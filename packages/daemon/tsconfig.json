@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@shelf-judge/shared": ["../shared/src"]
+    }
+  },
+  "include": ["src"]
+}
