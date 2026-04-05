@@ -27,3 +27,11 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
+- 15:49 commission-Dalton-20260405-121733 result: ## All 7 Thorne findings addressed
+
+### Defects fixed
+
+**DEFECT 1: Silent drop of out-of-range ratings** (`rating-form.tsx`)
+- Submit handler now validates all ratings before sending. Out-of-range val...
+
+- 15:49 commission-Dalton-20260405-121733 completed
