@@ -44,6 +44,7 @@ activity_timeline:
 current_progress: "Spec revised. Verifying the result by reading it back to confirm structure is correct."
 projectName: shelf-judge
 ---
+
 Revised `.lore/specs/mvp.md` to align with the standard `specify` skill format. All content and decisions preserved; this was purely structural.
 
 **Changes made:**

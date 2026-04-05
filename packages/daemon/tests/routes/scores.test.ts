@@ -1,9 +1,5 @@
 import { describe, test, expect, beforeEach } from "bun:test";
-import {
-  createTestApp,
-  jsonRequest,
-  type TestAppContext,
-} from "../helpers/test-app.js";
+import { createTestApp, jsonRequest, type TestAppContext } from "../helpers/test-app.js";
 
 describe("score routes", () => {
   let ctx: TestAppContext;
@@ -31,20 +27,13 @@ describe("score routes", () => {
       const gameId = gameBody.game.id;
 
       // Rate the game on the axis
-      const rateRes = await jsonRequest(
-        ctx.app,
-        "PUT",
-        `/api/games/${gameId}/ratings`,
-        { ratings: { [axis.id]: 8 } },
-      );
+      const rateRes = await jsonRequest(ctx.app, "PUT", `/api/games/${gameId}/ratings`, {
+        ratings: { [axis.id]: 8 },
+      });
       expect(rateRes.status).toBe(200);
 
       // Fetch the score
-      const scoreRes = await jsonRequest(
-        ctx.app,
-        "GET",
-        `/api/games/${gameId}/score`,
-      );
+      const scoreRes = await jsonRequest(ctx.app, "GET", `/api/games/${gameId}/score`);
       expect(scoreRes.status).toBe(200);
       const score = await scoreRes.json();
 
@@ -57,9 +46,7 @@ describe("score routes", () => {
       expect(score.breakdown).toBeArray();
       expect(score.breakdown.length).toBeGreaterThanOrEqual(1);
 
-      const personalEntry = score.breakdown.find(
-        (b: { axisId: string }) => b.axisId === axis.id,
-      );
+      const personalEntry = score.breakdown.find((b: { axisId: string }) => b.axisId === axis.id);
       expect(personalEntry).toBeDefined();
       expect(personalEntry.rating).toBe(8);
     });
@@ -73,11 +60,7 @@ describe("score routes", () => {
       const gameBody = await gameRes.json();
       const gameId = gameBody.game.id;
 
-      const scoreRes = await jsonRequest(
-        ctx.app,
-        "GET",
-        `/api/games/${gameId}/score`,
-      );
+      const scoreRes = await jsonRequest(ctx.app, "GET", `/api/games/${gameId}/score`);
       expect(scoreRes.status).toBe(200);
       const score = await scoreRes.json();
 
@@ -112,12 +95,9 @@ describe("score routes", () => {
       const game2 = await game2Res.json();
 
       // Rate only the first game
-      const rateRes = await jsonRequest(
-        ctx.app,
-        "PUT",
-        `/api/games/${game1.game.id}/ratings`,
-        { ratings: { [axis.id]: 7 } },
-      );
+      const rateRes = await jsonRequest(ctx.app, "PUT", `/api/games/${game1.game.id}/ratings`, {
+        ratings: { [axis.id]: 7 },
+      });
       expect(rateRes.status).toBe(200);
 
       // Fetch the score list
@@ -165,18 +145,12 @@ describe("score routes", () => {
       const highGame = await highRes.json();
 
       // Rate low game with 3, high game with 9
-      await jsonRequest(
-        ctx.app,
-        "PUT",
-        `/api/games/${lowGame.game.id}/ratings`,
-        { ratings: { [axis.id]: 3 } },
-      );
-      await jsonRequest(
-        ctx.app,
-        "PUT",
-        `/api/games/${highGame.game.id}/ratings`,
-        { ratings: { [axis.id]: 9 } },
-      );
+      await jsonRequest(ctx.app, "PUT", `/api/games/${lowGame.game.id}/ratings`, {
+        ratings: { [axis.id]: 3 },
+      });
+      await jsonRequest(ctx.app, "PUT", `/api/games/${highGame.game.id}/ratings`, {
+        ratings: { [axis.id]: 9 },
+      });
 
       const listRes = await jsonRequest(ctx.app, "GET", "/api/scores");
       expect(listRes.status).toBe(200);

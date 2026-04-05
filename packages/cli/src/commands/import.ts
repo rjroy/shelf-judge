@@ -15,7 +15,11 @@ interface ImportComplete {
   errors: string[];
 }
 
-export async function importBggCollection(client: DaemonClient, args: string[], opts: OutputOptions): Promise<string> {
+export async function importBggCollection(
+  client: DaemonClient,
+  args: string[],
+  opts: OutputOptions,
+): Promise<string> {
   const username = args[0];
   if (!username) {
     throw new Error("Usage: shelf-judge import bgg-collection <username>");
@@ -44,7 +48,9 @@ export async function importBggCollection(client: DaemonClient, args: string[], 
   }
 
   if (!result) {
-    throw new Error("Import stream ended without a completion event. The daemon may have disconnected. Check that the daemon is still running with: shelf-judge help");
+    throw new Error(
+      "Import stream ended without a completion event. The daemon may have disconnected. Check that the daemon is still running with: shelf-judge help",
+    );
   }
 
   const summary = result as ImportComplete;

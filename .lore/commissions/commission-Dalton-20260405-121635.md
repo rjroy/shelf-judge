@@ -88,38 +88,46 @@ activity_timeline:
 current_progress: "Both test files written and all 9 tests passing."
 projectName: shelf-judge
 ---
+
 Phase 4 implementation complete. All 6 steps delivered:
 
 **4.1 App factory and entry point:**
+
 - `packages/daemon/src/config.ts` - Config resolution from env vars
 - `packages/daemon/src/operations.ts` - OperationDefinition type, RouteModule type, operation tree builder
 - `packages/daemon/src/app.ts` - Hono app factory with full DI wiring
 - `packages/daemon/src/index.ts` - Entry point with Bun.serve() on Unix socket, idleTimeout: 0
 
 **4.2 Game routes** (`packages/daemon/src/routes/games.ts`):
+
 - All 7 game operations: search, add, get, list, rate, remove, refresh-bgg
 - Zod validation on inputs, proper error codes (400/404/409/503)
 - BGG-dependent routes return 503 when no token configured (REQ-MVP-12)
 
 **4.3 Axis routes** (`packages/daemon/src/routes/axes.ts`):
+
 - CRUD: create, list, update, delete
 - DELETE returns `{ deletedRatingsCount }` for confirmation UX
 
 **4.4 Score routes** (`packages/daemon/src/routes/scores.ts`):
+
 - `GET /api/games/:id/score` - Full breakdown, "not yet rated" for unscored
 - `GET /api/scores` - Scored list sorted by fitness descending, unscored at end
 
 **4.5 Import route** (`packages/daemon/src/routes/import.ts`):
+
 - `POST /api/import/bgg` with Hono streamSSE
 - SSE events: progress and complete, error handler for failures
 
 **4.6 Operations registry and help routes:**
+
 - `packages/daemon/src/routes/help.ts` - GET /api/help (full tree), GET /api/help/:feature (subtree)
 - `packages/daemon/src/routes/config.ts` - GET/PUT /api/config with token masking
 
 **Tests:** 150 tests pass across 14 files (108ms). All Phase 1-4 tests green. Typecheck clean.
 
 **New test files:**
+
 - `packages/daemon/tests/helpers/test-app.ts` - Reusable test app factory with mock storage
 - `packages/daemon/tests/routes/games.test.ts` - 10 integration tests
 - `packages/daemon/tests/routes/axes.test.ts` - 7 integration tests

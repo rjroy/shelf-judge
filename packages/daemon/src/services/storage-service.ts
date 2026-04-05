@@ -58,11 +58,7 @@ function defaultConfig(dataDir: string): AppConfig {
   };
 }
 
-async function atomicWrite(
-  filePath: string,
-  content: string,
-  fileOps: FileOps,
-): Promise<void> {
+async function atomicWrite(filePath: string, content: string, fileOps: FileOps): Promise<void> {
   const tmpPath = getTempPath(filePath);
   await fileOps.writeFile(tmpPath, content);
   await fileOps.rename(tmpPath, filePath);

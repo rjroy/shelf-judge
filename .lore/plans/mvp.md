@@ -135,6 +135,7 @@ The architecture pattern reference doc says "All durable state is in YAML and ma
 Create the monorepo workspace structure. Initialize `package.json` at root and in each package. Configure TypeScript (`tsconfig.json` with strict mode), ESLint (flat config with typescript-eslint), and Prettier. Add `.gitignore` for bun, node_modules, build artifacts, and `.shelf-judge/` data directory.
 
 **Files created:**
+
 - `package.json` (workspace root)
 - `packages/shared/package.json`, `packages/shared/tsconfig.json`
 - `packages/daemon/package.json`, `packages/daemon/tsconfig.json`
@@ -145,6 +146,7 @@ Create the monorepo workspace structure. Initialize `package.json` at root and i
 - `.gitignore`
 
 **Dependencies to install:**
+
 - Root: `typescript`, `typescript-eslint`, `eslint`, `prettier`, `bun-types`
 - Daemon: `hono`, `zod`, `fast-xml-parser` (for BGG XML parsing), `uuid`
 - Shared: `zod` (for validation schemas)
@@ -158,11 +160,13 @@ Define the core data types in `packages/shared/src/types.ts` following the data 
 Create Zod schemas in `packages/shared/src/validation.ts` for input validation: `CreateAxisSchema`, `UpdateAxisSchema`, `RateGameSchema`, `AddGameSchema`. Validate: axis weight 1-100 (integer), rating 1-10 (integer), axis name non-empty.
 
 **Files created:**
+
 - `packages/shared/src/types.ts`
 - `packages/shared/src/validation.ts`
 - `packages/shared/src/index.ts` (barrel export)
 
 **Tests (packages/shared/tests/):**
+
 - Zod schema validation: valid inputs pass, invalid inputs (rating 0, rating 11, weight -1, weight 101, empty name) are rejected
 - Type exports compile correctly (type-level test)
 
@@ -173,6 +177,7 @@ Create Zod schemas in `packages/shared/src/validation.ts` for input validation: 
 Implement `StorageService` in `packages/daemon/src/services/storage-service.ts`. DI factory pattern: `createStorageService({ dataDir, fileOps }) -> StorageService`.
 
 Interface:
+
 - `loadCollection(): Promise<Collection>` -- reads `collection.json`, returns parsed Collection. Creates default collection with two BGG-derived axes (Community Rating, Complexity) if file doesn't exist.
 - `saveCollection(collection: Collection): Promise<void>` -- atomic write (temp file + rename).
 - `loadConfig(): Promise<AppConfig>` -- reads `config.json`.
@@ -181,12 +186,14 @@ Interface:
 The `fileOps` dependency abstracts filesystem operations for testability (in-memory implementation for tests).
 
 **Files created:**
+
 - `packages/daemon/src/services/storage-service.ts`
 - `packages/daemon/src/services/file-ops.ts` (interface + real implementation)
 - `packages/daemon/tests/services/storage-service.test.ts`
 - `packages/daemon/tests/helpers/mock-file-ops.ts` (in-memory fileOps for testing)
 
 **Tests:**
+
 - Load collection from valid JSON file
 - Load collection returns default collection (with 2 BGG axes) when file doesn't exist
 - Save collection writes to temp file then renames (verify atomic write sequence)
@@ -219,9 +226,11 @@ After Phase 1 completes: review the shared types against the data model design, 
 Implement `FitnessService` in `packages/daemon/src/services/fitness-service.ts`. Pure computation, no I/O. Factory: `createFitnessService() -> FitnessService`.
 
 Interface:
+
 - `calculateScore(game: Game, axes: Axis[], bggData: BggGameData | null): FitnessResult | null`
 
 Logic:
+
 1. For each axis, determine the rating: check `game.ratings[axis.id]` first (personal or override). If not present and axis is BGG-derived, compute from `bggData` using `bggField` mapping. Community Rating is pass-through. Complexity maps BGG weight 1-5 to 1-10 via `weight * 2`.
 2. Collect all axes that have a rating (personal, BGG-derived, or override). If none, return `null` (REQ-MVP-14).
 3. If sum of weights for rated axes is zero, return `null` (REQ-MVP-16).
@@ -230,10 +239,12 @@ Logic:
 6. Build the breakdown array with each axis's name, rating, weight, contribution, source, and bggOriginal (for overrides).
 
 **Files created:**
+
 - `packages/daemon/src/services/fitness-service.ts`
 - `packages/daemon/tests/services/fitness-service.test.ts`
 
 **Tests (these are critical, use the Wingspan example from the fitness model design):**
+
 - Wingspan example: axes "Wife will play it" (w:40, r:8), "Visual design" (w:30, r:9), "Complexity" (w:20, BGG weight 2.9 -> 5.8), "Community Rating" (w:10, BGG 8.1). Expected score: 7.9. Verify breakdown entries sum to total.
 - Single axis: score equals the rating
 - Multiple axes, equal weights: simple average
@@ -251,16 +262,19 @@ Logic:
 Implement `AxisService` in `packages/daemon/src/services/axis-service.ts`. Factory: `createAxisService({ storageService }) -> AxisService`.
 
 Interface:
+
 - `createAxis(input: CreateAxisInput): Promise<Axis>`
 - `listAxes(): Promise<Axis[]>`
 - `updateAxis(id: string, input: UpdateAxisInput): Promise<Axis>`
 - `deleteAxis(id: string): Promise<{ deletedRatingsCount: number }>` -- cascade deletes all ratings on this axis across all games, returns count for confirmation UX (REQ-MVP-15)
 
 **Files created:**
+
 - `packages/daemon/src/services/axis-service.ts`
 - `packages/daemon/tests/services/axis-service.test.ts`
 
 **Tests:**
+
 - Create axis: generates UUID, stores in collection, validates input via Zod schema
 - Create axis rejects invalid weight (0, 101, -1, non-integer)
 - List axes returns all axes including default BGG-derived ones
@@ -275,6 +289,7 @@ Interface:
 Implement `GameService` in `packages/daemon/src/services/game-service.ts`. Factory: `createGameService({ storageService, fitnessService }) -> GameService`.
 
 Interface:
+
 - `addGame(input: AddGameInput): Promise<Game>` -- accepts both `{ name: string }` (manual) and `{ bggId: number }` (BGG). In Phase 2, bggId is stored as-is with `bggData: null`; the actual BGG fetch is wired in Phase 3. The `AddGameInput` schema (defined in Phase 1.2) must support both variants from the start so Phase 3 doesn't need to change it.
 - `getGame(id: string): Promise<{ game: Game, score: FitnessResult | null }>`
 - `listGames(): Promise<Array<{ game: Game, score: FitnessResult | null }>>`
@@ -284,10 +299,12 @@ Interface:
 Duplicate detection (REQ-MVP-9): when adding a game with a bggId, check if any existing game has the same bggId. If so, reject with a clear error. Manual games (no bggId) are never duplicates of each other.
 
 **Files created:**
+
 - `packages/daemon/src/services/game-service.ts`
 - `packages/daemon/tests/services/game-service.test.ts`
 
 **Tests:**
+
 - Add manual game: creates game with null bggId, generates UUID
 - Add game with bggId: stores bggId for later BGG data fetch
 - Duplicate bggId rejection: adding a game with bggId that already exists throws descriptive error
@@ -323,6 +340,7 @@ After Phase 2: review the fitness calculation against hand-calculated examples. 
 #### 3.0 BGG library spike
 
 Before implementing the full client, verify that the chosen library (`bgg-xml-api-client`) handles the 2025 auth token requirement. Write a minimal test script that:
+
 1. Imports `bgg-xml-api-client`
 2. Makes one authenticated request to `/xmlapi2/thing?id=174430&stats=1` (Gloomhaven)
 3. Verifies the response contains expected fields (name, stats, mechanics)
@@ -336,6 +354,7 @@ If the library doesn't handle auth tokens cleanly, switch to the fallback: a thi
 Implement `BggClient` in `packages/daemon/src/services/bgg-client.ts`. Factory: `createBggClient({ config, fetchFn? }) -> BggClient`.
 
 Interface:
+
 - `searchGames(query: string): Promise<BggSearchResult[]>` -- calls `/xmlapi2/search`
 - `getGame(bggId: number): Promise<BggGameData>` -- calls `/xmlapi2/thing` with `stats=1`
 - `getGames(bggIds: number[]): Promise<Map<number, BggGameData>>` -- batch thing request (up to 250 per call)
@@ -343,15 +362,18 @@ Interface:
 - `isConfigured(): boolean` -- checks if BGG token is present
 
 Rate limiting (internal):
+
 - Implementation: a sequential request queue with a configurable `delayMs` parameter (default: 5000ms). Each request waits `delayMs` after the previous request completes before firing. Tests inject `delayMs: 0` for speed. The queue is internal to `BggClient`; callers don't see it.
 - 429 response: back off 30 seconds, then 1 req/10s, gradually return to normal
 - 502/503: retry after 30 seconds, up to 2 retries
 
 202 handling (collection endpoint):
+
 - Retry with exponential backoff: 5s, 10s, 20s
 - Max 3 retries. If still 202, return error.
 
 XML parsing:
+
 - Use `fast-xml-parser` to parse XML responses
 - Extract primary name (`type="primary"`), player count, play time, year, mechanics, categories, community rating, weight, suggested player counts
 - Treat `averageweight` of 0 as null (known BGG bug)
@@ -360,6 +382,7 @@ XML parsing:
 The `fetchFn` dependency defaults to global `fetch` but is injectable for testing.
 
 **Files created:**
+
 - `packages/daemon/src/services/bgg-client.ts`
 - `packages/daemon/src/services/bgg-xml-parser.ts` (XML -> typed objects)
 - `packages/daemon/tests/services/bgg-client.test.ts`
@@ -367,6 +390,7 @@ The `fetchFn` dependency defaults to global `fetch` but is injectable for testin
 - `packages/daemon/tests/fixtures/` (captured real BGG API responses as XML files)
 
 **Tests:**
+
 - XML parser: parse a captured real `/xmlapi2/thing` response for a known game (e.g., Wingspan BGG ID 266192). Verify all fields extracted correctly.
 - XML parser: parse a search response. Verify IDs, names, years.
 - XML parser: parse a collection response. Verify game list with stats.
@@ -391,6 +415,7 @@ The `fetchFn` dependency defaults to global `fetch` but is injectable for testin
 Extend `GameService` to use `BggClient` for game addition and data refresh. Update factory: `createGameService({ storageService, fitnessService, bggClient }) -> GameService`.
 
 New/modified interface:
+
 - `addGame(input)` -- when `bggId` is provided, fetch full data from BGG via `bggClient.getGame()`, populate `bggData` field. When BGG is unavailable, still add the game but with null `bggData`.
 - `searchGames(query: string): Promise<BggSearchResult[]>` -- delegates to bggClient
 - `refreshBggData(gameId: string): Promise<Game>` -- re-fetches BGG data, updates cache, re-derives BGG axis ratings that haven't been overridden (REQ-MVP-19). Preserves user overrides.
@@ -401,10 +426,12 @@ Auto-population of BGG-derived axes (REQ-MVP-17): when a game has `bggData`, and
 **Design note on overrides:** When a user rates a BGG-derived axis explicitly, that rating is stored in `game.ratings[axisId]`. The fitness service checks `game.ratings` first; if present, it uses that value (source: "override") and records the original BGG value in `bggOriginal`. If not present, it computes from `bggData` (source: "bgg").
 
 **Files modified:**
+
 - `packages/daemon/src/services/game-service.ts`
 - `packages/daemon/src/services/fitness-service.ts` (BGG-derived rating logic)
 
 **Tests (new):**
+
 - Add game by bggId: fetches BGG data, stores in game.bggData
 - Add game by bggId when BGG unavailable: game added with null bggData, no crash
 - Search games: returns results from BGG
@@ -430,10 +457,12 @@ Implement collection import in `GameService` (or a dedicated `ImportService` if 
 - Return summary: `{ imported: number, skipped: number, errors: string[] }`
 
 **Files created/modified:**
+
 - `packages/daemon/src/services/game-service.ts` (or new `import-service.ts`)
 - `packages/daemon/tests/services/import.test.ts`
 
 **Tests:**
+
 - Import creates games for each item in BGG collection response
 - Import skips games that already exist (matched by bggId), counts them
 - Import reports progress (verify onProgress called with incrementing counts)
@@ -468,6 +497,7 @@ Create the Hono app factory with DI: `createApp(deps) -> { app, operations }`. T
 Create `packages/daemon/src/index.ts` entry point: resolve config, create services, create app, start `Bun.serve()` on Unix socket.
 
 **Files created:**
+
 - `packages/daemon/src/app.ts` (Hono app factory)
 - `packages/daemon/src/index.ts` (entry point)
 - `packages/daemon/src/config.ts` (config resolution from env/file)
@@ -479,6 +509,7 @@ Create `packages/daemon/src/index.ts` entry point: resolve config, create servic
 Implement game route factory: `createGameRoutes({ gameService, bggClient }) -> RouteModule`.
 
 Routes (from API surface design):
+
 - `GET /api/games/search?q={query}` -> `shelf.game.search`
 - `POST /api/games` -> `shelf.game.add`
 - `GET /api/games/:id` -> `shelf.game.get`
@@ -492,10 +523,12 @@ Each route validates input (Zod schemas), delegates to service, returns typed JS
 When BGG is not configured, BGG-dependent routes (search, add-by-bggId, refresh) return 503 with the configuration error message (REQ-MVP-12).
 
 **Files created:**
+
 - `packages/daemon/src/routes/games.ts`
 - `packages/daemon/tests/routes/games.test.ts`
 
 **Tests (integration-level, using Hono's `app.request()`):**
+
 - POST /api/games with manual game: returns 201 with game
 - POST /api/games with bggId: returns 201 with game + BGG data
 - POST /api/games duplicate bggId: returns 409 with error message
@@ -514,6 +547,7 @@ When BGG is not configured, BGG-dependent routes (search, add-by-bggId, refresh)
 Implement axis route factory: `createAxisRoutes({ axisService }) -> RouteModule`.
 
 Routes:
+
 - `POST /api/axes` -> `shelf.axis.create`
 - `GET /api/axes` -> `shelf.axis.list`
 - `PUT /api/axes/:id` -> `shelf.axis.update`
@@ -522,10 +556,12 @@ Routes:
 Delete returns the count of affected ratings (for confirmation UI).
 
 **Files created:**
+
 - `packages/daemon/src/routes/axes.ts`
 - `packages/daemon/tests/routes/axes.test.ts`
 
 **Tests:**
+
 - POST /api/axes: creates axis, returns 201
 - POST /api/axes with invalid weight: returns 400
 - GET /api/axes: returns all axes
@@ -539,6 +575,7 @@ Delete returns the count of affected ratings (for confirmation UI).
 Implement score route factory: `createScoreRoutes({ gameService, fitnessService }) -> RouteModule`.
 
 Routes:
+
 - `GET /api/games/:id/score` -> `shelf.score.get`
 - `GET /api/scores` -> `shelf.score.list`
 
@@ -547,10 +584,12 @@ Routes:
 The score.list endpoint returns all games ranked by fitness score (descending), with unscored games listed separately at the end.
 
 **Files created:**
+
 - `packages/daemon/src/routes/scores.ts`
 - `packages/daemon/tests/routes/scores.test.ts`
 
 **Tests:**
+
 - GET /api/games/:id/score: returns FitnessResult with breakdown
 - GET /api/games/:id/score for unrated game: returns null score with "not yet rated" indication
 - GET /api/scores: returns games ranked by fitness, unscored at end
@@ -562,21 +601,25 @@ The score.list endpoint returns all games ranked by fitness score (descending), 
 Implement import route factory: `createImportRoutes({ gameService, bggClient }) -> RouteModule`.
 
 Route:
+
 - `POST /api/import/bgg` -> `shelf.import.bgg-collection`
 
 This route uses Hono's `streamSSE` helper to stream progress events. The request body contains `{ username: string }` (see Technical Decision #7). The route calls `gameService.importBggCollection()` with a progress callback that writes SSE events.
 
 SSE events (from API design):
+
 - `event: progress` with `data: { imported, total, current }`
 - `event: complete` with `data: { imported, skipped, errors }`
 
 Set `idleTimeout: 0` on the SSE connection (per architecture pattern).
 
 **Files created:**
+
 - `packages/daemon/src/routes/import.ts`
 - `packages/daemon/tests/routes/import.test.ts`
 
 **Tests:**
+
 - POST /api/import/bgg: streams progress events, ends with complete event
 - POST /api/import/bgg without BGG token: returns 503
 - Verify SSE event format matches the API design
@@ -588,20 +631,24 @@ Set `idleTimeout: 0` on the SSE connection (per architecture pattern).
 Implement the operations registry. Each route factory exports its `OperationDefinition[]`. The app factory collects all operations into a registry.
 
 Routes:
+
 - `GET /api/help` -> `shelf.help` (full operation tree)
 - `GET /api/help/:feature` -> `shelf.help.feature` (subtree)
 
 Config routes:
+
 - `GET /api/config` -> `shelf.config.get`
 - `PUT /api/config` -> `shelf.config.set`
 
 **Files created:**
+
 - `packages/daemon/src/operations.ts` (registry builder)
 - `packages/daemon/src/routes/help.ts`
 - `packages/daemon/src/routes/config.ts`
 - `packages/daemon/tests/routes/help.test.ts`
 
 **Tests:**
+
 - GET /api/help returns all operations in tree structure
 - GET /api/help/game returns game operations subtree
 - Operations have correct method, path, and description
@@ -635,6 +682,7 @@ Create the daemon API client in `packages/web/lib/api.ts`: typed functions that 
 Create the root layout with navigation (sidebar or top nav with: Collection, Axes, Add Game).
 
 **Files created:**
+
 - `packages/web/` (full Next.js scaffold via `bunx create-next-app@latest`)
 - `packages/web/lib/api.ts`
 - `packages/web/app/layout.tsx` (with navigation)
@@ -653,6 +701,7 @@ Implement the collection view at `packages/web/app/page.tsx`.
 - Click a game row to navigate to `/games/[id]`
 
 **Files created:**
+
 - `packages/web/app/page.tsx`
 - `packages/web/components/game-list.tsx`
 - `packages/web/components/score-badge.tsx`
@@ -673,6 +722,7 @@ Implement game detail at `packages/web/app/games/[id]/page.tsx`.
 - "Remove Game" button with confirmation
 
 **Files created:**
+
 - `packages/web/app/games/[id]/page.tsx`
 - `packages/web/components/score-breakdown.tsx`
 - `packages/web/components/rating-form.tsx`
@@ -690,6 +740,7 @@ Implement at `packages/web/app/search/page.tsx`.
 - Duplicate detection: if add returns 409, show the error
 
 **Files created:**
+
 - `packages/web/app/search/page.tsx`
 - `packages/web/components/game-search.tsx`
 
@@ -705,6 +756,7 @@ Implement at `packages/web/app/axes/page.tsx`.
 - Delete axis with confirmation dialog. The confirmation must show the live count of games that have ratings on this axis (fetched from the API or pre-loaded with the axis list, not hardcoded). The delete flow: user clicks delete -> confirmation dialog shows "This will remove ratings from N games" -> user confirms -> DELETE request -> axis removed.
 
 **Files created:**
+
 - `packages/web/app/axes/page.tsx`
 - `packages/web/components/axis-form.tsx`
 - `packages/web/components/axis-list.tsx`
@@ -723,6 +775,7 @@ Implement at `packages/web/app/import/page.tsx`.
 - Navigate to collection when done
 
 **Files created:**
+
 - `packages/web/app/import/page.tsx`
 - `packages/web/components/import-progress.tsx`
 
@@ -757,6 +810,7 @@ Create the CLI entry point and the Unix socket HTTP client.
 - Operation discovery: on first run or when `help` is requested, fetch the operation tree from the daemon. Map CLI command paths to API routes.
 
 **Files created:**
+
 - `packages/cli/src/index.ts`
 - `packages/cli/src/client.ts`
 - `packages/cli/src/output.ts` (table and JSON formatting)
@@ -784,12 +838,14 @@ shelf-judge axis delete <id>
 Default output: human-readable tables. `--json` flag outputs raw JSON on all commands.
 
 **Files created:**
+
 - `packages/cli/src/commands/game.ts`
 - `packages/cli/src/commands/axis.ts`
 - `packages/cli/tests/commands/game.test.ts`
 - `packages/cli/tests/commands/axis.test.ts`
 
 **Tests:**
+
 - Game list outputs table format by default
 - Game list with --json outputs valid JSON
 - Axis list outputs table with name, weight, source
@@ -809,10 +865,12 @@ shelf-judge score get <id>      # Full breakdown for one game
 The score breakdown format must match the design (axis name, rating, weight, contribution, source). This is the same information as the web UI breakdown, in text format.
 
 **Files created:**
+
 - `packages/cli/src/commands/score.ts`
 - `packages/cli/tests/commands/score.test.ts`
 
 **Tests:**
+
 - `score list` shows games ranked by fitness with scores
 - `score list --json` outputs valid JSON
 - `score get <id>` shows full breakdown matching the format from the CLI design
@@ -831,6 +889,7 @@ shelf-judge config get
 Import reads SSE stream and displays progress in the terminal.
 
 Daemon management:
+
 ```
 shelf-judge start               # Start daemon in background
 shelf-judge stop                # Stop daemon
@@ -839,12 +898,14 @@ shelf-judge stop                # Stop daemon
 Commands that need the daemon check if it's running. If not, prompt to start.
 
 **Files created:**
+
 - `packages/cli/src/commands/import.ts`
 - `packages/cli/src/commands/config.ts`
 - `packages/cli/src/commands/daemon.ts`
 - `packages/cli/tests/commands/import.test.ts`
 
 **Tests:**
+
 - Import shows progress as games are imported
 - Config set stores BGG token
 - Config get displays current config
@@ -868,7 +929,7 @@ After Phase 6: verify all CLI commands against the CLI design document. Test `--
 
 **Dependencies:** Phases 5 and 6 complete.
 
-**Requirements verified:** All REQ-MVP-* (full pass)
+**Requirements verified:** All REQ-MVP-\* (full pass)
 
 ### Steps
 
@@ -877,6 +938,7 @@ After Phase 6: verify all CLI commands against the CLI design document. Test `--
 Write integration tests that exercise the full stack: daemon running on a test socket, API calls via HTTP.
 
 **Tests:**
+
 - Add game via API, rate it on 2+ axes, verify score calculation end-to-end
 - Create custom axis, rate games, observe score changes
 - Import BGG collection (mocked BGG responses), verify games created with BGG data
@@ -886,6 +948,7 @@ Write integration tests that exercise the full stack: daemon running on a test s
 - Verify `--json` output on CLI matches API response shapes
 
 **Files created:**
+
 - `packages/daemon/tests/integration/` (full-stack integration tests)
 
 #### 7.2 Manual verification walkthrough
@@ -920,6 +983,7 @@ Written alongside implementation in every phase. Services receive mock `fileOps`
 **Coverage target:** 90%+ on new code (per spec AI validation criteria).
 
 Key unit test areas:
+
 - Fitness score calculation (Phase 2): the mathematical core. Tested against hand-calculated examples.
 - BGG XML parsing (Phase 3): tested against captured real API responses, not synthetic XML.
 - Input validation (Phase 1): Zod schemas reject invalid data at boundaries.
@@ -930,6 +994,7 @@ Key unit test areas:
 Written in Phase 4 for each route module. Use Hono's `app.request()` test client. Services are real; external deps (filesystem, BGG API) are mocked.
 
 Key integration test areas:
+
 - Route → service → storage pipeline (end-to-end data flow)
 - Error responses (invalid input, missing resources, BGG unavailable)
 - SSE streaming for import
@@ -1008,29 +1073,29 @@ The sequence (data model -> fitness engine -> BGG -> API -> clients) follows the
 
 ## Requirement Traceability Matrix
 
-| Requirement | Phase(s) | Verified By |
-|---|---|---|
-| REQ-MVP-1 (axis CRUD) | 2.2 | Unit: axis-service.test.ts. Integration: axes route tests. |
-| REQ-MVP-2 (rating 1-10) | 2.3, 4.2 | Unit: game-service.test.ts (validation). Integration: rate route tests. |
-| REQ-MVP-3 (default BGG axes) | 1.3, 2.1, 3.2 | Unit: storage-service.test.ts (default creation). Fitness: BGG-derived scoring. |
-| REQ-MVP-4 (weighted average) | 2.1 | Unit: fitness-service.test.ts (Wingspan example + edge cases). |
-| REQ-MVP-5 (score breakdown) | 2.1, 5.3, 6.3 | Unit: fitness-service.test.ts. Web: score-breakdown component. CLI: score get format. |
-| REQ-MVP-6 (one decimal place) | 2.1 | Unit: fitness-service.test.ts (rounding boundary tests). |
-| REQ-MVP-7 (add by BGG ID/search/manual) | 3.2, 4.2 | Unit: game-service.test.ts. Integration: game route tests. |
-| REQ-MVP-8 (remove game) | 2.3, 4.2 | Unit: game-service.test.ts. Integration: delete route test. |
-| REQ-MVP-9 (duplicate detection) | 2.3, 4.2 | Unit: game-service.test.ts. Integration: 409 response test. |
-| REQ-MVP-10 (BGG collection import) | 3.3, 4.5 | Unit: import.test.ts. Integration: SSE streaming test. |
-| REQ-MVP-11 (offline operation) | 3.2, 4.2 | Unit: add-without-BGG test. Manual: start without token, verify local ops. |
-| REQ-MVP-12 (missing token message) | 3.1, 4.2 | Unit: bgg-client.test.ts. Integration: 503 response with setup instructions. |
-| REQ-MVP-13 (BGG error handling) | 3.1, 3.3 | Unit: bgg-client.test.ts (429, 5xx, malformed XML). Import: partial failure test. |
-| REQ-MVP-14 (unrated = no score) | 2.1 | Unit: fitness-service.test.ts (zero rated axes returns null). |
-| REQ-MVP-15 (axis deletion cascade) | 2.2 | Unit: axis-service.test.ts (cascade + recount). |
-| REQ-MVP-16 (zero-weight handling) | 2.1 | Unit: fitness-service.test.ts (all-zero weights returns null). |
-| REQ-MVP-17 (BGG override + preserve) | 2.1, 3.2 | Unit: fitness-service.test.ts (override source). BGG refresh: override preserved. |
-| REQ-MVP-18 (7-day cache TTL) | 3.1 | Unit: cache staleness check in bgg-client.test.ts. |
-| REQ-MVP-19 (manual refresh) | 3.2, 4.2 | Unit: game-service.test.ts (refresh + override preserve). Integration: refresh route. |
-| REQ-MVP-20 (JSON persistence) | 1.3 | Unit: storage-service.test.ts (read/write round-trip). |
-| REQ-MVP-21 (atomic writes) | 1.3 | Unit: storage-service.test.ts (temp file + rename sequence). |
-| REQ-MVP-22 (three interfaces) | 4, 5, 6 | Integration: all three clients operational. Phase 7 verification. |
-| REQ-MVP-23 (CLI --json flag) | 6.2, 6.3, 6.4 | Unit: CLI output tests. Manual: verify on all commands. |
-| REQ-MVP-24 (breakdown in both UIs) | 5.3, 6.3 | Web: score-breakdown component. CLI: score get command. Phase 7 comparison. |
+| Requirement                             | Phase(s)      | Verified By                                                                           |
+| --------------------------------------- | ------------- | ------------------------------------------------------------------------------------- |
+| REQ-MVP-1 (axis CRUD)                   | 2.2           | Unit: axis-service.test.ts. Integration: axes route tests.                            |
+| REQ-MVP-2 (rating 1-10)                 | 2.3, 4.2      | Unit: game-service.test.ts (validation). Integration: rate route tests.               |
+| REQ-MVP-3 (default BGG axes)            | 1.3, 2.1, 3.2 | Unit: storage-service.test.ts (default creation). Fitness: BGG-derived scoring.       |
+| REQ-MVP-4 (weighted average)            | 2.1           | Unit: fitness-service.test.ts (Wingspan example + edge cases).                        |
+| REQ-MVP-5 (score breakdown)             | 2.1, 5.3, 6.3 | Unit: fitness-service.test.ts. Web: score-breakdown component. CLI: score get format. |
+| REQ-MVP-6 (one decimal place)           | 2.1           | Unit: fitness-service.test.ts (rounding boundary tests).                              |
+| REQ-MVP-7 (add by BGG ID/search/manual) | 3.2, 4.2      | Unit: game-service.test.ts. Integration: game route tests.                            |
+| REQ-MVP-8 (remove game)                 | 2.3, 4.2      | Unit: game-service.test.ts. Integration: delete route test.                           |
+| REQ-MVP-9 (duplicate detection)         | 2.3, 4.2      | Unit: game-service.test.ts. Integration: 409 response test.                           |
+| REQ-MVP-10 (BGG collection import)      | 3.3, 4.5      | Unit: import.test.ts. Integration: SSE streaming test.                                |
+| REQ-MVP-11 (offline operation)          | 3.2, 4.2      | Unit: add-without-BGG test. Manual: start without token, verify local ops.            |
+| REQ-MVP-12 (missing token message)      | 3.1, 4.2      | Unit: bgg-client.test.ts. Integration: 503 response with setup instructions.          |
+| REQ-MVP-13 (BGG error handling)         | 3.1, 3.3      | Unit: bgg-client.test.ts (429, 5xx, malformed XML). Import: partial failure test.     |
+| REQ-MVP-14 (unrated = no score)         | 2.1           | Unit: fitness-service.test.ts (zero rated axes returns null).                         |
+| REQ-MVP-15 (axis deletion cascade)      | 2.2           | Unit: axis-service.test.ts (cascade + recount).                                       |
+| REQ-MVP-16 (zero-weight handling)       | 2.1           | Unit: fitness-service.test.ts (all-zero weights returns null).                        |
+| REQ-MVP-17 (BGG override + preserve)    | 2.1, 3.2      | Unit: fitness-service.test.ts (override source). BGG refresh: override preserved.     |
+| REQ-MVP-18 (7-day cache TTL)            | 3.1           | Unit: cache staleness check in bgg-client.test.ts.                                    |
+| REQ-MVP-19 (manual refresh)             | 3.2, 4.2      | Unit: game-service.test.ts (refresh + override preserve). Integration: refresh route. |
+| REQ-MVP-20 (JSON persistence)           | 1.3           | Unit: storage-service.test.ts (read/write round-trip).                                |
+| REQ-MVP-21 (atomic writes)              | 1.3           | Unit: storage-service.test.ts (temp file + rename sequence).                          |
+| REQ-MVP-22 (three interfaces)           | 4, 5, 6       | Integration: all three clients operational. Phase 7 verification.                     |
+| REQ-MVP-23 (CLI --json flag)            | 6.2, 6.3, 6.4 | Unit: CLI output tests. Manual: verify on all commands.                               |
+| REQ-MVP-24 (breakdown in both UIs)      | 5.3, 6.3      | Web: score-breakdown component. CLI: score get command. Phase 7 comparison.           |

@@ -18,6 +18,7 @@ MVP web interface. Minimal, functional, not polished. Next.js App Router, server
 ## Screens
 
 **1. Collection View** (home page)
+
 - Table/grid of all games, sorted by fitness score (descending)
 - Each row shows: game name, thumbnail, fitness score, last rated date
 - Click a game to see its detail view
@@ -25,6 +26,7 @@ MVP web interface. Minimal, functional, not polished. Next.js App Router, server
 - "Import from BGG" button
 
 **2. Game Detail View**
+
 - Game info: name, year, player count, play time, thumbnail
 - Fitness score with full breakdown (the transparency display from the score model design)
 - Rating form: one slider or number input per axis, pre-filled with existing ratings
@@ -32,18 +34,21 @@ MVP web interface. Minimal, functional, not polished. Next.js App Router, server
 - "Refresh BGG Data" button
 
 **3. Game Search / Add**
+
 - Text search field that queries BGG
 - Results list with name, year, and thumbnail
 - Click to add a game (fetches full BGG data on add)
 - Manual add option for games not on BGG
 
 **4. Axes Management**
+
 - List of all axes with name, weight, source
 - Create new axis (name, description, weight, source type)
 - Edit axis weight and description
 - Delete axis (with confirmation noting that ratings on this axis will be removed)
 
 **5. Import Status**
+
 - Shown during BGG collection import
 - Progress indicator: "Importing 12 of 47..."
 - List of imported games as they arrive

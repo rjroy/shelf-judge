@@ -27,7 +27,11 @@ export function createMockClient(config: MockClientConfig = {}): DaemonClient {
     return routes[`${method} ${path}`] ?? routes[path];
   }
 
-  async function request<T>(method: string, path: string, body?: unknown): Promise<DaemonResponse<T>> {
+  async function request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+  ): Promise<DaemonResponse<T>> {
     const route = findRoute(method, path);
     if (!route) {
       return { ok: false, status: 404, data: { error: `No mock for ${method} ${path}` } as T };

@@ -8,6 +8,7 @@ They include the fields the parser extracts plus surrounding context fields
 responses contain but the parser currently ignores.
 
 **TODO:** Replace with captured real API responses when network access is available:
+
 ```bash
 curl -o thing-wingspan-266192.xml "https://boardgamegeek.com/xmlapi2/thing?id=266192&stats=1&type=boardgame"
 curl -o thing-gloomhaven-174430.xml "https://boardgamegeek.com/xmlapi2/thing?id=174430&stats=1&type=boardgame"

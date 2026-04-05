@@ -22,17 +22,20 @@ The daemon validates the token is present on startup. If missing, API-dependent 
 ## Endpoints Used
 
 **Thing endpoint** (`/xmlapi2/thing`):
+
 - Used when adding a game by BGG ID or after search
 - Parameters: `id={bggId}&stats=1&type=boardgame`
 - Supports comma-delimited IDs for batch fetch (up to 250 per request)
 - Provides: name, player count, play time, year, mechanics, categories, community rating, weight, suggested player counts
 
 **Search endpoint** (`/xmlapi2/search`):
+
 - Used when the user searches for a game by name
 - Parameters: `query={name}&type=boardgame`
 - Returns: ID, name, year only. A follow-up Thing request is needed for full data.
 
 **Collection endpoint** (`/xmlapi2/collection`):
+
 - Used for bulk import from a BGG user's public collection
 - Parameters: `username={bggUsername}&own=1&subtype=boardgame&stats=1`
 - Returns: all owned games with basic stats

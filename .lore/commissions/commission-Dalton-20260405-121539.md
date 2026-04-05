@@ -61,9 +61,11 @@ activity_timeline:
 current_progress: "Read the plan, designs, and existing Phase 1 code. Starting implementation of Phase 2: fitness service, axis service, game service. Plan understood, existing types and storage are in place."
 projectName: shelf-judge
 ---
+
 Phase 2 implemented: fitness engine, axis service, game service. All 74 tests pass (Phase 1 + Phase 2), typecheck clean.
 
 **Files created:**
+
 - `packages/daemon/src/services/fitness-service.ts` - Pure computation, factory pattern. Weighted average with BGG field mapping (communityRating pass-through, weight*2 normalization). Handles missing ratings, zero weights, overrides, rounding via `Math.round(x*10)/10`.
 - `packages/daemon/src/services/axis-service.ts` - CRUD with cascade deletion. `deleteAxis` removes all ratings on that axis across all games, returns `{ deletedRatingsCount }`.
 - `packages/daemon/src/services/game-service.ts` - CRUD with duplicate detection on bggId. Manual games never duplicate. `rateGame` validates 1-10 integer. `listGames` sorts by fitness descending, unscored at end.
@@ -72,4 +74,5 @@ Phase 2 implemented: fitness engine, axis service, game service. All 74 tests pa
 - `packages/daemon/tests/services/game-service.test.ts` - 14 tests: manual game creation, bggId storage, duplicate bggId rejection, manual games never duplicate, get with score, unrated returns null, list sorted by fitness, rate with validation (0, 11, 1.5, -1 rejected), unknown axis rejected, remove game.
 
 **Files modified:**
+
 - `packages/shared/src/validation.ts` - Changed input type exports from `z.infer` to `z.input` so service method callers don't need to provide fields that have Zod defaults (description, source, bggField, bggId, etc.). This is a correctness fix: `z.infer` gives the output type after parsing, `z.input` gives the accepted input type.

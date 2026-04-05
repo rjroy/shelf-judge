@@ -14,10 +14,7 @@ function createMockFetch() {
   const calls: Array<{ url: string; headers: Record<string, string> }> = [];
   const responses: Array<{ status: number; body: string }> = [];
 
-  const fn = async (
-    input: string | URL | Request,
-    init?: RequestInit,
-  ): Promise<Response> => {
+  const fn = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = typeof input === "string" ? input : input.toString();
     const headers = (init?.headers as Record<string, string>) ?? {};
     calls.push({ url, headers });
@@ -92,9 +89,7 @@ describe("BggClient", () => {
       expect(mockFetch.calls[0].url).toContain("/xmlapi2/search");
       expect(mockFetch.calls[0].url).toContain("query=Wingspan");
       expect(mockFetch.calls[0].url).toContain("type=boardgame");
-      expect(mockFetch.calls[0].headers.Authorization).toBe(
-        "Bearer test-token",
-      );
+      expect(mockFetch.calls[0].headers.Authorization).toBe("Bearer test-token");
 
       expect(results).toHaveLength(3);
       expect(results[0].bggId).toBe(266192);
@@ -173,9 +168,9 @@ describe("BggClient", () => {
       mockFetch.enqueue(202, "");
       mockFetch.enqueue(202, "");
 
-      await expect(
-        client.getUserCollection("testuser"),
-      ).rejects.toThrow("still queued after maximum retries");
+      await expect(client.getUserCollection("testuser")).rejects.toThrow(
+        "still queued after maximum retries",
+      );
     });
   });
 
@@ -260,9 +255,7 @@ describe("BggClient", () => {
       mockFetch.enqueue(502, "Bad Gateway");
       mockFetch.enqueue(502, "Bad Gateway"); // 3rd attempt, exceeds MAX_5XX_RETRIES=2
 
-      await expect(client.searchGames("Wingspan")).rejects.toThrow(
-        "HTTP 502",
-      );
+      await expect(client.searchGames("Wingspan")).rejects.toThrow("HTTP 502");
     });
   });
 
@@ -278,9 +271,7 @@ describe("BggClient", () => {
     test("getGame throws when no items in response", async () => {
       mockFetch.enqueue(200, `<?xml version="1.0"?><items></items>`);
 
-      await expect(client.getGame(99999)).rejects.toThrow(
-        "No game found with BGG ID 99999",
-      );
+      await expect(client.getGame(99999)).rejects.toThrow("No game found with BGG ID 99999");
     });
   });
 

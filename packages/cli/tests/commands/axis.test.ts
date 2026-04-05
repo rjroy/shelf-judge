@@ -3,7 +3,13 @@ import { axisList, axisCreate, axisUpdate, axisDelete } from "../../src/commands
 import { createMockClient } from "../helpers/mock-client.js";
 
 const axes = [
-  { id: "ax-1-full-uuid", name: "Wife will play it", weight: 40, source: "personal", description: null },
+  {
+    id: "ax-1-full-uuid",
+    name: "Wife will play it",
+    weight: 40,
+    source: "personal",
+    description: null,
+  },
   { id: "ax-2-full-uuid", name: "Community Rating", weight: 10, source: "bgg", description: null },
 ];
 
@@ -51,7 +57,13 @@ describe("axis list", () => {
 });
 
 describe("axis create", () => {
-  const created = { id: "new-axis-id", name: "Visual design", weight: 30, source: "personal", description: null };
+  const created = {
+    id: "new-axis-id",
+    name: "Visual design",
+    weight: 30,
+    source: "personal",
+    description: null,
+  };
 
   test("human-readable output shows created axis name", async () => {
     const client = createMockClient({
@@ -82,7 +94,13 @@ describe("axis create", () => {
 });
 
 describe("axis update", () => {
-  const updated = { id: "ax-1-full-uuid", name: "Wife will play it", weight: 50, source: "personal", description: null };
+  const updated = {
+    id: "ax-1-full-uuid",
+    name: "Wife will play it",
+    weight: 50,
+    source: "personal",
+    description: null,
+  };
 
   test("human-readable output shows updated axis", async () => {
     const client = createMockClient({
@@ -117,7 +135,9 @@ describe("axis delete", () => {
   test("human-readable output shows deleted axis and rating count", async () => {
     const client = createMockClient({
       routes: {
-        "DELETE /api/axes/ax-1-full-uuid": { response: { ok: true, status: 200, data: deleteResult } },
+        "DELETE /api/axes/ax-1-full-uuid": {
+          response: { ok: true, status: 200, data: deleteResult },
+        },
       },
     });
 
@@ -130,7 +150,9 @@ describe("axis delete", () => {
   test("--json output is parseable JSON with deletedRatingsCount", async () => {
     const client = createMockClient({
       routes: {
-        "DELETE /api/axes/ax-1-full-uuid": { response: { ok: true, status: 200, data: deleteResult } },
+        "DELETE /api/axes/ax-1-full-uuid": {
+          response: { ok: true, status: 200, data: deleteResult },
+        },
       },
     });
 

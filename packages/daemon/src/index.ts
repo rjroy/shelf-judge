@@ -55,7 +55,9 @@ async function main() {
   });
 
   console.log(`shelf-judge daemon listening on ${socketPath}`);
-  console.log(`BGG integration: ${bggClient.isConfigured() ? "configured" : "not configured (set bgg-token to enable)"}`);
+  console.log(
+    `BGG integration: ${bggClient.isConfigured() ? "configured" : "not configured (set bgg-token to enable)"}`,
+  );
 
   process.on("SIGINT", () => {
     console.log("Shutting down...");

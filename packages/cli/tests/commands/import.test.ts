@@ -7,8 +7,14 @@ describe("import bgg-collection", () => {
     sseRoutes: {
       "/api/import/bgg": {
         events: [
-          { event: "progress", data: JSON.stringify({ imported: 1, total: 3, current: "Wingspan" }) },
-          { event: "progress", data: JSON.stringify({ imported: 2, total: 3, current: "Gloomhaven" }) },
+          {
+            event: "progress",
+            data: JSON.stringify({ imported: 1, total: 3, current: "Wingspan" }),
+          },
+          {
+            event: "progress",
+            data: JSON.stringify({ imported: 2, total: 3, current: "Gloomhaven" }),
+          },
           { event: "complete", data: JSON.stringify({ imported: 2, skipped: 1, errors: [] }) },
         ],
       },
@@ -35,11 +41,21 @@ describe("import bgg-collection with errors", () => {
     sseRoutes: {
       "/api/import/bgg": {
         events: [
-          { event: "progress", data: JSON.stringify({ imported: 1, total: 3, current: "Wingspan" }) },
-          { event: "progress", data: JSON.stringify({ imported: 2, total: 3, current: "Gloomhaven" }) },
+          {
+            event: "progress",
+            data: JSON.stringify({ imported: 1, total: 3, current: "Wingspan" }),
+          },
+          {
+            event: "progress",
+            data: JSON.stringify({ imported: 2, total: 3, current: "Gloomhaven" }),
+          },
           {
             event: "complete",
-            data: JSON.stringify({ imported: 2, skipped: 0, errors: ["Failed to fetch: Pandemic"] }),
+            data: JSON.stringify({
+              imported: 2,
+              skipped: 0,
+              errors: ["Failed to fetch: Pandemic"],
+            }),
           },
         ],
       },

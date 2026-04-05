@@ -16,7 +16,12 @@ export function createScoreRoutes(deps: ScoreRoutesDeps): RouteModule {
     try {
       const { game, score } = await gameService.getGame(id);
       if (score === null) {
-        return c.json({ gameId: game.id, gameName: game.name, score: null, status: "not yet rated" });
+        return c.json({
+          gameId: game.id,
+          gameName: game.name,
+          score: null,
+          status: "not yet rated",
+        });
       }
       return c.json({ gameId: game.id, gameName: game.name, ...score });
     } catch (err) {
@@ -45,19 +50,18 @@ export function createScoreRoutes(deps: ScoreRoutesDeps): RouteModule {
           breakdown: g.score!.breakdown,
         }));
 
-      const unscored = games.filter((g) => g.score === null).map((g) => ({
-        gameId: g.game.id,
-        gameName: g.game.name,
-        score: null as null,
-        status: "not yet rated" as const,
-      }));
+      const unscored = games
+        .filter((g) => g.score === null)
+        .map((g) => ({
+          gameId: g.game.id,
+          gameName: g.game.name,
+          score: null as null,
+          status: "not yet rated" as const,
+        }));
 
       return c.json({ scored, unscored });
     } catch (err) {
-      return c.json(
-        { error: err instanceof Error ? err.message : String(err) },
-        500,
-      );
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }
   });
 
@@ -68,9 +72,7 @@ export function createScoreRoutes(deps: ScoreRoutesDeps): RouteModule {
       description: "Get fitness score with full breakdown for a game",
       invocation: { method: "GET", path: "/api/games/:id/score" },
       hierarchy: { root: "shelf", feature: "score" },
-      parameters: [
-        { name: "id", in: "path", description: "Game ID", required: true },
-      ],
+      parameters: [{ name: "id", in: "path", description: "Game ID", required: true }],
       idempotent: true,
     },
     {

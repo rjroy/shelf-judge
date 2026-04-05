@@ -32,9 +32,7 @@ export default function SearchPage() {
       setSearching(true);
       setError(null);
       try {
-        const res = await fetch(
-          `/api/daemon/games/search?q=${encodeURIComponent(query)}`
-        );
+        const res = await fetch(`/api/daemon/games/search?q=${encodeURIComponent(query)}`);
         if (!res.ok) {
           const data = await res.json().catch(() => ({ error: "Search failed" }));
           throw new Error(data.error ?? `Search failed: ${res.status}`);
@@ -124,9 +122,7 @@ export default function SearchPage() {
           }}
         />
         {searching && (
-          <span style={{ marginLeft: 8, color: "#666", fontSize: 13 }}>
-            Searching...
-          </span>
+          <span style={{ marginLeft: 8, color: "#666", fontSize: 13 }}>Searching...</span>
         )}
       </div>
 
@@ -145,9 +141,7 @@ export default function SearchPage() {
             {results.map((r) => (
               <tr key={r.bggId} style={{ borderBottom: "1px solid #eee" }}>
                 <td style={{ padding: "6px 10px" }}>{r.name}</td>
-                <td style={{ padding: "6px 10px", color: "#666" }}>
-                  {r.yearPublished ?? ""}
-                </td>
+                <td style={{ padding: "6px 10px", color: "#666" }}>{r.yearPublished ?? ""}</td>
                 <td style={{ padding: "6px 10px" }}>
                   <button
                     onClick={() => handleAddBgg(r.bggId)}

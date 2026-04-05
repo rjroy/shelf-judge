@@ -64,9 +64,7 @@ export function RatingForm({
 
   return (
     <form onSubmit={handleSubmit}>
-      {error && (
-        <p style={{ color: "#c00", marginBottom: 12 }}>{error}</p>
-      )}
+      {error && <p style={{ color: "#c00", marginBottom: 12 }}>{error}</p>}
 
       <table style={{ borderCollapse: "collapse", fontSize: 14 }}>
         <tbody>
@@ -76,9 +74,7 @@ export function RatingForm({
                 <label htmlFor={`rating-${axis.id}`}>
                   {axis.name}
                   {axis.source === "bgg" && (
-                    <span style={{ color: "#059669", fontSize: 12, marginLeft: 4 }}>
-                      (BGG)
-                    </span>
+                    <span style={{ color: "#059669", fontSize: 12, marginLeft: 4 }}>(BGG)</span>
                   )}
                 </label>
               </td>

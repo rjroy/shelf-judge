@@ -11,7 +11,11 @@ interface AxisData {
   description: string | null;
 }
 
-export async function axisList(client: DaemonClient, _args: string[], opts: OutputOptions): Promise<string> {
+export async function axisList(
+  client: DaemonClient,
+  _args: string[],
+  opts: OutputOptions,
+): Promise<string> {
   const { ok, data } = await client.get<AxisData[]>("/api/axes");
 
   if (!ok) {
@@ -63,7 +67,9 @@ export async function axisUpdate(
 ): Promise<string> {
   const id = args[0];
   if (!id) {
-    throw new Error("Usage: shelf-judge axis update <id> [--weight N] [--name NAME] [--description TEXT]");
+    throw new Error(
+      "Usage: shelf-judge axis update <id> [--weight N] [--name NAME] [--description TEXT]",
+    );
   }
 
   const body: Record<string, unknown> = {};
@@ -88,13 +94,19 @@ export async function axisUpdate(
   return `Updated axis: ${axis.name} (weight: ${axis.weight})`;
 }
 
-export async function axisDelete(client: DaemonClient, args: string[], opts: OutputOptions): Promise<string> {
+export async function axisDelete(
+  client: DaemonClient,
+  args: string[],
+  opts: OutputOptions,
+): Promise<string> {
   const id = args[0];
   if (!id) {
     throw new Error("Usage: shelf-judge axis delete <id>");
   }
 
-  const { ok, data } = await client.del<{ deletedRatingsCount: number }>(`/api/axes/${encodeURIComponent(id)}`);
+  const { ok, data } = await client.del<{ deletedRatingsCount: number }>(
+    `/api/axes/${encodeURIComponent(id)}`,
+  );
 
   if (!ok) {
     const err = data as unknown as { error: string };

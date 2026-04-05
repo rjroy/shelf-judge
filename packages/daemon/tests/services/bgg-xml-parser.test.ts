@@ -45,9 +45,7 @@ describe("BGG XML Parser", () => {
 
       // Suggested player counts
       expect(data.suggestedPlayerCounts.length).toBeGreaterThanOrEqual(5);
-      const threePlayer = data.suggestedPlayerCounts.find(
-        (s) => s.playerCount === "3",
-      );
+      const threePlayer = data.suggestedPlayerCounts.find((s) => s.playerCount === "3");
       expect(threePlayer).toBeDefined();
       expect(threePlayer!.best).toBe(573);
       expect(threePlayer!.recommended).toBe(367);

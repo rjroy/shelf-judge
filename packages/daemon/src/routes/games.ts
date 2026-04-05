@@ -21,7 +21,8 @@ function isBggConfigured(bggClient?: BggClient): boolean {
 function bggNotConfiguredResponse(c: Context) {
   return c.json(
     {
-      error: "BGG integration is not configured. Register at https://boardgamegeek.com/using_the_xml_api and run `shelf-judge config set bgg-token YOUR_TOKEN`.",
+      error:
+        "BGG integration is not configured. Register at https://boardgamegeek.com/using_the_xml_api and run `shelf-judge config set bgg-token YOUR_TOKEN`.",
     },
     503,
   );
@@ -46,10 +47,7 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       const results = await gameService.searchGames(query);
       return c.json(results);
     } catch (err) {
-      return c.json(
-        { error: err instanceof Error ? err.message : String(err) },
-        500,
-      );
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }
   });
 
@@ -64,14 +62,15 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
 
     const parsed = AddGameSchema.safeParse(body);
     if (!parsed.success) {
-      return c.json(
-        { error: "Validation failed", details: parsed.error.issues },
-        400,
-      );
+      return c.json({ error: "Validation failed", details: parsed.error.issues }, 400);
     }
 
     // If adding by bggId, check BGG is configured
-    if (parsed.data.bggId !== null && parsed.data.bggId !== undefined && !isBggConfigured(bggClient)) {
+    if (
+      parsed.data.bggId !== null &&
+      parsed.data.bggId !== undefined &&
+      !isBggConfigured(bggClient)
+    ) {
       return bggNotConfiguredResponse(c);
     }
 
@@ -93,10 +92,7 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       const games = await gameService.listGames();
       return c.json(games);
     } catch (err) {
-      return c.json(
-        { error: err instanceof Error ? err.message : String(err) },
-        500,
-      );
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }
   });
 
@@ -128,10 +124,7 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
 
     const parsed = RatingsBodySchema.safeParse(body);
     if (!parsed.success) {
-      return c.json(
-        { error: "Validation failed", details: parsed.error.issues },
-        400,
-      );
+      return c.json({ error: "Validation failed", details: parsed.error.issues }, 400);
     }
 
     try {
@@ -191,9 +184,7 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       description: "Search BGG for games by name",
       invocation: { method: "GET", path: "/api/games/search" },
       hierarchy: { root: "shelf", feature: "game" },
-      parameters: [
-        { name: "q", in: "query", description: "Search query", required: true },
-      ],
+      parameters: [{ name: "q", in: "query", description: "Search query", required: true }],
       idempotent: true,
     },
     {
@@ -218,9 +209,7 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       description: "Get a game with current fitness score",
       invocation: { method: "GET", path: "/api/games/:id" },
       hierarchy: { root: "shelf", feature: "game" },
-      parameters: [
-        { name: "id", in: "path", description: "Game ID", required: true },
-      ],
+      parameters: [{ name: "id", in: "path", description: "Game ID", required: true }],
       idempotent: true,
     },
     {
@@ -229,9 +218,7 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       description: "Set ratings for a game on one or more axes",
       invocation: { method: "PUT", path: "/api/games/:id/ratings" },
       hierarchy: { root: "shelf", feature: "game" },
-      parameters: [
-        { name: "id", in: "path", description: "Game ID", required: true },
-      ],
+      parameters: [{ name: "id", in: "path", description: "Game ID", required: true }],
       idempotent: true,
     },
     {
@@ -240,9 +227,7 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       description: "Remove a game from the collection",
       invocation: { method: "DELETE", path: "/api/games/:id" },
       hierarchy: { root: "shelf", feature: "game" },
-      parameters: [
-        { name: "id", in: "path", description: "Game ID", required: true },
-      ],
+      parameters: [{ name: "id", in: "path", description: "Game ID", required: true }],
       idempotent: false,
     },
     {
@@ -251,9 +236,7 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       description: "Re-fetch BGG data for a game",
       invocation: { method: "POST", path: "/api/games/:id/refresh" },
       hierarchy: { root: "shelf", feature: "game" },
-      parameters: [
-        { name: "id", in: "path", description: "Game ID", required: true },
-      ],
+      parameters: [{ name: "id", in: "path", description: "Game ID", required: true }],
       idempotent: false,
     },
   ];

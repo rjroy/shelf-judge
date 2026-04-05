@@ -28,9 +28,9 @@ const COMMANDS: Record<string, number> = {
   "import bgg-collection": 2,
   "config get": 2,
   "config set": 2,
-  "start": 1,
-  "stop": 1,
-  "help": 1,
+  start: 1,
+  stop: 1,
+  help: 1,
 };
 
 interface ParsedArgs {
@@ -143,10 +143,19 @@ async function main(): Promise<void> {
       output = await axisList(client, args, opts);
       break;
     case "axis create":
-      output = await axisCreate(client, args, { ...opts, weight: parsed.weight, description: parsed.description });
+      output = await axisCreate(client, args, {
+        ...opts,
+        weight: parsed.weight,
+        description: parsed.description,
+      });
       break;
     case "axis update":
-      output = await axisUpdate(client, args, { ...opts, weight: parsed.weight, name: parsed.name, description: parsed.description });
+      output = await axisUpdate(client, args, {
+        ...opts,
+        weight: parsed.weight,
+        name: parsed.name,
+        description: parsed.description,
+      });
       break;
     case "axis delete":
       output = await axisDelete(client, args, opts);

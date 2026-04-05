@@ -1,5 +1,12 @@
 import { describe, test, expect } from "bun:test";
-import { gameSearch, gameAdd, gameList, gameRate, gameRemove, parseRateArgs } from "../../src/commands/game.js";
+import {
+  gameSearch,
+  gameAdd,
+  gameList,
+  gameRate,
+  gameRemove,
+  parseRateArgs,
+} from "../../src/commands/game.js";
 import { createMockClient } from "../helpers/mock-client.js";
 
 describe("game search", () => {

@@ -67,21 +67,25 @@ activity_timeline:
 current_progress: "All fixes implemented and verified. 59 CLI tests pass (up from 53). Fixes: (1) Daemon stop now sends POST /api/shutdown instead of unlinkSync, (2) Added daemon shutdown endpoint to daemon, (3) Made daemonStart testable via DaemonSpawner injection, (4) Added 6 new tests covering daemon start and stop happy paths, (5) Improved import error message, (6) Added SSE parser limitation comment. Pre-existing typecheck/daemon test failures in worktree are unrelated."
 projectName: shelf-judge
 ---
+
 # Phase 6 Review Fixes: All Thorne Findings Addressed
 
 ## Defects Fixed
 
 ### 1. Daemon stop now actually stops the daemon
+
 - Added `POST /api/shutdown` endpoint to daemon (`packages/daemon/src/routes/shutdown.ts`)
 - Wired into `app.ts` with injectable `onShutdown` callback
 - Wired into `index.ts` with real shutdown handler (stops server, exits process)
 - CLI `daemonStop` now calls `POST /api/shutdown` instead of the broken `unlinkSync` approach
 
 ### 2. Daemon stop happy path tested
+
 - Added test: "sends shutdown request when daemon is running" (reachable: true, POST /api/shutdown mock)
 - Added test: "--json outputs parseable JSON when daemon is running"
 
 ### 3. Daemon start tested
+
 - Extracted spawn logic behind `DaemonSpawner` interface for dependency injection
 - Extracted `resolveDaemonEntryPath()` as a testable function
 - Added tests: PID reporting, --json output, entry path resolution, spawner call verification
@@ -90,12 +94,15 @@ projectName: shelf-judge
 ## Concerns Addressed
 
 ### 4. Axis name vs ID (integration gap)
+
 No CLI code change. This is an integration gap between CLI and daemon API contract. The CLI correctly passes through the user's input. Whether the daemon expects names or IDs is a Phase 7 integration concern. Decision recorded.
 
 ### 5. SSE parser limitation
+
 Added comment documenting the simplified parser's scope and limitations.
 
 ### Additional
+
 - Improved import error message to be actionable: now suggests checking daemon status
 - Total CLI tests: 59 (up from 53), all passing
 
@@ -103,8 +110,8 @@ Added comment documenting the simplified parser's scope and limitations.
 
 **How to fix daemon stop: API endpoint vs PID tracking?**
 Add POST /api/shutdown to the daemon, have CLI stop call it. This is the clean approach: the daemon already handles SIGTERM, but an HTTP endpoint is more reliable than PID file tracking and works naturally with the existing DaemonClient interface.
-*Reasoning: The daemon already has SIGTERM handling (daemon/src/index.ts:58-62). Adding an HTTP endpoint keeps the CLI's interface consistent (all operations go through DaemonClient). PID tracking requires filesystem state management and is fragile. The HTTP approach also lets the daemon do graceful cleanup before exiting.*
+_Reasoning: The daemon already has SIGTERM handling (daemon/src/index.ts:58-62). Adding an HTTP endpoint keeps the CLI's interface consistent (all operations go through DaemonClient). PID tracking requires filesystem state management and is fragile. The HTTP approach also lets the daemon do graceful cleanup before exiting._
 
 **Should concern #4 (axis name vs ID) be fixed in CLI code?**
 No code change. This is an integration gap between CLI and daemon. The CLI passes through whatever the user provides. Whether that should be a name or ID depends on the daemon's API contract. Document as known integration gap for Phase 7.
-*Reasoning: Thorne flagged this as a concern, not a defect. The CLI code correctly passes the user's input. The mismatch, if any, is between the CLI design document's examples and the daemon API. Fixing this requires knowing the daemon's ratings API contract, which is an integration concern.*
+_Reasoning: Thorne flagged this as a concern, not a defect. The CLI code correctly passes the user's input. The mismatch, if any, is between the CLI design document's examples and the daemon API. Fixing this requires knowing the daemon's ratings API contract, which is an integration concern._

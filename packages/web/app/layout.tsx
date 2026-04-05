@@ -6,11 +6,7 @@ export const metadata: Metadata = {
   description: "Board game fitness scoring",
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body style={{ margin: 0, fontFamily: "system-ui, -apple-system, sans-serif" }}>
@@ -37,12 +33,18 @@ export default function RootLayout({
                 </Link>
               </li>
               <li style={{ marginBottom: 8 }}>
-                <Link href="/search" style={{ textDecoration: "none", color: "#333", fontSize: 14 }}>
+                <Link
+                  href="/search"
+                  style={{ textDecoration: "none", color: "#333", fontSize: 14 }}
+                >
                   Add Game
                 </Link>
               </li>
               <li style={{ marginBottom: 8 }}>
-                <Link href="/import" style={{ textDecoration: "none", color: "#333", fontSize: 14 }}>
+                <Link
+                  href="/import"
+                  style={{ textDecoration: "none", color: "#333", fontSize: 14 }}
+                >
                   Import from BGG
                 </Link>
               </li>

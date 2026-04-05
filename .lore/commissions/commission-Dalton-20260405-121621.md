@@ -76,41 +76,49 @@ activity_timeline:
 current_progress: "All 120 tests pass. All 5 actionable findings fixed: (1) Fixtures made structurally realistic with artist links, polls, CDN URLs, realistic stats; (2) addGame returns AddGameResult with warning on BGG failure; (3) 429 test verifies 30s delay timing; (4) Weight scaling comment added; (5) Rate limiter single-threaded assumption documented."
 projectName: shelf-judge
 ---
+
 # Phase 3 Review Findings: All Addressed
 
 ## Test Results
+
 120 tests pass, 0 failures, 330 assertions across 9 files.
 
 ## Fixes Applied
 
 ### Finding #1 (DEFECT): Fixtures made structurally realistic
+
 - `thing-gloomhaven-174430.xml`: Added `boardgameartist` links, `suggested_playerage` poll, `language_dependence` poll, real CDN-style image URLs, non-round stat numbers (numweights 15000 -> 4523, numowned 120000 -> 98745, etc.)
 - `collection-testuser.xml`: Fixed pubdate from future date to "Mon, 17 Mar 2025", added realistic CDN URLs, non-round numowned values
 - Added `tests/fixtures/README.md` documenting that fixtures should be refreshed from live API when network access is available (blocked by proxy 403 during this session)
 - Updated `bgg-xml-parser.test.ts` assertion for the changed numWeightVotes value
 
 ### Finding #2 (DEFECT): Silent catch block -> warning surfaced
+
 - Changed `GameService.addGame()` return type from `Promise<Game>` to `Promise<AddGameResult>` where `AddGameResult = { game: Game; warning?: string }`
 - Catch block now captures error message: `"Game added but BGG data could not be fetched: {error}"`
 - Updated all callers across 3 test files (game-service.test.ts, game-service-bgg.test.ts, import.test.ts) to destructure `{ game }` from result
 - Added test asserting warning is present and descriptive when BGG is unavailable
 
 ### Finding #3 (DEFECT): 429 backoff test verifies timing
+
 - Replaced the no-op delayFn with a tracking version that captures delay arguments
 - Test now asserts `delayCalls` contains 30000 (BACKOFF_429_MS)
 - Added second test verifying slower rate (10s) is applied after 429 recovery
 
 ### Finding #4 (CONCERN): Weight scaling documented
+
 - Added comment: `// BGG weight is 1-5 scale; multiply by 2 to map to 1-10 rating scale`
 
 ### Finding #5 (CONCERN): Rate limiter assumption documented
+
 - Added comment block explaining single-threaded assumption and why concurrent callers would bypass the throttle
 
 ### Finding #6 (OBSERVATION): Acknowledged, no action taken
+
 - Thorne noted this is not a blocker; the Wingspan example test covers correctness with hand-calculated values
 
 ## Decisions
 
 **Can I capture real BGG API responses for fixture files?**
 Network access is blocked (proxy 403). Will make fixtures structurally faithful to real BGG API format by adding missing fields (boardgameartist links, suggested_playerage poll, language_dependence poll, realistic URLs and stats). Document in a comment that fixtures should be refreshed from live API when network access is available.
-*Reasoning: The spec requires "captured real API responses." Without network access, I can't fulfill this literally. The next best action is to make fixtures match the real API structure as closely as possible, so the parser is tested against realistic XML. This is a gap I'm documenting rather than hiding.*
+_Reasoning: The spec requires "captured real API responses." Without network access, I can't fulfill this literally. The next best action is to make fixtures match the real API structure as closely as possible, so the parser is tested against realistic XML. This is a gap I'm documenting rather than hiding._

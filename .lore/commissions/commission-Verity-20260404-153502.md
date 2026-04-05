@@ -47,6 +47,7 @@ activity_timeline:
 current_progress: "Research complete. Found comprehensive data on BGG API v2 endpoints, response structure, the new 2025 authentication requirement (application tokens), rate limits, TypeScript libraries, and data format quirks. Writing artifact now."
 projectName: shelf-judge
 ---
+
 Research complete. Artifact written to `.lore/research/bgg-api.md`.
 
 Key findings:

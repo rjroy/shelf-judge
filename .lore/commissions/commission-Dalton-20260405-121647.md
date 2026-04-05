@@ -70,6 +70,7 @@ activity_timeline:
 current_progress: "All findings read. Now implementing fixes for F1-F5 and observations O1-O3."
 projectName: shelf-judge
 ---
+
 # Phase 4 Review Fixes: All Findings Addressed
 
 ## Findings Fixed
@@ -93,5 +94,6 @@ projectName: shelf-judge
 **O3: Score list sort implicit coupling** - Added explicit `.sort((a, b) => b.score!.score - a.score!.score)` in the scores route so it doesn't depend on `listGames()` sort order.
 
 ## Verification
+
 - 150 tests pass, 0 failures
 - TypeScript type check clean (zero errors)

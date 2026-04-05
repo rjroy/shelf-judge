@@ -1,7 +1,7 @@
 ---
 title: "Fitness Score Model Options"
 date: 2026-04-04
-status: approved 
+status: approved
 tags: [brainstorm, fitness, scoring, math]
 ---
 
@@ -48,6 +48,7 @@ BGG-derived axes appear pre-populated but can be overridden. "BGG community rati
 ### How BGG data integrates
 
 BGG fields are normalized to 1–10 and offered as derived axes:
+
 - BGG rating (already 1–10, pass-through)
 - BGG weight 1–5 → normalized to 1–10 (e.g., weight 3.5 → complexity axis score 7)
 - Player count match: does the game's player count range cover the user's household size? 1–10 score based on how well it covers
@@ -216,6 +217,7 @@ This is a simplification trade-off: users give up per-axis decomposition in exch
 ### How BGG data integrates
 
 BGG data IS the model. Games are represented as attribute vectors:
+
 - Mechanics: binary flags for each mechanic (or TF-IDF scores across the collection)
 - Categories: same
 - BGG weight: continuous, normalized
@@ -304,6 +306,7 @@ Most users will never need to think about this. The default is linear. Curves ar
 ### How BGG data integrates
 
 BGG fields map directly to axis inputs:
+
 - BGG weight → complexity axis (user defines the utility curve: linear, plateau, or veto)
 - Player count → player-count-fit axis (auto-populated, curve defaults to: full match = 10, partial match = 5, no overlap = 0)
 - BGG community rating → optional overall-quality axis (user can include or exclude)
@@ -317,6 +320,7 @@ Multiplicative combination of normalized utilities: `fitness = 10 × ∏(utility
 This is a generalization: with all linear axes, it behaves like a geometric mean. With veto axes (utility = 0 below threshold), a single veto zeros the entire product.
 
 Alternatively, offer two modes:
+
 - **Compensatory (additive):** Good scores can compensate for mediocre ones. Default for most users.
 - **Non-compensatory (multiplicative with veto):** A single veto cannot be overridden. For users who have hard requirements.
 
@@ -445,15 +449,15 @@ Three patterns appear across all approaches and are worth naming before the next
 
 ## Summary
 
-| | Approach 1: Axis Scorecard | Approach 2: Pairwise Tournament | Approach 3: Profile Similarity | Approach 4: Utility Curves | Approach 5: LLM Synthesis |
-|---|---|---|---|---|---|
-| **Transparency** | High | Medium (ranking, not score) | Medium (attributes, not axes) | High | High (natural language) |
-| **User burden** | High (rate every game on every axis) | Low (comparisons) | Low (one overall rating) | High | Medium (axes + notes) |
-| **Prediction strength** | Medium | Low (requires comparisons) | High (any BGG game) | Medium-High | High (handles gaps) |
-| **Redundancy model** | Explicit penalty | Organic (comparisons) | Structural (marginal fitness) | Explicit penalty | Narrative |
-| **Cold-start** | Partial (BGG axes work) | Poor | Poor | Partial | Good |
-| **Technical complexity** | Low-Medium | High | Medium-High | Medium | High |
-| **Personal axis support** | Full | Weak | Weak | Full | Full |
+|                           | Approach 1: Axis Scorecard           | Approach 2: Pairwise Tournament | Approach 3: Profile Similarity | Approach 4: Utility Curves | Approach 5: LLM Synthesis |
+| ------------------------- | ------------------------------------ | ------------------------------- | ------------------------------ | -------------------------- | ------------------------- |
+| **Transparency**          | High                                 | Medium (ranking, not score)     | Medium (attributes, not axes)  | High                       | High (natural language)   |
+| **User burden**           | High (rate every game on every axis) | Low (comparisons)               | Low (one overall rating)       | High                       | Medium (axes + notes)     |
+| **Prediction strength**   | Medium                               | Low (requires comparisons)      | High (any BGG game)            | Medium-High                | High (handles gaps)       |
+| **Redundancy model**      | Explicit penalty                     | Organic (comparisons)           | Structural (marginal fitness)  | Explicit penalty           | Narrative                 |
+| **Cold-start**            | Partial (BGG axes work)              | Poor                            | Poor                           | Partial                    | Good                      |
+| **Technical complexity**  | Low-Medium                           | High                            | Medium-High                    | Medium                     | High                      |
+| **Personal axis support** | Full                                 | Weak                            | Weak                           | Full                       | Full                      |
 
 ---
 

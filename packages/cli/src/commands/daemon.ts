@@ -39,7 +39,11 @@ export async function daemonStart(
   return `Daemon started (PID: ${handle.pid})`;
 }
 
-export async function daemonStop(client: DaemonClient, _args: string[], opts: OutputOptions): Promise<string> {
+export async function daemonStop(
+  client: DaemonClient,
+  _args: string[],
+  opts: OutputOptions,
+): Promise<string> {
   const reachable = await client.isReachable();
   if (!reachable) {
     if (opts.json) return printOutput({ stopped: false, reason: "not running" }, opts);

@@ -6,9 +6,7 @@ export interface MockFileOps extends FileOps {
 }
 
 export function createMockFileOps(initialFiles?: Record<string, string>): MockFileOps {
-  const files = new Map<string, string>(
-    initialFiles ? Object.entries(initialFiles) : [],
-  );
+  const files = new Map<string, string>(initialFiles ? Object.entries(initialFiles) : []);
   const calls: Array<{ method: string; args: string[] }> = [];
 
   return {

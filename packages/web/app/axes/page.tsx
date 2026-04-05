@@ -183,9 +183,7 @@ export default function AxesPage() {
                   {axis.source === "bgg" ? "BGG" : "Personal"}
                 </span>
               </td>
-              <td style={{ padding: "6px 10px" }}>
-                {ratingsCountForAxis(axis.id)}
-              </td>
+              <td style={{ padding: "6px 10px" }}>{ratingsCountForAxis(axis.id)}</td>
               <td style={{ padding: "6px 10px" }}>
                 {editingId === axis.id ? (
                   <div style={{ display: "flex", gap: 4 }}>
@@ -260,7 +258,10 @@ export default function AxesPage() {
       </table>
 
       <h2>Create New Axis</h2>
-      <form onSubmit={handleCreate} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "end" }}>
+      <form
+        onSubmit={handleCreate}
+        style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "end" }}
+      >
         <div>
           <label style={{ display: "block", fontSize: 12, marginBottom: 4 }}>Name</label>
           <input

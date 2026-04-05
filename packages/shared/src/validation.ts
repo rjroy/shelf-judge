@@ -29,14 +29,18 @@ const AddGameBaseFields = {
 
 // Union: { bggId: number } | { name: string, yearPublished?: number }
 // Both can coexist, but at least one of bggId or name must be present.
-export const AddGameSchema = z.object({
-  name: z.string().min(1, "Game name cannot be empty").optional(),
-  bggId: z.number().int().nullable().optional().default(null),
-  ...AddGameBaseFields,
-}).refine(
-  (data) => (data.name !== undefined && data.name.length > 0) || (data.bggId !== null && data.bggId !== undefined),
-  { message: "Either name or bggId must be provided" },
-);
+export const AddGameSchema = z
+  .object({
+    name: z.string().min(1, "Game name cannot be empty").optional(),
+    bggId: z.number().int().nullable().optional().default(null),
+    ...AddGameBaseFields,
+  })
+  .refine(
+    (data) =>
+      (data.name !== undefined && data.name.length > 0) ||
+      (data.bggId !== null && data.bggId !== undefined),
+    { message: "Either name or bggId must be provided" },
+  );
 
 export type CreateAxisInput = z.input<typeof CreateAxisSchema>;
 export type UpdateAxisInput = z.input<typeof UpdateAxisSchema>;

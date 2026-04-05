@@ -44,8 +44,22 @@ describe("formatScore", () => {
 describe("formatBreakdown", () => {
   test("formats breakdown entries as a table", () => {
     const result = formatBreakdown([
-      { axisName: "Wife will play it", rating: 8, weight: 40, contribution: 3.2, source: "personal", bggOriginal: null },
-      { axisName: "Complexity", rating: 5.8, weight: 20, contribution: 1.16, source: "bgg", bggOriginal: null },
+      {
+        axisName: "Wife will play it",
+        rating: 8,
+        weight: 40,
+        contribution: 3.2,
+        source: "personal",
+        bggOriginal: null,
+      },
+      {
+        axisName: "Complexity",
+        rating: 5.8,
+        weight: 20,
+        contribution: 1.16,
+        source: "bgg",
+        bggOriginal: null,
+      },
     ]);
     expect(result).toContain("Axis");
     expect(result).toContain("Wife will play it");
@@ -56,7 +70,14 @@ describe("formatBreakdown", () => {
 
   test("shows BGG original for override source", () => {
     const result = formatBreakdown([
-      { axisName: "Community Rating", rating: 9, weight: 10, contribution: 0.9, source: "override", bggOriginal: 8.1 },
+      {
+        axisName: "Community Rating",
+        rating: 9,
+        weight: 10,
+        contribution: 0.9,
+        source: "override",
+        bggOriginal: 8.1,
+      },
     ]);
     expect(result).toContain("(BGG: 8.1)");
     expect(result).toContain("override");
@@ -64,7 +85,14 @@ describe("formatBreakdown", () => {
 
   test("shows --- for unrated axes", () => {
     const result = formatBreakdown([
-      { axisName: "Unrated", rating: null, weight: 30, contribution: null, source: "personal", bggOriginal: null },
+      {
+        axisName: "Unrated",
+        rating: null,
+        weight: 30,
+        contribution: null,
+        source: "personal",
+        bggOriginal: null,
+      },
     ]);
     expect(result).toContain("---");
   });

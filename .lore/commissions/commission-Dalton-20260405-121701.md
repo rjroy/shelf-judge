@@ -77,6 +77,7 @@ activity_timeline:
 current_progress: "All pages and components written. Files: layout, API proxy route, API client, collection page, game detail page, search page, axes page, import page, score-badge, score-breakdown, rating-form, game-actions components. Verifying build now."
 projectName: shelf-judge
 ---
+
 Phase 5 (Web UI) implemented. All six steps complete:
 
 **5.1 Next.js setup** - App Router scaffold with `@shelf-judge/shared` workspace dependency. API proxy at `/api/daemon/[...path]/route.ts` forwards client component requests to the daemon's Unix socket. Server-side API client at `lib/api.ts` uses Bun's `fetch` with `unix` option directly. Root layout with persistent left sidebar navigation (Collection, Axes, Add Game, Import from BGG).
@@ -94,6 +95,7 @@ Phase 5 (Web UI) implemented. All six steps complete:
 **Build verification**: `next build` passes clean (TypeScript checks pass, all routes compile). Dev server starts in ~140ms.
 
 **Files created/modified**:
+
 - `packages/web/package.json` (scripts, dependencies including @shelf-judge/shared)
 - `packages/web/tsconfig.json`
 - `packages/web/next.config.ts` (BGG image domain whitelist)

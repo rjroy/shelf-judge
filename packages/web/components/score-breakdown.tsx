@@ -35,7 +35,9 @@ export function ScoreBreakdown({ score }: { score: FitnessResult | null }) {
             <tr key={entry.axisId} style={{ borderBottom: "1px solid #eee" }}>
               <td style={{ padding: "6px 10px" }}>{entry.axisName}</td>
               <td style={{ padding: "6px 10px" }}>
-                {entry.rating !== null ? entry.rating.toFixed(1) : (
+                {entry.rating !== null ? (
+                  entry.rating.toFixed(1)
+                ) : (
                   <span style={{ color: "#999", fontStyle: "italic" }}>not rated</span>
                 )}
               </td>
@@ -54,13 +56,7 @@ export function ScoreBreakdown({ score }: { score: FitnessResult | null }) {
   );
 }
 
-function SourceLabel({
-  source,
-  bggOriginal,
-}: {
-  source: string;
-  bggOriginal: number | null;
-}) {
+function SourceLabel({ source, bggOriginal }: { source: string; bggOriginal: number | null }) {
   if (source === "override" && bggOriginal !== null) {
     return (
       <span>

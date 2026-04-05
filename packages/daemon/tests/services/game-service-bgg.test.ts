@@ -22,10 +22,7 @@ function createMockFetch() {
   const calls: Array<{ url: string }> = [];
   const responses: Array<{ status: number; body: string }> = [];
 
-  const fn = async (
-    input: string | URL | Request,
-    init?: RequestInit,
-  ): Promise<Response> => {
+  const fn = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = typeof input === "string" ? input : input.toString();
     calls.push({ url });
 
@@ -149,9 +146,7 @@ describe("GameService BGG Integration", () => {
 
       // Rate a BGG-derived axis (override)
       const collection = await storageService.loadCollection();
-      const complexityAxis = collection.axes.find(
-        (a) => a.bggField === "weight",
-      );
+      const complexityAxis = collection.axes.find((a) => a.bggField === "weight");
       expect(complexityAxis).toBeDefined();
       await gameService.rateGame(game.id, { [complexityAxis!.id]: 7 });
 
@@ -170,9 +165,7 @@ describe("GameService BGG Integration", () => {
     test("throws for manual game without bggId", async () => {
       const { game } = await gameService.addGame({ name: "Manual Game" });
 
-      await expect(gameService.refreshBggData(game.id)).rejects.toThrow(
-        "no BGG ID",
-      );
+      await expect(gameService.refreshBggData(game.id)).rejects.toThrow("no BGG ID");
     });
   });
 
@@ -246,9 +239,7 @@ describe("GameService BGG Integration", () => {
       });
 
       const collection = await storageService.loadCollection();
-      const complexityAxis = collection.axes.find(
-        (a) => a.bggField === "weight",
-      );
+      const complexityAxis = collection.axes.find((a) => a.bggField === "weight");
 
       // Override the complexity axis
       await gameService.rateGame(game.id, { [complexityAxis!.id]: 7 });

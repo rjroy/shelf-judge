@@ -22,20 +22,14 @@ export function createAxisRoutes(deps: AxisRoutesDeps): RouteModule {
 
     const parsed = CreateAxisSchema.safeParse(body);
     if (!parsed.success) {
-      return c.json(
-        { error: "Validation failed", details: parsed.error.issues },
-        400,
-      );
+      return c.json({ error: "Validation failed", details: parsed.error.issues }, 400);
     }
 
     try {
       const axis = await axisService.createAxis(parsed.data);
       return c.json(axis, 201);
     } catch (err) {
-      return c.json(
-        { error: err instanceof Error ? err.message : String(err) },
-        500,
-      );
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }
   });
 
@@ -45,10 +39,7 @@ export function createAxisRoutes(deps: AxisRoutesDeps): RouteModule {
       const axes = await axisService.listAxes();
       return c.json(axes);
     } catch (err) {
-      return c.json(
-        { error: err instanceof Error ? err.message : String(err) },
-        500,
-      );
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }
   });
 
@@ -65,10 +56,7 @@ export function createAxisRoutes(deps: AxisRoutesDeps): RouteModule {
 
     const parsed = UpdateAxisSchema.safeParse(body);
     if (!parsed.success) {
-      return c.json(
-        { error: "Validation failed", details: parsed.error.issues },
-        400,
-      );
+      return c.json({ error: "Validation failed", details: parsed.error.issues }, 400);
     }
 
     try {
@@ -121,9 +109,7 @@ export function createAxisRoutes(deps: AxisRoutesDeps): RouteModule {
       description: "Update axis name, description, or weight",
       invocation: { method: "PUT", path: "/api/axes/:id" },
       hierarchy: { root: "shelf", feature: "axis" },
-      parameters: [
-        { name: "id", in: "path", description: "Axis ID", required: true },
-      ],
+      parameters: [{ name: "id", in: "path", description: "Axis ID", required: true }],
       idempotent: true,
     },
     {
@@ -132,9 +118,7 @@ export function createAxisRoutes(deps: AxisRoutesDeps): RouteModule {
       description: "Delete an axis (removes all ratings on it)",
       invocation: { method: "DELETE", path: "/api/axes/:id" },
       hierarchy: { root: "shelf", feature: "axis" },
-      parameters: [
-        { name: "id", in: "path", description: "Axis ID", required: true },
-      ],
+      parameters: [{ name: "id", in: "path", description: "Axis ID", required: true }],
       idempotent: false,
     },
   ];

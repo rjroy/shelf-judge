@@ -77,21 +77,25 @@ activity_timeline:
 current_progress: "Phase 1 complete. All three steps done: project scaffolding (monorepo with 4 packages, TS strict, ESLint, Prettier), shared types and validation (7 types, 4 Zod schemas, 22 validation tests), storage service (DI factory with atomic write, mock fileOps, 9 tests). 31 tests pass, types check clean."
 projectName: shelf-judge
 ---
+
 Phase 1 implemented. 31 tests pass, types check clean.
 
 **Step 1.1 - Project scaffolding:**
+
 - Bun workspace with 4 packages (shared, daemon, web placeholder, cli placeholder)
 - TypeScript strict mode, ESLint flat config with typescript-eslint, Prettier
 - .gitignore for bun/node_modules/build artifacts/.shelf-judge
 - Dependencies installed: hono, zod, fast-xml-parser, uuid in daemon; zod in shared
 
 **Step 1.2 - Shared types and validation:**
+
 - `packages/shared/src/types.ts`: Game, BggGameData, BggTag, SuggestedPlayerCount, Axis, Collection, FitnessResult, FitnessBreakdownEntry, AppConfig
 - `packages/shared/src/validation.ts`: CreateAxisSchema, UpdateAxisSchema, RateGameSchema, AddGameSchema with Zod
 - `packages/shared/src/index.ts`: barrel export
 - 22 validation tests (empty name, rating 0, rating 11, weight -1, weight 101, non-integer, partial updates)
 
 **Step 1.3 - Storage service:**
+
 - `packages/daemon/src/services/storage-service.ts`: DI factory with `createStorageService({ dataDir, configPath, fileOps })`
 - `packages/daemon/src/services/file-ops.ts`: FileOps interface + real implementation + getTempPath helper
 - `packages/daemon/tests/helpers/mock-file-ops.ts`: in-memory FileOps with call recording
@@ -100,5 +104,6 @@ Phase 1 implemented. 31 tests pass, types check clean.
 **Default collection:** Two BGG-derived axes per REQ-MVP-3 (Community Rating mapped to communityRating, Complexity mapped to weight).
 
 **Interpretation decisions:**
+
 - Used `tsc --noEmit` per-package instead of `tsc --build` with project references. Bun resolves workspace imports at runtime without emit, so composite mode adds complexity for no benefit.
 - AppConfig type defined in shared (not in plan explicitly) since storage-service needs it and it's cross-package.

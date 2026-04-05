@@ -51,9 +51,9 @@ describe("GameService", () => {
     test("rejects duplicate bggId", async () => {
       await gameService.addGame({ name: "Wingspan", bggId: 266192 });
 
-      expect(
-        gameService.addGame({ name: "Wingspan Copy", bggId: 266192 }),
-      ).rejects.toThrow("BGG ID 266192 already exists");
+      expect(gameService.addGame({ name: "Wingspan Copy", bggId: 266192 })).rejects.toThrow(
+        "BGG ID 266192 already exists",
+      );
     });
 
     test("manual games are never duplicates of each other", async () => {
@@ -89,9 +89,7 @@ describe("GameService", () => {
     });
 
     test("throws on non-existent game", async () => {
-      expect(gameService.getGame("nonexistent")).rejects.toThrow(
-        "Game not found",
-      );
+      expect(gameService.getGame("nonexistent")).rejects.toThrow("Game not found");
     });
   });
 
@@ -145,9 +143,9 @@ describe("GameService", () => {
       });
       const { game } = await gameService.addGame({ name: "Test" });
 
-      expect(
-        gameService.rateGame(game.id, { [axis.id]: 0 }),
-      ).rejects.toThrow("Rating must be an integer between 1 and 10");
+      expect(gameService.rateGame(game.id, { [axis.id]: 0 })).rejects.toThrow(
+        "Rating must be an integer between 1 and 10",
+      );
     });
 
     test("rejects rating of 11", async () => {
@@ -157,9 +155,9 @@ describe("GameService", () => {
       });
       const { game } = await gameService.addGame({ name: "Test" });
 
-      expect(
-        gameService.rateGame(game.id, { [axis.id]: 11 }),
-      ).rejects.toThrow("Rating must be an integer between 1 and 10");
+      expect(gameService.rateGame(game.id, { [axis.id]: 11 })).rejects.toThrow(
+        "Rating must be an integer between 1 and 10",
+      );
     });
 
     test("rejects non-integer rating", async () => {
@@ -169,9 +167,9 @@ describe("GameService", () => {
       });
       const { game } = await gameService.addGame({ name: "Test" });
 
-      expect(
-        gameService.rateGame(game.id, { [axis.id]: 1.5 }),
-      ).rejects.toThrow("Rating must be an integer between 1 and 10");
+      expect(gameService.rateGame(game.id, { [axis.id]: 1.5 })).rejects.toThrow(
+        "Rating must be an integer between 1 and 10",
+      );
     });
 
     test("rejects negative rating", async () => {
@@ -181,17 +179,15 @@ describe("GameService", () => {
       });
       const { game } = await gameService.addGame({ name: "Test" });
 
-      expect(
-        gameService.rateGame(game.id, { [axis.id]: -1 }),
-      ).rejects.toThrow("Rating must be an integer between 1 and 10");
+      expect(gameService.rateGame(game.id, { [axis.id]: -1 })).rejects.toThrow(
+        "Rating must be an integer between 1 and 10",
+      );
     });
 
     test("rejects unknown axis ID", async () => {
       const { game } = await gameService.addGame({ name: "Test" });
 
-      expect(
-        gameService.rateGame(game.id, { "fake-axis": 5 }),
-      ).rejects.toThrow("Axis not found");
+      expect(gameService.rateGame(game.id, { "fake-axis": 5 })).rejects.toThrow("Axis not found");
     });
   });
 
@@ -212,9 +208,7 @@ describe("GameService", () => {
     });
 
     test("throws on non-existent game", async () => {
-      expect(gameService.removeGame("nonexistent")).rejects.toThrow(
-        "Game not found",
-      );
+      expect(gameService.removeGame("nonexistent")).rejects.toThrow("Game not found");
     });
   });
 });

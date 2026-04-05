@@ -11,7 +11,11 @@ interface OperationTreeNode {
   children?: Record<string, OperationTreeNode>;
 }
 
-export async function helpCommand(client: DaemonClient, args: string[], opts: OutputOptions): Promise<string> {
+export async function helpCommand(
+  client: DaemonClient,
+  args: string[],
+  opts: OutputOptions,
+): Promise<string> {
   const feature = args[0];
   const path = feature ? `/api/help/${encodeURIComponent(feature)}` : "/api/help";
 

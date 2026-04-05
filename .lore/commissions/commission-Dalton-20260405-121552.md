@@ -53,22 +53,28 @@ activity_timeline:
 current_progress: "Reading Thorne's review findings. 4 items to address: DEFECT 1 (breakdown rounding inconsistency), DEFECT 2 (missing rounding edge case test), CONCERN (source field default for unrated BGG axes), STYLE (redundant null-coalescing in axis-service). Reading the affected files now."
 projectName: shelf-judge
 ---
+
 ## All Thorne Review Findings Addressed
 
 **77 tests pass, 0 failures.**
 
 ### DEFECT 1: Breakdown rounding inconsistency (fixed)
-`fitness-service.ts` — Contribution and score are now computed from the *rounded* rating, not the raw value. The chain is: round rating → compute contribution from rounded rating (then round) → sum contributions for score. This guarantees `displayed_rating × weight = displayed_contribution` and `sum(contributions) / sum(weights) → displayed_score`.
+
+`fitness-service.ts` — Contribution and score are now computed from the _rounded_ rating, not the raw value. The chain is: round rating → compute contribution from rounded rating (then round) → sum contributions for score. This guarantees `displayed_rating × weight = displayed_contribution` and `sum(contributions) / sum(weights) → displayed_score`.
 
 ### DEFECT 2: Missing rounding edge case tests (fixed)
+
 Added two new tests in `fitness-service.test.ts`:
+
 - "displayed rating × weight equals displayed contribution for multi-decimal BGG rating" — uses communityRating 7.666 (rounds to 7.7) and verifies contribution matches 7.7 × weight
 - "score is derivable from breakdown contributions" — uses multiple BGG axes with multi-decimal values and verifies sum(contributions)/sum(weights) rounds to the displayed score
 
 Also rewrote the 4 rounding boundary tests to use integer personal ratings with weight ratios, isolating the score rounding boundary from BGG resolution logic.
 
 ### CONCERN: Source field default for unrated BGG axes (fixed)
+
 `fitness-service.ts:56-57` — Default source now derives from `axis.source` instead of hardcoding "personal". An unrated BGG axis shows `source: "bgg"` in the breakdown. Added a dedicated test: "unrated BGG axis shows source as bgg, not personal."
 
 ### STYLE: Redundant null-coalescing in axis-service (fixed)
+
 `axis-service.ts:34,36,37` — Removed `?? null`, `?? "personal"`, `?? null` after `CreateAxisSchema.parse()`, since parse already applies these defaults.

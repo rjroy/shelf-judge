@@ -121,18 +121,12 @@ describe("Game Routes", () => {
       const game2 = (await game2Res.json()).game;
 
       // Rate game1 low, game2 high
-      await jsonRequest(
-        ctx.app,
-        "PUT",
-        `/api/games/${game1.id}/ratings`,
-        { ratings: { [axis.id]: 3 } },
-      );
-      await jsonRequest(
-        ctx.app,
-        "PUT",
-        `/api/games/${game2.id}/ratings`,
-        { ratings: { [axis.id]: 9 } },
-      );
+      await jsonRequest(ctx.app, "PUT", `/api/games/${game1.id}/ratings`, {
+        ratings: { [axis.id]: 3 },
+      });
+      await jsonRequest(ctx.app, "PUT", `/api/games/${game2.id}/ratings`, {
+        ratings: { [axis.id]: 9 },
+      });
 
       const listRes = await jsonRequest(ctx.app, "GET", "/api/games");
       expect(listRes.status).toBe(200);
@@ -161,18 +155,11 @@ describe("Game Routes", () => {
       const game = (await gameRes.json()).game;
 
       // Rate it
-      await jsonRequest(
-        ctx.app,
-        "PUT",
-        `/api/games/${game.id}/ratings`,
-        { ratings: { [axis.id]: 7 } },
-      );
+      await jsonRequest(ctx.app, "PUT", `/api/games/${game.id}/ratings`, {
+        ratings: { [axis.id]: 7 },
+      });
 
-      const getRes = await jsonRequest(
-        ctx.app,
-        "GET",
-        `/api/games/${game.id}`,
-      );
+      const getRes = await jsonRequest(ctx.app, "GET", `/api/games/${game.id}`);
 
       expect(getRes.status).toBe(200);
       const body = await getRes.json();
@@ -198,12 +185,9 @@ describe("Game Routes", () => {
       });
       const game = (await gameRes.json()).game;
 
-      const rateRes = await jsonRequest(
-        ctx.app,
-        "PUT",
-        `/api/games/${game.id}/ratings`,
-        { ratings: { [axis.id]: 8 } },
-      );
+      const rateRes = await jsonRequest(ctx.app, "PUT", `/api/games/${game.id}/ratings`, {
+        ratings: { [axis.id]: 8 },
+      });
 
       expect(rateRes.status).toBe(200);
       const body = await rateRes.json();
@@ -227,12 +211,9 @@ describe("Game Routes", () => {
       const game = (await gameRes.json()).game;
 
       // Rating out of range (> 10)
-      const rateRes = await jsonRequest(
-        ctx.app,
-        "PUT",
-        `/api/games/${game.id}/ratings`,
-        { ratings: { [axis.id]: 15 } },
-      );
+      const rateRes = await jsonRequest(ctx.app, "PUT", `/api/games/${game.id}/ratings`, {
+        ratings: { [axis.id]: 15 },
+      });
 
       expect(rateRes.status).toBe(400);
       const body = await rateRes.json();
@@ -247,19 +228,11 @@ describe("Game Routes", () => {
       });
       const game = (await gameRes.json()).game;
 
-      const delRes = await jsonRequest(
-        ctx.app,
-        "DELETE",
-        `/api/games/${game.id}`,
-      );
+      const delRes = await jsonRequest(ctx.app, "DELETE", `/api/games/${game.id}`);
       expect(delRes.status).toBe(204);
 
       // Confirm it's gone
-      const getRes = await jsonRequest(
-        ctx.app,
-        "GET",
-        `/api/games/${game.id}`,
-      );
+      const getRes = await jsonRequest(ctx.app, "GET", `/api/games/${game.id}`);
       expect(getRes.status).toBe(404);
     });
   });
@@ -274,11 +247,7 @@ describe("Game Routes", () => {
       });
       ctx = createTestApp({ bggClient });
 
-      const res = await jsonRequest(
-        ctx.app,
-        "GET",
-        "/api/games/search?q=wingspan",
-      );
+      const res = await jsonRequest(ctx.app, "GET", "/api/games/search?q=wingspan");
 
       expect(res.status).toBe(200);
       const results = await res.json();
@@ -291,11 +260,7 @@ describe("Game Routes", () => {
   describe("BGG routes without token", () => {
     test("search returns 503 with setup instructions when BGG is not configured", async () => {
       // Default createTestApp() has no bggClient
-      const res = await jsonRequest(
-        ctx.app,
-        "GET",
-        "/api/games/search?q=wingspan",
-      );
+      const res = await jsonRequest(ctx.app, "GET", "/api/games/search?q=wingspan");
 
       expect(res.status).toBe(503);
       const body = await res.json();

@@ -60,20 +60,25 @@ activity_timeline:
 current_progress: "Applying all 3 findings: (1) add missing await, (2) include tests in tsconfig, (3) document weight range decision."
 projectName: shelf-judge
 ---
+
 ## Phase 1 Review Fixes: All 3 Findings Addressed
 
 ### Finding 1: Missing `await` on reject assertion
+
 **Fixed.** Added `await` to `expect(service.loadCollection()).rejects.toThrow()` in `storage-service.test.ts:65`.
 
 ### Finding 2: tsconfig excludes test files from typecheck
+
 **Fixed.** Added `"tests"` to the `include` arrays in both `packages/shared/tsconfig.json` and `packages/daemon/tsconfig.json`. `bun run typecheck` now covers test files.
 
 ### Finding 3: Spec/plan conflict on weight range
+
 **Fixed.** Changed weight validation from `min(1)` to `min(0)` in both `CreateAxisSchema` and `UpdateAxisSchema` to match spec REQ-MVP-1 (0-100 range). Updated test: replaced "rejects weight below 1" (which tested weight 0) with "accepts weight of 0" and "rejects weight below 0". Removed duplicate "rejects negative weight" test.
 
 Decision documented: spec's 0-100 range wins over plan's 1-100 because REQ-MVP-16 explicitly describes zero-sum-weight handling, making weight 0 an intended input.
 
 ### Verification
+
 - `bun test`: 31 tests pass, 0 fail
 - `bun run typecheck`: clean
 
@@ -81,4 +86,4 @@ Decision documented: spec's 0-100 range wins over plan's 1-100 because REQ-MVP-1
 
 **Should axis weight validation allow 0 (spec REQ-MVP-1: 0-100) or require minimum 1 (plan: 1-100)?**
 Changed validation to min(0) to match the spec's 0-100 range.
-*Reasoning: REQ-MVP-16 explicitly describes zero-sum-weight handling, implying weight 0 is a valid API input. With min(1), that edge case becomes unreachable through normal input, which makes the spec requirement dead code. The plan's 1-100 was an implementation simplification that conflicts with the spec. Aligning with the spec is the safer choice since Phase 2 fitness calculation already needs to handle zero-sum weights defensively.*
+_Reasoning: REQ-MVP-16 explicitly describes zero-sum-weight handling, implying weight 0 is a valid API input. With min(1), that edge case becomes unreachable through normal input, which makes the spec requirement dead code. The plan's 1-100 was an implementation simplification that conflicts with the spec. Aligning with the spec is the safer choice since Phase 2 fitness calculation already needs to handle zero-sum weights defensively._

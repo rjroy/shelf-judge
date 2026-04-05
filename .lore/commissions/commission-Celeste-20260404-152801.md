@@ -44,6 +44,7 @@ activity_timeline:
 current_progress: "Context gathered. Vision is draft status — noting this, proceeding without full four-step vision alignment filtering. No prior brainstorms exist. Writing fitness model options brainstorm now."
 projectName: shelf-judge
 ---
+
 Brainstorm complete. Five meaningfully distinct fitness model approaches written to `.lore/brainstorms/fitness-model-options.md`.
 
 **Approaches covered:**

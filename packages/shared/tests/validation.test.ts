@@ -1,10 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  CreateAxisSchema,
-  UpdateAxisSchema,
-  RateGameSchema,
-  AddGameSchema,
-} from "../src/index";
+import { CreateAxisSchema, UpdateAxisSchema, RateGameSchema, AddGameSchema } from "../src/index";
 
 describe("CreateAxisSchema", () => {
   test("accepts valid input", () => {

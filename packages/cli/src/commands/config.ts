@@ -9,7 +9,11 @@ interface ConfigData {
   socketPath: string;
 }
 
-export async function configGet(client: DaemonClient, _args: string[], opts: OutputOptions): Promise<string> {
+export async function configGet(
+  client: DaemonClient,
+  _args: string[],
+  opts: OutputOptions,
+): Promise<string> {
   const { ok, data } = await client.get<ConfigData>("/api/config");
 
   if (!ok) {
@@ -30,7 +34,11 @@ export async function configGet(client: DaemonClient, _args: string[], opts: Out
   );
 }
 
-export async function configSet(client: DaemonClient, args: string[], opts: OutputOptions): Promise<string> {
+export async function configSet(
+  client: DaemonClient,
+  args: string[],
+  opts: OutputOptions,
+): Promise<string> {
   const key = args[0];
   const value = args.slice(1).join(" ");
 

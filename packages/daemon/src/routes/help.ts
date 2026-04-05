@@ -48,9 +48,7 @@ export function createHelpRoutes(deps: HelpRoutesDeps): RouteModule {
       description: "Operations for a feature subtree",
       invocation: { method: "GET", path: "/api/help/:feature" },
       hierarchy: { root: "shelf", feature: "help" },
-      parameters: [
-        { name: "feature", in: "path", description: "Feature name", required: true },
-      ],
+      parameters: [{ name: "feature", in: "path", description: "Feature name", required: true }],
       idempotent: true,
     },
   ];

@@ -97,14 +97,14 @@ These are real features from the vision, explicitly not in MVP:
 
 ## Exit Points
 
-| Exit | Triggers When | Target |
-|------|---------------|--------|
-| Redundancy scoring | User wants overlap-aware fitness | [STUB: redundancy-scoring] |
-| Prediction engine | User wants scores for unowned games | [STUB: prediction-engine] |
-| Collection profiling | User wants taste profile inference | [STUB: collection-profile] |
-| Tournament ranking | User wants pairwise comparison layer | [STUB: tournament-ranking] |
-| Utility curves | User needs non-linear axis scoring | [STUB: utility-curves] |
-| LLM features | User wants natural language explanations | [STUB: llm-integration] |
+| Exit                 | Triggers When                            | Target                     |
+| -------------------- | ---------------------------------------- | -------------------------- |
+| Redundancy scoring   | User wants overlap-aware fitness         | [STUB: redundancy-scoring] |
+| Prediction engine    | User wants scores for unowned games      | [STUB: prediction-engine]  |
+| Collection profiling | User wants taste profile inference       | [STUB: collection-profile] |
+| Tournament ranking   | User wants pairwise comparison layer     | [STUB: tournament-ranking] |
+| Utility curves       | User needs non-linear axis scoring       | [STUB: utility-curves]     |
+| LLM features         | User wants natural language explanations | [STUB: llm-integration]    |
 
 ## Success Criteria
 
@@ -139,11 +139,13 @@ These are real features from the vision, explicitly not in MVP:
 ## AI Validation
 
 **Defaults** (apply unless overridden):
+
 - Unit tests with mocked time/network/filesystem
 - 90%+ coverage on new code
 - Code review by fresh-context sub-agent
 
 **Custom:**
+
 - Fitness score math verified against hand-calculated examples (the Wingspan example in the fitness model design)
 - BGG XML parsing tested against captured real API responses, not synthetic XML
 - CLI output for `score list` and `score get` matches the breakdown format shown in the CLI design

@@ -78,6 +78,7 @@ activity_timeline:
 current_progress: "Implementation complete. All CLI source files created, 53 CLI tests pass, 203 total project tests pass, typecheck clean. Every command has --json test coverage per plan requirements. Ready to submit."
 projectName: shelf-judge
 ---
+
 Phase 6 (CLI) implemented. All four steps complete:
 
 **6.1 CLI scaffold and daemon client:** Unix socket HTTP client (`client.ts`) with GET/POST/PUT/DELETE/SSE support. Entry point (`index.ts`) with argument parser that matches command tokens against a known command table and dispatches to handlers. Output formatter (`output.ts`) with table rendering, score formatting, and breakdown display.
@@ -91,6 +92,7 @@ Phase 6 (CLI) implemented. All four steps complete:
 **Test results:** 53 CLI tests, 203 total project tests, all passing. Every command has at least one `--json` parseable JSON assertion per the plan's review gate requirement. Typecheck clean.
 
 **Files created:**
+
 - `packages/cli/package.json` (updated with deps and bin entries)
 - `packages/cli/tsconfig.json`
 - `packages/cli/src/index.ts`
@@ -114,4 +116,5 @@ Phase 6 (CLI) implemented. All four steps complete:
 - `packages/cli/tests/commands/help.test.ts`
 
 **Files modified:**
+
 - `package.json` (added CLI to typecheck script)

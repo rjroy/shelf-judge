@@ -3,10 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 const SOCKET_PATH = process.env.SHELF_JUDGE_SOCKET ?? "/tmp/shelf-judge.sock";
 const DAEMON_BASE = "http://localhost";
 
-async function proxyToDaemon(
-  request: NextRequest,
-  params: Promise<{ path: string[] }>,
-) {
+async function proxyToDaemon(request: NextRequest, params: Promise<{ path: string[] }>) {
   const { path } = await params;
   const daemonPath = `/api/${path.join("/")}`;
   const url = new URL(request.url);
@@ -52,24 +49,15 @@ async function proxyToDaemon(
   });
 }
 
-export async function GET(
-  request: NextRequest,
-  context: { params: Promise<{ path: string[] }> },
-) {
+export async function GET(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   return proxyToDaemon(request, context.params);
 }
 
-export async function POST(
-  request: NextRequest,
-  context: { params: Promise<{ path: string[] }> },
-) {
+export async function POST(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   return proxyToDaemon(request, context.params);
 }
 
-export async function PUT(
-  request: NextRequest,
-  context: { params: Promise<{ path: string[] }> },
-) {
+export async function PUT(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   return proxyToDaemon(request, context.params);
 }
 

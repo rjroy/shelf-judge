@@ -74,6 +74,7 @@ activity_timeline:
 current_progress: "All criteria examined. Preparing final review with prioritized findings."
 projectName: shelf-judge
 ---
+
 # Phase 3 Review: BGG Integration
 
 ## Limitation
@@ -91,6 +92,7 @@ I cannot run `bun test`. My posture is read-only (no shell execution). All findi
 The spec (mvp.md line 148) and plan (line 385) both require: "BGG XML parsing tested against captured real API responses, not synthetic XML."
 
 Evidence the fixtures are hand-crafted:
+
 - Missing fields present in real responses (no `boardgameartist` links, no `suggested_playerage` poll, no `language_dependence` poll)
 - Gloomhaven fixture uses truncated image URLs ("thumbnail.jpg", "original.jpg") instead of real CDN hashes
 - Collection fixture has pubdate "Sun, 06 Apr 2026" (tomorrow)
@@ -166,19 +168,20 @@ Not a blocker. The Wingspan example test (lines 52-106) validates against hand-c
 
 ## Requirement Coverage
 
-| Requirement | Status | Evidence |
-|---|---|---|
-| REQ-MVP-7 (add by BGG ID, search, manual) | SATISFIED | game-service.ts addGame handles both bggId and name-only; searchGames delegates to BggClient |
-| REQ-MVP-10 (import from BGG collection) | SATISFIED | importBggCollection with skip/error handling |
-| REQ-MVP-11 (offline functionality) | SATISFIED | addGame catch block, optional bggClient, manual entry works without BGG |
-| REQ-MVP-12 (clear error on missing token) | SATISFIED | assertConfigured with registration URL |
-| REQ-MVP-13 (API failures don't crash) | PARTIALLY SATISFIED | Errors don't crash, but addGame silently swallows fetch errors (Finding #2) |
-| REQ-MVP-18 (BGG data cached, 7-day TTL) | SATISFIED | fetchedAt stored in BggGameData; TTL check deferred to Phase 4 routes |
-| REQ-MVP-19 (refresh preserves overrides) | SATISFIED | refreshBggData updates bggData without touching game.ratings |
+| Requirement                               | Status              | Evidence                                                                                     |
+| ----------------------------------------- | ------------------- | -------------------------------------------------------------------------------------------- |
+| REQ-MVP-7 (add by BGG ID, search, manual) | SATISFIED           | game-service.ts addGame handles both bggId and name-only; searchGames delegates to BggClient |
+| REQ-MVP-10 (import from BGG collection)   | SATISFIED           | importBggCollection with skip/error handling                                                 |
+| REQ-MVP-11 (offline functionality)        | SATISFIED           | addGame catch block, optional bggClient, manual entry works without BGG                      |
+| REQ-MVP-12 (clear error on missing token) | SATISFIED           | assertConfigured with registration URL                                                       |
+| REQ-MVP-13 (API failures don't crash)     | PARTIALLY SATISFIED | Errors don't crash, but addGame silently swallows fetch errors (Finding #2)                  |
+| REQ-MVP-18 (BGG data cached, 7-day TTL)   | SATISFIED           | fetchedAt stored in BggGameData; TTL check deferred to Phase 4 routes                        |
+| REQ-MVP-19 (refresh preserves overrides)  | SATISFIED           | refreshBggData updates bggData without touching game.ratings                                 |
 
 ## Test Inventory
 
 All tests specified in the plan for Phase 3 exist:
+
 - `bgg-client.test.ts`: 12 tests covering search, getGame, batch, collection, 202 retry, 429 backoff, 502/503 retry, malformed XML, missing token
 - `bgg-xml-parser.test.ts`: 10 tests covering thing parsing (Wingspan, Gloomhaven), averageweight=0, primary name extraction, search parsing, collection parsing
 - `fitness-service.test.ts`: 12 tests (Phase 2 + Phase 3 BGG-derived axis tests)
@@ -191,70 +194,73 @@ All tests specified in the plan for Phase 3 exist:
 
 **Can I run bun test as part of this review?**
 Cannot run tests. Thorne's posture is read-only (no Bash tool). Static analysis only.
-*Reasoning: The commission asks to run bun test, but the Warden role prohibits file modification and shell execution. The findings will note this as a limitation and recommend the Guild Master runs tests before accepting the review.*
+_Reasoning: The commission asks to run bun test, but the Warden role prohibits file modification and shell execution. The findings will note this as a limitation and recommend the Guild Master runs tests before accepting the review._
 
 **Criterion 1: Does the BGG client handle 202 retry with correct exponential backoff (5s, 10s, 20s)?**
 PASS. The implementation is correct.
-*Reasoning: bgg-client.ts:130-154. fetchWithRetry202 loops from attempt=0 to MAX_202_RETRIES (3). On 202, backoff is BASE_202_DELAY_MS * Math.pow(2, attempt) = 5000 * 2^0 = 5s, 5000 * 2^1 = 10s, 5000 * 2^2 = 20s. After the 4th 202 (attempt === MAX_202_RETRIES at attempt 3), it throws. This matches the design spec exactly. The test at bgg-client.test.ts:156-179 covers both success-after-retry and max-retry-exhaustion.*
+_Reasoning: bgg-client.ts:130-154. fetchWithRetry202 loops from attempt=0 to MAX_202_RETRIES (3). On 202, backoff is BASE_202_DELAY_MS _ Math.pow(2, attempt) = 5000 _ 2^0 = 5s, 5000 _ 2^1 = 10s, 5000 _ 2^2 = 20s. After the 4th 202 (attempt === MAX_202_RETRIES at attempt 3), it throws. This matches the design spec exactly. The test at bgg-client.test.ts:156-179 covers both success-after-retry and max-retry-exhaustion._
 
 **Criterion 2: Rate limiting uses a sequential queue with configurable delay?**
 PASS. Implementation matches spec.
-*Reasoning: bgg-client.ts:71-128. throttledFetch tracks lastRequestTime and waits currentDelayMs between requests. The delay is configurable via deps.delayMs (default 5000). Tests inject delayMs: 0 for speed. The "sequential queue" is implicit: each call to throttledFetch awaits the delay before firing, and since all public methods await throttledFetch, requests are naturally serialized. This isn't a formal queue data structure, but for a single-caller pattern it achieves the same effect.*
+_Reasoning: bgg-client.ts:71-128. throttledFetch tracks lastRequestTime and waits currentDelayMs between requests. The delay is configurable via deps.delayMs (default 5000). Tests inject delayMs: 0 for speed. The "sequential queue" is implicit: each call to throttledFetch awaits the delay before firing, and since all public methods await throttledFetch, requests are naturally serialized. This isn't a formal queue data structure, but for a single-caller pattern it achieves the same effect._
 
 **Criterion 3: 429 backoff: 30s pause, then 1 req/10s?**
 PASS with a minor concern about recovery behavior.
-*Reasoning: bgg-client.ts:93-103. On 429, waits BACKOFF_429_MS (30s), sets currentDelayMs to 10000 (1 req/10s), then recurses. On successful non-429 response (line 106-110), rateLimitRetries resets to 0 and currentDelayMs halves toward delayMs. The "gradual return to normal" is implemented as a single halving step per successful request (line 109: currentDelayMs = Math.max(delayMs, currentDelayMs / 2)). With delayMs=5000 and currentDelayMs=10000, one success brings it to max(5000, 5000)=5000, so recovery is actually instant (one successful request restores full speed). This is fine for the MVP but the word "gradually" in the design suggests multi-step decay. Low severity.*
+_Reasoning: bgg-client.ts:93-103. On 429, waits BACKOFF_429_MS (30s), sets currentDelayMs to 10000 (1 req/10s), then recurses. On successful non-429 response (line 106-110), rateLimitRetries resets to 0 and currentDelayMs halves toward delayMs. The "gradual return to normal" is implemented as a single halving step per successful request (line 109: currentDelayMs = Math.max(delayMs, currentDelayMs / 2)). With delayMs=5000 and currentDelayMs=10000, one success brings it to max(5000, 5000)=5000, so recovery is actually instant (one successful request restores full speed). This is fine for the MVP but the word "gradually" in the design suggests multi-step decay. Low severity._
 
 **Criterion 4: 502/503 retry after 30s, max 2 retries?**
 PASS.
-*Reasoning: bgg-client.ts:113-119. On 502/503, if retryCount < MAX_5XX_RETRIES (2), waits RETRY_5XX_MS (30s) and retries with retryCount+1. Max 2 retries means 3 total attempts (initial + 2 retries). Test at bgg-client.test.ts:218-227 confirms: 3 502s cause failure.*
+_Reasoning: bgg-client.ts:113-119. On 502/503, if retryCount < MAX_5XX_RETRIES (2), waits RETRY_5XX_MS (30s) and retries with retryCount+1. Max 2 retries means 3 total attempts (initial + 2 retries). Test at bgg-client.test.ts:218-227 confirms: 3 502s cause failure._
 
 **Criterion 5: XML parsing uses captured real API responses, not synthetic XML?**
 FINDING: Fixtures are plausible but almost certainly hand-crafted, not captured from the real BGG API.
-*Reasoning: The spec's AI validation criteria (mvp.md line 148) requires "BGG XML parsing tested against captured real API responses, not synthetic XML." The plan (line 385) reiterates: "Critical: Use captured real API responses for XML parser tests, not synthetic XML."
+\*Reasoning: The spec's AI validation criteria (mvp.md line 148) requires "BGG XML parsing tested against captured real API responses, not synthetic XML." The plan (line 385) reiterates: "Critical: Use captured real API responses for XML parser tests, not synthetic XML."
 
 Evidence the fixtures are NOT captured real responses:
+
 1. thing-wingspan-266192.xml: Missing fields that real BGG responses include (e.g., <link type="boardgameartist">, <link type="boardgamepublisher" with multiple publishers>, <poll name="suggested_playerage">, <poll name="language_dependence">). A real API capture would include all of these.
 2. The image URLs use geekdo-images.com patterns but the Gloomhaven fixture (thing-gloomhaven-174430.xml:4-5) uses truncated URLs like "thumbnail.jpg" and "original.jpg" instead of real CDN hashes.
 3. The collection fixture (collection-testuser.xml) has a pubdate of "Sun, 06 Apr 2026" which is tomorrow. A captured response wouldn't have a future date.
 4. Round numbers in stats (numWeightVotes: exactly 12000, 15000) are suspiciously clean for real data.
 
-The fixtures follow the correct BGG XML structure (attributes, nesting, field names all match the research doc), so the parser will work against real data. But the spec requirement was explicit: captured real responses. These are well-crafted synthetic fixtures that match the schema.*
+The fixtures follow the correct BGG XML structure (attributes, nesting, field names all match the research doc), so the parser will work against real data. But the spec requirement was explicit: captured real responses. These are well-crafted synthetic fixtures that match the schema.\*
 
 **Criterion 6: averageweight=0 maps to null?**
 PASS.
-*Reasoning: bgg-xml-parser.ts:94-99. parseThingResponse extracts averageweight, then: "const weight = avgWeight === 0 ? null : avgWeight;". Test at bgg-xml-parser.test.ts:81-95 verifies with inline XML containing averageweight=0 and asserts result is null.*
+_Reasoning: bgg-xml-parser.ts:94-99. parseThingResponse extracts averageweight, then: "const weight = avgWeight === 0 ? null : avgWeight;". Test at bgg-xml-parser.test.ts:81-95 verifies with inline XML containing averageweight=0 and asserts result is null._
 
 **Criterion 7: Primary name extraction when multiple name elements exist?**
 PASS.
-*Reasoning: bgg-xml-parser.ts:35-38. extractPrimaryName finds name with @_type="primary", falls back to first name, then "Unknown". The Wingspan fixture has 3 name elements (primary + 2 alternate). Test at bgg-xml-parser.test.ts:97-103 verifies extraction returns "Wingspan" from the multi-name fixture.*
+_Reasoning: bgg-xml-parser.ts:35-38. extractPrimaryName finds name with @\_type="primary", falls back to first name, then "Unknown". The Wingspan fixture has 3 name elements (primary + 2 alternate). Test at bgg-xml-parser.test.ts:97-103 verifies extraction returns "Wingspan" from the multi-name fixture._
 
 **Criterion 8: Missing token returns clear error with registration URL (REQ-MVP-12)?**
 PASS.
-*Reasoning: bgg-client.ts:55-61. assertConfigured throws: "BGG application token not configured. Register at https://boardgamegeek.com/using_the_xml_api and run `shelf-judge config set bgg-token YOUR_TOKEN`." Test at bgg-client.test.ts:247-262 verifies both the message and the URL. GameService also has its own assertBggConfigured at game-service.ts:77-83 for when bggClient is absent entirely, with the same URL.*
+_Reasoning: bgg-client.ts:55-61. assertConfigured throws: "BGG application token not configured. Register at https://boardgamegeek.com/using_the_xml_api and run `shelf-judge config set bgg-token YOUR_TOKEN`." Test at bgg-client.test.ts:247-262 verifies both the message and the URL. GameService also has its own assertBggConfigured at game-service.ts:77-83 for when bggClient is absent entirely, with the same URL._
 
 **Criterion 9: Offline scenario - game addition works without BGG data (REQ-MVP-11)?**
 PASS.
-*Reasoning: game-service.ts:119-126. When addGame has a bggId, it attempts BGG fetch inside a try/catch. On failure (line 123-125), the catch is empty and the game is added with bggData: null. Test at game-service-bgg.test.ts:98-110 mocks 500 responses and verifies game is added with null bggData. Manual games (no bggId) skip the BGG fetch entirely (line 119 condition). GameService also works without a bggClient at all (deps.bggClient is optional at line 57).*
+_Reasoning: game-service.ts:119-126. When addGame has a bggId, it attempts BGG fetch inside a try/catch. On failure (line 123-125), the catch is empty and the game is added with bggData: null. Test at game-service-bgg.test.ts:98-110 mocks 500 responses and verifies game is added with null bggData. Manual games (no bggId) skip the BGG fetch entirely (line 119 condition). GameService also works without a bggClient at all (deps.bggClient is optional at line 57)._
 
 **Criterion 10: Import - duplicates skipped, partial failures handled, progress events streamed?**
 PASS.
-*Reasoning: game-service.ts:287-385. importBggCollection:
+\*Reasoning: game-service.ts:287-385. importBggCollection:
+
 - Duplicates: Lines 309-311 build existingBggIds set; lines 319-325 filter newItems vs skippedItems. Test import.test.ts:140-188 pre-adds Wingspan and verifies skipped=1.
 - Partial failures: Lines 352-358, if bggResults.get(item.bggId) returns nothing, error recorded and loop continues. Test import.test.ts:256-300 verifies 2 imported, 1 error for missing Terraforming Mars.
-- Progress events: Line 293-297 emits fetching-collection event. Lines 345-350 emit importing-games events per item with current/total/gameName. Test import.test.ts:190-254 captures events and verifies structure.*
+- Progress events: Line 293-297 emits fetching-collection event. Lines 345-350 emit importing-games events per item with current/total/gameName. Test import.test.ts:190-254 captures events and verifies structure.\*
 
 **Criterion 11: Refresh preserves user overrides of BGG-derived ratings (REQ-MVP-19)?**
 PASS.
-*Reasoning: game-service.ts:226-246. refreshBggData calls applyBggResult (line 240) which updates game.name, yearPublished, player counts, bggData, but does NOT touch game.ratings. User overrides live in game.ratings (keyed by axisId), so they survive the refresh. Test at game-service-bgg.test.ts:138-166 sets a rating on the complexity axis (value 7), refreshes, and verifies the override persists. The fitness service then resolves this at score time: fitness-service.ts:60-68 checks game.ratings first, and if present uses that with source "override" and records bggOriginal.*
+_Reasoning: game-service.ts:226-246. refreshBggData calls applyBggResult (line 240) which updates game.name, yearPublished, player counts, bggData, but does NOT touch game.ratings. User overrides live in game.ratings (keyed by axisId), so they survive the refresh. Test at game-service-bgg.test.ts:138-166 sets a rating on the complexity axis (value 7), refreshes, and verifies the override persists. The fitness service then resolves this at score time: fitness-service.ts:60-68 checks game.ratings first, and if present uses that with source "override" and records bggOriginal._
 
 **Criterion 12: BGG-derived ratings computed at score time, not stored in game.ratings?**
 PASS.
-*Reasoning: fitness-service.ts:18-33. resolveBggRating computes BGG-derived values on the fly from the axis.bggField and bggData parameter. The main calculateScore method (line 52-53) reads game.ratings for personal ratings and calls resolveBggRating separately. BGG values are never written into game.ratings. game.ratings only contains user-entered values. This matches the plan's design note at mvp.md line 399: "The rating in game.ratings represents user input only; BGG-derived values are computed on the fly."*
+_Reasoning: fitness-service.ts:18-33. resolveBggRating computes BGG-derived values on the fly from the axis.bggField and bggData parameter. The main calculateScore method (line 52-53) reads game.ratings for personal ratings and calls resolveBggRating separately. BGG values are never written into game.ratings. game.ratings only contains user-entered values. This matches the plan's design note at mvp.md line 399: "The rating in game.ratings represents user input only; BGG-derived values are computed on the fly."_
 
 **Criterion 13: All tests from the plan exist?**
 FINDING: One planned test is missing. The 429 backoff test doesn't verify timing behavior.
-*Reasoning: The plan at step 3.1 specifies these tests for BggClient:
+\*Reasoning: The plan at step 3.1 specifies these tests for BggClient:
+
 - search delegates to fetch with correct URL and auth header: PRESENT (bgg-client.test.ts:85-102)
 - getGame delegates to fetch with stats=1: PRESENT (bgg-client.test.ts:105-121)
 - 202 response triggers retry: PRESENT (bgg-client.test.ts:157-167)
@@ -269,72 +275,74 @@ XML parser tests: All present as specified in plan.
 
 Game service BGG tests (step 3.2): All present.
 
-Import tests (step 3.3): All present.*
+Import tests (step 3.3): All present.\*
 
 **Does the BGG client correctly validate against the research document's endpoint descriptions?**
 PASS. Endpoints match the research.
-*Reasoning: Research doc specifies:
+\*Reasoning: Research doc specifies:
+
 - Thing endpoint: /xmlapi2/thing?id={bggId}&stats=1&type=boardgame. Client: bgg-client.ts:178 builds this exactly.
 - Search endpoint: /xmlapi2/search?query={name}&type=boardgame. Client: bgg-client.ts:163 matches.
 - Collection endpoint: /xmlapi2/collection?username={bggUsername}&own=1&subtype=boardgame&stats=1. Client: bgg-client.ts:240 matches. Note: design doc says "subtype=boardgame" but the implementation uses "subtype=boardgame" correctly.
 - Auth header: All requests include Authorization: Bearer TOKEN via authHeaders() at line 63-66.
-- Batch IDs: Client batches 250 per request (line 14, MAX_BATCH_SIZE = 250), matching research recommendation of 250-500.*
+- Batch IDs: Client batches 250 per request (line 14, MAX_BATCH_SIZE = 250), matching research recommendation of 250-500.\*
 
 **Is there a silent catch block in addGame that should surface errors?**
 FINDING: Silent catch block at game-service.ts:123 swallows BGG fetch errors without logging or reporting.
-*Reasoning: game-service.ts:119-126. When addGame attempts to fetch BGG data and fails, the empty catch block silently swallows the error. The game is added with null bggData, which is correct behavior (REQ-MVP-11 requires offline functionality). However, the caller has no way to know that BGG data was requested but couldn't be fetched. The returned Game object has bggData: null, which is indistinguishable from "no BGG fetch was attempted."
+\*Reasoning: game-service.ts:119-126. When addGame attempts to fetch BGG data and fails, the empty catch block silently swallows the error. The game is added with null bggData, which is correct behavior (REQ-MVP-11 requires offline functionality). However, the caller has no way to know that BGG data was requested but couldn't be fetched. The returned Game object has bggData: null, which is indistinguishable from "no BGG fetch was attempted."
 
 The spec (REQ-MVP-13) says: "Failures are reported to the user with enough context to understand what happened." For addGame, the game still gets added, but the user should know the BGG fetch failed.
 
-Recommendation: Return a warning alongside the game, or at minimum log the error. A common pattern is to include a warnings array in the response.*
+Recommendation: Return a warning alongside the game, or at minimum log the error. A common pattern is to include a warnings array in the response.\*
 
 **Does the weight-to-rating conversion in the fitness service make sense?**
 FINDING: Weight scaling (multiply by 2) is undocumented and potentially incorrect.
-*Reasoning: fitness-service.ts:28-29. When axis.bggField is "weight", the code returns bggData.weight * 2. BGG weight is a 1-5 scale. Multiplying by 2 maps it to 2-10. But the rating scale in the system is 1-10 (per REQ-MVP-2). A BGG weight of 1.0 becomes 2.0, which is above the minimum of 1 on the personal rating scale. A weight of 5.0 becomes 10.0.
+_Reasoning: fitness-service.ts:28-29. When axis.bggField is "weight", the code returns bggData.weight _ 2. BGG weight is a 1-5 scale. Multiplying by 2 maps it to 2-10. But the rating scale in the system is 1-10 (per REQ-MVP-2). A BGG weight of 1.0 becomes 2.0, which is above the minimum of 1 on the personal rating scale. A weight of 5.0 becomes 10.0.
 
 This linear scaling is a reasonable choice, but:
+
 1. It's not documented anywhere in the design docs or specs. The design doc (mvp-bgg-integration.md) doesn't specify how BGG weight (1-5) maps to the 1-10 axis rating scale.
-2. The test at game-service-bgg.test.ts:263 asserts bggOriginal is 4.9 (2.45 * 2), confirming this is intentional. But a reader of the fitness service code has to infer the scaling rationale.
+2. The test at game-service-bgg.test.ts:263 asserts bggOriginal is 4.9 (2.45 \* 2), confirming this is intentional. But a reader of the fitness service code has to infer the scaling rationale.
 3. A weight of 0 is mapped to null upstream, but a weight of 0.5 (if it existed) would become 1.0, which is valid. The mapping is consistent.
 
-Recommendation: Add a comment explaining the 2x scaling rationale. This is a "clever code" case where a one-line comment prevents future confusion.*
+Recommendation: Add a comment explaining the 2x scaling rationale. This is a "clever code" case where a one-line comment prevents future confusion.\*
 
 **Is there a concurrency issue with the rate limiter when multiple callers invoke throttledFetch simultaneously?**
 FINDING: Potential race condition in rate limiter under concurrent callers.
-*Reasoning: bgg-client.ts:71-128. throttledFetch reads lastRequestTime at line 76, computes elapsed, potentially waits, then sets lastRequestTime at line 81. If two callers enter throttledFetch concurrently (e.g., during importBggCollection if it were parallelized), both read the same lastRequestTime, both compute the same elapsed, both decide they can proceed, and both fire simultaneously, defeating the rate limiter.
+\*Reasoning: bgg-client.ts:71-128. throttledFetch reads lastRequestTime at line 76, computes elapsed, potentially waits, then sets lastRequestTime at line 81. If two callers enter throttledFetch concurrently (e.g., during importBggCollection if it were parallelized), both read the same lastRequestTime, both compute the same elapsed, both decide they can proceed, and both fire simultaneously, defeating the rate limiter.
 
 Currently this is mitigated by the fact that all import and refresh operations are sequential (await in loops). But the rate limiter design claims to be a "sequential request queue" (plan line 346), and it isn't actually a queue. It's a timestamp-based throttle that works correctly only when callers are already serialized.
 
 Severity: Low for MVP (all callers are currently sequential). But if anyone adds parallel requests in the future, the rate limiter will fail silently. The plan explicitly says "The queue is internal to BggClient; callers don't see it" (line 346), implying the client should enforce sequencing regardless of caller behavior.
 
-Recommendation: Either add a mutex/semaphore to enforce true sequential execution, or document that the rate limiter assumes single-threaded access.*
+Recommendation: Either add a mutex/semaphore to enforce true sequential execution, or document that the rate limiter assumes single-threaded access.\*
 
 **Does the collection endpoint use the correct parameter name per the research doc?**
 PASS.
-*Reasoning: bgg-client.ts:240 uses username={}, own=1, subtype=boardgame, stats=1. The research doc (bgg-api.md line 169-170) specifies username (required), subtype, own=1, stats=1. The design doc (mvp-bgg-integration.md line 36) specifies the same. All match.*
+_Reasoning: bgg-client.ts:240 uses username={}, own=1, subtype=boardgame, stats=1. The research doc (bgg-api.md line 169-170) specifies username (required), subtype, own=1, stats=1. The design doc (mvp-bgg-integration.md line 36) specifies the same. All match._
 
 **Does the parser handle the collection endpoint's different XML structure correctly?**
 PASS with a note.
-*Reasoning: The collection endpoint returns a different XML structure than the thing endpoint. Specifically, the collection uses objectid attribute (not id) and name as text content (not as an attribute). The parser at bgg-xml-parser.ts:183-211 handles both correctly: bggId comes from @_objectid (line 206), and the name extraction (lines 188-202) handles the text content format with multiple fallback paths. The fixture at collection-testuser.xml uses the correct collection format with objectid, text content names, and nested stats/rating elements.*
+_Reasoning: The collection endpoint returns a different XML structure than the thing endpoint. Specifically, the collection uses objectid attribute (not id) and name as text content (not as an attribute). The parser at bgg-xml-parser.ts:183-211 handles both correctly: bggId comes from @\_objectid (line 206), and the name extraction (lines 188-202) handles the text content format with multiple fallback paths. The fixture at collection-testuser.xml uses the correct collection format with objectid, text content names, and nested stats/rating elements._
 
 **Is the fitness-service.test.ts:319-339 "score is derivable from breakdown contributions" test sound?**
 FINDING: The breakdown derivation test may validate consistency, not correctness.
-*Reasoning: fitness-service.test.ts:319-339. This test computes expected score from the breakdown's own contribution values and totalWeight values, then asserts the returned score matches. But both the score and the contributions come from the same code. If the code computed contributions wrong and the score wrong in the same way, this test would still pass.
+\*Reasoning: fitness-service.test.ts:319-339. This test computes expected score from the breakdown's own contribution values and totalWeight values, then asserts the returned score matches. But both the score and the contributions come from the same code. If the code computed contributions wrong and the score wrong in the same way, this test would still pass.
 
-The test at line 338 does: expect(result!.score).toBe(Math.round((totalContribution / totalWeight) * 10) / 10). This is literally re-implementing the scoring formula using the code's own output as inputs. It validates internal consistency (contributions sum to score) but not that the contributions are correct.
+The test at line 338 does: expect(result!.score).toBe(Math.round((totalContribution / totalWeight) \* 10) / 10). This is literally re-implementing the scoring formula using the code's own output as inputs. It validates internal consistency (contributions sum to score) but not that the contributions are correct.
 
 Compare with the Wingspan example test (lines 52-106) which uses known input values and hand-calculated expected outputs. That test validates correctness. This one validates consistency.
 
-Severity: Low. The Wingspan example test and the other specific tests cover correctness. This test catches a real class of bugs (where contributions and final score drift apart due to rounding). But it's worth noting for the principle: tests that construct expected values from the code's own output validate consistency, not correctness.*
+Severity: Low. The Wingspan example test and the other specific tests cover correctness. This test catches a real class of bugs (where contributions and final score drift apart due to rounding). But it's worth noting for the principle: tests that construct expected values from the code's own output validate consistency, not correctness.\*
 
 **Does the 202 retry logic have an off-by-one issue?**
 FINDING: The 202 retry logic makes one more throttled request than expected due to interaction with throttledFetch.
-*Reasoning: bgg-client.ts:130-154. fetchWithRetry202 loops from attempt=0 to MAX_202_RETRIES (3), making up to 4 calls to throttledFetch. On the first call (attempt=0), if 202, it waits 5s and continues. On attempt=1, waits 10s. On attempt=2, waits 20s. On attempt=3 (MAX_202_RETRIES), if still 202, it throws at line 139-142.
+\*Reasoning: bgg-client.ts:130-154. fetchWithRetry202 loops from attempt=0 to MAX_202_RETRIES (3), making up to 4 calls to throttledFetch. On the first call (attempt=0), if 202, it waits 5s and continues. On attempt=1, waits 10s. On attempt=2, waits 20s. On attempt=3 (MAX_202_RETRIES), if still 202, it throws at line 139-142.
 
 The design says "Max 3 retries. If still 202, return error." The implementation does 4 total requests: the initial request plus 3 retries. This matches "max 3 retries" if "retry" means "additional attempt after the first." But line 131 uses "attempt <= MAX_202_RETRIES" with MAX_202_RETRIES=3, so attempts 0,1,2,3 = 4 total requests. The exponential backoff runs on attempts 0,1,2 (5s, 10s, 20s). Attempt 3 hits the 202 check at line 139 and throws immediately without an additional wait.
 
-The test at bgg-client.test.ts:169-179 enqueues 4 responses (all 202), which is consistent. So the behavior is: 4 requests total, 3 backoff waits, then error. This matches "3 retries" semantics. PASS.*
+The test at bgg-client.test.ts:169-179 enqueues 4 responses (all 202), which is consistent. So the behavior is: 4 requests total, 3 backoff waits, then error. This matches "3 retries" semantics. PASS.\*
 
 **Does isConfigured handle all edge cases for missing tokens?**
 PASS. Covers null, empty string, and truthy values.
-*Reasoning: bgg-client.ts:157-159. Returns true only when bggAuthToken is not null and not empty string. Tests cover null (line 66-70) and empty string (line 74-80). The AppConfig type defines bggAuthToken as string | null, so undefined isn't a valid state in the type system.*
+_Reasoning: bgg-client.ts:157-159. Returns true only when bggAuthToken is not null and not empty string. Tests cover null (line 66-70) and empty string (line 74-80). The AppConfig type defines bggAuthToken as string | null, so undefined isn't a valid state in the type system._

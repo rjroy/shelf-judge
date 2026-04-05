@@ -47,11 +47,13 @@ activity_timeline:
 current_progress: "MVP spec drafted at .lore/specs/mvp.md. Running a self-review pass before submitting."
 projectName: shelf-judge
 ---
+
 MVP specification written to `.lore/specs/mvp.md`.
 
 The spec defines shelf-judge MVP as: user-defined rating axes with weights, per-game ratings (1-10), BGG data integration (community rating, weight, mechanics, categories), and a weighted-average fitness score with mandatory transparent breakdown.
 
 Key decisions made:
+
 - **Fitness model:** Axis Scorecard (Approach 1) with weighted average. Chosen for transparency (every point traceable), zero cold-start, and serving as the foundation the pairwise tournament (DEF-4) would extend later.
 - **Data model:** Game, Axis, BggGameData, Collection types with JSON file persistence. Single collection, single user.
 - **BGG integration:** Three endpoints (Thing, Search, Collection), application token auth, 202 retry logic, 7-day cache TTL, conservative rate limiting (1 req/5s).

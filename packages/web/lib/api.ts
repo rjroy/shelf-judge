@@ -2,12 +2,7 @@
 // Uses Bun's fetch with unix socket option to talk directly to the daemon.
 // Client components go through the /api/daemon/[...path] proxy instead.
 
-import type {
-  Game,
-  Axis,
-  FitnessResult,
-  FitnessBreakdownEntry,
-} from "@shelf-judge/shared";
+import type { Game, Axis, FitnessResult, FitnessBreakdownEntry } from "@shelf-judge/shared";
 
 const SOCKET_PATH = process.env.SHELF_JUDGE_SOCKET ?? "/tmp/shelf-judge.sock";
 const DAEMON_BASE = "http://localhost";
@@ -62,7 +57,9 @@ export async function getGame(id: string): Promise<GameWithScore> {
   return res.json();
 }
 
-export async function addGame(body: { bggId: number } | { name: string; yearPublished?: number }): Promise<AddGameResult> {
+export async function addGame(
+  body: { bggId: number } | { name: string; yearPublished?: number },
+): Promise<AddGameResult> {
   const res = await daemonFetch("/api/games", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

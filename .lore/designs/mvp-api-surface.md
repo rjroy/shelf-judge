@@ -21,50 +21,51 @@ Each operation follows the `OperationDefinition` structure from the architecture
 
 ### Game Operations
 
-| Operation ID | Method | Path | Description |
-|---|---|---|---|
-| `shelf.game.search` | GET | `/api/games/search?q={query}` | Search BGG for games by name |
-| `shelf.game.add` | POST | `/api/games` | Add a game (by BGG ID or manually) |
-| `shelf.game.get` | GET | `/api/games/:id` | Get a game with current fitness score |
-| `shelf.game.list` | GET | `/api/games` | List all games with fitness scores |
-| `shelf.game.rate` | PUT | `/api/games/:id/ratings` | Set ratings for a game on one or more axes |
-| `shelf.game.remove` | DELETE | `/api/games/:id` | Remove a game from the collection |
-| `shelf.game.refresh-bgg` | POST | `/api/games/:id/refresh` | Re-fetch BGG data for a game |
+| Operation ID             | Method | Path                          | Description                                |
+| ------------------------ | ------ | ----------------------------- | ------------------------------------------ |
+| `shelf.game.search`      | GET    | `/api/games/search?q={query}` | Search BGG for games by name               |
+| `shelf.game.add`         | POST   | `/api/games`                  | Add a game (by BGG ID or manually)         |
+| `shelf.game.get`         | GET    | `/api/games/:id`              | Get a game with current fitness score      |
+| `shelf.game.list`        | GET    | `/api/games`                  | List all games with fitness scores         |
+| `shelf.game.rate`        | PUT    | `/api/games/:id/ratings`      | Set ratings for a game on one or more axes |
+| `shelf.game.remove`      | DELETE | `/api/games/:id`              | Remove a game from the collection          |
+| `shelf.game.refresh-bgg` | POST   | `/api/games/:id/refresh`      | Re-fetch BGG data for a game               |
 
 ### Axis Operations
 
-| Operation ID | Method | Path | Description |
-|---|---|---|---|
-| `shelf.axis.create` | POST | `/api/axes` | Create a new rating axis |
-| `shelf.axis.list` | GET | `/api/axes` | List all axes with weights |
-| `shelf.axis.update` | PUT | `/api/axes/:id` | Update axis name, description, or weight |
+| Operation ID        | Method | Path            | Description                                |
+| ------------------- | ------ | --------------- | ------------------------------------------ |
+| `shelf.axis.create` | POST   | `/api/axes`     | Create a new rating axis                   |
+| `shelf.axis.list`   | GET    | `/api/axes`     | List all axes with weights                 |
+| `shelf.axis.update` | PUT    | `/api/axes/:id` | Update axis name, description, or weight   |
 | `shelf.axis.delete` | DELETE | `/api/axes/:id` | Delete an axis (removes all ratings on it) |
 
 ### Import Operations
 
-| Operation ID | Method | Path | Description |
-|---|---|---|---|
-| `shelf.import.bgg-collection` | POST | `/api/import/bgg` | Import owned games from a BGG user's collection |
+| Operation ID                  | Method | Path              | Description                                     |
+| ----------------------------- | ------ | ----------------- | ----------------------------------------------- |
+| `shelf.import.bgg-collection` | POST   | `/api/import/bgg` | Import owned games from a BGG user's collection |
 
 ### Score Operations
 
-| Operation ID | Method | Path | Description |
-|---|---|---|---|
-| `shelf.score.get` | GET | `/api/games/:id/score` | Get fitness score with full breakdown for a game |
-| `shelf.score.list` | GET | `/api/scores` | Get all games ranked by fitness score |
+| Operation ID       | Method | Path                   | Description                                      |
+| ------------------ | ------ | ---------------------- | ------------------------------------------------ |
+| `shelf.score.get`  | GET    | `/api/games/:id/score` | Get fitness score with full breakdown for a game |
+| `shelf.score.list` | GET    | `/api/scores`          | Get all games ranked by fitness score            |
 
 ### System Operations
 
-| Operation ID | Method | Path | Description |
-|---|---|---|---|
-| `shelf.help` | GET | `/api/help` | Operations registry (CLI discovery root) |
-| `shelf.help.feature` | GET | `/api/help/:feature` | Operations for a feature subtree |
-| `shelf.config.get` | GET | `/api/config` | Current configuration |
-| `shelf.config.set` | PUT | `/api/config` | Update configuration |
+| Operation ID         | Method | Path                 | Description                              |
+| -------------------- | ------ | -------------------- | ---------------------------------------- |
+| `shelf.help`         | GET    | `/api/help`          | Operations registry (CLI discovery root) |
+| `shelf.help.feature` | GET    | `/api/help/:feature` | Operations for a feature subtree         |
+| `shelf.config.get`   | GET    | `/api/config`        | Current configuration                    |
+| `shelf.config.set`   | PUT    | `/api/config`        | Update configuration                     |
 
 ## Request/Response Shapes
 
 **POST `/api/games`** (add game):
+
 ```typescript
 // Request
 { bggId: number } | { name: string, yearPublished?: number }
@@ -74,6 +75,7 @@ Each operation follows the `OperationDefinition` structure from the architecture
 ```
 
 **PUT `/api/games/:id/ratings`** (rate game):
+
 ```typescript
 // Request
 { ratings: Record<string, number> }  // axisId -> rating (1-10)
@@ -83,6 +85,7 @@ Each operation follows the `OperationDefinition` structure from the architecture
 ```
 
 **POST `/api/import/bgg`** (import collection):
+
 ```typescript
 // Request
 { username: string }

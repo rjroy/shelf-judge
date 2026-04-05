@@ -12,16 +12,21 @@ export default async function CollectionPage() {
     return (
       <div>
         <h1>Collection</h1>
-        <p style={{ color: "#c00" }}>
-          Could not connect to the shelf-judge daemon. Is it running?
-        </p>
+        <p style={{ color: "#c00" }}>Could not connect to the shelf-judge daemon. Is it running?</p>
       </div>
     );
   }
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 24,
+        }}
+      >
         <h1 style={{ margin: 0 }}>Collection</h1>
         <div style={{ display: "flex", gap: 8 }}>
           <Link
@@ -69,10 +74,7 @@ export default async function CollectionPage() {
           </thead>
           <tbody>
             {games.map(({ game, score }) => (
-              <tr
-                key={game.id}
-                style={{ borderBottom: "1px solid #e0e0e0" }}
-              >
+              <tr key={game.id} style={{ borderBottom: "1px solid #e0e0e0" }}>
                 <td style={{ padding: "8px 12px" }}>
                   <Link
                     href={`/games/${game.id}`}
@@ -81,9 +83,7 @@ export default async function CollectionPage() {
                     {game.name}
                   </Link>
                 </td>
-                <td style={{ padding: "8px 12px", color: "#666" }}>
-                  {game.yearPublished ?? ""}
-                </td>
+                <td style={{ padding: "8px 12px", color: "#666" }}>{game.yearPublished ?? ""}</td>
                 <td style={{ padding: "8px 12px" }}>
                   <ScoreBadge score={score} />
                 </td>

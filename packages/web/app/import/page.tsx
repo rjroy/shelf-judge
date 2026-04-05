@@ -97,8 +97,8 @@ export default function ImportPage() {
     <div>
       <h1>Import from BGG</h1>
       <p style={{ color: "#666", marginBottom: 16 }}>
-        Import your owned games from a BoardGameGeek collection. Enter your BGG
-        username to get started.
+        Import your owned games from a BoardGameGeek collection. Enter your BGG username to get
+        started.
       </p>
 
       <form onSubmit={handleImport} style={{ marginBottom: 24 }}>
@@ -142,9 +142,7 @@ export default function ImportPage() {
             Importing {progress.imported} of {progress.total}...
           </p>
           {progress.current && (
-            <p style={{ color: "#666", fontSize: 14 }}>
-              Current: {progress.current}
-            </p>
+            <p style={{ color: "#666", fontSize: 14 }}>Current: {progress.current}</p>
           )}
           <div
             style={{
@@ -158,9 +156,7 @@ export default function ImportPage() {
           >
             <div
               style={{
-                width: progress.total > 0
-                  ? `${(progress.imported / progress.total) * 100}%`
-                  : "0%",
+                width: progress.total > 0 ? `${(progress.imported / progress.total) * 100}%` : "0%",
                 height: "100%",
                 backgroundColor: "#059669",
                 transition: "width 0.3s ease",
@@ -185,8 +181,7 @@ export default function ImportPage() {
           </p>
           {result.skipped > 0 && (
             <p style={{ color: "#666" }}>
-              {result.skipped} game{result.skipped === 1 ? "" : "s"} skipped
-              (already in collection)
+              {result.skipped} game{result.skipped === 1 ? "" : "s"} skipped (already in collection)
             </p>
           )}
           {result.errors.length > 0 && (

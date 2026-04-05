@@ -45,20 +45,20 @@ Every fitness score is accompanied by a breakdown. This is not optional. A score
 
 ```typescript
 interface FitnessResult {
-  score: number;                          // 1.0 - 10.0
-  ratedAxisCount: number;                 // How many axes contributed
-  totalAxisCount: number;                 // How many axes exist
+  score: number; // 1.0 - 10.0
+  ratedAxisCount: number; // How many axes contributed
+  totalAxisCount: number; // How many axes exist
   breakdown: FitnessBreakdownEntry[];
 }
 
 interface FitnessBreakdownEntry {
   axisId: string;
   axisName: string;
-  rating: number | null;                  // null if not rated
+  rating: number | null; // null if not rated
   weight: number;
-  contribution: number | null;            // Points contributed to score, null if not rated
+  contribution: number | null; // Points contributed to score, null if not rated
   source: "personal" | "bgg" | "override"; // "override" = user replaced BGG value
-  bggOriginal: number | null;             // Original BGG value when source is "override"
+  bggOriginal: number | null; // Original BGG value when source is "override"
 }
 ```
 

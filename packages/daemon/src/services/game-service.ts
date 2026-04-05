@@ -44,10 +44,7 @@ export interface GameService {
   addGame(input: AddGameInput): Promise<AddGameResult>;
   getGame(id: string): Promise<GameWithScore>;
   listGames(): Promise<GameWithScore[]>;
-  rateGame(
-    id: string,
-    ratings: Record<string, number>,
-  ): Promise<GameWithScore>;
+  rateGame(id: string, ratings: Record<string, number>): Promise<GameWithScore>;
   removeGame(id: string): Promise<void>;
   searchGames(query: string): Promise<BggSearchResult[]>;
   refreshBggData(gameId: string): Promise<Game>;
@@ -77,7 +74,10 @@ function applyBggResult(game: Game, result: BggGameResult): void {
 export function createGameService(deps: GameServiceDeps): GameService {
   const { storageService, fitnessService, bggClient } = deps;
 
-  function computeScore(game: Game, axes: import("@shelf-judge/shared").Axis[]): FitnessResult | null {
+  function computeScore(
+    game: Game,
+    axes: import("@shelf-judge/shared").Axis[],
+  ): FitnessResult | null {
     return fitnessService.calculateScore(game, axes, game.bggData);
   }
 
@@ -96,13 +96,9 @@ export function createGameService(deps: GameServiceDeps): GameService {
 
       // Duplicate detection: reject if bggId already exists
       if (parsed.bggId !== null && parsed.bggId !== undefined) {
-        const existing = collection.games.find(
-          (g) => g.bggId === parsed.bggId,
-        );
+        const existing = collection.games.find((g) => g.bggId === parsed.bggId);
         if (existing) {
-          throw new Error(
-            `A game with BGG ID ${parsed.bggId} already exists: "${existing.name}"`,
-          );
+          throw new Error(`A game with BGG ID ${parsed.bggId} already exists: "${existing.name}"`);
         }
       }
 
@@ -174,10 +170,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
       return results;
     },
 
-    async rateGame(
-      id: string,
-      ratings: Record<string, number>,
-    ): Promise<GameWithScore> {
+    async rateGame(id: string, ratings: Record<string, number>): Promise<GameWithScore> {
       const collection = await storageService.loadCollection();
       const game = collection.games.find((g) => g.id === id);
 
@@ -191,11 +184,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
         if (!axis) {
           throw new Error(`Axis not found: ${axisId}`);
         }
-        if (
-          !Number.isInteger(rating) ||
-          rating < 1 ||
-          rating > 10
-        ) {
+        if (!Number.isInteger(rating) || rating < 1 || rating > 10) {
           throw new Error(
             `Rating must be an integer between 1 and 10, got ${rating} for axis "${axis.name}"`,
           );
@@ -243,7 +232,9 @@ export function createGameService(deps: GameServiceDeps): GameService {
       }
 
       if (game.bggId === null) {
-        throw new Error(`Game "${game.name}" has no BGG ID. Cannot refresh BGG data for manual games.`);
+        throw new Error(
+          `Game "${game.name}" has no BGG ID. Cannot refresh BGG data for manual games.`,
+        );
       }
 
       const result = await bggClient!.getGame(game.bggId);
@@ -271,9 +262,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
       } catch (err) {
         return {
           refreshed: 0,
-          errors: [
-            `Batch fetch failed: ${err instanceof Error ? err.message : String(err)}`,
-          ],
+          errors: [`Batch fetch failed: ${err instanceof Error ? err.message : String(err)}`],
         };
       }
 
@@ -327,12 +316,8 @@ export function createGameService(deps: GameServiceDeps): GameService {
       const total = collectionItems.length;
 
       // Identify new games (not already in collection)
-      const newItems = collectionItems.filter(
-        (item) => !existingBggIds.has(item.bggId),
-      );
-      const skippedItems = collectionItems.filter((item) =>
-        existingBggIds.has(item.bggId),
-      );
+      const newItems = collectionItems.filter((item) => !existingBggIds.has(item.bggId));
+      const skippedItems = collectionItems.filter((item) => existingBggIds.has(item.bggId));
       skipped = skippedItems.length;
 
       // Batch fetch full data for new games
@@ -345,9 +330,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
           return {
             imported: 0,
             skipped,
-            errors: [
-              `Batch fetch failed: ${err instanceof Error ? err.message : String(err)}`,
-            ],
+            errors: [`Batch fetch failed: ${err instanceof Error ? err.message : String(err)}`],
           };
         }
 
@@ -363,9 +346,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
 
           const result = bggResults.get(item.bggId);
           if (!result) {
-            errors.push(
-              `Failed to fetch full data for "${item.name}" (BGG ID ${item.bggId})`,
-            );
+            errors.push(`Failed to fetch full data for "${item.name}" (BGG ID ${item.bggId})`);
             continue;
           }
 

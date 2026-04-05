@@ -19,18 +19,18 @@ A game the user has added to their shelf-judge collection.
 
 ```typescript
 interface Game {
-  id: string;                    // UUID, generated locally
-  bggId: number | null;          // BGG thing ID, null if manually added
-  name: string;                  // Primary name (from BGG or user-entered)
+  id: string; // UUID, generated locally
+  bggId: number | null; // BGG thing ID, null if manually added
+  name: string; // Primary name (from BGG or user-entered)
   yearPublished: number | null;
   minPlayers: number | null;
   maxPlayers: number | null;
-  playingTime: number | null;    // Minutes (BGG "playingtime" field)
-  imageUrl: string | null;       // BGG thumbnail URL
-  bggData: BggGameData | null;   // Cached BGG API data
-  ratings: Record<string, number>;  // axisId -> rating (1-10)
-  createdAt: string;             // ISO 8601
-  updatedAt: string;             // ISO 8601
+  playingTime: number | null; // Minutes (BGG "playingtime" field)
+  imageUrl: string | null; // BGG thumbnail URL
+  bggData: BggGameData | null; // Cached BGG API data
+  ratings: Record<string, number>; // axisId -> rating (1-10)
+  createdAt: string; // ISO 8601
+  updatedAt: string; // ISO 8601
 }
 ```
 
@@ -40,15 +40,15 @@ Cached data from the BGG Thing endpoint. Stored alongside the game to avoid repe
 
 ```typescript
 interface BggGameData {
-  communityRating: number;       // BGG average (1-10)
-  bayesAverage: number;          // BGG Geek Rating (Bayesian)
-  weight: number | null;         // 1-5 scale, null if BGG returns 0 (known bug)
-  numWeightVotes: number;        // Confidence signal for weight
-  mechanics: BggTag[];           // { id: number, name: string }
-  categories: BggTag[];          // { id: number, name: string }
-  subdomains: string[];          // "Strategy Games", "Family Games", etc.
-  suggestedPlayerCounts: SuggestedPlayerCount[];  // Community poll data
-  fetchedAt: string;             // ISO 8601, for cache invalidation
+  communityRating: number; // BGG average (1-10)
+  bayesAverage: number; // BGG Geek Rating (Bayesian)
+  weight: number | null; // 1-5 scale, null if BGG returns 0 (known bug)
+  numWeightVotes: number; // Confidence signal for weight
+  mechanics: BggTag[]; // { id: number, name: string }
+  categories: BggTag[]; // { id: number, name: string }
+  subdomains: string[]; // "Strategy Games", "Family Games", etc.
+  suggestedPlayerCounts: SuggestedPlayerCount[]; // Community poll data
+  fetchedAt: string; // ISO 8601, for cache invalidation
 }
 
 interface BggTag {
@@ -57,8 +57,8 @@ interface BggTag {
 }
 
 interface SuggestedPlayerCount {
-  playerCount: string;           // "1", "2", ..., "4+"
-  best: number;                  // Vote count
+  playerCount: string; // "1", "2", ..., "4+"
+  best: number; // Vote count
   recommended: number;
   notRecommended: number;
 }
@@ -70,12 +70,12 @@ A user-defined rating dimension.
 
 ```typescript
 interface Axis {
-  id: string;                    // UUID
-  name: string;                  // "Wife will play it", "Visual design", etc.
-  description: string | null;    // Optional clarification
-  weight: number;                // 1-100, user-assigned importance
-  source: "personal" | "bgg";   // Personal = user rates manually. BGG = auto-populated.
-  bggField: string | null;       // For source="bgg": which BGG field maps here
+  id: string; // UUID
+  name: string; // "Wife will play it", "Visual design", etc.
+  description: string | null; // Optional clarification
+  weight: number; // 1-100, user-assigned importance
+  source: "personal" | "bgg"; // Personal = user rates manually. BGG = auto-populated.
+  bggField: string | null; // For source="bgg": which BGG field maps here
   createdAt: string;
   updatedAt: string;
 }
@@ -83,10 +83,10 @@ interface Axis {
 
 BGG-derived axes (`source: "bgg"`) are auto-populated when a game has BGG data. The `bggField` identifies which field maps to this axis. Two BGG-derived axes are created by default (the user can delete or re-weight them):
 
-| Default axis | `bggField` | Mapping |
-|---|---|---|
-| Community Rating | `communityRating` | Pass-through (already 1-10) |
-| Complexity | `weight` | BGG weight 1-5 normalized to 1-10: `score = weight * 2` |
+| Default axis     | `bggField`        | Mapping                                                 |
+| ---------------- | ----------------- | ------------------------------------------------------- |
+| Community Rating | `communityRating` | Pass-through (already 1-10)                             |
+| Complexity       | `weight`          | BGG weight 1-5 normalized to 1-10: `score = weight * 2` |
 
 The user can create additional BGG-derived axes later (player count fit, for example), but MVP ships with these two.
 
@@ -96,8 +96,8 @@ The user's set of games. MVP supports a single collection (one user, one shelf).
 
 ```typescript
 interface Collection {
-  id: string;                    // UUID
-  name: string;                  // Default: "My Collection"
+  id: string; // UUID
+  name: string; // Default: "My Collection"
   axes: Axis[];
   games: Game[];
   createdAt: string;

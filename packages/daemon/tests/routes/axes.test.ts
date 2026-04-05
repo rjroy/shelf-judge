@@ -1,9 +1,5 @@
 import { describe, test, expect, beforeEach } from "bun:test";
-import {
-  createTestApp,
-  jsonRequest,
-  type TestAppContext,
-} from "../helpers/test-app.js";
+import { createTestApp, jsonRequest, type TestAppContext } from "../helpers/test-app.js";
 
 describe("axis routes", () => {
   let ctx: TestAppContext;
@@ -73,12 +69,10 @@ describe("axis routes", () => {
       });
       const created = await createRes.json();
 
-      const res = await jsonRequest(
-        ctx.app,
-        "PUT",
-        `/api/axes/${created.id}`,
-        { name: "Updated", weight: 70 },
-      );
+      const res = await jsonRequest(ctx.app, "PUT", `/api/axes/${created.id}`, {
+        name: "Updated",
+        weight: 70,
+      });
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -87,12 +81,7 @@ describe("axis routes", () => {
     });
 
     test("returns 404 for nonexistent axis", async () => {
-      const res = await jsonRequest(
-        ctx.app,
-        "PUT",
-        "/api/axes/nonexistent-id",
-        { name: "Ghost" },
-      );
+      const res = await jsonRequest(ctx.app, "PUT", "/api/axes/nonexistent-id", { name: "Ghost" });
 
       expect(res.status).toBe(404);
       const body = await res.json();
@@ -119,20 +108,13 @@ describe("axis routes", () => {
       const gameId = gameBody.game.id;
 
       // Rate the game on that axis
-      const rateRes = await jsonRequest(
-        ctx.app,
-        "PUT",
-        `/api/games/${gameId}/ratings`,
-        { ratings: { [axis.id]: 7 } },
-      );
+      const rateRes = await jsonRequest(ctx.app, "PUT", `/api/games/${gameId}/ratings`, {
+        ratings: { [axis.id]: 7 },
+      });
       expect(rateRes.status).toBe(200);
 
       // Delete the axis
-      const deleteRes = await jsonRequest(
-        ctx.app,
-        "DELETE",
-        `/api/axes/${axis.id}`,
-      );
+      const deleteRes = await jsonRequest(ctx.app, "DELETE", `/api/axes/${axis.id}`);
 
       expect(deleteRes.status).toBe(200);
       const body = await deleteRes.json();

@@ -54,9 +54,9 @@ Fitness is relative, not absolute. Adding a game changes the fitness of every ot
 
 # Tension Resolution
 
-| Tension | Default Winner | Exception |
-|---------|---------------|-----------|
-| Personal axes vs BGG data accuracy | Personal axes | When BGG data corrects a factual error (e.g., listed player count) |
-| Fitness precision vs transparency | Transparency | Never. A score the user can't interrogate is worthless. |
-| Collection-aware fitness vs simplicity | Simplicity | Until the user has enough rated games for redundancy detection to be meaningful |
-| Prediction coverage vs prediction honesty | Honesty | Never. "Insufficient data" is better than a confident wrong number. |
+| Tension                                   | Default Winner | Exception                                                                       |
+| ----------------------------------------- | -------------- | ------------------------------------------------------------------------------- |
+| Personal axes vs BGG data accuracy        | Personal axes  | When BGG data corrects a factual error (e.g., listed player count)              |
+| Fitness precision vs transparency         | Transparency   | Never. A score the user can't interrogate is worthless.                         |
+| Collection-aware fitness vs simplicity    | Simplicity     | Until the user has enough rated games for redundancy detection to be meaningful |
+| Prediction coverage vs prediction honesty | Honesty        | Never. "Insufficient data" is better than a confident wrong number.             |

@@ -54,8 +54,20 @@ describe("FitnessService", () => {
       const axes: Axis[] = [
         makeAxis({ id: "wife", name: "Wife will play it", weight: 40 }),
         makeAxis({ id: "visual", name: "Visual design", weight: 30 }),
-        makeAxis({ id: "complexity", name: "Complexity", weight: 20, source: "bgg", bggField: "weight" }),
-        makeAxis({ id: "community", name: "Community Rating", weight: 10, source: "bgg", bggField: "communityRating" }),
+        makeAxis({
+          id: "complexity",
+          name: "Complexity",
+          weight: 20,
+          source: "bgg",
+          bggField: "weight",
+        }),
+        makeAxis({
+          id: "community",
+          name: "Community Rating",
+          weight: 10,
+          source: "bgg",
+          bggField: "communityRating",
+        }),
       ];
 
       const game = makeGame({
@@ -158,9 +170,7 @@ describe("FitnessService", () => {
 
   describe("zero rated axes", () => {
     test("returns null when no axes have ratings", () => {
-      const axes = [
-        makeAxis({ id: "a1", name: "Fun", weight: 10 }),
-      ];
+      const axes = [makeAxis({ id: "a1", name: "Fun", weight: 10 })];
       const game = makeGame({ ratings: {} });
 
       const result = fitnessService.calculateScore(game, axes, null);
@@ -187,7 +197,13 @@ describe("FitnessService", () => {
     test("excludes axis when bggData is null", () => {
       const axes = [
         makeAxis({ id: "a1", name: "Fun", weight: 10 }),
-        makeAxis({ id: "bgg1", name: "Community Rating", weight: 10, source: "bgg", bggField: "communityRating" }),
+        makeAxis({
+          id: "bgg1",
+          name: "Community Rating",
+          weight: 10,
+          source: "bgg",
+          bggField: "communityRating",
+        }),
       ];
       const game = makeGame({ ratings: { a1: 8 } });
 
@@ -217,7 +233,13 @@ describe("FitnessService", () => {
   describe("override of BGG-derived axis", () => {
     test("uses personal rating with override source and preserves bggOriginal", () => {
       const axes = [
-        makeAxis({ id: "bgg1", name: "Community Rating", weight: 10, source: "bgg", bggField: "communityRating" }),
+        makeAxis({
+          id: "bgg1",
+          name: "Community Rating",
+          weight: 10,
+          source: "bgg",
+          bggField: "communityRating",
+        }),
       ];
       const game = makeGame({ ratings: { bgg1: 9 } });
       const bggData = makeBggData({ communityRating: 7.5 });
@@ -343,7 +365,13 @@ describe("FitnessService", () => {
     test("unrated BGG axis shows source as bgg, not personal", () => {
       const axes = [
         makeAxis({ id: "a1", name: "Fun", weight: 10 }),
-        makeAxis({ id: "bgg1", name: "Community Rating", weight: 10, source: "bgg", bggField: "communityRating" }),
+        makeAxis({
+          id: "bgg1",
+          name: "Community Rating",
+          weight: 10,
+          source: "bgg",
+          bggField: "communityRating",
+        }),
       ];
       const game = makeGame({ ratings: { a1: 8 } });
 

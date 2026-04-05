@@ -21,20 +21,20 @@ This is the active API. v1 (`https://boardgamegeek.com/xmlapi/`) is legacy and f
 
 Available endpoints:
 
-| Endpoint | Path | Purpose |
-|----------|------|---------|
-| Thing | `/thing` | Detailed game data by BGG ID |
-| Search | `/search` | Full-text search by name |
-| Collection | `/collection` | User's game collection |
-| User | `/user` | User profile, top10, hot10 |
-| Plays | `/plays` | Play history for a user or game |
-| Hot | `/hot` | Trending items |
-| Family | `/family` | Game families/series |
-| Guild | `/guild` | Guild membership data |
-| Forum | `/forum` | Forum threads |
-| Forumlist | `/forumlist` | Forum list for an item |
-| Thread | `/thread` | Individual forum thread |
-| Geeklist | `/geeklist` | Community-curated lists |
+| Endpoint   | Path          | Purpose                         |
+| ---------- | ------------- | ------------------------------- |
+| Thing      | `/thing`      | Detailed game data by BGG ID    |
+| Search     | `/search`     | Full-text search by name        |
+| Collection | `/collection` | User's game collection          |
+| User       | `/user`       | User profile, top10, hot10      |
+| Plays      | `/plays`      | Play history for a user or game |
+| Hot        | `/hot`        | Trending items                  |
+| Family     | `/family`     | Game families/series            |
+| Guild      | `/guild`      | Guild membership data           |
+| Forum      | `/forum`      | Forum threads                   |
+| Forumlist  | `/forumlist`  | Forum list for an item          |
+| Thread     | `/thread`     | Individual forum thread         |
+| Geeklist   | `/geeklist`   | Community-curated lists         |
 
 ---
 
@@ -47,6 +47,7 @@ GET https://boardgamegeek.com/xmlapi2/thing?id=174430&stats=1&type=boardgame
 ```
 
 Key parameters:
+
 - `id`: Comma-delimited BGG game ID(s). Multiple IDs are batched in one request.
 - `type`: Filter by type (`boardgame`, `boardgameexpansion`, `boardgameaccessory`, etc.). Recommended to always include.
 - `stats=1`: **Required** to get ratings and weight data. Without this, statistics block is absent.
@@ -137,26 +138,26 @@ Root: `<items>` → `<item>` per game
 
 ### Complete field inventory for shelf-judge fitness model
 
-| Field | Source | Notes |
-|-------|--------|-------|
-| Community rating | `<average>` in stats | Mean of user ratings |
-| BGG Geek Rating | `<bayesaverage>` in stats | Bayesian average; penalizes games with few votes — more reliable for ranking |
-| Weight/complexity | `<averageweight>` in stats | 1–5 scale; requires `stats=1` |
-| Vote count for weight | `<numweights>` in stats | Confidence indicator |
-| Mechanics | `<link type="boardgamemechanic">` | Multiple, each with ID + name |
-| Categories | `<link type="boardgamecategory">` | Multiple, each with ID + name |
-| Player count range | `<minplayers>`, `<maxplayers>` | Declared by publisher |
-| Best player counts | `<poll name="suggested_numplayers">` | Community-voted; richer than min/max |
-| Play time | `<minplaytime>`, `<maxplaytime>`, `<playingtime>` | Publisher-declared |
-| Year published | `<yearpublished>` | |
-| Designer | `<link type="boardgamedesigner">` | |
-| Publisher | `<link type="boardgamepublisher">` | |
-| Expansions | `<link type="boardgameexpansion">` | Identifies expansion relationships |
-| Base game (if expansion) | `<link type="boardgameexpansion" inbound="true">` | |
-| Ownership count | `<owned>` in stats | Popularity signal |
-| Subdomains | `<link type="boardgamesubdomain">` | Broad categorization (Strategy, Family, etc.) |
-| BGG rank | `<rank type="subtype" name="boardgame">` | Overall rank on BGG |
-| Language dependence | `<poll name="language_dependence">` | Accessibility signal |
+| Field                    | Source                                            | Notes                                                                        |
+| ------------------------ | ------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Community rating         | `<average>` in stats                              | Mean of user ratings                                                         |
+| BGG Geek Rating          | `<bayesaverage>` in stats                         | Bayesian average; penalizes games with few votes — more reliable for ranking |
+| Weight/complexity        | `<averageweight>` in stats                        | 1–5 scale; requires `stats=1`                                                |
+| Vote count for weight    | `<numweights>` in stats                           | Confidence indicator                                                         |
+| Mechanics                | `<link type="boardgamemechanic">`                 | Multiple, each with ID + name                                                |
+| Categories               | `<link type="boardgamecategory">`                 | Multiple, each with ID + name                                                |
+| Player count range       | `<minplayers>`, `<maxplayers>`                    | Declared by publisher                                                        |
+| Best player counts       | `<poll name="suggested_numplayers">`              | Community-voted; richer than min/max                                         |
+| Play time                | `<minplaytime>`, `<maxplaytime>`, `<playingtime>` | Publisher-declared                                                           |
+| Year published           | `<yearpublished>`                                 |                                                                              |
+| Designer                 | `<link type="boardgamedesigner">`                 |                                                                              |
+| Publisher                | `<link type="boardgamepublisher">`                |                                                                              |
+| Expansions               | `<link type="boardgameexpansion">`                | Identifies expansion relationships                                           |
+| Base game (if expansion) | `<link type="boardgameexpansion" inbound="true">` |                                                                              |
+| Ownership count          | `<owned>` in stats                                | Popularity signal                                                            |
+| Subdomains               | `<link type="boardgamesubdomain">`                | Broad categorization (Strategy, Family, etc.)                                |
+| BGG rank                 | `<rank type="subtype" name="boardgame">`          | Overall rank on BGG                                                          |
+| Language dependence      | `<poll name="language_dependence">`               | Accessibility signal                                                         |
 
 ---
 
@@ -170,26 +171,27 @@ GET https://boardgamegeek.com/xmlapi2/collection?username=USERNAME&own=1&stats=1
 
 Key parameters:
 
-| Parameter | Description |
-|-----------|-------------|
-| `username` | Required. BGG username. |
-| `subtype` | `boardgame` (default), `boardgameexpansion`, etc. |
-| `own` | `1`/`0` — owned items |
-| `wishlist` | `1`/`0` — wishlisted items |
-| `want` | `1`/`0` — want in trade |
-| `want_to_play` | `1`/`0` |
-| `want_to_buy` | `1`/`0` |
-| `prev_owned` | `1`/`0` — previously owned |
-| `trade` | `1`/`0` — for trade |
-| `played` | `1`/`0` — has been played |
-| `rated` | `1`/`0` — has been rated |
-| `stats=1` | Include BGG community stats per item |
-| `showprivate=1` | Include private acquisition data (requires auth as that user) |
-| `modified_since` | Filter by last status change date |
+| Parameter        | Description                                                   |
+| ---------------- | ------------------------------------------------------------- |
+| `username`       | Required. BGG username.                                       |
+| `subtype`        | `boardgame` (default), `boardgameexpansion`, etc.             |
+| `own`            | `1`/`0` — owned items                                         |
+| `wishlist`       | `1`/`0` — wishlisted items                                    |
+| `want`           | `1`/`0` — want in trade                                       |
+| `want_to_play`   | `1`/`0`                                                       |
+| `want_to_buy`    | `1`/`0`                                                       |
+| `prev_owned`     | `1`/`0` — previously owned                                    |
+| `trade`          | `1`/`0` — for trade                                           |
+| `played`         | `1`/`0` — has been played                                     |
+| `rated`          | `1`/`0` — has been rated                                      |
+| `stats=1`        | Include BGG community stats per item                          |
+| `showprivate=1`  | Include private acquisition data (requires auth as that user) |
+| `modified_since` | Filter by last status change date                             |
 
 ### Response structure
 
 Each `<item>` in the collection includes:
+
 - `<name>` — game title
 - `<yearpublished>` — year
 - `<image>`, `<thumbnail>` — artwork URLs
@@ -227,6 +229,7 @@ Use `exact=1` to require exact name match.
 **BGG now requires registered application tokens for XML API access.** This was announced mid-2025 and enforced through late 2025.
 
 All API requests must include an `Authorization` header:
+
 ```
 Authorization: Bearer YOUR_APPLICATION_TOKEN
 ```
@@ -234,14 +237,17 @@ Authorization: Bearer YOUR_APPLICATION_TOKEN
 Registration is available at `https://boardgamegeek.com/using_the_xml_api` under "Application Tokens."
 
 **Exceptions to registration requirement:**
+
 - A user downloading only their own collection while logged in does not require registration.
 - However, any application accessing multiple users' collections, or bulk game data, requires registration.
 
 **User authentication (separate from app token):**
 If you need to access private collection data or write operations (logging plays), you must also authenticate as a user via:
+
 ```
 POST https://boardgamegeek.com/login/api/v1
 ```
+
 This sets session cookies (`SessionID`, `bgg_password`, `bgg_username`) that must accompany subsequent requests. Note: cookie handling is quirky — the server sets `bgg_username` and `bgg_password` twice, once with a valid expiry and once with a deletion (Unix epoch +1s). Libraries like Python's `requests` handle this correctly; manual cookie handling in curl/Insomnia may not.
 
 ---
@@ -249,11 +255,13 @@ This sets session cookies (`SessionID`, `bgg_password`, `bgg_username`) that mus
 ## 6. Rate Limits
 
 No officially published rate limit. Community consensus:
+
 - **Safe rate:** 1 request per 5 seconds (used by several libraries)
 - **Practical limit:** ~2 requests per second before seeing 429 responses
 - **Batch size:** Pass comma-delimited IDs to the thing endpoint; 250–500 IDs per request is optimal. Requests exceeding ~1,000 IDs can trigger blocking.
 
 HTTP response codes to handle:
+
 - `200` — Success
 - `202` — Queued (collection endpoint); retry after delay
 - `429` — Rate limited; back off
@@ -281,13 +289,13 @@ HTTP response codes to handle:
 
 For shelf-judge (TypeScript project), these are the viable options:
 
-| Library | Status | Notes |
-|---------|--------|-------|
-| **bgg-xml-api-client** ([npm](https://www.npmjs.com/package/bgg-xml-api-client), [GitHub](https://github.com/Qrzy/bgg-xml-api-client)) | Active | Handles auth tokens; supports `authorizationKey` param; has retry logic for 202 responses; returns JSON. Best fit for new projects. |
-| **bgg** ([npm](https://www.npmjs.com/package/bgg), [GitHub](https://github.com/monteslu/bgg)) | Active (v3.0 Feb 2026) | Uses `fast-xml-parser`; converts XML to JSON; supports all v2 endpoints. Recently updated. |
-| **bgg-client** ([GitHub](https://github.com/ghall89/bgg-client)) | Active | TypeScript; uses Zod for schemas; built-in rate limiting (1 req/5s); requires manual API key. |
-| **bgg-sdk** ([npm](https://www.npmjs.com/package/bgg-sdk)) | Active | Modern TypeScript SDK; full XMLAPI2 support; XML→JSON conversion. |
-| **boardgamegeekjsclient** ([GitHub](https://github.com/LearningProcesss/boardgamegeekjsclient)) | Uncertain | TypeScript wrapper for XML2 API; activity level unclear. |
+| Library                                                                                                                                | Status                 | Notes                                                                                                                               |
+| -------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| **bgg-xml-api-client** ([npm](https://www.npmjs.com/package/bgg-xml-api-client), [GitHub](https://github.com/Qrzy/bgg-xml-api-client)) | Active                 | Handles auth tokens; supports `authorizationKey` param; has retry logic for 202 responses; returns JSON. Best fit for new projects. |
+| **bgg** ([npm](https://www.npmjs.com/package/bgg), [GitHub](https://github.com/monteslu/bgg))                                          | Active (v3.0 Feb 2026) | Uses `fast-xml-parser`; converts XML to JSON; supports all v2 endpoints. Recently updated.                                          |
+| **bgg-client** ([GitHub](https://github.com/ghall89/bgg-client))                                                                       | Active                 | TypeScript; uses Zod for schemas; built-in rate limiting (1 req/5s); requires manual API key.                                       |
+| **bgg-sdk** ([npm](https://www.npmjs.com/package/bgg-sdk))                                                                             | Active                 | Modern TypeScript SDK; full XMLAPI2 support; XML→JSON conversion.                                                                   |
+| **boardgamegeekjsclient** ([GitHub](https://github.com/LearningProcesss/boardgamegeekjsclient))                                        | Uncertain              | TypeScript wrapper for XML2 API; activity level unclear.                                                                            |
 
 **Recommendation context:** `bgg-xml-api-client` is the most actively maintained library that explicitly handles the 2025 auth token requirement. `bgg` (monteslu) was updated to v3 in February 2026 and may have added token support. Verify token handling before committing to any library.
 
@@ -298,6 +306,7 @@ For shelf-judge (TypeScript project), these are the viable options:
 ### Official BGG data dump
 
 BGG provides a daily CSV download:
+
 - URL: `https://boardgamegeek.com/data_dumps/bg_ranks`
 - Requires: BGG login
 - Contains: game ID, name, year, BGG rank, average rating, number of raters
@@ -317,6 +326,7 @@ No BGG-licensed JSON API exists. Third-party wrappers all ultimately hit the XML
 ## 10. Summary for shelf-judge
 
 **What we can get per game:**
+
 - Community rating (average, bayesaverage/Geek Rating)
 - Weight/complexity (1–5, community-voted)
 - Mechanics (full list, each with ID + name)
@@ -329,16 +339,19 @@ No BGG-licensed JSON API exists. Third-party wrappers all ultimately hit the XML
 - BGG rank, ownership count, wishlist count
 
 **What requires a user's BGG account:**
+
 - User's personal rating on a game
 - Play count per game
 - Collection status (owned, wishlisted, etc.)
 - Private collection notes
 
 **What we cannot get:**
+
 - Play history details beyond count (without user auth)
 - Personal ratings for other users without their auth
 
 **Critical implementation notes:**
+
 1. Register for an application token before building anything that makes API calls.
 2. Always include `Authorization: Bearer TOKEN` header.
 3. Implement 202 retry logic for collection endpoint.

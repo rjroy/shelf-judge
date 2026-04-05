@@ -23,7 +23,8 @@ export function createImportRoutes(deps: ImportRoutesDeps): RouteModule {
     if (!bggClient || !bggClient.isConfigured()) {
       return c.json(
         {
-          error: "BGG integration is not configured. Register at https://boardgamegeek.com/using_the_xml_api and run `shelf-judge config set bgg-token YOUR_TOKEN`.",
+          error:
+            "BGG integration is not configured. Register at https://boardgamegeek.com/using_the_xml_api and run `shelf-judge config set bgg-token YOUR_TOKEN`.",
         },
         503,
       );
@@ -38,42 +39,43 @@ export function createImportRoutes(deps: ImportRoutesDeps): RouteModule {
 
     const parsed = ImportBodySchema.safeParse(body);
     if (!parsed.success) {
-      return c.json(
-        { error: "Validation failed", details: parsed.error.issues },
-        400,
-      );
+      return c.json({ error: "Validation failed", details: parsed.error.issues }, 400);
     }
 
     const { username } = parsed.data;
 
-    return streamSSE(c, async (stream) => {
-      const summary = await gameService.importBggCollection(username, async (event) => {
+    return streamSSE(
+      c,
+      async (stream) => {
+        const summary = await gameService.importBggCollection(username, async (event) => {
+          await stream.writeSSE({
+            event: "progress",
+            data: JSON.stringify({
+              imported: event.importedSoFar,
+              total: event.total,
+              current: event.gameName ?? "",
+            }),
+          });
+        });
+
         await stream.writeSSE({
-          event: "progress",
+          event: "complete",
           data: JSON.stringify({
-            imported: event.importedSoFar,
-            total: event.total,
-            current: event.gameName ?? "",
+            imported: summary.imported,
+            skipped: summary.skipped,
+            errors: summary.errors,
           }),
         });
-      });
-
-      await stream.writeSSE({
-        event: "complete",
-        data: JSON.stringify({
-          imported: summary.imported,
-          skipped: summary.skipped,
-          errors: summary.errors,
-        }),
-      });
-    }, async (err, stream) => {
-      await stream.writeSSE({
-        event: "error",
-        data: JSON.stringify({
-          error: err.message,
-        }),
-      });
-    });
+      },
+      async (err, stream) => {
+        await stream.writeSSE({
+          event: "error",
+          data: JSON.stringify({
+            error: err.message,
+          }),
+        });
+      },
+    );
   });
 
   const operations: OperationDefinition[] = [

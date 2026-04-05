@@ -45,6 +45,7 @@ Default output is human-readable tables. The `--json` flag on any command return
 ## Daemon Management
 
 The CLI checks whether the daemon is running on the expected socket. If not:
+
 - `shelf-judge start` starts the daemon in the background
 - `shelf-judge stop` stops it
 - Commands that need the daemon prompt the user to start it if it's not running

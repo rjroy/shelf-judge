@@ -32,7 +32,11 @@ export function createDaemonClient(options: DaemonClientOptions = {}): DaemonCli
   const socketPath = options.socketPath ?? process.env.SHELF_JUDGE_SOCKET ?? DEFAULT_SOCKET_PATH;
   const fetchFn = options.fetchFn ?? fetch;
 
-  async function request<T>(method: string, path: string, body?: unknown): Promise<DaemonResponse<T>> {
+  async function request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+  ): Promise<DaemonResponse<T>> {
     const url = `http://localhost${path}`;
     const init: RequestInit = {
       method,
@@ -61,7 +65,11 @@ export function createDaemonClient(options: DaemonClientOptions = {}): DaemonCli
     return { ok: response.ok, status: response.status, data };
   }
 
-  async function postSSE(path: string, body: unknown, onEvent: (event: SSEEvent) => void): Promise<void> {
+  async function postSSE(
+    path: string,
+    body: unknown,
+    onEvent: (event: SSEEvent) => void,
+  ): Promise<void> {
     const url = `http://localhost${path}`;
     const response = await fetchFn(url, {
       method: "POST",

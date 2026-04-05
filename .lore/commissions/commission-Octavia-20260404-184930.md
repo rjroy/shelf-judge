@@ -62,9 +62,11 @@ activity_timeline:
 current_progress: "Spec and all 6 design documents written. Running fresh-eyes review on the restructured spec."
 projectName: shelf-judge
 ---
+
 Restructured the MVP spec into a proper requirements document with extracted design documents.
 
 **Part 1: Design extraction.** Created 6 design documents under `.lore/designs/`:
+
 - `mvp-data-model.md` (Game, BggGameData, Axis, Collection, Storage Format)
 - `mvp-fitness-model.md` (weighted average algorithm, score breakdown interface, Wingspan example)
 - `mvp-bgg-integration.md` (endpoints, rate limiting, caching, XML parsing, library decision)
@@ -75,6 +77,7 @@ Restructured the MVP spec into a proper requirements document with extracted des
 Each design doc has proper frontmatter, links back to the spec, and lists which requirements it satisfies.
 
 **Part 2: Spec requirements expansion.** Grew from 7 one-line bullets to 24 detailed requirements organized into 7 sections: Axes and Weights (3), Fitness Scoring (3), Game Management (3), BGG Integration (4), Score Behavior and Edge Cases (4), Data Freshness (2), Persistence (2), Interface (3). New requirements cover:
+
 - Behavioral edge cases: zero-rated games, all-zero weights, axis deletion cascade, duplicate detection
 - Validation: rating scale enforcement (1-10 integer), weight range (0-100)
 - Resilience: system functions without BGG (REQ-MVP-11), BGG failures don't crash daemon (REQ-MVP-13)
@@ -83,7 +86,8 @@ Each design doc has proper frontmatter, links back to the spec, and lists which 
 - Atomic writes: crash safety for storage (REQ-MVP-21)
 
 **Post-review fixes.** Fresh-context spec reviewer caught 3 issues, all addressed:
+
 1. Fixed Wingspan math error in fitness model design (header said 7.65, math yields 7.87, now says 7.9)
 2. Promoted Open Question 3 (import conflict resolution) into REQ-MVP-10 since the answer was already decided
 3. Clarified REQ-MVP-19 to explicitly state that refresh re-derives non-overridden BGG axis ratings
-Also fixed Satisfies attribution across design docs and resolved weight-range tension (0-100, not 1-100).
+   Also fixed Satisfies attribution across design docs and resolved weight-range tension (0-100, not 1-100).

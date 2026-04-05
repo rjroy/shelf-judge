@@ -8,17 +8,10 @@ import type {
 } from "@shelf-judge/shared";
 
 export interface FitnessService {
-  calculateScore(
-    game: Game,
-    axes: Axis[],
-    bggData: BggGameData | null,
-  ): FitnessResult | null;
+  calculateScore(game: Game, axes: Axis[], bggData: BggGameData | null): FitnessResult | null;
 }
 
-function resolveBggRating(
-  axis: Axis,
-  bggData: BggGameData | null,
-): number | null {
+function resolveBggRating(axis: Axis, bggData: BggGameData | null): number | null {
   if (axis.source !== "bgg" || !axis.bggField || !bggData) return null;
 
   switch (axis.bggField) {
@@ -39,11 +32,7 @@ function roundToOneDecimal(value: number): number {
 
 export function createFitnessService(): FitnessService {
   return {
-    calculateScore(
-      game: Game,
-      axes: Axis[],
-      bggData: BggGameData | null,
-    ): FitnessResult | null {
+    calculateScore(game: Game, axes: Axis[], bggData: BggGameData | null): FitnessResult | null {
       const breakdown: FitnessBreakdownEntry[] = [];
       let weightedSum = 0;
       let weightSum = 0;
@@ -54,8 +43,7 @@ export function createFitnessService(): FitnessService {
         const bggRating = resolveBggRating(axis, bggData);
 
         let rating: number | null = null;
-        let source: FitnessBreakdownSource =
-          axis.source === "bgg" ? "bgg" : "personal";
+        let source: FitnessBreakdownSource = axis.source === "bgg" ? "bgg" : "personal";
         let bggOriginal: number | null = null;
 
         if (personalRating !== undefined) {
@@ -73,20 +61,15 @@ export function createFitnessService(): FitnessService {
         }
 
         // Display values are rounded; accumulation uses raw values
-        const displayedRating =
-          rating !== null ? roundToOneDecimal(rating) : null;
-        const rawContribution =
-          rating !== null ? rating * axis.weight : null;
+        const displayedRating = rating !== null ? roundToOneDecimal(rating) : null;
+        const rawContribution = rating !== null ? rating * axis.weight : null;
 
         breakdown.push({
           axisId: axis.id,
           axisName: axis.name,
           rating: displayedRating,
           weight: axis.weight,
-          contribution:
-            rawContribution !== null
-              ? roundToOneDecimal(rawContribution)
-              : null,
+          contribution: rawContribution !== null ? roundToOneDecimal(rawContribution) : null,
           source,
           bggOriginal,
         });

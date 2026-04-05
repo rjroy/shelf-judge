@@ -5,11 +5,7 @@ import { GameActions } from "@/components/game-actions";
 
 export const dynamic = "force-dynamic";
 
-export default async function GameDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default async function GameDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
   let data;

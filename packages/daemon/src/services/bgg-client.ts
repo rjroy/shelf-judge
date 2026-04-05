@@ -68,10 +68,7 @@ export function createBggClient(deps: BggClientDeps): BggClient {
 
   let rateLimitRetries = 0;
 
-  async function throttledFetch(
-    url: string,
-    retryCount = 0,
-  ): Promise<Response> {
+  async function throttledFetch(url: string, retryCount = 0): Promise<Response> {
     // Rate limiting: timestamp-based throttle. Assumes single-threaded access.
     // Concurrent calls would read the same lastRequestTime and both proceed,
     // bypassing the delay. All current callers are sequential (await in loops).
@@ -96,9 +93,7 @@ export function createBggClient(deps: BggClientDeps): BggClient {
     if (response.status === 429) {
       rateLimitRetries++;
       if (rateLimitRetries > MAX_429_RETRIES) {
-        throw new Error(
-          `BGG API rate limited after ${MAX_429_RETRIES} retries. Try again later.`,
-        );
+        throw new Error(`BGG API rate limited after ${MAX_429_RETRIES} retries. Try again later.`);
       }
       await delayFn(BACKOFF_429_MS);
       currentDelayMs = 10000; // Slow recovery: 1 req/10s after backoff
@@ -113,18 +108,13 @@ export function createBggClient(deps: BggClientDeps): BggClient {
     }
 
     // Handle 502/503 server errors with retry
-    if (
-      (response.status === 502 || response.status === 503) &&
-      retryCount < MAX_5XX_RETRIES
-    ) {
+    if ((response.status === 502 || response.status === 503) && retryCount < MAX_5XX_RETRIES) {
       await delayFn(RETRY_5XX_MS);
       return throttledFetch(url, retryCount + 1);
     }
 
     if (!response.ok && response.status !== 202) {
-      throw new Error(
-        `BGG API returned HTTP ${response.status}: ${await response.text()}`,
-      );
+      throw new Error(`BGG API returned HTTP ${response.status}: ${await response.text()}`);
     }
 
     return response;

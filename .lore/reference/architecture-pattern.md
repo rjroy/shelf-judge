@@ -24,11 +24,11 @@ The "One Entry Point for SDK Calls" section below describes how SDK usage is str
 
 ## Three Clients, One App
 
-| System | Stack | Role |
-|--------|-------|------|
-| **Daemon** | Hono on Unix socket via `Bun.serve()` | The application. Owns all state, logic, and coordination. |
-| **Web** | Next.js App Router (server + client components) | Read-only UI. Calls daemon REST API for writes. |
-| **CLI** | Plain bun scripts | Discovers operations from daemon at runtime. No built-in catalog. |
+| System     | Stack                                           | Role                                                              |
+| ---------- | ----------------------------------------------- | ----------------------------------------------------------------- |
+| **Daemon** | Hono on Unix socket via `Bun.serve()`           | The application. Owns all state, logic, and coordination.         |
+| **Web**    | Next.js App Router (server + client components) | Read-only UI. Calls daemon REST API for writes.                   |
+| **CLI**    | Plain bun scripts                               | Discovers operations from daemon at runtime. No built-in catalog. |
 
 The daemon runs on a Unix socket (or TCP for cross-platform). Web and CLI never touch the filesystem, config, or internal state directly.
 
@@ -100,8 +100,8 @@ Routes export `OperationDefinition` objects with hierarchy metadata. The registr
 
 ```typescript
 interface OperationDefinition {
-  operationId: string;          // "project.status.get"
-  name: string;                 // "get"
+  operationId: string; // "project.status.get"
+  name: string; // "get"
   description: string;
   invocation: { method: string; path: string };
   requestSchema?: ZodType;
@@ -161,6 +161,6 @@ Config resolution (`resolveConfig()`) lives in the app factory module, not in th
 
 ```typescript
 // Only resolves env config when deps don't provide what we need
-const config = (!deps?.adventuresPath || !deps?.queryFn) ? resolveConfig() : undefined;
+const config = !deps?.adventuresPath || !deps?.queryFn ? resolveConfig() : undefined;
 const adventuresPath = deps?.adventuresPath ?? config!.adventuresPath;
 ```

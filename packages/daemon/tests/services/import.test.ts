@@ -19,9 +19,7 @@ async function readFixture(filename: string): Promise<string> {
 function createMockFetch() {
   const responses: Array<{ status: number; body: string }> = [];
 
-  const fn = async (
-    input: string | URL | Request,
-  ): Promise<Response> => {
+  const fn = async (input: string | URL | Request): Promise<Response> => {
     const next = responses.shift();
     if (!next) {
       const url = typeof input === "string" ? input : input.toString();
@@ -316,8 +314,8 @@ describe("Collection Import", () => {
       fitnessService: createFitnessService(),
     });
 
-    await expect(
-      noBggService.importBggCollection("testuser"),
-    ).rejects.toThrow("BGG integration is not configured");
+    await expect(noBggService.importBggCollection("testuser")).rejects.toThrow(
+      "BGG integration is not configured",
+    );
   });
 });

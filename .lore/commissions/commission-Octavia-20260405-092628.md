@@ -53,11 +53,13 @@ activity_timeline:
 current_progress: "Plan review complete. Found 3 critical and 5 important issues. Applying fixes to the plan now."
 projectName: shelf-judge
 ---
+
 Wrote comprehensive MVP implementation plan to `.lore/plans/mvp.md`.
 
 **Structure:** 7 phases with 19-21 commissions in an implement -> review -> fix chain per phase. Phases 5 (web UI) and 6 (CLI) can run in parallel after Phase 4.
 
 **Phase sequence:**
+
 1. Project scaffolding + data model + storage (REQ-MVP-20, 21)
 2. Fitness engine + axis/game services (REQ-MVP-1-6, 8-9, 14-17)
 3. BGG integration with library spike (REQ-MVP-7, 10-13, 18-19)
@@ -68,7 +70,7 @@ Wrote comprehensive MVP implementation plan to `.lore/plans/mvp.md`.
 
 **9 technical decisions locked down:** axis weight UX, BGG library choice, project structure (monorepo), storage atomicity, config locations, rounding method, import endpoint style, CLI discovery model, architecture pattern scope.
 
-**Full requirement traceability matrix** maps all 24 REQ-MVP-* to specific phase steps and test files.
+**Full requirement traceability matrix** maps all 24 REQ-MVP-\* to specific phase steps and test files.
 
 **Review findings addressed:** Applied fixes from fresh-context plan review covering import endpoint parameter style, rounding implementation, Phase 2/3 boundary behavior for addGame, BGG library spike step, web UI socket proxy approach, axis deletion confirmation flow, CLI --json coverage, and score endpoint division of responsibility.
 
@@ -76,4 +78,4 @@ Wrote comprehensive MVP implementation plan to `.lore/plans/mvp.md`.
 
 **Should the MVP plan include automated tests for the web UI components?**
 No automated web UI tests in MVP. The web UI is a thin client with no business logic; all scoring, validation, and data logic is tested in the daemon. Manual verification covers the display layer.
-*Reasoning: The web UI is display-only (no business logic). The daemon API is thoroughly tested. Adding React component tests for a thin display layer in MVP adds scope without catching bugs that the daemon tests miss. If the project continues past MVP, add component tests for the score breakdown display and rating form.*
+_Reasoning: The web UI is display-only (no business logic). The daemon API is thoroughly tested. Adding React component tests for a thin display layer in MVP adds scope without catching bugs that the daemon tests miss. If the project continues past MVP, add component tests for the score breakdown display and rating form._

@@ -12,12 +12,7 @@ export type {
   AppConfig,
 } from "./types.js";
 
-export {
-  CreateAxisSchema,
-  UpdateAxisSchema,
-  RateGameSchema,
-  AddGameSchema,
-} from "./validation.js";
+export { CreateAxisSchema, UpdateAxisSchema, RateGameSchema, AddGameSchema } from "./validation.js";
 
 export type {
   CreateAxisInput,

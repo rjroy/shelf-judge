@@ -26,10 +26,7 @@ export function createConfigRoutes(deps: ConfigRoutesDeps): RouteModule {
         bggAuthToken: config.bggAuthToken ? "***configured***" : null,
       });
     } catch (err) {
-      return c.json(
-        { error: err instanceof Error ? err.message : String(err) },
-        500,
-      );
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }
   });
 
@@ -44,10 +41,7 @@ export function createConfigRoutes(deps: ConfigRoutesDeps): RouteModule {
 
     const parsed = UpdateConfigSchema.safeParse(body);
     if (!parsed.success) {
-      return c.json(
-        { error: "Validation failed", details: parsed.error.issues },
-        400,
-      );
+      return c.json({ error: "Validation failed", details: parsed.error.issues }, 400);
     }
 
     try {
@@ -67,10 +61,7 @@ export function createConfigRoutes(deps: ConfigRoutesDeps): RouteModule {
         bggAuthToken: config.bggAuthToken ? "***configured***" : null,
       });
     } catch (err) {
-      return c.json(
-        { error: err instanceof Error ? err.message : String(err) },
-        500,
-      );
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }
   });
 
