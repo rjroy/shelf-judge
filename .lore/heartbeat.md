@@ -59,6 +59,13 @@ Workers can also add entries to this file during their sessions.
 | 1 | All 5 screens exist | PASS |
 | 2 | Score breakdown s...
 - 13:50 commission-Thorne-20260405-121721 completed
+- 13:52 commission-Dalton-20260405-121737 result: # Phase 6 Review Fixes: All Thorne Findings Addressed
+
+- 13:52 commission-Dalton-20260405-121737 completed
+## Defects Fixed
+
+### 1. Daemon stop now actually stops the daemon
+- Added `POST /api/shutdown` endpoint to daemon (`packages/daemon/src/routes/s...
 ## Summary
 
 The CLI implementation covers all commands from the CLI design, has `--json` tests on every command (REQ-MVP-23 fully satisfied), produces readable ta...
