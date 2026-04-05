@@ -26,3 +26,8 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
+- 17:23 commission-Octavia-20260404-171931 result: MVP specification written to `.lore/specs/mvp.md`.
+
+The spec defines shelf-judge MVP as: user-defined rating axes with weights, per-game ratings (1-10), BGG data integration (community rating, weight,...
+
+- 17:23 commission-Octavia-20260404-171931 completed
