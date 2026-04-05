@@ -1,7 +1,7 @@
 ---
 title: "Commission: Phase 1 Review: Scaffolding and Data Model"
 date: 2026-04-05
-status: pending
+status: dispatched
 tags: [commission]
 worker: Thorne
 workerDisplayTitle: "Guild Warden"
@@ -14,6 +14,11 @@ activity_timeline:
   - timestamp: 2026-04-05T19:15:20.581Z
     event: created
     reason: "Commission created"
+  - timestamp: 2026-04-05T19:22:19.173Z
+    event: status_dispatched
+    reason: "Dispatched to worker"
+    from: "pending"
+    to: "dispatched"
 current_progress: ""
 projectName: shelf-judge
 ---

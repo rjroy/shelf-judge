@@ -1,7 +1,7 @@
 ---
 title: "Commission: Phase 2 Review: Fitness Engine and Services"
 date: 2026-04-05
-status: pending
+status: blocked
 tags: [commission]
 worker: Thorne
 workerDisplayTitle: "Guild Warden"
@@ -14,6 +14,11 @@ activity_timeline:
   - timestamp: 2026-04-05T19:15:48.263Z
     event: created
     reason: "Commission created"
+  - timestamp: 2026-04-05T19:22:19.171Z
+    event: status_blocked
+    reason: "Dependencies not satisfied"
+    from: "pending"
+    to: "blocked"
 current_progress: ""
 projectName: shelf-judge
 ---
