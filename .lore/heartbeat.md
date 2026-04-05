@@ -33,3 +33,8 @@ Workers can also add entries to this file during their sessions.
 1. **Numbering scheme** (primary is...
 
 - 18:37 commission-Octavia-20260404-183308 completed
+- 18:56 commission-Octavia-20260404-184930 result: Restructured the MVP spec into a proper requirements document with extracted design documents.
+
+**Part 1: Design extraction.** Created 6 design documents under `.lore/designs/`:
+- `mvp-data-model.md` ...
+- 18:56 commission-Octavia-20260404-184930 completed
