@@ -29,7 +29,7 @@ beforeEach(() => {
 describe("GameService", () => {
   describe("addGame", () => {
     test("creates a manual game with null bggId", async () => {
-      const game = await gameService.addGame({ name: "Custom Game" });
+      const { game } = await gameService.addGame({ name: "Custom Game" });
 
       expect(game.id).toBeTruthy();
       expect(game.name).toBe("Custom Game");
@@ -39,7 +39,7 @@ describe("GameService", () => {
     });
 
     test("creates a game with bggId for later BGG fetch", async () => {
-      const game = await gameService.addGame({
+      const { game } = await gameService.addGame({
         name: "Wingspan",
         bggId: 266192,
       });
@@ -57,8 +57,8 @@ describe("GameService", () => {
     });
 
     test("manual games are never duplicates of each other", async () => {
-      const g1 = await gameService.addGame({ name: "My Game" });
-      const g2 = await gameService.addGame({ name: "My Game" });
+      const { game: g1 } = await gameService.addGame({ name: "My Game" });
+      const { game: g2 } = await gameService.addGame({ name: "My Game" });
 
       expect(g1.id).not.toBe(g2.id);
     });
@@ -71,7 +71,7 @@ describe("GameService", () => {
         name: "Fun",
         weight: 50,
       });
-      const game = await gameService.addGame({ name: "Test Game" });
+      const { game } = await gameService.addGame({ name: "Test Game" });
       await gameService.rateGame(game.id, { [axis.id]: 8 });
 
       const result = await gameService.getGame(game.id);
@@ -82,7 +82,7 @@ describe("GameService", () => {
     });
 
     test("returns null score for unrated game", async () => {
-      const game = await gameService.addGame({ name: "Unrated" });
+      const { game } = await gameService.addGame({ name: "Unrated" });
       const result = await gameService.getGame(game.id);
 
       expect(result.score).toBeNull();
@@ -102,9 +102,9 @@ describe("GameService", () => {
         weight: 50,
       });
 
-      const g1 = await gameService.addGame({ name: "Low Score" });
-      const g2 = await gameService.addGame({ name: "High Score" });
-      const g3 = await gameService.addGame({ name: "Unrated" });
+      const { game: g1 } = await gameService.addGame({ name: "Low Score" });
+      const { game: g2 } = await gameService.addGame({ name: "High Score" });
+      const { game: g3 } = await gameService.addGame({ name: "Unrated" });
 
       await gameService.rateGame(g1.id, { [axis.id]: 3 });
       await gameService.rateGame(g2.id, { [axis.id]: 9 });
@@ -127,7 +127,7 @@ describe("GameService", () => {
         name: "Fun",
         weight: 50,
       });
-      const game = await gameService.addGame({ name: "Test" });
+      const { game } = await gameService.addGame({ name: "Test" });
 
       const result = await gameService.rateGame(game.id, {
         [axis.id]: 7,
@@ -143,7 +143,7 @@ describe("GameService", () => {
         name: "Fun",
         weight: 50,
       });
-      const game = await gameService.addGame({ name: "Test" });
+      const { game } = await gameService.addGame({ name: "Test" });
 
       expect(
         gameService.rateGame(game.id, { [axis.id]: 0 }),
@@ -155,7 +155,7 @@ describe("GameService", () => {
         name: "Fun",
         weight: 50,
       });
-      const game = await gameService.addGame({ name: "Test" });
+      const { game } = await gameService.addGame({ name: "Test" });
 
       expect(
         gameService.rateGame(game.id, { [axis.id]: 11 }),
@@ -167,7 +167,7 @@ describe("GameService", () => {
         name: "Fun",
         weight: 50,
       });
-      const game = await gameService.addGame({ name: "Test" });
+      const { game } = await gameService.addGame({ name: "Test" });
 
       expect(
         gameService.rateGame(game.id, { [axis.id]: 1.5 }),
@@ -179,7 +179,7 @@ describe("GameService", () => {
         name: "Fun",
         weight: 50,
       });
-      const game = await gameService.addGame({ name: "Test" });
+      const { game } = await gameService.addGame({ name: "Test" });
 
       expect(
         gameService.rateGame(game.id, { [axis.id]: -1 }),
@@ -187,7 +187,7 @@ describe("GameService", () => {
     });
 
     test("rejects unknown axis ID", async () => {
-      const game = await gameService.addGame({ name: "Test" });
+      const { game } = await gameService.addGame({ name: "Test" });
 
       expect(
         gameService.rateGame(game.id, { "fake-axis": 5 }),
@@ -197,14 +197,14 @@ describe("GameService", () => {
 
   describe("removeGame", () => {
     test("deletes game from collection", async () => {
-      const game = await gameService.addGame({ name: "Doomed" });
+      const { game } = await gameService.addGame({ name: "Doomed" });
       await gameService.removeGame(game.id);
 
       expect(gameService.getGame(game.id)).rejects.toThrow("Game not found");
     });
 
     test("removed game no longer appears in list", async () => {
-      const game = await gameService.addGame({ name: "Doomed" });
+      const { game } = await gameService.addGame({ name: "Doomed" });
       await gameService.removeGame(game.id);
 
       const list = await gameService.listGames();

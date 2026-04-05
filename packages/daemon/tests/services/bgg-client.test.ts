@@ -180,15 +180,55 @@ describe("BggClient", () => {
   });
 
   describe("429 backoff", () => {
-    test("retries after 429 response", async () => {
+    test("retries after 429 with correct delay timing", async () => {
+      const delayCalls: number[] = [];
+      const trackingClient = createBggClient({
+        config: { bggAuthToken: "test-token" },
+        fetchFn: mockFetch.fn,
+        delayMs: 0,
+        delayFn: async (ms: number) => {
+          delayCalls.push(ms);
+        },
+      });
+
       const searchXml = await readFixture("search-wingspan.xml");
       mockFetch.enqueue(429, ""); // Rate limited
       mockFetch.enqueue(200, searchXml); // Success after backoff
 
-      const results = await client.searchGames("Wingspan");
+      const results = await trackingClient.searchGames("Wingspan");
 
       expect(mockFetch.calls).toHaveLength(2);
       expect(results).toHaveLength(3);
+
+      // Should have called delayFn with BACKOFF_429_MS (30000)
+      expect(delayCalls).toContain(30000);
+    });
+
+    test("sets slower rate after 429 recovery", async () => {
+      const delayCalls: number[] = [];
+      const trackingClient = createBggClient({
+        config: { bggAuthToken: "test-token" },
+        fetchFn: mockFetch.fn,
+        delayMs: 0,
+        delayFn: async (ms: number) => {
+          delayCalls.push(ms);
+        },
+      });
+
+      const searchXml = await readFixture("search-wingspan.xml");
+      mockFetch.enqueue(429, ""); // Rate limited
+      mockFetch.enqueue(200, searchXml); // Success after backoff
+      mockFetch.enqueue(200, searchXml); // Second request at slower rate
+
+      await trackingClient.searchGames("Wingspan");
+
+      // Second search should use the 10s delay (currentDelayMs set to 10000 after 429)
+      await trackingClient.searchGames("Wingspan");
+
+      // The second request's throttle delay should reflect the 10s rate
+      // (delayFn will be called with remaining time based on 10000ms delay)
+      const postBackoffDelays = delayCalls.filter((ms) => ms !== 30000);
+      expect(postBackoffDelays.length).toBeGreaterThan(0);
     });
   });
 

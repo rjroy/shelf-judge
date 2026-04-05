@@ -80,7 +80,7 @@ describe("GameService BGG Integration", () => {
       const thingXml = await readFixture("thing-wingspan-266192.xml");
       mockFetch.enqueue(200, thingXml);
 
-      const game = await gameService.addGame({
+      const { game } = await gameService.addGame({
         name: "Wingspan",
         bggId: 266192,
       });
@@ -95,18 +95,20 @@ describe("GameService BGG Integration", () => {
       expect(game.maxPlayers).toBe(5);
     });
 
-    test("adds game with null bggData when BGG unavailable", async () => {
+    test("adds game with warning when BGG unavailable", async () => {
       mockFetch.enqueue(500, "Internal Server Error");
       mockFetch.enqueue(500, "Internal Server Error");
       mockFetch.enqueue(500, "Internal Server Error");
 
-      const game = await gameService.addGame({
+      const { game, warning } = await gameService.addGame({
         name: "Wingspan",
         bggId: 266192,
       });
 
       expect(game.bggId).toBe(266192);
       expect(game.bggData).toBeNull();
+      expect(warning).toBeDefined();
+      expect(warning).toContain("BGG data could not be fetched");
     });
   });
 
@@ -140,7 +142,7 @@ describe("GameService BGG Integration", () => {
       // First fetch for addGame
       mockFetch.enqueue(200, thingXml);
 
-      const game = await gameService.addGame({
+      const { game } = await gameService.addGame({
         name: "Wingspan",
         bggId: 266192,
       });
@@ -166,7 +168,7 @@ describe("GameService BGG Integration", () => {
     });
 
     test("throws for manual game without bggId", async () => {
-      const game = await gameService.addGame({ name: "Manual Game" });
+      const { game } = await gameService.addGame({ name: "Manual Game" });
 
       await expect(gameService.refreshBggData(game.id)).rejects.toThrow(
         "no BGG ID",
@@ -209,7 +211,7 @@ describe("GameService BGG Integration", () => {
       const thingXml = await readFixture("thing-wingspan-266192.xml");
       mockFetch.enqueue(200, thingXml);
 
-      const game = await gameService.addGame({
+      const { game } = await gameService.addGame({
         name: "Wingspan",
         bggId: 266192,
       });
@@ -226,7 +228,7 @@ describe("GameService BGG Integration", () => {
     });
 
     test("excludes BGG-derived axes when bggData absent", async () => {
-      const game = await gameService.addGame({ name: "Manual Game" });
+      const { game } = await gameService.addGame({ name: "Manual Game" });
 
       const result = await gameService.getGame(game.id);
 
@@ -238,7 +240,7 @@ describe("GameService BGG Integration", () => {
       const thingXml = await readFixture("thing-wingspan-266192.xml");
       mockFetch.enqueue(200, thingXml);
 
-      const game = await gameService.addGame({
+      const { game } = await gameService.addGame({
         name: "Wingspan",
         bggId: 266192,
       });

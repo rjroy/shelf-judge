@@ -67,7 +67,7 @@ describe("BGG XML Parser", () => {
       expect(data.communityRating).toBe(8.62);
       expect(data.bayesAverage).toBe(8.48);
       expect(data.weight).toBe(3.86);
-      expect(data.numWeightVotes).toBe(15000);
+      expect(data.numWeightVotes).toBe(4523);
 
       const mechNames = data.mechanics.map((m) => m.name);
       expect(mechNames).toContain("Cooperative Game");

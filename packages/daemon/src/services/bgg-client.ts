@@ -72,7 +72,10 @@ export function createBggClient(deps: BggClientDeps): BggClient {
     url: string,
     retryCount = 0,
   ): Promise<Response> {
-    // Rate limiting: wait until enough time has passed since last request
+    // Rate limiting: timestamp-based throttle. Assumes single-threaded access.
+    // Concurrent calls would read the same lastRequestTime and both proceed,
+    // bypassing the delay. All current callers are sequential (await in loops).
+    // Post-MVP: replace with a mutex-guarded queue if parallel callers are added.
     const now = Date.now();
     const elapsed = now - lastRequestTime;
     if (elapsed < currentDelayMs && lastRequestTime > 0) {

@@ -26,6 +26,7 @@ function resolveBggRating(
       return bggData.communityRating;
     case "weight":
       if (bggData.weight === null) return null;
+      // BGG weight is 1-5 scale; multiply by 2 to map to 1-10 rating scale
       return bggData.weight * 2;
     default:
       return null;

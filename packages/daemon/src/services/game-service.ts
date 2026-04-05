@@ -10,6 +10,11 @@ import type { FitnessService } from "./fitness-service.js";
 import type { BggClient, BggGameResult } from "./bgg-client.js";
 import type { BggSearchResult, BggCollectionItem } from "./bgg-xml-parser.js";
 
+export interface AddGameResult {
+  game: Game;
+  warning?: string;
+}
+
 export interface GameWithScore {
   game: Game;
   score: FitnessResult | null;
@@ -34,7 +39,7 @@ export interface ImportSummary {
 }
 
 export interface GameService {
-  addGame(input: AddGameInput): Promise<Game>;
+  addGame(input: AddGameInput): Promise<AddGameResult>;
   getGame(id: string): Promise<GameWithScore>;
   listGames(): Promise<GameWithScore[]>;
   rateGame(
@@ -83,7 +88,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
   }
 
   return {
-    async addGame(input: AddGameInput): Promise<Game> {
+    async addGame(input: AddGameInput): Promise<AddGameResult> {
       const parsed = AddGameSchema.parse(input);
       const collection = await storageService.loadCollection();
 
@@ -116,12 +121,13 @@ export function createGameService(deps: GameServiceDeps): GameService {
       };
 
       // Fetch BGG data if bggId is provided and client is available
+      let warning: string | undefined;
       if (game.bggId !== null && bggClient?.isConfigured()) {
         try {
           const result = await bggClient.getGame(game.bggId);
           applyBggResult(game, result);
-        } catch {
-          // BGG unavailable: still add the game with null bggData
+        } catch (err) {
+          warning = `Game added but BGG data could not be fetched: ${err instanceof Error ? err.message : String(err)}`;
         }
       }
 
@@ -129,7 +135,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
       collection.updatedAt = now;
       await storageService.saveCollection(collection);
 
-      return game;
+      return { game, warning };
     },
 
     async getGame(id: string): Promise<GameWithScore> {
