@@ -1,11 +1,8 @@
-// Daemon API client for server-side use.
-// Uses Bun's fetch with unix socket option to talk directly to the daemon.
+// Daemon API client for server-side use (Next.js server components).
 // Client components go through the /api/daemon/[...path] proxy instead.
 
 import type { Game, Axis, FitnessResult, FitnessBreakdownEntry } from "@shelf-judge/shared";
-
-const SOCKET_PATH = process.env.SHELF_JUDGE_SOCKET ?? "/tmp/shelf-judge.sock";
-const DAEMON_BASE = "http://localhost";
+import { daemonFetch, daemonJson } from "./daemon";
 
 export interface GameWithScore {
   game: Game;
@@ -36,25 +33,12 @@ export interface ImportComplete {
   errors: string[];
 }
 
-async function daemonFetch(path: string, init?: RequestInit): Promise<Response> {
-  const url = `${DAEMON_BASE}${path}`;
-  return fetch(url, {
-    ...init,
-    // @ts-expect-error Bun extension for unix socket transport
-    unix: SOCKET_PATH,
-  });
-}
-
 export async function listGames(): Promise<GameWithScore[]> {
-  const res = await daemonFetch("/api/games");
-  if (!res.ok) throw new Error(`Failed to list games: ${res.status}`);
-  return res.json();
+  return daemonJson("/api/games");
 }
 
 export async function getGame(id: string): Promise<GameWithScore> {
-  const res = await daemonFetch(`/api/games/${id}`);
-  if (!res.ok) throw new Error(`Failed to get game: ${res.status}`);
-  return res.json();
+  return daemonJson(`/api/games/${id}`);
 }
 
 export async function addGame(
@@ -62,8 +46,7 @@ export async function addGame(
 ): Promise<AddGameResult> {
   const res = await daemonFetch("/api/games", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body,
   });
   if (res.status === 409) {
     const data = await res.json();
@@ -80,16 +63,10 @@ export async function rateGame(
   id: string,
   ratings: Record<string, number>,
 ): Promise<GameWithScore> {
-  const res = await daemonFetch(`/api/games/${id}/ratings`, {
+  return daemonJson(`/api/games/${id}/ratings`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ratings }),
+    body: { ratings },
   });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({ error: "Unknown error" }));
-    throw new Error(data.error ?? `Failed to rate game: ${res.status}`);
-  }
-  return res.json();
 }
 
 export async function removeGame(id: string): Promise<void> {
@@ -98,27 +75,15 @@ export async function removeGame(id: string): Promise<void> {
 }
 
 export async function refreshBggData(id: string): Promise<{ game: Game }> {
-  const res = await daemonFetch(`/api/games/${id}/refresh`, { method: "POST" });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({ error: "Unknown error" }));
-    throw new Error(data.error ?? `Failed to refresh: ${res.status}`);
-  }
-  return res.json();
+  return daemonJson(`/api/games/${id}/refresh`, { method: "POST" });
 }
 
 export async function searchGames(query: string): Promise<BggSearchResult[]> {
-  const res = await daemonFetch(`/api/games/search?q=${encodeURIComponent(query)}`);
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({ error: "Unknown error" }));
-    throw new Error(data.error ?? `Failed to search: ${res.status}`);
-  }
-  return res.json();
+  return daemonJson(`/api/games/search?q=${encodeURIComponent(query)}`);
 }
 
 export async function listAxes(): Promise<Axis[]> {
-  const res = await daemonFetch("/api/axes");
-  if (!res.ok) throw new Error(`Failed to list axes: ${res.status}`);
-  return res.json();
+  return daemonJson("/api/axes");
 }
 
 export async function createAxis(body: {
@@ -126,49 +91,30 @@ export async function createAxis(body: {
   description?: string;
   weight: number;
 }): Promise<Axis> {
-  const res = await daemonFetch("/api/axes", {
+  return daemonJson("/api/axes", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body,
   });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({ error: "Unknown error" }));
-    throw new Error(data.error ?? `Failed to create axis: ${res.status}`);
-  }
-  return res.json();
 }
 
 export async function updateAxis(
   id: string,
   body: { name?: string; description?: string; weight?: number },
 ): Promise<Axis> {
-  const res = await daemonFetch(`/api/axes/${id}`, {
+  return daemonJson(`/api/axes/${id}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body,
   });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({ error: "Unknown error" }));
-    throw new Error(data.error ?? `Failed to update axis: ${res.status}`);
-  }
-  return res.json();
 }
 
 export async function deleteAxis(id: string): Promise<{ deletedRatingsCount: number }> {
-  const res = await daemonFetch(`/api/axes/${id}`, { method: "DELETE" });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({ error: "Unknown error" }));
-    throw new Error(data.error ?? `Failed to delete axis: ${res.status}`);
-  }
-  return res.json();
+  return daemonJson(`/api/axes/${id}`, { method: "DELETE" });
 }
 
 export async function importBggCollection(username: string): Promise<Response> {
-  // Returns the raw response so the caller can read the SSE stream
   return daemonFetch("/api/import/bgg", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username }),
+    body: { username },
   });
 }
 

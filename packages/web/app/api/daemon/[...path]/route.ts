@@ -1,52 +1,44 @@
 import { NextRequest, NextResponse } from "next/server";
-
-const SOCKET_PATH = process.env.SHELF_JUDGE_SOCKET ?? "/tmp/shelf-judge.sock";
-const DAEMON_BASE = "http://localhost";
+import { daemonFetch, daemonFetchStream } from "@/lib/daemon";
 
 async function proxyToDaemon(request: NextRequest, params: Promise<{ path: string[] }>) {
   const { path } = await params;
   const daemonPath = `/api/${path.join("/")}`;
   const url = new URL(request.url);
-  const queryString = url.search;
-  const fullPath = `${DAEMON_BASE}${daemonPath}${queryString}`;
+  const fullPath = `${daemonPath}${url.search}`;
 
-  const headers: Record<string, string> = {};
-  if (request.headers.get("content-type")) {
-    headers["Content-Type"] = request.headers.get("content-type")!;
-  }
+  const body =
+    request.method !== "GET" && request.method !== "HEAD"
+      ? await request.json().catch(() => undefined)
+      : undefined;
 
-  const init: RequestInit = {
-    method: request.method,
-    headers,
-    // @ts-expect-error Bun extension for unix socket transport
-    unix: SOCKET_PATH,
-  };
+  try {
+    // Use streaming for SSE-capable endpoints, buffered for everything else
+    const res = await daemonFetch(fullPath, { method: request.method, body });
 
-  if (request.method !== "GET" && request.method !== "HEAD") {
-    init.body = await request.text();
-  }
+    if (res.headers.get("content-type")?.includes("text/event-stream")) {
+      // Re-request with streaming for SSE
+      const streamRes = await daemonFetchStream(fullPath, { method: request.method, body });
+      return new NextResponse(streamRes.body, {
+        status: streamRes.status,
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+        },
+      });
+    }
 
-  const res = await fetch(fullPath, init);
-
-  // For SSE responses, stream them through
-  if (res.headers.get("content-type")?.includes("text/event-stream")) {
-    return new NextResponse(res.body, {
+    const responseBody = await res.text();
+    return new NextResponse(responseBody, {
       status: res.status,
       headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
+        "Content-Type": res.headers.get("content-type") ?? "application/json",
       },
     });
+  } catch {
+    return NextResponse.json({ error: "Daemon unavailable" }, { status: 502 });
   }
-
-  const body = await res.text();
-  return new NextResponse(body, {
-    status: res.status,
-    headers: {
-      "Content-Type": res.headers.get("content-type") ?? "application/json",
-    },
-  });
 }
 
 export async function GET(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {

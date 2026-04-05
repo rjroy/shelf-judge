@@ -40,6 +40,39 @@ An agent with shell access can discover what the daemon offers, invoke operation
 
 **When you make a thing, you make a CLI.**
 
+## Running the System
+
+The root `package.json` uses `concurrently` to run the daemon and web server together with labeled, color-coded output:
+
+```
+bun run dev    # daemon (bun --watch) + next dev
+bun run start  # daemon (bun) + next start
+```
+
+Each workspace package defines its own `dev` and `start` scripts. The root scripts wire them together via `bun run --filter`.
+
+## Unix Socket Connectivity
+
+The daemon listens on a Unix socket via `Bun.serve({ unix: socketPath })`. Clients connect differently depending on their runtime:
+
+**Bun clients (CLI, daemon-to-daemon):** Use Bun's `fetch` extension with the `unix` option. This is a Bun-specific API that doesn't exist in Node.js or browser `fetch`.
+
+```typescript
+fetch("http://localhost/api/axes", { unix: socketPath });
+```
+
+**Next.js server components and API routes:** Next.js runs on Node.js, not Bun, even when started via `bun run`. Bun's `fetch({ unix })` is silently ignored. Instead, use Node's `http.request()` with `socketPath`:
+
+```typescript
+import http from "node:http";
+
+http.request({ socketPath: SOCKET_PATH, path, method }, resolve);
+```
+
+The web package wraps this in a `lib/daemon.ts` module that exposes `daemonFetch()` (buffered) and `daemonFetchStream()` (for SSE). Both return standard Web API `Response` objects so the rest of the web code doesn't touch `node:http` directly.
+
+**Client-side JavaScript (browser):** Cannot reach Unix sockets. Client components go through Next.js API route handlers (`/api/daemon/[...path]`) which proxy to the daemon via the `node:http` pattern above.
+
 ## Daemon Internals
 
 ### Route/Service Split with DI Factories

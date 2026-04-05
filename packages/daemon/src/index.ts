@@ -59,17 +59,14 @@ async function main() {
     `BGG integration: ${bggClient.isConfigured() ? "configured" : "not configured (set bgg-token to enable)"}`,
   );
 
-  process.on("SIGINT", () => {
+  function shutdown() {
     console.log("Shutting down...");
     server.stop();
     process.exit(0);
-  });
+  }
 
-  process.on("SIGTERM", () => {
-    console.log("Shutting down...");
-    server.stop();
-    process.exit(0);
-  });
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 }
 
 main().catch((err) => {
