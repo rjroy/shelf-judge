@@ -26,3 +26,10 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
+- 18:37 commission-Octavia-20260404-183308 result: Revised `.lore/specs/mvp.md` to align with the standard `specify` skill format. All content and decisions preserved; this was purely structural.
+
+**Changes made:**
+
+1. **Numbering scheme** (primary is...
+
+- 18:37 commission-Octavia-20260404-183308 completed
