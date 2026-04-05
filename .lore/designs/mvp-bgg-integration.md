@@ -1,7 +1,7 @@
 ---
 title: "MVP BGG Integration"
 date: 2026-04-04
-status: draft
+status: approved
 tags: [design, bgg, api, integration, caching, mvp]
 modules: [daemon]
 related:
