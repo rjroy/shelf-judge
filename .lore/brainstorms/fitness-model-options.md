@@ -1,7 +1,7 @@
 ---
 title: "Fitness Score Model Options"
 date: 2026-04-04
-status: draft
+status: concluded
 tags: [brainstorm, fitness, scoring, math]
 ---
 
@@ -454,3 +454,28 @@ Three patterns appear across all approaches and are worth naming before the next
 | **Cold-start** | Partial (BGG axes work) | Poor | Poor | Partial | Good |
 | **Technical complexity** | Low-Medium | High | Medium-High | Medium | High |
 | **Personal axis support** | Full | Weak | Weak | Full | Full |
+
+---
+
+## Conclusion: Hybrid Tournament + Axis Ratings
+
+The chosen direction combines the honesty of pairwise comparison with the dimensionality of direct axis ratings, without multiplying the comparison burden.
+
+### The model
+
+- **Pairwise tournament for overall shelf fitness.** This is the axis where stated preference diverges most from revealed preference. People rate Gloomhaven a 9 because they think they should, then never play it. Forced pairwise comparison ("which stays?") surfaces the truth. Elo or Bradley-Terry scaling produces the primary fitness ranking.
+- **Direct 1-10 ratings for concrete axes.** Art, theme, nostalgia, and other user-defined axes use simple numeric ratings. These axes describe qualities where self-report is reliable: you know whether you find a game beautiful, whether it carries sentimental weight, whether the theme resonates. No honesty gap to close here.
+- **Combined vector feeds similarity and prediction.** Each game's tournament-derived fitness rank plus its axis ratings form a multi-dimensional vector. This vector is richer than a single Elo score, giving the similarity engine (for prediction and redundancy detection) more signal to work with.
+
+### Why this hybrid
+
+The honesty argument for pairwise comparison is strongest on the overall fitness question, where self-deception is common. It's weakest on concrete aesthetic or sentimental axes, where people generally know what they think. Running separate tournaments per axis would multiply comparison burden (K axes × ~30 comparisons per stable ranking) and destroy the low-friction advantage that made pairwise attractive in the first place.
+
+One tournament, multiple scorecards. The tournament answers "does this belong on your shelf?" The scorecards answer "why?"
+
+### Open questions for spec
+
+- How many axis ratings are needed before the similarity vector becomes useful for prediction? (Minimum viable dimensionality.)
+- Should the tournament ranking and axis ratings be presented as independent values, or should the axes feed back into the fitness score?
+- How does the system handle the cold-start gap before enough comparisons exist to produce a stable tournament ranking?
+- What confidence signals accompany predictions made from the combined vector?
