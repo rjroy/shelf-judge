@@ -1,7 +1,7 @@
 ---
 title: "MVP Web UI"
 date: 2026-04-04
-status: draft
+status: approved
 tags: [design, web-ui, frontend, mvp]
 modules: [web-ui]
 related:
