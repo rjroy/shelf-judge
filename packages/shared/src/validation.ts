@@ -29,7 +29,7 @@ export const AddGameSchema = z.object({
   imageUrl: z.string().url().nullable().optional().default(null),
 });
 
-export type CreateAxisInput = z.infer<typeof CreateAxisSchema>;
-export type UpdateAxisInput = z.infer<typeof UpdateAxisSchema>;
-export type RateGameInput = z.infer<typeof RateGameSchema>;
-export type AddGameInput = z.infer<typeof AddGameSchema>;
+export type CreateAxisInput = z.input<typeof CreateAxisSchema>;
+export type UpdateAxisInput = z.input<typeof UpdateAxisSchema>;
+export type RateGameInput = z.input<typeof RateGameSchema>;
+export type AddGameInput = z.input<typeof AddGameSchema>;
