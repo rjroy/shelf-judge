@@ -31,10 +31,10 @@ export function createAxisService(deps: AxisServiceDeps): AxisService {
       const axis: Axis = {
         id: uuidv4(),
         name: parsed.name,
-        description: parsed.description ?? null,
+        description: parsed.description,
         weight: parsed.weight,
-        source: parsed.source ?? "personal",
-        bggField: parsed.bggField ?? null,
+        source: parsed.source,
+        bggField: parsed.bggField,
         createdAt: now,
         updatedAt: now,
       };

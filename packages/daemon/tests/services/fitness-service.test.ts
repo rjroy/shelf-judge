@@ -236,73 +236,121 @@ describe("FitnessService", () => {
 
   describe("rounding to one decimal place", () => {
     test("7.84 rounds to 7.8", () => {
-      // Need weights and ratings that produce 7.84
-      // 784 / 100 = 7.84
+      // (8 * 84 + 7 * 16) / 100 = (672 + 112) / 100 = 7.84
       const axes = [
-        makeAxis({ id: "a1", name: "A", weight: 100 }),
+        makeAxis({ id: "a1", name: "A", weight: 84 }),
+        makeAxis({ id: "a2", name: "B", weight: 16 }),
       ];
-      // We need a non-integer rating to get 7.84. Use BGG-derived.
-      const axes2 = [
-        makeAxis({ id: "a1", name: "A", weight: 50 }),
-        makeAxis({ id: "a2", name: "B", weight: 50 }),
-      ];
-      // (8 * 50 + 7.68 * 50) / 100 = (400 + 384) / 100 = 7.84
-      const game = makeGame({ ratings: { a1: 8 } });
-      const bggAxes = [
-        makeAxis({ id: "a1", name: "A", weight: 50 }),
-        makeAxis({ id: "a2", name: "B", weight: 50, source: "bgg", bggField: "communityRating" }),
-      ];
-      const bggData = makeBggData({ communityRating: 7.68 });
+      const game = makeGame({ ratings: { a1: 8, a2: 7 } });
 
-      const result = fitnessService.calculateScore(game, bggAxes, bggData);
+      const result = fitnessService.calculateScore(game, axes, null);
 
       expect(result).not.toBeNull();
       expect(result!.score).toBe(7.8);
     });
 
     test("7.85 rounds to 7.9", () => {
-      // (8 * 50 + 7.7 * 50) / 100 = (400 + 385) / 100 = 7.85
+      // (8 * 85 + 7 * 15) / 100 = (680 + 105) / 100 = 7.85
       const axes = [
-        makeAxis({ id: "a1", name: "A", weight: 50 }),
-        makeAxis({ id: "a2", name: "B", weight: 50, source: "bgg", bggField: "communityRating" }),
+        makeAxis({ id: "a1", name: "A", weight: 85 }),
+        makeAxis({ id: "a2", name: "B", weight: 15 }),
       ];
-      const game = makeGame({ ratings: { a1: 8 } });
-      const bggData = makeBggData({ communityRating: 7.7 });
+      const game = makeGame({ ratings: { a1: 8, a2: 7 } });
 
-      const result = fitnessService.calculateScore(game, axes, bggData);
+      const result = fitnessService.calculateScore(game, axes, null);
 
       expect(result).not.toBeNull();
       expect(result!.score).toBe(7.9);
     });
 
     test("7.94 rounds to 7.9", () => {
-      // (8 * 50 + 7.88 * 50) / 100 = (400 + 394) / 100 = 7.94
+      // (8 * 94 + 7 * 6) / 100 = (752 + 42) / 100 = 7.94
       const axes = [
-        makeAxis({ id: "a1", name: "A", weight: 50 }),
-        makeAxis({ id: "a2", name: "B", weight: 50, source: "bgg", bggField: "communityRating" }),
+        makeAxis({ id: "a1", name: "A", weight: 94 }),
+        makeAxis({ id: "a2", name: "B", weight: 6 }),
       ];
-      const game = makeGame({ ratings: { a1: 8 } });
-      const bggData = makeBggData({ communityRating: 7.88 });
+      const game = makeGame({ ratings: { a1: 8, a2: 7 } });
 
-      const result = fitnessService.calculateScore(game, axes, bggData);
+      const result = fitnessService.calculateScore(game, axes, null);
 
       expect(result).not.toBeNull();
       expect(result!.score).toBe(7.9);
     });
 
     test("7.95 rounds to 8.0", () => {
-      // (8 * 50 + 7.9 * 50) / 100 = (400 + 395) / 100 = 7.95
+      // (8 * 95 + 7 * 5) / 100 = (760 + 35) / 100 = 7.95
       const axes = [
-        makeAxis({ id: "a1", name: "A", weight: 50 }),
-        makeAxis({ id: "a2", name: "B", weight: 50, source: "bgg", bggField: "communityRating" }),
+        makeAxis({ id: "a1", name: "A", weight: 95 }),
+        makeAxis({ id: "a2", name: "B", weight: 5 }),
       ];
-      const game = makeGame({ ratings: { a1: 8 } });
-      const bggData = makeBggData({ communityRating: 7.9 });
+      const game = makeGame({ ratings: { a1: 8, a2: 7 } });
+
+      const result = fitnessService.calculateScore(game, axes, null);
+
+      expect(result).not.toBeNull();
+      expect(result!.score).toBe(8);
+    });
+  });
+
+  describe("breakdown consistency", () => {
+    test("displayed rating × weight equals displayed contribution for multi-decimal BGG rating", () => {
+      // communityRating 7.666 rounds to displayed rating 7.7
+      // contribution should be roundToOneDecimal(7.7 * 30), not roundToOneDecimal(7.666 * 30)
+      const axes = [
+        makeAxis({ id: "a1", name: "A", weight: 30, source: "bgg", bggField: "communityRating" }),
+      ];
+      const game = makeGame({ ratings: {} });
+      const bggData = makeBggData({ communityRating: 7.666 });
 
       const result = fitnessService.calculateScore(game, axes, bggData);
 
       expect(result).not.toBeNull();
-      expect(result!.score).toBe(8);
+      const entry = result!.breakdown[0];
+
+      // Displayed rating should be rounded
+      expect(entry.rating).toBe(7.7);
+      // Contribution must match displayed rating × weight, rounded
+      const expectedContribution = Math.round(entry.rating! * entry.weight * 10) / 10;
+      expect(entry.contribution).toBe(expectedContribution);
+    });
+
+    test("score is derivable from breakdown contributions", () => {
+      // Use BGG ratings with multi-decimal precision across multiple axes
+      const axes = [
+        makeAxis({ id: "a1", name: "A", weight: 40 }),
+        makeAxis({ id: "a2", name: "B", weight: 30, source: "bgg", bggField: "communityRating" }),
+        makeAxis({ id: "a3", name: "C", weight: 30, source: "bgg", bggField: "weight" }),
+      ];
+      const game = makeGame({ ratings: { a1: 7 } });
+      const bggData = makeBggData({ communityRating: 8.347, weight: 3.14 });
+
+      const result = fitnessService.calculateScore(game, axes, bggData);
+
+      expect(result).not.toBeNull();
+      const totalContribution = result!.breakdown
+        .filter((b) => b.contribution !== null)
+        .reduce((sum, b) => sum + b.contribution!, 0);
+      const totalWeight = result!.breakdown
+        .filter((b) => b.rating !== null)
+        .reduce((sum, b) => sum + b.weight, 0);
+      expect(result!.score).toBe(Math.round((totalContribution / totalWeight) * 10) / 10);
+    });
+  });
+
+  describe("source field accuracy", () => {
+    test("unrated BGG axis shows source as bgg, not personal", () => {
+      const axes = [
+        makeAxis({ id: "a1", name: "Fun", weight: 10 }),
+        makeAxis({ id: "bgg1", name: "Community Rating", weight: 10, source: "bgg", bggField: "communityRating" }),
+      ];
+      const game = makeGame({ ratings: { a1: 8 } });
+
+      const result = fitnessService.calculateScore(game, axes, null);
+
+      expect(result).not.toBeNull();
+      const bggEntry = result!.breakdown.find((b) => b.axisId === "bgg1")!;
+      expect(bggEntry.rating).toBeNull();
+      expect(bggEntry.source).toBe("bgg");
     });
   });
 });

@@ -53,7 +53,8 @@ export function createFitnessService(): FitnessService {
         const bggRating = resolveBggRating(axis, bggData);
 
         let rating: number | null = null;
-        let source: FitnessBreakdownSource = "personal";
+        let source: FitnessBreakdownSource =
+          axis.source === "bgg" ? "bgg" : "personal";
         let bggOriginal: number | null = null;
 
         if (personalRating !== undefined) {
@@ -70,21 +71,25 @@ export function createFitnessService(): FitnessService {
           source = "bgg";
         }
 
+        const displayedRating =
+          rating !== null ? roundToOneDecimal(rating) : null;
         const contribution =
-          rating !== null ? roundToOneDecimal(rating * axis.weight) : null;
+          displayedRating !== null
+            ? roundToOneDecimal(displayedRating * axis.weight)
+            : null;
 
         breakdown.push({
           axisId: axis.id,
           axisName: axis.name,
-          rating: rating !== null ? roundToOneDecimal(rating) : null,
+          rating: displayedRating,
           weight: axis.weight,
           contribution,
           source,
           bggOriginal,
         });
 
-        if (rating !== null) {
-          weightedSum += rating * axis.weight;
+        if (contribution !== null) {
+          weightedSum += contribution;
           weightSum += axis.weight;
           ratedCount++;
         }
