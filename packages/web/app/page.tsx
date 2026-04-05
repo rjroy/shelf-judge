@@ -66,6 +66,7 @@ export default async function CollectionPage() {
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ borderBottom: "2px solid #e0e0e0", textAlign: "left" }}>
+              <th style={{ padding: "8px 12px", width: 48 }}></th>
               <th style={{ padding: "8px 12px" }}>Game</th>
               <th style={{ padding: "8px 12px" }}>Year</th>
               <th style={{ padding: "8px 12px" }}>Fitness</th>
@@ -75,6 +76,29 @@ export default async function CollectionPage() {
           <tbody>
             {games.map(({ game, score }) => (
               <tr key={game.id} style={{ borderBottom: "1px solid #e0e0e0" }}>
+                <td style={{ padding: "8px 12px", width: 48 }}>
+                  {game.imageUrl ? (
+                    <img
+                      src={game.imageUrl}
+                      alt=""
+                      style={{
+                        width: 36,
+                        height: 36,
+                        objectFit: "cover",
+                        borderRadius: 4,
+                      }}
+                    />
+                  ) : (
+                    <div
+                      style={{
+                        width: 36,
+                        height: 36,
+                        backgroundColor: "#e0e0e0",
+                        borderRadius: 4,
+                      }}
+                    />
+                  )}
+                </td>
                 <td style={{ padding: "8px 12px" }}>
                   <Link
                     href={`/games/${game.id}`}
@@ -88,7 +112,7 @@ export default async function CollectionPage() {
                   <ScoreBadge score={score} />
                 </td>
                 <td style={{ padding: "8px 12px", color: "#666" }}>
-                  {score ? `${score.ratedAxisCount} / ${score.totalAxisCount}` : "0"}
+                  {score ? `${score.ratedAxisCount} / ${score.totalAxisCount}` : "-"}
                 </td>
               </tr>
             ))}

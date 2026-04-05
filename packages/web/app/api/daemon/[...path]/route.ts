@@ -30,11 +30,19 @@ async function proxyToDaemon(request: NextRequest, params: Promise<{ path: strin
     }
 
     const responseBody = await res.text();
+    const headers = new Headers();
+    res.headers.forEach((value, key) => {
+      // Skip hop-by-hop headers that shouldn't be forwarded
+      if (!["connection", "keep-alive", "transfer-encoding"].includes(key.toLowerCase())) {
+        headers.set(key, value);
+      }
+    });
+    if (!headers.has("content-type")) {
+      headers.set("Content-Type", "application/json");
+    }
     return new NextResponse(responseBody, {
       status: res.status,
-      headers: {
-        "Content-Type": res.headers.get("content-type") ?? "application/json",
-      },
+      headers,
     });
   } catch {
     return NextResponse.json({ error: "Daemon unavailable" }, { status: 502 });

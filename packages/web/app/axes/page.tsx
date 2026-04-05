@@ -27,6 +27,7 @@ export default function AxesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
   const [editWeight, setEditWeight] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [newName, setNewName] = useState("");
@@ -90,9 +91,11 @@ export default function AxesPage() {
   async function handleUpdate(id: string) {
     setError(null);
     try {
-      const body: { weight?: number; description?: string } = {};
+      const body: { name?: string; weight?: number; description?: string } = {};
+      const axis = axes.find((a) => a.id === id);
+      if (editName.trim() && editName.trim() !== axis?.name) body.name = editName.trim();
       if (editWeight) body.weight = parseInt(editWeight, 10);
-      if (editDescription !== undefined) body.description = editDescription;
+      if (editDescription !== axis?.description) body.description = editDescription;
 
       const res = await fetch(`/api/daemon/axes/${id}`, {
         method: "PUT",
@@ -155,9 +158,36 @@ export default function AxesPage() {
           {axes.map((axis) => (
             <tr key={axis.id} style={{ borderBottom: "1px solid #eee" }}>
               <td style={{ padding: "6px 10px" }}>
-                {axis.name}
-                {axis.description && (
-                  <div style={{ fontSize: 12, color: "#666" }}>{axis.description}</div>
+                {editingId === axis.id ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <input
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      placeholder="Axis name"
+                      required
+                      style={{ padding: "2px 4px", border: "1px solid #ccc", borderRadius: 4 }}
+                    />
+                    <input
+                      type="text"
+                      value={editDescription}
+                      onChange={(e) => setEditDescription(e.target.value)}
+                      placeholder="Description (optional)"
+                      style={{
+                        padding: "2px 4px",
+                        border: "1px solid #ccc",
+                        borderRadius: 4,
+                        fontSize: 12,
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <>
+                    {axis.name}
+                    {axis.description && (
+                      <div style={{ fontSize: 12, color: "#666" }}>{axis.description}</div>
+                    )}
+                  </>
                 )}
               </td>
               <td style={{ padding: "6px 10px" }}>
@@ -221,6 +251,7 @@ export default function AxesPage() {
                     <button
                       onClick={() => {
                         setEditingId(axis.id);
+                        setEditName(axis.name);
                         setEditWeight(String(axis.weight));
                         setEditDescription(axis.description ?? "");
                       }}

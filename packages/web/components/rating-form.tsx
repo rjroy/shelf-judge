@@ -31,15 +31,25 @@ export function RatingForm({
     setSaving(true);
     setError(null);
 
-    // Only send axes that have values
+    // Validate and collect ratings
     const numericRatings: Record<string, number> = {};
+    const invalidAxes: string[] = [];
     for (const [axisId, value] of Object.entries(ratings)) {
       if (value !== "") {
         const num = parseInt(value, 10);
         if (num >= 1 && num <= 10) {
           numericRatings[axisId] = num;
+        } else {
+          const axis = axes.find((a) => a.id === axisId);
+          invalidAxes.push(axis?.name ?? axisId);
         }
       }
+    }
+
+    if (invalidAxes.length > 0) {
+      setError(`Ratings must be between 1 and 10: ${invalidAxes.join(", ")}`);
+      setSaving(false);
+      return;
     }
 
     try {

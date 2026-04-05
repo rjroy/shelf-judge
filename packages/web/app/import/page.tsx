@@ -62,25 +62,34 @@ export default function ImportPage() {
         const lines = buffer.split("\n");
         buffer = lines.pop() ?? "";
 
+        // Standard SSE parsing: accumulate fields, dispatch on blank line
         let eventType = "";
+        let dataLine = "";
         for (const line of lines) {
           if (line.startsWith("event: ")) {
             eventType = line.slice(7).trim();
           } else if (line.startsWith("data: ")) {
-            const data = line.slice(6);
-            try {
-              const parsed = JSON.parse(data);
-              if (eventType === "progress") {
-                setProgress(parsed);
-              } else if (eventType === "complete") {
-                setResult(parsed);
-              } else if (eventType === "error") {
-                setError(parsed.error);
+            dataLine = line.slice(6);
+          } else if (line.startsWith(":")) {
+            // SSE comment, ignore
+          } else if (line === "") {
+            // Blank line: dispatch the accumulated event
+            if (dataLine) {
+              try {
+                const parsed = JSON.parse(dataLine);
+                if (eventType === "progress") {
+                  setProgress(parsed);
+                } else if (eventType === "complete") {
+                  setResult(parsed);
+                } else if (eventType === "error") {
+                  setError(parsed.error);
+                }
+              } catch {
+                // Skip unparseable data
               }
-            } catch {
-              // Skip unparseable lines
             }
             eventType = "";
+            dataLine = "";
           }
         }
       }
