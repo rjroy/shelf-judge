@@ -1,7 +1,7 @@
 ---
 title: "Fitness Score Model Options"
 date: 2026-04-04
-status: concluded
+status: approved 
 tags: [brainstorm, fitness, scoring, math]
 ---
 
