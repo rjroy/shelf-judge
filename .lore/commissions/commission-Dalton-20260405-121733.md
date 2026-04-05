@@ -1,7 +1,7 @@
 ---
 title: "Commission: Phase 5 Fix: Address Web UI Review Findings"
 date: 2026-04-05
-status: failed
+status: dispatched
 tags: [commission]
 worker: Dalton
 workerDisplayTitle: "Guild Artificer"
@@ -32,6 +32,16 @@ activity_timeline:
   - timestamp: 2026-04-05T20:53:30.449Z
     event: status_failed
     reason: "Session error: Claude Code returned an error result: You've hit your limit · resets 5pm (America/Los_Angeles)"
+  - timestamp: 2026-04-05T22:46:11.366Z
+    event: status_pending
+    reason: "Redispatched for retry"
+    from: "failed"
+    to: "pending"
+  - timestamp: 2026-04-05T22:46:11.367Z
+    event: status_dispatched
+    reason: "Dispatched to worker"
+    from: "pending"
+    to: "dispatched"
 current_progress: ""
 projectName: shelf-judge
 ---
