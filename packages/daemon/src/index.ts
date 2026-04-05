@@ -33,7 +33,6 @@ async function main() {
 
   const { app } = createApp({
     storageService,
-    fitnessService,
     axisService,
     gameService,
     bggClient,

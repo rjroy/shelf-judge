@@ -1,11 +1,8 @@
 import { Hono } from "hono";
-import { resolveConfig } from "./config.js";
-import { createFileOps } from "./services/file-ops.js";
-import { createStorageService, type StorageService } from "./services/storage-service.js";
-import { createFitnessService, type FitnessService } from "./services/fitness-service.js";
-import { createAxisService, type AxisService } from "./services/axis-service.js";
-import { createGameService, type GameService } from "./services/game-service.js";
-import { createBggClient, type BggClient } from "./services/bgg-client.js";
+import type { StorageService } from "./services/storage-service.js";
+import type { AxisService } from "./services/axis-service.js";
+import type { GameService } from "./services/game-service.js";
+import type { BggClient } from "./services/bgg-client.js";
 import { createGameRoutes } from "./routes/games.js";
 import { createAxisRoutes } from "./routes/axes.js";
 import { createScoreRoutes } from "./routes/scores.js";
@@ -15,13 +12,10 @@ import { createConfigRoutes } from "./routes/config.js";
 import type { OperationDefinition } from "./operations.js";
 
 export interface AppDeps {
-  storageService?: StorageService;
-  fitnessService?: FitnessService;
-  axisService?: AxisService;
-  gameService?: GameService;
+  storageService: StorageService;
+  axisService: AxisService;
+  gameService: GameService;
   bggClient?: BggClient;
-  dataDir?: string;
-  configPath?: string;
 }
 
 export interface AppResult {
@@ -29,29 +23,8 @@ export interface AppResult {
   operations: OperationDefinition[];
 }
 
-export function createApp(deps?: AppDeps): AppResult {
-  // Resolve real deps from env/config only when not injected
-  const config = (!deps?.storageService || !deps?.gameService)
-    ? resolveConfig()
-    : undefined;
-
-  const storageService = deps?.storageService ?? createStorageService({
-    dataDir: deps?.dataDir ?? config!.dataDir,
-    configPath: deps?.configPath ?? config!.configPath,
-    fileOps: createFileOps(),
-  });
-
-  const fitnessService = deps?.fitnessService ?? createFitnessService();
-
-  const bggClient = deps?.bggClient;
-
-  const axisService = deps?.axisService ?? createAxisService({ storageService });
-
-  const gameService = deps?.gameService ?? createGameService({
-    storageService,
-    fitnessService,
-    bggClient,
-  });
+export function createApp(deps: AppDeps): AppResult {
+  const { storageService, axisService, gameService, bggClient } = deps;
 
   // Build routes
   const gameRouteModule = createGameRoutes({ gameService, bggClient });

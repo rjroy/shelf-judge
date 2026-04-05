@@ -38,7 +38,7 @@ describe("Game Routes", () => {
   });
 
   describe("POST /api/games", () => {
-    test("manual game returns 201 with game object", async () => {
+    test("manual game returns 201 with game object and bggImported: false", async () => {
       const res = await jsonRequest(ctx.app, "POST", "/api/games", {
         name: "Test Game",
       });
@@ -50,6 +50,7 @@ describe("Game Routes", () => {
       expect(body.game.id).toBeTruthy();
       expect(body.game.bggId).toBeNull();
       expect(body.game.ratings).toEqual({});
+      expect(body.bggImported).toBe(false);
     });
 
     test("game with bggId when BGG is configured returns 201", async () => {
@@ -67,6 +68,7 @@ describe("Game Routes", () => {
       const body = await res.json();
       expect(body.game.bggId).toBe(266192);
       expect(body.game.name).toBe("Wingspan");
+      expect(body.bggImported).toBe(true);
       // BGG data should have been applied
       expect(body.game.yearPublished).toBe(2019);
       expect(body.game.bggData).toBeTruthy();

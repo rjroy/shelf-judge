@@ -33,14 +33,17 @@ export function createScoreRoutes(deps: ScoreRoutesDeps): RouteModule {
     try {
       const games = await gameService.listGames();
 
-      const scored = games.filter((g) => g.score !== null).map((g) => ({
-        gameId: g.game.id,
-        gameName: g.game.name,
-        score: g.score!.score,
-        ratedAxisCount: g.score!.ratedAxisCount,
-        totalAxisCount: g.score!.totalAxisCount,
-        breakdown: g.score!.breakdown,
-      }));
+      const scored = games
+        .filter((g) => g.score !== null)
+        .sort((a, b) => b.score!.score - a.score!.score)
+        .map((g) => ({
+          gameId: g.game.id,
+          gameName: g.game.name,
+          score: g.score!.score,
+          ratedAxisCount: g.score!.ratedAxisCount,
+          totalAxisCount: g.score!.totalAxisCount,
+          breakdown: g.score!.breakdown,
+        }));
 
       const unscored = games.filter((g) => g.score === null).map((g) => ({
         gameId: g.game.id,

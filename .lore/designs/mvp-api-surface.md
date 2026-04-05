@@ -44,7 +44,7 @@ Each operation follows the `OperationDefinition` structure from the architecture
 
 | Operation ID | Method | Path | Description |
 |---|---|---|---|
-| `shelf.import.bgg-collection` | POST | `/api/import/bgg?username={bggUsername}` | Import owned games from a BGG user's collection |
+| `shelf.import.bgg-collection` | POST | `/api/import/bgg` | Import owned games from a BGG user's collection |
 
 ### Score Operations
 

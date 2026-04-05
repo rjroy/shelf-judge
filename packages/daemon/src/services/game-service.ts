@@ -12,6 +12,7 @@ import type { BggSearchResult, BggCollectionItem } from "./bgg-xml-parser.js";
 
 export interface AddGameResult {
   game: Game;
+  bggImported: boolean;
   warning?: string;
 }
 
@@ -29,6 +30,7 @@ export interface ImportProgressEvent {
   phase: "fetching-collection" | "importing-games";
   current: number;
   total: number;
+  importedSoFar: number;
   gameName?: string;
 }
 
@@ -52,7 +54,7 @@ export interface GameService {
   refreshAllBggData(): Promise<RefreshSummary>;
   importBggCollection(
     username: string,
-    onProgress?: (event: ImportProgressEvent) => void,
+    onProgress?: (event: ImportProgressEvent) => Promise<void> | void,
   ): Promise<ImportSummary>;
 }
 
@@ -108,7 +110,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
       const game: Game = {
         id: uuidv4(),
         bggId: parsed.bggId ?? null,
-        name: parsed.name,
+        name: parsed.name ?? "",
         yearPublished: parsed.yearPublished ?? null,
         minPlayers: parsed.minPlayers ?? null,
         maxPlayers: parsed.maxPlayers ?? null,
@@ -122,10 +124,12 @@ export function createGameService(deps: GameServiceDeps): GameService {
 
       // Fetch BGG data if bggId is provided and client is available
       let warning: string | undefined;
+      let bggImported = false;
       if (game.bggId !== null && bggClient?.isConfigured()) {
         try {
           const result = await bggClient.getGame(game.bggId);
           applyBggResult(game, result);
+          bggImported = true;
         } catch (err) {
           warning = `Game added but BGG data could not be fetched: ${err instanceof Error ? err.message : String(err)}`;
         }
@@ -135,7 +139,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
       collection.updatedAt = now;
       await storageService.saveCollection(collection);
 
-      return { game, warning };
+      return { game, bggImported, warning };
     },
 
     async getGame(id: string): Promise<GameWithScore> {
@@ -292,14 +296,15 @@ export function createGameService(deps: GameServiceDeps): GameService {
 
     async importBggCollection(
       username: string,
-      onProgress?: (event: ImportProgressEvent) => void,
+      onProgress?: (event: ImportProgressEvent) => Promise<void> | void,
     ): Promise<ImportSummary> {
       assertBggConfigured();
 
-      onProgress?.({
+      await onProgress?.({
         phase: "fetching-collection",
         current: 0,
         total: 0,
+        importedSoFar: 0,
       });
 
       let collectionItems: BggCollectionItem[];
@@ -348,10 +353,11 @@ export function createGameService(deps: GameServiceDeps): GameService {
 
         for (let i = 0; i < newItems.length; i++) {
           const item = newItems[i];
-          onProgress?.({
+          await onProgress?.({
             phase: "importing-games",
-            current: skipped + imported + i + 1,
+            current: skipped + i + 1,
             total,
+            importedSoFar: imported,
             gameName: item.name,
           });
 

@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { AddGameSchema } from "@shelf-judge/shared";
 import { z } from "zod";
 import type { GameService } from "../services/game-service.js";
@@ -18,12 +18,12 @@ function isBggConfigured(bggClient?: BggClient): boolean {
   return bggClient !== undefined && bggClient.isConfigured();
 }
 
-function bggNotConfiguredResponse() {
-  return Response.json(
+function bggNotConfiguredResponse(c: Context) {
+  return c.json(
     {
       error: "BGG integration is not configured. Register at https://boardgamegeek.com/using_the_xml_api and run `shelf-judge config set bgg-token YOUR_TOKEN`.",
     },
-    { status: 503 },
+    503,
   );
 }
 
@@ -39,7 +39,7 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     }
 
     if (!isBggConfigured(bggClient)) {
-      return bggNotConfiguredResponse();
+      return bggNotConfiguredResponse(c);
     }
 
     try {
@@ -72,7 +72,7 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
 
     // If adding by bggId, check BGG is configured
     if (parsed.data.bggId !== null && parsed.data.bggId !== undefined && !isBggConfigured(bggClient)) {
-      return bggNotConfiguredResponse();
+      return bggNotConfiguredResponse(c);
     }
 
     try {
@@ -169,7 +169,7 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     const id = c.req.param("id");
 
     if (!isBggConfigured(bggClient)) {
-      return bggNotConfiguredResponse();
+      return bggNotConfiguredResponse(c);
     }
 
     try {
