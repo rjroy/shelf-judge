@@ -31,16 +31,24 @@ async function main() {
     bggClient,
   });
 
+  const socketPath = resolveSocketPath(appConfig, envConfig);
+
+  // Forward-declared so the shutdown route can reference the server
+  let server: ReturnType<typeof Bun.serve>;
+
   const { app } = createApp({
     storageService,
     axisService,
     gameService,
     bggClient,
+    onShutdown() {
+      console.log("Shutting down via API...");
+      server.stop();
+      process.exit(0);
+    },
   });
 
-  const socketPath = resolveSocketPath(appConfig, envConfig);
-
-  const server = Bun.serve({
+  server = Bun.serve({
     fetch: app.fetch,
     unix: socketPath,
     idleTimeout: 0 as never,

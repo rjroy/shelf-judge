@@ -9,6 +9,7 @@ import { createScoreRoutes } from "./routes/scores.js";
 import { createImportRoutes } from "./routes/import.js";
 import { createHelpRoutes } from "./routes/help.js";
 import { createConfigRoutes } from "./routes/config.js";
+import { createShutdownRoutes } from "./routes/shutdown.js";
 import type { OperationDefinition } from "./operations.js";
 
 export interface AppDeps {
@@ -16,6 +17,7 @@ export interface AppDeps {
   axisService: AxisService;
   gameService: GameService;
   bggClient?: BggClient;
+  onShutdown?: () => void;
 }
 
 export interface AppResult {
@@ -24,7 +26,7 @@ export interface AppResult {
 }
 
 export function createApp(deps: AppDeps): AppResult {
-  const { storageService, axisService, gameService, bggClient } = deps;
+  const { storageService, axisService, gameService, bggClient, onShutdown } = deps;
 
   // Build routes
   const gameRouteModule = createGameRoutes({ gameService, bggClient });
@@ -42,8 +44,15 @@ export function createApp(deps: AppDeps): AppResult {
 
   const helpRouteModule = createHelpRoutes({ operations: allOperations });
   const configRouteModule = createConfigRoutes({ storageService });
+  const shutdownRouteModule = createShutdownRoutes({
+    onShutdown: onShutdown ?? (() => process.exit(0)),
+  });
 
-  allOperations.push(...helpRouteModule.operations, ...configRouteModule.operations);
+  allOperations.push(
+    ...helpRouteModule.operations,
+    ...configRouteModule.operations,
+    ...shutdownRouteModule.operations,
+  );
 
   // Wire Hono app
   const app = new Hono();
@@ -53,6 +62,7 @@ export function createApp(deps: AppDeps): AppResult {
   app.route("/api", importRouteModule.routes);
   app.route("/api", helpRouteModule.routes);
   app.route("/api", configRouteModule.routes);
+  app.route("/api", shutdownRouteModule.routes);
 
   return { app, operations: allOperations };
 }

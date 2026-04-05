@@ -44,7 +44,7 @@ export async function importBggCollection(client: DaemonClient, args: string[], 
   }
 
   if (!result) {
-    throw new Error("Import stream ended without a completion event");
+    throw new Error("Import stream ended without a completion event. The daemon may have disconnected. Check that the daemon is still running with: shelf-judge help");
   }
 
   const summary = result as ImportComplete;

@@ -3,24 +3,40 @@ import type { DaemonClient } from "../client.js";
 import type { OutputOptions } from "../output.js";
 import { printOutput } from "../output.js";
 
-export async function daemonStart(_client: DaemonClient, _args: string[], opts: OutputOptions): Promise<string> {
-  // Use Bun.spawn to start the daemon process in the background
-  const daemonEntry = new URL("../../../daemon/src/index.ts", import.meta.url).pathname;
+export interface DaemonSpawner {
+  spawn(entryPath: string): { pid: number; unref(): void };
+}
 
-  const proc = Bun.spawn(["bun", "run", daemonEntry], {
-    stdout: "ignore",
-    stderr: "ignore",
-    stdin: "ignore",
-  });
+const defaultSpawner: DaemonSpawner = {
+  spawn(entryPath: string) {
+    const proc = Bun.spawn(["bun", "run", entryPath], {
+      stdout: "ignore",
+      stderr: "ignore",
+      stdin: "ignore",
+    });
+    return { pid: proc.pid, unref: () => proc.unref() };
+  },
+};
 
-  // Detach so it keeps running after CLI exits
-  proc.unref();
+export function resolveDaemonEntryPath(): string {
+  return new URL("../../../daemon/src/index.ts", import.meta.url).pathname;
+}
+
+export async function daemonStart(
+  _client: DaemonClient,
+  _args: string[],
+  opts: OutputOptions,
+  spawner: DaemonSpawner = defaultSpawner,
+): Promise<string> {
+  const daemonEntry = resolveDaemonEntryPath();
+  const handle = spawner.spawn(daemonEntry);
+  handle.unref();
 
   // Wait briefly for the daemon to start
   await new Promise((resolve) => setTimeout(resolve, 500));
 
-  if (opts.json) return printOutput({ started: true, pid: proc.pid }, opts);
-  return `Daemon started (PID: ${proc.pid})`;
+  if (opts.json) return printOutput({ started: true, pid: handle.pid }, opts);
+  return `Daemon started (PID: ${handle.pid})`;
 }
 
 export async function daemonStop(client: DaemonClient, _args: string[], opts: OutputOptions): Promise<string> {
@@ -30,15 +46,7 @@ export async function daemonStop(client: DaemonClient, _args: string[], opts: Ou
     return "Daemon is not running.";
   }
 
-  // Send SIGTERM to the daemon process via the socket file
-  // The daemon listens for SIGTERM and shuts down gracefully
-  try {
-    const { unlinkSync } = await import("node:fs");
-    // Remove the socket file to signal the daemon
-    unlinkSync(client.socketPath);
-  } catch {
-    // Socket file might already be gone
-  }
+  await client.post("/api/shutdown");
 
   if (opts.json) return printOutput({ stopped: true }, opts);
   return "Daemon stopped.";

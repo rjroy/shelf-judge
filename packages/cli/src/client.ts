@@ -86,6 +86,9 @@ export function createDaemonClient(options: DaemonClientOptions = {}): DaemonCli
       throw new Error("No response body for SSE stream");
     }
 
+    // Simplified SSE parser: handles single event/data pairs per the daemon's
+    // current output format. Does not support multi-data-line events, id:, or
+    // retry: fields. Sufficient for the daemon's import endpoint.
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
