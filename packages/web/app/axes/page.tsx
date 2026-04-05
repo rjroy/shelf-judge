@@ -194,7 +194,7 @@ export default function AxesPage() {
                 {editingId === axis.id ? (
                   <input
                     type="number"
-                    min={1}
+                    min={0}
                     max={100}
                     value={editWeight}
                     onChange={(e) => setEditWeight(e.target.value)}
@@ -314,10 +314,10 @@ export default function AxesPage() {
           />
         </div>
         <div>
-          <label style={{ display: "block", fontSize: 12, marginBottom: 4 }}>Weight (1-100)</label>
+          <label style={{ display: "block", fontSize: 12, marginBottom: 4 }}>Weight (0-100)</label>
           <input
             type="number"
-            min={1}
+            min={0}
             max={100}
             value={newWeight}
             onChange={(e) => setNewWeight(e.target.value)}

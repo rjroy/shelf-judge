@@ -23,7 +23,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
     );
   }
 
-  const { game, score } = data;
+  const { game, score, bggDataStale } = data as { game: typeof data.game; score: typeof data.score; bggDataStale?: boolean };
 
   return (
     <div>
@@ -81,6 +81,12 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
           </table>
         </div>
       </div>
+
+      {bggDataStale && (
+        <p style={{ color: "#b45309", backgroundColor: "#fef3c7", padding: "8px 12px", borderRadius: 4, fontSize: 13 }}>
+          BGG data is older than 7 days. Use "Refresh BGG Data" below to update.
+        </p>
+      )}
 
       <h2>Fitness Score</h2>
       <ScoreBreakdown score={score} />

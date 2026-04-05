@@ -257,6 +257,103 @@ describe("Game Routes", () => {
     });
   });
 
+  describe("POST /api/games/refresh", () => {
+    test("refreshes all BGG games and returns summary", async () => {
+      const bggClient = createMockBggClient({
+        getGame: async () => wingspanBggResult,
+        getGames: async (ids) => {
+          const results = new Map<number, BggGameResult>();
+          for (const id of ids) {
+            if (id === 266192) results.set(id, wingspanBggResult);
+          }
+          return results;
+        },
+      });
+      ctx = createTestApp({ bggClient });
+
+      // Add a BGG game
+      await jsonRequest(ctx.app, "POST", "/api/games", {
+        name: "Wingspan",
+        bggId: 266192,
+      });
+
+      // Also add a manual game (should not be refreshed)
+      await jsonRequest(ctx.app, "POST", "/api/games", {
+        name: "Manual Game",
+      });
+
+      const res = await jsonRequest(ctx.app, "POST", "/api/games/refresh");
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.refreshed).toBe(1);
+      expect(body.errors).toBeArray();
+    });
+
+    test("returns 503 when BGG is not configured", async () => {
+      // Default: no bggClient
+      const res = await jsonRequest(ctx.app, "POST", "/api/games/refresh");
+      expect(res.status).toBe(503);
+    });
+  });
+
+  describe("bggDataStale field", () => {
+    test("game with recent BGG data has bggDataStale: false", async () => {
+      const bggClient = createMockBggClient({
+        getGame: async () => wingspanBggResult,
+      });
+      ctx = createTestApp({ bggClient });
+
+      const addRes = await jsonRequest(ctx.app, "POST", "/api/games", {
+        name: "Wingspan",
+        bggId: 266192,
+      });
+      const { game } = await addRes.json();
+
+      const getRes = await jsonRequest(ctx.app, "GET", `/api/games/${game.id}`);
+      const body = await getRes.json();
+      expect(body.bggDataStale).toBe(false);
+    });
+
+    test("game without BGG data has bggDataStale: undefined", async () => {
+      const addRes = await jsonRequest(ctx.app, "POST", "/api/games", {
+        name: "Manual Game",
+      });
+      const { game } = await addRes.json();
+
+      const getRes = await jsonRequest(ctx.app, "GET", `/api/games/${game.id}`);
+      const body = await getRes.json();
+      expect(body.bggDataStale).toBeUndefined();
+    });
+
+    test("list includes bggDataStale for each game", async () => {
+      const bggClient = createMockBggClient({
+        getGame: async () => wingspanBggResult,
+      });
+      ctx = createTestApp({ bggClient });
+
+      await jsonRequest(ctx.app, "POST", "/api/games", {
+        name: "Wingspan",
+        bggId: 266192,
+      });
+      await jsonRequest(ctx.app, "POST", "/api/games", {
+        name: "Manual Game",
+      });
+
+      const listRes = await jsonRequest(ctx.app, "GET", "/api/games");
+      const games = await listRes.json();
+      expect(games.length).toBe(2);
+
+      const bggGame = games.find(
+        (g: { game: { name: string } }) => g.game.name === "Wingspan",
+      );
+      const manualGame = games.find(
+        (g: { game: { name: string } }) => g.game.name === "Manual Game",
+      );
+      expect(bggGame.bggDataStale).toBe(false);
+      expect(manualGame.bggDataStale).toBeUndefined();
+    });
+  });
+
   describe("BGG routes without token", () => {
     test("search returns 503 with setup instructions when BGG is not configured", async () => {
       // Default createTestApp() has no bggClient

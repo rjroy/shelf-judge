@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { listGames } from "@/lib/api";
 import { ScoreBadge } from "@/components/score-badge";
+import { RefreshAllButton } from "@/components/refresh-all-button";
 
 export const dynamic = "force-dynamic";
 
@@ -55,6 +56,7 @@ export default async function CollectionPage() {
           >
             Import from BGG
           </Link>
+          <RefreshAllButton />
         </div>
       </div>
 

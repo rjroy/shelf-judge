@@ -19,6 +19,7 @@ const MAX_429_RETRIES = 3;
 const MAX_5XX_RETRIES = 2;
 const MAX_202_RETRIES = 3;
 const BASE_202_DELAY_MS = 5000;
+const FETCH_TIMEOUT_MS = 30000;
 
 export interface BggGameResult {
   metadata: ThingMetadata;
@@ -82,8 +83,17 @@ export function createBggClient(deps: BggClientDeps): BggClient {
 
     let response: Response;
     try {
-      response = await fetchFn(url, { headers: authHeaders() });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+      try {
+        response = await fetchFn(url, { headers: authHeaders(), signal: controller.signal });
+      } finally {
+        clearTimeout(timeoutId);
+      }
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        throw new Error(`BGG API request timed out after ${FETCH_TIMEOUT_MS / 1000}s`);
+      }
       throw new Error(
         `BGG API request failed: ${err instanceof Error ? err.message : String(err)}`,
       );

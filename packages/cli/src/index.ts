@@ -3,7 +3,7 @@
 // Parses arguments, checks daemon reachability, dispatches to command handlers.
 
 import { createDaemonClient } from "./client.js";
-import { gameSearch, gameAdd, gameList, gameRate, gameRemove } from "./commands/game.js";
+import { gameSearch, gameAdd, gameList, gameRate, gameRemove, gameRefreshAllBgg } from "./commands/game.js";
 import { axisList, axisCreate, axisUpdate, axisDelete } from "./commands/axis.js";
 import { scoreList, scoreGet } from "./commands/score.js";
 import { importBggCollection } from "./commands/import.js";
@@ -19,6 +19,7 @@ const COMMANDS: Record<string, number> = {
   "game list": 2,
   "game rate": 2,
   "game remove": 2,
+  "game refresh-all-bgg": 2,
   "axis list": 2,
   "axis create": 2,
   "axis update": 2,
@@ -138,6 +139,9 @@ async function main(): Promise<void> {
       break;
     case "game remove":
       output = await gameRemove(client, args, opts);
+      break;
+    case "game refresh-all-bgg":
+      output = await gameRefreshAllBgg(client, args, opts);
       break;
     case "axis list":
       output = await axisList(client, args, opts);

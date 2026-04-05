@@ -16,9 +16,13 @@ export interface AddGameResult {
   warning?: string;
 }
 
+const STALE_THRESHOLD_DAYS = 7;
+const STALE_THRESHOLD_MS = STALE_THRESHOLD_DAYS * 24 * 60 * 60 * 1000;
+
 export interface GameWithScore {
   game: Game;
   score: FitnessResult | null;
+  bggDataStale?: boolean;
 }
 
 export interface RefreshSummary {
@@ -69,6 +73,12 @@ function applyBggResult(game: Game, result: BggGameResult): void {
   game.playingTime = result.metadata.playingTime;
   game.imageUrl = result.metadata.imageUrl;
   game.bggData = result.bggData;
+}
+
+function isBggDataStale(game: Game): boolean | undefined {
+  if (!game.bggData?.fetchedAt) return undefined;
+  const fetchedAt = new Date(game.bggData.fetchedAt).getTime();
+  return Date.now() - fetchedAt > STALE_THRESHOLD_MS;
 }
 
 export function createGameService(deps: GameServiceDeps): GameService {
@@ -147,7 +157,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
       }
 
       const score = computeScore(game, collection.axes);
-      return { game, score };
+      return { game, score, bggDataStale: isBggDataStale(game) };
     },
 
     async listGames(): Promise<GameWithScore[]> {
@@ -155,6 +165,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
       const results: GameWithScore[] = collection.games.map((game) => ({
         game,
         score: computeScore(game, collection.axes),
+        bggDataStale: isBggDataStale(game),
       }));
 
       // Sort by fitness descending, unscored at end
@@ -201,7 +212,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
       await storageService.saveCollection(collection);
 
       const score = computeScore(game, collection.axes);
-      return { game, score };
+      return { game, score, bggDataStale: isBggDataStale(game) };
     },
 
     async removeGame(id: string): Promise<void> {

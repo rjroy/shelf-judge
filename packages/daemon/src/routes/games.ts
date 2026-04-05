@@ -157,6 +157,20 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     }
   });
 
+  // POST /games/refresh - refresh all BGG data (must be before :id/refresh)
+  routes.post("/games/refresh", async (c) => {
+    if (!isBggConfigured(bggClient)) {
+      return bggNotConfiguredResponse(c);
+    }
+
+    try {
+      const summary = await gameService.refreshAllBggData();
+      return c.json(summary);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
   // POST /games/:id/refresh
   routes.post("/games/:id/refresh", async (c) => {
     const id = c.req.param("id");
@@ -237,6 +251,14 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       invocation: { method: "POST", path: "/api/games/:id/refresh" },
       hierarchy: { root: "shelf", feature: "game" },
       parameters: [{ name: "id", in: "path", description: "Game ID", required: true }],
+      idempotent: false,
+    },
+    {
+      operationId: "shelf.game.refresh-all-bgg",
+      name: "refresh-all-bgg",
+      description: "Re-fetch BGG data for all games in the collection",
+      invocation: { method: "POST", path: "/api/games/refresh" },
+      hierarchy: { root: "shelf", feature: "game" },
       idempotent: false,
     },
   ];

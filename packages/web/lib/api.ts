@@ -7,6 +7,7 @@ import { daemonFetch, daemonJson } from "./daemon";
 export interface GameWithScore {
   game: Game;
   score: FitnessResult | null;
+  bggDataStale?: boolean;
 }
 
 export interface AddGameResult {
@@ -76,6 +77,10 @@ export async function removeGame(id: string): Promise<void> {
 
 export async function refreshBggData(id: string): Promise<{ game: Game }> {
   return daemonJson(`/api/games/${id}/refresh`, { method: "POST" });
+}
+
+export async function refreshAllBggData(): Promise<{ refreshed: number; errors: string[] }> {
+  return daemonJson("/api/games/refresh", { method: "POST" });
 }
 
 export async function searchGames(query: string): Promise<BggSearchResult[]> {

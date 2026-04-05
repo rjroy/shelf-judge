@@ -150,6 +150,33 @@ export async function gameRate(
   return `Rated ${result.game.name}. Fitness: ${scoreStr}`;
 }
 
+export async function gameRefreshAllBgg(
+  client: DaemonClient,
+  _args: string[],
+  opts: OutputOptions,
+): Promise<string> {
+  const { ok, data } = await client.post<{ refreshed: number; errors: string[] }>(
+    "/api/games/refresh",
+  );
+
+  if (!ok) {
+    const err = data as unknown as { error: string };
+    throw new Error(err.error ?? "Refresh failed");
+  }
+
+  if (opts.json) return printOutput(data, opts);
+
+  const result = data as { refreshed: number; errors: string[] };
+  const lines: string[] = [`Refreshed ${result.refreshed} game(s)`];
+  if (result.errors.length > 0) {
+    lines.push(`Errors (${result.errors.length}):`);
+    for (const err of result.errors) {
+      lines.push(`  - ${err}`);
+    }
+  }
+  return lines.join("\n");
+}
+
 export async function gameRemove(
   client: DaemonClient,
   args: string[],

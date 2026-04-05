@@ -275,6 +275,30 @@ describe("BggClient", () => {
     });
   });
 
+  describe("fetch timeout", () => {
+    test("aborts request after timeout and throws descriptive error", async () => {
+      // Create a fetch that hangs until aborted
+      const hangingFetch = async (_url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+        return new Promise((_resolve, reject) => {
+          if (init?.signal) {
+            init.signal.addEventListener("abort", () => {
+              reject(new DOMException("The operation was aborted.", "AbortError"));
+            });
+          }
+        });
+      };
+
+      const timeoutClient = createBggClient({
+        config: { bggAuthToken: "test-token" },
+        fetchFn: hangingFetch as unknown as typeof fetch,
+        delayMs: 0,
+        delayFn: async () => {},
+      });
+
+      await expect(timeoutClient.searchGames("Wingspan")).rejects.toThrow("timed out");
+    }, 35000);
+  });
+
   describe("missing token", () => {
     test("returns clear error with registration URL", async () => {
       const unconfigured = createBggClient({
