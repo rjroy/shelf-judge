@@ -43,6 +43,10 @@ Workers can also add entries to this file during their sessions.
 
 **6.1 CLI scaffold and daemon client:** Unix socket HTTP client (`client.ts`) with GET/POST/PUT/DELETE/SSE support. Entry point (`index.ts`) with a...
 - 13:44 commission-Dalton-20260405-121712 completed
+- 13:46 commission-Dalton-20260405-121701 result: Phase 5 (Web UI) implemented. All six steps complete:
+
+**5.1 Next.js setup** - App Router scaffold with `@shelf-judge/shared` workspace dependency. API proxy at `/api/daemon/[...path]/route.ts` forwar...
+- 13:46 commission-Dalton-20260405-121701 completed
 ## Findings Fixed
 
 **F1: SSE progress writes not awaited** - Changed `onProgress` callback type to `(event) => Promise<void> | void` in both interface a...
