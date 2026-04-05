@@ -1,5 +1,14 @@
 {
   "name": "@shelf-judge/cli",
   "version": "0.1.0",
-  "private": true
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "bin": {
+    "shelf-judge": "src/index.ts",
+    "sj": "src/index.ts"
+  },
+  "dependencies": {
+    "@shelf-judge/shared": "workspace:*"
+  }
 }

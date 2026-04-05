@@ -16,6 +16,13 @@
     "packages/cli": {
       "name": "@shelf-judge/cli",
       "version": "0.1.0",
+      "bin": {
+        "shelf-judge": "src/index.ts",
+        "sj": "src/index.ts",
+      },
+      "dependencies": {
+        "@shelf-judge/shared": "workspace:*",
+      },
     },
     "packages/daemon": {
       "name": "@shelf-judge/daemon",
