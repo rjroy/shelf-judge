@@ -71,25 +71,27 @@ export function createFitnessService(): FitnessService {
           source = "bgg";
         }
 
+        // Display values are rounded; accumulation uses raw values
         const displayedRating =
           rating !== null ? roundToOneDecimal(rating) : null;
-        const contribution =
-          displayedRating !== null
-            ? roundToOneDecimal(displayedRating * axis.weight)
-            : null;
+        const rawContribution =
+          rating !== null ? rating * axis.weight : null;
 
         breakdown.push({
           axisId: axis.id,
           axisName: axis.name,
           rating: displayedRating,
           weight: axis.weight,
-          contribution,
+          contribution:
+            rawContribution !== null
+              ? roundToOneDecimal(rawContribution)
+              : null,
           source,
           bggOriginal,
         });
 
-        if (contribution !== null) {
-          weightedSum += contribution;
+        if (rawContribution !== null) {
+          weightedSum += rawContribution;
           weightSum += axis.weight;
           ratedCount++;
         }

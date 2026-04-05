@@ -7,10 +7,30 @@ import {
 } from "@shelf-judge/shared";
 import type { StorageService } from "./storage-service.js";
 import type { FitnessService } from "./fitness-service.js";
+import type { BggClient, BggGameResult } from "./bgg-client.js";
+import type { BggSearchResult, BggCollectionItem } from "./bgg-xml-parser.js";
 
 export interface GameWithScore {
   game: Game;
   score: FitnessResult | null;
+}
+
+export interface RefreshSummary {
+  refreshed: number;
+  errors: string[];
+}
+
+export interface ImportProgressEvent {
+  phase: "fetching-collection" | "importing-games";
+  current: number;
+  total: number;
+  gameName?: string;
+}
+
+export interface ImportSummary {
+  imported: number;
+  skipped: number;
+  errors: string[];
 }
 
 export interface GameService {
@@ -22,18 +42,44 @@ export interface GameService {
     ratings: Record<string, number>,
   ): Promise<GameWithScore>;
   removeGame(id: string): Promise<void>;
+  searchGames(query: string): Promise<BggSearchResult[]>;
+  refreshBggData(gameId: string): Promise<Game>;
+  refreshAllBggData(): Promise<RefreshSummary>;
+  importBggCollection(
+    username: string,
+    onProgress?: (event: ImportProgressEvent) => void,
+  ): Promise<ImportSummary>;
 }
 
 export interface GameServiceDeps {
   storageService: StorageService;
   fitnessService: FitnessService;
+  bggClient?: BggClient;
+}
+
+function applyBggResult(game: Game, result: BggGameResult): void {
+  game.name = result.metadata.name;
+  game.yearPublished = result.metadata.yearPublished;
+  game.minPlayers = result.metadata.minPlayers;
+  game.maxPlayers = result.metadata.maxPlayers;
+  game.playingTime = result.metadata.playingTime;
+  game.imageUrl = result.metadata.imageUrl;
+  game.bggData = result.bggData;
 }
 
 export function createGameService(deps: GameServiceDeps): GameService {
-  const { storageService, fitnessService } = deps;
+  const { storageService, fitnessService, bggClient } = deps;
 
   function computeScore(game: Game, axes: import("@shelf-judge/shared").Axis[]): FitnessResult | null {
     return fitnessService.calculateScore(game, axes, game.bggData);
+  }
+
+  function assertBggConfigured(): void {
+    if (!bggClient || !bggClient.isConfigured()) {
+      throw new Error(
+        "BGG integration is not configured. Register at https://boardgamegeek.com/using_the_xml_api and run `shelf-judge config set bgg-token YOUR_TOKEN`.",
+      );
+    }
   }
 
   return {
@@ -68,6 +114,16 @@ export function createGameService(deps: GameServiceDeps): GameService {
         createdAt: now,
         updatedAt: now,
       };
+
+      // Fetch BGG data if bggId is provided and client is available
+      if (game.bggId !== null && bggClient?.isConfigured()) {
+        try {
+          const result = await bggClient.getGame(game.bggId);
+          applyBggResult(game, result);
+        } catch {
+          // BGG unavailable: still add the game with null bggData
+        }
+      }
 
       collection.games.push(game);
       collection.updatedAt = now;
@@ -160,6 +216,172 @@ export function createGameService(deps: GameServiceDeps): GameService {
       collection.games.splice(index, 1);
       collection.updatedAt = new Date().toISOString();
       await storageService.saveCollection(collection);
+    },
+
+    async searchGames(query: string): Promise<BggSearchResult[]> {
+      assertBggConfigured();
+      return bggClient!.searchGames(query);
+    },
+
+    async refreshBggData(gameId: string): Promise<Game> {
+      assertBggConfigured();
+      const collection = await storageService.loadCollection();
+      const game = collection.games.find((g) => g.id === gameId);
+
+      if (!game) {
+        throw new Error(`Game not found: ${gameId}`);
+      }
+
+      if (game.bggId === null) {
+        throw new Error(`Game "${game.name}" has no BGG ID. Cannot refresh BGG data for manual games.`);
+      }
+
+      const result = await bggClient!.getGame(game.bggId);
+      applyBggResult(game, result);
+      game.updatedAt = new Date().toISOString();
+      collection.updatedAt = game.updatedAt;
+      await storageService.saveCollection(collection);
+
+      return game;
+    },
+
+    async refreshAllBggData(): Promise<RefreshSummary> {
+      assertBggConfigured();
+      const collection = await storageService.loadCollection();
+      const bggGames = collection.games.filter((g) => g.bggId !== null);
+
+      let refreshed = 0;
+      const errors: string[] = [];
+
+      // Batch fetch all BGG IDs
+      const bggIds = bggGames.map((g) => g.bggId!);
+      let bggResults: Map<number, BggGameResult>;
+      try {
+        bggResults = await bggClient!.getGames(bggIds);
+      } catch (err) {
+        return {
+          refreshed: 0,
+          errors: [
+            `Batch fetch failed: ${err instanceof Error ? err.message : String(err)}`,
+          ],
+        };
+      }
+
+      for (const game of bggGames) {
+        const result = bggResults.get(game.bggId!);
+        if (result) {
+          applyBggResult(game, result);
+          game.updatedAt = new Date().toISOString();
+          refreshed++;
+        } else {
+          errors.push(`No BGG data returned for "${game.name}" (BGG ID ${game.bggId})`);
+        }
+      }
+
+      collection.updatedAt = new Date().toISOString();
+      await storageService.saveCollection(collection);
+
+      return { refreshed, errors };
+    },
+
+    async importBggCollection(
+      username: string,
+      onProgress?: (event: ImportProgressEvent) => void,
+    ): Promise<ImportSummary> {
+      assertBggConfigured();
+
+      onProgress?.({
+        phase: "fetching-collection",
+        current: 0,
+        total: 0,
+      });
+
+      let collectionItems: BggCollectionItem[];
+      try {
+        collectionItems = await bggClient!.getUserCollection(username);
+      } catch (err) {
+        throw new Error(
+          `Failed to fetch BGG collection for "${username}": ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+
+      const collection = await storageService.loadCollection();
+      const existingBggIds = new Set(
+        collection.games.filter((g) => g.bggId !== null).map((g) => g.bggId!),
+      );
+
+      let imported = 0;
+      let skipped = 0;
+      const errors: string[] = [];
+      const total = collectionItems.length;
+
+      // Identify new games (not already in collection)
+      const newItems = collectionItems.filter(
+        (item) => !existingBggIds.has(item.bggId),
+      );
+      const skippedItems = collectionItems.filter((item) =>
+        existingBggIds.has(item.bggId),
+      );
+      skipped = skippedItems.length;
+
+      // Batch fetch full data for new games
+      if (newItems.length > 0) {
+        const newBggIds = newItems.map((item) => item.bggId);
+        let bggResults: Map<number, BggGameResult>;
+        try {
+          bggResults = await bggClient!.getGames(newBggIds);
+        } catch (err) {
+          return {
+            imported: 0,
+            skipped,
+            errors: [
+              `Batch fetch failed: ${err instanceof Error ? err.message : String(err)}`,
+            ],
+          };
+        }
+
+        for (let i = 0; i < newItems.length; i++) {
+          const item = newItems[i];
+          onProgress?.({
+            phase: "importing-games",
+            current: skipped + imported + i + 1,
+            total,
+            gameName: item.name,
+          });
+
+          const result = bggResults.get(item.bggId);
+          if (!result) {
+            errors.push(
+              `Failed to fetch full data for "${item.name}" (BGG ID ${item.bggId})`,
+            );
+            continue;
+          }
+
+          const now = new Date().toISOString();
+          const game: Game = {
+            id: uuidv4(),
+            bggId: item.bggId,
+            name: result.metadata.name,
+            yearPublished: result.metadata.yearPublished,
+            minPlayers: result.metadata.minPlayers,
+            maxPlayers: result.metadata.maxPlayers,
+            playingTime: result.metadata.playingTime,
+            imageUrl: result.metadata.imageUrl,
+            bggData: result.bggData,
+            ratings: {},
+            createdAt: now,
+            updatedAt: now,
+          };
+
+          collection.games.push(game);
+          imported++;
+        }
+      }
+
+      collection.updatedAt = new Date().toISOString();
+      await storageService.saveCollection(collection);
+
+      return { imported, skipped, errors };
     },
   };
 }

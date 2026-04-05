@@ -293,9 +293,10 @@ describe("FitnessService", () => {
   });
 
   describe("breakdown consistency", () => {
-    test("displayed rating × weight equals displayed contribution for multi-decimal BGG rating", () => {
+    test("contribution uses raw rating for accuracy, displays rounded", () => {
       // communityRating 7.666 rounds to displayed rating 7.7
-      // contribution should be roundToOneDecimal(7.7 * 30), not roundToOneDecimal(7.666 * 30)
+      // contribution = roundToOneDecimal(7.666 * 30) = roundToOneDecimal(229.98) = 230
+      // Score uses raw 7.666, not rounded 7.7, to avoid compounding rounding error
       const axes = [
         makeAxis({ id: "a1", name: "A", weight: 30, source: "bgg", bggField: "communityRating" }),
       ];
@@ -307,11 +308,12 @@ describe("FitnessService", () => {
       expect(result).not.toBeNull();
       const entry = result!.breakdown[0];
 
-      // Displayed rating should be rounded
+      // Displayed rating is rounded
       expect(entry.rating).toBe(7.7);
-      // Contribution must match displayed rating × weight, rounded
-      const expectedContribution = Math.round(entry.rating! * entry.weight * 10) / 10;
-      expect(entry.contribution).toBe(expectedContribution);
+      // Contribution is rounded from raw: roundToOneDecimal(7.666 * 30) = 230
+      expect(entry.contribution).toBe(230);
+      // Score uses raw value: 7.666 * 30 / 30 = 7.666, rounded to 7.7
+      expect(result!.score).toBe(7.7);
     });
 
     test("score is derivable from breakdown contributions", () => {
