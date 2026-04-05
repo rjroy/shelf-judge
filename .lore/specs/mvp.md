@@ -9,6 +9,12 @@ related:
   - .lore/brainstorms/fitness-model-options.md
   - .lore/research/bgg-api.md
   - .lore/reference/architecture-pattern.md
+  - .lore/designs/mvp-data-model.md
+  - .lore/designs/mvp-fitness-model.md
+  - .lore/designs/mvp-bgg-integration.md
+  - .lore/designs/mvp-api-surface.md
+  - .lore/designs/mvp-web-ui.md
+  - .lore/designs/mvp-cli.md
 req-prefix: MVP
 ---
 
@@ -28,13 +34,53 @@ This is the smallest thing that proves the idea works. One user, their shelf, th
 
 ## Requirements
 
-- REQ-MVP-1: User-defined rating axes with weights
-- REQ-MVP-2: Per-game ratings on user-defined axes (1-10 scale)
-- REQ-MVP-3: BGG data import for individual games and bulk collection import
-- REQ-MVP-4: Fitness score computed as weighted average with full breakdown
-- REQ-MVP-5: BGG-derived axes (community rating, complexity) auto-populated from API data
-- REQ-MVP-6: Daemon API (Hono on Unix socket), web UI (Next.js), CLI (discovery pattern)
-- REQ-MVP-7: Local persistence (JSON files, no database)
+### Axes and Weights
+
+- REQ-MVP-1: Users can create, edit, and delete personal rating axes. Each axis has a name, optional description, and a weight (0-100) representing its importance in the fitness calculation.
+- REQ-MVP-2: Users can rate any game on any personal axis using an integer scale of 1 to 10, inclusive. Ratings outside this range are rejected. A game can have ratings on any subset of axes (partial rating is valid).
+- REQ-MVP-3: The system creates two default BGG-derived axes on first run: Community Rating and Complexity. These behave like personal axes (editable weight, deletable) but their ratings are auto-populated from BGG data rather than user input.
+
+### Fitness Scoring
+
+- REQ-MVP-4: The system computes a fitness score for each game as a weighted average of all rated axes. The formula is `sum(rating * weight) / sum(weight)` across only the axes that have a rating for that game. Unrated axes are excluded from both numerator and denominator.
+- REQ-MVP-5: Every displayed fitness score must include its full breakdown: each axis's name, rating, weight, contribution to the total, and source (personal, BGG, or user override of BGG). This is a hard requirement from the vision (Principle 2: "One number, honestly derived"). No score is ever shown without its derivation.
+- REQ-MVP-6: Scores are displayed to one decimal place (1.0 to 10.0).
+
+### Game Management
+
+- REQ-MVP-7: Users can add games by BGG ID (fetches full data from the BGG API), by name search against BGG (search, select from results, fetch full data), or manually (name only, no BGG data).
+- REQ-MVP-8: Users can remove a game from their collection. Removal deletes the game and all its ratings. This is not reversible.
+- REQ-MVP-9: Duplicate detection on import: when adding a game that matches an existing game's BGG ID, the system rejects the addition and reports the duplicate. Manual games (no BGG ID) are never considered duplicates of each other.
+
+### BGG Integration
+
+- REQ-MVP-10: Users can import their owned games from a public BGG collection by username. The import fetches game data from BGG and adds each game to the local collection. Games that already exist (matched by BGG ID) are skipped and counted in the import summary. BGG data for existing games is not updated during import (use explicit refresh for that).
+- REQ-MVP-11: The system must function without BGG connectivity. When no BGG token is configured or BGG is unreachable, all local features work: manual game entry, personal axis creation, personal ratings, and fitness scoring on personal axes. Only BGG-dependent operations (search, import, BGG-derived axis auto-population, BGG data refresh) are unavailable.
+- REQ-MVP-12: When no BGG application token is configured, the system reports this clearly on any BGG-dependent operation: what's missing, where to register, and how to configure it. The daemon starts normally without a token.
+- REQ-MVP-13: BGG API failures (timeouts, 5xx errors, malformed responses) must not crash the daemon or corrupt local data. Failures are reported to the user with enough context to understand what happened. Partial import failures report which games succeeded and which failed.
+
+### Score Behavior and Edge Cases
+
+- REQ-MVP-14: A game with zero rated axes has no fitness score. The system displays this as "not yet rated" rather than zero or null. The game still appears in the collection but is excluded from ranked lists.
+- REQ-MVP-15: When a user deletes an axis, all ratings on that axis across all games are also deleted. Every affected game's fitness score is recalculated. The deletion confirmation communicates how many games have ratings on the axis that will be removed.
+- REQ-MVP-16: When all axis weights sum to zero (e.g., the user sets every weight to zero), the system treats this as "no weighted axes" and behaves like REQ-MVP-14 (no score, "not yet rated"). Division by zero never occurs.
+- REQ-MVP-17: BGG-derived axis ratings are auto-populated from cached BGG data. Users can override any BGG-derived rating with a personal value. Overrides are preserved across BGG data refreshes. The breakdown shows the original BGG value alongside the override so the user can compare.
+
+### Data Freshness
+
+- REQ-MVP-18: BGG data is cached locally per game. Cached data older than 7 days is considered stale but is still used (stale data is acceptable; missing data is not).
+- REQ-MVP-19: Users can manually trigger a BGG data refresh for a single game or for all games in the collection. A refresh fetches current data from BGG, updates the cache, and re-derives any BGG axis ratings that have not been overridden by the user. User overrides are preserved. A game's fitness score may change after refresh if its non-overridden BGG-derived axis ratings change.
+
+### Persistence
+
+- REQ-MVP-20: All state (games, axes, ratings, BGG cache) persists locally as JSON files. No external database. The system reads state on startup and writes on mutation.
+- REQ-MVP-21: The storage format must survive unclean shutdown. Writes are atomic (write to temp file, rename into place). A crash mid-write must not corrupt existing data.
+
+### Interface
+
+- REQ-MVP-22: The system exposes three interfaces: a daemon API (Hono on Unix socket), a web UI (Next.js), and a CLI. All three are views over the same data. The daemon is the single source of truth; the web UI and CLI are clients.
+- REQ-MVP-23: The CLI provides a `--json` flag on all commands, outputting raw JSON for scripting and agent consumption.
+- REQ-MVP-24: The web UI and CLI both display the full score breakdown (per REQ-MVP-5) in their respective formats. The breakdown is not a web-only feature.
 
 ### Deferred
 
@@ -48,433 +94,6 @@ These are real features from the vision, explicitly not in MVP:
 - **LLM-mediated scoring.** No AI in the fitness calculation. The score is deterministic math. LLM features (natural language score explanation, conversational axis creation) are future enhancements.
 - **BGG user authentication.** MVP uses only public BGG data (application token, no user login). Private collection data (acquisition price, private notes) requires BGG user auth, which adds complexity for marginal MVP value.
 - **Play history import.** BGG play logs are available but not used in MVP scoring.
-
----
-
-### Data Model
-
-#### Game
-
-A game the user has added to their shelf-judge collection.
-
-```typescript
-interface Game {
-  id: string;                    // UUID, generated locally
-  bggId: number | null;          // BGG thing ID, null if manually added
-  name: string;                  // Primary name (from BGG or user-entered)
-  yearPublished: number | null;
-  minPlayers: number | null;
-  maxPlayers: number | null;
-  playingTime: number | null;    // Minutes (BGG "playingtime" field)
-  imageUrl: string | null;       // BGG thumbnail URL
-  bggData: BggGameData | null;   // Cached BGG API data
-  ratings: Record<string, number>;  // axisId → rating (1-10)
-  createdAt: string;             // ISO 8601
-  updatedAt: string;             // ISO 8601
-}
-```
-
-#### BggGameData
-
-Cached data from the BGG Thing endpoint. Stored alongside the game to avoid repeated API calls.
-
-```typescript
-interface BggGameData {
-  communityRating: number;       // BGG average (1-10)
-  bayesAverage: number;          // BGG Geek Rating (Bayesian)
-  weight: number | null;         // 1-5 scale, null if BGG returns 0 (known bug)
-  numWeightVotes: number;        // Confidence signal for weight
-  mechanics: BggTag[];           // { id: number, name: string }
-  categories: BggTag[];          // { id: number, name: string }
-  subdomains: string[];          // "Strategy Games", "Family Games", etc.
-  suggestedPlayerCounts: SuggestedPlayerCount[];  // Community poll data
-  fetchedAt: string;             // ISO 8601, for cache invalidation
-}
-
-interface BggTag {
-  id: number;
-  name: string;
-}
-
-interface SuggestedPlayerCount {
-  playerCount: string;           // "1", "2", ..., "4+"
-  best: number;                  // Vote count
-  recommended: number;
-  notRecommended: number;
-}
-```
-
-#### Axis
-
-A user-defined rating dimension.
-
-```typescript
-interface Axis {
-  id: string;                    // UUID
-  name: string;                  // "Wife will play it", "Visual design", etc.
-  description: string | null;    // Optional clarification
-  weight: number;                // 1-100, user-assigned importance
-  source: "personal" | "bgg";   // Personal = user rates manually. BGG = auto-populated.
-  bggField: string | null;       // For source="bgg": which BGG field maps here
-  createdAt: string;
-  updatedAt: string;
-}
-```
-
-BGG-derived axes (`source: "bgg"`) are auto-populated when a game has BGG data. The `bggField` identifies which field maps to this axis. Two BGG-derived axes are created by default (the user can delete or re-weight them):
-
-| Default axis | `bggField` | Mapping |
-|---|---|---|
-| Community Rating | `communityRating` | Pass-through (already 1-10) |
-| Complexity | `weight` | BGG weight 1-5 normalized to 1-10: `score = weight * 2` |
-
-The user can create additional BGG-derived axes later (player count fit, for example), but MVP ships with these two.
-
-#### Collection
-
-The user's set of games. MVP supports a single collection (one user, one shelf).
-
-```typescript
-interface Collection {
-  id: string;                    // UUID
-  name: string;                  // Default: "My Collection"
-  axes: Axis[];
-  games: Game[];
-  createdAt: string;
-  updatedAt: string;
-}
-```
-
-#### Storage Format
-
-All state persists as JSON files in a configurable data directory (default: `~/.shelf-judge/data/`).
-
-```
-~/.shelf-judge/
-  data/
-    collection.json              # Single collection with embedded axes and games
-  config.json                    # App config (BGG token, data dir, socket path)
-```
-
-MVP uses a single `collection.json` file. This is deliberately simple. If the file grows unwieldy with hundreds of games, splitting into per-game files is a straightforward migration, but not one we need to design for now.
-
----
-
-### Fitness Score Model
-
-#### Decision: Axis Scorecard (Approach 1, weighted average)
-
-The MVP uses Approach 1 from the brainstorm: direct axis ratings with weighted average aggregation. This is the right starting point for three reasons:
-
-1. **Transparency is the non-negotiable principle.** The vision's tension table says transparency beats precision, always. Weighted average produces a breakdown where every point is traceable to a specific axis, weight, and rating. No other approach is this legible.
-
-2. **Works from game one.** No cold-start problem. Rate one game on one axis, get a fitness score. The pairwise tournament (deferred) needs 20+ games to converge. The profile similarity approach (Approach 3) needs a meaningful collection to build a centroid. The scorecard delivers value immediately.
-
-3. **Foundation for the hybrid.** The brainstorm's conclusion envisions tournament ranking + axis ratings as a combined vector. The axis scorecard is the axis half of that hybrid. Building it first means the tournament layer, when added, slots in alongside it rather than replacing it.
-
-#### The Math
-
-**Fitness score** for a game is the weighted average of all rated axes:
-
-```
-fitness = Σ(axis_score_i × axis_weight_i) / Σ(axis_weight_i)
-```
-
-Where the sum runs over all axes that have a rating for this game (personal or BGG-derived).
-
-**Result range:** 1.0 to 10.0 (inherits the axis rating range).
-
-**Missing ratings:** If a game has no rating for an axis, that axis is excluded from both numerator and denominator. The breakdown shows the excluded axis as "not rated" so the user knows it didn't contribute.
-
-**BGG-derived axis scores:** Auto-populated from cached BGG data using the mapping defined in the Axis section above. The user can override any BGG-derived score with a personal rating. When overridden, the breakdown shows "[your rating, BGG: X.X]" so the original value is visible.
-
-#### Score Breakdown
-
-Every fitness score is accompanied by a breakdown. This is not optional. A score without a breakdown violates Principle 2.
-
-```typescript
-interface FitnessResult {
-  score: number;                          // 1.0 - 10.0
-  ratedAxisCount: number;                 // How many axes contributed
-  totalAxisCount: number;                 // How many axes exist
-  breakdown: FitnessBreakdownEntry[];
-}
-
-interface FitnessBreakdownEntry {
-  axisId: string;
-  axisName: string;
-  rating: number | null;                  // null if not rated
-  weight: number;
-  contribution: number | null;            // Points contributed to score, null if not rated
-  source: "personal" | "bgg" | "override"; // "override" = user replaced BGG value
-  bggOriginal: number | null;             // Original BGG value when source is "override"
-}
-```
-
-#### Example
-
-A user has three axes: "Wife will play it" (weight 40), "Visual design" (weight 30), "Complexity" (weight 20, BGG-derived), and "Community Rating" (weight 10, BGG-derived).
-
-For Wingspan:
-
-```
-Fitness: 7.65
-
-  Wife will play it:    8   × 40  → 320    [your rating]
-  Visual design:        9   × 30  → 270    [your rating]
-  Complexity:           5.8 × 20  → 116    [BGG weight 2.9 → 5.8]
-  Community Rating:     8.1 × 10  →  81    [BGG]
-
-  Sum of contributions: 787
-  Sum of weights:       100
-  Score: 787 / 100 = 7.87
-
-  Rounded: 7.9
-```
-
-Scores are stored and displayed to one decimal place.
-
----
-
-### BGG Integration
-
-#### Application Token
-
-All BGG API requests require an `Authorization: Bearer TOKEN` header. The token is registered at `https://boardgamegeek.com/using_the_xml_api` and stored in `~/.shelf-judge/config.json`.
-
-The daemon validates the token is present on startup. If missing, API-dependent operations return a clear error: "BGG application token not configured. Register at [URL] and run `shelf-judge config set bgg-token YOUR_TOKEN`."
-
-#### Endpoints Used
-
-**Thing endpoint** (`/xmlapi2/thing`):
-- Used when adding a game by BGG ID or after search
-- Parameters: `id={bggId}&stats=1&type=boardgame`
-- Supports comma-delimited IDs for batch fetch (up to 250 per request)
-- Provides: name, player count, play time, year, mechanics, categories, community rating, weight, suggested player counts
-
-**Search endpoint** (`/xmlapi2/search`):
-- Used when the user searches for a game by name
-- Parameters: `query={name}&type=boardgame`
-- Returns: ID, name, year only. A follow-up Thing request is needed for full data.
-
-**Collection endpoint** (`/xmlapi2/collection`):
-- Used for bulk import from a BGG user's public collection
-- Parameters: `username={bggUsername}&own=1&subtype=boardgame&stats=1`
-- Returns: all owned games with basic stats
-- **202 handling required:** This endpoint returns HTTP 202 when queued. The daemon retries with exponential backoff: 5s, 10s, 20s, up to 3 retries. If still 202 after retries, return an error to the client.
-
-#### Rate Limiting
-
-No officially published limits. The daemon enforces a conservative request throttle:
-
-- **Default:** 1 request per 5 seconds
-- **Batch thing requests:** Up to 250 IDs per call, reducing total request count
-- **429 response:** Back off 30 seconds, then resume at 1 req/10s, gradually returning to normal
-- **502/503 response:** Retry after 30 seconds, up to 2 retries
-
-Rate limiting is handled in the BGG client service, not in individual route handlers.
-
-#### Caching
-
-BGG data is cached in the `bggData` field of each Game record. Cache invalidation:
-
-- **Default TTL:** 7 days. BGG data (ratings, weight) changes slowly.
-- **Manual refresh:** User can trigger a refresh for a single game or the entire collection.
-- **Stale data is fine.** Community rating shifting from 7.8 to 7.9 doesn't materially change a fitness score. Prefer fewer API calls over fresher data.
-
-#### XML Parsing
-
-The BGG API returns XML only. The daemon uses an XML parsing library (e.g., `fast-xml-parser`) to convert responses to typed objects. Known quirks to handle:
-
-- `averageweight` of 0 is treated as null (known BGG bug)
-- Primary name is the `<name>` element with `type="primary"`
-- `<median>` is always 0; ignored
-
-#### Library Decision
-
-Deferred to implementation. The research identifies several viable TypeScript libraries (`bgg-xml-api-client`, `bgg-sdk`, `bgg`). The implementer should verify that the chosen library handles the 2025 auth token requirement before committing. If no library handles it cleanly, a thin custom client over `fast-xml-parser` is acceptable; the API surface we use is small (three endpoints).
-
----
-
-### API Surface
-
-Following the architecture pattern: Hono daemon on Unix socket, route/service split with DI factories, operations registry.
-
-#### Operations
-
-Each operation follows the `OperationDefinition` structure from the architecture doc. The hierarchy uses `shelf` as the root.
-
-##### Game Operations
-
-| Operation ID | Method | Path | Description |
-|---|---|---|---|
-| `shelf.game.search` | GET | `/api/games/search?q={query}` | Search BGG for games by name |
-| `shelf.game.add` | POST | `/api/games` | Add a game (by BGG ID or manually) |
-| `shelf.game.get` | GET | `/api/games/:id` | Get a game with current fitness score |
-| `shelf.game.list` | GET | `/api/games` | List all games with fitness scores |
-| `shelf.game.rate` | PUT | `/api/games/:id/ratings` | Set ratings for a game on one or more axes |
-| `shelf.game.remove` | DELETE | `/api/games/:id` | Remove a game from the collection |
-| `shelf.game.refresh-bgg` | POST | `/api/games/:id/refresh` | Re-fetch BGG data for a game |
-
-##### Axis Operations
-
-| Operation ID | Method | Path | Description |
-|---|---|---|---|
-| `shelf.axis.create` | POST | `/api/axes` | Create a new rating axis |
-| `shelf.axis.list` | GET | `/api/axes` | List all axes with weights |
-| `shelf.axis.update` | PUT | `/api/axes/:id` | Update axis name, description, or weight |
-| `shelf.axis.delete` | DELETE | `/api/axes/:id` | Delete an axis (removes all ratings on it) |
-
-##### Import Operations
-
-| Operation ID | Method | Path | Description |
-|---|---|---|---|
-| `shelf.import.bgg-collection` | POST | `/api/import/bgg?username={bggUsername}` | Import owned games from a BGG user's collection |
-
-##### Score Operations
-
-| Operation ID | Method | Path | Description |
-|---|---|---|---|
-| `shelf.score.get` | GET | `/api/games/:id/score` | Get fitness score with full breakdown for a game |
-| `shelf.score.list` | GET | `/api/scores` | Get all games ranked by fitness score |
-
-##### System Operations
-
-| Operation ID | Method | Path | Description |
-|---|---|---|---|
-| `shelf.help` | GET | `/api/help` | Operations registry (CLI discovery root) |
-| `shelf.help.feature` | GET | `/api/help/:feature` | Operations for a feature subtree |
-| `shelf.config.get` | GET | `/api/config` | Current configuration |
-| `shelf.config.set` | PUT | `/api/config` | Update configuration |
-
-#### Request/Response Shapes
-
-**POST `/api/games`** (add game):
-```typescript
-// Request
-{ bggId: number } | { name: string, yearPublished?: number }
-
-// Response
-{ game: Game, bggImported: boolean }
-```
-
-**PUT `/api/games/:id/ratings`** (rate game):
-```typescript
-// Request
-{ ratings: Record<string, number> }  // axisId → rating (1-10)
-
-// Response
-{ game: Game, score: FitnessResult }
-```
-
-**POST `/api/import/bgg`** (import collection):
-```typescript
-// Request
-{ username: string }
-
-// Response (SSE stream for progress)
-event: progress
-data: { imported: number, total: number, current: string }
-
-event: complete
-data: { imported: number, skipped: number, errors: string[] }
-```
-
-The BGG collection import streams progress via SSE because it involves multiple API calls with rate limiting. The client sees games appearing as they're imported rather than waiting for a bulk response.
-
-#### Service Layer
-
-Route factories receive injected services:
-
-- **GameService:** CRUD for games, delegates to BggClient for API calls, computes fitness scores
-- **AxisService:** CRUD for axes, handles cascade deletion of ratings
-- **BggClient:** Wraps BGG API calls, handles rate limiting, 202 retries, XML parsing, caching
-- **StorageService:** Reads/writes collection.json, handles file locking for concurrent access
-
-Each service is a DI factory: `createGameService(deps) → GameService`. Tests inject mock storage and BGG client.
-
----
-
-### Web UI
-
-MVP web interface. Minimal, functional, not polished. Next.js App Router, server components where possible, client components for interactive elements.
-
-#### Screens
-
-**1. Collection View** (home page)
-- Table/grid of all games, sorted by fitness score (descending)
-- Each row shows: game name, thumbnail, fitness score, last rated date
-- Click a game to see its detail view
-- "Add Game" button (opens search)
-- "Import from BGG" button
-
-**2. Game Detail View**
-- Game info: name, year, player count, play time, thumbnail
-- Fitness score with full breakdown (the transparency display from the score model section)
-- Rating form: one slider or number input per axis, pre-filled with existing ratings
-- BGG-derived axes show auto-populated value with option to override
-- "Refresh BGG Data" button
-
-**3. Game Search / Add**
-- Text search field that queries BGG
-- Results list with name, year, and thumbnail
-- Click to add a game (fetches full BGG data on add)
-- Manual add option for games not on BGG
-
-**4. Axes Management**
-- List of all axes with name, weight, source
-- Create new axis (name, description, weight, source type)
-- Edit axis weight and description
-- Delete axis (with confirmation noting that ratings on this axis will be removed)
-
-**5. Import Status**
-- Shown during BGG collection import
-- Progress indicator: "Importing 12 of 47..."
-- List of imported games as they arrive
-- Error summary at completion
-
-#### Navigation
-
-Persistent sidebar or top nav with: Collection, Axes, Add Game. The collection view is the landing page.
-
----
-
-### CLI Surface
-
-The CLI discovers operations from the daemon at runtime. No hardcoded command catalog.
-
-#### Binary
-
-`shelf-judge` (or `sj` alias). Connects to the daemon's Unix socket.
-
-#### Core Commands
-
-```
-shelf-judge help                        # Full operation tree
-shelf-judge game search "wingspan"      # Search BGG
-shelf-judge game add --bgg-id 266192    # Add by BGG ID
-shelf-judge game add --name "Custom"    # Add manually
-shelf-judge game list                   # All games with fitness scores
-shelf-judge game rate <id> --axis "Wife will play it" 8 --axis "Visual design" 9
-shelf-judge axis list                   # All axes
-shelf-judge axis create "Wife will play it" --weight 40
-shelf-judge axis update <id> --weight 50
-shelf-judge import bgg-collection <username>
-shelf-judge score list                  # Games ranked by fitness
-shelf-judge score get <id>             # Full breakdown for one game
-shelf-judge config set bgg-token <token>
-```
-
-#### Output
-
-Default output is human-readable tables. The `--json` flag on any command returns raw JSON for scripting and agent consumption.
-
-#### Daemon Management
-
-The CLI checks whether the daemon is running on the expected socket. If not:
-- `shelf-judge start` starts the daemon in the background
-- `shelf-judge stop` stops it
-- Commands that need the daemon prompt the user to start it if it's not running
 
 ## Exit Points
 
@@ -498,14 +117,24 @@ The CLI checks whether the daemon is running on the expected socket. If not:
 - [ ] Score breakdown entries sum to the total fitness score
 - [ ] BGG client handles 202 retry, 429 backoff, and malformed XML gracefully
 - [ ] Import from BGG collection creates games with cached BGG data
+- [ ] Duplicate BGG ID import is rejected with a clear message
+- [ ] Deleting an axis removes all ratings on that axis and recalculates affected scores
+- [ ] Ratings outside 1-10 are rejected
+- [ ] A game with zero rated axes returns "not yet rated" (no score)
+- [ ] All-zero weights produce "not yet rated" (no division by zero)
+- [ ] BGG data refresh preserves user overrides of BGG-derived ratings
+- [ ] Storage writes are atomic (temp file + rename)
 
 ### Manual Verification (demonstration)
 
 - [ ] Add a game by searching BGG, rate it on 2+ axes, see the fitness score with breakdown
 - [ ] Create a custom axis, re-rate games, observe score changes
 - [ ] Import a BGG collection (10+ games), verify games appear with BGG data populated
-- [ ] CLI `shelf-judge score list` shows all games ranked by fitness with breakdown available
+- [ ] CLI `shelf-judge score list` shows all games ranked by fitness; `shelf-judge score get <id>` shows the full breakdown for any game
 - [ ] Web UI displays score breakdown that matches the math (manually verify one game's arithmetic)
+- [ ] Start daemon without BGG token, verify manual game entry and personal scoring work
+- [ ] Disconnect from network, verify local operations continue
+- [ ] Override a BGG-derived axis rating on one game, trigger a BGG refresh, confirm the override is preserved and the original BGG value is shown alongside it
 
 ## AI Validation
 
@@ -515,9 +144,10 @@ The CLI checks whether the daemon is running on the expected socket. If not:
 - Code review by fresh-context sub-agent
 
 **Custom:**
-- Fitness score math verified against hand-calculated examples (the Wingspan example above)
+- Fitness score math verified against hand-calculated examples (the Wingspan example in the fitness model design)
 - BGG XML parsing tested against captured real API responses, not synthetic XML
-- CLI output for `score list` and `score get` matches the breakdown format shown in examples
+- CLI output for `score list` and `score get` matches the breakdown format shown in the CLI design
+- Edge case tests for: zero-weight axes, all-unrated game, deleted-axis cascade, duplicate import rejection
 
 ## Constraints
 
@@ -536,7 +166,7 @@ These are genuine unknowns that don't block MVP implementation but should be res
 
 2. **BGG library choice:** Several viable TypeScript libraries exist. The implementer should verify auth token support and pick one. This is an implementation decision, not a spec decision.
 
-3. **Collection import conflict resolution:** When importing from BGG, what happens if a game already exists in the collection? Options: skip, update BGG data only, or prompt. MVP should skip duplicates (match on bggId) and report them in the import summary.
+3. **Collection import conflict resolution:** Resolved. See REQ-MVP-10: skip duplicates (match on bggId), report them in the import summary.
 
 ## Context
 
@@ -544,3 +174,9 @@ These are genuine unknowns that don't block MVP implementation but should be res
 - [Fitness Model Brainstorm](.lore/brainstorms/fitness-model-options.md): Explored 4 scoring approaches; Approach 1 (axis scorecard) selected for MVP with hybrid as long-term direction
 - [BGG API Research](.lore/research/bgg-api.md): API endpoints, auth requirements, rate limiting, XML parsing quirks
 - [Architecture Pattern](.lore/reference/architecture-pattern.md): Hono daemon on Unix socket, route/service split, DI factories, operations registry
+- [Data Model Design](.lore/designs/mvp-data-model.md): Game, Axis, Collection, and Storage structures
+- [Fitness Model Design](.lore/designs/mvp-fitness-model.md): Weighted average algorithm, score breakdown interface, worked example
+- [BGG Integration Design](.lore/designs/mvp-bgg-integration.md): Endpoints, rate limiting, caching, XML parsing
+- [API Surface Design](.lore/designs/mvp-api-surface.md): Operations, request/response shapes, service layer
+- [Web UI Design](.lore/designs/mvp-web-ui.md): Screens and navigation
+- [CLI Design](.lore/designs/mvp-cli.md): Commands, output format, daemon management
