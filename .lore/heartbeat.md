@@ -39,3 +39,8 @@ Workers can also add entries to this file during their sessions.
 
 The implementation is solid. Types match the design docs exactly, atomic writes are correctly implemented, def...
 - 12:26 commission-Thorne-20260405-121520 completed
+- 12:28 commission-Dalton-20260405-121526 result: ## Phase 1 Review Fixes: All 3 Findings Addressed
+
+### Finding 1: Missing `await` on reject assertion
+**Fixed.** Added `await` to `expect(service.loadCollection()).rejects.toThrow()` in `storage-servi...
+- 12:28 commission-Dalton-20260405-121526 completed
