@@ -5,5 +5,5 @@
       "@shelf-judge/shared": ["../shared/src"]
     }
   },
-  "include": ["src"]
+  "include": ["src", "tests"]
 }

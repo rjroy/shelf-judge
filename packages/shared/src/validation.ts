@@ -3,7 +3,7 @@ import { z } from "zod";
 export const CreateAxisSchema = z.object({
   name: z.string().min(1, "Axis name cannot be empty"),
   description: z.string().nullable().optional().default(null),
-  weight: z.number().int("Weight must be an integer").min(1).max(100),
+  weight: z.number().int("Weight must be an integer").min(0).max(100),
   source: z.enum(["personal", "bgg"]).optional().default("personal"),
   bggField: z.string().nullable().optional().default(null),
 });
@@ -11,7 +11,7 @@ export const CreateAxisSchema = z.object({
 export const UpdateAxisSchema = z.object({
   name: z.string().min(1, "Axis name cannot be empty").optional(),
   description: z.string().nullable().optional(),
-  weight: z.number().int("Weight must be an integer").min(1).max(100).optional(),
+  weight: z.number().int("Weight must be an integer").min(0).max(100).optional(),
 });
 
 export const RateGameSchema = z.object({

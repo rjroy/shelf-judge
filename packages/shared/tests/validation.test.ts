@@ -41,18 +41,18 @@ describe("CreateAxisSchema", () => {
     expect(result.success).toBe(false);
   });
 
-  test("rejects weight below 1", () => {
+  test("accepts weight of 0 (minimum, per REQ-MVP-1)", () => {
     const result = CreateAxisSchema.safeParse({ name: "Test", weight: 0 });
+    expect(result.success).toBe(true);
+  });
+
+  test("rejects weight below 0", () => {
+    const result = CreateAxisSchema.safeParse({ name: "Test", weight: -1 });
     expect(result.success).toBe(false);
   });
 
   test("rejects weight above 100", () => {
     const result = CreateAxisSchema.safeParse({ name: "Test", weight: 101 });
-    expect(result.success).toBe(false);
-  });
-
-  test("rejects negative weight", () => {
-    const result = CreateAxisSchema.safeParse({ name: "Test", weight: -1 });
     expect(result.success).toBe(false);
   });
 

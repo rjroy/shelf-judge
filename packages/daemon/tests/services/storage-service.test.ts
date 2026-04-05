@@ -62,7 +62,7 @@ describe("StorageService.loadCollection", () => {
       [COLLECTION_PATH]: "{ not valid json !!!",
     });
 
-    expect(service.loadCollection()).rejects.toThrow();
+    await expect(service.loadCollection()).rejects.toThrow();
   });
 });
 
