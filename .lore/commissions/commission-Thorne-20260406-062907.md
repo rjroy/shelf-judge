@@ -1,7 +1,7 @@
 ---
 title: "Commission: Responsive Final Review"
 date: 2026-04-06
-status: pending
+status: blocked
 tags: [commission]
 worker: Thorne
 workerDisplayTitle: "Guild Warden"
@@ -15,6 +15,11 @@ activity_timeline:
     event: created
     reason: "Commission created"
   - timestamp: 2026-04-06T13:29:07.178Z
+    event: status_blocked
+    reason: "Dependencies not satisfied"
+    from: "pending"
+    to: "blocked"
+  - timestamp: 2026-04-06T15:09:50.384Z
     event: status_blocked
     reason: "Dependencies not satisfied"
     from: "pending"
