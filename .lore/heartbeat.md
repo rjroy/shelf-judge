@@ -38,3 +38,7 @@ Workers can also add entries to this file during their sessions.
 **New files (3):**
 - `packages/web/app/tournament/page.tsx` - Session start page: active s...
 - 16:29 commission-Dalton-20260406-153930 completed
+- 16:36 commission-Dalton-20260406-153940 result: Phase 6 complete. All 6 tournament CLI commands implemented, game list rank column added, score get tournament rank + divergence flag added, --filter arg parsing extended.
+
+**New file:** `packages/cli...
+- 16:36 commission-Dalton-20260406-153940 completed
