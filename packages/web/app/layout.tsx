@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
-import { Sidebar } from "../components/sidebar";
+import { MobileHeader, Sidebar, SidebarProvider } from "../components/sidebar";
 import "./globals.css";
 
 const inter = Inter({
@@ -24,10 +24,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className={inter.className}>
-        <div className="app-shell">
-          <Sidebar />
-          <main className="main-content">{children}</main>
-        </div>
+        <SidebarProvider>
+          <div className="app-shell">
+            <Sidebar />
+            <main className="main-content">
+              <MobileHeader />
+              {children}
+            </main>
+          </div>
+        </SidebarProvider>
       </body>
     </html>
   );

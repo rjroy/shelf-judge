@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 const navGroups = [
   {
@@ -57,11 +58,62 @@ function isActive(pathname: string, href: string): boolean {
   return pathname.startsWith(href);
 }
 
-export function Sidebar() {
+const SidebarContext = createContext<{ open: boolean; toggle: () => void }>({
+  open: false,
+  toggle: () => {},
+});
+
+export function useSidebar() {
+  return useContext(SidebarContext);
+}
+
+export function SidebarProvider({ children }: { children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
   const pathname = usePathname();
 
+  const toggle = useCallback(() => setOpen((prev) => !prev), []);
+  const close = useCallback(() => setOpen(false), []);
+
+  // Close sidebar on route change
+  useEffect(() => {
+    close();
+  }, [pathname, close]);
+
+  // Close sidebar on Escape key
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [open, close]);
+
+  const value = useMemo(() => ({ open, toggle }), [open, toggle]);
+
   return (
-    <aside className="sidebar">
+    <SidebarContext.Provider value={value}>
+      <div
+        className={`sidebar-backdrop${open ? " sidebar-backdrop-visible" : ""}`}
+        onClick={close}
+        aria-hidden="true"
+      />
+      {children}
+    </SidebarContext.Provider>
+  );
+}
+
+export function Sidebar() {
+  const pathname = usePathname();
+  const { open, toggle } = useSidebar();
+
+  return (
+    <aside className={`sidebar${open ? " sidebar-open" : ""}`}>
+      <button className="sidebar-close" onClick={toggle} aria-label="Close navigation">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M4.646 4.646a.5.5 0 01.708 0L8 7.293l2.646-2.647a.5.5 0 01.708.708L8.707 8l2.647 2.646a.5.5 0 01-.708.708L8 8.707l-2.646 2.647a.5.5 0 01-.708-.708L7.293 8 4.646 5.354a.5.5 0 010-.708z" />
+        </svg>
+      </button>
       <div className="sidebar-brand">
         <div className="sidebar-brand-row">
           <svg
@@ -100,5 +152,20 @@ export function Sidebar() {
 
       <div className="sidebar-footer">Shelf Judge v0.1</div>
     </aside>
+  );
+}
+
+export function MobileHeader() {
+  const { toggle } = useSidebar();
+
+  return (
+    <div className="mobile-header">
+      <button className="topbar-hamburger" onClick={toggle} aria-label="Open navigation">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M3 5h14v1.5H3V5zm0 4.25h14v1.5H3v-1.5zm0 4.25h14V15H3v-1.5z" />
+        </svg>
+      </button>
+      <span className="topbar-brand">Shelf Judge</span>
+    </div>
   );
 }
