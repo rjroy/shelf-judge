@@ -25,10 +25,9 @@ export async function axisList(
 
   if (opts.json) return printOutput(data, opts);
 
-  const axes = data as AxisData[];
   return formatTable(
     ["ID", "Name", "Weight", "Source"],
-    axes.map((a) => [a.id.slice(0, 8), a.name, String(a.weight), a.source]),
+    data.map((a) => [a.id.slice(0, 8), a.name, String(a.weight), a.source]),
   );
 }
 
@@ -56,8 +55,7 @@ export async function axisCreate(
 
   if (opts.json) return printOutput(data, opts);
 
-  const axis = data as AxisData;
-  return `Created axis: ${axis.name} (ID: ${axis.id}, weight: ${axis.weight})`;
+  return `Created axis: ${data.name} (ID: ${data.id}, weight: ${data.weight})`;
 }
 
 export async function axisUpdate(
@@ -90,8 +88,7 @@ export async function axisUpdate(
 
   if (opts.json) return printOutput(data, opts);
 
-  const axis = data as AxisData;
-  return `Updated axis: ${axis.name} (weight: ${axis.weight})`;
+  return `Updated axis: ${data.name} (weight: ${data.weight})`;
 }
 
 export async function axisDelete(

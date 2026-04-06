@@ -13,7 +13,7 @@ describe("daemon stop", () => {
   test("--json outputs parseable JSON when not running", async () => {
     const client = createMockClient({ reachable: false });
     const result = await daemonStop(client, [], { json: true });
-    const parsed = JSON.parse(result);
+    const parsed = JSON.parse(result) as { stopped: boolean; reason: string };
     expect(parsed.stopped).toBe(false);
     expect(parsed.reason).toBe("not running");
   });
@@ -41,7 +41,7 @@ describe("daemon stop", () => {
       },
     });
     const result = await daemonStop(client, [], { json: true });
-    const parsed = JSON.parse(result);
+    const parsed = JSON.parse(result) as { stopped: boolean };
     expect(parsed.stopped).toBe(true);
   });
 });
@@ -70,7 +70,7 @@ describe("daemon start", () => {
     const client = createMockClient({ reachable: false });
     const spawner = createTestSpawner();
     const result = await daemonStart(client, [], { json: true }, spawner);
-    const parsed = JSON.parse(result);
+    const parsed = JSON.parse(result) as { started: boolean; pid: number };
     expect(parsed.started).toBe(true);
     expect(parsed.pid).toBe(12345);
     expect(spawner.calls).toHaveLength(1);

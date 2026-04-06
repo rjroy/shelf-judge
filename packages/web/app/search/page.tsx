@@ -28,22 +28,26 @@ export default function SearchPage() {
       return;
     }
 
-    debounceRef.current = setTimeout(async () => {
-      setSearching(true);
-      setError(null);
-      try {
-        const res = await fetch(`/api/daemon/games/search?q=${encodeURIComponent(query)}`);
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({ error: "Search failed" }));
-          throw new Error(data.error ?? `Search failed: ${res.status}`);
+    debounceRef.current = setTimeout(() => {
+      void (async () => {
+        setSearching(true);
+        setError(null);
+        try {
+          const res = await fetch(`/api/daemon/games/search?q=${encodeURIComponent(query)}`);
+          if (!res.ok) {
+            const data = (await res.json().catch(() => ({ error: "Search failed" }))) as {
+              error?: string;
+            };
+            throw new Error(data.error ?? `Search failed: ${res.status}`);
+          }
+          setResults((await res.json()) as BggSearchResult[]);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Search failed");
+          setResults([]);
+        } finally {
+          setSearching(false);
         }
-        setResults(await res.json());
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Search failed");
-        setResults([]);
-      } finally {
-        setSearching(false);
-      }
+      })();
     }, 400);
   }, [query]);
 
@@ -57,14 +61,16 @@ export default function SearchPage() {
         body: JSON.stringify({ bggId }),
       });
       if (res.status === 409) {
-        const data = await res.json();
+        const data = (await res.json()) as { error?: string };
         throw new Error(data.error ?? "This game is already in your collection");
       }
       if (!res.ok) {
-        const data = await res.json().catch(() => ({ error: "Unknown error" }));
+        const data = (await res.json().catch(() => ({ error: "Unknown error" }))) as {
+          error?: string;
+        };
         throw new Error(data.error ?? `Failed: ${res.status}`);
       }
-      const { game } = await res.json();
+      const { game } = (await res.json()) as { game: { id: string } };
       router.push(`/games/${game.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to add game");
@@ -92,10 +98,12 @@ export default function SearchPage() {
         body: JSON.stringify(body),
       });
       if (!res.ok) {
-        const data = await res.json().catch(() => ({ error: "Unknown error" }));
+        const data = (await res.json().catch(() => ({ error: "Unknown error" }))) as {
+          error?: string;
+        };
         throw new Error(data.error ?? `Failed: ${res.status}`);
       }
-      const { game } = await res.json();
+      const { game } = (await res.json()) as { game: { id: string } };
       router.push(`/games/${game.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to add game");
@@ -135,7 +143,9 @@ export default function SearchPage() {
                   </div>
                   <button
                     className="btn btn-primary btn-sm"
-                    onClick={() => handleAddBgg(r.bggId)}
+                    onClick={() => {
+                      void handleAddBgg(r.bggId);
+                    }}
                     disabled={adding === r.bggId}
                   >
                     {adding === r.bggId ? "Adding..." : "Add"}
@@ -153,7 +163,11 @@ export default function SearchPage() {
 
             {showManual && (
               <div className="manual-add-card manual-add-card-mt">
-                <form onSubmit={handleAddManual}>
+                <form
+                  onSubmit={(e) => {
+                    void handleAddManual(e);
+                  }}
+                >
                   <div className="form-row">
                     <div className="form-group">
                       <label className="form-label">Game Name</label>

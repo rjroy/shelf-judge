@@ -62,6 +62,7 @@ describe("StorageService.loadCollection", () => {
       [COLLECTION_PATH]: "{ not valid json !!!",
     });
 
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
     await expect(service.loadCollection()).rejects.toThrow();
   });
 });

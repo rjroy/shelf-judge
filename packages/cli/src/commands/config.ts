@@ -23,13 +23,12 @@ export async function configGet(
 
   if (opts.json) return printOutput(data, opts);
 
-  const config = data as ConfigData;
   return formatTable(
     ["Key", "Value"],
     [
-      ["bgg-token", config.bggAuthToken ?? "(not set)"],
-      ["data-dir", config.dataDir],
-      ["socket-path", config.socketPath],
+      ["bgg-token", data.bggAuthToken ?? "(not set)"],
+      ["data-dir", data.dataDir],
+      ["socket-path", data.socketPath],
     ],
   );
 }

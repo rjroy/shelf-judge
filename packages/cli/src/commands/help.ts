@@ -28,11 +28,10 @@ export async function helpCommand(
 
   if (opts.json) return printOutput(data, opts);
 
-  const tree = data as OperationTreeNode;
   const lines: string[] = [];
   lines.push("shelf-judge - Board game fitness scoring");
   lines.push("");
-  formatNode(tree, lines, 0);
+  formatNode(data, lines, 0);
   return lines.join("\n");
 }
 

@@ -1,6 +1,17 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { createTestApp, jsonRequest, type TestAppContext } from "../helpers/test-app.js";
 
+interface HelpNode {
+  name: string;
+  description?: string;
+  invocation?: { method: string; path: string };
+  children?: Record<string, HelpNode>;
+}
+
+interface ConfigResponse {
+  bggAuthToken: string | null;
+}
+
 let ctx: TestAppContext;
 
 beforeEach(() => {
@@ -12,7 +23,7 @@ describe("GET /api/help", () => {
     const res = await jsonRequest(ctx.app, "GET", "/api/help");
     expect(res.status).toBe(200);
 
-    const body = await res.json();
+    const body = (await res.json()) as HelpNode;
     expect(body.name).toBe("shelf");
     expect(body.children).toBeDefined();
     expect(typeof body.children).toBe("object");
@@ -20,23 +31,23 @@ describe("GET /api/help", () => {
 
   test("root tree has children for registered features", async () => {
     const res = await jsonRequest(ctx.app, "GET", "/api/help");
-    const body = await res.json();
+    const body = (await res.json()) as HelpNode;
 
     // The app registers multiple route modules; at minimum help and config exist
-    expect(body.children.help).toBeDefined();
-    expect(body.children.config).toBeDefined();
+    expect(body.children!.help).toBeDefined();
+    expect(body.children!.config).toBeDefined();
   });
 
   test("operations in tree have correct name, description, and invocation properties", async () => {
     const res = await jsonRequest(ctx.app, "GET", "/api/help");
-    const body = await res.json();
+    const body = (await res.json()) as HelpNode;
 
     // shelf.help is a two-part operationId, so it lands directly at children.help
-    const helpNode = body.children.help;
+    const helpNode = body.children!.help;
     expect(helpNode).toBeDefined();
     expect(helpNode.name).toBe("help");
     expect(typeof helpNode.description).toBe("string");
-    expect(helpNode.description.length).toBeGreaterThan(0);
+    expect(helpNode.description!.length).toBeGreaterThan(0);
     expect(helpNode.invocation).toEqual({
       method: "GET",
       path: "/api/help",
@@ -49,17 +60,17 @@ describe("GET /api/help/:feature", () => {
     const res = await jsonRequest(ctx.app, "GET", "/api/help/game");
     expect(res.status).toBe(200);
 
-    const body = await res.json();
+    const body = (await res.json()) as HelpNode;
     expect(body.name).toBe("shelf");
     expect(body.children).toBeDefined();
-    expect(body.children.game).toBeDefined();
+    expect(body.children!.game).toBeDefined();
   });
 
   test("returns 404 for nonexistent feature", async () => {
     const res = await jsonRequest(ctx.app, "GET", "/api/help/nonexistent");
     expect(res.status).toBe(404);
 
-    const body = await res.json();
+    const body = (await res.json()) as { error: string };
     expect(body.error).toContain("nonexistent");
   });
 });
@@ -69,7 +80,7 @@ describe("GET /api/config", () => {
     const res = await jsonRequest(ctx.app, "GET", "/api/config");
     expect(res.status).toBe(200);
 
-    const body = await res.json();
+    const body = (await res.json()) as ConfigResponse;
     // Default config has no token, so bggAuthToken should be null
     expect(body.bggAuthToken).toBeNull();
   });
@@ -82,12 +93,12 @@ describe("PUT /api/config", () => {
     });
     expect(putRes.status).toBe(200);
 
-    const putBody = await putRes.json();
+    const putBody = (await putRes.json()) as ConfigResponse;
     expect(putBody.bggAuthToken).toBe("***configured***");
 
     // Verify GET also shows the masked token
     const getRes = await jsonRequest(ctx.app, "GET", "/api/config");
-    const getBody = await getRes.json();
+    const getBody = (await getRes.json()) as ConfigResponse;
     expect(getBody.bggAuthToken).toBe("***configured***");
   });
 });

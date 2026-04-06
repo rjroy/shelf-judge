@@ -19,16 +19,18 @@ async function readFixture(filename: string): Promise<string> {
 function createMockFetch() {
   const responses: Array<{ status: number; body: string }> = [];
 
-  const fn = async (input: string | URL | Request): Promise<Response> => {
+  const fn = (input: string | URL | Request): Promise<Response> => {
     const next = responses.shift();
     if (!next) {
-      const url = typeof input === "string" ? input : input.toString();
-      throw new Error(`No mock response for: ${url}`);
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      return Promise.reject(new Error(`No mock response for: ${url}`));
     }
-    return new Response(next.body, {
-      status: next.status,
-      headers: { "Content-Type": "application/xml" },
-    });
+    return Promise.resolve(
+      new Response(next.body, {
+        status: next.status,
+        headers: { "Content-Type": "application/xml" },
+      }),
+    );
   };
 
   return {
@@ -58,7 +60,7 @@ beforeEach(() => {
     config: { bggAuthToken: "test-token" },
     fetchFn: mockFetch.fn,
     delayMs: 0,
-    delayFn: async () => {},
+    delayFn: () => Promise.resolve(),
   });
   const fitnessService = createFitnessService();
   gameService = createGameService({ storageService, fitnessService, bggClient });
@@ -67,8 +69,6 @@ beforeEach(() => {
 describe("Collection Import", () => {
   test("imports all games from BGG collection", async () => {
     const collectionXml = await readFixture("collection-testuser.xml");
-    const wingspanXml = await readFixture("thing-wingspan-266192.xml");
-    const gloomhavenXml = await readFixture("thing-gloomhaven-174430.xml");
 
     // Collection fetch
     mockFetch.enqueue(200, collectionXml);
@@ -318,6 +318,7 @@ describe("Collection Import", () => {
       fitnessService: createFitnessService(),
     });
 
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
     await expect(noBggService.importBggCollection("testuser")).rejects.toThrow(
       "BGG integration is not configured",
     );

@@ -27,32 +27,33 @@ export function createMockClient(config: MockClientConfig = {}): DaemonClient {
     return routes[`${method} ${path}`] ?? routes[path];
   }
 
-  async function request<T>(
-    method: string,
-    path: string,
-    body?: unknown,
-  ): Promise<DaemonResponse<T>> {
+  function request<T>(method: string, path: string): Promise<DaemonResponse<T>> {
     const route = findRoute(method, path);
     if (!route) {
-      return { ok: false, status: 404, data: { error: `No mock for ${method} ${path}` } as T };
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        data: { error: `No mock for ${method} ${path}` } as T,
+      });
     }
-    return route.response as DaemonResponse<T>;
+    return Promise.resolve(route.response as DaemonResponse<T>);
   }
 
   return {
     get: <T>(path: string) => request<T>("GET", path),
-    post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),
-    put: <T>(path: string, body?: unknown) => request<T>("PUT", path, body),
+    post: <T>(path: string) => request<T>("POST", path),
+    put: <T>(path: string) => request<T>("PUT", path),
     del: <T>(path: string) => request<T>("DELETE", path),
-    async postSSE(path: string, body: unknown, onEvent: (event: SSEEvent) => void): Promise<void> {
+    postSSE(path: string, _body: unknown, onEvent: (event: SSEEvent) => void): Promise<void> {
       const route = sseRoutes[path];
       if (!route) throw new Error(`No SSE mock for ${path}`);
       for (const event of route.events) {
         onEvent(event);
       }
+      return Promise.resolve();
     },
-    async isReachable(): Promise<boolean> {
-      return reachable;
+    isReachable(): Promise<boolean> {
+      return Promise.resolve(reachable);
     },
     socketPath: "/tmp/shelf-judge-test.sock",
   };

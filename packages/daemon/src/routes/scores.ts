@@ -55,7 +55,7 @@ export function createScoreRoutes(deps: ScoreRoutesDeps): RouteModule {
         .map((g) => ({
           gameId: g.game.id,
           gameName: g.game.name,
-          score: null as null,
+          score: null,
           status: "not yet rated" as const,
         }));
 

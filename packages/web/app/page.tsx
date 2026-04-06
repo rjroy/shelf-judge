@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { listGames, listAxes } from "@/lib/api";
-import { ScoreBadge } from "@/components/score-badge";
 import { RefreshAllButton } from "@/components/refresh-all-button";
 import { scoreRangeClass } from "@/lib/score-utils";
 

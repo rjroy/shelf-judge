@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { createTestApp, jsonRequest, type TestAppContext } from "../helpers/test-app.js";
+import type { Axis, AxisSource, Game } from "@shelf-judge/shared";
 
 describe("axis routes", () => {
   let ctx: TestAppContext;
@@ -16,7 +17,7 @@ describe("axis routes", () => {
       });
 
       expect(res.status).toBe(201);
-      const body = await res.json();
+      const body = (await res.json()) as Axis;
       expect(body.name).toBe("Fun Factor");
       expect(body.weight).toBe(50);
       expect(body.id).toBeString();
@@ -30,7 +31,7 @@ describe("axis routes", () => {
       });
 
       expect(res.status).toBe(400);
-      const body = await res.json();
+      const body = (await res.json()) as { error: string };
       expect(body.error).toContain("Validation failed");
     });
 
@@ -41,7 +42,7 @@ describe("axis routes", () => {
       });
 
       expect(res.status).toBe(400);
-      const body = await res.json();
+      const body = (await res.json()) as { error: string };
       expect(body.error).toContain("Validation failed");
     });
   });
@@ -51,12 +52,12 @@ describe("axis routes", () => {
       const res = await jsonRequest(ctx.app, "GET", "/api/axes");
 
       expect(res.status).toBe(200);
-      const axes = await res.json();
+      const axes = (await res.json()) as Axis[];
       expect(Array.isArray(axes)).toBe(true);
       // Default collection has 2 BGG axes
       expect(axes.length).toBe(2);
-      const sources = axes.map((a: { source: string }) => a.source);
-      expect(sources.every((s: string) => s === "bgg")).toBe(true);
+      const sources = axes.map((a) => a.source);
+      expect(sources.every((s: AxisSource) => s === "bgg")).toBe(true);
     });
   });
 
@@ -67,7 +68,7 @@ describe("axis routes", () => {
         name: "Original",
         weight: 30,
       });
-      const created = await createRes.json();
+      const created = (await createRes.json()) as Axis;
 
       const res = await jsonRequest(ctx.app, "PUT", `/api/axes/${created.id}`, {
         name: "Updated",
@@ -75,7 +76,7 @@ describe("axis routes", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json();
+      const body = (await res.json()) as Axis;
       expect(body.name).toBe("Updated");
       expect(body.weight).toBe(70);
     });
@@ -84,7 +85,7 @@ describe("axis routes", () => {
       const res = await jsonRequest(ctx.app, "PUT", "/api/axes/nonexistent-id", { name: "Ghost" });
 
       expect(res.status).toBe(404);
-      const body = await res.json();
+      const body = (await res.json()) as { error: string };
       expect(body.error).toContain("not found");
     });
   });
@@ -97,14 +98,14 @@ describe("axis routes", () => {
         weight: 40,
       });
       expect(axisRes.status).toBe(201);
-      const axis = await axisRes.json();
+      const axis = (await axisRes.json()) as Axis;
 
       // Add a game
       const gameRes = await jsonRequest(ctx.app, "POST", "/api/games", {
         name: "Test Game",
       });
       expect(gameRes.status).toBe(201);
-      const gameBody = await gameRes.json();
+      const gameBody = (await gameRes.json()) as { game: Game; bggImported: boolean };
       const gameId = gameBody.game.id;
 
       // Rate the game on that axis
@@ -117,7 +118,7 @@ describe("axis routes", () => {
       const deleteRes = await jsonRequest(ctx.app, "DELETE", `/api/axes/${axis.id}`);
 
       expect(deleteRes.status).toBe(200);
-      const body = await deleteRes.json();
+      const body = (await deleteRes.json()) as { deletedRatingsCount: number };
       expect(body.deletedRatingsCount).toBe(1);
     });
   });

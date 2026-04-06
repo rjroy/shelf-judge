@@ -81,10 +81,9 @@ export async function gameList(
 
   if (opts.json) return printOutput(data, opts);
 
-  const games = data as GameListItem[];
   return formatTable(
     ["ID", "Name", "Year", "Score"],
-    games.map((g) => [
+    data.map((g) => [
       g.game.id.slice(0, 8),
       g.game.name,
       g.game.yearPublished ? String(g.game.yearPublished) : "---",

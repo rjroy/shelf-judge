@@ -14,20 +14,22 @@ function createMockFetch() {
   const calls: Array<{ url: string; headers: Record<string, string> }> = [];
   const responses: Array<{ status: number; body: string }> = [];
 
-  const fn = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-    const url = typeof input === "string" ? input : input.toString();
+  const fn = (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const headers = (init?.headers as Record<string, string>) ?? {};
     calls.push({ url, headers });
 
     const next = responses.shift();
     if (!next) {
-      throw new Error(`No mock response configured for: ${url}`);
+      return Promise.reject(new Error(`No mock response configured for: ${url}`));
     }
 
-    return new Response(next.body, {
-      status: next.status,
-      headers: { "Content-Type": "application/xml" },
-    });
+    return Promise.resolve(
+      new Response(next.body, {
+        status: next.status,
+        headers: { "Content-Type": "application/xml" },
+      }),
+    );
   };
 
   return {
@@ -50,7 +52,7 @@ describe("BggClient", () => {
       config: { bggAuthToken: "test-token" },
       fetchFn: mockFetch.fn,
       delayMs: 0,
-      delayFn: async () => {},
+      delayFn: () => Promise.resolve(),
     });
   });
 
@@ -125,7 +127,7 @@ describe("BggClient", () => {
       mockFetch.enqueue(200, thingXml); // Second batch (20)
       mockFetch.enqueue(200, thingXml); // Third batch (10)
 
-      const results = await client.getGames(ids);
+      await client.getGames(ids);
 
       // Should have made 3 requests: 20 + 20 + 10
       expect(mockFetch.calls).toHaveLength(3);
@@ -169,6 +171,7 @@ describe("BggClient", () => {
       mockFetch.enqueue(202, "");
       mockFetch.enqueue(202, "");
 
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
       await expect(client.getUserCollection("testuser")).rejects.toThrow(
         "still queued after maximum retries",
       );
@@ -182,8 +185,9 @@ describe("BggClient", () => {
         config: { bggAuthToken: "test-token" },
         fetchFn: mockFetch.fn,
         delayMs: 0,
-        delayFn: async (ms: number) => {
+        delayFn: (ms: number) => {
           delayCalls.push(ms);
+          return Promise.resolve();
         },
       });
 
@@ -206,8 +210,9 @@ describe("BggClient", () => {
         config: { bggAuthToken: "test-token" },
         fetchFn: mockFetch.fn,
         delayMs: 0,
-        delayFn: async (ms: number) => {
+        delayFn: (ms: number) => {
           delayCalls.push(ms);
+          return Promise.resolve();
         },
       });
 
@@ -256,6 +261,7 @@ describe("BggClient", () => {
       mockFetch.enqueue(502, "Bad Gateway");
       mockFetch.enqueue(502, "Bad Gateway"); // 3rd attempt, exceeds MAX_5XX_RETRIES=2
 
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
       await expect(client.searchGames("Wingspan")).rejects.toThrow("HTTP 502");
     });
   });
@@ -272,6 +278,7 @@ describe("BggClient", () => {
     test("getGame throws when no items in response", async () => {
       mockFetch.enqueue(200, `<?xml version="1.0"?><items></items>`);
 
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
       await expect(client.getGame(99999)).rejects.toThrow("No game found with BGG ID 99999");
     });
   });
@@ -296,9 +303,10 @@ describe("BggClient", () => {
         config: { bggAuthToken: "test-token" },
         fetchFn: hangingFetch as unknown as typeof fetch,
         delayMs: 0,
-        delayFn: async () => {},
+        delayFn: () => Promise.resolve(),
       });
 
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
       await expect(timeoutClient.searchGames("Wingspan")).rejects.toThrow("timed out");
     }, 35000);
   });
@@ -311,9 +319,11 @@ describe("BggClient", () => {
         delayMs: 0,
       });
 
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
       await expect(unconfigured.searchGames("Wingspan")).rejects.toThrow(
         "BGG application token not configured",
       );
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
       await expect(unconfigured.searchGames("Wingspan")).rejects.toThrow(
         "boardgamegeek.com/using_the_xml_api",
       );

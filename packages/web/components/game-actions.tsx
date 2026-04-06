@@ -25,7 +25,9 @@ export function GameActions({
         method: "POST",
       });
       if (!res.ok) {
-        const data = await res.json().catch(() => ({ error: "Unknown error" }));
+        const data = (await res.json().catch(() => ({ error: "Unknown error" }))) as {
+          error?: string;
+        };
         throw new Error(data.error ?? `Failed: ${res.status}`);
       }
       router.refresh();
@@ -47,7 +49,9 @@ export function GameActions({
         method: "DELETE",
       });
       if (!res.ok) {
-        const data = await res.json().catch(() => ({ error: "Unknown error" }));
+        const data = (await res.json().catch(() => ({ error: "Unknown error" }))) as {
+          error?: string;
+        };
         throw new Error(data.error ?? `Failed: ${res.status}`);
       }
       router.push("/");
@@ -62,11 +66,23 @@ export function GameActions({
     <div className="topbar-actions">
       {error && <span className="error-banner">{error}</span>}
       {hasBggId && (
-        <button className="btn btn-secondary" onClick={handleRefresh} disabled={refreshing}>
+        <button
+          className="btn btn-secondary"
+          onClick={() => {
+            void handleRefresh();
+          }}
+          disabled={refreshing}
+        >
           {refreshing ? "Refreshing..." : "↺ Refresh BGG"}
         </button>
       )}
-      <button className="btn btn-danger-outline" onClick={handleRemove} disabled={removing}>
+      <button
+        className="btn btn-danger-outline"
+        onClick={() => {
+          void handleRemove();
+        }}
+        disabled={removing}
+      >
         {removing ? "Removing..." : "Remove"}
       </button>
     </div>

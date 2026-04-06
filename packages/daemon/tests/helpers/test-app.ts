@@ -59,15 +59,13 @@ export function createTestApp(options?: TestAppOptions): TestAppContext {
 export function createMockBggClient(overrides?: Partial<BggClient>): BggClient {
   return {
     isConfigured: () => true,
-    searchGames: async () => [],
-    getGame: async () => {
-      throw new Error("Not implemented in mock");
-    },
+    searchGames: () => Promise.resolve([]),
+    getGame: () => Promise.reject(new Error("Not implemented in mock")),
     getGames: async (_ids, onBatch) => {
       await onBatch?.({ batchIds: _ids, results: new Map() });
       return new Map();
     },
-    getUserCollection: async () => [],
+    getUserCollection: () => Promise.resolve([]),
     ...overrides,
   };
 }
