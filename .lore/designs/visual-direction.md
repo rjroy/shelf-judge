@@ -184,7 +184,7 @@ Import progress uses a linear bar, not a spinner. The user should see the count 
 **Color:** Deep navy (`#1c3d5e`) on transparent background. The navbar uses dark background, so the icon renders in reverse there. For the web app favicon: deep navy on warm off-white.
 
 **File targets:**
-- `.lore/art/icon.png` — 512×512, production
+- `.lore/art/icon.webp` — 512×512, production
 - `.lore/art/favicon-32.png` — 32×32, favicon
 - `.lore/art/favicon-16.png` — 16×16, favicon (simplified)
 
