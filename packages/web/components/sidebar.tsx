@@ -58,9 +58,10 @@ function isActive(pathname: string, href: string): boolean {
   return pathname.startsWith(href);
 }
 
-const SidebarContext = createContext<{ open: boolean; toggle: () => void }>({
+const SidebarContext = createContext<{ open: boolean; toggle: () => void; close: () => void }>({
   open: false,
   toggle: () => {},
+  close: () => {},
 });
 
 export function useSidebar() {
@@ -89,7 +90,13 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     return () => document.removeEventListener("keydown", handler);
   }, [open, close]);
 
-  const value = useMemo(() => ({ open, toggle }), [open, toggle]);
+  // Lock body scroll when sidebar overlay is open
+  useEffect(() => {
+    document.body.classList.toggle("sidebar-overlay-open", open);
+    return () => document.body.classList.remove("sidebar-overlay-open");
+  }, [open]);
+
+  const value = useMemo(() => ({ open, toggle, close }), [open, toggle, close]);
 
   return (
     <SidebarContext.Provider value={value}>
@@ -105,11 +112,11 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { open, toggle } = useSidebar();
+  const { open, close } = useSidebar();
 
   return (
     <aside className={`sidebar${open ? " sidebar-open" : ""}`}>
-      <button className="sidebar-close" onClick={toggle} aria-label="Close navigation">
+      <button className="sidebar-close" onClick={close} aria-label="Close navigation">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
           <path d="M4.646 4.646a.5.5 0 01.708 0L8 7.293l2.646-2.647a.5.5 0 01.708.708L8.707 8l2.647 2.646a.5.5 0 01-.708.708L8 8.707l-2.646 2.647a.5.5 0 01-.708-.708L7.293 8 4.646 5.354a.5.5 0 010-.708z" />
         </svg>

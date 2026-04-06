@@ -1830,6 +1830,11 @@ body {
   inset: 0;
   background: rgba(0, 0, 0, 0.5);
   z-index: 99;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.2s ease,
+    visibility 0.2s ease;
 }
 
 .sidebar-close {
@@ -1862,7 +1867,9 @@ body {
 
   .sidebar {
     position: fixed;
-    inset: 0;
+    top: 0;
+    left: 0;
+    bottom: 0;
     z-index: 100;
     width: 260px;
     transform: translateX(-100%);
@@ -1873,12 +1880,21 @@ body {
     transform: translateX(0);
   }
 
-  .sidebar-backdrop.sidebar-backdrop-visible {
+  .sidebar-backdrop {
     display: block;
+  }
+
+  .sidebar-backdrop.sidebar-backdrop-visible {
+    opacity: 1;
+    visibility: visible;
   }
 
   .sidebar-close {
     display: flex;
+  }
+
+  body.sidebar-overlay-open .main-scroll {
+    overflow: hidden;
   }
 }
 
