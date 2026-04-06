@@ -27,21 +27,3 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
-- 13:03 commission-Dalton-20260406-125612 result: All 8 BGG client robustness issues verified and resolved. 230 tests pass, typecheck and lint clean.
-
-**Item 1** (429 unbounded recursion): Already fixed. No change needed.
-
-**Item 2** (429 recovery): ...
-
-- 13:03 commission-Dalton-20260406-125612 completed
-- 13:11 commission-Octavia-20260406-130316 result: Wrote tournament ranking specification at `.lore/specs/tournament-ranking.md` (20 requirements, REQ-TOURN-1 through REQ-TOURN-20 plus REQ-TOURN-15a).
-
-**Positions taken on the three open questions:**
-...
-- 13:11 commission-Octavia-20260406-130316 completed
-- 13:11 commission-Dalton-20260406-130842 result: Created `toErrorMessage(err: unknown): string` in `packages/shared/src/errors.ts`, exported from the shared package's public API. Wrote 7 tests covering Error, TypeError, string, number, null, undefin...
-- 13:11 commission-Dalton-20260406-130842 completed
-- 13:14 commission-Octavia-20260406-130704 result: Wrote utility curves specification at `.lore/specs/utility-curves.md` (25 requirements, REQ-CURVE-1 through REQ-CURVE-25).
-
-The spec defines three preference shapes (higher-is-better, lower-is-better,...
-- 13:14 commission-Octavia-20260406-130704 completed
