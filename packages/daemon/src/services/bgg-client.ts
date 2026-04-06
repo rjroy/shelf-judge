@@ -27,8 +27,7 @@ export interface BggGameResult {
 }
 
 export interface BatchProgressEvent {
-  batchIndex: number;
-  totalBatches: number;
+  batchIds: number[];
   results: Map<number, BggGameResult>;
 }
 
@@ -237,12 +236,11 @@ export function createBggClient(deps: BggClientDeps): BggClient {
       const totalBatches = Math.ceil(bggIds.length / MAX_BATCH_SIZE);
       console.log(`[bgg] getGames: fetching ${bggIds.length} games in ${totalBatches} batches`);
 
-      // Batch in chunks of MAX_BATCH_SIZE
       for (let i = 0; i < bggIds.length; i += MAX_BATCH_SIZE) {
-        const batchIndex = Math.floor(i / MAX_BATCH_SIZE);
-        const batch = bggIds.slice(i, i + MAX_BATCH_SIZE);
-        const idList = batch.join(",");
-        console.log(`[bgg] batch ${batchIndex + 1}/${totalBatches}: ${batch.length} ids`);
+        const batchNum = Math.floor(i / MAX_BATCH_SIZE) + 1;
+        const batchIds = bggIds.slice(i, i + MAX_BATCH_SIZE);
+        const idList = batchIds.join(",");
+        console.log(`[bgg] batch ${batchNum}/${totalBatches}: ${batchIds.length} ids`);
         const url = `${BGG_BASE_URL}/thing?id=${idList}&stats=1&type=boardgame`;
         const response = await throttledFetch(url);
         const xml = await response.text();
@@ -254,25 +252,26 @@ export function createBggClient(deps: BggClientDeps): BggClient {
           metadataList = parseThingMetadata(xml);
         } catch (err) {
           console.error(
-            `[bgg] batch ${batchIndex + 1} parse error: ${err instanceof Error ? err.message : String(err)}`,
+            `[bgg] batch ${batchNum} parse error: ${err instanceof Error ? err.message : String(err)}`,
           );
           throw new Error(
             `Failed to parse BGG batch thing response: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
 
+        console.log(`[bgg] batch ${batchNum}: parsed ${metadataList.length} games`);
         const batchResults = new Map<number, BggGameResult>();
-        console.log(`[bgg] batch ${batchIndex + 1}: parsed ${metadataList.length} games`);
         for (let j = 0; j < metadataList.length; j++) {
           const meta = metadataList[j];
           const data = bggDataList[j];
           if (meta && data) {
-            results.set(meta.bggId, { metadata: meta, bggData: data });
-            batchResults.set(meta.bggId, { metadata: meta, bggData: data });
+            const entry = { metadata: meta, bggData: data };
+            results.set(meta.bggId, entry);
+            batchResults.set(meta.bggId, entry);
           }
         }
 
-        await onBatch?.({ batchIndex, totalBatches, results: batchResults });
+        await onBatch?.({ batchIds, results: batchResults });
       }
 
       console.log(`[bgg] getGames: complete, ${results.size}/${bggIds.length} results`);

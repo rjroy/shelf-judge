@@ -202,7 +202,7 @@ describe("Integration: End-to-end scenarios", () => {
           const filtered = new Map(
             ids.filter((id) => bggResults.has(id)).map((id) => [id, bggResults.get(id)!]),
           );
-          await onBatch?.({ batchIndex: 0, totalBatches: 1, results: filtered });
+          await onBatch?.({ batchIds: ids, results: filtered });
           return filtered;
         },
         getGame: async (id) => {

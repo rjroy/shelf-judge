@@ -330,10 +330,8 @@ export function createGameService(deps: GameServiceDeps): GameService {
       const errors: string[] = [];
       const total = collectionItems.length;
 
-      // Identify new games (not already in collection)
       const newItems = collectionItems.filter((item) => !existingBggIds.has(item.bggId));
-      const skippedItems = collectionItems.filter((item) => existingBggIds.has(item.bggId));
-      skipped = skippedItems.length;
+      skipped = collectionItems.length - newItems.length;
       console.log(
         `[import] collection: ${total} total, ${newItems.length} new, ${skipped} already exist`,
       );
@@ -347,11 +345,10 @@ export function createGameService(deps: GameServiceDeps): GameService {
         importedSoFar: 0,
       });
 
-      // Build a lookup from bggId to collection item name for progress reporting
       const itemsByBggId = new Map(newItems.map((item) => [item.bggId, item]));
 
-      // Batch fetch game data, processing each batch as it arrives so progress
-      // events are paced by actual network requests instead of firing all at once.
+      // Process each batch as it arrives so progress events are paced by
+      // actual network requests instead of firing all at once.
       if (newItems.length > 0) {
         const newBggIds = newItems.map((item) => item.bggId);
         try {
@@ -388,10 +385,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
               imported++;
             }
 
-            // Check for items in this batch that BGG didn't return data for
-            const batchStart = batch.batchIndex * 20;
-            const batchIds = newBggIds.slice(batchStart, batchStart + 20);
-            for (const id of batchIds) {
+            for (const id of batch.batchIds) {
               if (!batch.results.has(id)) {
                 const item = itemsByBggId.get(id);
                 const name = item?.name ?? `BGG ID ${id}`;

@@ -107,7 +107,7 @@ describe("POST /api/import/bgg", () => {
     const mockClient = createMockBggClient({
       getUserCollection: async () => collectionItems,
       getGames: async (_ids, onBatch) => {
-        await onBatch?.({ batchIndex: 0, totalBatches: 1, results: gameResults });
+        await onBatch?.({ batchIds: _ids, results: gameResults });
         return gameResults;
       },
     });

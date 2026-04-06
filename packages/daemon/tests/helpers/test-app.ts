@@ -64,7 +64,7 @@ export function createMockBggClient(overrides?: Partial<BggClient>): BggClient {
       throw new Error("Not implemented in mock");
     },
     getGames: async (_ids, onBatch) => {
-      await onBatch?.({ batchIndex: 0, totalBatches: 1, results: new Map() });
+      await onBatch?.({ batchIds: _ids, results: new Map() });
       return new Map();
     },
     getUserCollection: async () => [],

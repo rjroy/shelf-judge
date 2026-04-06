@@ -15,6 +15,12 @@ interface ImportResult {
   errors: string[];
 }
 
+function progressStatusText(progress: ImportProgress): string {
+  if (progress.current) return `Fetching ${progress.current} from BGG…`;
+  if (progress.total > 0) return "Fetching game data from BGG…";
+  return "Fetching collection list…";
+}
+
 export default function ImportPage() {
   const router = useRouter();
   const [username, setUsername] = useState("");
@@ -156,13 +162,7 @@ export default function ImportPage() {
                 <div className="status-icon">⟳</div>
                 <div className="status-text">
                   <div className="status-headline">Importing in progress</div>
-                  <div className="status-sub">
-                    {progress.current
-                      ? `Fetching ${progress.current} from BGG…`
-                      : progress.total > 0
-                        ? "Fetching game data from BGG…"
-                        : "Fetching collection list…"}
-                  </div>
+                  <div className="status-sub">{progressStatusText(progress)}</div>
                 </div>
                 <div className="status-count">
                   <div className="count-value">
