@@ -27,3 +27,9 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
+- 15:42 commission-Dalton-20260406-153803 result: Phases 1 and 2 implemented. All checks pass: 281 tests green, typecheck clean, lint clean.
+
+**Phase 1: Data Model and Shared Types**
+- Added 11 tournament types to `packages/shared/src/types.ts`: Tour...
+
+- 15:42 commission-Dalton-20260406-153803 completed
