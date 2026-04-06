@@ -9,6 +9,56 @@ import {
 } from "../helpers/test-app.js";
 import type { BggGameResult } from "../../src/services/bgg-client.js";
 import type { BggCollectionItem } from "../../src/services/bgg-xml-parser.js";
+import type { Game, Axis, FitnessResult, FitnessBreakdownEntry } from "@shelf-judge/shared";
+
+// Response shapes returned by the daemon API
+interface AddGameResponse {
+  game: Game;
+  bggImported: boolean;
+  warning?: string;
+}
+
+interface RateGameResponse {
+  game: Game;
+  score: FitnessResult | null;
+}
+
+interface GameWithScore {
+  game: Game;
+  score: FitnessResult | null;
+}
+
+interface GetGameResponse {
+  game: Game;
+  score: FitnessResult | null;
+  bggDataStale?: boolean;
+}
+
+interface ScoreResponse {
+  gameId: string;
+  gameName: string;
+  score: number;
+  ratedAxisCount: number;
+  totalAxisCount: number;
+  breakdown: FitnessBreakdownEntry[];
+}
+
+interface ScoresListResponse {
+  scored: ScoreResponse[];
+  unscored: { gameId: string; gameName: string }[];
+}
+
+interface DeleteAxisResponse {
+  deletedRatingsCount: number;
+}
+
+interface RefreshAllResponse {
+  refreshed: number;
+}
+
+interface ErrorResponse {
+  error: string;
+}
 
 // Shared fixtures
 const wingspanBgg: BggGameResult = {
@@ -71,13 +121,13 @@ describe("Integration: End-to-end scenarios", () => {
         name: "My Card Game",
       });
       expect(addRes.status).toBe(201);
-      const { game } = await addRes.json();
+      const { game } = (await addRes.json()) as AddGameResponse;
       const gameId = game.id;
 
       // Step 2: Get the default axes (Community Rating, Complexity)
       const axesRes = await jsonRequest(ctx.app, "GET", "/api/axes");
       expect(axesRes.status).toBe(200);
-      const axes = await axesRes.json();
+      const axes = (await axesRes.json()) as Axis[];
       expect(axes.length).toBe(2);
 
       // Step 3: Create a personal axis
@@ -86,7 +136,7 @@ describe("Integration: End-to-end scenarios", () => {
         weight: 60,
       });
       expect(createAxisRes.status).toBe(201);
-      const funAxis = await createAxisRes.json();
+      const funAxis = (await createAxisRes.json()) as Axis;
 
       // Step 4: Create another personal axis
       const createAxis2Res = await jsonRequest(ctx.app, "POST", "/api/axes", {
@@ -94,7 +144,7 @@ describe("Integration: End-to-end scenarios", () => {
         weight: 40,
       });
       expect(createAxis2Res.status).toBe(201);
-      const replayAxis = await createAxis2Res.json();
+      const replayAxis = (await createAxis2Res.json()) as Axis;
 
       // Step 5: Rate the game on both personal axes
       const rateRes = await jsonRequest(ctx.app, "PUT", `/api/games/${gameId}/ratings`, {
@@ -104,17 +154,17 @@ describe("Integration: End-to-end scenarios", () => {
         },
       });
       expect(rateRes.status).toBe(200);
-      const rated = await rateRes.json();
+      const rated = (await rateRes.json()) as RateGameResponse;
 
       // Step 6: Verify the score
       // score = (8*60 + 6*40) / (60+40) = (480 + 240) / 100 = 7.2
       expect(rated.score).not.toBeNull();
-      expect(rated.score.score).toBe(7.2);
+      expect(rated.score!.score).toBe(7.2);
 
       // Step 7: Verify via score endpoint
       const scoreRes = await jsonRequest(ctx.app, "GET", `/api/games/${gameId}/score`);
       expect(scoreRes.status).toBe(200);
-      const scoreData = await scoreRes.json();
+      const scoreData = (await scoreRes.json()) as ScoreResponse;
       expect(scoreData.score).toBe(7.2);
       expect(scoreData.breakdown).toBeDefined();
       expect(scoreData.breakdown.length).toBe(4); // 2 default + 2 personal
@@ -124,9 +174,9 @@ describe("Integration: End-to-end scenarios", () => {
       // Step 8: Verify via game list
       const listRes = await jsonRequest(ctx.app, "GET", "/api/games");
       expect(listRes.status).toBe(200);
-      const games = await listRes.json();
+      const games = (await listRes.json()) as GameWithScore[];
       expect(games.length).toBe(1);
-      expect(games[0].score.score).toBe(7.2);
+      expect(games[0].score!.score).toBe(7.2);
     });
   });
 
@@ -142,14 +192,14 @@ describe("Integration: End-to-end scenarios", () => {
       const addRes = await jsonRequest(ctx.app, "POST", "/api/games", {
         name: "Strategy Game",
       });
-      const { game } = await addRes.json();
+      const { game } = (await addRes.json()) as AddGameResponse;
 
       // Create axis and rate
       const axisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
         name: "Depth",
         weight: 100,
       });
-      const axis = await axisRes.json();
+      const axis = (await axisRes.json()) as Axis;
 
       await jsonRequest(ctx.app, "PUT", `/api/games/${game.id}/ratings`, {
         ratings: { [axis.id]: 9 },
@@ -157,7 +207,7 @@ describe("Integration: End-to-end scenarios", () => {
 
       // Score should be 9.0
       let scoreRes = await jsonRequest(ctx.app, "GET", `/api/games/${game.id}/score`);
-      let scoreData = await scoreRes.json();
+      let scoreData = (await scoreRes.json()) as ScoreResponse;
       expect(scoreData.score).toBe(9);
 
       // Update axis weight
@@ -168,7 +218,7 @@ describe("Integration: End-to-end scenarios", () => {
         name: "Accessibility",
         weight: 50,
       });
-      const axis2 = await axis2Res.json();
+      const axis2 = (await axis2Res.json()) as Axis;
 
       await jsonRequest(ctx.app, "PUT", `/api/games/${game.id}/ratings`, {
         ratings: { [axis2.id]: 5 },
@@ -176,7 +226,7 @@ describe("Integration: End-to-end scenarios", () => {
 
       // Score should now be (9*50 + 5*50) / (50+50) = 700/100 = 7.0
       scoreRes = await jsonRequest(ctx.app, "GET", `/api/games/${game.id}/score`);
-      scoreData = await scoreRes.json();
+      scoreData = (await scoreRes.json()) as ScoreResponse;
       expect(scoreData.score).toBe(7);
       expect(scoreData.ratedAxisCount).toBe(2);
     });
@@ -197,7 +247,7 @@ describe("Integration: End-to-end scenarios", () => {
       ]);
 
       const bggClient = createMockBggClient({
-        getUserCollection: async () => collectionItems,
+        getUserCollection: () => Promise.resolve(collectionItems),
         getGames: async (ids, onBatch) => {
           const filtered = new Map(
             ids.filter((id) => bggResults.has(id)).map((id) => [id, bggResults.get(id)!]),
@@ -205,10 +255,10 @@ describe("Integration: End-to-end scenarios", () => {
           await onBatch?.({ batchIds: ids, results: filtered });
           return filtered;
         },
-        getGame: async (id) => {
+        getGame: (id) => {
           const result = bggResults.get(id);
           if (!result) throw new Error(`Not found: ${id}`);
-          return result;
+          return Promise.resolve(result);
         },
       });
 
@@ -224,10 +274,10 @@ describe("Integration: End-to-end scenarios", () => {
 
       // Verify games exist in the collection
       const listRes = await jsonRequest(ctx.app, "GET", "/api/games");
-      const games = await listRes.json();
+      const games = (await listRes.json()) as GameWithScore[];
       expect(games.length).toBe(2);
 
-      const names = games.map((g: { game: { name: string } }) => g.game.name).sort();
+      const names = games.map((g) => g.game.name).sort();
       expect(names).toEqual(["Gloomhaven", "Wingspan"]);
 
       // Import again: should skip both existing games
@@ -237,7 +287,7 @@ describe("Integration: End-to-end scenarios", () => {
 
       // Collection should still have only 2 games
       const listRes2 = await jsonRequest(ctx.app, "GET", "/api/games");
-      const games2 = await listRes2.json();
+      const games2 = (await listRes2.json()) as GameWithScore[];
       expect(games2.length).toBe(2);
     });
   });
@@ -255,20 +305,20 @@ describe("Integration: End-to-end scenarios", () => {
         name: "Fun",
         weight: 60,
       });
-      const axis1 = await axis1Res.json();
+      const axis1 = (await axis1Res.json()) as Axis;
 
       const axis2Res = await jsonRequest(ctx.app, "POST", "/api/axes", {
         name: "Theme",
         weight: 40,
       });
-      const axis2 = await axis2Res.json();
+      const axis2 = (await axis2Res.json()) as Axis;
 
       // Add two games and rate both on both axes
       const game1Res = await jsonRequest(ctx.app, "POST", "/api/games", { name: "Game A" });
-      const game1 = (await game1Res.json()).game;
+      const game1 = ((await game1Res.json()) as AddGameResponse).game;
 
       const game2Res = await jsonRequest(ctx.app, "POST", "/api/games", { name: "Game B" });
-      const game2 = (await game2Res.json()).game;
+      const game2 = ((await game2Res.json()) as AddGameResponse).game;
 
       await jsonRequest(ctx.app, "PUT", `/api/games/${game1.id}/ratings`, {
         ratings: { [axis1.id]: 8, [axis2.id]: 6 },
@@ -278,24 +328,28 @@ describe("Integration: End-to-end scenarios", () => {
       });
 
       // Verify scores before deletion
-      let score1 = await (await jsonRequest(ctx.app, "GET", `/api/games/${game1.id}/score`)).json();
+      let score1 = (await (
+        await jsonRequest(ctx.app, "GET", `/api/games/${game1.id}/score`)
+      ).json()) as ScoreResponse;
       // (8*60 + 6*40) / 100 = 7.2
       expect(score1.score).toBe(7.2);
 
       // Delete axis1 (Fun)
       const deleteRes = await jsonRequest(ctx.app, "DELETE", `/api/axes/${axis1.id}`);
       expect(deleteRes.status).toBe(200);
-      const deleteBody = await deleteRes.json();
+      const deleteBody = (await deleteRes.json()) as DeleteAxisResponse;
       expect(deleteBody.deletedRatingsCount).toBe(2);
 
       // Score should now be based only on axis2 (Theme)
-      score1 = await (await jsonRequest(ctx.app, "GET", `/api/games/${game1.id}/score`)).json();
+      score1 = (await (
+        await jsonRequest(ctx.app, "GET", `/api/games/${game1.id}/score`)
+      ).json()) as ScoreResponse;
       expect(score1.score).toBe(6); // Only Theme axis: 6*40/40 = 6
       expect(score1.ratedAxisCount).toBe(1);
 
-      const score2 = await (
+      const score2 = (await (
         await jsonRequest(ctx.app, "GET", `/api/games/${game2.id}/score`)
-      ).json();
+      ).json()) as ScoreResponse;
       expect(score2.score).toBe(9); // Only Theme axis: 9*40/40 = 9
     });
   });
@@ -313,13 +367,17 @@ describe("Integration: End-to-end scenarios", () => {
       };
 
       const bggClient = createMockBggClient({
-        getGame: async () => (refreshed ? updatedWingspan : wingspanBgg),
-        getGames: async (ids) => {
+        getGame: (id) => {
+          const result = refreshed ? updatedWingspan : wingspanBgg;
+          if (id !== 266192) throw new Error(`Not found: ${id}`);
+          return Promise.resolve(result);
+        },
+        getGames: (ids) => {
           const results = new Map<number, BggGameResult>();
           for (const id of ids) {
             if (id === 266192) results.set(id, updatedWingspan);
           }
-          return results;
+          return Promise.resolve(results);
         },
       });
 
@@ -330,27 +388,25 @@ describe("Integration: End-to-end scenarios", () => {
         name: "Wingspan",
         bggId: 266192,
       });
-      const { game } = await addRes.json();
+      const { game } = (await addRes.json()) as AddGameResponse;
 
       // Get default axes: Community Rating and Complexity are BGG-derived
       const axesRes = await jsonRequest(ctx.app, "GET", "/api/axes");
-      const axes = await axesRes.json();
-      const communityAxis = axes.find((a: { name: string }) => a.name === "Community Rating");
+      const axes = (await axesRes.json()) as Axis[];
+      const communityAxis = axes.find((a) => a.name === "Community Rating");
 
       // Override the BGG community rating with a personal value
       await jsonRequest(ctx.app, "PUT", `/api/games/${game.id}/ratings`, {
-        ratings: { [communityAxis.id]: 7 },
+        ratings: { [communityAxis!.id]: 7 },
       });
 
       // Get score: should use override value
       let scoreRes = await jsonRequest(ctx.app, "GET", `/api/games/${game.id}/score`);
-      let scoreData = await scoreRes.json();
-      const communityEntry = scoreData.breakdown.find(
-        (b: { axisName: string }) => b.axisName === "Community Rating",
-      );
-      expect(communityEntry.rating).toBe(7);
-      expect(communityEntry.source).toBe("override");
-      expect(communityEntry.bggOriginal).toBe(8.1);
+      let scoreData = (await scoreRes.json()) as ScoreResponse;
+      const communityEntry = scoreData.breakdown.find((b) => b.axisName === "Community Rating");
+      expect(communityEntry!.rating).toBe(7);
+      expect(communityEntry!.source).toBe("override");
+      expect(communityEntry!.bggOriginal).toBe(8.1);
 
       // Refresh BGG data for this game (now returns updated data)
       refreshed = true;
@@ -359,19 +415,17 @@ describe("Integration: End-to-end scenarios", () => {
 
       // Score should still use the override, but bggOriginal should be updated
       scoreRes = await jsonRequest(ctx.app, "GET", `/api/games/${game.id}/score`);
-      scoreData = await scoreRes.json();
-      const updatedEntry = scoreData.breakdown.find(
-        (b: { axisName: string }) => b.axisName === "Community Rating",
-      );
-      expect(updatedEntry.rating).toBe(7); // Override preserved
-      expect(updatedEntry.source).toBe("override");
+      scoreData = (await scoreRes.json()) as ScoreResponse;
+      const updatedEntry = scoreData.breakdown.find((b) => b.axisName === "Community Rating");
+      expect(updatedEntry!.rating).toBe(7); // Override preserved
+      expect(updatedEntry!.source).toBe("override");
       // bggOriginal reflects the refreshed BGG data
-      expect(updatedEntry.bggOriginal).toBe(8.5);
+      expect(updatedEntry!.bggOriginal).toBe(8.5);
 
       // Refresh all games
       const refreshAllRes = await jsonRequest(ctx.app, "POST", "/api/games/refresh");
       expect(refreshAllRes.status).toBe(200);
-      const refreshSummary = await refreshAllRes.json();
+      const refreshSummary = (await refreshAllRes.json()) as RefreshAllResponse;
       expect(refreshSummary.refreshed).toBe(1);
     });
   });
@@ -390,7 +444,7 @@ describe("Integration: End-to-end scenarios", () => {
         name: "Manual Game",
       });
       expect(addRes.status).toBe(201);
-      const { game } = await addRes.json();
+      const { game } = (await addRes.json()) as AddGameResponse;
 
       // Axis CRUD works
       const axisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
@@ -398,7 +452,7 @@ describe("Integration: End-to-end scenarios", () => {
         weight: 50,
       });
       expect(axisRes.status).toBe(201);
-      const axis = await axisRes.json();
+      const axis = (await axisRes.json()) as Axis;
 
       // Rating works
       const rateRes = await jsonRequest(ctx.app, "PUT", `/api/games/${game.id}/ratings`, {
@@ -409,13 +463,13 @@ describe("Integration: End-to-end scenarios", () => {
       // Score works
       const scoreRes = await jsonRequest(ctx.app, "GET", `/api/games/${game.id}/score`);
       expect(scoreRes.status).toBe(200);
-      const scoreData = await scoreRes.json();
+      const scoreData = (await scoreRes.json()) as ScoreResponse;
       expect(scoreData.score).toBe(8);
 
       // BGG search returns 503
       const searchRes = await jsonRequest(ctx.app, "GET", "/api/games/search?q=wingspan");
       expect(searchRes.status).toBe(503);
-      const searchErr = await searchRes.json();
+      const searchErr = (await searchRes.json()) as ErrorResponse;
       expect(searchErr.error).toContain("not configured");
 
       // BGG refresh returns 503
@@ -447,7 +501,7 @@ describe("Integration: End-to-end scenarios", () => {
         name: "JSON Test Game",
       });
       expect(addRes.status).toBe(201);
-      const addBody = await addRes.json();
+      const addBody = (await addRes.json()) as AddGameResponse;
       // Shape: { game: Game, bggImported: boolean, warning?: string }
       expect(addBody).toHaveProperty("game");
       expect(addBody).toHaveProperty("bggImported");
@@ -462,7 +516,7 @@ describe("Integration: End-to-end scenarios", () => {
         name: "Test Axis",
         weight: 50,
       });
-      const axis = await axisRes.json();
+      const axis = (await axisRes.json()) as Axis;
       // Shape: Axis
       expect(axis).toHaveProperty("id");
       expect(axis).toHaveProperty("name");
@@ -472,7 +526,7 @@ describe("Integration: End-to-end scenarios", () => {
       const rateRes = await jsonRequest(ctx.app, "PUT", `/api/games/${gameId}/ratings`, {
         ratings: { [axis.id]: 7 },
       });
-      const rateBody = await rateRes.json();
+      const rateBody = (await rateRes.json()) as RateGameResponse;
       // Shape: { game: Game, score: FitnessResult | null }
       expect(rateBody).toHaveProperty("game");
       expect(rateBody).toHaveProperty("score");
@@ -481,7 +535,7 @@ describe("Integration: End-to-end scenarios", () => {
 
       // List games
       const listRes = await jsonRequest(ctx.app, "GET", "/api/games");
-      const listBody = await listRes.json();
+      const listBody = (await listRes.json()) as GameWithScore[];
       // Shape: GameWithScore[]
       expect(Array.isArray(listBody)).toBe(true);
       expect(listBody[0]).toHaveProperty("game");
@@ -489,14 +543,14 @@ describe("Integration: End-to-end scenarios", () => {
 
       // Get game
       const getRes = await jsonRequest(ctx.app, "GET", `/api/games/${gameId}`);
-      const getBody = await getRes.json();
+      const getBody = (await getRes.json()) as GetGameResponse;
       // Shape: { game: Game, score: FitnessResult | null, bggDataStale?: boolean }
       expect(getBody).toHaveProperty("game");
       expect(getBody).toHaveProperty("score");
 
       // Score list
       const scoresRes = await jsonRequest(ctx.app, "GET", "/api/scores");
-      const scoresBody = await scoresRes.json();
+      const scoresBody = (await scoresRes.json()) as ScoresListResponse;
       // Shape: { scored: [...], unscored: [...] }
       expect(scoresBody).toHaveProperty("scored");
       expect(scoresBody).toHaveProperty("unscored");
@@ -508,7 +562,7 @@ describe("Integration: End-to-end scenarios", () => {
 
       // Score get
       const scoreGetRes = await jsonRequest(ctx.app, "GET", `/api/games/${gameId}/score`);
-      const scoreGetBody = await scoreGetRes.json();
+      const scoreGetBody = (await scoreGetRes.json()) as ScoreResponse;
       // Shape: { gameId, gameName, score, ratedAxisCount, totalAxisCount, breakdown }
       expect(scoreGetBody).toHaveProperty("gameId");
       expect(scoreGetBody).toHaveProperty("gameName");
@@ -517,7 +571,7 @@ describe("Integration: End-to-end scenarios", () => {
 
       // Axes list
       const axesListRes = await jsonRequest(ctx.app, "GET", "/api/axes");
-      const axesList = await axesListRes.json();
+      const axesList = (await axesListRes.json()) as Axis[];
       expect(Array.isArray(axesList)).toBe(true);
       // Each axis has required fields
       for (const a of axesList) {

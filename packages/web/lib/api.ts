@@ -50,14 +50,16 @@ export async function addGame(
     body,
   });
   if (res.status === 409) {
-    const data = await res.json();
+    const data = (await res.json()) as { error?: string };
     throw new Error(data.error ?? "Duplicate game");
   }
   if (!res.ok) {
-    const data = await res.json().catch(() => ({ error: "Unknown error" }));
+    const data = (await res.json().catch(() => ({ error: "Unknown error" }))) as {
+      error?: string;
+    };
     throw new Error(data.error ?? `Failed to add game: ${res.status}`);
   }
-  return res.json();
+  return res.json() as Promise<AddGameResult>;
 }
 
 export async function rateGame(

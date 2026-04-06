@@ -9,7 +9,7 @@ async function proxyToDaemon(request: NextRequest, params: Promise<{ path: strin
 
   const body =
     request.method !== "GET" && request.method !== "HEAD"
-      ? await request.json().catch(() => undefined)
+      ? ((await request.json().catch(() => undefined)) as unknown)
       : undefined;
 
   try {

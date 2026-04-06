@@ -71,7 +71,10 @@ describe("score list", () => {
 
   test("--json outputs parseable JSON with scored and unscored arrays", async () => {
     const output = await scoreList(client, [], { json: true });
-    const parsed = JSON.parse(output);
+    const parsed = JSON.parse(output) as {
+      scored: Array<{ gameName: string; score: number }>;
+      unscored: Array<{ gameName: string; score: null }>;
+    };
     expect(Array.isArray(parsed.scored)).toBe(true);
     expect(Array.isArray(parsed.unscored)).toBe(true);
     expect(parsed.scored[0].gameName).toBe("Wingspan");
@@ -133,7 +136,11 @@ describe("score get (rated game)", () => {
 
   test("--json outputs parseable JSON with score and breakdown", async () => {
     const output = await scoreGet(client, ["abc-123"], { json: true });
-    const parsed = JSON.parse(output);
+    const parsed = JSON.parse(output) as {
+      gameName: string;
+      score: number;
+      breakdown: Array<{ axisName: string }>;
+    };
     expect(parsed.gameName).toBe("Wingspan");
     expect(parsed.score).toBe(7.9);
     expect(Array.isArray(parsed.breakdown)).toBe(true);
@@ -166,7 +173,7 @@ describe("score get (unrated game)", () => {
 
   test("--json outputs parseable JSON with null score", async () => {
     const output = await scoreGet(client, ["ghi-789"], { json: true });
-    const parsed = JSON.parse(output);
+    const parsed = JSON.parse(output) as { gameName: string; score: null; status: string };
     expect(parsed.gameName).toBe("Unrated Game");
     expect(parsed.score).toBeNull();
     expect(parsed.status).toBe("not yet rated");

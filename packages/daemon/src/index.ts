@@ -33,8 +33,10 @@ async function main() {
 
   const socketPath = resolveSocketPath(appConfig, envConfig);
 
-  // Forward-declared so the shutdown route can reference the server
-  let server: ReturnType<typeof Bun.serve>;
+  // Forward-declared so the shutdown route can reference the server.
+  // Using a wrapper object so the reference can be updated after Bun.serve()
+  // while keeping the variable const.
+  const serverRef: { current: ReturnType<typeof Bun.serve> | null } = { current: null };
 
   const { app } = createApp({
     storageService,
@@ -43,12 +45,12 @@ async function main() {
     bggClient,
     onShutdown() {
       console.log("Shutting down via API...");
-      server.stop();
+      void serverRef.current?.stop();
       process.exit(0);
     },
   });
 
-  server = Bun.serve({
+  serverRef.current = Bun.serve({
     fetch: app.fetch,
     unix: socketPath,
     idleTimeout: 0 as never,
@@ -61,7 +63,7 @@ async function main() {
 
   function shutdown() {
     console.log("Shutting down...");
-    server.stop();
+    void serverRef.current?.stop();
     process.exit(0);
   }
 

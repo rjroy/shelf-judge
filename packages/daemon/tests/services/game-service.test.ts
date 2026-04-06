@@ -51,7 +51,8 @@ describe("GameService", () => {
     test("rejects duplicate bggId", async () => {
       await gameService.addGame({ name: "Wingspan", bggId: 266192 });
 
-      expect(gameService.addGame({ name: "Wingspan Copy", bggId: 266192 })).rejects.toThrow(
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(gameService.addGame({ name: "Wingspan Copy", bggId: 266192 })).rejects.toThrow(
         "BGG ID 266192 already exists",
       );
     });
@@ -89,7 +90,8 @@ describe("GameService", () => {
     });
 
     test("throws on non-existent game", async () => {
-      expect(gameService.getGame("nonexistent")).rejects.toThrow("Game not found");
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(gameService.getGame("nonexistent")).rejects.toThrow("Game not found");
     });
   });
 
@@ -102,7 +104,7 @@ describe("GameService", () => {
 
       const { game: g1 } = await gameService.addGame({ name: "Low Score" });
       const { game: g2 } = await gameService.addGame({ name: "High Score" });
-      const { game: g3 } = await gameService.addGame({ name: "Unrated" });
+      await gameService.addGame({ name: "Unrated" });
 
       await gameService.rateGame(g1.id, { [axis.id]: 3 });
       await gameService.rateGame(g2.id, { [axis.id]: 9 });
@@ -143,7 +145,8 @@ describe("GameService", () => {
       });
       const { game } = await gameService.addGame({ name: "Test" });
 
-      expect(gameService.rateGame(game.id, { [axis.id]: 0 })).rejects.toThrow(
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(gameService.rateGame(game.id, { [axis.id]: 0 })).rejects.toThrow(
         "Rating must be an integer between 1 and 10",
       );
     });
@@ -155,7 +158,8 @@ describe("GameService", () => {
       });
       const { game } = await gameService.addGame({ name: "Test" });
 
-      expect(gameService.rateGame(game.id, { [axis.id]: 11 })).rejects.toThrow(
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(gameService.rateGame(game.id, { [axis.id]: 11 })).rejects.toThrow(
         "Rating must be an integer between 1 and 10",
       );
     });
@@ -167,7 +171,8 @@ describe("GameService", () => {
       });
       const { game } = await gameService.addGame({ name: "Test" });
 
-      expect(gameService.rateGame(game.id, { [axis.id]: 1.5 })).rejects.toThrow(
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(gameService.rateGame(game.id, { [axis.id]: 1.5 })).rejects.toThrow(
         "Rating must be an integer between 1 and 10",
       );
     });
@@ -179,7 +184,8 @@ describe("GameService", () => {
       });
       const { game } = await gameService.addGame({ name: "Test" });
 
-      expect(gameService.rateGame(game.id, { [axis.id]: -1 })).rejects.toThrow(
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(gameService.rateGame(game.id, { [axis.id]: -1 })).rejects.toThrow(
         "Rating must be an integer between 1 and 10",
       );
     });
@@ -187,7 +193,10 @@ describe("GameService", () => {
     test("rejects unknown axis ID", async () => {
       const { game } = await gameService.addGame({ name: "Test" });
 
-      expect(gameService.rateGame(game.id, { "fake-axis": 5 })).rejects.toThrow("Axis not found");
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(gameService.rateGame(game.id, { "fake-axis": 5 })).rejects.toThrow(
+        "Axis not found",
+      );
     });
   });
 
@@ -208,7 +217,8 @@ describe("GameService", () => {
     });
 
     test("throws on non-existent game", async () => {
-      expect(gameService.removeGame("nonexistent")).rejects.toThrow("Game not found");
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(gameService.removeGame("nonexistent")).rejects.toThrow("Game not found");
     });
   });
 });

@@ -3,12 +3,10 @@ import * as path from "node:path";
 import { createGameService } from "../../src/services/game-service.js";
 import { createFitnessService } from "../../src/services/fitness-service.js";
 import { createStorageService } from "../../src/services/storage-service.js";
-import { createAxisService } from "../../src/services/axis-service.js";
 import { createBggClient } from "../../src/services/bgg-client.js";
 import { createMockFileOps } from "../helpers/mock-file-ops.js";
 import type { GameService } from "../../src/services/game-service.js";
 import type { StorageService } from "../../src/services/storage-service.js";
-import type { AxisService } from "../../src/services/axis-service.js";
 import type { BggClient } from "../../src/services/bgg-client.js";
 import type { MockFileOps } from "../helpers/mock-file-ops.js";
 
@@ -22,17 +20,19 @@ function createMockFetch() {
   const calls: Array<{ url: string }> = [];
   const responses: Array<{ status: number; body: string }> = [];
 
-  const fn = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-    const url = typeof input === "string" ? input : input.toString();
+  const fn = (input: string | URL | Request): Promise<Response> => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     calls.push({ url });
 
     const next = responses.shift();
-    if (!next) throw new Error(`No mock response for: ${url}`);
+    if (!next) return Promise.reject(new Error(`No mock response for: ${url}`));
 
-    return new Response(next.body, {
-      status: next.status,
-      headers: { "Content-Type": "application/xml" },
-    });
+    return Promise.resolve(
+      new Response(next.body, {
+        status: next.status,
+        headers: { "Content-Type": "application/xml" },
+      }),
+    );
   };
 
   return {
@@ -48,7 +48,6 @@ function createMockFetch() {
 let fileOps: MockFileOps;
 let storageService: StorageService;
 let gameService: GameService;
-let axisService: AxisService;
 let bggClient: BggClient;
 let mockFetch: ReturnType<typeof createMockFetch>;
 
@@ -64,11 +63,10 @@ beforeEach(() => {
     config: { bggAuthToken: "test-token" },
     fetchFn: mockFetch.fn,
     delayMs: 0,
-    delayFn: async () => {},
+    delayFn: () => Promise.resolve(),
   });
   const fitnessService = createFitnessService();
   gameService = createGameService({ storageService, fitnessService, bggClient });
-  axisService = createAxisService({ storageService });
 });
 
 describe("GameService BGG Integration", () => {
@@ -127,6 +125,7 @@ describe("GameService BGG Integration", () => {
         fitnessService: createFitnessService(),
       });
 
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
       await expect(noBggService.searchGames("Wingspan")).rejects.toThrow(
         "BGG integration is not configured",
       );
@@ -165,6 +164,7 @@ describe("GameService BGG Integration", () => {
     test("throws for manual game without bggId", async () => {
       const { game } = await gameService.addGame({ name: "Manual Game" });
 
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
       await expect(gameService.refreshBggData(game.id)).rejects.toThrow("no BGG ID");
     });
   });

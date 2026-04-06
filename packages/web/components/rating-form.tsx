@@ -66,7 +66,9 @@ export function RatingForm({
       });
 
       if (!res.ok) {
-        const data = await res.json().catch(() => ({ error: "Unknown error" }));
+        const data = (await res.json().catch(() => ({ error: "Unknown error" }))) as {
+          error?: string;
+        };
         throw new Error(data.error ?? `Failed: ${res.status}`);
       }
 
@@ -90,7 +92,11 @@ export function RatingForm({
   }
 
   return (
-    <form onSubmit={handleSubmit}>
+    <form
+      onSubmit={(e) => {
+        void handleSubmit(e);
+      }}
+    >
       {error && <div className="error-banner">{error}</div>}
 
       <div className="rating-form">

@@ -46,7 +46,7 @@ describe("axis list", () => {
     });
 
     const output = await axisList(client, [], { json: true });
-    const parsed = JSON.parse(output);
+    const parsed = JSON.parse(output) as Array<{ id: string; name: string }>;
 
     expect(Array.isArray(parsed)).toBe(true);
     expect(parsed).toHaveLength(2);
@@ -85,7 +85,7 @@ describe("axis create", () => {
     });
 
     const output = await axisCreate(client, ["Visual design"], { json: true, weight: 30 });
-    const parsed = JSON.parse(output);
+    const parsed = JSON.parse(output) as { id: string; name: string; weight: number };
 
     expect(parsed.id).toBe("new-axis-id");
     expect(parsed.name).toBe("Visual design");
@@ -122,7 +122,7 @@ describe("axis update", () => {
     });
 
     const output = await axisUpdate(client, ["ax-1-full-uuid"], { json: true, weight: 50 });
-    const parsed = JSON.parse(output);
+    const parsed = JSON.parse(output) as { id: string; weight: number };
 
     expect(parsed.id).toBe("ax-1-full-uuid");
     expect(parsed.weight).toBe(50);
@@ -157,7 +157,7 @@ describe("axis delete", () => {
     });
 
     const output = await axisDelete(client, ["ax-1-full-uuid"], { json: true });
-    const parsed = JSON.parse(output);
+    const parsed = JSON.parse(output) as { deletedRatingsCount: number };
 
     expect(parsed.deletedRatingsCount).toBe(3);
   });

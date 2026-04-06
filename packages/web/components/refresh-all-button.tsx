@@ -16,10 +16,12 @@ export function RefreshAllButton() {
     try {
       const res = await fetch("/api/daemon/games/refresh", { method: "POST" });
       if (!res.ok) {
-        const data = await res.json().catch(() => ({ error: "Unknown error" }));
+        const data = (await res.json().catch(() => ({ error: "Unknown error" }))) as {
+          error?: string;
+        };
         throw new Error(data.error ?? `Failed: ${res.status}`);
       }
-      const data = await res.json();
+      const data = (await res.json()) as { refreshed: number; errors?: string[] };
       const message = `Refreshed ${data.refreshed} game(s)${data.errors?.length ? `, ${data.errors.length} error(s)` : ""}`;
       setResult({ message, isError: false });
       router.refresh();
@@ -35,7 +37,13 @@ export function RefreshAllButton() {
 
   return (
     <div className="refresh-all-wrapper">
-      <button className="btn btn-secondary" onClick={handleRefresh} disabled={refreshing}>
+      <button
+        className="btn btn-secondary"
+        onClick={() => {
+          void handleRefresh();
+        }}
+        disabled={refreshing}
+      >
         {refreshing ? "Refreshing..." : "Refresh All BGG"}
       </button>
       {result && (

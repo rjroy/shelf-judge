@@ -38,14 +38,13 @@ export async function scoreList(
 
   if (opts.json) return printOutput(data, opts);
 
-  const result = data as ScoreListResponse;
   const lines: string[] = [];
 
-  if (result.scored.length > 0) {
+  if (data.scored.length > 0) {
     lines.push(
       formatTable(
         ["#", "Name", "Score", "Rated Axes"],
-        result.scored.map((g, i) => [
+        data.scored.map((g, i) => [
           String(i + 1),
           g.gameName,
           formatScore(g.score),
@@ -55,10 +54,10 @@ export async function scoreList(
     );
   }
 
-  if (result.unscored.length > 0) {
+  if (data.unscored.length > 0) {
     if (lines.length > 0) lines.push("");
     lines.push("Unscored:");
-    for (const g of result.unscored) {
+    for (const g of data.unscored) {
       lines.push(`  ${g.gameName} - not yet rated`);
     }
   }
@@ -101,21 +100,19 @@ export async function scoreGet(
 
   if (opts.json) return printOutput(data, opts);
 
-  const result = data as ScoreGetResponse;
-
-  if (result.score === null) {
-    return `${result.gameName}: not yet rated`;
+  if (data.score === null) {
+    return `${data.gameName}: not yet rated`;
   }
 
   const lines: string[] = [];
-  lines.push(`${result.gameName}`);
+  lines.push(`${data.gameName}`);
   lines.push(
-    `Fitness: ${formatScore(result.score)} (${result.ratedAxisCount}/${result.totalAxisCount} axes rated)`,
+    `Fitness: ${formatScore(data.score)} (${data.ratedAxisCount}/${data.totalAxisCount} axes rated)`,
   );
   lines.push("");
 
-  if (result.breakdown && result.breakdown.length > 0) {
-    lines.push(formatBreakdown(result.breakdown));
+  if (data.breakdown && data.breakdown.length > 0) {
+    lines.push(formatBreakdown(data.breakdown));
   }
 
   return lines.join("\n");

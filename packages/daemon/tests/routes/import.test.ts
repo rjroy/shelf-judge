@@ -48,7 +48,7 @@ describe("POST /api/import/bgg", () => {
     const res = await postImportBgg(ctx.app, "testuser");
     expect(res.status).toBe(503);
 
-    const body = await res.json();
+    const body = (await res.json()) as { error: string };
     expect(body.error).toContain("not configured");
   });
 
@@ -105,7 +105,7 @@ describe("POST /api/import/bgg", () => {
     });
 
     const mockClient = createMockBggClient({
-      getUserCollection: async () => collectionItems,
+      getUserCollection: () => Promise.resolve(collectionItems),
       getGames: async (_ids, onBatch) => {
         await onBatch?.({ batchIds: _ids, results: gameResults });
         return gameResults;
@@ -128,7 +128,11 @@ describe("POST /api/import/bgg", () => {
     expect(progressEvents.length).toBeGreaterThan(0);
     expect(completeEvents.length).toBe(1);
 
-    const complete = JSON.parse(completeEvents[0].data);
+    const complete = JSON.parse(completeEvents[0].data) as {
+      imported: number;
+      skipped: number;
+      errors: string[];
+    };
     expect(complete.imported).toBe(2);
     expect(complete.skipped).toBe(0);
     expect(complete.errors).toEqual([]);

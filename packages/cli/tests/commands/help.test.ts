@@ -48,7 +48,7 @@ describe("help command", () => {
     });
 
     const result = await helpCommand(client, [], { json: true });
-    const parsed = JSON.parse(result);
+    const parsed = JSON.parse(result) as { name: string; children: Record<string, unknown> };
     expect(parsed.name).toBe("shelf");
     expect(parsed.children.game).toBeDefined();
   });

@@ -50,7 +50,9 @@ export default function ImportPage() {
       });
 
       if (!res.ok) {
-        const data = await res.json().catch(() => ({ error: "Import failed" }));
+        const data = (await res.json().catch(() => ({ error: "Import failed" }))) as {
+          error?: string;
+        };
         throw new Error(data.error ?? `Import failed: ${res.status}`);
       }
 
@@ -82,13 +84,13 @@ export default function ImportPage() {
             // Blank line: dispatch the accumulated event
             if (dataLine) {
               try {
-                const parsed = JSON.parse(dataLine);
+                const parsed: unknown = JSON.parse(dataLine);
                 if (eventType === "progress") {
-                  setProgress(parsed);
+                  setProgress(parsed as ImportProgress);
                 } else if (eventType === "complete") {
-                  setResult(parsed);
+                  setResult(parsed as ImportResult);
                 } else if (eventType === "error") {
-                  setError(parsed.error);
+                  setError((parsed as { error: string }).error);
                 }
               } catch {
                 // Skip unparseable data
@@ -127,7 +129,12 @@ export default function ImportPage() {
                 </p>
               </div>
 
-              <form onSubmit={handleImport} className="import-form">
+              <form
+                onSubmit={(e) => {
+                  void handleImport(e);
+                }}
+                className="import-form"
+              >
                 <input
                   className="form-input"
                   type="text"

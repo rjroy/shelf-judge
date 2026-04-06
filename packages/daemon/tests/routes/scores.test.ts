@@ -1,5 +1,26 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { createTestApp, jsonRequest, type TestAppContext } from "../helpers/test-app.js";
+import type { Axis, Game, FitnessBreakdownEntry } from "@shelf-judge/shared";
+
+interface GameAddResponse {
+  game: Game;
+  bggImported: boolean;
+}
+
+interface ScoreResponse {
+  gameId: string;
+  gameName: string;
+  score: number | null;
+  ratedAxisCount: number;
+  totalAxisCount: number;
+  breakdown: FitnessBreakdownEntry[];
+  status?: string;
+}
+
+interface ScoreListResponse {
+  scored: ScoreResponse[];
+  unscored: ScoreResponse[];
+}
 
 describe("score routes", () => {
   let ctx: TestAppContext;
@@ -16,14 +37,14 @@ describe("score routes", () => {
         weight: 50,
       });
       expect(axisRes.status).toBe(201);
-      const axis = await axisRes.json();
+      const axis = (await axisRes.json()) as Axis;
 
       // Add a game
       const gameRes = await jsonRequest(ctx.app, "POST", "/api/games", {
         name: "Test",
       });
       expect(gameRes.status).toBe(201);
-      const gameBody = await gameRes.json();
+      const gameBody = (await gameRes.json()) as GameAddResponse;
       const gameId = gameBody.game.id;
 
       // Rate the game on the axis
@@ -35,7 +56,7 @@ describe("score routes", () => {
       // Fetch the score
       const scoreRes = await jsonRequest(ctx.app, "GET", `/api/games/${gameId}/score`);
       expect(scoreRes.status).toBe(200);
-      const score = await scoreRes.json();
+      const score = (await scoreRes.json()) as ScoreResponse;
 
       expect(score.gameId).toBe(gameId);
       expect(score.gameName).toBe("Test");
@@ -46,9 +67,9 @@ describe("score routes", () => {
       expect(score.breakdown).toBeArray();
       expect(score.breakdown.length).toBeGreaterThanOrEqual(1);
 
-      const personalEntry = score.breakdown.find((b: { axisId: string }) => b.axisId === axis.id);
+      const personalEntry = score.breakdown.find((b) => b.axisId === axis.id);
       expect(personalEntry).toBeDefined();
-      expect(personalEntry.rating).toBe(8);
+      expect(personalEntry!.rating).toBe(8);
     });
 
     test("returns null score for an unrated game", async () => {
@@ -57,12 +78,12 @@ describe("score routes", () => {
         name: "Unrated Game",
       });
       expect(gameRes.status).toBe(201);
-      const gameBody = await gameRes.json();
+      const gameBody = (await gameRes.json()) as GameAddResponse;
       const gameId = gameBody.game.id;
 
       const scoreRes = await jsonRequest(ctx.app, "GET", `/api/games/${gameId}/score`);
       expect(scoreRes.status).toBe(200);
-      const score = await scoreRes.json();
+      const score = (await scoreRes.json()) as ScoreResponse;
 
       expect(score.gameId).toBe(gameId);
       expect(score.gameName).toBe("Unrated Game");
@@ -79,20 +100,20 @@ describe("score routes", () => {
         weight: 50,
       });
       expect(axisRes.status).toBe(201);
-      const axis = await axisRes.json();
+      const axis = (await axisRes.json()) as Axis;
 
       // Add two games
       const game1Res = await jsonRequest(ctx.app, "POST", "/api/games", {
         name: "Rated Game",
       });
       expect(game1Res.status).toBe(201);
-      const game1 = await game1Res.json();
+      const game1 = (await game1Res.json()) as GameAddResponse;
 
       const game2Res = await jsonRequest(ctx.app, "POST", "/api/games", {
         name: "Unrated Game",
       });
       expect(game2Res.status).toBe(201);
-      const game2 = await game2Res.json();
+      const game2 = (await game2Res.json()) as GameAddResponse;
 
       // Rate only the first game
       const rateRes = await jsonRequest(ctx.app, "PUT", `/api/games/${game1.game.id}/ratings`, {
@@ -103,7 +124,7 @@ describe("score routes", () => {
       // Fetch the score list
       const listRes = await jsonRequest(ctx.app, "GET", "/api/scores");
       expect(listRes.status).toBe(200);
-      const body = await listRes.json();
+      const body = (await listRes.json()) as ScoreListResponse;
 
       // Scored array contains the rated game
       expect(body.scored).toBeArray();
@@ -129,20 +150,20 @@ describe("score routes", () => {
         weight: 50,
       });
       expect(axisRes.status).toBe(201);
-      const axis = await axisRes.json();
+      const axis = (await axisRes.json()) as Axis;
 
       // Add two games and rate them with different scores
       const lowRes = await jsonRequest(ctx.app, "POST", "/api/games", {
         name: "Low Score Game",
       });
       expect(lowRes.status).toBe(201);
-      const lowGame = await lowRes.json();
+      const lowGame = (await lowRes.json()) as GameAddResponse;
 
       const highRes = await jsonRequest(ctx.app, "POST", "/api/games", {
         name: "High Score Game",
       });
       expect(highRes.status).toBe(201);
-      const highGame = await highRes.json();
+      const highGame = (await highRes.json()) as GameAddResponse;
 
       // Rate low game with 3, high game with 9
       await jsonRequest(ctx.app, "PUT", `/api/games/${lowGame.game.id}/ratings`, {
@@ -154,13 +175,13 @@ describe("score routes", () => {
 
       const listRes = await jsonRequest(ctx.app, "GET", "/api/scores");
       expect(listRes.status).toBe(200);
-      const body = await listRes.json();
+      const body = (await listRes.json()) as ScoreListResponse;
 
       expect(body.scored).toHaveLength(2);
       // High score should come first (descending order)
       expect(body.scored[0].gameName).toBe("High Score Game");
       expect(body.scored[1].gameName).toBe("Low Score Game");
-      expect(body.scored[0].score).toBeGreaterThan(body.scored[1].score);
+      expect(body.scored[0].score!).toBeGreaterThan(body.scored[1].score!);
     });
   });
 });

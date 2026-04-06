@@ -13,38 +13,41 @@ export function createMockFileOps(initialFiles?: Record<string, string>): MockFi
     files,
     calls,
 
-    async readFile(filePath: string): Promise<string> {
+    readFile(filePath: string): Promise<string> {
       calls.push({ method: "readFile", args: [filePath] });
       const content = files.get(filePath);
       if (content === undefined) {
-        throw new Error(`ENOENT: no such file or directory, open '${filePath}'`);
+        return Promise.reject(new Error(`ENOENT: no such file or directory, open '${filePath}'`));
       }
-      return content;
+      return Promise.resolve(content);
     },
 
-    async writeFile(filePath: string, content: string): Promise<void> {
+    writeFile(filePath: string, content: string): Promise<void> {
       calls.push({ method: "writeFile", args: [filePath] });
       files.set(filePath, content);
+      return Promise.resolve();
     },
 
-    async rename(oldPath: string, newPath: string): Promise<void> {
+    rename(oldPath: string, newPath: string): Promise<void> {
       calls.push({ method: "rename", args: [oldPath, newPath] });
       const content = files.get(oldPath);
       if (content === undefined) {
-        throw new Error(`ENOENT: no such file or directory, rename '${oldPath}'`);
+        return Promise.reject(new Error(`ENOENT: no such file or directory, rename '${oldPath}'`));
       }
       files.set(newPath, content);
       files.delete(oldPath);
+      return Promise.resolve();
     },
 
-    async exists(filePath: string): Promise<boolean> {
+    exists(filePath: string): Promise<boolean> {
       calls.push({ method: "exists", args: [filePath] });
-      return files.has(filePath);
+      return Promise.resolve(files.has(filePath));
     },
 
-    async mkdir(_dirPath: string): Promise<void> {
+    mkdir(_dirPath: string): Promise<void> {
       calls.push({ method: "mkdir", args: [_dirPath] });
       // No-op for in-memory mock
+      return Promise.resolve();
     },
   };
 }

@@ -31,7 +31,7 @@ describe("game search", () => {
 
   test("--json outputs parseable JSON array", async () => {
     const output = await gameSearch(client, ["wingspan"], { json: true });
-    const parsed = JSON.parse(output);
+    const parsed = JSON.parse(output) as Array<{ id: number; name: string }>;
     expect(Array.isArray(parsed)).toBe(true);
     expect(parsed[0].id).toBe(266192);
   });
@@ -57,7 +57,7 @@ describe("game add (by bggId)", () => {
 
   test("--json outputs parseable JSON", async () => {
     const output = await gameAdd(client, [], { json: true, bggId: 266192 });
-    const parsed = JSON.parse(output);
+    const parsed = JSON.parse(output) as { game: { name: string }; bggImported: boolean };
     expect(parsed.game.name).toBe("Wingspan");
     expect(parsed.bggImported).toBe(true);
   });
@@ -83,7 +83,7 @@ describe("game add (by name)", () => {
 
   test("--json outputs parseable JSON", async () => {
     const output = await gameAdd(client, [], { json: true, name: "Custom Game" });
-    const parsed = JSON.parse(output);
+    const parsed = JSON.parse(output) as { game: { name: string }; bggImported: boolean };
     expect(parsed.game.name).toBe("Custom Game");
     expect(parsed.bggImported).toBe(false);
   });
@@ -115,7 +115,10 @@ describe("game list", () => {
 
   test("--json outputs parseable JSON array", async () => {
     const output = await gameList(client, [], { json: true });
-    const parsed = JSON.parse(output);
+    const parsed = JSON.parse(output) as Array<{
+      game: { name: string };
+      score: { score: number } | null;
+    }>;
     expect(Array.isArray(parsed)).toBe(true);
     expect(parsed[0].game.name).toBe("Wingspan");
     expect(parsed[1].score).toBeNull();
@@ -148,7 +151,7 @@ describe("game rate", () => {
       json: true,
       axisFlags: ["axis-1", "8", "axis-2", "9"],
     });
-    const parsed = JSON.parse(output);
+    const parsed = JSON.parse(output) as { game: { name: string }; score: { score: number } };
     expect(parsed.game.name).toBe("Wingspan");
     expect(parsed.score.score).toBe(7.9);
   });
@@ -170,7 +173,7 @@ describe("game remove", () => {
 
   test("--json outputs parseable JSON with removed: true", async () => {
     const output = await gameRemove(client, ["abc-123"], { json: true });
-    const parsed = JSON.parse(output);
+    const parsed = JSON.parse(output) as { removed: boolean };
     expect(parsed.removed).toBe(true);
   });
 });

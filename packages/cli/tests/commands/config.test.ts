@@ -31,7 +31,11 @@ describe("config get", () => {
 
   test("--json outputs parseable config object", async () => {
     const output = await configGet(client, [], { json: true });
-    const parsed = JSON.parse(output);
+    const parsed = JSON.parse(output) as {
+      bggAuthToken: string;
+      dataDir: string;
+      socketPath: string;
+    };
     expect(parsed.bggAuthToken).toBe("***configured***");
     expect(parsed.dataDir).toBe("/home/user/.shelf-judge/data");
     expect(parsed.socketPath).toBe("/tmp/shelf-judge.sock");
@@ -54,7 +58,11 @@ describe("config set", () => {
 
   test("--json outputs parseable updated config object", async () => {
     const output = await configSet(client, ["bgg-token", "my-secret-token"], { json: true });
-    const parsed = JSON.parse(output);
+    const parsed = JSON.parse(output) as {
+      bggAuthToken: string;
+      dataDir: string;
+      socketPath: string;
+    };
     expect(parsed.bggAuthToken).toBe("***configured***");
     expect(parsed.dataDir).toBe("/home/user/.shelf-judge/data");
     expect(parsed.socketPath).toBe("/tmp/shelf-judge.sock");

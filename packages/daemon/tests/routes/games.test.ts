@@ -6,6 +6,41 @@ import {
   type TestAppContext,
 } from "../helpers/test-app.js";
 import type { BggGameResult } from "../../src/services/bgg-client.js";
+import type { Axis, Game, FitnessResult } from "@shelf-judge/shared";
+
+interface GameAddResponse {
+  game: Game;
+  bggImported: boolean;
+  warning?: string;
+}
+
+interface GameDetailResponse {
+  game: Game;
+  score: FitnessResult | null;
+  bggDataStale?: boolean;
+}
+
+interface GameListEntry {
+  game: Game;
+  score: FitnessResult | null;
+  bggDataStale?: boolean;
+}
+
+interface GameRateResponse {
+  game: Game;
+  score: FitnessResult | null;
+}
+
+interface BggSearchResult {
+  bggId: number;
+  name: string;
+  yearPublished: number | null;
+}
+
+interface RefreshResponse {
+  refreshed: number;
+  errors: string[];
+}
 
 let ctx: TestAppContext;
 
@@ -44,7 +79,7 @@ describe("Game Routes", () => {
       });
 
       expect(res.status).toBe(201);
-      const body = await res.json();
+      const body = (await res.json()) as GameAddResponse;
       expect(body.game).toBeDefined();
       expect(body.game.name).toBe("Test Game");
       expect(body.game.id).toBeTruthy();
@@ -55,7 +90,7 @@ describe("Game Routes", () => {
 
     test("game with bggId when BGG is configured returns 201", async () => {
       const bggClient = createMockBggClient({
-        getGame: async () => wingspanBggResult,
+        getGame: () => Promise.resolve(wingspanBggResult),
       });
       ctx = createTestApp({ bggClient });
 
@@ -65,7 +100,7 @@ describe("Game Routes", () => {
       });
 
       expect(res.status).toBe(201);
-      const body = await res.json();
+      const body = (await res.json()) as GameAddResponse;
       expect(body.game.bggId).toBe(266192);
       expect(body.game.name).toBe("Wingspan");
       expect(body.bggImported).toBe(true);
@@ -76,7 +111,7 @@ describe("Game Routes", () => {
 
     test("duplicate bggId returns 409", async () => {
       const bggClient = createMockBggClient({
-        getGame: async () => wingspanBggResult,
+        getGame: () => Promise.resolve(wingspanBggResult),
       });
       ctx = createTestApp({ bggClient });
 
@@ -94,7 +129,7 @@ describe("Game Routes", () => {
       });
 
       expect(second.status).toBe(409);
-      const body = await second.json();
+      const body = (await second.json()) as { error: string };
       expect(body.error).toContain("already exists");
     });
   });
@@ -107,18 +142,18 @@ describe("Game Routes", () => {
         weight: 50,
       });
       expect(axisRes.status).toBe(201);
-      const axis = await axisRes.json();
+      const axis = (await axisRes.json()) as Axis;
 
       // Add two games
       const game1Res = await jsonRequest(ctx.app, "POST", "/api/games", {
         name: "Low Rated Game",
       });
-      const game1 = (await game1Res.json()).game;
+      const game1 = ((await game1Res.json()) as GameAddResponse).game;
 
       const game2Res = await jsonRequest(ctx.app, "POST", "/api/games", {
         name: "High Rated Game",
       });
-      const game2 = (await game2Res.json()).game;
+      const game2 = ((await game2Res.json()) as GameAddResponse).game;
 
       // Rate game1 low, game2 high
       await jsonRequest(ctx.app, "PUT", `/api/games/${game1.id}/ratings`, {
@@ -130,7 +165,7 @@ describe("Game Routes", () => {
 
       const listRes = await jsonRequest(ctx.app, "GET", "/api/games");
       expect(listRes.status).toBe(200);
-      const games = await listRes.json();
+      const games = (await listRes.json()) as GameListEntry[];
 
       expect(games).toBeArray();
       expect(games.length).toBe(2);
@@ -147,12 +182,12 @@ describe("Game Routes", () => {
         name: "Fun",
         weight: 50,
       });
-      const axis = await axisRes.json();
+      const axis = (await axisRes.json()) as Axis;
 
       const gameRes = await jsonRequest(ctx.app, "POST", "/api/games", {
         name: "Test Game",
       });
-      const game = (await gameRes.json()).game;
+      const game = ((await gameRes.json()) as GameAddResponse).game;
 
       // Rate it
       await jsonRequest(ctx.app, "PUT", `/api/games/${game.id}/ratings`, {
@@ -162,11 +197,11 @@ describe("Game Routes", () => {
       const getRes = await jsonRequest(ctx.app, "GET", `/api/games/${game.id}`);
 
       expect(getRes.status).toBe(200);
-      const body = await getRes.json();
+      const body = (await getRes.json()) as GameDetailResponse;
       expect(body.game.id).toBe(game.id);
       expect(body.score).toBeDefined();
-      expect(body.score.breakdown).toBeArray();
-      expect(body.score.score).toBeGreaterThan(0);
+      expect(body.score!.breakdown).toBeArray();
+      expect(body.score!.score).toBeGreaterThan(0);
     });
   });
 
@@ -177,23 +212,23 @@ describe("Game Routes", () => {
         name: "Fun",
         weight: 50,
       });
-      const axis = await axisRes.json();
+      const axis = (await axisRes.json()) as Axis;
 
       // Create a game
       const gameRes = await jsonRequest(ctx.app, "POST", "/api/games", {
         name: "Test Game",
       });
-      const game = (await gameRes.json()).game;
+      const game = ((await gameRes.json()) as GameAddResponse).game;
 
       const rateRes = await jsonRequest(ctx.app, "PUT", `/api/games/${game.id}/ratings`, {
         ratings: { [axis.id]: 8 },
       });
 
       expect(rateRes.status).toBe(200);
-      const body = await rateRes.json();
+      const body = (await rateRes.json()) as GameRateResponse;
       expect(body.game.ratings[axis.id]).toBe(8);
       expect(body.score).toBeDefined();
-      expect(body.score.score).toBeGreaterThan(0);
+      expect(body.score!.score).toBeGreaterThan(0);
     });
 
     test("invalid rating returns 400", async () => {
@@ -202,13 +237,13 @@ describe("Game Routes", () => {
         name: "Fun",
         weight: 50,
       });
-      const axis = await axisRes.json();
+      const axis = (await axisRes.json()) as Axis;
 
       // Create a game
       const gameRes = await jsonRequest(ctx.app, "POST", "/api/games", {
         name: "Test Game",
       });
-      const game = (await gameRes.json()).game;
+      const game = ((await gameRes.json()) as GameAddResponse).game;
 
       // Rating out of range (> 10)
       const rateRes = await jsonRequest(ctx.app, "PUT", `/api/games/${game.id}/ratings`, {
@@ -216,7 +251,7 @@ describe("Game Routes", () => {
       });
 
       expect(rateRes.status).toBe(400);
-      const body = await rateRes.json();
+      const body = (await rateRes.json()) as { error: string };
       expect(body.error).toBeDefined();
     });
   });
@@ -226,7 +261,7 @@ describe("Game Routes", () => {
       const gameRes = await jsonRequest(ctx.app, "POST", "/api/games", {
         name: "Doomed Game",
       });
-      const game = (await gameRes.json()).game;
+      const game = ((await gameRes.json()) as GameAddResponse).game;
 
       const delRes = await jsonRequest(ctx.app, "DELETE", `/api/games/${game.id}`);
       expect(delRes.status).toBe(204);
@@ -240,17 +275,18 @@ describe("Game Routes", () => {
   describe("GET /api/games/search", () => {
     test("returns search results when BGG is configured", async () => {
       const bggClient = createMockBggClient({
-        searchGames: async () => [
-          { bggId: 266192, name: "Wingspan", yearPublished: 2019 },
-          { bggId: 290837, name: "Wingspan: European Expansion", yearPublished: 2019 },
-        ],
+        searchGames: () =>
+          Promise.resolve([
+            { bggId: 266192, name: "Wingspan", yearPublished: 2019 },
+            { bggId: 290837, name: "Wingspan: European Expansion", yearPublished: 2019 },
+          ]),
       });
       ctx = createTestApp({ bggClient });
 
       const res = await jsonRequest(ctx.app, "GET", "/api/games/search?q=wingspan");
 
       expect(res.status).toBe(200);
-      const results = await res.json();
+      const results = (await res.json()) as BggSearchResult[];
       expect(results).toBeArray();
       expect(results.length).toBe(2);
       expect(results[0].name).toBe("Wingspan");
@@ -260,13 +296,13 @@ describe("Game Routes", () => {
   describe("POST /api/games/refresh", () => {
     test("refreshes all BGG games and returns summary", async () => {
       const bggClient = createMockBggClient({
-        getGame: async () => wingspanBggResult,
-        getGames: async (ids) => {
+        getGame: () => Promise.resolve(wingspanBggResult),
+        getGames: (ids) => {
           const results = new Map<number, BggGameResult>();
           for (const id of ids) {
             if (id === 266192) results.set(id, wingspanBggResult);
           }
-          return results;
+          return Promise.resolve(results);
         },
       });
       ctx = createTestApp({ bggClient });
@@ -284,7 +320,7 @@ describe("Game Routes", () => {
 
       const res = await jsonRequest(ctx.app, "POST", "/api/games/refresh");
       expect(res.status).toBe(200);
-      const body = await res.json();
+      const body = (await res.json()) as RefreshResponse;
       expect(body.refreshed).toBe(1);
       expect(body.errors).toBeArray();
     });
@@ -299,7 +335,7 @@ describe("Game Routes", () => {
   describe("bggDataStale field", () => {
     test("game with recent BGG data has bggDataStale: false", async () => {
       const bggClient = createMockBggClient({
-        getGame: async () => wingspanBggResult,
+        getGame: () => Promise.resolve(wingspanBggResult),
       });
       ctx = createTestApp({ bggClient });
 
@@ -307,10 +343,10 @@ describe("Game Routes", () => {
         name: "Wingspan",
         bggId: 266192,
       });
-      const { game } = await addRes.json();
+      const { game } = (await addRes.json()) as GameAddResponse;
 
       const getRes = await jsonRequest(ctx.app, "GET", `/api/games/${game.id}`);
-      const body = await getRes.json();
+      const body = (await getRes.json()) as GameDetailResponse;
       expect(body.bggDataStale).toBe(false);
     });
 
@@ -318,16 +354,16 @@ describe("Game Routes", () => {
       const addRes = await jsonRequest(ctx.app, "POST", "/api/games", {
         name: "Manual Game",
       });
-      const { game } = await addRes.json();
+      const { game } = (await addRes.json()) as GameAddResponse;
 
       const getRes = await jsonRequest(ctx.app, "GET", `/api/games/${game.id}`);
-      const body = await getRes.json();
+      const body = (await getRes.json()) as GameDetailResponse;
       expect(body.bggDataStale).toBeUndefined();
     });
 
     test("list includes bggDataStale for each game", async () => {
       const bggClient = createMockBggClient({
-        getGame: async () => wingspanBggResult,
+        getGame: () => Promise.resolve(wingspanBggResult),
       });
       ctx = createTestApp({ bggClient });
 
@@ -340,17 +376,13 @@ describe("Game Routes", () => {
       });
 
       const listRes = await jsonRequest(ctx.app, "GET", "/api/games");
-      const games = await listRes.json();
+      const games = (await listRes.json()) as GameListEntry[];
       expect(games.length).toBe(2);
 
-      const bggGame = games.find(
-        (g: { game: { name: string } }) => g.game.name === "Wingspan",
-      );
-      const manualGame = games.find(
-        (g: { game: { name: string } }) => g.game.name === "Manual Game",
-      );
-      expect(bggGame.bggDataStale).toBe(false);
-      expect(manualGame.bggDataStale).toBeUndefined();
+      const bggGame = games.find((g) => g.game.name === "Wingspan");
+      const manualGame = games.find((g) => g.game.name === "Manual Game");
+      expect(bggGame!.bggDataStale).toBe(false);
+      expect(manualGame!.bggDataStale).toBeUndefined();
     });
   });
 
@@ -360,7 +392,7 @@ describe("Game Routes", () => {
       const res = await jsonRequest(ctx.app, "GET", "/api/games/search?q=wingspan");
 
       expect(res.status).toBe(503);
-      const body = await res.json();
+      const body = (await res.json()) as { error: string };
       expect(body.error).toContain("not configured");
       expect(body.error).toContain("shelf-judge config set bgg-token");
     });

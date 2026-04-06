@@ -28,7 +28,7 @@ describe("import bgg-collection", () => {
 
   test("--json outputs parseable result with imported/skipped/errors", async () => {
     const output = await importBggCollection(client, ["testuser"], { json: true });
-    const parsed = JSON.parse(output);
+    const parsed = JSON.parse(output) as { imported: number; skipped: number; errors: string[] };
     expect(parsed.imported).toBe(2);
     expect(parsed.skipped).toBe(1);
     expect(Array.isArray(parsed.errors)).toBe(true);
@@ -71,7 +71,7 @@ describe("import bgg-collection with errors", () => {
 
   test("--json outputs parseable result with errors array populated", async () => {
     const output = await importBggCollection(client, ["testuser"], { json: true });
-    const parsed = JSON.parse(output);
+    const parsed = JSON.parse(output) as { imported: number; skipped: number; errors: string[] };
     expect(parsed.imported).toBe(2);
     expect(parsed.skipped).toBe(0);
     expect(Array.isArray(parsed.errors)).toBe(true);

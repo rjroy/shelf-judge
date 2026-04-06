@@ -46,15 +46,18 @@ describe("AxisService", () => {
     });
 
     test("rejects invalid weight (0 is allowed by schema, 101 is not)", async () => {
-      expect(axisService.createAxis({ name: "Bad", weight: 101 })).rejects.toThrow();
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(axisService.createAxis({ name: "Bad", weight: 101 })).rejects.toThrow();
     });
 
     test("rejects negative weight", async () => {
-      expect(axisService.createAxis({ name: "Bad", weight: -1 })).rejects.toThrow();
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(axisService.createAxis({ name: "Bad", weight: -1 })).rejects.toThrow();
     });
 
     test("rejects non-integer weight", async () => {
-      expect(axisService.createAxis({ name: "Bad", weight: 5.5 })).rejects.toThrow();
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(axisService.createAxis({ name: "Bad", weight: 5.5 })).rejects.toThrow();
     });
   });
 
@@ -96,7 +99,8 @@ describe("AxisService", () => {
     });
 
     test("throws on non-existent axis", async () => {
-      expect(axisService.updateAxis("nonexistent", { name: "Nope" })).rejects.toThrow(
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(axisService.updateAxis("nonexistent", { name: "Nope" })).rejects.toThrow(
         "Axis not found",
       );
     });
@@ -195,7 +199,8 @@ describe("AxisService", () => {
     });
 
     test("throws on non-existent axis", async () => {
-      expect(axisService.deleteAxis("nonexistent")).rejects.toThrow("Axis not found");
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(axisService.deleteAxis("nonexistent")).rejects.toThrow("Axis not found");
     });
   });
 });

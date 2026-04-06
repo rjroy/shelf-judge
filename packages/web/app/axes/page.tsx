@@ -36,7 +36,7 @@ export default function AxesPage() {
   const [showCreate, setShowCreate] = useState(false);
 
   useEffect(() => {
-    loadData();
+    void loadData();
   }, []);
 
   async function loadData() {
@@ -48,8 +48,8 @@ export default function AxesPage() {
       ]);
       if (!axesRes.ok) throw new Error("Failed to load axes");
       if (!gamesRes.ok) throw new Error("Failed to load games");
-      setAxes(await axesRes.json());
-      setGames(await gamesRes.json());
+      setAxes((await axesRes.json()) as Axis[]);
+      setGames((await gamesRes.json()) as GameWithScore[]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load");
     } finally {
@@ -77,13 +77,15 @@ export default function AxesPage() {
         }),
       });
       if (!res.ok) {
-        const data = await res.json().catch(() => ({ error: "Unknown error" }));
+        const data = (await res.json().catch(() => ({ error: "Unknown error" }))) as {
+          error?: string;
+        };
         throw new Error(data.error ?? `Failed: ${res.status}`);
       }
       setNewName("");
       setNewDescription("");
       setNewWeight("50");
-      loadData();
+      void loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create axis");
     }
@@ -104,11 +106,13 @@ export default function AxesPage() {
         body: JSON.stringify(body),
       });
       if (!res.ok) {
-        const data = await res.json().catch(() => ({ error: "Unknown error" }));
+        const data = (await res.json().catch(() => ({ error: "Unknown error" }))) as {
+          error?: string;
+        };
         throw new Error(data.error ?? `Failed: ${res.status}`);
       }
       setEditingId(null);
-      loadData();
+      void loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update axis");
     }
@@ -128,10 +132,12 @@ export default function AxesPage() {
         method: "DELETE",
       });
       if (!res.ok) {
-        const data = await res.json().catch(() => ({ error: "Unknown error" }));
+        const data = (await res.json().catch(() => ({ error: "Unknown error" }))) as {
+          error?: string;
+        };
         throw new Error(data.error ?? `Failed: ${res.status}`);
       }
-      loadData();
+      void loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete axis");
     }
@@ -172,7 +178,11 @@ export default function AxesPage() {
           {/* Create form (toggleable) */}
           {showCreate && (
             <div className="create-form">
-              <form onSubmit={handleCreate}>
+              <form
+                onSubmit={(e) => {
+                  void handleCreate(e);
+                }}
+              >
                 <div className="form-row">
                   <div className="form-group">
                     <label className="form-label">Name</label>
@@ -291,7 +301,9 @@ export default function AxesPage() {
                     <>
                       <button
                         className="btn btn-primary btn-sm"
-                        onClick={() => handleUpdate(axis.id)}
+                        onClick={() => {
+                          void handleUpdate(axis.id);
+                        }}
                       >
                         Save
                       </button>
@@ -317,7 +329,9 @@ export default function AxesPage() {
                       </button>
                       <button
                         className="btn btn-danger-outline btn-sm"
-                        onClick={() => handleDelete(axis)}
+                        onClick={() => {
+                          void handleDelete(axis);
+                        }}
                       >
                         Delete
                       </button>
@@ -416,7 +430,9 @@ export default function AxesPage() {
                         <>
                           <button
                             className="btn btn-primary btn-sm"
-                            onClick={() => handleUpdate(axis.id)}
+                            onClick={() => {
+                              void handleUpdate(axis.id);
+                            }}
                           >
                             Save
                           </button>
@@ -442,7 +458,9 @@ export default function AxesPage() {
                           </button>
                           <button
                             className="btn btn-danger-outline btn-sm"
-                            onClick={() => handleDelete(axis)}
+                            onClick={() => {
+                              void handleDelete(axis);
+                            }}
                           >
                             Delete
                           </button>

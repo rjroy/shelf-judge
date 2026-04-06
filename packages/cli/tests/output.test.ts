@@ -101,7 +101,7 @@ describe("formatBreakdown", () => {
 describe("printOutput", () => {
   test("outputs JSON when json option is true", () => {
     const result = printOutput({ hello: "world" }, { json: true });
-    const parsed = JSON.parse(result);
+    const parsed = JSON.parse(result) as { hello: string };
     expect(parsed.hello).toBe("world");
   });
 
