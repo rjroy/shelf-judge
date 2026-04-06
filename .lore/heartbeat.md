@@ -27,3 +27,11 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
+- 08:13 commission-Dalton-20260406-062857 result: Step 8 complete. CSS cleanup and responsive audit done.
+
+**Changes made:**
+- Added `html { overflow-x: hidden; }` safety net to `packages/web/app/globals.css` (line 75)
+
+**Audit findings (no issues fo...
+
+- 08:13 commission-Dalton-20260406-062857 completed
