@@ -1,7 +1,7 @@
 ---
 title: "Commission: Visual Transition Review: Validation Against Mockups"
 date: 2026-04-06
-status: pending
+status: blocked
 tags: [commission]
 worker: Thorne
 workerDisplayTitle: "Guild Warden"
@@ -14,6 +14,11 @@ activity_timeline:
   - timestamp: 2026-04-06T02:06:38.784Z
     event: created
     reason: "Commission created"
+  - timestamp: 2026-04-06T02:08:30.944Z
+    event: status_blocked
+    reason: "Dependencies not satisfied"
+    from: "pending"
+    to: "blocked"
 current_progress: ""
 projectName: shelf-judge
 ---

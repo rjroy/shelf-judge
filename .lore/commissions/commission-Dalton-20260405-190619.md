@@ -1,7 +1,7 @@
 ---
 title: "Commission: Visual Transition: All Screens (Steps 4-8)"
 date: 2026-04-06
-status: pending
+status: dispatched
 tags: [commission]
 worker: Dalton
 workerDisplayTitle: "Guild Artificer"
@@ -14,6 +14,11 @@ activity_timeline:
   - timestamp: 2026-04-06T02:06:19.299Z
     event: created
     reason: "Commission created"
+  - timestamp: 2026-04-06T02:08:30.947Z
+    event: status_dispatched
+    reason: "Dispatched to worker"
+    from: "pending"
+    to: "dispatched"
 current_progress: ""
 projectName: shelf-judge
 ---
