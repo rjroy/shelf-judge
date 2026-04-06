@@ -58,3 +58,7 @@ File: `packages/daemon/src/services/tournament-service.ts:347`
 
 `winnerId` is...
 - 16:06 commission-Thorne-20260406-153843 completed
+- 16:08 commission-Dalton-20260406-153848 result: Addressed all 4 actionable findings from Thorne's review:
+
+**Defect #1 - winnerId validation**: Added guard in `submitComparison` that throws if `winnerId` is not one of `gameAId` or `gameBId`. Preven...
+- 16:08 commission-Dalton-20260406-153848 completed
