@@ -43,6 +43,7 @@ export function createImportRoutes(deps: ImportRoutesDeps): RouteModule {
     }
 
     const { username } = parsed.data;
+    console.log(`[route] POST /import/bgg for "${username}"`);
 
     return streamSSE(
       c,
@@ -58,6 +59,9 @@ export function createImportRoutes(deps: ImportRoutesDeps): RouteModule {
           });
         });
 
+        console.log(
+          `[route] import complete: ${summary.imported} imported, ${summary.skipped} skipped, ${summary.errors.length} errors`,
+        );
         await stream.writeSSE({
           event: "complete",
           data: JSON.stringify({
@@ -68,6 +72,7 @@ export function createImportRoutes(deps: ImportRoutesDeps): RouteModule {
         });
       },
       async (err, stream) => {
+        console.error(`[route] import error: ${err.message}`);
         await stream.writeSSE({
           event: "error",
           data: JSON.stringify({

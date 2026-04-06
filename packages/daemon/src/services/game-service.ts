@@ -299,6 +299,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
       onProgress?: (event: ImportProgressEvent) => Promise<void> | void,
     ): Promise<ImportSummary> {
       assertBggConfigured();
+      console.log(`[import] starting BGG import for "${username}"`);
 
       await onProgress?.({
         phase: "fetching-collection",
@@ -311,6 +312,9 @@ export function createGameService(deps: GameServiceDeps): GameService {
       try {
         collectionItems = await bggClient!.getUserCollection(username);
       } catch (err) {
+        console.error(
+          `[import] failed to fetch collection: ${err instanceof Error ? err.message : String(err)}`,
+        );
         throw new Error(
           `Failed to fetch BGG collection for "${username}": ${err instanceof Error ? err.message : String(err)}`,
         );
@@ -330,6 +334,9 @@ export function createGameService(deps: GameServiceDeps): GameService {
       const newItems = collectionItems.filter((item) => !existingBggIds.has(item.bggId));
       const skippedItems = collectionItems.filter((item) => existingBggIds.has(item.bggId));
       skipped = skippedItems.length;
+      console.log(
+        `[import] collection: ${total} total, ${newItems.length} new, ${skipped} already exist`,
+      );
 
       // Batch fetch full data for new games
       if (newItems.length > 0) {
@@ -338,6 +345,9 @@ export function createGameService(deps: GameServiceDeps): GameService {
         try {
           bggResults = await bggClient!.getGames(newBggIds);
         } catch (err) {
+          console.error(
+            `[import] batch fetch failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
           return {
             imported: 0,
             skipped,
@@ -357,6 +367,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
 
           const result = bggResults.get(item.bggId);
           if (!result) {
+            console.warn(`[import] no BGG data for "${item.name}" (BGG ID ${item.bggId})`);
             errors.push(`Failed to fetch full data for "${item.name}" (BGG ID ${item.bggId})`);
             continue;
           }
@@ -384,6 +395,9 @@ export function createGameService(deps: GameServiceDeps): GameService {
 
       collection.updatedAt = new Date().toISOString();
       await storageService.saveCollection(collection);
+      console.log(
+        `[import] complete: ${imported} imported, ${skipped} skipped, ${errors.length} errors`,
+      );
 
       return { imported, skipped, errors };
     },

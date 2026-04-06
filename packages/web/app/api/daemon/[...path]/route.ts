@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { daemonFetch, daemonFetchStream } from "@/lib/daemon";
+import { daemonRequest } from "@/lib/daemon";
 
 async function proxyToDaemon(request: NextRequest, params: Promise<{ path: string[] }>) {
   const { path } = await params;
@@ -13,14 +13,14 @@ async function proxyToDaemon(request: NextRequest, params: Promise<{ path: strin
       : undefined;
 
   try {
-    // Use streaming for SSE-capable endpoints, buffered for everything else
-    const res = await daemonFetch(fullPath, { method: request.method, body });
+    const { response, isStream } = await daemonRequest(fullPath, {
+      method: request.method,
+      body,
+    });
 
-    if (res.headers.get("content-type")?.includes("text/event-stream")) {
-      // Re-request with streaming for SSE
-      const streamRes = await daemonFetchStream(fullPath, { method: request.method, body });
-      return new NextResponse(streamRes.body, {
-        status: streamRes.status,
+    if (isStream) {
+      return new NextResponse(response.body, {
+        status: response.status,
         headers: {
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",
@@ -29,10 +29,9 @@ async function proxyToDaemon(request: NextRequest, params: Promise<{ path: strin
       });
     }
 
-    const responseBody = await res.text();
+    const responseBody = await response.text();
     const headers = new Headers();
-    res.headers.forEach((value, key) => {
-      // Skip hop-by-hop headers that shouldn't be forwarded
+    response.headers.forEach((value, key) => {
       if (!["connection", "keep-alive", "transfer-encoding"].includes(key.toLowerCase())) {
         headers.set(key, value);
       }
@@ -41,7 +40,7 @@ async function proxyToDaemon(request: NextRequest, params: Promise<{ path: strin
       headers.set("Content-Type", "application/json");
     }
     return new NextResponse(responseBody, {
-      status: res.status,
+      status: response.status,
       headers,
     });
   } catch {

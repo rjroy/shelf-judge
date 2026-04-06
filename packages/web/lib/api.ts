@@ -2,7 +2,7 @@
 // Client components go through the /api/daemon/[...path] proxy instead.
 
 import type { Game, Axis, FitnessResult, FitnessBreakdownEntry } from "@shelf-judge/shared";
-import { daemonFetch, daemonJson } from "./daemon";
+import { daemonRequest, daemonJson } from "./daemon";
 
 export interface GameWithScore {
   game: Game;
@@ -45,7 +45,7 @@ export async function getGame(id: string): Promise<GameWithScore> {
 export async function addGame(
   body: { bggId: number } | { name: string; yearPublished?: number },
 ): Promise<AddGameResult> {
-  const res = await daemonFetch("/api/games", {
+  const { response: res } = await daemonRequest("/api/games", {
     method: "POST",
     body,
   });
@@ -71,7 +71,7 @@ export async function rateGame(
 }
 
 export async function removeGame(id: string): Promise<void> {
-  const res = await daemonFetch(`/api/games/${id}`, { method: "DELETE" });
+  const { response: res } = await daemonRequest(`/api/games/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error(`Failed to remove game: ${res.status}`);
 }
 
@@ -117,10 +117,11 @@ export async function deleteAxis(id: string): Promise<{ deletedRatingsCount: num
 }
 
 export async function importBggCollection(username: string): Promise<Response> {
-  return daemonFetch("/api/import/bgg", {
+  const { response } = await daemonRequest("/api/import/bgg", {
     method: "POST",
     body: { username },
   });
+  return response;
 }
 
 // Re-export types for convenience

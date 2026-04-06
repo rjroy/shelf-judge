@@ -27,9 +27,10 @@ function makeRequest(
         socketPath: SOCKET_PATH,
         path,
         method,
-        headers: bodyStr !== undefined
-          ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(bodyStr) }
-          : undefined,
+        headers:
+          bodyStr !== undefined
+            ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(bodyStr) }
+            : undefined,
       },
       resolve,
     );
@@ -52,16 +53,40 @@ function nodeHeadersToRecord(headers: http.IncomingHttpHeaders): Record<string, 
 }
 
 /**
- * Fetch from the daemon via Unix socket using Node's http module.
- * Buffers the response body into a Web API Response.
+ * Fetch from the daemon via Unix socket. Makes a single request and decides
+ * how to deliver the response based on content-type headers (available before
+ * any body is consumed). SSE responses are streamed; everything else is buffered.
  */
-export async function daemonFetch(
+export async function daemonRequest(
   path: string,
   options: DaemonFetchOptions = {},
-): Promise<Response> {
+): Promise<{ response: Response; isStream: boolean }> {
   const res = await makeRequest(path, options);
+  const contentType = res.headers["content-type"] ?? "";
+  const isStream = contentType.includes("text/event-stream");
 
-  return new Promise<Response>((resolve, reject) => {
+  if (isStream) {
+    const stream = new ReadableStream({
+      start(controller) {
+        res.on("data", (chunk: Buffer) => controller.enqueue(chunk));
+        res.on("end", () => controller.close());
+        res.on("error", (err) => controller.error(err));
+      },
+      cancel() {
+        res.destroy();
+      },
+    });
+
+    return {
+      response: new Response(stream, {
+        status: res.statusCode ?? 200,
+        headers: nodeHeadersToRecord(res.headers),
+      }),
+      isStream: true,
+    };
+  }
+
+  const buffered = await new Promise<Response>((resolve, reject) => {
     const chunks: Buffer[] = [];
     res.on("data", (chunk: Buffer) => chunks.push(chunk));
     res.on("end", () => {
@@ -74,43 +99,15 @@ export async function daemonFetch(
     });
     res.on("error", reject);
   });
-}
 
-/**
- * Fetch from the daemon and return a streaming Web API Response.
- * Used for SSE proxying where we can't buffer the full response.
- */
-export async function daemonFetchStream(
-  path: string,
-  options: DaemonFetchOptions = {},
-): Promise<Response> {
-  const res = await makeRequest(path, options);
-
-  const stream = new ReadableStream({
-    start(controller) {
-      res.on("data", (chunk: Buffer) => controller.enqueue(chunk));
-      res.on("end", () => controller.close());
-      res.on("error", (err) => controller.error(err));
-    },
-    cancel() {
-      res.destroy();
-    },
-  });
-
-  return new Response(stream, {
-    status: res.statusCode ?? 200,
-    headers: nodeHeadersToRecord(res.headers),
-  });
+  return { response: buffered, isStream: false };
 }
 
 /**
  * Fetch JSON from the daemon. Throws on non-OK responses.
  */
-export async function daemonJson<T>(
-  path: string,
-  options: DaemonFetchOptions = {},
-): Promise<T> {
-  const response = await daemonFetch(path, options);
+export async function daemonJson<T>(path: string, options: DaemonFetchOptions = {}): Promise<T> {
+  const { response } = await daemonRequest(path, options);
 
   if (!response.ok) {
     const text = await response.text();
