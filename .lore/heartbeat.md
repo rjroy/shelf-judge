@@ -34,3 +34,8 @@ Workers can also add entries to this file during their sessions.
 **Item 2** (429 recovery): ...
 
 - 13:03 commission-Dalton-20260406-125612 completed
+- 13:11 commission-Octavia-20260406-130316 result: Wrote tournament ranking specification at `.lore/specs/tournament-ranking.md` (20 requirements, REQ-TOURN-1 through REQ-TOURN-20 plus REQ-TOURN-15a).
+
+**Positions taken on the three open questions:**
+...
+- 13:11 commission-Octavia-20260406-130316 completed
