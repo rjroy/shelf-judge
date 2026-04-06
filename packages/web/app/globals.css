@@ -787,7 +787,7 @@ body {
 }
 
 .panel-right {
-  padding: 28px 24px;
+  padding: 28px var(--content-padding);
   background: var(--bg-surface);
 }
 
@@ -2161,5 +2161,10 @@ body {
   /* Step 7: Touch target polish — nav items */
   .nav-item {
     padding: 12px 20px;
+  }
+
+  /* iOS zoom fix: rating-value-input has font-size:14px which triggers Safari auto-zoom */
+  .rating-value-input {
+    font-size: 16px;
   }
 }
