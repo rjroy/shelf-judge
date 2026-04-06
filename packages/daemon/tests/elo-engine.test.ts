@@ -214,6 +214,36 @@ describe("recalculateAllRatings - 5-game 10-comparison worked example", () => {
         expect(partial["E"].eloRating).toBeCloseTo(1516, 2);
         expect(partial["A"].eloRating).toBeCloseTo(1484, 2);
       }
+      if (i === 6) {
+        // After step 6: E vs C, C wins. E=1516(1), C=1532(2).
+        // Expected(E) ≈ 0.4770. E: 1516 + 32*(0-0.4770) ≈ 1500.74. C: 1532 + 32*(1-0.5230) ≈ 1547.26.
+        expect(partial["E"].eloRating).toBeCloseTo(1500.74, 0);
+        expect(partial["C"].eloRating).toBeCloseTo(1547.26, 0);
+      }
+      if (i === 7) {
+        // After step 7: A vs D, A wins. A=1484(3), D=1468(2).
+        // Expected(A) ≈ 0.5230. A: 1484 + 32*(1-0.5230) ≈ 1499.26. D: 1468 + 32*(0-0.4770) ≈ 1452.74.
+        expect(partial["A"].eloRating).toBeCloseTo(1499.26, 0);
+        expect(partial["D"].eloRating).toBeCloseTo(1452.74, 0);
+      }
+      if (i === 8) {
+        // After step 8: B vs E, B wins. B=1500(2), E≈1500.74(2).
+        // Expected(B) ≈ 0.4997. B ≈ 1516.01. E ≈ 1484.73.
+        expect(partial["B"].eloRating).toBeCloseTo(1516.01, 0);
+        expect(partial["E"].eloRating).toBeCloseTo(1484.73, 0);
+      }
+      if (i === 9) {
+        // After step 9: C vs B, C wins. C≈1547.26(3), B≈1516.01(3).
+        // Expected(C) ≈ 0.5449. C ≈ 1561.82. B ≈ 1501.45.
+        expect(partial["C"].eloRating).toBeCloseTo(1561.82, 0);
+        expect(partial["B"].eloRating).toBeCloseTo(1501.45, 0);
+      }
+      if (i === 10) {
+        // After step 10: D vs E, E wins. D≈1452.74(3), E≈1484.73(3).
+        // Expected(D) ≈ 0.4541. D ≈ 1438.21. E ≈ 1499.26.
+        expect(partial["D"].eloRating).toBeCloseTo(1438.21, 0);
+        expect(partial["E"].eloRating).toBeCloseTo(1499.26, 0);
+      }
     }
   });
 
@@ -232,7 +262,7 @@ describe("recalculateAllRatings - 5-game 10-comparison worked example", () => {
 });
 
 describe("recalculateAllRatings - incremental matches full recalculation", () => {
-  test("adding comparisons one at a time matches batch recalculation", () => {
+  test("step-by-step calculateNewRatings matches batch recalculateAllRatings", () => {
     const comparisons: Comparison[] = [
       makeComparison("X", "Y", "X", "s1", "2026-01-01T00:01:00Z"),
       makeComparison("Y", "Z", "Y", "s1", "2026-01-01T00:02:00Z"),
@@ -241,18 +271,41 @@ describe("recalculateAllRatings - incremental matches full recalculation", () =>
       makeComparison("Z", "Y", "Z", "s1", "2026-01-01T00:05:00Z"),
     ];
 
+    // Batch: single call to recalculateAllRatings
     const batchResult = recalculateAllRatings(comparisons, 15);
 
-    // Simulate incremental: recalculate after each comparison added
-    let incrementalResult: Record<string, { eloRating: number; comparisonCount: number }> = {};
-    for (let i = 1; i <= comparisons.length; i++) {
-      incrementalResult = recalculateAllRatings(comparisons.slice(0, i), 15);
+    // Incremental: manually apply calculateNewRatings one comparison at a time
+    const stats: Record<string, { eloRating: number; comparisonCount: number }> = {};
+    const getOrCreate = (id: string) => {
+      if (!stats[id]) stats[id] = { eloRating: 1500, comparisonCount: 0 };
+      return stats[id];
+    };
+
+    for (const comp of comparisons) {
+      const a = getOrCreate(comp.gameAId);
+      const b = getOrCreate(comp.gameBId);
+      const winnerId: "a" | "b" = comp.winnerId === comp.gameAId ? "a" : "b";
+      const { newRatingA, newRatingB } = calculateNewRatings(
+        a.eloRating,
+        b.eloRating,
+        winnerId,
+        a.comparisonCount,
+        b.comparisonCount,
+        15,
+      );
+      a.eloRating = newRatingA;
+      b.eloRating = newRatingB;
+      a.comparisonCount++;
+      b.comparisonCount++;
     }
 
-    // They should be identical since recalculate always replays from scratch
-    expect(incrementalResult["X"].eloRating).toBeCloseTo(batchResult["X"].eloRating, 10);
-    expect(incrementalResult["Y"].eloRating).toBeCloseTo(batchResult["Y"].eloRating, 10);
-    expect(incrementalResult["Z"].eloRating).toBeCloseTo(batchResult["Z"].eloRating, 10);
+    // Incremental application of calculateNewRatings must match recalculateAllRatings
+    expect(stats["X"].eloRating).toBeCloseTo(batchResult["X"].eloRating, 10);
+    expect(stats["Y"].eloRating).toBeCloseTo(batchResult["Y"].eloRating, 10);
+    expect(stats["Z"].eloRating).toBeCloseTo(batchResult["Z"].eloRating, 10);
+    expect(stats["X"].comparisonCount).toBe(batchResult["X"].comparisonCount);
+    expect(stats["Y"].comparisonCount).toBe(batchResult["Y"].comparisonCount);
+    expect(stats["Z"].comparisonCount).toBe(batchResult["Z"].comparisonCount);
   });
 
   test("chronological ordering is enforced regardless of input order", () => {

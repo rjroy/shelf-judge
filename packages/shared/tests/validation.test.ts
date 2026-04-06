@@ -280,4 +280,25 @@ describe("SubmitComparisonSchema", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  test("rejects winnerId that is neither gameAId nor gameBId", () => {
+    const result = SubmitComparisonSchema.safeParse({
+      gameAId: "game-1",
+      gameBId: "game-2",
+      winnerId: "game-3",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].message).toBe("winnerId must equal gameAId or gameBId");
+    }
+  });
+
+  test("accepts winnerId equal to gameBId", () => {
+    const result = SubmitComparisonSchema.safeParse({
+      gameAId: "game-1",
+      gameBId: "game-2",
+      winnerId: "game-2",
+    });
+    expect(result.success).toBe(true);
+  });
 });

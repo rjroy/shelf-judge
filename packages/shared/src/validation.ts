@@ -53,11 +53,16 @@ export const StartSessionSchema = z.object({
   filters: z.array(SessionFilterSchema).nullable().optional().default(null),
 });
 
-export const SubmitComparisonSchema = z.object({
-  gameAId: z.string().min(1, "gameAId is required"),
-  gameBId: z.string().min(1, "gameBId is required"),
-  winnerId: z.string().min(1, "winnerId is required"),
-});
+export const SubmitComparisonSchema = z
+  .object({
+    gameAId: z.string().min(1, "gameAId is required"),
+    gameBId: z.string().min(1, "gameBId is required"),
+    winnerId: z.string().min(1, "winnerId is required"),
+  })
+  .refine((data) => data.winnerId === data.gameAId || data.winnerId === data.gameBId, {
+    message: "winnerId must equal gameAId or gameBId",
+    path: ["winnerId"],
+  });
 
 export type CreateAxisInput = z.input<typeof CreateAxisSchema>;
 export type UpdateAxisInput = z.input<typeof UpdateAxisSchema>;

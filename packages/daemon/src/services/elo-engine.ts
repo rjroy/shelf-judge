@@ -89,7 +89,8 @@ export function recalculateAllRatings(
 /**
  * Normalize ELO to 1.0-10.0 using a reference window of 1500 ± halfWidth.
  * Formula: clamp(1 + 9 * (elo - (1500 - halfWidth)) / (2 * halfWidth), 1.0, 10.0)
- * Returns null when normalization shouldn't be displayed (caller decides based on game count).
+ * Always returns a number. Use shouldDisplayRanking() to decide whether to show the result.
+ * Phase 3 composes both to produce TournamentGameStatsDisplay.normalizedScore: number | null.
  */
 export function normalizeElo(elo: number, halfWidth: number): number {
   const minElo = 1500 - halfWidth;
