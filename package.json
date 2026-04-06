@@ -14,7 +14,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "bun test"
+    "test": "bun test",
+    "build": "bun run --filter @shelf-judge/web build"
   },
   "devDependencies": {
     "@eslint/js": "^9.24.0",
