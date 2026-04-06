@@ -41,3 +41,7 @@ Workers can also add entries to this file during their sessions.
 - 13:11 commission-Octavia-20260406-130316 completed
 - 13:11 commission-Dalton-20260406-130842 result: Created `toErrorMessage(err: unknown): string` in `packages/shared/src/errors.ts`, exported from the shared package's public API. Wrote 7 tests covering Error, TypeError, string, number, null, undefin...
 - 13:11 commission-Dalton-20260406-130842 completed
+- 13:14 commission-Octavia-20260406-130704 result: Wrote utility curves specification at `.lore/specs/utility-curves.md` (25 requirements, REQ-CURVE-1 through REQ-CURVE-25).
+
+The spec defines three preference shapes (higher-is-better, lower-is-better,...
+- 13:14 commission-Octavia-20260406-130704 completed
