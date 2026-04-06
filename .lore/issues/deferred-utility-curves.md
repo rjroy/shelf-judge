@@ -1,7 +1,7 @@
 ---
 title: "Deferred: Utility curves and veto axes"
 date: 2026-04-06
-status: open
+status: resolved
 tags: [deferred, feature, fitness, scoring, axes]
 modules: [daemon]
 origin: .lore/specs/mvp.md
@@ -27,3 +27,7 @@ Utility curves increase configuration burden. Each axis would need a curve type 
 - Veto axes are a special case: if a game scores below a threshold on a veto axis, its fitness drops to zero (or a penalty floor) regardless of other scores.
 - UX challenge: how to present curve configuration without overwhelming users who are fine with linear.
 - Exit point defined in spec: triggers when "user needs non-linear axis scoring."
+
+## Resolution
+
+Specified in `.lore/specs/utility-curves.md` (2026-04-06). The spec defines three preference shapes (higher-is-better, lower-is-better, sweet spot), tolerance levels with quantitative anchors, asymmetric lean, and veto thresholds. Additive weighted average is preserved; curves transform ratings before they enter the sum.
