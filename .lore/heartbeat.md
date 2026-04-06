@@ -49,3 +49,12 @@ File: `packages/daemon/tests/elo-engine.test.ts:234-25...
 **Storage changes** (`packages/daemon/src/services/storage-service.ts`):
 - Added `loadTournament()`/`saveTournament()` to `StorageServic...
 - 16:03 commission-Dalton-20260406-153834 completed
+- 16:06 commission-Thorne-20260406-153843 result: ## Tournament Service Review (Phase 3)
+
+### Defects
+
+**1. submitComparison accepts invalid winnerId — data integrity bug**
+File: `packages/daemon/src/services/tournament-service.ts:347`
+
+`winnerId` is...
+- 16:06 commission-Thorne-20260406-153843 completed
