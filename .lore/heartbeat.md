@@ -40,6 +40,11 @@ Workers can also add entries to this file during their sessions.
 - 19:31 commission-Thorne-20260405-190638 result: # Visual Validation Review — Shelf Judge Web UI
 
 - 19:32 commission-Thorne-20260405-190638 completed
+- 19:37 commission-Dalton-20260405-190645 result: All 7 findings from Thorne's visual validation review addressed:
+
+**Defects fixed:**
+1. **Missing scroll wrapper** — Collection page content now wrapped in `<div className="main-scroll">` after the to...
+- 19:37 commission-Dalton-20260405-190645 completed
 ## Summary
 
 The visual transition is substantially complete. Token system, font loading, sidebar, buttons, badges, score spectrum, and all five screens...
