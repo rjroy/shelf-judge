@@ -27,20 +27,3 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
-- 14:47 commission-Sienna-20260406-144019 result: Created four HTML mockups for the tournament session filter UX in `.lore/visual-direction/tournament/`.
-
-**Files delivered:**
-- `01-session-start.html` — Tournament landing page. Shows resume banner f...
-
-- 14:47 commission-Sienna-20260406-144019 completed
-- 14:48 commission-Octavia-20260406-144114 result: Updated `.lore/specs/tournament-ranking.md` with two additions:
-
-1. Added `.lore/visual-direction/tournament/` to the `related:` frontmatter list.
-2. Appended a mockup reference to Open Question #3 (S...
-- 14:48 commission-Octavia-20260406-144114 completed
-- 15:07 commission-Octavia-20260406-145916 result: Implementation plan for tournament-based ELO ranking saved to `.lore/plans/tournament-ranking.md`.
-
-The plan is structured into 7 phases with review gates between each:
-
-- **Phase 1**: Data model and ...
-- 15:07 commission-Octavia-20260406-145916 completed
