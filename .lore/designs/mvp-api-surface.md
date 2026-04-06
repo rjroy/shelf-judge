@@ -1,7 +1,7 @@
 ---
 title: "MVP API Surface"
 date: 2026-04-04
-status: approved
+status: implemented
 tags: [design, api, daemon, operations, mvp]
 modules: [daemon]
 related:

@@ -27,34 +27,3 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
-- 15:49 commission-Dalton-20260405-121733 result: ## All 7 Thorne findings addressed
-
-### Defects fixed
-
-**DEFECT 1: Silent drop of out-of-range ratings** (`rating-form.tsx`)
-- Submit handler now validates all ratings before sending. Out-of-range val...
-
-- 15:49 commission-Dalton-20260405-121733 completed
-- 16:00 commission-Thorne-20260405-121750 result: # Final Integration Verification: Shelf Judge MVP
-
-- 16:00 commission-Thorne-20260405-121750 completed
-- 16:05 commission-Sienna-20260405-155040 result: Visual direction defined and mockups produced for Shelf Judge. Here's what was created and why.
-
-- 16:05 commission-Sienna-20260405-155040 completed
-- 16:10 commission-Dalton-20260405-121755 result: # Fix Pass Results: All Thorne Findings Addressed
-
-- 16:10 commission-Dalton-20260405-121755 completed
-## Test Results
-- **222 tests pass, 0 failures** (up from 209)
-- Typecheck: clean across shared, daemon, CLI
-- Lint: clean
-
-## Findings Fixed
-
-### F1...
-## Creative Direction
-
-**Personality:** Shelf Judge is a personal curation tool, not a product. The rig...
-## Test Execution
-
-**Cannot run tests.** Thorne is read-only (no Bash tool). All findings below are from static analysis. Running `bun test` from the...

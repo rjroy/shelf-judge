@@ -1,7 +1,7 @@
 ---
 title: "MVP Data Model"
 date: 2026-04-04
-status: approved
+status: implemented
 tags: [design, data-model, storage, mvp]
 modules: [daemon]
 related:

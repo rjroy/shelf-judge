@@ -1,7 +1,7 @@
 ---
 title: "MVP Fitness Score Model"
 date: 2026-04-04
-status: approved
+status: implemented
 tags: [design, fitness, scoring, algorithm, mvp]
 modules: [daemon]
 related:
