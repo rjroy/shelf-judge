@@ -1,7 +1,7 @@
 ---
 title: Missing favicon PNGs and Apple touch icon
 date: 2026-04-06
-status: open
+status: resolved
 tags: [web-ui, icons, polish]
 modules: [web]
 ---
