@@ -10,8 +10,14 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Shelf Judge",
+  title: {
+    default: "Shelf Judge",
+    template: "%s | Shelf Judge",
+  },
   description: "Board game fitness scoring",
+  icons: {
+    icon: "/icon.webp",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

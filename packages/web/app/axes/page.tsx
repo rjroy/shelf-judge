@@ -137,12 +137,7 @@ export default function AxesPage() {
     }
   }
 
-  if (loading)
-    return (
-      <p className="axes-content" style={{ color: "var(--text-muted)" }}>
-        Loading axes...
-      </p>
-    );
+  if (loading) return <p className="axes-content loading-text">Loading axes...</p>;
 
   const personalAxes = axes.filter((a) => a.source === "personal");
   const bggAxes = axes.filter((a) => a.source === "bgg");
@@ -165,6 +160,7 @@ export default function AxesPage() {
           <div className="weight-summary">
             <div className="weight-summary-label">Total weight</div>
             <div className="weight-total-bar">
+              {/* Dynamic width: indicates whether any weight is defined */}
               <div
                 className="weight-total-fill"
                 style={{ width: totalWeight > 0 ? "100%" : "0%" }}
@@ -203,7 +199,7 @@ export default function AxesPage() {
                     <span className="form-hint">Relative importance of this axis</span>
                   </div>
                 </div>
-                <div className="form-group" style={{ marginBottom: 16 }}>
+                <div className="form-group form-group-mb">
                   <label className="form-label">Description</label>
                   <input
                     className="form-input"
@@ -237,7 +233,7 @@ export default function AxesPage() {
               <div className="axis-card-main">
                 <div>
                   {editingId === axis.id ? (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <div className="edit-fields">
                       <input
                         className="form-input"
                         type="text"
@@ -246,12 +242,11 @@ export default function AxesPage() {
                         placeholder="Axis name"
                       />
                       <input
-                        className="form-input"
+                        className="form-input edit-desc-input"
                         type="text"
                         value={editDescription}
                         onChange={(e) => setEditDescription(e.target.value)}
                         placeholder="Description (optional)"
-                        style={{ fontSize: 12 }}
                       />
                     </div>
                   ) : (
@@ -265,13 +260,12 @@ export default function AxesPage() {
                 <div className="weight-display">
                   {editingId === axis.id ? (
                     <input
-                      className="form-input"
+                      className="form-input weight-edit-input"
                       type="number"
                       min={0}
                       max={100}
                       value={editWeight}
                       onChange={(e) => setEditWeight(e.target.value)}
-                      style={{ width: 60, textAlign: "center" }}
                     />
                   ) : (
                     <>
@@ -284,6 +278,7 @@ export default function AxesPage() {
                   )}
                 </div>
                 <div className="weight-bar-track">
+                  {/* Dynamic width: proportional weight relative to total */}
                   <div
                     className="weight-bar-fill"
                     style={{
@@ -350,10 +345,10 @@ export default function AxesPage() {
           {/* BGG axes */}
           {bggAxes.length > 0 && (
             <>
-              <div className="section-label" style={{ marginTop: 28 }}>
+              <div className="section-label section-label-mt">
                 BGG-derived axes &middot; {bggAxes.length}
               </div>
-              <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>
+              <p className="bgg-axes-desc">
                 These axes are automatically populated from BoardGameGeek data. You can override any
                 individual game{"'"}s value.
               </p>
@@ -363,7 +358,7 @@ export default function AxesPage() {
                   <div className="axis-card-main">
                     <div>
                       {editingId === axis.id ? (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        <div className="edit-fields">
                           <input
                             className="form-input"
                             type="text"
@@ -372,12 +367,11 @@ export default function AxesPage() {
                             placeholder="Axis name"
                           />
                           <input
-                            className="form-input"
+                            className="form-input edit-desc-input"
                             type="text"
                             value={editDescription}
                             onChange={(e) => setEditDescription(e.target.value)}
                             placeholder="Description (optional)"
-                            style={{ fontSize: 12 }}
                           />
                         </div>
                       ) : (
@@ -391,13 +385,12 @@ export default function AxesPage() {
                     <div className="weight-display">
                       {editingId === axis.id ? (
                         <input
-                          className="form-input"
+                          className="form-input weight-edit-input"
                           type="number"
                           min={0}
                           max={100}
                           value={editWeight}
                           onChange={(e) => setEditWeight(e.target.value)}
-                          style={{ width: 60, textAlign: "center" }}
                         />
                       ) : (
                         <>
@@ -410,6 +403,7 @@ export default function AxesPage() {
                       )}
                     </div>
                     <div className="weight-bar-track">
+                      {/* Dynamic width: proportional weight relative to total */}
                       <div
                         className="weight-bar-fill"
                         style={{

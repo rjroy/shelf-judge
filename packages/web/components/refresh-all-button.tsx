@@ -34,18 +34,12 @@ export function RefreshAllButton() {
   }
 
   return (
-    <div style={{ display: "inline-flex", flexDirection: "column", alignItems: "end" }}>
+    <div className="refresh-all-wrapper">
       <button className="btn btn-secondary" onClick={handleRefresh} disabled={refreshing}>
         {refreshing ? "Refreshing..." : "Refresh All BGG"}
       </button>
       {result && (
-        <span
-          style={{
-            fontSize: 12,
-            color: result.isError ? "var(--danger)" : "var(--text-muted)",
-            marginTop: 4,
-          }}
-        >
+        <span className={`refresh-result ${result.isError ? "error" : "success"}`}>
           {result.message}
         </span>
       )}

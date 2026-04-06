@@ -8,33 +8,13 @@ function scoreRangeClass(score: number): string {
 
 export function ScoreBadge({ score }: { score: FitnessResult | null }) {
   if (!score) {
-    return (
-      <span style={{ color: "var(--text-muted)", fontStyle: "italic", fontSize: 12 }}>
-        not rated
-      </span>
-    );
+    return <span className="score-badge-not-rated">not rated</span>;
   }
 
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-      <span
-        style={{
-          width: 8,
-          height: 8,
-          borderRadius: "50%",
-          flexShrink: 0,
-          background: `var(--score-${scoreRangeClass(score.score)})`,
-        }}
-      />
-      <span
-        style={{
-          fontWeight: 700,
-          color: "var(--score-color)",
-          fontVariantNumeric: "tabular-nums",
-        }}
-      >
-        {score.score.toFixed(1)}
-      </span>
+    <span className="score-badge-inline">
+      <span className={`score-dot ${scoreRangeClass(score.score)}`} />
+      <span className="score-value">{score.score.toFixed(1)}</span>
     </span>
   );
 }

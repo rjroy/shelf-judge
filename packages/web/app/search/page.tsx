@@ -113,16 +113,13 @@ export default function SearchPage() {
           {/* Search input */}
           <div className="search-input-row">
             <input
-              className="form-input"
+              className="form-input search-input-flex"
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search BoardGameGeek..."
-              style={{ flex: 1, maxWidth: 400 }}
             />
-            {searching && (
-              <span style={{ color: "var(--text-muted)", fontSize: 13 }}>Searching...</span>
-            )}
+            {searching && <span className="search-status">Searching...</span>}
           </div>
 
           {error && <div className="error-banner">{error}</div>}
@@ -149,13 +146,13 @@ export default function SearchPage() {
           )}
 
           {/* Manual add section */}
-          <div style={{ borderTop: "1px solid var(--border)", paddingTop: 24 }}>
+          <div className="manual-section">
             <button className="btn btn-ghost" onClick={() => setShowManual(!showManual)}>
               {showManual ? "Hide manual entry" : "Add a game manually (not on BGG)"}
             </button>
 
             {showManual && (
-              <div className="manual-add-card" style={{ marginTop: 16 }}>
+              <div className="manual-add-card manual-add-card-mt">
                 <form onSubmit={handleAddManual}>
                   <div className="form-row">
                     <div className="form-group">

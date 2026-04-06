@@ -3,7 +3,7 @@ import type { FitnessResult } from "@shelf-judge/shared";
 export function ScoreBreakdown({ score }: { score: FitnessResult | null }) {
   if (!score) {
     return (
-      <p className="bgg-data-line" style={{ fontStyle: "italic" }}>
+      <p className="bgg-data-line breakdown-empty">
         Not yet rated. Rate this game on at least one axis to see a fitness score.
       </p>
     );
@@ -21,7 +21,7 @@ export function ScoreBreakdown({ score }: { score: FitnessResult | null }) {
           <th className="right">Rating</th>
           <th className="right">Weight</th>
           <th className="right">Contribution</th>
-          <th style={{ textAlign: "right" }}>Source</th>
+          <th className="right">Source</th>
         </tr>
       </thead>
       <tbody>
@@ -35,27 +35,24 @@ export function ScoreBreakdown({ score }: { score: FitnessResult | null }) {
 
           return (
             <tr key={entry.axisId} className={rowClass}>
-              <td style={{ fontWeight: 500 }}>
+              <td className="breakdown-name-cell">
                 {entry.axisName}
                 {entry.source === "override" && entry.bggOriginal !== null && (
-                  <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 1 }}>
+                  <div className="breakdown-override-detail">
                     BGG value: {entry.bggOriginal.toFixed(1)} → scaled{" "}
                     {Math.round(entry.bggOriginal)}
                   </div>
                 )}
               </td>
               <td className="right">
-                {entry.rating !== null ? (
-                  entry.rating
-                ) : (
-                  <span style={{ color: "var(--text-muted)", fontStyle: "italic" }}>—</span>
-                )}
+                {entry.rating !== null ? entry.rating : <span className="breakdown-dash">—</span>}
               </td>
               <td className="right">{entry.weight}</td>
               <td className="right">
                 {contribPct !== null ? (
                   <div className="contrib-cell">
                     <div className="contrib-bar-track">
+                      {/* Dynamic width: contribution percentage computed from runtime data */}
                       <div className="contrib-bar-fill" style={{ width: `${contribPct}%` }} />
                     </div>
                     <span className="contrib-pct">{contribPct}%</span>
@@ -64,17 +61,17 @@ export function ScoreBreakdown({ score }: { score: FitnessResult | null }) {
                   "—"
                 )}
               </td>
-              <td style={{ textAlign: "right" }}>
+              <td className="right">
                 <SourceBadge source={entry.source} />
               </td>
             </tr>
           );
         })}
         <tr className="total-row">
-          <td colSpan={3} style={{ fontWeight: 700 }}>
+          <td colSpan={3} className="total-label">
             Fitness Score
           </td>
-          <td colSpan={2} style={{ textAlign: "right" }}>
+          <td colSpan={2} className="right">
             {score.score.toFixed(1)}
           </td>
         </tr>

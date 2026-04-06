@@ -125,9 +125,7 @@ export function RatingForm({
         {bggAxes.length > 0 && (
           <>
             <hr className="section-divider" />
-            <div className="panel-section-title" style={{ marginBottom: 12 }}>
-              BGG-Derived Axes
-            </div>
+            <div className="panel-section-title bgg-section-title">BGG-Derived Axes</div>
 
             {bggAxes.map((axis) => {
               const hasOverride = ratings[axis.id] !== undefined && ratings[axis.id] !== "";
@@ -136,12 +134,7 @@ export function RatingForm({
                   <div className="rating-field-header">
                     <div className="rating-field-name">
                       {axis.name}
-                      <span
-                        className="source-badge source-bgg"
-                        style={{ marginLeft: 6, verticalAlign: "middle" }}
-                      >
-                        BGG
-                      </span>
+                      <span className="source-badge source-bgg bgg-badge-inline">BGG</span>
                     </div>
                     <div className="rating-field-weight">Weight: {axis.weight}</div>
                   </div>
@@ -167,24 +160,19 @@ export function RatingForm({
                       <div className="rating-input-row">
                         <input
                           type="range"
-                          className="rating-slider"
+                          className="rating-slider override-slider"
                           min={1}
                           max={10}
                           value={ratings[axis.id] || "5"}
                           onChange={(e) => handleChange(axis.id, e.target.value)}
-                          style={{ accentColor: "var(--override-accent)" }}
                         />
                         <input
                           type="number"
-                          className="rating-value-input"
+                          className="rating-value-input override-value-input"
                           min={1}
                           max={10}
                           value={ratings[axis.id] ?? ""}
                           onChange={(e) => handleChange(axis.id, e.target.value)}
-                          style={{
-                            color: "var(--override-accent)",
-                            borderColor: "var(--override-accent)",
-                          }}
                         />
                       </div>
                     </>

@@ -1,8 +1,23 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { getGame, listAxes } from "@/lib/api";
 import { ScoreBreakdown } from "@/components/score-breakdown";
 import { RatingForm } from "@/components/rating-form";
 import { GameActions } from "@/components/game-actions";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}): Promise<Metadata> {
+  const { id } = await params;
+  try {
+    const { game } = await getGame(id);
+    return { title: game.name };
+  } catch {
+    return { title: "Game" };
+  }
+}
 
 export const dynamic = "force-dynamic";
 
@@ -86,12 +101,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
             ) : (
               <>
                 <div className="score-hero-label">Fitness Score</div>
-                <div
-                  className="score-hero-number"
-                  style={{ color: "var(--text-muted)", fontSize: 24 }}
-                >
-                  —
-                </div>
+                <div className="score-hero-number score-hero-unrated">—</div>
                 <div className="score-hero-out-of">not yet rated</div>
               </>
             )}

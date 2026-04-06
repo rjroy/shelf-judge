@@ -179,6 +179,7 @@ export default function ImportPage() {
                   </div>
                 </div>
                 <div className="progress-track">
+                  {/* Dynamic width: progress percentage computed from runtime import count */}
                   <div
                     className="progress-fill"
                     style={{
@@ -227,7 +228,7 @@ export default function ImportPage() {
               </div>
 
               {result.errors.length > 0 && (
-                <div className="error-banner" style={{ marginBottom: 16 }}>
+                <div className="error-banner error-banner-mb">
                   {result.errors.map((err, i) => (
                     <div key={i}>{err}</div>
                   ))}
