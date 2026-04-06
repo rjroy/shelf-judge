@@ -338,6 +338,15 @@ export function createGameService(deps: GameServiceDeps): GameService {
         `[import] collection: ${total} total, ${newItems.length} new, ${skipped} already exist`,
       );
 
+      // Signal the total before batch fetch starts so the UI can show "0 / N"
+      // during the slow BGG API calls instead of "0 / 0".
+      await onProgress?.({
+        phase: "importing-games",
+        current: skipped,
+        total,
+        importedSoFar: 0,
+      });
+
       // Build a lookup from bggId to collection item name for progress reporting
       const itemsByBggId = new Map(newItems.map((item) => [item.bggId, item]));
 

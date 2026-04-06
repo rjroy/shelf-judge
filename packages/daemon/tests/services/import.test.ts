@@ -246,9 +246,13 @@ describe("Collection Import", () => {
     expect(events[0].phase).toBe("fetching-collection");
 
     const importEvents = events.filter((e) => e.phase === "importing-games");
-    expect(importEvents.length).toBe(3);
-    // Counts should increment
-    expect(importEvents[0].current).toBeLessThanOrEqual(importEvents[1].current);
+    // 1 "signal total" event + 3 per-game events
+    expect(importEvents.length).toBe(4);
+    // First event signals the total before batch fetch
+    expect(importEvents[0].importedSoFar).toBe(0);
+    expect(importEvents[0].total).toBe(3);
+    // Subsequent counts should increment
+    expect(importEvents[1].current).toBeLessThanOrEqual(importEvents[2].current);
   });
 
   test("handles partial failure (some games fail to fetch)", async () => {

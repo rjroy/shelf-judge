@@ -157,7 +157,11 @@ export default function ImportPage() {
                 <div className="status-text">
                   <div className="status-headline">Importing in progress</div>
                   <div className="status-sub">
-                    {progress.current ? `Fetching ${progress.current} from BGG…` : "Preparing…"}
+                    {progress.current
+                      ? `Fetching ${progress.current} from BGG…`
+                      : progress.total > 0
+                        ? "Fetching game data from BGG…"
+                        : "Fetching collection list…"}
                   </div>
                 </div>
                 <div className="status-count">
