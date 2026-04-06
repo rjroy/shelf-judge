@@ -256,6 +256,7 @@ body {
   background: transparent;
   border: 1px solid var(--border-strong);
   color: var(--text-secondary);
+  margin: 0 4px;
 }
 
 .btn-secondary:hover:not(:disabled) {
