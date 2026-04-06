@@ -45,6 +45,14 @@ Workers can also add entries to this file during their sessions.
 - 16:45 commission-Thorne-20260406-153950 result: # Tournament Feature Integration Review
 
 - 16:45 commission-Thorne-20260406-153950 completed
+- 16:52 commission-Dalton-20260406-153958 result: # All 7 Thorne Findings Fixed
+
+All 3 defects and 4 concerns from Thorne's integration review are resolved. 380 tests pass, typecheck clean, lint clean.
+
+- 16:52 commission-Dalton-20260406-153958 completed
+## Defects Fixed
+
+**D1+D2: CLI stats API shape ...
 ## Requirement Verification: 20/20 Implemented
 
 All 20 requirements (REQ-TOURN-1 through REQ-TOURN-20) are implemented in the code. All 15 automated success cr...
