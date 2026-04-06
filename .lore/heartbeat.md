@@ -50,3 +50,7 @@ The spec defines 7 requirements (REQ-LOG-1 through REQ-LOG-7) covering: the `cre
 
 All plan requirements for Steps 1-2 are implemented. Desktop layout is unchanged. Spacing tokens are ...
 - 06:37 commission-Thorne-20260406-062824 completed
+- 06:38 commission-Octavia-20260406-063552 result: Filed 9 structured issues from the MVP spec's deferred items and open questions. No overlap with the 6 pre-existing issues (which track implementation quality and cleanup).
+
+**8 deferred features file...
+- 06:38 commission-Octavia-20260406-063552 completed
