@@ -62,3 +62,8 @@ File: `packages/daemon/src/services/tournament-service.ts:347`
 
 **Defect #1 - winnerId validation**: Added guard in `submitComparison` that throws if `winnerId` is not one of `gameAId` or `gameBId`. Preven...
 - 16:08 commission-Dalton-20260406-153848 completed
+- 16:13 commission-Dalton-20260406-153859 result: Phase 4 complete: tournament API routes, app/index wiring, and route tests.
+
+**New files:**
+- `packages/daemon/src/routes/tournament.ts` — 11 endpoints matching the plan's endpoint specification table...
+- 16:13 commission-Dalton-20260406-153859 completed
