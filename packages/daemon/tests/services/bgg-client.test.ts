@@ -116,21 +116,22 @@ describe("BggClient", () => {
   });
 
   describe("getGames (batch)", () => {
-    test("batches up to 250 IDs per request", async () => {
+    test("batches up to 20 IDs per request", async () => {
       const thingXml = await readFixture("thing-wingspan-266192.xml");
-      // Create 300 IDs to force 2 batches
-      const ids = Array.from({ length: 300 }, (_, i) => 266192 + i);
+      // Create 50 IDs to force 3 batches
+      const ids = Array.from({ length: 50 }, (_, i) => 266192 + i);
 
-      mockFetch.enqueue(200, thingXml); // First batch returns Wingspan
-      mockFetch.enqueue(200, thingXml); // Second batch
+      mockFetch.enqueue(200, thingXml); // First batch (20)
+      mockFetch.enqueue(200, thingXml); // Second batch (20)
+      mockFetch.enqueue(200, thingXml); // Third batch (10)
 
       const results = await client.getGames(ids);
 
-      // Should have made 2 requests: 250 + 50
-      expect(mockFetch.calls).toHaveLength(2);
+      // Should have made 3 requests: 20 + 20 + 10
+      expect(mockFetch.calls).toHaveLength(3);
       const firstUrl = mockFetch.calls[0].url;
       const firstIds = new URL(firstUrl).searchParams.get("id")!.split(",");
-      expect(firstIds).toHaveLength(250);
+      expect(firstIds).toHaveLength(20);
     });
   });
 
@@ -278,7 +279,10 @@ describe("BggClient", () => {
   describe("fetch timeout", () => {
     test("aborts request after timeout and throws descriptive error", async () => {
       // Create a fetch that hangs until aborted
-      const hangingFetch = async (_url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      const hangingFetch = async (
+        _url: string | URL | Request,
+        init?: RequestInit,
+      ): Promise<Response> => {
         return new Promise((_resolve, reject) => {
           if (init?.signal) {
             init.signal.addEventListener("abort", () => {

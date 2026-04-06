@@ -258,7 +258,7 @@ No officially published rate limit. Community consensus:
 
 - **Safe rate:** 1 request per 5 seconds (used by several libraries)
 - **Practical limit:** ~2 requests per second before seeing 429 responses
-- **Batch size:** Pass comma-delimited IDs to the thing endpoint; 250–500 IDs per request is optimal. Requests exceeding ~1,000 IDs can trigger blocking.
+- **Batch size:** The thing endpoint accepts comma-delimited IDs but returns HTTP 400 ("Cannot load more than 20 items") for requests exceeding 20 IDs. Batch in groups of 20.
 
 HTTP response codes to handle:
 

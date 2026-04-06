@@ -11,7 +11,7 @@ import {
 
 const BGG_BASE_URL = "https://boardgamegeek.com/xmlapi2";
 const BGG_REGISTER_URL = "https://boardgamegeek.com/using_the_xml_api";
-const MAX_BATCH_SIZE = 250;
+const MAX_BATCH_SIZE = 20;
 const DEFAULT_DELAY_MS = 5000;
 const BACKOFF_429_MS = 30000;
 const RETRY_5XX_MS = 30000;
