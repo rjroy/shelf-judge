@@ -45,6 +45,11 @@ Workers can also add entries to this file during their sessions.
 **Defects fixed:**
 1. **Missing scroll wrapper** — Collection page content now wrapped in `<div className="main-scroll">` after the to...
 - 19:37 commission-Dalton-20260405-190645 completed
+- 20:12 commission-Dalton-20260405-201129 result: Fixed BGG API batch size limit. Three files changed:
+
+1. `packages/daemon/src/services/bgg-client.ts` — `MAX_BATCH_SIZE` changed from 250 to 20
+2. `packages/daemon/tests/services/bgg-client.test.ts` —...
+- 20:12 commission-Dalton-20260405-201129 completed
 ## Summary
 
 The visual transition is substantially complete. Token system, font loading, sidebar, buttons, badges, score spectrum, and all five screens...
