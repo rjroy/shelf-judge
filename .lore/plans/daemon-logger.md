@@ -1,7 +1,7 @@
 ---
 title: "Implementation plan: daemon-logger"
 date: 2026-04-06
-status: draft
+status: approved
 tags: [plan, observability, logging, cleanup]
 modules: [daemon-services, bgg-client]
 related:
