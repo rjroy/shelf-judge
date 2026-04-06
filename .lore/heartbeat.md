@@ -33,3 +33,8 @@ Workers can also add entries to this file during their sessions.
 - `01-session-start.html` — Tournament landing page. Shows resume banner f...
 
 - 14:47 commission-Sienna-20260406-144019 completed
+- 14:48 commission-Octavia-20260406-144114 result: Updated `.lore/specs/tournament-ranking.md` with two additions:
+
+1. Added `.lore/visual-direction/tournament/` to the `related:` frontmatter list.
+2. Appended a mockup reference to Open Question #3 (S...
+- 14:48 commission-Octavia-20260406-144114 completed
