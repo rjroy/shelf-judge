@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shelf Judge — BGG Import</title>
+<style>
+  :root {
+    --bg-base: #f4f1ec;
+    --bg-surface: #fefcf9;
+    --border: #ddd8d0;
+    --border-strong: #c4bfb8;
+    --text-primary: #1a1714;
+    --text-secondary: #6b6560;
+    --text-muted: #9c9590;
+    --score-color: #b86c1a;
+    --score-high: #2d7a4a;
+    --bgg-accent: #2e5f8a;
+    --bgg-bg: #edf3f9;
+    --action: #1c3d5e;
+    --danger: #b84040;
+    --danger-subtle: #fdf0f0;
+    --nav-bg: #1a1714;
+    --nav-text: #e8e4dc;
+    --nav-active: #b86c1a;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg-base);
+    color: var(--text-primary);
+    font-size: 15px;
+    line-height: 1.5;
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .sidebar { width: 200px; flex-shrink: 0; background: var(--nav-bg); display: flex; flex-direction: column; }
+  .sidebar-brand { padding: 20px 20px 24px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+  .brand-name { font-size: 15px; font-weight: 700; color: var(--nav-text); }
+  .brand-sub { font-size: 11px; color: rgba(232,228,220,0.4); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .nav-section { padding: 16px 0; flex: 1; }
+  .nav-label { font-size: 10px; font-weight: 600; color: rgba(232,228,220,0.35); text-transform: uppercase; letter-spacing: 0.1em; padding: 0 20px; margin-bottom: 6px; margin-top: 12px; }
+  .nav-label:first-child { margin-top: 0; }
+  .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 20px; font-size: 13px; color: rgba(232,228,220,0.65); cursor: pointer; border-left: 3px solid transparent; text-decoration: none; }
+  .nav-item.active { background: rgba(184,108,26,0.12); color: var(--nav-text); border-left-color: var(--nav-active); font-weight: 500; }
+  .nav-icon { width: 16px; height: 16px; opacity: 0.7; flex-shrink: 0; }
+  .nav-item.active .nav-icon { opacity: 1; }
+  .sidebar-footer { padding: 16px 20px; border-top: 1px solid rgba(255,255,255,0.08); font-size: 11px; color: rgba(232,228,220,0.3); }
+
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  .topbar {
+    height: 56px;
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 32px;
+    gap: 16px;
+    flex-shrink: 0;
+  }
+
+  .topbar-title { font-size: 16px; font-weight: 600; flex: 1; }
+
+  .content { flex: 1; overflow-y: auto; padding: 40px 32px; max-width: 680px; }
+
+  .import-header {
+    margin-bottom: 32px;
+  }
+
+  .import-header h2 { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+  .import-header p { font-size: 14px; color: var(--text-secondary); }
+
+  /* Status banner */
+  .status-banner {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px 24px;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .status-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--bgg-bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    flex-shrink: 0;
+  }
+
+  .status-banner.running .status-icon { animation: pulse 1.4s ease-in-out infinite; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  .status-text { flex: 1; }
+  .status-headline { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 3px; }
+  .status-sub { font-size: 13px; color: var(--text-secondary); }
+
+  .status-count {
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  .count-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+
+  .count-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  /* Progress bar */
+  .progress-section { margin-bottom: 24px; }
+
+  .progress-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+
+  .progress-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+  .progress-fraction { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+  .progress-track {
+    height: 8px;
+    background: var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: var(--bgg-accent);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+  }
+
+  /* Games list */
+  .games-log-header {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .game-log-list { display: flex; flex-direction: column; gap: 0; }
+
+  .game-log-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .log-status {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+
+  .log-status.ok { background: #d5f0e0; color: var(--score-high); }
+  .log-status.skipped { background: #ede9e3; color: var(--text-muted); }
+  .log-status.error { background: var(--danger-subtle); color: var(--danger); }
+  .log-status.loading { background: var(--bgg-bg); color: var(--bgg-accent); font-size: 10px; }
+
+  .log-game-name { flex: 1; font-size: 13px; font-weight: 500; color: var(--text-primary); }
+  .log-game-year { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .log-tag { font-size: 10px; color: var(--text-muted); }
+  .log-tag.added { color: var(--score-high); font-weight: 600; }
+  .log-tag.skipped { color: var(--text-muted); }
+  .log-tag.error { color: var(--danger); font-weight: 600; }
+
+  /* Summary (completed state) */
+  .summary-block {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px 24px;
+    margin-bottom: 24px;
+    display: none; /* shown on completion */
+  }
+
+  .summary-block.show { display: block; }
+
+  .summary-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-top: 12px;
+  }
+
+  .summary-stat {
+    background: var(--bg-elevated);
+    padding: 14px 16px;
+  }
+
+  .summary-stat-value { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .summary-stat-value.added { color: var(--score-high); }
+  .summary-stat-value.skipped { color: var(--text-secondary); }
+  .summary-stat-value.errors { color: var(--danger); }
+  .summary-stat-label { font-size: 11px; color: var(--text-muted); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.06em; }
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:2px;">
+      <svg width="22" height="18" viewBox="0 0 22 18" fill="none">
+        <rect x="0" y="6" width="5" height="12" rx="1" fill="#b86c1a"/>
+        <rect x="7" y="0" width="5" height="18" rx="1" fill="#e8e4dc"/>
+        <rect x="14" y="4" width="5" height="14" rx="1" fill="#e8e4dc" opacity="0.6"/>
+      </svg>
+      <span class="brand-name">Shelf Judge</span>
+    </div>
+    <div class="brand-sub">Board Game Collection</div>
+  </div>
+  <nav class="nav-section">
+    <div class="nav-label">Library</div>
+    <a class="nav-item" href="#">
+      <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M2 2h12v12H2V2zm1 1v10h10V3H3zm2 2h6v1H5V5zm0 3h6v1H5V8zm0 3h4v1H5v-1z"/></svg>
+      Collection
+    </a>
+    <a class="nav-item" href="#">
+      <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M1 3a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h8a1 1 0 010 2H2a1 1 0 01-1-1z"/></svg>
+      Axes
+    </a>
+    <div class="nav-label">Add</div>
+    <a class="nav-item" href="#">
+      <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 1a6 6 0 110 12A6 6 0 018 2zm0 3v2H6v1h2v2h1V8h2V7H9V5H8z"/></svg>
+      Add Game
+    </a>
+    <a class="nav-item active" href="#">
+      <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M14 3H2a1 1 0 00-1 1v8a1 1 0 001 1h12a1 1 0 001-1V4a1 1 0 00-1-1zM8 11l-4-3h2.5V7h3v1H12L8 11z"/></svg>
+      Import BGG
+    </a>
+  </nav>
+  <div class="sidebar-footer">Importing…</div>
+</aside>
+
+<main class="main">
+  <div class="topbar">
+    <div class="topbar-title">Import from BoardGameGeek</div>
+  </div>
+
+  <div class="content">
+
+    <div class="import-header">
+      <h2>Importing Collection</h2>
+      <p>Fetching game data from BGG for <strong>rjroy</strong>. This may take a moment — BGG requests are rate-limited.</p>
+    </div>
+
+    <!-- Status banner — "running" state -->
+    <div class="status-banner running">
+      <div class="status-icon">⟳</div>
+      <div class="status-text">
+        <div class="status-headline">Importing in progress</div>
+        <div class="status-sub">Fetching Brass: Birmingham from BGG…</div>
+      </div>
+      <div class="status-count">
+        <div class="count-value">12 / 47</div>
+        <div class="count-label">games</div>
+      </div>
+    </div>
+
+    <!-- Progress bar -->
+    <div class="progress-section">
+      <div class="progress-header">
+        <div class="progress-label">Progress</div>
+        <div class="progress-fraction">12 of 47 · 26%</div>
+      </div>
+      <div class="progress-track">
+        <div class="progress-fill" style="width:26%;"></div>
+      </div>
+    </div>
+
+    <!-- Games log -->
+    <div class="games-log-header">Imported games</div>
+    <div class="game-log-list">
+
+      <div class="game-log-item">
+        <div class="log-status ok">✓</div>
+        <div class="log-game-name">Wingspan</div>
+        <div class="log-game-year">2019</div>
+        <div class="log-tag added">added</div>
+      </div>
+
+      <div class="game-log-item">
+        <div class="log-status ok">✓</div>
+        <div class="log-game-name">Azul</div>
+        <div class="log-game-year">2017</div>
+        <div class="log-tag added">added</div>
+      </div>
+
+      <div class="game-log-item">
+        <div class="log-status skipped">↷</div>
+        <div class="log-game-name">Ticket to Ride</div>
+        <div class="log-game-year">2004</div>
+        <div class="log-tag skipped">already in collection</div>
+      </div>
+
+      <div class="game-log-item">
+        <div class="log-status ok">✓</div>
+        <div class="log-game-name">Spirit Island</div>
+        <div class="log-game-year">2017</div>
+        <div class="log-tag added">added</div>
+      </div>
+
+      <div class="game-log-item">
+        <div class="log-status ok">✓</div>
+        <div class="log-game-name">Everdell</div>
+        <div class="log-game-year">2018</div>
+        <div class="log-tag added">added</div>
+      </div>
+
+      <div class="game-log-item">
+        <div class="log-status skipped">↷</div>
+        <div class="log-game-name">Pandemic</div>
+        <div class="log-game-year">2008</div>
+        <div class="log-tag skipped">already in collection</div>
+      </div>
+
+      <div class="game-log-item">
+        <div class="log-status ok">✓</div>
+        <div class="log-game-name">7 Wonders Duel</div>
+        <div class="log-game-year">2015</div>
+        <div class="log-tag added">added</div>
+      </div>
+
+      <div class="game-log-item">
+        <div class="log-status ok">✓</div>
+        <div class="log-game-name">Twilight Imperium 4E</div>
+        <div class="log-game-year">2017</div>
+        <div class="log-tag added">added</div>
+      </div>
+
+      <div class="game-log-item">
+        <div class="log-status error">✗</div>
+        <div class="log-game-name">Dominion (2E)</div>
+        <div class="log-game-year">2016</div>
+        <div class="log-tag error">BGG timeout</div>
+      </div>
+
+      <div class="game-log-item">
+        <div class="log-status ok">✓</div>
+        <div class="log-game-name">Root</div>
+        <div class="log-game-year">2018</div>
+        <div class="log-tag added">added</div>
+      </div>
+
+      <div class="game-log-item">
+        <div class="log-status ok">✓</div>
+        <div class="log-game-name">Gloomhaven</div>
+        <div class="log-game-year">2017</div>
+        <div class="log-tag added">added</div>
+      </div>
+
+      <!-- Current: loading -->
+      <div class="game-log-item" style="opacity:0.6;">
+        <div class="log-status loading">···</div>
+        <div class="log-game-name">Brass: Birmingham</div>
+        <div class="log-game-year">2018</div>
+        <div class="log-tag" style="color:var(--bgg-accent);">fetching…</div>
+      </div>
+
+    </div>
+
+    <p style="font-size:11px;color:var(--text-muted);margin-top:20px;text-align:center;">
+      BGG requests are throttled to avoid rate limiting. Please keep this window open until the import finishes.
+    </p>
+
+  </div>
+</main>
+
+</body>
+</html>

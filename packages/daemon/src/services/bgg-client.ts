@@ -1,0 +1,301 @@
+import type { BggGameData, AppConfig } from "@shelf-judge/shared";
+import {
+  parseThingResponse,
+  parseThingMetadata,
+  parseSearchResponse,
+  parseCollectionResponse,
+  type BggSearchResult,
+  type BggCollectionItem,
+  type ThingMetadata,
+} from "./bgg-xml-parser.js";
+
+const BGG_BASE_URL = "https://boardgamegeek.com/xmlapi2";
+const BGG_REGISTER_URL = "https://boardgamegeek.com/using_the_xml_api";
+const MAX_BATCH_SIZE = 20;
+const DEFAULT_DELAY_MS = 5000;
+const BACKOFF_429_MS = 30000;
+const RETRY_5XX_MS = 30000;
+const MAX_429_RETRIES = 3;
+const MAX_5XX_RETRIES = 2;
+const MAX_202_RETRIES = 3;
+const BASE_202_DELAY_MS = 5000;
+const FETCH_TIMEOUT_MS = 30000;
+
+export interface BggGameResult {
+  metadata: ThingMetadata;
+  bggData: BggGameData;
+}
+
+export interface BatchProgressEvent {
+  batchIds: number[];
+  results: Map<number, BggGameResult>;
+}
+
+export interface BggClient {
+  searchGames(query: string): Promise<BggSearchResult[]>;
+  getGame(bggId: number): Promise<BggGameResult>;
+  getGames(
+    bggIds: number[],
+    onBatch?: (event: BatchProgressEvent) => Promise<void> | void,
+  ): Promise<Map<number, BggGameResult>>;
+  getUserCollection(username: string): Promise<BggCollectionItem[]>;
+  isConfigured(): boolean;
+}
+
+export interface BggClientDeps {
+  config: Pick<AppConfig, "bggAuthToken">;
+  fetchFn?: typeof fetch;
+  delayMs?: number;
+  delayFn?: (ms: number) => Promise<void>;
+}
+
+function defaultDelay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export function createBggClient(deps: BggClientDeps): BggClient {
+  const { config, delayMs = DEFAULT_DELAY_MS } = deps;
+  const fetchFn = deps.fetchFn ?? fetch;
+  const delayFn = deps.delayFn ?? defaultDelay;
+
+  let lastRequestTime = 0;
+  let currentDelayMs = delayMs;
+
+  function assertConfigured(): void {
+    if (!config.bggAuthToken) {
+      throw new Error(
+        `BGG application token not configured. Register at ${BGG_REGISTER_URL} and run \`shelf-judge config set bgg-token YOUR_TOKEN\`.`,
+      );
+    }
+  }
+
+  function authHeaders(): Record<string, string> {
+    return {
+      Authorization: `Bearer ${config.bggAuthToken}`,
+    };
+  }
+
+  let rateLimitRetries = 0;
+
+  async function throttledFetch(url: string, retryCount = 0): Promise<Response> {
+    // Rate limiting: timestamp-based throttle. Assumes single-threaded access.
+    // Concurrent calls would read the same lastRequestTime and both proceed,
+    // bypassing the delay. All current callers are sequential (await in loops).
+    // Post-MVP: replace with a mutex-guarded queue if parallel callers are added.
+    const now = Date.now();
+    const elapsed = now - lastRequestTime;
+    if (elapsed < currentDelayMs && lastRequestTime > 0) {
+      const waitMs = currentDelayMs - elapsed;
+      console.log(`[bgg] throttle: waiting ${waitMs}ms before next request`);
+      await delayFn(waitMs);
+    }
+    lastRequestTime = Date.now();
+
+    console.log(`[bgg] fetch: ${url}`);
+    let response: Response;
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+      try {
+        response = await fetchFn(url, { headers: authHeaders(), signal: controller.signal });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        console.error(`[bgg] timeout after ${FETCH_TIMEOUT_MS / 1000}s: ${url}`);
+        throw new Error(`BGG API request timed out after ${FETCH_TIMEOUT_MS / 1000}s`);
+      }
+      console.error(`[bgg] fetch error: ${err instanceof Error ? err.message : String(err)}`);
+      throw new Error(
+        `BGG API request failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    console.log(`[bgg] response: ${response.status} from ${url}`);
+
+    // Handle 429 rate limiting with bounded retries
+    if (response.status === 429) {
+      rateLimitRetries++;
+      console.warn(`[bgg] rate limited (429), retry ${rateLimitRetries}/${MAX_429_RETRIES}`);
+      if (rateLimitRetries > MAX_429_RETRIES) {
+        throw new Error(`BGG API rate limited after ${MAX_429_RETRIES} retries. Try again later.`);
+      }
+      await delayFn(BACKOFF_429_MS);
+      currentDelayMs = 10000; // Slow recovery: 1 req/10s after backoff
+      return throttledFetch(url, retryCount);
+    }
+
+    // Successful non-429 response: gradually recover rate
+    if (rateLimitRetries > 0) {
+      rateLimitRetries = 0;
+      currentDelayMs = Math.max(delayMs, currentDelayMs / 2);
+    }
+
+    // Handle 502/503 server errors with retry
+    if ((response.status === 502 || response.status === 503) && retryCount < MAX_5XX_RETRIES) {
+      console.warn(
+        `[bgg] server error (${response.status}), retry ${retryCount + 1}/${MAX_5XX_RETRIES}`,
+      );
+      await delayFn(RETRY_5XX_MS);
+      return throttledFetch(url, retryCount + 1);
+    }
+
+    if (!response.ok && response.status !== 202) {
+      const body = await response.text();
+      console.error(`[bgg] HTTP ${response.status}: ${body}`);
+      throw new Error(`BGG API returned HTTP ${response.status}: ${body}`);
+    }
+
+    return response;
+  }
+
+  async function fetchWithRetry202(url: string): Promise<string> {
+    for (let attempt = 0; attempt <= MAX_202_RETRIES; attempt++) {
+      const response = await throttledFetch(url);
+
+      if (response.status === 200) {
+        return response.text();
+      }
+
+      if (response.status === 202) {
+        if (attempt === MAX_202_RETRIES) {
+          console.error(`[bgg] collection still queued after ${MAX_202_RETRIES} retries`);
+          throw new Error(
+            "BGG collection request still queued after maximum retries. Try again later.",
+          );
+        }
+        // Exponential backoff: 5s, 10s, 20s
+        const backoffMs = BASE_202_DELAY_MS * Math.pow(2, attempt);
+        console.log(
+          `[bgg] collection queued (202), retry ${attempt + 1}/${MAX_202_RETRIES} in ${backoffMs}ms`,
+        );
+        await delayFn(backoffMs);
+        continue;
+      }
+
+      throw new Error(`Unexpected BGG response status: ${response.status}`);
+    }
+
+    throw new Error("BGG collection request failed after retries.");
+  }
+
+  return {
+    isConfigured(): boolean {
+      return config.bggAuthToken !== null && config.bggAuthToken !== "";
+    },
+
+    async searchGames(query: string): Promise<BggSearchResult[]> {
+      assertConfigured();
+      const url = `${BGG_BASE_URL}/search?query=${encodeURIComponent(query)}&type=boardgame`;
+      const response = await throttledFetch(url);
+      const xml = await response.text();
+
+      try {
+        return parseSearchResponse(xml);
+      } catch (err) {
+        throw new Error(
+          `Failed to parse BGG search response: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    },
+
+    async getGame(bggId: number): Promise<BggGameResult> {
+      assertConfigured();
+      const url = `${BGG_BASE_URL}/thing?id=${bggId}&stats=1&type=boardgame`;
+      const response = await throttledFetch(url);
+      const xml = await response.text();
+
+      let bggDataList: BggGameData[];
+      let metadataList: ThingMetadata[];
+      try {
+        bggDataList = parseThingResponse(xml);
+        metadataList = parseThingMetadata(xml);
+      } catch (err) {
+        throw new Error(
+          `Failed to parse BGG thing response: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+
+      if (bggDataList.length === 0 || metadataList.length === 0) {
+        throw new Error(`No game found with BGG ID ${bggId}`);
+      }
+
+      return {
+        metadata: metadataList[0],
+        bggData: bggDataList[0],
+      };
+    },
+
+    async getGames(
+      bggIds: number[],
+      onBatch?: (event: BatchProgressEvent) => Promise<void> | void,
+    ): Promise<Map<number, BggGameResult>> {
+      assertConfigured();
+      const results = new Map<number, BggGameResult>();
+      const totalBatches = Math.ceil(bggIds.length / MAX_BATCH_SIZE);
+      console.log(`[bgg] getGames: fetching ${bggIds.length} games in ${totalBatches} batches`);
+
+      for (let i = 0; i < bggIds.length; i += MAX_BATCH_SIZE) {
+        const batchNum = Math.floor(i / MAX_BATCH_SIZE) + 1;
+        const batchIds = bggIds.slice(i, i + MAX_BATCH_SIZE);
+        const idList = batchIds.join(",");
+        console.log(`[bgg] batch ${batchNum}/${totalBatches}: ${batchIds.length} ids`);
+        const url = `${BGG_BASE_URL}/thing?id=${idList}&stats=1&type=boardgame`;
+        const response = await throttledFetch(url);
+        const xml = await response.text();
+
+        let bggDataList: BggGameData[];
+        let metadataList: ThingMetadata[];
+        try {
+          bggDataList = parseThingResponse(xml);
+          metadataList = parseThingMetadata(xml);
+        } catch (err) {
+          console.error(
+            `[bgg] batch ${batchNum} parse error: ${err instanceof Error ? err.message : String(err)}`,
+          );
+          throw new Error(
+            `Failed to parse BGG batch thing response: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+
+        console.log(`[bgg] batch ${batchNum}: parsed ${metadataList.length} games`);
+        const batchResults = new Map<number, BggGameResult>();
+        for (let j = 0; j < metadataList.length; j++) {
+          const meta = metadataList[j];
+          const data = bggDataList[j];
+          if (meta && data) {
+            const entry = { metadata: meta, bggData: data };
+            results.set(meta.bggId, entry);
+            batchResults.set(meta.bggId, entry);
+          }
+        }
+
+        await onBatch?.({ batchIds, results: batchResults });
+      }
+
+      console.log(`[bgg] getGames: complete, ${results.size}/${bggIds.length} results`);
+      return results;
+    },
+
+    async getUserCollection(username: string): Promise<BggCollectionItem[]> {
+      assertConfigured();
+      console.log(`[bgg] getUserCollection: fetching for "${username}"`);
+      const url = `${BGG_BASE_URL}/collection?username=${encodeURIComponent(username)}&own=1&subtype=boardgame&stats=1`;
+      const xml = await fetchWithRetry202(url);
+
+      try {
+        const items = parseCollectionResponse(xml);
+        console.log(`[bgg] getUserCollection: ${items.length} items for "${username}"`);
+        return items;
+      } catch (err) {
+        console.error(
+          `[bgg] collection parse error: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        throw new Error(
+          `Failed to parse BGG collection response: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    },
+  };
+}

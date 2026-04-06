@@ -1,0 +1,29 @@
+{
+  "name": "shelf-judge",
+  "private": true,
+  "workspaces": [
+    "packages/shared",
+    "packages/daemon",
+    "packages/web",
+    "packages/cli"
+  ],
+  "scripts": {
+    "dev": "concurrently -n daemon,web -c blue,green \"bun run --filter @shelf-judge/daemon dev\" \"bun run --filter @shelf-judge/web dev\"",
+    "start": "concurrently -n daemon,web -c blue,green \"bun run --filter @shelf-judge/daemon start\" \"bun run --filter @shelf-judge/web start\"",
+    "typecheck": "tsc --noEmit -p packages/shared && tsc --noEmit -p packages/daemon && tsc --noEmit -p packages/cli",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "bun test",
+    "build": "bun run --filter @shelf-judge/web build"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.24.0",
+    "bun-types": "^1.2.0",
+    "concurrently": "^9.2.1",
+    "eslint": "^9.24.0",
+    "prettier": "^3.5.0",
+    "typescript": "^5.8.0",
+    "typescript-eslint": "^8.30.0"
+  }
+}
