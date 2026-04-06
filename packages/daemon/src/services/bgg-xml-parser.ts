@@ -126,8 +126,15 @@ function extractSuggestedPlayerCounts(poll: BggXmlPoll | undefined): SuggestedPl
   });
 }
 
+function assertBggXml(parsed: { items?: unknown }, context: string): void {
+  if (!parsed || !("items" in parsed)) {
+    throw new Error(`Malformed BGG ${context} response: missing root <items> element`);
+  }
+}
+
 export function parseThingResponse(xml: string): BggGameData[] {
   const parsed = parser.parse(xml) as BggXmlDocument;
+  assertBggXml(parsed, "thing");
   const items = ensureArray(parsed?.items?.item);
 
   return items.map((item) => {
@@ -168,6 +175,7 @@ export interface ThingMetadata {
 
 export function parseThingMetadata(xml: string): ThingMetadata[] {
   const parsed = parser.parse(xml) as BggXmlDocument;
+  assertBggXml(parsed, "thing");
   const items = ensureArray(parsed?.items?.item);
 
   return items.map((item) => {
@@ -184,8 +192,55 @@ export function parseThingMetadata(xml: string): ThingMetadata[] {
   });
 }
 
+export interface ThingItem {
+  bggId: number;
+  metadata: ThingMetadata;
+  bggData: BggGameData;
+}
+
+export function parseThingItems(xml: string): ThingItem[] {
+  const parsed = parser.parse(xml) as BggXmlDocument;
+  assertBggXml(parsed, "thing");
+  const items = ensureArray(parsed?.items?.item);
+
+  return items.map((item) => {
+    const names = ensureArray(item.name);
+    const links = ensureArray(item.link);
+    const ratings = item.statistics?.ratings;
+    const avgWeight = parseNumber(ratings?.averageweight?.["@_value"]);
+    const weight = avgWeight === 0 ? null : avgWeight;
+    const polls = ensureArray(item.poll);
+    const playerCountPoll = polls.find((p) => p["@_name"] === "suggested_numplayers");
+
+    return {
+      bggId: Number(item["@_id"]),
+      metadata: {
+        bggId: Number(item["@_id"]),
+        name: extractPrimaryName(names),
+        yearPublished: parseNumber(item.yearpublished?.["@_value"]),
+        minPlayers: parseNumber(item.minplayers?.["@_value"]),
+        maxPlayers: parseNumber(item.maxplayers?.["@_value"]),
+        playingTime: parseNumber(item.playingtime?.["@_value"]),
+        imageUrl: item.image ?? null,
+      },
+      bggData: {
+        communityRating: parseNumber(ratings?.average?.["@_value"]) ?? 0,
+        bayesAverage: parseNumber(ratings?.bayesaverage?.["@_value"]) ?? 0,
+        weight,
+        numWeightVotes: parseNumber(ratings?.numweights?.["@_value"]) ?? 0,
+        mechanics: extractLinks(links, "boardgamemechanic"),
+        categories: extractLinks(links, "boardgamecategory"),
+        subdomains: extractSubdomains(links),
+        suggestedPlayerCounts: extractSuggestedPlayerCounts(playerCountPoll),
+        fetchedAt: new Date().toISOString(),
+      },
+    };
+  });
+}
+
 export function parseSearchResponse(xml: string): BggSearchResult[] {
   const parsed = parser.parse(xml) as BggXmlDocument;
+  assertBggXml(parsed, "search");
   const items = ensureArray(parsed?.items?.item);
 
   return items.map((item) => {
@@ -200,6 +255,7 @@ export function parseSearchResponse(xml: string): BggSearchResult[] {
 
 export function parseCollectionResponse(xml: string): BggCollectionItem[] {
   const parsed = parser.parse(xml) as BggXmlCollectionDocument;
+  assertBggXml(parsed, "collection");
   const items = ensureArray(parsed?.items?.item);
 
   return items.map((item) => {

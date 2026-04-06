@@ -1,32 +1,32 @@
 ---
 title: BGG client robustness gaps
 date: 2026-04-06
-status: open
+status: resolved
 tags: [robustness, bgg-client, error-handling]
 modules: [bgg-client, game-service]
 ---
 
 # BGG client robustness
 
-Several robustness gaps were identified during MVP implementation. Some may have been fixed inline during development without being reported in the review chain. Each item needs verification against the current code before acting on it.
+Several robustness gaps were identified during MVP implementation. All items verified and resolved.
 
-## Items to verify
+## Resolution
 
-1. **429 unbounded recursion**: retry handler may recurse without incrementing `retryCount`. Persistent 429 responses would cause unbounded recursion. Check `bgg-client.ts` retry logic.
+1. **429 unbounded recursion**: Already fixed. `rateLimitRetries` counter with `MAX_429_RETRIES = 3` was in place.
 
-2. **429 recovery not implemented**: after a 429, `currentDelayMs` may be set to 10000 permanently with no path back to normal rate. Plan called for "gradually return to normal."
+2. **429 recovery not implemented**: Fixed. Recovery logic previously only triggered once (reset `rateLimitRetries` to 0, halved delay, then stopped). Changed to check `currentDelayMs > delayMs` independently of retry counter, so delay halves on every successful request until back to baseline.
 
-3. **Import batch fetch all-or-nothing**: transport failure on any batch may kill all remaining imports. Plan intended per-game failure handling so partial imports succeed.
+3. **Import batch fetch all-or-nothing**: Fixed. `getGames` now wraps each batch in try/catch and continues on failure. Failed batches produce empty results instead of killing remaining batches. Import error path also now falls through to save partial results instead of returning early.
 
-4. **Malformed XML handling**: malformed XML may return empty results instead of an error. Plan says "malformed XML returns error, not crash."
+4. **Malformed XML handling**: Fixed. Added `assertBggXml` validation to all four XML parser functions. If the parsed XML lacks a root `<items>` element, throws a descriptive error instead of returning empty results.
 
-5. **`getGames` batch index correlation**: metadata and bggData may be correlated by array index, which is fragile if either parser adds filtering.
+5. **`getGames` batch index correlation**: Fixed. Replaced dual `parseThingResponse`/`parseThingMetadata` calls with new `parseThingItems` function that returns metadata and bggData paired by construction in a single pass over the XML items. No index correlation needed.
 
-6. **`refreshAllBggData` unnecessary save**: may save collection with new `updatedAt` even when zero games were actually refreshed.
+6. **`refreshAllBggData` unnecessary save**: Fixed. Both `refreshAllBggData` and `importBggCollection` now skip `saveCollection` when zero games were changed.
 
-7. **`isConfigured()` vs `assertConfigured()` inconsistency**: different undefined-handling patterns between the two functions.
+7. **`isConfigured()` vs `assertConfigured()` inconsistency**: Fixed. `isConfigured()` changed from `!== null && !== ""` to `Boolean(config.bggAuthToken)`, which handles undefined the same way as `assertConfigured()`'s `!config.bggAuthToken` check.
 
-8. **`createMockFetch` duplication**: same mock helper copy-pasted across 3 test files. Should be extracted to a shared test utility.
+8. **`createMockFetch` duplication**: Fixed. Extracted to `packages/daemon/tests/helpers/mock-fetch.ts`. All three test files now import from the shared helper.
 
 ## Origin
 

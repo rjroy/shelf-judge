@@ -290,8 +290,10 @@ export function createGameService(deps: GameServiceDeps): GameService {
         }
       }
 
-      collection.updatedAt = new Date().toISOString();
-      await storageService.saveCollection(collection);
+      if (refreshed > 0) {
+        collection.updatedAt = new Date().toISOString();
+        await storageService.saveCollection(collection);
+      }
 
       return { refreshed, errors };
     },
@@ -396,19 +398,14 @@ export function createGameService(deps: GameServiceDeps): GameService {
           });
         } catch (err) {
           logger.error(`batch fetch failed: ${err instanceof Error ? err.message : String(err)}`);
-          return {
-            imported,
-            skipped,
-            errors: [
-              ...errors,
-              `Batch fetch failed: ${err instanceof Error ? err.message : String(err)}`,
-            ],
-          };
+          errors.push(`Batch fetch failed: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
 
-      collection.updatedAt = new Date().toISOString();
-      await storageService.saveCollection(collection);
+      if (imported > 0) {
+        collection.updatedAt = new Date().toISOString();
+        await storageService.saveCollection(collection);
+      }
       logger.log(`complete: ${imported} imported, ${skipped} skipped, ${errors.length} errors`);
 
       return { imported, skipped, errors };

@@ -1,7 +1,6 @@
 import type { BggGameData, AppConfig } from "@shelf-judge/shared";
 import {
-  parseThingResponse,
-  parseThingMetadata,
+  parseThingItems,
   parseSearchResponse,
   parseCollectionResponse,
   type BggSearchResult,
@@ -128,10 +127,13 @@ export function createBggClient(deps: BggClientDeps): BggClient {
       return throttledFetch(url, retryCount);
     }
 
-    // Successful non-429 response: gradually recover rate
+    // Successful non-429 response: reset retry counter and gradually recover rate.
+    // Recovery halves the delay on each success until back to baseline.
     if (rateLimitRetries > 0) {
       rateLimitRetries = 0;
-      currentDelayMs = Math.max(delayMs, currentDelayMs / 2);
+    }
+    if (currentDelayMs > delayMs) {
+      currentDelayMs = Math.max(delayMs, Math.floor(currentDelayMs / 2));
     }
 
     // Handle 502/503 server errors with retry
@@ -182,7 +184,7 @@ export function createBggClient(deps: BggClientDeps): BggClient {
 
   return {
     isConfigured(): boolean {
-      return config.bggAuthToken !== null && config.bggAuthToken !== "";
+      return Boolean(config.bggAuthToken);
     },
 
     async searchGames(query: string): Promise<BggSearchResult[]> {
@@ -206,24 +208,22 @@ export function createBggClient(deps: BggClientDeps): BggClient {
       const response = await throttledFetch(url);
       const xml = await response.text();
 
-      let bggDataList: BggGameData[];
-      let metadataList: ThingMetadata[];
+      let items: Array<{ metadata: ThingMetadata; bggData: BggGameData }>;
       try {
-        bggDataList = parseThingResponse(xml);
-        metadataList = parseThingMetadata(xml);
+        items = parseThingItems(xml);
       } catch (err) {
         throw new Error(
           `Failed to parse BGG thing response: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
 
-      if (bggDataList.length === 0 || metadataList.length === 0) {
+      if (items.length === 0) {
         throw new Error(`No game found with BGG ID ${bggId}`);
       }
 
       return {
-        metadata: metadataList[0],
-        bggData: bggDataList[0],
+        metadata: items[0].metadata,
+        bggData: items[0].bggData,
       };
     },
 
@@ -242,33 +242,23 @@ export function createBggClient(deps: BggClientDeps): BggClient {
         const idList = batchIds.join(",");
         logger.log(`batch ${batchNum}/${totalBatches}: ${batchIds.length} ids`);
         const url = `${BGG_BASE_URL}/thing?id=${idList}&stats=1&type=boardgame`;
-        const response = await throttledFetch(url);
-        const xml = await response.text();
 
-        let bggDataList: BggGameData[];
-        let metadataList: ThingMetadata[];
+        const batchResults = new Map<number, BggGameResult>();
         try {
-          bggDataList = parseThingResponse(xml);
-          metadataList = parseThingMetadata(xml);
+          const response = await throttledFetch(url);
+          const xml = await response.text();
+          const items = parseThingItems(xml);
+
+          logger.log(`batch ${batchNum}: parsed ${items.length} games`);
+          for (const item of items) {
+            const entry = { metadata: item.metadata, bggData: item.bggData };
+            results.set(item.bggId, entry);
+            batchResults.set(item.bggId, entry);
+          }
         } catch (err) {
           logger.error(
-            `batch ${batchNum} parse error: ${err instanceof Error ? err.message : String(err)}`,
+            `batch ${batchNum} failed: ${err instanceof Error ? err.message : String(err)}`,
           );
-          throw new Error(
-            `Failed to parse BGG batch thing response: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-
-        logger.log(`batch ${batchNum}: parsed ${metadataList.length} games`);
-        const batchResults = new Map<number, BggGameResult>();
-        for (let j = 0; j < metadataList.length; j++) {
-          const meta = metadataList[j];
-          const data = bggDataList[j];
-          if (meta && data) {
-            const entry = { metadata: meta, bggData: data };
-            results.set(meta.bggId, entry);
-            batchResults.set(meta.bggId, entry);
-          }
         }
 
         await onBatch?.({ batchIds, results: batchResults });

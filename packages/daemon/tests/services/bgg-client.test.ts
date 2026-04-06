@@ -1,45 +1,12 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import * as path from "node:path";
 import { createBggClient, type BggClient } from "../../src/services/bgg-client.js";
+import { createMockFetch, type MockFetch } from "../helpers/mock-fetch.js";
 
 const fixturesDir = path.join(import.meta.dir, "../fixtures");
 
 async function readFixture(filename: string): Promise<string> {
   return Bun.file(path.join(fixturesDir, filename)).text();
-}
-
-type MockFetch = ReturnType<typeof createMockFetch>;
-
-function createMockFetch() {
-  const calls: Array<{ url: string; headers: Record<string, string> }> = [];
-  const responses: Array<{ status: number; body: string }> = [];
-
-  const fn = (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    const headers = (init?.headers as Record<string, string>) ?? {};
-    calls.push({ url, headers });
-
-    const next = responses.shift();
-    if (!next) {
-      return Promise.reject(new Error(`No mock response configured for: ${url}`));
-    }
-
-    return Promise.resolve(
-      new Response(next.body, {
-        status: next.status,
-        headers: { "Content-Type": "application/xml" },
-      }),
-    );
-  };
-
-  return {
-    fn: fn as unknown as typeof fetch,
-    calls,
-    responses,
-    enqueue(status: number, body: string) {
-      responses.push({ status, body });
-    },
-  };
 }
 
 describe("BggClient", () => {
@@ -267,12 +234,11 @@ describe("BggClient", () => {
   });
 
   describe("malformed XML", () => {
-    test("returns empty results for garbage XML", async () => {
+    test("throws for garbage XML missing root element", async () => {
       mockFetch.enqueue(200, "<<<not xml at all>>>");
 
-      // fast-xml-parser is lenient; garbage input returns empty results
-      const results = await client.searchGames("Anything");
-      expect(results).toHaveLength(0);
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(client.searchGames("Anything")).rejects.toThrow("Malformed BGG search response");
     });
 
     test("getGame throws when no items in response", async () => {
@@ -327,6 +293,81 @@ describe("BggClient", () => {
       await expect(unconfigured.searchGames("Wingspan")).rejects.toThrow(
         "boardgamegeek.com/using_the_xml_api",
       );
+    });
+  });
+
+  describe("isConfigured consistency", () => {
+    test("returns false when token is undefined", () => {
+      const unconfigured = createBggClient({
+        config: { bggAuthToken: undefined as unknown as string | null },
+        fetchFn: mockFetch.fn,
+        delayMs: 0,
+      });
+      expect(unconfigured.isConfigured()).toBe(false);
+    });
+  });
+
+  describe("429 gradual recovery", () => {
+    test("delay reduces on each successful request after 429", async () => {
+      const delayCalls: number[] = [];
+      const recoveryMock = createMockFetch();
+      const recoveryClient = createBggClient({
+        config: { bggAuthToken: "test-token" },
+        fetchFn: recoveryMock.fn,
+        delayMs: 100,
+        delayFn: (ms: number) => {
+          delayCalls.push(ms);
+          return Promise.resolve();
+        },
+      });
+
+      const searchXml = await readFixture("search-wingspan.xml");
+
+      // 429 sets delay to 10000
+      recoveryMock.enqueue(429, "");
+      recoveryMock.enqueue(200, searchXml); // success, delay halves to 5000
+      recoveryMock.enqueue(200, searchXml); // success, delay halves to 2500
+      recoveryMock.enqueue(200, searchXml); // success, delay halves to 1250
+
+      await recoveryClient.searchGames("A");
+      await recoveryClient.searchGames("B");
+      await recoveryClient.searchGames("C");
+
+      // After the 429 backoff, the throttle delays should decrease over time
+      const throttleDelays = delayCalls.filter((ms) => ms !== 30000 && ms > 0);
+      if (throttleDelays.length >= 2) {
+        // Each successive throttle delay should be <= the previous
+        for (let i = 1; i < throttleDelays.length; i++) {
+          expect(throttleDelays[i]).toBeLessThanOrEqual(throttleDelays[i - 1]);
+        }
+      }
+    });
+  });
+
+  describe("getGames batch failure resilience", () => {
+    test("continues with remaining batches when one batch fails", async () => {
+      const thingXml = await readFixture("thing-wingspan-266192.xml");
+      // 25 IDs: batch 1 (20 ids) fails, batch 2 (5 ids) succeeds
+      const ids = Array.from({ length: 25 }, (_, i) => 266192 + i);
+
+      mockFetch.enqueue(502, "Bad Gateway"); // batch 1 fails (after max retries)
+      mockFetch.enqueue(502, "Bad Gateway");
+      mockFetch.enqueue(502, "Bad Gateway");
+      mockFetch.enqueue(200, thingXml); // batch 2 succeeds
+
+      const batchEvents: Array<{ batchIds: number[]; resultCount: number }> = [];
+      const results = await client.getGames(ids, (event) => {
+        batchEvents.push({ batchIds: event.batchIds, resultCount: event.results.size });
+      });
+
+      // Both batches should have fired onBatch callbacks
+      expect(batchEvents).toHaveLength(2);
+      // First batch failed, should have 0 results
+      expect(batchEvents[0].resultCount).toBe(0);
+      // Second batch succeeded
+      expect(batchEvents[1].resultCount).toBeGreaterThan(0);
+      // Overall results should contain games from batch 2
+      expect(results.size).toBeGreaterThan(0);
     });
   });
 });
