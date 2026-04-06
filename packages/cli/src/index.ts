@@ -18,6 +18,14 @@ import { importBggCollection } from "./commands/import.js";
 import { configGet, configSet } from "./commands/config.js";
 import { daemonStart, daemonStop } from "./commands/daemon.js";
 import { helpCommand } from "./commands/help.js";
+import {
+  tournamentStart,
+  tournamentNext,
+  tournamentPick,
+  tournamentStop,
+  tournamentStats,
+  tournamentRecalculate,
+} from "./commands/tournament.js";
 
 // Known command paths and their token depths.
 // Dispatch matches on the first N tokens; everything after is positional.
@@ -34,6 +42,12 @@ const COMMANDS: Record<string, number> = {
   "axis delete": 2,
   "score list": 2,
   "score get": 2,
+  "tournament start": 2,
+  "tournament next": 2,
+  "tournament pick": 2,
+  "tournament stop": 2,
+  "tournament stats": 2,
+  "tournament recalculate": 2,
   "import bgg-collection": 2,
   "config get": 2,
   "config set": 2,
@@ -51,6 +65,7 @@ interface ParsedArgs {
   weight?: number;
   description?: string;
   axisFlags: string[];
+  filterFlags: string[];
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -59,6 +74,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   // Separate flags from non-flag tokens
   const tokens: string[] = [];
   const axisFlags: string[] = [];
+  const filterFlags: string[] = [];
   let json = false;
   let bggId: number | undefined;
   let name: string | undefined;
@@ -81,6 +97,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     } else if (arg === "--axis") {
       axisFlags.push(raw[++i]);
       axisFlags.push(raw[++i]);
+    } else if (arg === "--filter") {
+      filterFlags.push(raw[++i]);
     } else {
       tokens.push(arg);
     }
@@ -106,7 +124,17 @@ function parseArgs(argv: string[]): ParsedArgs {
     }
   }
 
-  return { commandPath, positional, json, bggId, name, weight, description, axisFlags };
+  return {
+    commandPath,
+    positional,
+    json,
+    bggId,
+    name,
+    weight,
+    description,
+    axisFlags,
+    filterFlags,
+  };
 }
 
 // Commands that don't need the daemon
@@ -177,6 +205,27 @@ async function main(): Promise<void> {
       break;
     case "score get":
       output = await scoreGet(client, args, opts);
+      break;
+    case "tournament start":
+      output = await tournamentStart(client, args, {
+        ...opts,
+        filterFlags: parsed.filterFlags,
+      });
+      break;
+    case "tournament next":
+      output = await tournamentNext(client, args, opts);
+      break;
+    case "tournament pick":
+      output = await tournamentPick(client, args, opts);
+      break;
+    case "tournament stop":
+      output = await tournamentStop(client, args, opts);
+      break;
+    case "tournament stats":
+      output = await tournamentStats(client, args, opts);
+      break;
+    case "tournament recalculate":
+      output = await tournamentRecalculate(client, args, opts);
       break;
     case "import bgg-collection":
       output = await importBggCollection(client, args, opts);

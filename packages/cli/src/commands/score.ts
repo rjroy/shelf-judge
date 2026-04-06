@@ -2,6 +2,7 @@
 import type { DaemonClient } from "../client.js";
 import type { OutputOptions, BreakdownEntry } from "../output.js";
 import { formatTable, formatScore, formatBreakdown, printOutput } from "../output.js";
+import type { TournamentGameStatsDisplay } from "@shelf-judge/shared";
 
 interface ScoredGame {
   gameId: string;
@@ -104,11 +105,32 @@ export async function scoreGet(
     return `${data.gameName}: not yet rated`;
   }
 
+  // Fetch tournament stats for this game (best-effort)
+  const tournamentRes = await client.get<TournamentGameStatsDisplay>(
+    `/api/tournament/games/${encodeURIComponent(id)}/stats`,
+  );
+
   const lines: string[] = [];
   lines.push(`${data.gameName}`);
   lines.push(
     `Fitness: ${formatScore(data.score)} (${data.ratedAxisCount}/${data.totalAxisCount} axes rated)`,
   );
+
+  if (tournamentRes.ok) {
+    lines.push(`Tournament Rank: ${tournamentRes.data.displayLabel}`);
+
+    // Divergence flag: when both scores are non-null, non-provisional, and differ by > 2.0
+    if (
+      tournamentRes.data.normalizedScore !== null &&
+      !tournamentRes.data.isProvisional &&
+      Math.abs(data.score - tournamentRes.data.normalizedScore) > 2.0
+    ) {
+      lines.push(
+        `[divergence] Fitness (${formatScore(data.score)}) and tournament rank (${formatScore(tournamentRes.data.normalizedScore)}) differ by more than 2.0`,
+      );
+    }
+  }
+
   lines.push("");
 
   if (data.breakdown && data.breakdown.length > 0) {
