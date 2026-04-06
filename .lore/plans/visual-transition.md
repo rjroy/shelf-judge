@@ -25,6 +25,7 @@ The current web UI (`packages/web/`) has all 5 screens working (collection, game
 
 **Visual direction**: `.lore/designs/visual-direction.md` (approved)
 **Target mockups**:
+
 - `.lore/art/mockup-collection-view.html` (collection table with stats strip, score dots, axis chips)
 - `.lore/art/mockup-game-detail.html` (hero score, breakdown table, rating form, two-panel layout)
 - `.lore/art/mockup-axes.html` (axis cards with weight bars, source tags, stats strips)
@@ -157,6 +158,7 @@ Transcribe every token from the visual direction doc into custom properties. Gro
 Replace the inline-styled sidebar with the dark nav panel from the mockups. This is the biggest structural change in `layout.tsx`.
 
 **Sidebar** (matching mockup-collection-view.html):
+
 - 200px fixed width, `background: var(--nav-bg)`, full viewport height
 - Brand section: "Shelf Judge" with the bar-chart SVG icon, "Board Game Collection" subtitle
 - Nav items grouped under "Library" (Collection, Axes) and "Add" (Add Game, Import BGG) section labels
@@ -168,6 +170,7 @@ Replace the inline-styled sidebar with the dark nav panel from the mockups. This
 - Footer: "Last synced: ..." text (or static placeholder, the daemon API does not currently expose a sync timestamp)
 
 **Content area**:
+
 - `flex: 1`, vertical flex column
 - Overflow-y auto for scrolling
 
@@ -184,6 +187,7 @@ Replace the inline-styled sidebar with the dark nav panel from the mockups. This
 Add reusable CSS classes for elements that appear across multiple screens:
 
 **3a. Button classes** (from visual direction, Component Language > Buttons):
+
 - `.btn` base: `inline-flex, align-items center, gap 6px, padding 7px 14px, border-radius 5px, font-size 13px, font-weight 500`
 - `.btn-primary`: `background: var(--action); color: white`
 - `.btn-secondary`: `border: 1px solid var(--border-strong); color: var(--text-secondary); background: transparent`
@@ -195,6 +199,7 @@ Add reusable CSS classes for elements that appear across multiple screens:
 All button variants inherit the `.btn` base styles. Usage: `className="btn btn-primary"`, `className="btn btn-danger-outline btn-sm"`, etc.
 
 **3b. Source badges**:
+
 - `.source-badge` base: `font-size 9px, font-weight 700, padding 2px 5px, border-radius 3px, uppercase, letter-spacing 0.04em`
 - `.source-personal`: text `var(--text-secondary)`, bg `var(--border)`
 - `.source-bgg`: text `var(--bgg-accent)`, bg `#d4e7f5`
@@ -202,6 +207,7 @@ All button variants inherit the `.btn` base styles. Usage: `className="btn btn-p
 
 **3c. Score badge rewrite** (`score-badge.tsx`):
 Replace the current hue-based color calculation with the visual direction's score spectrum. The component should:
+
 - Display score with `font-weight: 700; color: var(--score-color); font-variant-numeric: tabular-nums`
 - Include a score dot (8px circle) colored by range: `var(--score-high)` for 7.5-10.0, `var(--score-mid)` for 5.0-7.4, `var(--score-low)` for 1.0-4.9
 - Show "not rated" in muted italic for games without a score
@@ -225,6 +231,7 @@ Restyle the collection view to match `mockup-collection-view.html`. This is the 
 **4c. Table structure**: The mockup uses a hybrid approach. The header and each game row use CSS Grid for column alignment: `display: grid; grid-template-columns: 36px 58px 1fr 180px 110px 100px`. The header row is sticky (`position: sticky; top: 0; z-index: 10`). Uppercase labels, `font-size: 11px`, `background: #ede9e3; border-bottom: 1px solid var(--border-strong)`. Each game row is a clickable `<div>` (or `<a>`) with the same grid template, not a `<table>` element. This keeps the layout simple and avoids table-cell alignment issues with the complex cell contents.
 
 **4d. Game rows**: Each row uses the same grid template as the header. Contents:
+
 - Rank number (tabular-nums, muted)
 - 40x40 thumbnail (rounded, with placeholder gradient if no image)
 - Game info: name (14px, 600 weight), meta line (year, player count, BGG badge)
@@ -249,16 +256,19 @@ Restyle to match `mockup-game-detail.html`. This screen has the most visual comp
 **5a. Topbar**: Breadcrumb navigation ("Collection > Wingspan"), right-aligned action buttons (Refresh BGG secondary, Remove danger).
 
 **5b. Game hero section**: Full-width panel below topbar with:
+
 - Game cover image (100x100 rounded, with placeholder)
 - Game info: title (26px, 700 weight), meta row (year, players, play time, BGG weight, BGG link badge)
 - BGG data freshness line
 - Score display (right-aligned): "Fitness Score" label, huge score number (`font-size: var(--score-hero)`, 700 weight, score-color), "out of 10.0", "N axes rated"
 
 **5c. Two-panel layout**: `grid-template-columns: 1fr 380px`.
+
 - Left panel: Score breakdown table + calculation explanation
 - Right panel: Rating form (bg-surface background)
 
 **5d. Score breakdown table** (`score-breakdown.tsx` rewrite):
+
 - Table headers: Axis, Rating, Weight, Contribution, Source
 - Contribution column includes a thin bar visualization (60px track with fill) plus percentage
 - BGG rows get `background: var(--bgg-bg)`
@@ -267,6 +277,7 @@ Restyle to match `mockup-game-detail.html`. This screen has the most visual comp
 - Source column: badge chips (Personal grey, BGG blue, Override purple)
 
 **5e. Rating form** (`rating-form.tsx` rewrite):
+
 - Personal axes section with slider + number input per axis
 - Each field shows: axis name, weight, optional description
 - Slider accent color: `var(--score-color)`
@@ -277,6 +288,7 @@ Restyle to match `mockup-game-detail.html`. This screen has the most visual comp
 - Save/Cancel buttons at bottom
 
 **5f. Game actions** (`game-actions.tsx`):
+
 - Apply button classes (`.btn-secondary` for refresh, `.btn-danger` for remove)
 
 **Verification**: Score breakdown math is visible and correct. Contribution bars are proportional. BGG/personal/override rows are visually distinct. Rating form inputs are functional.
@@ -294,6 +306,7 @@ Restyle to match `mockup-axes.html`.
 **6c. Section labels**: "Personal axes, N" and "BGG-derived axes, N" with uppercase styling and bottom border.
 
 **6d. Axis cards**: Each axis as a card with:
+
 - Main row (grid): axis name + description, source tag (Personal grey or BGG blue), weight display (large number + percentage), weight bar (80px track), action buttons (Edit, Delete)
 - Stats strip below: rated count, avg rating, created date. BGG axes show auto-populated/overridden counts with `background: var(--bgg-bg)`.
 
@@ -318,6 +331,7 @@ Restyle to match `mockup-bgg-import.html`.
 **7c. Progress bar**: 8px track with `var(--bgg-accent)` fill, label and fraction text above.
 
 **7d. Game log**: List of imported games with status indicators:
+
 - Green circle + checkmark for added
 - Grey circle for skipped ("already in collection")
 - Red circle for errors
@@ -364,6 +378,7 @@ This screen doesn't have a dedicated mockup. Reference the form element styling 
 **Files**: All files in `packages/web/app/` and `packages/web/components/`
 
 After Steps 1-9, do a final sweep to catch any remaining inline styles that weren't addressed during the per-screen work. Search for `style={{` across the web package. Every instance should either:
+
 - Be replaced with a CSS class from `globals.css`
 - Be replaced with a CSS custom property reference
 - Be justified with a comment if truly dynamic (e.g., a percentage width calculated from data)

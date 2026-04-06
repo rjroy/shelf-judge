@@ -57,9 +57,11 @@ activity_timeline:
 current_progress: "Identified 8 deferred/future items from MVP spec: redundancy scoring, prediction engine, collection profiling, tournament ranking, utility curves, LLM features, BGG user auth, play history import. Plus 1 open question (axis weight UX). Filing issues now."
 projectName: shelf-judge
 ---
+
 Filed 9 structured issues from the MVP spec's deferred items and open questions. No overlap with the 6 pre-existing issues (which track implementation quality and cleanup).
 
 **8 deferred features filed:**
+
 - `deferred-redundancy-scoring.md` — collection-awareness, vision Principle 5
 - `deferred-prediction-engine.md` — fitness estimates for unowned games
 - `deferred-collection-profiling.md` — taste profile inference, vision Principle 3
@@ -70,6 +72,7 @@ Filed 9 structured issues from the MVP spec's deferred items and open questions.
 - `deferred-play-history-import.md` — BGG play logs
 
 **1 open question filed:**
+
 - `open-question-axis-weight-ux.md` — raw numbers vs normalized sliders (flagged for resolution through use)
 
 Each issue captures what was deferred, why, the spec's reasoning for deferral, and pointers to relevant design artifacts. The 6 items with spec exit point stubs have stub references in their frontmatter.

@@ -59,6 +59,7 @@ activity_timeline:
 current_progress: "Completed code review of all three files. Recording findings now."
 projectName: shelf-judge
 ---
+
 ## Review: Responsive Foundation (Steps 1-2)
 
 **Verdict: PASS with 4 findings (1 medium, 3 low)**
@@ -101,53 +102,53 @@ Touch scroll gestures pass through the backdrop to `.main-scroll` underneath. A 
 
 ### What Passed
 
-| Check | Status |
-|-------|--------|
-| Spacing tokens defined (32/24/16px tiers) | PASS |
-| All 7 hardcoded padding replacements done | PASS |
-| Sidebar collapses below 900px | PASS |
-| Hamburger toggle with MobileHeader | PASS |
-| Overlay with backdrop and transitions | PASS |
-| Close on backdrop tap, route change, Escape, close button | PASS |
-| Desktop layout completely unchanged | PASS |
-| CSS responsive sections at end of file, clearly marked | PASS |
-| TypeScript types and memoization correct | PASS |
-| Plan Steps 1-2 fully implemented, nothing skipped | PASS |
+| Check                                                     | Status |
+| --------------------------------------------------------- | ------ |
+| Spacing tokens defined (32/24/16px tiers)                 | PASS   |
+| All 7 hardcoded padding replacements done                 | PASS   |
+| Sidebar collapses below 900px                             | PASS   |
+| Hamburger toggle with MobileHeader                        | PASS   |
+| Overlay with backdrop and transitions                     | PASS   |
+| Close on backdrop tap, route change, Escape, close button | PASS   |
+| Desktop layout completely unchanged                       | PASS   |
+| CSS responsive sections at end of file, clearly marked    | PASS   |
+| TypeScript types and memoization correct                  | PASS   |
+| Plan Steps 1-2 fully implemented, nothing skipped         | PASS   |
 
 ## Decisions
 
 **Are all 7 hardcoded padding replacements from the plan correctly migrated to responsive spacing tokens?**
 PASS. All 7 replacements confirmed.
-*Reasoning: Verified each by line number: .topbar (224), .game-hero (671), .axes-content (1056), .search-content (1582), .import-content (1296), .panel-left (781), .empty-state (589) all use var(--content-padding) or var(--topbar-padding). Grep for "padding.*32px" returns only the token definition itself (line 61-62). No residual hardcoded values.*
+*Reasoning: Verified each by line number: .topbar (224), .game-hero (671), .axes-content (1056), .search-content (1582), .import-content (1296), .panel-left (781), .empty-state (589) all use var(--content-padding) or var(--topbar-padding). Grep for "padding.*32px" returns only the token definition itself (line 61-62). No residual hardcoded values.\*
 
 **Is the desktop layout (900px+) completely unchanged by the responsive additions?**
 PASS. Desktop layout is untouched.
-*Reasoning: Base .sidebar styles (line 96-104) retain position: relative; width: 200px. All new elements (.mobile-header, .sidebar-backdrop, .sidebar-close) default to display: none and only activate inside @media (max-width: 899px). The .app-shell flex layout (line 198-202) is unchanged. The only modification to existing desktop rules is replacing hardcoded "32px" with var(--content-padding), which resolves to 32px at desktop via the :root definition. No existing selectors were removed or restructured.*
+_Reasoning: Base .sidebar styles (line 96-104) retain position: relative; width: 200px. All new elements (.mobile-header, .sidebar-backdrop, .sidebar-close) default to display: none and only activate inside @media (max-width: 899px). The .app-shell flex layout (line 198-202) is unchanged. The only modification to existing desktop rules is replacing hardcoded "32px" with var(--content-padding), which resolves to 32px at desktop via the :root definition. No existing selectors were removed or restructured._
 
 **Does the sidebar close button use the correct close semantic?**
 FINDING (Medium): Close button uses toggle() instead of close(). File: sidebar.tsx:112
-*Reasoning: The SidebarContext exposes { open, toggle } but not a dedicated close function. The sidebar close button (line 112) calls toggle(), which flips state. The backdrop correctly uses close() (a direct setOpen(false)) defined in the provider scope (line 75), but this function isn't exposed through context. If state were ever out of sync, the "close" button would re-open the sidebar. The fix is to add close to the context value so consumer components can call the correct semantic. The backdrop works correctly because it accesses close directly within the provider's render scope.*
+_Reasoning: The SidebarContext exposes { open, toggle } but not a dedicated close function. The sidebar close button (line 112) calls toggle(), which flips state. The backdrop correctly uses close() (a direct setOpen(false)) defined in the provider scope (line 75), but this function isn't exposed through context. If state were ever out of sync, the "close" button would re-open the sidebar. The fix is to add close to the context value so consumer components can call the correct semantic. The backdrop works correctly because it accesses close directly within the provider's render scope._
 
 **Is the CSS for the fixed sidebar overlay correctly constrained?**
 FINDING (Low): Over-constrained box model on sidebar overlay. File: globals.css:1864-1867
-*Reasoning: The responsive sidebar uses `inset: 0` (which sets top/right/bottom/left all to 0) combined with `width: 260px`. This is over-constrained: the element can't simultaneously stretch to right: 0 and be 260px wide. Browsers resolve this by ignoring right: 0 when an explicit width is set, so it renders correctly. But the intent is clearer as `top: 0; left: 0; bottom: 0; width: 260px;` or `inset: 0; right: auto; width: 260px;`. Not a bug, but reads as imprecise.*
+_Reasoning: The responsive sidebar uses `inset: 0` (which sets top/right/bottom/left all to 0) combined with `width: 260px`. This is over-constrained: the element can't simultaneously stretch to right: 0 and be 260px wide. Browsers resolve this by ignoring right: 0 when an explicit width is set, so it renders correctly. But the intent is clearer as `top: 0; left: 0; bottom: 0; width: 260px;` or `inset: 0; right: auto; width: 260px;`. Not a bug, but reads as imprecise._
 
 **Does the sidebar backdrop have appropriate transitions?**
 FINDING (Low): Backdrop has no fade transition. File: globals.css:1827-1833, 1876-1878
-*Reasoning: The sidebar slides in with `transition: transform 0.2s ease` (line 1869), but the backdrop snaps between `display: none` and `display: block` with no transition. CSS cannot animate `display`, so achieving a fade would require using opacity + visibility or a separate approach. The plan mentions "transitions" in the context of the sidebar panel, not the backdrop specifically, so this is plan-compliant. But the visual effect is a smooth sidebar slide paired with an instant backdrop flash, which is a polish gap. Common fix: use `opacity: 0; visibility: hidden; transition: opacity 0.2s, visibility 0.2s` as the base, then `opacity: 1; visibility: visible` when active.*
+_Reasoning: The sidebar slides in with `transition: transform 0.2s ease` (line 1869), but the backdrop snaps between `display: none` and `display: block` with no transition. CSS cannot animate `display`, so achieving a fade would require using opacity + visibility or a separate approach. The plan mentions "transitions" in the context of the sidebar panel, not the backdrop specifically, so this is plan-compliant. But the visual effect is a smooth sidebar slide paired with an instant backdrop flash, which is a polish gap. Common fix: use `opacity: 0; visibility: hidden; transition: opacity 0.2s, visibility 0.2s` as the base, then `opacity: 1; visibility: visible` when active._
 
 **Does the body/content scroll while the sidebar overlay is open?**
 FINDING (Low): Content behind the backdrop remains scrollable when sidebar overlay is open. File: sidebar.tsx, globals.css
-*Reasoning: When the sidebar opens as an overlay, the backdrop covers the content area (z-index 99). Click events on the backdrop correctly close the sidebar. But touch scroll gestures pass through the backdrop to the underlying .main-scroll container. A user could scroll the page behind the open sidebar, which is confusing on touch devices. The plan doesn't mention scroll locking, so this isn't a plan compliance issue. Common fix: when the sidebar is open, add overflow: hidden to the scroll container or use the CSS `overscroll-behavior` property on the backdrop. This is a polish item for a later step.*
+_Reasoning: When the sidebar opens as an overlay, the backdrop covers the content area (z-index 99). Click events on the backdrop correctly close the sidebar. But touch scroll gestures pass through the backdrop to the underlying .main-scroll container. A user could scroll the page behind the open sidebar, which is confusing on touch devices. The plan doesn't mention scroll locking, so this isn't a plan compliance issue. Common fix: when the sidebar is open, add overflow: hidden to the scroll container or use the CSS `overscroll-behavior` property on the backdrop. This is a polish item for a later step._
 
 **Is the CSS organization correct per the plan's requirements?**
 PASS. Responsive overrides are at the end of globals.css in clearly marked sections.
-*Reasoning: New component base styles (.mobile-header, .sidebar-backdrop, .sidebar-close, .topbar-brand, .topbar-hamburger) are defined at lines 1800-1849, immediately before the responsive sections. Responsive overrides begin at line 1851 with "Responsive: Tablet and Phone (max-width: 899px)" and line 1885 with "Responsive: Phone (max-width: 599px)". Both are clearly labeled with comment headers. The plan specified separate tablet (600-899px) and phone (<599px) sections. The implementation combines tablet and phone into a single ≤899px query, with a phone-only ≤599px query for further overrides. This is a valid simplification: the cascade handles it correctly since the phone query appears second and overrides the combined query's values.*
+_Reasoning: New component base styles (.mobile-header, .sidebar-backdrop, .sidebar-close, .topbar-brand, .topbar-hamburger) are defined at lines 1800-1849, immediately before the responsive sections. Responsive overrides begin at line 1851 with "Responsive: Tablet and Phone (max-width: 899px)" and line 1885 with "Responsive: Phone (max-width: 599px)". Both are clearly labeled with comment headers. The plan specified separate tablet (600-899px) and phone (<599px) sections. The implementation combines tablet and phone into a single ≤899px query, with a phone-only ≤599px query for further overrides. This is a valid simplification: the cascade handles it correctly since the phone query appears second and overrides the combined query's values._
 
 **Is the TypeScript implementation of sidebar state management correct?**
 PASS with one concern (noted separately as the toggle/close finding).
-*Reasoning: SidebarContext typed correctly as { open: boolean; toggle: () => void }. State initialized with useState(false), useCallback for stable toggle/close references, useMemo for context value to prevent unnecessary re-renders. Effects properly clean up (keydown listener). Route change effect closes sidebar on navigation. The useEffect for Escape key correctly short-circuits when !open, avoiding unnecessary listener registration. All components are properly "use client" annotated. No type errors in the component composition (layout.tsx imports are correct).*
+_Reasoning: SidebarContext typed correctly as { open: boolean; toggle: () => void }. State initialized with useState(false), useCallback for stable toggle/close references, useMemo for context value to prevent unnecessary re-renders. Effects properly clean up (keydown listener). Route change effect closes sidebar on navigation. The useEffect for Escape key correctly short-circuits when !open, avoiding unnecessary listener registration. All components are properly "use client" annotated. No type errors in the component composition (layout.tsx imports are correct)._
 
 **Is every item from Steps 1-2 of the plan implemented?**
 PASS. All plan items from Steps 1-2 are implemented.
-*Reasoning: Step 1a (viewport meta): Next.js handles it; confirmed not overridden. Step 1b (responsive tokens): --content-padding and --topbar-padding defined with three-tier values (32/24/16px). Step 1c (padding migration): all 7 selectors migrated. Step 2a (mobile sidebar): hidden by default, hamburger toggle, full-screen overlay, transform transition, backdrop. Step 2b (tablet sidebar): uses same hidden+toggle as phone per plan decision. Step 2c (topbar modification): MobileHeader with hamburger and brand name. Close triggers: backdrop tap, route change, Escape key, close button. No items skipped or half-done.*
+_Reasoning: Step 1a (viewport meta): Next.js handles it; confirmed not overridden. Step 1b (responsive tokens): --content-padding and --topbar-padding defined with three-tier values (32/24/16px). Step 1c (padding migration): all 7 selectors migrated. Step 2a (mobile sidebar): hidden by default, hamburger toggle, full-screen overlay, transform transition, backdrop. Step 2b (tablet sidebar): uses same hidden+toggle as phone per plan decision. Step 2c (topbar modification): MobileHeader with hamburger and brand name. Close triggers: backdrop tap, route change, Escape key, close button. No items skipped or half-done._

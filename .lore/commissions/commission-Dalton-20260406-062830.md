@@ -51,28 +51,34 @@ activity_timeline:
 current_progress: "Reading Thorne's review commission to identify findings that need addressing."
 projectName: shelf-judge
 ---
+
 ## Thorne Review Findings: All 4 Addressed
 
 **MEDIUM — Close button uses toggle instead of close** (sidebar.tsx)
+
 - Added `close` to `SidebarContext` type and provider value
 - `Sidebar` component now destructures `close` instead of `toggle` and uses it on the close button
 - Behavior now matches the `aria-label="Close navigation"` semantic
 
 **LOW — Over-constrained box model on sidebar overlay** (globals.css)
+
 - Replaced `inset: 0` with explicit `top: 0; left: 0; bottom: 0` on the responsive sidebar
 - Intent is now clear: sidebar anchors to left edge, no conflicting right constraint
 
 **LOW — Backdrop has no fade transition** (globals.css)
+
 - Added `opacity: 0; visibility: hidden; transition: opacity 0.2s ease, visibility 0.2s ease` to base `.sidebar-backdrop`
 - Responsive media query now sets `display: block` as base, with `.sidebar-backdrop-visible` toggling `opacity: 1; visibility: visible`
 - Backdrop fades in/out in sync with the sidebar slide transition
 
 **LOW — Content scrolls behind open sidebar overlay** (sidebar.tsx, globals.css)
+
 - `SidebarProvider` now toggles `sidebar-overlay-open` class on `document.body` when sidebar is open
 - CSS rule `body.sidebar-overlay-open .main-scroll { overflow: hidden }` locks scroll at mobile widths
 - Effect cleans up on unmount
 
 ### Verification
+
 - `bun run typecheck`: clean
 - `bun run lint`: clean
 - `bun run test`: 222 pass, 0 fail

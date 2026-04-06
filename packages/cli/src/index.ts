@@ -3,7 +3,14 @@
 // Parses arguments, checks daemon reachability, dispatches to command handlers.
 
 import { createDaemonClient } from "./client.js";
-import { gameSearch, gameAdd, gameList, gameRate, gameRemove, gameRefreshAllBgg } from "./commands/game.js";
+import {
+  gameSearch,
+  gameAdd,
+  gameList,
+  gameRate,
+  gameRemove,
+  gameRefreshAllBgg,
+} from "./commands/game.js";
 import { axisList, axisCreate, axisUpdate, axisDelete } from "./commands/axis.js";
 import { scoreList, scoreGet } from "./commands/score.js";
 import { importBggCollection } from "./commands/import.js";

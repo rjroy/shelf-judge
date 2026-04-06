@@ -1,469 +1,660 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Shelf Judge — Axes</title>
-<style>
-  :root {
-    --bg-base: #f4f1ec;
-    --bg-surface: #fefcf9;
-    --bg-elevated: #ffffff;
-    --border: #ddd8d0;
-    --border-strong: #c4bfb8;
-    --text-primary: #1a1714;
-    --text-secondary: #6b6560;
-    --text-muted: #9c9590;
-    --score-color: #b86c1a;
-    --bgg-accent: #2e5f8a;
-    --bgg-bg: #edf3f9;
-    --action: #1c3d5e;
-    --action-subtle: #e8eff6;
-    --danger: #b84040;
-    --danger-subtle: #fdf0f0;
-    --nav-bg: #1a1714;
-    --nav-text: #e8e4dc;
-    --nav-active: #b86c1a;
-  }
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shelf Judge — Axes</title>
+    <style>
+      :root {
+        --bg-base: #f4f1ec;
+        --bg-surface: #fefcf9;
+        --bg-elevated: #ffffff;
+        --border: #ddd8d0;
+        --border-strong: #c4bfb8;
+        --text-primary: #1a1714;
+        --text-secondary: #6b6560;
+        --text-muted: #9c9590;
+        --score-color: #b86c1a;
+        --bgg-accent: #2e5f8a;
+        --bgg-bg: #edf3f9;
+        --action: #1c3d5e;
+        --action-subtle: #e8eff6;
+        --danger: #b84040;
+        --danger-subtle: #fdf0f0;
+        --nav-bg: #1a1714;
+        --nav-text: #e8e4dc;
+        --nav-active: #b86c1a;
+      }
 
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
 
-  body {
-    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: var(--bg-base);
-    color: var(--text-primary);
-    font-size: 15px;
-    line-height: 1.5;
-    display: flex;
-    height: 100vh;
-    overflow: hidden;
-  }
+      body {
+        font-family:
+          Inter,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        background: var(--bg-base);
+        color: var(--text-primary);
+        font-size: 15px;
+        line-height: 1.5;
+        display: flex;
+        height: 100vh;
+        overflow: hidden;
+      }
 
-  .sidebar {
-    width: 200px;
-    flex-shrink: 0;
-    background: var(--nav-bg);
-    display: flex;
-    flex-direction: column;
-  }
+      .sidebar {
+        width: 200px;
+        flex-shrink: 0;
+        background: var(--nav-bg);
+        display: flex;
+        flex-direction: column;
+      }
 
-  .sidebar-brand {
-    padding: 20px 20px 24px;
-    border-bottom: 1px solid rgba(255,255,255,0.08);
-  }
+      .sidebar-brand {
+        padding: 20px 20px 24px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
 
-  .brand-name { font-size: 15px; font-weight: 700; color: var(--nav-text); }
-  .brand-sub { font-size: 11px; color: rgba(232,228,220,0.4); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.06em; }
-  .nav-section { padding: 16px 0; flex: 1; }
-  .nav-label { font-size: 10px; font-weight: 600; color: rgba(232,228,220,0.35); text-transform: uppercase; letter-spacing: 0.1em; padding: 0 20px; margin-bottom: 6px; margin-top: 12px; }
-  .nav-label:first-child { margin-top: 0; }
-  .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 20px; font-size: 13px; color: rgba(232,228,220,0.65); cursor: pointer; border-left: 3px solid transparent; text-decoration: none; }
-  .nav-item.active { background: rgba(184,108,26,0.12); color: var(--nav-text); border-left-color: var(--nav-active); font-weight: 500; }
-  .nav-icon { width: 16px; height: 16px; opacity: 0.7; flex-shrink: 0; }
-  .nav-item.active .nav-icon { opacity: 1; }
-  .sidebar-footer { padding: 16px 20px; border-top: 1px solid rgba(255,255,255,0.08); font-size: 11px; color: rgba(232,228,220,0.3); }
+      .brand-name {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--nav-text);
+      }
+      .brand-sub {
+        font-size: 11px;
+        color: rgba(232, 228, 220, 0.4);
+        margin-top: 2px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .nav-section {
+        padding: 16px 0;
+        flex: 1;
+      }
+      .nav-label {
+        font-size: 10px;
+        font-weight: 600;
+        color: rgba(232, 228, 220, 0.35);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        padding: 0 20px;
+        margin-bottom: 6px;
+        margin-top: 12px;
+      }
+      .nav-label:first-child {
+        margin-top: 0;
+      }
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 20px;
+        font-size: 13px;
+        color: rgba(232, 228, 220, 0.65);
+        cursor: pointer;
+        border-left: 3px solid transparent;
+        text-decoration: none;
+      }
+      .nav-item.active {
+        background: rgba(184, 108, 26, 0.12);
+        color: var(--nav-text);
+        border-left-color: var(--nav-active);
+        font-weight: 500;
+      }
+      .nav-icon {
+        width: 16px;
+        height: 16px;
+        opacity: 0.7;
+        flex-shrink: 0;
+      }
+      .nav-item.active .nav-icon {
+        opacity: 1;
+      }
+      .sidebar-footer {
+        padding: 16px 20px;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        font-size: 11px;
+        color: rgba(232, 228, 220, 0.3);
+      }
 
-  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+      .main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
 
-  .topbar {
-    height: 56px;
-    background: var(--bg-surface);
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    padding: 0 32px;
-    gap: 16px;
-    flex-shrink: 0;
-  }
+      .topbar {
+        height: 56px;
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        padding: 0 32px;
+        gap: 16px;
+        flex-shrink: 0;
+      }
 
-  .topbar-title { font-size: 16px; font-weight: 600; flex: 1; }
+      .topbar-title {
+        font-size: 16px;
+        font-weight: 600;
+        flex: 1;
+      }
 
-  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 5px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; font-family: inherit; }
-  .btn-primary { background: var(--action); color: white; }
-  .btn-secondary { background: transparent; border: 1px solid var(--border-strong); color: var(--text-secondary); }
-  .btn-sm { padding: 5px 10px; font-size: 12px; }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 7px 14px;
+        border-radius: 5px;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        font-family: inherit;
+      }
+      .btn-primary {
+        background: var(--action);
+        color: white;
+      }
+      .btn-secondary {
+        background: transparent;
+        border: 1px solid var(--border-strong);
+        color: var(--text-secondary);
+      }
+      .btn-sm {
+        padding: 5px 10px;
+        font-size: 12px;
+      }
 
-  .content { flex: 1; overflow-y: auto; padding: 32px; max-width: 780px; }
+      .content {
+        flex: 1;
+        overflow-y: auto;
+        padding: 32px;
+        max-width: 780px;
+      }
 
-  .section-label {
-    font-size: 10px;
-    font-weight: 700;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    margin-bottom: 10px;
-    padding-bottom: 6px;
-    border-bottom: 1px solid var(--border);
-  }
+      .section-label {
+        font-size: 10px;
+        font-weight: 700;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        margin-bottom: 10px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid var(--border);
+      }
 
-  .axis-card {
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    margin-bottom: 10px;
-    transition: border-color 0.1s;
-  }
+      .axis-card {
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        margin-bottom: 10px;
+        transition: border-color 0.1s;
+      }
 
-  .axis-card:hover { border-color: var(--border-strong); }
+      .axis-card:hover {
+        border-color: var(--border-strong);
+      }
 
-  .axis-card-main {
-    display: grid;
-    grid-template-columns: 1fr auto auto auto;
-    align-items: center;
-    gap: 16px;
-    padding: 16px 20px;
-  }
+      .axis-card-main {
+        display: grid;
+        grid-template-columns: 1fr auto auto auto;
+        align-items: center;
+        gap: 16px;
+        padding: 16px 20px;
+      }
 
-  .axis-name {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 3px;
-  }
+      .axis-name {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 3px;
+      }
 
-  .axis-desc {
-    font-size: 12px;
-    color: var(--text-muted);
-  }
+      .axis-desc {
+        font-size: 12px;
+        color: var(--text-muted);
+      }
 
-  .weight-display {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 2px;
-    flex-shrink: 0;
-  }
+      .weight-display {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 2px;
+        flex-shrink: 0;
+      }
 
-  .weight-number {
-    font-size: 22px;
-    font-weight: 700;
-    color: var(--text-primary);
-    font-variant-numeric: tabular-nums;
-    line-height: 1;
-  }
+      .weight-number {
+        font-size: 22px;
+        font-weight: 700;
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+        line-height: 1;
+      }
 
-  .weight-pct {
-    font-size: 11px;
-    color: var(--text-muted);
-  }
+      .weight-pct {
+        font-size: 11px;
+        color: var(--text-muted);
+      }
 
-  .weight-bar-track {
-    width: 100px;
-    height: 4px;
-    background: var(--border);
-    border-radius: 2px;
-    overflow: hidden;
-    flex-shrink: 0;
-  }
+      .weight-bar-track {
+        width: 100px;
+        height: 4px;
+        background: var(--border);
+        border-radius: 2px;
+        overflow: hidden;
+        flex-shrink: 0;
+      }
 
-  .weight-bar-fill {
-    height: 100%;
-    background: var(--score-color);
-    border-radius: 2px;
-  }
+      .weight-bar-fill {
+        height: 100%;
+        background: var(--score-color);
+        border-radius: 2px;
+      }
 
-  .axis-actions {
-    display: flex;
-    gap: 6px;
-    align-items: center;
-  }
+      .axis-actions {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
 
-  .bgg-source-tag {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 10px;
-    font-weight: 700;
-    color: var(--bgg-accent);
-    background: var(--bgg-bg);
-    padding: 3px 8px;
-    border-radius: 4px;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-  }
+      .bgg-source-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 10px;
+        font-weight: 700;
+        color: var(--bgg-accent);
+        background: var(--bgg-bg);
+        padding: 3px 8px;
+        border-radius: 4px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
 
-  .personal-source-tag {
-    font-size: 10px;
-    font-weight: 600;
-    color: var(--text-muted);
-    background: var(--border);
-    padding: 3px 8px;
-    border-radius: 4px;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-  }
+      .personal-source-tag {
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--text-muted);
+        background: var(--border);
+        padding: 3px 8px;
+        border-radius: 4px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
 
-  .axis-stats-strip {
-    padding: 8px 20px 12px;
-    display: flex;
-    gap: 20px;
-    border-top: 1px solid var(--border);
-    font-size: 12px;
-    color: var(--text-muted);
-    background: #f9f7f4;
-    border-radius: 0 0 6px 6px;
-  }
+      .axis-stats-strip {
+        padding: 8px 20px 12px;
+        display: flex;
+        gap: 20px;
+        border-top: 1px solid var(--border);
+        font-size: 12px;
+        color: var(--text-muted);
+        background: #f9f7f4;
+        border-radius: 0 0 6px 6px;
+      }
 
-  .axis-stat { display: flex; gap: 6px; align-items: center; }
-  .axis-stat strong { color: var(--text-secondary); }
+      .axis-stat {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+      .axis-stat strong {
+        color: var(--text-secondary);
+      }
 
-  /* Create form */
-  .create-form {
-    background: var(--bg-surface);
-    border: 2px dashed var(--border-strong);
-    border-radius: 6px;
-    padding: 24px;
-    margin-bottom: 32px;
-    display: none; /* toggled open in real UI */
-  }
+      /* Create form */
+      .create-form {
+        background: var(--bg-surface);
+        border: 2px dashed var(--border-strong);
+        border-radius: 6px;
+        padding: 24px;
+        margin-bottom: 32px;
+        display: none; /* toggled open in real UI */
+      }
 
-  .create-form.open { display: block; }
+      .create-form.open {
+        display: block;
+      }
 
-  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
-  .form-group { display: flex; flex-direction: column; gap: 6px; }
-  .form-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
-  .form-input { border: 1px solid var(--border-strong); border-radius: 4px; padding: 8px 12px; font-size: 13px; font-family: inherit; color: var(--text-primary); background: var(--bg-elevated); }
-  .form-input:focus { outline: 2px solid var(--action); outline-offset: 1px; }
-  .form-hint { font-size: 11px; color: var(--text-muted); }
-  .form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+      .form-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        margin-bottom: 16px;
+      }
+      .form-group {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .form-label {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .form-input {
+        border: 1px solid var(--border-strong);
+        border-radius: 4px;
+        padding: 8px 12px;
+        font-size: 13px;
+        font-family: inherit;
+        color: var(--text-primary);
+        background: var(--bg-elevated);
+      }
+      .form-input:focus {
+        outline: 2px solid var(--action);
+        outline-offset: 1px;
+      }
+      .form-hint {
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+      .form-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+        margin-top: 8px;
+      }
 
-  /* Total weight indicator */
-  .weight-summary {
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 14px 20px;
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    margin-bottom: 20px;
-  }
+      /* Total weight indicator */
+      .weight-summary {
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 14px 20px;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin-bottom: 20px;
+      }
 
-  .weight-total-bar {
-    flex: 1;
-    height: 8px;
-    background: var(--border);
-    border-radius: 4px;
-    overflow: hidden;
-  }
+      .weight-total-bar {
+        flex: 1;
+        height: 8px;
+        background: var(--border);
+        border-radius: 4px;
+        overflow: hidden;
+      }
 
-  .weight-total-fill {
-    height: 100%;
-    background: var(--score-color);
-    border-radius: 4px;
-    width: 100%;
-  }
+      .weight-total-fill {
+        height: 100%;
+        background: var(--score-color);
+        border-radius: 4px;
+        width: 100%;
+      }
 
-  .weight-summary-label {
-    font-size: 12px;
-    color: var(--text-secondary);
-    flex-shrink: 0;
-  }
+      .weight-summary-label {
+        font-size: 12px;
+        color: var(--text-secondary);
+        flex-shrink: 0;
+      }
 
-  .weight-summary-total {
-    font-size: 15px;
-    font-weight: 700;
-    color: var(--text-primary);
-    font-variant-numeric: tabular-nums;
-    flex-shrink: 0;
-    min-width: 50px;
-    text-align: right;
-  }
-</style>
-</head>
-<body>
-
-<aside class="sidebar">
-  <div class="sidebar-brand">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:2px;">
-      <svg width="22" height="18" viewBox="0 0 22 18" fill="none">
-        <rect x="0" y="6" width="5" height="12" rx="1" fill="#b86c1a"/>
-        <rect x="7" y="0" width="5" height="18" rx="1" fill="#e8e4dc"/>
-        <rect x="14" y="4" width="5" height="14" rx="1" fill="#e8e4dc" opacity="0.6"/>
-      </svg>
-      <span class="brand-name">Shelf Judge</span>
-    </div>
-    <div class="brand-sub">Board Game Collection</div>
-  </div>
-  <nav class="nav-section">
-    <div class="nav-label">Library</div>
-    <a class="nav-item" href="#">
-      <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M2 2h12v12H2V2zm1 1v10h10V3H3zm2 2h6v1H5V5zm0 3h6v1H5V8zm0 3h4v1H5v-1z"/></svg>
-      Collection
-    </a>
-    <a class="nav-item active" href="#">
-      <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M1 3a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h8a1 1 0 010 2H2a1 1 0 01-1-1z"/></svg>
-      Axes
-    </a>
-    <div class="nav-label">Add</div>
-    <a class="nav-item" href="#">
-      <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 1a6 6 0 110 12A6 6 0 018 2zm0 3v2H6v1h2v2h1V8h2V7H9V5H8z"/></svg>
-      Add Game
-    </a>
-    <a class="nav-item" href="#">
-      <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M14 3H2a1 1 0 00-1 1v8a1 1 0 001 1h12a1 1 0 001-1V4a1 1 0 00-1-1zM8 11l-4-3h2.5V7h3v1H12L8 11z"/></svg>
-      Import BGG
-    </a>
-  </nav>
-  <div class="sidebar-footer">Last synced: 2 hours ago</div>
-</aside>
-
-<main class="main">
-  <div class="topbar">
-    <div class="topbar-title">Rating Axes</div>
-    <button class="btn btn-primary">+ New Axis</button>
-  </div>
-
-  <div class="content">
-
-    <!-- Weight summary -->
-    <div class="weight-summary">
-      <div class="weight-summary-label">Total weight</div>
-      <div class="weight-total-bar">
-        <div class="weight-total-fill"></div>
+      .weight-summary-total {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+        flex-shrink: 0;
+        min-width: 50px;
+        text-align: right;
+      }
+    </style>
+  </head>
+  <body>
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 2px">
+          <svg width="22" height="18" viewBox="0 0 22 18" fill="none">
+            <rect x="0" y="6" width="5" height="12" rx="1" fill="#b86c1a" />
+            <rect x="7" y="0" width="5" height="18" rx="1" fill="#e8e4dc" />
+            <rect x="14" y="4" width="5" height="14" rx="1" fill="#e8e4dc" opacity="0.6" />
+          </svg>
+          <span class="brand-name">Shelf Judge</span>
+        </div>
+        <div class="brand-sub">Board Game Collection</div>
       </div>
-      <div class="weight-summary-total">100</div>
-    </div>
+      <nav class="nav-section">
+        <div class="nav-label">Library</div>
+        <a class="nav-item" href="#">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M2 2h12v12H2V2zm1 1v10h10V3H3zm2 2h6v1H5V5zm0 3h6v1H5V8zm0 3h4v1H5v-1z" />
+          </svg>
+          Collection
+        </a>
+        <a class="nav-item active" href="#">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path
+              d="M1 3a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h8a1 1 0 010 2H2a1 1 0 01-1-1z"
+            />
+          </svg>
+          Axes
+        </a>
+        <div class="nav-label">Add</div>
+        <a class="nav-item" href="#">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path
+              d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 1a6 6 0 110 12A6 6 0 018 2zm0 3v2H6v1h2v2h1V8h2V7H9V5H8z"
+            />
+          </svg>
+          Add Game
+        </a>
+        <a class="nav-item" href="#">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path
+              d="M14 3H2a1 1 0 00-1 1v8a1 1 0 001 1h12a1 1 0 001-1V4a1 1 0 00-1-1zM8 11l-4-3h2.5V7h3v1H12L8 11z"
+            />
+          </svg>
+          Import BGG
+        </a>
+      </nav>
+      <div class="sidebar-footer">Last synced: 2 hours ago</div>
+    </aside>
 
-    <!-- Personal axes -->
-    <div class="section-label" style="margin-bottom:12px;">Personal axes · 3</div>
+    <main class="main">
+      <div class="topbar">
+        <div class="topbar-title">Rating Axes</div>
+        <button class="btn btn-primary">+ New Axis</button>
+      </div>
 
-    <div class="axis-card">
-      <div class="axis-card-main">
-        <div>
-          <div class="axis-name">Wife will play it</div>
-          <div class="axis-desc">How likely is Sarah to enjoy this game and want to play it with me?</div>
+      <div class="content">
+        <!-- Weight summary -->
+        <div class="weight-summary">
+          <div class="weight-summary-label">Total weight</div>
+          <div class="weight-total-bar">
+            <div class="weight-total-fill"></div>
+          </div>
+          <div class="weight-summary-total">100</div>
         </div>
-        <span class="personal-source-tag">Personal</span>
-        <div class="weight-display">
-          <div class="weight-number">30</div>
-          <div class="weight-pct">30% of total</div>
-        </div>
-        <div class="weight-bar-track" style="width:80px;">
-          <div class="weight-bar-fill" style="width:30%;"></div>
-        </div>
-        <div class="axis-actions">
-          <button class="btn btn-secondary btn-sm">Edit</button>
-          <button class="btn btn-sm" style="color:var(--danger);border:1px solid #e0c0c0;background:transparent;">Delete</button>
-        </div>
-      </div>
-      <div class="axis-stats-strip">
-        <div class="axis-stat">Rated on <strong>38 games</strong></div>
-        <div class="axis-stat">Avg rating <strong>6.4</strong></div>
-        <div class="axis-stat">Created <strong>Jan 2025</strong></div>
-      </div>
-    </div>
 
-    <div class="axis-card">
-      <div class="axis-card-main">
-        <div>
-          <div class="axis-name">Visual design</div>
-          <div class="axis-desc">Quality of artwork, component design, and physical presentation of the game.</div>
-        </div>
-        <span class="personal-source-tag">Personal</span>
-        <div class="weight-display">
-          <div class="weight-number">20</div>
-          <div class="weight-pct">20% of total</div>
-        </div>
-        <div class="weight-bar-track" style="width:80px;">
-          <div class="weight-bar-fill" style="width:20%;"></div>
-        </div>
-        <div class="axis-actions">
-          <button class="btn btn-secondary btn-sm">Edit</button>
-          <button class="btn btn-sm" style="color:var(--danger);border:1px solid #e0c0c0;background:transparent;">Delete</button>
-        </div>
-      </div>
-      <div class="axis-stats-strip">
-        <div class="axis-stat">Rated on <strong>35 games</strong></div>
-        <div class="axis-stat">Avg rating <strong>7.1</strong></div>
-        <div class="axis-stat">Created <strong>Jan 2025</strong></div>
-      </div>
-    </div>
+        <!-- Personal axes -->
+        <div class="section-label" style="margin-bottom: 12px">Personal axes · 3</div>
 
-    <div class="axis-card">
-      <div class="axis-card-main">
-        <div>
-          <div class="axis-name">Date night fit</div>
-          <div class="axis-desc">Works well as a 2-player evening game that doesn't overstay its welcome.</div>
+        <div class="axis-card">
+          <div class="axis-card-main">
+            <div>
+              <div class="axis-name">Wife will play it</div>
+              <div class="axis-desc">
+                How likely is Sarah to enjoy this game and want to play it with me?
+              </div>
+            </div>
+            <span class="personal-source-tag">Personal</span>
+            <div class="weight-display">
+              <div class="weight-number">30</div>
+              <div class="weight-pct">30% of total</div>
+            </div>
+            <div class="weight-bar-track" style="width: 80px">
+              <div class="weight-bar-fill" style="width: 30%"></div>
+            </div>
+            <div class="axis-actions">
+              <button class="btn btn-secondary btn-sm">Edit</button>
+              <button
+                class="btn btn-sm"
+                style="color: var(--danger); border: 1px solid #e0c0c0; background: transparent"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+          <div class="axis-stats-strip">
+            <div class="axis-stat">Rated on <strong>38 games</strong></div>
+            <div class="axis-stat">Avg rating <strong>6.4</strong></div>
+            <div class="axis-stat">Created <strong>Jan 2025</strong></div>
+          </div>
         </div>
-        <span class="personal-source-tag">Personal</span>
-        <div class="weight-display">
-          <div class="weight-number">25</div>
-          <div class="weight-pct">25% of total</div>
-        </div>
-        <div class="weight-bar-track" style="width:80px;">
-          <div class="weight-bar-fill" style="width:25%;"></div>
-        </div>
-        <div class="axis-actions">
-          <button class="btn btn-secondary btn-sm">Edit</button>
-          <button class="btn btn-sm" style="color:var(--danger);border:1px solid #e0c0c0;background:transparent;">Delete</button>
-        </div>
-      </div>
-      <div class="axis-stats-strip">
-        <div class="axis-stat">Rated on <strong>30 games</strong></div>
-        <div class="axis-stat">Avg rating <strong>5.8</strong></div>
-        <div class="axis-stat">Created <strong>Feb 2025</strong></div>
-      </div>
-    </div>
 
-    <!-- BGG axes -->
-    <div class="section-label" style="margin-bottom:12px;margin-top:28px;">BGG-derived axes · 2</div>
-    <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">These axes are automatically populated from BoardGameGeek data. You can override any individual game's value.</p>
+        <div class="axis-card">
+          <div class="axis-card-main">
+            <div>
+              <div class="axis-name">Visual design</div>
+              <div class="axis-desc">
+                Quality of artwork, component design, and physical presentation of the game.
+              </div>
+            </div>
+            <span class="personal-source-tag">Personal</span>
+            <div class="weight-display">
+              <div class="weight-number">20</div>
+              <div class="weight-pct">20% of total</div>
+            </div>
+            <div class="weight-bar-track" style="width: 80px">
+              <div class="weight-bar-fill" style="width: 20%"></div>
+            </div>
+            <div class="axis-actions">
+              <button class="btn btn-secondary btn-sm">Edit</button>
+              <button
+                class="btn btn-sm"
+                style="color: var(--danger); border: 1px solid #e0c0c0; background: transparent"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+          <div class="axis-stats-strip">
+            <div class="axis-stat">Rated on <strong>35 games</strong></div>
+            <div class="axis-stat">Avg rating <strong>7.1</strong></div>
+            <div class="axis-stat">Created <strong>Jan 2025</strong></div>
+          </div>
+        </div>
 
-    <div class="axis-card">
-      <div class="axis-card-main">
-        <div>
-          <div class="axis-name">Complexity fit</div>
-          <div class="axis-desc">Derived from BGG weight (complexity). Inverted so lower BGG weight = higher score. Represents preference for medium-weight games.</div>
+        <div class="axis-card">
+          <div class="axis-card-main">
+            <div>
+              <div class="axis-name">Date night fit</div>
+              <div class="axis-desc">
+                Works well as a 2-player evening game that doesn't overstay its welcome.
+              </div>
+            </div>
+            <span class="personal-source-tag">Personal</span>
+            <div class="weight-display">
+              <div class="weight-number">25</div>
+              <div class="weight-pct">25% of total</div>
+            </div>
+            <div class="weight-bar-track" style="width: 80px">
+              <div class="weight-bar-fill" style="width: 25%"></div>
+            </div>
+            <div class="axis-actions">
+              <button class="btn btn-secondary btn-sm">Edit</button>
+              <button
+                class="btn btn-sm"
+                style="color: var(--danger); border: 1px solid #e0c0c0; background: transparent"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+          <div class="axis-stats-strip">
+            <div class="axis-stat">Rated on <strong>30 games</strong></div>
+            <div class="axis-stat">Avg rating <strong>5.8</strong></div>
+            <div class="axis-stat">Created <strong>Feb 2025</strong></div>
+          </div>
         </div>
-        <span class="bgg-source-tag">↗ BGG</span>
-        <div class="weight-display">
-          <div class="weight-number">15</div>
-          <div class="weight-pct">15% of total</div>
+
+        <!-- BGG axes -->
+        <div class="section-label" style="margin-bottom: 12px; margin-top: 28px">
+          BGG-derived axes · 2
         </div>
-        <div class="weight-bar-track" style="width:80px;">
-          <div class="weight-bar-fill" style="width:15%;"></div>
+        <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 16px">
+          These axes are automatically populated from BoardGameGeek data. You can override any
+          individual game's value.
+        </p>
+
+        <div class="axis-card">
+          <div class="axis-card-main">
+            <div>
+              <div class="axis-name">Complexity fit</div>
+              <div class="axis-desc">
+                Derived from BGG weight (complexity). Inverted so lower BGG weight = higher score.
+                Represents preference for medium-weight games.
+              </div>
+            </div>
+            <span class="bgg-source-tag">↗ BGG</span>
+            <div class="weight-display">
+              <div class="weight-number">15</div>
+              <div class="weight-pct">15% of total</div>
+            </div>
+            <div class="weight-bar-track" style="width: 80px">
+              <div class="weight-bar-fill" style="width: 15%"></div>
+            </div>
+            <div class="axis-actions">
+              <button class="btn btn-secondary btn-sm">Edit Weight</button>
+              <button
+                class="btn btn-sm"
+                style="color: var(--danger); border: 1px solid #e0c0c0; background: transparent"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+          <div class="axis-stats-strip" style="background: var(--bgg-bg)">
+            <div class="axis-stat">Auto-populated on <strong>40 games</strong></div>
+            <div class="axis-stat">Overridden on <strong>3 games</strong></div>
+            <div class="axis-stat">BGG source: <strong>Weight</strong></div>
+          </div>
         </div>
-        <div class="axis-actions">
-          <button class="btn btn-secondary btn-sm">Edit Weight</button>
-          <button class="btn btn-sm" style="color:var(--danger);border:1px solid #e0c0c0;background:transparent;">Delete</button>
+
+        <div class="axis-card">
+          <div class="axis-card-main">
+            <div>
+              <div class="axis-name">Community rating</div>
+              <div class="axis-desc">
+                BGG community average rating, scaled to 1–10 range. Reflects the collective
+                assessment of the game's quality.
+              </div>
+            </div>
+            <span class="bgg-source-tag">↗ BGG</span>
+            <div class="weight-display">
+              <div class="weight-number">10</div>
+              <div class="weight-pct">10% of total</div>
+            </div>
+            <div class="weight-bar-track" style="width: 80px">
+              <div class="weight-bar-fill" style="width: 10%"></div>
+            </div>
+            <div class="axis-actions">
+              <button class="btn btn-secondary btn-sm">Edit Weight</button>
+              <button
+                class="btn btn-sm"
+                style="color: var(--danger); border: 1px solid #e0c0c0; background: transparent"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+          <div class="axis-stats-strip" style="background: var(--bgg-bg)">
+            <div class="axis-stat">Auto-populated on <strong>40 games</strong></div>
+            <div class="axis-stat">Overridden on <strong>1 game</strong></div>
+            <div class="axis-stat">BGG source: <strong>Rating</strong></div>
+          </div>
         </div>
       </div>
-      <div class="axis-stats-strip" style="background:var(--bgg-bg);">
-        <div class="axis-stat">Auto-populated on <strong>40 games</strong></div>
-        <div class="axis-stat">Overridden on <strong>3 games</strong></div>
-        <div class="axis-stat">BGG source: <strong>Weight</strong></div>
-      </div>
-    </div>
-
-    <div class="axis-card">
-      <div class="axis-card-main">
-        <div>
-          <div class="axis-name">Community rating</div>
-          <div class="axis-desc">BGG community average rating, scaled to 1–10 range. Reflects the collective assessment of the game's quality.</div>
-        </div>
-        <span class="bgg-source-tag">↗ BGG</span>
-        <div class="weight-display">
-          <div class="weight-number">10</div>
-          <div class="weight-pct">10% of total</div>
-        </div>
-        <div class="weight-bar-track" style="width:80px;">
-          <div class="weight-bar-fill" style="width:10%;"></div>
-        </div>
-        <div class="axis-actions">
-          <button class="btn btn-secondary btn-sm">Edit Weight</button>
-          <button class="btn btn-sm" style="color:var(--danger);border:1px solid #e0c0c0;background:transparent;">Delete</button>
-        </div>
-      </div>
-      <div class="axis-stats-strip" style="background:var(--bgg-bg);">
-        <div class="axis-stat">Auto-populated on <strong>40 games</strong></div>
-        <div class="axis-stat">Overridden on <strong>1 game</strong></div>
-        <div class="axis-stat">BGG source: <strong>Rating</strong></div>
-      </div>
-    </div>
-
-  </div>
-</main>
-
-</body>
+    </main>
+  </body>
 </html>

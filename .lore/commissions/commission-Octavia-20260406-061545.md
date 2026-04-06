@@ -41,6 +41,7 @@ activity_timeline:
 current_progress: "Context gathered: issue, retro, all 4 daemon files with logging, frontmatter schema, compendium spec-writing reference. Drafting specification now."
 projectName: shelf-judge
 ---
+
 Wrote specification for the daemon logger factory at `.lore/specs/daemon-logger.md`.
 
 The spec defines 7 requirements (REQ-LOG-1 through REQ-LOG-7) covering: the `createLogger` factory API, prefix format (`[name] `), delegation to `console.*`, replacement of all ~35 existing call sites across 4 files, file placement, type export, and explicit scope boundary (no timestamps, JSON, or log levels).
@@ -48,6 +49,7 @@ The spec defines 7 requirements (REQ-LOG-1 through REQ-LOG-7) covering: the `cre
 Success criteria include a machine-verifiable grep-to-zero check and identical output format. Constraints prevent DI signature changes, shared package modifications, and observable behavior changes.
 
 A fresh-eyes spec review was run and surfaced three findings, all addressed:
+
 1. Hardened SHOULD NOT to MUST NOT on DI signature constraint
 2. Clarified the per-file call site list vs. the broader "all calls replaced" requirement
 3. Made the trailing space in prefix format explicit in REQ-LOG-2

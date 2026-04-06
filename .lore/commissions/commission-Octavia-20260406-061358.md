@@ -44,6 +44,7 @@ activity_timeline:
 current_progress: "Audit findings synthesized. Writing the responsive plan now."
 projectName: shelf-judge
 ---
+
 Created responsive web plan at `.lore/plans/responsive-web.md`.
 
 The plan covers:
@@ -53,6 +54,7 @@ The plan covers:
 **Breakpoint strategy:** Three tiers at 599px, 899px, and 900px+. Desktop-first overrides via `max-width` queries to minimize churn against the existing 1787-line CSS file.
 
 **8 implementation steps:**
+
 1. Responsive spacing tokens (replace 7 hardcoded padding values with CSS custom properties)
 2. Sidebar collapse with hamburger toggle (highest-leverage change, one approach for both phone and tablet)
 3. Collection table redesign (card layout on phone, 5-column grid on tablet, 2x2 stats strip)

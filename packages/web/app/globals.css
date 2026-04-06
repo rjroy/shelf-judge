@@ -1909,4 +1909,79 @@ body {
   .sidebar {
     width: 100%;
   }
+
+  /* Step 5: Axis cards — stacked layout */
+  .axis-card-main {
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto auto;
+    gap: 8px 12px;
+  }
+
+  .axis-card-main > div:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .weight-display {
+    flex-direction: row;
+    gap: 8px;
+    align-items: baseline;
+  }
+
+  .weight-bar-track {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .axis-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+
+  /* Step 5: Form rows — single column */
+  .form-row {
+    grid-template-columns: 1fr;
+  }
+
+  /* Step 6: Import status banner — wrap on phone */
+  .status-banner {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .status-count {
+    width: 100%;
+    text-align: left;
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+  }
+
+  .count-value {
+    font-size: 22px;
+  }
+
+  /* Step 6: Import summary stats — single column */
+  .summary-stats {
+    grid-template-columns: 1fr;
+  }
+
+  /* Step 7: Touch target polish — buttons */
+  .btn {
+    padding: 10px 16px;
+  }
+
+  .btn-sm {
+    padding: 8px 12px;
+  }
+
+  /* Step 7: Touch target polish — form inputs */
+  .form-input {
+    padding: 10px 14px;
+    font-size: 16px; /* Prevents iOS zoom on focus */
+  }
+
+  /* Step 7: Touch target polish — nav items */
+  .nav-item {
+    padding: 12px 20px;
+  }
 }

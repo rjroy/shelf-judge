@@ -42,14 +42,17 @@ activity_timeline:
 current_progress: "Read plan, layout.tsx, sidebar.tsx, and all relevant globals.css sections. Starting Step 1: responsive spacing tokens and padding migration."
 projectName: shelf-judge
 ---
+
 Steps 1-2 of the responsive web plan implemented and verified.
 
 **Step 1: Responsive Spacing Tokens**
+
 - Confirmed viewport meta tag is handled by Next.js 16 defaults (no override in layout.tsx)
 - Added `--content-padding` and `--topbar-padding` custom properties to `:root` with media query overrides: 32px (desktop), 24px (tablet 600-899px), 16px (phone <600px)
 - Migrated 7 hardcoded padding values to use the new tokens: `.topbar`, `.game-hero`, `.axes-content`, `.search-content`, `.import-content`, `.panel-left`, `.empty-state`
 
 **Step 2: Sidebar Responsive Behavior**
+
 - Sidebar hidden by default below 900px via `position: fixed; transform: translateX(-100%)` with 0.2s CSS transition
 - Added `SidebarProvider` context to manage open/close state across components
 - Added `MobileHeader` component with hamburger toggle and "Shelf Judge" brand text, visible only below 900px
@@ -58,6 +61,7 @@ Steps 1-2 of the responsive web plan implemented and verified.
 - Desktop layout (900px+) completely unchanged: sidebar remains fixed 200px, mobile-header hidden
 
 **Files modified:**
+
 - `packages/web/app/globals.css`: spacing tokens, padding migration, responsive sections at end of file
 - `packages/web/app/layout.tsx`: wrapped in SidebarProvider, added MobileHeader
 - `packages/web/components/sidebar.tsx`: added SidebarContext/Provider, MobileHeader, close button, open/close state management
