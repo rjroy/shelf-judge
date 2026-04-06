@@ -10,9 +10,27 @@ export type {
   FitnessBreakdownEntry,
   FitnessResult,
   AppConfig,
+  TournamentSettings,
+  SessionFilterType,
+  SessionFilter,
+  SessionStatus,
+  TournamentSession,
+  Comparison,
+  TournamentGameStats,
+  TournamentData,
+  RecentComparison,
+  TournamentGameStatsDisplay,
 } from "./types.js";
 
-export { CreateAxisSchema, UpdateAxisSchema, RateGameSchema, AddGameSchema } from "./validation.js";
+export {
+  CreateAxisSchema,
+  UpdateAxisSchema,
+  RateGameSchema,
+  AddGameSchema,
+  SessionFilterSchema,
+  StartSessionSchema,
+  SubmitComparisonSchema,
+} from "./validation.js";
 
 export { toErrorMessage } from "./errors.js";
 
@@ -21,4 +39,7 @@ export type {
   UpdateAxisInput,
   RateGameInput,
   AddGameInput,
+  SessionFilterInput,
+  StartSessionInput,
+  SubmitComparisonInput,
 } from "./validation.js";
