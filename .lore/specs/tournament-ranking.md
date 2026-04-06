@@ -85,7 +85,7 @@ ELO requires knowing the result of each comparison to calculate scores correctly
 
 - REQ-TOURN-5: ELO scores MUST be calculated using the standard ELO formula. Expected score: `E = 1 / (1 + 10^((opponent_rating - player_rating) / 400))`. New rating: `R_new = R_old + K * (S - E)` where S is 1 for a win and 0 for a loss. Both games are updated after each comparison.
 
-- REQ-TOURN-6: The K-factor MUST be 32 for games with fewer than 30 comparisons and 16 for games with 30 or more comparisons. This allows new games to move quickly in the ranking while stabilizing established games. The threshold and K-values are constants, not user-configurable.
+- REQ-TOURN-6: The K-factor MUST be 32 for games with fewer than N comparisons and 16 for games with N or more comparisons, where N is the K-factor transition threshold. This allows new games to move quickly in the ranking while stabilizing established games. The transition threshold defaults to 15 and is configurable via daemon settings. K-values (32 and 16) are fixed constants derived from ELO theory and are not user-configurable. Changes to the threshold take effect on the next recalculate (REQ-TOURN-7).
 
 - REQ-TOURN-7: ELO ratings MUST be recalculable from comparison history. A `recalculate` operation replays all comparisons in chronological order from the default starting rating (1500) and regenerates all cached ELO scores. This ensures scores survive algorithm changes and validates cached values.
 
@@ -93,15 +93,15 @@ ELO requires knowing the result of each comparison to calculate scores correctly
 
 ### Display and Normalization
 
-- REQ-TOURN-9: For display purposes, ELO ratings MUST be normalized to a 1.0-10.0 scale. When fewer than 5 games have at least one comparison, display "not yet ranked" for all games (the sample is too small for normalization to be meaningful). Once 5 or more games have comparisons, normalize using a fixed reference range centered on 1500: `min_ref = 1500 - 400`, `max_ref = 1500 + 400`, clamped to [1.0, 10.0]. The formula is: `display = clamp(1 + 9 * (elo - min_ref) / (max_ref - min_ref), 1.0, 10.0)`. This avoids the instability of min/max normalization where a single comparison could produce extreme display scores. The reference range (1100-1900) covers the expected spread for a recreational collection; if games fall outside it, they clamp to 1.0 or 10.0.
+- REQ-TOURN-9: For display purposes, ELO ratings MUST be normalized to a 1.0-10.0 scale. When fewer than 5 games have at least one comparison, display "not yet ranked" for all games (the sample is too small for normalization to be meaningful). Once 5 or more games have comparisons, normalize using a configurable reference window centered on 1500. The window half-width defaults to 400 (producing a reference range of 1100-1900) and is configurable via daemon settings. Normalization formula: `min_ref = 1500 - half_width`, `max_ref = 1500 + half_width`, `display = clamp(1 + 9 * (elo - min_ref) / (max_ref - min_ref), 1.0, 10.0)`. This avoids the instability of min/max normalization where a single comparison could produce extreme display scores. Games with ELO outside the reference range clamp to 1.0 or 10.0. Changes to the half-width take effect immediately on display.
 
-- REQ-TOURN-10: The game detail view (web UI and CLI) MUST show both the axis fitness score and the tournament rank as independent values. When the game has no comparisons, the tournament rank displays as "not yet ranked." When the game has fewer than 10 comparisons, the rank displays with a "(provisional)" qualifier.
+- REQ-TOURN-10: The game detail view (web UI and CLI) MUST show both the axis fitness score and the tournament rank as independent values. When the game has no comparisons, the tournament rank displays as "not yet ranked." When the game has fewer than P comparisons, where P is the provisional threshold (default 6, configurable via daemon settings), the rank displays with a "(provisional)" qualifier. Changes to the threshold take effect immediately on display.
 
 - REQ-TOURN-11: A tournament rank breakdown MUST be available showing: total comparisons for this game, win/loss record, the 5 most recent comparisons with opponent names and outcomes, and the raw ELO rating alongside the normalized display score. This parallels the axis fitness breakdown (REQ-MVP-5) for the tournament signal.
 
 ### Tournament Sessions
 
-- REQ-TOURN-12: Users MUST be able to start a tournament session with an optional filter. Supported filters: by game name substring, by minimum axis fitness score, by BGG mechanic or category tag, or by "stale" (games with fewer than N total comparisons, where N is user-specified, default 10; this default intentionally matches the provisional threshold in REQ-TOURN-10 so that a staleness-filtered session graduates games out of provisional status). Filters can be combined. The session scope is fixed at creation; adding or removing games from the collection mid-session does not change the session's game list.
+- REQ-TOURN-12: Users MUST be able to start a tournament session with an optional filter. Supported filters: by game name substring, by minimum axis fitness score, by BGG mechanic or category tag, or by "stale" (games with fewer than N total comparisons, where N is user-specified and defaults to the provisional threshold from REQ-TOURN-10; this link is intentional so that a staleness-filtered session graduates games out of provisional status). Filters can be combined. The session scope is fixed at creation; adding or removing games from the collection mid-session does not change the session's game list.
 
 - REQ-TOURN-13: The minimum number of games in a session scope is 4. If a filter produces fewer than 4 games, the session is not created and the user is told why.
 
@@ -198,11 +198,11 @@ ELO requires knowing the result of each comparison to calculate scores correctly
 
 These are genuine unknowns that should be resolved through use:
 
-1. **K-factor tuning.** The K=32/16 split at 30 comparisons is a reasonable starting point borrowed from chess federation practice. A board game collection is not a chess league. If rankings feel too volatile or too sticky, these values may need adjustment. The recalculate operation (REQ-TOURN-7) makes changing K-factors safe: adjust the constants, replay history, done.
+1. **K-factor tuning.** The K-factor transition threshold defaults to 15 and the provisional threshold defaults to 6 (both configurable via daemon settings). These are informed guesses for a recreational board game collection. If rankings feel too volatile or too sticky, the transition threshold can be adjusted and history replayed via recalculate (REQ-TOURN-7). Observe whether 15/6 are the right defaults after real use.
 
-2. **Normalization reference range.** The fixed 1100-1900 reference range is based on standard ELO spread in casual contexts. If a large, well-compared collection produces ELO ratings that cluster in a narrow band (e.g., 1400-1600), the display scores will compress to the middle of the 1-10 range and lose resolution. Percentile-based normalization would address this but requires more comparisons to be stable. Start with the fixed range, observe, and reconsider if display scores feel compressed.
+2. **Normalization reference range.** The reference window half-width defaults to 400 (range 1100-1900), configurable via daemon settings. If display scores feel compressed toward the middle of the 1-10 range, narrowing the half-width (e.g., to 200) will spread them out. If scores cluster at the extremes, widen it. Observe after real use.
 
-3. **Session filter UX.** The spec defines four filter types (name, axis fitness, BGG tag, staleness). Whether these are exposed as a filter builder UI, a search-bar syntax, or preset buttons is an implementation/design decision. The spec requires the capability, not the surface.
+3. **Session filter UX.** The spec defines four filter types (name, axis fitness, BGG tag, staleness). How these are surfaced (filter builder, search syntax, preset buttons, or something else) is a design decision. The web UI and CLI design documents must resolve this before implementation.
 
 ## Context
 
