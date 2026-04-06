@@ -38,6 +38,17 @@
   --nav-text: #e8e4dc;
   --nav-active: #b86c1a;
 
+  /* Derived palette */
+  --row-hover: #f0ede8;
+  --table-header-bg: #ede9e3;
+  --bgg-badge-bg: #d4e7f5;
+  --override-badge-bg: #e0d6f5;
+  --bgg-border: #c0d8ec;
+  --override-border: #c5b8e8;
+  --danger-border: #e0c0c0;
+  --bg-subtle: #f9f7f4;
+  --success-bg: #d5f0e0;
+
   /* Typography scale */
   --text-xs: 11px;
   --text-sm: 13px;
@@ -262,7 +273,7 @@ body {
 
 .btn-danger-outline {
   background: transparent;
-  border: 1px solid #e0c0c0;
+  border: 1px solid var(--danger-border);
   color: var(--danger);
 }
 
@@ -304,12 +315,12 @@ body {
 
 .source-bgg {
   color: var(--bgg-accent);
-  background: #d4e7f5;
+  background: var(--bgg-badge-bg);
 }
 
 .source-override {
   color: var(--override-accent);
-  background: #e0d6f5;
+  background: var(--override-badge-bg);
 }
 
 /* ===== Collection View ===== */
@@ -356,7 +367,7 @@ body {
   grid-template-columns: 36px 58px 1fr 180px 110px 100px;
   gap: 0;
   padding: 10px 16px;
-  background: #ede9e3;
+  background: var(--table-header-bg);
   border-bottom: 1px solid var(--border-strong);
   position: sticky;
   top: 0;
@@ -391,7 +402,7 @@ body {
 }
 
 .game-row:hover {
-  background: #f0ede8;
+  background: var(--row-hover);
 }
 
 .game-row.unrated {
@@ -555,7 +566,7 @@ body {
 
 .section-sep {
   padding: 8px 16px;
-  background: #f0ede8;
+  background: var(--row-hover);
   border-bottom: 1px solid var(--border);
 }
 
@@ -586,6 +597,40 @@ body {
   max-width: 360px;
   margin-left: auto;
   margin-right: auto;
+}
+
+.empty-state-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+/* Collection header column labels (positioned by grid, styled for consistency) */
+.game-thumb-col,
+.game-info-col,
+.axes-used-col,
+.last-rated-col,
+.score-col {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.score-col {
+  text-align: right;
+}
+
+.last-rated-col {
+  text-align: right;
+}
+
+.no-ratings {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--text-muted);
 }
 
 /* ===== Game Detail ===== */
@@ -773,7 +818,7 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   padding: 6px 10px;
-  background: #ede9e3;
+  background: var(--table-header-bg);
   border-bottom: 1px solid var(--border-strong);
   border-top: 1px solid var(--border-strong);
 }
@@ -806,7 +851,7 @@ body {
 }
 
 .breakdown-table tr.total-row td {
-  background: #ede9e3;
+  background: var(--table-header-bg);
   font-weight: 700;
   border-top: 2px solid var(--border-strong);
   border-bottom: 2px solid var(--border-strong);
@@ -923,7 +968,7 @@ body {
   gap: 8px;
   padding: 6px 10px;
   background: var(--bgg-bg);
-  border: 1px solid #c0d8ec;
+  border: 1px solid var(--bgg-border);
   border-radius: 4px;
   font-size: 12px;
   color: var(--bgg-accent);
@@ -943,7 +988,7 @@ body {
 
 .bgg-auto-value.overridden {
   background: var(--override-bg);
-  border-color: #c5b8e8;
+  border-color: var(--override-border);
   color: var(--override-accent);
 }
 
@@ -1109,6 +1154,7 @@ body {
 .weight-pct {
   font-size: 11px;
   color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .weight-bar-track {
@@ -1164,7 +1210,7 @@ body {
   border-top: 1px solid var(--border);
   font-size: 12px;
   color: var(--text-muted);
-  background: #f9f7f4;
+  background: var(--bg-subtle);
   border-radius: 0 0 6px 6px;
 }
 
@@ -1408,12 +1454,12 @@ body {
 }
 
 .log-status.ok {
-  background: #d5f0e0;
+  background: var(--success-bg);
   color: var(--score-high);
 }
 
 .log-status.skipped {
-  background: #ede9e3;
+  background: var(--table-header-bg);
   color: var(--text-muted);
 }
 
