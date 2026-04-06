@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getGame, listAxes } from "@/lib/api";
 import { ScoreBreakdown } from "@/components/score-breakdown";
 import { RatingForm } from "@/components/rating-form";
@@ -14,88 +15,125 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
     [data, axes] = await Promise.all([getGame(id), listAxes()]);
   } catch (err) {
     return (
-      <div>
-        <h1>Game Not Found</h1>
-        <p style={{ color: "#c00" }}>
-          {err instanceof Error ? err.message : "Could not load game data."}
-        </p>
+      <div className="error-banner">
+        {err instanceof Error ? err.message : "Could not load game data."}
       </div>
     );
   }
 
-  const { game, score, bggDataStale } = data as { game: typeof data.game; score: typeof data.score; bggDataStale?: boolean };
+  const { game, score } = data;
 
   return (
-    <div>
-      <h1>{game.name}</h1>
-
-      <div style={{ display: "flex", gap: 24, marginBottom: 24 }}>
-        {game.imageUrl && (
-          <img
-            src={game.imageUrl}
-            alt={game.name}
-            style={{ width: 150, height: "auto", borderRadius: 4 }}
-          />
-        )}
-        <div>
-          <table style={{ borderCollapse: "collapse" }}>
-            <tbody>
-              {game.yearPublished && (
-                <tr>
-                  <td style={{ padding: "4px 12px 4px 0", color: "#666" }}>Year</td>
-                  <td style={{ padding: "4px 0" }}>{game.yearPublished}</td>
-                </tr>
-              )}
-              {game.minPlayers && (
-                <tr>
-                  <td style={{ padding: "4px 12px 4px 0", color: "#666" }}>Players</td>
-                  <td style={{ padding: "4px 0" }}>
-                    {game.minPlayers === game.maxPlayers
-                      ? game.minPlayers
-                      : `${game.minPlayers}-${game.maxPlayers}`}
-                  </td>
-                </tr>
-              )}
-              {game.playingTime && (
-                <tr>
-                  <td style={{ padding: "4px 12px 4px 0", color: "#666" }}>Play Time</td>
-                  <td style={{ padding: "4px 0" }}>{game.playingTime} min</td>
-                </tr>
-              )}
-              {game.bggId && (
-                <tr>
-                  <td style={{ padding: "4px 12px 4px 0", color: "#666" }}>BGG</td>
-                  <td style={{ padding: "4px 0" }}>
-                    <a
-                      href={`https://boardgamegeek.com/boardgame/${game.bggId}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ color: "#2563eb" }}
-                    >
-                      View on BGG
-                    </a>
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+    <>
+      {/* Topbar with breadcrumb */}
+      <div className="topbar">
+        <div className="breadcrumb">
+          <Link href="/">Collection</Link>
+          <span>›</span>
+          <strong>{game.name}</strong>
         </div>
+        <GameActions gameId={game.id} gameName={game.name} hasBggId={game.bggId !== null} />
       </div>
 
-      {bggDataStale && (
-        <p style={{ color: "#b45309", backgroundColor: "#fef3c7", padding: "8px 12px", borderRadius: 4, fontSize: 13 }}>
-          BGG data is older than 7 days. Use "Refresh BGG Data" below to update.
-        </p>
-      )}
+      <div className="main-scroll">
+        {/* Game hero section */}
+        <div className="game-hero">
+          <div className="game-cover">
+            {game.imageUrl ? <img src={game.imageUrl} alt={game.name} /> : <span>🎲</span>}
+          </div>
+          <div className="game-hero-info">
+            <div className="game-hero-title">{game.name}</div>
+            <div className="game-hero-meta">
+              {game.yearPublished && <span>📅 {game.yearPublished}</span>}
+              {game.minPlayers && (
+                <span>
+                  👥{" "}
+                  {game.minPlayers === game.maxPlayers
+                    ? game.minPlayers
+                    : `${game.minPlayers}–${game.maxPlayers}`}{" "}
+                  players
+                </span>
+              )}
+              {game.playingTime && <span>⏱ {game.playingTime} min</span>}
+              {game.bggData?.weight && <span>⚖️ BGG Weight: {game.bggData.weight.toFixed(2)}</span>}
+              {game.bggId && (
+                <a
+                  className="bgg-link"
+                  href={`https://boardgamegeek.com/boardgame/${game.bggId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  BGG ↗
+                </a>
+              )}
+            </div>
+            {game.bggData && (
+              <div className="bgg-data-line">
+                BGG data refreshed <strong>{formatRelativeDate(game.bggData.fetchedAt)}</strong>
+                {" · "}BGG community rating:{" "}
+                <span className="bgg-value">{game.bggData.communityRating.toFixed(1)}</span>
+              </div>
+            )}
+          </div>
+          <div className="game-hero-score-section">
+            {score ? (
+              <>
+                <div className="score-hero-label">Fitness Score</div>
+                <div className="score-hero-number">{score.score.toFixed(1)}</div>
+                <div className="score-hero-out-of">out of 10.0</div>
+                <div className="score-hero-rated">{score.ratedAxisCount} axes rated</div>
+              </>
+            ) : (
+              <>
+                <div className="score-hero-label">Fitness Score</div>
+                <div
+                  className="score-hero-number"
+                  style={{ color: "var(--text-muted)", fontSize: 24 }}
+                >
+                  —
+                </div>
+                <div className="score-hero-out-of">not yet rated</div>
+              </>
+            )}
+          </div>
+        </div>
 
-      <h2>Fitness Score</h2>
-      <ScoreBreakdown score={score} />
-
-      <h2>Rate This Game</h2>
-      <RatingForm gameId={game.id} axes={axes} currentRatings={game.ratings} />
-
-      <h2 style={{ marginTop: 32 }}>Actions</h2>
-      <GameActions gameId={game.id} gameName={game.name} hasBggId={game.bggId !== null} />
-    </div>
+        {/* Two-panel layout */}
+        <div className="detail-panels">
+          <div className="panel-left">
+            <div className="panel-section-title">
+              Score Breakdown
+              {score && <span className="badge">How {score.score.toFixed(1)} was calculated</span>}
+            </div>
+            <ScoreBreakdown score={score} />
+            <div className="calc-explanation">
+              <strong>How this is calculated:</strong> weighted average of all rated axes. Formula:{" "}
+              <code>sum(rating × weight) / sum(weight)</code>. Axes without ratings are excluded
+              from both the numerator and denominator.
+            </div>
+          </div>
+          <div className="panel-right">
+            <div className="panel-section-title">Your Ratings</div>
+            <RatingForm gameId={game.id} axes={axes} currentRatings={game.ratings} />
+          </div>
+        </div>
+      </div>
+    </>
   );
+}
+
+function formatRelativeDate(dateStr: string): string {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const diffMs = now - then;
+  const diffDays = Math.floor(diffMs / 86400000);
+  if (diffDays === 0) return "today";
+  if (diffDays === 1) return "1 day ago";
+  if (diffDays < 7) return `${diffDays} days ago`;
+  const diffWeeks = Math.floor(diffDays / 7);
+  if (diffWeeks === 1) return "1 week ago";
+  if (diffWeeks < 4) return `${diffWeeks} weeks ago`;
+  const diffMonths = Math.floor(diffDays / 30);
+  if (diffMonths === 1) return "1 month ago";
+  return `${diffMonths} months ago`;
 }

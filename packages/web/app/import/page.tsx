@@ -103,125 +103,144 @@ export default function ImportPage() {
   }
 
   return (
-    <div>
-      <h1>Import from BGG</h1>
-      <p style={{ color: "#666", marginBottom: 16 }}>
-        Import your owned games from a BoardGameGeek collection. Enter your BGG username to get
-        started.
-      </p>
+    <>
+      <div className="topbar">
+        <div className="topbar-title">Import from BoardGameGeek</div>
+      </div>
 
-      <form onSubmit={handleImport} style={{ marginBottom: 24 }}>
-        <input
-          type="text"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          placeholder="BGG username"
-          disabled={importing}
-          required
-          style={{
-            padding: "8px 12px",
-            border: "1px solid #ccc",
-            borderRadius: 4,
-            fontSize: 14,
-            marginRight: 8,
-          }}
-        />
-        <button
-          type="submit"
-          disabled={importing}
-          style={{
-            padding: "8px 16px",
-            backgroundColor: importing ? "#999" : "#059669",
-            color: "white",
-            border: "none",
-            borderRadius: 4,
-            cursor: importing ? "default" : "pointer",
-            fontSize: 14,
-          }}
-        >
-          {importing ? "Importing..." : "Import"}
-        </button>
-      </form>
+      <div className="main-scroll">
+        <div className="import-content">
+          {/* Pre-import: username form */}
+          {!importing && !result && (
+            <>
+              <div className="import-header">
+                <h2>Import Collection</h2>
+                <p>
+                  Import your owned games from a BoardGameGeek collection. Enter your BGG username
+                  to get started.
+                </p>
+              </div>
 
-      {error && <p style={{ color: "#c00", marginBottom: 12 }}>{error}</p>}
-
-      {importing && progress && (
-        <div style={{ marginBottom: 16 }}>
-          <p style={{ fontWeight: 600 }}>
-            Importing {progress.imported} of {progress.total}...
-          </p>
-          {progress.current && (
-            <p style={{ color: "#666", fontSize: 14 }}>Current: {progress.current}</p>
+              <form onSubmit={handleImport} className="import-form">
+                <input
+                  className="form-input"
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="BGG username"
+                  disabled={importing}
+                  required
+                />
+                <button type="submit" className="btn btn-primary" disabled={importing}>
+                  Import
+                </button>
+              </form>
+            </>
           )}
-          <div
-            style={{
-              width: "100%",
-              maxWidth: 400,
-              height: 8,
-              backgroundColor: "#e0e0e0",
-              borderRadius: 4,
-              overflow: "hidden",
-            }}
-          >
-            <div
-              style={{
-                width: progress.total > 0 ? `${(progress.imported / progress.total) * 100}%` : "0%",
-                height: "100%",
-                backgroundColor: "#059669",
-                transition: "width 0.3s ease",
-              }}
-            />
-          </div>
-        </div>
-      )}
 
-      {result && (
-        <div
-          style={{
-            padding: 16,
-            border: "1px solid #e0e0e0",
-            borderRadius: 8,
-            marginBottom: 16,
-          }}
-        >
-          <h2 style={{ margin: "0 0 12px 0", fontSize: 16 }}>Import Complete</h2>
-          <p>
-            <strong>{result.imported}</strong> game{result.imported === 1 ? "" : "s"} imported
-          </p>
-          {result.skipped > 0 && (
-            <p style={{ color: "#666" }}>
-              {result.skipped} game{result.skipped === 1 ? "" : "s"} skipped (already in collection)
-            </p>
-          )}
-          {result.errors.length > 0 && (
-            <div>
-              <p style={{ color: "#c00" }}>
-                {result.errors.length} error{result.errors.length === 1 ? "" : "s"}:
+          {error && <div className="error-banner">{error}</div>}
+
+          {/* Importing state */}
+          {importing && progress && (
+            <>
+              <div className="import-header">
+                <h2>Importing Collection</h2>
+                <p>
+                  Fetching game data from BGG for <strong>{username}</strong>. This may take a
+                  moment — BGG requests are rate-limited.
+                </p>
+              </div>
+
+              {/* Status banner */}
+              <div className="status-banner running">
+                <div className="status-icon">⟳</div>
+                <div className="status-text">
+                  <div className="status-headline">Importing in progress</div>
+                  <div className="status-sub">
+                    {progress.current ? `Fetching ${progress.current} from BGG…` : "Preparing…"}
+                  </div>
+                </div>
+                <div className="status-count">
+                  <div className="count-value">
+                    {progress.imported} / {progress.total}
+                  </div>
+                  <div className="count-label">games</div>
+                </div>
+              </div>
+
+              {/* Progress bar */}
+              <div className="progress-section">
+                <div className="progress-header">
+                  <div className="progress-label">Progress</div>
+                  <div className="progress-fraction">
+                    {progress.imported} of {progress.total}
+                    {progress.total > 0 &&
+                      ` · ${Math.round((progress.imported / progress.total) * 100)}%`}
+                  </div>
+                </div>
+                <div className="progress-track">
+                  <div
+                    className="progress-fill"
+                    style={{
+                      width:
+                        progress.total > 0
+                          ? `${(progress.imported / progress.total) * 100}%`
+                          : "0%",
+                    }}
+                  />
+                </div>
+              </div>
+
+              <p className="import-throttle-note">
+                BGG requests are throttled to avoid rate limiting. Please keep this window open
+                until the import finishes.
               </p>
-              <ul style={{ color: "#c00", fontSize: 13 }}>
-                {result.errors.map((err, i) => (
-                  <li key={i}>{err}</li>
-                ))}
-              </ul>
-            </div>
+            </>
           )}
-          <button
-            onClick={() => router.push("/")}
-            style={{
-              marginTop: 8,
-              padding: "8px 16px",
-              backgroundColor: "#2563eb",
-              color: "white",
-              border: "none",
-              borderRadius: 4,
-              cursor: "pointer",
-              fontSize: 14,
-            }}
-          >
-            Go to Collection
-          </button>
+
+          {/* Completion summary */}
+          {result && (
+            <>
+              <div className="import-header">
+                <h2>Import Complete</h2>
+                <p>
+                  Finished importing games from BGG for <strong>{username}</strong>.
+                </p>
+              </div>
+
+              <div className="summary-block">
+                <div className="status-headline">Import Summary</div>
+                <div className="summary-stats">
+                  <div className="summary-stat">
+                    <div className="summary-stat-value added">{result.imported}</div>
+                    <div className="summary-stat-label">Added</div>
+                  </div>
+                  <div className="summary-stat">
+                    <div className="summary-stat-value skipped">{result.skipped}</div>
+                    <div className="summary-stat-label">Skipped</div>
+                  </div>
+                  <div className="summary-stat">
+                    <div className="summary-stat-value errors">{result.errors.length}</div>
+                    <div className="summary-stat-label">Errors</div>
+                  </div>
+                </div>
+              </div>
+
+              {result.errors.length > 0 && (
+                <div className="error-banner" style={{ marginBottom: 16 }}>
+                  {result.errors.map((err, i) => (
+                    <div key={i}>{err}</div>
+                  ))}
+                </div>
+              )}
+
+              <button className="btn btn-primary" onClick={() => router.push("/")}>
+                Go to Collection
+              </button>
+            </>
+          )}
         </div>
-      )}
-    </div>
+      </div>
+    </>
   );
 }

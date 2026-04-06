@@ -1,74 +1,94 @@
 import type { FitnessResult } from "@shelf-judge/shared";
-import { ScoreBadge } from "./score-badge";
 
 export function ScoreBreakdown({ score }: { score: FitnessResult | null }) {
   if (!score) {
     return (
-      <p style={{ color: "#999", fontStyle: "italic" }}>
+      <p className="bgg-data-line" style={{ fontStyle: "italic" }}>
         Not yet rated. Rate this game on at least one axis to see a fitness score.
       </p>
     );
   }
 
-  return (
-    <div>
-      <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
-        <span style={{ fontSize: 14, color: "#666" }}>Overall:</span>
-        <ScoreBadge score={score} />
-        <span style={{ fontSize: 13, color: "#999" }}>
-          ({score.ratedAxisCount} of {score.totalAxisCount} axes rated)
-        </span>
-      </div>
+  const totalWeight = score.breakdown
+    .filter((e) => e.rating !== null)
+    .reduce((sum, e) => sum + e.weight, 0);
 
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-        <thead>
-          <tr style={{ borderBottom: "2px solid #e0e0e0", textAlign: "left" }}>
-            <th style={{ padding: "6px 10px" }}>Axis</th>
-            <th style={{ padding: "6px 10px" }}>Rating</th>
-            <th style={{ padding: "6px 10px" }}>Weight</th>
-            <th style={{ padding: "6px 10px" }}>Contribution</th>
-            <th style={{ padding: "6px 10px" }}>Source</th>
-          </tr>
-        </thead>
-        <tbody>
-          {score.breakdown.map((entry) => (
-            <tr key={entry.axisId} style={{ borderBottom: "1px solid #eee" }}>
-              <td style={{ padding: "6px 10px" }}>{entry.axisName}</td>
-              <td style={{ padding: "6px 10px" }}>
-                {entry.rating !== null ? (
-                  entry.rating.toFixed(1)
-                ) : (
-                  <span style={{ color: "#999", fontStyle: "italic" }}>not rated</span>
+  return (
+    <table className="breakdown-table">
+      <thead>
+        <tr>
+          <th>Axis</th>
+          <th className="right">Rating</th>
+          <th className="right">Weight</th>
+          <th className="right">Contribution</th>
+          <th style={{ textAlign: "right" }}>Source</th>
+        </tr>
+      </thead>
+      <tbody>
+        {score.breakdown.map((entry) => {
+          const rowClass =
+            entry.source === "override" ? "override-row" : entry.source === "bgg" ? "bgg-row" : "";
+          const contribPct =
+            entry.contribution !== null && totalWeight > 0
+              ? Math.round((entry.contribution / score.score) * 100)
+              : null;
+
+          return (
+            <tr key={entry.axisId} className={rowClass}>
+              <td style={{ fontWeight: 500 }}>
+                {entry.axisName}
+                {entry.source === "override" && entry.bggOriginal !== null && (
+                  <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 1 }}>
+                    BGG value: {entry.bggOriginal.toFixed(1)} → scaled{" "}
+                    {Math.round(entry.bggOriginal)}
+                  </div>
                 )}
               </td>
-              <td style={{ padding: "6px 10px" }}>{entry.weight}</td>
-              <td style={{ padding: "6px 10px" }}>
-                {entry.contribution !== null ? entry.contribution.toFixed(2) : "-"}
+              <td className="right">
+                {entry.rating !== null ? (
+                  entry.rating
+                ) : (
+                  <span style={{ color: "var(--text-muted)", fontStyle: "italic" }}>—</span>
+                )}
               </td>
-              <td style={{ padding: "6px 10px" }}>
-                <SourceLabel source={entry.source} bggOriginal={entry.bggOriginal} />
+              <td className="right">{entry.weight}</td>
+              <td className="right">
+                {contribPct !== null ? (
+                  <div className="contrib-cell">
+                    <div className="contrib-bar-track">
+                      <div className="contrib-bar-fill" style={{ width: `${contribPct}%` }} />
+                    </div>
+                    <span className="contrib-pct">{contribPct}%</span>
+                  </div>
+                ) : (
+                  "—"
+                )}
+              </td>
+              <td style={{ textAlign: "right" }}>
+                <SourceBadge source={entry.source} />
               </td>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          );
+        })}
+        <tr className="total-row">
+          <td colSpan={3} style={{ fontWeight: 700 }}>
+            Fitness Score
+          </td>
+          <td colSpan={2} style={{ textAlign: "right" }}>
+            {score.score.toFixed(1)}
+          </td>
+        </tr>
+      </tbody>
+    </table>
   );
 }
 
-function SourceLabel({ source, bggOriginal }: { source: string; bggOriginal: number | null }) {
-  if (source === "override" && bggOriginal !== null) {
-    return (
-      <span>
-        <span style={{ color: "#7c3aed" }}>Override</span>
-        <span style={{ color: "#999", fontSize: 12, marginLeft: 4 }}>
-          (BGG: {bggOriginal.toFixed(1)})
-        </span>
-      </span>
-    );
+function SourceBadge({ source }: { source: string }) {
+  if (source === "override") {
+    return <span className="source-badge source-override">Override</span>;
   }
   if (source === "bgg") {
-    return <span style={{ color: "#059669" }}>BGG</span>;
+    return <span className="source-badge source-bgg">BGG</span>;
   }
-  return <span style={{ color: "#2563eb" }}>Personal</span>;
+  return <span className="source-badge source-personal">Personal</span>;
 }

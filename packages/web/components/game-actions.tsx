@@ -59,42 +59,16 @@ export function GameActions({
   }
 
   return (
-    <div>
-      {error && <p style={{ color: "#c00", marginBottom: 8 }}>{error}</p>}
-      <div style={{ display: "flex", gap: 8 }}>
-        {hasBggId && (
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing}
-            style={{
-              padding: "8px 16px",
-              backgroundColor: refreshing ? "#999" : "#059669",
-              color: "white",
-              border: "none",
-              borderRadius: 4,
-              cursor: refreshing ? "default" : "pointer",
-              fontSize: 14,
-            }}
-          >
-            {refreshing ? "Refreshing..." : "Refresh BGG Data"}
-          </button>
-        )}
-        <button
-          onClick={handleRemove}
-          disabled={removing}
-          style={{
-            padding: "8px 16px",
-            backgroundColor: removing ? "#999" : "#dc2626",
-            color: "white",
-            border: "none",
-            borderRadius: 4,
-            cursor: removing ? "default" : "pointer",
-            fontSize: 14,
-          }}
-        >
-          {removing ? "Removing..." : "Remove Game"}
+    <div className="topbar-actions">
+      {error && <span className="error-banner">{error}</span>}
+      {hasBggId && (
+        <button className="btn btn-secondary" onClick={handleRefresh} disabled={refreshing}>
+          {refreshing ? "Refreshing..." : "↺ Refresh BGG"}
         </button>
-      </div>
+      )}
+      <button className="btn btn-danger-outline" onClick={handleRemove} disabled={removing}>
+        {removing ? "Removing..." : "Remove"}
+      </button>
     </div>
   );
 }

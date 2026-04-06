@@ -26,12 +26,18 @@ export function RatingForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const personalAxes = axes.filter((a) => a.source === "personal");
+  const bggAxes = axes.filter((a) => a.source === "bgg");
+
+  function handleChange(axisId: string, value: string) {
+    setRatings((prev) => ({ ...prev, [axisId]: value }));
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
     setError(null);
 
-    // Validate and collect ratings
     const numericRatings: Record<string, number> = {};
     const invalidAxes: string[] = [];
     for (const [axisId, value] of Object.entries(ratings)) {
@@ -72,69 +78,143 @@ export function RatingForm({
     }
   }
 
+  function handleCancel() {
+    const initial: Record<string, string> = {};
+    for (const axis of axes) {
+      if (currentRatings[axis.id] !== undefined) {
+        initial[axis.id] = String(currentRatings[axis.id]);
+      }
+    }
+    setRatings(initial);
+    setError(null);
+  }
+
   return (
     <form onSubmit={handleSubmit}>
-      {error && <p style={{ color: "#c00", marginBottom: 12 }}>{error}</p>}
+      {error && <div className="error-banner">{error}</div>}
 
-      <table style={{ borderCollapse: "collapse", fontSize: 14 }}>
-        <tbody>
-          {axes.map((axis) => (
-            <tr key={axis.id}>
-              <td style={{ padding: "4px 12px 4px 0" }}>
-                <label htmlFor={`rating-${axis.id}`}>
-                  {axis.name}
-                  {axis.source === "bgg" && (
-                    <span style={{ color: "#059669", fontSize: 12, marginLeft: 4 }}>(BGG)</span>
+      <div className="rating-form">
+        {personalAxes.map((axis) => (
+          <div key={axis.id} className="rating-field">
+            <div className="rating-field-header">
+              <div className="rating-field-name">{axis.name}</div>
+              <div className="rating-field-weight">Weight: {axis.weight}</div>
+            </div>
+            {axis.description && <div className="rating-field-desc">{axis.description}</div>}
+            <div className="rating-input-row">
+              <input
+                type="range"
+                className="rating-slider"
+                min={1}
+                max={10}
+                value={ratings[axis.id] || "5"}
+                onChange={(e) => handleChange(axis.id, e.target.value)}
+              />
+              <input
+                type="number"
+                className="rating-value-input"
+                min={1}
+                max={10}
+                value={ratings[axis.id] ?? ""}
+                onChange={(e) => handleChange(axis.id, e.target.value)}
+              />
+            </div>
+          </div>
+        ))}
+
+        {bggAxes.length > 0 && (
+          <>
+            <hr className="section-divider" />
+            <div className="panel-section-title" style={{ marginBottom: 12 }}>
+              BGG-Derived Axes
+            </div>
+
+            {bggAxes.map((axis) => {
+              const hasOverride = ratings[axis.id] !== undefined && ratings[axis.id] !== "";
+              return (
+                <div key={axis.id} className="rating-field">
+                  <div className="rating-field-header">
+                    <div className="rating-field-name">
+                      {axis.name}
+                      <span
+                        className="source-badge source-bgg"
+                        style={{ marginLeft: 6, verticalAlign: "middle" }}
+                      >
+                        BGG
+                      </span>
+                    </div>
+                    <div className="rating-field-weight">Weight: {axis.weight}</div>
+                  </div>
+                  {axis.description && <div className="rating-field-desc">{axis.description}</div>}
+                  {hasOverride ? (
+                    <>
+                      <div className="bgg-auto-value overridden">
+                        <span>Your override: {ratings[axis.id]}</span>
+                        <span className="value">{ratings[axis.id]}</span>
+                        <span
+                          className="override-link"
+                          onClick={() => {
+                            setRatings((prev) => {
+                              const next = { ...prev };
+                              delete next[axis.id];
+                              return next;
+                            });
+                          }}
+                        >
+                          Revert to BGG ›
+                        </span>
+                      </div>
+                      <div className="rating-input-row">
+                        <input
+                          type="range"
+                          className="rating-slider"
+                          min={1}
+                          max={10}
+                          value={ratings[axis.id] || "5"}
+                          onChange={(e) => handleChange(axis.id, e.target.value)}
+                          style={{ accentColor: "var(--override-accent)" }}
+                        />
+                        <input
+                          type="number"
+                          className="rating-value-input"
+                          min={1}
+                          max={10}
+                          value={ratings[axis.id] ?? ""}
+                          onChange={(e) => handleChange(axis.id, e.target.value)}
+                          style={{
+                            color: "var(--override-accent)",
+                            borderColor: "var(--override-accent)",
+                          }}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="bgg-auto-value">
+                      <span>Auto-populated from BGG</span>
+                      <span className="value">{currentRatings[axis.id] ?? "—"}</span>
+                      <span
+                        className="override-link"
+                        onClick={() => handleChange(axis.id, String(currentRatings[axis.id] ?? 5))}
+                      >
+                        Override ›
+                      </span>
+                    </div>
                   )}
-                </label>
-              </td>
-              <td style={{ padding: "4px 0" }}>
-                <input
-                  id={`rating-${axis.id}`}
-                  type="number"
-                  min={1}
-                  max={10}
-                  step={1}
-                  value={ratings[axis.id] ?? ""}
-                  onChange={(e) =>
-                    setRatings((prev) => ({
-                      ...prev,
-                      [axis.id]: e.target.value,
-                    }))
-                  }
-                  placeholder={axis.source === "bgg" ? "auto from BGG" : "1-10"}
-                  style={{
-                    width: 60,
-                    padding: "4px 8px",
-                    border: "1px solid #ccc",
-                    borderRadius: 4,
-                  }}
-                />
-                <span style={{ marginLeft: 4, color: "#999", fontSize: 12 }}>
-                  (w: {axis.weight})
-                </span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+                </div>
+              );
+            })}
+          </>
+        )}
+      </div>
 
-      <button
-        type="submit"
-        disabled={saving}
-        style={{
-          marginTop: 12,
-          padding: "8px 16px",
-          backgroundColor: saving ? "#999" : "#2563eb",
-          color: "white",
-          border: "none",
-          borderRadius: 4,
-          cursor: saving ? "default" : "pointer",
-          fontSize: 14,
-        }}
-      >
-        {saving ? "Saving..." : "Save Ratings"}
-      </button>
+      <div className="save-btn-row">
+        <button type="button" className="btn btn-secondary" onClick={handleCancel}>
+          Cancel
+        </button>
+        <button type="submit" className="btn btn-primary" disabled={saving}>
+          {saving ? "Saving..." : "Save Ratings"}
+        </button>
+      </div>
     </form>
   );
 }

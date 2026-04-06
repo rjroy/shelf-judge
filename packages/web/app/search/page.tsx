@@ -103,131 +103,94 @@ export default function SearchPage() {
   }
 
   return (
-    <div>
-      <h1>Add Game</h1>
-
-      <div style={{ marginBottom: 24 }}>
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search BoardGameGeek..."
-          style={{
-            width: "100%",
-            maxWidth: 400,
-            padding: "8px 12px",
-            border: "1px solid #ccc",
-            borderRadius: 4,
-            fontSize: 14,
-          }}
-        />
-        {searching && (
-          <span style={{ marginLeft: 8, color: "#666", fontSize: 13 }}>Searching...</span>
-        )}
+    <>
+      <div className="topbar">
+        <div className="topbar-title">Add Game</div>
       </div>
 
-      {error && <p style={{ color: "#c00", marginBottom: 12 }}>{error}</p>}
+      <div className="main-scroll">
+        <div className="search-content">
+          {/* Search input */}
+          <div className="search-input-row">
+            <input
+              className="form-input"
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search BoardGameGeek..."
+              style={{ flex: 1, maxWidth: 400 }}
+            />
+            {searching && (
+              <span style={{ color: "var(--text-muted)", fontSize: 13 }}>Searching...</span>
+            )}
+          </div>
 
-      {results.length > 0 && (
-        <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 24 }}>
-          <thead>
-            <tr style={{ borderBottom: "2px solid #e0e0e0", textAlign: "left" }}>
-              <th style={{ padding: "6px 10px" }}>Game</th>
-              <th style={{ padding: "6px 10px" }}>Year</th>
-              <th style={{ padding: "6px 10px" }}></th>
-            </tr>
-          </thead>
-          <tbody>
-            {results.map((r) => (
-              <tr key={r.bggId} style={{ borderBottom: "1px solid #eee" }}>
-                <td style={{ padding: "6px 10px" }}>{r.name}</td>
-                <td style={{ padding: "6px 10px", color: "#666" }}>{r.yearPublished ?? ""}</td>
-                <td style={{ padding: "6px 10px" }}>
+          {error && <div className="error-banner">{error}</div>}
+
+          {/* Results list */}
+          {results.length > 0 && (
+            <div className="search-results">
+              {results.map((r) => (
+                <div key={r.bggId} className="search-result-row">
+                  <div className="search-result-info">
+                    <div className="search-result-name">{r.name}</div>
+                    {r.yearPublished && <div className="search-result-year">{r.yearPublished}</div>}
+                  </div>
                   <button
+                    className="btn btn-primary btn-sm"
                     onClick={() => handleAddBgg(r.bggId)}
                     disabled={adding === r.bggId}
-                    style={{
-                      padding: "4px 12px",
-                      backgroundColor: adding === r.bggId ? "#999" : "#2563eb",
-                      color: "white",
-                      border: "none",
-                      borderRadius: 4,
-                      cursor: adding === r.bggId ? "default" : "pointer",
-                      fontSize: 13,
-                    }}
                   >
                     {adding === r.bggId ? "Adding..." : "Add"}
                   </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      <div style={{ borderTop: "1px solid #e0e0e0", paddingTop: 16 }}>
-        <button
-          onClick={() => setShowManual(!showManual)}
-          style={{
-            background: "none",
-            border: "none",
-            color: "#2563eb",
-            cursor: "pointer",
-            fontSize: 14,
-            padding: 0,
-          }}
-        >
-          {showManual ? "Hide manual entry" : "Add a game manually (not on BGG)"}
-        </button>
-
-        {showManual && (
-          <form onSubmit={handleAddManual} style={{ marginTop: 12 }}>
-            <div style={{ marginBottom: 8 }}>
-              <input
-                type="text"
-                value={manualName}
-                onChange={(e) => setManualName(e.target.value)}
-                placeholder="Game name"
-                required
-                style={{
-                  padding: "8px 12px",
-                  border: "1px solid #ccc",
-                  borderRadius: 4,
-                  fontSize: 14,
-                  marginRight: 8,
-                }}
-              />
-              <input
-                type="number"
-                value={manualYear}
-                onChange={(e) => setManualYear(e.target.value)}
-                placeholder="Year (optional)"
-                style={{
-                  padding: "8px 12px",
-                  border: "1px solid #ccc",
-                  borderRadius: 4,
-                  fontSize: 14,
-                  width: 140,
-                }}
-              />
+                </div>
+              ))}
             </div>
-            <button
-              type="submit"
-              style={{
-                padding: "8px 16px",
-                backgroundColor: "#2563eb",
-                color: "white",
-                border: "none",
-                borderRadius: 4,
-                cursor: "pointer",
-                fontSize: 14,
-              }}
-            >
-              Add Game
+          )}
+
+          {/* Manual add section */}
+          <div style={{ borderTop: "1px solid var(--border)", paddingTop: 24 }}>
+            <button className="btn btn-ghost" onClick={() => setShowManual(!showManual)}>
+              {showManual ? "Hide manual entry" : "Add a game manually (not on BGG)"}
             </button>
-          </form>
-        )}
+
+            {showManual && (
+              <div className="manual-add-card" style={{ marginTop: 16 }}>
+                <form onSubmit={handleAddManual}>
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label className="form-label">Game Name</label>
+                      <input
+                        className="form-input"
+                        type="text"
+                        value={manualName}
+                        onChange={(e) => setManualName(e.target.value)}
+                        placeholder="Game name"
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Year (optional)</label>
+                      <input
+                        className="form-input"
+                        type="number"
+                        value={manualYear}
+                        onChange={(e) => setManualYear(e.target.value)}
+                        placeholder="Year published"
+                      />
+                    </div>
+                  </div>
+                  <div className="form-actions">
+                    <button type="submit" className="btn btn-primary">
+                      Add Game
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
