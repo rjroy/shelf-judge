@@ -27,3 +27,9 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
+- 14:47 commission-Sienna-20260406-144019 result: Created four HTML mockups for the tournament session filter UX in `.lore/visual-direction/tournament/`.
+
+**Files delivered:**
+- `01-session-start.html` — Tournament landing page. Shows resume banner f...
+
+- 14:47 commission-Sienna-20260406-144019 completed
