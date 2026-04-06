@@ -72,6 +72,10 @@
 
 /* ===== Base Styles ===== */
 
+html {
+  overflow-x: hidden;
+}
+
 body {
   margin: 0;
   background: var(--bg-base);
