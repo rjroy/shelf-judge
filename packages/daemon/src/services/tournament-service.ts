@@ -76,7 +76,8 @@ function applyFilters(
       }
 
       case "staleness": {
-        const threshold = parseInt(filter.value, 10) || data.settings.provisionalThreshold;
+        const parsed = parseInt(filter.value, 10);
+        const threshold = Number.isNaN(parsed) ? data.settings.provisionalThreshold : parsed;
         result = result.filter((g) => {
           const stats = data.gameStats[g.game.id];
           return !stats || stats.comparisonCount < threshold;
@@ -317,6 +318,11 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
       // Ensure both games are in the session
       if (!session.gameIds.includes(gameAId) || !session.gameIds.includes(gameBId)) {
         throw new Error("Both games must be part of the active session");
+      }
+
+      // Validate winnerId is one of the compared games
+      if (winnerId !== gameAId && winnerId !== gameBId) {
+        throw new Error("winnerId must be one of the compared games");
       }
 
       // Create the comparison record

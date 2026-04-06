@@ -316,6 +316,15 @@ describe("TournamentService", () => {
       expect(pairGames.every((g) => zeroCompGames.includes(g))).toBe(true);
     });
 
+    test("throws for non-existent session", async () => {
+      try {
+        await service.getNextPair("nonexistent");
+        expect.unreachable("should have thrown");
+      } catch (err) {
+        expect((err as Error).message).toContain("Session not found");
+      }
+    });
+
     test("does not repeat pairs within the same session", async () => {
       const fourGames = games.slice(0, 4);
       const session = await service.startSession(null, fourGames);
@@ -396,6 +405,16 @@ describe("TournamentService", () => {
         expect.unreachable("should have thrown");
       } catch (err) {
         expect((err as Error).message).toContain("Session already completed");
+      }
+    });
+
+    test("throws for invalid winnerId", async () => {
+      const session = await service.startSession(null, games);
+      try {
+        await service.submitComparison(session.id, "g1", "g2", "g999");
+        expect.unreachable("should have thrown");
+      } catch (err) {
+        expect((err as Error).message).toContain("winnerId must be one of the compared games");
       }
     });
 
