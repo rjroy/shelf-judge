@@ -6,6 +6,9 @@ import { createAxisService } from "./services/axis-service.js";
 import { createGameService } from "./services/game-service.js";
 import { createBggClient } from "./services/bgg-client.js";
 import { createApp } from "./app.js";
+import { createLogger } from "./services/logger.js";
+
+const logger = createLogger("daemon");
 
 async function main() {
   const envConfig = resolveConfig();
@@ -44,7 +47,7 @@ async function main() {
     gameService,
     bggClient,
     onShutdown() {
-      console.log("Shutting down via API...");
+      logger.log("Shutting down via API...");
       void serverRef.current?.stop();
       process.exit(0);
     },
@@ -56,13 +59,13 @@ async function main() {
     idleTimeout: 0 as never,
   });
 
-  console.log(`shelf-judge daemon listening on ${socketPath}`);
-  console.log(
+  logger.log(`shelf-judge daemon listening on ${socketPath}`);
+  logger.log(
     `BGG integration: ${bggClient.isConfigured() ? "configured" : "not configured (set bgg-token to enable)"}`,
   );
 
   function shutdown() {
-    console.log("Shutting down...");
+    logger.log("Shutting down...");
     void serverRef.current?.stop();
     process.exit(0);
   }
@@ -72,6 +75,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("Failed to start daemon:", err);
+  logger.error("Failed to start daemon:", err);
   process.exit(1);
 });
