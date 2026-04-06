@@ -1,7 +1,7 @@
 ---
 title: "Shelf Judge Visual Direction"
 date: 2026-04-05
-status: approved
+status: active
 tags: [design, visual, ui, branding]
 modules: [web-ui]
 related:
