@@ -319,8 +319,18 @@ const singleGameStats = {
   wins: 8,
   losses: 4,
   recentComparisons: [
-    { opponentGameId: "g2", won: true, createdAt: "2026-01-01T00:00:00Z" },
-    { opponentGameId: "g3", won: false, createdAt: "2026-01-01T00:01:00Z" },
+    {
+      opponentGameId: "g2",
+      opponentGameName: "Gloomhaven",
+      won: true,
+      createdAt: "2026-01-01T00:00:00Z",
+    },
+    {
+      opponentGameId: "g3",
+      opponentGameName: "Catan",
+      won: false,
+      createdAt: "2026-01-01T00:01:00Z",
+    },
   ],
 };
 
@@ -339,8 +349,8 @@ describe("tournament stats (single game)", () => {
     expect(output).toContain("Rank: 8.1");
     expect(output).toContain("8W / 4L");
     expect(output).toContain("Recent comparisons:");
-    expect(output).toContain("vs g2 - won");
-    expect(output).toContain("vs g3 - lost");
+    expect(output).toContain("vs Gloomhaven - won");
+    expect(output).toContain("vs Catan - lost");
   });
 
   test("--json outputs parseable JSON", async () => {

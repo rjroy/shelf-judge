@@ -8,6 +8,8 @@ interface PairData {
   done?: boolean;
   gameA?: Game;
   gameB?: Game;
+  gameAFitness?: number | null;
+  gameBFitness?: number | null;
   gameAStats?: TournamentGameStatsDisplay;
   gameBStats?: TournamentGameStatsDisplay;
 }
@@ -206,8 +208,8 @@ export default function TournamentSessionPage() {
                   <ScoreDisplay
                     label="Axis"
                     value={
-                      pair.gameAStats?.normalizedScore !== null
-                        ? (pair.gameAStats?.normalizedScore ?? 0).toFixed(1)
+                      pair.gameAFitness !== null && pair.gameAFitness !== undefined
+                        ? pair.gameAFitness.toFixed(1)
                         : "-"
                     }
                     className="axis"
@@ -249,8 +251,8 @@ export default function TournamentSessionPage() {
                   <ScoreDisplay
                     label="Axis"
                     value={
-                      pair.gameBStats?.normalizedScore !== null
-                        ? (pair.gameBStats?.normalizedScore ?? 0).toFixed(1)
+                      pair.gameBFitness !== null && pair.gameBFitness !== undefined
+                        ? pair.gameBFitness.toFixed(1)
                         : "-"
                     }
                     className="axis"

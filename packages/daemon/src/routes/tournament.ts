@@ -92,7 +92,7 @@ export function createTournamentRoutes(deps: TournamentRoutesDeps): RouteModule 
         return c.json({ done: true });
       }
 
-      const [gameA, gameB, gameAStats, gameBStats] = await Promise.all([
+      const [gameAResult, gameBResult, gameAStats, gameBStats] = await Promise.all([
         gameService.getGame(pair.gameA),
         gameService.getGame(pair.gameB),
         tournamentService.getGameStats(pair.gameA),
@@ -100,8 +100,10 @@ export function createTournamentRoutes(deps: TournamentRoutesDeps): RouteModule 
       ]);
 
       return c.json({
-        gameA: gameA.game,
-        gameB: gameB.game,
+        gameA: gameAResult.game,
+        gameB: gameBResult.game,
+        gameAFitness: gameAResult.score?.score ?? null,
+        gameBFitness: gameBResult.score?.score ?? null,
         gameAStats,
         gameBStats,
       });
@@ -163,22 +165,42 @@ export function createTournamentRoutes(deps: TournamentRoutesDeps): RouteModule 
     }
   });
 
-  // GET /tournament/games/:id/stats - Tournament stats for a game
+  // GET /tournament/games/:id/stats - Tournament stats for a game (enriched with opponent names)
   routes.get("/tournament/games/:id/stats", async (c) => {
     const id = c.req.param("id");
     try {
-      const stats = await tournamentService.getGameStats(id);
+      const [stats, games] = await Promise.all([
+        tournamentService.getGameStats(id),
+        gameService.listGames(),
+      ]);
+
+      const nameMap = new Map(games.map((g) => [g.game.id, g.game.name]));
+      for (const comp of stats.recentComparisons) {
+        comp.opponentGameName = nameMap.get(comp.opponentGameId) ?? null;
+      }
+
       return c.json(stats);
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 500);
     }
   });
 
-  // GET /tournament/stats - All game tournament stats
+  // GET /tournament/stats - All game tournament stats (enriched with game names)
   routes.get("/tournament/stats", async (c) => {
     try {
-      const stats = await tournamentService.getAllGameStats();
-      return c.json(stats);
+      const [stats, games] = await Promise.all([
+        tournamentService.getAllGameStats(),
+        gameService.listGames(),
+      ]);
+
+      const nameMap = new Map(games.map((g) => [g.game.id, g.game.name]));
+      const result = Object.entries(stats).map(([gameId, gameStats]) => ({
+        gameId,
+        gameName: nameMap.get(gameId) ?? "(deleted)",
+        stats: gameStats,
+      }));
+
+      return c.json(result);
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 500);
     }

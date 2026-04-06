@@ -267,7 +267,8 @@ export async function tournamentStats(
       lines.push("Recent comparisons:");
       for (const c of data.recentComparisons) {
         const result = c.won ? "won" : "lost";
-        lines.push(`  vs ${c.opponentGameId} - ${result}`);
+        const opponent = c.opponentGameName ?? c.opponentGameId.slice(0, 8);
+        lines.push(`  vs ${opponent} - ${result}`);
       }
     }
 

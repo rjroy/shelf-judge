@@ -136,6 +136,7 @@ export interface TournamentData {
 
 export interface RecentComparison {
   opponentGameId: string;
+  opponentGameName: string | null; // null when game has been deleted from collection
   won: boolean;
   createdAt: string;
 }

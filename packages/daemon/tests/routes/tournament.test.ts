@@ -132,6 +132,8 @@ describe("Tournament Routes", () => {
       const body = (await res.json()) as {
         gameA: Game;
         gameB: Game;
+        gameAFitness: number | null;
+        gameBFitness: number | null;
         gameAStats: TournamentGameStatsDisplay;
         gameBStats: TournamentGameStatsDisplay;
       };
@@ -140,6 +142,9 @@ describe("Tournament Routes", () => {
       expect(body.gameA.id).not.toBe(body.gameB.id);
       expect(body.gameAStats).toBeDefined();
       expect(body.gameBStats).toBeDefined();
+      // Fitness scores included (null when no axis ratings)
+      expect("gameAFitness" in body).toBe(true);
+      expect("gameBFitness" in body).toBe(true);
     });
 
     test("returns 404 for non-existent session", async () => {
@@ -277,14 +282,76 @@ describe("Tournament Routes", () => {
       expect(body.eloRating).toBe(1500);
       expect(body.comparisonCount).toBe(0);
     });
+
+    test("recent comparisons include opponent game names", async () => {
+      const ids = await addGames(5);
+      const startRes = await startSession();
+      const { session } = (await startRes.json()) as { session: TournamentSession };
+
+      const nextRes = await jsonRequest(
+        ctx.app,
+        "GET",
+        `/api/tournament/sessions/${session.id}/next`,
+      );
+      const pair = (await nextRes.json()) as { gameA: Game; gameB: Game };
+      await jsonRequest(ctx.app, "POST", `/api/tournament/sessions/${session.id}/compare`, {
+        gameAId: pair.gameA.id,
+        gameBId: pair.gameB.id,
+        winnerId: pair.gameA.id,
+      });
+
+      const res = await jsonRequest(ctx.app, "GET", `/api/tournament/games/${pair.gameA.id}/stats`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as TournamentGameStatsDisplay;
+      expect(body.recentComparisons.length).toBe(1);
+      expect(body.recentComparisons[0].opponentGameName).toBeTruthy();
+    });
   });
 
   describe("GET /api/tournament/stats", () => {
-    test("returns empty stats initially", async () => {
+    test("returns empty array initially", async () => {
       const res = await jsonRequest(ctx.app, "GET", "/api/tournament/stats");
       expect(res.status).toBe(200);
-      const body = (await res.json()) as Record<string, TournamentGameStatsDisplay>;
-      expect(Object.keys(body).length).toBe(0);
+      const body = (await res.json()) as Array<{
+        gameId: string;
+        gameName: string;
+        stats: TournamentGameStatsDisplay;
+      }>;
+      expect(body).toEqual([]);
+    });
+
+    test("returns enriched array with gameId and gameName after comparisons", async () => {
+      const ids = await addGames(5);
+      const startRes = await startSession();
+      const { session } = (await startRes.json()) as { session: TournamentSession };
+
+      // Get and submit one comparison
+      const nextRes = await jsonRequest(
+        ctx.app,
+        "GET",
+        `/api/tournament/sessions/${session.id}/next`,
+      );
+      const pair = (await nextRes.json()) as { gameA: Game; gameB: Game };
+      await jsonRequest(ctx.app, "POST", `/api/tournament/sessions/${session.id}/compare`, {
+        gameAId: pair.gameA.id,
+        gameBId: pair.gameB.id,
+        winnerId: pair.gameA.id,
+      });
+
+      const res = await jsonRequest(ctx.app, "GET", "/api/tournament/stats");
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as Array<{
+        gameId: string;
+        gameName: string;
+        stats: TournamentGameStatsDisplay;
+      }>;
+      expect(Array.isArray(body)).toBe(true);
+      expect(body.length).toBe(2);
+      for (const entry of body) {
+        expect(entry.gameId).toBeTruthy();
+        expect(entry.gameName).toBeTruthy();
+        expect(entry.stats.eloRating).toBeDefined();
+      }
     });
   });
 

@@ -62,8 +62,8 @@ function countMatchingGames(
           const mechanics = game.bggData?.mechanics ?? [];
           const categories = game.bggData?.categories ?? [];
           return (
-            mechanics.some((m) => m.name.toLowerCase().includes(tag)) ||
-            categories.some((c) => c.name.toLowerCase().includes(tag))
+            mechanics.some((m) => m.name.toLowerCase() === tag) ||
+            categories.some((c) => c.name.toLowerCase() === tag)
           );
         }
         case "staleness": {

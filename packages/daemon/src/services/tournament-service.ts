@@ -121,19 +121,34 @@ function deriveDisplayStats(gameId: string, data: TournamentData): TournamentGam
   // Derive wins/losses from comparisons
   let wins = 0;
   let losses = 0;
-  const gameComparisons: { opponentGameId: string; won: boolean; createdAt: string }[] = [];
+  const gameComparisons: {
+    opponentGameId: string;
+    opponentGameName: string | null;
+    won: boolean;
+    createdAt: string;
+  }[] = [];
 
   for (const comp of data.comparisons) {
     if (comp.gameAId === gameId) {
       const won = comp.winnerId === gameId;
       if (won) wins++;
       else losses++;
-      gameComparisons.push({ opponentGameId: comp.gameBId, won, createdAt: comp.createdAt });
+      gameComparisons.push({
+        opponentGameId: comp.gameBId,
+        opponentGameName: null,
+        won,
+        createdAt: comp.createdAt,
+      });
     } else if (comp.gameBId === gameId) {
       const won = comp.winnerId === gameId;
       if (won) wins++;
       else losses++;
-      gameComparisons.push({ opponentGameId: comp.gameAId, won, createdAt: comp.createdAt });
+      gameComparisons.push({
+        opponentGameId: comp.gameAId,
+        opponentGameName: null,
+        won,
+        createdAt: comp.createdAt,
+      });
     }
   }
 
@@ -295,9 +310,14 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
       const closeElo = tied.filter((c) => c.eloDiff <= 200);
       const pool = closeElo.length > 0 ? closeElo : tied;
 
-      // Random tiebreak
-      const pick = pool[Math.floor(Math.random() * pool.length)];
-      return { gameA: pick.gameA, gameB: pick.gameB };
+      // Deterministic tiebreak: sort by game ID pair for stable ordering.
+      // This ensures `next` and `pick` always agree on the current pair.
+      pool.sort((a, b) => {
+        const keyA = [a.gameA, a.gameB].sort().join("|");
+        const keyB = [b.gameA, b.gameB].sort().join("|");
+        return keyA.localeCompare(keyB);
+      });
+      return { gameA: pool[0].gameA, gameB: pool[0].gameB };
     },
 
     async submitComparison(

@@ -98,6 +98,9 @@ function parseArgs(argv: string[]): ParsedArgs {
       axisFlags.push(raw[++i]);
       axisFlags.push(raw[++i]);
     } else if (arg === "--filter") {
+      if (i + 1 >= raw.length) {
+        throw new Error("--filter requires a value (e.g. --filter name:wingspan)");
+      }
       filterFlags.push(raw[++i]);
     } else {
       tokens.push(arg);
