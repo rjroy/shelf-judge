@@ -32,3 +32,8 @@ Workers can also add entries to this file during their sessions.
 - **Collection View** (page.tsx): Stats...
 
 - 19:16 commission-Dalton-20260405-190619 completed
+- 19:26 commission-Dalton-20260405-190626 result: Steps 9-10 of the visual transition plan are complete.
+
+**Step 9: Icon and Favicon**
+- Copied `.lore/art/icon.webp` to `packages/web/public/icon.webp` (favicon-32.png and favicon-16.png do not exist y...
+- 19:26 commission-Dalton-20260405-190626 completed
