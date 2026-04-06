@@ -27,3 +27,10 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
+- 13:03 commission-Dalton-20260406-125612 result: All 8 BGG client robustness issues verified and resolved. 230 tests pass, typecheck and lint clean.
+
+**Item 1** (429 unbounded recursion): Already fixed. No change needed.
+
+**Item 2** (429 recovery): ...
+
+- 13:03 commission-Dalton-20260406-125612 completed
