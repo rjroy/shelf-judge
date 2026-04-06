@@ -7,6 +7,7 @@ import {
   SessionFilterSchema,
   StartSessionSchema,
   SubmitComparisonSchema,
+  TournamentSettingsUpdateSchema,
 } from "../src/index";
 
 describe("CreateAxisSchema", () => {
@@ -300,5 +301,42 @@ describe("SubmitComparisonSchema", () => {
       winnerId: "game-2",
     });
     expect(result.success).toBe(true);
+  });
+});
+
+describe("TournamentSettingsUpdateSchema", () => {
+  test("accepts valid partial update", () => {
+    const result = TournamentSettingsUpdateSchema.safeParse({ kFactorThreshold: 20 });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.kFactorThreshold).toBe(20);
+    }
+  });
+
+  test("accepts empty object", () => {
+    const result = TournamentSettingsUpdateSchema.safeParse({});
+    expect(result.success).toBe(true);
+  });
+
+  test("accepts all fields", () => {
+    const result = TournamentSettingsUpdateSchema.safeParse({
+      kFactorThreshold: 20,
+      normalizationHalfWidth: 300,
+      provisionalThreshold: 10,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("rejects non-number values", () => {
+    const result = TournamentSettingsUpdateSchema.safeParse({ kFactorThreshold: "banana" });
+    expect(result.success).toBe(false);
+  });
+
+  test("rejects unknown fields (strict)", () => {
+    const result = TournamentSettingsUpdateSchema.safeParse({
+      kFactorThreshold: 20,
+      garbage: true,
+    });
+    expect(result.success).toBe(false);
   });
 });

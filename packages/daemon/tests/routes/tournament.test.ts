@@ -146,6 +146,40 @@ describe("Tournament Routes", () => {
       const res = await jsonRequest(ctx.app, "GET", "/api/tournament/sessions/nonexistent/next");
       expect(res.status).toBe(404);
     });
+
+    test("returns done:true when all pairs are exhausted", async () => {
+      // 4 games = C(4,2) = 6 comparisons to exhaust all pairs
+      await addGames(4);
+      const startRes = await startSession();
+      const { session } = (await startRes.json()) as { session: TournamentSession };
+
+      // Submit all 6 pair comparisons
+      for (let i = 0; i < 6; i++) {
+        const nextRes = await jsonRequest(
+          ctx.app,
+          "GET",
+          `/api/tournament/sessions/${session.id}/next`,
+        );
+        const pair = (await nextRes.json()) as { gameA: Game; gameB: Game; done?: boolean };
+        if (pair.done) break;
+
+        await jsonRequest(ctx.app, "POST", `/api/tournament/sessions/${session.id}/compare`, {
+          gameAId: pair.gameA.id,
+          gameBId: pair.gameB.id,
+          winnerId: pair.gameA.id,
+        });
+      }
+
+      // Next request should return done
+      const doneRes = await jsonRequest(
+        ctx.app,
+        "GET",
+        `/api/tournament/sessions/${session.id}/next`,
+      );
+      expect(doneRes.status).toBe(200);
+      const body = (await doneRes.json()) as { done: boolean };
+      expect(body.done).toBe(true);
+    });
   });
 
   describe("POST /api/tournament/sessions/:id/compare", () => {
@@ -283,6 +317,25 @@ describe("Tournament Routes", () => {
       const body = (await res.json()) as TournamentSettings;
       expect(body.kFactorThreshold).toBe(20);
       expect(body.normalizationHalfWidth).toBe(400);
+    });
+
+    test("returns 400 for unknown fields (strict mode)", async () => {
+      const res = await jsonRequest(ctx.app, "PUT", "/api/tournament/settings", {
+        kFactorThreshold: 20,
+        garbage: true,
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe("Validation failed");
+    });
+
+    test("returns 400 for wrong field types", async () => {
+      const res = await jsonRequest(ctx.app, "PUT", "/api/tournament/settings", {
+        kFactorThreshold: "banana",
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe("Validation failed");
     });
 
     test("returns 400 for invalid JSON", async () => {

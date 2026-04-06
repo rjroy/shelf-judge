@@ -30,6 +30,7 @@ export {
   SessionFilterSchema,
   StartSessionSchema,
   SubmitComparisonSchema,
+  TournamentSettingsUpdateSchema,
 } from "./validation.js";
 
 export { toErrorMessage } from "./errors.js";
@@ -42,4 +43,5 @@ export type {
   SessionFilterInput,
   StartSessionInput,
   SubmitComparisonInput,
+  TournamentSettingsUpdateInput,
 } from "./validation.js";

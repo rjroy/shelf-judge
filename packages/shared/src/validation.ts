@@ -64,6 +64,14 @@ export const SubmitComparisonSchema = z
     path: ["winnerId"],
   });
 
+export const TournamentSettingsUpdateSchema = z
+  .object({
+    kFactorThreshold: z.number().optional(),
+    normalizationHalfWidth: z.number().optional(),
+    provisionalThreshold: z.number().optional(),
+  })
+  .strict();
+
 export type CreateAxisInput = z.input<typeof CreateAxisSchema>;
 export type UpdateAxisInput = z.input<typeof UpdateAxisSchema>;
 export type RateGameInput = z.input<typeof RateGameSchema>;
@@ -71,3 +79,4 @@ export type AddGameInput = z.input<typeof AddGameSchema>;
 export type SessionFilterInput = z.input<typeof SessionFilterSchema>;
 export type StartSessionInput = z.input<typeof StartSessionSchema>;
 export type SubmitComparisonInput = z.input<typeof SubmitComparisonSchema>;
+export type TournamentSettingsUpdateInput = z.input<typeof TournamentSettingsUpdateSchema>;

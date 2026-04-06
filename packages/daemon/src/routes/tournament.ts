@@ -2,8 +2,8 @@ import { Hono } from "hono";
 import {
   StartSessionSchema,
   SubmitComparisonSchema,
+  TournamentSettingsUpdateSchema,
   toErrorMessage,
-  type TournamentSettings,
 } from "@shelf-judge/shared";
 import type { TournamentService } from "../services/tournament-service.js";
 import type { GameService } from "../services/game-service.js";
@@ -38,7 +38,10 @@ export function createTournamentRoutes(deps: TournamentRoutesDeps): RouteModule 
       return c.json({ session }, 201);
     } catch (err) {
       const message = toErrorMessage(err);
-      return c.json({ error: message }, 400);
+      if (message.includes("At least 4 games")) {
+        return c.json({ error: message }, 400);
+      }
+      return c.json({ error: message }, 500);
     }
   });
 
@@ -149,7 +152,14 @@ export function createTournamentRoutes(deps: TournamentRoutesDeps): RouteModule 
       if (message.includes("not found")) {
         return c.json({ error: message }, 404);
       }
-      return c.json({ error: message }, 400);
+      if (
+        message.includes("must be one of") ||
+        message.includes("must be part of") ||
+        message.includes("already completed")
+      ) {
+        return c.json({ error: message }, 400);
+      }
+      return c.json({ error: message }, 500);
     }
   });
 
@@ -203,11 +213,13 @@ export function createTournamentRoutes(deps: TournamentRoutesDeps): RouteModule 
       return c.json({ error: "Invalid JSON body" }, 400);
     }
 
-    // Accept any subset of TournamentSettings
-    const patch = body as Partial<TournamentSettings>;
+    const parsed = TournamentSettingsUpdateSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json({ error: "Validation failed", details: parsed.error.issues }, 400);
+    }
 
     try {
-      const settings = await tournamentService.updateSettings(patch);
+      const settings = await tournamentService.updateSettings(parsed.data);
       return c.json(settings);
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 500);
