@@ -11,6 +11,7 @@ related:
   - .lore/designs/mvp-fitness-model.md
   - .lore/designs/mvp-data-model.md
   - .lore/issues/deferred-tournament-ranking.md
+  - .lore/visual-direction/tournament/
 req-prefix: TOURN
 ---
 
@@ -202,7 +203,7 @@ These are genuine unknowns that should be resolved through use:
 
 2. **Normalization reference range.** The reference window half-width defaults to 400 (range 1100-1900), configurable via daemon settings. If display scores feel compressed toward the middle of the 1-10 range, narrowing the half-width (e.g., to 200) will spread them out. If scores cluster at the extremes, widen it. Observe after real use.
 
-3. **Session filter UX.** The spec defines four filter types (name, axis fitness, BGG tag, staleness). How these are surfaced (filter builder, search syntax, preset buttons, or something else) is a design decision. The web UI and CLI design documents must resolve this before implementation.
+3. **Session filter UX.** The spec defines four filter types (name, axis fitness, BGG tag, staleness). How these are surfaced (filter builder, search syntax, preset buttons, or something else) is a design decision. The web UI and CLI design documents must resolve this before implementation. Visual mockups for the filter UX are at `.lore/visual-direction/tournament/`.
 
 ## Context
 
