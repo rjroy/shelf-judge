@@ -338,58 +338,71 @@ export function createGameService(deps: GameServiceDeps): GameService {
         `[import] collection: ${total} total, ${newItems.length} new, ${skipped} already exist`,
       );
 
-      // Batch fetch full data for new games
+      // Build a lookup from bggId to collection item name for progress reporting
+      const itemsByBggId = new Map(newItems.map((item) => [item.bggId, item]));
+
+      // Batch fetch game data, processing each batch as it arrives so progress
+      // events are paced by actual network requests instead of firing all at once.
       if (newItems.length > 0) {
         const newBggIds = newItems.map((item) => item.bggId);
-        let bggResults: Map<number, BggGameResult>;
         try {
-          bggResults = await bggClient!.getGames(newBggIds);
+          await bggClient!.getGames(newBggIds, async (batch) => {
+            for (const [bggId, result] of batch.results) {
+              const item = itemsByBggId.get(bggId);
+              const gameName = item?.name ?? result.metadata.name;
+
+              await onProgress?.({
+                phase: "importing-games",
+                current: skipped + imported + errors.length + 1,
+                total,
+                importedSoFar: imported,
+                gameName,
+              });
+
+              const now = new Date().toISOString();
+              const game: Game = {
+                id: uuidv4(),
+                bggId,
+                name: result.metadata.name,
+                yearPublished: result.metadata.yearPublished,
+                minPlayers: result.metadata.minPlayers,
+                maxPlayers: result.metadata.maxPlayers,
+                playingTime: result.metadata.playingTime,
+                imageUrl: result.metadata.imageUrl,
+                bggData: result.bggData,
+                ratings: {},
+                createdAt: now,
+                updatedAt: now,
+              };
+
+              collection.games.push(game);
+              imported++;
+            }
+
+            // Check for items in this batch that BGG didn't return data for
+            const batchStart = batch.batchIndex * 20;
+            const batchIds = newBggIds.slice(batchStart, batchStart + 20);
+            for (const id of batchIds) {
+              if (!batch.results.has(id)) {
+                const item = itemsByBggId.get(id);
+                const name = item?.name ?? `BGG ID ${id}`;
+                console.warn(`[import] no BGG data for "${name}" (BGG ID ${id})`);
+                errors.push(`Failed to fetch full data for "${name}" (BGG ID ${id})`);
+              }
+            }
+          });
         } catch (err) {
           console.error(
             `[import] batch fetch failed: ${err instanceof Error ? err.message : String(err)}`,
           );
           return {
-            imported: 0,
+            imported,
             skipped,
-            errors: [`Batch fetch failed: ${err instanceof Error ? err.message : String(err)}`],
+            errors: [
+              ...errors,
+              `Batch fetch failed: ${err instanceof Error ? err.message : String(err)}`,
+            ],
           };
-        }
-
-        for (let i = 0; i < newItems.length; i++) {
-          const item = newItems[i];
-          await onProgress?.({
-            phase: "importing-games",
-            current: skipped + i + 1,
-            total,
-            importedSoFar: imported,
-            gameName: item.name,
-          });
-
-          const result = bggResults.get(item.bggId);
-          if (!result) {
-            console.warn(`[import] no BGG data for "${item.name}" (BGG ID ${item.bggId})`);
-            errors.push(`Failed to fetch full data for "${item.name}" (BGG ID ${item.bggId})`);
-            continue;
-          }
-
-          const now = new Date().toISOString();
-          const game: Game = {
-            id: uuidv4(),
-            bggId: item.bggId,
-            name: result.metadata.name,
-            yearPublished: result.metadata.yearPublished,
-            minPlayers: result.metadata.minPlayers,
-            maxPlayers: result.metadata.maxPlayers,
-            playingTime: result.metadata.playingTime,
-            imageUrl: result.metadata.imageUrl,
-            bggData: result.bggData,
-            ratings: {},
-            createdAt: now,
-            updatedAt: now,
-          };
-
-          collection.games.push(game);
-          imported++;
         }
       }
 

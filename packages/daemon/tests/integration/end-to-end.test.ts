@@ -198,7 +198,13 @@ describe("Integration: End-to-end scenarios", () => {
 
       const bggClient = createMockBggClient({
         getUserCollection: async () => collectionItems,
-        getGames: async () => bggResults,
+        getGames: async (ids, onBatch) => {
+          const filtered = new Map(
+            ids.filter((id) => bggResults.has(id)).map((id) => [id, bggResults.get(id)!]),
+          );
+          await onBatch?.({ batchIndex: 0, totalBatches: 1, results: filtered });
+          return filtered;
+        },
         getGame: async (id) => {
           const result = bggResults.get(id);
           if (!result) throw new Error(`Not found: ${id}`);
@@ -287,7 +293,9 @@ describe("Integration: End-to-end scenarios", () => {
       expect(score1.score).toBe(6); // Only Theme axis: 6*40/40 = 6
       expect(score1.ratedAxisCount).toBe(1);
 
-      const score2 = await (await jsonRequest(ctx.app, "GET", `/api/games/${game2.id}/score`)).json();
+      const score2 = await (
+        await jsonRequest(ctx.app, "GET", `/api/games/${game2.id}/score`)
+      ).json();
       expect(score2.score).toBe(9); // Only Theme axis: 9*40/40 = 9
     });
   });
