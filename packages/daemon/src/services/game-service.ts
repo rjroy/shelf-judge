@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import {
   AddGameSchema,
+  toErrorMessage,
   type Game,
   type AddGameInput,
   type FitnessResult,
@@ -139,7 +140,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
           applyBggResult(game, result);
           bggImported = true;
         } catch (err) {
-          warning = `Game added but BGG data could not be fetched: ${err instanceof Error ? err.message : String(err)}`;
+          warning = `Game added but BGG data could not be fetched: ${toErrorMessage(err)}`;
         }
       }
 
@@ -275,7 +276,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
       } catch (err) {
         return {
           refreshed: 0,
-          errors: [`Batch fetch failed: ${err instanceof Error ? err.message : String(err)}`],
+          errors: [`Batch fetch failed: ${toErrorMessage(err)}`],
         };
       }
 
@@ -316,12 +317,8 @@ export function createGameService(deps: GameServiceDeps): GameService {
       try {
         collectionItems = await bggClient!.getUserCollection(username);
       } catch (err) {
-        logger.error(
-          `failed to fetch collection: ${err instanceof Error ? err.message : String(err)}`,
-        );
-        throw new Error(
-          `Failed to fetch BGG collection for "${username}": ${err instanceof Error ? err.message : String(err)}`,
-        );
+        logger.error(`failed to fetch collection: ${toErrorMessage(err)}`);
+        throw new Error(`Failed to fetch BGG collection for "${username}": ${toErrorMessage(err)}`);
       }
 
       const collection = await storageService.loadCollection();
@@ -397,8 +394,8 @@ export function createGameService(deps: GameServiceDeps): GameService {
             }
           });
         } catch (err) {
-          logger.error(`batch fetch failed: ${err instanceof Error ? err.message : String(err)}`);
-          errors.push(`Batch fetch failed: ${err instanceof Error ? err.message : String(err)}`);
+          logger.error(`batch fetch failed: ${toErrorMessage(err)}`);
+          errors.push(`Batch fetch failed: ${toErrorMessage(err)}`);
         }
       }
 

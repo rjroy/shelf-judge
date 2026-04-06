@@ -1,5 +1,5 @@
 import { Hono, type Context } from "hono";
-import { AddGameSchema } from "@shelf-judge/shared";
+import { AddGameSchema, toErrorMessage } from "@shelf-judge/shared";
 import { z } from "zod";
 import type { GameService } from "../services/game-service.js";
 import type { BggClient } from "../services/bgg-client.js";
@@ -47,7 +47,7 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       const results = await gameService.searchGames(query);
       return c.json(results);
     } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+      return c.json({ error: toErrorMessage(err) }, 500);
     }
   });
 
@@ -78,7 +78,7 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       const result = await gameService.addGame(parsed.data);
       return c.json(result, 201);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = toErrorMessage(err);
       if (message.includes("already exists")) {
         return c.json({ error: message }, 409);
       }
@@ -92,7 +92,7 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       const games = await gameService.listGames();
       return c.json(games);
     } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+      return c.json({ error: toErrorMessage(err) }, 500);
     }
   });
 
@@ -103,7 +103,7 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       const result = await gameService.getGame(id);
       return c.json(result);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = toErrorMessage(err);
       if (message.includes("not found")) {
         return c.json({ error: message }, 404);
       }
@@ -131,7 +131,7 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       const result = await gameService.rateGame(id, parsed.data.ratings);
       return c.json(result);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = toErrorMessage(err);
       if (message.includes("not found")) {
         return c.json({ error: message }, 404);
       }
@@ -149,7 +149,7 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       await gameService.removeGame(id);
       return c.body(null, 204);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = toErrorMessage(err);
       if (message.includes("not found")) {
         return c.json({ error: message }, 404);
       }
@@ -167,7 +167,7 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       const summary = await gameService.refreshAllBggData();
       return c.json(summary);
     } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+      return c.json({ error: toErrorMessage(err) }, 500);
     }
   });
 
@@ -183,7 +183,7 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       const game = await gameService.refreshBggData(id);
       return c.json({ game });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = toErrorMessage(err);
       if (message.includes("not found")) {
         return c.json({ error: message }, 404);
       }

@@ -1,4 +1,4 @@
-import type { BggGameData, AppConfig } from "@shelf-judge/shared";
+import { toErrorMessage, type BggGameData, type AppConfig } from "@shelf-judge/shared";
 import {
   parseThingItems,
   parseSearchResponse,
@@ -107,10 +107,8 @@ export function createBggClient(deps: BggClientDeps): BggClient {
         logger.error(`timeout after ${FETCH_TIMEOUT_MS / 1000}s: ${url}`);
         throw new Error(`BGG API request timed out after ${FETCH_TIMEOUT_MS / 1000}s`);
       }
-      logger.error(`fetch error: ${err instanceof Error ? err.message : String(err)}`);
-      throw new Error(
-        `BGG API request failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      logger.error(`fetch error: ${toErrorMessage(err)}`);
+      throw new Error(`BGG API request failed: ${toErrorMessage(err)}`);
     }
 
     logger.log(`response: ${response.status} from ${url}`);
@@ -196,9 +194,7 @@ export function createBggClient(deps: BggClientDeps): BggClient {
       try {
         return parseSearchResponse(xml);
       } catch (err) {
-        throw new Error(
-          `Failed to parse BGG search response: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        throw new Error(`Failed to parse BGG search response: ${toErrorMessage(err)}`);
       }
     },
 
@@ -212,9 +208,7 @@ export function createBggClient(deps: BggClientDeps): BggClient {
       try {
         items = parseThingItems(xml);
       } catch (err) {
-        throw new Error(
-          `Failed to parse BGG thing response: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        throw new Error(`Failed to parse BGG thing response: ${toErrorMessage(err)}`);
       }
 
       if (items.length === 0) {
@@ -256,9 +250,7 @@ export function createBggClient(deps: BggClientDeps): BggClient {
             batchResults.set(item.bggId, entry);
           }
         } catch (err) {
-          logger.error(
-            `batch ${batchNum} failed: ${err instanceof Error ? err.message : String(err)}`,
-          );
+          logger.error(`batch ${batchNum} failed: ${toErrorMessage(err)}`);
         }
 
         await onBatch?.({ batchIds, results: batchResults });
@@ -279,10 +271,8 @@ export function createBggClient(deps: BggClientDeps): BggClient {
         logger.log(`getUserCollection: ${items.length} items for "${username}"`);
         return items;
       } catch (err) {
-        logger.error(`collection parse error: ${err instanceof Error ? err.message : String(err)}`);
-        throw new Error(
-          `Failed to parse BGG collection response: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        logger.error(`collection parse error: ${toErrorMessage(err)}`);
+        throw new Error(`Failed to parse BGG collection response: ${toErrorMessage(err)}`);
       }
     },
   };

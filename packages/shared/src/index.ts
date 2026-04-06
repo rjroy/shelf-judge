@@ -14,6 +14,8 @@ export type {
 
 export { CreateAxisSchema, UpdateAxisSchema, RateGameSchema, AddGameSchema } from "./validation.js";
 
+export { toErrorMessage } from "./errors.js";
+
 export type {
   CreateAxisInput,
   UpdateAxisInput,
