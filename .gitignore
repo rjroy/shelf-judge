@@ -17,3 +17,7 @@ Thumbs.db
 # Environment
 .env
 .env.local
+
+# next.js
+packages/web/next-env.d.ts
+
