@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import { v4 as uuidv4 } from "uuid";
-import type { Collection, AppConfig } from "@shelf-judge/shared";
+import type { Collection, AppConfig, TournamentData } from "@shelf-judge/shared";
 import type { FileOps } from "./file-ops.js";
 import { getTempPath } from "./file-ops.js";
 
@@ -9,6 +9,8 @@ export interface StorageService {
   saveCollection(collection: Collection): Promise<void>;
   loadConfig(): Promise<AppConfig>;
   saveConfig(config: AppConfig): Promise<void>;
+  loadTournament(): Promise<TournamentData>;
+  saveTournament(data: TournamentData): Promise<void>;
 }
 
 export interface StorageServiceDeps {
@@ -50,6 +52,15 @@ function createDefaultCollection(): Collection {
   };
 }
 
+function createDefaultTournament(): TournamentData {
+  return {
+    settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
+    sessions: [],
+    comparisons: [],
+    gameStats: {},
+  };
+}
+
 function defaultConfig(dataDir: string): AppConfig {
   return {
     bggAuthToken: null,
@@ -67,6 +78,7 @@ async function atomicWrite(filePath: string, content: string, fileOps: FileOps):
 export function createStorageService(deps: StorageServiceDeps): StorageService {
   const { dataDir, configPath, fileOps } = deps;
   const collectionPath = path.join(dataDir, "collection.json");
+  const tournamentPath = path.join(dataDir, "tournament.json");
 
   return {
     async loadCollection(): Promise<Collection> {
@@ -105,6 +117,24 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
       const configDir = path.dirname(configPath);
       await fileOps.mkdir(configDir);
       await atomicWrite(configPath, JSON.stringify(config, null, 2), fileOps);
+    },
+
+    async loadTournament(): Promise<TournamentData> {
+      const exists = await fileOps.exists(tournamentPath);
+      if (!exists) {
+        const tournament = createDefaultTournament();
+        await fileOps.mkdir(dataDir);
+        await atomicWrite(tournamentPath, JSON.stringify(tournament, null, 2), fileOps);
+        return tournament;
+      }
+
+      const raw = await fileOps.readFile(tournamentPath);
+      return JSON.parse(raw) as TournamentData;
+    },
+
+    async saveTournament(data: TournamentData): Promise<void> {
+      await fileOps.mkdir(dataDir);
+      await atomicWrite(tournamentPath, JSON.stringify(data, null, 2), fileOps);
     },
   };
 }

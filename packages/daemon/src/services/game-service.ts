@@ -65,6 +65,7 @@ export interface GameServiceDeps {
   storageService: StorageService;
   fitnessService: FitnessService;
   bggClient?: BggClient;
+  onGameDeleted?: (gameId: string) => Promise<void>;
 }
 
 function applyBggResult(game: Game, result: BggGameResult): void {
@@ -229,6 +230,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
       collection.games.splice(index, 1);
       collection.updatedAt = new Date().toISOString();
       await storageService.saveCollection(collection);
+      await deps.onGameDeleted?.(id);
     },
 
     async searchGames(query: string): Promise<BggSearchResult[]> {
