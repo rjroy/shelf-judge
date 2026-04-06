@@ -1896,6 +1896,27 @@ body {
   body.sidebar-overlay-open .main-scroll {
     overflow: hidden;
   }
+
+  /* --- Collection table: tablet (5-column, hide Axes Rated) --- */
+  .collection-header,
+  .game-row {
+    grid-template-columns: 30px 50px 1fr 100px 80px;
+  }
+
+  .axes-used-col,
+  .axes-used {
+    display: none;
+  }
+
+  /* --- Game detail: panels stack on tablet --- */
+  .detail-panels {
+    grid-template-columns: 1fr;
+  }
+
+  .panel-left {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
 }
 
 /* ===== Responsive: Phone (max-width: 599px) ===== */
@@ -1908,6 +1929,159 @@ body {
 
   .sidebar {
     width: 100%;
+  }
+
+  /* --- Collection topbar: wrap meta to second line --- */
+  .topbar {
+    height: auto;
+    flex-wrap: wrap;
+    padding: 12px var(--content-padding);
+    gap: 8px;
+  }
+
+  .topbar-meta {
+    width: 100%;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  /* --- Stats strip: 2x2 grid --- */
+  .stats-strip {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .stat-block {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .stat-block:nth-child(odd) {
+    border-right: 1px solid var(--border);
+  }
+
+  .stat-block:nth-last-child(-n + 2) {
+    border-bottom: none;
+  }
+
+  /* --- Collection table: card layout per game row --- */
+  .collection-header {
+    display: none;
+  }
+
+  .game-row {
+    grid-template-columns: 24px 40px 1fr auto;
+    grid-template-rows: auto auto;
+    gap: 4px 8px;
+    padding: 10px var(--content-padding);
+  }
+
+  .rank {
+    grid-row: 1 / 3;
+    align-self: center;
+  }
+
+  .game-thumb-col {
+    grid-row: 1 / 3;
+    align-self: center;
+  }
+
+  .game-info {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .score-cell {
+    grid-column: 4;
+    grid-row: 1 / 3;
+    align-self: center;
+    width: auto;
+  }
+
+  .score-unrated {
+    width: auto;
+  }
+
+  .axes-used {
+    grid-column: 3;
+    grid-row: 2;
+    display: flex;
+  }
+
+  .last-rated {
+    display: none;
+  }
+
+  /* --- Game hero: cover+info side-by-side, score below --- */
+  .game-hero {
+    flex-wrap: wrap;
+    padding: 20px var(--content-padding);
+    gap: 16px;
+  }
+
+  .game-cover {
+    width: 72px;
+    height: 72px;
+  }
+
+  .game-hero-info {
+    flex: 1;
+    min-width: 200px;
+  }
+
+  .game-hero-title {
+    font-size: 20px;
+  }
+
+  .game-hero-score-section {
+    width: 100%;
+    flex-direction: row;
+    align-items: baseline;
+    gap: 8px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    min-width: 0;
+  }
+
+  .score-hero-number {
+    font-size: 36px;
+  }
+
+  .score-hero-label {
+    margin-bottom: 0;
+  }
+
+  .score-hero-out-of {
+    margin-top: 0;
+  }
+
+  .score-hero-rated {
+    margin-top: 0;
+    text-align: left;
+  }
+
+  /* --- Game detail: panels stack (inherits from tablet) --- */
+  /* detail-panels and panel-left already stacked from tablet query */
+
+  /* --- Breakdown table: hide Contribution column --- */
+  .breakdown-table th:nth-child(4),
+  .breakdown-table td:nth-child(4) {
+    display: none;
+  }
+
+  /* --- Breadcrumb: truncation for long game names --- */
+  .breadcrumb {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .breadcrumb strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: block;
   }
 
   /* Step 5: Axis cards — stacked layout */
