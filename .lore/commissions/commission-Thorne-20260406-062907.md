@@ -1,7 +1,7 @@
 ---
 title: "Commission: Responsive Final Review"
 date: 2026-04-06
-status: blocked
+status: pending
 tags: [commission]
 worker: Thorne
 workerDisplayTitle: "Guild Warden"
