@@ -5,6 +5,7 @@ import { createFitnessService } from "./services/fitness-service.js";
 import { createAxisService } from "./services/axis-service.js";
 import { createGameService } from "./services/game-service.js";
 import { createBggClient } from "./services/bgg-client.js";
+import { createTournamentService } from "./services/tournament-service.js";
 import { createApp } from "./app.js";
 import { createLogger } from "./services/logger.js";
 
@@ -28,10 +29,12 @@ async function main() {
   });
 
   const axisService = createAxisService({ storageService });
+  const tournamentService = createTournamentService({ storageService });
   const gameService = createGameService({
     storageService,
     fitnessService,
     bggClient,
+    onGameDeleted: (gameId) => tournamentService.onGameDeleted(gameId),
   });
 
   const socketPath = resolveSocketPath(appConfig, envConfig);
@@ -45,6 +48,7 @@ async function main() {
     storageService,
     axisService,
     gameService,
+    tournamentService,
     bggClient,
     onShutdown() {
       logger.log("Shutting down via API...");

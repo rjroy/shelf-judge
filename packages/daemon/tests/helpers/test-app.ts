@@ -3,6 +3,10 @@ import { createStorageService, type StorageService } from "../../src/services/st
 import { createFitnessService, type FitnessService } from "../../src/services/fitness-service.js";
 import { createAxisService, type AxisService } from "../../src/services/axis-service.js";
 import { createGameService, type GameService } from "../../src/services/game-service.js";
+import {
+  createTournamentService,
+  type TournamentService,
+} from "../../src/services/tournament-service.js";
 import type { BggClient } from "../../src/services/bgg-client.js";
 import { createApp, type AppResult } from "../../src/app.js";
 
@@ -13,6 +17,7 @@ export interface TestAppContext {
   fitnessService: FitnessService;
   axisService: AxisService;
   gameService: GameService;
+  tournamentService: TournamentService;
   bggClient: BggClient | undefined;
   fileOps: ReturnType<typeof createMockFileOps>;
 }
@@ -31,16 +36,19 @@ export function createTestApp(options?: TestAppOptions): TestAppContext {
   const bggClient = options?.bggClient;
 
   const axisService = createAxisService({ storageService });
+  const tournamentService = createTournamentService({ storageService });
   const gameService = createGameService({
     storageService,
     fitnessService,
     bggClient,
+    onGameDeleted: (gameId) => tournamentService.onGameDeleted(gameId),
   });
 
   const { app, operations } = createApp({
     storageService,
     axisService,
     gameService,
+    tournamentService,
     bggClient,
   });
 
@@ -51,6 +59,7 @@ export function createTestApp(options?: TestAppOptions): TestAppContext {
     fitnessService,
     axisService,
     gameService,
+    tournamentService,
     bggClient,
     fileOps,
   };
