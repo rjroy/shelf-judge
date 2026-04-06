@@ -40,3 +40,7 @@ Workers can also add entries to this file during their sessions.
 **1. DEFECT — "Incremental matches recalculate" test is vacuous**
 File: `packages/daemon/tests/elo-engine.test.ts:234-25...
 - 15:46 commission-Thorne-20260406-153813 completed
+- 15:49 commission-Dalton-20260406-153819 result: Addressed all four findings from Thorne's review of tournament Phases 1-2.
+
+**Finding 1 (DEFECT) - Vacuous incremental test**: Rewrote to manually apply `calculateNewRatings` step by step (starting at...
+- 15:49 commission-Dalton-20260406-153819 completed
