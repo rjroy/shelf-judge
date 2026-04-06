@@ -36,3 +36,8 @@ Workers can also add entries to this file during their sessions.
 
 1. **DEFECT fixed:** Added `.rating-value-input { font-size: 16px; }` to the phone media query block (`globals.css:2167-2169`). This prevents iOS Safari auto-zoom when...
 - 08:20 commission-Dalton-20260406-062911 completed
+- 08:29 commission-Dalton-20260406-082416 result: Implemented the daemon logger factory per `.lore/plans/daemon-logger.md`, all three steps complete.
+
+**Step 1 - Logger factory + tests:**
+- Created `packages/daemon/src/services/logger.ts` with `Logge...
+- 08:29 commission-Dalton-20260406-082416 completed
