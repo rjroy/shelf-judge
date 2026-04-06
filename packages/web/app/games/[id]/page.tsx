@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { getGame, listAxes } from "@/lib/api";
+import { getGame, listAxes, getTournamentGameStats } from "@/lib/api";
+import type { TournamentGameStatsDisplay } from "@shelf-judge/shared";
 import { ScoreBreakdown } from "@/components/score-breakdown";
 import { RatingForm } from "@/components/rating-form";
 import { GameActions } from "@/components/game-actions";
@@ -26,8 +27,14 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
 
   let data;
   let axes;
+  let tournamentStats: TournamentGameStatsDisplay | null = null;
   try {
     [data, axes] = await Promise.all([getGame(id), listAxes()]);
+    try {
+      tournamentStats = await getTournamentGameStats(id);
+    } catch {
+      // Tournament stats may not exist yet
+    }
   } catch (err) {
     return (
       <div className="error-banner">
@@ -37,6 +44,14 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
   }
 
   const { game, score } = data;
+
+  // Divergence check: > 2.0 difference between fitness and tournament, both non-provisional
+  const hasDivergence =
+    score !== null &&
+    tournamentStats !== null &&
+    tournamentStats.normalizedScore !== null &&
+    !tournamentStats.isProvisional &&
+    Math.abs(score.score - tournamentStats.normalizedScore) > 2.0;
 
   return (
     <>
@@ -105,8 +120,73 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
                 <div className="score-hero-out-of">not yet rated</div>
               </>
             )}
+            {tournamentStats && (
+              <div className="tournament-hero-rank">
+                <div className="score-hero-label">Tournament Rank</div>
+                <div
+                  className={`tournament-hero-value${tournamentStats.isProvisional ? " provisional" : ""}`}
+                >
+                  {tournamentStats.displayLabel}
+                </div>
+              </div>
+            )}
           </div>
         </div>
+
+        {hasDivergence && (
+          <div className="divergence-banner">
+            <strong>Score divergence:</strong> This game&apos;s fitness score (
+            {score!.score.toFixed(1)}) and tournament rank (
+            {tournamentStats!.normalizedScore!.toFixed(1)}) differ by more than 2.0 points. This may
+            indicate your axis ratings and head-to-head preferences are measuring different things.
+          </div>
+        )}
+
+        {tournamentStats && tournamentStats.comparisonCount > 0 && (
+          <div className="tournament-breakdown-panel">
+            <div className="panel-section-title">Tournament Breakdown</div>
+            <div className="tournament-breakdown-grid">
+              <div className="tournament-stat">
+                <div className="tournament-stat-value">{tournamentStats.comparisonCount}</div>
+                <div className="tournament-stat-label">Comparisons</div>
+              </div>
+              <div className="tournament-stat">
+                <div className="tournament-stat-value">
+                  {tournamentStats.wins}W / {tournamentStats.losses}L
+                </div>
+                <div className="tournament-stat-label">Record</div>
+              </div>
+              <div className="tournament-stat">
+                <div className="tournament-stat-value">{tournamentStats.eloRating}</div>
+                <div className="tournament-stat-label">Raw ELO</div>
+              </div>
+              <div className="tournament-stat">
+                <div className="tournament-stat-value">
+                  {tournamentStats.normalizedScore !== null
+                    ? tournamentStats.normalizedScore.toFixed(1)
+                    : "-"}
+                </div>
+                <div className="tournament-stat-label">Normalized</div>
+              </div>
+            </div>
+            {tournamentStats.recentComparisons.length > 0 && (
+              <div className="tournament-recent">
+                <div className="tournament-recent-title">Last 5 comparisons</div>
+                {tournamentStats.recentComparisons.map((c, i) => (
+                  <div key={i} className={`tournament-recent-row ${c.won ? "win" : "loss"}`}>
+                    <span className="tournament-result-badge">{c.won ? "W" : "L"}</span>
+                    <span className="tournament-opponent-id">
+                      vs {c.opponentGameId.slice(0, 8)}
+                    </span>
+                    <span className="tournament-recent-date">
+                      {new Date(c.createdAt).toLocaleDateString()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Two-panel layout */}
         <div className="detail-panels">

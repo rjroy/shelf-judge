@@ -29,6 +29,20 @@ const navGroups = [
     ],
   },
   {
+    label: "Ranking",
+    items: [
+      {
+        href: "/tournament",
+        name: "Tournament",
+        icon: (
+          <svg className="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M4 2h8v1H4V2zm-2 2h12v1h-1.5l-1 3H12l-.5 1.5h-1L10 11H9l-.5 1.5h-1L7 11H6l-.5-1.5h-1L4 6.5H2.5L1.5 5H4V4zM5.5 5l1 3h3l1-3h-5zM6.5 12h3v1.5h-3V12z" />
+          </svg>
+        ),
+      },
+    ],
+  },
+  {
     label: "Add",
     items: [
       {
