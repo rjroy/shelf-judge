@@ -35,3 +35,8 @@ Key areas explored:
 **Sorting:** Identi...
 
 - 18:59 commission-Octavia-20260406-185604 completed
+- 19:10 commission-Dalton-20260406-190430 result: Consolidated 5 duplicated types into `packages/shared/src/types.ts`:
+
+- `GameWithScore`, `AddGameResult`, `BggSearchResult` (API response types)
+- `ImportProgress`, `ImportComplete` (SSE wire format t...
+- 19:10 commission-Dalton-20260406-190430 completed
