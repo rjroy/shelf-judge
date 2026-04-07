@@ -211,30 +211,41 @@ export function CollectionTable({
             </button>
 
             {menuOpen && (
-              <div className="sort-menu">
-                {groupedFields.map(({ group, label, fields }) => (
-                  <div className="sort-menu-group" key={group}>
-                    <div className="sort-menu-group-label">{label}</div>
-                    {fields.map((f) => {
-                      const isAxis = f.group === "axes";
-                      const isActive = f.id === sort.field;
-                      const itemClass = isAxis
-                        ? `sort-menu-axis-item${isActive ? " active" : ""}`
-                        : `sort-menu-item${isActive ? " active" : ""}`;
-                      return (
-                        <div
-                          key={f.id}
-                          className={itemClass}
-                          onClick={() => handleSortSelect(f.id)}
-                        >
-                          <span className="check">{isActive ? "\u2713" : ""}</span>
-                          <span className="item-label">{f.label}</span>
-                        </div>
-                      );
-                    })}
+              <>
+                <div className="sort-overlay-backdrop" onClick={() => setMenuOpen(false)} />
+                <div className="sort-menu">
+                  <div className="sort-menu-header">
+                    <span className="sort-menu-title">Sort by</span>
+                    <span className="sort-menu-close" onClick={() => setMenuOpen(false)}>
+                      {"\u2715"}
+                    </span>
                   </div>
-                ))}
-              </div>
+                  <div className="sort-menu-scroll">
+                    {groupedFields.map(({ group, label, fields }) => (
+                      <div className="sort-menu-group" key={group}>
+                        <div className="sort-menu-group-label">{label}</div>
+                        {fields.map((f) => {
+                          const isAxis = f.group === "axes";
+                          const isActive = f.id === sort.field;
+                          const itemClass = isAxis
+                            ? `sort-menu-axis-item${isActive ? " active" : ""}`
+                            : `sort-menu-item${isActive ? " active" : ""}`;
+                          return (
+                            <div
+                              key={f.id}
+                              className={itemClass}
+                              onClick={() => handleSortSelect(f.id)}
+                            >
+                              <span className="check">{isActive ? "\u2713" : ""}</span>
+                              <span className="item-label">{f.label}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
             )}
           </div>
 

@@ -2641,6 +2641,11 @@ body {
   background: var(--bg-base);
 }
 
+/* Sort overlay backdrop (visible only on mobile) */
+.sort-overlay-backdrop {
+  display: none;
+}
+
 /* Sort dropdown menu */
 .sort-menu {
   position: absolute;
@@ -2655,6 +2660,15 @@ body {
     0 2px 8px rgba(0, 0, 0, 0.08);
   z-index: 100;
   overflow: hidden;
+}
+
+/* Sort menu header and close (hidden on desktop, visible on mobile) */
+.sort-menu-header {
+  display: none;
+}
+
+.sort-menu-scroll {
+  overflow-y: auto;
 }
 
 .sort-menu-group {
@@ -3100,6 +3114,19 @@ body {
     overflow: hidden;
   }
 
+  /* --- Filter bar: tablet adjustments --- */
+  .filter-row-1 {
+    flex-wrap: wrap;
+  }
+
+  .search-input-wrap {
+    max-width: none;
+  }
+
+  .filter-panel {
+    flex-direction: column;
+  }
+
   /* --- Collection table: tablet (5-column, hide Axes Rated) --- */
   .collection-header,
   .game-row {
@@ -3175,6 +3202,129 @@ body {
     gap: 8px;
     flex-wrap: wrap;
     align-items: center;
+  }
+
+  /* --- Filter bar: phone layout --- */
+  .filter-bar {
+    padding: 8px var(--content-padding);
+  }
+
+  .filter-row-1 {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .search-input-wrap {
+    flex: 1 1 100%;
+    max-width: none;
+    order: -1;
+  }
+
+  .search-input {
+    font-size: 16px; /* Prevent iOS zoom */
+  }
+
+  .sort-control {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .sort-label-prefix {
+    display: none;
+  }
+
+  .sort-select {
+    min-width: 0;
+    font-size: 12px;
+    padding: 6px 8px;
+  }
+
+  .sort-select-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 120px;
+  }
+
+  .filter-toggle-btn {
+    padding: 7px 10px;
+    font-size: 12px;
+  }
+
+  /* --- Sort overlay: full-width fixed panel on phone --- */
+  .sort-overlay-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 199;
+  }
+
+  .sort-menu {
+    position: fixed;
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    max-height: 70vh;
+    border-radius: 12px 12px 0 0;
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .sort-menu-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .sort-menu-title {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-secondary);
+  }
+
+  .sort-menu-close {
+    font-size: 18px;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px;
+    line-height: 1;
+  }
+
+  .sort-menu-scroll {
+    overflow-y: auto;
+    max-height: calc(70vh - 48px);
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .sort-menu-item,
+  .sort-menu-axis-item {
+    min-height: 44px;
+    padding: 10px 16px;
+    font-size: 14px;
+  }
+
+  .sort-menu-axis-item {
+    font-size: 13px;
+  }
+
+  /* --- Filter panel: stacked on phone --- */
+  .filter-panel {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  /* --- Active chips: wrap on phone --- */
+  .active-chips-row {
+    flex-wrap: wrap;
   }
 
   /* --- Stats strip: 2x2 grid --- */
@@ -3459,9 +3609,5 @@ body {
 
   .tournament-breakdown-grid {
     grid-template-columns: repeat(2, 1fr);
-  }
-
-  .sort-control {
-    width: 100%;
   }
 }
