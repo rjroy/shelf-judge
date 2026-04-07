@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { GameService } from "../services/game-service.js";
 import type { BggClient } from "../services/bgg-client.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
+import { createLogger } from "../services/logger.js";
 
 export interface ImportRoutesDeps {
   gameService: GameService;
@@ -16,6 +17,7 @@ const ImportBodySchema = z.object({
 
 export function createImportRoutes(deps: ImportRoutesDeps): RouteModule {
   const { gameService, bggClient } = deps;
+  const logger = createLogger("route");
   const routes = new Hono();
 
   // POST /import/bgg
@@ -43,7 +45,7 @@ export function createImportRoutes(deps: ImportRoutesDeps): RouteModule {
     }
 
     const { username } = parsed.data;
-    console.log(`[route] POST /import/bgg for "${username}"`);
+    logger.log(`POST /import/bgg for "${username}"`);
 
     return streamSSE(
       c,
@@ -59,8 +61,8 @@ export function createImportRoutes(deps: ImportRoutesDeps): RouteModule {
           });
         });
 
-        console.log(
-          `[route] import complete: ${summary.imported} imported, ${summary.skipped} skipped, ${summary.errors.length} errors`,
+        logger.log(
+          `import complete: ${summary.imported} imported, ${summary.skipped} skipped, ${summary.errors.length} errors`,
         );
         await stream.writeSSE({
           event: "complete",
@@ -72,7 +74,7 @@ export function createImportRoutes(deps: ImportRoutesDeps): RouteModule {
         });
       },
       async (err, stream) => {
-        console.error(`[route] import error: ${err.message}`);
+        logger.error(`import error: ${err.message}`);
         await stream.writeSSE({
           event: "error",
           data: JSON.stringify({

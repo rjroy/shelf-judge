@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { CreateAxisSchema, UpdateAxisSchema } from "@shelf-judge/shared";
+import { CreateAxisSchema, UpdateAxisSchema, toErrorMessage } from "@shelf-judge/shared";
 import type { AxisService } from "../services/axis-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
 
@@ -29,7 +29,7 @@ export function createAxisRoutes(deps: AxisRoutesDeps): RouteModule {
       const axis = await axisService.createAxis(parsed.data);
       return c.json(axis, 201);
     } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+      return c.json({ error: toErrorMessage(err) }, 500);
     }
   });
 
@@ -39,7 +39,7 @@ export function createAxisRoutes(deps: AxisRoutesDeps): RouteModule {
       const axes = await axisService.listAxes();
       return c.json(axes);
     } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+      return c.json({ error: toErrorMessage(err) }, 500);
     }
   });
 
@@ -63,7 +63,7 @@ export function createAxisRoutes(deps: AxisRoutesDeps): RouteModule {
       const axis = await axisService.updateAxis(id, parsed.data);
       return c.json(axis);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = toErrorMessage(err);
       if (message.includes("not found")) {
         return c.json({ error: message }, 404);
       }
@@ -78,7 +78,7 @@ export function createAxisRoutes(deps: AxisRoutesDeps): RouteModule {
       const result = await axisService.deleteAxis(id);
       return c.json({ deletedRatingsCount: result.deletedRatingsCount });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = toErrorMessage(err);
       if (message.includes("not found")) {
         return c.json({ error: message }, 404);
       }

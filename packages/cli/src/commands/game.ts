@@ -67,6 +67,12 @@ interface GameListItem {
   score: { score: number } | null;
 }
 
+interface TournamentStatsEntry {
+  gameId: string;
+  gameName: string;
+  stats: { displayLabel: string };
+}
+
 export async function gameList(
   client: DaemonClient,
   _args: string[],
@@ -79,16 +85,36 @@ export async function gameList(
     throw new Error(err.error ?? "List failed");
   }
 
+  // Fetch tournament stats to show rank column (best-effort, don't fail if unavailable)
+  const tournamentRes = await client.get<TournamentStatsEntry[]>("/api/tournament/stats");
+  const rankMap = new Map<string, string>();
+  if (tournamentRes.ok) {
+    for (const e of tournamentRes.data) {
+      rankMap.set(e.gameId, e.stats.displayLabel);
+    }
+  }
+
   if (opts.json) return printOutput(data, opts);
 
+  const hasRanks = rankMap.size > 0;
+  const headers = hasRanks
+    ? ["ID", "Name", "Year", "Score", "Rank"]
+    : ["ID", "Name", "Year", "Score"];
+
   return formatTable(
-    ["ID", "Name", "Year", "Score"],
-    data.map((g) => [
-      g.game.id.slice(0, 8),
-      g.game.name,
-      g.game.yearPublished ? String(g.game.yearPublished) : "---",
-      formatScore(g.score?.score ?? null),
-    ]),
+    headers,
+    data.map((g) => {
+      const row = [
+        g.game.id.slice(0, 8),
+        g.game.name,
+        g.game.yearPublished ? String(g.game.yearPublished) : "---",
+        formatScore(g.score?.score ?? null),
+      ];
+      if (hasRanks) {
+        row.push(rankMap.get(g.game.id) ?? "---");
+      }
+      return row;
+    }),
   );
 }
 

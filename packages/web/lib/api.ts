@@ -126,5 +126,82 @@ export async function importBggCollection(username: string): Promise<Response> {
   return response;
 }
 
+// Tournament API functions
+
+import type {
+  TournamentSession,
+  SessionFilter,
+  TournamentGameStatsDisplay,
+  Comparison,
+  TournamentSettings,
+} from "@shelf-judge/shared";
+
+export async function getActiveSession(): Promise<TournamentSession | null> {
+  try {
+    return await daemonJson("/api/tournament/sessions/active");
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("404")) return null;
+    throw err;
+  }
+}
+
+export async function startTournamentSession(
+  filters?: SessionFilter[],
+): Promise<{ session: TournamentSession }> {
+  return daemonJson("/api/tournament/sessions", {
+    method: "POST",
+    body: filters ? { filters } : {},
+  });
+}
+
+export async function endSession(id: string): Promise<{ session: TournamentSession }> {
+  return daemonJson(`/api/tournament/sessions/${id}/end`, { method: "POST" });
+}
+
+export async function getNextPair(sessionId: string): Promise<{
+  done?: boolean;
+  gameA?: Game;
+  gameB?: Game;
+  gameAStats?: TournamentGameStatsDisplay;
+  gameBStats?: TournamentGameStatsDisplay;
+}> {
+  return daemonJson(`/api/tournament/sessions/${sessionId}/next`);
+}
+
+export async function submitComparison(
+  sessionId: string,
+  gameAId: string,
+  gameBId: string,
+  winnerId: string,
+): Promise<{
+  comparison: Comparison;
+  updatedStats: { gameA: TournamentGameStatsDisplay; gameB: TournamentGameStatsDisplay };
+}> {
+  return daemonJson(`/api/tournament/sessions/${sessionId}/compare`, {
+    method: "POST",
+    body: { gameAId, gameBId, winnerId },
+  });
+}
+
+export async function getTournamentGameStats(gameId: string): Promise<TournamentGameStatsDisplay> {
+  return daemonJson(`/api/tournament/games/${gameId}/stats`);
+}
+
+export async function getAllTournamentStats(): Promise<Record<string, TournamentGameStatsDisplay>> {
+  return daemonJson("/api/tournament/stats");
+}
+
+export async function recalculateElo(): Promise<{ gamesUpdated: number }> {
+  return daemonJson("/api/tournament/recalculate", { method: "POST" });
+}
+
+export async function getTournamentSettings(): Promise<TournamentSettings> {
+  return daemonJson("/api/tournament/settings");
+}
+
+export async function listTournamentSessions(): Promise<TournamentSession[]> {
+  return daemonJson("/api/tournament/sessions");
+}
+
 // Re-export types for convenience
 export type { Game, Axis, FitnessResult, FitnessBreakdownEntry };

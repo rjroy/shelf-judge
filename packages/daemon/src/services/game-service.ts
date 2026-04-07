@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import {
   AddGameSchema,
+  toErrorMessage,
   type Game,
   type AddGameInput,
   type FitnessResult,
@@ -9,6 +10,7 @@ import type { StorageService } from "./storage-service.js";
 import type { FitnessService } from "./fitness-service.js";
 import type { BggClient, BggGameResult } from "./bgg-client.js";
 import type { BggSearchResult, BggCollectionItem } from "./bgg-xml-parser.js";
+import { createLogger } from "./logger.js";
 
 export interface AddGameResult {
   game: Game;
@@ -63,6 +65,7 @@ export interface GameServiceDeps {
   storageService: StorageService;
   fitnessService: FitnessService;
   bggClient?: BggClient;
+  onGameDeleted?: (gameId: string) => Promise<void>;
 }
 
 function applyBggResult(game: Game, result: BggGameResult): void {
@@ -83,6 +86,7 @@ function isBggDataStale(game: Game): boolean | undefined {
 
 export function createGameService(deps: GameServiceDeps): GameService {
   const { storageService, fitnessService, bggClient } = deps;
+  const logger = createLogger("import");
 
   function computeScore(
     game: Game,
@@ -137,7 +141,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
           applyBggResult(game, result);
           bggImported = true;
         } catch (err) {
-          warning = `Game added but BGG data could not be fetched: ${err instanceof Error ? err.message : String(err)}`;
+          warning = `Game added but BGG data could not be fetched: ${toErrorMessage(err)}`;
         }
       }
 
@@ -226,6 +230,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
       collection.games.splice(index, 1);
       collection.updatedAt = new Date().toISOString();
       await storageService.saveCollection(collection);
+      await deps.onGameDeleted?.(id);
     },
 
     async searchGames(query: string): Promise<BggSearchResult[]> {
@@ -273,7 +278,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
       } catch (err) {
         return {
           refreshed: 0,
-          errors: [`Batch fetch failed: ${err instanceof Error ? err.message : String(err)}`],
+          errors: [`Batch fetch failed: ${toErrorMessage(err)}`],
         };
       }
 
@@ -288,8 +293,10 @@ export function createGameService(deps: GameServiceDeps): GameService {
         }
       }
 
-      collection.updatedAt = new Date().toISOString();
-      await storageService.saveCollection(collection);
+      if (refreshed > 0) {
+        collection.updatedAt = new Date().toISOString();
+        await storageService.saveCollection(collection);
+      }
 
       return { refreshed, errors };
     },
@@ -299,7 +306,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
       onProgress?: (event: ImportProgressEvent) => Promise<void> | void,
     ): Promise<ImportSummary> {
       assertBggConfigured();
-      console.log(`[import] starting BGG import for "${username}"`);
+      logger.log(`starting BGG import for "${username}"`);
 
       await onProgress?.({
         phase: "fetching-collection",
@@ -312,12 +319,8 @@ export function createGameService(deps: GameServiceDeps): GameService {
       try {
         collectionItems = await bggClient!.getUserCollection(username);
       } catch (err) {
-        console.error(
-          `[import] failed to fetch collection: ${err instanceof Error ? err.message : String(err)}`,
-        );
-        throw new Error(
-          `Failed to fetch BGG collection for "${username}": ${err instanceof Error ? err.message : String(err)}`,
-        );
+        logger.error(`failed to fetch collection: ${toErrorMessage(err)}`);
+        throw new Error(`Failed to fetch BGG collection for "${username}": ${toErrorMessage(err)}`);
       }
 
       const collection = await storageService.loadCollection();
@@ -332,9 +335,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
 
       const newItems = collectionItems.filter((item) => !existingBggIds.has(item.bggId));
       skipped = collectionItems.length - newItems.length;
-      console.log(
-        `[import] collection: ${total} total, ${newItems.length} new, ${skipped} already exist`,
-      );
+      logger.log(`collection: ${total} total, ${newItems.length} new, ${skipped} already exist`);
 
       // Signal the total before batch fetch starts so the UI can show "0 / N"
       // during the slow BGG API calls instead of "0 / 0".
@@ -389,31 +390,22 @@ export function createGameService(deps: GameServiceDeps): GameService {
               if (!batch.results.has(id)) {
                 const item = itemsByBggId.get(id);
                 const name = item?.name ?? `BGG ID ${id}`;
-                console.warn(`[import] no BGG data for "${name}" (BGG ID ${id})`);
+                logger.warn(`no BGG data for "${name}" (BGG ID ${id})`);
                 errors.push(`Failed to fetch full data for "${name}" (BGG ID ${id})`);
               }
             }
           });
         } catch (err) {
-          console.error(
-            `[import] batch fetch failed: ${err instanceof Error ? err.message : String(err)}`,
-          );
-          return {
-            imported,
-            skipped,
-            errors: [
-              ...errors,
-              `Batch fetch failed: ${err instanceof Error ? err.message : String(err)}`,
-            ],
-          };
+          logger.error(`batch fetch failed: ${toErrorMessage(err)}`);
+          errors.push(`Batch fetch failed: ${toErrorMessage(err)}`);
         }
       }
 
-      collection.updatedAt = new Date().toISOString();
-      await storageService.saveCollection(collection);
-      console.log(
-        `[import] complete: ${imported} imported, ${skipped} skipped, ${errors.length} errors`,
-      );
+      if (imported > 0) {
+        collection.updatedAt = new Date().toISOString();
+        await storageService.saveCollection(collection);
+      }
+      logger.log(`complete: ${imported} imported, ${skipped} skipped, ${errors.length} errors`);
 
       return { imported, skipped, errors };
     },

@@ -42,7 +42,41 @@ export const AddGameSchema = z
     { message: "Either name or bggId must be provided" },
   );
 
+// Tournament schemas
+
+export const SessionFilterSchema = z.object({
+  type: z.enum(["name", "minFitness", "bggTag", "staleness"]),
+  value: z.string().min(1, "Filter value cannot be empty"),
+});
+
+export const StartSessionSchema = z.object({
+  filters: z.array(SessionFilterSchema).nullable().optional().default(null),
+});
+
+export const SubmitComparisonSchema = z
+  .object({
+    gameAId: z.string().min(1, "gameAId is required"),
+    gameBId: z.string().min(1, "gameBId is required"),
+    winnerId: z.string().min(1, "winnerId is required"),
+  })
+  .refine((data) => data.winnerId === data.gameAId || data.winnerId === data.gameBId, {
+    message: "winnerId must equal gameAId or gameBId",
+    path: ["winnerId"],
+  });
+
+export const TournamentSettingsUpdateSchema = z
+  .object({
+    kFactorThreshold: z.number().optional(),
+    normalizationHalfWidth: z.number().optional(),
+    provisionalThreshold: z.number().optional(),
+  })
+  .strict();
+
 export type CreateAxisInput = z.input<typeof CreateAxisSchema>;
 export type UpdateAxisInput = z.input<typeof UpdateAxisSchema>;
 export type RateGameInput = z.input<typeof RateGameSchema>;
 export type AddGameInput = z.input<typeof AddGameSchema>;
+export type SessionFilterInput = z.input<typeof SessionFilterSchema>;
+export type StartSessionInput = z.input<typeof StartSessionSchema>;
+export type SubmitComparisonInput = z.input<typeof SubmitComparisonSchema>;
+export type TournamentSettingsUpdateInput = z.input<typeof TournamentSettingsUpdateSchema>;

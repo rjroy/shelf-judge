@@ -84,6 +84,74 @@ export interface FitnessResult {
   breakdown: FitnessBreakdownEntry[];
 }
 
+// Tournament types
+
+export interface TournamentSettings {
+  kFactorThreshold: number; // Default 15. Games with fewer comparisons use K=32, rest use K=16.
+  normalizationHalfWidth: number; // Default 400. Reference range is 1500 ± this value.
+  provisionalThreshold: number; // Default 6. Games with fewer comparisons show "(provisional)".
+}
+
+export type SessionFilterType = "name" | "minFitness" | "bggTag" | "staleness";
+
+export interface SessionFilter {
+  type: SessionFilterType;
+  value: string; // Interpretation depends on type
+}
+
+export type SessionStatus = "active" | "completed";
+
+export interface TournamentSession {
+  id: string;
+  filters: SessionFilter[] | null; // null for unfiltered
+  gameIds: string[];
+  comparisonCount: number;
+  status: SessionStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Comparison {
+  id: string;
+  gameAId: string;
+  gameBId: string;
+  winnerId: string;
+  sessionId: string;
+  createdAt: string;
+}
+
+export interface TournamentGameStats {
+  eloRating: number; // Default 1500
+  comparisonCount: number; // Default 0
+}
+
+export interface TournamentData {
+  settings: TournamentSettings;
+  sessions: TournamentSession[];
+  comparisons: Comparison[];
+  gameStats: Record<string, TournamentGameStats>;
+}
+
+// Display types (derived from TournamentData, used by API responses and clients)
+
+export interface RecentComparison {
+  opponentGameId: string;
+  opponentGameName: string | null; // null when game has been deleted from collection
+  won: boolean;
+  createdAt: string;
+}
+
+export interface TournamentGameStatsDisplay {
+  eloRating: number;
+  comparisonCount: number;
+  normalizedScore: number | null; // null when < 5 games ranked or game has 0 comparisons
+  isProvisional: boolean; // comparisonCount < provisionalThreshold
+  displayLabel: string; // "not yet ranked" | "8.3 (provisional)" | "8.3"
+  wins: number;
+  losses: number;
+  recentComparisons: RecentComparison[]; // Last 5, derived from comparison history (never cached)
+}
+
 // App config
 
 export interface AppConfig {

@@ -1,0 +1,649 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shelf Judge — Tournament Filter Preview</title>
+    <style>
+      :root {
+        --bg-base: #f4f1ec;
+        --bg-surface: #fefcf9;
+        --bg-elevated: #ffffff;
+        --border: #ddd8d0;
+        --border-strong: #c4bfb8;
+        --text-primary: #1a1714;
+        --text-secondary: #6b6560;
+        --text-muted: #9c9590;
+        --score-color: #b86c1a;
+        --score-high: #2d7a4a;
+        --score-mid: #8a6f20;
+        --score-low: #b84040;
+        --bgg-accent: #2e5f8a;
+        --bgg-bg: #edf3f9;
+        --action: #1c3d5e;
+        --action-hover: #2a5580;
+        --action-subtle: #e8eff6;
+        --danger: #b84040;
+        --danger-subtle: #fdf0f0;
+        --nav-bg: #1a1714;
+        --nav-text: #e8e4dc;
+        --nav-active: #b86c1a;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family:
+          Inter,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        background: var(--bg-base);
+        color: var(--text-primary);
+        font-size: 15px;
+        line-height: 1.5;
+        display: flex;
+        height: 100vh;
+        overflow: hidden;
+      }
+
+      /* Sidebar (shared) */
+      .sidebar {
+        width: 200px;
+        flex-shrink: 0;
+        background: var(--nav-bg);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .sidebar-brand {
+        padding: 20px 20px 24px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .brand-name {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--nav-text);
+        letter-spacing: -0.01em;
+      }
+      .brand-sub {
+        font-size: 11px;
+        color: rgba(232, 228, 220, 0.4);
+        margin-top: 2px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .nav-section {
+        padding: 16px 0;
+        flex: 1;
+      }
+      .nav-label {
+        font-size: 10px;
+        font-weight: 600;
+        color: rgba(232, 228, 220, 0.35);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        padding: 0 20px;
+        margin-bottom: 6px;
+        margin-top: 12px;
+      }
+      .nav-label:first-child {
+        margin-top: 0;
+      }
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 20px;
+        font-size: 13px;
+        color: rgba(232, 228, 220, 0.65);
+        cursor: pointer;
+        border-left: 3px solid transparent;
+        text-decoration: none;
+      }
+      .nav-item:hover {
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--nav-text);
+      }
+      .nav-item.active {
+        background: rgba(184, 108, 26, 0.12);
+        color: var(--nav-text);
+        border-left-color: var(--nav-active);
+        font-weight: 500;
+      }
+      .nav-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: rgba(232, 228, 220, 0.4);
+        flex-shrink: 0;
+      }
+      .nav-item.active .nav-dot {
+        background: var(--nav-active);
+      }
+      .sidebar-footer {
+        padding: 16px 20px;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        font-size: 11px;
+        color: rgba(232, 228, 220, 0.3);
+      }
+
+      /* Main */
+      .main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .topbar {
+        height: 56px;
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        padding: 0 32px;
+        gap: 16px;
+        flex-shrink: 0;
+      }
+      .topbar-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--text-primary);
+        flex: 1;
+      }
+      .topbar-back {
+        font-size: 13px;
+        color: var(--text-muted);
+        cursor: pointer;
+      }
+      .topbar-back:hover {
+        color: var(--action);
+      }
+
+      .content {
+        flex: 1;
+        overflow-y: auto;
+        padding: 32px;
+        max-width: 860px;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 16px;
+        border-radius: 5px;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        font-family: inherit;
+        text-decoration: none;
+        line-height: 1.4;
+      }
+      .btn-primary {
+        background: var(--action);
+        color: white;
+      }
+      .btn-primary:hover {
+        background: var(--action-hover);
+      }
+      .btn-secondary {
+        background: transparent;
+        border: 1px solid var(--border-strong);
+        color: var(--text-secondary);
+      }
+      .btn-lg {
+        padding: 10px 20px;
+        font-size: 14px;
+      }
+
+      /* Filter summary bar */
+      .filter-summary {
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 14px 20px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 16px;
+      }
+
+      .filter-summary-label {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        flex-shrink: 0;
+      }
+
+      .filter-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 500;
+        line-height: 1;
+      }
+
+      .filter-chip.bgg {
+        background: var(--bgg-bg);
+        color: var(--bgg-accent);
+        border: 1px solid rgba(46, 95, 138, 0.25);
+      }
+      .filter-chip.fitness {
+        background: var(--action-subtle);
+        color: var(--action);
+        border: 1px solid rgba(28, 61, 94, 0.2);
+      }
+
+      .filter-chip-label {
+        opacity: 0.7;
+      }
+
+      .filter-summary-edit {
+        font-size: 12px;
+        color: var(--action);
+        cursor: pointer;
+        text-decoration: underline;
+        margin-left: auto;
+      }
+
+      /* Preview hero */
+      .preview-hero {
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        overflow: hidden;
+        margin-bottom: 16px;
+      }
+
+      .preview-hero-count {
+        padding: 24px 24px 16px;
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .preview-count-number {
+        font-size: 40px;
+        font-weight: 700;
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+        line-height: 1;
+      }
+
+      .preview-count-label {
+        font-size: 16px;
+        color: var(--text-secondary);
+      }
+
+      .preview-count-minimum {
+        font-size: 13px;
+        color: var(--score-high);
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        margin-left: auto;
+      }
+
+      .preview-count-minimum::before {
+        content: "✓";
+        font-weight: 700;
+      }
+
+      /* Game list preview */
+      .preview-game-list {
+        padding: 0;
+      }
+
+      .preview-game-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 24px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .preview-game-row:last-child {
+        border-bottom: none;
+      }
+
+      .preview-game-thumb {
+        width: 36px;
+        height: 36px;
+        border-radius: 4px;
+        background: linear-gradient(135deg, #e8e4dc, #d8d4cc);
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+      }
+
+      .preview-game-name {
+        flex: 1;
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--text-primary);
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .preview-game-scores {
+        display: flex;
+        gap: 16px;
+        flex-shrink: 0;
+      }
+
+      .score-pair {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 1px;
+      }
+
+      .score-pair-value {
+        font-size: 14px;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .score-pair-value.axis {
+        color: var(--score-color);
+      }
+      .score-pair-value.tournament {
+        color: var(--bgg-accent);
+      }
+      .score-pair-value.unranked {
+        color: var(--text-muted);
+        font-size: 11px;
+        font-weight: 400;
+        font-style: italic;
+      }
+
+      .score-pair-label {
+        font-size: 10px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      .preview-more-row {
+        padding: 10px 24px;
+        font-size: 13px;
+        color: var(--text-muted);
+        font-style: italic;
+      }
+
+      /* Provisional note */
+      .provisional-badge {
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--score-mid);
+        background: rgba(138, 111, 32, 0.1);
+        padding: 1px 5px;
+        border-radius: 3px;
+        letter-spacing: 0.03em;
+        flex-shrink: 0;
+      }
+
+      /* Footer */
+      .preview-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-top: 8px;
+      }
+
+      .preview-footer-note {
+        font-size: 12px;
+        color: var(--text-muted);
+        font-style: italic;
+      }
+
+      /* Error state variant (too few games) */
+      .preview-hero.error-state .preview-count-number {
+        color: var(--danger);
+      }
+
+      .preview-hero.error-state .preview-count-minimum {
+        color: var(--danger);
+      }
+
+      .preview-hero.error-state .preview-count-minimum::before {
+        content: "✗";
+      }
+
+      .error-message {
+        background: var(--danger-subtle);
+        border-top: 1px solid rgba(184, 64, 64, 0.2);
+        padding: 12px 24px;
+        font-size: 13px;
+        color: var(--danger);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      /* Alternative: error state demo panel */
+      .section-separator {
+        height: 1px;
+        background: var(--border);
+        margin: 32px 0;
+        position: relative;
+      }
+
+      .section-separator-label {
+        position: absolute;
+        top: -9px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--bg-base);
+        padding: 0 12px;
+        font-size: 11px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        white-space: nowrap;
+      }
+
+      .scenario-label {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-name">Shelf Judge</div>
+        <div class="brand-sub">Personal curation</div>
+      </div>
+      <nav class="nav-section">
+        <div class="nav-label">Library</div>
+        <a class="nav-item" href="#"> <span class="nav-dot"></span>Collection </a>
+        <a class="nav-item" href="#"> <span class="nav-dot"></span>Axes </a>
+        <a class="nav-item" href="#"> <span class="nav-dot"></span>Import </a>
+        <div class="nav-label">Ranking</div>
+        <a class="nav-item active" href="#"> <span class="nav-dot"></span>Tournament </a>
+      </nav>
+      <div class="sidebar-footer">47 games · 12 axes</div>
+    </aside>
+
+    <!-- Main -->
+    <main class="main">
+      <div class="topbar">
+        <div class="topbar-back">← Edit filters</div>
+        <div class="topbar-title">Scope Preview</div>
+      </div>
+
+      <div class="content">
+        <!-- Scenario A: Enough games -->
+        <div class="scenario-label">Scenario A — Enough games (green path)</div>
+
+        <!-- Active filter summary -->
+        <div class="filter-summary">
+          <span class="filter-summary-label">Filters</span>
+          <span class="filter-chip bgg">
+            <span class="filter-chip-label">BGG tag</span>
+            Worker Placement
+          </span>
+          <span class="filter-chip fitness">
+            <span class="filter-chip-label">Axis fitness ≥</span>
+            6.0
+          </span>
+          <a class="filter-summary-edit">Edit filters</a>
+        </div>
+
+        <!-- Preview hero: 11 games match -->
+        <div class="preview-hero">
+          <div class="preview-hero-count">
+            <div class="preview-count-number">11</div>
+            <div class="preview-count-label">games match your filters</div>
+            <div class="preview-count-minimum">Minimum met</div>
+          </div>
+
+          <div class="preview-game-list">
+            <div class="preview-game-row">
+              <div class="preview-game-thumb">🎲</div>
+              <div class="preview-game-name">Terraforming Mars</div>
+              <div class="preview-game-scores">
+                <div class="score-pair">
+                  <div class="score-pair-value axis">8.2</div>
+                  <div class="score-pair-label">Axis</div>
+                </div>
+                <div class="score-pair">
+                  <div class="score-pair-value tournament">7.9</div>
+                  <div class="score-pair-label">Tournament</div>
+                </div>
+              </div>
+            </div>
+            <div class="preview-game-row">
+              <div class="preview-game-thumb">🏭</div>
+              <div class="preview-game-name">Viticulture Essential Edition</div>
+              <div class="preview-game-scores">
+                <div class="score-pair">
+                  <div class="score-pair-value axis">7.8</div>
+                  <div class="score-pair-label">Axis</div>
+                </div>
+                <div class="score-pair">
+                  <div class="score-pair-value tournament">8.3</div>
+                  <div class="score-pair-label">Tournament</div>
+                </div>
+              </div>
+            </div>
+            <div class="preview-game-row">
+              <div class="preview-game-thumb">🌾</div>
+              <div class="preview-game-name">Agricola (Revised Edition)</div>
+              <div class="preview-game-scores">
+                <div class="score-pair">
+                  <div class="score-pair-value axis">6.9</div>
+                  <div class="score-pair-label">Axis</div>
+                </div>
+                <div class="score-pair">
+                  <div class="score-pair-value unranked">not yet ranked</div>
+                  <div class="score-pair-label">Tournament</div>
+                </div>
+              </div>
+              <span class="provisional-badge">provisional</span>
+            </div>
+            <div class="preview-game-row">
+              <div class="preview-game-thumb">🏰</div>
+              <div class="preview-game-name">Lords of Waterdeep</div>
+              <div class="preview-game-scores">
+                <div class="score-pair">
+                  <div class="score-pair-value axis">7.1</div>
+                  <div class="score-pair-label">Axis</div>
+                </div>
+                <div class="score-pair">
+                  <div class="score-pair-value tournament">6.4</div>
+                  <div class="score-pair-label">Tournament</div>
+                </div>
+              </div>
+            </div>
+            <div class="preview-more-row">+ 7 more games in scope</div>
+          </div>
+        </div>
+
+        <div class="preview-footer">
+          <div class="preview-footer-note">
+            Game list is fixed at session start. Collection changes won't affect this session.
+          </div>
+          <button class="btn btn-primary btn-lg">Start with 11 games →</button>
+        </div>
+
+        <!-- Divider -->
+        <div class="section-separator">
+          <span class="section-separator-label">vs.</span>
+        </div>
+
+        <!-- Scenario B: Too few games (error state) -->
+        <div class="scenario-label" style="margin-bottom: 10px">
+          Scenario B — Too few games (error path)
+        </div>
+
+        <div class="filter-summary">
+          <span class="filter-summary-label">Filters</span>
+          <span class="filter-chip bgg">
+            <span class="filter-chip-label">BGG tag</span>
+            Negotiation
+          </span>
+          <span class="filter-chip fitness">
+            <span class="filter-chip-label">Axis fitness ≥</span>
+            8.0
+          </span>
+          <a class="filter-summary-edit">Edit filters</a>
+        </div>
+
+        <div class="preview-hero error-state">
+          <div class="preview-hero-count">
+            <div class="preview-count-number" style="color: var(--danger)">2</div>
+            <div class="preview-count-label">games match your filters</div>
+            <div class="preview-count-minimum" style="color: var(--danger)">Minimum not met</div>
+          </div>
+
+          <div class="error-message">
+            A session needs at least 4 games. Relax your filters or add more games to the
+            collection.
+          </div>
+        </div>
+
+        <div class="preview-footer" style="margin-top: 12px">
+          <div class="preview-footer-note" style="color: var(--danger)">
+            Cannot start — fewer than 4 games match.
+          </div>
+          <div style="display: flex; gap: 8px">
+            <button class="btn btn-secondary">← Edit filters</button>
+            <button
+              class="btn btn-primary btn-lg"
+              disabled
+              style="opacity: 0.4; cursor: not-allowed"
+            >
+              Start session →
+            </button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

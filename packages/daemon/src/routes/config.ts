@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { toErrorMessage } from "@shelf-judge/shared";
 import { z } from "zod";
 import type { StorageService } from "../services/storage-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
@@ -26,7 +27,7 @@ export function createConfigRoutes(deps: ConfigRoutesDeps): RouteModule {
         bggAuthToken: config.bggAuthToken ? "***configured***" : null,
       });
     } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+      return c.json({ error: toErrorMessage(err) }, 500);
     }
   });
 
@@ -61,7 +62,7 @@ export function createConfigRoutes(deps: ConfigRoutesDeps): RouteModule {
         bggAuthToken: config.bggAuthToken ? "***configured***" : null,
       });
     } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+      return c.json({ error: toErrorMessage(err) }, 500);
     }
   });
 

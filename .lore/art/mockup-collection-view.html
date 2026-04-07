@@ -1,867 +1,1058 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Shelf Judge — Collection View</title>
-<style>
-  :root {
-    --bg-base: #f4f1ec;
-    --bg-surface: #fefcf9;
-    --bg-elevated: #ffffff;
-    --border: #ddd8d0;
-    --border-strong: #c4bfb8;
-    --text-primary: #1a1714;
-    --text-secondary: #6b6560;
-    --text-muted: #9c9590;
-    --score-color: #b86c1a;
-    --score-high: #2d7a4a;
-    --score-mid: #8a6f20;
-    --score-low: #b84040;
-    --bgg-accent: #2e5f8a;
-    --bgg-bg: #edf3f9;
-    --action: #1c3d5e;
-    --action-hover: #2a5580;
-    --action-subtle: #e8eff6;
-    --nav-bg: #1a1714;
-    --nav-text: #e8e4dc;
-    --nav-active: #b86c1a;
-  }
-
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-
-  body {
-    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: var(--bg-base);
-    color: var(--text-primary);
-    font-size: 15px;
-    line-height: 1.5;
-    display: flex;
-    height: 100vh;
-    overflow: hidden;
-  }
-
-  /* Sidebar */
-  .sidebar {
-    width: 200px;
-    flex-shrink: 0;
-    background: var(--nav-bg);
-    display: flex;
-    flex-direction: column;
-    padding: 0;
-    overflow: hidden;
-  }
-
-  .sidebar-brand {
-    padding: 20px 20px 24px;
-    border-bottom: 1px solid rgba(255,255,255,0.08);
-  }
-
-  .sidebar-brand .brand-name {
-    font-size: 15px;
-    font-weight: 700;
-    color: var(--nav-text);
-    letter-spacing: -0.01em;
-  }
-
-  .sidebar-brand .brand-sub {
-    font-size: 11px;
-    color: rgba(232,228,220,0.4);
-    margin-top: 2px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-  }
-
-  .sidebar-icon {
-    display: inline-block;
-    width: 24px;
-    height: 20px;
-    margin-bottom: 8px;
-    position: relative;
-  }
-
-  .sidebar-icon svg {
-    width: 24px;
-    height: 20px;
-  }
-
-  .nav-section {
-    padding: 16px 0;
-    flex: 1;
-  }
-
-  .nav-label {
-    font-size: 10px;
-    font-weight: 600;
-    color: rgba(232,228,220,0.35);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    padding: 0 20px;
-    margin-bottom: 6px;
-    margin-top: 12px;
-  }
-
-  .nav-label:first-child {
-    margin-top: 0;
-  }
-
-  .nav-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 9px 20px;
-    font-size: 13px;
-    color: rgba(232,228,220,0.65);
-    cursor: pointer;
-    transition: all 0.1s;
-    border-left: 3px solid transparent;
-    text-decoration: none;
-  }
-
-  .nav-item:hover {
-    background: rgba(255,255,255,0.06);
-    color: var(--nav-text);
-  }
-
-  .nav-item.active {
-    background: rgba(184,108,26,0.12);
-    color: var(--nav-text);
-    border-left-color: var(--nav-active);
-    font-weight: 500;
-  }
-
-  .nav-item .nav-icon {
-    width: 16px;
-    height: 16px;
-    opacity: 0.7;
-    flex-shrink: 0;
-  }
-
-  .nav-item.active .nav-icon {
-    opacity: 1;
-  }
-
-  .sidebar-footer {
-    padding: 16px 20px;
-    border-top: 1px solid rgba(255,255,255,0.08);
-    font-size: 11px;
-    color: rgba(232,228,220,0.3);
-  }
-
-  /* Main Content */
-  .main {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
-  .topbar {
-    height: 56px;
-    background: var(--bg-surface);
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    padding: 0 32px;
-    gap: 16px;
-    flex-shrink: 0;
-  }
-
-  .topbar-title {
-    font-size: 16px;
-    font-weight: 600;
-    color: var(--text-primary);
-    flex: 1;
-  }
-
-  .topbar-meta {
-    font-size: 13px;
-    color: var(--text-muted);
-  }
-
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 7px 14px;
-    border-radius: 5px;
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    border: none;
-    font-family: inherit;
-    text-decoration: none;
-  }
-
-  .btn-primary {
-    background: var(--action);
-    color: white;
-  }
-
-  .btn-secondary {
-    background: transparent;
-    border: 1px solid var(--border-strong);
-    color: var(--text-secondary);
-  }
-
-  .content {
-    flex: 1;
-    overflow-y: auto;
-    padding: 0;
-  }
-
-  /* Game Table */
-  .game-table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-
-  .game-table thead tr {
-    background: #ede9e3;
-    border-bottom: 1px solid var(--border-strong);
-    position: sticky;
-    top: 0;
-    z-index: 10;
-  }
-
-  .game-table th {
-    padding: 10px 16px;
-    text-align: left;
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    white-space: nowrap;
-  }
-
-  .game-table th.score-col {
-    text-align: right;
-  }
-
-  .game-table th.sortable {
-    cursor: pointer;
-  }
-
-  .game-table th.sortable:hover {
-    color: var(--text-primary);
-  }
-
-  .sort-arrow {
-    display: inline-block;
-    margin-left: 4px;
-    opacity: 0.5;
-  }
-
-  .game-table td {
-    padding: 0;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .game-row {
-    display: flex;
-    align-items: center;
-    padding: 10px 16px;
-    gap: 14px;
-    cursor: pointer;
-    transition: background 0.1s;
-  }
-
-  .game-row:hover {
-    background: #f0ede8;
-  }
-
-  .rank {
-    width: 24px;
-    text-align: center;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-muted);
-    font-variant-numeric: tabular-nums;
-    flex-shrink: 0;
-  }
-
-  .game-thumb {
-    width: 44px;
-    height: 44px;
-    border-radius: 5px;
-    background: var(--border);
-    overflow: hidden;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .game-thumb img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-
-  .game-thumb-placeholder {
-    background: linear-gradient(135deg, #e8e4dc, #d8d4cc);
-    width: 100%;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 18px;
-  }
-
-  .game-info {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .game-name {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text-primary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .game-meta {
-    font-size: 12px;
-    color: var(--text-muted);
-    margin-top: 2px;
-    display: flex;
-    gap: 12px;
-  }
-
-  .game-meta span {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .bgg-badge {
-    font-size: 10px;
-    font-weight: 600;
-    color: var(--bgg-accent);
-    background: var(--bgg-bg);
-    padding: 1px 5px;
-    border-radius: 3px;
-    letter-spacing: 0.03em;
-  }
-
-  .axes-used {
-    display: flex;
-    gap: 5px;
-    flex-wrap: wrap;
-    align-items: center;
-  }
-
-  .axis-chip {
-    font-size: 10px;
-    color: var(--text-muted);
-    background: var(--border);
-    border-radius: 3px;
-    padding: 1px 6px;
-    border: 1px solid var(--border);
-  }
-
-  .axis-chip-more {
-    font-size: 10px;
-    color: var(--text-muted);
-    font-style: italic;
-  }
-
-  .score-cell {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    justify-content: flex-end;
-    flex-shrink: 0;
-    width: 100px;
-  }
-
-  .score-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-
-  .score-dot.high { background: var(--score-high); }
-  .score-dot.mid { background: var(--score-mid); }
-  .score-dot.low { background: var(--score-low); }
-
-  .score-value {
-    font-size: 16px;
-    font-weight: 700;
-    color: var(--score-color);
-    font-variant-numeric: tabular-nums;
-    min-width: 36px;
-    text-align: right;
-  }
-
-  .score-unrated {
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--text-muted);
-    font-style: italic;
-    text-align: right;
-    width: 100px;
-    flex-shrink: 0;
-  }
-
-  .last-rated {
-    font-size: 12px;
-    color: var(--text-muted);
-    white-space: nowrap;
-    flex-shrink: 0;
-    width: 90px;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .table-header-row {
-    display: grid;
-    grid-template-columns: 24px 44px 1fr auto auto auto;
-    gap: 14px;
-    align-items: center;
-    padding: 10px 16px;
-    background: #ede9e3;
-    border-bottom: 1px solid var(--border-strong);
-    position: sticky;
-    top: 0;
-    z-index: 10;
-  }
-
-  .col-label {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    white-space: nowrap;
-  }
-
-  .col-label.right { text-align: right; }
-  .col-label.sortable { cursor: pointer; }
-  .col-label.sortable:hover { color: var(--text-primary); }
-  .col-label.sort-active { color: var(--text-primary); }
-
-  /* Empty state */
-  .empty-state {
-    text-align: center;
-    padding: 80px 32px;
-    color: var(--text-muted);
-  }
-
-  .empty-state h3 {
-    font-size: 18px;
-    font-weight: 600;
-    color: var(--text-secondary);
-    margin-bottom: 8px;
-  }
-
-  .empty-state p {
-    font-size: 14px;
-    margin-bottom: 24px;
-    max-width: 360px;
-    margin-left: auto;
-    margin-right: auto;
-  }
-
-  /* Stats strip */
-  .stats-strip {
-    display: flex;
-    gap: 0;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-surface);
-  }
-
-  .stat-block {
-    padding: 14px 24px;
-    border-right: 1px solid var(--border);
-    flex-shrink: 0;
-  }
-
-  .stat-block:last-child {
-    border-right: none;
-  }
-
-  .stat-value {
-    font-size: 22px;
-    font-weight: 700;
-    color: var(--text-primary);
-    font-variant-numeric: tabular-nums;
-    line-height: 1;
-  }
-
-  .stat-value.score {
-    color: var(--score-color);
-  }
-
-  .stat-label {
-    font-size: 11px;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    margin-top: 4px;
-  }
-
-  /* Game row separator row */
-  .section-sep {
-    display: flex;
-    align-items: center;
-    padding: 8px 16px;
-    background: #f0ede8;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .section-sep-label {
-    font-size: 10px;
-    font-weight: 600;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-  }
-
-  .game-row-wrapper {
-    display: table-row;
-  }
-</style>
-</head>
-<body>
-
-<!-- Sidebar -->
-<aside class="sidebar">
-  <div class="sidebar-brand">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:2px;">
-      <!-- Icon: bar chart silhouette -->
-      <svg width="22" height="18" viewBox="0 0 22 18" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <rect x="0" y="6" width="5" height="12" rx="1" fill="#b86c1a"/>
-        <rect x="7" y="0" width="5" height="18" rx="1" fill="#e8e4dc"/>
-        <rect x="14" y="4" width="5" height="14" rx="1" fill="#e8e4dc" opacity="0.6"/>
-        <rect x="21" y="9" width="5" height="9" rx="1" fill="#e8e4dc" opacity="0.4"/>
-      </svg>
-      <span class="brand-name" style="letter-spacing:-0.02em;">Shelf Judge</span>
-    </div>
-    <div class="brand-sub">Board Game Collection</div>
-  </div>
-
-  <nav class="nav-section">
-    <div class="nav-label">Library</div>
-    <a class="nav-item active" href="#">
-      <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M2 2h12v12H2V2zm1 1v10h10V3H3zm2 2h6v1H5V5zm0 3h6v1H5V8zm0 3h4v1H5v-1z"/></svg>
-      Collection
-    </a>
-    <a class="nav-item" href="#">
-      <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M1 3a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h8a1 1 0 010 2H2a1 1 0 01-1-1z"/></svg>
-      Axes
-    </a>
-    <div class="nav-label">Add</div>
-    <a class="nav-item" href="#">
-      <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 1a6 6 0 110 12A6 6 0 018 2zm0 3v2H6v1h2v2h1V8h2V7H9V5H8z"/></svg>
-      Add Game
-    </a>
-    <a class="nav-item" href="#">
-      <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M14 3H2a1 1 0 00-1 1v8a1 1 0 001 1h12a1 1 0 001-1V4a1 1 0 00-1-1zM8 11l-4-3h2.5V7h3v1H12L8 11z"/></svg>
-      Import BGG
-    </a>
-  </nav>
-
-  <div class="sidebar-footer">
-    Last synced: 2 hours ago
-  </div>
-</aside>
-
-<!-- Main content -->
-<main class="main">
-  <div class="topbar">
-    <div class="topbar-title">My Collection</div>
-    <div class="topbar-meta">42 games · 5 axes</div>
-    <button class="btn btn-secondary" style="font-size:12px;">⤓ Import BGG</button>
-    <button class="btn btn-primary" style="font-size:12px;">+ Add Game</button>
-  </div>
-
-  <!-- Stats strip -->
-  <div class="stats-strip">
-    <div class="stat-block">
-      <div class="stat-value">42</div>
-      <div class="stat-label">Games</div>
-    </div>
-    <div class="stat-block">
-      <div class="stat-value score">7.8</div>
-      <div class="stat-label">Avg Fitness</div>
-    </div>
-    <div class="stat-block">
-      <div class="stat-value">38</div>
-      <div class="stat-label">Rated</div>
-    </div>
-    <div class="stat-block">
-      <div class="stat-value">5</div>
-      <div class="stat-label">Axes</div>
-    </div>
-  </div>
-
-  <div class="content">
-    <!-- Table header -->
-    <div style="display:grid;grid-template-columns:36px 58px 1fr 180px 110px 100px;gap:0;padding:10px 16px;background:#ede9e3;border-bottom:1px solid var(--border-strong);position:sticky;top:0;z-index:10;">
-      <div class="col-label">#</div>
-      <div class="col-label"></div>
-      <div class="col-label sortable">Game</div>
-      <div class="col-label">Axes Rated</div>
-      <div class="col-label right">Last Rated</div>
-      <div class="col-label right sort-active sortable">Score ↓</div>
-    </div>
-
-    <!-- Game rows -->
-    <!-- Rank 1 -->
-    <div style="display:grid;grid-template-columns:36px 58px 1fr 180px 110px 100px;align-items:center;gap:0;padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer;background:var(--bg-surface);" onmouseenter="this.style.background='#f0ede8'" onmouseleave="this.style.background='var(--bg-surface)'">
-      <div class="rank">1</div>
-      <div style="padding:0 7px;">
-        <div class="game-thumb" style="width:40px;height:40px;">
-          <div class="game-thumb-placeholder">🧩</div>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shelf Judge — Collection View</title>
+    <style>
+      :root {
+        --bg-base: #f4f1ec;
+        --bg-surface: #fefcf9;
+        --bg-elevated: #ffffff;
+        --border: #ddd8d0;
+        --border-strong: #c4bfb8;
+        --text-primary: #1a1714;
+        --text-secondary: #6b6560;
+        --text-muted: #9c9590;
+        --score-color: #b86c1a;
+        --score-high: #2d7a4a;
+        --score-mid: #8a6f20;
+        --score-low: #b84040;
+        --bgg-accent: #2e5f8a;
+        --bgg-bg: #edf3f9;
+        --action: #1c3d5e;
+        --action-hover: #2a5580;
+        --action-subtle: #e8eff6;
+        --nav-bg: #1a1714;
+        --nav-text: #e8e4dc;
+        --nav-active: #b86c1a;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family:
+          Inter,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        background: var(--bg-base);
+        color: var(--text-primary);
+        font-size: 15px;
+        line-height: 1.5;
+        display: flex;
+        height: 100vh;
+        overflow: hidden;
+      }
+
+      /* Sidebar */
+      .sidebar {
+        width: 200px;
+        flex-shrink: 0;
+        background: var(--nav-bg);
+        display: flex;
+        flex-direction: column;
+        padding: 0;
+        overflow: hidden;
+      }
+
+      .sidebar-brand {
+        padding: 20px 20px 24px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .sidebar-brand .brand-name {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--nav-text);
+        letter-spacing: -0.01em;
+      }
+
+      .sidebar-brand .brand-sub {
+        font-size: 11px;
+        color: rgba(232, 228, 220, 0.4);
+        margin-top: 2px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      .sidebar-icon {
+        display: inline-block;
+        width: 24px;
+        height: 20px;
+        margin-bottom: 8px;
+        position: relative;
+      }
+
+      .sidebar-icon svg {
+        width: 24px;
+        height: 20px;
+      }
+
+      .nav-section {
+        padding: 16px 0;
+        flex: 1;
+      }
+
+      .nav-label {
+        font-size: 10px;
+        font-weight: 600;
+        color: rgba(232, 228, 220, 0.35);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        padding: 0 20px;
+        margin-bottom: 6px;
+        margin-top: 12px;
+      }
+
+      .nav-label:first-child {
+        margin-top: 0;
+      }
+
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 20px;
+        font-size: 13px;
+        color: rgba(232, 228, 220, 0.65);
+        cursor: pointer;
+        transition: all 0.1s;
+        border-left: 3px solid transparent;
+        text-decoration: none;
+      }
+
+      .nav-item:hover {
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--nav-text);
+      }
+
+      .nav-item.active {
+        background: rgba(184, 108, 26, 0.12);
+        color: var(--nav-text);
+        border-left-color: var(--nav-active);
+        font-weight: 500;
+      }
+
+      .nav-item .nav-icon {
+        width: 16px;
+        height: 16px;
+        opacity: 0.7;
+        flex-shrink: 0;
+      }
+
+      .nav-item.active .nav-icon {
+        opacity: 1;
+      }
+
+      .sidebar-footer {
+        padding: 16px 20px;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        font-size: 11px;
+        color: rgba(232, 228, 220, 0.3);
+      }
+
+      /* Main Content */
+      .main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      .topbar {
+        height: 56px;
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        padding: 0 32px;
+        gap: 16px;
+        flex-shrink: 0;
+      }
+
+      .topbar-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--text-primary);
+        flex: 1;
+      }
+
+      .topbar-meta {
+        font-size: 13px;
+        color: var(--text-muted);
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 7px 14px;
+        border-radius: 5px;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        font-family: inherit;
+        text-decoration: none;
+      }
+
+      .btn-primary {
+        background: var(--action);
+        color: white;
+      }
+
+      .btn-secondary {
+        background: transparent;
+        border: 1px solid var(--border-strong);
+        color: var(--text-secondary);
+      }
+
+      .content {
+        flex: 1;
+        overflow-y: auto;
+        padding: 0;
+      }
+
+      /* Game Table */
+      .game-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      .game-table thead tr {
+        background: #ede9e3;
+        border-bottom: 1px solid var(--border-strong);
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+
+      .game-table th {
+        padding: 10px 16px;
+        text-align: left;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        white-space: nowrap;
+      }
+
+      .game-table th.score-col {
+        text-align: right;
+      }
+
+      .game-table th.sortable {
+        cursor: pointer;
+      }
+
+      .game-table th.sortable:hover {
+        color: var(--text-primary);
+      }
+
+      .sort-arrow {
+        display: inline-block;
+        margin-left: 4px;
+        opacity: 0.5;
+      }
+
+      .game-table td {
+        padding: 0;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .game-row {
+        display: flex;
+        align-items: center;
+        padding: 10px 16px;
+        gap: 14px;
+        cursor: pointer;
+        transition: background 0.1s;
+      }
+
+      .game-row:hover {
+        background: #f0ede8;
+      }
+
+      .rank {
+        width: 24px;
+        text-align: center;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-muted);
+        font-variant-numeric: tabular-nums;
+        flex-shrink: 0;
+      }
+
+      .game-thumb {
+        width: 44px;
+        height: 44px;
+        border-radius: 5px;
+        background: var(--border);
+        overflow: hidden;
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .game-thumb img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .game-thumb-placeholder {
+        background: linear-gradient(135deg, #e8e4dc, #d8d4cc);
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+      }
+
+      .game-info {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .game-name {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-primary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .game-meta {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-top: 2px;
+        display: flex;
+        gap: 12px;
+      }
+
+      .game-meta span {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+
+      .bgg-badge {
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--bgg-accent);
+        background: var(--bgg-bg);
+        padding: 1px 5px;
+        border-radius: 3px;
+        letter-spacing: 0.03em;
+      }
+
+      .axes-used {
+        display: flex;
+        gap: 5px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+
+      .axis-chip {
+        font-size: 10px;
+        color: var(--text-muted);
+        background: var(--border);
+        border-radius: 3px;
+        padding: 1px 6px;
+        border: 1px solid var(--border);
+      }
+
+      .axis-chip-more {
+        font-size: 10px;
+        color: var(--text-muted);
+        font-style: italic;
+      }
+
+      .score-cell {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        justify-content: flex-end;
+        flex-shrink: 0;
+        width: 100px;
+      }
+
+      .score-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+
+      .score-dot.high {
+        background: var(--score-high);
+      }
+      .score-dot.mid {
+        background: var(--score-mid);
+      }
+      .score-dot.low {
+        background: var(--score-low);
+      }
+
+      .score-value {
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--score-color);
+        font-variant-numeric: tabular-nums;
+        min-width: 36px;
+        text-align: right;
+      }
+
+      .score-unrated {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-muted);
+        font-style: italic;
+        text-align: right;
+        width: 100px;
+        flex-shrink: 0;
+      }
+
+      .last-rated {
+        font-size: 12px;
+        color: var(--text-muted);
+        white-space: nowrap;
+        flex-shrink: 0;
+        width: 90px;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .table-header-row {
+        display: grid;
+        grid-template-columns: 24px 44px 1fr auto auto auto;
+        gap: 14px;
+        align-items: center;
+        padding: 10px 16px;
+        background: #ede9e3;
+        border-bottom: 1px solid var(--border-strong);
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+
+      .col-label {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        white-space: nowrap;
+      }
+
+      .col-label.right {
+        text-align: right;
+      }
+      .col-label.sortable {
+        cursor: pointer;
+      }
+      .col-label.sortable:hover {
+        color: var(--text-primary);
+      }
+      .col-label.sort-active {
+        color: var(--text-primary);
+      }
+
+      /* Empty state */
+      .empty-state {
+        text-align: center;
+        padding: 80px 32px;
+        color: var(--text-muted);
+      }
+
+      .empty-state h3 {
+        font-size: 18px;
+        font-weight: 600;
+        color: var(--text-secondary);
+        margin-bottom: 8px;
+      }
+
+      .empty-state p {
+        font-size: 14px;
+        margin-bottom: 24px;
+        max-width: 360px;
+        margin-left: auto;
+        margin-right: auto;
+      }
+
+      /* Stats strip */
+      .stats-strip {
+        display: flex;
+        gap: 0;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-surface);
+      }
+
+      .stat-block {
+        padding: 14px 24px;
+        border-right: 1px solid var(--border);
+        flex-shrink: 0;
+      }
+
+      .stat-block:last-child {
+        border-right: none;
+      }
+
+      .stat-value {
+        font-size: 22px;
+        font-weight: 700;
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+        line-height: 1;
+      }
+
+      .stat-value.score {
+        color: var(--score-color);
+      }
+
+      .stat-label {
+        font-size: 11px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        margin-top: 4px;
+      }
+
+      /* Game row separator row */
+      .section-sep {
+        display: flex;
+        align-items: center;
+        padding: 8px 16px;
+        background: #f0ede8;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .section-sep-label {
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .game-row-wrapper {
+        display: table-row;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 2px">
+          <!-- Icon: bar chart silhouette -->
+          <svg
+            width="22"
+            height="18"
+            viewBox="0 0 22 18"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <rect x="0" y="6" width="5" height="12" rx="1" fill="#b86c1a" />
+            <rect x="7" y="0" width="5" height="18" rx="1" fill="#e8e4dc" />
+            <rect x="14" y="4" width="5" height="14" rx="1" fill="#e8e4dc" opacity="0.6" />
+            <rect x="21" y="9" width="5" height="9" rx="1" fill="#e8e4dc" opacity="0.4" />
+          </svg>
+          <span class="brand-name" style="letter-spacing: -0.02em">Shelf Judge</span>
+        </div>
+        <div class="brand-sub">Board Game Collection</div>
+      </div>
+
+      <nav class="nav-section">
+        <div class="nav-label">Library</div>
+        <a class="nav-item active" href="#">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M2 2h12v12H2V2zm1 1v10h10V3H3zm2 2h6v1H5V5zm0 3h6v1H5V8zm0 3h4v1H5v-1z" />
+          </svg>
+          Collection
+        </a>
+        <a class="nav-item" href="#">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path
+              d="M1 3a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h8a1 1 0 010 2H2a1 1 0 01-1-1z"
+            />
+          </svg>
+          Axes
+        </a>
+        <div class="nav-label">Add</div>
+        <a class="nav-item" href="#">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path
+              d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 1a6 6 0 110 12A6 6 0 018 2zm0 3v2H6v1h2v2h1V8h2V7H9V5H8z"
+            />
+          </svg>
+          Add Game
+        </a>
+        <a class="nav-item" href="#">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path
+              d="M14 3H2a1 1 0 00-1 1v8a1 1 0 001 1h12a1 1 0 001-1V4a1 1 0 00-1-1zM8 11l-4-3h2.5V7h3v1H12L8 11z"
+            />
+          </svg>
+          Import BGG
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">Last synced: 2 hours ago</div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="main">
+      <div class="topbar">
+        <div class="topbar-title">My Collection</div>
+        <div class="topbar-meta">42 games · 5 axes</div>
+        <button class="btn btn-secondary" style="font-size: 12px">⤓ Import BGG</button>
+        <button class="btn btn-primary" style="font-size: 12px">+ Add Game</button>
+      </div>
+
+      <!-- Stats strip -->
+      <div class="stats-strip">
+        <div class="stat-block">
+          <div class="stat-value">42</div>
+          <div class="stat-label">Games</div>
+        </div>
+        <div class="stat-block">
+          <div class="stat-value score">7.8</div>
+          <div class="stat-label">Avg Fitness</div>
+        </div>
+        <div class="stat-block">
+          <div class="stat-value">38</div>
+          <div class="stat-label">Rated</div>
+        </div>
+        <div class="stat-block">
+          <div class="stat-value">5</div>
+          <div class="stat-label">Axes</div>
         </div>
       </div>
-      <div class="game-info" style="padding:0 8px 0 0;">
-        <div class="game-name">Wingspan</div>
-        <div class="game-meta">
-          <span>2019 · 1–5 players</span>
-          <span class="bgg-badge">BGG 8.1</span>
-        </div>
-      </div>
-      <div style="display:flex;gap:4px;flex-wrap:wrap;padding:0 8px 0 0;">
-        <span class="axis-chip">Wife plays</span>
-        <span class="axis-chip">Visual</span>
-        <span class="axis-chip">Weight</span>
-        <span class="axis-chip-more">+2</span>
-      </div>
-      <div class="last-rated">3 days ago</div>
-      <div class="score-cell">
-        <div class="score-dot high"></div>
-        <div class="score-value">9.1</div>
-      </div>
-    </div>
 
-    <!-- Rank 2 -->
-    <div style="display:grid;grid-template-columns:36px 58px 1fr 180px 110px 100px;align-items:center;gap:0;padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer;background:var(--bg-surface);" onmouseenter="this.style.background='#f0ede8'" onmouseleave="this.style.background='var(--bg-surface)'">
-      <div class="rank">2</div>
-      <div style="padding:0 7px;">
-        <div class="game-thumb" style="width:40px;height:40px;">
-          <div class="game-thumb-placeholder">🏙</div>
+      <div class="content">
+        <!-- Table header -->
+        <div
+          style="
+            display: grid;
+            grid-template-columns: 36px 58px 1fr 180px 110px 100px;
+            gap: 0;
+            padding: 10px 16px;
+            background: #ede9e3;
+            border-bottom: 1px solid var(--border-strong);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+          "
+        >
+          <div class="col-label">#</div>
+          <div class="col-label"></div>
+          <div class="col-label sortable">Game</div>
+          <div class="col-label">Axes Rated</div>
+          <div class="col-label right">Last Rated</div>
+          <div class="col-label right sort-active sortable">Score ↓</div>
         </div>
-      </div>
-      <div class="game-info" style="padding:0 8px 0 0;">
-        <div class="game-name">Azul</div>
-        <div class="game-meta">
-          <span>2017 · 2–4 players</span>
-          <span class="bgg-badge">BGG 7.9</span>
-        </div>
-      </div>
-      <div style="display:flex;gap:4px;flex-wrap:wrap;padding:0 8px 0 0;">
-        <span class="axis-chip">Wife plays</span>
-        <span class="axis-chip">Visual</span>
-        <span class="axis-chip">Weight</span>
-        <span class="axis-chip">Date night</span>
-        <span class="axis-chip-more">+1</span>
-      </div>
-      <div class="last-rated">1 week ago</div>
-      <div class="score-cell">
-        <div class="score-dot high"></div>
-        <div class="score-value">8.7</div>
-      </div>
-    </div>
 
-    <!-- Rank 3 -->
-    <div style="display:grid;grid-template-columns:36px 58px 1fr 180px 110px 100px;align-items:center;gap:0;padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer;background:var(--bg-surface);" onmouseenter="this.style.background='#f0ede8'" onmouseleave="this.style.background='var(--bg-surface)'">
-      <div class="rank">3</div>
-      <div style="padding:0 7px;">
-        <div class="game-thumb" style="width:40px;height:40px;">
-          <div class="game-thumb-placeholder">🏛</div>
+        <!-- Game rows -->
+        <!-- Rank 1 -->
+        <div
+          style="
+            display: grid;
+            grid-template-columns: 36px 58px 1fr 180px 110px 100px;
+            align-items: center;
+            gap: 0;
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            background: var(--bg-surface);
+          "
+          onmouseenter="this.style.background = '#f0ede8'"
+          onmouseleave="this.style.background = 'var(--bg-surface)'"
+        >
+          <div class="rank">1</div>
+          <div style="padding: 0 7px">
+            <div class="game-thumb" style="width: 40px; height: 40px">
+              <div class="game-thumb-placeholder">🧩</div>
+            </div>
+          </div>
+          <div class="game-info" style="padding: 0 8px 0 0">
+            <div class="game-name">Wingspan</div>
+            <div class="game-meta">
+              <span>2019 · 1–5 players</span>
+              <span class="bgg-badge">BGG 8.1</span>
+            </div>
+          </div>
+          <div style="display: flex; gap: 4px; flex-wrap: wrap; padding: 0 8px 0 0">
+            <span class="axis-chip">Wife plays</span>
+            <span class="axis-chip">Visual</span>
+            <span class="axis-chip">Weight</span>
+            <span class="axis-chip-more">+2</span>
+          </div>
+          <div class="last-rated">3 days ago</div>
+          <div class="score-cell">
+            <div class="score-dot high"></div>
+            <div class="score-value">9.1</div>
+          </div>
         </div>
-      </div>
-      <div class="game-info" style="padding:0 8px 0 0;">
-        <div class="game-name">Spirit Island</div>
-        <div class="game-meta">
-          <span>2017 · 1–4 players</span>
-          <span class="bgg-badge">BGG 8.4</span>
-        </div>
-      </div>
-      <div style="display:flex;gap:4px;flex-wrap:wrap;padding:0 8px 0 0;">
-        <span class="axis-chip">Weight</span>
-        <span class="axis-chip">Theme</span>
-        <span class="axis-chip-more">+1</span>
-      </div>
-      <div class="last-rated">2 weeks ago</div>
-      <div class="score-cell">
-        <div class="score-dot high"></div>
-        <div class="score-value">8.2</div>
-      </div>
-    </div>
 
-    <!-- Rank 4 -->
-    <div style="display:grid;grid-template-columns:36px 58px 1fr 180px 110px 100px;align-items:center;gap:0;padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer;background:var(--bg-surface);" onmouseenter="this.style.background='#f0ede8'" onmouseleave="this.style.background='var(--bg-surface)'">
-      <div class="rank">4</div>
-      <div style="padding:0 7px;">
-        <div class="game-thumb" style="width:40px;height:40px;">
-          <div class="game-thumb-placeholder">🌿</div>
+        <!-- Rank 2 -->
+        <div
+          style="
+            display: grid;
+            grid-template-columns: 36px 58px 1fr 180px 110px 100px;
+            align-items: center;
+            gap: 0;
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            background: var(--bg-surface);
+          "
+          onmouseenter="this.style.background = '#f0ede8'"
+          onmouseleave="this.style.background = 'var(--bg-surface)'"
+        >
+          <div class="rank">2</div>
+          <div style="padding: 0 7px">
+            <div class="game-thumb" style="width: 40px; height: 40px">
+              <div class="game-thumb-placeholder">🏙</div>
+            </div>
+          </div>
+          <div class="game-info" style="padding: 0 8px 0 0">
+            <div class="game-name">Azul</div>
+            <div class="game-meta">
+              <span>2017 · 2–4 players</span>
+              <span class="bgg-badge">BGG 7.9</span>
+            </div>
+          </div>
+          <div style="display: flex; gap: 4px; flex-wrap: wrap; padding: 0 8px 0 0">
+            <span class="axis-chip">Wife plays</span>
+            <span class="axis-chip">Visual</span>
+            <span class="axis-chip">Weight</span>
+            <span class="axis-chip">Date night</span>
+            <span class="axis-chip-more">+1</span>
+          </div>
+          <div class="last-rated">1 week ago</div>
+          <div class="score-cell">
+            <div class="score-dot high"></div>
+            <div class="score-value">8.7</div>
+          </div>
         </div>
-      </div>
-      <div class="game-info" style="padding:0 8px 0 0;">
-        <div class="game-name">Everdell</div>
-        <div class="game-meta">
-          <span>2018 · 1–4 players</span>
-          <span class="bgg-badge">BGG 8.0</span>
-        </div>
-      </div>
-      <div style="display:flex;gap:4px;flex-wrap:wrap;padding:0 8px 0 0;">
-        <span class="axis-chip">Wife plays</span>
-        <span class="axis-chip">Visual</span>
-        <span class="axis-chip">Weight</span>
-        <span class="axis-chip-more">+2</span>
-      </div>
-      <div class="last-rated">1 month ago</div>
-      <div class="score-cell">
-        <div class="score-dot high"></div>
-        <div class="score-value">7.9</div>
-      </div>
-    </div>
 
-    <!-- Rank 5 -->
-    <div style="display:grid;grid-template-columns:36px 58px 1fr 180px 110px 100px;align-items:center;gap:0;padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer;background:var(--bg-surface);" onmouseenter="this.style.background='#f0ede8'" onmouseleave="this.style.background='var(--bg-surface)'">
-      <div class="rank">5</div>
-      <div style="padding:0 7px;">
-        <div class="game-thumb" style="width:40px;height:40px;">
-          <div class="game-thumb-placeholder">⚙️</div>
+        <!-- Rank 3 -->
+        <div
+          style="
+            display: grid;
+            grid-template-columns: 36px 58px 1fr 180px 110px 100px;
+            align-items: center;
+            gap: 0;
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            background: var(--bg-surface);
+          "
+          onmouseenter="this.style.background = '#f0ede8'"
+          onmouseleave="this.style.background = 'var(--bg-surface)'"
+        >
+          <div class="rank">3</div>
+          <div style="padding: 0 7px">
+            <div class="game-thumb" style="width: 40px; height: 40px">
+              <div class="game-thumb-placeholder">🏛</div>
+            </div>
+          </div>
+          <div class="game-info" style="padding: 0 8px 0 0">
+            <div class="game-name">Spirit Island</div>
+            <div class="game-meta">
+              <span>2017 · 1–4 players</span>
+              <span class="bgg-badge">BGG 8.4</span>
+            </div>
+          </div>
+          <div style="display: flex; gap: 4px; flex-wrap: wrap; padding: 0 8px 0 0">
+            <span class="axis-chip">Weight</span>
+            <span class="axis-chip">Theme</span>
+            <span class="axis-chip-more">+1</span>
+          </div>
+          <div class="last-rated">2 weeks ago</div>
+          <div class="score-cell">
+            <div class="score-dot high"></div>
+            <div class="score-value">8.2</div>
+          </div>
         </div>
-      </div>
-      <div class="game-info" style="padding:0 8px 0 0;">
-        <div class="game-name">Brass: Birmingham</div>
-        <div class="game-meta">
-          <span>2018 · 2–4 players</span>
-          <span class="bgg-badge">BGG 8.6</span>
-        </div>
-      </div>
-      <div style="display:flex;gap:4px;flex-wrap:wrap;padding:0 8px 0 0;">
-        <span class="axis-chip">Weight</span>
-        <span class="axis-chip">Date night</span>
-        <span class="axis-chip">Theme</span>
-        <span class="axis-chip-more">+2</span>
-      </div>
-      <div class="last-rated">3 months ago</div>
-      <div class="score-cell">
-        <div class="score-dot mid"></div>
-        <div class="score-value">7.4</div>
-      </div>
-    </div>
 
-    <!-- Rank 6 -->
-    <div style="display:grid;grid-template-columns:36px 58px 1fr 180px 110px 100px;align-items:center;gap:0;padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer;background:var(--bg-surface);" onmouseenter="this.style.background='#f0ede8'" onmouseleave="this.style.background='var(--bg-surface)'">
-      <div class="rank">6</div>
-      <div style="padding:0 7px;">
-        <div class="game-thumb" style="width:40px;height:40px;">
-          <div class="game-thumb-placeholder">🃏</div>
+        <!-- Rank 4 -->
+        <div
+          style="
+            display: grid;
+            grid-template-columns: 36px 58px 1fr 180px 110px 100px;
+            align-items: center;
+            gap: 0;
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            background: var(--bg-surface);
+          "
+          onmouseenter="this.style.background = '#f0ede8'"
+          onmouseleave="this.style.background = 'var(--bg-surface)'"
+        >
+          <div class="rank">4</div>
+          <div style="padding: 0 7px">
+            <div class="game-thumb" style="width: 40px; height: 40px">
+              <div class="game-thumb-placeholder">🌿</div>
+            </div>
+          </div>
+          <div class="game-info" style="padding: 0 8px 0 0">
+            <div class="game-name">Everdell</div>
+            <div class="game-meta">
+              <span>2018 · 1–4 players</span>
+              <span class="bgg-badge">BGG 8.0</span>
+            </div>
+          </div>
+          <div style="display: flex; gap: 4px; flex-wrap: wrap; padding: 0 8px 0 0">
+            <span class="axis-chip">Wife plays</span>
+            <span class="axis-chip">Visual</span>
+            <span class="axis-chip">Weight</span>
+            <span class="axis-chip-more">+2</span>
+          </div>
+          <div class="last-rated">1 month ago</div>
+          <div class="score-cell">
+            <div class="score-dot high"></div>
+            <div class="score-value">7.9</div>
+          </div>
         </div>
-      </div>
-      <div class="game-info" style="padding:0 8px 0 0;">
-        <div class="game-name">7 Wonders Duel</div>
-        <div class="game-meta">
-          <span>2015 · 2 players</span>
-          <span class="bgg-badge">BGG 8.1</span>
-        </div>
-      </div>
-      <div style="display:flex;gap:4px;flex-wrap:wrap;padding:0 8px 0 0;">
-        <span class="axis-chip">Wife plays</span>
-        <span class="axis-chip">Date night</span>
-        <span class="axis-chip-more">+3</span>
-      </div>
-      <div class="last-rated">2 months ago</div>
-      <div class="score-cell">
-        <div class="score-dot mid"></div>
-        <div class="score-value">6.8</div>
-      </div>
-    </div>
 
-    <!-- Rank 7 -->
-    <div style="display:grid;grid-template-columns:36px 58px 1fr 180px 110px 100px;align-items:center;gap:0;padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer;background:var(--bg-surface);" onmouseenter="this.style.background='#f0ede8'" onmouseleave="this.style.background='var(--bg-surface)'">
-      <div class="rank">7</div>
-      <div style="padding:0 7px;">
-        <div class="game-thumb" style="width:40px;height:40px;">
-          <div class="game-thumb-placeholder">🗺</div>
+        <!-- Rank 5 -->
+        <div
+          style="
+            display: grid;
+            grid-template-columns: 36px 58px 1fr 180px 110px 100px;
+            align-items: center;
+            gap: 0;
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            background: var(--bg-surface);
+          "
+          onmouseenter="this.style.background = '#f0ede8'"
+          onmouseleave="this.style.background = 'var(--bg-surface)'"
+        >
+          <div class="rank">5</div>
+          <div style="padding: 0 7px">
+            <div class="game-thumb" style="width: 40px; height: 40px">
+              <div class="game-thumb-placeholder">⚙️</div>
+            </div>
+          </div>
+          <div class="game-info" style="padding: 0 8px 0 0">
+            <div class="game-name">Brass: Birmingham</div>
+            <div class="game-meta">
+              <span>2018 · 2–4 players</span>
+              <span class="bgg-badge">BGG 8.6</span>
+            </div>
+          </div>
+          <div style="display: flex; gap: 4px; flex-wrap: wrap; padding: 0 8px 0 0">
+            <span class="axis-chip">Weight</span>
+            <span class="axis-chip">Date night</span>
+            <span class="axis-chip">Theme</span>
+            <span class="axis-chip-more">+2</span>
+          </div>
+          <div class="last-rated">3 months ago</div>
+          <div class="score-cell">
+            <div class="score-dot mid"></div>
+            <div class="score-value">7.4</div>
+          </div>
         </div>
-      </div>
-      <div class="game-info" style="padding:0 8px 0 0;">
-        <div class="game-name">Ticket to Ride</div>
-        <div class="game-meta">
-          <span>2004 · 2–5 players</span>
-          <span class="bgg-badge">BGG 7.4</span>
-        </div>
-      </div>
-      <div style="display:flex;gap:4px;flex-wrap:wrap;padding:0 8px 0 0;">
-        <span class="axis-chip">Wife plays</span>
-        <span class="axis-chip">Date night</span>
-        <span class="axis-chip">Visual</span>
-        <span class="axis-chip-more">+2</span>
-      </div>
-      <div class="last-rated">4 months ago</div>
-      <div class="score-cell">
-        <div class="score-dot mid"></div>
-        <div class="score-value">5.9</div>
-      </div>
-    </div>
 
-    <!-- Rank 8 - low score -->
-    <div style="display:grid;grid-template-columns:36px 58px 1fr 180px 110px 100px;align-items:center;gap:0;padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer;background:var(--bg-surface);" onmouseenter="this.style.background='#f0ede8'" onmouseleave="this.style.background='var(--bg-surface)'">
-      <div class="rank">8</div>
-      <div style="padding:0 7px;">
-        <div class="game-thumb" style="width:40px;height:40px;">
-          <div class="game-thumb-placeholder">🎲</div>
+        <!-- Rank 6 -->
+        <div
+          style="
+            display: grid;
+            grid-template-columns: 36px 58px 1fr 180px 110px 100px;
+            align-items: center;
+            gap: 0;
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            background: var(--bg-surface);
+          "
+          onmouseenter="this.style.background = '#f0ede8'"
+          onmouseleave="this.style.background = 'var(--bg-surface)'"
+        >
+          <div class="rank">6</div>
+          <div style="padding: 0 7px">
+            <div class="game-thumb" style="width: 40px; height: 40px">
+              <div class="game-thumb-placeholder">🃏</div>
+            </div>
+          </div>
+          <div class="game-info" style="padding: 0 8px 0 0">
+            <div class="game-name">7 Wonders Duel</div>
+            <div class="game-meta">
+              <span>2015 · 2 players</span>
+              <span class="bgg-badge">BGG 8.1</span>
+            </div>
+          </div>
+          <div style="display: flex; gap: 4px; flex-wrap: wrap; padding: 0 8px 0 0">
+            <span class="axis-chip">Wife plays</span>
+            <span class="axis-chip">Date night</span>
+            <span class="axis-chip-more">+3</span>
+          </div>
+          <div class="last-rated">2 months ago</div>
+          <div class="score-cell">
+            <div class="score-dot mid"></div>
+            <div class="score-value">6.8</div>
+          </div>
+        </div>
+
+        <!-- Rank 7 -->
+        <div
+          style="
+            display: grid;
+            grid-template-columns: 36px 58px 1fr 180px 110px 100px;
+            align-items: center;
+            gap: 0;
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            background: var(--bg-surface);
+          "
+          onmouseenter="this.style.background = '#f0ede8'"
+          onmouseleave="this.style.background = 'var(--bg-surface)'"
+        >
+          <div class="rank">7</div>
+          <div style="padding: 0 7px">
+            <div class="game-thumb" style="width: 40px; height: 40px">
+              <div class="game-thumb-placeholder">🗺</div>
+            </div>
+          </div>
+          <div class="game-info" style="padding: 0 8px 0 0">
+            <div class="game-name">Ticket to Ride</div>
+            <div class="game-meta">
+              <span>2004 · 2–5 players</span>
+              <span class="bgg-badge">BGG 7.4</span>
+            </div>
+          </div>
+          <div style="display: flex; gap: 4px; flex-wrap: wrap; padding: 0 8px 0 0">
+            <span class="axis-chip">Wife plays</span>
+            <span class="axis-chip">Date night</span>
+            <span class="axis-chip">Visual</span>
+            <span class="axis-chip-more">+2</span>
+          </div>
+          <div class="last-rated">4 months ago</div>
+          <div class="score-cell">
+            <div class="score-dot mid"></div>
+            <div class="score-value">5.9</div>
+          </div>
+        </div>
+
+        <!-- Rank 8 - low score -->
+        <div
+          style="
+            display: grid;
+            grid-template-columns: 36px 58px 1fr 180px 110px 100px;
+            align-items: center;
+            gap: 0;
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            background: var(--bg-surface);
+          "
+          onmouseenter="this.style.background = '#f0ede8'"
+          onmouseleave="this.style.background = 'var(--bg-surface)'"
+        >
+          <div class="rank">8</div>
+          <div style="padding: 0 7px">
+            <div class="game-thumb" style="width: 40px; height: 40px">
+              <div class="game-thumb-placeholder">🎲</div>
+            </div>
+          </div>
+          <div class="game-info" style="padding: 0 8px 0 0">
+            <div class="game-name">Pandemic</div>
+            <div class="game-meta">
+              <span>2008 · 2–4 players</span>
+              <span class="bgg-badge">BGG 7.6</span>
+            </div>
+          </div>
+          <div style="display: flex; gap: 4px; flex-wrap: wrap; padding: 0 8px 0 0">
+            <span class="axis-chip">Wife plays</span>
+            <span class="axis-chip">Weight</span>
+            <span class="axis-chip-more">+3</span>
+          </div>
+          <div class="last-rated">6 months ago</div>
+          <div class="score-cell">
+            <div class="score-dot low"></div>
+            <div class="score-value">4.1</div>
+          </div>
+        </div>
+
+        <!-- Not yet rated section -->
+        <div style="padding: 8px 16px; background: #f0ede8; border-bottom: 1px solid var(--border)">
+          <span
+            style="
+              font-size: 10px;
+              font-weight: 600;
+              color: var(--text-muted);
+              text-transform: uppercase;
+              letter-spacing: 0.08em;
+            "
+            >Not yet rated · 4 games</span
+          >
+        </div>
+
+        <div
+          style="
+            display: grid;
+            grid-template-columns: 36px 58px 1fr 180px 110px 100px;
+            align-items: center;
+            gap: 0;
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            background: var(--bg-surface);
+            opacity: 0.7;
+          "
+          onmouseenter="this.style.background = '#f0ede8'"
+          onmouseleave="this.style.background = 'var(--bg-surface)'"
+        >
+          <div class="rank" style="color: var(--border-strong)">—</div>
+          <div style="padding: 0 7px">
+            <div class="game-thumb" style="width: 40px; height: 40px">
+              <div class="game-thumb-placeholder">🌌</div>
+            </div>
+          </div>
+          <div class="game-info" style="padding: 0 8px 0 0">
+            <div class="game-name">Twilight Imperium 4E</div>
+            <div class="game-meta">
+              <span>2017 · 3–6 players</span>
+              <span class="bgg-badge">BGG 8.7</span>
+            </div>
+          </div>
+          <div style="display: flex; gap: 4px; flex-wrap: wrap; padding: 0 8px 0 0">
+            <span style="font-size: 11px; color: var(--text-muted); font-style: italic"
+              >No ratings yet</span
+            >
+          </div>
+          <div class="last-rated" style="color: var(--border-strong)">—</div>
+          <div
+            style="
+              width: 100px;
+              text-align: right;
+              font-size: 12px;
+              font-weight: 500;
+              color: var(--text-muted);
+              font-style: italic;
+              padding: 0 0 0 0;
+            "
+          >
+            not rated
+          </div>
         </div>
       </div>
-      <div class="game-info" style="padding:0 8px 0 0;">
-        <div class="game-name">Pandemic</div>
-        <div class="game-meta">
-          <span>2008 · 2–4 players</span>
-          <span class="bgg-badge">BGG 7.6</span>
-        </div>
-      </div>
-      <div style="display:flex;gap:4px;flex-wrap:wrap;padding:0 8px 0 0;">
-        <span class="axis-chip">Wife plays</span>
-        <span class="axis-chip">Weight</span>
-        <span class="axis-chip-more">+3</span>
-      </div>
-      <div class="last-rated">6 months ago</div>
-      <div class="score-cell">
-        <div class="score-dot low"></div>
-        <div class="score-value">4.1</div>
-      </div>
-    </div>
-
-    <!-- Not yet rated section -->
-    <div style="padding:8px 16px;background:#f0ede8;border-bottom:1px solid var(--border);">
-      <span style="font-size:10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;">Not yet rated · 4 games</span>
-    </div>
-
-    <div style="display:grid;grid-template-columns:36px 58px 1fr 180px 110px 100px;align-items:center;gap:0;padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer;background:var(--bg-surface);opacity:0.7;" onmouseenter="this.style.background='#f0ede8'" onmouseleave="this.style.background='var(--bg-surface)'">
-      <div class="rank" style="color:var(--border-strong);">—</div>
-      <div style="padding:0 7px;">
-        <div class="game-thumb" style="width:40px;height:40px;">
-          <div class="game-thumb-placeholder">🌌</div>
-        </div>
-      </div>
-      <div class="game-info" style="padding:0 8px 0 0;">
-        <div class="game-name">Twilight Imperium 4E</div>
-        <div class="game-meta">
-          <span>2017 · 3–6 players</span>
-          <span class="bgg-badge">BGG 8.7</span>
-        </div>
-      </div>
-      <div style="display:flex;gap:4px;flex-wrap:wrap;padding:0 8px 0 0;">
-        <span style="font-size:11px;color:var(--text-muted);font-style:italic;">No ratings yet</span>
-      </div>
-      <div class="last-rated" style="color:var(--border-strong);">—</div>
-      <div style="width:100px;text-align:right;font-size:12px;font-weight:500;color:var(--text-muted);font-style:italic;padding:0 0 0 0;">not rated</div>
-    </div>
-
-  </div>
-</main>
-
-</body>
+    </main>
+  </body>
 </html>

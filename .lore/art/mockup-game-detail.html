@@ -1,795 +1,916 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Shelf Judge — Game Detail</title>
-<style>
-  :root {
-    --bg-base: #f4f1ec;
-    --bg-surface: #fefcf9;
-    --bg-elevated: #ffffff;
-    --border: #ddd8d0;
-    --border-strong: #c4bfb8;
-    --text-primary: #1a1714;
-    --text-secondary: #6b6560;
-    --text-muted: #9c9590;
-    --score-color: #b86c1a;
-    --score-high: #2d7a4a;
-    --score-mid: #8a6f20;
-    --score-low: #b84040;
-    --bgg-accent: #2e5f8a;
-    --bgg-bg: #edf3f9;
-    --override-accent: #5c3d99;
-    --override-bg: #f0ecfa;
-    --action: #1c3d5e;
-    --action-hover: #2a5580;
-    --action-subtle: #e8eff6;
-    --nav-bg: #1a1714;
-    --nav-text: #e8e4dc;
-    --nav-active: #b86c1a;
-  }
-
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-
-  body {
-    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: var(--bg-base);
-    color: var(--text-primary);
-    font-size: 15px;
-    line-height: 1.5;
-    display: flex;
-    height: 100vh;
-    overflow: hidden;
-  }
-
-  /* Sidebar */
-  .sidebar {
-    width: 200px;
-    flex-shrink: 0;
-    background: var(--nav-bg);
-    display: flex;
-    flex-direction: column;
-  }
-
-  .sidebar-brand {
-    padding: 20px 20px 24px;
-    border-bottom: 1px solid rgba(255,255,255,0.08);
-  }
-
-  .brand-name {
-    font-size: 15px;
-    font-weight: 700;
-    color: var(--nav-text);
-  }
-
-  .brand-sub {
-    font-size: 11px;
-    color: rgba(232,228,220,0.4);
-    margin-top: 2px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-  }
-
-  .nav-section { padding: 16px 0; flex: 1; }
-
-  .nav-label {
-    font-size: 10px;
-    font-weight: 600;
-    color: rgba(232,228,220,0.35);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    padding: 0 20px;
-    margin-bottom: 6px;
-    margin-top: 12px;
-  }
-
-  .nav-label:first-child { margin-top: 0; }
-
-  .nav-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 9px 20px;
-    font-size: 13px;
-    color: rgba(232,228,220,0.65);
-    cursor: pointer;
-    border-left: 3px solid transparent;
-    text-decoration: none;
-  }
-
-  .nav-item.active {
-    background: rgba(184,108,26,0.12);
-    color: var(--nav-text);
-    border-left-color: var(--nav-active);
-    font-weight: 500;
-  }
-
-  .nav-icon { width: 16px; height: 16px; opacity: 0.7; flex-shrink: 0; }
-  .nav-item.active .nav-icon { opacity: 1; }
-
-  .sidebar-footer {
-    padding: 16px 20px;
-    border-top: 1px solid rgba(255,255,255,0.08);
-    font-size: 11px;
-    color: rgba(232,228,220,0.3);
-  }
-
-  .main {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
-  .topbar {
-    height: 48px;
-    background: var(--bg-surface);
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    padding: 0 32px;
-    gap: 12px;
-    flex-shrink: 0;
-  }
-
-  .breadcrumb {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-    color: var(--text-muted);
-  }
-
-  .breadcrumb a {
-    color: var(--action);
-    text-decoration: none;
-  }
-
-  .breadcrumb span { color: var(--text-muted); }
-
-  .breadcrumb strong { color: var(--text-primary); font-weight: 600; }
-
-  .topbar-actions { margin-left: auto; display: flex; gap: 8px; }
-
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 13px;
-    border-radius: 5px;
-    font-size: 12px;
-    font-weight: 500;
-    cursor: pointer;
-    border: none;
-    font-family: inherit;
-  }
-
-  .btn-primary { background: var(--action); color: white; }
-  .btn-secondary { background: transparent; border: 1px solid var(--border-strong); color: var(--text-secondary); }
-  .btn-danger { background: transparent; border: 1px solid #e0c0c0; color: var(--score-low); }
-
-  .content { flex: 1; overflow-y: auto; }
-
-  /* Game hero section */
-  .game-hero {
-    background: var(--bg-surface);
-    border-bottom: 1px solid var(--border);
-    padding: 28px 32px;
-    display: flex;
-    gap: 24px;
-    align-items: flex-start;
-  }
-
-  .game-cover {
-    width: 100px;
-    height: 100px;
-    border-radius: 8px;
-    background: linear-gradient(135deg, #e0dcd5, #ccc8c0);
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 40px;
-    border: 1px solid var(--border);
-  }
-
-  .game-hero-info { flex: 1; }
-
-  .game-hero-title {
-    font-size: 26px;
-    font-weight: 700;
-    color: var(--text-primary);
-    line-height: 1.2;
-    margin-bottom: 6px;
-  }
-
-  .game-hero-meta {
-    display: flex;
-    gap: 16px;
-    font-size: 13px;
-    color: var(--text-secondary);
-    margin-bottom: 14px;
-    flex-wrap: wrap;
-  }
-
-  .game-hero-meta span { display: flex; align-items: center; gap: 5px; }
-
-  .bgg-link {
-    font-size: 12px;
-    color: var(--bgg-accent);
-    text-decoration: none;
-    background: var(--bgg-bg);
-    padding: 3px 8px;
-    border-radius: 4px;
-    font-weight: 500;
-  }
-
-  .game-hero-score-section {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    flex-shrink: 0;
-    min-width: 160px;
-  }
-
-  .score-hero-label {
-    font-size: 10px;
-    font-weight: 600;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    margin-bottom: 4px;
-  }
-
-  .score-hero-number {
-    font-size: 52px;
-    font-weight: 700;
-    color: var(--score-color);
-    font-variant-numeric: tabular-nums;
-    line-height: 1;
-    letter-spacing: -0.02em;
-  }
-
-  .score-hero-out-of {
-    font-size: 13px;
-    color: var(--text-muted);
-    margin-top: 4px;
-  }
-
-  .score-hero-rated {
-    font-size: 11px;
-    color: var(--text-muted);
-    margin-top: 6px;
-    text-align: right;
-  }
-
-  /* Two-panel layout */
-  .detail-panels {
-    display: grid;
-    grid-template-columns: 1fr 380px;
-    gap: 0;
-    min-height: 0;
-  }
-
-  .panel-left {
-    padding: 28px 32px;
-    border-right: 1px solid var(--border);
-  }
-
-  .panel-right {
-    padding: 28px 24px;
-    background: var(--bg-surface);
-  }
-
-  .panel-section-title {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    margin-bottom: 16px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .panel-section-title .badge {
-    font-size: 10px;
-    padding: 1px 6px;
-    border-radius: 3px;
-    background: var(--border);
-    color: var(--text-muted);
-    text-transform: none;
-    letter-spacing: 0;
-  }
-
-  /* Score breakdown table */
-  .breakdown-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-bottom: 24px;
-  }
-
-  .breakdown-table th {
-    text-align: left;
-    font-size: 10px;
-    font-weight: 600;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    padding: 6px 10px;
-    background: #ede9e3;
-    border-bottom: 1px solid var(--border-strong);
-    border-top: 1px solid var(--border-strong);
-  }
-
-  .breakdown-table th:last-child { text-align: right; }
-  .breakdown-table th:nth-child(2),
-  .breakdown-table th:nth-child(3),
-  .breakdown-table th:nth-child(4) { text-align: right; }
-
-  .breakdown-table td {
-    padding: 9px 10px;
-    border-bottom: 1px solid var(--border);
-    font-size: 13px;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .breakdown-table td:nth-child(2),
-  .breakdown-table td:nth-child(3),
-  .breakdown-table td:nth-child(4) { text-align: right; }
-
-  .breakdown-table tr.bgg-row td { background: var(--bgg-bg); }
-  .breakdown-table tr.override-row td { background: var(--override-bg); }
-
-  .breakdown-table tr.total-row td {
-    background: #ede9e3;
-    font-weight: 700;
-    border-top: 2px solid var(--border-strong);
-    border-bottom: 2px solid var(--border-strong);
-  }
-
-  .breakdown-table tr.total-row td:last-child {
-    color: var(--score-color);
-    font-size: 15px;
-  }
-
-  .source-badge {
-    display: inline-block;
-    font-size: 9px;
-    font-weight: 700;
-    padding: 2px 5px;
-    border-radius: 3px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-
-  .source-personal {
-    color: var(--text-secondary);
-    background: var(--border);
-  }
-
-  .source-bgg {
-    color: var(--bgg-accent);
-    background: #d4e7f5;
-  }
-
-  .source-override {
-    color: var(--override-accent);
-    background: #e0d6f5;
-  }
-
-  /* Contribution bar */
-  .contrib-cell {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    justify-content: flex-end;
-  }
-
-  .contrib-bar-track {
-    width: 60px;
-    height: 5px;
-    background: var(--border);
-    border-radius: 3px;
-    overflow: hidden;
-  }
-
-  .contrib-bar-fill {
-    height: 100%;
-    background: var(--score-color);
-    border-radius: 3px;
-    opacity: 0.6;
-  }
-
-  .contrib-pct {
-    font-size: 12px;
-    color: var(--text-secondary);
-    min-width: 32px;
-    text-align: right;
-  }
-
-  /* Rating form */
-  .rating-form { display: flex; flex-direction: column; gap: 16px; }
-
-  .rating-field {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .rating-field-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .rating-field-name {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-primary);
-  }
-
-  .rating-field-weight {
-    font-size: 11px;
-    color: var(--text-muted);
-  }
-
-  .rating-field-desc {
-    font-size: 11px;
-    color: var(--text-muted);
-    margin-bottom: 2px;
-  }
-
-  .rating-input-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .rating-slider {
-    flex: 1;
-    height: 4px;
-    border-radius: 2px;
-    background: var(--border);
-    appearance: none;
-    cursor: pointer;
-    accent-color: var(--score-color);
-  }
-
-  .rating-value-input {
-    width: 44px;
-    border: 1px solid var(--border-strong);
-    border-radius: 4px;
-    padding: 4px 8px;
-    font-size: 14px;
-    font-weight: 700;
-    font-family: inherit;
-    text-align: center;
-    color: var(--score-color);
-    background: var(--bg-surface);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .rating-field.bgg-derived .rating-field-name::after {
-    content: 'BGG';
-    font-size: 9px;
-    font-weight: 700;
-    color: var(--bgg-accent);
-    background: var(--bgg-bg);
-    padding: 1px 5px;
-    border-radius: 3px;
-    margin-left: 6px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    vertical-align: middle;
-  }
-
-  .bgg-auto-value {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 10px;
-    background: var(--bgg-bg);
-    border: 1px solid #c0d8ec;
-    border-radius: 4px;
-    font-size: 12px;
-    color: var(--bgg-accent);
-  }
-
-  .bgg-auto-value .value { font-weight: 700; font-size: 14px; }
-  .bgg-auto-value .override-link { margin-left: auto; font-size: 11px; cursor: pointer; color: var(--action); }
-
-  .section-divider {
-    border: none;
-    border-top: 1px solid var(--border);
-    margin: 24px 0;
-  }
-
-  .save-btn-row {
-    display: flex;
-    gap: 8px;
-    justify-content: flex-end;
-    margin-top: 8px;
-  }
-</style>
-</head>
-<body>
-
-<!-- Sidebar -->
-<aside class="sidebar">
-  <div class="sidebar-brand">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:2px;">
-      <svg width="22" height="18" viewBox="0 0 22 18" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <rect x="0" y="6" width="5" height="12" rx="1" fill="#b86c1a"/>
-        <rect x="7" y="0" width="5" height="18" rx="1" fill="#e8e4dc"/>
-        <rect x="14" y="4" width="5" height="14" rx="1" fill="#e8e4dc" opacity="0.6"/>
-      </svg>
-      <span class="brand-name">Shelf Judge</span>
-    </div>
-    <div class="brand-sub">Board Game Collection</div>
-  </div>
-  <nav class="nav-section">
-    <div class="nav-label">Library</div>
-    <a class="nav-item active" href="#">
-      <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M2 2h12v12H2V2zm1 1v10h10V3H3zm2 2h6v1H5V5zm0 3h6v1H5V8zm0 3h4v1H5v-1z"/></svg>
-      Collection
-    </a>
-    <a class="nav-item" href="#">
-      <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M1 3a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h8a1 1 0 010 2H2a1 1 0 01-1-1z"/></svg>
-      Axes
-    </a>
-    <div class="nav-label">Add</div>
-    <a class="nav-item" href="#">
-      <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 1a6 6 0 110 12A6 6 0 018 2zm0 3v2H6v1h2v2h1V8h2V7H9V5H8z"/></svg>
-      Add Game
-    </a>
-    <a class="nav-item" href="#">
-      <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M14 3H2a1 1 0 00-1 1v8a1 1 0 001 1h12a1 1 0 001-1V4a1 1 0 00-1-1zM8 11l-4-3h2.5V7h3v1H12L8 11z"/></svg>
-      Import BGG
-    </a>
-  </nav>
-  <div class="sidebar-footer">Last synced: 2 hours ago</div>
-</aside>
-
-<!-- Main -->
-<main class="main">
-  <div class="topbar">
-    <div class="breadcrumb">
-      <a href="#">Collection</a>
-      <span>›</span>
-      <strong>Wingspan</strong>
-    </div>
-    <div class="topbar-actions">
-      <button class="btn btn-secondary">↺ Refresh BGG</button>
-      <button class="btn btn-danger">Remove</button>
-    </div>
-  </div>
-
-  <div class="content">
-    <!-- Game hero -->
-    <div class="game-hero">
-      <div class="game-cover">🧩</div>
-      <div class="game-hero-info">
-        <div class="game-hero-title">Wingspan</div>
-        <div class="game-hero-meta">
-          <span>📅 2019</span>
-          <span>👥 1–5 players</span>
-          <span>⏱ 40–70 min</span>
-          <span>⚖️ BGG Weight: 2.45</span>
-          <a class="bgg-link" href="#">BGG #21 ↗</a>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shelf Judge — Game Detail</title>
+    <style>
+      :root {
+        --bg-base: #f4f1ec;
+        --bg-surface: #fefcf9;
+        --bg-elevated: #ffffff;
+        --border: #ddd8d0;
+        --border-strong: #c4bfb8;
+        --text-primary: #1a1714;
+        --text-secondary: #6b6560;
+        --text-muted: #9c9590;
+        --score-color: #b86c1a;
+        --score-high: #2d7a4a;
+        --score-mid: #8a6f20;
+        --score-low: #b84040;
+        --bgg-accent: #2e5f8a;
+        --bgg-bg: #edf3f9;
+        --override-accent: #5c3d99;
+        --override-bg: #f0ecfa;
+        --action: #1c3d5e;
+        --action-hover: #2a5580;
+        --action-subtle: #e8eff6;
+        --nav-bg: #1a1714;
+        --nav-text: #e8e4dc;
+        --nav-active: #b86c1a;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family:
+          Inter,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        background: var(--bg-base);
+        color: var(--text-primary);
+        font-size: 15px;
+        line-height: 1.5;
+        display: flex;
+        height: 100vh;
+        overflow: hidden;
+      }
+
+      /* Sidebar */
+      .sidebar {
+        width: 200px;
+        flex-shrink: 0;
+        background: var(--nav-bg);
+        display: flex;
+        flex-direction: column;
+      }
+
+      .sidebar-brand {
+        padding: 20px 20px 24px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .brand-name {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--nav-text);
+      }
+
+      .brand-sub {
+        font-size: 11px;
+        color: rgba(232, 228, 220, 0.4);
+        margin-top: 2px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      .nav-section {
+        padding: 16px 0;
+        flex: 1;
+      }
+
+      .nav-label {
+        font-size: 10px;
+        font-weight: 600;
+        color: rgba(232, 228, 220, 0.35);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        padding: 0 20px;
+        margin-bottom: 6px;
+        margin-top: 12px;
+      }
+
+      .nav-label:first-child {
+        margin-top: 0;
+      }
+
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 20px;
+        font-size: 13px;
+        color: rgba(232, 228, 220, 0.65);
+        cursor: pointer;
+        border-left: 3px solid transparent;
+        text-decoration: none;
+      }
+
+      .nav-item.active {
+        background: rgba(184, 108, 26, 0.12);
+        color: var(--nav-text);
+        border-left-color: var(--nav-active);
+        font-weight: 500;
+      }
+
+      .nav-icon {
+        width: 16px;
+        height: 16px;
+        opacity: 0.7;
+        flex-shrink: 0;
+      }
+      .nav-item.active .nav-icon {
+        opacity: 1;
+      }
+
+      .sidebar-footer {
+        padding: 16px 20px;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        font-size: 11px;
+        color: rgba(232, 228, 220, 0.3);
+      }
+
+      .main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      .topbar {
+        height: 48px;
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        padding: 0 32px;
+        gap: 12px;
+        flex-shrink: 0;
+      }
+
+      .breadcrumb {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        color: var(--text-muted);
+      }
+
+      .breadcrumb a {
+        color: var(--action);
+        text-decoration: none;
+      }
+
+      .breadcrumb span {
+        color: var(--text-muted);
+      }
+
+      .breadcrumb strong {
+        color: var(--text-primary);
+        font-weight: 600;
+      }
+
+      .topbar-actions {
+        margin-left: auto;
+        display: flex;
+        gap: 8px;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 13px;
+        border-radius: 5px;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        font-family: inherit;
+      }
+
+      .btn-primary {
+        background: var(--action);
+        color: white;
+      }
+      .btn-secondary {
+        background: transparent;
+        border: 1px solid var(--border-strong);
+        color: var(--text-secondary);
+      }
+      .btn-danger {
+        background: transparent;
+        border: 1px solid #e0c0c0;
+        color: var(--score-low);
+      }
+
+      .content {
+        flex: 1;
+        overflow-y: auto;
+      }
+
+      /* Game hero section */
+      .game-hero {
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        padding: 28px 32px;
+        display: flex;
+        gap: 24px;
+        align-items: flex-start;
+      }
+
+      .game-cover {
+        width: 100px;
+        height: 100px;
+        border-radius: 8px;
+        background: linear-gradient(135deg, #e0dcd5, #ccc8c0);
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 40px;
+        border: 1px solid var(--border);
+      }
+
+      .game-hero-info {
+        flex: 1;
+      }
+
+      .game-hero-title {
+        font-size: 26px;
+        font-weight: 700;
+        color: var(--text-primary);
+        line-height: 1.2;
+        margin-bottom: 6px;
+      }
+
+      .game-hero-meta {
+        display: flex;
+        gap: 16px;
+        font-size: 13px;
+        color: var(--text-secondary);
+        margin-bottom: 14px;
+        flex-wrap: wrap;
+      }
+
+      .game-hero-meta span {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+
+      .bgg-link {
+        font-size: 12px;
+        color: var(--bgg-accent);
+        text-decoration: none;
+        background: var(--bgg-bg);
+        padding: 3px 8px;
+        border-radius: 4px;
+        font-weight: 500;
+      }
+
+      .game-hero-score-section {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        flex-shrink: 0;
+        min-width: 160px;
+      }
+
+      .score-hero-label {
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 4px;
+      }
+
+      .score-hero-number {
+        font-size: 52px;
+        font-weight: 700;
+        color: var(--score-color);
+        font-variant-numeric: tabular-nums;
+        line-height: 1;
+        letter-spacing: -0.02em;
+      }
+
+      .score-hero-out-of {
+        font-size: 13px;
+        color: var(--text-muted);
+        margin-top: 4px;
+      }
+
+      .score-hero-rated {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-top: 6px;
+        text-align: right;
+      }
+
+      /* Two-panel layout */
+      .detail-panels {
+        display: grid;
+        grid-template-columns: 1fr 380px;
+        gap: 0;
+        min-height: 0;
+      }
+
+      .panel-left {
+        padding: 28px 32px;
+        border-right: 1px solid var(--border);
+      }
+
+      .panel-right {
+        padding: 28px 24px;
+        background: var(--bg-surface);
+      }
+
+      .panel-section-title {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 16px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .panel-section-title .badge {
+        font-size: 10px;
+        padding: 1px 6px;
+        border-radius: 3px;
+        background: var(--border);
+        color: var(--text-muted);
+        text-transform: none;
+        letter-spacing: 0;
+      }
+
+      /* Score breakdown table */
+      .breakdown-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 24px;
+      }
+
+      .breakdown-table th {
+        text-align: left;
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        padding: 6px 10px;
+        background: #ede9e3;
+        border-bottom: 1px solid var(--border-strong);
+        border-top: 1px solid var(--border-strong);
+      }
+
+      .breakdown-table th:last-child {
+        text-align: right;
+      }
+      .breakdown-table th:nth-child(2),
+      .breakdown-table th:nth-child(3),
+      .breakdown-table th:nth-child(4) {
+        text-align: right;
+      }
+
+      .breakdown-table td {
+        padding: 9px 10px;
+        border-bottom: 1px solid var(--border);
+        font-size: 13px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .breakdown-table td:nth-child(2),
+      .breakdown-table td:nth-child(3),
+      .breakdown-table td:nth-child(4) {
+        text-align: right;
+      }
+
+      .breakdown-table tr.bgg-row td {
+        background: var(--bgg-bg);
+      }
+      .breakdown-table tr.override-row td {
+        background: var(--override-bg);
+      }
+
+      .breakdown-table tr.total-row td {
+        background: #ede9e3;
+        font-weight: 700;
+        border-top: 2px solid var(--border-strong);
+        border-bottom: 2px solid var(--border-strong);
+      }
+
+      .breakdown-table tr.total-row td:last-child {
+        color: var(--score-color);
+        font-size: 15px;
+      }
+
+      .source-badge {
+        display: inline-block;
+        font-size: 9px;
+        font-weight: 700;
+        padding: 2px 5px;
+        border-radius: 3px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      .source-personal {
+        color: var(--text-secondary);
+        background: var(--border);
+      }
+
+      .source-bgg {
+        color: var(--bgg-accent);
+        background: #d4e7f5;
+      }
+
+      .source-override {
+        color: var(--override-accent);
+        background: #e0d6f5;
+      }
+
+      /* Contribution bar */
+      .contrib-cell {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        justify-content: flex-end;
+      }
+
+      .contrib-bar-track {
+        width: 60px;
+        height: 5px;
+        background: var(--border);
+        border-radius: 3px;
+        overflow: hidden;
+      }
+
+      .contrib-bar-fill {
+        height: 100%;
+        background: var(--score-color);
+        border-radius: 3px;
+        opacity: 0.6;
+      }
+
+      .contrib-pct {
+        font-size: 12px;
+        color: var(--text-secondary);
+        min-width: 32px;
+        text-align: right;
+      }
+
+      /* Rating form */
+      .rating-form {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+
+      .rating-field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .rating-field-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .rating-field-name {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+
+      .rating-field-weight {
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+
+      .rating-field-desc {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-bottom: 2px;
+      }
+
+      .rating-input-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .rating-slider {
+        flex: 1;
+        height: 4px;
+        border-radius: 2px;
+        background: var(--border);
+        appearance: none;
+        cursor: pointer;
+        accent-color: var(--score-color);
+      }
+
+      .rating-value-input {
+        width: 44px;
+        border: 1px solid var(--border-strong);
+        border-radius: 4px;
+        padding: 4px 8px;
+        font-size: 14px;
+        font-weight: 700;
+        font-family: inherit;
+        text-align: center;
+        color: var(--score-color);
+        background: var(--bg-surface);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .rating-field.bgg-derived .rating-field-name::after {
+        content: "BGG";
+        font-size: 9px;
+        font-weight: 700;
+        color: var(--bgg-accent);
+        background: var(--bgg-bg);
+        padding: 1px 5px;
+        border-radius: 3px;
+        margin-left: 6px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        vertical-align: middle;
+      }
+
+      .bgg-auto-value {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        background: var(--bgg-bg);
+        border: 1px solid #c0d8ec;
+        border-radius: 4px;
+        font-size: 12px;
+        color: var(--bgg-accent);
+      }
+
+      .bgg-auto-value .value {
+        font-weight: 700;
+        font-size: 14px;
+      }
+      .bgg-auto-value .override-link {
+        margin-left: auto;
+        font-size: 11px;
+        cursor: pointer;
+        color: var(--action);
+      }
+
+      .section-divider {
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 24px 0;
+      }
+
+      .save-btn-row {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+        margin-top: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 2px">
+          <svg
+            width="22"
+            height="18"
+            viewBox="0 0 22 18"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <rect x="0" y="6" width="5" height="12" rx="1" fill="#b86c1a" />
+            <rect x="7" y="0" width="5" height="18" rx="1" fill="#e8e4dc" />
+            <rect x="14" y="4" width="5" height="14" rx="1" fill="#e8e4dc" opacity="0.6" />
+          </svg>
+          <span class="brand-name">Shelf Judge</span>
         </div>
-        <div style="font-size:12px;color:var(--text-muted);">
-          BGG data refreshed <strong style="color:var(--text-secondary);">3 days ago</strong>
-          · BGG community rating: <strong style="color:var(--bgg-accent);">8.1</strong>
-        </div>
+        <div class="brand-sub">Board Game Collection</div>
       </div>
-      <div class="game-hero-score-section">
-        <div class="score-hero-label">Fitness Score</div>
-        <div class="score-hero-number">9.1</div>
-        <div class="score-hero-out-of">out of 10.0</div>
-        <div class="score-hero-rated">5 axes rated</div>
-      </div>
-    </div>
+      <nav class="nav-section">
+        <div class="nav-label">Library</div>
+        <a class="nav-item active" href="#">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M2 2h12v12H2V2zm1 1v10h10V3H3zm2 2h6v1H5V5zm0 3h6v1H5V8zm0 3h4v1H5v-1z" />
+          </svg>
+          Collection
+        </a>
+        <a class="nav-item" href="#">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path
+              d="M1 3a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h8a1 1 0 010 2H2a1 1 0 01-1-1z"
+            />
+          </svg>
+          Axes
+        </a>
+        <div class="nav-label">Add</div>
+        <a class="nav-item" href="#">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path
+              d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 1a6 6 0 110 12A6 6 0 018 2zm0 3v2H6v1h2v2h1V8h2V7H9V5H8z"
+            />
+          </svg>
+          Add Game
+        </a>
+        <a class="nav-item" href="#">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path
+              d="M14 3H2a1 1 0 00-1 1v8a1 1 0 001 1h12a1 1 0 001-1V4a1 1 0 00-1-1zM8 11l-4-3h2.5V7h3v1H12L8 11z"
+            />
+          </svg>
+          Import BGG
+        </a>
+      </nav>
+      <div class="sidebar-footer">Last synced: 2 hours ago</div>
+    </aside>
 
-    <!-- Two-panel content -->
-    <div class="detail-panels">
-
-      <!-- LEFT: Score breakdown + (scrolls) -->
-      <div class="panel-left">
-        <div class="panel-section-title">
-          Score Breakdown
-          <span class="badge">How 9.1 was calculated</span>
+    <!-- Main -->
+    <main class="main">
+      <div class="topbar">
+        <div class="breadcrumb">
+          <a href="#">Collection</a>
+          <span>›</span>
+          <strong>Wingspan</strong>
         </div>
-
-        <table class="breakdown-table">
-          <thead>
-            <tr>
-              <th>Axis</th>
-              <th>Rating</th>
-              <th>Weight</th>
-              <th>Contribution</th>
-              <th>Source</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td style="font-weight:500;">Wife will play it</td>
-              <td>10</td>
-              <td>30</td>
-              <td>
-                <div class="contrib-cell">
-                  <div class="contrib-bar-track">
-                    <div class="contrib-bar-fill" style="width:37%;"></div>
-                  </div>
-                  <span class="contrib-pct">37%</span>
-                </div>
-              </td>
-              <td><span class="source-badge source-personal">Personal</span></td>
-            </tr>
-            <tr>
-              <td style="font-weight:500;">Visual design</td>
-              <td>9</td>
-              <td>20</td>
-              <td>
-                <div class="contrib-cell">
-                  <div class="contrib-bar-track">
-                    <div class="contrib-bar-fill" style="width:22%;"></div>
-                  </div>
-                  <span class="contrib-pct">22%</span>
-                </div>
-              </td>
-              <td><span class="source-badge source-personal">Personal</span></td>
-            </tr>
-            <tr class="bgg-row">
-              <td style="font-weight:500;">Complexity fit</td>
-              <td>8</td>
-              <td>15</td>
-              <td>
-                <div class="contrib-cell">
-                  <div class="contrib-bar-track">
-                    <div class="contrib-bar-fill" style="width:15%;"></div>
-                  </div>
-                  <span class="contrib-pct">15%</span>
-                </div>
-              </td>
-              <td><span class="source-badge source-bgg">BGG</span></td>
-            </tr>
-            <tr>
-              <td style="font-weight:500;">Date night fit</td>
-              <td>9</td>
-              <td>25</td>
-              <td>
-                <div class="contrib-cell">
-                  <div class="contrib-bar-track">
-                    <div class="contrib-bar-fill" style="width:28%;"></div>
-                  </div>
-                  <span class="contrib-pct">28%</span>
-                </div>
-              </td>
-              <td><span class="source-badge source-personal">Personal</span></td>
-            </tr>
-            <tr class="override-row">
-              <td style="font-weight:500;">
-                Community rating
-                <div style="font-size:10px;color:var(--text-muted);margin-top:1px;">BGG value: 8.1 → scaled 8</div>
-              </td>
-              <td>9</td>
-              <td>10</td>
-              <td>
-                <div class="contrib-cell">
-                  <div class="contrib-bar-track">
-                    <div class="contrib-bar-fill" style="width:11%;"></div>
-                  </div>
-                  <span class="contrib-pct">11%</span>
-                </div>
-              </td>
-              <td><span class="source-badge source-override">Override</span></td>
-            </tr>
-            <tr class="total-row">
-              <td colspan="3" style="font-weight:700;">Fitness Score</td>
-              <td colspan="2" style="text-align:right;">9.1</td>
-            </tr>
-          </tbody>
-        </table>
-
-        <div style="font-size:11px;color:var(--text-muted);line-height:1.6;">
-          <strong style="color:var(--text-secondary);">How this is calculated:</strong> weighted average of all rated axes.
-          Formula: <code style="background:var(--border);padding:1px 5px;border-radius:3px;font-size:10px;">sum(rating × weight) / sum(weight)</code>.
-          Axes without ratings are excluded from both the numerator and denominator.
+        <div class="topbar-actions">
+          <button class="btn btn-secondary">↺ Refresh BGG</button>
+          <button class="btn btn-danger">Remove</button>
         </div>
       </div>
 
-      <!-- RIGHT: Rating form -->
-      <div class="panel-right">
-        <div class="panel-section-title">Your Ratings</div>
-
-        <div class="rating-form">
-
-          <div class="rating-field">
-            <div class="rating-field-header">
-              <div class="rating-field-name">Wife will play it</div>
-              <div class="rating-field-weight">Weight: 30</div>
+      <div class="content">
+        <!-- Game hero -->
+        <div class="game-hero">
+          <div class="game-cover">🧩</div>
+          <div class="game-hero-info">
+            <div class="game-hero-title">Wingspan</div>
+            <div class="game-hero-meta">
+              <span>📅 2019</span>
+              <span>👥 1–5 players</span>
+              <span>⏱ 40–70 min</span>
+              <span>⚖️ BGG Weight: 2.45</span>
+              <a class="bgg-link" href="#">BGG #21 ↗</a>
             </div>
-            <div class="rating-field-desc">How likely is Sarah to enjoy this game?</div>
-            <div class="rating-input-row">
-              <input type="range" class="rating-slider" min="1" max="10" value="10">
-              <input type="number" class="rating-value-input" value="10" min="1" max="10">
+            <div style="font-size: 12px; color: var(--text-muted)">
+              BGG data refreshed <strong style="color: var(--text-secondary)">3 days ago</strong> ·
+              BGG community rating: <strong style="color: var(--bgg-accent)">8.1</strong>
+            </div>
+          </div>
+          <div class="game-hero-score-section">
+            <div class="score-hero-label">Fitness Score</div>
+            <div class="score-hero-number">9.1</div>
+            <div class="score-hero-out-of">out of 10.0</div>
+            <div class="score-hero-rated">5 axes rated</div>
+          </div>
+        </div>
+
+        <!-- Two-panel content -->
+        <div class="detail-panels">
+          <!-- LEFT: Score breakdown + (scrolls) -->
+          <div class="panel-left">
+            <div class="panel-section-title">
+              Score Breakdown
+              <span class="badge">How 9.1 was calculated</span>
+            </div>
+
+            <table class="breakdown-table">
+              <thead>
+                <tr>
+                  <th>Axis</th>
+                  <th>Rating</th>
+                  <th>Weight</th>
+                  <th>Contribution</th>
+                  <th>Source</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td style="font-weight: 500">Wife will play it</td>
+                  <td>10</td>
+                  <td>30</td>
+                  <td>
+                    <div class="contrib-cell">
+                      <div class="contrib-bar-track">
+                        <div class="contrib-bar-fill" style="width: 37%"></div>
+                      </div>
+                      <span class="contrib-pct">37%</span>
+                    </div>
+                  </td>
+                  <td><span class="source-badge source-personal">Personal</span></td>
+                </tr>
+                <tr>
+                  <td style="font-weight: 500">Visual design</td>
+                  <td>9</td>
+                  <td>20</td>
+                  <td>
+                    <div class="contrib-cell">
+                      <div class="contrib-bar-track">
+                        <div class="contrib-bar-fill" style="width: 22%"></div>
+                      </div>
+                      <span class="contrib-pct">22%</span>
+                    </div>
+                  </td>
+                  <td><span class="source-badge source-personal">Personal</span></td>
+                </tr>
+                <tr class="bgg-row">
+                  <td style="font-weight: 500">Complexity fit</td>
+                  <td>8</td>
+                  <td>15</td>
+                  <td>
+                    <div class="contrib-cell">
+                      <div class="contrib-bar-track">
+                        <div class="contrib-bar-fill" style="width: 15%"></div>
+                      </div>
+                      <span class="contrib-pct">15%</span>
+                    </div>
+                  </td>
+                  <td><span class="source-badge source-bgg">BGG</span></td>
+                </tr>
+                <tr>
+                  <td style="font-weight: 500">Date night fit</td>
+                  <td>9</td>
+                  <td>25</td>
+                  <td>
+                    <div class="contrib-cell">
+                      <div class="contrib-bar-track">
+                        <div class="contrib-bar-fill" style="width: 28%"></div>
+                      </div>
+                      <span class="contrib-pct">28%</span>
+                    </div>
+                  </td>
+                  <td><span class="source-badge source-personal">Personal</span></td>
+                </tr>
+                <tr class="override-row">
+                  <td style="font-weight: 500">
+                    Community rating
+                    <div style="font-size: 10px; color: var(--text-muted); margin-top: 1px">
+                      BGG value: 8.1 → scaled 8
+                    </div>
+                  </td>
+                  <td>9</td>
+                  <td>10</td>
+                  <td>
+                    <div class="contrib-cell">
+                      <div class="contrib-bar-track">
+                        <div class="contrib-bar-fill" style="width: 11%"></div>
+                      </div>
+                      <span class="contrib-pct">11%</span>
+                    </div>
+                  </td>
+                  <td><span class="source-badge source-override">Override</span></td>
+                </tr>
+                <tr class="total-row">
+                  <td colspan="3" style="font-weight: 700">Fitness Score</td>
+                  <td colspan="2" style="text-align: right">9.1</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div style="font-size: 11px; color: var(--text-muted); line-height: 1.6">
+              <strong style="color: var(--text-secondary)">How this is calculated:</strong> weighted
+              average of all rated axes. Formula:
+              <code
+                style="
+                  background: var(--border);
+                  padding: 1px 5px;
+                  border-radius: 3px;
+                  font-size: 10px;
+                "
+                >sum(rating × weight) / sum(weight)</code
+              >. Axes without ratings are excluded from both the numerator and denominator.
             </div>
           </div>
 
-          <div class="rating-field">
-            <div class="rating-field-header">
-              <div class="rating-field-name">Visual design</div>
-              <div class="rating-field-weight">Weight: 20</div>
-            </div>
-            <div class="rating-field-desc">How beautiful is the artwork and component quality?</div>
-            <div class="rating-input-row">
-              <input type="range" class="rating-slider" min="1" max="10" value="9">
-              <input type="number" class="rating-value-input" value="9" min="1" max="10">
-            </div>
-          </div>
+          <!-- RIGHT: Rating form -->
+          <div class="panel-right">
+            <div class="panel-section-title">Your Ratings</div>
 
-          <div class="rating-field">
-            <div class="rating-field-header">
-              <div class="rating-field-name">Date night fit</div>
-              <div class="rating-field-weight">Weight: 25</div>
-            </div>
-            <div class="rating-field-desc">Works well as a 2-player evening game?</div>
-            <div class="rating-input-row">
-              <input type="range" class="rating-slider" min="1" max="10" value="9">
-              <input type="number" class="rating-value-input" value="9" min="1" max="10">
-            </div>
-          </div>
+            <div class="rating-form">
+              <div class="rating-field">
+                <div class="rating-field-header">
+                  <div class="rating-field-name">Wife will play it</div>
+                  <div class="rating-field-weight">Weight: 30</div>
+                </div>
+                <div class="rating-field-desc">How likely is Sarah to enjoy this game?</div>
+                <div class="rating-input-row">
+                  <input type="range" class="rating-slider" min="1" max="10" value="10" />
+                  <input type="number" class="rating-value-input" value="10" min="1" max="10" />
+                </div>
+              </div>
 
-          <hr class="section-divider">
+              <div class="rating-field">
+                <div class="rating-field-header">
+                  <div class="rating-field-name">Visual design</div>
+                  <div class="rating-field-weight">Weight: 20</div>
+                </div>
+                <div class="rating-field-desc">
+                  How beautiful is the artwork and component quality?
+                </div>
+                <div class="rating-input-row">
+                  <input type="range" class="rating-slider" min="1" max="10" value="9" />
+                  <input type="number" class="rating-value-input" value="9" min="1" max="10" />
+                </div>
+              </div>
 
-          <div class="panel-section-title" style="margin-bottom:12px;">BGG-Derived Axes</div>
+              <div class="rating-field">
+                <div class="rating-field-header">
+                  <div class="rating-field-name">Date night fit</div>
+                  <div class="rating-field-weight">Weight: 25</div>
+                </div>
+                <div class="rating-field-desc">Works well as a 2-player evening game?</div>
+                <div class="rating-input-row">
+                  <input type="range" class="rating-slider" min="1" max="10" value="9" />
+                  <input type="number" class="rating-value-input" value="9" min="1" max="10" />
+                </div>
+              </div>
 
-          <div class="rating-field bgg-derived">
-            <div class="rating-field-header">
-              <div class="rating-field-name">Complexity fit</div>
-              <div class="rating-field-weight">Weight: 15</div>
-            </div>
-            <div class="rating-field-desc">Inverted from BGG weight (2.45 → score 7.5)</div>
-            <div class="bgg-auto-value">
-              <span>Auto-populated from BGG</span>
-              <span class="value">8</span>
-              <span class="override-link">Override ›</span>
-            </div>
-          </div>
+              <hr class="section-divider" />
 
-          <div class="rating-field bgg-derived">
-            <div class="rating-field-header">
-              <div class="rating-field-name">Community rating</div>
-              <div class="rating-field-weight">Weight: 10</div>
-            </div>
-            <div class="rating-field-desc">BGG community avg (8.1 → scaled to 8)</div>
-            <div style="margin-bottom:4px;">
-              <div class="bgg-auto-value" style="background:var(--override-bg);border-color:#c5b8e8;color:var(--override-accent);">
-                <span>BGG value: 8 · <em>Your override: 9</em></span>
-                <span class="value" style="color:var(--override-accent);">9</span>
-                <span class="override-link" style="color:var(--override-accent);">Revert to BGG ›</span>
+              <div class="panel-section-title" style="margin-bottom: 12px">BGG-Derived Axes</div>
+
+              <div class="rating-field bgg-derived">
+                <div class="rating-field-header">
+                  <div class="rating-field-name">Complexity fit</div>
+                  <div class="rating-field-weight">Weight: 15</div>
+                </div>
+                <div class="rating-field-desc">Inverted from BGG weight (2.45 → score 7.5)</div>
+                <div class="bgg-auto-value">
+                  <span>Auto-populated from BGG</span>
+                  <span class="value">8</span>
+                  <span class="override-link">Override ›</span>
+                </div>
+              </div>
+
+              <div class="rating-field bgg-derived">
+                <div class="rating-field-header">
+                  <div class="rating-field-name">Community rating</div>
+                  <div class="rating-field-weight">Weight: 10</div>
+                </div>
+                <div class="rating-field-desc">BGG community avg (8.1 → scaled to 8)</div>
+                <div style="margin-bottom: 4px">
+                  <div
+                    class="bgg-auto-value"
+                    style="
+                      background: var(--override-bg);
+                      border-color: #c5b8e8;
+                      color: var(--override-accent);
+                    "
+                  >
+                    <span>BGG value: 8 · <em>Your override: 9</em></span>
+                    <span class="value" style="color: var(--override-accent)">9</span>
+                    <span class="override-link" style="color: var(--override-accent)"
+                      >Revert to BGG ›</span
+                    >
+                  </div>
+                </div>
+                <div class="rating-input-row">
+                  <input
+                    type="range"
+                    class="rating-slider"
+                    min="1"
+                    max="10"
+                    value="9"
+                    style="accent-color: var(--override-accent)"
+                  />
+                  <input
+                    type="number"
+                    class="rating-value-input"
+                    value="9"
+                    min="1"
+                    max="10"
+                    style="color: var(--override-accent); border-color: var(--override-accent)"
+                  />
+                </div>
               </div>
             </div>
-            <div class="rating-input-row">
-              <input type="range" class="rating-slider" min="1" max="10" value="9" style="accent-color:var(--override-accent);">
-              <input type="number" class="rating-value-input" value="9" min="1" max="10" style="color:var(--override-accent);border-color:var(--override-accent);">
+
+            <div class="save-btn-row" style="margin-top: 20px">
+              <button class="btn btn-secondary">Cancel</button>
+              <button class="btn btn-primary">Save Ratings</button>
             </div>
           </div>
-
-        </div>
-
-        <div class="save-btn-row" style="margin-top:20px;">
-          <button class="btn btn-secondary">Cancel</button>
-          <button class="btn btn-primary">Save Ratings</button>
         </div>
       </div>
-
-    </div>
-  </div>
-</main>
-
-</body>
+    </main>
+  </body>
 </html>

@@ -5,6 +5,7 @@ import { createFitnessService } from "../../src/services/fitness-service.js";
 import { createStorageService } from "../../src/services/storage-service.js";
 import { createBggClient } from "../../src/services/bgg-client.js";
 import { createMockFileOps } from "../helpers/mock-file-ops.js";
+import { createMockFetch } from "../helpers/mock-fetch.js";
 import type { GameService } from "../../src/services/game-service.js";
 import type { StorageService } from "../../src/services/storage-service.js";
 import type { BggClient } from "../../src/services/bgg-client.js";
@@ -14,35 +15,6 @@ const fixturesDir = path.join(import.meta.dir, "../fixtures");
 
 async function readFixture(filename: string): Promise<string> {
   return Bun.file(path.join(fixturesDir, filename)).text();
-}
-
-function createMockFetch() {
-  const calls: Array<{ url: string }> = [];
-  const responses: Array<{ status: number; body: string }> = [];
-
-  const fn = (input: string | URL | Request): Promise<Response> => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    calls.push({ url });
-
-    const next = responses.shift();
-    if (!next) return Promise.reject(new Error(`No mock response for: ${url}`));
-
-    return Promise.resolve(
-      new Response(next.body, {
-        status: next.status,
-        headers: { "Content-Type": "application/xml" },
-      }),
-    );
-  };
-
-  return {
-    fn: fn as unknown as typeof fetch,
-    calls,
-    responses,
-    enqueue(status: number, body: string) {
-      responses.push({ status, body });
-    },
-  };
 }
 
 let fileOps: MockFileOps;

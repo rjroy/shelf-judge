@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { listGames, listAxes } from "@/lib/api";
+import { listGames, listAxes, getAllTournamentStats } from "@/lib/api";
+import type { TournamentGameStatsDisplay } from "@shelf-judge/shared";
 import { RefreshAllButton } from "@/components/refresh-all-button";
+import { CollectionSortToggle } from "@/components/collection-sort-toggle";
 import { scoreRangeClass } from "@/lib/score-utils";
 
 export const metadata: Metadata = { title: "Collection" };
@@ -29,11 +31,22 @@ function relativeDate(dateStr: string): string {
   return `${diffMonth} months ago`;
 }
 
-export default async function CollectionPage() {
+export default async function CollectionPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ sort?: string }>;
+}) {
+  const { sort: sortBy = "fitness" } = await searchParams;
   let games;
   let axes;
+  let tournamentStats: Record<string, TournamentGameStatsDisplay> = {};
   try {
     [games, axes] = await Promise.all([listGames(), listAxes()]);
+    try {
+      tournamentStats = await getAllTournamentStats();
+    } catch {
+      // Tournament data may not exist yet
+    }
   } catch {
     return (
       <div className="error-banner">
@@ -44,9 +57,25 @@ export default async function CollectionPage() {
 
   const axisMap = new Map(axes.map((a) => [a.id, a.name]));
 
+  const hasTournamentData = Object.keys(tournamentStats).length > 0;
+  const isTournamentSort = sortBy === "tournament" && hasTournamentData;
+
   const rated = games
     .filter(({ score }) => score !== null)
-    .sort((a, b) => (b.score?.score ?? 0) - (a.score?.score ?? 0));
+    .sort((a, b) => {
+      if (isTournamentSort) {
+        const aStats = tournamentStats[a.game.id];
+        const bStats = tournamentStats[b.game.id];
+        const aScore = aStats?.normalizedScore ?? -1;
+        const bScore = bStats?.normalizedScore ?? -1;
+        // Games with no comparisons go to bottom
+        if (aScore === -1 && bScore === -1) return 0;
+        if (aScore === -1) return 1;
+        if (bScore === -1) return -1;
+        return bScore - aScore;
+      }
+      return (b.score?.score ?? 0) - (a.score?.score ?? 0);
+    });
   const unrated = games.filter(({ score }) => score === null);
 
   const avgFitness =
@@ -94,6 +123,7 @@ export default async function CollectionPage() {
             Add Game
           </Link>
           <RefreshAllButton />
+          <CollectionSortToggle hasTournamentData={hasTournamentData} />
         </div>
       </div>
 
@@ -170,8 +200,18 @@ export default async function CollectionPage() {
               </div>
               <div className="last-rated">{relativeDate(game.updatedAt)}</div>
               <div className="score-cell">
-                <span className={`score-dot ${scoreRangeClass(score!.score)}`} />
-                <span className="score-value">{score!.score.toFixed(1)}</span>
+                {isTournamentSort ? (
+                  <>
+                    <span className="score-value tournament-score">
+                      {tournamentStats[game.id]?.displayLabel ?? "-"}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className={`score-dot ${scoreRangeClass(score!.score)}`} />
+                    <span className="score-value">{score!.score.toFixed(1)}</span>
+                  </>
+                )}
               </div>
             </Link>
           );

@@ -1,7 +1,7 @@
 ---
 title: Add structured logger factory for daemon services
 date: 2026-04-05
-status: open
+status: resolved
 tags: [observability, logging, cleanup]
 modules: [daemon-services, bgg-client]
 ---

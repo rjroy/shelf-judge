@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { toErrorMessage } from "@shelf-judge/shared";
 import type { GameService } from "../services/game-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
 
@@ -25,7 +26,7 @@ export function createScoreRoutes(deps: ScoreRoutesDeps): RouteModule {
       }
       return c.json({ gameId: game.id, gameName: game.name, ...score });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = toErrorMessage(err);
       if (message.includes("not found")) {
         return c.json({ error: message }, 404);
       }
@@ -61,7 +62,7 @@ export function createScoreRoutes(deps: ScoreRoutesDeps): RouteModule {
 
       return c.json({ scored, unscored });
     } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+      return c.json({ error: toErrorMessage(err) }, 500);
     }
   });
 

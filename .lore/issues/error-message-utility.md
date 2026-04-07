@@ -1,7 +1,7 @@
 ---
 title: Extract toErrorMessage utility from 30+ inline copies
 date: 2026-04-05
-status: open
+status: resolved
 tags: [cleanup, utility, code-reuse]
 modules: [daemon-routes, daemon-services, bgg-client, cli]
 ---
