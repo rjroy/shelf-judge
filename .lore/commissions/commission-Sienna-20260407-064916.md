@@ -1,7 +1,7 @@
 ---
 title: "Commission: Mockup: Collection Page Filter and Sort UX"
 date: 2026-04-07
-status: pending
+status: dispatched
 tags: [commission]
 worker: Sienna
 workerDisplayTitle: "Guild Illuminator"
@@ -14,6 +14,11 @@ activity_timeline:
   - timestamp: 2026-04-07T13:49:16.042Z
     event: created
     reason: "Commission created"
+  - timestamp: 2026-04-07T13:51:15.867Z
+    event: status_dispatched
+    reason: "Dispatched to worker"
+    from: "pending"
+    to: "dispatched"
 current_progress: ""
 projectName: shelf-judge
 ---
