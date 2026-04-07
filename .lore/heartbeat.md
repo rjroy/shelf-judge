@@ -29,3 +29,7 @@ Workers can also add entries to this file during their sessions.
 - 06:51 commission-Octavia-20260407-064903 result: Revised `.lore/brainstorms/collection-filter-sort.md` to integrate all nine user decisions as settled conclusions throughout the document body. Removed all `USER RESPONSE:` annotations and the `USER G...
 
 - 06:51 commission-Octavia-20260407-064903 completed
+- 06:57 commission-Sienna-20260407-064916 result: Created `.lore/art/mockup-collection-filter-sort.html` — a three-panel HTML mockup for the collection page's new filter and sort UX.
+
+**Panel 1 — Desktop: filter bar expanded, sort dropdown open, acti...
+- 06:57 commission-Sienna-20260407-064916 completed
