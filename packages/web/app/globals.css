@@ -420,7 +420,8 @@ body {
 }
 
 .rank {
-  width: 24px;
+  min-width: 12px;
+  max-width: 24px;
   text-align: center;
   font-size: 12px;
   font-weight: 600;
@@ -560,7 +561,7 @@ body {
   color: var(--text-muted);
   font-style: italic;
   text-align: right;
-  width: 100px;
+  min-width: 50px;
   flex-shrink: 0;
 }
 
@@ -569,7 +570,7 @@ body {
   color: var(--text-muted);
   white-space: nowrap;
   flex-shrink: 0;
-  width: 90px;
+  min-width: 50px;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
@@ -954,7 +955,7 @@ body {
 }
 
 .rating-value-input {
-  width: 44px;
+  width: 52px;
   border: 1px solid var(--border-strong);
   border-radius: 4px;
   padding: 4px 8px;
@@ -2650,7 +2651,7 @@ body {
   /* --- Collection table: tablet (5-column, hide Axes Rated) --- */
   .collection-header,
   .game-row {
-    grid-template-columns: 30px 50px 1fr 100px 80px;
+    grid-template-columns: 30px 50px 1fr 100px 100px;
   }
 
   .axes-used-col,

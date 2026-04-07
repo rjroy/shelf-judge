@@ -215,8 +215,10 @@ Currently the page renders rated games first (sorted), then unrated games below 
 ## Open Questions
 
 1. **Should filter state persist across sessions?** URL params persist per-tab but not across sessions. localStorage could remember "last used filters." But for a curation tool, ephemeral filters seem right; you filter to answer a question, then go back to the full view. If users find themselves re-applying the same filters repeatedly, that's a signal for a saved-views feature later.
+USER RESPONSE: ephemeral filtering is right.
 
 2. **How should the sort dropdown interact with the existing tournament toggle?** Replace it. The toggle is a special case of sort-by-field. A proper sort dropdown subsumes it. The toggle can be removed once the dropdown exists.
+USER RESPONSE: 
 
 3. **Should column headers be clickable for sorting?** Yes for columns that map to a single sort field (Score, Last Rated). Not practical for "Game" (which contains name, year, player count) or "Axes Rated" (which is a count but not obviously sortable). A sort dropdown covers the fields that don't map to a column.
 
