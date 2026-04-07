@@ -1,7 +1,7 @@
 ---
 title: "Deferred: Pairwise tournament ranking"
 date: 2026-04-06
-status: open
+status: resolved
 tags: [deferred, feature, fitness, ranking, tournament]
 modules: [daemon, web, cli]
 origin: .lore/specs/mvp.md
