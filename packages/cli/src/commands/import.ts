@@ -1,19 +1,8 @@
 // Import commands: bgg-collection
+import type { ImportProgress, ImportComplete } from "@shelf-judge/shared";
 import type { DaemonClient } from "../client.js";
 import type { OutputOptions } from "../output.js";
 import { printOutput } from "../output.js";
-
-interface ImportProgress {
-  imported: number;
-  total: number;
-  current: string;
-}
-
-interface ImportComplete {
-  imported: number;
-  skipped: number;
-  errors: string[];
-}
 
 export async function importBggCollection(
   client: DaemonClient,

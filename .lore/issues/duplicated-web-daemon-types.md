@@ -1,7 +1,7 @@
 ---
 title: Consolidate duplicated types between web and daemon packages
 date: 2026-04-05
-status: open
+status: resolved
 tags: [cleanup, types, shared-package]
 modules: [web-api, daemon-services, shared]
 ---

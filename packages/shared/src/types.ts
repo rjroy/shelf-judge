@@ -152,6 +152,40 @@ export interface TournamentGameStatsDisplay {
   recentComparisons: RecentComparison[]; // Last 5, derived from comparison history (never cached)
 }
 
+// API response types (shared between daemon, web, and CLI)
+
+export interface GameWithScore {
+  game: Game;
+  score: FitnessResult | null;
+  bggDataStale?: boolean;
+}
+
+export interface AddGameResult {
+  game: Game;
+  bggImported: boolean;
+  warning?: string;
+}
+
+export interface BggSearchResult {
+  bggId: number;
+  name: string;
+  yearPublished: number | null;
+}
+
+// SSE event types for BGG collection import (wire format between daemon and clients)
+
+export interface ImportProgress {
+  imported: number;
+  total: number;
+  current: string;
+}
+
+export interface ImportComplete {
+  imported: number;
+  skipped: number;
+  errors: string[];
+}
+
 // App config
 
 export interface AppConfig {

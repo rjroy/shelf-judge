@@ -7,9 +7,10 @@ import type {
   Comparison,
   SessionFilter,
   RecentComparison,
+  GameWithScore,
 } from "@shelf-judge/shared";
+import { matchesBggTag } from "@shelf-judge/shared";
 import type { StorageService } from "./storage-service.js";
-import type { GameWithScore } from "./game-service.js";
 import {
   calculateNewRatings,
   normalizeElo,
@@ -63,14 +64,14 @@ function applyFilters(
       }
 
       case "bggTag": {
-        const tag = filter.value.toLowerCase();
         result = result.filter((g) => {
           const bgg = g.game.bggData;
           if (!bgg) return false;
-          return (
-            bgg.mechanics.some((m) => m.name.toLowerCase() === tag) ||
-            bgg.categories.some((c) => c.name.toLowerCase() === tag)
-          );
+          const tagNames = [
+            ...bgg.mechanics.map((m) => m.name),
+            ...bgg.categories.map((c) => c.name),
+          ];
+          return matchesBggTag(filter.value, tagNames);
         });
         break;
       }
@@ -253,71 +254,60 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
         return null;
       }
 
-      // Get pairs already seen this session
-      const sessionComparisons = data.comparisons.filter((c) => c.sessionId === sessionId);
+      // Get pairs already seen in any session. Once a pair has been judged,
+      // don't re-offer it — ELO refinement happens through new match-ups,
+      // not repeats of the same match.
       const seenPairs = new Set<string>();
-      for (const comp of sessionComparisons) {
+      for (const comp of data.comparisons) {
         const key = [comp.gameAId, comp.gameBId].sort().join("|");
         seenPairs.add(key);
       }
 
-      // Generate all candidate pairs
-      type CandidatePair = { gameA: string; gameB: string; score: number; eloDiff: number };
-      const candidates: CandidatePair[] = [];
-
-      for (let i = 0; i < availableGameIds.length; i++) {
-        for (let j = i + 1; j < availableGameIds.length; j++) {
-          const a = availableGameIds[i];
-          const b = availableGameIds[j];
-          const key = [a, b].sort().join("|");
-          if (seenPairs.has(key)) continue;
-
-          const statsA = data.gameStats[a];
-          const statsB = data.gameStats[b];
-          const countA = statsA?.comparisonCount ?? 0;
-          const countB = statsB?.comparisonCount ?? 0;
-          const eloA = statsA?.eloRating ?? 1500;
-          const eloB = statsB?.eloRating ?? 1500;
-          const eloDiff = Math.abs(eloA - eloB);
-
-          // Lower comparison count sum is better (prioritize under-compared games).
-          // Within similar comparison counts, prefer similar ELO (within 200 preferred).
-          const score = countA + countB;
-
-          candidates.push({ gameA: a, gameB: b, score, eloDiff });
+      // Start with the game with the fewest comparisons (REQ-TOURN-8)
+      let selectedA: string | null = null;
+      let selectedElo = 1500;
+      for (let i = 0, lowestCount = Infinity; i < availableGameIds.length; i++) {
+        const gameId = availableGameIds[i];
+        const stats = data.gameStats[gameId];
+        const count = stats?.comparisonCount ?? 0;
+        if (count < lowestCount) {
+          selectedA = gameId;
+          lowestCount = count;
+          selectedElo = stats?.eloRating ?? 1500;
         }
       }
 
-      if (candidates.length === 0) {
-        // All pairs exhausted this session
+      if (!selectedA) {
+        // This shouldn't happen since we check length above, but just in case...
         session.status = "completed";
         session.updatedAt = new Date().toISOString();
         await storageService.saveTournament(data);
         return null;
       }
 
-      // Sort: primary by comparison count sum (ascending), secondary by ELO diff (ascending)
-      candidates.sort((a, b) => {
-        if (a.score !== b.score) return a.score - b.score;
-        return a.eloDiff - b.eloDiff;
+      // Prioritize pairs with the furthest-apart ELO ratings, to maximize information gained from each comparison (REQ-TOURN-9).
+      availableGameIds.sort((a:string, b:string) => {
+        const eloADiff = Math.abs(selectedElo - (data.gameStats[a]?.eloRating ?? 1500));
+        const eloBDiff = Math.abs(selectedElo - (data.gameStats[b]?.eloRating ?? 1500));
+        return eloBDiff - eloADiff;
       });
 
-      // Find all candidates tied on the best score and best eloDiff bracket
-      const bestScore = candidates[0].score;
-      const tied = candidates.filter((c) => c.score === bestScore);
+      // Find the first pair that hasn't been seen before (REQ-TOURN-8)
+      for (let j = 0; j < availableGameIds.length; j++) {
+        const b = availableGameIds[j];
+        if (b === selectedA) continue;
 
-      // Among ties on score, prefer within 200 ELO
-      const closeElo = tied.filter((c) => c.eloDiff <= 200);
-      const pool = closeElo.length > 0 ? closeElo : tied;
+        const key = [selectedA, b].sort().join("|");
+        if (seenPairs.has(key)) continue;
 
-      // Deterministic tiebreak: sort by game ID pair for stable ordering.
-      // This ensures `next` and `pick` always agree on the current pair.
-      pool.sort((a, b) => {
-        const keyA = [a.gameA, a.gameB].sort().join("|");
-        const keyB = [b.gameA, b.gameB].sort().join("|");
-        return keyA.localeCompare(keyB);
-      });
-      return { gameA: pool[0].gameA, gameB: pool[0].gameB };
+        return { gameA: selectedA, gameB: b };
+      }
+
+      // All pairs exhausted this session
+      session.status = "completed";
+      session.updatedAt = new Date().toISOString();
+      await storageService.saveTournament(data);
+      return null;
     },
 
     async submitComparison(

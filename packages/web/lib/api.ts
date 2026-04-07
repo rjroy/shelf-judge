@@ -1,38 +1,18 @@
 // Daemon API client for server-side use (Next.js server components).
 // Client components go through the /api/daemon/[...path] proxy instead.
 
-import type { Game, Axis, FitnessResult, FitnessBreakdownEntry } from "@shelf-judge/shared";
+import type {
+  Game,
+  Axis,
+  FitnessResult,
+  FitnessBreakdownEntry,
+  GameWithScore,
+  AddGameResult,
+  BggSearchResult,
+  ImportProgress,
+  ImportComplete,
+} from "@shelf-judge/shared";
 import { daemonRequest, daemonJson } from "./daemon";
-
-export interface GameWithScore {
-  game: Game;
-  score: FitnessResult | null;
-  bggDataStale?: boolean;
-}
-
-export interface AddGameResult {
-  game: Game;
-  bggImported: boolean;
-  warning?: string;
-}
-
-export interface BggSearchResult {
-  bggId: number;
-  name: string;
-  yearPublished: number | null;
-}
-
-export interface ImportProgress {
-  imported: number;
-  total: number;
-  current: string;
-}
-
-export interface ImportComplete {
-  imported: number;
-  skipped: number;
-  errors: string[];
-}
 
 export async function listGames(): Promise<GameWithScore[]> {
   return daemonJson("/api/games");
@@ -188,7 +168,11 @@ export async function getTournamentGameStats(gameId: string): Promise<Tournament
 }
 
 export async function getAllTournamentStats(): Promise<Record<string, TournamentGameStatsDisplay>> {
-  return daemonJson("/api/tournament/stats");
+  const entries =
+    await daemonJson<{ gameId: string; gameName: string; stats: TournamentGameStatsDisplay }[]>(
+      "/api/tournament/stats",
+    );
+  return Object.fromEntries(entries.map((e) => [e.gameId, e.stats]));
 }
 
 export async function recalculateElo(): Promise<{ gamesUpdated: number }> {
@@ -204,4 +188,14 @@ export async function listTournamentSessions(): Promise<TournamentSession[]> {
 }
 
 // Re-export types for convenience
-export type { Game, Axis, FitnessResult, FitnessBreakdownEntry };
+export type {
+  Game,
+  Axis,
+  FitnessResult,
+  FitnessBreakdownEntry,
+  GameWithScore,
+  AddGameResult,
+  BggSearchResult,
+  ImportProgress,
+  ImportComplete,
+};
