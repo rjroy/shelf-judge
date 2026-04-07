@@ -32,3 +32,9 @@ Workers can also add entries to this file during their sessions.
 - Axis sort grouping: Yes, the...
 
 - 08:05 commission-Octavia-20260407-075859 completed
+- 08:11 commission-Octavia-20260407-080800 result: Implementation plan written to `.lore/plans/collection-filter-sort.md`.
+
+Five sequential phases covering all 30 requirements from the spec:
+
+1. **Sort State and Dropdown** — Creates `CollectionTable` ...
+- 08:11 commission-Octavia-20260407-080800 completed
