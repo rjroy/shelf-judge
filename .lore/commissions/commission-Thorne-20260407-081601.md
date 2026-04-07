@@ -1,7 +1,7 @@
 ---
 title: "Commission: Review: Collection Filter/Sort Phases 1-4"
 date: 2026-04-07
-status: pending
+status: blocked
 tags: [commission]
 worker: Thorne
 workerDisplayTitle: "Guild Warden"
@@ -14,6 +14,11 @@ activity_timeline:
   - timestamp: 2026-04-07T15:16:01.389Z
     event: created
     reason: "Commission created"
+  - timestamp: 2026-04-07T15:20:49.755Z
+    event: status_blocked
+    reason: "Dependencies not satisfied"
+    from: "pending"
+    to: "blocked"
 current_progress: ""
 projectName: shelf-judge
 ---

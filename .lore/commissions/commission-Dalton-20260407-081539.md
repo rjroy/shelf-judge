@@ -1,7 +1,7 @@
 ---
 title: "Commission: Collection Filter/Sort Phase 1+2 Fix + Phase 3: Filters"
 date: 2026-04-07
-status: pending
+status: blocked
 tags: [commission]
 worker: Dalton
 workerDisplayTitle: "Guild Artificer"
@@ -14,6 +14,11 @@ activity_timeline:
   - timestamp: 2026-04-07T15:15:39.445Z
     event: created
     reason: "Commission created"
+  - timestamp: 2026-04-07T15:20:49.755Z
+    event: status_blocked
+    reason: "Dependencies not satisfied"
+    from: "pending"
+    to: "blocked"
 current_progress: ""
 projectName: shelf-judge
 ---

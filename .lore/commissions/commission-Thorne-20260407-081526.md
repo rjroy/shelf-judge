@@ -1,7 +1,7 @@
 ---
 title: "Commission: Review: Collection Filter/Sort Phase 1+2"
 date: 2026-04-07
-status: pending
+status: dispatched
 tags: [commission]
 worker: Thorne
 workerDisplayTitle: "Guild Warden"
@@ -14,6 +14,11 @@ activity_timeline:
   - timestamp: 2026-04-07T15:15:26.493Z
     event: created
     reason: "Commission created"
+  - timestamp: 2026-04-07T15:20:49.758Z
+    event: status_dispatched
+    reason: "Dispatched to worker"
+    from: "pending"
+    to: "dispatched"
 current_progress: ""
 projectName: shelf-judge
 ---
