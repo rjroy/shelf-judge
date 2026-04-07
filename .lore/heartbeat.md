@@ -43,3 +43,7 @@ Five sequential phases covering all 30 requirements from the spec:
 **Phase 1 (Sort State and Dropdown):**
 - Created `packages/web/lib...
 - 08:20 commission-Dalton-20260407-081514 completed
+- 08:26 commission-Thorne-20260407-081526 result: ## Review: Collection Filter/Sort Phase 1+2
+
+Reviewed `collection-table.tsx` (665 lines), `date-utils.ts` (22 lines), `page.tsx` (112 lines), and `globals.css` additions against REQ-CFS-1 through REQ-...
+- 08:26 commission-Thorne-20260407-081526 completed
