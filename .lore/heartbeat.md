@@ -26,3 +26,9 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
+- 08:05 commission-Octavia-20260407-075859 result: Wrote spec at `.lore/specs/collection-filter-sort.md` with 30 requirements (CFS-1 through CFS-30) and 10 success criteria.
+
+**Open questions from brainstorm, resolved:**
+- Axis sort grouping: Yes, the...
+
+- 08:05 commission-Octavia-20260407-075859 completed
