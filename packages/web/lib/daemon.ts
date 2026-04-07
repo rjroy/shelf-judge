@@ -90,9 +90,11 @@ export async function daemonRequest(
     const chunks: Buffer[] = [];
     res.on("data", (chunk: Buffer) => chunks.push(chunk));
     res.on("end", () => {
+      const status = res.statusCode ?? 200;
+      const nullBody = status === 204 || status === 205 || status === 304;
       resolve(
-        new Response(Buffer.concat(chunks).toString(), {
-          status: res.statusCode ?? 200,
+        new Response(nullBody ? null : Buffer.concat(chunks).toString(), {
+          status,
           headers: nodeHeadersToRecord(res.headers),
         }),
       );
