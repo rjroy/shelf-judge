@@ -1,7 +1,7 @@
 ---
 title: "Tournament-based ELO ranking"
 date: 2026-04-06
-status: approved
+status: implemented 
 tags: [spec, fitness, ranking, tournament, elo, pairwise]
 modules: [daemon, web, cli, shared]
 related:
