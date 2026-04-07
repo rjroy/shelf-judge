@@ -79,32 +79,14 @@ export default async function CollectionPage() {
       </div>
 
       <div className="main-scroll">
-        <div className="stats-strip">
-          <div className="stat-block">
-            <div className="stat-value">{games.length}</div>
-            <div className="stat-label">Games</div>
-          </div>
-          <div className="stat-block">
-            <div className="stat-value score">
-              {avgFitness !== null ? avgFitness.toFixed(1) : "-"}
-            </div>
-            <div className="stat-label">Avg Fitness</div>
-          </div>
-          <div className="stat-block">
-            <div className="stat-value">{rated.length}</div>
-            <div className="stat-label">Rated</div>
-          </div>
-          <div className="stat-block">
-            <div className="stat-value">{axes.length}</div>
-            <div className="stat-label">Axes</div>
-          </div>
-        </div>
-
         <CollectionTable
           games={games}
           axes={axes}
           tournamentStats={tournamentStats}
           hasTournamentData={hasTournamentData}
+          totalGames={games.length}
+          ratedCount={rated.length}
+          avgFitness={avgFitness}
         />
       </div>
     </>

@@ -1,343 +1,37 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import Link from "next/link";
 import type { GameWithScore, Axis, TournamentGameStatsDisplay } from "@shelf-judge/shared";
 import { scoreRangeClass } from "@/lib/score-utils";
 import { relativeDate } from "@/lib/date-utils";
-
-// ---------------------------------------------------------------------------
-// Sort field definitions
-// ---------------------------------------------------------------------------
-
-type SortGroup = "score" | "identity" | "specs" | "axes";
-
-interface SortFieldDef {
-  id: string;
-  label: string;
-  group: SortGroup;
-  defaultDirection: "asc" | "desc";
-}
-
-const BUILT_IN_SORT_FIELDS: SortFieldDef[] = [
-  // Score group
-  { id: "fitness", label: "Fitness Score", group: "score", defaultDirection: "desc" },
-  { id: "tournament", label: "Tournament ELO", group: "score", defaultDirection: "desc" },
-  // Identity group
-  { id: "name", label: "Name", group: "identity", defaultDirection: "asc" },
-  { id: "yearPublished", label: "Year Published", group: "identity", defaultDirection: "desc" },
-  { id: "createdAt", label: "Date Added", group: "identity", defaultDirection: "desc" },
-  { id: "updatedAt", label: "Last Updated", group: "identity", defaultDirection: "desc" },
-  // Specs group
-  { id: "playerCount", label: "Player Count", group: "specs", defaultDirection: "asc" },
-  { id: "playTime", label: "Play Time", group: "specs", defaultDirection: "asc" },
-  { id: "bggRating", label: "BGG Community Rating", group: "specs", defaultDirection: "desc" },
-  { id: "bggWeight", label: "BGG Weight", group: "specs", defaultDirection: "desc" },
-];
-
-const GROUP_LABELS: Record<SortGroup, string> = {
-  score: "Score",
-  identity: "Identity",
-  specs: "Specs",
-  axes: "Your Axes",
-};
-
-const GROUP_ORDER: SortGroup[] = ["score", "identity", "specs", "axes"];
-
-function buildSortFields(
-  axes: Axis[],
-  hasTournamentData: boolean,
-  hasBggData: boolean,
-): SortFieldDef[] {
-  const fields = BUILT_IN_SORT_FIELDS.filter((f) => {
-    if (f.id === "tournament" && !hasTournamentData) return false;
-    if ((f.id === "bggRating" || f.id === "bggWeight") && !hasBggData) return false;
-    return true;
-  });
-  for (const axis of axes) {
-    fields.push({
-      id: `axis:${axis.id}`,
-      label: axis.name,
-      group: "axes",
-      defaultDirection: "desc",
-    });
-  }
-  return fields;
-}
-
-// ---------------------------------------------------------------------------
-// Sort state persistence
-// ---------------------------------------------------------------------------
-
-interface SortState {
-  field: string;
-  direction: "asc" | "desc";
-}
-
-const SORT_STORAGE_KEY = "shelf-judge-sort";
-const DEFAULT_SORT: SortState = { field: "fitness", direction: "desc" };
-
-function loadSort(): SortState {
-  if (typeof window === "undefined") return DEFAULT_SORT;
-  try {
-    const raw = localStorage.getItem(SORT_STORAGE_KEY);
-    if (!raw) return DEFAULT_SORT;
-    const parsed = JSON.parse(raw) as SortState;
-    if (parsed.field && (parsed.direction === "asc" || parsed.direction === "desc")) {
-      return parsed;
-    }
-  } catch {
-    // Corrupt data, fall back
-  }
-  return DEFAULT_SORT;
-}
-
-function saveSort(sort: SortState): void {
-  try {
-    localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify(sort));
-  } catch {
-    // Storage full or unavailable
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Sort comparator
-// ---------------------------------------------------------------------------
-
-type SortValue = number | string | null;
-
-function getSortValue(
-  gws: GameWithScore,
-  field: string,
-  tournamentStats: Record<string, TournamentGameStatsDisplay>,
-): SortValue {
-  const { game, score } = gws;
-  switch (field) {
-    case "fitness":
-      return score?.score ?? null;
-    case "tournament":
-      return tournamentStats[game.id]?.normalizedScore ?? null;
-    case "name":
-      return game.name.toLowerCase();
-    case "yearPublished":
-      return game.yearPublished;
-    case "createdAt":
-      return game.createdAt;
-    case "updatedAt":
-      return game.updatedAt;
-    case "playerCount":
-      return game.minPlayers;
-    case "playTime":
-      return game.playingTime;
-    case "bggRating":
-      return game.bggData?.communityRating ?? null;
-    case "bggWeight":
-      return game.bggData?.weight ?? null;
-    default:
-      if (field.startsWith("axis:")) {
-        const axisId = field.slice(5);
-        return game.ratings[axisId] ?? null;
-      }
-      return null;
-  }
-}
-
-function sortGames(
-  games: GameWithScore[],
-  field: string,
-  direction: "asc" | "desc",
-  tournamentStats: Record<string, TournamentGameStatsDisplay>,
-): { withValue: GameWithScore[]; withoutValue: GameWithScore[] } {
-  const withValue: GameWithScore[] = [];
-  const withoutValue: GameWithScore[] = [];
-
-  for (const g of games) {
-    const v = getSortValue(g, field, tournamentStats);
-    if (v === null) {
-      withoutValue.push(g);
-    } else {
-      withValue.push(g);
-    }
-  }
-
-  const dir = direction === "asc" ? 1 : -1;
-  withValue.sort((a, b) => {
-    const av = getSortValue(a, field, tournamentStats)!;
-    const bv = getSortValue(b, field, tournamentStats)!;
-    if (typeof av === "string" && typeof bv === "string") {
-      return dir * av.localeCompare(bv);
-    }
-    return dir * ((av as number) - (bv as number));
-  });
-
-  withoutValue.sort((a, b) => a.game.name.localeCompare(b.game.name));
-
-  return { withValue, withoutValue };
-}
-
-// ---------------------------------------------------------------------------
-// Score display (Phase 2)
-// ---------------------------------------------------------------------------
-
-interface ScoreDisplay {
-  text: string;
-  className: string;
-  dotClass?: string; // For fitness color dot
-}
-
-function getScoreDisplay(
-  gws: GameWithScore,
-  field: string,
-  tournamentStats: Record<string, TournamentGameStatsDisplay>,
-  axes: Axis[],
-): ScoreDisplay {
-  const { game, score } = gws;
-
-  switch (field) {
-    case "fitness":
-    case "name": {
-      // Name sort falls back to fitness display (REQ-CFS-8)
-      if (!score) return { text: "not rated", className: "score-unrated" };
-      return {
-        text: score.score.toFixed(1),
-        className: "score-value",
-        dotClass: scoreRangeClass(score.score),
-      };
-    }
-    case "tournament": {
-      const stats = tournamentStats[game.id];
-      return {
-        text: stats?.displayLabel ?? "-",
-        className: "score-value tournament-score",
-      };
-    }
-    case "yearPublished":
-      return {
-        text: game.yearPublished != null ? String(game.yearPublished) : "---",
-        className: "score-value",
-      };
-    case "playerCount": {
-      if (game.minPlayers == null || game.maxPlayers == null)
-        return { text: "---", className: "score-value" };
-      const range =
-        game.minPlayers === game.maxPlayers
-          ? `${game.minPlayers}p`
-          : `${game.minPlayers}-${game.maxPlayers}`;
-      return { text: range, className: "score-value" };
-    }
-    case "playTime":
-      return {
-        text: game.playingTime != null ? `${game.playingTime} min` : "---",
-        className: "score-value",
-      };
-    case "bggRating":
-      return {
-        text:
-          game.bggData?.communityRating != null ? game.bggData.communityRating.toFixed(1) : "---",
-        className: "score-value",
-      };
-    case "bggWeight":
-      return {
-        text: game.bggData?.weight != null ? game.bggData.weight.toFixed(1) : "---",
-        className: "score-value",
-      };
-    case "createdAt":
-      return { text: relativeDate(game.createdAt), className: "score-value" };
-    case "updatedAt":
-      return { text: relativeDate(game.updatedAt), className: "score-value" };
-    default: {
-      if (field.startsWith("axis:")) {
-        const axisId = field.slice(5);
-        const rating = game.ratings[axisId];
-        if (rating == null) return { text: "---", className: "score-value" };
-        return { text: String(rating), className: "score-value axis-score" };
-      }
-      return { text: "---", className: "score-value" };
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Separator label (Phase 2)
-// ---------------------------------------------------------------------------
-
-function getSeparatorLabel(field: string, count: number, axes: Axis[]): string | null {
-  if (field === "name") return null; // Every game has a name
-  const n = `${count} game${count !== 1 ? "s" : ""}`;
-  switch (field) {
-    case "fitness":
-      return `Not yet rated \u00b7 ${n}`;
-    case "tournament":
-      return `Not yet ranked \u00b7 ${n}`;
-    case "playerCount":
-      return `No player count data \u00b7 ${n}`;
-    case "playTime":
-      return `No play time data \u00b7 ${n}`;
-    case "bggRating":
-      return `No BGG rating data \u00b7 ${n}`;
-    case "bggWeight":
-      return `No BGG weight data \u00b7 ${n}`;
-    case "yearPublished":
-      return `No year published \u00b7 ${n}`;
-    case "createdAt":
-    case "updatedAt":
-      return null; // Every game has timestamps
-    default: {
-      if (field.startsWith("axis:")) {
-        const axisId = field.slice(5);
-        const axis = axes.find((a) => a.id === axisId);
-        const axisName = axis?.name ?? "unknown";
-        return `No rating on \u2018${axisName}\u2019 \u00b7 ${n}`;
-      }
-      return `No data \u00b7 ${n}`;
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Score column header subtitle (Phase 2)
-// ---------------------------------------------------------------------------
-
-function getScoreSubtitle(field: string, axes: Axis[]): string {
-  switch (field) {
-    case "fitness":
-    case "name":
-      return "Fitness";
-    case "tournament":
-      return "Tournament ELO";
-    case "yearPublished":
-      return "Year";
-    case "createdAt":
-      return "Date Added";
-    case "updatedAt":
-      return "Last Updated";
-    case "playerCount":
-      return "Player Count";
-    case "playTime":
-      return "Play Time";
-    case "bggRating":
-      return "BGG Rating";
-    case "bggWeight":
-      return "BGG Weight";
-    default: {
-      if (field.startsWith("axis:")) {
-        const axisId = field.slice(5);
-        return axes.find((a) => a.id === axisId)?.name ?? "Axis";
-      }
-      return "";
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
+import {
+  type FilterState,
+  type SortState,
+  buildSortFields,
+  DEFAULT_FILTERS,
+  DEFAULT_SORT,
+  getScoreDisplay,
+  getScoreSubtitle,
+  getSeparatorLabel,
+  GROUP_LABELS,
+  GROUP_ORDER,
+  loadFilters,
+  loadSort,
+  matchesFilters,
+  saveFilters,
+  saveSort,
+  sortGames,
+} from "@/lib/collection-utils";
 
 interface CollectionTableProps {
   games: GameWithScore[];
   axes: Axis[];
   tournamentStats: Record<string, TournamentGameStatsDisplay>;
   hasTournamentData: boolean;
+  totalGames: number;
+  ratedCount: number;
+  avgFitness: number | null;
 }
 
 export function CollectionTable({
@@ -345,21 +39,34 @@ export function CollectionTable({
   axes,
   tournamentStats,
   hasTournamentData,
+  totalGames,
+  ratedCount,
+  avgFitness,
 }: CollectionTableProps) {
   // Sort state: default on SSR, hydrate from localStorage after mount
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
+  const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [hydrated, setHydrated] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  const [playerCountInput, setPlayerCountInput] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setSort(loadSort());
+    const loaded = loadFilters();
+    setFilters(loaded);
+    setPlayerCountInput(loaded.playerCount !== null ? String(loaded.playerCount) : "");
     setHydrated(true);
   }, []);
 
   useEffect(() => {
     if (hydrated) saveSort(sort);
   }, [sort, hydrated]);
+
+  useEffect(() => {
+    if (hydrated) saveFilters(filters);
+  }, [filters, hydrated]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -374,13 +81,16 @@ export function CollectionTable({
   }, [menuOpen]);
 
   const hasBggData = games.some((g) => g.game.bggData !== null);
-  const sortFields = buildSortFields(axes, hasTournamentData, hasBggData);
+  // Finding #5 fix: memoize sortFields so useCallback deps are stable
+  const sortFields = useMemo(
+    () => buildSortFields(axes, hasTournamentData, hasBggData),
+    [axes, hasTournamentData, hasBggData],
+  );
   const activeDef = sortFields.find((f) => f.id === sort.field) ?? sortFields[0];
 
   const handleSortSelect = useCallback(
     (fieldId: string) => {
       if (fieldId === sort.field) {
-        // Toggle direction
         setSort({ field: fieldId, direction: sort.direction === "asc" ? "desc" : "asc" });
       } else {
         const def = sortFields.find((f) => f.id === fieldId);
@@ -398,7 +108,6 @@ export function CollectionTable({
     }));
   }, []);
 
-  // Clickable column headers (Phase 2, REQ-CFS-11, 12, 13)
   const handleScoreHeaderClick = useCallback(() => {
     toggleDirection();
   }, [toggleDirection]);
@@ -419,14 +128,49 @@ export function CollectionTable({
     }
   }, [sort.field]);
 
-  // Build sorted lists
-  const { withValue, withoutValue } = sortGames(games, sort.field, sort.direction, tournamentStats);
-  const axisMap = new Map(axes.map((a) => [a.id, a]));
+  // Filter handlers
+  const updateFilter = useCallback(<K extends keyof FilterState>(key: K, value: FilterState[K]) => {
+    setFilters((prev) => ({ ...prev, [key]: value }));
+  }, []);
+
+  const clearAllFilters = useCallback(() => {
+    setFilters(DEFAULT_FILTERS);
+    setPlayerCountInput("");
+  }, []);
+
+  const handlePlayerCountChange = useCallback(
+    (value: string) => {
+      setPlayerCountInput(value);
+      const num = parseInt(value, 10);
+      updateFilter("playerCount", isNaN(num) || num < 1 ? null : num);
+    },
+    [updateFilter],
+  );
+
+  // Apply filters then sort
+  const filtered = useMemo(() => games.filter((g) => matchesFilters(g, filters)), [games, filters]);
+  const { withValue, withoutValue } = sortGames(
+    filtered,
+    sort.field,
+    sort.direction,
+    tournamentStats,
+  );
+  const axisMap = useMemo(() => new Map(axes.map((a) => [a.id, a])), [axes]);
   const isAxisSort = sort.field.startsWith("axis:");
   const separatorLabel =
     withoutValue.length > 0 ? getSeparatorLabel(sort.field, withoutValue.length, axes) : null;
   const scoreSubtitle = getScoreSubtitle(sort.field, axes);
   const dirArrow = sort.direction === "asc" ? "\u2191" : "\u2193";
+  // Finding #1 fix: score column only owns the arrow when it's the active sort target
+  const scoreOwnsSort = sort.field !== "name" && sort.field !== "updatedAt";
+
+  // Filter chip state
+  const hasSearch = filters.search !== "";
+  const hasRatedFilter = filters.ratedStatus !== "all";
+  const hasPlayerCount = filters.playerCount !== null;
+  const activeFilterCount = (hasRatedFilter ? 1 : 0) + (hasPlayerCount ? 1 : 0);
+  const hasAnyFilter = hasSearch || hasRatedFilter || hasPlayerCount;
+  const hiddenCount = totalGames - filtered.length;
 
   // Group fields for the dropdown menu
   const groupedFields = GROUP_ORDER.map((group) => ({
@@ -437,42 +181,179 @@ export function CollectionTable({
 
   return (
     <>
-      {/* Sort control in topbar area */}
-      <div className="sort-control" ref={menuRef}>
-        <span className="sort-label-prefix">Sort by</span>
-        <button className="sort-select" onClick={() => setMenuOpen((v) => !v)}>
-          <span className="sort-select-label">{activeDef.label}</span>
-          <span className="chevron">{menuOpen ? "\u25B2" : "\u25BC"}</span>
-        </button>
-        <button className="sort-dir-btn" onClick={toggleDirection} title="Toggle sort direction">
-          {dirArrow}
-        </button>
+      {/* Filter bar (REQ-CFS-15, 16, 20) */}
+      <div className="filter-bar">
+        <div className="filter-row-1">
+          <div className="search-input-wrap">
+            <span className="search-icon">{"\uD83D\uDD0D"}</span>
+            <input
+              type="text"
+              className={`search-input${hasSearch ? " has-value" : ""}`}
+              placeholder="Search games\u2026"
+              value={filters.search}
+              onChange={(e) => updateFilter("search", e.target.value)}
+            />
+          </div>
 
-        {menuOpen && (
-          <div className="sort-menu">
-            {groupedFields.map(({ group, label, fields }) => (
-              <div className="sort-menu-group" key={group}>
-                <div className="sort-menu-group-label">{label}</div>
-                {fields.map((f) => {
-                  const isAxis = f.group === "axes";
-                  const isActive = f.id === sort.field;
-                  const itemClass = isAxis
-                    ? `sort-menu-axis-item${isActive ? " active" : ""}`
-                    : `sort-menu-item${isActive ? " active" : ""}`;
-                  return (
-                    <div key={f.id} className={itemClass} onClick={() => handleSortSelect(f.id)}>
-                      <span className="check">{isActive ? "\u2713" : ""}</span>
-                      <span className="item-label">{f.label}</span>
-                    </div>
-                  );
-                })}
+          {/* Sort control */}
+          <div className="sort-control" ref={menuRef}>
+            <span className="sort-label-prefix">Sort by</span>
+            <button className="sort-select" onClick={() => setMenuOpen((v) => !v)}>
+              <span className="sort-select-label">{activeDef.label}</span>
+              <span className="chevron">{menuOpen ? "\u25B2" : "\u25BC"}</span>
+            </button>
+            <button
+              className="sort-dir-btn"
+              onClick={toggleDirection}
+              title="Toggle sort direction"
+            >
+              {dirArrow}
+            </button>
+
+            {menuOpen && (
+              <div className="sort-menu">
+                {groupedFields.map(({ group, label, fields }) => (
+                  <div className="sort-menu-group" key={group}>
+                    <div className="sort-menu-group-label">{label}</div>
+                    {fields.map((f) => {
+                      const isAxis = f.group === "axes";
+                      const isActive = f.id === sort.field;
+                      const itemClass = isAxis
+                        ? `sort-menu-axis-item${isActive ? " active" : ""}`
+                        : `sort-menu-item${isActive ? " active" : ""}`;
+                      return (
+                        <div
+                          key={f.id}
+                          className={itemClass}
+                          onClick={() => handleSortSelect(f.id)}
+                        >
+                          <span className="check">{isActive ? "\u2713" : ""}</span>
+                          <span className="item-label">{f.label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
+          </div>
+
+          <button
+            className={`filter-toggle-btn${activeFilterCount > 0 ? " has-filters" : ""}`}
+            onClick={() => setFilterPanelOpen((v) => !v)}
+          >
+            Filters
+            {activeFilterCount > 0 && (
+              <span className="filter-count-badge">{activeFilterCount}</span>
+            )}
+          </button>
+        </div>
+
+        {/* Expandable filter panel (REQ-CFS-16) */}
+        {filterPanelOpen && (
+          <div className="filter-panel">
+            <div className="filter-group">
+              <div className="filter-group-label">Status</div>
+              <div className="filter-group-controls">
+                {(["all", "rated", "unrated"] as const).map((status) => (
+                  <button
+                    key={status}
+                    className={`seg-btn${filters.ratedStatus === status ? " active" : ""}`}
+                    onClick={() => updateFilter("ratedStatus", status)}
+                  >
+                    {status === "all" ? "All" : status === "rated" ? "Rated" : "Unrated"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="filter-group">
+              <div className="filter-group-label">Player Count</div>
+              <div className="filter-group-controls">
+                <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>Plays at</span>
+                <input
+                  type="text"
+                  className="range-input"
+                  placeholder="#"
+                  value={playerCountInput}
+                  onChange={(e) => handlePlayerCountChange(e.target.value)}
+                />
+                <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>players</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Active filter chips (REQ-CFS-17) */}
+        {hasAnyFilter && (
+          <div className="active-chips-row">
+            <span className="chips-label">Active:</span>
+            {hasSearch && (
+              <span className="filter-chip chip-search">
+                &ldquo;{filters.search}&rdquo;{" "}
+                <span className="chip-x" onClick={() => updateFilter("search", "")}>
+                  &times;
+                </span>
+              </span>
+            )}
+            {hasRatedFilter && (
+              <span className="filter-chip chip-rated">
+                {filters.ratedStatus === "rated" ? "Rated only" : "Unrated only"}{" "}
+                <span className="chip-x" onClick={() => updateFilter("ratedStatus", "all")}>
+                  &times;
+                </span>
+              </span>
+            )}
+            {hasPlayerCount && (
+              <span className="filter-chip chip-spec">
+                Plays at {filters.playerCount}{" "}
+                <span
+                  className="chip-x"
+                  onClick={() => {
+                    updateFilter("playerCount", null);
+                    setPlayerCountInput("");
+                  }}
+                >
+                  &times;
+                </span>
+              </span>
+            )}
+            {(hasSearch ? 1 : 0) + (hasRatedFilter ? 1 : 0) + (hasPlayerCount ? 1 : 0) >= 2 && (
+              <span className="clear-all-link" onClick={clearAllFilters}>
+                Clear all
+              </span>
+            )}
           </div>
         )}
       </div>
 
-      {/* Table header with clickable columns (Phase 2) */}
+      {/* Stats strip (REQ-CFS-19) */}
+      <div className="stats-strip">
+        <div className="stat-block">
+          <div className="stat-value">
+            {hasAnyFilter ? `${filtered.length} of ${totalGames}` : totalGames}
+          </div>
+          <div className="stat-label">Games</div>
+        </div>
+        <div className="stat-block">
+          <div className="stat-value score">
+            {avgFitness !== null ? avgFitness.toFixed(1) : "-"}
+          </div>
+          <div className="stat-label">Avg Fitness</div>
+        </div>
+        <div className="stat-block">
+          <div className="stat-value">{ratedCount}</div>
+          <div className="stat-label">Rated</div>
+        </div>
+        <div className="stat-block">
+          <div className="stat-value">{axes.length}</div>
+          <div className="stat-label">Axes</div>
+        </div>
+        {hasAnyFilter && hiddenCount > 0 && (
+          <div className="filtered-note">Filtered, {hiddenCount} games hidden</div>
+        )}
+      </div>
+
+      {/* Table header with clickable columns */}
       <div className="collection-header">
         <div className="rank">#</div>
         <div className="game-thumb-col"></div>
@@ -497,9 +378,9 @@ export function CollectionTable({
           onClick={handleScoreHeaderClick}
           style={{ cursor: "pointer" }}
         >
-          <span className={`score-col-main${sort.field !== "name" ? " sort-active" : ""}`}>
+          <span className={`score-col-main${scoreOwnsSort ? " sort-active" : ""}`}>
             Score
-            <span className="sort-arrow">{dirArrow}</span>
+            {scoreOwnsSort && <span className="sort-arrow">{dirArrow}</span>}
           </span>
           <span className="score-col-sub">{scoreSubtitle}</span>
         </div>
@@ -513,7 +394,6 @@ export function CollectionTable({
           rank={i + 1}
           sortField={sort.field}
           tournamentStats={tournamentStats}
-          axes={axes}
           axisMap={axisMap}
           isAxisSort={isAxisSort}
         />
@@ -535,7 +415,6 @@ export function CollectionTable({
           rank={null}
           sortField={sort.field}
           tournamentStats={tournamentStats}
-          axes={axes}
           axisMap={axisMap}
           isAxisSort={isAxisSort}
         />
@@ -553,25 +432,15 @@ interface GameRowProps {
   rank: number | null;
   sortField: string;
   tournamentStats: Record<string, TournamentGameStatsDisplay>;
-  axes: Axis[];
   axisMap: Map<string, Axis>;
   isAxisSort: boolean;
 }
 
-function GameRow({
-  gws,
-  rank,
-  sortField,
-  tournamentStats,
-  axes,
-  axisMap,
-  isAxisSort,
-}: GameRowProps) {
+function GameRow({ gws, rank, sortField, tournamentStats, axisMap, isAxisSort }: GameRowProps) {
   const { game, score } = gws;
-  const display = getScoreDisplay(gws, sortField, tournamentStats, axes);
+  const display = getScoreDisplay(gws, sortField, tournamentStats);
   const isUnrated = score === null && rank === null;
 
-  // Axes column: show rated axis chips, or alternate context when axis-sorting (REQ-CFS-10)
   const ratedAxisIds = Object.keys(game.ratings);
   const ratedAxisNames = ratedAxisIds
     .map((id) => axisMap.get(id)?.name)
@@ -605,7 +474,6 @@ function GameRow({
       </div>
       <div className="axes-used">
         {isAxisSort ? (
-          // REQ-CFS-10: Show fitness + ELO when sorting by axis
           <AxisSortAltScores gws={gws} tournamentStats={tournamentStats} />
         ) : isUnrated ? (
           <span className="no-ratings">No ratings yet</span>
