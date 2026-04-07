@@ -99,7 +99,7 @@ export default function TournamentSessionPage() {
       router.push("/tournament");
       return;
     }
-    Promise.all([loadSession(), loadNextPair()]);
+    void Promise.all([loadSession(), loadNextPair()]);
   }, [sessionId, loadSession, loadNextPair, router]);
 
   async function handlePick(winnerId: string) {
@@ -166,7 +166,12 @@ export default function TournamentSessionPage() {
       <div className="topbar">
         <div className="topbar-title">Tournament — {sessionDesc}</div>
         <div className="topbar-session-meta">{gameCountInScope} games in scope</div>
-        <button className="btn btn-danger-ghost" onClick={handleEndSession}>
+        <button
+          className="btn btn-danger-ghost"
+          onClick={() => {
+            void handleEndSession();
+          }}
+        >
           End session
         </button>
       </div>
@@ -194,7 +199,9 @@ export default function TournamentSessionPage() {
             <div className="comparison-cards">
               <div
                 className={`game-card${submitting ? " disabled" : ""}`}
-                onClick={() => handlePick(pair.gameA!.id)}
+                onClick={() => {
+                  void handlePick(pair.gameA!.id);
+                }}
               >
                 <div className="game-thumb-lg">
                   {pair.gameA.imageUrl ? (
@@ -237,7 +244,9 @@ export default function TournamentSessionPage() {
 
               <div
                 className={`game-card${submitting ? " disabled" : ""}`}
-                onClick={() => handlePick(pair.gameB!.id)}
+                onClick={() => {
+                  void handlePick(pair.gameB!.id);
+                }}
               >
                 <div className="game-thumb-lg">
                   {pair.gameB.imageUrl ? (
@@ -290,7 +299,12 @@ export default function TournamentSessionPage() {
             </div>
             <div className="session-footer-note">Comparing games with fewer comparisons first</div>
             <div className="session-footer-right">
-              <button className="btn btn-secondary" onClick={handleEndSession}>
+              <button
+                className="btn btn-secondary"
+                onClick={() => {
+                  void handleEndSession();
+                }}
+              >
                 End session
               </button>
             </div>

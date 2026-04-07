@@ -120,7 +120,7 @@ export default function TournamentPage() {
   }, []);
 
   useEffect(() => {
-    loadData();
+    void loadData();
   }, [loadData]);
 
   const currentFilters =
@@ -178,7 +178,7 @@ export default function TournamentPage() {
     try {
       await fetch(`/api/daemon/tournament/sessions/${activeSession.id}/end`, { method: "POST" });
       setActiveSession(null);
-      loadData();
+      void loadData();
     } catch {
       setError("Failed to end session");
     }
@@ -242,7 +242,12 @@ export default function TournamentPage() {
                 >
                   Resume session
                 </button>
-                <button className="btn btn-secondary" onClick={handleEndSession}>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    void handleEndSession();
+                  }}
+                >
                   End
                 </button>
               </div>
@@ -351,7 +356,9 @@ export default function TournamentPage() {
               </div>
               <button
                 className="btn btn-primary btn-lg"
-                onClick={handleStartSession}
+                onClick={() => {
+                  void handleStartSession();
+                }}
                 disabled={gameCount < 4 || starting}
               >
                 {starting ? "Starting..." : "Start session"}

@@ -284,7 +284,7 @@ describe("Tournament Routes", () => {
     });
 
     test("recent comparisons include opponent game names", async () => {
-      const ids = await addGames(5);
+      await addGames(5);
       const startRes = await startSession();
       const { session } = (await startRes.json()) as { session: TournamentSession };
 
@@ -321,7 +321,7 @@ describe("Tournament Routes", () => {
     });
 
     test("returns enriched array with gameId and gameName after comparisons", async () => {
-      const ids = await addGames(5);
+      await addGames(5);
       const startRes = await startSession();
       const { session } = (await startRes.json()) as { session: TournamentSession };
 
