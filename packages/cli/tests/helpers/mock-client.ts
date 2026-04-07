@@ -55,6 +55,6 @@ export function createMockClient(config: MockClientConfig = {}): DaemonClient {
     isReachable(): Promise<boolean> {
       return Promise.resolve(reachable);
     },
-    socketPath: "/tmp/shelf-judge-test.sock",
+    socketPath: "/home/user/.shelf-judge/shelf-judge-test.sock",
   };
 }

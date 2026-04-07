@@ -68,12 +68,6 @@ export default async function CollectionPage() {
             {games.length} game{games.length !== 1 && "s"} &middot; {axes.length} ax
             {axes.length === 1 ? "is" : "es"}
           </span>
-          <Link href="/import" className="btn btn-secondary">
-            Import BGG
-          </Link>
-          <Link href="/search" className="btn btn-primary">
-            Add Game
-          </Link>
           <RefreshAllButton />
         </div>
       </div>

@@ -4,7 +4,7 @@ import type { AppConfig } from "@shelf-judge/shared";
 
 const DEFAULT_DATA_DIR = path.join(os.homedir(), ".shelf-judge", "data");
 const DEFAULT_CONFIG_PATH = path.join(os.homedir(), ".shelf-judge", "config.json");
-const DEFAULT_SOCKET_PATH = "/tmp/shelf-judge.sock";
+const DEFAULT_SOCKET_PATH = path.join(os.homedir(), ".shelf-judge", "shelf-judge.sock");
 
 export interface ResolvedConfig {
   dataDir: string;

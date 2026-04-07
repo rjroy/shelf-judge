@@ -81,6 +81,22 @@ export function createFitnessService(): FitnessService {
         }
       }
 
+      for (const entry of breakdown) {
+        if (entry.contribution !== null && weightSum > 0) {
+          // Recalculate contribution percentage based on final score to ensure consistency
+          entry.contribution = roundToOneDecimal((entry.rating! * entry.weight) / weightSum);
+        }
+      }
+
+      breakdown.sort((a, b) => {
+        // Override entries first, then BGG, then personal; within each group, sort by contribution desc
+        const sourceOrder = { override: 0, bgg: 1, personal: 2 };
+        if (sourceOrder[a.source] !== sourceOrder[b.source]) {
+          return sourceOrder[a.source] - sourceOrder[b.source];
+        }
+        return (b.contribution || 0) - (a.contribution || 0);
+      });
+
       if (ratedCount === 0) return null;
       if (weightSum === 0) return null;
 

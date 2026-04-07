@@ -45,7 +45,7 @@ export const AddGameSchema = z
 // Tournament schemas
 
 export const SessionFilterSchema = z.object({
-  type: z.enum(["name", "minFitness", "bggTag", "staleness"]),
+  type: z.enum(["name", "minFitness", "maxFitness", "bggTag", "staleness"]),
   value: z.string().min(1, "Filter value cannot be empty"),
 });
 

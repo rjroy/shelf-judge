@@ -92,7 +92,7 @@ export interface TournamentSettings {
   provisionalThreshold: number; // Default 6. Games with fewer comparisons show "(provisional)".
 }
 
-export type SessionFilterType = "name" | "minFitness" | "bggTag" | "staleness";
+export type SessionFilterType = "name" | "minFitness" | "maxFitness" | "bggTag" | "staleness";
 
 export interface SessionFilter {
   type: SessionFilterType;
