@@ -268,19 +268,35 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
         const gameId = availableGameIds[i];
         const stats = data.gameStats[gameId];
         const count = stats?.comparisonCount ?? 0;
+        if (count > lowestCount) {
+          continue;
+        }
         if (count < lowestCount) {
           selectedA = gameId;
           lowestCount = count;
           selectedElo = stats?.eloRating ?? 1500;
           selectedCount = count;
-        } if (count === lowestCount) {
-          // Tiebreaker: choose the one with ELO closest to 1500
-          const elo = stats?.eloRating ?? 1500;
-          if (Math.abs(elo - 1500) < Math.abs(selectedElo - 1500)) {
-            selectedA = gameId;
-            selectedElo = elo;
-            selectedCount = count;
-          }
+          continue;
+        } 
+
+        // Tiebreaker: choose the one with ELO closest to 1500
+        const elo = stats?.eloRating ?? 1500;
+        const selectedEloDiff = Math.abs(selectedElo - 1500);
+        const eloDiff = Math.abs(elo - 1500);
+        if (eloDiff > selectedEloDiff) {
+          continue;
+        }
+        if (eloDiff < selectedEloDiff) {
+          selectedA = gameId;
+          selectedElo = elo;
+          selectedCount = count;
+          continue;
+        }
+
+        if (gameId < (selectedA ?? "")) {
+          selectedA = gameId;
+          selectedElo = elo;
+          selectedCount = count;
         }
       }
 
@@ -303,7 +319,11 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
         }
         const eloADiff = Math.abs(selectedElo - (data.gameStats[a]?.eloRating ?? 1500));
         const eloBDiff = Math.abs(selectedElo - (data.gameStats[b]?.eloRating ?? 1500));
-        return eloBDiff - eloADiff;
+        if (eloADiff !== eloBDiff) {
+          return eloADiff - eloBDiff; // games with closer ELO first
+        }
+
+        return a.localeCompare(b); // tiebreaker for consistent ordering
       });
 
       // Get pairs already seen in this session.
