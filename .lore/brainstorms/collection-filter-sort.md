@@ -177,6 +177,7 @@ The collection page already loads all games with scores in a single request. For
 The daemon already sorts by fitness score server-side (the response comes pre-sorted). We could add optional `sort` and `filter` query params to `GET /api/games` for the CLI's benefit, while the web UI ignores them and sorts/filters client-side. This gives CLI users a nice interface without blocking web UI progress. But it's also two implementations of the same logic. Not worth it for MVP.
 
 **Recommendation:** Client-side only for the first pass. The page already has all the data. If CLI needs filtering, add daemon params later.
+USER RESPONSE: Client-side only
 
 ### Client-side implementation consequence
 
@@ -195,6 +196,7 @@ The current sort toggle switches between fitness and tournament ranking. Both sh
 That is: sort field and score display are independent. You might sort by name alphabetically but still see fitness scores. Or sort by player count but see tournament rankings. The current toggle conflates "sort by" with "display metric." Separating them is more flexible.
 
 **What if the score column always showed fitness, and tournament was a separate column?** The table could have both columns visible when tournament data exists. This avoids the toggle entirely and lets users sort by either column independently. Downside: another column on an already-wide table. But tournament data is the user's other ranking signal; hiding one to show the other is a real loss.
+USER RESPONSE: I feel the right thing is to change the score column to be the sort value. Selecting a sort value is a signal of what the user cares about at that moment.
 
 ---
 
@@ -210,21 +212,31 @@ Currently the page renders rated games first (sorted), then unrated games below 
 
 **Recommendation:** Keep the rated/unrated split as the default visual grouping. When the user applies a sort other than fitness or tournament, merge them into a single list (the split only makes sense for score-based sorts). When filtering to rated-only or unrated-only, show only that group.
 
+USER RESPONSE: The rated/unrated split is more of a "has sort value/doesn't have sort value". That's the split. When sorting by minimum player count, if the game doesn't have a player count then it "doesn't have a sort value".
+
 ---
 
 ## Open Questions
 
 1. **Should filter state persist across sessions?** URL params persist per-tab but not across sessions. localStorage could remember "last used filters." But for a curation tool, ephemeral filters seem right; you filter to answer a question, then go back to the full view. If users find themselves re-applying the same filters repeatedly, that's a signal for a saved-views feature later.
-USER RESPONSE: ephemeral filtering is right.
+USER RESPONSE: localStorage.
 
 2. **How should the sort dropdown interact with the existing tournament toggle?** Replace it. The toggle is a special case of sort-by-field. A proper sort dropdown subsumes it. The toggle can be removed once the dropdown exists.
-USER RESPONSE: 
+USER RESPONSE: Replace it, but remember how it was being sorted via localStorage.
 
 3. **Should column headers be clickable for sorting?** Yes for columns that map to a single sort field (Score, Last Rated). Not practical for "Game" (which contains name, year, player count) or "Axes Rated" (which is a count but not obviously sortable). A sort dropdown covers the fields that don't map to a column.
+UUSER RESPONSE: agreed. But keep in mind that the Score column is either the fitness or the tournament score depending on what is selected.
 
 4. **Mobile responsiveness.** The current table is wide. Filters add another bar above it. On mobile, should filters collapse into a slide-out panel? Or is the collection page simply a desktop-first experience for now?
+USER RESPONSE: There is a mobile responsive version that toggles between sorting via Fitness and Tournament. Just replacing that with the drop-down would be sufficient.
 
 5. **What about combining filters?** If I filter to "2 players" AND "under 60 minutes" AND "score above 7," that's a conjunction. Are there cases where OR logic matters? Probably not for MVP. AND is the natural default.
+USER RESPONSE: Not now.
+
+
+## USER GENERAL RESPONSE
+I'd like to be able to sort by a specific axes. This is interesting to me as the user.
+Additionally the "score" column could show what we are sorting by, or if sorting by alphabetic the Fitness score as a special edge case.
 
 ## Next Steps
 
