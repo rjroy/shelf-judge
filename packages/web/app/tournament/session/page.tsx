@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { Suspense, useEffect, useState, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { Game, TournamentGameStatsDisplay, TournamentSession } from "@shelf-judge/shared";
 
@@ -52,6 +52,25 @@ function describeSession(session: TournamentSession): string {
 }
 
 export default function TournamentSessionPage() {
+  return (
+    <Suspense
+      fallback={
+        <>
+          <div className="topbar">
+            <div className="topbar-title">Tournament</div>
+          </div>
+          <div className="comparison-area">
+            <div className="tournament-loading">Loading...</div>
+          </div>
+        </>
+      }
+    >
+      <TournamentSessionPageInner />
+    </Suspense>
+  );
+}
+
+function TournamentSessionPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const sessionId = searchParams.get("id");
