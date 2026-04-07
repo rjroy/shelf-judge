@@ -51,3 +51,10 @@ Reviewed `collection-table.tsx` (665 lines), `date-utils.ts` (22 lines), `page.t
 
 **Finding #1 (Score arrow unconditional):** Added `scoreOwnsSort` flag gating the arrow to render only when `sort.field !== "name" && sort.field ...
 - 08:35 commission-Dalton-20260407-081539 completed
+- 08:39 commission-Dalton-20260407-081548 result: Phase 4 complete. All deliverables implemented:
+
+**Deleted:**
+- `packages/web/components/collection-sort-toggle.tsx` (REQ-CFS-28)
+
+**No `.sort-toggle` CSS remained** (Phase 1 already cleaned it). No r...
+- 08:39 commission-Dalton-20260407-081548 completed
