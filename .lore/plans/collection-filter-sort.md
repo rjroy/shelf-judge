@@ -1,7 +1,7 @@
 ---
 title: "Implementation plan: collection-filter-sort"
 date: 2026-04-07
-status: approved
+status: executed
 tags: [plan, web-ui, filtering, sorting, collection, client-component]
 modules: [web]
 related:

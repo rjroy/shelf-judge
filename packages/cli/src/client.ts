@@ -1,6 +1,8 @@
 // Unix socket HTTP client for communicating with the shelf-judge daemon.
 
-const DEFAULT_SOCKET_PATH = "/tmp/shelf-judge.sock";
+import path from "path";
+
+const DEFAULT_SOCKET_PATH = process.env.SHELF_JUDGE_SOCKET ?? path.join(process.env.HOME ?? ".", ".shelf-judge", "shelf-judge.sock");
 
 export interface DaemonClientOptions {
   socketPath?: string;

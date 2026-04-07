@@ -63,6 +63,12 @@ function applyFilters(
         break;
       }
 
+      case "maxFitness": {
+        const threshold = parseFloat(filter.value);
+        result = result.filter((g) => g.score !== null && g.score.score <= threshold);
+        break;
+      }
+
       case "bggTag": {
         result = result.filter((g) => {
           const bgg = g.game.bggData;
@@ -254,9 +260,10 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
         return null;
       }
 
-      // Start with the game with the fewest comparisons (REQ-TOURN-8)
+      // Start with the game with the fewest comparisons
       let selectedA: string | null = null;
       let selectedElo = 1500;
+      let selectedCount = 0;
       for (let i = 0, lowestCount = Infinity; i < availableGameIds.length; i++) {
         const gameId = availableGameIds[i];
         const stats = data.gameStats[gameId];
@@ -265,6 +272,15 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
           selectedA = gameId;
           lowestCount = count;
           selectedElo = stats?.eloRating ?? 1500;
+          selectedCount = count;
+        } if (count === lowestCount) {
+          // Tiebreaker: choose the one with ELO closest to 1500
+          const elo = stats?.eloRating ?? 1500;
+          if (Math.abs(elo - 1500) < Math.abs(selectedElo - 1500)) {
+            selectedA = gameId;
+            selectedElo = elo;
+            selectedCount = count;
+          }
         }
       }
 
@@ -276,10 +292,12 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
         return null;
       }
 
-      // Sort remaining candidates by fewest comparisons, then by furthest ELO from selectedA (REQ-TOURN-8)
+      // Sort the remaining games by comparison count (fewest first), then ELO proximity to selectedA
+      // But allow games with almost the same count (within 1) to be mixed together to add some variety
+      // After kFactorThreshold comparisons, the count difference is no longer considered to allow more mixing
       availableGameIds.sort((a:string, b:string) => {
-        const countA = data.gameStats[a]?.comparisonCount ?? 0;
-        const countB = data.gameStats[b]?.comparisonCount ?? 0;
+        const countA = Math.min(data.settings.kFactorThreshold, Math.max(0, Math.abs(data.gameStats[a]?.comparisonCount ?? 0 - selectedCount) - 1));
+        const countB = Math.min(data.settings.kFactorThreshold, Math.max(0, Math.abs(data.gameStats[b]?.comparisonCount ?? 0 - selectedCount) - 1));
         if (countA !== countB) {
           return countA - countB; // games with fewer comparisons first
         }
@@ -298,7 +316,7 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
         seenPairs.add(key);
       }
 
-      // Find the first pair that hasn't been seen before (REQ-TOURN-8)
+      // Find the first pair that hasn't been seen before
       for (let j = 0; j < availableGameIds.length; j++) {
         const b = availableGameIds[j];
         if (b === selectedA) continue;

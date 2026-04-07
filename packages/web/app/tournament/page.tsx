@@ -16,7 +16,7 @@ interface TournamentStatsEntry {
   stats: TournamentGameStatsDisplay;
 }
 
-type PresetKey = "all" | "unranked" | "topRated" | "needsData" | "custom";
+type PresetKey = "all" | "unranked" | "topRated" | "lowRated" | "needsData" | "custom";
 
 interface PresetDef {
   key: PresetKey;
@@ -28,6 +28,7 @@ const PRESETS: PresetDef[] = [
   { key: "all", label: "All games", filters: null },
   { key: "unranked", label: "Unranked", filters: [{ type: "staleness", value: "6" }] },
   { key: "topRated", label: "Top rated", filters: [{ type: "minFitness", value: "7.5" }] },
+  { key: "lowRated", label: "Low rated", filters: [{ type: "maxFitness", value: "4.5" }] },
   { key: "needsData", label: "Needs more data", filters: [{ type: "staleness", value: "3" }] },
 ];
 
@@ -40,6 +41,8 @@ function describeFilters(filters: SessionFilter[] | null): string {
           return `Name: "${f.value}"`;
         case "minFitness":
           return `Fitness >= ${f.value}`;
+        case "maxFitness":
+          return `Fitness <= ${f.value}`;
         case "bggTag":
           return `Tag: ${f.value}`;
         case "staleness":
@@ -64,6 +67,8 @@ function countMatchingGames(
           return game.name.toLowerCase().includes(f.value.toLowerCase());
         case "minFitness":
           return score !== null && score.score >= parseFloat(f.value);
+        case "maxFitness":
+          return score !== null && score.score <= parseFloat(f.value);
         case "bggTag": {
           const mechanics = game.bggData?.mechanics ?? [];
           const categories = game.bggData?.categories ?? [];
@@ -321,6 +326,7 @@ export default function TournamentPage() {
                   <option value="">Select filter type...</option>
                   <option value="name">Name contains...</option>
                   <option value="minFitness">Axis fitness above...</option>
+                  <option value="maxFitness">Axis fitness below...</option>
                   <option value="bggTag">BGG tag...</option>
                   <option value="staleness">Fewer than N comparisons</option>
                 </select>
@@ -328,16 +334,18 @@ export default function TournamentPage() {
                   <input
                     className="filter-value-input"
                     type={
-                      filterType === "minFitness" || filterType === "staleness" ? "number" : "text"
+                      filterType === "minFitness" || filterType === "maxFitness" || filterType === "staleness" ? "number" : "text"
                     }
                     placeholder={
                       filterType === "name"
                         ? "Game name..."
                         : filterType === "minFitness"
                           ? "7.5"
-                          : filterType === "bggTag"
-                            ? "Worker Placement"
-                            : "6"
+                          : filterType === "maxFitness"
+                            ? "6.0"
+                            : filterType === "bggTag"
+                              ? "Worker Placement"
+                              : "6"
                     }
                     value={filterValue}
                     onChange={(e) => setFilterValue(e.target.value)}

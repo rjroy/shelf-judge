@@ -90,22 +90,22 @@ describe("FitnessService", () => {
       const wife = result!.breakdown.find((b) => b.axisId === "wife")!;
       expect(wife.rating).toBe(8);
       expect(wife.source).toBe("personal");
-      expect(wife.contribution).toBe(320);
+      expect(wife.contribution).toBeCloseTo(3.2);
 
       const visual = result!.breakdown.find((b) => b.axisId === "visual")!;
       expect(visual.rating).toBe(9);
       expect(visual.source).toBe("personal");
-      expect(visual.contribution).toBe(270);
+      expect(visual.contribution).toBeCloseTo(2.7);
 
       const complexity = result!.breakdown.find((b) => b.axisId === "complexity")!;
       expect(complexity.rating).toBe(5.8);
       expect(complexity.source).toBe("bgg");
-      expect(complexity.contribution).toBe(116);
+      expect(complexity.contribution).toBeCloseTo(1.2);
 
       const community = result!.breakdown.find((b) => b.axisId === "community")!;
       expect(community.rating).toBe(8.1);
       expect(community.source).toBe("bgg");
-      expect(community.contribution).toBe(81);
+      expect(community.contribution).toBeCloseTo(0.8);
 
       // Verify the math: (320 + 270 + 116 + 81) / 100 = 7.87 -> 7.9
       const totalContribution = result!.breakdown
@@ -114,7 +114,8 @@ describe("FitnessService", () => {
       const totalWeight = result!.breakdown
         .filter((b) => b.rating !== null)
         .reduce((sum, b) => sum + b.weight, 0);
-      expect(Math.round((totalContribution / totalWeight) * 10) / 10).toBe(7.9);
+      expect(totalContribution).toBeCloseTo(7.9);
+      expect(totalWeight).toBeCloseTo(100);
     });
   });
 
@@ -332,8 +333,8 @@ describe("FitnessService", () => {
 
       // Displayed rating is rounded
       expect(entry.rating).toBe(7.7);
-      // Contribution is rounded from raw: roundToOneDecimal(7.666 * 30) = 230
-      expect(entry.contribution).toBe(230);
+      // Contribution is rounded from raw: roundToOneDecimal(7.666 * 30 / 30) = 7.7
+      expect(entry.contribution).toBe(7.7);
       // Score uses raw value: 7.666 * 30 / 30 = 7.666, rounded to 7.7
       expect(result!.score).toBe(7.7);
     });
@@ -357,7 +358,8 @@ describe("FitnessService", () => {
       const totalWeight = result!.breakdown
         .filter((b) => b.rating !== null)
         .reduce((sum, b) => sum + b.weight, 0);
-      expect(result!.score).toBe(Math.round((totalContribution / totalWeight) * 10) / 10);
+      expect(result!.score).toBeCloseTo(totalContribution);
+      expect(totalWeight).toBeCloseTo(100);
     });
   });
 

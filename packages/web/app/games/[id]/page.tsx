@@ -157,7 +157,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
                 <div className="tournament-stat-label">Record</div>
               </div>
               <div className="tournament-stat">
-                <div className="tournament-stat-value">{tournamentStats.eloRating}</div>
+                <div className="tournament-stat-value">{Math.round(tournamentStats.eloRating)}</div>
                 <div className="tournament-stat-label">Raw ELO</div>
               </div>
               <div className="tournament-stat">

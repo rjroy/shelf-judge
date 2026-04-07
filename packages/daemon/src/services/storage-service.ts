@@ -1,4 +1,5 @@
 import * as path from "node:path";
+import * as os from "node:os";
 import { v4 as uuidv4 } from "uuid";
 import type { Collection, AppConfig, TournamentData } from "@shelf-judge/shared";
 import type { FileOps } from "./file-ops.js";
@@ -65,7 +66,7 @@ function defaultConfig(dataDir: string): AppConfig {
   return {
     bggAuthToken: null,
     dataDir,
-    socketPath: "/tmp/shelf-judge.sock",
+    socketPath: path.join(os.homedir(), ".shelf-judge", "shelf-judge.sock"),
   };
 }
 

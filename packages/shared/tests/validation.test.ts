@@ -164,7 +164,7 @@ describe("AddGameSchema", () => {
 
 describe("SessionFilterSchema", () => {
   test("accepts valid filter types", () => {
-    for (const type of ["name", "minFitness", "bggTag", "staleness"] as const) {
+    for (const type of ["name", "minFitness", "maxFitness", "bggTag", "staleness"] as const) {
       const result = SessionFilterSchema.safeParse({ type, value: "test" });
       expect(result.success).toBe(true);
     }

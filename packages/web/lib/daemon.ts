@@ -5,8 +5,10 @@
 // for Unix socket support instead of Bun's fetch({ unix }) extension.
 
 import http from "node:http";
+import * as path from "node:path";
+import * as os from "node:os";
 
-const SOCKET_PATH = process.env.SHELF_JUDGE_SOCKET ?? "/tmp/shelf-judge.sock";
+const SOCKET_PATH = process.env.SHELF_JUDGE_SOCKET ?? path.join(os.homedir(), ".shelf-judge", "shelf-judge.sock");
 
 export interface DaemonFetchOptions {
   method?: string;

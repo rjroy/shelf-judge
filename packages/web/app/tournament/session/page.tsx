@@ -40,8 +40,10 @@ function describeSession(session: TournamentSession): string {
           return `"${f.value}"`;
         case "minFitness":
           return `Fitness >= ${f.value}`;
+        case "maxFitness":
+          return `Fitness <= ${f.value}`;
         case "bggTag":
-          return f.value;
+          return `Tag: ${f.value}`;
         case "staleness":
           return `< ${f.value} comparisons`;
         default:

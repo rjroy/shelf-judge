@@ -1,7 +1,7 @@
 ---
 title: "Collection page filtering and sorting"
 date: 2026-04-07
-status: approved
+status: implemented
 tags: [spec, web-ui, filtering, sorting, ux, collection]
 modules: [web-ui]
 related:

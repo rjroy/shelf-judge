@@ -1,3 +1,5 @@
+import * as os from "os";
+import * as path from "path";
 import { describe, expect, test } from "bun:test";
 import type { Collection } from "@shelf-judge/shared";
 import { createStorageService } from "../../src/services/storage-service.js";
@@ -155,7 +157,7 @@ describe("StorageService.loadConfig", () => {
 
     expect(config.bggAuthToken).toBeNull();
     expect(config.dataDir).toBe(DATA_DIR);
-    expect(config.socketPath).toBe("/tmp/shelf-judge.sock");
+    expect(config.socketPath).toBe(path.join(os.homedir(), ".shelf-judge", "shelf-judge.sock"));
   });
 
   test("loads config from existing file", async () => {
