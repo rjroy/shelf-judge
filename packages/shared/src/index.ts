@@ -20,6 +20,11 @@ export type {
   TournamentData,
   RecentComparison,
   TournamentGameStatsDisplay,
+  GameWithScore,
+  AddGameResult,
+  BggSearchResult,
+  ImportProgress,
+  ImportComplete,
 } from "./types.js";
 
 export {

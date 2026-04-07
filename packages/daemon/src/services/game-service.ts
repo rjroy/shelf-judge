@@ -5,27 +5,18 @@ import {
   type Game,
   type AddGameInput,
   type FitnessResult,
+  type GameWithScore,
+  type AddGameResult,
+  type BggSearchResult,
 } from "@shelf-judge/shared";
 import type { StorageService } from "./storage-service.js";
 import type { FitnessService } from "./fitness-service.js";
 import type { BggClient, BggGameResult } from "./bgg-client.js";
-import type { BggSearchResult, BggCollectionItem } from "./bgg-xml-parser.js";
+import type { BggCollectionItem } from "./bgg-xml-parser.js";
 import { createLogger } from "./logger.js";
-
-export interface AddGameResult {
-  game: Game;
-  bggImported: boolean;
-  warning?: string;
-}
 
 const STALE_THRESHOLD_DAYS = 7;
 const STALE_THRESHOLD_MS = STALE_THRESHOLD_DAYS * 24 * 60 * 60 * 1000;
-
-export interface GameWithScore {
-  game: Game;
-  score: FitnessResult | null;
-  bggDataStale?: boolean;
-}
 
 export interface RefreshSummary {
   refreshed: number;

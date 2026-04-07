@@ -7,9 +7,9 @@ import type {
   Comparison,
   SessionFilter,
   RecentComparison,
+  GameWithScore,
 } from "@shelf-judge/shared";
 import type { StorageService } from "./storage-service.js";
-import type { GameWithScore } from "./game-service.js";
 import {
   calculateNewRatings,
   normalizeElo,

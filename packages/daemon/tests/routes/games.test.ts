@@ -6,35 +6,22 @@ import {
   type TestAppContext,
 } from "../helpers/test-app.js";
 import type { BggGameResult } from "../../src/services/bgg-client.js";
-import type { Axis, Game, FitnessResult } from "@shelf-judge/shared";
+import type {
+  Axis,
+  Game,
+  FitnessResult,
+  AddGameResult,
+  GameWithScore,
+  BggSearchResult,
+} from "@shelf-judge/shared";
 
-interface GameAddResponse {
-  game: Game;
-  bggImported: boolean;
-  warning?: string;
-}
-
-interface GameDetailResponse {
-  game: Game;
-  score: FitnessResult | null;
-  bggDataStale?: boolean;
-}
-
-interface GameListEntry {
-  game: Game;
-  score: FitnessResult | null;
-  bggDataStale?: boolean;
-}
+type GameAddResponse = AddGameResult;
+type GameDetailResponse = GameWithScore;
+type GameListEntry = GameWithScore;
 
 interface GameRateResponse {
   game: Game;
   score: FitnessResult | null;
-}
-
-interface BggSearchResult {
-  bggId: number;
-  name: string;
-  yearPublished: number | null;
 }
 
 interface RefreshResponse {

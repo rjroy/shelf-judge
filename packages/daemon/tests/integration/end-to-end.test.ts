@@ -9,30 +9,24 @@ import {
 } from "../helpers/test-app.js";
 import type { BggGameResult } from "../../src/services/bgg-client.js";
 import type { BggCollectionItem } from "../../src/services/bgg-xml-parser.js";
-import type { Game, Axis, FitnessResult, FitnessBreakdownEntry } from "@shelf-judge/shared";
+import type {
+  Game,
+  Axis,
+  FitnessResult,
+  FitnessBreakdownEntry,
+  AddGameResult,
+  GameWithScore,
+} from "@shelf-judge/shared";
 
 // Response shapes returned by the daemon API
-interface AddGameResponse {
-  game: Game;
-  bggImported: boolean;
-  warning?: string;
-}
+type AddGameResponse = AddGameResult;
 
 interface RateGameResponse {
   game: Game;
   score: FitnessResult | null;
 }
 
-interface GameWithScore {
-  game: Game;
-  score: FitnessResult | null;
-}
-
-interface GetGameResponse {
-  game: Game;
-  score: FitnessResult | null;
-  bggDataStale?: boolean;
-}
+type GetGameResponse = GameWithScore;
 
 interface ScoreResponse {
   gameId: string;

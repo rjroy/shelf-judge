@@ -2,8 +2,7 @@ import { describe, test, expect, beforeEach } from "bun:test";
 import { createTournamentService } from "../src/services/tournament-service.js";
 import type { TournamentService } from "../src/services/tournament-service.js";
 import type { StorageService } from "../src/services/storage-service.js";
-import type { GameWithScore } from "../src/services/game-service.js";
-import type { TournamentData, Game, BggGameData } from "@shelf-judge/shared";
+import type { TournamentData, Game, BggGameData, GameWithScore } from "@shelf-judge/shared";
 
 // In-memory storage stub for tournament data
 function createStubStorage(): StorageService & { tournamentData: TournamentData } {

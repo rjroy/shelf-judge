@@ -1,38 +1,18 @@
 // Daemon API client for server-side use (Next.js server components).
 // Client components go through the /api/daemon/[...path] proxy instead.
 
-import type { Game, Axis, FitnessResult, FitnessBreakdownEntry } from "@shelf-judge/shared";
+import type {
+  Game,
+  Axis,
+  FitnessResult,
+  FitnessBreakdownEntry,
+  GameWithScore,
+  AddGameResult,
+  BggSearchResult,
+  ImportProgress,
+  ImportComplete,
+} from "@shelf-judge/shared";
 import { daemonRequest, daemonJson } from "./daemon";
-
-export interface GameWithScore {
-  game: Game;
-  score: FitnessResult | null;
-  bggDataStale?: boolean;
-}
-
-export interface AddGameResult {
-  game: Game;
-  bggImported: boolean;
-  warning?: string;
-}
-
-export interface BggSearchResult {
-  bggId: number;
-  name: string;
-  yearPublished: number | null;
-}
-
-export interface ImportProgress {
-  imported: number;
-  total: number;
-  current: string;
-}
-
-export interface ImportComplete {
-  imported: number;
-  skipped: number;
-  errors: string[];
-}
 
 export async function listGames(): Promise<GameWithScore[]> {
   return daemonJson("/api/games");
@@ -208,4 +188,14 @@ export async function listTournamentSessions(): Promise<TournamentSession[]> {
 }
 
 // Re-export types for convenience
-export type { Game, Axis, FitnessResult, FitnessBreakdownEntry };
+export type {
+  Game,
+  Axis,
+  FitnessResult,
+  FitnessBreakdownEntry,
+  GameWithScore,
+  AddGameResult,
+  BggSearchResult,
+  ImportProgress,
+  ImportComplete,
+};

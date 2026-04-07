@@ -1,9 +1,13 @@
-import { toErrorMessage, type BggGameData, type AppConfig } from "@shelf-judge/shared";
+import {
+  toErrorMessage,
+  type BggGameData,
+  type AppConfig,
+  type BggSearchResult,
+} from "@shelf-judge/shared";
 import {
   parseThingItems,
   parseSearchResponse,
   parseCollectionResponse,
-  type BggSearchResult,
   type BggCollectionItem,
   type ThingMetadata,
 } from "./bgg-xml-parser.js";

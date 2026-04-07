@@ -2,18 +2,7 @@
 
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-
-interface ImportProgress {
-  imported: number;
-  total: number;
-  current: string;
-}
-
-interface ImportResult {
-  imported: number;
-  skipped: number;
-  errors: string[];
-}
+import type { ImportProgress, ImportComplete } from "@shelf-judge/shared";
 
 function progressStatusText(progress: ImportProgress): string {
   if (progress.current) return `Fetching ${progress.current} from BGG…`;
@@ -26,7 +15,7 @@ export default function ImportPage() {
   const [username, setUsername] = useState("");
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState<ImportProgress | null>(null);
-  const [result, setResult] = useState<ImportResult | null>(null);
+  const [result, setResult] = useState<ImportComplete | null>(null);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -88,7 +77,7 @@ export default function ImportPage() {
                 if (eventType === "progress") {
                   setProgress(parsed as ImportProgress);
                 } else if (eventType === "complete") {
-                  setResult(parsed as ImportResult);
+                  setResult(parsed as ImportComplete);
                 } else if (eventType === "error") {
                   setError((parsed as { error: string }).error);
                 }

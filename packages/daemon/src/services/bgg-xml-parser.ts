@@ -1,11 +1,10 @@
 import { XMLParser } from "fast-xml-parser";
-import type { BggGameData, BggTag, SuggestedPlayerCount } from "@shelf-judge/shared";
-
-export interface BggSearchResult {
-  bggId: number;
-  name: string;
-  yearPublished: number | null;
-}
+import type {
+  BggGameData,
+  BggTag,
+  SuggestedPlayerCount,
+  BggSearchResult,
+} from "@shelf-judge/shared";
 
 export interface BggCollectionItem {
   bggId: number;
