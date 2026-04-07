@@ -188,7 +188,11 @@ export async function getTournamentGameStats(gameId: string): Promise<Tournament
 }
 
 export async function getAllTournamentStats(): Promise<Record<string, TournamentGameStatsDisplay>> {
-  return daemonJson("/api/tournament/stats");
+  const entries =
+    await daemonJson<{ gameId: string; gameName: string; stats: TournamentGameStatsDisplay }[]>(
+      "/api/tournament/stats",
+    );
+  return Object.fromEntries(entries.map((e) => [e.gameId, e.stats]));
 }
 
 export async function recalculateElo(): Promise<{ gamesUpdated: number }> {

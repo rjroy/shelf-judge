@@ -47,3 +47,7 @@ Design docs, specs, plans, and research live in `.lore/`. Check there before ask
 - `.lore/vision.md` - Project principles and anti-goals
 - `.lore/specs/mvp.md` - MVP requirements (24 items)
 - `.lore/designs/` - Data model, fitness algorithm, API surface, BGG integration, CLI, web UI
+
+## Critical Lessons
+
+- When a daemon route's response shape changes, grep every client helper (web and CLI) in the same change, not just the one that prompted the edit.
