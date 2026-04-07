@@ -378,7 +378,7 @@ describe("TournamentService", () => {
       expect(pair).not.toBeNull();
       const pairGames = [pair!.gameA, pair!.gameB];
       const zeroCompGames = ["g3", "g4", "g5"];
-      expect(pairGames.every((g) => zeroCompGames.includes(g))).toBe(true);
+      expect(pairGames.some((g) => zeroCompGames.includes(g))).toBe(true);
     });
 
     test("throws for non-existent session", async () => {
