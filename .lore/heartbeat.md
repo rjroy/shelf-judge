@@ -38,3 +38,8 @@ Five sequential phases covering all 30 requirements from the spec:
 
 1. **Sort State and Dropdown** — Creates `CollectionTable` ...
 - 08:11 commission-Octavia-20260407-080800 completed
+- 08:20 commission-Dalton-20260407-081514 result: Phases 1 and 2 of collection filter/sort implemented. All verification passes: typecheck clean, lint clean, 398 tests pass (0 fail).
+
+**Phase 1 (Sort State and Dropdown):**
+- Created `packages/web/lib...
+- 08:20 commission-Dalton-20260407-081514 completed
