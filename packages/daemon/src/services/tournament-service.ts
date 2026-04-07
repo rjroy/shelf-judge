@@ -254,15 +254,6 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
         return null;
       }
 
-      // Get pairs already seen in any session. Once a pair has been judged,
-      // don't re-offer it — ELO refinement happens through new match-ups,
-      // not repeats of the same match.
-      const seenPairs = new Set<string>();
-      for (const comp of data.comparisons) {
-        const key = [comp.gameAId, comp.gameBId].sort().join("|");
-        seenPairs.add(key);
-      }
-
       // Start with the game with the fewest comparisons (REQ-TOURN-8)
       let selectedA: string | null = null;
       let selectedElo = 1500;
@@ -285,12 +276,27 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
         return null;
       }
 
-      // Prioritize pairs with the furthest-apart ELO ratings, to maximize information gained from each comparison (REQ-TOURN-9).
+      // Sort remaining candidates by fewest comparisons, then by furthest ELO from selectedA (REQ-TOURN-8)
       availableGameIds.sort((a:string, b:string) => {
+        const countA = data.gameStats[a]?.comparisonCount ?? 0;
+        const countB = data.gameStats[b]?.comparisonCount ?? 0;
+        if (countA !== countB) {
+          return countA - countB; // games with fewer comparisons first
+        }
         const eloADiff = Math.abs(selectedElo - (data.gameStats[a]?.eloRating ?? 1500));
         const eloBDiff = Math.abs(selectedElo - (data.gameStats[b]?.eloRating ?? 1500));
         return eloBDiff - eloADiff;
       });
+
+      // Get pairs already seen in this session.
+      const seenPairs = new Set<string>();
+      for (const comp of data.comparisons) {
+        if (comp.sessionId !== sessionId) {
+          continue;
+        }
+        const key = [comp.gameAId, comp.gameBId].sort().join("|");
+        seenPairs.add(key);
+      }
 
       // Find the first pair that hasn't been seen before (REQ-TOURN-8)
       for (let j = 0; j < availableGameIds.length; j++) {
