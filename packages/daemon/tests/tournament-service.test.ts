@@ -176,31 +176,97 @@ describe("TournamentService", () => {
       expect(session.gameIds).not.toContain("g5");
     });
 
-    test("filters by bggTag (mechanics and categories)", async () => {
+    test("filters by bggTag with fuzzy token matching (positive: 'deck building' matches 'Deck, Bag, and Pool Building')", async () => {
       const bggGames = [
-        makeGameWithScore("g1", "Alpha", null, { bggData: makeBggData(["Deck Building"], []) }),
-        makeGameWithScore("g2", "Beta", null, { bggData: makeBggData([], ["Strategy"]) }),
-        makeGameWithScore("g3", "Gamma", null, {
-          bggData: makeBggData(["Deck Building"], ["Strategy"]),
+        makeGameWithScore("g1", "Alpha", null, {
+          bggData: makeBggData(["Deck, Bag, and Pool Building"], []),
         }),
-        makeGameWithScore("g4", "Delta", null, { bggData: makeBggData(["Deck Building"], []) }),
+        makeGameWithScore("g2", "Beta", null, {
+          bggData: makeBggData(["Deck, Bag, and Pool Building"], ["Strategy"]),
+        }),
+        makeGameWithScore("g3", "Gamma", null, {
+          bggData: makeBggData(["Worker Placement"], []),
+        }),
+        makeGameWithScore("g4", "Delta", null, {
+          bggData: makeBggData(["Deck, Bag, and Pool Building"], []),
+        }),
         makeGameWithScore("g5", "Epsilon", null, { bggData: makeBggData([], []) }),
         makeGameWithScore("g6", "Zeta", null, {
-          bggData: makeBggData([], ["Deck Building"]),
+          bggData: makeBggData([], ["Deck, Bag, and Pool Building"]),
         }),
       ];
       const session = await service.startSession(
         [{ type: "bggTag", value: "deck building" }],
         bggGames,
       );
-      // g1(mech), g3(mech), g4(mech), g6(cat) match. g2 and g5 don't.
       expect(session.gameIds).toHaveLength(4);
       expect(session.gameIds).toContain("g1");
-      expect(session.gameIds).toContain("g3");
+      expect(session.gameIds).toContain("g2");
       expect(session.gameIds).toContain("g4");
       expect(session.gameIds).toContain("g6");
-      expect(session.gameIds).not.toContain("g2");
+      expect(session.gameIds).not.toContain("g3");
       expect(session.gameIds).not.toContain("g5");
+    });
+
+    test("filters by bggTag rejects when query token has no substring match (negative: 'decks building')", async () => {
+      const bggGames = [
+        makeGameWithScore("g1", "Alpha", null, {
+          bggData: makeBggData(["Deck, Bag, and Pool Building"], []),
+        }),
+        makeGameWithScore("g2", "Beta", null, {
+          bggData: makeBggData(["Deck, Bag, and Pool Building"], []),
+        }),
+        makeGameWithScore("g3", "Gamma", null, {
+          bggData: makeBggData(["Deck, Bag, and Pool Building"], []),
+        }),
+        makeGameWithScore("g4", "Delta", null, {
+          bggData: makeBggData(["Deck, Bag, and Pool Building"], []),
+        }),
+      ];
+      try {
+        await service.startSession([{ type: "bggTag", value: "decks building" }], bggGames);
+        expect.unreachable("should have thrown");
+      } catch (err) {
+        expect((err as Error).message).toContain("only 0 matched");
+      }
+    });
+
+    test("filters by bggTag enforces per-tag matching (negative: 'worker deck' across two mechanics)", async () => {
+      const bggGames = [
+        makeGameWithScore("g1", "Alpha", null, {
+          bggData: makeBggData(["Worker Placement", "Deck Building"], []),
+        }),
+        makeGameWithScore("g2", "Beta", null, {
+          bggData: makeBggData(["Worker Placement", "Deck Building"], []),
+        }),
+        makeGameWithScore("g3", "Gamma", null, {
+          bggData: makeBggData(["Worker Placement", "Deck Building"], []),
+        }),
+        makeGameWithScore("g4", "Delta", null, {
+          bggData: makeBggData(["Worker Placement", "Deck Building"], []),
+        }),
+      ];
+      try {
+        await service.startSession([{ type: "bggTag", value: "worker deck" }], bggGames);
+        expect.unreachable("should have thrown");
+      } catch (err) {
+        expect((err as Error).message).toContain("only 0 matched");
+      }
+    });
+
+    test("filters by bggTag with empty value matches no games", async () => {
+      const bggGames = [
+        makeGameWithScore("g1", "Alpha", null, { bggData: makeBggData(["Deck Building"], []) }),
+        makeGameWithScore("g2", "Beta", null, { bggData: makeBggData(["Deck Building"], []) }),
+        makeGameWithScore("g3", "Gamma", null, { bggData: makeBggData(["Deck Building"], []) }),
+        makeGameWithScore("g4", "Delta", null, { bggData: makeBggData(["Deck Building"], []) }),
+      ];
+      try {
+        await service.startSession([{ type: "bggTag", value: "" }], bggGames);
+        expect.unreachable("should have thrown");
+      } catch (err) {
+        expect((err as Error).message).toContain("only 0 matched");
+      }
     });
 
     test("filters by staleness (games with low comparison count)", async () => {

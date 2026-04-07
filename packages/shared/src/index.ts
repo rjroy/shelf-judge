@@ -25,7 +25,7 @@ export type {
   BggSearchResult,
   ImportProgress,
   ImportComplete,
-} from "./types.js";
+} from "./types";
 
 export {
   CreateAxisSchema,
@@ -36,9 +36,11 @@ export {
   StartSessionSchema,
   SubmitComparisonSchema,
   TournamentSettingsUpdateSchema,
-} from "./validation.js";
+} from "./validation";
 
-export { toErrorMessage } from "./errors.js";
+export { toErrorMessage } from "./errors";
+
+export { matchesBggTag, normalizeBggTagTokens } from "./bgg-tag-match";
 
 export type {
   CreateAxisInput,
@@ -49,4 +51,4 @@ export type {
   StartSessionInput,
   SubmitComparisonInput,
   TournamentSettingsUpdateInput,
-} from "./validation.js";
+} from "./validation";

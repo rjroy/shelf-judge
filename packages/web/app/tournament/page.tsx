@@ -2,12 +2,19 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { matchesBggTag } from "@shelf-judge/shared";
 import type {
   TournamentSession,
   SessionFilter,
   TournamentGameStatsDisplay,
 } from "@shelf-judge/shared";
 import type { GameWithScore } from "@/lib/api";
+
+interface TournamentStatsEntry {
+  gameId: string;
+  gameName: string;
+  stats: TournamentGameStatsDisplay;
+}
 
 type PresetKey = "all" | "unranked" | "topRated" | "needsData" | "custom";
 
@@ -58,13 +65,10 @@ function countMatchingGames(
         case "minFitness":
           return score !== null && score.score >= parseFloat(f.value);
         case "bggTag": {
-          const tag = f.value.toLowerCase();
           const mechanics = game.bggData?.mechanics ?? [];
           const categories = game.bggData?.categories ?? [];
-          return (
-            mechanics.some((m) => m.name.toLowerCase() === tag) ||
-            categories.some((c) => c.name.toLowerCase() === tag)
-          );
+          const tagNames = [...mechanics, ...categories].map((t) => t.name);
+          return matchesBggTag(f.value, tagNames);
         }
         case "staleness": {
           const stats = allStats[game.id];
@@ -96,9 +100,11 @@ export default function TournamentPage() {
     try {
       const [gamesRes, statsRes, activeRes, sessionsRes] = await Promise.all([
         fetch("/api/daemon/games").then((r) => r.json()) as Promise<GameWithScore[]>,
-        fetch("/api/daemon/tournament/stats").then((r) => r.json()) as Promise<
-          Record<string, TournamentGameStatsDisplay>
-        >,
+        fetch("/api/daemon/tournament/stats")
+          .then((r) => r.json() as Promise<TournamentStatsEntry[]>)
+          .then((entries) =>
+            Object.fromEntries(entries.map((e) => [e.gameId, e.stats])),
+          ) as Promise<Record<string, TournamentGameStatsDisplay>>,
         fetch("/api/daemon/tournament/sessions/active").then(async (r) => {
           if (r.status === 404) return null;
           const data = (await r.json()) as { session: TournamentSession };

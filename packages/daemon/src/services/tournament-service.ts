@@ -9,6 +9,7 @@ import type {
   RecentComparison,
   GameWithScore,
 } from "@shelf-judge/shared";
+import { matchesBggTag } from "@shelf-judge/shared";
 import type { StorageService } from "./storage-service.js";
 import {
   calculateNewRatings,
@@ -63,14 +64,14 @@ function applyFilters(
       }
 
       case "bggTag": {
-        const tag = filter.value.toLowerCase();
         result = result.filter((g) => {
           const bgg = g.game.bggData;
           if (!bgg) return false;
-          return (
-            bgg.mechanics.some((m) => m.name.toLowerCase() === tag) ||
-            bgg.categories.some((c) => c.name.toLowerCase() === tag)
-          );
+          const tagNames = [
+            ...bgg.mechanics.map((m) => m.name),
+            ...bgg.categories.map((c) => c.name),
+          ];
+          return matchesBggTag(filter.value, tagNames);
         });
         break;
       }

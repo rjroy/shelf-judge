@@ -26,17 +26,3 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
-- 18:59 commission-Octavia-20260406-185604 result: Produced a single brainstorm artifact covering both collection page filtering and sorting issues.
-
-**Artifact:** `.lore/brainstorms/collection-filter-sort.md`
-
-Key areas explored:
-
-**Sorting:** Identi...
-
-- 18:59 commission-Octavia-20260406-185604 completed
-- 19:10 commission-Dalton-20260406-190430 result: Consolidated 5 duplicated types into `packages/shared/src/types.ts`:
-
-- `GameWithScore`, `AddGameResult`, `BggSearchResult` (API response types)
-- `ImportProgress`, `ImportComplete` (SSE wire format t...
-- 19:10 commission-Dalton-20260406-190430 completed
