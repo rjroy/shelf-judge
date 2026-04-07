@@ -278,7 +278,7 @@ export function getScoreDisplay(
         return { text: "---", className: "score-value" };
       const range =
         game.minPlayers === game.maxPlayers
-          ? `${game.minPlayers}p`
+          ? `${game.minPlayers}`
           : `${game.minPlayers}-${game.maxPlayers}`;
       return { text: range, className: "score-value" };
     }

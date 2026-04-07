@@ -149,11 +149,9 @@ export function CollectionTable({
 
   // Apply filters then sort
   const filtered = useMemo(() => games.filter((g) => matchesFilters(g, filters)), [games, filters]);
-  const { withValue, withoutValue } = sortGames(
-    filtered,
-    sort.field,
-    sort.direction,
-    tournamentStats,
+  const { withValue, withoutValue } = useMemo(
+    () => sortGames(filtered, sort.field, sort.direction, tournamentStats),
+    [filtered, sort.field, sort.direction, tournamentStats],
   );
   const axisMap = useMemo(() => new Map(axes.map((a) => [a.id, a])), [axes]);
   const isAxisSort = sort.field.startsWith("axis:");
@@ -216,9 +214,9 @@ export function CollectionTable({
                 <div className="sort-menu">
                   <div className="sort-menu-header">
                     <span className="sort-menu-title">Sort by</span>
-                    <span className="sort-menu-close" onClick={() => setMenuOpen(false)}>
+                    <button className="sort-menu-close" onClick={() => setMenuOpen(false)}>
                       {"\u2715"}
-                    </span>
+                    </button>
                   </div>
                   <div className="sort-menu-scroll">
                     {groupedFields.map(({ group, label, fields }) => (
@@ -231,14 +229,14 @@ export function CollectionTable({
                             ? `sort-menu-axis-item${isActive ? " active" : ""}`
                             : `sort-menu-item${isActive ? " active" : ""}`;
                           return (
-                            <div
+                            <button
                               key={f.id}
                               className={itemClass}
                               onClick={() => handleSortSelect(f.id)}
                             >
                               <span className="check">{isActive ? "\u2713" : ""}</span>
                               <span className="item-label">{f.label}</span>
-                            </div>
+                            </button>
                           );
                         })}
                       </div>
@@ -301,23 +299,23 @@ export function CollectionTable({
             {hasSearch && (
               <span className="filter-chip chip-search">
                 &ldquo;{filters.search}&rdquo;{" "}
-                <span className="chip-x" onClick={() => updateFilter("search", "")}>
+                <button className="chip-x" onClick={() => updateFilter("search", "")}>
                   &times;
-                </span>
+                </button>
               </span>
             )}
             {hasRatedFilter && (
               <span className="filter-chip chip-rated">
                 {filters.ratedStatus === "rated" ? "Rated only" : "Unrated only"}{" "}
-                <span className="chip-x" onClick={() => updateFilter("ratedStatus", "all")}>
+                <button className="chip-x" onClick={() => updateFilter("ratedStatus", "all")}>
                   &times;
-                </span>
+                </button>
               </span>
             )}
             {hasPlayerCount && (
               <span className="filter-chip chip-spec">
-                Plays at {filters.playerCount}{" "}
-                <span
+                {filters.playerCount} players{" "}
+                <button
                   className="chip-x"
                   onClick={() => {
                     updateFilter("playerCount", null);
@@ -325,13 +323,13 @@ export function CollectionTable({
                   }}
                 >
                   &times;
-                </span>
+                </button>
               </span>
             )}
             {(hasSearch ? 1 : 0) + (hasRatedFilter ? 1 : 0) + (hasPlayerCount ? 1 : 0) >= 2 && (
-              <span className="clear-all-link" onClick={clearAllFilters}>
+              <button className="clear-all-link" onClick={clearAllFilters}>
                 Clear all
-              </span>
+              </button>
             )}
           </div>
         )}

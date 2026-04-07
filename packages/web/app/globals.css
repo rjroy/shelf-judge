@@ -2697,6 +2697,11 @@ body {
   color: var(--text-secondary);
   cursor: pointer;
   gap: 8px;
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
 }
 
 .sort-menu-item:hover {
@@ -2729,6 +2734,11 @@ body {
   color: var(--text-secondary);
   cursor: pointer;
   gap: 8px;
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
 }
 
 .sort-menu-axis-item:hover {
@@ -3015,7 +3025,7 @@ body {
   padding-right: 2px;
 }
 
-.filter-chip {
+.active-chips-row .filter-chip {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -3027,19 +3037,19 @@ body {
   border: 1px solid transparent;
 }
 
-.filter-chip.chip-search {
+.active-chips-row .filter-chip.chip-search {
   background: #f0ede8;
   color: var(--text-secondary);
   border-color: var(--border-strong);
 }
 
-.filter-chip.chip-rated {
+.active-chips-row .filter-chip.chip-rated {
   background: rgba(184, 108, 26, 0.1);
   color: var(--score-color);
   border-color: rgba(184, 108, 26, 0.25);
 }
 
-.filter-chip.chip-spec {
+.active-chips-row .filter-chip.chip-spec {
   background: var(--filter-spec-bg);
   color: var(--filter-spec);
   border-color: #c4ddbf;
@@ -3051,6 +3061,11 @@ body {
   cursor: pointer;
   opacity: 0.65;
   margin-left: 2px;
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font-family: inherit;
 }
 
 .clear-all-link {
@@ -3059,6 +3074,10 @@ body {
   cursor: pointer;
   text-decoration: underline;
   margin-left: 4px;
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
 }
 
 .filtered-note {
@@ -3297,6 +3316,9 @@ body {
     cursor: pointer;
     padding: 4px;
     line-height: 1;
+    background: none;
+    border: none;
+    font-family: inherit;
   }
 
   .sort-menu-scroll {

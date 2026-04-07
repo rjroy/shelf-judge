@@ -15,6 +15,14 @@ export default tseslint.config(
     },
   },
   {
+    files: ["packages/web/tests/**/*.ts"],
+    languageOptions: {
+      parserOptions: {
+        project: "./tsconfig.json",
+      },
+    },
+  },
+  {
     ignores: ["**/node_modules/", "**/dist/", "**/.next/"],
   },
 );
