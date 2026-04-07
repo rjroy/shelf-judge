@@ -1,0 +1,2345 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shelf Judge — Collection Filter + Sort UX Mockup</title>
+    <style>
+      :root {
+        --bg-base: #f4f1ec;
+        --bg-surface: #fefcf9;
+        --bg-elevated: #ffffff;
+        --border: #ddd8d0;
+        --border-strong: #c4bfb8;
+        --text-primary: #1a1714;
+        --text-secondary: #6b6560;
+        --text-muted: #9c9590;
+        --score-color: #b86c1a;
+        --score-high: #2d7a4a;
+        --score-mid: #8a6f20;
+        --score-low: #b84040;
+        --bgg-accent: #2e5f8a;
+        --bgg-bg: #edf3f9;
+        --action: #1c3d5e;
+        --action-hover: #2a5580;
+        --action-subtle: #e8eff6;
+        --nav-bg: #1a1714;
+        --nav-text: #e8e4dc;
+        --nav-active: #b86c1a;
+        --filter-axis: #1c3d5e;
+        --filter-axis-bg: #e8eff6;
+        --filter-spec: #4a6e42;
+        --filter-spec-bg: #eaf2e8;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family:
+          Inter,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        background: #e8e4dc;
+        color: var(--text-primary);
+        font-size: 15px;
+        line-height: 1.5;
+        padding: 40px 32px;
+      }
+
+      /* ─── Annotation wrapper ─── */
+      .annotation-section {
+        margin-bottom: 56px;
+      }
+
+      .annotation-label {
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #9c9590;
+        margin-bottom: 12px;
+        padding-left: 2px;
+      }
+
+      /* ─── App chrome ─── */
+      .app-frame {
+        display: flex;
+        height: 640px;
+        background: var(--bg-base);
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow:
+          0 4px 32px rgba(0, 0, 0, 0.18),
+          0 1px 4px rgba(0, 0, 0, 0.08);
+        position: relative;
+      }
+
+      .app-frame.tall {
+        height: 780px;
+      }
+      .app-frame.dropdown-open {
+        overflow: visible;
+      }
+
+      /* ─── Sidebar ─── */
+      .sidebar {
+        width: 200px;
+        flex-shrink: 0;
+        background: var(--nav-bg);
+        display: flex;
+        flex-direction: column;
+      }
+
+      .sidebar-brand {
+        padding: 18px 20px 20px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .brand-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 2px;
+      }
+
+      .brand-name {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--nav-text);
+        letter-spacing: -0.02em;
+      }
+
+      .brand-sub {
+        font-size: 10px;
+        color: rgba(232, 228, 220, 0.4);
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+      }
+
+      .nav-section {
+        padding: 12px 0;
+        flex: 1;
+      }
+
+      .nav-label {
+        font-size: 10px;
+        font-weight: 600;
+        color: rgba(232, 228, 220, 0.35);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        padding: 0 20px;
+        margin-bottom: 4px;
+        margin-top: 10px;
+      }
+
+      .nav-label:first-child {
+        margin-top: 0;
+      }
+
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 20px;
+        font-size: 13px;
+        color: rgba(232, 228, 220, 0.65);
+        cursor: pointer;
+        border-left: 3px solid transparent;
+        text-decoration: none;
+      }
+
+      .nav-item.active {
+        background: rgba(184, 108, 26, 0.12);
+        color: var(--nav-text);
+        border-left-color: var(--nav-active);
+        font-weight: 500;
+      }
+
+      .nav-icon {
+        width: 15px;
+        height: 15px;
+        opacity: 0.7;
+        flex-shrink: 0;
+      }
+
+      .nav-item.active .nav-icon {
+        opacity: 1;
+      }
+
+      /* ─── Main content ─── */
+      .main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        min-width: 0;
+      }
+
+      /* ─── Topbar ─── */
+      .topbar {
+        height: 52px;
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        padding: 0 24px;
+        gap: 12px;
+        flex-shrink: 0;
+      }
+
+      .topbar-title {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--text-primary);
+        flex: 1;
+      }
+
+      .topbar-meta {
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+
+      /* ─── Sort dropdown (the control in topbar) ─── */
+      .sort-control {
+        display: flex;
+        align-items: center;
+        gap: 0;
+        border: 1px solid var(--border-strong);
+        border-radius: 6px;
+        overflow: visible;
+        position: relative;
+        background: var(--bg-elevated);
+      }
+
+      .sort-label-prefix {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        padding: 6px 8px 6px 12px;
+        border-right: 1px solid var(--border);
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+
+      .sort-select {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 10px 6px 10px;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text-primary);
+        cursor: pointer;
+        white-space: nowrap;
+        min-width: 130px;
+      }
+
+      .sort-select .chevron {
+        margin-left: auto;
+        font-size: 10px;
+        color: var(--text-muted);
+      }
+
+      .sort-dir-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 30px;
+        height: 30px;
+        border-left: 1px solid var(--border);
+        cursor: pointer;
+        color: var(--text-secondary);
+        font-size: 13px;
+        flex-shrink: 0;
+      }
+
+      /* ─── Sort dropdown menu ─── */
+      .sort-menu {
+        position: absolute;
+        top: calc(100% + 4px);
+        right: 0;
+        width: 220px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-strong);
+        border-radius: 8px;
+        box-shadow:
+          0 8px 32px rgba(0, 0, 0, 0.14),
+          0 2px 8px rgba(0, 0, 0, 0.08);
+        z-index: 100;
+        overflow: hidden;
+      }
+
+      .sort-menu-group {
+        padding: 4px 0;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .sort-menu-group:last-child {
+        border-bottom: none;
+      }
+
+      .sort-menu-group-label {
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-muted);
+        padding: 6px 14px 3px;
+      }
+
+      .sort-menu-item {
+        display: flex;
+        align-items: center;
+        padding: 7px 14px;
+        font-size: 13px;
+        color: var(--text-secondary);
+        cursor: pointer;
+        gap: 8px;
+      }
+
+      .sort-menu-item:hover {
+        background: var(--bg-base);
+        color: var(--text-primary);
+      }
+
+      .sort-menu-item.active {
+        background: rgba(184, 108, 26, 0.08);
+        color: var(--score-color);
+        font-weight: 600;
+      }
+
+      .sort-menu-item .check {
+        width: 14px;
+        flex-shrink: 0;
+        font-size: 11px;
+        color: var(--score-color);
+      }
+
+      .sort-menu-item .item-label {
+        flex: 1;
+      }
+
+      .sort-menu-axis-item {
+        display: flex;
+        align-items: center;
+        padding: 6px 14px;
+        font-size: 12px;
+        color: var(--text-secondary);
+        cursor: pointer;
+        gap: 8px;
+      }
+
+      .sort-menu-axis-item:hover {
+        background: var(--bg-base);
+        color: var(--text-primary);
+      }
+
+      .sort-menu-axis-item.active {
+        background: rgba(28, 61, 94, 0.08);
+        color: var(--action);
+        font-weight: 600;
+      }
+
+      .sort-menu-axis-item .check {
+        width: 14px;
+        flex-shrink: 0;
+        font-size: 11px;
+        color: var(--action);
+      }
+
+      /* ─── Buttons ─── */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 6px 12px;
+        border-radius: 5px;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        font-family: inherit;
+        text-decoration: none;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+
+      .btn-primary {
+        background: var(--action);
+        color: white;
+      }
+
+      .btn-secondary {
+        background: transparent;
+        border: 1px solid var(--border-strong);
+        color: var(--text-secondary);
+      }
+
+      .btn-ghost {
+        background: transparent;
+        color: var(--text-secondary);
+        border: 1px solid transparent;
+        padding: 6px 10px;
+      }
+
+      /* ─── Filter bar ─── */
+      .filter-bar {
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        padding: 10px 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        flex-shrink: 0;
+      }
+
+      .filter-row-1 {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .search-input-wrap {
+        flex: 1;
+        position: relative;
+        max-width: 320px;
+      }
+
+      .search-icon {
+        position: absolute;
+        left: 10px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--text-muted);
+        font-size: 13px;
+        pointer-events: none;
+      }
+
+      .search-input {
+        width: 100%;
+        padding: 7px 12px 7px 32px;
+        font-size: 13px;
+        font-family: inherit;
+        border: 1px solid var(--border-strong);
+        border-radius: 6px;
+        background: var(--bg-elevated);
+        color: var(--text-primary);
+        outline: none;
+      }
+
+      .search-input::placeholder {
+        color: var(--text-muted);
+      }
+      .search-input.has-value {
+        border-color: var(--action);
+      }
+
+      .filter-toggle-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 7px 12px;
+        font-size: 13px;
+        font-weight: 500;
+        border: 1px solid var(--border-strong);
+        border-radius: 6px;
+        background: var(--bg-elevated);
+        color: var(--text-secondary);
+        cursor: pointer;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+
+      .filter-toggle-btn.has-filters {
+        border-color: var(--action);
+        color: var(--action);
+        background: var(--action-subtle);
+      }
+
+      .filter-count-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 17px;
+        height: 17px;
+        border-radius: 50%;
+        background: var(--action);
+        color: white;
+        font-size: 10px;
+        font-weight: 700;
+      }
+
+      /* ─── Expanded filter panel ─── */
+      .filter-panel {
+        display: flex;
+        gap: 20px;
+        padding: 10px 0 2px;
+        flex-wrap: wrap;
+        align-items: flex-start;
+      }
+
+      .filter-group {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+
+      .filter-group-label {
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        color: var(--text-muted);
+      }
+
+      .filter-group-controls {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+      }
+
+      .seg-btn {
+        display: inline-flex;
+        align-items: center;
+        padding: 5px 10px;
+        font-size: 12px;
+        font-weight: 500;
+        border: 1px solid var(--border-strong);
+        border-radius: 4px;
+        background: var(--bg-elevated);
+        color: var(--text-secondary);
+        cursor: pointer;
+        white-space: nowrap;
+      }
+
+      .seg-btn.active {
+        background: var(--action);
+        border-color: var(--action);
+        color: white;
+      }
+
+      .range-input {
+        width: 64px;
+        padding: 5px 8px;
+        font-size: 12px;
+        font-family: inherit;
+        border: 1px solid var(--border-strong);
+        border-radius: 4px;
+        background: var(--bg-elevated);
+        color: var(--text-primary);
+        text-align: center;
+      }
+
+      .range-sep {
+        font-size: 12px;
+        color: var(--text-muted);
+        padding: 0 2px;
+      }
+
+      /* ─── Active filter chips row ─── */
+      .active-chips-row {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .chips-label {
+        font-size: 11px;
+        color: var(--text-muted);
+        flex-shrink: 0;
+        padding-right: 2px;
+      }
+
+      .filter-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px 8px 3px 10px;
+        border-radius: 20px;
+        font-size: 11px;
+        font-weight: 500;
+        white-space: nowrap;
+        border: 1px solid transparent;
+      }
+
+      .filter-chip.chip-spec {
+        background: var(--filter-spec-bg);
+        color: var(--filter-spec);
+        border-color: #c4ddbf;
+      }
+
+      .filter-chip.chip-search {
+        background: #f0ede8;
+        color: var(--text-secondary);
+        border-color: var(--border-strong);
+      }
+
+      .filter-chip.chip-rated {
+        background: rgba(184, 108, 26, 0.1);
+        color: var(--score-color);
+        border-color: rgba(184, 108, 26, 0.25);
+      }
+
+      .chip-x {
+        font-size: 12px;
+        line-height: 1;
+        cursor: pointer;
+        opacity: 0.65;
+        margin-left: 2px;
+      }
+
+      .clear-all-link {
+        font-size: 11px;
+        color: var(--text-muted);
+        cursor: pointer;
+        text-decoration: underline;
+        margin-left: 4px;
+      }
+
+      /* ─── Stats strip ─── */
+      .stats-strip {
+        display: flex;
+        gap: 0;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-surface);
+        flex-shrink: 0;
+      }
+
+      .stat-block {
+        padding: 10px 20px;
+        border-right: 1px solid var(--border);
+        flex-shrink: 0;
+      }
+
+      .stat-block:last-child {
+        border-right: none;
+      }
+
+      .stat-value {
+        font-size: 18px;
+        font-weight: 700;
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+        line-height: 1;
+      }
+
+      .stat-value.score {
+        color: var(--score-color);
+      }
+
+      .stat-label {
+        font-size: 10px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        margin-top: 3px;
+      }
+
+      .filtered-note {
+        font-size: 12px;
+        color: var(--text-muted);
+        display: flex;
+        align-items: center;
+        padding: 0 20px;
+        font-style: italic;
+      }
+
+      /* ─── Content area ─── */
+      .content {
+        flex: 1;
+        overflow-y: auto;
+        padding: 0;
+        min-height: 0;
+      }
+
+      /* ─── Table header ─── */
+      .table-header-row {
+        display: grid;
+        grid-template-columns: 28px 44px 1fr auto auto auto;
+        gap: 12px;
+        align-items: center;
+        padding: 9px 16px;
+        background: #ede9e3;
+        border-bottom: 1px solid var(--border-strong);
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+
+      .col-label {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        white-space: nowrap;
+        user-select: none;
+      }
+
+      .col-label.right {
+        text-align: right;
+      }
+
+      .col-label.sortable {
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        justify-content: flex-end;
+      }
+
+      .col-label.sortable:hover {
+        color: var(--text-primary);
+      }
+
+      .col-label.sort-active {
+        color: var(--text-primary);
+      }
+
+      .sort-arrow {
+        font-size: 10px;
+        opacity: 0.7;
+      }
+
+      .score-col-label {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 1px;
+      }
+
+      .score-col-main {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-primary);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+
+      .score-col-sub {
+        font-size: 9px;
+        font-weight: 500;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      /* ─── Game rows ─── */
+      .game-row {
+        display: grid;
+        grid-template-columns: 28px 44px 1fr auto auto auto;
+        gap: 12px;
+        align-items: center;
+        padding: 9px 16px;
+        border-bottom: 1px solid var(--border);
+        cursor: pointer;
+        transition: background 0.1s;
+      }
+
+      .game-row:hover {
+        background: #f0ede8;
+      }
+
+      .rank {
+        width: 28px;
+        text-align: center;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-muted);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .game-thumb {
+        width: 44px;
+        height: 44px;
+        border-radius: 5px;
+        overflow: hidden;
+        background: linear-gradient(135deg, #e0dbce, #ccc7bc);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 17px;
+        flex-shrink: 0;
+      }
+
+      .game-info {
+        min-width: 0;
+      }
+
+      .game-name {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-primary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .game-meta {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-top: 2px;
+        display: flex;
+        gap: 10px;
+      }
+
+      .axes-col {
+        display: flex;
+        gap: 4px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        align-items: center;
+        width: 160px;
+      }
+
+      .axis-chip {
+        font-size: 10px;
+        color: var(--text-muted);
+        background: var(--border);
+        border-radius: 3px;
+        padding: 1px 6px;
+        border: 1px solid var(--border);
+      }
+
+      .score-cell {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        justify-content: flex-end;
+        flex-shrink: 0;
+        width: 90px;
+      }
+
+      .score-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+
+      .score-dot.high {
+        background: var(--score-high);
+      }
+      .score-dot.mid {
+        background: var(--score-mid);
+      }
+      .score-dot.low {
+        background: var(--score-low);
+      }
+
+      .score-value {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--score-color);
+        font-variant-numeric: tabular-nums;
+        min-width: 34px;
+        text-align: right;
+      }
+
+      .score-value.axis-score {
+        color: var(--action);
+      }
+
+      .score-unrated {
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--text-muted);
+        font-style: italic;
+        text-align: right;
+        width: 90px;
+        flex-shrink: 0;
+      }
+
+      .last-rated {
+        font-size: 12px;
+        color: var(--text-muted);
+        white-space: nowrap;
+        flex-shrink: 0;
+        width: 80px;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        cursor: pointer;
+      }
+
+      .last-rated.sort-active {
+        color: var(--text-primary);
+        font-weight: 600;
+      }
+
+      /* ─── Section separator ─── */
+      .section-sep {
+        display: flex;
+        align-items: center;
+        padding: 7px 16px;
+        background: #eeebe5;
+        border-bottom: 1px solid var(--border);
+        gap: 10px;
+      }
+
+      .section-sep-label {
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .section-sep-line {
+        flex: 1;
+        height: 1px;
+        background: var(--border-strong);
+        opacity: 0.5;
+      }
+
+      /* ─── Score column: axis variant ─── */
+      .score-axis-label {
+        font-size: 9px;
+        color: var(--action);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        font-weight: 600;
+        text-align: right;
+        margin-bottom: 1px;
+      }
+
+      /* ─── Mobile frame ─── */
+      .mobile-frame {
+        width: 390px;
+        height: 780px;
+        background: var(--bg-base);
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow:
+          0 4px 32px rgba(0, 0, 0, 0.18),
+          0 1px 4px rgba(0, 0, 0, 0.08);
+        display: flex;
+        flex-direction: column;
+        position: relative;
+      }
+
+      /* ─── Mobile topbar ─── */
+      .mobile-topbar {
+        background: var(--nav-bg);
+        padding: 12px 16px 10px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-shrink: 0;
+      }
+
+      .mobile-brand-name {
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--nav-text);
+        letter-spacing: -0.01em;
+        flex: 1;
+      }
+
+      .mobile-nav-btn {
+        width: 30px;
+        height: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 5px;
+        background: rgba(255, 255, 255, 0.08);
+        color: rgba(232, 228, 220, 0.7);
+        font-size: 15px;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+
+      /* ─── Mobile content header ─── */
+      .mobile-content-header {
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        padding: 10px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        flex-shrink: 0;
+      }
+
+      .mobile-header-row1 {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .mobile-page-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-primary);
+        flex: 1;
+      }
+
+      .mobile-meta {
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+
+      /* ─── Mobile sort control ─── */
+      .mobile-sort-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .mobile-search-wrap {
+        flex: 1;
+        position: relative;
+      }
+
+      .mobile-search-input {
+        width: 100%;
+        padding: 6px 10px 6px 28px;
+        font-size: 13px;
+        font-family: inherit;
+        border: 1px solid var(--border-strong);
+        border-radius: 6px;
+        background: var(--bg-elevated);
+        color: var(--text-primary);
+      }
+
+      .mobile-search-icon {
+        position: absolute;
+        left: 9px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--text-muted);
+        font-size: 12px;
+        pointer-events: none;
+      }
+
+      .mobile-sort-btn {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        padding: 6px 10px;
+        font-size: 12px;
+        font-weight: 500;
+        border: 1px solid var(--border-strong);
+        border-radius: 6px;
+        background: var(--bg-elevated);
+        color: var(--text-secondary);
+        cursor: pointer;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+
+      .mobile-filter-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 34px;
+        height: 32px;
+        border: 1px solid var(--border-strong);
+        border-radius: 6px;
+        background: var(--bg-elevated);
+        color: var(--text-secondary);
+        cursor: pointer;
+        flex-shrink: 0;
+        font-size: 14px;
+      }
+
+      .mobile-filter-btn.has-filters {
+        border-color: var(--action);
+        background: var(--action-subtle);
+        color: var(--action);
+      }
+
+      /* ─── Mobile table ─── */
+      .mobile-content {
+        flex: 1;
+        overflow-y: auto;
+      }
+
+      .mobile-table-header {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 10px;
+        align-items: center;
+        padding: 8px 14px;
+        background: #ede9e3;
+        border-bottom: 1px solid var(--border-strong);
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+
+      .mobile-game-row {
+        display: grid;
+        grid-template-columns: 40px 1fr auto;
+        gap: 10px;
+        align-items: center;
+        padding: 9px 14px;
+        border-bottom: 1px solid var(--border);
+        cursor: pointer;
+      }
+
+      .mobile-game-row:hover {
+        background: #f0ede8;
+      }
+
+      .mobile-thumb {
+        width: 40px;
+        height: 40px;
+        border-radius: 4px;
+        background: linear-gradient(135deg, #e0dbce, #ccc7bc);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 16px;
+        flex-shrink: 0;
+      }
+
+      .mobile-game-info {
+        min-width: 0;
+      }
+
+      .mobile-game-name {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-primary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .mobile-game-meta {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-top: 1px;
+      }
+
+      .mobile-score-cell {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 2px;
+        flex-shrink: 0;
+      }
+
+      .mobile-score-value {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--score-color);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .mobile-score-label {
+        font-size: 9px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      .mobile-section-sep {
+        display: flex;
+        align-items: center;
+        padding: 6px 14px;
+        background: #eeebe5;
+        border-bottom: 1px solid var(--border);
+        gap: 8px;
+      }
+
+      /* ─── Mobile sort dropdown ─── */
+      .mobile-sort-menu {
+        position: absolute;
+        top: 148px;
+        left: 14px;
+        right: 14px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-strong);
+        border-radius: 8px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+        z-index: 200;
+        overflow: hidden;
+      }
+
+      .mobile-sort-menu-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .mobile-sort-menu-title {
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-secondary);
+      }
+
+      .mobile-sort-menu-close {
+        font-size: 16px;
+        color: var(--text-muted);
+        cursor: pointer;
+      }
+
+      /* ─── Annotation callouts ─── */
+      .callout-set {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 14px;
+      }
+
+      .callout {
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+        font-size: 12px;
+        color: var(--text-secondary);
+        line-height: 1.45;
+      }
+
+      .callout-num {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: #c4bfb8;
+        color: #fefcf9;
+        font-size: 10px;
+        font-weight: 700;
+        flex-shrink: 0;
+        margin-top: 1px;
+      }
+
+      .divider {
+        height: 1px;
+        background: #c4bfb8;
+        margin: 40px 0;
+        opacity: 0.5;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ═══════════════════════════════════════════════════════════════
+         PANEL 1: Desktop — Filter Bar + Active Filters + Sort Dropdown (open)
+    ════════════════════════════════════════════════════════════════════ -->
+
+    <div class="annotation-section">
+      <div class="annotation-label">
+        Panel 1 — Desktop: Filter bar (expanded) with active filters, sort dropdown open
+      </div>
+
+      <div class="app-frame tall dropdown-open" style="position: relative">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+          <div class="sidebar-brand">
+            <div class="brand-row">
+              <svg width="20" height="17" viewBox="0 0 22 18" fill="none">
+                <rect x="0" y="6" width="5" height="12" rx="1" fill="#b86c1a" />
+                <rect x="7" y="0" width="5" height="18" rx="1" fill="#e8e4dc" />
+                <rect x="14" y="4" width="5" height="14" rx="1" fill="#e8e4dc" opacity="0.6" />
+                <rect x="21" y="9" width="5" height="9" rx="1" fill="#e8e4dc" opacity="0.4" />
+              </svg>
+              <span class="brand-name">Shelf Judge</span>
+            </div>
+            <div class="brand-sub">Board Game Collection</div>
+          </div>
+          <nav class="nav-section">
+            <div class="nav-label">Library</div>
+            <a class="nav-item active">
+              <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M2 2h12v12H2V2zm1 1v10h10V3H3zm2 2h6v1H5V5zm0 3h6v1H5V8zm0 3h4v1H5v-1z" />
+              </svg>
+              Collection
+            </a>
+            <a class="nav-item">
+              <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+                <path
+                  d="M1 3a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h8a1 1 0 010 2H2a1 1 0 01-1-1z"
+                />
+              </svg>
+              Axes
+            </a>
+            <div class="nav-label">Ranking</div>
+            <a class="nav-item">
+              <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+                <path
+                  d="M8 1l2.163 4.279 4.837.67-3.5 3.31.826 4.741L8 11.5l-4.326 2.5.826-4.741L1 5.949l4.837-.67z"
+                />
+              </svg>
+              Tournament
+            </a>
+            <div class="nav-label">Add</div>
+            <a class="nav-item">
+              <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm1 6V5H7v2H5v2h2v2h2V9h2V7H9z" />
+              </svg>
+              Add Game
+            </a>
+            <a class="nav-item">
+              <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M2 3h12v2H2V3zm2 4h8v1H4V7zm0 3h6v1H4v-1z" />
+              </svg>
+              Import BGG
+            </a>
+          </nav>
+          <div
+            style="
+              padding: 14px 20px;
+              border-top: 1px solid rgba(255, 255, 255, 0.08);
+              font-size: 11px;
+              color: rgba(232, 228, 220, 0.28);
+            "
+          >
+            47 games
+          </div>
+        </aside>
+
+        <!-- Main -->
+        <div class="main">
+          <!-- Topbar -->
+          <div class="topbar">
+            <span class="topbar-title">Collection</span>
+            <span class="topbar-meta">12 of 47 shown</span>
+            <!-- Sort control -->
+            <div class="sort-control">
+              <span class="sort-label-prefix">Sort</span>
+              <div class="sort-select">
+                <span>Fitness Score</span>
+                <span class="chevron">▾</span>
+              </div>
+              <div class="sort-dir-btn" title="Sort descending">↓</div>
+
+              <!-- Dropdown menu (expanded state) -->
+              <div class="sort-menu">
+                <div class="sort-menu-group">
+                  <div class="sort-menu-group-label">Score</div>
+                  <div class="sort-menu-item active">
+                    <span class="check">✓</span>
+                    <span class="item-label">Fitness Score</span>
+                  </div>
+                  <div class="sort-menu-item">
+                    <span class="check"></span>
+                    <span class="item-label">Tournament ELO</span>
+                  </div>
+                </div>
+                <div class="sort-menu-group">
+                  <div class="sort-menu-group-label">Identity</div>
+                  <div class="sort-menu-item">
+                    <span class="check"></span>
+                    <span class="item-label">Name (A–Z)</span>
+                  </div>
+                  <div class="sort-menu-item">
+                    <span class="check"></span>
+                    <span class="item-label">Year Published</span>
+                  </div>
+                  <div class="sort-menu-item">
+                    <span class="check"></span>
+                    <span class="item-label">Date Added</span>
+                  </div>
+                  <div class="sort-menu-item">
+                    <span class="check"></span>
+                    <span class="item-label">Last Rated</span>
+                  </div>
+                </div>
+                <div class="sort-menu-group">
+                  <div class="sort-menu-group-label">Specs</div>
+                  <div class="sort-menu-item">
+                    <span class="check"></span>
+                    <span class="item-label">Min Players</span>
+                  </div>
+                  <div class="sort-menu-item">
+                    <span class="check"></span>
+                    <span class="item-label">Play Time</span>
+                  </div>
+                  <div class="sort-menu-item">
+                    <span class="check"></span>
+                    <span class="item-label">BGG Rating</span>
+                  </div>
+                  <div class="sort-menu-item">
+                    <span class="check"></span>
+                    <span class="item-label">BGG Weight</span>
+                  </div>
+                </div>
+                <div class="sort-menu-group">
+                  <div class="sort-menu-group-label">Your Axes</div>
+                  <div class="sort-menu-axis-item">
+                    <span class="check"></span>
+                    <span class="item-label">Wife Will Play It</span>
+                  </div>
+                  <div class="sort-menu-axis-item">
+                    <span class="check"></span>
+                    <span class="item-label">Complexity</span>
+                  </div>
+                  <div class="sort-menu-axis-item">
+                    <span class="check"></span>
+                    <span class="item-label">Replayability</span>
+                  </div>
+                  <div class="sort-menu-axis-item">
+                    <span class="check"></span>
+                    <span class="item-label">Component Quality</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <button class="btn btn-primary" style="margin-left: 4px">+ Add Game</button>
+          </div>
+
+          <!-- Filter bar (expanded) -->
+          <div class="filter-bar">
+            <!-- Row 1: search + filter toggle -->
+            <div class="filter-row-1">
+              <div class="search-input-wrap">
+                <span class="search-icon">🔍</span>
+                <input
+                  class="search-input has-value"
+                  type="text"
+                  value="ark"
+                  placeholder="Search games…"
+                />
+              </div>
+              <button class="filter-toggle-btn has-filters">
+                <svg
+                  width="13"
+                  height="12"
+                  viewBox="0 0 13 12"
+                  fill="currentColor"
+                  style="flex-shrink: 0; opacity: 0.75"
+                >
+                  <path d="M1 2h11l-4 5v3l-3-1V7L1 2z" />
+                </svg>
+                Filters
+                <span class="filter-count-badge">2</span>
+              </button>
+            </div>
+
+            <!-- Filter panel (expanded) -->
+            <div class="filter-panel">
+              <div class="filter-group">
+                <div class="filter-group-label">Rated Status</div>
+                <div class="filter-group-controls">
+                  <button class="seg-btn">All</button>
+                  <button class="seg-btn active">Rated</button>
+                  <button class="seg-btn">Unrated</button>
+                </div>
+              </div>
+              <div class="filter-group">
+                <div class="filter-group-label">Player Count</div>
+                <div class="filter-group-controls">
+                  <input class="range-input" type="text" value="2" placeholder="min" />
+                  <span class="range-sep">–</span>
+                  <input class="range-input" type="text" value="5" placeholder="max" />
+                  <span
+                    class="range-sep"
+                    style="font-size: 11px; color: var(--text-muted); padding-left: 2px"
+                    >players</span
+                  >
+                </div>
+              </div>
+              <div class="filter-group">
+                <div class="filter-group-label">Score Range</div>
+                <div class="filter-group-controls">
+                  <input class="range-input" type="text" value="5.0" placeholder="min" />
+                  <span class="range-sep">–</span>
+                  <input class="range-input" type="text" placeholder="max" />
+                </div>
+              </div>
+              <div class="filter-group">
+                <div class="filter-group-label">Play Time</div>
+                <div class="filter-group-controls">
+                  <input class="range-input" type="text" placeholder="min" />
+                  <span class="range-sep">–</span>
+                  <input class="range-input" type="text" value="90" placeholder="max" />
+                  <span
+                    class="range-sep"
+                    style="font-size: 11px; color: var(--text-muted); padding-left: 2px"
+                    >min</span
+                  >
+                </div>
+              </div>
+            </div>
+
+            <!-- Active filter chips -->
+            <div class="active-chips-row">
+              <span class="chips-label">Active:</span>
+              <span class="filter-chip chip-search">"ark" <span class="chip-x">×</span></span>
+              <span class="filter-chip chip-rated">Rated only <span class="chip-x">×</span></span>
+              <span class="filter-chip chip-spec">2–5 players <span class="chip-x">×</span></span>
+              <span class="clear-all-link">Clear all</span>
+            </div>
+          </div>
+
+          <!-- Stats strip (showing filtered count) -->
+          <div class="stats-strip">
+            <div class="stat-block">
+              <div class="stat-value">12</div>
+              <div class="stat-label">Showing</div>
+            </div>
+            <div class="stat-block">
+              <div class="stat-value score">7.4</div>
+              <div class="stat-label">Avg Score</div>
+            </div>
+            <div class="stat-block">
+              <div class="stat-value">47</div>
+              <div class="stat-label">Total Games</div>
+            </div>
+            <div class="filtered-note">Filtered — 35 games hidden</div>
+          </div>
+
+          <!-- Table -->
+          <div class="content">
+            <!-- Column headers -->
+            <div class="table-header-row">
+              <div class="col-label">#</div>
+              <div class="col-label"></div>
+              <div class="col-label">Game</div>
+              <div class="col-label" style="width: 160px; text-align: right"></div>
+              <!-- Score col: sortable, reflects current sort -->
+              <div class="col-label right sortable sort-active" style="width: 90px">
+                <div class="score-col-label">
+                  <div class="score-col-main">Score ↓</div>
+                  <div class="score-col-sub">Fitness</div>
+                </div>
+              </div>
+              <!-- Last Rated: sortable -->
+              <div class="col-label right sortable" style="width: 80px">Last Rated</div>
+            </div>
+
+            <!-- Rated games section -->
+            <div class="game-row">
+              <div class="rank">1</div>
+              <div class="game-thumb">🎲</div>
+              <div class="game-info">
+                <div class="game-name">Arkham Horror: The Card Game</div>
+                <div class="game-meta">
+                  <span>1–4p</span><span>60–120 min</span><span>2016</span>
+                </div>
+              </div>
+              <div class="axes-col">
+                <span class="axis-chip">Wife: 9</span><span class="axis-chip">Replay: 9</span
+                ><span class="axis-chip">+2</span>
+              </div>
+              <div class="score-cell">
+                <span class="score-dot high"></span>
+                <span class="score-value">9.1</span>
+              </div>
+              <div class="last-rated">3 days ago</div>
+            </div>
+
+            <div class="game-row">
+              <div class="rank">2</div>
+              <div class="game-thumb">🗺️</div>
+              <div class="game-info">
+                <div class="game-name">Ark Nova</div>
+                <div class="game-meta">
+                  <span>1–4p</span><span>90–150 min</span><span>2021</span>
+                </div>
+              </div>
+              <div class="axes-col">
+                <span class="axis-chip">Wife: 7</span><span class="axis-chip">Replay: 8</span
+                ><span class="axis-chip">+2</span>
+              </div>
+              <div class="score-cell">
+                <span class="score-dot high"></span>
+                <span class="score-value">8.3</span>
+              </div>
+              <div class="last-rated">1 wk ago</div>
+            </div>
+
+            <div class="game-row">
+              <div class="rank">3</div>
+              <div class="game-thumb">⚔️</div>
+              <div class="game-info">
+                <div class="game-name">Arcs</div>
+                <div class="game-meta">
+                  <span>2–4p</span><span>60–120 min</span><span>2024</span>
+                </div>
+              </div>
+              <div class="axes-col">
+                <span class="axis-chip">Wife: 5</span><span class="axis-chip">Replay: 9</span
+                ><span class="axis-chip">+2</span>
+              </div>
+              <div class="score-cell">
+                <span class="score-dot high"></span>
+                <span class="score-value">7.8</span>
+              </div>
+              <div class="last-rated">2 wks ago</div>
+            </div>
+
+            <!-- No-value separator -->
+            <div class="section-sep">
+              <div class="section-sep-label">Not yet rated</div>
+              <div class="section-sep-line"></div>
+              <div class="section-sep-label">9 games below</div>
+            </div>
+
+            <div class="game-row">
+              <div class="rank" style="color: var(--border-strong)">–</div>
+              <div class="game-thumb">🌊</div>
+              <div class="game-info">
+                <div class="game-name">Arkwright: The Card Game</div>
+                <div class="game-meta"><span>2–4p</span><span>60 min</span><span>2019</span></div>
+              </div>
+              <div class="axes-col"></div>
+              <div class="score-unrated">not rated</div>
+              <div class="last-rated">—</div>
+            </div>
+
+            <div class="game-row">
+              <div class="rank" style="color: var(--border-strong)">–</div>
+              <div class="game-thumb">🏰</div>
+              <div class="game-info">
+                <div class="game-name">Pandemic: In the Lab</div>
+                <div class="game-meta">
+                  <span>2–5p</span><span>45–75 min</span><span>2014</span>
+                </div>
+              </div>
+              <div class="axes-col"></div>
+              <div class="score-unrated">not rated</div>
+              <div class="last-rated">—</div>
+            </div>
+          </div>
+        </div>
+        <!-- end .main -->
+      </div>
+      <!-- end .app-frame -->
+
+      <div class="callout-set">
+        <div class="callout">
+          <div class="callout-num">1</div>
+          <div>
+            Sort dropdown replaces the tournament toggle. Groups: Score (fitness / ELO), Identity
+            (name / year / date added / last rated), Specs (players / time / BGG rating / weight),
+            Your Axes (individual axis ratings). Active selection shown with checkmark.
+          </div>
+        </div>
+        <div class="callout">
+          <div class="callout-num">2</div>
+          <div>
+            Filter bar is always present below the topbar. Search input always visible. "Filters"
+            button toggles the expanded panel — badge shows active filter count. Panel includes:
+            rated status (segmented), player count range, score range, play time range.
+          </div>
+        </div>
+        <div class="callout">
+          <div class="callout-num">3</div>
+          <div>
+            Active filter chips appear as a third row when any filter is set. Each chip shows the
+            filter value and has a × dismiss button. "Clear all" removes every filter at once.
+          </div>
+        </div>
+        <div class="callout">
+          <div class="callout-num">4</div>
+          <div>
+            Score column header reads "Score / Fitness" (main + subtitle). It's clickable to toggle
+            sort direction. The subtitle updates to reflect the active sort metric (ELO, axis name,
+            etc.).
+          </div>
+        </div>
+        <div class="callout">
+          <div class="callout-num">5</div>
+          <div>
+            "Has value / no value" separator generalizes the old rated/unrated split. Here: "Not yet
+            rated — 9 games below." When sorting by player count, untagged games fall below the line
+            with the same treatment.
+          </div>
+        </div>
+        <div class="callout">
+          <div class="callout-num">6</div>
+          <div>
+            Stats strip shows filtered count (12 showing / 47 total) when filters are active, with a
+            "Filtered — 35 games hidden" note. When no filters are active, shows full collection
+            stats only.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         PANEL 2: Desktop — Axis sort active ("Wife Will Play It"), no filters
+    ════════════════════════════════════════════════════════════════════ -->
+
+    <div class="annotation-section">
+      <div class="annotation-label">
+        Panel 2 — Desktop: Sorting by axis rating ("Wife Will Play It"), no active filters
+      </div>
+
+      <div class="app-frame">
+        <!-- Sidebar (abbreviated) -->
+        <aside class="sidebar">
+          <div class="sidebar-brand">
+            <div class="brand-row">
+              <svg width="20" height="17" viewBox="0 0 22 18" fill="none">
+                <rect x="0" y="6" width="5" height="12" rx="1" fill="#b86c1a" />
+                <rect x="7" y="0" width="5" height="18" rx="1" fill="#e8e4dc" />
+                <rect x="14" y="4" width="5" height="14" rx="1" fill="#e8e4dc" opacity="0.6" />
+              </svg>
+              <span class="brand-name">Shelf Judge</span>
+            </div>
+            <div class="brand-sub">Board Game Collection</div>
+          </div>
+          <nav class="nav-section">
+            <div class="nav-label">Library</div>
+            <a class="nav-item active">
+              <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M2 2h12v12H2V2zm1 1v10h10V3H3zm2 2h6v1H5V5zm0 3h6v1H5V8zm0 3h4v1H5v-1z" />
+              </svg>
+              Collection
+            </a>
+            <a class="nav-item">
+              <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+                <path
+                  d="M1 3a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h8a1 1 0 010 2H2a1 1 0 01-1-1z"
+                />
+              </svg>
+              Axes
+            </a>
+            <div class="nav-label">Ranking</div>
+            <a class="nav-item">
+              <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+                <path
+                  d="M8 1l2.163 4.279 4.837.67-3.5 3.31.826 4.741L8 11.5l-4.326 2.5.826-4.741L1 5.949l4.837-.67z"
+                />
+              </svg>
+              Tournament
+            </a>
+            <div class="nav-label">Add</div>
+            <a class="nav-item">
+              <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm1 6V5H7v2H5v2h2v2h2V9h2V7H9z" />
+              </svg>
+              Add Game
+            </a>
+          </nav>
+          <div
+            style="
+              padding: 14px 20px;
+              border-top: 1px solid rgba(255, 255, 255, 0.08);
+              font-size: 11px;
+              color: rgba(232, 228, 220, 0.28);
+            "
+          >
+            47 games
+          </div>
+        </aside>
+
+        <!-- Main -->
+        <div class="main">
+          <!-- Topbar -->
+          <div class="topbar">
+            <span class="topbar-title">Collection</span>
+            <span class="topbar-meta">47 games</span>
+            <!-- Sort control — axis active -->
+            <div class="sort-control">
+              <span class="sort-label-prefix">Sort</span>
+              <div class="sort-select" style="color: var(--action); font-weight: 600">
+                <span>Wife Will Play It</span>
+                <span class="chevron" style="color: var(--action)">▾</span>
+              </div>
+              <div class="sort-dir-btn">↓</div>
+            </div>
+            <button class="btn btn-primary" style="margin-left: 4px">+ Add Game</button>
+          </div>
+
+          <!-- Filter bar (collapsed, no active filters) -->
+          <div class="filter-bar">
+            <div class="filter-row-1">
+              <div class="search-input-wrap">
+                <span class="search-icon">🔍</span>
+                <input class="search-input" type="text" placeholder="Search games…" />
+              </div>
+              <button class="filter-toggle-btn">
+                <svg
+                  width="13"
+                  height="12"
+                  viewBox="0 0 13 12"
+                  fill="currentColor"
+                  style="flex-shrink: 0; opacity: 0.6"
+                >
+                  <path d="M1 2h11l-4 5v3l-3-1V7L1 2z" />
+                </svg>
+                Filters
+              </button>
+            </div>
+            <!-- No active chips row when no filters -->
+          </div>
+
+          <!-- Stats strip -->
+          <div class="stats-strip">
+            <div class="stat-block">
+              <div class="stat-value">47</div>
+              <div class="stat-label">Games</div>
+            </div>
+            <div class="stat-block">
+              <div class="stat-value score">6.8</div>
+              <div class="stat-label">Avg Fitness</div>
+            </div>
+            <div class="stat-block">
+              <div class="stat-value" style="color: var(--action)">7.2</div>
+              <div class="stat-label">Avg Wife Rating</div>
+            </div>
+          </div>
+
+          <!-- Table — axis sort active -->
+          <div class="content">
+            <div class="table-header-row">
+              <div class="col-label">#</div>
+              <div class="col-label"></div>
+              <div class="col-label">Game</div>
+              <div class="col-label" style="width: 160px; text-align: right"></div>
+              <!-- Score col: shows axis rating, sortable active -->
+              <div class="col-label right sortable sort-active" style="width: 90px">
+                <div class="score-col-label">
+                  <div class="score-col-main" style="color: var(--action)">Score ↓</div>
+                  <div class="score-col-sub" style="color: var(--action); opacity: 0.7">
+                    Wife Will Play It
+                  </div>
+                </div>
+              </div>
+              <div class="col-label right sortable" style="width: 80px">Last Rated</div>
+            </div>
+
+            <!-- Games rated on this axis -->
+            <div class="game-row">
+              <div class="rank">1</div>
+              <div class="game-thumb">🎲</div>
+              <div class="game-info">
+                <div class="game-name">Arkham Horror: The Card Game</div>
+                <div class="game-meta"><span>1–4p</span><span>60–120 min</span></div>
+              </div>
+              <div class="axes-col">
+                <span class="axis-chip">Fitness: 9.1</span><span class="axis-chip">ELO: 1642</span>
+              </div>
+              <div class="score-cell">
+                <span class="score-dot high"></span>
+                <span class="score-value axis-score">9</span>
+              </div>
+              <div class="last-rated">3 days ago</div>
+            </div>
+
+            <div class="game-row">
+              <div class="rank">2</div>
+              <div class="game-thumb">🧩</div>
+              <div class="game-info">
+                <div class="game-name">Wingspan</div>
+                <div class="game-meta"><span>1–5p</span><span>40–70 min</span></div>
+              </div>
+              <div class="axes-col">
+                <span class="axis-chip">Fitness: 8.0</span><span class="axis-chip">ELO: 1598</span>
+              </div>
+              <div class="score-cell">
+                <span class="score-dot high"></span>
+                <span class="score-value axis-score">9</span>
+              </div>
+              <div class="last-rated">1 wk ago</div>
+            </div>
+
+            <div class="game-row">
+              <div class="rank">3</div>
+              <div class="game-thumb">🌿</div>
+              <div class="game-info">
+                <div class="game-name">Cascadia</div>
+                <div class="game-meta"><span>1–4p</span><span>30–45 min</span></div>
+              </div>
+              <div class="axes-col">
+                <span class="axis-chip">Fitness: 7.2</span><span class="axis-chip">ELO: 1410</span>
+              </div>
+              <div class="score-cell">
+                <span class="score-dot high"></span>
+                <span class="score-value axis-score">8</span>
+              </div>
+              <div class="last-rated">2 wks ago</div>
+            </div>
+
+            <div class="game-row">
+              <div class="rank">4</div>
+              <div class="game-thumb">🗺️</div>
+              <div class="game-info">
+                <div class="game-name">Ark Nova</div>
+                <div class="game-meta"><span>1–4p</span><span>90–150 min</span></div>
+              </div>
+              <div class="axes-col">
+                <span class="axis-chip">Fitness: 8.3</span><span class="axis-chip">ELO: 1555</span>
+              </div>
+              <div class="score-cell">
+                <span class="score-dot mid"></span>
+                <span class="score-value axis-score">7</span>
+              </div>
+              <div class="last-rated">1 wk ago</div>
+            </div>
+
+            <div class="game-row">
+              <div class="rank">5</div>
+              <div class="game-thumb">⚔️</div>
+              <div class="game-info">
+                <div class="game-name">Spirit Island</div>
+                <div class="game-meta"><span>1–4p</span><span>90–120 min</span></div>
+              </div>
+              <div class="axes-col">
+                <span class="axis-chip">Fitness: 7.8</span><span class="axis-chip">ELO: 1531</span>
+              </div>
+              <div class="score-cell">
+                <span class="score-dot low"></span>
+                <span class="score-value axis-score">4</span>
+              </div>
+              <div class="last-rated">3 wks ago</div>
+            </div>
+
+            <!-- No-value separator: games not rated on this axis -->
+            <div class="section-sep">
+              <div class="section-sep-label">No rating on "Wife Will Play It"</div>
+              <div class="section-sep-line"></div>
+              <div class="section-sep-label">14 games below</div>
+            </div>
+
+            <div class="game-row">
+              <div class="rank" style="color: var(--border-strong)">–</div>
+              <div class="game-thumb">🃏</div>
+              <div class="game-info">
+                <div class="game-name">Gloomhaven</div>
+                <div class="game-meta"><span>1–4p</span><span>60–120 min</span></div>
+              </div>
+              <div class="axes-col"></div>
+              <div class="score-unrated">not rated</div>
+              <div class="last-rated">—</div>
+            </div>
+
+            <div class="game-row">
+              <div class="rank" style="color: var(--border-strong)">–</div>
+              <div class="game-thumb">🌊</div>
+              <div class="game-info">
+                <div class="game-name">Terraforming Mars</div>
+                <div class="game-meta"><span>1–5p</span><span>120 min</span></div>
+              </div>
+              <div class="axes-col"></div>
+              <div class="score-unrated">not rated</div>
+              <div class="last-rated">—</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout-set">
+        <div class="callout">
+          <div class="callout-num">A</div>
+          <div>
+            When an axis is the active sort, the sort control button text turns action-navy to
+            signal a non-default state. The dropdown stays consistent — axis sorts are in the "Your
+            Axes" group.
+          </div>
+        </div>
+        <div class="callout">
+          <div class="callout-num">B</div>
+          <div>
+            Score column now shows the axis rating value (1–10) in action-navy instead of amber. The
+            subtitle reads the axis name verbatim. The dot uses the standard high/mid/low coloring
+            against the axis scale.
+          </div>
+        </div>
+        <div class="callout">
+          <div class="callout-num">C</div>
+          <div>
+            The axes column shows alternate context: fitness score and ELO rating, so the user still
+            sees overall standing while browsing by axis. This replaces the axis chips from the
+            default view.
+          </div>
+        </div>
+        <div class="callout">
+          <div class="callout-num">D</div>
+          <div>
+            The "no value" separator label changes to match the axis: "No rating on 'Wife Will Play
+            It' — 14 games below." Consistent visual treatment, contextual label.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         PANEL 3: Mobile view
+    ════════════════════════════════════════════════════════════════════ -->
+
+    <div class="annotation-section">
+      <div class="annotation-label">
+        Panel 3 — Mobile (390px): Sort dropdown open, active filters shown
+      </div>
+
+      <div style="display: flex; gap: 32px; align-items: flex-start; flex-wrap: wrap">
+        <!-- Mobile state A: normal with sort + filter controls -->
+        <div>
+          <div style="font-size: 11px; color: #9c9590; margin-bottom: 8px; font-weight: 600">
+            A — Controls visible, no dropdown
+          </div>
+          <div class="mobile-frame">
+            <!-- Mobile topbar -->
+            <div class="mobile-topbar">
+              <svg width="18" height="15" viewBox="0 0 22 18" fill="none">
+                <rect x="0" y="6" width="5" height="12" rx="1" fill="#b86c1a" />
+                <rect x="7" y="0" width="5" height="18" rx="1" fill="#e8e4dc" />
+                <rect x="14" y="4" width="5" height="14" rx="1" fill="#e8e4dc" opacity="0.6" />
+              </svg>
+              <span class="mobile-brand-name">Shelf Judge</span>
+              <div class="mobile-nav-btn">☰</div>
+            </div>
+
+            <!-- Content header -->
+            <div class="mobile-content-header">
+              <div class="mobile-header-row1">
+                <span class="mobile-page-title">Collection</span>
+                <span class="mobile-meta">12 of 47</span>
+              </div>
+              <div class="mobile-sort-row">
+                <!-- Search -->
+                <div class="mobile-search-wrap">
+                  <span class="mobile-search-icon">🔍</span>
+                  <input class="mobile-search-input" type="text" value="ark" />
+                </div>
+                <!-- Sort dropdown trigger -->
+                <button class="mobile-sort-btn">
+                  <svg
+                    width="11"
+                    height="10"
+                    viewBox="0 0 13 12"
+                    fill="currentColor"
+                    style="opacity: 0.65"
+                  >
+                    <path
+                      d="M1 1h11M3 5h7M5 9h3"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                      stroke-linecap="round"
+                      fill="none"
+                    />
+                  </svg>
+                  Fitness ↓
+                </button>
+                <!-- Filter button with active badge -->
+                <button class="mobile-filter-btn has-filters">
+                  <svg
+                    width="14"
+                    height="13"
+                    viewBox="0 0 13 12"
+                    fill="currentColor"
+                    style="opacity: 0.85"
+                  >
+                    <path d="M1 2h11l-4 5v3l-3-1V7L1 2z" />
+                  </svg>
+                </button>
+              </div>
+              <!-- Active filter chips (mobile compact) -->
+              <div class="active-chips-row" style="flex-wrap: wrap; gap: 5px">
+                <span class="filter-chip chip-search" style="font-size: 10px"
+                  >"ark" <span class="chip-x">×</span></span
+                >
+                <span class="filter-chip chip-rated" style="font-size: 10px"
+                  >Rated only <span class="chip-x">×</span></span
+                >
+                <span class="filter-chip chip-spec" style="font-size: 10px"
+                  >2–5p <span class="chip-x">×</span></span
+                >
+              </div>
+            </div>
+
+            <!-- Mobile table -->
+            <div class="mobile-content">
+              <div class="mobile-table-header">
+                <div class="col-label">Game</div>
+                <div class="col-label right" style="width: 60px">Score ↓</div>
+                <div class="col-label right" style="width: 64px">Last Rated</div>
+              </div>
+
+              <div class="mobile-game-row">
+                <div class="mobile-thumb">🎲</div>
+                <div class="mobile-game-info">
+                  <div class="mobile-game-name">Arkham Horror: LCG</div>
+                  <div class="mobile-game-meta">1–4p · 60–120 min</div>
+                </div>
+                <div class="mobile-score-cell">
+                  <span class="mobile-score-value">9.1</span>
+                  <span class="mobile-score-label">fitness</span>
+                </div>
+              </div>
+
+              <div class="mobile-game-row">
+                <div class="mobile-thumb">🗺️</div>
+                <div class="mobile-game-info">
+                  <div class="mobile-game-name">Ark Nova</div>
+                  <div class="mobile-game-meta">1–4p · 90–150 min</div>
+                </div>
+                <div class="mobile-score-cell">
+                  <span class="mobile-score-value">8.3</span>
+                  <span class="mobile-score-label">fitness</span>
+                </div>
+              </div>
+
+              <div class="mobile-game-row">
+                <div class="mobile-thumb">⚔️</div>
+                <div class="mobile-game-info">
+                  <div class="mobile-game-name">Arcs</div>
+                  <div class="mobile-game-meta">2–4p · 60–120 min</div>
+                </div>
+                <div class="mobile-score-cell">
+                  <span class="mobile-score-value">7.8</span>
+                  <span class="mobile-score-label">fitness</span>
+                </div>
+              </div>
+
+              <div class="mobile-section-sep">
+                <span class="section-sep-label">Not yet rated · 9 below</span>
+                <div class="section-sep-line"></div>
+              </div>
+
+              <div class="mobile-game-row">
+                <div class="mobile-thumb">🌊</div>
+                <div class="mobile-game-info">
+                  <div class="mobile-game-name">Arkwright: Card Game</div>
+                  <div class="mobile-game-meta">2–4p · 60 min</div>
+                </div>
+                <div class="mobile-score-cell">
+                  <span
+                    class="mobile-score-value"
+                    style="
+                      font-size: 11px;
+                      font-style: italic;
+                      color: var(--text-muted);
+                      font-weight: 400;
+                    "
+                    >—</span
+                  >
+                  <span class="mobile-score-label"></span>
+                </div>
+              </div>
+
+              <div class="mobile-game-row">
+                <div class="mobile-thumb">🏰</div>
+                <div class="mobile-game-info">
+                  <div class="mobile-game-name">Pandemic: In the Lab</div>
+                  <div class="mobile-game-meta">2–5p · 45–75 min</div>
+                </div>
+                <div class="mobile-score-cell">
+                  <span
+                    class="mobile-score-value"
+                    style="
+                      font-size: 11px;
+                      font-style: italic;
+                      color: var(--text-muted);
+                      font-weight: 400;
+                    "
+                    >—</span
+                  >
+                  <span class="mobile-score-label"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Mobile state B: sort dropdown open -->
+        <div>
+          <div style="font-size: 11px; color: #9c9590; margin-bottom: 8px; font-weight: 600">
+            B — Sort dropdown open
+          </div>
+          <div class="mobile-frame" style="position: relative; overflow: visible">
+            <!-- Mobile topbar -->
+            <div class="mobile-topbar">
+              <svg width="18" height="15" viewBox="0 0 22 18" fill="none">
+                <rect x="0" y="6" width="5" height="12" rx="1" fill="#b86c1a" />
+                <rect x="7" y="0" width="5" height="18" rx="1" fill="#e8e4dc" />
+                <rect x="14" y="4" width="5" height="14" rx="1" fill="#e8e4dc" opacity="0.6" />
+              </svg>
+              <span class="mobile-brand-name">Shelf Judge</span>
+              <div class="mobile-nav-btn">☰</div>
+            </div>
+
+            <!-- Content header -->
+            <div class="mobile-content-header">
+              <div class="mobile-header-row1">
+                <span class="mobile-page-title">Collection</span>
+                <span class="mobile-meta">47 games</span>
+              </div>
+              <div class="mobile-sort-row">
+                <div class="mobile-search-wrap">
+                  <span class="mobile-search-icon">🔍</span>
+                  <input class="mobile-search-input" type="text" placeholder="Search games…" />
+                </div>
+                <button
+                  class="mobile-sort-btn"
+                  style="
+                    border-color: var(--action);
+                    color: var(--action);
+                    background: var(--action-subtle);
+                  "
+                >
+                  Fitness ↓
+                  <span style="font-size: 10px">▲</span>
+                </button>
+                <button class="mobile-filter-btn">
+                  <svg
+                    width="14"
+                    height="13"
+                    viewBox="0 0 13 12"
+                    fill="currentColor"
+                    style="opacity: 0.65"
+                  >
+                    <path d="M1 2h11l-4 5v3l-3-1V7L1 2z" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- Sort dropdown overlay -->
+            <div class="mobile-sort-menu">
+              <div class="mobile-sort-menu-header">
+                <span class="mobile-sort-menu-title">Sort by</span>
+                <span class="mobile-sort-menu-close">✕</span>
+              </div>
+              <div style="overflow-y: auto; max-height: 480px">
+                <div class="sort-menu-group">
+                  <div class="sort-menu-group-label">Score</div>
+                  <div class="sort-menu-item active" style="padding: 9px 14px; font-size: 14px">
+                    <span class="check">✓</span>
+                    <span class="item-label">Fitness Score</span>
+                  </div>
+                  <div class="sort-menu-item" style="padding: 9px 14px; font-size: 14px">
+                    <span class="check"></span>
+                    <span class="item-label">Tournament ELO</span>
+                  </div>
+                </div>
+                <div class="sort-menu-group">
+                  <div class="sort-menu-group-label">Identity</div>
+                  <div class="sort-menu-item" style="padding: 9px 14px; font-size: 14px">
+                    <span class="check"></span>
+                    <span class="item-label">Name (A–Z)</span>
+                  </div>
+                  <div class="sort-menu-item" style="padding: 9px 14px; font-size: 14px">
+                    <span class="check"></span>
+                    <span class="item-label">Year Published</span>
+                  </div>
+                  <div class="sort-menu-item" style="padding: 9px 14px; font-size: 14px">
+                    <span class="check"></span>
+                    <span class="item-label">Date Added</span>
+                  </div>
+                  <div class="sort-menu-item" style="padding: 9px 14px; font-size: 14px">
+                    <span class="check"></span>
+                    <span class="item-label">Last Rated</span>
+                  </div>
+                </div>
+                <div class="sort-menu-group">
+                  <div class="sort-menu-group-label">Specs</div>
+                  <div class="sort-menu-item" style="padding: 9px 14px; font-size: 14px">
+                    <span class="check"></span>
+                    <span class="item-label">Min Players</span>
+                  </div>
+                  <div class="sort-menu-item" style="padding: 9px 14px; font-size: 14px">
+                    <span class="check"></span>
+                    <span class="item-label">Play Time</span>
+                  </div>
+                  <div class="sort-menu-item" style="padding: 9px 14px; font-size: 14px">
+                    <span class="check"></span>
+                    <span class="item-label">BGG Rating</span>
+                  </div>
+                  <div class="sort-menu-item" style="padding: 9px 14px; font-size: 14px">
+                    <span class="check"></span>
+                    <span class="item-label">BGG Weight</span>
+                  </div>
+                </div>
+                <div class="sort-menu-group">
+                  <div class="sort-menu-group-label">Your Axes</div>
+                  <div class="sort-menu-axis-item" style="padding: 9px 14px; font-size: 13px">
+                    <span class="check"></span>
+                    <span class="item-label">Wife Will Play It</span>
+                  </div>
+                  <div class="sort-menu-axis-item" style="padding: 9px 14px; font-size: 13px">
+                    <span class="check"></span>
+                    <span class="item-label">Complexity</span>
+                  </div>
+                  <div class="sort-menu-axis-item" style="padding: 9px 14px; font-size: 13px">
+                    <span class="check"></span>
+                    <span class="item-label">Replayability</span>
+                  </div>
+                  <div class="sort-menu-axis-item" style="padding: 9px 14px; font-size: 13px">
+                    <span class="check"></span>
+                    <span class="item-label">Component Quality</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Dimmed table beneath dropdown -->
+            <div class="mobile-content" style="opacity: 0.3; pointer-events: none">
+              <div class="mobile-table-header">
+                <div class="col-label">Game</div>
+                <div class="col-label right" style="width: 60px">Score</div>
+                <div class="col-label right" style="width: 64px">Last Rated</div>
+              </div>
+              <div class="mobile-game-row">
+                <div class="mobile-thumb">🎲</div>
+                <div class="mobile-game-info">
+                  <div class="mobile-game-name">Arkham Horror: LCG</div>
+                </div>
+                <div class="mobile-score-cell"><span class="mobile-score-value">9.1</span></div>
+              </div>
+              <div class="mobile-game-row">
+                <div class="mobile-thumb">🗺️</div>
+                <div class="mobile-game-info"><div class="mobile-game-name">Ark Nova</div></div>
+                <div class="mobile-score-cell"><span class="mobile-score-value">8.3</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- end mobile panels flex -->
+
+      <div class="callout-set">
+        <div class="callout">
+          <div class="callout-num">M1</div>
+          <div>
+            Mobile layout: search input + sort button + filter icon in a single row. The sort button
+            shows the current sort name and direction. The filter icon gets a color change (navy)
+            when filters are active.
+          </div>
+        </div>
+        <div class="callout">
+          <div class="callout-num">M2</div>
+          <div>
+            Active filter chips appear directly in the content header below the controls row — same
+            chips pattern as desktop, but no "Active:" prefix label (space is tighter). Chips are
+            horizontally scrollable if they overflow.
+          </div>
+        </div>
+        <div class="callout">
+          <div class="callout-num">M3</div>
+          <div>
+            Mobile sort dropdown is a full-width overlay panel that slides up from below the
+            controls, dimming the table behind it. Same four groups as desktop. Touch-optimized row
+            height (44px). Closed by tapping the ✕ or selecting a sort.
+          </div>
+        </div>
+        <div class="callout">
+          <div class="callout-num">M4</div>
+          <div>
+            Mobile table is simplified to three columns: game (with thumb + name + meta), score
+            (with sub-label showing what the score represents), and last rated. The "no value"
+            separator is compact: single line with label left and separator line right.
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

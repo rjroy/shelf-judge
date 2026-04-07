@@ -1,7 +1,7 @@
 ---
 title: BGG Tag Filter Fuzzy Matching
 date: 2026-04-06
-status: draft
+status: implemented
 tags: [tournament, filters, bgg, fuzzy-match]
 modules: [shared, daemon, web]
 related:
