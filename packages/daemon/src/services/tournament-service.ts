@@ -77,6 +77,7 @@ function applyFilters(
           const tagNames = [
             ...bgg.mechanics.map((m) => m.name),
             ...bgg.categories.map((c) => c.name),
+            ...bgg.families.map((f) => f.name),
           ];
           return matchesBggTag(filter.value, tagNames);
         });

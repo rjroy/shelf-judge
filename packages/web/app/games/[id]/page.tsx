@@ -87,7 +87,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
               )}
               {game.playingTime && <span>⏱ {game.playingTime} min</span>}
               {game.bggData?.weight && <span>⚖️ BGG Weight: {game.bggData.weight.toFixed(2)}</span>}
-              {game.numPlays && <span>🎲 Plays: {game.numPlays}</span>}
+              {game.numPlays && game.numPlays > 0 && <span>🎲 Plays: {game.numPlays}</span>}
               {game.bggId && (
                 <a
                   className="bgg-link"
