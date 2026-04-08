@@ -67,6 +67,7 @@ function defaultConfig(dataDir: string): AppConfig {
     bggAuthToken: null,
     dataDir,
     socketPath: path.join(os.homedir(), ".shelf-judge", "shelf-judge.sock"),
+    username: null,
   };
 }
 

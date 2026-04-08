@@ -16,7 +16,7 @@ describe("BggClient", () => {
   beforeEach(() => {
     mockFetch = createMockFetch();
     client = createBggClient({
-      config: { bggAuthToken: "test-token" },
+      config: { bggAuthToken: "test-token", username: "testuser" },
       fetchFn: mockFetch.fn,
       delayMs: 0,
       delayFn: () => Promise.resolve(),
@@ -30,7 +30,7 @@ describe("BggClient", () => {
 
     test("returns false when token is null", () => {
       const unconfigured = createBggClient({
-        config: { bggAuthToken: null },
+        config: { bggAuthToken: null, username: null },
         fetchFn: mockFetch.fn,
         delayMs: 0,
       });
@@ -39,7 +39,7 @@ describe("BggClient", () => {
 
     test("returns false when token is empty string", () => {
       const unconfigured = createBggClient({
-        config: { bggAuthToken: "" },
+        config: { bggAuthToken: "", username: null },
         fetchFn: mockFetch.fn,
         delayMs: 0,
       });
@@ -60,16 +60,18 @@ describe("BggClient", () => {
       expect(mockFetch.calls[0].url).toContain("type=boardgame");
       expect(mockFetch.calls[0].headers.Authorization).toBe("Bearer test-token");
 
-      expect(results).toHaveLength(3);
-      expect(results[0].bggId).toBe(266192);
-      expect(results[0].name).toBe("Wingspan");
+      expect(results).toHaveLength(14);
+      expect(results[1].bggId).toBe(266192);
+      expect(results[1].name).toBe("Wingspan");
     });
   });
 
   describe("getGame", () => {
     test("fetches with stats=1 and returns parsed data", async () => {
       const thingXml = await readFixture("thing-wingspan-266192.xml");
+      const collectionXml = await readFixture("collection-testuser-wingspan-266192.xml");
       mockFetch.enqueue(200, thingXml);
+      mockFetch.enqueue(200, collectionXml);
 
       const result = await client.getGame(266192);
 
@@ -79,25 +81,31 @@ describe("BggClient", () => {
 
       expect(result.metadata.bggId).toBe(266192);
       expect(result.metadata.name).toBe("Wingspan");
-      expect(result.bggData.communityRating).toBe(8.1);
-      expect(result.bggData.weight).toBe(2.45);
+      expect(result.bggData.communityRating).toBe(8.00153);
+      expect(result.bggData.weight).toBe(2.4802);
+      expect(result.collectionData?.numPlays).toBe(12);
     });
   });
 
   describe("getGames (batch)", () => {
     test("batches up to 20 IDs per request", async () => {
       const thingXml = await readFixture("thing-wingspan-266192.xml");
+      const emptyCollectionXml = `<?xml version="1.0" encoding="utf-8"?><items totalitems="0"></items>`;
       // Create 50 IDs to force 3 batches
       const ids = Array.from({ length: 50 }, (_, i) => 266192 + i);
 
-      mockFetch.enqueue(200, thingXml); // First batch (20)
-      mockFetch.enqueue(200, thingXml); // Second batch (20)
-      mockFetch.enqueue(200, thingXml); // Third batch (10)
+      // Each batch: thing fetch + collection fetch (username is configured)
+      mockFetch.enqueue(200, thingXml); // First batch thing
+      mockFetch.enqueue(200, emptyCollectionXml); // First batch collection
+      mockFetch.enqueue(200, thingXml); // Second batch thing
+      mockFetch.enqueue(200, emptyCollectionXml); // Second batch collection
+      mockFetch.enqueue(200, thingXml); // Third batch thing
+      mockFetch.enqueue(200, emptyCollectionXml); // Third batch collection
 
       await client.getGames(ids);
 
-      // Should have made 3 requests: 20 + 20 + 10
-      expect(mockFetch.calls).toHaveLength(3);
+      // Should have made 6 requests: 3 batches × (thing + collection)
+      expect(mockFetch.calls).toHaveLength(6);
       const firstUrl = mockFetch.calls[0].url;
       const firstIds = new URL(firstUrl).searchParams.get("id")!.split(",");
       expect(firstIds).toHaveLength(20);
@@ -109,7 +117,7 @@ describe("BggClient", () => {
       const collectionXml = await readFixture("collection-testuser.xml");
       mockFetch.enqueue(200, collectionXml);
 
-      const results = await client.getUserCollection("testuser");
+      const results = await client.getUserCollection();
 
       expect(mockFetch.calls[0].url).toContain("username=testuser");
       expect(mockFetch.calls[0].url).toContain("own=1");
@@ -124,7 +132,7 @@ describe("BggClient", () => {
       mockFetch.enqueue(202, ""); // First attempt: queued
       mockFetch.enqueue(200, collectionXml); // Second attempt: success
 
-      const results = await client.getUserCollection("testuser");
+      const results = await client.getUserCollection();
 
       // 2 calls: initial 202, then successful 200
       expect(mockFetch.calls).toHaveLength(2);
@@ -139,7 +147,7 @@ describe("BggClient", () => {
       mockFetch.enqueue(202, "");
 
       // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
-      await expect(client.getUserCollection("testuser")).rejects.toThrow(
+      await expect(client.getUserCollection()).rejects.toThrow(
         "still queued after maximum retries",
       );
     });
@@ -149,7 +157,7 @@ describe("BggClient", () => {
     test("retries after 429 with correct delay timing", async () => {
       const delayCalls: number[] = [];
       const trackingClient = createBggClient({
-        config: { bggAuthToken: "test-token" },
+        config: { bggAuthToken: "test-token", username: null },
         fetchFn: mockFetch.fn,
         delayMs: 0,
         delayFn: (ms: number) => {
@@ -165,7 +173,7 @@ describe("BggClient", () => {
       const results = await trackingClient.searchGames("Wingspan");
 
       expect(mockFetch.calls).toHaveLength(2);
-      expect(results).toHaveLength(3);
+      expect(results).toHaveLength(14);
 
       // Should have called delayFn with BACKOFF_429_MS (30000)
       expect(delayCalls).toContain(30000);
@@ -174,7 +182,7 @@ describe("BggClient", () => {
     test("sets slower rate after 429 recovery", async () => {
       const delayCalls: number[] = [];
       const trackingClient = createBggClient({
-        config: { bggAuthToken: "test-token" },
+        config: { bggAuthToken: "test-token", username: null },
         fetchFn: mockFetch.fn,
         delayMs: 0,
         delayFn: (ms: number) => {
@@ -209,17 +217,19 @@ describe("BggClient", () => {
       const results = await client.searchGames("Wingspan");
 
       expect(mockFetch.calls).toHaveLength(2);
-      expect(results).toHaveLength(3);
+      expect(results).toHaveLength(14);
     });
 
     test("retries on 503", async () => {
       const thingXml = await readFixture("thing-gloomhaven-174430.xml");
+      const emptyCollectionXml = `<?xml version="1.0" encoding="utf-8"?><items totalitems="0"></items>`;
       mockFetch.enqueue(503, "Service Unavailable");
       mockFetch.enqueue(200, thingXml);
+      mockFetch.enqueue(200, emptyCollectionXml);
 
       const result = await client.getGame(174430);
 
-      expect(mockFetch.calls).toHaveLength(2);
+      expect(mockFetch.calls).toHaveLength(3);
       expect(result.metadata.name).toBe("Gloomhaven");
     });
 
@@ -266,7 +276,7 @@ describe("BggClient", () => {
       };
 
       const timeoutClient = createBggClient({
-        config: { bggAuthToken: "test-token" },
+        config: { bggAuthToken: "test-token", username: null },
         fetchFn: hangingFetch as unknown as typeof fetch,
         delayMs: 0,
         delayFn: () => Promise.resolve(),
@@ -280,7 +290,7 @@ describe("BggClient", () => {
   describe("missing token", () => {
     test("returns clear error with registration URL", async () => {
       const unconfigured = createBggClient({
-        config: { bggAuthToken: null },
+        config: { bggAuthToken: null, username: null },
         fetchFn: mockFetch.fn,
         delayMs: 0,
       });
@@ -299,7 +309,7 @@ describe("BggClient", () => {
   describe("isConfigured consistency", () => {
     test("returns false when token is undefined", () => {
       const unconfigured = createBggClient({
-        config: { bggAuthToken: undefined as unknown as string | null },
+        config: { bggAuthToken: undefined as unknown as string | null, username: null },
         fetchFn: mockFetch.fn,
         delayMs: 0,
       });
@@ -312,7 +322,7 @@ describe("BggClient", () => {
       const delayCalls: number[] = [];
       const recoveryMock = createMockFetch();
       const recoveryClient = createBggClient({
-        config: { bggAuthToken: "test-token" },
+        config: { bggAuthToken: "test-token", username: null },
         fetchFn: recoveryMock.fn,
         delayMs: 100,
         delayFn: (ms: number) => {

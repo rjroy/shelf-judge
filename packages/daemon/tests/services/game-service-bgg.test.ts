@@ -32,7 +32,7 @@ beforeEach(() => {
   });
   mockFetch = createMockFetch();
   bggClient = createBggClient({
-    config: { bggAuthToken: "test-token" },
+    config: { bggAuthToken: "test-token", username: null },
     fetchFn: mockFetch.fn,
     delayMs: 0,
     delayFn: () => Promise.resolve(),
@@ -54,8 +54,8 @@ describe("GameService BGG Integration", () => {
 
       expect(game.bggId).toBe(266192);
       expect(game.bggData).not.toBeNull();
-      expect(game.bggData!.communityRating).toBe(8.1);
-      expect(game.bggData!.weight).toBe(2.45);
+      expect(game.bggData!.communityRating).toBe(8.00153);
+      expect(game.bggData!.weight).toBe(2.4802);
       expect(game.name).toBe("Wingspan");
       expect(game.yearPublished).toBe(2019);
       expect(game.minPlayers).toBe(1);
@@ -86,9 +86,9 @@ describe("GameService BGG Integration", () => {
 
       const results = await gameService.searchGames("Wingspan");
 
-      expect(results).toHaveLength(3);
-      expect(results[0].bggId).toBe(266192);
-      expect(results[0].name).toBe("Wingspan");
+      expect(results).toHaveLength(14);
+      expect(results[1].bggId).toBe(266192);
+      expect(results[1].name).toBe("Wingspan");
     });
 
     test("throws when BGG not configured", async () => {
@@ -127,7 +127,7 @@ describe("GameService BGG Integration", () => {
 
       // bggData should be updated (fetchedAt changed)
       expect(refreshed.bggData).not.toBeNull();
-      expect(refreshed.bggData!.communityRating).toBe(8.1);
+      expect(refreshed.bggData!.communityRating).toBe(8.00153);
 
       // User override should be preserved
       expect(refreshed.ratings[complexityAxis!.id]).toBe(7);
@@ -187,8 +187,8 @@ describe("GameService BGG Integration", () => {
       expect(result.score).not.toBeNull();
       expect(result.score!.ratedAxisCount).toBe(2);
 
-      // Community Rating: 8.1, Complexity: 2.45 * 2 = 4.9
-      // Equal weights (50/50): (8.1*50 + 4.9*50) / (50+50) = 6.5
+      // Community Rating: 8.00153, Complexity: 2.4802 * 2 = 4.9604
+      // Equal weights (50/50): rounds to 6.5
       expect(result.score!.score).toBe(6.5);
     });
 
@@ -225,7 +225,7 @@ describe("GameService BGG Integration", () => {
       expect(complexityBreakdown).toBeDefined();
       expect(complexityBreakdown!.source).toBe("override");
       expect(complexityBreakdown!.rating).toBe(7);
-      expect(complexityBreakdown!.bggOriginal).toBe(4.9); // 2.45 * 2
+      expect(complexityBreakdown!.bggOriginal).toBe(5.0); // 2.4802 * 2, rounded
     });
   });
 });

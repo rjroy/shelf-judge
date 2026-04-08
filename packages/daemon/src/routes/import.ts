@@ -50,7 +50,7 @@ export function createImportRoutes(deps: ImportRoutesDeps): RouteModule {
     return streamSSE(
       c,
       async (stream) => {
-        const summary = await gameService.importBggCollection(username, async (event) => {
+        const summary = await gameService.importBggCollection(async (event) => {
           await stream.writeSSE({
             event: "progress",
             data: JSON.stringify({

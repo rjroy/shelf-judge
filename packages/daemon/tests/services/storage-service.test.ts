@@ -183,6 +183,7 @@ describe("StorageService.saveConfig", () => {
 
     await service.saveConfig({
       bggAuthToken: "tok",
+      username: null,
       dataDir: DATA_DIR,
       socketPath: "/tmp/shelf-judge.sock",
     });

@@ -33,6 +33,7 @@ export interface TournamentService {
   getAllGameStats(): Promise<Record<string, TournamentGameStatsDisplay>>;
   listSessions(): Promise<TournamentSession[]>;
   recalculate(): Promise<{ gamesUpdated: number }>;
+  normalizeFitness(): Promise<{ normalized: number }>;
   onGameDeleted(gameId: string): Promise<void>;
   getSettings(): Promise<TournamentSettings>;
   updateSettings(patch: Partial<TournamentSettings>): Promise<TournamentSettings>;
@@ -260,44 +261,24 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
         return null;
       }
 
-      // Start with the game with the fewest comparisons
+      // Shuffle the available games to add some randomness.
+      for (let i = availableGameIds.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [availableGameIds[i], availableGameIds[j]] = [availableGameIds[j], availableGameIds[i]];
+      }
+
+      // Look for the game with the fewest comparisons to be gameA.
       let selectedA: string | null = null;
       let selectedElo = 1500;
-      let selectedCount = 0;
       for (let i = 0, lowestCount = Infinity; i < availableGameIds.length; i++) {
         const gameId = availableGameIds[i];
         const stats = data.gameStats[gameId];
         const count = stats?.comparisonCount ?? 0;
-        if (count > lowestCount) {
-          continue;
-        }
         if (count < lowestCount) {
           selectedA = gameId;
           lowestCount = count;
           selectedElo = stats?.eloRating ?? 1500;
-          selectedCount = count;
-          continue;
         } 
-
-        // Tiebreaker: choose the one with ELO closest to 1500
-        const elo = stats?.eloRating ?? 1500;
-        const selectedEloDiff = Math.abs(selectedElo - 1500);
-        const eloDiff = Math.abs(elo - 1500);
-        if (eloDiff > selectedEloDiff) {
-          continue;
-        }
-        if (eloDiff < selectedEloDiff) {
-          selectedA = gameId;
-          selectedElo = elo;
-          selectedCount = count;
-          continue;
-        }
-
-        if (gameId < (selectedA ?? "")) {
-          selectedA = gameId;
-          selectedElo = elo;
-          selectedCount = count;
-        }
       }
 
       if (!selectedA) {
@@ -308,22 +289,14 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
         return null;
       }
 
-      // Sort the remaining games by comparison count (fewest first), then ELO proximity to selectedA
-      // But allow games with almost the same count (within 1) to be mixed together to add some variety
-      // After kFactorThreshold comparisons, the count difference is no longer considered to allow more mixing
+      // Sort the remaining games by ELO proximity to selectedA, to increase chance of a meaningful comparison.
       availableGameIds.sort((a:string, b:string) => {
-        const countA = Math.min(data.settings.kFactorThreshold, Math.max(0, Math.abs(data.gameStats[a]?.comparisonCount ?? 0 - selectedCount) - 1));
-        const countB = Math.min(data.settings.kFactorThreshold, Math.max(0, Math.abs(data.gameStats[b]?.comparisonCount ?? 0 - selectedCount) - 1));
-        if (countA !== countB) {
-          return countA - countB; // games with fewer comparisons first
-        }
         const eloADiff = Math.abs(selectedElo - (data.gameStats[a]?.eloRating ?? 1500));
         const eloBDiff = Math.abs(selectedElo - (data.gameStats[b]?.eloRating ?? 1500));
         if (eloADiff !== eloBDiff) {
           return eloADiff - eloBDiff; // games with closer ELO first
         }
-
-        return a.localeCompare(b); // tiebreaker for consistent ordering
+        return 0; // if ELO difference is the same, keep original order (which is randomized)
       });
 
       // Get pairs already seen in this session.
@@ -448,6 +421,27 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
       data.gameStats = recalculateAllRatings(data.comparisons, data.settings.kFactorThreshold);
       await storageService.saveTournament(data);
       return { gamesUpdated: Object.keys(data.gameStats).length };
+    },
+
+    async normalizeFitness(): Promise<{ normalized: number }> {
+      const data = await storageService.loadTournament();
+      let minElo = Infinity;
+      let maxElo = -Infinity;
+      for (const stats of Object.values(data.gameStats)) {
+        if (stats.eloRating < minElo) {
+          minElo = stats.eloRating;
+        }
+        if (stats.eloRating > maxElo) {
+          maxElo = stats.eloRating;
+        }
+      }
+
+      // calculate the normalization half-width as the distance from 1500 to the furthest rating, or use the existing half-width if it's larger
+      const halfWidth = Math.max(maxElo - 1500, 1500 - minElo);
+      data.settings.normalizationHalfWidth = halfWidth;
+
+      await storageService.saveTournament(data);
+      return { normalized: Object.keys(data.gameStats).length };
     },
 
     async onGameDeleted(gameId: string): Promise<void> {

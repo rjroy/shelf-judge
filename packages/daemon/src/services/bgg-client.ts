@@ -10,6 +10,7 @@ import {
   parseCollectionResponse,
   type BggCollectionItem,
   type ThingMetadata,
+  CollectiomItemMetadata,
 } from "./bgg-xml-parser.js";
 import { createLogger } from "./logger.js";
 
@@ -28,6 +29,7 @@ const FETCH_TIMEOUT_MS = 30000;
 export interface BggGameResult {
   metadata: ThingMetadata;
   bggData: BggGameData;
+  collectionData?: CollectiomItemMetadata;
 }
 
 export interface BatchProgressEvent {
@@ -37,17 +39,19 @@ export interface BatchProgressEvent {
 
 export interface BggClient {
   searchGames(query: string): Promise<BggSearchResult[]>;
-  getGame(bggId: number): Promise<BggGameResult>;
+  getGame(
+      bggId: number, 
+  ): Promise<BggGameResult>;
   getGames(
     bggIds: number[],
     onBatch?: (event: BatchProgressEvent) => Promise<void> | void,
   ): Promise<Map<number, BggGameResult>>;
-  getUserCollection(username: string): Promise<BggCollectionItem[]>;
+  getUserCollection(): Promise<BggCollectionItem[]>;
   isConfigured(): boolean;
 }
 
 export interface BggClientDeps {
-  config: Pick<AppConfig, "bggAuthToken">;
+  config: Pick<AppConfig, "bggAuthToken" | "username">;
   fetchFn?: typeof fetch;
   delayMs?: number;
   delayFn?: (ms: number) => Promise<void>;
@@ -219,6 +223,22 @@ export function createBggClient(deps: BggClientDeps): BggClient {
         throw new Error(`No game found with BGG ID ${bggId}`);
       }
 
+      if (config.username) {
+        logger.log(`getGame: fetched data for "${items[0].metadata.name}", checking collection for "${config.username}"`);
+        const collectionUrl = `${BGG_BASE_URL}/collection?username=${encodeURIComponent(config.username)}&id=${bggId}&stats=1`;
+        const collectionXml = await fetchWithRetry202(collectionUrl);
+        const collectionItems = parseCollectionResponse(collectionXml);
+        if (collectionItems.length > 0) {
+          return {
+            metadata: items[0].metadata,
+            bggData: items[0].bggData,
+            collectionData: {
+              numPlays: collectionItems[0].numplays,
+            }
+          };
+        }
+      }
+
       return {
         metadata: items[0].metadata,
         bggData: items[0].bggData,
@@ -253,6 +273,23 @@ export function createBggClient(deps: BggClientDeps): BggClient {
             results.set(item.bggId, entry);
             batchResults.set(item.bggId, entry);
           }
+          if (config.username) {
+            logger.log(`batch ${batchNum}: checking collection for "${config.username}"`);
+            const collectionUrl = `${BGG_BASE_URL}/collection?username=${encodeURIComponent(config.username)}&id=${idList}&stats=1`;
+            const collectionXml = await fetchWithRetry202(collectionUrl);
+            const collectionItems = parseCollectionResponse(collectionXml);
+            logger.log(`batch ${batchNum}: found ${collectionItems.length} items in collection`);
+
+            for (const colItem of collectionItems) {
+              const gameResult = results.get(colItem.bggId);
+              if (gameResult) {
+                gameResult.collectionData = {
+                  numPlays: colItem.numplays,
+                };
+                batchResults.set(colItem.bggId, gameResult);
+              }
+            }
+          }
         } catch (err) {
           logger.error(`batch ${batchNum} failed: ${toErrorMessage(err)}`);
         }
@@ -264,15 +301,19 @@ export function createBggClient(deps: BggClientDeps): BggClient {
       return results;
     },
 
-    async getUserCollection(username: string): Promise<BggCollectionItem[]> {
+    async getUserCollection(): Promise<BggCollectionItem[]> {
+      if (!config.username) {
+        throw new Error("Username not configured. Set a username to fetch collection data.");
+      }
+
       assertConfigured();
-      logger.log(`getUserCollection: fetching for "${username}"`);
-      const url = `${BGG_BASE_URL}/collection?username=${encodeURIComponent(username)}&own=1&subtype=boardgame&stats=1`;
+      logger.log(`getUserCollection: fetching for "${config.username}"`);
+      const url = `${BGG_BASE_URL}/collection?username=${encodeURIComponent(config.username)}&own=1&subtype=boardgame&stats=1`;
       const xml = await fetchWithRetry202(url);
 
       try {
         const items = parseCollectionResponse(xml);
-        logger.log(`getUserCollection: ${items.length} items for "${username}"`);
+        logger.log(`getUserCollection: ${items.length} items for "${config.username}"`);
         return items;
       } catch (err) {
         logger.error(`collection parse error: ${toErrorMessage(err)}`);

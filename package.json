@@ -1,6 +1,7 @@
 {
   "name": "shelf-judge",
   "private": true,
+  "type": "module",
   "workspaces": [
     "packages/shared",
     "packages/daemon",
@@ -8,7 +9,7 @@
     "packages/cli"
   ],
   "scripts": {
-    "dev": "concurrently -n daemon,web -c blue,green \"bun run --filter @shelf-judge/daemon dev\" \"bun run --filter @shelf-judge/web dev\"",
+    "dev": "concurrently -n daemon,web -c blue,green \"bun run --cwd packages/daemon dev\" \"bun run --cwd packages/web dev\"",
     "start": "concurrently -n daemon,web -c blue,green \"bun run --filter @shelf-judge/daemon start\" \"bun run --filter @shelf-judge/web start\"",
     "typecheck": "tsc --noEmit -p packages/shared && tsc --noEmit -p packages/daemon && tsc --noEmit -p packages/cli",
     "lint": "eslint .",

@@ -47,7 +47,6 @@ export interface GameService {
   refreshBggData(gameId: string): Promise<Game>;
   refreshAllBggData(): Promise<RefreshSummary>;
   importBggCollection(
-    username: string,
     onProgress?: (event: ImportProgressEvent) => Promise<void> | void,
   ): Promise<ImportSummary>;
 }
@@ -67,6 +66,7 @@ function applyBggResult(game: Game, result: BggGameResult): void {
   game.playingTime = result.metadata.playingTime;
   game.imageUrl = result.metadata.imageUrl;
   game.bggData = result.bggData;
+  game.numPlays = result.collectionData?.numPlays ?? game.numPlays ?? null;
 }
 
 function isBggDataStale(game: Game): boolean | undefined {
@@ -117,6 +117,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
         maxPlayers: parsed.maxPlayers ?? null,
         playingTime: parsed.playingTime ?? null,
         imageUrl: parsed.imageUrl ?? null,
+        numPlays: parsed.numPlays ?? null,
         bggData: null,
         ratings: {},
         createdAt: now,
@@ -293,11 +294,10 @@ export function createGameService(deps: GameServiceDeps): GameService {
     },
 
     async importBggCollection(
-      username: string,
       onProgress?: (event: ImportProgressEvent) => Promise<void> | void,
     ): Promise<ImportSummary> {
       assertBggConfigured();
-      logger.log(`starting BGG import for "${username}"`);
+      logger.log("starting BGG import...");
 
       await onProgress?.({
         phase: "fetching-collection",
@@ -308,10 +308,10 @@ export function createGameService(deps: GameServiceDeps): GameService {
 
       let collectionItems: BggCollectionItem[];
       try {
-        collectionItems = await bggClient!.getUserCollection(username);
+        collectionItems = await bggClient!.getUserCollection();
       } catch (err) {
         logger.error(`failed to fetch collection: ${toErrorMessage(err)}`);
-        throw new Error(`Failed to fetch BGG collection for "${username}": ${toErrorMessage(err)}`);
+        throw new Error(`Failed to fetch BGG collection: ${toErrorMessage(err)}`);
       }
 
       const collection = await storageService.loadCollection();
@@ -367,6 +367,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
                 maxPlayers: result.metadata.maxPlayers,
                 playingTime: result.metadata.playingTime,
                 imageUrl: result.metadata.imageUrl,
+                numPlays: result.collectionData?.numPlays ?? null,
                 bggData: result.bggData,
                 ratings: {},
                 createdAt: now,

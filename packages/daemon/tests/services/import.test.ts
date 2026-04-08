@@ -32,7 +32,7 @@ beforeEach(() => {
   });
   mockFetch = createMockFetch();
   bggClient = createBggClient({
-    config: { bggAuthToken: "test-token" },
+    config: { bggAuthToken: "test-token", username: "testuser" },
     fetchFn: mockFetch.fn,
     delayMs: 0,
     delayFn: () => Promise.resolve(),
@@ -100,7 +100,7 @@ describe("Collection Import", () => {
 </items>`;
     mockFetch.enqueue(200, batchXml);
 
-    const summary = await gameService.importBggCollection("testuser");
+    const summary = await gameService.importBggCollection();
 
     expect(summary.imported).toBe(3);
     expect(summary.skipped).toBe(0);
@@ -113,7 +113,9 @@ describe("Collection Import", () => {
   test("skips games that already exist (matched by bggId)", async () => {
     // Pre-add Wingspan
     const wingspanThingXml = await readFixture("thing-wingspan-266192.xml");
+    const collectionWingspanXml = await readFixture("collection-testuser-wingspan-266192.xml");
     mockFetch.enqueue(200, wingspanThingXml);
+    mockFetch.enqueue(200, collectionWingspanXml);
     await gameService.addGame({ name: "Wingspan", bggId: 266192 });
 
     const collectionXml = await readFixture("collection-testuser.xml");
@@ -153,7 +155,7 @@ describe("Collection Import", () => {
 </items>`;
     mockFetch.enqueue(200, batchXml);
 
-    const summary = await gameService.importBggCollection("testuser");
+    const summary = await gameService.importBggCollection();
 
     expect(summary.imported).toBe(2);
     expect(summary.skipped).toBe(1); // Wingspan skipped
@@ -212,7 +214,7 @@ describe("Collection Import", () => {
     mockFetch.enqueue(200, batchXml);
 
     const events: ImportProgressEvent[] = [];
-    await gameService.importBggCollection("testuser", (event) => {
+    await gameService.importBggCollection((event) => {
       events.push(event);
     });
 
@@ -268,7 +270,7 @@ describe("Collection Import", () => {
 </items>`;
     mockFetch.enqueue(200, batchXml);
 
-    const summary = await gameService.importBggCollection("testuser");
+    const summary = await gameService.importBggCollection();
 
     expect(summary.imported).toBe(2);
     expect(summary.skipped).toBe(0);
@@ -280,7 +282,7 @@ describe("Collection Import", () => {
     const emptyXml = `<?xml version="1.0" encoding="utf-8"?><items totalitems="0"></items>`;
     mockFetch.enqueue(200, emptyXml);
 
-    const summary = await gameService.importBggCollection("emptyuser");
+    const summary = await gameService.importBggCollection();
 
     expect(summary.imported).toBe(0);
     expect(summary.skipped).toBe(0);
@@ -294,7 +296,7 @@ describe("Collection Import", () => {
     });
 
     // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
-    await expect(noBggService.importBggCollection("testuser")).rejects.toThrow(
+    await expect(noBggService.importBggCollection()).rejects.toThrow(
       "BGG integration is not configured",
     );
   });

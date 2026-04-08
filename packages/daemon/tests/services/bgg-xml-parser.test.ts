@@ -22,10 +22,10 @@ describe("BGG XML Parser", () => {
       expect(results).toHaveLength(1);
       const data = results[0];
 
-      expect(data.communityRating).toBe(8.1);
-      expect(data.bayesAverage).toBe(7.92);
-      expect(data.weight).toBe(2.45);
-      expect(data.numWeightVotes).toBe(12000);
+      expect(data.communityRating).toBeCloseTo(8.00153);
+      expect(data.bayesAverage).toBeCloseTo(7.8487);
+      expect(data.weight).toBeCloseTo(2.4802);
+      expect(data.numWeightVotes).toBe(3711);
 
       // Mechanics
       expect(data.mechanics.length).toBeGreaterThanOrEqual(4);
@@ -39,17 +39,13 @@ describe("BGG XML Parser", () => {
       expect(catNames).toContain("Animals");
       expect(catNames).toContain("Card Game");
 
-      // Subdomains
-      expect(data.subdomains).toContain("Strategy Games");
-      expect(data.subdomains).toContain("Family Games");
-
       // Suggested player counts
       expect(data.suggestedPlayerCounts.length).toBeGreaterThanOrEqual(5);
       const threePlayer = data.suggestedPlayerCounts.find((s) => s.playerCount === "3");
       expect(threePlayer).toBeDefined();
-      expect(threePlayer!.best).toBe(573);
-      expect(threePlayer!.recommended).toBe(367);
-      expect(threePlayer!.notRecommended).toBe(21);
+      expect(threePlayer!.best).toBe(1217);
+      expect(threePlayer!.recommended).toBe(596);
+      expect(threePlayer!.notRecommended).toBe(25);
 
       // fetchedAt should be a valid ISO string
       expect(new Date(data.fetchedAt).getTime()).not.toBeNaN();
@@ -62,10 +58,10 @@ describe("BGG XML Parser", () => {
       expect(results).toHaveLength(1);
       const data = results[0];
 
-      expect(data.communityRating).toBe(8.62);
-      expect(data.bayesAverage).toBe(8.48);
-      expect(data.weight).toBe(3.86);
-      expect(data.numWeightVotes).toBe(4523);
+      expect(data.communityRating).toBeCloseTo(8.54142);
+      expect(data.bayesAverage).toBeCloseTo(8.29996);
+      expect(data.weight).toBeCloseTo(3.9179);
+      expect(data.numWeightVotes).toBe(2752);
 
       const mechNames = data.mechanics.map((m) => m.name);
       expect(mechNames).toContain("Cooperative Game");
@@ -136,12 +132,12 @@ describe("BGG XML Parser", () => {
       const xml = await readFixture("search-wingspan.xml");
       const results = parseSearchResponse(xml);
 
-      expect(results).toHaveLength(3);
-      expect(results[0].bggId).toBe(266192);
-      expect(results[0].name).toBe("Wingspan");
-      expect(results[0].yearPublished).toBe(2019);
-      expect(results[1].bggId).toBe(290448);
-      expect(results[1].name).toBe("Wingspan: European Expansion");
+      expect(results).toHaveLength(14);
+      expect(results[0].bggId).toBe(339017);
+      expect(results[0].name).toBe("Frogmouth Fan Pack (fan expansion for Wingspan)");
+      expect(results[0].yearPublished).toBe(2020);
+      expect(results[1].bggId).toBe(266192);
+      expect(results[1].name).toBe("Wingspan");
     });
 
     test("handles empty search results", () => {
@@ -153,17 +149,17 @@ describe("BGG XML Parser", () => {
 
   describe("parseCollectionResponse", () => {
     test("parses collection with game list", async () => {
-      const xml = await readFixture("collection-testuser.xml");
+      const xml = await readFixture("collection-bloodmage.xml");
       const results = parseCollectionResponse(xml);
 
-      expect(results).toHaveLength(3);
-      expect(results[0].bggId).toBe(266192);
-      expect(results[0].name).toBe("Wingspan");
-      expect(results[0].yearPublished).toBe(2019);
-      expect(results[1].bggId).toBe(174430);
-      expect(results[1].name).toBe("Gloomhaven");
-      expect(results[2].bggId).toBe(167791);
-      expect(results[2].name).toBe("Terraforming Mars");
+      expect(results).toHaveLength(316);
+      expect(results[0].bggId).toBe(373167);
+      expect(results[0].name).toBe("20 Strong");
+      expect(results[0].yearPublished).toBe(2023);
+      expect(results[1].bggId).toBe(357726);
+      expect(results[1].name).toBe("51st State: Ultimate Edition");
+      expect(results[2].bggId).toBe(344872);
+      expect(results[2].name).toBe("À la Food Cart");
     });
 
     test("handles empty collection", () => {

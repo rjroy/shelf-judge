@@ -36,6 +36,7 @@ export interface Game {
   playingTime: number | null; // Minutes
   imageUrl: string | null;
   bggData: BggGameData | null;
+  numPlays: number | null;
   ratings: Record<string, number>; // axisId -> rating (1-10)
   createdAt: string; // ISO 8601
   updatedAt: string; // ISO 8601
@@ -192,4 +193,5 @@ export interface AppConfig {
   bggAuthToken: string | null;
   dataDir: string;
   socketPath: string;
+  username: string | null;
 }

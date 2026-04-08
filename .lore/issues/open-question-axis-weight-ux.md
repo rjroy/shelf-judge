@@ -1,7 +1,7 @@
 ---
 title: "Open question: Axis weight UX (raw numbers vs normalized sliders)"
 date: 2026-04-06
-status: parked
+status: declined
 tags: [open-question, ux, axes, web-ui]
 modules: [web, daemon]
 origin: .lore/specs/mvp.md

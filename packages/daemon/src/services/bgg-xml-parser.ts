@@ -6,14 +6,8 @@ import type {
   BggSearchResult,
 } from "@shelf-judge/shared";
 
-export interface BggCollectionItem {
-  bggId: number;
-  name: string;
-  yearPublished: number | null;
-}
-
-// Interfaces for the parsed XML structure from fast-xml-parser.
-// The parser returns untyped objects; these capture the shapes we actually access.
+type BggXmlNameEntry = BggXmlAttribute & Record<string, string>;
+type BggXmlLinkEntry = BggXmlAttribute & Record<string, string>;
 
 interface BggXmlAttribute {
   "@_id"?: string;
@@ -25,8 +19,19 @@ interface BggXmlAttribute {
   "@_objectid"?: string;
 }
 
-type BggXmlNameEntry = BggXmlAttribute & Record<string, string>;
-type BggXmlLinkEntry = BggXmlAttribute & Record<string, string>;
+interface BggXmlValueElement {
+  "@_value"?: string;
+}
+
+export interface BggCollectionItem {
+  bggId: number;
+  name: string;
+  yearPublished: number | null;
+  numplays: number | null;
+}
+
+// Interfaces for the parsed XML structure from fast-xml-parser.
+// The parser returns untyped objects; these capture the shapes we actually access.
 
 interface BggXmlPollResult extends BggXmlAttribute {
   result?: BggXmlAttribute[];
@@ -34,10 +39,6 @@ interface BggXmlPollResult extends BggXmlAttribute {
 
 interface BggXmlPoll extends BggXmlAttribute {
   results?: BggXmlPollResult[];
-}
-
-interface BggXmlValueElement {
-  "@_value"?: string;
 }
 
 interface BggXmlRatings {
@@ -64,6 +65,7 @@ interface BggXmlItem extends BggXmlAttribute {
 interface BggXmlCollectionItem extends BggXmlAttribute {
   name?: BggXmlNameEntry[] | BggXmlNameEntry | string | number;
   yearpublished?: number | string;
+  numplays?: number | string;
 }
 
 interface BggXmlDocument {
@@ -80,6 +82,10 @@ const parser = new XMLParser({
   isArray: (name) => ["item", "link", "name", "results", "result", "rank"].includes(name),
 });
 
+function cleanupString(value: string | undefined): string {
+  return value?.replace(/&#039;/g, "'") ?? "";
+}
+
 function ensureArray<T>(value: T | T[] | undefined): T[] {
   if (value === undefined || value === null) return [];
   if (Array.isArray(value)) return value;
@@ -94,7 +100,8 @@ function parseNumber(value: string | number | undefined | null): number | null {
 
 function extractPrimaryName(names: BggXmlNameEntry[]): string {
   const primary = names.find((n) => n["@_type"] === "primary");
-  return primary?.["@_value"] ?? names[0]?.["@_value"] ?? "Unknown";
+  const value = primary?.["@_value"] ?? names[0]?.["@_value"] ?? "Unknown";
+  return cleanupString(value);
 }
 
 function extractLinks(links: BggXmlLinkEntry[], type: string): BggTag[] {
@@ -102,12 +109,12 @@ function extractLinks(links: BggXmlLinkEntry[], type: string): BggTag[] {
     .filter((l) => l["@_type"] === type)
     .map((l) => ({
       id: Number(l["@_id"]),
-      name: l["@_value"] ?? "",
+      name: cleanupString(l["@_value"]),
     }));
 }
 
 function extractSubdomains(links: BggXmlLinkEntry[]): string[] {
-  return links.filter((l) => l["@_type"] === "boardgamesubdomain").map((l) => l["@_value"] ?? "");
+  return links.filter((l) => l["@_type"] === "boardgamesubdomain").map((l) => cleanupString(l["@_value"]));
 }
 
 function extractSuggestedPlayerCounts(poll: BggXmlPoll | undefined): SuggestedPlayerCount[] {
@@ -170,6 +177,10 @@ export interface ThingMetadata {
   maxPlayers: number | null;
   playingTime: number | null;
   imageUrl: string | null;
+}
+
+export interface CollectiomItemMetadata {
+  numPlays: number | null;
 }
 
 export function parseThingMetadata(xml: string): ThingMetadata[] {
@@ -272,11 +283,13 @@ export function parseCollectionResponse(xml: string): BggCollectionItem[] {
       nameStr = "Unknown";
     }
     const year = item.yearpublished;
+    const numplays = item.numplays;
 
     return {
       bggId: Number(item["@_objectid"]),
       name: nameStr,
       yearPublished: parseNumber(year),
+      numplays: parseNumber(numplays),
     };
   });
 }

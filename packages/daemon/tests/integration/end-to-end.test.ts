@@ -229,9 +229,9 @@ describe("Integration: End-to-end scenarios", () => {
   describe("Scenario 3: Import BGG collection (mocked)", () => {
     test("imports games from BGG, skips duplicates, reports summary", async () => {
       const collectionItems: BggCollectionItem[] = [
-        { bggId: 266192, name: "Wingspan", yearPublished: 2019 },
-        { bggId: 174430, name: "Gloomhaven", yearPublished: 2017 },
-        { bggId: 999999, name: "Unknown Game", yearPublished: 2020 },
+        { bggId: 266192, name: "Wingspan", yearPublished: 2019, numplays: null },
+        { bggId: 174430, name: "Gloomhaven", yearPublished: 2017, numplays: null },
+        { bggId: 999999, name: "Unknown Game", yearPublished: 2020, numplays: null },
       ];
 
       const bggResults = new Map<number, BggGameResult>([
@@ -259,7 +259,7 @@ describe("Integration: End-to-end scenarios", () => {
       const ctx = createTestApp({ bggClient });
 
       // Import via the service directly (SSE endpoints are harder to test via app.request)
-      const summary = await ctx.gameService.importBggCollection("testuser");
+      const summary = await ctx.gameService.importBggCollection();
 
       expect(summary.imported).toBe(2); // Wingspan + Gloomhaven
       expect(summary.skipped).toBe(0);
@@ -275,7 +275,7 @@ describe("Integration: End-to-end scenarios", () => {
       expect(names).toEqual(["Gloomhaven", "Wingspan"]);
 
       // Import again: should skip both existing games
-      const summary2 = await ctx.gameService.importBggCollection("testuser");
+      const summary2 = await ctx.gameService.importBggCollection();
       expect(summary2.imported).toBe(0);
       expect(summary2.skipped).toBe(2);
 

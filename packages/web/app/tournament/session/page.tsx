@@ -214,7 +214,17 @@ function TournamentSessionPageInner() {
         </div>
       ) : pair?.gameA && pair?.gameB ? (
         <>
-          <div className="comparison-area">
+          <div className="comparison-area"
+          onKeyDown={(e) => {
+            // 1, up, or left picks game A, 2, down, or right picks game B
+            if (e.key === "1" || e.key === "ArrowLeft" || e.key === "ArrowUp") {
+              void handlePick(pair.gameA!.id);
+            } else if (e.key === "2" || e.key === "ArrowRight" || e.key === "ArrowDown") {
+              void handlePick(pair.gameB!.id);
+            }
+          }}
+          tabIndex={0}
+          >
             <div className="comparison-prompt">Which would you keep?</div>
 
             <div className="comparison-cards">

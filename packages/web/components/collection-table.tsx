@@ -187,7 +187,7 @@ export function CollectionTable({
             <input
               type="text"
               className={`search-input${hasSearch ? " has-value" : ""}`}
-              placeholder="Search games\u2026"
+              placeholder="Search games by name..."
               value={filters.search}
               onChange={(e) => updateFilter("search", e.target.value)}
             />
@@ -470,6 +470,7 @@ function GameRow({ gws, rank, sortField, tournamentStats, axisMap, isAxisSort }:
       <div className="game-info">
         <div className="game-name">{game.name}</div>
         <div className="game-meta">
+          {game.numPlays != null && <span>x{game.numPlays}</span>}
           {game.yearPublished && <span>{game.yearPublished}</span>}
           {game.minPlayers != null && game.maxPlayers != null && (
             <span>

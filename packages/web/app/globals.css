@@ -1690,6 +1690,26 @@ body {
   color: var(--danger);
 }
 
+/* Normalize fitness button */
+.normalize-fitness-wrapper {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: end;
+}
+
+.normalize-result {
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.normalize-result.success {
+  color: var(--text-muted);
+}
+
+.normalize-result.error {
+  color: var(--danger);
+}
+
 /* Score breakdown extras */
 .breakdown-name-cell {
   font-weight: 500;

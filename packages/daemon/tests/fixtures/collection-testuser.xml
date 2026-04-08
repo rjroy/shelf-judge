@@ -1,63 +1,40 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <items totalitems="3" termsofuse="https://boardgamegeek.com/xmlapi/termsofuse" pubdate="Mon, 17 Mar 2025 14:23:41 +0000">
-  <item objecttype="thing" objectid="266192" subtype="boardgame" collid="98765001">
-    <name sortindex="1">Wingspan</name>
-    <yearpublished>2019</yearpublished>
-    <image>https://cf.geekdo-images.com/yLZJCVLlIx4c7eJEWUNJ7w__original/img/VNfba0pR8nEJgH9wQ2g1Ui5nP-E=/0x0/filters:format(jpeg)/pic4458123.jpg</image>
-    <thumbnail>https://cf.geekdo-images.com/yLZJCVLlIx4c7eJEWUNJ7w__thumb/img/VNfba0pR8nEJgH9wQ2g1Ui5nP-E=/fit-in/200x150/filters:strip_icc()/pic4458123.jpg</thumbnail>
-    <stats minplayers="1" maxplayers="5" minplaytime="40" maxplaytime="70" playingtime="70" numowned="156324">
-      <rating value="8.5">
-        <usersrated value="98765"/>
-        <average value="8.1"/>
-        <bayesaverage value="7.92"/>
-        <stddev value="1.31"/>
-        <median value="0"/>
-        <ranks>
-          <rank type="subtype" id="1" name="boardgame" friendlyname="Board Game Rank" value="21" bayesaverage="7.92"/>
-        </ranks>
-      </rating>
-    </stats>
-    <status own="1" prevowned="0" fortrade="0" want="0" wanttoplay="0" wanttobuy="0" wishlist="0" preordered="0" lastmodified="2024-01-15 10:30:00"/>
-    <numplays>12</numplays>
-  </item>
-  <item objecttype="thing" objectid="174430" subtype="boardgame" collid="98765002">
-    <name sortindex="1">Gloomhaven</name>
-    <yearpublished>2017</yearpublished>
-    <image>https://cf.geekdo-images.com/sZYp_3BTDGjh2unaZfZmuA__original/img/r5_grN0B7xFaWLQlBfMOq0CzMRA=/0x0/filters:format(jpeg)/pic2437871.jpg</image>
-    <thumbnail>https://cf.geekdo-images.com/sZYp_3BTDGjh2unaZfZmuA__thumb/img/r5_grN0B7xFaWLQlBfMOq0CzMRA=/fit-in/200x150/filters:strip_icc()/pic2437871.jpg</thumbnail>
-    <stats minplayers="1" maxplayers="4" minplaytime="60" maxplaytime="120" playingtime="120" numowned="98745">
-      <rating value="9">
-        <usersrated value="56432"/>
-        <average value="8.62"/>
-        <bayesaverage value="8.48"/>
-        <stddev value="1.23"/>
-        <median value="0"/>
-        <ranks>
-          <rank type="subtype" id="1" name="boardgame" friendlyname="Board Game Rank" value="3" bayesaverage="8.48"/>
-        </ranks>
-      </rating>
-    </stats>
-    <status own="1" prevowned="0" fortrade="0" want="0" wanttoplay="0" wanttobuy="0" wishlist="0" preordered="0" lastmodified="2024-02-20 14:00:00"/>
-    <numplays>8</numplays>
-  </item>
-  <item objecttype="thing" objectid="167791" subtype="boardgame" collid="98765003">
-    <name sortindex="1">Terraforming Mars</name>
-    <yearpublished>2016</yearpublished>
-    <image>https://cf.geekdo-images.com/wg9oOLcsKvDesSUdZQ4rxw__original/img/thA0pC7-Y1a3-hpOwQXYLT4Xr1Y=/0x0/filters:format(jpeg)/pic3536616.jpg</image>
-    <thumbnail>https://cf.geekdo-images.com/wg9oOLcsKvDesSUdZQ4rxw__thumb/img/thA0pC7-Y1a3-hpOwQXYLT4Xr1Y=/fit-in/200x150/filters:strip_icc()/pic3536616.jpg</thumbnail>
-    <stats minplayers="1" maxplayers="5" minplaytime="120" maxplaytime="120" playingtime="120" numowned="145213">
-      <rating value="N/A">
-        <usersrated value="95312"/>
-        <average value="8.38"/>
-        <bayesaverage value="8.19"/>
-        <stddev value="1.45"/>
-        <median value="0"/>
-        <ranks>
-          <rank type="subtype" id="1" name="boardgame" friendlyname="Board Game Rank" value="7" bayesaverage="8.19"/>
-        </ranks>
-      </rating>
-    </stats>
-    <status own="1" prevowned="0" fortrade="0" want="0" wanttoplay="0" wanttobuy="0" wishlist="0" preordered="0" lastmodified="2023-11-01 08:00:00"/>
-    <numplays>5</numplays>
-  </item>
+		<item objecttype="thing" objectid="266192" subtype="boardgame" collid="74141460">
+	<name sortindex="1">Wingspan</name>
+		<yearpublished>2019</yearpublished>			<image>https://cf.geekdo-images.com/yLZJCVLlIx4c7eJEWUNJ7w__original/img/cI782Zis9cT66j2MjSHKJGnFPNw=/0x0/filters:format(jpeg)/pic4458123.jpg</image>
+		<thumbnail>https://cf.geekdo-images.com/yLZJCVLlIx4c7eJEWUNJ7w__small/img/VNToqgS2-pOGU6MuvIkMPKn_y-s=/fit-in/200x150/filters:strip_icc()/pic4458123.jpg</thumbnail>
+		<stats minplayers="1"																	maxplayers="5"																	minplaytime="40"																	maxplaytime="70"																	playingtime="70"																	numowned="178904" >
+				<rating value="7">			<usersrated value="111985" />			<average value="8.00153" />
+			<bayesaverage value="7.8487" />			<stddev value="1.37373" />
+			<median value="0" />			<ranks>
+												<rank type="subtype" id="1" name="boardgame" friendlyname="Board Game Rank" value="38" bayesaverage="7.8487" />
+											</ranks>		</rating>
+			</stats>	<status own="1" prevowned="0" fortrade="0" want="0" wanttoplay="0" wanttobuy="0" wishlist="0"  preordered="0" lastmodified="2023-06-14 09:48:41" />
+	<numplays>12</numplays>							</item>
+		<item objecttype="thing" objectid="174430" subtype="boardgame" collid="74141461">
+	<name sortindex="1">Gloomhaven</name>
+		<yearpublished>2017</yearpublished>			<image>https://cf.geekdo-images.com/sZYp_3BTDGjh2unaZfZmuA__original/img/r5_grN0B7xFaWLQlBfMOq0CzMRA=/0x0/filters:format(jpeg)/pic2437871.jpg</image>
+		<thumbnail>https://cf.geekdo-images.com/sZYp_3BTDGjh2unaZfZmuA__small/img/r5_grN0B7xFaWLQlBfMOq0CzMRA=/fit-in/200x150/filters:strip_icc()/pic2437871.jpg</thumbnail>
+		<stats minplayers="1"																	maxplayers="4"																	minplaytime="60"																	maxplaytime="120"																	playingtime="120"																	numowned="98745" >
+				<rating value="9">			<usersrated value="56432" />			<average value="8.54142" />
+			<bayesaverage value="8.29996" />			<stddev value="1.56" />
+			<median value="0" />			<ranks>
+												<rank type="subtype" id="1" name="boardgame" friendlyname="Board Game Rank" value="2" bayesaverage="8.29996" />
+											</ranks>		</rating>
+			</stats>	<status own="1" prevowned="0" fortrade="0" want="0" wanttoplay="0" wanttobuy="0" wishlist="0"  preordered="0" lastmodified="2024-02-20 15:30:00" />
+	<numplays>5</numplays>							</item>
+		<item objecttype="thing" objectid="167791" subtype="boardgame" collid="74141462">
+	<name sortindex="1">Terraforming Mars</name>
+		<yearpublished>2016</yearpublished>			<image>https://cf.geekdo-images.com/wg9oOLcsKvDesSUdZQ4rxw__original/img/placeholder=/0x0/filters:format(jpeg)/pic3536616.jpg</image>
+		<thumbnail>https://cf.geekdo-images.com/wg9oOLcsKvDesSUdZQ4rxw__small/img/placeholder=/fit-in/200x150/filters:strip_icc()/pic3536616.jpg</thumbnail>
+		<stats minplayers="1"																	maxplayers="5"																	minplaytime="120"																	maxplaytime="120"																	playingtime="120"																	numowned="87654" >
+				<rating value="8">			<usersrated value="89012" />			<average value="8.38" />
+			<bayesaverage value="8.19" />			<stddev value="1.42" />
+			<median value="0" />			<ranks>
+												<rank type="subtype" id="1" name="boardgame" friendlyname="Board Game Rank" value="5" bayesaverage="8.19" />
+											</ranks>		</rating>
+			</stats>	<status own="1" prevowned="0" fortrade="0" want="0" wanttoplay="0" wanttobuy="0" wishlist="0"  preordered="0" lastmodified="2024-03-10 12:00:00" />
+	<numplays>8</numplays>							</item>
+		
 </items>

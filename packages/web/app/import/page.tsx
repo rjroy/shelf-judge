@@ -19,6 +19,36 @@ export default function ImportPage() {
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
+  // On page load, fetch the saved username from config to pre-fill the form
+  useState(() => {
+    fetch("/api/daemon/config")
+      .then((res) => res.json())
+      .then((data: { username?: string }) => {
+        if (data.username) {
+          setUsername(data.username);
+        }
+      })
+      .catch(() => {
+        // Ignore errors, just leave the form blank
+      });
+  });
+
+  async function handleSaveUsername() {
+    if (!username.trim()) return;
+
+    try {
+      await fetch(`/api/daemon/config?username=${encodeURIComponent(username.trim())}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: username.trim() }),
+      });
+      setError(null);
+      alert("Username saved successfully!");
+    } catch {
+      setError("Failed to save username in config. Please try again.");
+    }
+  }
+
   async function handleImport(e: React.FormEvent) {
     e.preventDefault();
     if (!username.trim() || importing) return;
@@ -29,6 +59,18 @@ export default function ImportPage() {
     setError(null);
 
     abortRef.current = new AbortController();
+
+    try {
+      await fetch(`/api/daemon/config?username=${encodeURIComponent(username.trim())}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: username.trim() }),
+      });
+    } catch {
+      setError("Failed to set username in config. Please try again.");
+      setImporting(false);
+      return;
+    }
 
     try {
       const res = await fetch("/api/daemon/import/bgg", {
@@ -135,6 +177,9 @@ export default function ImportPage() {
                 />
                 <button type="submit" className="btn btn-primary" disabled={importing}>
                   Import
+                </button>
+                <button type="button" className="btn btn-secondary" onClick={() => { void handleSaveUsername(); }} disabled={importing}>
+                  Save Username Only
                 </button>
               </form>
             </>
