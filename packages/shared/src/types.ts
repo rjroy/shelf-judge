@@ -21,7 +21,7 @@ export interface BggGameData {
   numWeightVotes: number;
   mechanics: BggTag[];
   categories: BggTag[];
-  subdomains: string[];
+  families: BggTag[];
   suggestedPlayerCounts: SuggestedPlayerCount[];
   fetchedAt: string; // ISO 8601
 }

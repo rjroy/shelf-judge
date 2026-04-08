@@ -48,7 +48,7 @@ const wingspanBggResult: BggGameResult = {
     numWeightVotes: 1200,
     mechanics: [{ id: 2004, name: "Set Collection" }],
     categories: [{ id: 1089, name: "Animals" }],
-    subdomains: ["familygames"],
+    families: [],
     suggestedPlayerCounts: [],
     fetchedAt: new Date().toISOString(),
   },

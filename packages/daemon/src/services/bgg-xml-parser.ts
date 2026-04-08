@@ -113,10 +113,6 @@ function extractLinks(links: BggXmlLinkEntry[], type: string): BggTag[] {
     }));
 }
 
-function extractSubdomains(links: BggXmlLinkEntry[]): string[] {
-  return links.filter((l) => l["@_type"] === "boardgamesubdomain").map((l) => cleanupString(l["@_value"]));
-}
-
 function extractSuggestedPlayerCounts(poll: BggXmlPoll | undefined): SuggestedPlayerCount[] {
   if (!poll) return [];
   const allResults = ensureArray(poll.results);
@@ -162,7 +158,7 @@ export function parseThingResponse(xml: string): BggGameData[] {
       numWeightVotes: parseNumber(ratings?.numweights?.["@_value"]) ?? 0,
       mechanics: extractLinks(links, "boardgamemechanic"),
       categories: extractLinks(links, "boardgamecategory"),
-      subdomains: extractSubdomains(links),
+      families: extractLinks(links, "boardgamefamily"),
       suggestedPlayerCounts: extractSuggestedPlayerCounts(playerCountPoll),
       fetchedAt: new Date().toISOString(),
     };
@@ -240,7 +236,7 @@ export function parseThingItems(xml: string): ThingItem[] {
         numWeightVotes: parseNumber(ratings?.numweights?.["@_value"]) ?? 0,
         mechanics: extractLinks(links, "boardgamemechanic"),
         categories: extractLinks(links, "boardgamecategory"),
-        subdomains: extractSubdomains(links),
+        families: extractLinks(links, "boardgamefamily"),
         suggestedPlayerCounts: extractSuggestedPlayerCounts(playerCountPoll),
         fetchedAt: new Date().toISOString(),
       },

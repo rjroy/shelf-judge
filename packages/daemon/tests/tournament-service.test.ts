@@ -83,7 +83,7 @@ function makeBggData(mechanics: string[] = [], categories: string[] = []): BggGa
     numWeightVotes: 100,
     mechanics: mechanics.map((name, i) => ({ id: i + 1, name })),
     categories: categories.map((name, i) => ({ id: i + 100, name })),
-    subdomains: [],
+    families: [],
     suggestedPlayerCounts: [],
     fetchedAt: new Date().toISOString(),
   };

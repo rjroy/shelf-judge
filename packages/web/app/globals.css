@@ -1031,6 +1031,7 @@ body {
 .bgg-data-line {
   font-size: 12px;
   color: var(--text-muted);
+  margin: 4px;
 }
 
 .bgg-data-line strong {

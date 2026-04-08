@@ -42,7 +42,7 @@ function makeBggData(overrides: Partial<BggGameData> = {}): BggGameData {
     numWeightVotes: 100,
     mechanics: [],
     categories: [],
-    subdomains: [],
+    families: [],
     suggestedPlayerCounts: [],
     fetchedAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
