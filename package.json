@@ -1,6 +1,7 @@
 {
   "name": "shelf-judge",
   "private": true,
+  "type": "module",
   "workspaces": [
     "packages/shared",
     "packages/daemon",

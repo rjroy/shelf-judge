@@ -212,7 +212,7 @@ describe("Collection Import", () => {
     mockFetch.enqueue(200, batchXml);
 
     const events: ImportProgressEvent[] = [];
-    await gameService.importBggCollection("testuser", (event) => {
+    await gameService.importBggCollection((event) => {
       events.push(event);
     });
 

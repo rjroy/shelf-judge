@@ -23,7 +23,7 @@ export default function ImportPage() {
   useState(() => {
     fetch("/api/daemon/config")
       .then((res) => res.json())
-      .then((data) => {
+      .then((data: { username?: string }) => {
         if (data.username) {
           setUsername(data.username);
         }
@@ -178,7 +178,7 @@ export default function ImportPage() {
                 <button type="submit" className="btn btn-primary" disabled={importing}>
                   Import
                 </button>
-                <button type="button" className="btn btn-secondary" onClick={() => handleSaveUsername()} disabled={importing}>
+                <button type="button" className="btn btn-secondary" onClick={() => { void handleSaveUsername(); }} disabled={importing}>
                   Save Username Only
                 </button>
               </form>

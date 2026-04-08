@@ -95,7 +95,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
   }
 
   return {
-    async addGame(input: AddGameInput, username?: string): Promise<AddGameResult> {
+    async addGame(input: AddGameInput): Promise<AddGameResult> {
       const parsed = AddGameSchema.parse(input);
       const collection = await storageService.loadCollection();
 
