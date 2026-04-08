@@ -3,6 +3,7 @@ import Link from "next/link";
 import { listGames, listAxes, getAllTournamentStats } from "@/lib/api";
 import type { TournamentGameStatsDisplay } from "@shelf-judge/shared";
 import { RefreshAllButton } from "@/components/refresh-all-button";
+import { NormalizeFitnessButton } from "@/components/normalize-fitness-button";
 import { CollectionTable } from "@/components/collection-table";
 
 export const metadata: Metadata = { title: "Collection" };
@@ -68,6 +69,7 @@ export default async function CollectionPage() {
             {games.length} game{games.length !== 1 && "s"} &middot; {axes.length} ax
             {axes.length === 1 ? "is" : "es"}
           </span>
+          <NormalizeFitnessButton />
           <RefreshAllButton />
         </div>
       </div>

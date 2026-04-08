@@ -216,6 +216,17 @@ export function createTournamentRoutes(deps: TournamentRoutesDeps): RouteModule 
     }
   });
 
+
+  // POST /tournament/normalize-fitness - Normalize fitness scores based on current tournament ELO ratings
+  routes.post("/tournament/normalize-fitness", async (c) => {
+    try {
+      const result = await tournamentService.normalizeFitness();
+      return c.json(result);
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 500);
+    }
+  });
+
   // GET /tournament/settings - Get tournament settings
   routes.get("/tournament/settings", async (c) => {
     try {

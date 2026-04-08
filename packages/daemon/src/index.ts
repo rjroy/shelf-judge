@@ -25,7 +25,7 @@ async function main() {
   const fitnessService = createFitnessService();
 
   const bggClient = createBggClient({
-    config: { bggAuthToken: appConfig.bggAuthToken },
+    config: { bggAuthToken: appConfig.bggAuthToken, username: appConfig.username },
   });
 
   const axisService = createAxisService({ storageService });

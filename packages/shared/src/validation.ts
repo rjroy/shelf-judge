@@ -25,6 +25,7 @@ const AddGameBaseFields = {
   maxPlayers: z.number().int().min(1).nullable().optional().default(null),
   playingTime: z.number().int().min(0).nullable().optional().default(null),
   imageUrl: z.string().url().nullable().optional().default(null),
+  numPlays: z.number().int().min(0).nullable().optional().default(null),
 };
 
 // Union: { bggId: number } | { name: string, yearPublished?: number }
