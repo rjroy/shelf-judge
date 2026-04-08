@@ -6,7 +6,7 @@ import { RefreshAllButton } from "@/components/refresh-all-button";
 import { NormalizeFitnessButton } from "@/components/normalize-fitness-button";
 import { CollectionTable } from "@/components/collection-table";
 
-export const metadata: Metadata = { title: "Collection" };
+export const metadata: Metadata = { title: "Shelf Judge" };
 export const dynamic = "force-dynamic";
 
 export default async function CollectionPage() {

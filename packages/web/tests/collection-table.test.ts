@@ -29,6 +29,7 @@ function makeGame(overrides: Partial<Game> = {}): Game {
     playingTime: null,
     imageUrl: null,
     bggData: null,
+    numPlays: null,
     ratings: {},
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -97,6 +98,9 @@ describe("sortGames", () => {
         isProvisional: false,
         comparisonCount: 10,
         eloRating: 1600,
+        wins: 5,
+        losses: 5,
+        recentComparisons: [],
       },
       c: {
         normalizedScore: 8.5,
@@ -104,6 +108,9 @@ describe("sortGames", () => {
         isProvisional: false,
         comparisonCount: 10,
         eloRating: 1700,
+        wins: 5,
+        losses: 5,
+        recentComparisons: [],
       },
     };
     const { withValue, withoutValue } = sortGames(games, "tournament", "desc", stats);
@@ -186,9 +193,10 @@ describe("sortGames", () => {
         bayesAverage: 5.0,
         weight: null,
         numWeightVotes: 0,
+        description: null,
         mechanics: [],
         categories: [],
-        subdomains: [],
+        families: [],
         suggestedPlayerCounts: [],
         fetchedAt: "2026-01-01T00:00:00.000Z",
       },
@@ -201,9 +209,10 @@ describe("sortGames", () => {
         bayesAverage: 7.5,
         weight: null,
         numWeightVotes: 0,
+        description: null,
         mechanics: [],
         categories: [],
-        subdomains: [],
+        families: [],
         suggestedPlayerCounts: [],
         fetchedAt: "2026-01-01T00:00:00.000Z",
       },
@@ -225,11 +234,12 @@ describe("sortGames", () => {
       bayesAverage: 6.5,
       weight,
       numWeightVotes: 10,
+      description: null,
       mechanics: [] as { id: number; name: string }[],
       categories: [] as { id: number; name: string }[],
-      subdomains: [] as string[],
+      families: [] as { id: number; name: string }[], 
       suggestedPlayerCounts: [] as {
-        playerCount: number;
+        playerCount: string;
         best: number;
         recommended: number;
         notRecommended: number;
@@ -293,7 +303,7 @@ describe("sortGames", () => {
 // ---------------------------------------------------------------------------
 
 describe("matchesFilters", () => {
-  const defaultFilters: FilterState = { search: "", ratedStatus: "all", playerCount: null };
+  const defaultFilters: FilterState = { search: "", ratedStatus: "all", playedStatus: "all", playerCount: null };
 
   test("default filters match everything", () => {
     expect(matchesFilters(makeGWS(), defaultFilters)).toBe(true);
@@ -338,7 +348,7 @@ describe("matchesFilters", () => {
 
   test("AND combination of multiple filters", () => {
     const rated = makeGWS({ name: "Wingspan", minPlayers: 1, maxPlayers: 5 }, makeScore(8.0));
-    const filter: FilterState = { search: "wing", ratedStatus: "rated", playerCount: 3 };
+    const filter: FilterState = { search: "wing", ratedStatus: "rated", playedStatus: "all" , playerCount: 3 };
     expect(matchesFilters(rated, filter)).toBe(true);
 
     // Fails search
@@ -377,9 +387,10 @@ describe("getScoreDisplay", () => {
         bayesAverage: 7.2,
         weight: 3.1,
         numWeightVotes: 100,
+        description: null,
         mechanics: [],
         categories: [],
-        subdomains: [],
+        families: [],
         suggestedPlayerCounts: [],
         fetchedAt: "2026-01-01T00:00:00.000Z",
       },
@@ -414,6 +425,9 @@ describe("getScoreDisplay", () => {
         isProvisional: false,
         comparisonCount: 10,
         eloRating: 1600,
+        wins: 5,
+        losses: 5,
+        recentComparisons: [],
       },
     };
     const result = getScoreDisplay(ratedGame, "tournament", stats);
@@ -483,9 +497,10 @@ describe("getScoreDisplay", () => {
         bayesAverage: 6.5,
         weight: null,
         numWeightVotes: 0,
+        description: null,
         mechanics: [],
         categories: [],
-        subdomains: [],
+        families: [],
         suggestedPlayerCounts: [],
         fetchedAt: "2026-01-01T00:00:00.000Z",
       },

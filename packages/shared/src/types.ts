@@ -19,9 +19,10 @@ export interface BggGameData {
   bayesAverage: number; // BGG Geek Rating (Bayesian)
   weight: number | null; // 1-5 scale, null if BGG returns 0
   numWeightVotes: number;
+  description: string | null;
   mechanics: BggTag[];
   categories: BggTag[];
-  subdomains: string[];
+  families: BggTag[];
   suggestedPlayerCounts: SuggestedPlayerCount[];
   fetchedAt: string; // ISO 8601
 }

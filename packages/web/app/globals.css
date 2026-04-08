@@ -1028,12 +1028,22 @@ body {
   margin-top: 20px;
 }
 
+.bgg-data-section {
+  overflow-y: auto;
+  max-height: 200px;
+}
+
 .bgg-data-line {
   font-size: 12px;
   color: var(--text-muted);
+  margin: 4px;
 }
 
 .bgg-data-line strong {
+  color: var(--text-secondary);
+}
+
+.bgg-data-line em {
   color: var(--text-secondary);
 }
 

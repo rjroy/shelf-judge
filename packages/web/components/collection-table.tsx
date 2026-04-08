@@ -493,7 +493,7 @@ function GameRow({ gws, rank, sortField, tournamentStats, axisMap, isAxisSort }:
       <div className="game-info">
         <div className="game-name">{game.name}</div>
         <div className="game-meta">
-          {game.numPlays != null && <span>x{game.numPlays}</span>}
+          {game.numPlays != null && game.numPlays > 0 && <span>x{game.numPlays}</span>}
           {game.yearPublished && <span>{game.yearPublished}</span>}
           {game.minPlayers != null && game.maxPlayers != null && (
             <span>

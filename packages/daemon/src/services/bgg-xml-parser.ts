@@ -57,6 +57,7 @@ interface BggXmlItem extends BggXmlAttribute {
   minplayers?: BggXmlValueElement;
   maxplayers?: BggXmlValueElement;
   playingtime?: BggXmlValueElement;
+  description?: string;
   image?: string;
   "#text"?: string;
   rank?: BggXmlAttribute[];
@@ -113,10 +114,6 @@ function extractLinks(links: BggXmlLinkEntry[], type: string): BggTag[] {
     }));
 }
 
-function extractSubdomains(links: BggXmlLinkEntry[]): string[] {
-  return links.filter((l) => l["@_type"] === "boardgamesubdomain").map((l) => cleanupString(l["@_value"]));
-}
-
 function extractSuggestedPlayerCounts(poll: BggXmlPoll | undefined): SuggestedPlayerCount[] {
   if (!poll) return [];
   const allResults = ensureArray(poll.results);
@@ -160,9 +157,10 @@ export function parseThingResponse(xml: string): BggGameData[] {
       bayesAverage: parseNumber(ratings?.bayesaverage?.["@_value"]) ?? 0,
       weight,
       numWeightVotes: parseNumber(ratings?.numweights?.["@_value"]) ?? 0,
+      description: item.description ?? null,
       mechanics: extractLinks(links, "boardgamemechanic"),
       categories: extractLinks(links, "boardgamecategory"),
-      subdomains: extractSubdomains(links),
+      families: extractLinks(links, "boardgamefamily"),
       suggestedPlayerCounts: extractSuggestedPlayerCounts(playerCountPoll),
       fetchedAt: new Date().toISOString(),
     };
@@ -238,9 +236,10 @@ export function parseThingItems(xml: string): ThingItem[] {
         bayesAverage: parseNumber(ratings?.bayesaverage?.["@_value"]) ?? 0,
         weight,
         numWeightVotes: parseNumber(ratings?.numweights?.["@_value"]) ?? 0,
+        description: item.description ?? null,
         mechanics: extractLinks(links, "boardgamemechanic"),
         categories: extractLinks(links, "boardgamecategory"),
-        subdomains: extractSubdomains(links),
+        families: extractLinks(links, "boardgamefamily"),
         suggestedPlayerCounts: extractSuggestedPlayerCounts(playerCountPoll),
         fetchedAt: new Date().toISOString(),
       },
