@@ -165,9 +165,10 @@ export function CollectionTable({
   // Filter chip state
   const hasSearch = filters.search !== "";
   const hasRatedFilter = filters.ratedStatus !== "all";
+  const hasPlayedFilter = filters.playedStatus !== "all";
   const hasPlayerCount = filters.playerCount !== null;
-  const activeFilterCount = (hasRatedFilter ? 1 : 0) + (hasPlayerCount ? 1 : 0);
-  const hasAnyFilter = hasSearch || hasRatedFilter || hasPlayerCount;
+  const activeFilterCount = (hasRatedFilter ? 1 : 0) + (hasPlayedFilter ? 1 : 0) + (hasPlayerCount ? 1 : 0);
+  const hasAnyFilter = hasSearch || hasRatedFilter || hasPlayedFilter || hasPlayerCount;
   const hiddenCount = totalGames - filtered.length;
 
   // Group fields for the dropdown menu
@@ -275,6 +276,20 @@ export function CollectionTable({
                 ))}
               </div>
             </div>
+             <div className="filter-group">
+              <div className="filter-group-label">Played</div>
+              <div className="filter-group-controls">
+                {(["all", "played", "unplayed"] as const).map((status) => (
+                  <button
+                    key={status}
+                    className={`seg-btn${filters.playedStatus === status ? " active" : ""}`}
+                    onClick={() => updateFilter("playedStatus", status)}
+                  >
+                    {status === "all" ? "All" : status === "played" ? "Played" : "Unplayed"}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="filter-group">
               <div className="filter-group-label">Player Count</div>
               <div className="filter-group-controls">
@@ -304,7 +319,15 @@ export function CollectionTable({
                 </button>
               </span>
             )}
-            {hasRatedFilter && (
+            {hasPlayedFilter && (
+              <span className="filter-chip chip-played">
+                {filters.playedStatus === "played" ? "Played only" : "Unplayed only"}{" "}
+                <button className="chip-x" onClick={() => updateFilter("playedStatus", "all")}>
+                  &times;
+                </button>
+              </span>
+            )}
+             {hasRatedFilter && (
               <span className="filter-chip chip-rated">
                 {filters.ratedStatus === "rated" ? "Rated only" : "Unrated only"}{" "}
                 <button className="chip-x" onClick={() => updateFilter("ratedStatus", "all")}>
@@ -326,7 +349,7 @@ export function CollectionTable({
                 </button>
               </span>
             )}
-            {(hasSearch ? 1 : 0) + (hasRatedFilter ? 1 : 0) + (hasPlayerCount ? 1 : 0) >= 2 && (
+            {(hasSearch ? 1 : 0) + (hasRatedFilter ? 1 : 0) + (hasPlayedFilter ? 1 : 0) + (hasPlayerCount ? 1 : 0) >= 2 && (
               <button className="clear-all-link" onClick={clearAllFilters}>
                 Clear all
               </button>
