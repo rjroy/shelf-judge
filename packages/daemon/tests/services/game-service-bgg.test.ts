@@ -32,7 +32,7 @@ beforeEach(() => {
   });
   mockFetch = createMockFetch();
   bggClient = createBggClient({
-    config: { bggAuthToken: "test-token" },
+    config: { bggAuthToken: "test-token", username: null },
     fetchFn: mockFetch.fn,
     delayMs: 0,
     delayFn: () => Promise.resolve(),

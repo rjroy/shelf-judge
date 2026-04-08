@@ -16,7 +16,7 @@ describe("BggClient", () => {
   beforeEach(() => {
     mockFetch = createMockFetch();
     client = createBggClient({
-      config: { bggAuthToken: "test-token" },
+      config: { bggAuthToken: "test-token", username: "testuser" },
       fetchFn: mockFetch.fn,
       delayMs: 0,
       delayFn: () => Promise.resolve(),
@@ -30,7 +30,7 @@ describe("BggClient", () => {
 
     test("returns false when token is null", () => {
       const unconfigured = createBggClient({
-        config: { bggAuthToken: null },
+        config: { bggAuthToken: null, username: null },
         fetchFn: mockFetch.fn,
         delayMs: 0,
       });
@@ -39,7 +39,7 @@ describe("BggClient", () => {
 
     test("returns false when token is empty string", () => {
       const unconfigured = createBggClient({
-        config: { bggAuthToken: "" },
+        config: { bggAuthToken: "", username: null },
         fetchFn: mockFetch.fn,
         delayMs: 0,
       });
@@ -109,7 +109,7 @@ describe("BggClient", () => {
       const collectionXml = await readFixture("collection-testuser.xml");
       mockFetch.enqueue(200, collectionXml);
 
-      const results = await client.getUserCollection("testuser");
+      const results = await client.getUserCollection();
 
       expect(mockFetch.calls[0].url).toContain("username=testuser");
       expect(mockFetch.calls[0].url).toContain("own=1");
@@ -124,7 +124,7 @@ describe("BggClient", () => {
       mockFetch.enqueue(202, ""); // First attempt: queued
       mockFetch.enqueue(200, collectionXml); // Second attempt: success
 
-      const results = await client.getUserCollection("testuser");
+      const results = await client.getUserCollection();
 
       // 2 calls: initial 202, then successful 200
       expect(mockFetch.calls).toHaveLength(2);
@@ -139,7 +139,7 @@ describe("BggClient", () => {
       mockFetch.enqueue(202, "");
 
       // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
-      await expect(client.getUserCollection("testuser")).rejects.toThrow(
+      await expect(client.getUserCollection()).rejects.toThrow(
         "still queued after maximum retries",
       );
     });
@@ -149,7 +149,7 @@ describe("BggClient", () => {
     test("retries after 429 with correct delay timing", async () => {
       const delayCalls: number[] = [];
       const trackingClient = createBggClient({
-        config: { bggAuthToken: "test-token" },
+        config: { bggAuthToken: "test-token", username: null },
         fetchFn: mockFetch.fn,
         delayMs: 0,
         delayFn: (ms: number) => {
@@ -174,7 +174,7 @@ describe("BggClient", () => {
     test("sets slower rate after 429 recovery", async () => {
       const delayCalls: number[] = [];
       const trackingClient = createBggClient({
-        config: { bggAuthToken: "test-token" },
+        config: { bggAuthToken: "test-token", username: null },
         fetchFn: mockFetch.fn,
         delayMs: 0,
         delayFn: (ms: number) => {
@@ -266,7 +266,7 @@ describe("BggClient", () => {
       };
 
       const timeoutClient = createBggClient({
-        config: { bggAuthToken: "test-token" },
+        config: { bggAuthToken: "test-token", username: null },
         fetchFn: hangingFetch as unknown as typeof fetch,
         delayMs: 0,
         delayFn: () => Promise.resolve(),
@@ -280,7 +280,7 @@ describe("BggClient", () => {
   describe("missing token", () => {
     test("returns clear error with registration URL", async () => {
       const unconfigured = createBggClient({
-        config: { bggAuthToken: null },
+        config: { bggAuthToken: null, username: null },
         fetchFn: mockFetch.fn,
         delayMs: 0,
       });
@@ -299,7 +299,7 @@ describe("BggClient", () => {
   describe("isConfigured consistency", () => {
     test("returns false when token is undefined", () => {
       const unconfigured = createBggClient({
-        config: { bggAuthToken: undefined as unknown as string | null },
+        config: { bggAuthToken: undefined as unknown as string | null, username: null },
         fetchFn: mockFetch.fn,
         delayMs: 0,
       });
@@ -312,7 +312,7 @@ describe("BggClient", () => {
       const delayCalls: number[] = [];
       const recoveryMock = createMockFetch();
       const recoveryClient = createBggClient({
-        config: { bggAuthToken: "test-token" },
+        config: { bggAuthToken: "test-token", username: null },
         fetchFn: recoveryMock.fn,
         delayMs: 100,
         delayFn: (ms: number) => {

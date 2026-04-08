@@ -54,8 +54,8 @@ describe("POST /api/import/bgg", () => {
 
   test("returns SSE stream with progress and complete events", async () => {
     const collectionItems: BggCollectionItem[] = [
-      { bggId: 1, name: "Game 1", yearPublished: 2020 },
-      { bggId: 2, name: "Game 2", yearPublished: 2021 },
+      { bggId: 1, name: "Game 1", yearPublished: 2020, numplays: null },
+      { bggId: 2, name: "Game 2", yearPublished: 2021, numplays: null },
     ];
 
     const gameResults = new Map<number, BggGameResult>();

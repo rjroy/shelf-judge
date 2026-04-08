@@ -55,6 +55,7 @@ function makeGame(id: string, name: string, overrides?: Partial<Game>): Game {
     playingTime: null,
     imageUrl: null,
     bggData: null,
+    numPlays: null,
     ratings: {},
     createdAt: now,
     updatedAt: now,
