@@ -106,29 +106,38 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
                 <span className="bgg-value">{game.bggData.communityRating.toFixed(1)}</span>
               </div>
             )}
-            {game.bggData?.mechanics && game.bggData.mechanics.length > 0 && (
-              <div className="bgg-data-line">
-                <strong>Mechanics:</strong> {game.bggData.mechanics.map((mechanic) => mechanic.name).join(", ")}
-              </div>
-            )}
-            {game.bggData?.categories && game.bggData.categories.length > 0 && (
-              <div className="bgg-data-line">
-                <strong>Categories:</strong> {game.bggData.categories.map((category) => category.name).join(", ")}
-              </div>
-            )}
-            {game.bggData?.families && game.bggData.families.length > 0 && (
-              <div className="bgg-data-line">
-                {familyPrefix = null}
-                <strong>Families:</strong> {game.bggData.families.map((family) => {
-                  if (family.name.includes(':')) {
-                    const parts = family.name.split(':');
-                    const familyElement = <span key={parts[1]}>{familyPrefix ? familyPrefix : ''}<em>{parts[0]}:</em>{parts[1]}</span>;
-                    familyPrefix = ', ';
-                    return familyElement;
-                  } else {
-                    return <span key={family.name}> {family.name}</span>;
-                  }
-                })}
+            {game.bggData && (
+              <div className="bgg-data-section">
+                {game.bggData?.mechanics && game.bggData.mechanics.length > 0 && (
+                  <div className="bgg-data-line">
+                    <strong>Mechanics:</strong> {game.bggData.mechanics.map((mechanic) => mechanic.name).join(", ")}
+                  </div>
+                )}
+                {game.bggData?.categories && game.bggData.categories.length > 0 && (
+                  <div className="bgg-data-line">
+                    <strong>Categories:</strong> {game.bggData.categories.map((category) => category.name).join(", ")}
+                  </div>
+                )}
+                {game.bggData?.families && game.bggData.families.length > 0 && (
+                  <div className="bgg-data-line">
+                    {familyPrefix = null}
+                    <strong>Families:</strong> {game.bggData.families.map((family) => {
+                      if (family.name.includes(':')) {
+                        const parts = family.name.split(':');
+                        const familyElement = <span key={parts[1]}>{familyPrefix ? familyPrefix : ''}<em>{parts[0]}:</em>{parts[1]}</span>;
+                        familyPrefix = ', ';
+                        return familyElement;
+                      } else {
+                        return <span key={family.name}> {family.name}</span>;
+                      }
+                    })}
+                  </div>
+                )}
+                {game.bggData?.description && (
+                  <div className="bgg-data-line">
+                    <strong>Description:</strong> {game.bggData.description}
+                  </div>
+                )}
               </div>
             )}
           </div>

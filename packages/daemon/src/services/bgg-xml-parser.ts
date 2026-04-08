@@ -57,6 +57,7 @@ interface BggXmlItem extends BggXmlAttribute {
   minplayers?: BggXmlValueElement;
   maxplayers?: BggXmlValueElement;
   playingtime?: BggXmlValueElement;
+  description?: string;
   image?: string;
   "#text"?: string;
   rank?: BggXmlAttribute[];
@@ -156,6 +157,7 @@ export function parseThingResponse(xml: string): BggGameData[] {
       bayesAverage: parseNumber(ratings?.bayesaverage?.["@_value"]) ?? 0,
       weight,
       numWeightVotes: parseNumber(ratings?.numweights?.["@_value"]) ?? 0,
+      description: item.description ?? null,
       mechanics: extractLinks(links, "boardgamemechanic"),
       categories: extractLinks(links, "boardgamecategory"),
       families: extractLinks(links, "boardgamefamily"),
@@ -234,6 +236,7 @@ export function parseThingItems(xml: string): ThingItem[] {
         bayesAverage: parseNumber(ratings?.bayesaverage?.["@_value"]) ?? 0,
         weight,
         numWeightVotes: parseNumber(ratings?.numweights?.["@_value"]) ?? 0,
+        description: item.description ?? null,
         mechanics: extractLinks(links, "boardgamemechanic"),
         categories: extractLinks(links, "boardgamecategory"),
         families: extractLinks(links, "boardgamefamily"),

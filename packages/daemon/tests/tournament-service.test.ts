@@ -81,6 +81,7 @@ function makeBggData(mechanics: string[] = [], categories: string[] = []): BggGa
     bayesAverage: 6.5,
     weight: 3.0,
     numWeightVotes: 100,
+    description: null,
     mechanics: mechanics.map((name, i) => ({ id: i + 1, name })),
     categories: categories.map((name, i) => ({ id: i + 100, name })),
     families: [],

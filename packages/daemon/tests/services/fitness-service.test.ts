@@ -40,6 +40,7 @@ function makeBggData(overrides: Partial<BggGameData> = {}): BggGameData {
     bayesAverage: 6.5,
     weight: 3.0,
     numWeightVotes: 100,
+    description: null,
     mechanics: [],
     categories: [],
     families: [],

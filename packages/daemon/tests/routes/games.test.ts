@@ -46,6 +46,7 @@ const wingspanBggResult: BggGameResult = {
     bayesAverage: 7.9,
     weight: 2.4,
     numWeightVotes: 1200,
+    description: null,
     mechanics: [{ id: 2004, name: "Set Collection" }],
     categories: [{ id: 1089, name: "Animals" }],
     families: [],
