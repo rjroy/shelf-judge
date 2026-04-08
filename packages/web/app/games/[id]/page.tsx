@@ -106,11 +106,6 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
                 <span className="bgg-value">{game.bggData.communityRating.toFixed(1)}</span>
               </div>
             )}
-            {game.bggData?.subdomains && game.bggData.subdomains.length > 0 && (
-              <div className="bgg-data-line">
-                <strong>Subdomains:</strong> {game.bggData.subdomains.join(", ")}
-              </div>
-            )}
             {game.bggData?.mechanics && game.bggData.mechanics.length > 0 && (
               <div className="bgg-data-line">
                 <strong>Mechanics:</strong> {game.bggData.mechanics.map((mechanic) => mechanic.name).join(", ")}
