@@ -113,7 +113,9 @@ describe("Collection Import", () => {
   test("skips games that already exist (matched by bggId)", async () => {
     // Pre-add Wingspan
     const wingspanThingXml = await readFixture("thing-wingspan-266192.xml");
+    const collectionWingspanXml = await readFixture("collection-testuser-wingspan-266192.xml");
     mockFetch.enqueue(200, wingspanThingXml);
+    mockFetch.enqueue(200, collectionWingspanXml);
     await gameService.addGame({ name: "Wingspan", bggId: 266192 });
 
     const collectionXml = await readFixture("collection-testuser.xml");
