@@ -23,6 +23,7 @@ const BUILT_IN_SORT_FIELDS: SortFieldDef[] = [
   { id: "createdAt", label: "Date Added", group: "identity", defaultDirection: "desc" },
   { id: "updatedAt", label: "Last Updated", group: "identity", defaultDirection: "desc" },
   { id: "playerCount", label: "Player Count", group: "specs", defaultDirection: "asc" },
+  { id: "numPlays", label: "Number of Plays", group: "specs", defaultDirection: "desc" },
   { id: "playTime", label: "Play Time", group: "specs", defaultDirection: "asc" },
   { id: "bggRating", label: "BGG Community Rating", group: "specs", defaultDirection: "desc" },
   { id: "bggWeight", label: "BGG Weight", group: "specs", defaultDirection: "desc" },
@@ -100,11 +101,12 @@ export function saveSort(sort: SortState): void {
 export interface FilterState {
   search: string;
   ratedStatus: "all" | "rated" | "unrated";
+  playedStatus: "all" | "played" | "unplayed";
   playerCount: number | null;
 }
 
 const FILTER_STORAGE_KEY = "shelf-judge-filters";
-export const DEFAULT_FILTERS: FilterState = { search: "", ratedStatus: "all", playerCount: null };
+export const DEFAULT_FILTERS: FilterState = { search: "", ratedStatus: "all", playedStatus: "all", playerCount: null };
 
 export function loadFilters(): FilterState {
   if (typeof window === "undefined") return DEFAULT_FILTERS;
@@ -117,6 +119,9 @@ export function loadFilters(): FilterState {
       (parsed.ratedStatus === "all" ||
         parsed.ratedStatus === "rated" ||
         parsed.ratedStatus === "unrated") &&
+      (parsed.playedStatus === "all" ||
+        parsed.playedStatus === "played" ||
+        parsed.playedStatus === "unplayed") &&
       (parsed.playerCount === null || typeof parsed.playerCount === "number")
     ) {
       return parsed;
@@ -141,6 +146,7 @@ export function saveFilters(filters: FilterState): void {
 
 export function matchesFilters(gws: GameWithScore, filters: FilterState): boolean {
   const { game, score } = gws;
+  const numPlays = game?.numPlays ?? 0;
 
   if (filters.search && !game.name.toLowerCase().includes(filters.search.toLowerCase())) {
     return false;
@@ -148,6 +154,9 @@ export function matchesFilters(gws: GameWithScore, filters: FilterState): boolea
 
   if (filters.ratedStatus === "rated" && score === null) return false;
   if (filters.ratedStatus === "unrated" && score !== null) return false;
+
+  if (filters.playedStatus === "played" && numPlays === 0) return false;
+  if (filters.playedStatus === "unplayed" && numPlays > 0) return false;
 
   if (filters.playerCount !== null) {
     if (game.minPlayers == null || game.maxPlayers == null) return false;
@@ -186,6 +195,8 @@ export function getSortValue(
       return game.updatedAt;
     case "playerCount":
       return game.minPlayers;
+    case "numPlays":
+      return game.numPlays;
     case "playTime":
       return game.playingTime;
     case "bggRating":
@@ -282,6 +293,11 @@ export function getScoreDisplay(
           : `${game.minPlayers}-${game.maxPlayers}`;
       return { text: range, className: "score-value" };
     }
+    case "numPlays":
+      return {
+        text: String(game.numPlays ?? 0),
+        className: "score-value",
+      };
     case "playTime":
       return {
         text: game.playingTime != null ? `${game.playingTime} min` : "---",
@@ -328,6 +344,8 @@ export function getSeparatorLabel(field: string, count: number, axes: Axis[]): s
       return `Not yet ranked - ${n}`;
     case "playerCount":
       return `No player count data - ${n}`;
+    case "numPlays":
+      return `No play count data - ${n}`;
     case "playTime":
       return `No play time data - ${n}`;
     case "bggRating":
@@ -370,6 +388,8 @@ export function getScoreSubtitle(field: string, axes: Axis[]): string {
       return "Last Updated";
     case "playerCount":
       return "Player Count";
+    case "numPlays":
+      return "Number of Plays";
     case "playTime":
       return "Play Time";
     case "bggRating":
