@@ -1,0 +1,19 @@
+---
+title: "Commission: Collection Profiling Phase 5: Web UI"
+date: 2026-04-10
+status: pending
+tags: [commission]
+worker: Dalton
+workerDisplayTitle: "Guild Artificer"
+prompt: "Implement Phase 5 of `.lore/plans/collection-profiling.md`: Web UI.\n\n**Design target**: `.lore/mockups/profile-overview.html` (the visual spec)\n\nKey deliverables:\n1. **Navigation restructuring**: Move collection list from `/` to `/collection`. New Profile Overview at `/`. Update sidebar nav with grouped sections (Overview, Library, Ranking, Settings) per mockup.\n2. **Profile Overview page**: Server component fetching from daemon. Seven sections in mockup order:\n   - Topbar with stale state handling (amber badge, Recompute button)\n   - LLM narration empty state (deferred, non-functional Generate button)\n   - Axis Rating Distributions (mini-histograms, 10 buckets, amber bars)\n   - Axis Importance (horizontal bar chart)\n   - BGG Attribute Concentrations (two-column grid, collapses at 720px)\n   - Utility Curve Declarations (pill tags by type)\n   - Preference Divergence (conditional, side-by-side scores)\n   - Collection Outliers (per-component distance chips, classification tags)\n   - Axis Suggestions (question-phrased cards with dismiss)\n3. **Game detail additions**: Divergence and outlier status on game pages\n4. **CSS**: Extract from mockup, add color language tokens to globals.css\n5. **Component extraction**: Split into sub-components per section to manage file size\n\nFollow the plan's detailed section-by-section layout specs and color language rules. The mockup is authoritative for visual design.\n\nRun `bun run typecheck` and `bun run lint`."
+dependencies:
+  - commission-Dalton-20260410-120312
+linked_artifacts: []
+
+activity_timeline:
+  - timestamp: 2026-04-10T19:03:29.968Z
+    event: created
+    reason: "Commission created"
+current_progress: ""
+projectName: shelf-judge
+---
