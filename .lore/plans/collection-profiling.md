@@ -11,6 +11,7 @@ related:
   - .lore/brainstorms/collection-profiling.md
   - .lore/brainstorms/prediction-engine.md
   - .lore/retros/tournament-stats-record-shape-mismatch.md
+  - .lore/mockups/profile-overview.html
 ---
 
 # Plan: Collection Identity and Taste Profiling
@@ -20,6 +21,7 @@ related:
 **Spec**: `.lore/specs/collection-profiling.md`
 **Outlier distance research**: `.lore/research/outlier-distance-metric.md`
 **Prediction engine spec**: `.lore/specs/prediction-engine.md` (shared feature vector module)
+**Profile Overview mockup**: `.lore/mockups/profile-overview.html` (annotated design target for Phase 5 web UI)
 
 Requirements addressed:
 
@@ -697,6 +699,7 @@ Both clients are updated in this phase, not deferred to the web/CLI phases. This
 **Files modified**: `packages/web/app/page.tsx`, `packages/web/app/layout.tsx`, `packages/web/app/games/[id]/page.tsx`, `packages/web/components/sidebar.tsx`, `packages/web/app/globals.css`
 **Addresses**: REQ-PROFILE-16, 29, 30, 31
 **Expertise**: Frontend layout, responsive design
+**Design target**: `.lore/mockups/profile-overview.html` (annotated mockup with four states: fresh, stale, stale-narration, navigation)
 
 #### Navigation restructuring (REQ-PROFILE-29)
 
@@ -704,50 +707,122 @@ The collection list currently lives at `/` (root). It moves to `/collection`. Th
 
 1. Move the contents of `packages/web/app/page.tsx` to `packages/web/app/collection/page.tsx`. Update the page title metadata to "Collection".
 2. Create the new `packages/web/app/page.tsx` as the Profile Overview page.
-3. Update sidebar navigation (`packages/web/components/sidebar.tsx`) to add a "Collection" link pointing to `/collection`. The existing home/root link becomes "Profile" (or stays as the app title link).
+3. Update sidebar navigation (`packages/web/components/sidebar.tsx`) to match the mockup's nav structure:
+   - **Overview** section: "Profile" (active when at `/`, icon ◎)
+   - **Library** section: "Collection" (`/collection`, icon ▤), "Add Games" (`/add`, icon ⊕), "Axes" (`/axes`, icon ◈)
+   - **Ranking** section: "Tournament" (`/tournament`, icon ⚖)
+   - **Settings** section: "Import / BGG" (existing settings route, icon ⚙)
+
+   The mockup groups nav items under labeled sections (uppercase, muted text). This replaces the current flat nav list.
 
 #### Profile Overview page (REQ-PROFILE-30)
 
-The page is a server component. It fetches the profile from the daemon via `getProfile()` and renders sections:
+The page is a server component. It fetches the profile from the daemon via `getProfile()` and renders sections in the order established by the mockup:
 
-1. **Axis rating distributions**: For each axis, show mean, median, stddev, range. A compact table or card grid. Games with tight clustering (low stddev) can be visually distinguished from loose distributions.
+**Topbar**: Shows "Collection Profile" as the page title, "Computed [date]" meta text, and game/axis counts. When the profile is stale (REQ-PROFILE-25), the topbar adds an amber "Profile outdated" badge, the last-computed date, and a "Recompute" button. The stale state still shows the old profile data below with a note that it reflects a prior state.
 
-2. **Axis weight breakdown**: Horizontal bar chart or ranked list showing each axis's percentage of total weight.
+**LLM Narration slot** (deferred): Always rendered, even before narration is available. The empty state shows a rounded card with a ✦ icon, "Collection Narrative" label, a short description of what narration provides, and a "Generate Narrative" button. This establishes the feature's existence for post-MVP. The button is non-functional until LLM integration ships.
 
-3. **BGG attribute clustering**: Top mechanics, categories, subdomains by count/percentage. Weight distribution by range.
+**Section A: Axis Rating Distributions** (REQ-PROFILE-2): Each axis gets its own row inside a section card titled "Axis Rating Distributions" with a subtitle count ("[N] axes · [M] games"). Each row shows:
 
-4. **Utility curve declarations**: For axes with configured curves, show the shape, ideal value, tolerance, and veto thresholds.
+- Axis name (left), inline stats (Mean, Median, Std Dev, Range) right-aligned as stacked value/label pairs in amber.
+- A 10-bucket mini-histogram (36px tall) spanning the 1-10 rating scale, with labeled ticks below. Peak bars at higher opacity, zero-count bars at minimal opacity with muted fill. Histogram bars are amber (personal data provenance). The histogram makes distribution shape visible at a glance: bimodal patterns, skew, and clustering that summary statistics alone can't convey.
 
-5. **Tournament/fitness divergence** (conditional): Only shown when `profile.divergence !== null`. Lists divergent games with both scores, gap magnitude, and direction label.
+**Section B: Axis Importance** (REQ-PROFILE-3): Section card titled "Axis Importance" with subtitle "% of total weight". Ranked list, numbered, sorted descending by weight percentage. Each row: rank number, axis name, horizontal bar track with navy fill proportional to percentage, percentage label right-aligned. This makes implicit axis priority explicit.
 
-6. **Collection outliers**: Lists outlier games with per-component distances and classifications.
+**Section C: BGG Attribute Concentrations** (REQ-PROFILE-4): Section card titled "BGG Attribute Concentrations" with game count. Uses a responsive two-column grid layout (`.two-col`, collapses to single column at 720px):
 
-7. **Suggested axes**: Presented as questions (REQ-PROFILE-16). "Have you considered creating an axis for [mechanic]? It appears in [N]% of your collection." Each suggestion has a dismiss button (session-only, via client-side state, not persisted per REQ-PROFILE-16).
+- **Left column**: "Top Mechanics" sub-section, then "Top Categories" sub-section. Each attribute gets a row: name, horizontal bar (slate blue fill on blue-tinted track), count with percentage (e.g., "35 (83%)").
+- **Right column**: "Subdomains" sub-section with the same bar treatment, then "Complexity (BGG Weight)" sub-section with a 10-bucket histogram (slate blue bars, labels from 1.0 to 5.0) and a prose summary note below.
+
+All BGG data uses slate blue color language throughout, never amber. Sub-section labels are uppercase, small, in `--bgg-accent`. Attributes appearing in fewer than 2 games are omitted (they surface in outlier detection instead).
+
+**Section D: Utility Curve Declarations** (REQ-PROFILE-5): Section card titled "Utility Curve Declarations" with configured axis count. Each axis with a non-default curve gets a row: axis name (left, fixed width), then a flex-wrap row of pill-shaped tags. Tag types by color:
+
+- Shape tag (action-navy): e.g., "Sweet spot", "Cliff (high-lean)"
+- Ideal value tag (amber): e.g., "Ideal: 20-30 min"
+- Tolerance tag (warm muted): e.g., "Tolerance: ±15 min"
+- Veto tags (red): e.g., "Veto below 10 min", "Veto above 60 min"
+
+**Section E: Preference Divergence** (REQ-PROFILE-7 through 9, conditional): Section card titled "Preference Divergence" with count and threshold note ("[N] games · gap > 1.5 pts"). Only shown when `profile.divergence !== null`. Each divergent game row shows:
+
+- Game name with BGG mechanic/category subtitle in muted text
+- Fitness score (amber, large) → arrow → Tournament score (slate blue, large)
+- Directional gap tag: tournament-outlier tags in blue-tinted pill ("+ 2.8 ▲ T"), fitness-outlier tags in amber-tinted pill ("−2.4 ▲ F")
+
+The side-by-side score presentation makes the tension legible without explanatory text.
+
+**Section F: Collection Outliers** (REQ-PROFILE-11 through 14): Section card titled "Collection Outliers" with count and threshold note ("[N] games · composite distance > 2σ"). Each outlier row has two parts:
+
+- Left: game name, human-readable reason text explaining why flagged (referencing specific mechanics, categories, and composite distance value), and a row of per-component distance chips. Chips show "Mechanics: 0.91", "BGG weight: 0.78", "Axis ratings: 0.42". Chips whose values indicate high distance get a purple `.high` style; others use muted styling.
+- Right: stacked classification tags (uppercase pill badges). "Lone Wolf" in purple, "Category Orphan" in warm muted, "High-Fitness" in green. Games can have multiple tags.
+
+The per-component distance chips answer the user's "why?" question for each flagged game.
+
+**Section G: Axis Suggestions** (REQ-PROFILE-15 through 17): Section card titled "Axis Suggestions" with count. Each suggestion is a card (`.suggest-card`) with warm background and stronger border containing:
+
+- A color-coded dot indicating source type: amber for "unexpressed concentration", slate blue for "high-variance BGG attribute", red for "divergence repair"
+- Question text in bold for the attribute name, conversational phrasing (per REQ-PROFILE-16: questions, not imperatives), and a muted "Source: [type description]" line below
+- A "Dismiss" button (right-aligned, session-only, not persisted per spec)
 
 Sections with insufficient data (e.g., outlier detection with < 3 games) are omitted, not shown as empty (per the constraint in the spec).
+
+#### Color language
+
+The mockup establishes a provenance-based color system for the profile page. This is a design constraint the implementer must follow:
+
+- **Amber** (`--score-color: #b86c1a`): personal ratings, axis weights, fitness scores. Used for histogram bars in axis distributions, stat values, and suggestion dots for concentration type.
+- **Slate blue** (`--bgg-accent: #2e5f8a`): BGG-derived data. Used for attribute clustering bars, weight range histogram, tournament scores, and suggestion dots for variance type.
+- **Navy** (`--action: #1c3d5e`): navigation and actions. Used for axis weight bars, Recompute button, shape tags.
+- **Red** (`--score-low: #b84040`): veto thresholds in curve declarations, divergence repair suggestion dots.
+- **Purple** (`--outlier-lone: #5c3d99` / `--override-accent`): lone wolf tags, high-distance component chips.
+
+These tokens are defined in the mockup's `:root` and should be added to `globals.css` as CSS custom properties.
 
 #### Game detail view additions (REQ-PROFILE-31)
 
 In `packages/web/app/games/[id]/page.tsx`:
 
-Fetch the profile alongside existing game data. If the current game appears in `profile.divergence`, show its divergence status (which direction, gap magnitude). If the game appears in `profile.outliers`, show its outlier status with per-component distances and classifications.
+Fetch the profile alongside existing game data. If the current game appears in `profile.divergence`, show its divergence status (which direction, gap magnitude) using the same side-by-side score layout from the profile page. If the game appears in `profile.outliers`, show its outlier status with per-component distance chips and classification tags matching the profile page's outlier row design.
 
 Both sections are informational. The profile's distance breakdown ("mechanics distance 0.85, complexity distance 0.12") provides the explanation layer.
 
 #### CSS
 
-Add styles to `packages/web/app/globals.css` for the profile page sections. Match the existing design system (card-based layout, consistent spacing, color variables). Profile-specific CSS classes should be prefixed (e.g., `.profile-section`, `.profile-axis-dist`, `.profile-outlier-card`).
+Add styles to `packages/web/app/globals.css` for the profile page sections. The mockup (`.lore/mockups/profile-overview.html`) contains the complete CSS with class names, spacing, and color values. Key structural classes to implement:
+
+- `.section-card`, `.section-header`, `.section-body`: card container pattern (8px radius, surface background, border)
+- `.axis-dist-row`, `.axis-stat`, `.mini-histogram`, `.hist-bar`: axis distribution rows with inline histograms
+- `.weight-row`, `.weight-bar-track`, `.weight-bar-fill`, `.weight-pct`: axis weight breakdown
+- `.bgg-attr-row`, `.bgg-bar-track`, `.bgg-bar-fill`, `.bgg-section-label`: BGG clustering with sub-labels
+- `.weight-range-row`, `.wt-bucket`: BGG weight histogram
+- `.curve-row`, `.curve-tag` (with `.shape`, `.sweet-spot`, `.veto`, `.tolerance` modifiers): utility curve tags
+- `.divergence-row`, `.div-score`, `.div-gap`: divergence score comparison
+- `.outlier-row`, `.outlier-type-tag`, `.dist-component`: outlier display with distance chips
+- `.suggest-card`, `.suggest-type-dot`, `.btn-dismiss`: suggestion cards
+- `.narration-empty`, `.btn-narrate`: LLM narration empty state
+- `.stale-badge`, `.btn-recompute`: stale profile indicators
+- `.two-col`: responsive two-column grid (collapses at 720px)
+
+The mockup's CSS is the reference implementation. Extract the relevant rules, adapting as needed for Next.js/CSS module conventions, but preserve the visual proportions and color assignments.
 
 **Depends on**: Phase 4 (profile route must exist for the web page to fetch data).
 
 **Verification**:
 
 - Profile Overview page renders with real data (200-game dataset).
-- All sections display when data is available.
+- Visual output matches the mockup (`.lore/mockups/profile-overview.html`): section order, color language, layout proportions, component styling.
+- All seven sections display when data is available, in the mockup's order (narration slot, distributions, weights, BGG clustering, curves, divergence, outliers, suggestions).
+- Mini-histograms render per axis with correct bucket counts and peak/zero styling.
+- BGG clustering section uses two-column grid layout, collapsing to single column at 720px.
 - Divergence section is absent when no tournament data exists.
 - Outlier section is absent when fewer than 3 games.
+- Outlier rows show per-component distance chips with `.high` highlighting for large values.
 - Axis suggestions show dismiss buttons that work (session-only).
+- Stale state shows "Profile outdated" badge, last-computed date, and "Recompute" button in topbar.
+- LLM narration empty state renders with Generate button (non-functional).
 - Collection list is accessible at `/collection`.
+- Sidebar nav uses grouped sections (Overview, Library, Ranking, Settings) matching mockup structure.
 - Navigation links work.
 - Game detail view shows divergence and outlier status for applicable games.
 - Responsive layout works on desktop, tablet, and phone breakpoints.
@@ -828,6 +903,13 @@ Run `bun run test` across all packages. All tests pass.
 - [ ] Profile does not recompute when current
 - [ ] Profile is deterministic (repeated calls, unchanged data)
 - [ ] Profile Overview page displays all sections with real data
+- [ ] Profile page visual output matches mockup (`.lore/mockups/profile-overview.html`): section order, color provenance, layout
+- [ ] Mini-histograms render per axis (10 buckets, 1-10 scale, amber bars)
+- [ ] BGG clustering uses two-column grid, collapses at 720px
+- [ ] Stale state shows topbar badge + Recompute button, old data still visible
+- [ ] LLM narration empty state present with Generate button
+- [ ] Sidebar nav grouped into Overview / Library / Ranking / Settings sections
+- [ ] Outlier distance chips show per-component values with high-distance highlighting
 - [ ] Outlier threshold produces reasonable number of flags (not zero, not half)
 - [ ] CLI returns complete parseable JSON
 - [ ] Profile Overview replaces home page; collection at separate route
@@ -853,7 +935,7 @@ All seven phases are assigned to **Dalton** (implementation). Phases are sequent
 
 After Phase 3, invoke **Thorne** (review) to check the profile computation engine and feature vector module against the spec. These contain the core math; catching errors here prevents them from propagating to the service layer and UI.
 
-After Phase 5, invoke **Thorne** again to review the web UI for spec compliance (all sections rendered, omission behavior correct, no anti-goal violations).
+After Phase 5, invoke **Thorne** again to review the web UI for spec compliance (all sections rendered, omission behavior correct, no anti-goal violations) and mockup fidelity (section order, color provenance, layout structure per `.lore/mockups/profile-overview.html`).
 
 After Phase 7, a final Thorne review confirms full requirement coverage across all packages.
 
@@ -867,7 +949,7 @@ After Phase 7, a final Thorne review confirms full requirement coverage across a
 
 4. **Profile computation performance.** Feature vector encoding and centroid distance computation are O(n \* d) where n = games and d = vocabulary size. For 400 games with ~300 features, this is ~120K operations per profile computation, which is negligible. If the collection grows to thousands of games, the computation should be profiled, but for the current scale (and the fact that computation is cached), performance is not a concern.
 
-5. **Component file size.** The Profile Overview page renders seven sections. If the page component exceeds ~300 lines, extract sections into sub-components (`packages/web/components/profile-*.tsx`). The Phase 5 implementer should use judgment on decomposition.
+5. **Component file size.** The Profile Overview page renders seven sections plus a topbar, narration slot, and stale state. The mockup's section complexity (histograms, distance chips, tag systems) means this will exceed 300 lines as a single component. Extract sections into sub-components (`packages/web/components/profile-*.tsx`): one per section card type (distributions, weights, clustering, curves, divergence, outliers, suggestions) plus a narration slot component. The mockup is the visual spec; component boundaries are the implementer's call.
 
 ## Open Questions
 
