@@ -39,3 +39,10 @@ Workers can also add entries to this file during their sessions.
 - Removed `POST /tournament/recalculate` route...
 - 11:15 commission-Dalton-20260410-070855 completed
 - 11:19 commission-Octavia-20260410-110602 completed
+- 11:21 commission-Thorne-20260410-070903 result: ## Review: Phases 3 & 4 of Tournament Overhead Reduction
+
+### Findings (priority order)
+
+**1. DEFECT: All-stats endpoint no longer enriches `opponentGameName`**
+File: `packages/daemon/src/routes/tourn...
+- 11:21 commission-Thorne-20260410-070903 completed
