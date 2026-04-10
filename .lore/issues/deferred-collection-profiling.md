@@ -26,3 +26,6 @@ Profiling builds on a populated rating dataset. Without enough rated games, any 
 - The data model already captures per-axis ratings across games, which is the raw input for profiling.
 - Could surface things like: "you consistently rate theme higher than mechanics," "your collection skews toward medium-weight euros," "you have no games rated above 7 on player interaction."
 - Exit point defined in spec: triggers when "user wants taste profile inference."
+
+
+USER NOTE: What if this was LLM driven? NOTE: use Claude Agent SDK to gain the benefits of using the subscription.
