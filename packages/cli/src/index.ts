@@ -25,6 +25,7 @@ import {
   tournamentStop,
   tournamentStats,
 } from "./commands/tournament.js";
+import { profileCommand } from "./commands/profile.js";
 
 // Known command paths and their token depths.
 // Dispatch matches on the first N tokens; everything after is positional.
@@ -49,6 +50,7 @@ const COMMANDS: Record<string, number> = {
   "import bgg-collection": 2,
   "config get": 2,
   "config set": 2,
+  profile: 1,
   start: 1,
   stop: 1,
   help: 1,
@@ -282,6 +284,9 @@ async function main(): Promise<void> {
       break;
     case "config set":
       output = await configSet(client, args, opts);
+      break;
+    case "profile":
+      output = await profileCommand(client, args, opts);
       break;
     case "start":
       output = await daemonStart(client, args, opts);
