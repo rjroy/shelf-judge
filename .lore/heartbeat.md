@@ -42,6 +42,13 @@ Added to `packages/shared/src/types.ts`:
 All four findings from Thorne's Phase 1+2 review resolved.
 
 - 20:24 commission-Dalton-20260409-200801 completed
+- 20:30 commission-Dalton-20260409-200818 result: # Phase 3: Fitness Service Integration Complete
+
+- 20:30 commission-Dalton-20260409-200818 completed
+## Implementation
+
+### `packages/daemon/src/services/fitness-service.ts`
+- **Replaced `resolveBggRating`** with `resolveBggRawValue`: returns raw nativ...
 ## Code Changes
 
 ### Finding 2 [MEDIUM]: Output clamping added to `applyPreferenceCurve`
