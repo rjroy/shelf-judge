@@ -72,6 +72,10 @@ export function createFitnessService(): FitnessService {
           contribution: rawContribution !== null ? roundToOneDecimal(rawContribution) : null,
           source,
           bggOriginal,
+          rawValue: displayedRating,
+          effectiveRating: displayedRating,
+          preferenceShape: "higher-is-better",
+          curveAffected: false,
         });
 
         if (rawContribution !== null) {
@@ -107,6 +111,9 @@ export function createFitnessService(): FitnessService {
         ratedAxisCount: ratedCount,
         totalAxisCount: axes.length,
         breakdown,
+        vetoed: false,
+        vetoedBy: null,
+        hypotheticalScore: null,
       };
     },
   };

@@ -2,6 +2,22 @@
 // Matches the approved data model design (.lore/designs/mvp-data-model.md)
 // and fitness model design (.lore/designs/mvp-fitness-model.md).
 
+// Curve configuration types (utility-curves spec)
+
+export type PreferenceShape = "higher-is-better" | "lower-is-better" | "sweet-spot";
+export type ToleranceLevel = "flexible" | "moderate" | "strict";
+export type LeanDirection = "lower" | "higher";
+
+export interface VetoConfig {
+  direction: "below" | "above";
+  threshold: number; // native-scale value
+}
+
+export interface NativeScale {
+  min: number;
+  max: number;
+}
+
 export interface BggTag {
   id: number;
   name: string;
@@ -52,6 +68,11 @@ export interface Axis {
   weight: number; // 1-100
   source: AxisSource;
   bggField: string | null; // For source="bgg": which BGG field maps here
+  preferenceShape?: PreferenceShape;
+  idealValue?: number | null;
+  tolerance?: ToleranceLevel;
+  leanDirection?: LeanDirection | null;
+  veto?: VetoConfig | null;
   createdAt: string; // ISO 8601
   updatedAt: string; // ISO 8601
 }
@@ -77,13 +98,26 @@ export interface FitnessBreakdownEntry {
   contribution: number | null; // null if not rated
   source: FitnessBreakdownSource;
   bggOriginal: number | null; // Original BGG value when source is "override"
+  rawValue: number | null; // native-scale value
+  effectiveRating: number | null; // post-curve 1-10 value (same as rating)
+  preferenceShape: PreferenceShape; // which shape was applied
+  curveAffected: boolean; // true when curve changed the rating by > 0.5
 }
 
 export interface FitnessResult {
-  score: number; // 1.0 - 10.0
+  score: number; // 1.0 - 10.0 (0 when vetoed)
   ratedAxisCount: number;
   totalAxisCount: number;
   breakdown: FitnessBreakdownEntry[];
+  vetoed: boolean;
+  vetoedBy: {
+    axisId: string;
+    axisName: string;
+    threshold: number; // native-scale
+    direction: "below" | "above";
+    rawValue: number; // native-scale
+  } | null;
+  hypotheticalScore: number | null; // score without veto, null when not vetoed
 }
 
 // Tournament types

@@ -25,6 +25,11 @@ export type {
   BggSearchResult,
   ImportProgress,
   ImportComplete,
+  PreferenceShape,
+  ToleranceLevel,
+  LeanDirection,
+  VetoConfig,
+  NativeScale,
 } from "./types";
 
 export {
