@@ -229,7 +229,7 @@ describe("axis create with curve flags", () => {
       },
     });
     // Override post to capture body
-    const origPost = client.post;
+    const origPost = client.post.bind(client);
     client.post = <T>(path: string, body?: unknown) => {
       capturedBody = body;
       return origPost<T>(path, body);
@@ -268,7 +268,7 @@ describe("axis update with curve flags", () => {
         "PUT /api/axes/ax-1-full-uuid": { response: { ok: true, status: 200, data: updated } },
       },
     });
-    const origPut = client.put;
+    const origPut = client.put.bind(client);
     client.put = <T>(path: string, body?: unknown) => {
       capturedBody = body;
       return origPut<T>(path, body);
@@ -290,7 +290,7 @@ describe("axis update with curve flags", () => {
         "PUT /api/axes/ax-1-full-uuid": { response: { ok: true, status: 200, data: updated } },
       },
     });
-    const origPut = client.put;
+    const origPut = client.put.bind(client);
     client.put = <T>(path: string, body?: unknown) => {
       capturedBody = body;
       return origPut<T>(path, body);
@@ -312,7 +312,7 @@ describe("axis update with curve flags", () => {
         "PUT /api/axes/ax-1-full-uuid": { response: { ok: true, status: 200, data: updated } },
       },
     });
-    const origPut = client.put;
+    const origPut = client.put.bind(client);
     client.put = <T>(path: string, body?: unknown) => {
       capturedBody = body;
       return origPut<T>(path, body);
