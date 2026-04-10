@@ -1,6 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import type {
+  PreferenceShape,
+  ToleranceLevel,
+  LeanDirection,
+  VetoConfig,
+} from "@shelf-judge/shared";
+import { getNativeScale, applyPreferenceCurve } from "@/lib/curve-math";
 
 interface Axis {
   id: string;
@@ -9,6 +16,11 @@ interface Axis {
   weight: number;
   source: "personal" | "bgg";
   bggField: string | null;
+  preferenceShape?: PreferenceShape;
+  idealValue?: number | null;
+  tolerance?: ToleranceLevel;
+  leanDirection?: LeanDirection | null;
+  veto?: VetoConfig | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -21,6 +33,60 @@ interface GameWithScore {
   score: unknown;
 }
 
+// Curve config state for create/edit forms
+interface CurveState {
+  shape: PreferenceShape;
+  idealValue: string;
+  tolerance: ToleranceLevel;
+  leanDirection: LeanDirection | null;
+  vetoEnabled: boolean;
+  vetoDirection: "below" | "above";
+  vetoThreshold: string;
+}
+
+const DEFAULT_CURVE: CurveState = {
+  shape: "higher-is-better",
+  idealValue: "",
+  tolerance: "moderate",
+  leanDirection: null,
+  vetoEnabled: false,
+  vetoDirection: "below",
+  vetoThreshold: "",
+};
+
+function curveStateFromAxis(axis: Axis): CurveState {
+  return {
+    shape: axis.preferenceShape ?? "higher-is-better",
+    idealValue: axis.idealValue != null ? String(axis.idealValue) : "",
+    tolerance: axis.tolerance ?? "moderate",
+    leanDirection: axis.leanDirection ?? null,
+    vetoEnabled: axis.veto != null,
+    vetoDirection: axis.veto?.direction ?? "below",
+    vetoThreshold: axis.veto != null ? String(axis.veto.threshold) : "",
+  };
+}
+
+function curveStateToBody(curve: CurveState): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    preferenceShape: curve.shape,
+  };
+  if (curve.shape === "sweet-spot") {
+    body.idealValue = curve.idealValue !== "" ? parseFloat(curve.idealValue) : null;
+    body.tolerance = curve.tolerance;
+    body.leanDirection = curve.leanDirection;
+  } else {
+    body.idealValue = null;
+    body.tolerance = undefined;
+    body.leanDirection = null;
+  }
+  if (curve.vetoEnabled && curve.vetoThreshold !== "") {
+    body.veto = { direction: curve.vetoDirection, threshold: parseFloat(curve.vetoThreshold) };
+  } else {
+    body.veto = null;
+  }
+  return body;
+}
+
 export default function AxesPage() {
   const [axes, setAxes] = useState<Axis[]>([]);
   const [games, setGames] = useState<GameWithScore[]>([]);
@@ -30,9 +96,11 @@ export default function AxesPage() {
   const [editName, setEditName] = useState("");
   const [editWeight, setEditWeight] = useState("");
   const [editDescription, setEditDescription] = useState("");
+  const [editCurve, setEditCurve] = useState<CurveState>(DEFAULT_CURVE);
   const [newName, setNewName] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [newWeight, setNewWeight] = useState("50");
+  const [newCurve, setNewCurve] = useState<CurveState>(DEFAULT_CURVE);
   const [showCreate, setShowCreate] = useState(false);
 
   useEffect(() => {
@@ -74,6 +142,7 @@ export default function AxesPage() {
           name: newName.trim(),
           description: newDescription.trim() || undefined,
           weight: parseInt(newWeight, 10),
+          ...curveStateToBody(newCurve),
         }),
       });
       if (!res.ok) {
@@ -85,6 +154,7 @@ export default function AxesPage() {
       setNewName("");
       setNewDescription("");
       setNewWeight("50");
+      setNewCurve(DEFAULT_CURVE);
       void loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create axis");
@@ -94,11 +164,12 @@ export default function AxesPage() {
   async function handleUpdate(id: string) {
     setError(null);
     try {
-      const body: { name?: string; weight?: number; description?: string } = {};
+      const body: Record<string, unknown> = {};
       const axis = axes.find((a) => a.id === id);
       if (editName.trim() && editName.trim() !== axis?.name) body.name = editName.trim();
       if (editWeight) body.weight = parseInt(editWeight, 10);
       if (editDescription !== axis?.description) body.description = editDescription;
+      Object.assign(body, curveStateToBody(editCurve));
 
       const res = await fetch(`/api/daemon/axes/${id}`, {
         method: "PUT",
@@ -166,7 +237,6 @@ export default function AxesPage() {
           <div className="weight-summary">
             <div className="weight-summary-label">Total weight</div>
             <div className="weight-total-bar">
-              {/* Dynamic width: indicates whether any weight is defined */}
               <div
                 className="weight-total-fill"
                 style={{ width: totalWeight > 0 ? "100%" : "0%" }}
@@ -219,6 +289,14 @@ export default function AxesPage() {
                     placeholder="Optional description"
                   />
                 </div>
+
+                <CurveConfig
+                  curve={newCurve}
+                  onChange={setNewCurve}
+                  source="personal"
+                  bggField={null}
+                />
+
                 <div className="form-actions">
                   <button
                     type="button"
@@ -239,121 +317,35 @@ export default function AxesPage() {
           <div className="section-label">Personal axes &middot; {personalAxes.length}</div>
 
           {personalAxes.map((axis) => (
-            <div key={axis.id} className="axis-card">
-              <div className="axis-card-main">
-                <div>
-                  {editingId === axis.id ? (
-                    <div className="edit-fields">
-                      <input
-                        className="form-input"
-                        type="text"
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                        placeholder="Axis name"
-                      />
-                      <input
-                        className="form-input edit-desc-input"
-                        type="text"
-                        value={editDescription}
-                        onChange={(e) => setEditDescription(e.target.value)}
-                        placeholder="Description (optional)"
-                      />
-                    </div>
-                  ) : (
-                    <>
-                      <div className="axis-name">{axis.name}</div>
-                      {axis.description && <div className="axis-desc">{axis.description}</div>}
-                    </>
-                  )}
-                </div>
-                <span className="personal-source-tag">Personal</span>
-                <div className="weight-display">
-                  {editingId === axis.id ? (
-                    <input
-                      className="form-input weight-edit-input"
-                      type="number"
-                      min={0}
-                      max={100}
-                      value={editWeight}
-                      onChange={(e) => setEditWeight(e.target.value)}
-                    />
-                  ) : (
-                    <>
-                      <div className="weight-number">{axis.weight}</div>
-                      <div className="weight-pct">
-                        {totalWeight > 0 ? Math.round((axis.weight / totalWeight) * 100) : 0}% of
-                        total
-                      </div>
-                    </>
-                  )}
-                </div>
-                <div className="weight-bar-track">
-                  {/* Dynamic width: proportional weight relative to total */}
-                  <div
-                    className="weight-bar-fill"
-                    style={{
-                      width: `${totalWeight > 0 ? (axis.weight / totalWeight) * 100 : 0}%`,
-                    }}
-                  />
-                </div>
-                <div className="axis-actions">
-                  {editingId === axis.id ? (
-                    <>
-                      <button
-                        className="btn btn-primary btn-sm"
-                        onClick={() => {
-                          void handleUpdate(axis.id);
-                        }}
-                      >
-                        Save
-                      </button>
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => setEditingId(null)}
-                      >
-                        Cancel
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => {
-                          setEditingId(axis.id);
-                          setEditName(axis.name);
-                          setEditWeight(String(axis.weight));
-                          setEditDescription(axis.description ?? "");
-                        }}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        className="btn btn-danger-outline btn-sm"
-                        onClick={() => {
-                          void handleDelete(axis);
-                        }}
-                      >
-                        Delete
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-              <div className="axis-stats-strip">
-                <div className="axis-stat">
-                  Rated on <strong>{ratingsCountForAxis(axis.id)} games</strong>
-                </div>
-                <div className="axis-stat">
-                  Created{" "}
-                  <strong>
-                    {new Date(axis.createdAt).toLocaleDateString("en-US", {
-                      month: "short",
-                      year: "numeric",
-                    })}
-                  </strong>
-                </div>
-              </div>
-            </div>
+            <AxisCard
+              key={axis.id}
+              axis={axis}
+              editingId={editingId}
+              editName={editName}
+              editWeight={editWeight}
+              editDescription={editDescription}
+              editCurve={editCurve}
+              totalWeight={totalWeight}
+              ratingsCount={ratingsCountForAxis(axis.id)}
+              onStartEdit={() => {
+                setEditingId(axis.id);
+                setEditName(axis.name);
+                setEditWeight(String(axis.weight));
+                setEditDescription(axis.description ?? "");
+                setEditCurve(curveStateFromAxis(axis));
+              }}
+              onCancelEdit={() => setEditingId(null)}
+              onSave={() => {
+                void handleUpdate(axis.id);
+              }}
+              onDelete={() => {
+                void handleDelete(axis);
+              }}
+              onCurveChange={setEditCurve}
+              onNameChange={setEditName}
+              onWeightChange={setEditWeight}
+              onDescChange={setEditDescription}
+            />
           ))}
 
           {/* BGG axes */}
@@ -368,117 +360,32 @@ export default function AxesPage() {
               </p>
 
               {bggAxes.map((axis) => (
-                <div key={axis.id} className="axis-card">
-                  <div className="axis-card-main">
-                    <div>
-                      {editingId === axis.id ? (
-                        <div className="edit-fields">
-                          <input
-                            className="form-input"
-                            type="text"
-                            value={editName}
-                            onChange={(e) => setEditName(e.target.value)}
-                            placeholder="Axis name"
-                          />
-                          <input
-                            className="form-input edit-desc-input"
-                            type="text"
-                            value={editDescription}
-                            onChange={(e) => setEditDescription(e.target.value)}
-                            placeholder="Description (optional)"
-                          />
-                        </div>
-                      ) : (
-                        <>
-                          <div className="axis-name">{axis.name}</div>
-                          {axis.description && <div className="axis-desc">{axis.description}</div>}
-                        </>
-                      )}
-                    </div>
-                    <span className="bgg-source-tag">&#8599; BGG</span>
-                    <div className="weight-display">
-                      {editingId === axis.id ? (
-                        <input
-                          className="form-input weight-edit-input"
-                          type="number"
-                          min={0}
-                          max={100}
-                          value={editWeight}
-                          onChange={(e) => setEditWeight(e.target.value)}
-                        />
-                      ) : (
-                        <>
-                          <div className="weight-number">{axis.weight}</div>
-                          <div className="weight-pct">
-                            {totalWeight > 0 ? Math.round((axis.weight / totalWeight) * 100) : 0}%
-                            of total
-                          </div>
-                        </>
-                      )}
-                    </div>
-                    <div className="weight-bar-track">
-                      {/* Dynamic width: proportional weight relative to total */}
-                      <div
-                        className="weight-bar-fill"
-                        style={{
-                          width: `${totalWeight > 0 ? (axis.weight / totalWeight) * 100 : 0}%`,
-                        }}
-                      />
-                    </div>
-                    <div className="axis-actions">
-                      {editingId === axis.id ? (
-                        <>
-                          <button
-                            className="btn btn-primary btn-sm"
-                            onClick={() => {
-                              void handleUpdate(axis.id);
-                            }}
-                          >
-                            Save
-                          </button>
-                          <button
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => setEditingId(null)}
-                          >
-                            Cancel
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => {
-                              setEditingId(axis.id);
-                              setEditName(axis.name);
-                              setEditWeight(String(axis.weight));
-                              setEditDescription(axis.description ?? "");
-                            }}
-                          >
-                            Edit Weight
-                          </button>
-                          <button
-                            className="btn btn-danger-outline btn-sm"
-                            onClick={() => {
-                              void handleDelete(axis);
-                            }}
-                          >
-                            Delete
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  <div className="axis-stats-strip bgg-strip">
-                    <div className="axis-stat">
-                      Auto-populated on <strong>{ratingsCountForAxis(axis.id)} games</strong>
-                    </div>
-                    {axis.bggField && (
-                      <div className="axis-stat">
-                        BGG source: <strong>{axis.bggField}</strong>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                <AxisCard
+                  key={axis.id}
+                  axis={axis}
+                  editingId={editingId}
+                  editName={editName}
+                  editWeight={editWeight}
+                  editDescription={editDescription}
+                  editCurve={editCurve}
+                  totalWeight={totalWeight}
+                  ratingsCount={ratingsCountForAxis(axis.id)}
+                  onStartEdit={() => {
+                    setEditingId(axis.id);
+                    setEditName(axis.name);
+                    setEditWeight(String(axis.weight));
+                    setEditDescription(axis.description ?? "");
+                    setEditCurve(curveStateFromAxis(axis));
+                  }}
+                  onCancelEdit={() => setEditingId(null)}
+                  onSave={() => {
+                    void handleUpdate(axis.id);
+                  }}
+                  onDelete={() => {
+                    void handleDelete(axis);
+                  }}
+                  onCurveChange={setEditCurve}
+                />
               ))}
             </>
           )}
@@ -486,4 +393,525 @@ export default function AxesPage() {
       </div>
     </>
   );
+}
+
+// ---------------------------------------------------------------------------
+// AxisCard
+// ---------------------------------------------------------------------------
+
+interface AxisCardProps {
+  axis: Axis;
+  editingId: string | null;
+  editName: string;
+  editWeight: string;
+  editDescription: string;
+  editCurve: CurveState;
+  totalWeight: number;
+  ratingsCount: number;
+  onStartEdit: () => void;
+  onCancelEdit: () => void;
+  onSave: () => void;
+  onDelete: () => void;
+  onCurveChange: (curve: CurveState) => void;
+  onNameChange: (v: string) => void;
+  onWeightChange: (v: string) => void;
+  onDescChange: (v: string) => void;
+}
+
+function AxisCard({
+  axis,
+  editingId,
+  editName,
+  editWeight,
+  editDescription,
+  editCurve,
+  totalWeight,
+  ratingsCount,
+  onStartEdit,
+  onCancelEdit,
+  onSave,
+  onDelete,
+  onCurveChange,
+  onNameChange,
+  onWeightChange,
+  onDescChange,
+}: AxisCardProps) {
+  const isEditing = editingId === axis.id;
+  const isBgg = axis.source === "bgg";
+  const shapeLabel = formatShape(axis.preferenceShape);
+  const hasVeto = axis.veto != null;
+
+  return (
+    <div className="axis-card">
+      <div className="axis-card-main">
+        <div>
+          {isEditing ? (
+            <div className="edit-fields">
+              <input
+                className="form-input"
+                type="text"
+                value={editName}
+                onChange={(e) => onNameChange(e.target.value)}
+                placeholder="Axis name"
+              />
+              <input
+                className="form-input edit-desc-input"
+                type="text"
+                value={editDescription}
+                onChange={(e) => onDescChange(e.target.value)}
+                placeholder="Description (optional)"
+              />
+            </div>
+          ) : (
+            <>
+              <div className="axis-name">{axis.name}</div>
+              {axis.description && <div className="axis-desc">{axis.description}</div>}
+              <div className="axis-curve-summary">
+                <span className="curve-shape-tag">{shapeLabel}</span>
+                {axis.preferenceShape === "sweet-spot" && axis.idealValue != null && (
+                  <span className="curve-detail">ideal: {axis.idealValue}</span>
+                )}
+                {hasVeto && (
+                  <span className="curve-veto-tag">
+                    Veto {axis.veto!.direction} {axis.veto!.threshold}
+                  </span>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+        <span className={isBgg ? "bgg-source-tag" : "personal-source-tag"}>
+          {isBgg ? <>&#8599; BGG</> : "Personal"}
+        </span>
+        <div className="weight-display">
+          {isEditing ? (
+            <input
+              className="form-input weight-edit-input"
+              type="number"
+              min={0}
+              max={100}
+              value={editWeight}
+              onChange={(e) => onWeightChange(e.target.value)}
+            />
+          ) : (
+            <>
+              <div className="weight-number">{axis.weight}</div>
+              <div className="weight-pct">
+                {totalWeight > 0 ? Math.round((axis.weight / totalWeight) * 100) : 0}% of total
+              </div>
+            </>
+          )}
+        </div>
+        <div className="weight-bar-track">
+          <div
+            className="weight-bar-fill"
+            style={{
+              width: `${totalWeight > 0 ? (axis.weight / totalWeight) * 100 : 0}%`,
+            }}
+          />
+        </div>
+        <div className="axis-actions">
+          {isEditing ? (
+            <>
+              <button className="btn btn-primary btn-sm" onClick={onSave}>
+                Save
+              </button>
+              <button className="btn btn-secondary btn-sm" onClick={onCancelEdit}>
+                Cancel
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="btn btn-secondary btn-sm" onClick={onStartEdit}>
+                {isBgg ? "Edit" : "Edit"}
+              </button>
+              <button className="btn btn-danger-outline btn-sm" onClick={onDelete}>
+                Delete
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Curve config shown in edit mode */}
+      {isEditing && (
+        <CurveConfig
+          curve={editCurve}
+          onChange={onCurveChange}
+          source={axis.source}
+          bggField={axis.bggField}
+        />
+      )}
+
+      <div className={`axis-stats-strip${isBgg ? " bgg-strip" : ""}`}>
+        <div className="axis-stat">
+          {isBgg ? "Auto-populated on" : "Rated on"} <strong>{ratingsCount} games</strong>
+        </div>
+        {isBgg && axis.bggField && (
+          <div className="axis-stat">
+            BGG source: <strong>{axis.bggField}</strong>
+          </div>
+        )}
+        {!isBgg && (
+          <div className="axis-stat">
+            Created{" "}
+            <strong>
+              {new Date(axis.createdAt).toLocaleDateString("en-US", {
+                month: "short",
+                year: "numeric",
+              })}
+            </strong>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// CurveConfig
+// ---------------------------------------------------------------------------
+
+interface CurveConfigProps {
+  curve: CurveState;
+  onChange: (curve: CurveState) => void;
+  source: "personal" | "bgg";
+  bggField: string | null;
+}
+
+function CurveConfig({ curve, onChange, source, bggField }: CurveConfigProps) {
+  const scale = getNativeScale(source, bggField);
+
+  function update(partial: Partial<CurveState>) {
+    onChange({ ...curve, ...partial });
+  }
+
+  return (
+    <div className="curve-config">
+      <div className="curve-config-title">Preference Curve</div>
+
+      {/* Shape selector */}
+      <div className="shape-selector">
+        {(
+          [
+            {
+              value: "higher-is-better" as const,
+              label: "Higher is better",
+              desc: "Higher values on this axis mean a better fit.",
+            },
+            {
+              value: "lower-is-better" as const,
+              label: "Lower is better",
+              desc: "Lower values mean a better fit.",
+            },
+            {
+              value: "sweet-spot" as const,
+              label: "Sweet spot",
+              desc: "There's an ideal value, and further from it is worse.",
+            },
+          ] as const
+        ).map((opt) => (
+          <label
+            key={opt.value}
+            className={`shape-option${curve.shape === opt.value ? " active" : ""}`}
+          >
+            <input
+              type="radio"
+              name="shape"
+              value={opt.value}
+              checked={curve.shape === opt.value}
+              onChange={() => update({ shape: opt.value })}
+            />
+            <span className="shape-option-label">{opt.label}</span>
+            <span className="shape-option-desc">{opt.desc}</span>
+          </label>
+        ))}
+      </div>
+
+      {/* Sweet spot controls */}
+      {curve.shape === "sweet-spot" && (
+        <div className="sweet-spot-controls">
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">
+                Ideal value ({scale.min}&ndash;{scale.max})
+              </label>
+              <input
+                className="form-input"
+                type="number"
+                min={scale.min}
+                max={scale.max}
+                step={source === "bgg" && bggField === "weight" ? 0.25 : 1}
+                value={curve.idealValue}
+                onChange={(e) => update({ idealValue: e.target.value })}
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Tolerance</label>
+              <div className="seg-control">
+                {(["flexible", "moderate", "strict"] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    className={`seg-btn${curve.tolerance === t ? " active" : ""}`}
+                    onClick={() => update({ tolerance: t })}
+                  >
+                    {t.charAt(0).toUpperCase() + t.slice(1)}
+                  </button>
+                ))}
+              </div>
+              <span className="form-hint">
+                {curve.tolerance === "flexible"
+                  ? "I'm not picky about this."
+                  : curve.tolerance === "strict"
+                    ? "I know exactly what I want."
+                    : "Moderate preference."}
+              </span>
+            </div>
+          </div>
+          <div className="form-group form-group-mb">
+            <label className="form-label">Lean direction</label>
+            <div className="seg-control">
+              <button
+                type="button"
+                className={`seg-btn${curve.leanDirection === null ? " active" : ""}`}
+                onClick={() => update({ leanDirection: null })}
+              >
+                Symmetric
+              </button>
+              <button
+                type="button"
+                className={`seg-btn${curve.leanDirection === "lower" ? " active" : ""}`}
+                onClick={() => update({ leanDirection: "lower" })}
+              >
+                Prefer lower
+              </button>
+              <button
+                type="button"
+                className={`seg-btn${curve.leanDirection === "higher" ? " active" : ""}`}
+                onClick={() => update({ leanDirection: "higher" })}
+              >
+                Prefer higher
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Curve preview */}
+      <CurvePreview curve={curve} scale={scale} />
+
+      {/* Veto threshold */}
+      <div className="veto-config">
+        <label className="veto-toggle">
+          <input
+            type="checkbox"
+            checked={curve.vetoEnabled}
+            onChange={(e) => update({ vetoEnabled: e.target.checked })}
+          />
+          <span>Enable veto threshold</span>
+        </label>
+        {curve.vetoEnabled && (
+          <div className="veto-controls">
+            <div className="seg-control">
+              <button
+                type="button"
+                className={`seg-btn${curve.vetoDirection === "below" ? " active" : ""}`}
+                onClick={() => update({ vetoDirection: "below" })}
+              >
+                Veto below
+              </button>
+              <button
+                type="button"
+                className={`seg-btn${curve.vetoDirection === "above" ? " active" : ""}`}
+                onClick={() => update({ vetoDirection: "above" })}
+              >
+                Veto above
+              </button>
+            </div>
+            <input
+              className="form-input veto-threshold-input"
+              type="number"
+              min={scale.min}
+              max={scale.max}
+              step={source === "bgg" && bggField === "weight" ? 0.25 : 1}
+              value={curve.vetoThreshold}
+              onChange={(e) => update({ vetoThreshold: e.target.value })}
+              placeholder="Threshold"
+            />
+            <span className="form-hint">
+              Games scoring {curve.vetoDirection} this value will get fitness 0.
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// CurvePreview (SVG)
+// ---------------------------------------------------------------------------
+
+interface CurvePreviewProps {
+  curve: CurveState;
+  scale: { min: number; max: number };
+}
+
+function CurvePreview({ curve, scale }: CurvePreviewProps) {
+  const canvasRef = useRef<SVGSVGElement>(null);
+  const width = 280;
+  const height = 140;
+  const pad = { top: 12, right: 16, bottom: 24, left: 32 };
+  const plotW = width - pad.left - pad.right;
+  const plotH = height - pad.top - pad.bottom;
+
+  const steps = 60;
+  const points: string[] = [];
+  const idealVal = curve.idealValue !== "" ? parseFloat(curve.idealValue) : null;
+
+  for (let i = 0; i <= steps; i++) {
+    const raw = scale.min + ((scale.max - scale.min) * i) / steps;
+    const eff = applyPreferenceCurve(raw, scale, curve.shape, {
+      idealValue: idealVal,
+      tolerance: curve.tolerance,
+      leanDirection: curve.leanDirection,
+    });
+    const x = pad.left + (plotW * i) / steps;
+    const y = pad.top + plotH - ((eff - 1) / 9) * plotH;
+    points.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+  }
+
+  // Veto line position
+  const vetoX =
+    curve.vetoEnabled && curve.vetoThreshold !== ""
+      ? pad.left + ((parseFloat(curve.vetoThreshold) - scale.min) / (scale.max - scale.min)) * plotW
+      : null;
+
+  return (
+    <div className="curve-preview">
+      <svg ref={canvasRef} viewBox={`0 0 ${width} ${height}`} className="curve-svg">
+        {/* Grid lines */}
+        <line
+          x1={pad.left}
+          y1={pad.top}
+          x2={pad.left}
+          y2={pad.top + plotH}
+          stroke="var(--border)"
+          strokeWidth="1"
+        />
+        <line
+          x1={pad.left}
+          y1={pad.top + plotH}
+          x2={pad.left + plotW}
+          y2={pad.top + plotH}
+          stroke="var(--border)"
+          strokeWidth="1"
+        />
+
+        {/* Y-axis labels */}
+        <text x={pad.left - 4} y={pad.top + 4} className="curve-axis-label" textAnchor="end">
+          10
+        </text>
+        <text
+          x={pad.left - 4}
+          y={pad.top + plotH + 4}
+          className="curve-axis-label"
+          textAnchor="end"
+        >
+          1
+        </text>
+
+        {/* X-axis labels */}
+        <text
+          x={pad.left}
+          y={pad.top + plotH + 14}
+          className="curve-axis-label"
+          textAnchor="middle"
+        >
+          {scale.min}
+        </text>
+        <text
+          x={pad.left + plotW}
+          y={pad.top + plotH + 14}
+          className="curve-axis-label"
+          textAnchor="middle"
+        >
+          {scale.max}
+        </text>
+
+        {/* Veto region */}
+        {vetoX !== null && (
+          <>
+            {curve.vetoDirection === "below" ? (
+              <rect
+                x={pad.left}
+                y={pad.top}
+                width={Math.max(0, vetoX - pad.left)}
+                height={plotH}
+                fill="var(--danger)"
+                opacity="0.08"
+              />
+            ) : (
+              <rect
+                x={vetoX}
+                y={pad.top}
+                width={Math.max(0, pad.left + plotW - vetoX)}
+                height={plotH}
+                fill="var(--danger)"
+                opacity="0.08"
+              />
+            )}
+            <line
+              x1={vetoX}
+              y1={pad.top}
+              x2={vetoX}
+              y2={pad.top + plotH}
+              stroke="var(--danger)"
+              strokeWidth="1.5"
+              strokeDasharray="4 3"
+            />
+          </>
+        )}
+
+        {/* Curve line */}
+        <polyline
+          points={points.join(" ")}
+          fill="none"
+          stroke="var(--action)"
+          strokeWidth="2"
+          strokeLinejoin="round"
+        />
+
+        {/* Ideal marker for sweet spot */}
+        {curve.shape === "sweet-spot" && idealVal !== null && (
+          <circle
+            cx={pad.left + ((idealVal - scale.min) / (scale.max - scale.min)) * plotW}
+            cy={pad.top}
+            r="3"
+            fill="var(--score-high)"
+          />
+        )}
+      </svg>
+      <div className="curve-preview-labels">
+        <span>Native value</span>
+        <span>Effective (1-10)</span>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function formatShape(shape?: PreferenceShape): string {
+  switch (shape) {
+    case "lower-is-better":
+      return "Lower is better";
+    case "sweet-spot":
+      return "Sweet spot";
+    default:
+      return "Higher is better";
+  }
 }

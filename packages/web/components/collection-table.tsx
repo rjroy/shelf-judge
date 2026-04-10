@@ -167,7 +167,8 @@ export function CollectionTable({
   const hasRatedFilter = filters.ratedStatus !== "all";
   const hasPlayedFilter = filters.playedStatus !== "all";
   const hasPlayerCount = filters.playerCount !== null;
-  const activeFilterCount = (hasRatedFilter ? 1 : 0) + (hasPlayedFilter ? 1 : 0) + (hasPlayerCount ? 1 : 0);
+  const activeFilterCount =
+    (hasRatedFilter ? 1 : 0) + (hasPlayedFilter ? 1 : 0) + (hasPlayerCount ? 1 : 0);
   const hasAnyFilter = hasSearch || hasRatedFilter || hasPlayedFilter || hasPlayerCount;
   const hiddenCount = totalGames - filtered.length;
 
@@ -276,7 +277,7 @@ export function CollectionTable({
                 ))}
               </div>
             </div>
-             <div className="filter-group">
+            <div className="filter-group">
               <div className="filter-group-label">Played</div>
               <div className="filter-group-controls">
                 {(["all", "played", "unplayed"] as const).map((status) => (
@@ -327,7 +328,7 @@ export function CollectionTable({
                 </button>
               </span>
             )}
-             {hasRatedFilter && (
+            {hasRatedFilter && (
               <span className="filter-chip chip-rated">
                 {filters.ratedStatus === "rated" ? "Rated only" : "Unrated only"}{" "}
                 <button className="chip-x" onClick={() => updateFilter("ratedStatus", "all")}>
@@ -349,7 +350,11 @@ export function CollectionTable({
                 </button>
               </span>
             )}
-            {(hasSearch ? 1 : 0) + (hasRatedFilter ? 1 : 0) + (hasPlayedFilter ? 1 : 0) + (hasPlayerCount ? 1 : 0) >= 2 && (
+            {(hasSearch ? 1 : 0) +
+              (hasRatedFilter ? 1 : 0) +
+              (hasPlayedFilter ? 1 : 0) +
+              (hasPlayerCount ? 1 : 0) >=
+              2 && (
               <button className="clear-all-link" onClick={clearAllFilters}>
                 Clear all
               </button>
@@ -523,7 +528,14 @@ function GameRow({ gws, rank, sortField, tournamentStats, axisMap, isAxisSort }:
       </div>
       <div className="last-rated">{relativeDate(game.updatedAt)}</div>
       <div className="score-cell">
-        {display.className === "score-unrated" ? (
+        {score?.vetoed ? (
+          <div className="score-vetoed-cell">
+            <span className="vetoed-badge">VETOED</span>
+            {score.hypotheticalScore !== null && (
+              <span className="vetoed-hypothetical">{score.hypotheticalScore.toFixed(1)}</span>
+            )}
+          </div>
+        ) : display.className === "score-unrated" ? (
           <span className="score-unrated">{display.text}</span>
         ) : (
           <>

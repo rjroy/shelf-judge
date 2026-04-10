@@ -13,69 +13,124 @@ export function ScoreBreakdown({ score }: { score: FitnessResult | null }) {
     .filter((e) => e.rating !== null)
     .reduce((sum, e) => sum + e.weight, 0);
 
-  return (
-    <table className="breakdown-table">
-      <thead>
-        <tr>
-          <th>Axis</th>
-          <th className="right">Rating</th>
-          <th className="right">Weight</th>
-          <th className="right">Contribution</th>
-          <th className="right">Source</th>
-        </tr>
-      </thead>
-      <tbody>
-        {score.breakdown.map((entry) => {
-          const rowClass =
-            entry.source === "override" ? "override-row" : entry.source === "bgg" ? "bgg-row" : "";
-          const contribPct =
-            entry.contribution !== null && totalWeight > 0
-              ? Math.round((entry.contribution / score.score) * 100)
-              : null;
+  const displayScore = score.vetoed ? (score.hypotheticalScore ?? 0) : score.score;
 
-          return (
-            <tr key={entry.axisId} className={rowClass}>
-              <td className="breakdown-name-cell">
-                {entry.axisName}
-                {entry.source === "override" && entry.bggOriginal !== null && (
-                  <div className="breakdown-override-detail">
-                    BGG: {entry.bggOriginal.toFixed(1)}
-                  </div>
-                )}
-              </td>
-              <td className="right">
-                {entry.rating !== null ? entry.rating : <span className="breakdown-dash">—</span>}
-              </td>
-              <td className="right">{entry.weight}</td>
-              <td className="right">
-                {contribPct !== null ? (
-                  <div className="contrib-cell">
-                    <div className="contrib-bar-track">
-                      {/* Dynamic width: contribution percentage computed from runtime data */}
-                      <div className="contrib-bar-fill" style={{ width: `${contribPct}%` }} />
+  return (
+    <>
+      {/* Veto banner */}
+      {score.vetoed && score.vetoedBy && (
+        <div className="veto-banner">
+          <div className="veto-banner-title">VETOED</div>
+          <div className="veto-banner-detail">
+            <strong>{score.vetoedBy.axisName}</strong> scored {score.vetoedBy.rawValue.toFixed(1)}{" "}
+            (threshold: {score.vetoedBy.direction} {score.vetoedBy.threshold})
+          </div>
+          {score.hypotheticalScore !== null && (
+            <div className="veto-banner-hypothetical">
+              Without veto, fitness would be {score.hypotheticalScore.toFixed(1)}
+            </div>
+          )}
+        </div>
+      )}
+
+      <table className={`breakdown-table${score.vetoed ? " breakdown-vetoed" : ""}`}>
+        <thead>
+          <tr>
+            <th>Axis</th>
+            <th className="right">Raw</th>
+            <th className="right">Effective</th>
+            <th className="right">Weight</th>
+            <th className="right">Contribution</th>
+            <th className="right">Source</th>
+          </tr>
+        </thead>
+        <tbody>
+          {score.breakdown.map((entry) => {
+            const rowClass = [
+              entry.source === "override"
+                ? "override-row"
+                : entry.source === "bgg"
+                  ? "bgg-row"
+                  : "",
+              entry.curveAffected ? "curve-affected-row" : "",
+            ]
+              .filter(Boolean)
+              .join(" ");
+
+            const contribPct =
+              entry.contribution !== null && totalWeight > 0 && displayScore > 0
+                ? Math.round((entry.contribution / displayScore) * 100)
+                : null;
+
+            // Show raw when it differs from effective (different scale or curve applied)
+            const showRaw =
+              entry.rawValue !== null &&
+              entry.effectiveRating !== null &&
+              Math.abs(entry.rawValue - entry.effectiveRating) > 0.05;
+
+            return (
+              <tr key={entry.axisId} className={rowClass}>
+                <td className="breakdown-name-cell">
+                  {entry.axisName}
+                  {entry.curveAffected && (
+                    <span className="curve-indicator" title="Curve applied">
+                      ~
+                    </span>
+                  )}
+                  {entry.source === "override" && entry.bggOriginal !== null && (
+                    <div className="breakdown-override-detail">
+                      BGG: {entry.bggOriginal.toFixed(1)}
                     </div>
-                    <span className="contrib-pct">{contribPct}%</span>
-                  </div>
-                ) : (
-                  "—"
-                )}
-              </td>
-              <td className="right">
-                <SourceBadge source={entry.source} />
-              </td>
-            </tr>
-          );
-        })}
-        <tr className="total-row">
-          <td colSpan={3} className="total-label">
-            Fitness Score
-          </td>
-          <td colSpan={2} className="right">
-            {score.score.toFixed(1)}
-          </td>
-        </tr>
-      </tbody>
-    </table>
+                  )}
+                </td>
+                <td className="right breakdown-raw">
+                  {showRaw && entry.rawValue !== null ? (
+                    entry.rawValue.toFixed(1)
+                  ) : (
+                    <span className="breakdown-dash">&mdash;</span>
+                  )}
+                </td>
+                <td className="right">
+                  {entry.rating !== null ? (
+                    entry.rating
+                  ) : (
+                    <span className="breakdown-dash">&mdash;</span>
+                  )}
+                </td>
+                <td className="right">{entry.weight}</td>
+                <td className="right">
+                  {contribPct !== null ? (
+                    <div className="contrib-cell">
+                      <div className="contrib-bar-track">
+                        <div className="contrib-bar-fill" style={{ width: `${contribPct}%` }} />
+                      </div>
+                      <span className="contrib-pct">{contribPct}%</span>
+                    </div>
+                  ) : (
+                    "&mdash;"
+                  )}
+                </td>
+                <td className="right">
+                  <SourceBadge source={entry.source} />
+                </td>
+              </tr>
+            );
+          })}
+          <tr className="total-row">
+            <td colSpan={4} className="total-label">
+              {score.vetoed ? "Hypothetical Score" : "Fitness Score"}
+            </td>
+            <td colSpan={2} className="right">
+              {score.vetoed ? (
+                <span className="score-hypothetical">{displayScore.toFixed(1)}</span>
+              ) : (
+                score.score.toFixed(1)
+              )}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </>
   );
 }
 
