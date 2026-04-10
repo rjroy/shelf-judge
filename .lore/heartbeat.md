@@ -26,3 +26,10 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
+- 06:16 commission-Dalton-20260410-061208 result: Fixed both bugs. Root cause was shared: the `rateGame` API only accepted numeric values, so there was no way to express "clear this rating."
+
+**Changes:**
+
+1. **`packages/daemon/src/routes/games.ts`**...
+
+- 06:16 commission-Dalton-20260410-061208 completed
