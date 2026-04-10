@@ -47,3 +47,4 @@ Reviewed against spec (`.lore/specs/collection-profiling.md`), plan (`.lore/plan
 ### Finding 1: Jaccard distance with centroid frequency vectors (HIGH)
 Replaced strict `=== 1` binary Jaccard with generalized Jaccard (`1 - sum(min(a,b)) / ...
 - 12:28 commission-Dalton-20260410-120301 completed
+- 12:35 commission-Dalton-20260410-120312 failed

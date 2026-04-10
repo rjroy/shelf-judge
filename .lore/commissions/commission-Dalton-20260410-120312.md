@@ -1,7 +1,7 @@
 ---
 title: "Commission: Collection Profiling Phase 4: Service, Storage, Routes"
 date: 2026-04-10
-status: dispatched
+status: failed
 tags: [commission]
 worker: Dalton
 workerDisplayTitle: "Guild Artificer"
@@ -29,6 +29,9 @@ activity_timeline:
     reason: "Dispatched to worker"
     from: "pending"
     to: "dispatched"
+  - timestamp: 2026-04-10T19:35:47.226Z
+    event: status_failed
+    reason: "Session error: Claude Code returned an error result: You've hit your limit · resets 4pm (America/Los_Angeles)"
 current_progress: ""
 projectName: shelf-judge
 ---
