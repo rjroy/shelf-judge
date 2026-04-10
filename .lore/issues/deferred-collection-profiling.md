@@ -29,4 +29,4 @@ Profiling builds on a populated rating dataset. Without enough rated games, any 
 
 
 USER NOTE: What if this was LLM driven?
-USER NOTE: use Claude Agent SDK to gain the benefits of using the subscription. See .lore/research/claude-agent-sdk.md
+USER NOTE: use Claude Agent SDK to gain the benefits of using the subscription. See `.lore/research/claude-agent-sdk.md`
