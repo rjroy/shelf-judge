@@ -251,6 +251,7 @@ export interface AxisDistribution {
   standardDeviation: number;
   range: { min: number; max: number };
   ratedGameCount: number;
+  histogram: number[]; // 10-element array: game counts per rating bucket (1-10)
 }
 
 export interface AxisWeightEntry {

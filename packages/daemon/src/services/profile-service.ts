@@ -94,8 +94,8 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
         tournamentStats,
       };
 
-      const profile = computeProfile(input);
       const now = new Date().toISOString();
+      const profile: CollectionProfile = { ...computeProfile(input), computedAt: now };
 
       const profileData: ProfileData = {
         profile,

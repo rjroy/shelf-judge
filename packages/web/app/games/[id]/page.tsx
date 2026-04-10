@@ -59,16 +59,6 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
 
   const { game, score } = data;
 
-  // Divergence check: > 2.0 difference between fitness and tournament, both non-provisional.
-  // Skip vetoed games entirely: their score is 0 by design, not a meaningful divergence signal.
-  const hasDivergence =
-    score !== null &&
-    !score.vetoed &&
-    tournamentStats !== null &&
-    tournamentStats.normalizedScore !== null &&
-    !tournamentStats.isProvisional &&
-    Math.abs(score.score - tournamentStats.normalizedScore) > 2.0;
-
   return (
     <>
       {/* Topbar with breadcrumb */}
@@ -205,15 +195,6 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
             )}
           </div>
         </div>
-
-        {hasDivergence && (
-          <div className="divergence-banner">
-            <strong>Score divergence:</strong> This game&apos;s fitness score (
-            {score.score.toFixed(1)}) and tournament rank (
-            {tournamentStats!.normalizedScore!.toFixed(1)}) differ by more than 2.0 points. This may
-            indicate your axis ratings and head-to-head preferences are measuring different things.
-          </div>
-        )}
 
         {profileDivergence && (
           <div className="profile-divergence-detail">

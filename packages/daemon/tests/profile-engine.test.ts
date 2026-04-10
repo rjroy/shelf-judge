@@ -125,6 +125,9 @@ describe("computeAxisDistributions", () => {
     expect(fun.standardDeviation).toBeCloseTo(Math.sqrt(8), 10);
     expect(fun.range).toEqual({ min: 2, max: 10 });
     expect(fun.ratedGameCount).toBe(5);
+    // Histogram: bucket[1]=1(rating 2), bucket[3]=1(rating 4), bucket[5]=1(rating 6),
+    //            bucket[7]=1(rating 8), bucket[9]=1(rating 10)
+    expect(fun.histogram).toEqual([0, 1, 0, 1, 0, 1, 0, 1, 0, 1]);
 
     // Strategy: [5,5,5,7,3] → mean=5, median=5
     // Variance = (0+0+0+4+4)/5 = 1.6, stddev = sqrt(1.6)
@@ -134,6 +137,8 @@ describe("computeAxisDistributions", () => {
     expect(strategy.standardDeviation).toBeCloseTo(Math.sqrt(1.6), 10);
     expect(strategy.range).toEqual({ min: 3, max: 7 });
     expect(strategy.ratedGameCount).toBe(5);
+    // Histogram: bucket[2]=1(rating 3), bucket[4]=3(rating 5), bucket[6]=1(rating 7)
+    expect(strategy.histogram).toEqual([0, 0, 1, 0, 3, 0, 1, 0, 0, 0]);
 
     // Art: [7,8,9] → mean=8, median=8
     // Variance = (1+0+1)/3 = 2/3, stddev = sqrt(2/3)
@@ -143,6 +148,8 @@ describe("computeAxisDistributions", () => {
     expect(art.standardDeviation).toBeCloseTo(Math.sqrt(2 / 3), 10);
     expect(art.range).toEqual({ min: 7, max: 9 });
     expect(art.ratedGameCount).toBe(3);
+    // Histogram: bucket[6]=1(rating 7), bucket[7]=1(rating 8), bucket[8]=1(rating 9)
+    expect(art.histogram).toEqual([0, 0, 0, 0, 0, 0, 1, 1, 1, 0]);
   });
 
   test("axis with no ratings returns zeroed distribution", () => {
@@ -154,6 +161,7 @@ describe("computeAxisDistributions", () => {
     expect(result[0].median).toBe(0);
     expect(result[0].standardDeviation).toBe(0);
     expect(result[0].ratedGameCount).toBe(0);
+    expect(result[0].histogram).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
   });
 
   test("median for even number of ratings averages middle two", () => {
@@ -905,7 +913,6 @@ describe("computeProfile", () => {
     expect(profile.axisWeights.length).toBe(1);
     expect(profile.bggClustering.mechanics.length).toBe(1);
     expect(profile.divergence).toBeNull(); // no tournament data
-    expect(profile.computedAt).toBeTruthy();
   });
 
   test("deterministic: identical results on repeated calls", () => {

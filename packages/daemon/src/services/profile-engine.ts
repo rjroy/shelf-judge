@@ -46,7 +46,7 @@ const WEIGHT_RANGES: { range: string; min: number; max: number }[] = [
 /**
  * Main entry point. Computes a full collection profile from input data.
  */
-export function computeProfile(input: ProfileInput): CollectionProfile {
+export function computeProfile(input: ProfileInput): Omit<CollectionProfile, "computedAt"> {
   const { games, axes, fitnessResults, tournamentStats } = input;
 
   const axisDistributions = computeAxisDistributions(games, axes);
@@ -70,7 +70,6 @@ export function computeProfile(input: ProfileInput): CollectionProfile {
     suggestions,
     gameCount: games.length,
     ratedGameCount,
-    computedAt: new Date().toISOString(),
   };
 }
 
@@ -95,6 +94,7 @@ export function computeAxisDistributions(games: Game[], axes: Axis[]): AxisDistr
         standardDeviation: 0,
         range: { min: 0, max: 0 },
         ratedGameCount: 0,
+        histogram: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
       };
     }
 
@@ -113,6 +113,14 @@ export function computeAxisDistributions(games: Game[], axes: Axis[]): AxisDistr
     const varianceSum = sorted.reduce((acc, v) => acc + (v - mean) * (v - mean), 0);
     const standardDeviation = Math.sqrt(varianceSum / n);
 
+    // Count games per rating bucket (1-10). Ratings are integers 1-10;
+    // clamp to valid range defensively.
+    const histogram = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    for (const r of ratings) {
+      const bucket = Math.max(0, Math.min(9, Math.round(r) - 1));
+      histogram[bucket]++;
+    }
+
     return {
       axisId: axis.id,
       axisName: axis.name,
@@ -121,6 +129,7 @@ export function computeAxisDistributions(games: Game[], axes: Axis[]): AxisDistr
       standardDeviation,
       range: { min: sorted[0], max: sorted[n - 1] },
       ratedGameCount: n,
+      histogram,
     };
   });
 }
