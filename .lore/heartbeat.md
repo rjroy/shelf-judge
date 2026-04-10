@@ -49,6 +49,10 @@ All four findings from Thorne's Phase 1+2 review resolved.
 
 1. **Algorithmic Taste Profile** (Medium) - Deterministic profiling service computing rating d...
 - 20:33 commission-Celeste-20260409-202834 completed
+- 20:36 commission-Celeste-20260409-203114 result: Brainstorm artifact written to `.lore/brainstorms/prediction-engine.md` with 6 proposals:
+
+1. **Curve-First Prediction for BGG-Derived Axes** (Small) — Apply the user's utility curves to BGG data for ...
+- 20:36 commission-Celeste-20260409-203114 completed
 ## Implementation
 
 ### `packages/daemon/src/services/fitness-service.ts`
