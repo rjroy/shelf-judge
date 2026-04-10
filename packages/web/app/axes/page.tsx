@@ -132,6 +132,18 @@ export default function AxesPage() {
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     if (!newName.trim()) return;
+
+    if (newCurve.vetoEnabled && newCurve.vetoThreshold !== "") {
+      const dir = newCurve.vetoDirection;
+      const threshold = newCurve.vetoThreshold;
+      if (
+        !confirm(
+          `This will set any game scoring ${dir} ${threshold} on this axis to fitness 0. Continue?`,
+        )
+      )
+        return;
+    }
+
     setError(null);
 
     try {
@@ -162,6 +174,19 @@ export default function AxesPage() {
   }
 
   async function handleUpdate(id: string) {
+    const existingAxis = axes.find((a) => a.id === id);
+    const hadVeto = existingAxis?.veto != null;
+    if (!hadVeto && editCurve.vetoEnabled && editCurve.vetoThreshold !== "") {
+      const dir = editCurve.vetoDirection;
+      const threshold = editCurve.vetoThreshold;
+      if (
+        !confirm(
+          `This will set any game scoring ${dir} ${threshold} on this axis to fitness 0. Continue?`,
+        )
+      )
+        return;
+    }
+
     setError(null);
     try {
       const body: Record<string, unknown> = {};
@@ -385,6 +410,9 @@ export default function AxesPage() {
                     void handleDelete(axis);
                   }}
                   onCurveChange={setEditCurve}
+                  onNameChange={setEditName}
+                  onWeightChange={setEditWeight}
+                  onDescChange={setEditDescription}
                 />
               ))}
             </>
@@ -769,17 +797,20 @@ function CurvePreview({ curve, scale }: CurvePreviewProps) {
   const steps = 60;
   const points: string[] = [];
   const idealVal = curve.idealValue !== "" ? parseFloat(curve.idealValue) : null;
+  const canRender = curve.shape !== "sweet-spot" || idealVal != null;
 
-  for (let i = 0; i <= steps; i++) {
-    const raw = scale.min + ((scale.max - scale.min) * i) / steps;
-    const eff = applyPreferenceCurve(raw, scale, curve.shape, {
-      idealValue: idealVal,
-      tolerance: curve.tolerance,
-      leanDirection: curve.leanDirection,
-    });
-    const x = pad.left + (plotW * i) / steps;
-    const y = pad.top + plotH - ((eff - 1) / 9) * plotH;
-    points.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+  if (canRender) {
+    for (let i = 0; i <= steps; i++) {
+      const raw = scale.min + ((scale.max - scale.min) * i) / steps;
+      const eff = applyPreferenceCurve(raw, scale, curve.shape, {
+        idealValue: idealVal,
+        tolerance: curve.tolerance,
+        leanDirection: curve.leanDirection,
+      });
+      const x = pad.left + (plotW * i) / steps;
+      const y = pad.top + plotH - ((eff - 1) / 9) * plotH;
+      points.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+    }
   }
 
   // Veto line position

@@ -564,10 +564,17 @@ function AxisSortAltScores({
   return (
     <span className="axis-sort-alt">
       {score ? (
-        <span className="axis-sort-fitness">
-          <span className={`score-dot ${scoreRangeClass(score.score)}`} />
-          {score.score.toFixed(1)}
-        </span>
+        score.vetoed ? (
+          <span className="axis-sort-fitness">
+            <span className="vetoed-badge-small">V</span>
+            {score.hypotheticalScore !== null ? score.hypotheticalScore.toFixed(1) : "--"}
+          </span>
+        ) : (
+          <span className="axis-sort-fitness">
+            <span className={`score-dot ${scoreRangeClass(score.score)}`} />
+            {score.score.toFixed(1)}
+          </span>
+        )
       ) : (
         <span className="axis-sort-fitness muted">--</span>
       )}

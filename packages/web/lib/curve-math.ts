@@ -30,7 +30,7 @@ export function getNativeScale(source: AxisSource, bggField: string | null): Nat
     case "weight":
       return { min: 1, max: 5 };
     default:
-      return { min: 1, max: 10 };
+      throw new Error(`Unknown BGG field: ${bggField}`);
   }
 }
 
@@ -79,7 +79,9 @@ export function applyPreferenceCurve(
       return clamp(10 - (9 * (rawValue - scale.min)) / range);
     }
     case "sweet-spot": {
-      if (config.idealValue == null) return 5;
+      if (config.idealValue == null) {
+        throw new Error("idealValue is required for sweet-spot shape");
+      }
       const ideal = config.idealValue;
       const tolerance = config.tolerance ?? "moderate";
       const leanDirection = config.leanDirection ?? null;

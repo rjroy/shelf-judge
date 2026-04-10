@@ -1993,6 +1993,13 @@ body {
   letter-spacing: 0.06em;
 }
 
+.vetoed-badge-small {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--danger);
+  margin-right: 4px;
+}
+
 .vetoed-hypothetical {
   font-size: var(--text-xs);
   color: var(--text-muted);

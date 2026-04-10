@@ -54,7 +54,10 @@ export interface BreakdownEntry {
 export function formatBreakdown(breakdown: BreakdownEntry[]): string {
   // Determine if any entry has a raw value that differs from effective
   const hasRawColumn = breakdown.some(
-    (e) => e.rawValue != null && e.effectiveRating != null && e.rawValue !== e.effectiveRating,
+    (e) =>
+      e.rawValue != null &&
+      e.effectiveRating != null &&
+      Math.abs(e.rawValue - e.effectiveRating) > 0.05,
   );
 
   const headers = hasRawColumn

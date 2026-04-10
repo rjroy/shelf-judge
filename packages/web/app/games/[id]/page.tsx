@@ -46,9 +46,11 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
 
   const { game, score } = data;
 
-  // Divergence check: > 2.0 difference between fitness and tournament, both non-provisional
+  // Divergence check: > 2.0 difference between fitness and tournament, both non-provisional.
+  // Skip vetoed games entirely: their score is 0 by design, not a meaningful divergence signal.
   const hasDivergence =
     score !== null &&
+    !score.vetoed &&
     tournamentStats !== null &&
     tournamentStats.normalizedScore !== null &&
     !tournamentStats.isProvisional &&
@@ -251,7 +253,9 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
           <div className="panel-left">
             <div className="panel-section-title">
               Score Breakdown
-              {score && <span className="badge">How {score.score.toFixed(1)} was calculated</span>}
+              {score && !score.vetoed && (
+                <span className="badge">How {score.score.toFixed(1)} was calculated</span>
+              )}
             </div>
             <ScoreBreakdown score={score} />
             <div className="calc-explanation">
