@@ -28,4 +28,5 @@ Profiling builds on a populated rating dataset. Without enough rated games, any 
 - Exit point defined in spec: triggers when "user wants taste profile inference."
 
 
-USER NOTE: What if this was LLM driven? NOTE: use Claude Agent SDK to gain the benefits of using the subscription.
+USER NOTE: What if this was LLM driven?
+USER NOTE: use Claude Agent SDK to gain the benefits of using the subscription. See .lore/research/claude-agent-sdk.md
