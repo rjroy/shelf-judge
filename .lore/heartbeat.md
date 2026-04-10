@@ -77,6 +77,13 @@ All four findings from Thorne's Phase 1+2 review resolved.
 
 1. **`output.ts`**: Extended `BreakdownEntry` with `rawValue`, `effectiveRating`, `preferenceShape`, `curveAffect...
 - 20:53 commission-Dalton-20260409-200920 completed
+- 20:59 commission-Dalton-20260409-200910 result: # Phase 5: Web UI for Utility Curves
+
+All changes pass typecheck (web + shared + daemon + cli), lint, and tests (578 pass, 0 fail).
+
+- 20:59 commission-Dalton-20260409-200910 completed
+## Created
+- `packages/web/lib/curve-math.ts` - Client-side pure cu...
 ## Finding 1: String-Based Error Routing (Fixed)
 
 Replaced fragile `message.includes()` checks with typed error classes:
