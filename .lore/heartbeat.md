@@ -38,3 +38,7 @@ Workers can also add entries to this file during their sessions.
 **Created**: `packages/daemon/src/services/profile-engine.ts` (pure-function module, no I/O, no service dependencies)
 - `computeProfile(input: Profil...
 - 12:15 commission-Dalton-20260410-120242 completed
+- 12:22 commission-Thorne-20260410-120257 result: ## Review: Collection Profiling Phases 1-3
+
+Reviewed against spec (`.lore/specs/collection-profiling.md`), plan (`.lore/plans/collection-profiling.md`), and research (`.lore/research/outlier-distance-...
+- 12:22 commission-Thorne-20260410-120257 completed
