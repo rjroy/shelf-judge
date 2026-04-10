@@ -1,7 +1,7 @@
 ---
 title: "Commission: Collection Profiling Phase 3: Profile Computation Engine"
 date: 2026-04-10
-status: pending
+status: dispatched
 tags: [commission]
 worker: Dalton
 workerDisplayTitle: "Guild Artificer"
@@ -14,6 +14,11 @@ activity_timeline:
   - timestamp: 2026-04-10T19:02:42.617Z
     event: created
     reason: "Commission created"
+  - timestamp: 2026-04-10T19:10:00.064Z
+    event: status_dispatched
+    reason: "Dispatched to worker"
+    from: "pending"
+    to: "dispatched"
 current_progress: ""
 projectName: shelf-judge
 ---
