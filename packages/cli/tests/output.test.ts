@@ -96,6 +96,106 @@ describe("formatBreakdown", () => {
     ]);
     expect(result).toContain("---");
   });
+
+  test("shows Raw column when rawValue differs from effectiveRating", () => {
+    const result = formatBreakdown([
+      {
+        axisName: "Complexity",
+        rating: 5.275,
+        weight: 20,
+        contribution: 1.055,
+        source: "bgg",
+        bggOriginal: null,
+        rawValue: 2.9,
+        effectiveRating: 5.275,
+        preferenceShape: "higher-is-better",
+        curveAffected: false,
+      },
+      {
+        axisName: "Fun",
+        rating: 8,
+        weight: 40,
+        contribution: 3.2,
+        source: "personal",
+        bggOriginal: null,
+        rawValue: 8,
+        effectiveRating: 8,
+        preferenceShape: "higher-is-better",
+        curveAffected: false,
+      },
+    ]);
+    expect(result).toContain("Raw");
+    expect(result).toContain("2.9");
+  });
+
+  test("hides Raw column when all rawValues equal effectiveRatings", () => {
+    const result = formatBreakdown([
+      {
+        axisName: "Fun",
+        rating: 8,
+        weight: 40,
+        contribution: 3.2,
+        source: "personal",
+        bggOriginal: null,
+        rawValue: 8,
+        effectiveRating: 8,
+        preferenceShape: "higher-is-better",
+        curveAffected: false,
+      },
+    ]);
+    expect(result).not.toContain("Raw");
+  });
+
+  test("marks curve-affected rows with *", () => {
+    const result = formatBreakdown([
+      {
+        axisName: "Complexity",
+        rating: 9.2,
+        weight: 20,
+        contribution: 1.84,
+        source: "bgg",
+        bggOriginal: null,
+        rawValue: 2.75,
+        effectiveRating: 9.2,
+        preferenceShape: "sweet-spot",
+        curveAffected: true,
+      },
+    ]);
+    expect(result).toContain("9.2 *");
+  });
+
+  test("does not mark non-curve-affected rows", () => {
+    const result = formatBreakdown([
+      {
+        axisName: "Fun",
+        rating: 8,
+        weight: 40,
+        contribution: 3.2,
+        source: "personal",
+        bggOriginal: null,
+        rawValue: 8,
+        effectiveRating: 8,
+        preferenceShape: "higher-is-better",
+        curveAffected: false,
+      },
+    ]);
+    expect(result).not.toContain("*");
+  });
+
+  test("backward compatible with entries missing curve fields", () => {
+    const result = formatBreakdown([
+      {
+        axisName: "Fun",
+        rating: 8,
+        weight: 40,
+        contribution: 3.2,
+        source: "personal",
+        bggOriginal: null,
+      },
+    ]);
+    expect(result).toContain("Fun");
+    expect(result).not.toContain("Raw");
+  });
 });
 
 describe("printOutput", () => {

@@ -45,22 +45,40 @@ export interface BreakdownEntry {
   contribution: number | null;
   source: string;
   bggOriginal: number | null;
+  rawValue?: number | null;
+  effectiveRating?: number | null;
+  preferenceShape?: string;
+  curveAffected?: boolean;
 }
 
 export function formatBreakdown(breakdown: BreakdownEntry[]): string {
-  const headers = ["Axis", "Rating", "Weight", "Contribution", "Source"];
+  // Determine if any entry has a raw value that differs from effective
+  const hasRawColumn = breakdown.some(
+    (e) => e.rawValue != null && e.effectiveRating != null && e.rawValue !== e.effectiveRating,
+  );
+
+  const headers = hasRawColumn
+    ? ["Axis", "Raw", "Rating", "Weight", "Contribution", "Source"]
+    : ["Axis", "Rating", "Weight", "Contribution", "Source"];
+
   const rows = breakdown.map((entry) => {
-    let ratingStr = entry.rating !== null ? String(entry.rating) : "---";
+    const marker = entry.curveAffected ? " *" : "";
+    let ratingStr = entry.rating !== null ? String(entry.rating) + marker : "---";
     if (entry.source === "override" && entry.bggOriginal !== null) {
       ratingStr += ` (BGG: ${entry.bggOriginal})`;
     }
-    return [
+
+    const rawStr = entry.rawValue != null ? String(entry.rawValue) : "---";
+
+    const row = [
       entry.axisName,
+      ...(hasRawColumn ? [rawStr] : []),
       ratingStr,
       String(entry.weight),
       entry.contribution !== null ? entry.contribution.toFixed(2) : "---",
       entry.source,
     ];
+    return row;
   });
   return formatTable(headers, rows);
 }
