@@ -38,7 +38,7 @@ export function RatingForm({
     setSaving(true);
     setError(null);
 
-    const numericRatings: Record<string, number> = {};
+    const numericRatings: Record<string, number | null> = {};
     const invalidAxes: string[] = [];
     for (const [axisId, value] of Object.entries(ratings)) {
       if (value !== "") {
@@ -49,6 +49,13 @@ export function RatingForm({
           const axis = axes.find((a) => a.id === axisId);
           invalidAxes.push(axis?.name ?? axisId);
         }
+      }
+    }
+
+    // Send null for axes that had a rating but were cleared
+    for (const axis of axes) {
+      if (currentRatings[axis.id] !== undefined && !(axis.id in numericRatings)) {
+        numericRatings[axis.id] = null;
       }
     }
 

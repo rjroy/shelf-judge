@@ -198,6 +198,56 @@ describe("GameService", () => {
         "Axis not found",
       );
     });
+
+    test("null rating clears an existing rating", async () => {
+      const axis = await axisService.createAxis({
+        name: "Fun",
+        weight: 50,
+      });
+      const { game } = await gameService.addGame({ name: "Test" });
+
+      // Set a rating first
+      await gameService.rateGame(game.id, { [axis.id]: 7 });
+
+      // Clear it
+      const result = await gameService.rateGame(game.id, { [axis.id]: null });
+
+      expect(result.game.ratings[axis.id]).toBeUndefined();
+      expect(result.score).toBeNull();
+    });
+
+    test("null rating for axis without existing rating is a no-op", async () => {
+      const axis = await axisService.createAxis({
+        name: "Fun",
+        weight: 50,
+      });
+      const { game } = await gameService.addGame({ name: "Test" });
+
+      const result = await gameService.rateGame(game.id, { [axis.id]: null });
+
+      expect(result.game.ratings[axis.id]).toBeUndefined();
+    });
+
+    test("can set some ratings and clear others in one call", async () => {
+      const axis1 = await axisService.createAxis({ name: "Fun", weight: 50 });
+      const axis2 = await axisService.createAxis({ name: "Depth", weight: 50 });
+      const { game } = await gameService.addGame({ name: "Test" });
+
+      // Set both
+      await gameService.rateGame(game.id, {
+        [axis1.id]: 8,
+        [axis2.id]: 6,
+      });
+
+      // Clear axis1, update axis2
+      const result = await gameService.rateGame(game.id, {
+        [axis1.id]: null,
+        [axis2.id]: 9,
+      });
+
+      expect(result.game.ratings[axis1.id]).toBeUndefined();
+      expect(result.game.ratings[axis2.id]).toBe(9);
+    });
   });
 
   describe("removeGame", () => {

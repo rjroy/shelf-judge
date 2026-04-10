@@ -11,7 +11,7 @@ export interface GameRoutesDeps {
 }
 
 const RatingsBodySchema = z.object({
-  ratings: z.record(z.string(), z.number().int().min(1).max(10)),
+  ratings: z.record(z.string(), z.number().int().min(1).max(10).nullable()),
 });
 
 function isBggConfigured(bggClient?: BggClient): boolean {
