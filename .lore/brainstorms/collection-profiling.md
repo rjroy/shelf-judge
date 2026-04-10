@@ -1,7 +1,7 @@
 ---
 title: "Collection Identity and Taste Profiling"
 date: 2026-04-09
-status: active
+status: open
 tags: [brainstorm, profiling, collection, llm, agent-sdk, vision-principle-3]
 related:
   - .lore/issues/deferred-collection-profiling.md
