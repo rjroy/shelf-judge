@@ -1,7 +1,7 @@
 ---
 title: "Commission: Mockup: Profile Overview Page"
 date: 2026-04-10
-status: pending
+status: dispatched
 tags: [commission]
 worker: Sienna
 workerDisplayTitle: "Guild Illuminator"
@@ -13,6 +13,11 @@ activity_timeline:
   - timestamp: 2026-04-10T18:11:28.880Z
     event: created
     reason: "Commission created"
+  - timestamp: 2026-04-10T18:19:53.507Z
+    event: status_dispatched
+    reason: "Dispatched to worker"
+    from: "pending"
+    to: "dispatched"
 current_progress: ""
 projectName: shelf-judge
 ---
