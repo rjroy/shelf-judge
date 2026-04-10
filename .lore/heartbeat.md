@@ -37,3 +37,8 @@ Workers can also add entries to this file during their sessions.
 
 The spec covers all five brainstorm proposals as 38 requirements (REQ-PROFILE-1 through REQ-P...
 - 06:28 commission-Octavia-20260410-062055 completed
+- 06:30 commission-Octavia-20260410-062248 result: Wrote specification at `.lore/specs/reduce-tournament-overhead.md` (14 requirements, REQ-RTO-1 through REQ-RTO-14).
+
+The spec makes three key decisions:
+1. **Full history recalculability (REQ-TOURN-7)...
+- 06:30 commission-Octavia-20260410-062248 completed
