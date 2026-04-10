@@ -26,28 +26,3 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
-- 07:13 commission-Dalton-20260410-070820 result: Phases 1 and 2 implemented. All tests pass.
-
-**Phase 1: Shared Types and Validation**
-- Added `CachedRecentComparison` interface to `packages/shared/src/types.ts`
-- Expanded `TournamentGameStats` with...
-
-- 07:13 commission-Dalton-20260410-070820 completed
-- 07:17 commission-Thorne-20260410-070829 result: ## Review: Phases 1-2 of Tournament Overhead Reduction
-
-**Verdict: Approved to proceed to Phase 3.** No defects found. One test gap worth closing before moving on.
-
----
-
-### Requirement Coverage
-
-All ...
-- 07:17 commission-Thorne-20260410-070829 completed
-- 07:18 commission-Octavia-20260410-071449 result: Updated `.lore/specs/collection-profiling.md` with five categories of changes:
-
-**1. Resolved Open Question #2** (outlier distance metric). Replaced the open question with a settled decision referenci...
-- 07:18 commission-Octavia-20260410-071449 completed
-- 07:18 commission-Dalton-20260410-070836 result: All three Thorne review findings addressed:
-
-**Finding #1 (Medium)**: Added test "caps recentComparisons at 10 most-recent when comparisons arrive out of order" to `packages/daemon/tests/tournament-mi...
-- 07:18 commission-Dalton-20260410-070836 completed
