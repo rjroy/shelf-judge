@@ -2,13 +2,13 @@ import { describe, expect, test } from "bun:test";
 import type { Game } from "@shelf-judge/shared";
 import {
   buildVocabulary,
+  computeContinuousRanges,
   encodeGame,
   jaccardDistance,
   normalizedManhattanDistance,
   compositeDistance,
   computeCentroid,
   cosineSimilarity,
-  DEFAULT_WEIGHTS,
 } from "../src/services/feature-vector";
 import type { FeatureVector } from "../src/services/feature-vector";
 
@@ -172,6 +172,48 @@ describe("encodeGame", () => {
     const vec = encodeGame(game, vocab);
     expect(vec.personalAxes).toBeNull();
   });
+
+  test("uses observed ranges when provided", () => {
+    const game = makeGame({ minPlayers: 3, maxPlayers: 6, playingTime: 90 });
+    const vocab = { mechanics: [], categories: [] };
+    const ranges = {
+      minPlayers: { min: 2, max: 4 },
+      maxPlayers: { min: 4, max: 8 },
+      playingTime: { min: 30, max: 120 },
+    };
+    const vec = encodeGame(game, vocab, undefined, ranges);
+
+    // minPlayers: (3-2)/(4-2) = 0.5
+    expect(vec.continuous[2]).toBeCloseTo(0.5, 10);
+    // maxPlayers: (6-4)/(8-4) = 0.5
+    expect(vec.continuous[3]).toBeCloseTo(0.5, 10);
+    // playingTime: (90-30)/(120-30) = 60/90 ≈ 0.667
+    expect(vec.continuous[4]).toBeCloseTo(60 / 90, 10);
+  });
+});
+
+describe("computeContinuousRanges", () => {
+  test("computes observed min/max from collection", () => {
+    const games = [
+      makeGame({ minPlayers: 2, maxPlayers: 4, playingTime: 30 }),
+      makeGame({ minPlayers: 3, maxPlayers: 8, playingTime: 120 }),
+      makeGame({ minPlayers: 1, maxPlayers: 6, playingTime: 60 }),
+    ];
+
+    const ranges = computeContinuousRanges(games);
+    expect(ranges.minPlayers).toEqual({ min: 1, max: 3 });
+    expect(ranges.maxPlayers).toEqual({ min: 4, max: 8 });
+    expect(ranges.playingTime).toEqual({ min: 30, max: 120 });
+  });
+
+  test("falls back to defaults when no games have the field", () => {
+    const games = [makeGame({ minPlayers: null, maxPlayers: null, playingTime: null })];
+
+    const ranges = computeContinuousRanges(games);
+    expect(ranges.minPlayers).toEqual({ min: 1, max: 10 });
+    expect(ranges.maxPlayers).toEqual({ min: 1, max: 10 });
+    expect(ranges.playingTime).toEqual({ min: 0, max: 300 });
+  });
 });
 
 describe("jaccardDistance", () => {
@@ -192,6 +234,27 @@ describe("jaccardDistance", () => {
   test("both empty returns 0", () => {
     expect(jaccardDistance([0, 0, 0], [0, 0, 0])).toBe(0);
     expect(jaccardDistance([], [])).toBe(0);
+  });
+
+  test("handles frequency vectors (centroid comparison)", () => {
+    // Game binary [1, 0, 1] vs centroid frequency [0.8, 0.2, 0.6]
+    // minSum = min(1,0.8) + min(0,0.2) + min(1,0.6) = 0.8 + 0 + 0.6 = 1.4
+    // maxSum = max(1,0.8) + max(0,0.2) + max(1,0.6) = 1 + 0.2 + 1 = 2.2
+    // distance = 1 - 1.4/2.2 ≈ 0.3636
+    const d = jaccardDistance([1, 0, 1], [0.8, 0.2, 0.6]);
+    expect(d).toBeCloseTo(1 - 1.4 / 2.2, 10);
+  });
+
+  test("centroid with high frequency correctly reduces distance", () => {
+    // Game has mechanic A, centroid says 80% of collection has it → low distance contribution
+    // Game lacks mechanic B, centroid says 10% have it → small distance contribution
+    const game = [1, 0];
+    const centroid = [0.8, 0.1];
+    const d = jaccardDistance(game, centroid);
+    // minSum = 0.8 + 0 = 0.8, maxSum = 1 + 0.1 = 1.1
+    expect(d).toBeCloseTo(1 - 0.8 / 1.1, 10);
+    // Should be significantly less than 1 (not inflated)
+    expect(d).toBeLessThan(0.5);
   });
 });
 

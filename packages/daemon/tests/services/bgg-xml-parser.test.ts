@@ -39,6 +39,12 @@ describe("BGG XML Parser", () => {
       expect(catNames).toContain("Animals");
       expect(catNames).toContain("Card Game");
 
+      // Subdomains
+      expect(data.subdomains.length).toBe(2);
+      const subNames = data.subdomains.map((s) => s.name);
+      expect(subNames).toContain("Strategy Games");
+      expect(subNames).toContain("Family Games");
+
       // Suggested player counts
       expect(data.suggestedPlayerCounts.length).toBeGreaterThanOrEqual(5);
       const threePlayer = data.suggestedPlayerCounts.find((s) => s.playerCount === "3");

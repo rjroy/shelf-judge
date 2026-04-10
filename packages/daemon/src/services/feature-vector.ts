@@ -2,11 +2,17 @@
 // Implements REQ-PROFILE-11 (composite distance), REQ-PRED-4 (shared module).
 // Follows the elo-engine.ts and curve-engine.ts pattern.
 
-import type { Game } from "@shelf-judge/shared";
+import type { ComponentDistances, Game } from "@shelf-judge/shared";
 
 export interface Vocabulary {
   mechanics: string[];
   categories: string[];
+}
+
+export interface ContinuousRanges {
+  minPlayers: { min: number; max: number };
+  maxPlayers: { min: number; max: number };
+  playingTime: { min: number; max: number };
 }
 
 export interface FeatureVector {
@@ -21,12 +27,7 @@ export interface ComponentWeights {
   personalAxes: number;
 }
 
-export interface ComponentDistances {
-  binary: number;
-  continuous: number;
-  personalAxes: number | null;
-  composite: number;
-}
+export type { ComponentDistances };
 
 export const DEFAULT_WEIGHTS: ComponentWeights = {
   binary: 0.4,
@@ -64,6 +65,40 @@ function normalize(value: number, min: number, max: number): number {
 }
 
 /**
+ * Compute observed min/max ranges for continuous attributes across a collection.
+ * Used to normalize continuous values per REQ-PROFILE-11.
+ */
+export function computeContinuousRanges(games: Game[]): ContinuousRanges {
+  let minP = Infinity,
+    maxP = -Infinity;
+  let minMP = Infinity,
+    maxMP = -Infinity;
+  let minT = Infinity,
+    maxT = -Infinity;
+
+  for (const g of games) {
+    if (g.minPlayers != null) {
+      minP = Math.min(minP, g.minPlayers);
+      maxP = Math.max(maxP, g.minPlayers);
+    }
+    if (g.maxPlayers != null) {
+      minMP = Math.min(minMP, g.maxPlayers);
+      maxMP = Math.max(maxMP, g.maxPlayers);
+    }
+    if (g.playingTime != null) {
+      minT = Math.min(minT, g.playingTime);
+      maxT = Math.max(maxT, g.playingTime);
+    }
+  }
+
+  return {
+    minPlayers: { min: isFinite(minP) ? minP : 1, max: isFinite(maxP) ? maxP : 10 },
+    maxPlayers: { min: isFinite(minMP) ? minMP : 1, max: isFinite(maxMP) ? maxMP : 10 },
+    playingTime: { min: isFinite(minT) ? minT : 0, max: isFinite(maxT) ? maxT : 300 },
+  };
+}
+
+/**
  * Encode a single game into a feature vector.
  *
  * Binary portion: one bit per mechanic/category in the vocabulary.
@@ -75,6 +110,7 @@ export function encodeGame(
   game: Game,
   vocabulary: Vocabulary,
   axisRatings?: Record<string, number>,
+  ranges?: ContinuousRanges,
 ): FeatureVector {
   const allTerms = [...vocabulary.mechanics, ...vocabulary.categories];
   const gameTerms = new Set<string>();
@@ -93,12 +129,18 @@ export function encodeGame(
   const maxPlayers = game.maxPlayers ?? 4;
   const playingTime = game.playingTime ?? 60;
 
+  const r = ranges ?? {
+    minPlayers: { min: 1, max: 10 },
+    maxPlayers: { min: 1, max: 10 },
+    playingTime: { min: 0, max: 300 },
+  };
+
   const continuous = [
     normalize(weight, 1, 5),
     normalize(communityRating, 1, 10),
-    normalize(minPlayers, 1, 10), // reasonable player count range
-    normalize(maxPlayers, 1, 10),
-    normalize(playingTime, 0, 300), // cap at 300 minutes for normalization
+    normalize(minPlayers, r.minPlayers.min, r.minPlayers.max),
+    normalize(maxPlayers, r.maxPlayers.min, r.maxPlayers.max),
+    normalize(playingTime, r.playingTime.min, r.playingTime.max),
   ];
 
   // Clamp continuous values to [0,1]
@@ -122,22 +164,22 @@ export function encodeGame(
 }
 
 /**
- * Jaccard distance between two binary vectors: 1 - |A ∩ B| / |A ∪ B|.
- * When both sets are empty, returns 0 (no distance).
+ * Generalized Jaccard distance: 1 - sum(min(a,b)) / sum(max(a,b)).
+ * Handles both binary (0/1) vectors and frequency vectors (0-1 fractional values).
+ * For pure binary inputs this is equivalent to classic Jaccard.
+ * When both vectors are all zeros, returns 0 (no distance).
  */
 export function jaccardDistance(a: number[], b: number[]): number {
-  let intersection = 0;
-  let union = 0;
+  let minSum = 0;
+  let maxSum = 0;
 
   for (let i = 0; i < a.length; i++) {
-    const ai = a[i];
-    const bi = b[i];
-    if (ai === 1 || bi === 1) union++;
-    if (ai === 1 && bi === 1) intersection++;
+    minSum += Math.min(a[i], b[i]);
+    maxSum += Math.max(a[i], b[i]);
   }
 
-  if (union === 0) return 0;
-  return 1 - intersection / union;
+  if (maxSum === 0) return 0;
+  return 1 - minSum / maxSum;
 }
 
 /**

@@ -24,6 +24,7 @@ import {
   buildVocabulary,
   compositeDistance,
   computeCentroid,
+  computeContinuousRanges,
   encodeGame,
 } from "./feature-vector.js";
 
@@ -167,7 +168,7 @@ export function computeBggClustering(games: Game[]): CollectionProfile["bggClust
 
   const mechanics = countAttributes((g) => g.bggData!.mechanics);
   const categories = countAttributes((g) => g.bggData!.categories);
-  const subdomains = countAttributes((g) => g.bggData!.subdomains);
+  const subdomains = countAttributes((g) => g.bggData!.subdomains ?? []);
 
   // Weight ranges
   const gamesWithWeight = gamesWithBgg.filter((g) => g.bggData!.weight !== null);
@@ -272,6 +273,7 @@ export function detectOutliers(
   if (gamesWithBgg.length < 3) return []; // need meaningful collection size
 
   const vocabulary = buildVocabulary(gamesWithBgg);
+  const ranges = computeContinuousRanges(gamesWithBgg);
 
   // Build axis ratings map for encoding
   const axisIds = axes.reduce<Record<string, number>>((acc, a) => {
@@ -280,7 +282,7 @@ export function detectOutliers(
   }, {});
 
   const vectors = gamesWithBgg.map((game) =>
-    encodeGame(game, vocabulary, Object.keys(axisIds).length > 0 ? axisIds : undefined),
+    encodeGame(game, vocabulary, Object.keys(axisIds).length > 0 ? axisIds : undefined, ranges),
   );
   const centroid = computeCentroid(vectors);
 
@@ -321,20 +323,22 @@ export function detectOutliers(
       if (g.bggData) {
         for (const c of g.bggData.categories)
           categoryCounts.set(c.name, (categoryCounts.get(c.name) ?? 0) + 1);
-        for (const s of g.bggData.subdomains)
+        for (const s of g.bggData.subdomains ?? [])
           subdomainCounts.set(s.name, (subdomainCounts.get(s.name) ?? 0) + 1);
       }
     }
     const isOrphan =
       (game.bggData?.categories.some((c) => (categoryCounts.get(c.name) ?? 0) === 1) ?? false) ||
-      (game.bggData?.subdomains.some((s) => (subdomainCounts.get(s.name) ?? 0) === 1) ?? false);
+      ((game.bggData?.subdomains ?? []).some((s) => (subdomainCounts.get(s.name) ?? 0) === 1) ??
+        false);
     if (isOrphan) {
       classifications.push("category-orphan");
     }
 
-    // High-fitness outlier: has a non-zero, non-vetoed fitness score
+    // High-fitness outlier: fitness score above scale midpoint (axes say "keep it")
+    // but BGG attributes say the game doesn't fit the collection identity
     const fitness = fitnessResults.get(game.id);
-    if (fitness && fitness.score > 0 && !fitness.vetoed) {
+    if (fitness && fitness.score >= 5.0 && !fitness.vetoed) {
       classifications.push("high-fitness-outlier");
     }
 

@@ -566,9 +566,8 @@ describe("detectOutliers", () => {
     const fitnessResults = new Map<string, FitnessResult>();
     const outliers = detectOutliers(games, axes, fitnessResults);
     const warOutlier = outliers.find((o) => o.gameId === "war1");
-    if (warOutlier) {
-      expect(warOutlier.classifications).toContain("category-orphan");
-    }
+    expect(warOutlier).toBeDefined();
+    expect(warOutlier!.classifications).toContain("category-orphan");
   });
 
   test("lone wolf classification: game sharing zero mechanics with others", () => {
@@ -598,9 +597,8 @@ describe("detectOutliers", () => {
     const fitnessResults = new Map<string, FitnessResult>();
     const outliers = detectOutliers(games, axes, fitnessResults);
     const oddOutlier = outliers.find((o) => o.gameId === "odd1");
-    if (oddOutlier) {
-      expect(oddOutlier.classifications).toContain("lone-wolf");
-    }
+    expect(oddOutlier).toBeDefined();
+    expect(oddOutlier!.classifications).toContain("lone-wolf");
   });
 
   test("high-fitness outlier classification: game with fitness score and outlier distance", () => {
@@ -631,9 +629,42 @@ describe("detectOutliers", () => {
 
     const outliers = detectOutliers(games, axes, fitnessResults);
     const warOutlier = outliers.find((o) => o.gameId === "war1");
+    expect(warOutlier).toBeDefined();
+    expect(warOutlier!.classifications).toContain("high-fitness-outlier");
+    expect(warOutlier!.fitnessScore).toBe(8.5);
+  });
+
+  test("low-fitness outlier does NOT get high-fitness-outlier classification", () => {
+    const games = [
+      makeEuroGame("e1", "Euro 1"),
+      makeEuroGame("e2", "Euro 2"),
+      makeEuroGame("e3", "Euro 3"),
+      makeEuroGame("e4", "Euro 4"),
+      makeEuroGame("e5", "Euro 5"),
+      makeGame({
+        id: "war1",
+        name: "Poor Fit Wargame",
+        minPlayers: 2,
+        maxPlayers: 2,
+        playingTime: 240,
+        bggData: makeBggData({
+          weight: 4.5,
+          communityRating: 8.0,
+          mechanics: warMechanics,
+          categories: warCategories,
+          subdomains: [],
+        }),
+        ratings: { a1: 2 },
+      }),
+    ];
+
+    // Low fitness: axes say "don't keep it"
+    const fitnessResults = new Map<string, FitnessResult>([["war1", makeFitness(2.5)]]);
+
+    const outliers = detectOutliers(games, axes, fitnessResults);
+    const warOutlier = outliers.find((o) => o.gameId === "war1");
     if (warOutlier) {
-      expect(warOutlier.classifications).toContain("high-fitness-outlier");
-      expect(warOutlier.fitnessScore).toBe(8.5);
+      expect(warOutlier.classifications).not.toContain("high-fitness-outlier");
     }
   });
 
