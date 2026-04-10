@@ -27,3 +27,9 @@ Workers can also add entries to this file during their sessions.
 
 ## Recent Activity
 - 11:08 commission-Octavia-20260410-110602 result: Comprehensive search completed. Rich prior work found across all major .lore/ categories. No existing implementation plan for collection profiling exists yet. See full findings below.
+
+- 11:10 commission-Dalton-20260410-070846 result: Phase 3 (Service Layer Changes) complete. All changes implemented per plan:
+
+**Storage** (`packages/daemon/src/services/storage-service.ts`):
+- `createDefaultTournament()` no longer produces a top-lev...
+- 11:10 commission-Dalton-20260410-070846 completed
