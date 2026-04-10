@@ -194,11 +194,16 @@ export function createTournamentRoutes(deps: TournamentRoutesDeps): RouteModule 
       ]);
 
       const nameMap = new Map(games.map((g) => [g.game.id, g.game.name]));
-      const result = Object.entries(stats).map(([gameId, gameStats]) => ({
-        gameId,
-        gameName: nameMap.get(gameId) ?? "(deleted)",
-        stats: gameStats,
-      }));
+      const result = Object.entries(stats).map(([gameId, gameStats]) => {
+        for (const comp of gameStats.recentComparisons) {
+          comp.opponentGameName = nameMap.get(comp.opponentGameId) ?? null;
+        }
+        return {
+          gameId,
+          gameName: nameMap.get(gameId) ?? "(deleted)",
+          stats: gameStats,
+        };
+      });
 
       return c.json(result);
     } catch (err) {

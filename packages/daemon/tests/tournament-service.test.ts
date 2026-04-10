@@ -735,12 +735,17 @@ describe("TournamentService", () => {
 
     test("auto-completes session when deletions reduce available games below 4", async () => {
       const fourGames = games.slice(0, 4);
-      await service.startSession(null, fourGames);
+      const session = await service.startSession(null, fourGames);
       expect(storage.tournamentData.sessions[0].status).toBe("active");
 
-      // Delete one game, reducing to 3
+      // Submit a comparison so comparisons array is non-empty
+      await service.submitComparison(session.id, "g1", "g2", "g1");
+      expect(storage.tournamentData.sessions[0].comparisons.length).toBeGreaterThan(0);
+
+      // Delete one game, reducing to 3 - should auto-complete and clear comparisons
       await service.onGameDeleted("g1");
       expect(storage.tournamentData.sessions[0].status).toBe("completed");
+      expect(storage.tournamentData.sessions[0].comparisons).toEqual([]);
     });
 
     test("does not auto-complete when 4+ games remain after deletion", async () => {
