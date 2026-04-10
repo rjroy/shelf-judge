@@ -71,6 +71,12 @@ All four findings from Thorne's Phase 1+2 review resolved.
 - 20:48 commission-Dalton-20260409-200854 result: # Phase 4 Review Findings: Addressed
 
 - 20:48 commission-Dalton-20260409-200854 completed
+- 20:53 commission-Dalton-20260409-200920 result: Phase 6 (CLI) complete. All changes confined to `packages/cli/`.
+
+**Implementation:**
+
+1. **`output.ts`**: Extended `BreakdownEntry` with `rawValue`, `effectiveRating`, `preferenceShape`, `curveAffect...
+- 20:53 commission-Dalton-20260409-200920 completed
 ## Finding 1: String-Based Error Routing (Fixed)
 
 Replaced fragile `message.includes()` checks with typed error classes:
