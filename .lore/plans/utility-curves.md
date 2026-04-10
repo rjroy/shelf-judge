@@ -1,7 +1,7 @@
 ---
 title: "Implementation plan: utility-curves"
 date: 2026-04-07
-status: approved
+status: exectued
 tags: [plan, fitness, scoring, axes, utility-curves, curves, veto]
 modules: [shared, daemon, web, cli]
 related:
