@@ -39,8 +39,7 @@ export function ScoreBreakdown({ score }: { score: FitnessResult | null }) {
                 {entry.axisName}
                 {entry.source === "override" && entry.bggOriginal !== null && (
                   <div className="breakdown-override-detail">
-                    BGG value: {entry.bggOriginal.toFixed(1)} → scaled{" "}
-                    {Math.round(entry.bggOriginal)}
+                    BGG: {entry.bggOriginal.toFixed(1)}
                   </div>
                 )}
               </td>

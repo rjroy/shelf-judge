@@ -516,6 +516,53 @@ describe("fitness-service", () => {
       expect(result!.breakdown.length).toBe(2);
     });
 
+    test("personal override of BGG axis skips veto check", () => {
+      const axes = [
+        makeAxis({
+          id: "cmplx",
+          name: "Complexity",
+          weight: 50,
+          source: "bgg",
+          bggField: "weight",
+          veto: { direction: "above", threshold: 3 },
+        }),
+      ];
+      // BGG weight is 4.5 (would trigger veto), but user overrides with personal rating
+      const game = makeGame({ cmplx: 5 });
+      const bgg = makeBggData({ weight: 4.5 });
+      const result = fitnessService.calculateScore(game, axes, bgg);
+
+      expect(result).not.toBeNull();
+      expect(result!.vetoed).toBe(false);
+      expect(result!.score).toBe(5);
+
+      const entry = result!.breakdown[0];
+      expect(entry.source).toBe("override");
+      expect(entry.bggOriginal).toBe(4.5);
+      expect(entry.rawValue).toBe(5);
+    });
+
+    test("veto still triggers on BGG value when no personal override exists", () => {
+      const axes = [
+        makeAxis({
+          id: "cmplx",
+          name: "Complexity",
+          weight: 50,
+          source: "bgg",
+          bggField: "weight",
+          veto: { direction: "above", threshold: 3 },
+        }),
+      ];
+      // No personal override, BGG weight exceeds threshold
+      const game = makeGame({});
+      const bgg = makeBggData({ weight: 4.5 });
+      const result = fitnessService.calculateScore(game, axes, bgg);
+
+      expect(result!.vetoed).toBe(true);
+      expect(result!.score).toBe(0);
+      expect(result!.vetoedBy!.axisId).toBe("cmplx");
+    });
+
     test("no veto when axis has no veto config", () => {
       const axes = [makeAxis({ id: "fun", name: "Fun", weight: 50 })];
       const game = makeGame({ fun: 1 });

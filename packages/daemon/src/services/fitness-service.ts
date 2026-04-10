@@ -82,9 +82,11 @@ export function createFitnessService(): FitnessService {
         }
 
         // Check veto on raw value (before curve application).
-        // Veto thresholds are in native scale, so use the axis scale for BGG values
-        // and personal scale for personal/override values.
-        if (rawValue !== null && !vetoTriggered) {
+        // Veto thresholds are in the axis's native scale (e.g., 1-5 for BGG weight).
+        // When a user overrides a BGG axis with a personal rating (1-10 scale),
+        // skip the veto: the user is asserting their judgment for this specific game.
+        const isOverride = source === "override";
+        if (rawValue !== null && !vetoTriggered && !isOverride) {
           const vetoed = checkVeto(rawValue, axis.veto ?? null);
           if (vetoed) {
             vetoTriggered = true;
