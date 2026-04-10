@@ -54,6 +54,7 @@ The planning pipeline (brainstorm, user feedback, mockup, spec, plan) produced c
 **Profile Overview replaces home page.** Significant navigation/architecture change decided in the profiling brainstorm's resolved questions. Not in any spec or design doc.
 
 **Agent SDK authentication model.** Brainstorm assumes "the SDK handles its own authentication; Shelf Judge does not manage API keys." This hasn't been validated against the SDK's actual behavior.
+USER NOTE: This doesn't need validation. It works.
 
 **Shared computation primitive across profiling, prediction, and redundancy scoring.** The brainstorms identify that mechanic/category similarity is needed by all three. No tracking ensures they share the implementation.
 
