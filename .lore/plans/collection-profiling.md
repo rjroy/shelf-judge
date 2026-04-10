@@ -1,7 +1,7 @@
 ---
 title: "Implementation plan: collection-profiling"
 date: 2026-04-10
-status: draft
+status: approved
 tags: [plan, profiling, collection, outlier, divergence, feature-vector]
 modules: [shared, daemon, web, cli]
 related:
