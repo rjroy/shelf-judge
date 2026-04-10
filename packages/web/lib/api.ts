@@ -193,10 +193,6 @@ export async function getAllTournamentStats(): Promise<Record<string, Tournament
   return Object.fromEntries(entries.map((e) => [e.gameId, e.stats]));
 }
 
-export async function recalculateElo(): Promise<{ gamesUpdated: number }> {
-  return daemonJson("/api/tournament/recalculate", { method: "POST" });
-}
-
 export async function getTournamentSettings(): Promise<TournamentSettings> {
   return daemonJson("/api/tournament/settings");
 }

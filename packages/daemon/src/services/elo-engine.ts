@@ -1,8 +1,6 @@
 // Pure ELO calculation functions. No I/O, no service dependencies.
 // Implements REQ-TOURN-5 (standard ELO), REQ-TOURN-6 (K-factor),
-// REQ-TOURN-7 (recalculate from history), REQ-TOURN-9 (normalization).
-
-import type { Comparison, TournamentGameStats } from "@shelf-judge/shared";
+// REQ-TOURN-9 (normalization).
 
 /**
  * Standard ELO expected score: 1 / (1 + 10^((ratingB - ratingA) / 400))
@@ -37,53 +35,6 @@ export function calculateNewRatings(
     newRatingA: ratingA + kA * (actualA - expectedA),
     newRatingB: ratingB + kB * (actualB - expectedB),
   };
-}
-
-/**
- * Replay all comparisons in chronological order from default 1500.
- * Returns fresh gameStats map. This is the authoritative calculation;
- * incremental updates must produce identical results.
- */
-export function recalculateAllRatings(
-  comparisons: Comparison[],
-  kThreshold: number,
-): Record<string, TournamentGameStats> {
-  const stats: Record<string, TournamentGameStats> = {};
-
-  const getOrCreate = (gameId: string): TournamentGameStats => {
-    if (!stats[gameId]) {
-      stats[gameId] = { eloRating: 1500, comparisonCount: 0 };
-    }
-    return stats[gameId];
-  };
-
-  // Sort by createdAt to ensure chronological replay
-  const sorted = [...comparisons].sort(
-    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
-  );
-
-  for (const comp of sorted) {
-    const statsA = getOrCreate(comp.gameAId);
-    const statsB = getOrCreate(comp.gameBId);
-
-    const winnerId: "a" | "b" = comp.winnerId === comp.gameAId ? "a" : "b";
-
-    const { newRatingA, newRatingB } = calculateNewRatings(
-      statsA.eloRating,
-      statsB.eloRating,
-      winnerId,
-      statsA.comparisonCount,
-      statsB.comparisonCount,
-      kThreshold,
-    );
-
-    statsA.eloRating = newRatingA;
-    statsB.eloRating = newRatingB;
-    statsA.comparisonCount++;
-    statsB.comparisonCount++;
-  }
-
-  return stats;
 }
 
 /**

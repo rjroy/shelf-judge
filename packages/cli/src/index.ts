@@ -24,7 +24,6 @@ import {
   tournamentPick,
   tournamentStop,
   tournamentStats,
-  tournamentRecalculate,
 } from "./commands/tournament.js";
 
 // Known command paths and their token depths.
@@ -47,7 +46,6 @@ const COMMANDS: Record<string, number> = {
   "tournament pick": 2,
   "tournament stop": 2,
   "tournament stats": 2,
-  "tournament recalculate": 2,
   "import bgg-collection": 2,
   "config get": 2,
   "config set": 2,
@@ -275,9 +273,6 @@ async function main(): Promise<void> {
       break;
     case "tournament stats":
       output = await tournamentStats(client, args, opts);
-      break;
-    case "tournament recalculate":
-      output = await tournamentRecalculate(client, args, opts);
       break;
     case "import bgg-collection":
       output = await importBggCollection(client, args, opts);

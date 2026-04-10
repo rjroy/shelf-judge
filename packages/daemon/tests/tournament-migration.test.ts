@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { migrateTournamentData } from "../src/services/tournament-migration";
+import type { TournamentData } from "@shelf-judge/shared";
 
 const baseSettings = {
   kFactorThreshold: 15,
@@ -252,7 +253,7 @@ describe("migrateTournamentData", () => {
 
     const { data, migrated } = migrateTournamentData(alreadyMigrated);
     expect(migrated).toBe(false);
-    expect(data).toEqual(alreadyMigrated);
+    expect(data).toEqual(alreadyMigrated as TournamentData);
   });
 
   test("fresh tournament with no comparisons and no sessions passes through unchanged", () => {

@@ -1,4 +1,4 @@
-// Tournament commands: start, next, pick, stop, stats, recalculate
+// Tournament commands: start, next, pick, stop, stats
 import type { DaemonClient } from "../client.js";
 import type { OutputOptions } from "../output.js";
 import { formatTable, formatScore, printOutput } from "../output.js";
@@ -305,21 +305,4 @@ export async function tournamentStats(
       String(e.stats.comparisonCount),
     ]),
   );
-}
-
-export async function tournamentRecalculate(
-  client: DaemonClient,
-  _args: string[],
-  opts: OutputOptions,
-): Promise<string> {
-  const { ok, data } = await client.post<{ gamesUpdated: number }>("/api/tournament/recalculate");
-
-  if (!ok) {
-    const err = data as unknown as { error: string };
-    throw new Error(err.error ?? "Recalculate failed");
-  }
-
-  if (opts.json) return printOutput(data, opts);
-
-  return `Recalculated ELO for ${data.gamesUpdated} game(s)`;
 }

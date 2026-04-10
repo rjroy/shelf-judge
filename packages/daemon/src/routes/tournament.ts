@@ -206,17 +206,6 @@ export function createTournamentRoutes(deps: TournamentRoutesDeps): RouteModule 
     }
   });
 
-  // POST /tournament/recalculate - Recalculate all ELO from history
-  routes.post("/tournament/recalculate", async (c) => {
-    try {
-      const result = await tournamentService.recalculate();
-      return c.json(result);
-    } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 500);
-    }
-  });
-
-
   // POST /tournament/normalize-fitness - Normalize fitness scores based on current tournament ELO ratings
   routes.post("/tournament/normalize-fitness", async (c) => {
     try {
@@ -325,14 +314,6 @@ export function createTournamentRoutes(deps: TournamentRoutesDeps): RouteModule 
       name: "all-stats",
       description: "Get tournament stats for all games",
       invocation: { method: "GET", path: "/api/tournament/stats" },
-      hierarchy: { root: "shelf", feature: "tournament" },
-      idempotent: true,
-    },
-    {
-      operationId: "shelf.tournament.recalculate",
-      name: "recalculate",
-      description: "Recalculate all ELO ratings from comparison history",
-      invocation: { method: "POST", path: "/api/tournament/recalculate" },
       hierarchy: { root: "shelf", feature: "tournament" },
       idempotent: true,
     },
