@@ -34,3 +34,9 @@ Added to `packages/shared/src/types.ts`:
 - New types: `PreferenceShape...
 
 - 20:14 commission-Dalton-20260409-200745 completed
+- 20:21 commission-Thorne-20260409-200754 result: # Review: Utility Curves Phase 1 + Phase 2
+
+- 20:22 commission-Thorne-20260409-200754 completed
+## Verdict
+
+Implementation is correct. The curve math verifies against hand calculations. Types match the plan exactly. Test coverage hits every category th...
