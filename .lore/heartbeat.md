@@ -47,3 +47,7 @@ The spec makes three key decisions:
 1. `.lore/issues/deferred-filter-types.md` — 8 deferred filter types from filter/sort spec with no backlog visibility
 2. `.lore/issue...
 - 06:33 commission-Octavia-20260410-063144 completed
+- 06:36 commission-Octavia-20260410-062403 result: Completed both deliverables:
+
+1. **Revised brainstorm** (`.lore/brainstorms/prediction-engine.md`): Folded all user decisions into the text as conclusions. Restructured around four accepted proposals ...
+- 06:37 commission-Octavia-20260410-062403 completed
