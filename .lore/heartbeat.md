@@ -43,3 +43,7 @@ Workers can also add entries to this file during their sessions.
 
 All ...
 - 07:17 commission-Thorne-20260410-070829 completed
+- 07:18 commission-Octavia-20260410-071449 result: Updated `.lore/specs/collection-profiling.md` with five categories of changes:
+
+**1. Resolved Open Question #2** (outlier distance metric). Replaced the open question with a settled decision referenci...
+- 07:18 commission-Octavia-20260410-071449 completed
