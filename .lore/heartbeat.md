@@ -42,3 +42,8 @@ The spec covers all five brainstorm proposals as 38 requirements (REQ-PROFILE-1 
 The spec makes three key decisions:
 1. **Full history recalculability (REQ-TOURN-7)...
 - 06:30 commission-Octavia-20260410-062248 completed
+- 06:33 commission-Octavia-20260410-063144 result: Filed 5 issues from the commission cleanup retro's loose threads:
+
+1. `.lore/issues/deferred-filter-types.md` — 8 deferred filter types from filter/sort spec with no backlog visibility
+2. `.lore/issue...
+- 06:33 commission-Octavia-20260410-063144 completed
