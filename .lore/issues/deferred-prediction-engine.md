@@ -1,7 +1,7 @@
 ---
 title: "Deferred: Prediction engine for unowned games"
 date: 2026-04-06
-status: resolved
+status: active
 tags: [deferred, feature, fitness, prediction]
 modules: [daemon]
 origin: .lore/specs/mvp.md
