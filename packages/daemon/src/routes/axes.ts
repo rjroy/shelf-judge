@@ -29,7 +29,11 @@ export function createAxisRoutes(deps: AxisRoutesDeps): RouteModule {
       const axis = await axisService.createAxis(parsed.data);
       return c.json(axis, 201);
     } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 500);
+      const message = toErrorMessage(err);
+      if (message.includes("idealValue") || message.includes("outside native scale")) {
+        return c.json({ error: message }, 400);
+      }
+      return c.json({ error: message }, 500);
     }
   });
 
@@ -67,6 +71,9 @@ export function createAxisRoutes(deps: AxisRoutesDeps): RouteModule {
       if (message.includes("not found")) {
         return c.json({ error: message }, 404);
       }
+      if (message.includes("idealValue") || message.includes("outside native scale")) {
+        return c.json({ error: message }, 400);
+      }
       return c.json({ error: message }, 500);
     }
   });
@@ -90,7 +97,7 @@ export function createAxisRoutes(deps: AxisRoutesDeps): RouteModule {
     {
       operationId: "shelf.axis.create",
       name: "create",
-      description: "Create a new rating axis",
+      description: "Create a new rating axis with optional curve and veto configuration",
       invocation: { method: "POST", path: "/api/axes" },
       hierarchy: { root: "shelf", feature: "axis" },
       idempotent: false,
@@ -106,7 +113,7 @@ export function createAxisRoutes(deps: AxisRoutesDeps): RouteModule {
     {
       operationId: "shelf.axis.update",
       name: "update",
-      description: "Update axis name, description, or weight",
+      description: "Update axis name, description, weight, curve, or veto configuration",
       invocation: { method: "PUT", path: "/api/axes/:id" },
       hierarchy: { root: "shelf", feature: "axis" },
       parameters: [{ name: "id", in: "path", description: "Axis ID", required: true }],

@@ -29,19 +29,16 @@ export const CreateAxisSchema = z
     { message: "idealValue is required when preferenceShape is sweet-spot", path: ["idealValue"] },
   );
 
-export const UpdateAxisSchema = z
-  .object({
-    name: z.string().min(1, "Axis name cannot be empty").optional(),
-    description: z.string().nullable().optional(),
-    weight: z.number().int("Weight must be an integer").min(0).max(100).optional(),
-    ...curveFields,
-  })
-  .refine(
-    (data) =>
-      data.preferenceShape !== "sweet-spot" ||
-      (data.idealValue !== undefined && data.idealValue !== null),
-    { message: "idealValue is required when preferenceShape is sweet-spot", path: ["idealValue"] },
-  );
+// UpdateAxisSchema omits the sweet-spot/idealValue refinement that CreateAxisSchema has.
+// On update, an axis may already have idealValue stored, so sending
+// { preferenceShape: "sweet-spot" } without idealValue is valid.
+// The service layer validates against stored axis state instead.
+export const UpdateAxisSchema = z.object({
+  name: z.string().min(1, "Axis name cannot be empty").optional(),
+  description: z.string().nullable().optional(),
+  weight: z.number().int("Weight must be an integer").min(0).max(100).optional(),
+  ...curveFields,
+});
 
 export const RateGameSchema = z.object({
   axisId: z.string().min(1),

@@ -7,6 +7,7 @@ import {
   type UpdateAxisInput,
 } from "@shelf-judge/shared";
 import type { StorageService } from "./storage-service.js";
+import { getNativeScale } from "./curve-engine.js";
 
 export interface AxisService {
   createAxis(input: CreateAxisInput): Promise<Axis>;
@@ -25,6 +26,17 @@ export function createAxisService(deps: AxisServiceDeps): AxisService {
   return {
     async createAxis(input: CreateAxisInput): Promise<Axis> {
       const parsed = CreateAxisSchema.parse(input);
+
+      // Cross-field validation: idealValue must be within native scale for sweet-spot
+      if (parsed.preferenceShape === "sweet-spot" && parsed.idealValue != null) {
+        const scale = getNativeScale(parsed.source, parsed.bggField);
+        if (parsed.idealValue < scale.min || parsed.idealValue > scale.max) {
+          throw new Error(
+            `idealValue ${parsed.idealValue} is outside native scale range [${scale.min}, ${scale.max}]`,
+          );
+        }
+      }
+
       const collection = await storageService.loadCollection();
       const now = new Date().toISOString();
 
@@ -35,6 +47,11 @@ export function createAxisService(deps: AxisServiceDeps): AxisService {
         weight: parsed.weight,
         source: parsed.source,
         bggField: parsed.bggField,
+        preferenceShape: parsed.preferenceShape,
+        idealValue: parsed.idealValue,
+        tolerance: parsed.tolerance,
+        leanDirection: parsed.leanDirection,
+        veto: parsed.veto,
         createdAt: now,
         updatedAt: now,
       };
@@ -60,11 +77,48 @@ export function createAxisService(deps: AxisServiceDeps): AxisService {
         throw new Error(`Axis not found: ${id}`);
       }
 
+      // Determine the effective preferenceShape after this update
+      const effectiveShape = parsed.preferenceShape ?? axis.preferenceShape;
+
+      if (effectiveShape === "sweet-spot") {
+        // idealValue must exist: either provided in this update or already stored
+        const effectiveIdealValue =
+          parsed.idealValue !== undefined ? parsed.idealValue : axis.idealValue;
+        if (effectiveIdealValue == null) {
+          throw new Error("idealValue is required when preferenceShape is sweet-spot");
+        }
+
+        // Validate idealValue is within native scale
+        const scale = getNativeScale(axis.source, axis.bggField);
+        if (effectiveIdealValue < scale.min || effectiveIdealValue > scale.max) {
+          throw new Error(
+            `idealValue ${effectiveIdealValue} is outside native scale range [${scale.min}, ${scale.max}]`,
+          );
+        }
+      }
+
       const now = new Date().toISOString();
 
       if (parsed.name !== undefined) axis.name = parsed.name;
       if (parsed.description !== undefined) axis.description = parsed.description;
       if (parsed.weight !== undefined) axis.weight = parsed.weight;
+
+      // Curve fields
+      if (parsed.preferenceShape !== undefined) {
+        axis.preferenceShape = parsed.preferenceShape;
+
+        // When changing away from sweet-spot, clear stale config
+        if (parsed.preferenceShape !== "sweet-spot") {
+          axis.idealValue = undefined;
+          axis.tolerance = undefined;
+          axis.leanDirection = undefined;
+        }
+      }
+      if (parsed.idealValue !== undefined) axis.idealValue = parsed.idealValue;
+      if (parsed.tolerance !== undefined) axis.tolerance = parsed.tolerance;
+      if (parsed.leanDirection !== undefined) axis.leanDirection = parsed.leanDirection;
+      if (parsed.veto !== undefined) axis.veto = parsed.veto;
+
       axis.updatedAt = now;
       collection.updatedAt = now;
 

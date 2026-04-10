@@ -214,11 +214,11 @@ describe("UpdateAxisSchema", () => {
     expect(result.success).toBe(true);
   });
 
-  test("rejects sweet-spot without idealValue", () => {
+  test("accepts sweet-spot without idealValue (service layer validates with stored context)", () => {
     const result = UpdateAxisSchema.safeParse({
       preferenceShape: "sweet-spot",
     });
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
   });
 
   test("accepts sweet-spot with idealValue", () => {
