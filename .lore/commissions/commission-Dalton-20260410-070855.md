@@ -1,7 +1,7 @@
 ---
 title: "Commission: Reduce Tournament Overhead Phase 4: Remove Recalculate + Client Grep"
 date: 2026-04-10
-status: pending
+status: blocked
 tags: [commission]
 worker: Dalton
 workerDisplayTitle: "Guild Artificer"
@@ -14,6 +14,11 @@ activity_timeline:
   - timestamp: 2026-04-10T14:08:55.034Z
     event: created
     reason: "Commission created"
+  - timestamp: 2026-04-10T14:09:54.550Z
+    event: status_blocked
+    reason: "Dependencies not satisfied"
+    from: "pending"
+    to: "blocked"
 current_progress: ""
 projectName: shelf-judge
 ---

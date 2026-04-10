@@ -1,7 +1,7 @@
 ---
 title: "Commission: Review: Tournament Overhead Phase 3+4"
 date: 2026-04-10
-status: pending
+status: blocked
 tags: [commission]
 worker: Thorne
 workerDisplayTitle: "Guild Warden"
@@ -14,6 +14,11 @@ activity_timeline:
   - timestamp: 2026-04-10T14:09:03.314Z
     event: created
     reason: "Commission created"
+  - timestamp: 2026-04-10T14:09:54.550Z
+    event: status_blocked
+    reason: "Dependencies not satisfied"
+    from: "pending"
+    to: "blocked"
 current_progress: ""
 projectName: shelf-judge
 ---
