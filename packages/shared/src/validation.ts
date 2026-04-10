@@ -1,17 +1,43 @@
 import { z } from "zod";
 
-export const CreateAxisSchema = z.object({
-  name: z.string().min(1, "Axis name cannot be empty"),
-  description: z.string().nullable().optional().default(null),
-  weight: z.number().int("Weight must be an integer").min(0).max(100),
-  source: z.enum(["personal", "bgg"]).optional().default("personal"),
-  bggField: z.string().nullable().optional().default(null),
+const VetoConfigSchema = z.object({
+  direction: z.enum(["below", "above"]),
+  threshold: z.number(),
 });
 
+const curveFields = {
+  preferenceShape: z.enum(["higher-is-better", "lower-is-better", "sweet-spot"]).optional(),
+  idealValue: z.number().nullable().optional(),
+  tolerance: z.enum(["flexible", "moderate", "strict"]).optional(),
+  leanDirection: z.enum(["lower", "higher"]).nullable().optional(),
+  veto: VetoConfigSchema.nullable().optional(),
+};
+
+export const CreateAxisSchema = z
+  .object({
+    name: z.string().min(1, "Axis name cannot be empty"),
+    description: z.string().nullable().optional().default(null),
+    weight: z.number().int("Weight must be an integer").min(0).max(100),
+    source: z.enum(["personal", "bgg"]).optional().default("personal"),
+    bggField: z.string().nullable().optional().default(null),
+    ...curveFields,
+  })
+  .refine(
+    (data) =>
+      data.preferenceShape !== "sweet-spot" ||
+      (data.idealValue !== undefined && data.idealValue !== null),
+    { message: "idealValue is required when preferenceShape is sweet-spot", path: ["idealValue"] },
+  );
+
+// UpdateAxisSchema omits the sweet-spot/idealValue refinement that CreateAxisSchema has.
+// On update, an axis may already have idealValue stored, so sending
+// { preferenceShape: "sweet-spot" } without idealValue is valid.
+// The service layer validates against stored axis state instead.
 export const UpdateAxisSchema = z.object({
   name: z.string().min(1, "Axis name cannot be empty").optional(),
   description: z.string().nullable().optional(),
   weight: z.number().int("Weight must be an integer").min(0).max(100).optional(),
+  ...curveFields,
 });
 
 export const RateGameSchema = z.object({

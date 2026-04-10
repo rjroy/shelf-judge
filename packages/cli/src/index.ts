@@ -66,6 +66,13 @@ interface ParsedArgs {
   description?: string;
   axisFlags: string[];
   filterFlags: string[];
+  shape?: string;
+  ideal?: number;
+  tolerance?: string;
+  lean?: string;
+  vetoBelow?: number;
+  vetoAbove?: number;
+  noVeto?: boolean;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -80,6 +87,13 @@ function parseArgs(argv: string[]): ParsedArgs {
   let name: string | undefined;
   let weight: number | undefined;
   let description: string | undefined;
+  let shape: string | undefined;
+  let ideal: number | undefined;
+  let tolerance: string | undefined;
+  let lean: string | undefined;
+  let vetoBelow: number | undefined;
+  let vetoAbove: number | undefined;
+  let noVeto = false;
 
   for (let i = 0; i < raw.length; i++) {
     const arg = raw[i];
@@ -94,6 +108,20 @@ function parseArgs(argv: string[]): ParsedArgs {
       weight = Number(raw[++i]);
     } else if (arg === "--description") {
       description = raw[++i];
+    } else if (arg === "--shape") {
+      shape = raw[++i];
+    } else if (arg === "--ideal") {
+      ideal = Number(raw[++i]);
+    } else if (arg === "--tolerance") {
+      tolerance = raw[++i];
+    } else if (arg === "--lean") {
+      lean = raw[++i];
+    } else if (arg === "--veto-below") {
+      vetoBelow = Number(raw[++i]);
+    } else if (arg === "--veto-above") {
+      vetoAbove = Number(raw[++i]);
+    } else if (arg === "--no-veto") {
+      noVeto = true;
     } else if (arg === "--axis") {
       axisFlags.push(raw[++i]);
       axisFlags.push(raw[++i]);
@@ -137,6 +165,13 @@ function parseArgs(argv: string[]): ParsedArgs {
     description,
     axisFlags,
     filterFlags,
+    shape,
+    ideal,
+    tolerance,
+    lean,
+    vetoBelow,
+    vetoAbove,
+    noVeto: noVeto || undefined,
   };
 }
 
@@ -190,6 +225,13 @@ async function main(): Promise<void> {
         ...opts,
         weight: parsed.weight,
         description: parsed.description,
+        shape: parsed.shape,
+        ideal: parsed.ideal,
+        tolerance: parsed.tolerance,
+        lean: parsed.lean,
+        vetoBelow: parsed.vetoBelow,
+        vetoAbove: parsed.vetoAbove,
+        noVeto: parsed.noVeto,
       });
       break;
     case "axis update":
@@ -198,6 +240,13 @@ async function main(): Promise<void> {
         weight: parsed.weight,
         name: parsed.name,
         description: parsed.description,
+        shape: parsed.shape,
+        ideal: parsed.ideal,
+        tolerance: parsed.tolerance,
+        lean: parsed.lean,
+        vetoBelow: parsed.vetoBelow,
+        vetoAbove: parsed.vetoAbove,
+        noVeto: parsed.noVeto,
       });
       break;
     case "axis delete":

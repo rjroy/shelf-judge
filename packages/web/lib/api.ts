@@ -11,6 +11,10 @@ import type {
   BggSearchResult,
   ImportProgress,
   ImportComplete,
+  PreferenceShape,
+  ToleranceLevel,
+  LeanDirection,
+  VetoConfig,
 } from "@shelf-judge/shared";
 import { daemonRequest, daemonJson } from "./daemon";
 
@@ -77,6 +81,11 @@ export async function createAxis(body: {
   name: string;
   description?: string;
   weight: number;
+  preferenceShape?: PreferenceShape;
+  idealValue?: number | null;
+  tolerance?: ToleranceLevel;
+  leanDirection?: LeanDirection | null;
+  veto?: VetoConfig | null;
 }): Promise<Axis> {
   return daemonJson("/api/axes", {
     method: "POST",
@@ -86,7 +95,16 @@ export async function createAxis(body: {
 
 export async function updateAxis(
   id: string,
-  body: { name?: string; description?: string; weight?: number },
+  body: {
+    name?: string;
+    description?: string;
+    weight?: number;
+    preferenceShape?: PreferenceShape;
+    idealValue?: number | null;
+    tolerance?: ToleranceLevel;
+    leanDirection?: LeanDirection | null;
+    veto?: VetoConfig | null;
+  },
 ): Promise<Axis> {
   return daemonJson(`/api/axes/${id}`, {
     method: "PUT",

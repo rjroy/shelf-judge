@@ -84,7 +84,9 @@ describe("FitnessService", () => {
       const result = fitnessService.calculateScore(game, axes, bggData);
 
       expect(result).not.toBeNull();
-      expect(result!.score).toBe(7.9);
+      // Score shifted from 7.9 to 7.8 due to corrected BGG weight normalization:
+      // Old: weight 2.9 * 2 = 5.8, New: 1 + 9*(2.9-1)/(5-1) = 5.275 -> 5.3
+      expect(result!.score).toBe(7.8);
       expect(result!.ratedAxisCount).toBe(4);
       expect(result!.totalAxisCount).toBe(4);
 
@@ -100,23 +102,25 @@ describe("FitnessService", () => {
       expect(visual.contribution).toBeCloseTo(2.7);
 
       const complexity = result!.breakdown.find((b) => b.axisId === "complexity")!;
-      expect(complexity.rating).toBe(5.8);
+      // Raw BGG weight 2.9 on 1-5 scale, higher-is-better: 1 + 9*(2.9-1)/4 = 5.275 -> 5.3
+      expect(complexity.rating).toBe(5.3);
+      expect(complexity.rawValue).toBe(2.9);
       expect(complexity.source).toBe("bgg");
-      expect(complexity.contribution).toBeCloseTo(1.2);
+      expect(complexity.contribution).toBeCloseTo(1.1);
 
       const community = result!.breakdown.find((b) => b.axisId === "community")!;
       expect(community.rating).toBe(8.1);
       expect(community.source).toBe("bgg");
       expect(community.contribution).toBeCloseTo(0.8);
 
-      // Verify the math: (320 + 270 + 116 + 81) / 100 = 7.87 -> 7.9
+      // Verify the math: (320 + 270 + 105.5 + 81) / 100 = 7.765 -> 7.8
       const totalContribution = result!.breakdown
         .filter((b) => b.contribution !== null)
         .reduce((sum, b) => sum + b.contribution!, 0);
       const totalWeight = result!.breakdown
         .filter((b) => b.rating !== null)
         .reduce((sum, b) => sum + b.weight, 0);
-      expect(totalContribution).toBeCloseTo(7.9);
+      expect(totalContribution).toBeCloseTo(7.8);
       expect(totalWeight).toBeCloseTo(100);
     });
   });

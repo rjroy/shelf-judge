@@ -6,21 +6,29 @@ import type {
   FitnessBreakdownEntry,
   FitnessBreakdownSource,
 } from "@shelf-judge/shared";
+import {
+  getNativeScale,
+  applyPreferenceCurve,
+  checkVeto,
+  computeHigherIsBetterEffective,
+} from "./curve-engine";
 
 export interface FitnessService {
   calculateScore(game: Game, axes: Axis[], bggData: BggGameData | null): FitnessResult | null;
 }
 
-function resolveBggRating(axis: Axis, bggData: BggGameData | null): number | null {
+/**
+ * Returns the raw native-scale BGG value for an axis.
+ * No normalization: weight returns 1-5, communityRating returns 1-10.
+ */
+function resolveBggRawValue(axis: Axis, bggData: BggGameData | null): number | null {
   if (axis.source !== "bgg" || !axis.bggField || !bggData) return null;
 
   switch (axis.bggField) {
     case "communityRating":
       return bggData.communityRating;
     case "weight":
-      if (bggData.weight === null) return null;
-      // BGG weight is 1-5 scale; multiply by 2 to map to 1-10 rating scale
-      return bggData.weight * 2;
+      return bggData.weight;
     default:
       return null;
   }
@@ -30,6 +38,11 @@ function roundToOneDecimal(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
+// Threshold for curveAffected highlighting (REQ-CURVE-17).
+// When the effective rating differs from the higher-is-better baseline by more than
+// this amount, the axis is flagged as curve-affected.
+const CURVE_AFFECTED_THRESHOLD = 0.5;
+
 export function createFitnessService(): FitnessService {
   return {
     calculateScore(game: Game, axes: Axis[], bggData: BggGameData | null): FitnessResult | null {
@@ -37,32 +50,77 @@ export function createFitnessService(): FitnessService {
       let weightedSum = 0;
       let weightSum = 0;
       let ratedCount = 0;
+      let vetoTriggered = false;
+      let vetoInfo: FitnessResult["vetoedBy"] = null;
 
       for (const axis of axes) {
         const personalRating = game.ratings[axis.id];
-        const bggRating = resolveBggRating(axis, bggData);
+        const bggRawValue = resolveBggRawValue(axis, bggData);
+        const scale = getNativeScale(axis.source, axis.bggField);
+        const shape = axis.preferenceShape ?? "higher-is-better";
 
-        let rating: number | null = null;
+        // Determine raw value, source, and the appropriate native scale for curve application.
+        // Personal overrides use the personal scale (1-10), not the BGG axis scale.
+        let rawValue: number | null = null;
         let source: FitnessBreakdownSource = axis.source === "bgg" ? "bgg" : "personal";
         let bggOriginal: number | null = null;
+        let valueScale = scale;
 
         if (personalRating !== undefined) {
-          rating = personalRating;
-          if (bggRating !== null) {
-            // User overrode a BGG-derived axis
+          rawValue = personalRating;
+          // Personal ratings are always on the 1-10 scale, even when overriding a BGG axis
+          valueScale = getNativeScale("personal", null);
+          if (bggRawValue !== null) {
             source = "override";
-            bggOriginal = roundToOneDecimal(bggRating);
+            bggOriginal = roundToOneDecimal(bggRawValue);
           } else {
             source = "personal";
           }
-        } else if (bggRating !== null) {
-          rating = bggRating;
+        } else if (bggRawValue !== null) {
+          rawValue = bggRawValue;
           source = "bgg";
         }
 
-        // Display values are rounded; accumulation uses raw values
-        const displayedRating = rating !== null ? roundToOneDecimal(rating) : null;
-        const rawContribution = rating !== null ? rating * axis.weight : null;
+        // Check veto on raw value (before curve application).
+        // Veto thresholds are in the axis's native scale (e.g., 1-5 for BGG weight).
+        // When a user overrides a BGG axis with a personal rating (1-10 scale),
+        // skip the veto: the user is asserting their judgment for this specific game.
+        const isOverride = source === "override";
+        if (rawValue !== null && !vetoTriggered && !isOverride) {
+          const vetoed = checkVeto(rawValue, axis.veto ?? null);
+          if (vetoed) {
+            vetoTriggered = true;
+            vetoInfo = {
+              axisId: axis.id,
+              axisName: axis.name,
+              threshold: axis.veto!.threshold,
+              direction: axis.veto!.direction,
+              rawValue,
+            };
+          }
+        }
+
+        // Apply preference curve to get effective rating (1-10)
+        let effectiveRating: number | null = null;
+        if (rawValue !== null) {
+          effectiveRating = applyPreferenceCurve(rawValue, valueScale, shape, {
+            idealValue: axis.idealValue,
+            tolerance: axis.tolerance,
+            leanDirection: axis.leanDirection,
+          });
+        }
+
+        // Compute higher-is-better baseline for curveAffected highlighting
+        let curveAffected = false;
+        if (rawValue !== null && effectiveRating !== null) {
+          const baseline = computeHigherIsBetterEffective(rawValue, valueScale);
+          curveAffected = Math.abs(effectiveRating - baseline) > CURVE_AFFECTED_THRESHOLD;
+        }
+
+        const displayedRating =
+          effectiveRating !== null ? roundToOneDecimal(effectiveRating) : null;
+        const displayedRawValue = rawValue !== null ? roundToOneDecimal(rawValue) : null;
+        const rawContribution = effectiveRating !== null ? effectiveRating * axis.weight : null;
 
         breakdown.push({
           axisId: axis.id,
@@ -72,6 +130,10 @@ export function createFitnessService(): FitnessService {
           contribution: rawContribution !== null ? roundToOneDecimal(rawContribution) : null,
           source,
           bggOriginal,
+          rawValue: displayedRawValue,
+          effectiveRating: displayedRating,
+          preferenceShape: shape,
+          curveAffected,
         });
 
         if (rawContribution !== null) {
@@ -81,15 +143,14 @@ export function createFitnessService(): FitnessService {
         }
       }
 
+      // Recalculate contribution as weighted contribution to final score
       for (const entry of breakdown) {
         if (entry.contribution !== null && weightSum > 0) {
-          // Recalculate contribution percentage based on final score to ensure consistency
           entry.contribution = roundToOneDecimal((entry.rating! * entry.weight) / weightSum);
         }
       }
 
       breakdown.sort((a, b) => {
-        // Override entries first, then BGG, then personal; within each group, sort by contribution desc
         const sourceOrder = { override: 0, bgg: 1, personal: 2 };
         if (sourceOrder[a.source] !== sourceOrder[b.source]) {
           return sourceOrder[a.source] - sourceOrder[b.source];
@@ -100,13 +161,28 @@ export function createFitnessService(): FitnessService {
       if (ratedCount === 0) return null;
       if (weightSum === 0) return null;
 
-      const score = roundToOneDecimal(weightedSum / weightSum);
+      const hypotheticalScore = roundToOneDecimal(weightedSum / weightSum);
+
+      if (vetoTriggered) {
+        return {
+          score: 0,
+          ratedAxisCount: ratedCount,
+          totalAxisCount: axes.length,
+          breakdown,
+          vetoed: true,
+          vetoedBy: vetoInfo,
+          hypotheticalScore,
+        };
+      }
 
       return {
-        score,
+        score: hypotheticalScore,
         ratedAxisCount: ratedCount,
         totalAxisCount: axes.length,
         breakdown,
+        vetoed: false,
+        vetoedBy: null,
+        hypotheticalScore: null,
       };
     },
   };

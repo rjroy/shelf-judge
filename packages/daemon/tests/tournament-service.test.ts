@@ -71,7 +71,18 @@ function makeGameWithScore(
 ): GameWithScore {
   return {
     game: makeGame(id, name, overrides),
-    score: score !== null ? { score, ratedAxisCount: 1, totalAxisCount: 1, breakdown: [] } : null,
+    score:
+      score !== null
+        ? {
+            score,
+            ratedAxisCount: 1,
+            totalAxisCount: 1,
+            breakdown: [],
+            vetoed: false,
+            vetoedBy: null,
+            hypotheticalScore: null,
+          }
+        : null,
   };
 }
 

@@ -1,7 +1,7 @@
 ---
 title: "Implementation plan: utility-curves"
 date: 2026-04-07
-status: approved
+status: exectued
 tags: [plan, fitness, scoring, axes, utility-curves, curves, veto]
 modules: [shared, daemon, web, cli]
 related:
@@ -323,6 +323,8 @@ Create a pure-function module `curve-engine.ts` following the `elo-engine.ts` pa
 
 This is the critical integration phase. The fitness service is the only consumer of the curve engine, and it's the code path that produces every score in the system.
 
+> **Review note (Phase 1/2 review):** The backward-compatible defaults in `fitness-service.ts:75` set `rawValue: displayedRating`, where `displayedRating` is the post-`*2` normalized value for BGG weight axes. This violates `rawValue`'s documented contract ("native-scale value"). Phase 3's `resolveBggRawValue` replacement must fix this as its first step. Verify that `rawValue` holds the native-scale value (e.g., 2.9 for weight, not 5.8) after the refactor.
+
 #### Replace `resolveBggRating`
 
 The existing `resolveBggRating` function (`fitness-service.ts:14-27`) has two jobs: (1) resolve which BGG field to read, and (2) normalize the value. Split these apart:
@@ -438,6 +440,8 @@ Add validation at the service level (not schema level, since schema doesn't know
 - When `preferenceShape` is `"sweet-spot"`, `idealValue` must be provided and must fall within the axis's native scale. Use `getNativeScale(axis.source, axis.bggField)` to determine bounds.
 - When updating an axis to `"sweet-spot"` without providing `idealValue`, check if the axis already has one stored. If not, reject.
 - When `preferenceShape` is not `"sweet-spot"`, clear `idealValue`, `tolerance`, and `leanDirection` to avoid stale config confusion.
+
+> **Review note (Phase 1/2 review):** The `UpdateAxisSchema` in `validation.ts` currently requires `idealValue` whenever `preferenceShape` is `"sweet-spot"` (via the `.refine()` on lines 39-44). This is correct for Phase 1/2 but conflicts with the second bullet above: allowing `{ preferenceShape: "sweet-spot" }` without `idealValue` when the axis already has one stored. When implementing Phase 4, either remove the sweet-spot refinement from `UpdateAxisSchema` and enforce it at the service layer only, or make it conditional.
 
 #### Route changes
 

@@ -1,5 +1,11 @@
 import { Hono } from "hono";
-import { CreateAxisSchema, UpdateAxisSchema, toErrorMessage } from "@shelf-judge/shared";
+import {
+  CreateAxisSchema,
+  UpdateAxisSchema,
+  ValidationError,
+  NotFoundError,
+  toErrorMessage,
+} from "@shelf-judge/shared";
 import type { AxisService } from "../services/axis-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
 
@@ -29,6 +35,9 @@ export function createAxisRoutes(deps: AxisRoutesDeps): RouteModule {
       const axis = await axisService.createAxis(parsed.data);
       return c.json(axis, 201);
     } catch (err) {
+      if (err instanceof ValidationError) {
+        return c.json({ error: err.message }, 400);
+      }
       return c.json({ error: toErrorMessage(err) }, 500);
     }
   });
@@ -63,11 +72,13 @@ export function createAxisRoutes(deps: AxisRoutesDeps): RouteModule {
       const axis = await axisService.updateAxis(id, parsed.data);
       return c.json(axis);
     } catch (err) {
-      const message = toErrorMessage(err);
-      if (message.includes("not found")) {
-        return c.json({ error: message }, 404);
+      if (err instanceof NotFoundError) {
+        return c.json({ error: err.message }, 404);
       }
-      return c.json({ error: message }, 500);
+      if (err instanceof ValidationError) {
+        return c.json({ error: err.message }, 400);
+      }
+      return c.json({ error: toErrorMessage(err) }, 500);
     }
   });
 
@@ -78,11 +89,10 @@ export function createAxisRoutes(deps: AxisRoutesDeps): RouteModule {
       const result = await axisService.deleteAxis(id);
       return c.json({ deletedRatingsCount: result.deletedRatingsCount });
     } catch (err) {
-      const message = toErrorMessage(err);
-      if (message.includes("not found")) {
-        return c.json({ error: message }, 404);
+      if (err instanceof NotFoundError) {
+        return c.json({ error: err.message }, 404);
       }
-      return c.json({ error: message }, 500);
+      return c.json({ error: toErrorMessage(err) }, 500);
     }
   });
 
@@ -90,7 +100,7 @@ export function createAxisRoutes(deps: AxisRoutesDeps): RouteModule {
     {
       operationId: "shelf.axis.create",
       name: "create",
-      description: "Create a new rating axis",
+      description: "Create a new rating axis with optional curve and veto configuration",
       invocation: { method: "POST", path: "/api/axes" },
       hierarchy: { root: "shelf", feature: "axis" },
       idempotent: false,
@@ -106,7 +116,7 @@ export function createAxisRoutes(deps: AxisRoutesDeps): RouteModule {
     {
       operationId: "shelf.axis.update",
       name: "update",
-      description: "Update axis name, description, or weight",
+      description: "Update axis name, description, weight, curve, or veto configuration",
       invocation: { method: "PUT", path: "/api/axes/:id" },
       hierarchy: { root: "shelf", feature: "axis" },
       parameters: [{ name: "id", in: "path", description: "Axis ID", required: true }],

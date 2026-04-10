@@ -1,7 +1,7 @@
 ---
 title: "Utility Curves for Axis Scoring"
 date: 2026-04-06
-status: approved
+status: implemented
 tags: [spec, fitness, scoring, axes, utility-curves, ux]
 modules: [daemon, shared, web, cli]
 req-prefix: CURVE

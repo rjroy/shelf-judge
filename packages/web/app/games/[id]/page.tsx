@@ -46,9 +46,11 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
 
   const { game, score } = data;
 
-  // Divergence check: > 2.0 difference between fitness and tournament, both non-provisional
+  // Divergence check: > 2.0 difference between fitness and tournament, both non-provisional.
+  // Skip vetoed games entirely: their score is 0 by design, not a meaningful divergence signal.
   const hasDivergence =
     score !== null &&
+    !score.vetoed &&
     tournamentStats !== null &&
     tournamentStats.normalizedScore !== null &&
     !tournamentStats.isProvisional &&
@@ -110,22 +112,31 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
               <div className="bgg-data-section">
                 {game.bggData?.mechanics && game.bggData.mechanics.length > 0 && (
                   <div className="bgg-data-line">
-                    <strong>Mechanics:</strong> {game.bggData.mechanics.map((mechanic) => mechanic.name).join(", ")}
+                    <strong>Mechanics:</strong>{" "}
+                    {game.bggData.mechanics.map((mechanic) => mechanic.name).join(", ")}
                   </div>
                 )}
                 {game.bggData?.categories && game.bggData.categories.length > 0 && (
                   <div className="bgg-data-line">
-                    <strong>Categories:</strong> {game.bggData.categories.map((category) => category.name).join(", ")}
+                    <strong>Categories:</strong>{" "}
+                    {game.bggData.categories.map((category) => category.name).join(", ")}
                   </div>
                 )}
                 {game.bggData?.families && game.bggData.families.length > 0 && (
                   <div className="bgg-data-line">
-                    {familyPrefix = null}
-                    <strong>Families:</strong> {game.bggData.families.map((family) => {
-                      if (family.name.includes(':')) {
-                        const parts = family.name.split(':');
-                        const familyElement = <span key={parts[1]}>{familyPrefix ? familyPrefix : ''}<em>{parts[0]}:</em>{parts[1]}</span>;
-                        familyPrefix = ', ';
+                    {(familyPrefix = null)}
+                    <strong>Families:</strong>{" "}
+                    {game.bggData.families.map((family) => {
+                      if (family.name.includes(":")) {
+                        const parts = family.name.split(":");
+                        const familyElement = (
+                          <span key={parts[1]}>
+                            {familyPrefix ? familyPrefix : ""}
+                            <em>{parts[0]}:</em>
+                            {parts[1]}
+                          </span>
+                        );
+                        familyPrefix = ", ";
                         return familyElement;
                       } else {
                         return <span key={family.name}> {family.name}</span>;
@@ -143,12 +154,25 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
           </div>
           <div className="game-hero-score-section">
             {score ? (
-              <>
-                <div className="score-hero-label">Fitness Score</div>
-                <div className="score-hero-number">{score.score.toFixed(1)}</div>
-                <div className="score-hero-out-of">out of 10.0</div>
-                <div className="score-hero-rated">{score.ratedAxisCount} axes rated</div>
-              </>
+              score.vetoed ? (
+                <>
+                  <div className="score-hero-label">Fitness Score</div>
+                  <div className="score-hero-number score-hero-vetoed">VETOED</div>
+                  {score.hypotheticalScore !== null && (
+                    <div className="score-hero-out-of">
+                      hypothetical: {score.hypotheticalScore.toFixed(1)}
+                    </div>
+                  )}
+                  <div className="score-hero-rated">{score.ratedAxisCount} axes rated</div>
+                </>
+              ) : (
+                <>
+                  <div className="score-hero-label">Fitness Score</div>
+                  <div className="score-hero-number">{score.score.toFixed(1)}</div>
+                  <div className="score-hero-out-of">out of 10.0</div>
+                  <div className="score-hero-rated">{score.ratedAxisCount} axes rated</div>
+                </>
+              )
             ) : (
               <>
                 <div className="score-hero-label">Fitness Score</div>
@@ -229,7 +253,9 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
           <div className="panel-left">
             <div className="panel-section-title">
               Score Breakdown
-              {score && <span className="badge">How {score.score.toFixed(1)} was calculated</span>}
+              {score && !score.vetoed && (
+                <span className="badge">How {score.score.toFixed(1)} was calculated</span>
+              )}
             </div>
             <ScoreBreakdown score={score} />
             <div className="calc-explanation">

@@ -4,6 +4,14 @@ import type { OutputOptions, BreakdownEntry } from "../output.js";
 import { formatTable, formatScore, formatBreakdown, printOutput } from "../output.js";
 import type { TournamentGameStatsDisplay } from "@shelf-judge/shared";
 
+interface VetoInfo {
+  axisId: string;
+  axisName: string;
+  threshold: number;
+  direction: "below" | "above";
+  rawValue: number;
+}
+
 interface ScoredGame {
   gameId: string;
   gameName: string;
@@ -11,6 +19,9 @@ interface ScoredGame {
   ratedAxisCount: number;
   totalAxisCount: number;
   breakdown: BreakdownEntry[];
+  vetoed?: boolean;
+  vetoedBy?: VetoInfo | null;
+  hypotheticalScore?: number | null;
 }
 
 interface UnscoredGame {
@@ -48,7 +59,7 @@ export async function scoreList(
         data.scored.map((g, i) => [
           String(i + 1),
           g.gameName,
-          formatScore(g.score),
+          g.vetoed ? `VETOED (${formatScore(g.hypotheticalScore)})` : formatScore(g.score),
           `${g.ratedAxisCount}/${g.totalAxisCount}`,
         ]),
       ),
@@ -78,6 +89,9 @@ interface ScoreGetResponse {
   ratedAxisCount?: number;
   totalAxisCount?: number;
   breakdown?: BreakdownEntry[];
+  vetoed?: boolean;
+  vetoedBy?: VetoInfo | null;
+  hypotheticalScore?: number | null;
 }
 
 export async function scoreGet(
@@ -112,21 +126,32 @@ export async function scoreGet(
 
   const lines: string[] = [];
   lines.push(`${data.gameName}`);
-  lines.push(
-    `Fitness: ${formatScore(data.score)} (${data.ratedAxisCount}/${data.totalAxisCount} axes rated)`,
-  );
+
+  if (data.vetoed && data.vetoedBy) {
+    lines.push(`Fitness: VETOED (hypothetical: ${formatScore(data.hypotheticalScore)})`);
+    const dir = data.vetoedBy.direction === "below" ? "below" : "above";
+    lines.push(
+      `Veto: "${data.vetoedBy.axisName}" scored ${data.vetoedBy.rawValue} (threshold: ${dir} ${data.vetoedBy.threshold})`,
+    );
+  } else {
+    lines.push(
+      `Fitness: ${formatScore(data.score)} (${data.ratedAxisCount}/${data.totalAxisCount} axes rated)`,
+    );
+  }
 
   if (tournamentRes.ok) {
+    const compareScore = data.vetoed ? data.hypotheticalScore : data.score;
     lines.push(`Tournament Rank: ${tournamentRes.data.displayLabel}`);
 
-    // Divergence flag: when both scores are non-null, non-provisional, and differ by > 2.0
     if (
+      compareScore !== null &&
+      compareScore !== undefined &&
       tournamentRes.data.normalizedScore !== null &&
       !tournamentRes.data.isProvisional &&
-      Math.abs(data.score - tournamentRes.data.normalizedScore) > 2.0
+      Math.abs(compareScore - tournamentRes.data.normalizedScore) > 2.0
     ) {
       lines.push(
-        `[divergence] Fitness (${formatScore(data.score)}) and tournament rank (${formatScore(tournamentRes.data.normalizedScore)}) differ by more than 2.0`,
+        `[divergence] Fitness (${formatScore(compareScore)}) and tournament rank (${formatScore(tournamentRes.data.normalizedScore)}) differ by more than 2.0`,
       );
     }
   }

@@ -149,6 +149,141 @@ describe("score get (rated game)", () => {
   });
 });
 
+const scoreGetVetoedData = {
+  gameId: "veto-123",
+  gameName: "Too Complex Game",
+  score: 0,
+  ratedAxisCount: 4,
+  totalAxisCount: 4,
+  vetoed: true,
+  vetoedBy: {
+    axisId: "ax-complexity",
+    axisName: "Complexity",
+    threshold: 4,
+    direction: "above" as const,
+    rawValue: 4.5,
+  },
+  hypotheticalScore: 7.2,
+  breakdown: [
+    {
+      axisName: "Complexity",
+      rating: 1.75,
+      weight: 20,
+      contribution: 0.35,
+      source: "bgg",
+      bggOriginal: null,
+      rawValue: 4.5,
+      effectiveRating: 1.75,
+      preferenceShape: "sweet-spot",
+      curveAffected: true,
+    },
+    {
+      axisName: "Fun Factor",
+      rating: 9,
+      weight: 40,
+      contribution: 3.6,
+      source: "personal",
+      bggOriginal: null,
+      rawValue: 9,
+      effectiveRating: 9,
+      preferenceShape: "higher-is-better",
+      curveAffected: false,
+    },
+  ],
+};
+
+describe("score get (vetoed game)", () => {
+  const client = createMockClient({
+    routes: {
+      "GET /api/games/veto-123/score": {
+        response: { ok: true, status: 200, data: scoreGetVetoedData },
+      },
+    },
+  });
+
+  test("human-readable output shows VETOED with hypothetical score", async () => {
+    const output = await scoreGet(client, ["veto-123"], { json: false });
+    expect(output).toContain("Too Complex Game");
+    expect(output).toContain("VETOED");
+    expect(output).toContain("hypothetical: 7.2");
+  });
+
+  test("human-readable output shows veto trigger details", async () => {
+    const output = await scoreGet(client, ["veto-123"], { json: false });
+    expect(output).toContain("Complexity");
+    expect(output).toContain("scored 4.5");
+    expect(output).toContain("threshold: above 4");
+  });
+
+  test("human-readable output shows breakdown with Raw column", async () => {
+    const output = await scoreGet(client, ["veto-123"], { json: false });
+    expect(output).toContain("Raw");
+    expect(output).toContain("4.5");
+    expect(output).toContain("1.75 *");
+  });
+
+  test("--json outputs full response including veto fields", async () => {
+    const output = await scoreGet(client, ["veto-123"], { json: true });
+    const parsed = JSON.parse(output) as {
+      vetoed: boolean;
+      vetoedBy: { axisName: string; threshold: number };
+      hypotheticalScore: number;
+    };
+    expect(parsed.vetoed).toBe(true);
+    expect(parsed.vetoedBy.axisName).toBe("Complexity");
+    expect(parsed.vetoedBy.threshold).toBe(4);
+    expect(parsed.hypotheticalScore).toBe(7.2);
+  });
+});
+
+describe("score list with vetoed game", () => {
+  const vetoedListData = {
+    scored: [
+      {
+        gameId: "abc-123",
+        gameName: "Wingspan",
+        score: 7.9,
+        ratedAxisCount: 4,
+        totalAxisCount: 4,
+        breakdown: [],
+      },
+      {
+        gameId: "veto-123",
+        gameName: "Too Complex Game",
+        score: 0,
+        ratedAxisCount: 4,
+        totalAxisCount: 4,
+        breakdown: [],
+        vetoed: true,
+        vetoedBy: {
+          axisId: "ax-complexity",
+          axisName: "Complexity",
+          threshold: 4,
+          direction: "above" as const,
+          rawValue: 4.5,
+        },
+        hypotheticalScore: 7.2,
+      },
+    ],
+    unscored: [],
+  };
+
+  test("shows VETOED with hypothetical in score list", async () => {
+    const client = createMockClient({
+      routes: {
+        "GET /api/scores": {
+          response: { ok: true, status: 200, data: vetoedListData },
+        },
+      },
+    });
+
+    const output = await scoreList(client, [], { json: false });
+    expect(output).toContain("VETOED (7.2)");
+    expect(output).toContain("Wingspan");
+    expect(output).toContain("7.9");
+  });
+});
+
 const scoreGetUnscoredData = {
   gameId: "ghi-789",
   gameName: "Unrated Game",

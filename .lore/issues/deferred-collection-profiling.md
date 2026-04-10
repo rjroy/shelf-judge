@@ -1,7 +1,7 @@
 ---
 title: "Deferred: Collection identity / taste profiling"
 date: 2026-04-06
-status: open
+status: approved
 tags: [deferred, feature, profiling, collection]
 modules: [daemon]
 origin: .lore/specs/mvp.md
@@ -26,3 +26,7 @@ Profiling builds on a populated rating dataset. Without enough rated games, any 
 - The data model already captures per-axis ratings across games, which is the raw input for profiling.
 - Could surface things like: "you consistently rate theme higher than mechanics," "your collection skews toward medium-weight euros," "you have no games rated above 7 on player interaction."
 - Exit point defined in spec: triggers when "user wants taste profile inference."
+
+
+USER NOTE: What if this was LLM driven?
+USER NOTE: use Claude Agent SDK to gain the benefits of using the subscription. See `.lore/research/claude-agent-sdk.md`

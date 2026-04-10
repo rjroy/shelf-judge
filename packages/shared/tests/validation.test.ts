@@ -64,6 +64,123 @@ describe("CreateAxisSchema", () => {
     const result = CreateAxisSchema.safeParse({ name: "Test", weight: 50.5 });
     expect(result.success).toBe(false);
   });
+
+  test("accepts curve config fields", () => {
+    const result = CreateAxisSchema.safeParse({
+      name: "Complexity",
+      weight: 20,
+      source: "bgg",
+      bggField: "weight",
+      preferenceShape: "sweet-spot",
+      idealValue: 2.75,
+      tolerance: "moderate",
+      leanDirection: "lower",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("accepts higher-is-better without idealValue", () => {
+    const result = CreateAxisSchema.safeParse({
+      name: "Fun",
+      weight: 30,
+      preferenceShape: "higher-is-better",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("accepts lower-is-better without idealValue", () => {
+    const result = CreateAxisSchema.safeParse({
+      name: "Fiddliness",
+      weight: 15,
+      preferenceShape: "lower-is-better",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("rejects sweet-spot without idealValue", () => {
+    const result = CreateAxisSchema.safeParse({
+      name: "Complexity",
+      weight: 20,
+      preferenceShape: "sweet-spot",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].path).toContain("idealValue");
+    }
+  });
+
+  test("rejects sweet-spot with null idealValue", () => {
+    const result = CreateAxisSchema.safeParse({
+      name: "Complexity",
+      weight: 20,
+      preferenceShape: "sweet-spot",
+      idealValue: null,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test("accepts veto config", () => {
+    const result = CreateAxisSchema.safeParse({
+      name: "Wife factor",
+      weight: 25,
+      veto: { direction: "below", threshold: 4 },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("accepts null veto (no veto)", () => {
+    const result = CreateAxisSchema.safeParse({
+      name: "Fun",
+      weight: 30,
+      veto: null,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("rejects invalid veto direction", () => {
+    const result = CreateAxisSchema.safeParse({
+      name: "Fun",
+      weight: 30,
+      veto: { direction: "sideways", threshold: 5 },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test("rejects invalid preference shape", () => {
+    const result = CreateAxisSchema.safeParse({
+      name: "Fun",
+      weight: 30,
+      preferenceShape: "bell-curve",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test("rejects invalid tolerance level", () => {
+    const result = CreateAxisSchema.safeParse({
+      name: "Complexity",
+      weight: 20,
+      preferenceShape: "sweet-spot",
+      idealValue: 3,
+      tolerance: "very-strict",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test("accepts existing axis payloads without curve fields", () => {
+    const result = CreateAxisSchema.safeParse({
+      name: "Visual design",
+      weight: 50,
+      source: "personal",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.preferenceShape).toBeUndefined();
+      expect(result.data.idealValue).toBeUndefined();
+      expect(result.data.tolerance).toBeUndefined();
+      expect(result.data.leanDirection).toBeUndefined();
+      expect(result.data.veto).toBeUndefined();
+    }
+  });
 });
 
 describe("UpdateAxisSchema", () => {
@@ -85,6 +202,50 @@ describe("UpdateAxisSchema", () => {
   test("rejects invalid weight", () => {
     const result = UpdateAxisSchema.safeParse({ weight: 101 });
     expect(result.success).toBe(false);
+  });
+
+  test("accepts curve config update", () => {
+    const result = UpdateAxisSchema.safeParse({
+      preferenceShape: "sweet-spot",
+      idealValue: 3.0,
+      tolerance: "strict",
+      leanDirection: "higher",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("accepts sweet-spot without idealValue (service layer validates with stored context)", () => {
+    const result = UpdateAxisSchema.safeParse({
+      preferenceShape: "sweet-spot",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("accepts sweet-spot with idealValue", () => {
+    const result = UpdateAxisSchema.safeParse({
+      preferenceShape: "sweet-spot",
+      idealValue: 5.5,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("accepts veto update", () => {
+    const result = UpdateAxisSchema.safeParse({
+      veto: { direction: "above", threshold: 4.0 },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("accepts removing veto with null", () => {
+    const result = UpdateAxisSchema.safeParse({
+      veto: null,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("accepts update without curve fields (backward compat)", () => {
+    const result = UpdateAxisSchema.safeParse({ name: "Renamed" });
+    expect(result.success).toBe(true);
   });
 });
 

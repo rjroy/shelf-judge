@@ -25,6 +25,11 @@ export type {
   BggSearchResult,
   ImportProgress,
   ImportComplete,
+  PreferenceShape,
+  ToleranceLevel,
+  LeanDirection,
+  VetoConfig,
+  NativeScale,
 } from "./types";
 
 export {
@@ -38,7 +43,7 @@ export {
   TournamentSettingsUpdateSchema,
 } from "./validation";
 
-export { toErrorMessage } from "./errors";
+export { toErrorMessage, ValidationError, NotFoundError } from "./errors";
 
 export { matchesBggTag, normalizeBggTagTokens } from "./bgg-tag-match";
 
