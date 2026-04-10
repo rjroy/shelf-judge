@@ -16,6 +16,7 @@ export type {
   SessionStatus,
   TournamentSession,
   Comparison,
+  CachedRecentComparison,
   TournamentGameStats,
   TournamentData,
   RecentComparison,
@@ -41,6 +42,8 @@ export {
   StartSessionSchema,
   SubmitComparisonSchema,
   TournamentSettingsUpdateSchema,
+  TournamentSettingsSchema,
+  TournamentDataSchema,
 } from "./validation";
 
 export { toErrorMessage, ValidationError, NotFoundError } from "./errors";

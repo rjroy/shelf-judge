@@ -145,6 +145,7 @@ export interface TournamentSession {
   status: SessionStatus;
   createdAt: string;
   updatedAt: string;
+  comparisons: Comparison[]; // Active session only; cleared on completion
 }
 
 export interface Comparison {
@@ -156,15 +157,23 @@ export interface Comparison {
   createdAt: string;
 }
 
+export interface CachedRecentComparison {
+  opponentGameId: string;
+  won: boolean;
+  createdAt: string; // ISO 8601
+}
+
 export interface TournamentGameStats {
   eloRating: number; // Default 1500
   comparisonCount: number; // Default 0
+  wins: number; // Default 0
+  losses: number; // Default 0
+  recentComparisons: CachedRecentComparison[]; // Capped at 10, most-recent-first
 }
 
 export interface TournamentData {
   settings: TournamentSettings;
   sessions: TournamentSession[];
-  comparisons: Comparison[];
   gameStats: Record<string, TournamentGameStats>;
 }
 
@@ -185,7 +194,7 @@ export interface TournamentGameStatsDisplay {
   displayLabel: string; // "not yet ranked" | "8.3 (provisional)" | "8.3"
   wins: number;
   losses: number;
-  recentComparisons: RecentComparison[]; // Last 5, derived from comparison history (never cached)
+  recentComparisons: RecentComparison[]; // Read from cached TournamentGameStats.recentComparisons, enriched with game names at read time
 }
 
 // API response types (shared between daemon, web, and CLI)
