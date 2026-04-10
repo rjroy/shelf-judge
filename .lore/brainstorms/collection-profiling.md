@@ -26,6 +26,29 @@ related:
 
 ---
 
+## Direction
+
+The home page currently shows the collection list. Profiling replaces this with a **Profile Overview** page: a collection of statistics about the user's taste, with an LLM narration summary at the top. The collection list moves to its own page (or becomes a section/tab accessible from the profile).
+
+The profile dataset is generated and stored persistently, the same pattern used for tournament data. It recomputes when underlying data changes (new ratings, new games, axis changes) but does not regenerate on every page view. The LLM narration is cached alongside the profile and only regenerated when the profile data itself has changed.
+
+The profile page is the primary surface for several distinct insights, each described in its own proposal below. The UX provides ways to explore and interact with the profile summary, not just read it passively.
+
+**Proposals included in this direction:**
+
+- **Proposal 1** (Algorithmic Profile): the stored dataset, foundation for everything else
+- **Proposal 2** (LLM Narration): cached natural-language summary at the top of the page
+- **Proposal 3** (Tournament/Fitness Divergence): section surfacing stated vs. revealed preference gaps
+- **Proposal 4** (Axis Suggestions): actionable suggestions for new scoring dimensions
+- **Proposal 5** (Collection Outlier Detection): games that don't fit the collection's statistical identity
+
+**Parked:**
+
+- **Prediction Engine** (originally Proposal 5): estimating fitness for unowned games based on the profile centroid. Valuable but separate from the profile feature itself. Deferred to `.lore/issues/deferred-prediction-engine.md`.
+- **Profile Drift Detection** (originally Proposal 6): tracking how the profile changes over time via periodic snapshots. Rejected for now. Taste drift happens over years, not months, and the snapshot-and-diff model assumes frequent enough change to produce interesting diffs. For a collector who adds a few games a year, most snapshots would be identical. The interesting temporal question ("what changed?") is better answered by the outlier detection in Proposal 5 than by a changelog.
+
+---
+
 ## What data already exists for profiling
 
 Before imagining what a profile could say, inventory what the system already knows. The profiling feature doesn't start from zero; it reads a dataset that's been accumulating since the user's first game import.
@@ -74,7 +97,7 @@ BGG mechanics and categories are stored as `BggTag[]` arrays on `BggGameData` (`
 
 ### Proposal
 
-Build a deterministic profiling service in the daemon that computes collection-level statistics from existing data. No LLM. No external API calls. Pure aggregation over the data the user has already entered.
+Build a deterministic profiling service in the daemon that computes collection-level statistics from existing data. No LLM. No external API calls. Pure aggregation over the data the user has already entered. The profile is persisted as a stored dataset (like tournament data), recomputed when underlying data changes.
 
 The profile computes:
 
@@ -84,11 +107,9 @@ The profile computes:
 
 3. **BGG attribute clustering.** Group the collection by BGG mechanics, categories, subdomains, and weight ranges. Surface concentrations: "67% of your collection includes hand management. Your complexity sweet spot is BGG weight 2.0-3.0 (18 of 27 games). You own zero games in the 'Wargames' subdomain."
 
-4. **Tournament-derived preference.** Where tournament data exists, compare ELO rankings against fitness scores. Divergence is the interesting signal: games that rank high in tournaments but low on fitness have qualities the axes don't capture. Games that rank low in tournaments but high on fitness are games the user thinks they should like but don't reach for.
+4. **Utility curve declarations.** When utility curves are configured, the profile includes them as explicit preference statements: "You've declared a complexity sweet spot at BGG weight 2.75 with moderate tolerance. You've vetoed any game your wife rates below 4."
 
-5. **Utility curve declarations.** When utility curves are configured, the profile includes them as explicit preference statements: "You've declared a complexity sweet spot at BGG weight 2.75 with moderate tolerance. You've vetoed any game your wife rates below 4."
-
-The profile is a read-only computation. It doesn't alter scores, ratings, or any stored data. It updates whenever the underlying data changes (new ratings, new games, curve changes).
+The profile is a read-only computation. It doesn't alter scores, ratings, or any stored data.
 
 ### Rationale
 
@@ -108,7 +129,7 @@ The insight it surfaces is genuinely useful: most users have never computed the 
 
 ### Scope
 
-**Medium.** New daemon service, new API endpoints, new UI section (web) and command (CLI). The math is straightforward. The interesting work is deciding which statistics are worth surfacing and how to present them without overwhelming the user.
+**Medium.** New daemon service, new API endpoints, new UI page (Profile Overview replaces home), and CLI command. The math is straightforward. The interesting work is deciding which statistics are worth surfacing and how to present them without overwhelming the user.
 
 ---
 
@@ -124,9 +145,10 @@ The existing fitness breakdown (`FitnessResult` in `types.ts:107-121`) already p
 
 Use the Claude Agent SDK (TypeScript) to create an LLM-powered profile narrator. The daemon exposes a new endpoint that:
 
-1. Computes the algorithmic profile from Proposal 1 (distributions, clusters, divergences).
+1. Computes the algorithmic profile from Proposal 1 (distributions, clusters, outliers).
 2. Passes the structured profile data to a Claude agent via the Agent SDK.
 3. The agent produces a natural-language narrative that interprets the statistics in the context of the user's collection.
+4. The narrative is cached alongside the profile data. It regenerates only when the underlying profile data changes, not on every page view.
 
 The Agent SDK integration uses:
 
@@ -150,6 +172,8 @@ The user specifically asked for LLM-driven profiling and specifically called out
 
 The subscription benefit is real: the user already pays for Claude access. Using the Agent SDK for profile narration lets the tool leverage that subscription for a feature that pure statistics can't replicate, naming patterns that exist in the data but require interpretation to articulate.
 
+The caching model keeps costs predictable: the narrative regenerates when profile data changes, not on every page view. For a collector who adds a few games a month and tweaks ratings occasionally, this means a handful of LLM calls per month at most.
+
 ### Vision alignment
 
 1. **Anti-goal check.** Automated purchase decisions? No. The narrative describes the existing collection, not what to buy next. Social/competitive? No. BGG replacement? No.
@@ -158,7 +182,7 @@ The subscription benefit is real: the user already pays for Claude access. Using
 
 3. **Tension resolution.** Prediction honesty: the narrative makes observations, not predictions. If it speculates ("you might enjoy cooperative games"), it's clearly framed as interpretation, not a score. Fitness precision vs transparency: the underlying profile data is fully transparent; the narrative is an additional layer, not a replacement.
 
-4. **Constraint check.** New dependency: Claude Agent SDK (TypeScript). This is an external service dependency, but it's the user's own subscription. Network required for LLM calls. The algorithmic profile (Proposal 1) must work standalone without the LLM; the narrative is an enhancement, not a requirement. Cost scales per profile generation, not per page load (profiles are cached and regenerated on demand).
+4. **Constraint check.** New dependency: Claude Agent SDK (TypeScript). This is an external service dependency, but it's the user's own subscription. Network required for LLM calls. The algorithmic profile (Proposal 1) must work standalone without the LLM; the narrative is an enhancement, not a requirement. Cost scales per profile regeneration, not per page load.
 
 ### Scope
 
@@ -220,7 +244,7 @@ The BGG data stored per game includes mechanics (`BggTag[]`), categories (`BggTa
 
 ### Proposal
 
-After the algorithmic profile (Proposal 1) identifies the user's collection characteristics, suggest new axes the user might not have thought to create. Two sources of suggestions:
+After the algorithmic profile (Proposal 1) identifies the user's collection characteristics, suggest new axes the user might not have thought to create. Three sources of suggestions:
 
 1. **Unexpressed concentration.** If 80% of the user's games share a mechanic (say, "Hand Management") and no existing axis captures that dimension, suggest: "You own 24 hand-management games but don't have an axis for it. Creating a 'Hand Management Quality' axis would let you distinguish between the ones that do it well and the ones where it's incidental."
 
@@ -254,92 +278,52 @@ This connects profiling to the scoring system in a feedback loop: profile observ
 
 ---
 
-## Proposal 5: Prediction Engine Seeded by Profile
+## Proposal 5: Collection Outlier Detection
 
 ### Evidence
 
-The deferred prediction engine issue (`deferred-prediction-engine.md`) describes similarity-based prediction for unowned games. The fitness-model brainstorm's Approach 3 (Collection Profile + Attribute Similarity) proposed cosine similarity between game attribute vectors and a taste profile centroid (`fitness-model-options.md:207-285`). That approach was not chosen as the fitness model, but the profile concept is directly relevant here.
+The algorithmic profile (Proposal 1) computes what's typical for the collection: mechanic distributions, complexity ranges, category concentrations. Any game that falls far outside these norms is an outlier, a game that doesn't look like the rest of the shelf.
 
-The `BggGameData` type (`types.ts:33-44`) stores mechanics, categories, families, weight, community rating, and suggested player counts. These fields constitute a feature vector for any BGG game.
+This is distinct from Proposal 3 (tournament/fitness divergence). Proposal 3 asks "where do your two scoring systems disagree about a game?" Outlier detection asks "which games don't fit who you are?" A game could score fine on both fitness and tournament and still be the lone heavy wargame in a collection of medium-weight euros.
 
-### Proposal
-
-The algorithmic profile from Proposal 1 produces a collection centroid in BGG attribute space: the average mechanic distribution, complexity range, player count preference, and category frequency across rated games. This centroid is the "taste vector" that the prediction engine uses to estimate fitness for unowned games.
-
-The prediction works:
-
-1. Represent each rated game as a feature vector: BGG mechanics (binary), categories (binary), weight (continuous), player count range, play time. Weight each dimension by how much variance it explains in the user's fitness scores (a simple correlation).
-2. The collection profile is the weighted centroid of these vectors, biased toward higher-rated games.
-3. For an unowned game, compute similarity to the centroid. Map similarity to predicted fitness on the 1-10 scale, anchored to the user's actual score distribution (so the prediction lands in the range the user actually uses, not an abstract 1-10).
-4. Confidence signal: how many similar games exist in the collection, how tight the cluster is, and which axes have data vs. which are interpolated.
-
-The profile IS the prediction model. No separate training step, no ML pipeline, no external service. The same statistics that describe the collection's identity also power the prediction.
-
-This connects three deferred features in one architecture: collection profiling, prediction engine, and (via axis suggestions from Proposal 4) the collection-awareness that the redundancy scoring stub (`[STUB: redundancy-scoring]`) eventually needs.
-
-### Rationale
-
-The fitness-model brainstorm evaluated and rejected Approach 3 as the primary fitness model because it couldn't handle personal, idiosyncratic axes. But as a prediction layer for unowned games (where personal ratings don't exist by definition), the attribute-similarity approach is ideal. The brainstorm's own verdict: "Prediction is the strongest of any approach, any BGG game can be scored."
-
-The profile-prediction connection means the prediction engine gets better as the collection grows, with no additional user effort. Every new rating sharpens the centroid. Every new axis weight shifts what the centroid emphasizes.
-
-### Vision alignment
-
-1. **Anti-goal check.** Predicted fitness is information, not a purchase recommendation. The anti-goal is "automated purchase decisions"; the prediction explicitly doesn't tell the user to buy anything. It shows what the data looks like through the lens of their preferences.
-
-2. **Principle alignment.** Principle 4 ("data serves judgment") is the direct driver. Principle 2 extends: predicted scores must be as decomposable as rated scores, showing which attributes drove the prediction and at what confidence.
-
-3. **Tension resolution.** Prediction coverage vs prediction honesty: honesty wins (per tension table). The prediction includes confidence signals, and "insufficient data" is a valid output. The minimum viable collection threshold (deferred-prediction-engine.md:25 suggests 20+ games) is enforced: the profile refuses to predict below that threshold.
-
-4. **Constraint check.** No external services. Local computation. The feature vectors come from BGG data already cached in the collection. Requires Proposal 1 as foundation.
-
-### Scope
-
-**Large.** Feature vector representation, centroid computation, similarity scoring, confidence estimation, prediction caching, UI for predicted scores (distinct from rated scores), and the "minimum viable collection" threshold logic. This is the largest single feature in the profiling space.
-
----
-
-## Proposal 6: Profile Changelog and Drift Detection
-
-### Evidence
-
-The `Collection` type (`types.ts:80-87`) stores `createdAt` and `updatedAt`. Individual games and axes have timestamps. Tournament comparisons have `createdAt` (`types.ts:155`). No code tracks how the collection's aggregate character has changed over time.
-
-The vision's Principle 3 example says "after rating 20 games, the system can surface" preferences. But the profile at 20 games is different from the profile at 50 games. The user's taste may have genuinely shifted, or the early profile may have been an artifact of which games were rated first.
+The BGG data needed for this analysis is already stored per game: mechanics, categories, weight, player count, play time. The profile from Proposal 1 provides the baseline to compare against.
 
 ### Proposal
 
-Store periodic profile snapshots (weekly or on significant collection changes, like adding 5+ games or completing 10+ tournament comparisons). The profile view includes a "how your taste has evolved" section:
+Use the collection's statistical profile as a baseline to identify games that sit outside the collection's identity. An outlier is a game whose BGG attributes place it far from the collection's center of gravity across multiple dimensions.
 
-- "When you had 15 games, your collection was 70% strategy. After adding 10 family games last month, it's now 55% strategy, 30% family."
-- "Your complexity sweet spot has drifted from BGG weight 3.0 (January) to 2.5 (April). Your recent additions are consistently lighter."
-- "Your tournament preferences have become more consistent with your fitness scores over time. The divergence gap narrowed from 2.1 average to 0.8."
+Outlier detection computes:
 
-This is meaningful for a curation tool specifically. The user is making deliberate shelf decisions; seeing how those decisions have shifted their collection's identity over months is the long-game version of Principle 3.
+1. **Attribute distance.** For each game, measure how far its mechanics, categories, complexity, and play time deviate from the collection's typical values. A game that's unusual on one dimension isn't necessarily an outlier (you might own one 4-hour game among mostly 1-hour games). A game that's unusual on several dimensions is genuinely different from everything else on the shelf.
 
-Snapshots are stored as JSON in the data directory alongside `collection.json`. Each snapshot is the output of the algorithmic profile (Proposal 1) at a point in time. The changelog is a diff between snapshots.
+2. **Outlier classification.** Not all outliers mean the same thing:
+   - **Lone wolves:** games with no close neighbors in the collection. "Twilight Imperium shares zero mechanics with any other game you own and sits 2 points above your complexity sweet spot."
+   - **Category orphans:** games in BGG categories or subdomains that appear nowhere else in the collection. "This is your only wargame."
+   - **High-fitness outliers:** games the axes love but the profile says shouldn't belong. These are interesting because the user's explicit ratings say "keep it" even though the collection's identity says "this doesn't fit." That's a deliberate choice worth naming.
+
+3. **Outlier as signal, not judgment.** The profile surfaces outliers without recommending action. "This game doesn't look like the rest of your collection" is an observation. The user decides whether that means "maybe I should sell it" or "I love this game precisely because it's different."
+
+For the LLM narrative (Proposal 2), outliers are rich material: "Your shelf has a clear identity: medium-weight, hand-management-heavy euros. Three games break that pattern: Twilight Imperium, Codenames, and Gloomhaven. Each is an outlier for different reasons."
 
 ### Rationale
 
-A static profile describes what the collection is now. A profile with history describes what the user has been building. For a tool whose thesis is intentional curation, the trajectory matters as much as the current state. "Your shelf is getting lighter and more partner-friendly" is information the user can act on, whether to continue the trend or push back against it.
+The original Proposal 6 (drift detection over time) was rejected because taste drift happens over years, not months, and the snapshot model would produce identical snapshots for long stretches. But the question underlying it, "what doesn't fit?", is still valuable. Outlier detection answers it without needing temporal data. It works on the collection as it exists right now.
 
-This also provides a natural hook for the LLM narrative (Proposal 2): temporal patterns are rich material for interpretation. "Six months ago you owned zero cooperative games. Now you own five and they're climbing your tournament rankings. Something changed."
-
-### Rationale for small snapshots: the collection is stored as a single JSON file. A profile snapshot is a few KB of aggregate statistics, not a full collection copy. Even weekly snapshots for a year produce under 1MB.
+For a curation tool, knowing which games sit outside your collection's identity is directly useful. It might confirm a suspicion ("I always felt like that game didn't belong"), or it might surface something unexpected ("I didn't realize this was my only cooperative game").
 
 ### Vision alignment
 
-1. **Anti-goal check.** Observational, not prescriptive. Describes what happened, not what should happen next. Not social, not a BGG feature.
+1. **Anti-goal check.** Not a purchase recommendation. Not social. Not prescriptive ("you should sell these outliers"). The system names what's different; the user decides what it means.
 
-2. **Principle alignment.** Principle 3 extended over time. Principle 2: drift is computed from the same transparent data as the current profile. Principle 4: the trajectory is data that serves judgment about future curation decisions.
+2. **Principle alignment.** Principle 3 ("your collection has an identity"): outliers are the negative space that defines the identity. Knowing what doesn't fit sharpens understanding of what does. Principle 4: data serves judgment. The outlier list is information, not a cull recommendation.
 
-3. **Tension resolution.** No new tensions. The changelog inherits the transparency properties of the underlying profile.
+3. **Tension resolution.** The interesting tension: does an outlier indicate a bad purchase or a valued exception? The system doesn't resolve this. It names the game as unusual and lets the user decide. Consistent with "data serves judgment, doesn't replace it."
 
-4. **Constraint check.** No external dependencies. Small storage footprint. Requires Proposal 1 as foundation.
+4. **Constraint check.** No new dependencies. Computation is local. Requires Proposal 1's profile data as the baseline.
 
 ### Scope
 
-**Medium.** Snapshot storage, periodic trigger logic, diff computation between snapshots, UI for displaying timeline. The snapshot format is a subset of the profile output. The diff logic is the interesting part.
+**Medium.** Requires Proposal 1 as foundation. New computation (multi-dimensional distance from collection centroid), new section in profile output, new UI elements. The interesting design work is choosing the right distance metric and deciding what threshold constitutes "outlier" without being too noisy.
 
 ---
 
@@ -347,13 +331,13 @@ This also provides a natural hook for the LLM narrative (Proposal 2): temporal p
 
 The following are things the profiling feature should explicitly not become:
 
-1. **Not a recommendation engine.** The profile describes what the user already owns and values. It does not say "you should buy X." Prediction (Proposal 5) estimates fitness for unowned games, but presenting that as "recommended" crosses into the anti-goal of automated purchase decisions. The distinction matters: "this game would score 7.8 based on your profile" is information. "We recommend this game" is a purchase decision.
+1. **Not a recommendation engine.** The profile describes what the user already owns and values. It does not say "you should buy X." The prediction engine (parked) would estimate fitness for unowned games, but even that presents information, not recommendations.
 
 2. **Not a social signal.** No sharing, exporting for social media, or "what kind of gamer are you?" quiz-style outputs. The profile serves the owner, not an audience.
 
 3. **Not a replacement for axis ratings.** The profile observes patterns in existing ratings. It doesn't generate ratings, fill in missing ratings, or override the user's input. If the profile suggests an axis (Proposal 4), the user still creates it and rates games on it manually.
 
-4. **Not always-on LLM inference.** The LLM narration (Proposal 2) is an on-demand feature, not a background process. The algorithmic profile (Proposal 1) updates deterministically when data changes. The LLM narrative is regenerated when the user requests it. No ambient LLM calls, no background token consumption.
+4. **Not always-on LLM inference.** The LLM narration (Proposal 2) regenerates when the profile data changes, not on every page view. No ambient LLM calls, no background token consumption. The algorithmic profile (Proposal 1) is the primary dataset; the narrative is a cached enhancement.
 
 5. **Not a prescriptive curation coach.** "You should cull your party games" is not the system's job. "Your party games consistently score below 4 on your axes and rank in the bottom third of your tournament" is. The user decides what to do with that information.
 
@@ -363,25 +347,28 @@ The following are things the profiling feature should explicitly not become:
 
 The proposals have a natural dependency chain:
 
-1. **Proposal 1 (Algorithmic Profile)** is the foundation. Everything else reads from it.
-2. **Proposal 3 (Tournament/Fitness Divergence)** is small and depends only on existing data. Can ship alongside Proposal 1.
-3. **Proposal 4 (Axis Suggestions)** requires Proposal 1's distribution data. Can ship in the same release or immediately after.
-4. **Proposal 6 (Profile Changelog)** requires Proposal 1's output format to be stable before snapshotting. Ship after Proposal 1 has been in use briefly.
-5. **Proposal 2 (LLM Narration via Agent SDK)** is an enhancement layer over Proposal 1. Ship when the algorithmic profile proves its value and the Agent SDK integration is justified.
-6. **Proposal 5 (Prediction Engine)** is the largest feature. Depends on Proposal 1's centroid computation. Can be developed in parallel with Proposals 2-4 but should ship after the profile is validated.
+1. **Proposal 1 (Algorithmic Profile)** is the foundation. Everything else reads from it. Includes the Profile Overview page replacing home.
+2. **Proposal 3 (Tournament/Fitness Divergence)** is small and depends only on existing data. Ships alongside Proposal 1 as a section on the profile page.
+3. **Proposal 5 (Collection Outlier Detection)** requires Proposal 1's profile data as a baseline. Can ship alongside or immediately after Proposals 1+3.
+4. **Proposal 4 (Axis Suggestions)** requires Proposal 1's distribution data and benefits from Proposal 3's divergence data. Ships after the profile page is established.
+5. **Proposal 2 (LLM Narration via Agent SDK)** is an enhancement layer over all of the above. Ships when the algorithmic profile, divergence, and outlier data prove their value and provide rich material for the narrative. The cached narration sits at the top of the Profile Overview page.
 
-The minimum viable profiling feature is Proposal 1 + Proposal 3. That gives the user a deterministic, transparent collection identity with the most interesting insight (stated vs. revealed preference divergence) included from the start.
+The minimum viable profiling feature is **Proposals 1 + 3**: a deterministic, transparent collection identity with the most interesting insight (stated vs. revealed preference divergence) included from the start. Proposal 5 (outlier detection) is a strong candidate for the same release since it reads from the same data Proposal 1 already computes.
 
 ---
 
-## Open Questions
+## Resolved Questions
 
-1. **Where does the profile live in the UI?** A dedicated "Profile" page? A section on the collection page? A separate view accessible from the nav? The profile is a different mode of looking at the collection (aggregate vs. per-game), which suggests a separate page. But it should be reachable from the collection page, since that's where the user encounters their games.
+1. **Profile Overview as home page.** The profile replaces the current home page. The collection list moves to a separate "Collection" page in the nav. Different interaction modes (aggregate understanding vs. per-game browsing) belong on different pages.
 
-2. **CLI presentation.** A `shelf-judge profile` command is natural. How much statistical detail goes in the terminal output vs. being web-only? The CLI should show the highlights; the web UI can show the full distribution visualizations.
+2. **CLI presentation.** The CLI is a programmatic interface for LLM/agent access, not a human-facing summary. The `shelf-judge profile` command returns the full profile as structured JSON. The web UI handles all human-facing presentation and visualization.
 
-3. **Minimum collection size.** Below what threshold is the profile not meaningful? The prediction engine issue suggests 20 games. The algorithmic profile might produce useful observations with fewer (even 10 games show mechanic concentrations). Define a progressive disclosure: show what's meaningful at each collection size, not an arbitrary "unlock at N games" gate.
+3. **Minimum collection size.** No minimum gate. The profile computes everything from whatever data exists. At 200 games (current dataset size), every analysis is meaningful. No progressive disclosure needed.
 
-4. **Profile regeneration trigger.** Every data change? On demand only? A hybrid (dirty flag that triggers recalculation on next view)? The profile should feel current without requiring explicit refresh, but computing distributions over the full collection on every page load is wasteful even for small collections.
+4. **Profile regeneration trigger.** Dirty flag model. Any write to collection data (ratings, games, axes, tournament results, BGG refreshes) sets the flag. Profile recomputes lazily on next view.
 
-5. **Agent SDK authentication.** The SDK research (`claude-agent-sdk.md:192-195`) documents authentication via `ANTHROPIC_API_KEY` or cloud provider credentials. How does Shelf Judge store and manage the API key? This is a new secret management concern for a previously local-only tool.
+5. **LLM narration cache invalidation.** Three states: **current** (show narration), **stale** (show old narration with indicator and "regenerate" button), **empty** (no narration generated yet, prompt to generate or show nothing if no API key). Stale narration is better than nothing. Regeneration is always user-initiated, never automatic.
+
+6. **Agent SDK authentication.** Not the app's concern. The daemon uses the Claude Agent SDK; the SDK handles its own authentication. Shelf Judge does not store, configure, or manage API keys. If the SDK can't authenticate, the narration is unavailable (empty state).
+
+7. **Outlier threshold tuning.** Default to 2 standard deviations from the collection centroid. Validate against the 200-game collection during implementation; adjust if it flags too many or too few.
