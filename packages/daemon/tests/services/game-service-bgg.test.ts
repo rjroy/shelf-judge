@@ -187,9 +187,10 @@ describe("GameService BGG Integration", () => {
       expect(result.score).not.toBeNull();
       expect(result.score!.ratedAxisCount).toBe(2);
 
-      // Community Rating: 8.00153, Complexity: 2.4802 * 2 = 4.9604
-      // Equal weights (50/50): rounds to 6.5
-      expect(result.score!.score).toBe(6.5);
+      // Community Rating: 8.00153 (1-10 scale, identity)
+      // Complexity: 2.4802 on 1-5 scale, higher-is-better: 1 + 9*(2.4802-1)/4 = 4.33
+      // Equal weights (50/50): (8.00153 + 4.33) / 2 ≈ 6.17 -> 6.2
+      expect(result.score!.score).toBe(6.2);
     });
 
     test("excludes BGG-derived axes when bggData absent", async () => {
@@ -225,7 +226,7 @@ describe("GameService BGG Integration", () => {
       expect(complexityBreakdown).toBeDefined();
       expect(complexityBreakdown!.source).toBe("override");
       expect(complexityBreakdown!.rating).toBe(7);
-      expect(complexityBreakdown!.bggOriginal).toBe(5.0); // 2.4802 * 2, rounded
+      expect(complexityBreakdown!.bggOriginal).toBe(2.5); // raw BGG weight 2.4802, rounded
     });
   });
 });
