@@ -1,7 +1,7 @@
 import * as os from "os";
 import * as path from "path";
 import { describe, expect, test } from "bun:test";
-import type { Collection } from "@shelf-judge/shared";
+import type { Collection, ProfileData, CollectionProfile } from "@shelf-judge/shared";
 import { createStorageService } from "../../src/services/storage-service.js";
 import { createMockFileOps } from "../helpers/mock-file-ops.js";
 
@@ -195,5 +195,62 @@ describe("StorageService.saveConfig", () => {
     expect(writeCalls[0].method).toBe("writeFile");
     expect(writeCalls[0].args[0]).toContain(".tmp");
     expect(writeCalls[1].method).toBe("rename");
+  });
+});
+
+const PROFILE_PATH = "/test/data/profile.json";
+
+function makeEmptyProfile(): CollectionProfile {
+  return {
+    axisDistributions: [],
+    axisWeights: [],
+    bggClustering: { mechanics: [], categories: [], subdomains: [], weightRanges: [] },
+    utilityCurves: [],
+    divergence: null,
+    outliers: [],
+    suggestions: [],
+    gameCount: 0,
+    ratedGameCount: 0,
+    computedAt: "2026-01-01T00:00:00.000Z",
+  };
+}
+
+describe("StorageService.loadProfile", () => {
+  test("returns null when file doesn't exist", async () => {
+    const { service } = makeService();
+    const profile = await service.loadProfile();
+    expect(profile).toBeNull();
+  });
+
+  test("loads profile from valid JSON file", async () => {
+    const profileData: ProfileData = {
+      profile: makeEmptyProfile(),
+      computedAt: "2026-01-01T00:00:00.000Z",
+    };
+    const { service } = makeService({
+      [PROFILE_PATH]: JSON.stringify(profileData),
+    });
+
+    const loaded = await service.loadProfile();
+    expect(loaded).not.toBeNull();
+    expect(loaded!.computedAt).toBe("2026-01-01T00:00:00.000Z");
+    expect(loaded!.profile.gameCount).toBe(0);
+  });
+});
+
+describe("StorageService.saveProfile", () => {
+  test("writes and loads correctly (round-trip)", async () => {
+    const { service } = makeService();
+    const profileData: ProfileData = {
+      profile: { ...makeEmptyProfile(), gameCount: 42 },
+      computedAt: "2026-03-15T12:00:00.000Z",
+    };
+
+    await service.saveProfile(profileData);
+    const loaded = await service.loadProfile();
+
+    expect(loaded).not.toBeNull();
+    expect(loaded!.computedAt).toBe("2026-03-15T12:00:00.000Z");
+    expect(loaded!.profile.gameCount).toBe(42);
   });
 });

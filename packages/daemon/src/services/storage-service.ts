@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import * as os from "node:os";
 import { v4 as uuidv4 } from "uuid";
-import type { Collection, AppConfig, TournamentData } from "@shelf-judge/shared";
+import type { Collection, AppConfig, TournamentData, ProfileData } from "@shelf-judge/shared";
 import { TournamentDataSchema } from "@shelf-judge/shared";
 import type { FileOps } from "./file-ops.js";
 import { getTempPath } from "./file-ops.js";
@@ -14,6 +14,8 @@ export interface StorageService {
   saveConfig(config: AppConfig): Promise<void>;
   loadTournament(): Promise<TournamentData>;
   saveTournament(data: TournamentData): Promise<void>;
+  loadProfile(): Promise<ProfileData | null>;
+  saveProfile(data: ProfileData): Promise<void>;
 }
 
 export interface StorageServiceDeps {
@@ -82,6 +84,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
   const { dataDir, configPath, fileOps } = deps;
   const collectionPath = path.join(dataDir, "collection.json");
   const tournamentPath = path.join(dataDir, "tournament.json");
+  const profilePath = path.join(dataDir, "profile.json");
 
   return {
     async loadCollection(): Promise<Collection> {
@@ -146,6 +149,19 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     async saveTournament(data: TournamentData): Promise<void> {
       await fileOps.mkdir(dataDir);
       await atomicWrite(tournamentPath, JSON.stringify(data, null, 2), fileOps);
+    },
+
+    async loadProfile(): Promise<ProfileData | null> {
+      const exists = await fileOps.exists(profilePath);
+      if (!exists) return null;
+
+      const raw = await fileOps.readFile(profilePath);
+      return JSON.parse(raw) as ProfileData;
+    },
+
+    async saveProfile(data: ProfileData): Promise<void> {
+      await fileOps.mkdir(dataDir);
+      await atomicWrite(profilePath, JSON.stringify(data, null, 2), fileOps);
     },
   };
 }

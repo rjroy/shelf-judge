@@ -37,6 +37,12 @@ function createStubStorage(): StorageService & { tournamentData: TournamentData 
     saveConfig(): Promise<void> {
       return Promise.resolve();
     },
+    loadProfile(): Promise<null> {
+      return Promise.resolve(null);
+    },
+    saveProfile(): Promise<void> {
+      return Promise.resolve();
+    },
   };
 
   return stub;

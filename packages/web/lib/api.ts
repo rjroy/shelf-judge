@@ -124,6 +124,14 @@ export async function importBggCollection(username: string): Promise<Response> {
   return response;
 }
 
+// Profile API functions
+
+import type { CollectionProfile } from "@shelf-judge/shared";
+
+export async function getProfile(): Promise<CollectionProfile> {
+  return daemonJson("/api/profile");
+}
+
 // Tournament API functions
 
 import type {
@@ -212,4 +220,5 @@ export type {
   BggSearchResult,
   ImportProgress,
   ImportComplete,
+  CollectionProfile,
 };
