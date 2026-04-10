@@ -6,14 +6,37 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 
 const navGroups = [
   {
-    label: "Library",
+    label: "Overview",
     items: [
       {
         href: "/",
+        name: "Profile",
+        icon: (
+          <svg className="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 2a5 5 0 110 10A5 5 0 018 3zm0 2a3 3 0 100 6 3 3 0 000-6zm0 2a1 1 0 110 2 1 1 0 010-2z" />
+          </svg>
+        ),
+      },
+    ],
+  },
+  {
+    label: "Library",
+    items: [
+      {
+        href: "/collection",
         name: "Collection",
         icon: (
           <svg className="nav-icon" viewBox="0 0 16 16" fill="currentColor">
             <path d="M2 2h12v12H2V2zm1 1v10h10V3H3zm2 2h6v1H5V5zm0 3h6v1H5V8zm0 3h4v1H5v-1z" />
+          </svg>
+        ),
+      },
+      {
+        href: "/search",
+        name: "Add Games",
+        icon: (
+          <svg className="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 1a6 6 0 110 12A6 6 0 018 2zm0 3v2H6v1h2v2h1V8h2V7H9V5H8z" />
           </svg>
         ),
       },
@@ -43,20 +66,11 @@ const navGroups = [
     ],
   },
   {
-    label: "Add",
+    label: "Settings",
     items: [
       {
-        href: "/search",
-        name: "Add Game",
-        icon: (
-          <svg className="nav-icon" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 1a6 6 0 110 12A6 6 0 018 2zm0 3v2H6v1h2v2h1V8h2V7H9V5H8z" />
-          </svg>
-        ),
-      },
-      {
         href: "/import",
-        name: "Import BGG",
+        name: "Import / BGG",
         icon: (
           <svg className="nav-icon" viewBox="0 0 16 16" fill="currentColor">
             <path d="M14 3H2a1 1 0 00-1 1v8a1 1 0 001 1h12a1 1 0 001-1V4a1 1 0 00-1-1zM8 11l-4-3h2.5V7h3v1H12L8 11z" />
@@ -69,7 +83,7 @@ const navGroups = [
 
 function isActive(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";
-  return pathname.startsWith(href);
+  return pathname === href || pathname.startsWith(href + "/");
 }
 
 const SidebarContext = createContext<{ open: boolean; toggle: () => void; close: () => void }>({

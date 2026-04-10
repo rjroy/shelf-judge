@@ -1,7 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { getGame, listAxes, getTournamentGameStats } from "@/lib/api";
-import type { TournamentGameStatsDisplay } from "@shelf-judge/shared";
+import { getGame, listAxes, getTournamentGameStats, getProfile } from "@/lib/api";
+import type {
+  TournamentGameStatsDisplay,
+  DivergentGame,
+  CollectionOutlier,
+} from "@shelf-judge/shared";
 import { ScoreBreakdown } from "@/components/score-breakdown";
 import { RatingForm } from "@/components/rating-form";
 import { GameActions } from "@/components/game-actions";
@@ -29,12 +33,21 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
   let data;
   let axes;
   let tournamentStats: TournamentGameStatsDisplay | null = null;
+  let profileDivergence: DivergentGame | null = null;
+  let profileOutlier: CollectionOutlier | null = null;
   try {
     [data, axes] = await Promise.all([getGame(id), listAxes()]);
     try {
       tournamentStats = await getTournamentGameStats(id);
     } catch {
       // Tournament stats may not exist yet
+    }
+    try {
+      const profile = await getProfile();
+      profileDivergence = profile.divergence?.find((d) => d.gameId === id) ?? null;
+      profileOutlier = profile.outliers.find((o) => o.gameId === id) ?? null;
+    } catch {
+      // Profile may not exist yet
     }
   } catch (err) {
     return (
@@ -61,7 +74,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
       {/* Topbar with breadcrumb */}
       <div className="topbar">
         <div className="breadcrumb">
-          <Link href="/">Collection</Link>
+          <Link href="/collection">Collection</Link>
           <span>›</span>
           <strong>{game.name}</strong>
         </div>
@@ -199,6 +212,89 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
             {score.score.toFixed(1)}) and tournament rank (
             {tournamentStats!.normalizedScore!.toFixed(1)}) differ by more than 2.0 points. This may
             indicate your axis ratings and head-to-head preferences are measuring different things.
+          </div>
+        )}
+
+        {profileDivergence && (
+          <div className="profile-divergence-detail">
+            <div className="profile-detail-title">Profile Divergence</div>
+            <div className="divergence-row">
+              <div className="div-game-name">
+                {profileDivergence.direction === "tournament-outlier"
+                  ? "Tournament rates higher than fitness"
+                  : "Fitness rates higher than tournament"}
+              </div>
+              <div className="div-scores">
+                <div className="div-score">
+                  <span className="div-score-val fitness">
+                    {profileDivergence.fitnessScore.toFixed(1)}
+                  </span>
+                  <span className="div-score-lbl">Fitness</span>
+                </div>
+                <span className="div-arrow">&rarr;</span>
+                <div className="div-score">
+                  <span className="div-score-val tournament">
+                    {profileDivergence.normalizedTournamentScore.toFixed(1)}
+                  </span>
+                  <span className="div-score-lbl">Tournament</span>
+                </div>
+                <span className={`div-gap ${profileDivergence.direction}`}>
+                  {profileDivergence.direction === "tournament-outlier" ? "+" : "\u2212"}
+                  {profileDivergence.gap.toFixed(1)}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {profileOutlier && (
+          <div className="profile-outlier-detail">
+            <div className="profile-detail-title">Collection Outlier</div>
+            <div className="outlier-row">
+              <div className="outlier-info">
+                <div className="outlier-reason">
+                  Composite distance <span>{profileOutlier.distances.composite.toFixed(2)}</span>{" "}
+                  from collection centroid
+                </div>
+                <div className="outlier-distance">
+                  {profileOutlier.distances.binary !== null && (
+                    <span
+                      className={`dist-component${profileOutlier.distances.binary >= 0.7 ? " high" : ""}`}
+                    >
+                      Mechanics: {profileOutlier.distances.binary.toFixed(2)}
+                    </span>
+                  )}
+                  {profileOutlier.distances.continuous !== null && (
+                    <span
+                      className={`dist-component${profileOutlier.distances.continuous >= 0.7 ? " high" : ""}`}
+                    >
+                      BGG attrs: {profileOutlier.distances.continuous.toFixed(2)}
+                    </span>
+                  )}
+                  {profileOutlier.distances.personalAxes !== null && (
+                    <span
+                      className={`dist-component${profileOutlier.distances.personalAxes >= 0.7 ? " high" : ""}`}
+                    >
+                      Axis ratings: {profileOutlier.distances.personalAxes.toFixed(2)}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="outlier-type-tags">
+                {profileOutlier.classifications.map((cls) => (
+                  <span
+                    key={cls}
+                    className={`outlier-type-tag ${cls === "lone-wolf" ? "lone-wolf" : cls === "category-orphan" ? "category-orphan" : "high-fitness"}`}
+                  >
+                    {cls === "lone-wolf"
+                      ? "Lone Wolf"
+                      : cls === "category-orphan"
+                        ? "Category Orphan"
+                        : "High-Fitness"}
+                  </span>
+                ))}
+              </div>
+            </div>
           </div>
         )}
 
