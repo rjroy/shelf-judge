@@ -25,6 +25,9 @@ interface MigrationResult {
  *                 active session holds its own comparisons.
  *
  * Idempotent: already-migrated data passes through unchanged.
+ *
+ * Caller must validate the returned data with TournamentDataSchema. The non-migration
+ * path returns raw data without structural verification.
  */
 export function migrateTournamentData(raw: Record<string, unknown>): MigrationResult {
   const topComparisons = raw.comparisons;

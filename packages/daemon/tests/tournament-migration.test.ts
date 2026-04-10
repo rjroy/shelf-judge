@@ -357,6 +357,58 @@ describe("migrateTournamentData", () => {
     ]);
   });
 
+  test("caps recentComparisons at 10 most-recent when comparisons arrive out of order", () => {
+    // 15 comparisons in REVERSE chronological order (newest first in the raw array).
+    // The migration must sort before capping so the 10 truly most-recent survive.
+    const comparisons = Array.from({ length: 15 }, (_, i) =>
+      makeComparison(
+        `c${i}`,
+        "g1",
+        "g2",
+        i % 2 === 0 ? "g1" : "g2",
+        "s1",
+        // i=0 is newest (T14), i=14 is oldest (T00)
+        `2026-01-01T${String(14 - i).padStart(2, "0")}:00:00Z`,
+      ),
+    );
+
+    const raw = {
+      settings: baseSettings,
+      sessions: [
+        {
+          id: "s1",
+          filters: null,
+          gameIds: ["g1", "g2"],
+          comparisonCount: 15,
+          status: "completed",
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T15:00:00Z",
+        },
+      ],
+      comparisons,
+      gameStats: {
+        g1: { eloRating: 1510, comparisonCount: 15 },
+        g2: { eloRating: 1490, comparisonCount: 15 },
+      },
+    };
+
+    const { data } = migrateTournamentData(raw);
+    expect(data.gameStats.g1.recentComparisons).toHaveLength(10);
+    expect(data.gameStats.g2.recentComparisons).toHaveLength(10);
+
+    // Most recent (T14) should be first despite being first in the unsorted array
+    expect(data.gameStats.g1.recentComparisons[0].createdAt).toBe("2026-01-01T14:00:00Z");
+    // Oldest retained (T05) should be last; T00-T04 should be dropped
+    expect(data.gameStats.g1.recentComparisons[9].createdAt).toBe("2026-01-01T05:00:00Z");
+
+    // Verify the dropped comparisons (T00-T04) are NOT present
+    const g1Timestamps = data.gameStats.g1.recentComparisons.map((c) => c.createdAt);
+    for (let h = 0; h < 5; h++) {
+      const droppedTs = `2026-01-01T${String(h).padStart(2, "0")}:00:00Z`;
+      expect(g1Timestamps).not.toContain(droppedTs);
+    }
+  });
+
   test("empty top-level comparisons array triggers migration but produces clean output", () => {
     const raw = {
       settings: baseSettings,
