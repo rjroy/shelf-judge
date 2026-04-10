@@ -1,7 +1,7 @@
 ---
 title: "Implementation plan: reduce-tournament-overhead"
 date: 2026-04-10
-status: draft
+status: approved
 tags: [plan, tournament, storage, performance, data-model, migration]
 modules: [shared, daemon, cli]
 related:
