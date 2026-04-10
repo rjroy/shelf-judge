@@ -12,6 +12,7 @@ related:
   - .lore/designs/mvp-fitness-model.md
   - .lore/specs/utility-curves.md
   - .lore/specs/tournament-ranking.md
+  - .lore/mockups/prediction-engine.html
 ---
 
 # Plan: Prediction Engine for Unrated Games
@@ -103,11 +104,14 @@ Bun monorepo, four workspace packages. The daemon owns all data via services inj
 
 - `packages/daemon/src/routes/prediction.ts` (new): predict game, readiness, collection with predictions
 
-**Web**:
+**Web** (layout and visual treatment defined in `.lore/mockups/prediction-engine.html`):
 
-- `packages/web/app/games/[id]/page.tsx`: predicted score display, reference games, confidence, tension
-- `packages/web/components/collection-table.tsx`: predicted score column, sort by predicted fitness
+- `packages/web/app/games/[id]/page.tsx`: predicted score display, confidence breakdown panel, reference games, tension panel, rating form prediction hints
+- `packages/web/components/collection-table.tsx`: predicted score column, confidence column, prediction toggle, predicted row teal wash
+- `packages/web/app/readiness/page.tsx` (new): dedicated readiness page with stage banner, stage timeline, weak axes, suggested actions
 - `packages/web/lib/api.ts`: new API calls for prediction endpoints
+- `packages/web/app/globals.css`: prediction design tokens (`--predict-*`, `--conf-*`, `--tourney-*`) and component classes
+- Sidebar layout (likely `packages/web/components/sidebar.tsx` or equivalent): readiness widget showing stage, progress bar, count
 
 **CLI**:
 
@@ -476,17 +480,23 @@ The existing `GET /api/games` route gains `?includePredicted=true`. When enabled
 
 ### Phase 5: Web UI
 
-**What changes**: Display predicted scores in the game detail view and collection list. Show confidence levels, reference games, revealed preference tension, and prediction readiness. Visually distinguish predicted from actual scores.
+**Design target**: `.lore/mockups/prediction-engine.html` — 5 mockup sections define the visual language and layout. All UI decisions below reference this mockup. Open the mockup in a browser for visual reference while implementing.
+
+**What changes**: Display predicted scores in the game detail view and collection list. Show confidence levels, reference games, revealed preference tension, and prediction readiness. Visually distinguish predicted from actual scores. Add a dedicated readiness page.
 
 **Files modified**:
 
 - `packages/web/lib/api.ts` -- add prediction API calls
 - `packages/web/app/games/[id]/page.tsx` -- predicted score display, confidence, reference games, tension
-- `packages/web/components/collection-table.tsx` -- predicted score column, sort by predicted fitness
+- `packages/web/components/collection-table.tsx` -- predicted score column, confidence column, sort by predicted fitness
 - `packages/web/components/score-breakdown.tsx` -- predicted axis entries with confidence badges
-- `packages/web/app/globals.css` -- prediction visual treatment styles
+- `packages/web/app/globals.css` -- prediction visual treatment styles (design tokens, component classes)
 - `packages/web/lib/collection-utils.ts` (line 155) -- the `ratedStatus === "rated"` filter checks `score === null`. When `includePredicted` is active, a predicted-only game has `score !== null` but `ratedAxisCount === 0`. This filter must check `predictionMeta` to correctly classify predicted-only games as "unrated" for filter purposes.
 - `packages/web/app/page.tsx` (line 33) -- the average fitness computation filters by `score !== null`. With predictions enabled, predicted-only scores should not be mixed into the "actual" average. Check `predictionMeta === null` (or `ratedAxisCount > 0`) before including in the average.
+
+**Files created**:
+
+- `packages/web/app/readiness/page.tsx` -- dedicated prediction readiness page (mockup Section 5)
 
 #### Web API additions
 
@@ -496,51 +506,130 @@ Add to `packages/web/lib/api.ts`:
 - `getReadiness(): Promise<PredictionReadiness>` -- calls `GET /api/predictions/readiness`
 - `listGamesWithPredictions(): Promise<GameWithScore[]>` -- calls `GET /api/games?includePredicted=true`
 
-#### Game detail view
+#### Game detail view (mockup Sections 1–3)
 
-The game detail page already shows the fitness breakdown. For games with predicted axes:
+The game detail page already shows the fitness breakdown. For games with predicted axes, the mockup specifies a concrete layout:
 
-- Each predicted axis entry shows a confidence badge (strong/moderate/weak) next to the rating. The badge is a small pill with text and background color distinguishing confidence levels.
-- Clicking or hovering over a predicted rating reveals the reference games: a list of game name + similarity score, matching the spec's example ("predicted 7.2 based on Azul (0.87, rated 8), Patchwork (0.81, rated 7)").
-- The overall score section shows "Predicted" label when `predictionMeta` is non-null.
-- When `RevealedPreferenceTension` is present, a separate section shows both numbers with context (REQ-PRED-28).
+**Score hero area** (mockup Section 1, top-right of game hero):
 
-The visual distinction between predicted and actual: predicted scores use a dashed border or different background tint (implementation decision for the implementer, but the distinction must be unambiguous per REQ-PRED-14).
+- A "PREDICTED" pill badge above the score, teal background with teal text (`--predict-accent: #1a706a`, `--predict-bg: #eaf5f3`, `--predict-border: #a8d9d4`).
+- The score number renders in teal instead of the existing amber (`--score-color`), with a tilde prefix (`~7.4`) to reinforce the estimated nature. The tilde is smaller (`font-size: 28px` vs the `52px` score number), superscript-aligned, reduced opacity.
+- Below the score: "{N} axes predicted · {M} actual" and the overall confidence level in the confidence-level color.
 
-#### Collection list
+**Breakdown table** (mockup Section 1, left panel):
 
-The `CollectionTable` gains a toggle or option to include predicted scores. When enabled:
+- Predicted axis rows use a teal row background (`--predict-bg`). BGG-derived rows use the existing blue wash (`--bgg-bg`). Insufficient-confidence rows use the insufficient background with 65% opacity.
+- Each predicted axis shows an inline confidence badge (pill shape, 9px uppercase text) next to the axis name: "Strong" (green), "Moderate" (amber), "Weak" (orange-red), "Insufficient" (gray). The mockup defines specific colors for each level (`--conf-strong`, `--conf-moderate`, `--conf-weak`, `--conf-insufficient` and their `-bg` variants).
+- The Source column shows a "PREDICTED" source badge in teal alongside the existing "BGG" and "Personal" badges.
+- The Contribution column includes a teal bar fill for predicted rows, a weak-colored bar for weak-confidence rows, and a gray bar for insufficient rows showing "excl." text.
+- The total row shows "~Predicted Fitness" with a summary of contributing vs. excluded axes.
 
-- The page fetches from `listGamesWithPredictions()` instead of `listGames()`.
-- Games with predicted scores show the prediction visual marker in the score column.
-- Sorting by fitness treats predicted and actual scores equally for ordering, but the visual marker prevents confusion.
-- The prediction readiness stage is shown in a small status indicator (location is an implementation decision, likely near the stats strip or as a banner at Stage 0/1).
-- At Stages 0 and 1, suggested actions from readiness are displayed to guide the user.
+**Confidence breakdown panel** (mockup Section 2):
 
-#### CSS
+- Clicking a confidence badge opens an expandable panel (shown inline in a full-colspan table row in the mockup, can also be a popover). The panel title is "{Axis Name} — Confidence Breakdown".
+- A 3-column stat grid: reference game count, average similarity, and rating variance.
+- An explanatory sentence stating which thresholds were met and what would be needed for the next confidence level.
+- A reference game list: each row shows game name, a similarity bar (40px track with proportional fill), the numeric similarity, and the axis rating on that game. This satisfies REQ-PRED-12's "game ID, name, and similarity score" requirement.
+- At the bottom, the weighted average formula is shown explicitly (e.g., "(6 × 0.87 + 5 × 0.81 + 4 × 0.51) / (0.87 + 0.81 + 0.51) = 5.22 → 5.2") for transparency.
 
-New CSS classes for prediction visual treatment:
+**Revealed preference tension** (mockup Section 3):
 
-- `.predicted-score` -- visual distinction (dashed border, tinted background, or similar)
-- `.confidence-badge`, `.confidence-strong`, `.confidence-moderate`, `.confidence-weak` -- confidence level pills
-- `.reference-games-tooltip` or `.reference-games-panel` -- expandable reference game list
-- `.prediction-tension` -- revealed preference tension section
-- `.prediction-readiness` -- readiness stage indicator
-- `.experimental-marker` -- Stage 1 experimental label
+- Below the breakdown table (not in the right panel). The mockup uses a light blue gradient panel (`--tourney-bg`) with a lightning bolt icon and "REVEALED PREFERENCE TENSION" header.
+- Two side-by-side signal cards: "Axis Prediction" (teal value) and "Tournament Pattern" (slate blue value) separated by a "vs" label. A delta value (e.g., "Δ 1.6 points") in the header.
+- Below the signals: a list of tournament neighbor games used for the comparison, each as a small chip with game name and tournament score.
+- An explanation paragraph ending with the REQ-PRED-17 framing: "This is context, not a correction. Both numbers are yours."
+
+**Rating form panel** (mockup Section 1, right panel):
+
+- For unrated axes with predictions, the rating input is replaced by a "prediction hint" row: dashed teal border, showing "Predicted from {N} similar games" with the estimated value and a "Rate →" link.
+- For insufficient-data axes, the hint row uses the insufficient background with "No similar games rated on this axis".
+- A callout box at the top of the rating panel: "Predicted scores shown below. Your ratings override these predictions."
+
+#### Collection list (mockup Section 4)
+
+The mockup makes several layout decisions the plan left open:
+
+- **Toggle location**: A "Predictions on" toggle in the collection stats strip (below the topbar), right-aligned. Uses the teal prediction icon (concentric circles).
+- **Stats strip**: Shows "{N} games" and "{M} with predicted scores" in teal when predictions are active.
+- **Score column**: When sorted by predicted fitness, the column header shows "Score ↓" with "Pred. Fitness" subtitle in teal. Actual scores render in amber; predicted scores render in teal with a tilde prefix (`~7.4`).
+- **Confidence column**: A new column between Score and BGG showing the confidence badge (Actual/Strong/Moderate/Weak) as a pill. This replaces the plan's original suggestion of a visual marker in the score column; the confidence is explicit rather than implied.
+- **Predicted row treatment**: Predicted rows have a faint teal wash (`rgba(26, 112, 106, 0.04)`) and show "· not rated" text after the game name.
+- **Confidence pip**: In the collection table, the mockup uses a 6px colored dot next to predicted scores as a compact confidence indicator. Use the badge form factor instead for clarity (the mockup shows both; use the badge in the Confidence column).
+- Sorting treats predicted and actual scores equally for ordering. The visual language (color, tilde, confidence badge) prevents confusion.
+
+#### Sidebar readiness widget (mockup Section 1, sidebar)
+
+The mockup places prediction readiness in the sidebar as a small widget:
+
+- Located above the sidebar footer, below the nav section.
+- Shows: "PREDICTIONS" label, "Stage {N} — {label}" stage name, a progress bar (tracking toward next stage), and a count string ("22 rated · 8 more for Stage 3").
+- Uses teal coloring on the dark sidebar background (`rgba(26, 112, 106, 0.15)` background, `rgba(26, 112, 106, 0.3)` border).
+- This widget appears on all pages, not just the collection list. It is the persistent readiness indicator.
+
+#### Readiness page (mockup Section 5)
+
+The mockup introduces a dedicated "Prediction Readiness" page, accessible via a "Readiness" nav item under a "Predictions" nav section in the sidebar:
+
+- **Stage banner**: A prominent teal banner at the top showing the current stage name, description, and a progress bar with "{N} / {M} rated" toward the next stage.
+- **Stage timeline**: A 4-column grid showing all four stages (0, 1, 2, 3) with their thresholds and descriptions. The current stage is highlighted with a thicker border; past stages are dimmed.
+- **Weak axes section** ("Axes with Thin Coverage"): A 2-column grid of cards.
+  - Left card: "Coverage per axis" showing each personal axis with a bar chart of rated game count. Bars are colored by tier (low/medium/high).
+  - Right card: "Underrepresented mechanic clusters" listing mechanic groups with their rated game count and a confidence pip.
+- **Suggested actions**: A list of actionable suggestions, each as a card with a teal dot and descriptive text (e.g., "Rate Theme Immersion and Table Appeal on games already in your collection").
+
+#### CSS design tokens and classes
+
+The mockup defines a complete set of CSS custom properties. Add to `globals.css`:
+
+**New prediction tokens** (alongside existing tokens):
+
+- `--predict-accent: #1a706a` (deep teal)
+- `--predict-bg: #eaf5f3` (soft teal wash)
+- `--predict-border: #a8d9d4`
+
+**Confidence level colors** (4 levels plus actual):
+
+- `--conf-strong: #2d7a4a` / `--conf-strong-bg: #e8f5ee`
+- `--conf-moderate: #7a5e1a` / `--conf-moderate-bg: #f5ecd8`
+- `--conf-weak: #8a3a10` / `--conf-weak-bg: #f5e4d8`
+- `--conf-insufficient: #9c9590` / `--conf-insufficient-bg: #f0ede8`
+
+**Tournament tension** reuses BGG slate blue: `--tourney-accent: #2e5f8a` / `--tourney-bg: #edf3f9`.
+
+**Component classes** (see mockup CSS for exact styling):
+
+- `.predict-badge` -- "PREDICTED" pill badge (teal border, uppercase)
+- `.score-predicted` / `.score-predicted-tilde` -- teal score with tilde prefix
+- `.conf-badge` (+ `.conf-strong`, `.conf-moderate`, `.conf-weak`, `.conf-insufficient`, `.conf-actual`) -- confidence level pills
+- `.source-badge` (+ `.source-predicted`) -- source indicator in breakdown table
+- `.conf-panel` / `.conf-stats` / `.ref-game-list` / `.ref-game-item` -- confidence breakdown panel
+- `.tension-panel` / `.tension-body` / `.tension-signal` -- revealed preference tension display
+- `.readiness-widget` / `.readiness-stage-banner` / `.readiness-progress` -- readiness indicators
+- `.predict-callout` -- prediction hint callout in rating form
+- `.rating-predict-hint` -- dashed prediction hint row for unrated axes
+- `.improve-grid` / `.improve-card` / `.improve-axis-list` -- readiness page improvement section
+- `.suggest-list` / `.suggest-item` -- suggested actions list
+
+**Responsive breakpoints** (mockup includes `@media (max-width: 800px)`):
+
+- Sidebar collapses to horizontal strip. Game hero stacks vertically. Detail panels go single-column. Tension signal cards stack. Improve grid goes single-column. Confidence stats grid goes 2-column.
+- Tablet (800–1100px): sidebar stays, detail panels single-column, collection table compressed but all columns visible.
 
 **Depends on**: Phase 4 (API endpoints).
 
 **Verification**:
 
-- Game detail shows predicted scores visually distinct from actual scores.
-- Confidence badges appear on predicted axes.
-- Reference games are visible on click/hover for predicted axes.
-- Revealed preference tension is shown when present, not shown when absent.
-- Collection list can toggle predictions on/off.
-- Collection list sorted by predicted fitness includes predicted scores.
-- Prediction readiness stage is visible. At Stages 0/1, suggested actions appear.
+- Game detail shows predicted scores visually distinct from actual scores: teal vs. amber, tilde prefix, "PREDICTED" badge (per mockup Section 1).
+- Confidence badges appear on predicted axes in the breakdown table.
+- Clicking a confidence badge opens the confidence breakdown panel showing reference games, stats, and the weighted average formula (per mockup Section 2).
+- Revealed preference tension panel appears below the breakdown table when present, not shown when absent (per mockup Section 3).
+- Collection list "Predictions on" toggle in stats strip controls predicted score display. Predicted rows show teal wash, tilde prefix, and "not rated" label (per mockup Section 4).
+- Collection table includes a Confidence column with per-row badges.
+- Sidebar readiness widget appears on all pages showing stage, progress bar, and count.
+- Readiness page shows stage banner, stage timeline, weak axes cards, and suggested actions (per mockup Section 5).
 - `collection-utils.ts` `ratedStatus` filter correctly classifies predicted-only games (score non-null, ratedAxisCount 0) as "unrated."
 - `app/page.tsx` average fitness computation excludes predicted-only scores from the "actual" average.
+- Responsive layout stacks correctly below 800px.
 - Typecheck clean.
 
 **Reqs covered**: REQ-PRED-14, 26, 27, 28, 29.
@@ -662,7 +751,7 @@ Phases are sequential. Each depends on the previous, except Phases 5 and 6 (web 
 
 4. **Prediction readiness suggested actions.** The suggested actions (REQ-PRED-20) require identifying underrepresented mechanic/category clusters. The logic needs the vocabulary, the set of rated games per mechanic, and the set of all games per mechanic. This is the most complex part of the readiness computation. If it proves too complex for the initial implementation, the suggested actions can be simplified to "Rate more games" with mechanic-specific suggestions as a follow-up.
 
-5. **Web component size.** The game detail page will grow with prediction display, confidence badges, reference game panels, and tension sections. If the page exceeds ~300 lines, extract prediction-specific display into a sub-component (e.g., `PredictionBreakdown`). The `CollectionTable` already has a lot of responsibility; the prediction toggle should be a simple prop, not a structural change.
+5. **Web component size.** The mockup defines five distinct UI surfaces (game detail score hero, breakdown table with confidence panels, tension panel, collection list with confidence column, readiness page). The game detail page will grow substantially. Extract prediction-specific display into sub-components: `ConfidenceBreakdownPanel` (the expandable panel per axis), `TensionPanel` (revealed preference section), `ReadinessWidget` (sidebar widget), and `PredictionHint` (rating form prediction hints). The `CollectionTable` gains a confidence column and prediction toggle but these should be additive props, not structural changes. The readiness page is a new route (`/readiness`), not embedded in an existing page.
 
 ## Open Questions
 
