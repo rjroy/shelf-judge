@@ -2,8 +2,10 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { v4 as uuidv4 } from "uuid";
 import type { Collection, AppConfig, TournamentData } from "@shelf-judge/shared";
+import { TournamentDataSchema } from "@shelf-judge/shared";
 import type { FileOps } from "./file-ops.js";
 import { getTempPath } from "./file-ops.js";
+import { migrateTournamentData } from "./tournament-migration.js";
 
 export interface StorageService {
   loadCollection(): Promise<Collection>;
@@ -57,7 +59,6 @@ function createDefaultTournament(): TournamentData {
   return {
     settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
     sessions: [],
-    comparisons: [],
     gameStats: {},
   };
 }
@@ -131,7 +132,15 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
       }
 
       const raw = await fileOps.readFile(tournamentPath);
-      return JSON.parse(raw) as TournamentData;
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const { data, migrated } = migrateTournamentData(parsed);
+      const validated = TournamentDataSchema.parse(data);
+
+      if (migrated) {
+        await atomicWrite(tournamentPath, JSON.stringify(validated, null, 2), fileOps);
+      }
+
+      return validated;
     },
 
     async saveTournament(data: TournamentData): Promise<void> {

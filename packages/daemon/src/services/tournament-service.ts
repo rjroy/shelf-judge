@@ -7,16 +7,12 @@ import type {
   Comparison,
   SessionFilter,
   RecentComparison,
+  CachedRecentComparison,
   GameWithScore,
 } from "@shelf-judge/shared";
 import { matchesBggTag } from "@shelf-judge/shared";
 import type { StorageService } from "./storage-service.js";
-import {
-  calculateNewRatings,
-  normalizeElo,
-  shouldDisplayRanking,
-  recalculateAllRatings,
-} from "./elo-engine.js";
+import { calculateNewRatings, normalizeElo, shouldDisplayRanking } from "./elo-engine.js";
 
 export interface TournamentService {
   startSession(filters: SessionFilter[] | null, games: GameWithScore[]): Promise<TournamentSession>;
@@ -32,7 +28,6 @@ export interface TournamentService {
   getGameStats(gameId: string): Promise<TournamentGameStatsDisplay>;
   getAllGameStats(): Promise<Record<string, TournamentGameStatsDisplay>>;
   listSessions(): Promise<TournamentSession[]>;
-  recalculate(): Promise<{ gamesUpdated: number }>;
   normalizeFitness(): Promise<{ normalized: number }>;
   onGameDeleted(gameId: string): Promise<void>;
   getSettings(): Promise<TournamentSettings>;
@@ -127,43 +122,15 @@ function deriveDisplayStats(gameId: string, data: TournamentData): TournamentGam
     displayLabel = normalizedScore.toFixed(1);
   }
 
-  // Derive wins/losses from comparisons
-  let wins = 0;
-  let losses = 0;
-  const gameComparisons: {
-    opponentGameId: string;
-    opponentGameName: string | null;
-    won: boolean;
-    createdAt: string;
-  }[] = [];
-
-  for (const comp of data.comparisons) {
-    if (comp.gameAId === gameId) {
-      const won = comp.winnerId === gameId;
-      if (won) wins++;
-      else losses++;
-      gameComparisons.push({
-        opponentGameId: comp.gameBId,
-        opponentGameName: null,
-        won,
-        createdAt: comp.createdAt,
-      });
-    } else if (comp.gameBId === gameId) {
-      const won = comp.winnerId === gameId;
-      if (won) wins++;
-      else losses++;
-      gameComparisons.push({
-        opponentGameId: comp.gameAId,
-        opponentGameName: null,
-        won,
-        createdAt: comp.createdAt,
-      });
-    }
-  }
-
-  // Last 5, most recent first
-  gameComparisons.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  const recentComparisons: RecentComparison[] = gameComparisons.slice(0, 5);
+  // Read wins, losses, and recentComparisons from cached gameStats (REQ-RTO-7)
+  const wins = cached?.wins ?? 0;
+  const losses = cached?.losses ?? 0;
+  const recentComparisons: RecentComparison[] = (cached?.recentComparisons ?? []).map((rc) => ({
+    opponentGameId: rc.opponentGameId,
+    opponentGameName: null, // Enriched with game names at the route layer
+    won: rc.won,
+    createdAt: rc.createdAt,
+  }));
 
   return {
     eloRating,
@@ -191,6 +158,7 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
       const active = data.sessions.find((s) => s.status === "active");
       if (active) {
         active.status = "completed";
+        active.comparisons = [];
         active.updatedAt = new Date().toISOString();
       }
 
@@ -212,6 +180,7 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
         status: "active",
         createdAt: now,
         updatedAt: now,
+        comparisons: [],
       };
 
       data.sessions.push(session);
@@ -235,6 +204,7 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
       }
 
       session.status = "completed";
+      session.comparisons = [];
       session.updatedAt = new Date().toISOString();
       await storageService.saveTournament(data);
       return session;
@@ -257,6 +227,7 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
       if (availableGameIds.length < 4) {
         // Auto-complete if too few games remain
         session.status = "completed";
+        session.comparisons = [];
         session.updatedAt = new Date().toISOString();
         await storageService.saveTournament(data);
         return null;
@@ -279,19 +250,20 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
           selectedA = gameId;
           lowestCount = count;
           selectedElo = stats?.eloRating ?? 1500;
-        } 
+        }
       }
 
       if (!selectedA) {
         // This shouldn't happen since we check length above, but just in case...
         session.status = "completed";
+        session.comparisons = [];
         session.updatedAt = new Date().toISOString();
         await storageService.saveTournament(data);
         return null;
       }
 
       // Sort the remaining games by ELO proximity to selectedA, to increase chance of a meaningful comparison.
-      availableGameIds.sort((a:string, b:string) => {
+      availableGameIds.sort((a: string, b: string) => {
         const eloADiff = Math.abs(selectedElo - (data.gameStats[a]?.eloRating ?? 1500));
         const eloBDiff = Math.abs(selectedElo - (data.gameStats[b]?.eloRating ?? 1500));
         if (eloADiff !== eloBDiff) {
@@ -300,12 +272,9 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
         return 0; // if ELO difference is the same, keep original order (which is randomized)
       });
 
-      // Get pairs already seen in this session.
+      // Get pairs already seen in this session (REQ-RTO-8).
       const seenPairs = new Set<string>();
-      for (const comp of data.comparisons) {
-        if (comp.sessionId !== sessionId) {
-          continue;
-        }
+      for (const comp of session.comparisons) {
         const key = [comp.gameAId, comp.gameBId].sort().join("|");
         seenPairs.add(key);
       }
@@ -323,6 +292,7 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
 
       // All pairs exhausted this session
       session.status = "completed";
+      session.comparisons = [];
       session.updatedAt = new Date().toISOString();
       await storageService.saveTournament(data);
       return null;
@@ -364,16 +334,28 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
         createdAt: now,
       };
 
-      data.comparisons.push(comparison);
+      session.comparisons.push(comparison);
       session.comparisonCount++;
       session.updatedAt = now;
 
       // Incremental ELO update
       if (!data.gameStats[gameAId]) {
-        data.gameStats[gameAId] = { eloRating: 1500, comparisonCount: 0 };
+        data.gameStats[gameAId] = {
+          eloRating: 1500,
+          comparisonCount: 0,
+          wins: 0,
+          losses: 0,
+          recentComparisons: [],
+        };
       }
       if (!data.gameStats[gameBId]) {
-        data.gameStats[gameBId] = { eloRating: 1500, comparisonCount: 0 };
+        data.gameStats[gameBId] = {
+          eloRating: 1500,
+          comparisonCount: 0,
+          wins: 0,
+          losses: 0,
+          recentComparisons: [],
+        };
       }
 
       const statsA = data.gameStats[gameAId];
@@ -393,6 +375,31 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
       statsB.eloRating = newRatingB;
       statsA.comparisonCount++;
       statsB.comparisonCount++;
+
+      // Update cached wins/losses (REQ-RTO-6)
+      const loserId = winnerId === gameAId ? gameBId : gameAId;
+      data.gameStats[winnerId].wins++;
+      data.gameStats[loserId].losses++;
+
+      // Update cached recentComparisons with FIFO cap at 10
+      const winnerRecent: CachedRecentComparison = {
+        opponentGameId: loserId,
+        won: true,
+        createdAt: now,
+      };
+      const loserRecent: CachedRecentComparison = {
+        opponentGameId: winnerId,
+        won: false,
+        createdAt: now,
+      };
+      data.gameStats[winnerId].recentComparisons.unshift(winnerRecent);
+      if (data.gameStats[winnerId].recentComparisons.length > 10) {
+        data.gameStats[winnerId].recentComparisons.pop();
+      }
+      data.gameStats[loserId].recentComparisons.unshift(loserRecent);
+      if (data.gameStats[loserId].recentComparisons.length > 10) {
+        data.gameStats[loserId].recentComparisons.pop();
+      }
 
       await storageService.saveTournament(data);
       return comparison;
@@ -415,13 +422,6 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
     async listSessions(): Promise<TournamentSession[]> {
       const data = await storageService.loadTournament();
       return data.sessions;
-    },
-
-    async recalculate(): Promise<{ gamesUpdated: number }> {
-      const data = await storageService.loadTournament();
-      data.gameStats = recalculateAllRatings(data.comparisons, data.settings.kFactorThreshold);
-      await storageService.saveTournament(data);
-      return { gamesUpdated: Object.keys(data.gameStats).length };
     },
 
     async normalizeFitness(): Promise<{ normalized: number }> {
@@ -461,6 +461,7 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
           // Auto-complete if fewer than 4 games remain
           if (active.gameIds.length < 4) {
             active.status = "completed";
+            active.comparisons = [];
           }
         }
       }

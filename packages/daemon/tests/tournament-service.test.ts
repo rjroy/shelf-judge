@@ -9,7 +9,6 @@ function createStubStorage(): StorageService & { tournamentData: TournamentData 
   const defaultData: TournamentData = {
     settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
     sessions: [],
-    comparisons: [],
     gameStats: {},
   };
 
@@ -285,9 +284,27 @@ describe("TournamentService", () => {
     test("filters by staleness (games with low comparison count)", async () => {
       // Pre-seed some stats
       storage.tournamentData.gameStats = {
-        g1: { eloRating: 1550, comparisonCount: 10 },
-        g2: { eloRating: 1500, comparisonCount: 3 },
-        g3: { eloRating: 1480, comparisonCount: 0 },
+        g1: {
+          eloRating: 1550,
+          comparisonCount: 10,
+          wins: 5,
+          losses: 5,
+          recentComparisons: [],
+        },
+        g2: {
+          eloRating: 1500,
+          comparisonCount: 3,
+          wins: 2,
+          losses: 1,
+          recentComparisons: [],
+        },
+        g3: {
+          eloRating: 1480,
+          comparisonCount: 0,
+          wins: 0,
+          losses: 0,
+          recentComparisons: [],
+        },
         // g4 and g5 have no stats (count=0, always match)
       };
 
@@ -379,8 +396,20 @@ describe("TournamentService", () => {
     test("prioritizes games with 0 comparisons", async () => {
       // Give g1 and g2 existing stats, leave g3-g5 at 0
       storage.tournamentData.gameStats = {
-        g1: { eloRating: 1600, comparisonCount: 10 },
-        g2: { eloRating: 1400, comparisonCount: 8 },
+        g1: {
+          eloRating: 1600,
+          comparisonCount: 10,
+          wins: 5,
+          losses: 5,
+          recentComparisons: [],
+        },
+        g2: {
+          eloRating: 1400,
+          comparisonCount: 8,
+          wins: 3,
+          losses: 5,
+          recentComparisons: [],
+        },
       };
 
       const session = await service.startSession(null, games);
@@ -505,18 +534,186 @@ describe("TournamentService", () => {
         expect((err as Error).message).toContain("Both games must be part of the active session");
       }
     });
+
+    test("updates cached wins and losses on gameStats (REQ-RTO-6)", async () => {
+      const session = await service.startSession(null, games);
+      await service.submitComparison(session.id, "g1", "g2", "g1"); // g1 wins
+      await service.submitComparison(session.id, "g1", "g3", "g3"); // g1 loses
+
+      const stats = storage.tournamentData.gameStats;
+      expect(stats["g1"].wins).toBe(1);
+      expect(stats["g1"].losses).toBe(1);
+      expect(stats["g2"].wins).toBe(0);
+      expect(stats["g2"].losses).toBe(1);
+      expect(stats["g3"].wins).toBe(1);
+      expect(stats["g3"].losses).toBe(0);
+    });
+
+    test("updates cached recentComparisons on gameStats (REQ-RTO-6)", async () => {
+      const session = await service.startSession(null, games);
+      await service.submitComparison(session.id, "g1", "g2", "g1");
+
+      const g1Stats = storage.tournamentData.gameStats["g1"];
+      expect(g1Stats.recentComparisons).toHaveLength(1);
+      expect(g1Stats.recentComparisons[0].opponentGameId).toBe("g2");
+      expect(g1Stats.recentComparisons[0].won).toBe(true);
+
+      const g2Stats = storage.tournamentData.gameStats["g2"];
+      expect(g2Stats.recentComparisons).toHaveLength(1);
+      expect(g2Stats.recentComparisons[0].opponentGameId).toBe("g1");
+      expect(g2Stats.recentComparisons[0].won).toBe(false);
+    });
+
+    test("caps recentComparisons at 10 with FIFO eviction", async () => {
+      const session = await service.startSession(null, games);
+
+      // Submit 12 comparisons for g1 (alternating opponent)
+      for (let i = 0; i < 12; i++) {
+        const opponent = i % 2 === 0 ? "g2" : "g3";
+        await service.submitComparison(session.id, "g1", opponent, "g1");
+      }
+
+      const g1Stats = storage.tournamentData.gameStats["g1"];
+      expect(g1Stats.recentComparisons).toHaveLength(10);
+      // Most recent should be first
+      expect(g1Stats.recentComparisons[0].won).toBe(true);
+    });
+
+    test("pushes comparison to session.comparisons (REQ-RTO-4)", async () => {
+      const session = await service.startSession(null, games);
+      await service.submitComparison(session.id, "g1", "g2", "g1");
+
+      const sessions = await service.listSessions();
+      const active = sessions.find((s) => s.id === session.id);
+      expect(active?.comparisons).toHaveLength(1);
+      expect(active?.comparisons[0].gameAId).toBe("g1");
+    });
+  });
+
+  describe("session completion clears comparisons (REQ-RTO-10)", () => {
+    test("endSession clears session comparisons", async () => {
+      const session = await service.startSession(null, games);
+      await service.submitComparison(session.id, "g1", "g2", "g1");
+
+      const ended = await service.endSession(session.id);
+      expect(ended.comparisons).toHaveLength(0);
+
+      const sessions = await service.listSessions();
+      const found = sessions.find((s) => s.id === session.id);
+      expect(found?.comparisons).toHaveLength(0);
+    });
+
+    test("auto-complete via startSession clears previous session comparisons", async () => {
+      const first = await service.startSession(null, games);
+      await service.submitComparison(first.id, "g1", "g2", "g1");
+
+      await service.startSession(null, games);
+
+      const sessions = await service.listSessions();
+      const firstUpdated = sessions.find((s) => s.id === first.id);
+      expect(firstUpdated?.status).toBe("completed");
+      expect(firstUpdated?.comparisons).toHaveLength(0);
+    });
+
+    test("auto-complete via all pairs exhausted clears comparisons", async () => {
+      const fourGames = games.slice(0, 4);
+      const session = await service.startSession(null, fourGames);
+
+      // Exhaust all 6 possible pairs
+      for (let i = 0; i < 6; i++) {
+        const pair = await service.getNextPair(session.id);
+        if (!pair) break;
+        await service.submitComparison(session.id, pair.gameA, pair.gameB, pair.gameA);
+      }
+
+      // Trigger auto-complete
+      await service.getNextPair(session.id);
+
+      const sessions = await service.listSessions();
+      const updated = sessions.find((s) => s.id === session.id);
+      expect(updated?.status).toBe("completed");
+      expect(updated?.comparisons).toHaveLength(0);
+    });
+  });
+
+  describe("pair dedup uses session comparisons (REQ-RTO-8)", () => {
+    test("new session starts with empty comparisons (dedup source is session-scoped)", async () => {
+      const session1 = await service.startSession(null, games);
+      await service.submitComparison(session1.id, "g1", "g2", "g1");
+      await service.submitComparison(session1.id, "g3", "g4", "g3");
+
+      // End first session (clears comparisons)
+      await service.endSession(session1.id);
+
+      // Start new session
+      const session2 = await service.startSession(null, games);
+
+      // New session's comparisons start empty, so dedup has no history
+      const sessions = await service.listSessions();
+      const active = sessions.find((s) => s.id === session2.id);
+      expect(active?.comparisons).toHaveLength(0);
+    });
+
+    test("completed session comparisons do not affect new session pairing", async () => {
+      const fourGames = games.slice(0, 4);
+      const session1 = await service.startSession(null, fourGames);
+
+      // Submit comparisons until the session auto-completes
+      let pairsSubmitted = 0;
+      for (let i = 0; i < 10; i++) {
+        const pair = await service.getNextPair(session1.id);
+        if (!pair) break;
+        await service.submitComparison(session1.id, pair.gameA, pair.gameB, pair.gameA);
+        pairsSubmitted++;
+      }
+      expect(pairsSubmitted).toBeGreaterThan(0);
+
+      // End the session if not already auto-completed
+      const sessionsAfterFirst = await service.listSessions();
+      const firstSession = sessionsAfterFirst.find((s) => s.id === session1.id);
+      if (firstSession?.status === "active") {
+        await service.endSession(session1.id);
+      }
+
+      // Start new session with the same games
+      const session2 = await service.startSession(null, fourGames);
+
+      // getNextPair should return a pair (not null), proving dedup doesn't carry over
+      const pair = await service.getNextPair(session2.id);
+      expect(pair).not.toBeNull();
+    });
+  });
+
+  describe("deriveDisplayStats reads from cache (REQ-RTO-7)", () => {
+    test("getGameStats returns cached wins/losses/recentComparisons", async () => {
+      const session = await service.startSession(null, games);
+      await service.submitComparison(session.id, "g1", "g2", "g1"); // g1 wins
+      await service.submitComparison(session.id, "g1", "g3", "g3"); // g1 loses
+      await service.submitComparison(session.id, "g1", "g4", "g1"); // g1 wins
+
+      const stats = await service.getGameStats("g1");
+      expect(stats.wins).toBe(2);
+      expect(stats.losses).toBe(1);
+      expect(stats.recentComparisons).toHaveLength(3);
+      // Most recent first
+      expect(stats.recentComparisons[0].opponentGameId).toBe("g4");
+      expect(stats.recentComparisons[0].won).toBe(true);
+      // opponentGameName is null (enriched at route layer)
+      expect(stats.recentComparisons[0].opponentGameName).toBeNull();
+    });
   });
 
   describe("game deletion", () => {
-    test("retains comparisons involving deleted game", async () => {
+    test("retains other games' recentComparisons involving deleted game (REQ-RTO-11)", async () => {
       const session = await service.startSession(null, games);
       await service.submitComparison(session.id, "g1", "g2", "g1");
 
       await service.onGameDeleted("g1");
 
-      // Comparisons should still exist
-      expect(storage.tournamentData.comparisons).toHaveLength(1);
-      expect(storage.tournamentData.comparisons[0].gameAId).toBe("g1");
+      // g2's recentComparisons should still reference g1
+      const g2Stats = storage.tournamentData.gameStats["g2"];
+      expect(g2Stats.recentComparisons).toHaveLength(1);
+      expect(g2Stats.recentComparisons[0].opponentGameId).toBe("g1");
     });
 
     test("removes cached ELO for deleted game", async () => {
@@ -585,28 +782,6 @@ describe("TournamentService", () => {
       expect(Object.keys(allStats)).toContain("g1");
       expect(Object.keys(allStats)).toContain("g2");
       expect(allStats["g1"].eloRating).toBeGreaterThan(1500);
-    });
-  });
-
-  describe("recalculate", () => {
-    test("rebuilds gameStats from comparison history", async () => {
-      const session = await service.startSession(null, games);
-      await service.submitComparison(session.id, "g1", "g2", "g1");
-      await service.submitComparison(session.id, "g3", "g4", "g3");
-
-      // Capture current stats
-      const beforeG1 = storage.tournamentData.gameStats["g1"].eloRating;
-      const beforeG3 = storage.tournamentData.gameStats["g3"].eloRating;
-
-      // Corrupt stats manually
-      storage.tournamentData.gameStats["g1"].eloRating = 9999;
-
-      const result = await service.recalculate();
-      expect(result.gamesUpdated).toBe(4);
-
-      // Should match the original incremental results
-      expect(storage.tournamentData.gameStats["g1"].eloRating).toBeCloseTo(beforeG1, 5);
-      expect(storage.tournamentData.gameStats["g3"].eloRating).toBeCloseTo(beforeG3, 5);
     });
   });
 
