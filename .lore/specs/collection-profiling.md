@@ -228,10 +228,13 @@ This is the realization of Vision Principle 3: "Your collection has an identity.
 ## Open Questions
 
 1. **Profile data file location.** Should the profile persist as a separate file (e.g., `~/.shelf-judge/profile.json`) alongside `collection.json` and `tournament.json`, or as a section within an existing file? Separate file matches the tournament data precedent and keeps concerns isolated. The implementer should follow the tournament pattern unless there's a reason not to.
+USER NOTE: That's the location I expected.
 
 2. **Outlier distance metric.** The brainstorm specifies "multi-dimensional distance from collection centroid" but doesn't name the metric. Euclidean distance over normalized attribute vectors is the obvious choice, but cosine similarity may better capture "doesn't fit" for sparse categorical data (mechanics, categories). The implementer should evaluate both against the 200-game dataset and choose the one that produces more intuitive results.
+USER NOTE: This needs seperate design.
 
 3. **Agent SDK session resumption.** The brainstorm mentions session resumption for follow-up questions ("Why do you say I have a blind spot for cooperative games?"). Whether the profile page supports conversational follow-up with the LLM agent or only one-shot narration is an implementation scope decision. One-shot narration is sufficient for this spec; conversational follow-up can be added as an enhancement.
+USER NOTE: Conversational follow-up is out of scope entirely.
 
 ## Context
 
