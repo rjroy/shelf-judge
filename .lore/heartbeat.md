@@ -68,6 +68,14 @@ All four findings from Thorne's Phase 1+2 review resolved.
 - 20:46 commission-Thorne-20260409-200849 result: # Phase 4 Review: API and Service Layer
 
 - 20:46 commission-Thorne-20260409-200849 completed
+- 20:48 commission-Dalton-20260409-200854 result: # Phase 4 Review Findings: Addressed
+
+- 20:48 commission-Dalton-20260409-200854 completed
+## Finding 1: String-Based Error Routing (Fixed)
+
+Replaced fragile `message.includes()` checks with typed error classes:
+
+- Added `ValidationError` and `NotFoundE...
 ## Verdict: Pass. Ready for Phase 5/6 consumption.
 
 All five review criteria are satisfied. No blocking defects found.
