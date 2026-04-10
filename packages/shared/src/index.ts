@@ -43,7 +43,7 @@ export {
   TournamentSettingsUpdateSchema,
 } from "./validation";
 
-export { toErrorMessage } from "./errors";
+export { toErrorMessage, ValidationError, NotFoundError } from "./errors";
 
 export { matchesBggTag, normalizeBggTagTokens } from "./bgg-tag-match";
 

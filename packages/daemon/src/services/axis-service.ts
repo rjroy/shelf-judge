@@ -2,6 +2,8 @@ import { v4 as uuidv4 } from "uuid";
 import {
   CreateAxisSchema,
   UpdateAxisSchema,
+  ValidationError,
+  NotFoundError,
   type Axis,
   type CreateAxisInput,
   type UpdateAxisInput,
@@ -31,7 +33,7 @@ export function createAxisService(deps: AxisServiceDeps): AxisService {
       if (parsed.preferenceShape === "sweet-spot" && parsed.idealValue != null) {
         const scale = getNativeScale(parsed.source, parsed.bggField);
         if (parsed.idealValue < scale.min || parsed.idealValue > scale.max) {
-          throw new Error(
+          throw new ValidationError(
             `idealValue ${parsed.idealValue} is outside native scale range [${scale.min}, ${scale.max}]`,
           );
         }
@@ -74,7 +76,7 @@ export function createAxisService(deps: AxisServiceDeps): AxisService {
       const axis = collection.axes.find((a) => a.id === id);
 
       if (!axis) {
-        throw new Error(`Axis not found: ${id}`);
+        throw new NotFoundError(`Axis not found: ${id}`);
       }
 
       // Determine the effective preferenceShape after this update
@@ -85,13 +87,13 @@ export function createAxisService(deps: AxisServiceDeps): AxisService {
         const effectiveIdealValue =
           parsed.idealValue !== undefined ? parsed.idealValue : axis.idealValue;
         if (effectiveIdealValue == null) {
-          throw new Error("idealValue is required when preferenceShape is sweet-spot");
+          throw new ValidationError("idealValue is required when preferenceShape is sweet-spot");
         }
 
         // Validate idealValue is within native scale
         const scale = getNativeScale(axis.source, axis.bggField);
         if (effectiveIdealValue < scale.min || effectiveIdealValue > scale.max) {
-          throw new Error(
+          throw new ValidationError(
             `idealValue ${effectiveIdealValue} is outside native scale range [${scale.min}, ${scale.max}]`,
           );
         }
@@ -131,7 +133,7 @@ export function createAxisService(deps: AxisServiceDeps): AxisService {
       const axisIndex = collection.axes.findIndex((a) => a.id === id);
 
       if (axisIndex === -1) {
-        throw new Error(`Axis not found: ${id}`);
+        throw new NotFoundError(`Axis not found: ${id}`);
       }
 
       collection.axes.splice(axisIndex, 1);
