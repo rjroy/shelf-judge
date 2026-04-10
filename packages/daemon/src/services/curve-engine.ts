@@ -11,6 +11,12 @@ import type {
   VetoConfig,
 } from "@shelf-judge/shared";
 
+// Clamp effective rating to 1-10 range. The curve formulas produce values outside
+// this range when raw values exceed the native scale bounds.
+function clamp(value: number): number {
+  return Math.max(1, Math.min(10, value));
+}
+
 // Tolerance calibration constants.
 // Derived from REQ-CURVE-8 anchors at center-of-scale ideal position.
 // At center ideal, t at one-third range = 2/3, so (1-t) = 1/3.
@@ -104,16 +110,19 @@ export function applyPreferenceCurve(
   switch (shape) {
     case "higher-is-better": {
       if (range === 0) return 10;
-      return 1 + (9 * (rawValue - scale.min)) / range;
+      return clamp(1 + (9 * (rawValue - scale.min)) / range);
     }
 
     case "lower-is-better": {
       if (range === 0) return 10;
-      return 10 - (9 * (rawValue - scale.min)) / range;
+      return clamp(10 - (9 * (rawValue - scale.min)) / range);
     }
 
     case "sweet-spot": {
-      const ideal = config.idealValue ?? scale.min;
+      if (config.idealValue == null) {
+        throw new Error("idealValue is required for sweet-spot preference shape");
+      }
+      const ideal = config.idealValue;
       const tolerance = config.tolerance ?? "moderate";
       const leanDirection = config.leanDirection ?? null;
       const baseK = calibrateTolerance(tolerance);
@@ -125,7 +134,7 @@ export function applyPreferenceCurve(
         if (sideRange === 0) return 1; // ideal is at scale min, can't go lower
         const t = (ideal - rawValue) / sideRange;
         const k = applyLean(baseK, leanDirection, "left");
-        return 1 + 9 * Math.pow(1 - t, k);
+        return clamp(1 + 9 * Math.pow(1 - t, k));
       }
 
       // rawValue > ideal
@@ -133,7 +142,7 @@ export function applyPreferenceCurve(
       if (sideRange === 0) return 1; // ideal is at scale max, can't go higher
       const t = (rawValue - ideal) / sideRange;
       const k = applyLean(baseK, leanDirection, "right");
-      return 1 + 9 * Math.pow(1 - t, k);
+      return clamp(1 + 9 * Math.pow(1 - t, k));
     }
   }
 }

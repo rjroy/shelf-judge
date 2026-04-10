@@ -491,14 +491,21 @@ describe("edge cases", () => {
     expect(applyPreferenceCurve(5, { min: 5, max: 5 }, "lower-is-better", {})).toBe(10);
   });
 
-  test("raw value outside scale bounds is handled gracefully", () => {
+  test("raw value outside scale bounds is clamped to 1-10", () => {
     const scale = { min: 1, max: 10 };
-    // Below minimum
+    // Below minimum clamps to 1
     const below = applyPreferenceCurve(0, scale, "higher-is-better", {});
-    expect(below).toBeLessThan(1);
-    // Above maximum
+    expect(below).toBe(1);
+    // Above maximum clamps to 10
     const above = applyPreferenceCurve(11, scale, "higher-is-better", {});
-    expect(above).toBeGreaterThan(10);
+    expect(above).toBe(10);
+  });
+
+  test("sweet-spot throws when idealValue is missing", () => {
+    const scale = { min: 1, max: 10 };
+    expect(() => applyPreferenceCurve(5, scale, "sweet-spot", {})).toThrow(
+      "idealValue is required for sweet-spot preference shape",
+    );
   });
 
   test("sweet-spot defaults to moderate tolerance when not specified", () => {
