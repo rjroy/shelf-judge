@@ -1,7 +1,7 @@
 ---
 title: "Commission: Reduce Tournament Overhead Phase 3: Service Layer"
 date: 2026-04-10
-status: failed
+status: dispatched
 tags: [commission]
 worker: Dalton
 workerDisplayTitle: "Guild Artificer"
@@ -32,6 +32,16 @@ activity_timeline:
   - timestamp: 2026-04-10T14:24:00.045Z
     event: status_failed
     reason: "Session error: Claude Code returned an error result: You've hit your limit · resets 11am (America/Los_Angeles)"
+  - timestamp: 2026-04-10T18:02:53.176Z
+    event: status_pending
+    reason: "Redispatched for retry"
+    from: "failed"
+    to: "pending"
+  - timestamp: 2026-04-10T18:02:53.178Z
+    event: status_dispatched
+    reason: "Dispatched to worker"
+    from: "pending"
+    to: "dispatched"
 current_progress: ""
 projectName: shelf-judge
 ---
