@@ -34,3 +34,11 @@ All deliverables implemented and verified.
 Added `loadProfile()` and `saveProfile()` to `StorageService`. Profile stored...
 
 - 16:17 commission-Dalton-20260410-120312 completed
+- 16:26 commission-Dalton-20260410-120329 result: ## Phase 5: Web UI — Complete
+
+All deliverables implemented and verified.
+
+### Navigation Restructuring (REQ-PROFILE-29)
+- Collection list moved from `/` to `/collection/page.tsx`
+- Profile Overview n...
+- 16:26 commission-Dalton-20260410-120329 completed
