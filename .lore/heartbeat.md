@@ -37,6 +37,15 @@ Added to `packages/shared/src/types.ts`:
 - 20:21 commission-Thorne-20260409-200754 result: # Review: Utility Curves Phase 1 + Phase 2
 
 - 20:22 commission-Thorne-20260409-200754 completed
+- 20:24 commission-Dalton-20260409-200801 result: # Review Findings Addressed
+
+All four findings from Thorne's Phase 1+2 review resolved.
+
+- 20:24 commission-Dalton-20260409-200801 completed
+## Code Changes
+
+### Finding 2 [MEDIUM]: Output clamping added to `applyPreferenceCurve`
+- Added `clamp()` help...
 ## Verdict
 
 Implementation is correct. The curve math verifies against hand calculations. Types match the plan exactly. Test coverage hits every category th...
