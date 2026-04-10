@@ -39,6 +39,7 @@ export interface BggGameData {
   mechanics: BggTag[];
   categories: BggTag[];
   families: BggTag[];
+  subdomains: BggTag[]; // BGG subdomains (Strategy Games, Family Games, etc.)
   suggestedPlayerCounts: SuggestedPlayerCount[];
   fetchedAt: string; // ISO 8601
 }
@@ -238,4 +239,104 @@ export interface AppConfig {
   dataDir: string;
   socketPath: string;
   username: string | null;
+}
+
+// Profile types (collection-profiling spec)
+
+export interface AxisDistribution {
+  axisId: string;
+  axisName: string;
+  mean: number;
+  median: number;
+  standardDeviation: number;
+  range: { min: number; max: number };
+  ratedGameCount: number;
+}
+
+export interface AxisWeightEntry {
+  axisId: string;
+  axisName: string;
+  weight: number;
+  percentage: number; // weight / totalWeight * 100
+}
+
+export interface AttributeCluster {
+  name: string;
+  count: number;
+  percentage: number; // count / totalGames * 100
+}
+
+export interface WeightRangeCluster {
+  range: string; // "Light", "Medium-Light", etc.
+  min: number;
+  max: number;
+  count: number;
+  percentage: number;
+}
+
+export interface UtilityCurveDeclaration {
+  axisId: string;
+  axisName: string;
+  shape: PreferenceShape;
+  idealValue: number | null;
+  tolerance: ToleranceLevel | null;
+  leanDirection: LeanDirection | null;
+  vetoThreshold: VetoConfig | null;
+  nativeScale: NativeScale;
+}
+
+export interface DivergentGame {
+  gameId: string;
+  gameName: string;
+  fitnessScore: number;
+  normalizedTournamentScore: number;
+  gap: number; // absolute difference
+  direction: "tournament-outlier" | "fitness-outlier";
+}
+
+export interface ComponentDistances {
+  binary: number; // Jaccard distance [0,1]
+  continuous: number; // normalized Manhattan [0,1]
+  personalAxes: number | null; // normalized Manhattan [0,1], null when no shared axes
+  composite: number; // weighted combination [0,1]
+}
+
+export type OutlierClassification = "lone-wolf" | "category-orphan" | "high-fitness-outlier";
+
+export interface CollectionOutlier {
+  gameId: string;
+  gameName: string;
+  distances: ComponentDistances;
+  classifications: OutlierClassification[];
+  fitnessScore: number | null;
+}
+
+export interface AxisSuggestion {
+  source: "unexpressed-concentration" | "high-variance" | "divergence-repair";
+  attribute: string; // mechanic name, category name, or BGG field
+  reason: string; // human-readable explanation
+  evidence: { gameCount?: number; percentage?: number; variance?: number };
+}
+
+export interface CollectionProfile {
+  axisDistributions: AxisDistribution[];
+  axisWeights: AxisWeightEntry[];
+  bggClustering: {
+    mechanics: AttributeCluster[];
+    categories: AttributeCluster[];
+    subdomains: AttributeCluster[];
+    weightRanges: WeightRangeCluster[];
+  };
+  utilityCurves: UtilityCurveDeclaration[];
+  divergence: DivergentGame[] | null; // null when no tournament data
+  outliers: CollectionOutlier[];
+  suggestions: AxisSuggestion[];
+  gameCount: number;
+  ratedGameCount: number;
+  computedAt: string; // ISO 8601
+}
+
+export interface ProfileData {
+  profile: CollectionProfile;
+  computedAt: string; // ISO 8601
 }

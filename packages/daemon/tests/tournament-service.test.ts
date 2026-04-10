@@ -95,6 +95,7 @@ function makeBggData(mechanics: string[] = [], categories: string[] = []): BggGa
     mechanics: mechanics.map((name, i) => ({ id: i + 1, name })),
     categories: categories.map((name, i) => ({ id: i + 100, name })),
     families: [],
+    subdomains: [],
     suggestedPlayerCounts: [],
     fetchedAt: new Date().toISOString(),
   };

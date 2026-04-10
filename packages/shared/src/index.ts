@@ -31,6 +31,18 @@ export type {
   LeanDirection,
   VetoConfig,
   NativeScale,
+  AxisDistribution,
+  AxisWeightEntry,
+  AttributeCluster,
+  WeightRangeCluster,
+  UtilityCurveDeclaration,
+  DivergentGame,
+  ComponentDistances,
+  OutlierClassification,
+  CollectionOutlier,
+  AxisSuggestion,
+  CollectionProfile,
+  ProfileData,
 } from "./types";
 
 export {
