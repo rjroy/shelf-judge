@@ -1,7 +1,7 @@
 ---
 title: "Reduce tournament data overhead"
 date: 2026-04-10
-status: draft
+status: approved
 tags: [spec, tournament, storage, performance, data-model, migration]
 modules: [shared, daemon]
 related:
