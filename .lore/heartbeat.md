@@ -60,6 +60,11 @@ All four findings from Thorne's Phase 1+2 review resolved.
 
 **Finding 1 (web bggOriginal rendering)**: Replaced the broken "BGG value: 2.9 → scaled 3" rendering with "BGG: 2.9". The old rendering beca...
 - 20:38 commission-Dalton-20260409-200833 completed
+- 20:42 commission-Dalton-20260409-200842 result: Phase 4 complete. 578 pass, 1 skip, 0 fail. Typecheck clean.
+
+**Axis service** (`packages/daemon/src/services/axis-service.ts`):
+- `createAxis` now passes through all curve fields (preferenceShape, id...
+- 20:42 commission-Dalton-20260409-200842 completed
 ## Verdict
 
 The implementation is structurally sound. The scoring loop follows the plan's sequence exactly. Curve engine integration is correct. Backward...
