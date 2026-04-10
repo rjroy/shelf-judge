@@ -38,17 +38,17 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 
 ### Feature Vector Encoding
 
-- REQ-PRED-1: Each game with BGG data is representable as a feature vector composed of: mechanics (binary flags per mechanic present in the collection vocabulary), categories (binary flags per category), BGG weight (normalized to 0-1 using the 1-5 native scale), community rating (normalized to 0-1 using the 1-10 native scale), and player count range (min and max, each normalized). The vector vocabulary (which mechanics/categories have columns) is derived from the union of all mechanics and categories present across all games in the collection.
+- REQ-PRED-1: Each game with BGG data is representable as a feature vector composed of: mechanics (binary flags per mechanic present in the collection vocabulary), categories (binary flags per category), BGG weight (normalized to 0-1 using the 1-5 native scale), community rating (normalized to 0-1 using the 1-10 native scale), min players, max players, and playing time (each normalized over observed collection ranges via `computeContinuousRanges`). Personal axis ratings are included as a separate nullable component (normalized 0-1 over the 1-10 rating scale), null when the game has no ratings. The vector vocabulary (which mechanics/categories have columns) is derived from the union of all mechanic and category names present across all games in the collection. **Implementation**: `packages/daemon/src/services/feature-vector.ts` exports the `FeatureVector` interface (`{ binary, continuous, personalAxes }`) and the `encodeGame`, `buildVocabulary`, and `computeContinuousRanges` functions.
 
 - REQ-PRED-2: Families are excluded from the initial feature vector. They are noisier than mechanics and categories (publisher families, series groupings) and can be added later if prediction quality is insufficient with the core features.
 
 - REQ-PRED-3: Games without BGG data (manually added, no `bggData`) cannot be used as reference games for prediction and cannot receive predictions. The system reports "no BGG data available for prediction" for these games.
 
-- REQ-PRED-4: The feature vector encoding module is a pure-function module (no side effects, no service dependencies), following the pattern of `curve-engine.ts` and `elo-engine.ts`. It exposes the encoded vectors and the vocabulary mapping for use by prediction, and later by collection profiling and redundancy scoring.
+- REQ-PRED-4: The feature vector encoding module is a pure-function module (no side effects, no service dependencies), following the pattern of `curve-engine.ts` and `elo-engine.ts`. It exposes the encoded vectors and the vocabulary mapping for use by both prediction and collection profiling. **Implemented**: `packages/daemon/src/services/feature-vector.ts` already exists (built during collection profiling). It exports: `buildVocabulary`, `encodeGame`, `computeContinuousRanges`, `cosineSimilarity`, `jaccardDistance`, `normalizedManhattanDistance`, `compositeDistance`, `computeCentroid`, and associated types (`FeatureVector`, `Vocabulary`, `ContinuousRanges`, `ComponentWeights`). Prediction consumes `buildVocabulary`, `encodeGame`, `computeContinuousRanges`, and `cosineSimilarity`. The other exports serve collection profiling's outlier detection.
 
 ### Similarity Computation
 
-- REQ-PRED-5: Similarity between two games is computed as cosine similarity between their feature vectors. The result is a value between 0 (no overlap) and 1 (identical features).
+- REQ-PRED-5: Similarity between two games for prediction purposes is computed as cosine similarity between their full feature vectors (concatenation of binary, continuous, and personalAxes components). The result is a value between 0 (no overlap) and 1 (identical features). **Note**: `cosineSimilarity` is already exported from `feature-vector.ts`. The prediction engine should concatenate the `FeatureVector` components into a flat array before calling `cosineSimilarity`, since the function operates on flat `number[]` arrays. Collection profiling uses `compositeDistance` (weighted Jaccard + Manhattan) on the structured `FeatureVector` for a different purpose (outlier detection).
 
 - REQ-PRED-6: Only games that have at least one personal axis rating contribute as reference games. A game in the collection with BGG data but no personal ratings is not a useful training example.
 
@@ -149,12 +149,12 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 
 ## Exit Points
 
-| Exit                      | Triggers When                                                         | Target                       |
-| ------------------------- | --------------------------------------------------------------------- | ---------------------------- |
-| Collection profiling      | User wants taste profile inference from the same feature vectors      | [STUB: collection-profiling] |
-| Redundancy scoring        | Feature vector overlap computation feeds mechanic/category redundancy | [STUB: redundancy-scoring]   |
-| Prediction caching        | Computation becomes slow for large collections                        | [STUB: prediction-caching]   |
-| Custom k/threshold tuning | User wants to adjust k, similarity thresholds, or stage boundaries    | [STUB: prediction-tuning]    |
+| Exit                      | Triggers When                                                         | Target                                                                      |
+| ------------------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Collection profiling      | User wants taste profile inference from the same feature vectors      | **Implemented**: `.lore/specs/collection-profiling.md`, `profile-engine.ts` |
+| Redundancy scoring        | Feature vector overlap computation feeds mechanic/category redundancy | [STUB: redundancy-scoring]                                                  |
+| Prediction caching        | Computation becomes slow for large collections                        | [STUB: prediction-caching]                                                  |
+| Custom k/threshold tuning | User wants to adjust k, similarity thresholds, or stage boundaries    | [STUB: prediction-tuning]                                                   |
 
 ## Success Criteria
 
@@ -223,12 +223,20 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 
 **Origin:** Deferred from MVP spec as `[STUB: prediction-engine]`. The brainstorm (`.lore/brainstorms/prediction-engine.md`, revised 2026-04-10) evaluated six proposals and concluded with four accepted approaches: k-NN estimation (core), tournament ELO prior (extension), confidence architecture (extension), and cold start progressive unlock (completeness). Two proposals were rejected: curve-first prediction (subsumed by k-NN, since curves produce "actual" scores for BGG-derived axes automatically) and BGG "fans also like" discovery (API not accessible, single-user data too sparse for collaborative filtering).
 
-**Shared infrastructure:** The collection profiling brainstorm (`.lore/brainstorms/collection-profiling.md`, approved) explicitly notes that profiling and prediction "are the same engine pointed in different directions." The feature vector module should expose taste centroid, mechanic clusters, and axis-weight patterns for profiling to consume later. The redundancy scoring issue (`.lore/issues/deferred-redundancy-scoring.md`) needs the same mechanic/category overlap computation.
+**Shared infrastructure:** Collection profiling is now implemented. The feature vector module (`packages/daemon/src/services/feature-vector.ts`) was built during profiling and already exposes: vocabulary building, per-game encoding into `FeatureVector` structs, centroid computation, cosine similarity, Jaccard distance, and normalized Manhattan distance. The profiling engine (`packages/daemon/src/services/profile-engine.ts`) consumes this module for outlier detection via composite distance. The prediction engine consumes the same module differently: cosine similarity on full (flattened) vectors for k-NN neighbor finding, rather than weighted component distances for outlier detection. Shared types (`ComponentDistances`, `CollectionProfile`, `CollectionOutlier`, etc.) are already in `packages/shared/src/types.ts`. The redundancy scoring issue (`.lore/issues/deferred-redundancy-scoring.md`) needs the same mechanic/category overlap computation.
 
 **Key design documents:**
 
 - `.lore/brainstorms/prediction-engine.md` (source brainstorm, concluded)
 - `.lore/brainstorms/collection-profiling.md` (shares feature vector infrastructure)
+- `.lore/specs/collection-profiling.md` (implemented, shares feature-vector.ts)
 - `.lore/designs/mvp-fitness-model.md` (current FitnessResult types being extended)
 - `.lore/specs/utility-curves.md` (curves make BGG-derived prediction exact)
 - `.lore/specs/tournament-ranking.md` (tournament data as prediction input)
+
+**Implementation artifacts (post-profiling):**
+
+- `packages/daemon/src/services/feature-vector.ts` (shared feature vector module, already exists)
+- `packages/daemon/src/services/profile-engine.ts` (profiling consumer, reference for how to use feature-vector.ts)
+- `packages/shared/src/types.ts` (profile types already added: `ComponentDistances`, `CollectionProfile`, `CollectionOutlier`, `AxisDistribution`, etc.)
+- `packages/web/components/sidebar.tsx` (sidebar navigation structure with "Profile" at `/`)

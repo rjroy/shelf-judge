@@ -86,16 +86,18 @@ Bun monorepo, four workspace packages. The daemon owns all data via services inj
 
 **Shared types** (`packages/shared/src/types.ts`):
 
-- `FitnessBreakdownSource` (line 91): add `"predicted"` value
-- `FitnessBreakdownEntry` (line 93): add `predictionConfidence` and `referenceGames` nullable fields
-- `FitnessResult` (line 107): add `predictionMeta` nullable field
-- New types: `PredictionConfidence`, `PredictionMeta`, `PredictionReadiness`, `FeatureVector`, `ReferenceGame`
+- `FitnessBreakdownSource` (line 92): add `"predicted"` value
+- `FitnessBreakdownEntry` (line 94): add `predictionConfidence` and `referenceGames` nullable fields
+- `FitnessResult` (line 108): add `predictionMeta` nullable field
+- New types: `PredictionConfidence`, `PredictionMeta`, `PredictionReadiness`, `ReferenceGame`, `RevealedPreferenceTension`, `PredictionSettings`
+- **Note**: `FeatureVector` is NOT added to shared types. It is defined locally in `feature-vector.ts` (same as `Vocabulary`, `ContinuousRanges`, `ComponentWeights`). Only the `ComponentDistances` type crossed into shared because it's used in API responses (`CollectionOutlier.distances`). The prediction engine's `FeatureVector` usage is internal to daemon services.
+- **Already present** from profiling: `ComponentDistances`, `CollectionProfile`, `CollectionOutlier`, `AxisDistribution`, `AxisWeightEntry`, `AttributeCluster`, `WeightRangeCluster`, `UtilityCurveDeclaration`, `DivergentGame`, `OutlierClassification`, `AxisSuggestion`, `ProfileData`
 
 **Shared validation** (`packages/shared/src/validation.ts`): No prediction-specific validation schemas needed. Prediction is read-only; no user input to validate beyond game IDs.
 
 **Daemon services**:
 
-- `packages/daemon/src/services/feature-vector-engine.ts` (new): pure-function module for vector encoding, vocabulary building, similarity computation
+- `packages/daemon/src/services/feature-vector.ts` (**already exists**, built during collection profiling): pure-function module for vector encoding, vocabulary building, similarity computation, centroid, and distance metrics
 - `packages/daemon/src/services/prediction-engine.ts` (new): pure-function module for k-NN estimation, confidence calculation, readiness assessment
 - `packages/daemon/src/services/prediction-service.ts` (new): service that wires engines together with data access
 - `packages/daemon/src/services/fitness-service.ts` (line 46): no changes to the existing `calculateScore` path. Prediction produces its own `FitnessResult` with `predictionMeta` populated.
@@ -123,15 +125,19 @@ Bun monorepo, four workspace packages. The daemon owns all data via services inj
 
 **Backward compatibility**: All type extensions are additive nullable fields. `predictionConfidence`, `referenceGames`, and `predictionMeta` are null for non-predicted results. Existing code that reads `FitnessBreakdownEntry` and `FitnessResult` is unaffected. The one compatibility risk: clients that treat `score === null` as "unscored" in the collection list. When the `includePredicted` query parameter is enabled, games that currently return `score: null` will instead return a `FitnessResult` with `ratedAxisCount: 0` and `predictionMeta` populated. The web `CollectionTable` and CLI `scoreList` must handle this shape.
 
-**Shared infrastructure for collection profiling**: The feature vector module is intentionally not prediction-specific. It exposes:
+**Shared infrastructure (now implemented)**: The feature vector module (`packages/daemon/src/services/feature-vector.ts`) was built during collection profiling and is not prediction-specific. It exports:
 
-- Vocabulary building (which mechanics/categories have columns)
-- Per-game vector encoding
-- Cosine similarity (for prediction's k-NN)
-- Binary flag extraction (profiling needs Jaccard distance on the binary portion separately)
-- Continuous feature extraction (profiling needs normalized Manhattan on the continuous portion separately)
+- `buildVocabulary(games)` returns `Vocabulary { mechanics: string[], categories: string[] }` (sorted tag names, not IDs)
+- `encodeGame(game, vocabulary, axisRatings?, ranges?)` returns `FeatureVector { binary: number[], continuous: number[], personalAxes: number[] | null }`
+- `computeContinuousRanges(games)` returns observed min/max ranges for player counts and play time
+- `cosineSimilarity(a, b)` for prediction's k-NN
+- `jaccardDistance(a, b)` generalized Jaccard on any numeric arrays (profiling uses for binary portion game-to-centroid)
+- `normalizedManhattanDistance(a, b)` for continuous portion distances
+- `compositeDistance(a, b, weights?)` weighted combination of Jaccard + Manhattan + personalAxes distances (profiling's outlier detection)
+- `computeCentroid(vectors)` element-wise mean of feature vectors (profiling's collection center)
+- Types: `FeatureVector`, `Vocabulary`, `ContinuousRanges`, `ComponentWeights`
 
-The profiling spec (`REQ-PROFILE-11`) needs Jaccard on mechanics/categories and normalized Manhattan on continuous attributes. The prediction spec (`REQ-PRED-5`) needs cosine similarity on the full vector. Both need the same underlying encoding. The module exposes the components so each consumer composes what it needs.
+Profiling consumes `compositeDistance` (game vs. centroid) for outlier detection. Prediction will consume `cosineSimilarity` on flattened vectors for k-NN. The `personalAxes` component of `FeatureVector` is relevant to prediction: when building the flat similarity vector, concatenate `binary + continuous + (personalAxes ?? [])` before calling `cosineSimilarity`.
 
 **Web UI local type duplication**: The web game detail page (`packages/web/app/games/[id]/page.tsx`) and axes page both have local type definitions that duplicate shared types. When prediction fields are added to shared types, the web pages' local types must also be updated. This is a known issue (`.lore/issues/axes-page-local-type.md`).
 
@@ -171,19 +177,16 @@ The profiling spec (`REQ-PROFILE-11`) needs Jaccard on mechanics/categories and 
 
 ## Phases
 
-### Phase 1: Shared Types and Feature Vector Engine
+### Phase 1: Shared Types (Feature Vector Engine Already Exists)
 
-**What changes**: Extend shared types with prediction fields. Create the feature vector encoding module as a pure-function module in the daemon. Write comprehensive tests for vector math.
+**What changes**: Extend shared types with prediction fields. The feature vector module (`feature-vector.ts`) and its tests already exist from the collection profiling implementation. This phase adds only the prediction-specific type extensions and the `predictionMeta: null` backfill on existing `FitnessResult` return paths.
 
-**Files created**:
-
-- `packages/daemon/src/services/feature-vector-engine.ts` -- pure vector encoding, vocabulary, similarity
-- `packages/daemon/tests/services/feature-vector-engine.test.ts`
+**Files created**: None (feature vector module already exists as `packages/daemon/src/services/feature-vector.ts` with tests at `packages/daemon/tests/services/feature-vector.test.ts`).
 
 **Files modified**:
 
-- `packages/shared/src/types.ts` -- type extensions
-- `packages/shared/src/index.ts` -- re-exports
+- `packages/shared/src/types.ts` -- prediction type extensions (new types + field additions)
+- `packages/shared/src/index.ts` -- re-exports for new prediction types
 - `packages/daemon/src/services/fitness-service.ts` -- add `predictionMeta: null` to both return paths (vetoed and non-vetoed) so the existing `calculateScore` satisfies the extended `FitnessResult` type
 
 #### Type extensions
@@ -251,42 +254,43 @@ Add to `FitnessResult`:
 predictionMeta: PredictionMeta | null; // null for fully-actual results
 ```
 
-#### Feature vector engine
+#### Feature vector engine (already implemented)
 
-`feature-vector-engine.ts` exports pure functions:
+`packages/daemon/src/services/feature-vector.ts` was built during collection profiling. The actual API differs from what this plan originally proposed:
 
-- `buildVocabulary(games: Game[]): Vocabulary` -- scans all games' `bggData.mechanics` and `bggData.categories`, builds a sorted list of unique tag IDs for each. Returns `{ mechanicIds: number[], categoryIds: number[] }`. Only games with `bggData` contribute.
+**Vocabulary**: `buildVocabulary(games: Game[]): Vocabulary` returns `{ mechanics: string[], categories: string[] }` (sorted tag **names**, not IDs). Only games with `bggData` contribute.
 
-- `encodeBinaryFlags(game: Game, vocabulary: Vocabulary): number[]` -- binary flag array where each position is 1 if the game has that mechanic/category, 0 otherwise. Mechanics first, then categories. Games without `bggData` return an empty array.
+**Encoding**: A single `encodeGame(game, vocabulary, axisRatings?, ranges?): FeatureVector` replaces the originally proposed `encodeBinaryFlags`, `encodeContinuousFeatures`, and `encodeFullVector`. The returned `FeatureVector` has three components:
 
-- `encodeContinuousFeatures(game: Game): number[]` -- `[normalizedWeight, normalizedCommunityRating, normalizedMinPlayers, normalizedMaxPlayers]`. Weight: `(weight - 1) / 4` (1-5 to 0-1). Community rating: `(communityRating - 1) / 9` (1-10 to 0-1). Player counts: `min(minPlayers, 12) / 12` and `min(maxPlayers, 12) / 12`. Null weight produces 0.5 (midpoint). Games without `bggData` return an empty array.
+- `binary: number[]` -- one-hot encoding of mechanics + categories (mechanics first, then categories)
+- `continuous: number[]` -- 5 elements: BGG weight (normalized 1-5 to 0-1), community rating (normalized 1-10 to 0-1), min players, max players, playing time (each normalized over observed collection ranges via `computeContinuousRanges`, not fixed scales)
+- `personalAxes: number[] | null` -- axis ratings normalized 0-1 over 1-10 scale, null when no ratings
 
-- `encodeFullVector(game: Game, vocabulary: Vocabulary): number[]` -- concatenation of `encodeBinaryFlags` and `encodeContinuousFeatures`.
+**Normalization**: Continuous features use `computeContinuousRanges(games): ContinuousRanges` for player counts and play time (collection-relative min/max), with fixed scales only for BGG weight (1-5) and community rating (1-10). This differs from the original plan's fixed-scale normalization for player counts.
 
-- `cosineSimilarity(a: number[], b: number[]): number` -- standard cosine similarity. Returns 0 if either vector is all zeros.
+**Similarity/distance functions** (all operate on flat `number[]` arrays):
 
-- `jaccardDistance(a: number[], b: number[]): number` -- `1 - |intersection| / |union|` on binary arrays. For profiling reuse.
+- `cosineSimilarity(a, b): number` -- for prediction's k-NN
+- `jaccardDistance(a, b): number` -- generalized Jaccard (handles float frequency vectors, not just binary)
+- `normalizedManhattanDistance(a, b): number` -- `sum(|a_i - b_i|) / n`
+- `compositeDistance(a, b, weights?): ComponentDistances` -- weighted combination for profiling's outlier detection
 
-- `normalizedManhattanDistance(a: number[], b: number[]): number` -- `sum(|a_i - b_i|) / n`. For profiling reuse.
+**Centroid**: `computeCentroid(vectors: FeatureVector[]): FeatureVector` -- element-wise mean. Used by profiling.
 
-The `Vocabulary` type is exported for consumers to inspect which mechanics/categories are encoded and at which positions.
+**Profiling interface note**: The original plan warned about centroid-vs-game Jaccard on frequency vectors. This is resolved: `jaccardDistance` uses generalized Jaccard (`1 - sum(min)/sum(max)`), which handles float frequency centroids correctly. Profiling already uses this for outlier detection via `compositeDistance`.
 
-**Profiling interface boundary**: `jaccardDistance` and `normalizedManhattanDistance` are designed for game-to-game comparison on binary and continuous arrays respectively. Collection profiling's centroid is a float frequency vector (e.g., 0.6 means 60% of games have that mechanic), not a binary vector. The profiling team will need to adapt Jaccard for game-vs-centroid comparison (threshold the centroid or use a frequency-weighted variant). This module does not solve that problem, but the binary flag encoding and vocabulary are reusable as inputs to whatever centroid distance the profiler chooses.
+**For prediction**: To compute cosine similarity for k-NN, flatten the `FeatureVector` components: `[...fv.binary, ...fv.continuous, ...(fv.personalAxes ?? [])]` before calling `cosineSimilarity`. The `encodeGame` function accepts optional `axisRatings` to include personal axis dimensions in the vector, which improves similarity quality for games with ratings.
 
-**Depends on**: Nothing. This is the foundation.
+**Depends on**: Nothing. Feature vector module already exists and is tested. This phase only adds type extensions.
 
 **Verification**:
 
-- Feature vector encodes known mechanics/categories as correct binary flags at correct positions.
-- Normalization produces correct 0-1 values for weight (1-5), community rating (1-10), and player counts.
-- Cosine similarity returns 1.0 for identical vectors, 0.0 for orthogonal vectors, and correct intermediate values for partial overlap.
-- Cosine similarity returns 0.0 when either vector is all zeros (no BGG data).
-- Jaccard distance returns 0.0 for identical sets, 1.0 for disjoint sets.
-- Games without `bggData` produce empty vectors.
-- Vocabulary built from a known collection contains exactly the expected mechanic/category IDs.
-- Typecheck clean. Existing tests still pass.
+- Feature vector tests already pass (`packages/daemon/tests/services/feature-vector.test.ts`). No new feature vector tests needed in this phase.
+- New prediction types compile cleanly with existing code (especially `FitnessResult` consumers in fitness-service, web, and CLI).
+- `predictionMeta: null` addition to fitness-service.ts doesn't break existing consumers.
+- Typecheck clean. All existing tests still pass (especially fitness, profiling, and feature vector tests).
 
-**Reqs covered**: REQ-PRED-1, 2, 3, 4, 5, 33, 34, 35.
+**Reqs covered**: REQ-PRED-1 (already implemented), 2 (already implemented), 3 (partial), 4 (already implemented), 5 (already implemented), 33, 34, 35.
 
 ---
 
@@ -331,7 +335,7 @@ The `Vocabulary` type is exported for consumers to inspect which mechanics/categ
   - Weak axes: for each personal axis, count how many games have a rating on it. Sort ascending. Report the bottom ones.
   - Suggested actions: identify mechanic/category clusters that are underrepresented among rated games. For example, if the collection has 10 deck-building games but only 1 is rated, suggest "Rate a deck-building game to improve predictions for that mechanic cluster."
 
-**Depends on**: Phase 1 (feature vector engine, shared types).
+**Depends on**: Phase 1 (shared types). Imports `cosineSimilarity` and `buildVocabulary` from `feature-vector.ts` (already exists). The `Vocabulary` type is imported from `feature-vector.ts`, not from shared types.
 
 **Verification**:
 
@@ -428,8 +432,8 @@ The service depends on `StorageService`, `FitnessService`, and `TournamentServic
 
 1. Load the target game and its BGG data.
 2. Load all games in the collection. Load all axes.
-3. Build the vocabulary from all games.
-4. Encode feature vectors for all games.
+3. Build the vocabulary from all games via `buildVocabulary` (from `feature-vector.ts`). Compute continuous ranges via `computeContinuousRanges`.
+4. Encode feature vectors for all games via `encodeGame` (from `feature-vector.ts`). To get flat vectors for cosine similarity, concatenate `[...fv.binary, ...fv.continuous, ...(fv.personalAxes ?? [])]`.
 5. Build `ReferenceGameCandidate[]` from games that have at least one personal axis rating and BGG data.
 6. Load tournament stats via `TournamentService`. Read `provisionalThreshold` from `TournamentService.getSettings()` (not from `PredictionSettings`). Populate `tournamentStability` on each candidate using: for games with `comparisonCount >= provisionalThreshold`, factor = `1.0 + predictionSettings.tournamentStabilityBoost * min(comparisonCount / provisionalThreshold, 1.0)`. Otherwise `1.0`. When no tournament data exists, all candidates get `1.0` (REQ-PRED-18).
 7. Load prediction settings. Compute readiness stage from rated game count.
@@ -492,7 +496,7 @@ The existing `GET /api/games` route gains `?includePredicted=true`. When enabled
 - `packages/web/components/score-breakdown.tsx` -- predicted axis entries with confidence badges
 - `packages/web/app/globals.css` -- prediction visual treatment styles (design tokens, component classes)
 - `packages/web/lib/collection-utils.ts` (line 155) -- the `ratedStatus === "rated"` filter checks `score === null`. When `includePredicted` is active, a predicted-only game has `score !== null` but `ratedAxisCount === 0`. This filter must check `predictionMeta` to correctly classify predicted-only games as "unrated" for filter purposes.
-- `packages/web/app/page.tsx` (line 33) -- the average fitness computation filters by `score !== null`. With predictions enabled, predicted-only scores should not be mixed into the "actual" average. Check `predictionMeta === null` (or `ratedAxisCount > 0`) before including in the average.
+- `packages/web/app/page.tsx` -- **this is now the Profile page** (collection profiling owns `/`). The profile page computes collection-wide statistics. When predictions are active, predicted-only scores should not be mixed into actual averages. Check `predictionMeta === null` (or `ratedAxisCount > 0`) before including in averages.
 
 **Files created**:
 
@@ -559,16 +563,16 @@ The mockup makes several layout decisions the plan left open:
 
 #### Sidebar readiness widget (mockup Section 1, sidebar)
 
-The mockup places prediction readiness in the sidebar as a small widget:
+The mockup places prediction readiness in the sidebar as a small widget. **Note**: The sidebar navigation structure has changed since the mockup was created. The current sidebar (`packages/web/components/sidebar.tsx`) has these nav groups: Overview (Profile at `/`), Library (Collection, Add Games, Axes), Ranking (Tournament), and Import (Import BGG). The mockup's sidebar omits "Profile" because it predates profiling.
 
-- Located above the sidebar footer, below the nav section.
+- Located above the sidebar footer, below the nav sections.
 - Shows: "PREDICTIONS" label, "Stage {N} — {label}" stage name, a progress bar (tracking toward next stage), and a count string ("22 rated · 8 more for Stage 3").
 - Uses teal coloring on the dark sidebar background (`rgba(26, 112, 106, 0.15)` background, `rgba(26, 112, 106, 0.3)` border).
 - This widget appears on all pages, not just the collection list. It is the persistent readiness indicator.
 
 #### Readiness page (mockup Section 5)
 
-The mockup introduces a dedicated "Prediction Readiness" page, accessible via a "Readiness" nav item under a "Predictions" nav section in the sidebar:
+The mockup introduces a dedicated "Prediction Readiness" page. The readiness page should be accessible via a "Readiness" nav item added to the sidebar. The natural placement is within a new "Predictions" nav group, or as a child of the existing "Overview" group alongside "Profile". Implementation decision, but it must appear in the sidebar navigation.
 
 - **Stage banner**: A prominent teal banner at the top showing the current stage name, description, and a progress bar with "{N} / {M} rated" toward the next stage.
 - **Stage timeline**: A 4-column grid showing all four stages (0, 1, 2, 3) with their thresholds and descriptions. The current stage is highlighted with a thicker border; past stages are dimmed.
