@@ -33,3 +33,8 @@ Workers can also add entries to this file during their sessions.
 **Storage** (`packages/daemon/src/services/storage-service.ts`):
 - `createDefaultTournament()` no longer produces a top-lev...
 - 11:10 commission-Dalton-20260410-070846 completed
+- 11:14 commission-Dalton-20260410-070855 result: Phase 4 (Remove Recalculate and Client Grep) complete. All changes implemented per plan:
+
+**Route removal** (`packages/daemon/src/routes/tournament.ts`):
+- Removed `POST /tournament/recalculate` route...
+- 11:15 commission-Dalton-20260410-070855 completed
