@@ -2,7 +2,7 @@
 title: "Prediction Engine for Unrated Games"
 date: 2026-04-09
 revised: 2026-04-10
-status: concluded
+status: approved
 tags: [brainstorm, prediction, fitness, similarity, bgg]
 related:
   - .lore/issues/deferred-prediction-engine.md
