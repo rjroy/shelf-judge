@@ -15,6 +15,7 @@ related:
   - .lore/designs/mvp-data-model.md
   - .lore/designs/mvp-fitness-model.md
   - .lore/research/claude-agent-sdk.md
+  - .lore/research/outlier-distance-metric.md
   - .lore/vision.md
 ---
 
@@ -65,9 +66,17 @@ This is the realization of Vision Principle 3: "Your collection has an identity.
 
 ### Collection Outlier Detection
 
-- REQ-PROFILE-11: The profile identifies games whose BGG attributes place them far from the collection's statistical center across multiple dimensions. The outlier threshold (REQ-PROFILE-12) applies to an aggregate multi-dimensional distance, not per-dimension counting. A game that is extreme on one dimension alone is not necessarily an outlier; the distance metric naturally weights games that deviate across several dimensions higher than games that deviate on only one.
+- REQ-PROFILE-11: The profile identifies games whose BGG attributes place them far from the collection's statistical center across multiple dimensions. Distance from the centroid is measured using a composite metric with type-appropriate components:
+  - **Binary attributes** (mechanics, categories): Jaccard distance. Measures set overlap between a game's attributes and the collection centroid's attribute frequency vector. Shared absence (neither the game nor the collection center has a mechanic) does not count as similarity.
+  - **Continuous BGG attributes** (weight, player count range, play time): Normalized Manhattan distance. Each attribute is normalized to [0,1] by the observed range in the collection.
+  - **Personal axis ratings** (where available): Normalized Manhattan distance on the subset of axes where both the game and the centroid have values. Games without axis ratings are scored on the binary and continuous components only.
+  - **Combination**: Weighted average of the three component distances, producing a final [0,1] composite distance. Default weights: binary attributes 0.4, continuous BGG attributes 0.3, personal axis ratings 0.3. When personal axis ratings are unavailable for a game, the weight redistributes proportionally to the other two components.
 
-- REQ-PROFILE-12: Outlier detection considers mechanics, categories, subdomains, complexity (BGG weight), player count range, and play time. The default threshold is 2 standard deviations from the collection centroid. The threshold should be validated against the existing 200-game collection during implementation and adjusted if it flags too many or too few games.
+  The composite distance applies to aggregate multi-dimensional distance, not per-dimension counting. A game that is extreme on one dimension alone is not necessarily an outlier; the weighted combination naturally scores games that deviate across several dimensions higher than games that deviate on only one. The per-component distances are individually meaningful and should be available in the profile response for transparency (e.g., "this game is an outlier because: mechanics distance 0.85, complexity distance 0.12").
+
+- REQ-PROFILE-12: Outlier detection uses centroid-based distance. The collection centroid is the mean feature vector: attribute frequency for binary features, mean value for continuous features. Each game's composite distance from the centroid (per REQ-PROFILE-11) is computed, and the mean and standard deviation of all distances are calculated. The default outlier threshold is 2 standard deviations above the mean distance. Games whose composite distance exceeds this threshold are flagged. The threshold should be validated against the existing 200-game collection during implementation and adjusted if it flags too many or too few games. If the composite distance distribution is heavily skewed, a percentile-based threshold (e.g., top 5%) may work better than standard deviations; the implementer should evaluate both.
+
+  **Upgrade path**: If centroid-based detection produces counterintuitive results for diverse collections (e.g., a user who collects both heavy euros and light party games, where the centroid sits between two clusters), Local Outlier Factor (LOF) is the intended upgrade. LOF detects outliers relative to local density rather than a single global centroid, handling multi-cluster collections correctly. This is explicitly out of scope for this version. The composite distance metric is shared between centroid and LOF approaches, so the upgrade path is clean. See [Outlier Distance Metric Research](.lore/research/outlier-distance-metric.md) for the full evaluation.
 
 - REQ-PROFILE-13: Three outlier classifications are reported:
   - **Lone wolves**: games with no close neighbors in the collection across multiple attribute dimensions.
@@ -87,23 +96,25 @@ This is the realization of Vision Principle 3: "Your collection has an identity.
 
 - REQ-PROFILE-17: The algorithmic suggestion engine operates without LLM inference. When LLM narration is available (REQ-PROFILE-22), suggestions become part of the narrative with richer interpretation, but the underlying suggestion logic is deterministic.
 
-### LLM Narration
+### LLM Narration [DEFERRED: post-MVP]
 
-- REQ-PROFILE-18: The daemon integrates with the Claude Agent SDK (TypeScript) to produce a natural-language narrative that interprets the algorithmic profile. The narrative sits alongside the profile data as an enhancement, not a replacement. The algorithmic profile (REQ-PROFILE-1 through REQ-PROFILE-17) must function fully without the LLM.
+The LLM narration layer ships after the algorithmic profile is stable. The algorithmic profile (REQ-PROFILE-1 through REQ-PROFILE-17) is the MVP. The narration requirements below define the post-MVP enhancement. They remain in this spec to guide the algorithmic profile's data model (the narration consumes the profile's output, so the profile must produce data rich enough to narrate).
 
-- REQ-PROFILE-19: The Agent SDK integration uses structured outputs (`outputFormat` with JSON Schema). The agent returns a typed response with named sections (summary, surprises, tensions, blind spots), not free-form text. This keeps the output parseable and displayable in structured UI.
+- REQ-PROFILE-18: [DEFERRED] The daemon integrates with the Claude Agent SDK (TypeScript) to produce a natural-language narrative that interprets the algorithmic profile. The narrative sits alongside the profile data as an enhancement, not a replacement. The algorithmic profile (REQ-PROFILE-1 through REQ-PROFILE-17) must function fully without the LLM.
 
-- REQ-PROFILE-20: The daemon exposes collection data to the agent via in-process MCP tools. The agent can pull additional context beyond the initial structured profile if needed.
+- REQ-PROFILE-19: [DEFERRED] The Agent SDK integration uses structured outputs (`outputFormat` with JSON Schema). The agent returns a typed response with named sections (summary, surprises, tensions, blind spots), not free-form text. This keeps the output parseable and displayable in structured UI.
 
-- REQ-PROFILE-21: Budget control (`maxBudgetUsd`) caps per-profile generation cost. A single profile narrative should be bounded to prevent runaway token consumption.
+- REQ-PROFILE-20: [DEFERRED] The daemon exposes collection data to the agent via in-process MCP tools. The agent can pull additional context beyond the initial structured profile if needed.
 
-- REQ-PROFILE-22: The LLM adds interpretation that statistics alone cannot provide:
+- REQ-PROFILE-21: [DEFERRED] Budget control (`maxBudgetUsd`) caps per-profile generation cost. A single profile narrative should be bounded to prevent runaway token consumption.
+
+- REQ-PROFILE-22: [DEFERRED] The LLM adds interpretation that statistics alone cannot provide:
   - **Pattern naming**: identifying throughlines across games that share a mechanic in different contexts.
   - **Tension identification**: surfacing disagreements between stated preferences (axis weights) and revealed preferences (tournament choices).
   - **Blind spot surfacing**: naming attribute categories that are absent or underrepresented.
   - **Utility curve connection**: relating configured curves to actual collection distributions.
 
-- REQ-PROFILE-23: The LLM never determines scores. The fitness calculation remains deterministic math. The LLM reads the results of that math and narrates them. This preserves the vision's transparency guarantee (Principle 2).
+- REQ-PROFILE-23: [DEFERRED] The LLM never determines scores. The fitness calculation remains deterministic math. The LLM reads the results of that math and narrates them. This preserves the vision's transparency guarantee (Principle 2).
 
 ### Profile Storage and Caching
 
@@ -111,21 +122,21 @@ This is the realization of Vision Principle 3: "Your collection has an identity.
 
 - REQ-PROFILE-25: Any write to collection data (ratings, games, axes, tournament results, BGG refreshes) sets a dirty flag. The profile recomputes lazily on the next view when the flag is set.
 
-- REQ-PROFILE-26: The LLM narration is cached alongside the profile data. Three states:
+- REQ-PROFILE-26: [DEFERRED] The LLM narration is cached alongside the profile data. Three states:
   - **Current**: the narration matches the current profile data. Display it.
   - **Stale**: the profile data has changed since narration was generated. Display the old narration with a visual indicator and a "regenerate" button.
   - **Empty**: no narration has been generated. Show a prompt to generate, or show nothing if the Agent SDK is unavailable.
 
-- REQ-PROFILE-27: Narration regeneration is always user-initiated, never automatic. No ambient LLM calls, no background token consumption. Stale narration is better than nothing.
+- REQ-PROFILE-27: [DEFERRED] Narration regeneration is always user-initiated, never automatic. No ambient LLM calls, no background token consumption. Stale narration is better than nothing.
 
-- REQ-PROFILE-28: Agent SDK authentication is not the application's concern. The daemon uses the Agent SDK; the SDK handles its own authentication (via `ANTHROPIC_API_KEY` or equivalent). Shelf Judge does not store, configure, or manage API keys for the LLM. If the SDK cannot authenticate, the narration is unavailable (empty state per REQ-PROFILE-26).
+- REQ-PROFILE-28: [DEFERRED] Agent SDK authentication is not the application's concern. The daemon uses the Agent SDK; the SDK handles its own authentication (via `ANTHROPIC_API_KEY` or equivalent). Shelf Judge does not store, configure, or manage API keys for the LLM. If the SDK cannot authenticate, the narration is unavailable (empty state per REQ-PROFILE-26).
 
 ### Web UI
 
 - REQ-PROFILE-29: The Profile Overview page replaces the current home page. The collection list moves to a separate "Collection" page in the navigation. Different interaction modes (aggregate understanding vs. per-game browsing) belong on different pages.
 
 - REQ-PROFILE-30: The Profile Overview page displays:
-  - LLM narration summary at the top (when available, per REQ-PROFILE-26 states)
+  - LLM narration summary at the top [DEFERRED: post-MVP, depends on REQ-PROFILE-18]
   - Axis rating distributions with statistical summaries
   - Axis weight breakdown as percentages
   - BGG attribute clustering (top mechanics, categories, subdomains, weight distribution)
@@ -142,7 +153,7 @@ This is the realization of Vision Principle 3: "Your collection has an identity.
 
 - REQ-PROFILE-33: The `--json` flag (per REQ-MVP-23) applies to the profile command. Since the profile command's default output is already structured JSON, the flag is accepted but has no behavioral difference.
 
-- REQ-PROFILE-34: The CLI can trigger LLM narration regeneration via a subcommand (e.g., `shelf-judge profile narrate`). The command returns the narration as part of the profile JSON response. If the Agent SDK is unavailable, the command reports the error and returns the algorithmic profile without narration.
+- REQ-PROFILE-34: [DEFERRED] The CLI can trigger LLM narration regeneration via a subcommand (e.g., `shelf-judge profile narrate`). The command returns the narration as part of the profile JSON response. If the Agent SDK is unavailable, the command reports the error and returns the algorithmic profile without narration.
 
 ### Anti-Goals
 
@@ -173,8 +184,11 @@ This is the realization of Vision Principle 3: "Your collection has an identity.
 - [ ] Tournament/fitness divergence correctly identifies games above the 1.5-point threshold in both directions
 - [ ] Divergence analysis excludes games with zero tournament comparisons
 - [ ] Divergence section is omitted (not empty) when no tournament data exists
-- [ ] Outlier detection flags games that deviate on multiple BGG attribute dimensions simultaneously
-- [ ] A game unusual on only one dimension is not flagged as an outlier
+- [ ] Composite distance metric computes Jaccard distance for binary attributes and normalized Manhattan distance for continuous attributes
+- [ ] Composite distance weighted combination produces a [0,1] value
+- [ ] Per-component distances (binary, continuous, personal axes) are available in the profile response
+- [ ] Outlier detection flags games whose composite distance exceeds 2 standard deviations above the mean
+- [ ] A game unusual on only one dimension is not flagged as an outlier (weighted combination dilutes single-dimension extremes)
 - [ ] Category orphan detection correctly identifies games in categories appearing only once
 - [ ] Lone wolf detection flags a game sharing zero mechanics with any other collection game
 - [ ] High-fitness outlier detection flags a game with high fitness score but BGG attributes placing it beyond the outlier threshold from the collection centroid
@@ -183,20 +197,20 @@ This is the realization of Vision Principle 3: "Your collection has an identity.
 - [ ] Profile dirty flag is set on any collection mutation (game add/remove, rating change, axis change, tournament comparison, BGG refresh)
 - [ ] Profile recomputes on next read when dirty flag is set
 - [ ] Profile does not recompute when dirty flag is not set
-- [ ] LLM narration cache returns current/stale/empty states correctly
-- [ ] Agent SDK structured output parses into the expected typed response
+- [ ] [DEFERRED] LLM narration cache returns current/stale/empty states correctly
+- [ ] [DEFERRED] Agent SDK structured output parses into the expected typed response
 - [ ] Profile computation produces identical results on repeated calls with unchanged data (determinism)
 
 ### Manual Verification
 
 - [ ] Profile Overview page displays all sections with real collection data (200-game dataset)
-- [ ] LLM narration contains at least one specific claim traceable to the algorithmic profile (e.g., names a mechanic concentration, identifies a specific divergent game, or references a configured utility curve)
-- [ ] Stale narration displays with a visual indicator and regenerate button after a rating change
-- [ ] Outlier threshold (2 standard deviations) produces a reasonable number of flagged games (not zero, not half the collection)
+- [ ] [DEFERRED] LLM narration contains at least one specific claim traceable to the algorithmic profile (e.g., names a mechanic concentration, identifies a specific divergent game, or references a configured utility curve)
+- [ ] [DEFERRED] Stale narration displays with a visual indicator and regenerate button after a rating change
+- [ ] Outlier threshold (2 standard deviations on composite distance) produces a reasonable number of flagged games (not zero, not half the collection)
 - [ ] CLI `shelf-judge profile` returns complete profile as parseable JSON
 - [ ] Profile Overview replaces home page; collection list is accessible from separate nav entry
 - [ ] Game detail view shows divergence and outlier status when applicable
-- [ ] When Agent SDK is unavailable, the profile page shows the algorithmic profile without narration (empty state)
+- [ ] [DEFERRED] When Agent SDK is unavailable, the profile page shows the algorithmic profile without narration (empty state)
 
 ## AI Validation
 
@@ -210,15 +224,16 @@ This is the realization of Vision Principle 3: "Your collection has an identity.
 
 - Profile statistics validated against hand-calculated examples for a small known dataset (5-10 games, 3 axes)
 - Divergence detection tested against games with known fitness and tournament scores at both sides of the 1.5-point threshold
-- Outlier detection tested against a collection with one deliberate outlier (a heavy wargame in a collection of medium-weight euros)
-- LLM integration tested with Agent SDK calls mocked at the SDK boundary, verifying structured output parsing and cache state transitions
+- Outlier detection tested against a collection with one deliberate outlier (a heavy wargame in a collection of medium-weight euros), verifying that Jaccard distance on mechanics and normalized Manhattan distance on weight/player-count both contribute to flagging it
+- Composite distance weights tested: verify that adjusting weights changes which games are flagged, and that the default weights (0.4/0.3/0.3) produce intuitive results on the 200-game dataset
+- [DEFERRED] LLM integration tested with Agent SDK calls mocked at the SDK boundary, verifying structured output parsing and cache state transitions
 - When adding profile routes to the daemon, verify that both web proxy route and CLI client helper are updated in the same change (per tournament retro lesson)
 - Feature vector computations (mechanic overlap, attribute distance) should be structured for reuse by the future prediction engine ([STUB: prediction-engine])
 
 ## Constraints
 
 - The fitness formula and calculation remain unchanged. Profiling reads fitness results; it does not participate in computing them.
-- No new external service dependencies except the Claude Agent SDK (TypeScript), which is optional. The algorithmic profile has zero external dependencies.
+- No new external service dependencies for MVP. The Claude Agent SDK (TypeScript) dependency is deferred to post-MVP with the LLM narration layer. The algorithmic profile has zero external dependencies.
 - Profile data follows the existing JSON file persistence pattern (REQ-MVP-20, REQ-MVP-21). Atomic writes via temp file + rename.
 - The Agent SDK integration uses the user's own Claude subscription. Shelf Judge does not bundle, manage, or proxy API credentials.
 - Profile computation is local math and aggregation. No network calls for the algorithmic profile.
@@ -228,13 +243,11 @@ This is the realization of Vision Principle 3: "Your collection has an identity.
 ## Open Questions
 
 1. **Profile data file location.** Should the profile persist as a separate file (e.g., `~/.shelf-judge/profile.json`) alongside `collection.json` and `tournament.json`, or as a section within an existing file? Separate file matches the tournament data precedent and keeps concerns isolated. The implementer should follow the tournament pattern unless there's a reason not to.
-USER NOTE: That's the location I expected.
+   USER NOTE: That's the location I expected.
 
-2. **Outlier distance metric.** The brainstorm specifies "multi-dimensional distance from collection centroid" but doesn't name the metric. Euclidean distance over normalized attribute vectors is the obvious choice, but cosine similarity may better capture "doesn't fit" for sparse categorical data (mechanics, categories). The implementer should evaluate both against the 200-game dataset and choose the one that produces more intuitive results.
-USER NOTE: This needs seperate design.
+2. ~~**Outlier distance metric.**~~ **Resolved.** Neither Euclidean nor cosine similarity is appropriate as a unified metric. Euclidean distance is dominated by shared zeros on sparse binary data (mechanics/categories); cosine similarity captures the wrong semantic for continuous features where absolute differences matter. The decision is a **composite metric with type-appropriate components**: Jaccard distance for binary attributes, normalized Manhattan distance for continuous attributes, weighted combination into [0,1]. Centroid-based detection with a 2σ threshold ships first; LOF is the upgrade path if centroid distance proves inadequate for diverse collections. See [Outlier Distance Metric Research](.lore/research/outlier-distance-metric.md) for the full evaluation of five metrics and four detection approaches.
 
-3. **Agent SDK session resumption.** The brainstorm mentions session resumption for follow-up questions ("Why do you say I have a blind spot for cooperative games?"). Whether the profile page supports conversational follow-up with the LLM agent or only one-shot narration is an implementation scope decision. One-shot narration is sufficient for this spec; conversational follow-up can be added as an enhancement.
-USER NOTE: Conversational follow-up is out of scope entirely.
+3. ~~**Agent SDK session resumption.**~~ **Resolved.** Conversational follow-up is out of scope entirely. One-shot narration only. The Agent SDK integration (REQ-PROFILE-18 through REQ-PROFILE-28) is itself deferred to post-MVP; the algorithmic profile ships first.
 
 ## Context
 
@@ -243,7 +256,8 @@ USER NOTE: Conversational follow-up is out of scope entirely.
 - [Vision](.lore/vision.md): Principle 3 ("Your collection has an identity") is the direct driver. Principle 2 ("One number, honestly derived") constrains the LLM to narration, not scoring. Principle 4 ("Data serves judgment") shapes the anti-goals.
 - [MVP Spec](.lore/specs/mvp.md): Collection profiling was deferred as [STUB: collection-profile]. This spec resolves that stub.
 - [Utility Curves Spec](.lore/specs/utility-curves.md): Curve declarations feed into the profile (REQ-PROFILE-5). Native scales and preference shapes are reported as part of the profile.
-- [Agent SDK Research](.lore/research/claude-agent-sdk.md): Documents the TypeScript SDK capabilities used in the LLM narration layer: structured outputs, in-process MCP servers, budget control, session management.
+- [Agent SDK Research](.lore/research/claude-agent-sdk.md): Documents the TypeScript SDK capabilities used in the LLM narration layer (deferred to post-MVP): structured outputs, in-process MCP servers, budget control, session management.
+- [Outlier Distance Metric Research](.lore/research/outlier-distance-metric.md): Evaluates five distance metrics (Euclidean, cosine, Jaccard, Gower, Mahalanobis) and three detection approaches (centroid, LOF, Isolation Forest) for the collection's mixed-type feature vectors. Recommends composite metric with Jaccard for binary + normalized Manhattan for continuous, centroid-based detection with LOF as upgrade path.
 - [Retro: Tournament Stats Shape Mismatch](.lore/retros/tournament-stats-record-shape-mismatch.md): Lesson applied in AI Validation: when adding daemon routes, update both web and CLI client helpers in the same change.
 - [Issue: Deferred Collection Profiling](.lore/issues/deferred-collection-profiling.md): The issue that triggered this spec. Contains user notes requesting LLM-driven profiling via Agent SDK.
 - [Issue: Deferred LLM Integration](.lore/issues/deferred-llm-integration.md): Related LLM features (natural language explanation, conversational axis creation) that share the Agent SDK dependency.
