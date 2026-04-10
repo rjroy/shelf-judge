@@ -79,3 +79,9 @@ All 14 REQ-RTO requirements verified against the implementation. **No unmet requ
 
 **Frontmatter and references**: Added `.lore/mockups/profile-overview.html` to the `related` li...
 - 11:55 commission-Octavia-20260410-114932 completed
+- 11:56 commission-Octavia-20260410-115301 result: Updated `.lore/plans/prediction-engine.md` to incorporate the mockup at `.lore/mockups/prediction-engine.html`. Three areas of change:
+
+1. **Frontmatter**: Added mockup to `related:` artifacts list.
+
+...
+- 11:56 commission-Octavia-20260410-115301 completed
