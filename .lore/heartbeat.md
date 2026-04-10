@@ -69,3 +69,9 @@ All 14 REQ-RTO requirements verified against the implementation. **No unmet requ
 
 | Requirement | St...
 - 11:25 commission-Thorne-20260410-070916 completed
+- 11:30 commission-Sienna-20260410-111225 result: Delivered `.lore/mockups/prediction-engine.html` — 2,873 lines, 5 annotated sections covering all required UI surfaces.
+
+**Sections delivered:**
+
+1. **Game Detail: Unrated Game with Predicted Score** ...
+- 11:31 commission-Sienna-20260410-111225 completed
