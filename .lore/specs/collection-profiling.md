@@ -1,7 +1,7 @@
 ---
 title: "Collection Identity and Taste Profiling"
 date: 2026-04-10
-status: approved
+status: implemented
 tags: [spec, profiling, collection, llm, agent-sdk, outlier, divergence]
 modules: [daemon, shared, web, cli]
 req-prefix: PROFILE
