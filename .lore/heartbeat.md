@@ -82,6 +82,10 @@ All four findings from Thorne's Phase 1+2 review resolved.
 All changes pass typecheck (web + shared + daemon + cli), lint, and tests (578 pass, 0 fail).
 
 - 20:59 commission-Dalton-20260409-200910 completed
+- 21:04 commission-Thorne-20260409-200929 result: ## Review: Phase 5 (Web UI) and Phase 6 (CLI) — Utility Curves
+
+**Scope**: Static code review of all files listed in the plan for Phase 5 and Phase 6. Typecheck and test suite could not be executed (s...
+- 21:04 commission-Thorne-20260409-200929 completed
 ## Created
 - `packages/web/lib/curve-math.ts` - Client-side pure cu...
 ## Finding 1: String-Based Error Routing (Fixed)
