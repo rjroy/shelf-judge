@@ -75,3 +75,7 @@ All 14 REQ-RTO requirements verified against the implementation. **No unmet requ
 
 1. **Game Detail: Unrated Game with Predicted Score** ...
 - 11:31 commission-Sienna-20260410-111225 completed
+- 11:55 commission-Octavia-20260410-114932 result: Updated `.lore/plans/collection-profiling.md` to incorporate the Profile Overview mockup. Changes made:
+
+**Frontmatter and references**: Added `.lore/mockups/profile-overview.html` to the `related` li...
+- 11:55 commission-Octavia-20260410-114932 completed
