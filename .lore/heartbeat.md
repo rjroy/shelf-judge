@@ -42,3 +42,8 @@ Workers can also add entries to this file during their sessions.
 
 Reviewed against spec (`.lore/specs/collection-profiling.md`), plan (`.lore/plans/collection-profiling.md`), and research (`.lore/research/outlier-distance-...
 - 12:22 commission-Thorne-20260410-120257 completed
+- 12:28 commission-Dalton-20260410-120301 result: ## All 7 Thorne Review Findings Addressed
+
+### Finding 1: Jaccard distance with centroid frequency vectors (HIGH)
+Replaced strict `=== 1` binary Jaccard with generalized Jaccard (`1 - sum(min(a,b)) / ...
+- 12:28 commission-Dalton-20260410-120301 completed
