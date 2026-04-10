@@ -1,7 +1,7 @@
 ---
 title: "Prediction Engine for Unrated Games"
 date: 2026-04-09
-status: open
+status: approved
 tags: [brainstorm, prediction, fitness, similarity, bgg]
 related:
   - .lore/issues/deferred-prediction-engine.md
@@ -54,6 +54,8 @@ Three things constrain what prediction can look like in this system:
 
 ## Proposal 1: Curve-First Prediction for BGG-Derived Axes
 
+*USER NOTE:* Won't provide enough useful information. 
+
 ### Evidence
 
 The utility curves spec (REQ-CURVE-4) defines preference shapes that map native-scale values to effective 1-10 ratings. For BGG-derived axes (community rating, complexity), the curve is a complete prediction function: given a game's BGG weight, the user's configured sweet spot and tolerance directly produce the effective rating. No estimation, no similarity matching, no minimum collection size.
@@ -88,6 +90,8 @@ Extends existing fitness calculation with a mode flag. The curve engine and BGG 
 ---
 
 ## Proposal 2: Nearest-Neighbor Estimation for Personal Axes
+
+*USER NOTE:* This is exactly what I was envisioning.
 
 ### Evidence
 
@@ -136,6 +140,8 @@ Requires: feature vector encoding module (new pure-function module, similar patt
 
 ## Proposal 3: Tournament ELO as Prediction Prior
 
+*USER NOTE:* Good extension.
+
 ### Evidence
 
 The tournament system (`TournamentData` in `types.ts`) stores per-game ELO ratings, comparison counts, and a `normalizedScore` (1-10 scale). Games with 6+ comparisons have stable ELO rankings that represent the user's revealed preference: not what they say they like, but which games they actually choose when forced to pick.
@@ -172,6 +178,8 @@ Depends on Proposal 2 (k-NN estimation). Primary work: tournament-weighted simil
 ---
 
 ## Proposal 4: Confidence Architecture with Explicit Uncertainty
+
+*USER NOTE:* Good extension.
 
 ### Evidence
 
@@ -232,6 +240,8 @@ Type extensions, confidence computation logic (pure functions), UI components fo
 
 ## Proposal 5: BGG "Fans Also Like" as Candidate Discovery
 
+*USER NOTE:* Not viable.
+
 ### Evidence
 
 The BGG XML API exposes `families: BggTag[]` per game (already fetched and stored in `BggGameData.families`). BGG families include curated groupings like "Game: Carcassonne" or "Theme: Pirates" that represent human-curated similarity clusters. The `suggestedPlayerCounts` field includes vote distributions that encode community consensus on optimal player counts.
@@ -270,6 +280,8 @@ New daemon endpoint, BGG data traversal (fetching games the user doesn't own), p
 ---
 
 ## Proposal 6: Graceful Cold Start with Progressive Unlock
+
+*USER NOTE:* Good extension, but the data set already has 100+ games. Not immediately necessary but good for completeness. 
 
 ### Evidence
 
