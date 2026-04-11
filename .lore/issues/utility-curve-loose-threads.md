@@ -9,6 +9,8 @@ related: [.lore/retros/commission-cleanup-2026-04-10.md]
 
 # Utility Curve Loose Threads from Review Cycle
 
+USER NOTE: Im dubious of these claims. Validate before taking action.
+
 ## What Happened
 
 Five findings from the utility curves review cycle were never resolved. Each was flagged in Thorne's reviews but no fix commission followed.
