@@ -72,9 +72,17 @@
   --table-header-bg: #ede9e3;
   --suggest-bg: var(--bg-subtle);
   --suggest-border: #c8c0b4;
-  --overlay-bg: rgba(0, 0, 0, 0.5);
+  --overlay-bg: rgb(0 0 0 / 0.5);
   --placeholder-from: #e8e4dc;
   --placeholder-to: #d0cbc0;
+
+  /* Shadows (black overlays) */
+  --shadow-menu: 0 8px 32px rgb(0 0 0 / 0.14), 0 2px 8px rgb(0 0 0 / 0.08);
+
+  /* Sidebar (light-on-dark overlays) */
+  --sidebar-divider: color-mix(in rgb, var(--nav-text), 8%, transparent);
+  --sidebar-item-hover-bg: color-mix(in rgb, var(--nav-text), 6%, transparent);
+  --sidebar-track-bg: color-mix(in rgb, var(--nav-text), 10%, transparent);
 
   /* Profile: outlier tags (aliases to semantic colors) */
   --outlier-lone: var(--override-accent);
@@ -86,6 +94,25 @@
   --outlier-fitness: var(--score-high);
   --outlier-fitness-bg: var(--score-high-bg);
   --outlier-fitness-border: #a8d8b8;
+
+  /* Prediction accent */
+  --predict-accent: #1a706a;
+  --predict-bg: #eaf5f3;
+  --predict-border: #a8d9d4;
+
+  /* Confidence level colors (aliases to shared palette where identical) */
+  --conf-strong: var(--score-high);
+  --conf-strong-bg: var(--score-high-bg);
+  --conf-moderate: #7a5e1a;
+  --conf-moderate-bg: #f5ecd8;
+  --conf-weak: #8a3a10;
+  --conf-weak-bg: #f5e4d8;
+  --conf-insufficient: var(--text-muted);
+  --conf-insufficient-bg: var(--row-hover);
+
+  /* Tournament tension (aliases to BGG palette) */
+  --tourney-accent: var(--bgg-accent);
+  --tourney-bg: var(--bgg-bg);
 
   /* Typography scale */
   --text-xs: 11px;
@@ -147,7 +174,7 @@ body {
 
 .sidebar-brand {
   padding: 20px 20px 24px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--sidebar-divider);
 }
 
 .sidebar-brand-row {
@@ -166,7 +193,7 @@ body {
 
 .sidebar-brand .brand-sub {
   font-size: 11px;
-  color: rgba(232, 228, 220, 0.4);
+  color: color-mix(in rgb, var(--nav-text), 40%, transparent);
   margin-top: 2px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -180,7 +207,7 @@ body {
 .nav-label {
   font-size: 10px;
   font-weight: 600;
-  color: rgba(232, 228, 220, 0.35);
+  color: color-mix(in rgb, var(--nav-text), 35%, transparent);
   text-transform: uppercase;
   letter-spacing: 0.1em;
   padding: 0 20px;
@@ -198,7 +225,7 @@ body {
   gap: 10px;
   padding: 9px 20px;
   font-size: 13px;
-  color: rgba(232, 228, 220, 0.65);
+  color: color-mix(in rgb, var(--nav-text), 65%, transparent);
   cursor: pointer;
   transition: all 0.1s;
   border-left: 3px solid transparent;
@@ -206,12 +233,12 @@ body {
 }
 
 .nav-item:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--sidebar-item-hover-bg);
   color: var(--nav-text);
 }
 
 .nav-item.active {
-  background: rgba(184, 108, 26, 0.12);
+  background: color-mix(in rgb, var(--score-color), 12%, transparent);
   color: var(--nav-text);
   border-left-color: var(--nav-active);
   font-weight: 500;
@@ -230,9 +257,9 @@ body {
 
 .sidebar-footer {
   padding: 16px 20px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--sidebar-divider);
   font-size: 11px;
-  color: rgba(232, 228, 220, 0.3);
+  color: color-mix(in rgb, var(--nav-text), 30%, transparent);
 }
 
 /* ===== Layout ===== */
@@ -2663,12 +2690,12 @@ body {
 /* Danger ghost button */
 .btn-danger-ghost {
   background: transparent;
-  border: 1px solid rgba(184, 64, 64, 0.3);
+  border: 1px solid color-mix(in rgb, var(--danger), 30%, transparent);
   color: var(--danger);
 }
 
 .btn-danger-ghost:hover:not(:disabled) {
-  background: rgba(184, 64, 64, 0.05);
+  background: color-mix(in rgb, var(--danger), 5%, transparent);
 }
 
 /* Comparison area */
@@ -2729,7 +2756,7 @@ body {
 
 .game-card:hover {
   border-color: var(--action);
-  box-shadow: 0 0 0 4px rgba(28, 61, 94, 0.08);
+  box-shadow: 0 0 0 4px color-mix(in rgb, var(--action), 8%, transparent);
   transform: translateY(-2px);
 }
 
@@ -3110,9 +3137,7 @@ body {
   background: var(--bg-elevated);
   border: 1px solid var(--border-strong);
   border-radius: 8px;
-  box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.14),
-    0 2px 8px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-menu);
   z-index: 100;
   overflow: hidden;
 }
@@ -3165,7 +3190,7 @@ body {
 }
 
 .sort-menu-item.active {
-  background: rgba(184, 108, 26, 0.08);
+  background: color-mix(in rgb, var(--score-color), 8%, transparent);
   color: var(--score-color);
   font-weight: 600;
 }
@@ -3202,7 +3227,7 @@ body {
 }
 
 .sort-menu-axis-item.active {
-  background: rgba(28, 61, 94, 0.08);
+  background: color-mix(in rgb, var(--action), 8%, transparent);
   color: var(--action);
   font-weight: 600;
 }
@@ -3499,9 +3524,9 @@ body {
 }
 
 .active-chips-row .filter-chip.chip-rated {
-  background: rgba(184, 108, 26, 0.1);
+  background: color-mix(in rgb, var(--score-color), 10%, transparent);
   color: var(--score-color);
-  border-color: rgba(184, 108, 26, 0.25);
+  border-color: color-mix(in rgb, var(--score-color), 25%, transparent);
 }
 
 .active-chips-row .filter-chip.chip-spec {
@@ -4782,27 +4807,6 @@ body {
 
 /* ===== Prediction Design Tokens ===== */
 
-:root {
-  /* Prediction accent */
-  --predict-accent: #1a706a;
-  --predict-bg: #eaf5f3;
-  --predict-border: #a8d9d4;
-
-  /* Confidence level colors (aliases to shared palette where identical) */
-  --conf-strong: var(--score-high);
-  --conf-strong-bg: var(--score-high-bg);
-  --conf-moderate: #7a5e1a;
-  --conf-moderate-bg: #f5ecd8;
-  --conf-weak: #8a3a10;
-  --conf-weak-bg: #f5e4d8;
-  --conf-insufficient: var(--text-muted);
-  --conf-insufficient-bg: var(--row-hover);
-
-  /* Tournament tension (aliases to BGG palette) */
-  --tourney-accent: var(--bgg-accent);
-  --tourney-bg: var(--bgg-bg);
-}
-
 /* ===== Prediction Components ===== */
 
 /* PREDICTED badge pill */
@@ -5118,8 +5122,8 @@ body {
 .readiness-widget {
   margin: 0 12px 12px;
   padding: 12px;
-  background: rgba(26, 112, 106, 0.15);
-  border: 1px solid rgba(26, 112, 106, 0.3);
+  background: color-mix(in rgb, var(--predict-accent), 15%, transparent);
+  border: 1px solid color-mix(in rgb, var(--predict-accent), 30%, transparent);
   border-radius: 8px;
 }
 
@@ -5141,7 +5145,7 @@ body {
 
 .readiness-progress {
   height: 4px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--sidebar-track-bg);
   border-radius: 2px;
   overflow: hidden;
   margin-bottom: 4px;
@@ -5156,7 +5160,7 @@ body {
 
 .readiness-widget-count {
   font-size: 10px;
-  color: rgba(232, 228, 220, 0.5);
+  color: color-mix(in rgb, var(--nav-text), 50%, transparent);
 }
 
 /* Prediction hint in rating form */
@@ -5205,11 +5209,11 @@ body {
 
 /* Predicted row in collection table */
 .game-row.predicted-row {
-  background: rgba(26, 112, 106, 0.04);
+  background: color-mix(in rgb, var(--predict-accent), 4%, transparent);
 }
 
 .game-row.predicted-row:hover {
-  background: rgba(26, 112, 106, 0.08);
+  background: color-mix(in rgb, var(--predict-accent), 8%, transparent);
 }
 
 .predicted-label {
@@ -5304,7 +5308,7 @@ body {
 
 .readiness-stage-banner-progress {
   height: 8px;
-  background: rgba(26, 112, 106, 0.15);
+  background: color-mix(in rgb, var(--predict-accent), 15%, transparent);
   border-radius: 4px;
   overflow: hidden;
   margin-bottom: 6px;
