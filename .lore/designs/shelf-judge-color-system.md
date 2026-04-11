@@ -19,7 +19,7 @@ This document defines the canonical color token system for `packages/web/app/glo
 
 ## Architecture
 
-Shelf Judge is a single-user, single-theme app. It uses **architecture B** from the principles doc: hex roots live directly in semantic tokens, with derivations and aliases on top. There is no primitive palette and no theme-switching layer.
+Shelf Judge is a single-user app with light and dark themes. It uses **architecture B** from the principles doc: hex roots live directly in semantic tokens, with derivations and aliases on top. There is no primitive palette layer (architecture A). Dark mode is implemented via a `[data-theme="dark"]` override block on `:root` that redefines the ~31 hex roots and ~26 derivations. Aliases cascade automatically and require no overrides.
 
 The three kinds of value in the system:
 
@@ -28,6 +28,18 @@ The three kinds of value in the system:
 - **Aliases.** `var()` references that express "these two concepts share a color."
 
 Components reference tokens by name. No hex values appear in component CSS.
+
+### Dark mode derivation strategy
+
+In light mode, derivations mix toward `white` (e.g. `color-mix(in hsl, var(--bgg-accent), white 92%)`). In dark mode, mixing toward white produces washed-out pastels on dark backgrounds. The dark override block replaces `white` with `var(--bg-base)` in all derivations, producing subtle tints appropriate for dark surfaces:
+
+- `-bg` variants: `color-mix(in hsl, <root>, var(--bg-base) 85%)`
+- `-border` variants: `color-mix(in hsl, <root>, var(--bg-base) 70%)`
+- `-badge-bg` variants: `color-mix(in hsl, <root>, var(--bg-base) 80%)`
+
+### Button text tokens
+
+`--on-action` and `--on-danger` represent text color on filled button backgrounds. In light mode these are `white`; in dark mode they are `var(--bg-base)` (dark text on lighter button surfaces). This resolves the mathematical impossibility of a single action color meeting 4.5:1 contrast against both a dark page background (as text) and white (as button label).
 
 ---
 
@@ -154,6 +166,46 @@ Both changes are reflected in the canonical `:root` block below.
 **Audit method.** Ratios computed via the WCAG 2.1 relative-luminance formula in a Python script on 2026-04-11. Values cross-checked against the WebAIM Contrast Checker spot-checks. Re-run the audit whenever a root hex value changes.
 
 **Rule for new tokens.** Any new foreground/background pair must be checked before adoption. Derived backgrounds at 92% white preserve contrast against `--text-primary` in typical use (15-17:1), but "typical use" is not a guarantee, especially for non-primary text colors or saturated accents.
+
+### Dark-mode contrast audit
+
+Audited 2026-04-11 against the `[data-theme="dark"]` override block values. Same WCAG 2.1 method as the light-mode audit.
+
+| Foreground          | Background       |     Ratio | Target         | Status     |
+| ------------------- | ---------------- | --------: | -------------- | ---------- |
+| `--text-primary`    | `--bg-base`      | 13.86 : 1 | AA normal text | PASS (AAA) |
+| `--text-primary`    | `--bg-surface`   | 12.39 : 1 | AA normal text | PASS (AAA) |
+| `--text-primary`    | `--bg-subtle`    | 13.00 : 1 | AA normal text | PASS (AAA) |
+| `--text-secondary`  | `--bg-base`      |  6.29 : 1 | AA normal text | PASS       |
+| `--text-secondary`  | `--bg-surface`   |  5.63 : 1 | AA normal text | PASS       |
+| `--text-muted`      | `--bg-base`      |  5.13 : 1 | AA normal text | PASS       |
+| `--text-muted`      | `--bg-surface`   |  4.59 : 1 | AA normal text | PASS       |
+| `--text-muted`      | `--bg-subtle`    |  4.81 : 1 | AA normal text | PASS       |
+| `--nav-text`        | `--nav-bg`       | 14.88 : 1 | AA normal text | PASS (AAA) |
+| `--score-color`     | `--bg-base`      |  6.16 : 1 | AA normal text | PASS       |
+| `--score-high`      | `--bg-base`      |  5.37 : 1 | AA normal text | PASS       |
+| `--score-mid`       | `--bg-base`      |  5.92 : 1 | AA normal text | PASS       |
+| `--score-low`       | `--bg-base`      |  5.03 : 1 | AA normal text | PASS       |
+| `--bgg-accent`      | `--bg-base`      |  4.84 : 1 | AA normal text | PASS       |
+| `--override-accent` | `--bg-base`      |  5.32 : 1 | AA normal text | PASS       |
+| `--action`          | `--bg-base`      |  5.18 : 1 | AA normal text | PASS       |
+| `--action-hover`    | `--bg-base`      |  6.32 : 1 | AA normal text | PASS       |
+| `--on-action`       | `--action`       |  5.18 : 1 | AA normal text | PASS       |
+| `--on-action`       | `--action-hover` |  6.32 : 1 | AA normal text | PASS       |
+| `--on-danger`       | `--score-low`    |  5.03 : 1 | AA normal text | PASS       |
+| `--warning`         | `--bg-base`      |  5.61 : 1 | AA non-text UI | PASS (AAA) |
+| `--warning-text`    | `--bg-base`      |  7.91 : 1 | AA normal text | PASS (AAA) |
+| `--filter-spec`     | `--bg-base`      |  4.67 : 1 | AA normal text | PASS       |
+| `--predict-accent`  | `--bg-base`      |  6.11 : 1 | AA normal text | PASS       |
+| `--conf-moderate`   | `--bg-base`      |  6.50 : 1 | AA normal text | PASS       |
+| `--conf-weak`       | `--bg-base`      |  4.52 : 1 | AA normal text | PASS       |
+| `--text-primary`    | `--success-bg`   | 10.10 : 1 | AA normal text | PASS (AAA) |
+
+**Dark-mode-specific "kept explicit" values:**
+
+- **`--on-action: var(--bg-base)` / `--on-danger: var(--bg-base)`**: Button text tokens. In light mode, buttons use white text on dark action/danger backgrounds. In dark mode, the action/danger colors are lighter (for text-link contrast on dark backgrounds), so button text flips to dark. These tokens bridge the gap.
+- **`--success-bg: #1a3828`**: Dark green surface for success feedback, replacing the light-mode `#d5f0e0`.
+- **`--warning-subtle: #2e2010`**: Dark warm surface for warning backgrounds.
 
 ---
 

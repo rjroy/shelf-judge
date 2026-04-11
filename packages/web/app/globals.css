@@ -108,6 +108,10 @@
   --placeholder-from: var(--nav-text);
   --placeholder-to: #d0cbc0;
 
+  /* ── Button text (on filled backgrounds) ──────────────────── */
+  --on-action: white;
+  --on-danger: white;
+
   /* ── Shadows ──────────────────────────────────────────────── */
   --shadow-menu: 0 8px 32px rgb(0 0 0 / 0.14), 0 2px 8px rgb(0 0 0 / 0.08);
 
@@ -115,7 +119,104 @@
   --sidebar-divider: color-mix(in srgb, var(--nav-text) 8%, transparent);
   --sidebar-item-hover-bg: color-mix(in srgb, var(--nav-text) 6%, transparent);
   --sidebar-track-bg: color-mix(in srgb, var(--nav-text) 10%, transparent);
+}
 
+/* ===== Dark Mode Overrides ===== */
+
+[data-theme="dark"] {
+  /* ── Neutral surfaces ─────────────────────────────────────── */
+  --bg-base: #1a1916;
+  --bg-surface: #242320;
+  --bg-elevated: #2e2d29;
+  --bg-subtle: #201f1c;
+  --bg-muted: #2a2a28;
+  --border: #3d3a35;
+  --border-strong: #524e48;
+  --row-hover: #2a2825;
+  --table-header-bg: #282724;
+
+  /* ── Text ─────────────────────────────────────────────────── */
+  --text-primary: #e8e4dc;
+  --text-secondary: #a09a90;
+  --text-muted: #908a80;
+
+  /* ── Score spectrum (tiered-scale domain) ────────────────── */
+  --score-color: #d4882e;
+  --score-high: #40a060;
+  --score-mid: #b89030;
+  --score-low: #e06060;
+
+  --score-bg: color-mix(in hsl, var(--score-color), var(--bg-base) 85%);
+  --score-high-bg: color-mix(in hsl, var(--score-high), var(--bg-base) 85%);
+  --score-mid-bg: color-mix(in hsl, var(--score-mid), var(--bg-base) 85%);
+  --score-low-bg: color-mix(in hsl, var(--score-low), var(--bg-base) 85%);
+  --score-border: color-mix(in hsl, var(--score-color), var(--bg-base) 70%);
+  --score-mid-border: color-mix(in hsl, var(--score-mid), var(--bg-base) 70%);
+  --score-low-border: color-mix(in hsl, var(--score-low), var(--bg-base) 70%);
+
+  /* ── Status ───────────────────────────────────────────────── */
+  --success-bg: #1a3828;
+  --warning: #f06820;
+  --warning-subtle: #2e2010;
+  --warning-border: #a08830;
+  --warning-text: #d4a830;
+  --danger-border: color-mix(in hsl, var(--score-low), var(--bg-base) 70%);
+
+  /* ── Data source languages (single-accent domains) ──────── */
+  --bgg-accent: #4a8bc4;
+  --bgg-bg: color-mix(in hsl, var(--bgg-accent), var(--bg-base) 85%);
+  --bgg-border: color-mix(in hsl, var(--bgg-accent), var(--bg-base) 70%);
+  --bgg-badge-bg: color-mix(in hsl, var(--bgg-accent), var(--bg-base) 80%);
+  --override-accent: #9a7ed8;
+  --override-bg: color-mix(in hsl, var(--override-accent), var(--bg-base) 85%);
+  --override-border: color-mix(in hsl, var(--override-accent), var(--bg-base) 70%);
+  --override-badge-bg: color-mix(in hsl, var(--override-accent), var(--bg-base) 80%);
+
+  /* ── Action (primary interactive color) ──────────────────── */
+  --action: #5a90c0;
+  --action-hover: #6aa0d0;
+  --action-subtle: color-mix(in hsl, var(--action), var(--bg-base) 85%);
+  --action-border: color-mix(in hsl, var(--action), var(--bg-base) 70%);
+
+  /* ── Navigation ───────────────────────────────────────────── */
+  --nav-bg: #121110;
+  --nav-text: #e8e4dc;
+
+  /* ── Filter spec (single-accent domain) ──────────────────── */
+  --filter-spec: #5d9054;
+  --filter-spec-bg: color-mix(in hsl, var(--filter-spec), var(--bg-base) 85%);
+  --filter-spec-border: color-mix(in hsl, var(--filter-spec), var(--bg-base) 70%);
+
+  /* ── Prediction (single-accent domain) ───────────────────── */
+  --predict-accent: #2aaa98;
+  --predict-bg: color-mix(in hsl, var(--predict-accent), var(--bg-base) 85%);
+  --predict-border: color-mix(in hsl, var(--predict-accent), var(--bg-base) 70%);
+
+  /* ── Confidence levels (tiered-scale domain) ─────────────── */
+  --conf-moderate: #c09828;
+  --conf-moderate-bg: color-mix(in hsl, var(--conf-moderate), var(--bg-base) 85%);
+  --conf-weak: #d06030;
+  --conf-weak-bg: color-mix(in hsl, var(--conf-weak), var(--bg-base) 85%);
+
+  /* ── Outlier tags ────────────────────────────────────────── */
+  --outlier-fitness-border: color-mix(in hsl, var(--score-high), var(--bg-base) 70%);
+
+  /* ── UI surface tokens ────────────────────────────────────── */
+  --placeholder-from: #3a3835;
+  --placeholder-to: #2a2825;
+
+  /* ── Button text (on filled backgrounds) ──────────────────── */
+  --on-action: var(--bg-base);
+  --on-danger: var(--bg-base);
+
+  /* ── Shadows (stronger for dark backgrounds) ──────────────── */
+  --shadow-menu: 0 8px 32px rgb(0 0 0 / 0.4), 0 2px 8px rgb(0 0 0 / 0.3);
+
+  /* ── Overlay ──────────────────────────────────────────────── */
+  --overlay-bg: rgb(0 0 0 / 0.65);
+}
+
+:root {
   /* Typography scale */
   --text-xs: 11px;
   --text-sm: 13px;
@@ -262,6 +363,43 @@ body {
   border-top: 1px solid var(--sidebar-divider);
   font-size: 11px;
   color: color-mix(in srgb, var(--nav-text) 30%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+
+.theme-toggle-sidebar {
+  color: var(--nav-text);
+}
+
+.theme-toggle-sidebar:hover {
+  background: var(--sidebar-item-hover-bg);
+}
+
+.theme-toggle-label {
+  opacity: 0.7;
+}
+
+.theme-toggle-mobile {
+  margin-left: auto;
+  color: var(--text-secondary);
+}
+
+.theme-toggle-mobile:hover {
+  background: var(--row-hover);
 }
 
 /* ===== Layout ===== */
@@ -321,7 +459,7 @@ body {
 
 .btn-primary {
   background: var(--action);
-  color: white;
+  color: var(--on-action);
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -341,7 +479,7 @@ body {
 
 .btn-danger {
   background: var(--danger);
-  color: white;
+  color: var(--on-danger);
 }
 
 .btn-danger:hover:not(:disabled) {
@@ -2862,7 +3000,7 @@ body {
 .pick-btn:hover:not(:disabled) {
   background: var(--action);
   border-color: var(--action);
-  color: white;
+  color: var(--on-action);
 }
 
 .pick-btn:disabled {
@@ -3428,7 +3566,7 @@ body {
   height: 17px;
   border-radius: 50%;
   background: var(--action);
-  color: white;
+  color: var(--on-action);
   font-size: 10px;
   font-weight: 700;
 }
@@ -3478,7 +3616,7 @@ body {
 .seg-btn.active {
   background: var(--action);
   border-color: var(--action);
-  color: white;
+  color: var(--on-action);
 }
 
 .range-input {
