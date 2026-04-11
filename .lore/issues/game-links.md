@@ -1,7 +1,7 @@
 ---
 title: "Game Links"
 date: 2026-04-11
-status: open
+status: resolved
 tags: [feature, web-ui, navigation]
 ---
 
