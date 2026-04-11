@@ -2,7 +2,7 @@
 title: Search result thumbnails
 date: 2026-04-06
 status: open
-tags: [ui, bgg, search]
+tags: [web-ui, bgg, search]
 modules: [daemon, web]
 ---
 

@@ -1,14 +1,14 @@
 ---
 title: "Implementation plan: tournament-ranking"
 date: 2026-04-06
-status: executed 
+status: executed
 tags: [plan, tournament, elo, ranking, pairwise]
 modules: [shared, daemon, web, cli]
 related:
   - .lore/specs/tournament-ranking.md
   - .lore/designs/mvp-data-model.md
   - .lore/designs/mvp-api-surface.md
-  - .lore/visual-direction/tournament/
+  - .lore/mockups/ (tournament-*.html)
 ---
 
 # Plan: Tournament-Based ELO Ranking
@@ -16,7 +16,7 @@ related:
 ## Spec Reference
 
 **Spec**: `.lore/specs/tournament-ranking.md`
-**Visual mockups**: `.lore/visual-direction/tournament/` (4 HTML mockups: session start, filter builder, filter preview, active comparison)
+**Visual mockups**: `.lore/mockups/ (tournament-*.html)` (4 HTML mockups: session start, filter builder, filter preview, active comparison)
 
 Requirements addressed:
 
@@ -484,7 +484,7 @@ In `index.ts`, construct `tournamentService` before `gameService`. The `onGameDe
 
 **Files**: New pages under `packages/web/app/tournament/`, modified `packages/web/components/sidebar.tsx`, `packages/web/app/page.tsx`, `packages/web/app/games/[id]/page.tsx`, `packages/web/lib/api.ts`
 **Addresses**: REQ-TOURN-10, REQ-TOURN-11, REQ-TOURN-16, REQ-TOURN-17, REQ-TOURN-18
-**Expertise**: Frontend (reference visual mockups at `.lore/visual-direction/tournament/`)
+**Expertise**: Frontend (reference visual mockups at `.lore/mockups/ (tournament-*.html)`)
 
 #### Navigation
 

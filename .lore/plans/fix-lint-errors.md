@@ -1,5 +1,8 @@
 ---
+title: "Fix lint errors (eager-forging-shannon)"
+date: 2026-04-06
 status: executed
+tags: [plan, lint, cleanup]
 ---
 
 # Fix Lint Errors

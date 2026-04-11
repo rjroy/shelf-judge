@@ -1,7 +1,7 @@
 ---
 title: "Tournament-based ELO ranking"
 date: 2026-04-06
-status: implemented 
+status: implemented
 tags: [spec, fitness, ranking, tournament, elo, pairwise]
 modules: [daemon, web, cli, shared]
 related:
@@ -11,7 +11,7 @@ related:
   - .lore/designs/mvp-fitness-model.md
   - .lore/designs/mvp-data-model.md
   - .lore/issues/deferred-tournament-ranking.md
-  - .lore/visual-direction/tournament/
+  - .lore/mockups/ (tournament-*.html)
 req-prefix: TOURN
 ---
 
@@ -88,7 +88,7 @@ ELO requires knowing the result of each comparison to calculate scores correctly
 
 - REQ-TOURN-6: The K-factor MUST be 32 for games with fewer than N comparisons and 16 for games with N or more comparisons, where N is the K-factor transition threshold. This allows new games to move quickly in the ranking while stabilizing established games. The transition threshold defaults to 15 and is configurable via daemon settings. K-values (32 and 16) are fixed constants derived from ELO theory and are not user-configurable. Changes to the threshold take effect on the next recalculate (REQ-TOURN-7).
 
-- REQ-TOURN-7: ELO ratings MUST be recalculable from comparison history. A `recalculate` operation replays all comparisons in chronological order from the default starting rating (1500) and regenerates all cached ELO scores. This ensures scores survive algorithm changes and validates cached values.
+- REQ-TOURN-7: [SUPERSEDED by `.lore/specs/reduce-tournament-overhead.md`] ~~ELO ratings MUST be recalculable from comparison history.~~ Cached ELO scores and win/loss counts are now authoritative. The `recalculate` operation was removed. See REQ-RTO-9.
 
 - REQ-TOURN-8: When a game is deleted from the collection, its comparisons MUST be retained in tournament history (the game ID remains as a historical reference). The deleted game's ELO rating is removed from the cached scores. Comparisons involving deleted games still contribute to surviving games' histories during recalculation.
 
@@ -203,7 +203,7 @@ These are genuine unknowns that should be resolved through use:
 
 2. **Normalization reference range.** The reference window half-width defaults to 400 (range 1100-1900), configurable via daemon settings. If display scores feel compressed toward the middle of the 1-10 range, narrowing the half-width (e.g., to 200) will spread them out. If scores cluster at the extremes, widen it. Observe after real use.
 
-3. **Session filter UX.** The spec defines four filter types (name, axis fitness, BGG tag, staleness). How these are surfaced (filter builder, search syntax, preset buttons, or something else) is a design decision. The web UI and CLI design documents must resolve this before implementation. Visual mockups for the filter UX are at `.lore/visual-direction/tournament/`.
+3. **Session filter UX.** The spec defines four filter types (name, axis fitness, BGG tag, staleness). How these are surfaced (filter builder, search syntax, preset buttons, or something else) is a design decision. The web UI and CLI design documents must resolve this before implementation. Visual mockups for the filter UX are at `.lore/mockups/ (tournament-*.html)`.
 
 ## Context
 

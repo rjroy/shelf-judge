@@ -1,7 +1,7 @@
 ---
 title: "BGG XML API Research"
 date: 2026-04-04
-status: resolved
+status: archived
 tags: [research, bgg, api, external]
 ---
 

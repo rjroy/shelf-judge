@@ -2,12 +2,12 @@
 title: "Implementation plan: collection-filter-sort"
 date: 2026-04-07
 status: executed
-tags: [plan, web-ui, filtering, sorting, collection, client-component]
+tags: [plan, web-ui, filtering, sorting, collection]
 modules: [web]
 related:
   - .lore/specs/collection-filter-sort.md
   - .lore/brainstorms/collection-filter-sort.md
-  - .lore/art/mockup-collection-filter-sort.html
+  - .lore/mockups/mockup-collection-filter-sort.html
   - .lore/designs/mvp-web-ui.md
 ---
 
@@ -16,7 +16,7 @@ related:
 ## Spec Reference
 
 **Spec**: `.lore/specs/collection-filter-sort.md`
-**Visual mockup**: `.lore/art/mockup-collection-filter-sort.html` (three panels: desktop full state, desktop axis-sort, mobile)
+**Visual mockup**: `.lore/mockups/mockup-collection-filter-sort.html` (three panels: desktop full state, desktop axis-sort, mobile)
 
 Requirements addressed: REQ-CFS-1 through REQ-CFS-30 (all). Every requirement maps to at least one phase below.
 
@@ -40,7 +40,7 @@ No new shared types are needed. All filtering and sorting is client-side against
 
 ### Mockup Patterns
 
-The HTML mockup (`.lore/art/mockup-collection-filter-sort.html`) establishes:
+The HTML mockup (`.lore/mockups/mockup-collection-filter-sort.html`) establishes:
 
 - **Sort control** in the topbar: a composite widget with "SORT BY" prefix label, a dropdown trigger showing the active sort name + chevron, and a direction toggle button. The dropdown menu has four groups (Score, Identity, Specs, Your Axes) with group headers, checkmark on the active item, and axis items slightly smaller.
 - **Filter bar** below the topbar: search input (always visible, with magnifying glass icon), a "Filters" toggle button (with count badge when active), and an expandable panel with rated-status segmented control and player-count input.
