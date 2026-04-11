@@ -350,7 +350,10 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
                   <div key={i} className={`tournament-recent-row ${c.won ? "win" : "loss"}`}>
                     <span className="tournament-result-badge">{c.won ? "W" : "L"}</span>
                     <span className="tournament-opponent-id">
-                      vs {c.opponentGameName ?? c.opponentGameId.slice(0, 8)}
+                      vs{" "}
+                      <Link href={`/games/${c.opponentGameId}`} className="game-link">
+                        {c.opponentGameName ?? c.opponentGameId.slice(0, 8)}
+                      </Link>
                     </span>
                     <span className="tournament-recent-date">
                       {new Date(c.createdAt).toLocaleDateString()}

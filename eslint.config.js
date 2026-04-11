@@ -17,7 +17,7 @@ export default tseslint.config(
   {
     // Web test files need bun-types for bun:test globals, but the main web tsconfig
     // serves Next.js without bun-types. Use a dedicated test tsconfig instead.
-    files: ["packages/web/tests/**/*.ts"],
+    files: ["packages/web/tests/**/*.ts", "packages/web/tests/**/*.tsx"],
     languageOptions: {
       parserOptions: {
         projectService: false,

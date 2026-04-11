@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { CollectionOutlier, OutlierClassification } from "@shelf-judge/shared";
 
 const HIGH_DISTANCE_THRESHOLD = 0.7;
@@ -40,7 +41,11 @@ export function Outliers({ outliers }: { outliers: CollectionOutlier[] }) {
         {outliers.map((outlier) => (
           <div key={outlier.gameId} className="outlier-row">
             <div className="outlier-info">
-              <div className="outlier-name">{outlier.gameName}</div>
+              <div className="outlier-name">
+                <Link href={`/games/${outlier.gameId}`} className="game-link">
+                  {outlier.gameName}
+                </Link>
+              </div>
               <div className="outlier-reason">
                 Composite distance <span>{outlier.distances.composite.toFixed(2)}</span> from
                 collection centroid

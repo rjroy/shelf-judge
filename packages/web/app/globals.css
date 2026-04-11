@@ -931,6 +931,17 @@ body {
   gap: 5px;
 }
 
+.game-link {
+  color: var(--bgg-accent);
+  text-decoration: none;
+  font-weight: inherit;
+  font-size: inherit;
+}
+
+.game-link:hover {
+  text-decoration: underline;
+}
+
 .bgg-link {
   font-size: 12px;
   color: var(--bgg-accent);
