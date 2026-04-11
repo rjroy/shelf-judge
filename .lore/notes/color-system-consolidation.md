@@ -154,9 +154,9 @@ All matches must be gone before the migration is complete.
 ## Status
 
 - [x] Contrast audit run against spec-canonical values (2026-04-11, all pairs pass)
-- [ ] `globals.css` `:root` block replaced with canonical (includes darkened `--text-muted` and `--score-mid`)
-- [ ] `color-mix(in rgb, ...)` occurrences repaired throughout `globals.css`
-- [ ] Enforcement grep (hex in components) clean
+- [x] `globals.css` `:root` block replaced with canonical (includes darkened `--text-muted` and `--score-mid`)
+- [x] `color-mix(in rgb, ...)` occurrences repaired throughout `globals.css`
+- [x] Enforcement grep (hex in components) clean
 - [ ] Visual verification pass (including `--text-muted` darkening and sidebar overlays previously broken)
 - [ ] Contrast audit re-run post-migration
 - [ ] Retro written
