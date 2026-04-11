@@ -1,7 +1,7 @@
 ---
 title: "Niche Champion Display"
 date: 2026-04-11
-status: draft
+status: approved
 tags: [spec, redundancy, niche, collection-awareness, display]
 modules: [daemon, shared, web, cli]
 req-prefix: NICHE
@@ -283,6 +283,7 @@ This function computes what niches the candidate game would join and where it wo
 ## Open Questions
 
 1. **Family noise.** BGG families include publisher families (e.g., "Kosmos: 2-player series") and thematic groupings alongside mechanical groupings. These can create noisy niches where membership is incidental rather than meaningful. The spec includes families because the brainstorm and profiling spec both include them in BGG clustering. If families produce unhelpful niches during implementation, the implementer should add a minimum size filter (e.g., families need 3+ members instead of 2) rather than excluding families entirely. Flag this in the retro if it arises.
+USER NOTE: Is a niche that is 1/2 the collection also noise? Such as "solo play" which exists on most games. I'd argue yes. But is "1/2 the collection" the good value?
 
 ## Context
 
