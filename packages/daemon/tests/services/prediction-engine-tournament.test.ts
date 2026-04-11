@@ -61,11 +61,9 @@ describe("tournament stability weighting in findKNearestForAxis", () => {
     expect(matches[0].similarity).toBeGreaterThan(matches[1].similarity);
   });
 
-  test("tournamentStability caps at 1.0 + boost and does not grow unbounded", () => {
-    // The stability factor is computed by the prediction service (Phase 4),
-    // but we verify that findKNearestForAxis treats the value as a simple multiplier.
-    // A candidate with stability 1.2 (the max for boost=0.2) should not be
-    // outranked by one with an artificially high stability.
+  test("tournamentStability is treated as a straight multiplier on base similarity", () => {
+    // The stability factor and its capping are computed by the prediction service (Phase 4).
+    // This test verifies that findKNearestForAxis treats the value as a simple multiplier.
     const target = [1, 0, 0.5];
     const candidates = [
       makeCandidate({

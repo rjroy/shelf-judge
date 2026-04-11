@@ -329,7 +329,9 @@ export function computePredictedFitness(
     return (b.contribution || 0) - (a.contribution || 0);
   });
 
-  const ratedCount = actualAxisCount + predictedAxisCount;
+  // ratedAxisCount reflects actual axes only (REQ-PRED-35). Predicted axes do not inflate this count.
+  // The score guard uses the combined count so predictions still produce a non-zero score.
+  const combinedCount = actualAxisCount + predictedAxisCount;
   const score = weightSum > 0 ? roundToOneDecimal(weightedSum / weightSum) : 0;
   const hypotheticalScore = vetoTriggered ? score : null;
 
@@ -354,7 +356,7 @@ export function computePredictedFitness(
   const fitnessResult: FitnessResult = vetoTriggered
     ? {
         score: 0,
-        ratedAxisCount: ratedCount,
+        ratedAxisCount: actualAxisCount,
         totalAxisCount: axes.length,
         breakdown,
         vetoed: true,
@@ -363,8 +365,8 @@ export function computePredictedFitness(
         predictionMeta,
       }
     : {
-        score: ratedCount > 0 ? score : 0,
-        ratedAxisCount: ratedCount,
+        score: combinedCount > 0 ? score : 0,
+        ratedAxisCount: actualAxisCount,
         totalAxisCount: axes.length,
         breakdown,
         vetoed: false,
@@ -407,12 +409,20 @@ function confidenceRank(c: PredictionConfidence): number {
  *   2: >= stageThresholds[1] (stable)
  *   3: >= stageThresholds[2] (mature)
  */
+/**
+ * Pre-computed map of cluster name (mechanic or category) to the set of game IDs
+ * in the collection that have that cluster. Passed by the caller so assessReadiness
+ * can identify underrepresented clusters without taking a full Game[] array.
+ */
+export type ClusterMembership = Map<string, Set<string>>;
+
 export function assessReadiness(
   ratedGameCount: number,
   axes: Axis[],
   gameRatings: Map<string, Record<string, number>>,
   vocabulary: Vocabulary,
   settings: PredictionSettings,
+  clusterMembership: ClusterMembership = new Map(),
 ): PredictionReadiness {
   const [t1, t2, t3] = settings.stageThresholds;
 
@@ -458,15 +468,46 @@ export function assessReadiness(
     );
   }
 
-  // Count how many rated games have each mechanic/category
+  // Identify rated game IDs for cluster coverage analysis
   const ratedGamesSet = new Set<string>();
   for (const [gameId, ratings] of gameRatings.entries()) {
     if (Object.keys(ratings).length > 0) ratedGamesSet.add(gameId);
   }
 
-  // Find clusters that are common in collection but underrepresented among rated games
-  // (This needs game data, but we only have vocabulary and ratings here.
-  //  For weak axes, we can still suggest rating games on those axes.)
+  // Find mechanic/category clusters that are common in the collection but underrepresented
+  // among rated games (REQ-PRED-20)
+  if (clusterMembership.size > 0) {
+    const clusterCoverage: { name: string; total: number; rated: number }[] = [];
+    for (const [clusterName, gameIds] of clusterMembership) {
+      const total = gameIds.size;
+      if (total < 3) continue; // only suggest clusters with meaningful presence
+      let rated = 0;
+      for (const gid of gameIds) {
+        if (ratedGamesSet.has(gid)) rated++;
+      }
+      clusterCoverage.push({ name: clusterName, total, rated });
+    }
+
+    // Sort by coverage ratio ascending (least covered first), break ties by total descending
+    clusterCoverage.sort((a, b) => {
+      const ratioA = a.rated / a.total;
+      const ratioB = b.rated / b.total;
+      if (ratioA !== ratioB) return ratioA - ratioB;
+      return b.total - a.total;
+    });
+
+    // Suggest the top underrepresented clusters (coverage < 50%, up to 2 suggestions)
+    let clusterSuggestions = 0;
+    for (const cluster of clusterCoverage) {
+      if (clusterSuggestions >= 2) break;
+      if (cluster.rated / cluster.total >= 0.5) break; // rest are well-covered
+      suggestedActions.push(
+        `Rate a ${cluster.name} game to improve predictions for that cluster (${cluster.rated}/${cluster.total} rated).`,
+      );
+      clusterSuggestions++;
+    }
+  }
+
   for (const weak of weakAxes.slice(0, 3)) {
     if (weak.ratedCount === 0) {
       suggestedActions.push(

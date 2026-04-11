@@ -7,7 +7,11 @@ import {
   findKNearestForAxis,
   predictAxisRating,
 } from "../../src/services/prediction-engine";
-import type { ReferenceGameCandidate, SimilarityMatch } from "../../src/services/prediction-engine";
+import type {
+  ClusterMembership,
+  ReferenceGameCandidate,
+  SimilarityMatch,
+} from "../../src/services/prediction-engine";
 import type { Vocabulary } from "../../src/services/feature-vector";
 
 // --- Helpers ---
@@ -748,6 +752,122 @@ describe("computePredictedFitness", () => {
     expect(meta.coveragePercent).toBe(0);
   });
 
+  test("ratedAxisCount reflects actual axes only, not predicted (REQ-PRED-35)", () => {
+    const game = makeGame("target", {}); // no personal ratings
+    const axes = [funAxis, themeAxis];
+
+    // Refs so both axes get predicted
+    const refs: ReferenceGameCandidate[] = [
+      makeCandidate({ gameId: "r1", vector: [1, 0, 0.5], ratings: { fun: 7, theme: 6 } }),
+      makeCandidate({ gameId: "r2", vector: [1, 0, 0.5], ratings: { fun: 8, theme: 7 } }),
+      makeCandidate({ gameId: "r3", vector: [1, 0, 0.5], ratings: { fun: 9, theme: 8 } }),
+    ];
+
+    const result = computePredictedFitness(
+      game,
+      axes,
+      null,
+      refs,
+      [1, 0, 0.5],
+      defaultSettings,
+      2,
+      () => null,
+    );
+
+    // Both axes are predicted, zero are actual
+    expect(result.predictedAxisCount).toBe(2);
+    expect(result.actualAxisCount).toBe(0);
+    // ratedAxisCount must be 0 (actual only), not 2
+    expect(result.fitnessResult.ratedAxisCount).toBe(0);
+    // But score should still be non-zero because predictions contribute
+    expect(result.fitnessResult.score).toBeGreaterThan(0);
+  });
+
+  test("ratedAxisCount is actual-only even with mixed actual and predicted axes", () => {
+    const game = makeGame("target", { fun: 8 }); // fun rated, theme not
+    const axes = [funAxis, themeAxis];
+
+    const refs: ReferenceGameCandidate[] = [
+      makeCandidate({ gameId: "r1", vector: [1, 0, 0.5], ratings: { theme: 7 } }),
+      makeCandidate({ gameId: "r2", vector: [1, 0, 0.5], ratings: { theme: 7 } }),
+      makeCandidate({ gameId: "r3", vector: [1, 0, 0.5], ratings: { theme: 7 } }),
+    ];
+
+    const result = computePredictedFitness(
+      game,
+      axes,
+      null,
+      refs,
+      [1, 0, 0.5],
+      defaultSettings,
+      2,
+      mockCalculateScore,
+    );
+
+    expect(result.actualAxisCount).toBe(1);
+    expect(result.predictedAxisCount).toBe(1);
+    // ratedAxisCount = actual only = 1
+    expect(result.fitnessResult.ratedAxisCount).toBe(1);
+  });
+
+  test("overall confidence is lowest non-actual confidence (mixed confidence)", () => {
+    const game = makeGame("target", {}); // no personal ratings
+    const axes = [funAxis, themeAxis];
+
+    // fun: 5 high-sim refs => strong confidence
+    // theme: only 2 refs => weak confidence
+    const refs: ReferenceGameCandidate[] = [
+      makeCandidate({ gameId: "r1", vector: [1, 0, 0.5], ratings: { fun: 7, theme: 6 } }),
+      makeCandidate({ gameId: "r2", vector: [1, 0, 0.5], ratings: { fun: 7, theme: 7 } }),
+      makeCandidate({ gameId: "r3", vector: [1, 0, 0.5], ratings: { fun: 7 } }),
+      makeCandidate({ gameId: "r4", vector: [1, 0, 0.5], ratings: { fun: 7 } }),
+      makeCandidate({ gameId: "r5", vector: [1, 0, 0.5], ratings: { fun: 7 } }),
+    ];
+
+    const result = computePredictedFitness(
+      game,
+      axes,
+      null,
+      refs,
+      [1, 0, 0.5],
+      defaultSettings,
+      2,
+      () => null,
+    );
+
+    const meta = result.fitnessResult.predictionMeta!;
+    // fun should be strong (5 refs, 0 variance, sim=1.0)
+    // theme should be weak (2 refs)
+    // overall = lowest = weak
+    expect(meta.confidence).toBe("weak");
+  });
+
+  test("all predictions insufficient produces null predictionMeta", () => {
+    const game = makeGame("target", {}); // no personal ratings
+    const axes = [funAxis, themeAxis];
+
+    // No refs have fun or theme ratings => insufficient for both
+    const refs: ReferenceGameCandidate[] = [
+      makeCandidate({ gameId: "r1", vector: [1, 0, 0.5], ratings: { other: 7 } }),
+    ];
+
+    const result = computePredictedFitness(
+      game,
+      axes,
+      null,
+      refs,
+      [1, 0, 0.5],
+      defaultSettings,
+      2,
+      () => null,
+    );
+
+    // Both axes insufficient => predictedAxisCount = 0 => predictionMeta = null
+    expect(result.predictedAxisCount).toBe(0);
+    expect(result.fitnessResult.predictionMeta).toBeNull();
+    expect(result.fitnessResult.score).toBe(0);
+  });
+
   test("games without BGG data and no ratings returns score 0", () => {
     const game = makeGame("target", {});
     const axes = [bggAxis]; // Only a BGG axis, no BGG data
@@ -885,5 +1005,78 @@ describe("assessReadiness", () => {
     );
     const result = assessReadiness(5, axes, gameRatings, emptyVocab, defaultSettings);
     expect(result.stage).toBe(1);
+  });
+
+  test("suggests underrepresented mechanic/category clusters (REQ-PRED-20)", () => {
+    // 10 games in collection, 5 rated. "Deck Building" has 5 games, only 1 rated.
+    // "Worker Placement" has 4 games, 3 rated. "Area Control" has 3 games, 0 rated.
+    const gameRatings = new Map<string, Record<string, number>>([
+      ["g1", { fun: 8 }], // deck-building, rated
+      ["g2", { fun: 7 }], // worker placement, rated
+      ["g3", { fun: 6 }], // worker placement, rated
+      ["g4", { fun: 5 }], // worker placement, rated
+      ["g5", { fun: 4 }], // unrelated, rated
+    ]);
+
+    const clusterMembership: ClusterMembership = new Map([
+      ["Deck Building", new Set(["g1", "g6", "g7", "g8", "g9"])], // 5 total, 1 rated
+      ["Worker Placement", new Set(["g2", "g3", "g4", "g10"])], // 4 total, 3 rated
+      ["Area Control", new Set(["g11", "g12", "g13"])], // 3 total, 0 rated
+    ]);
+
+    const result = assessReadiness(
+      5,
+      axes,
+      gameRatings,
+      emptyVocab,
+      defaultSettings,
+      clusterMembership,
+    );
+
+    // Should suggest Area Control (0/3 = 0%) and Deck Building (1/5 = 20%)
+    // Worker Placement is 3/4 = 75%, above the 50% threshold
+    expect(result.suggestedActions.some((a) => a.includes("Area Control"))).toBe(true);
+    expect(result.suggestedActions.some((a) => a.includes("Deck Building"))).toBe(true);
+    expect(result.suggestedActions.some((a) => a.includes("Worker Placement"))).toBe(false);
+  });
+
+  test("cluster suggestions limited to 2 and skips clusters with fewer than 3 games", () => {
+    const gameRatings = new Map<string, Record<string, number>>([["g1", { fun: 8 }]]);
+
+    const clusterMembership: ClusterMembership = new Map([
+      ["Tiny Cluster", new Set(["g1", "g2"])], // only 2, should be skipped
+      ["Big A", new Set(["g3", "g4", "g5"])], // 3 total, 0 rated
+      ["Big B", new Set(["g6", "g7", "g8"])], // 3 total, 0 rated
+      ["Big C", new Set(["g9", "g10", "g11"])], // 3 total, 0 rated
+    ]);
+
+    const result = assessReadiness(
+      1,
+      axes,
+      gameRatings,
+      emptyVocab,
+      defaultSettings,
+      clusterMembership,
+    );
+
+    // Tiny Cluster skipped (<3). Only 2 of the 3 big clusters suggested.
+    const clusterActions = result.suggestedActions.filter((a) => a.includes("cluster"));
+    expect(clusterActions.length).toBe(2);
+    expect(result.suggestedActions.some((a) => a.includes("Tiny Cluster"))).toBe(false);
+  });
+
+  test("no cluster suggestions when clusterMembership is empty (backward compatible)", () => {
+    const gameRatings = new Map<string, Record<string, number>>([
+      ["g1", { fun: 8 }],
+      ["g2", { fun: 7 }],
+      ["g3", { fun: 6 }],
+      ["g4", { fun: 5 }],
+      ["g5", { fun: 4 }],
+    ]);
+
+    const result = assessReadiness(5, axes, gameRatings, emptyVocab, defaultSettings);
+    // No cluster suggestions, only weak-axis suggestions
+    const clusterActions = result.suggestedActions.filter((a) => a.includes("cluster"));
+    expect(clusterActions.length).toBe(0);
   });
 });
