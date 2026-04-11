@@ -43,3 +43,9 @@ The plan covers 9 steps: dark-mode CSS token overrides via `[data-theme="dark"]`
 
 **Root cause identified:** BGG-sourced axis values (community rating, weight) are compute...
 - 10:15 commission-Octavia-20260411-100133 completed
+- 10:17 commission-Octavia-20260411-101401 result: Updated `.lore/plans/dark-mode.md` to reflect the post-migration color system state.
+
+**Changes made:**
+
+1. **Added post-migration baseline note** (line 32) documenting that the color consolidation la...
+- 10:17 commission-Octavia-20260411-101401 completed
