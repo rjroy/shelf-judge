@@ -1,4 +1,5 @@
 ---
+status: active
 custom_directories:
   art: [current]
   generated: [current]
