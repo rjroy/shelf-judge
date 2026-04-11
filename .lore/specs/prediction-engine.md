@@ -1,7 +1,7 @@
 ---
 title: "Prediction Engine for Unrated Games"
 date: 2026-04-11
-status: revised
+status: implemented
 tags: [spec, prediction, fitness, similarity, k-nn, confidence]
 modules: [daemon, shared, web, cli]
 related:
