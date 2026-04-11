@@ -1,7 +1,7 @@
 ---
 title: "Deferred filter types from collection filter/sort spec"
 date: 2026-04-10
-status: open
+status: parked
 tags: [deferred, collection-filter, low-priority]
 modules: [web]
 related: [.lore/specs/collection-filter-sort.md]
