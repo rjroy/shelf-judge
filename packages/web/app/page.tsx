@@ -43,6 +43,9 @@ export default async function ProfileOverviewPage() {
     );
   }
 
+  // Exclude predicted-only scores from actual averages
+  // (profile data comes from the daemon which already handles this, but defensive)
+
   const computedDate = new Date(profile.computedAt).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
@@ -56,8 +59,8 @@ export default async function ProfileOverviewPage() {
         <div className="topbar-meta">
           <span>Computed {computedDate}</span>
           <span>
-            {" "}&middot;{" "}
-            {profile.gameCount} {profile.gameCount === 1 ? "game" : "games"} &middot;{" "}
+            {" "}
+            &middot; {profile.gameCount} {profile.gameCount === 1 ? "game" : "games"} &middot;{" "}
             {profile.axisDistributions.length}{" "}
             {profile.axisDistributions.length === 1 ? "axis" : "axes"}
           </span>

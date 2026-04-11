@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { getGame, listAxes, getTournamentGameStats, getProfile } from "@/lib/api";
+import { getGame, listAxes, getTournamentGameStats, getProfile, predictGame } from "@/lib/api";
 import type {
   TournamentGameStatsDisplay,
   DivergentGame,
   CollectionOutlier,
+  FitnessResult,
+  RevealedPreferenceTension,
 } from "@shelf-judge/shared";
 import { ScoreBreakdown } from "@/components/score-breakdown";
 import { RatingForm } from "@/components/rating-form";
@@ -35,6 +37,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
   let tournamentStats: TournamentGameStatsDisplay | null = null;
   let profileDivergence: DivergentGame | null = null;
   let profileOutlier: CollectionOutlier | null = null;
+  let prediction: { score: FitnessResult; tension?: RevealedPreferenceTension } | null = null;
   try {
     [data, axes] = await Promise.all([getGame(id), listAxes()]);
     try {
@@ -49,6 +52,20 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
     } catch {
       // Profile may not exist yet
     }
+    // Fetch prediction data for unrated or partially-rated games
+    try {
+      const predicted = await predictGame(id);
+      if (predicted.score?.predictionMeta) {
+        prediction = {
+          score: predicted.score,
+          tension: predicted.score.predictionMeta
+            ? undefined // tension comes from the prediction response
+            : undefined,
+        };
+      }
+    } catch {
+      // Prediction may not be available (fully rated, no BGG data, etc.)
+    }
   } catch (err) {
     return (
       <div className="error-banner">
@@ -58,6 +75,10 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
   }
 
   const { game, score } = data;
+  // Use predicted score when the game has no actual score but has predictions
+  const displayScore = score ?? prediction?.score ?? null;
+  const hasPredictions =
+    displayScore?.predictionMeta !== null && displayScore?.predictionMeta !== undefined;
 
   return (
     <>
@@ -65,7 +86,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
       <div className="topbar">
         <div className="breadcrumb">
           <Link href="/collection">Collection</Link>
-          <span>›</span>
+          <span>&rsaquo;</span>
           <strong>{game.name}</strong>
         </div>
         <GameActions gameId={game.id} gameName={game.name} hasBggId={game.bggId !== null} />
@@ -156,30 +177,48 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
             )}
           </div>
           <div className="game-hero-score-section">
-            {score ? (
-              score.vetoed ? (
+            {displayScore ? (
+              displayScore.vetoed ? (
                 <>
                   <div className="score-hero-label">Fitness Score</div>
                   <div className="score-hero-number score-hero-vetoed">VETOED</div>
-                  {score.hypotheticalScore !== null && (
+                  {displayScore.hypotheticalScore !== null && (
                     <div className="score-hero-out-of">
-                      hypothetical: {score.hypotheticalScore.toFixed(1)}
+                      hypothetical: {displayScore.hypotheticalScore.toFixed(1)}
                     </div>
                   )}
-                  <div className="score-hero-rated">{score.ratedAxisCount} axes rated</div>
+                  <div className="score-hero-rated">{displayScore.ratedAxisCount} axes rated</div>
+                </>
+              ) : hasPredictions ? (
+                <>
+                  <span className="predict-badge">PREDICTED</span>
+                  <div className="score-hero-label">Fitness Score</div>
+                  <div className="score-hero-number score-predicted">
+                    <span className="score-predicted-tilde">~</span>
+                    {displayScore.score.toFixed(1)}
+                  </div>
+                  <div className="score-hero-predict-summary">
+                    {displayScore.predictionMeta!.actualAxisCount} actual &middot;{" "}
+                    {displayScore.predictionMeta!.predictedAxisCount} predicted
+                  </div>
+                  <div className="score-hero-predict-summary" style={{ marginTop: 2 }}>
+                    <span className={`conf-badge conf-${displayScore.predictionMeta!.confidence}`}>
+                      {displayScore.predictionMeta!.confidence}
+                    </span>
+                  </div>
                 </>
               ) : (
                 <>
                   <div className="score-hero-label">Fitness Score</div>
-                  <div className="score-hero-number">{score.score.toFixed(1)}</div>
+                  <div className="score-hero-number">{displayScore.score.toFixed(1)}</div>
                   <div className="score-hero-out-of">out of 10.0</div>
-                  <div className="score-hero-rated">{score.ratedAxisCount} axes rated</div>
+                  <div className="score-hero-rated">{displayScore.ratedAxisCount} axes rated</div>
                 </>
               )
             ) : (
               <>
                 <div className="score-hero-label">Fitness Score</div>
-                <div className="score-hero-number score-hero-unrated">—</div>
+                <div className="score-hero-number score-hero-unrated">&mdash;</div>
                 <div className="score-hero-out-of">not yet rated</div>
               </>
             )}
@@ -330,20 +369,76 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
           <div className="panel-left">
             <div className="panel-section-title">
               Score Breakdown
-              {score && !score.vetoed && (
-                <span className="badge">How {score.score.toFixed(1)} was calculated</span>
+              {displayScore && !displayScore.vetoed && (
+                <span className="badge">
+                  How {hasPredictions ? "~" : ""}
+                  {displayScore.score.toFixed(1)} was calculated
+                </span>
               )}
             </div>
-            <ScoreBreakdown score={score} />
+            <ScoreBreakdown score={displayScore} />
             <div className="calc-explanation">
               <strong>How this is calculated:</strong> weighted average of all rated axes. Formula:{" "}
-              <code>sum(rating × weight) / sum(weight)</code>. Axes without ratings are excluded
-              from both the numerator and denominator.
+              <code>sum(rating &times; weight) / sum(weight)</code>. Axes without ratings are
+              excluded from both the numerator and denominator.
+              {hasPredictions && (
+                <>
+                  {" "}
+                  Predicted axes use similarity-weighted ratings from your most similar rated games.
+                  Insufficient-confidence axes are excluded.
+                </>
+              )}
             </div>
+
+            {/* Revealed preference tension */}
+            {prediction?.score?.predictionMeta &&
+              (() => {
+                // Check if any breakdown entry has tension data available
+                // Tension comes through the prediction response
+                const tensionNote = prediction.score.predictionMeta
+                  ? prediction.tension
+                  : undefined;
+                if (!tensionNote) return null;
+
+                const delta = Math.abs(
+                  tensionNote.predictedFitness - tensionNote.tournamentClusterAverage,
+                );
+
+                return (
+                  <div className="tension-panel">
+                    <div className="tension-header">
+                      <span className="tension-icon">&#x26A1;</span>
+                      <span className="tension-title">Revealed Preference Tension</span>
+                      <span className="tension-delta">&Delta; {delta.toFixed(1)} points</span>
+                    </div>
+                    <div className="tension-body">
+                      <div className="tension-signal">
+                        <div className="tension-signal-label">Axis Prediction</div>
+                        <div className="tension-signal-value predict">
+                          {tensionNote.predictedFitness.toFixed(1)}
+                        </div>
+                      </div>
+                      <span className="tension-vs">vs</span>
+                      <div className="tension-signal">
+                        <div className="tension-signal-label">Tournament Pattern</div>
+                        <div className="tension-signal-value tourney">
+                          {tensionNote.tournamentClusterAverage.toFixed(1)}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="tension-note">{tensionNote.note}</div>
+                  </div>
+                );
+              })()}
           </div>
           <div className="panel-right">
             <div className="panel-section-title">Your Ratings</div>
-            <RatingForm gameId={game.id} axes={axes} currentRatings={game.ratings} />
+            <RatingForm
+              gameId={game.id}
+              axes={axes}
+              currentRatings={game.ratings}
+              predictionScore={hasPredictions ? displayScore : null}
+            />
           </div>
         </div>
       </div>

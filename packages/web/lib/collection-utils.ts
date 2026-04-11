@@ -106,7 +106,12 @@ export interface FilterState {
 }
 
 const FILTER_STORAGE_KEY = "shelf-judge-filters";
-export const DEFAULT_FILTERS: FilterState = { search: "", ratedStatus: "all", playedStatus: "all", playerCount: null };
+export const DEFAULT_FILTERS: FilterState = {
+  search: "",
+  ratedStatus: "all",
+  playedStatus: "all",
+  playerCount: null,
+};
 
 export function loadFilters(): FilterState {
   if (typeof window === "undefined") return DEFAULT_FILTERS;
@@ -152,8 +157,12 @@ export function matchesFilters(gws: GameWithScore, filters: FilterState): boolea
     return false;
   }
 
-  if (filters.ratedStatus === "rated" && score === null) return false;
-  if (filters.ratedStatus === "unrated" && score !== null) return false;
+  // A predicted-only game has score !== null but ratedAxisCount === 0.
+  // For filter purposes, classify it as "unrated" based on actual ratings.
+  const isActuallyRated =
+    score !== null && (score.predictionMeta === null || score.ratedAxisCount > 0);
+  if (filters.ratedStatus === "rated" && !isActuallyRated) return false;
+  if (filters.ratedStatus === "unrated" && isActuallyRated) return false;
 
   if (filters.playedStatus === "played" && numPlays === 0) return false;
   if (filters.playedStatus === "unplayed" && numPlays > 0) return false;

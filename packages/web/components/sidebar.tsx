@@ -3,6 +3,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import type { PredictionReadiness } from "@shelf-judge/shared";
+
+const STAGE_LABELS: Record<number, string> = {
+  0: "Not Ready",
+  1: "Basic",
+  2: "Moderate",
+  3: "Strong",
+};
 
 const navGroups = [
   {
@@ -60,6 +68,20 @@ const navGroups = [
         icon: (
           <svg className="nav-icon" viewBox="0 0 16 16" fill="currentColor">
             <path d="M4 2h8v1H4V2zm-2 2h12v1h-1.5l-1 3H12l-.5 1.5h-1L10 11H9l-.5 1.5h-1L7 11H6l-.5-1.5h-1L4 6.5H2.5L1.5 5H4V4zM5.5 5l1 3h3l1-3h-5zM6.5 12h3v1.5h-3V12z" />
+          </svg>
+        ),
+      },
+    ],
+  },
+  {
+    label: "Predictions",
+    items: [
+      {
+        href: "/readiness",
+        name: "Readiness",
+        icon: (
+          <svg className="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 2a5 5 0 110 10A5 5 0 018 3zm0 1.5a3.5 3.5 0 100 7 3.5 3.5 0 000-7zm0 1.5a2 2 0 110 4 2 2 0 010-4z" />
           </svg>
         ),
       },
@@ -141,6 +163,29 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 export function Sidebar() {
   const pathname = usePathname();
   const { open, close } = useSidebar();
+  const [readiness, setReadiness] = useState<PredictionReadiness | null>(null);
+
+  useEffect(() => {
+    fetch("/api/daemon/predictions/readiness")
+      .then((res) => {
+        if (!res.ok) return null;
+        return res.json() as Promise<PredictionReadiness>;
+      })
+      .then((data) => setReadiness(data))
+      .catch(() => {
+        // Readiness not available
+      });
+  }, []);
+
+  const progressPercent =
+    readiness && readiness.nextStageAt > 0
+      ? Math.min(100, Math.round((readiness.ratedGameCount / readiness.nextStageAt) * 100))
+      : readiness?.stage === 3
+        ? 100
+        : 0;
+
+  const moreNeeded =
+    readiness && readiness.stage < 3 ? readiness.nextStageAt - readiness.ratedGameCount : 0;
 
   return (
     <aside className={`sidebar${open ? " sidebar-open" : ""}`}>
@@ -184,6 +229,30 @@ export function Sidebar() {
           </div>
         ))}
       </nav>
+
+      {/* Prediction readiness widget */}
+      {readiness && (
+        <Link href="/readiness" style={{ textDecoration: "none" }}>
+          <div className="readiness-widget">
+            <div className="readiness-widget-label">Predictions</div>
+            <div className="readiness-widget-stage">
+              Stage {readiness.stage} &mdash; {STAGE_LABELS[readiness.stage]}
+            </div>
+            <div className="readiness-progress">
+              <div className="readiness-progress-fill" style={{ width: `${progressPercent}%` }} />
+            </div>
+            <div className="readiness-widget-count">
+              {readiness.ratedGameCount} rated
+              {moreNeeded > 0 && (
+                <>
+                  {" "}
+                  &middot; {moreNeeded} more for Stage {readiness.stage + 1}
+                </>
+              )}
+            </div>
+          </div>
+        </Link>
+      )}
 
       <div className="sidebar-footer">Shelf Judge v0.1</div>
     </aside>

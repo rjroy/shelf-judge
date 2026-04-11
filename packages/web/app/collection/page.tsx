@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { listGames, listAxes, getAllTournamentStats } from "@/lib/api";
+import { listGames, listAxes, getAllTournamentStats, listGamesWithPredictions } from "@/lib/api";
 import type { TournamentGameStatsDisplay } from "@shelf-judge/shared";
 import { RefreshAllButton } from "@/components/refresh-all-button";
 import { NormalizeFitnessButton } from "@/components/normalize-fitness-button";
@@ -11,6 +11,7 @@ export const dynamic = "force-dynamic";
 
 export default async function CollectionPage() {
   let games;
+  let predictedGames;
   let axes;
   let tournamentStats: Record<string, TournamentGameStatsDisplay> = {};
   try {
@@ -19,6 +20,11 @@ export default async function CollectionPage() {
       tournamentStats = await getAllTournamentStats();
     } catch {
       // Tournament data may not exist yet
+    }
+    try {
+      predictedGames = await listGamesWithPredictions();
+    } catch {
+      // Prediction data may not be available
     }
   } catch {
     return (
@@ -30,11 +36,18 @@ export default async function CollectionPage() {
 
   const hasTournamentData = Object.keys(tournamentStats).length > 0;
 
+  // Exclude predicted-only scores from the "rated" average
   const rated = games.filter(({ score }) => score !== null);
   const avgFitness =
     rated.length > 0
       ? rated.reduce((sum, { score }) => sum + (score?.score ?? 0), 0) / rated.length
       : null;
+
+  const predictedCount = predictedGames
+    ? predictedGames.filter(
+        (g) => g.score?.predictionMeta !== null && g.score?.predictionMeta !== undefined,
+      ).length - rated.length
+    : 0;
 
   if (games.length === 0) {
     return (
@@ -77,12 +90,14 @@ export default async function CollectionPage() {
       <div className="main-scroll">
         <CollectionTable
           games={games}
+          predictedGames={predictedGames ?? null}
           axes={axes}
           tournamentStats={tournamentStats}
           hasTournamentData={hasTournamentData}
           totalGames={games.length}
           ratedCount={rated.length}
           avgFitness={avgFitness}
+          predictedCount={predictedCount > 0 ? predictedCount : 0}
         />
       </div>
     </>

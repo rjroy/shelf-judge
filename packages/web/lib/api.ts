@@ -209,6 +209,22 @@ export async function listTournamentSessions(): Promise<TournamentSession[]> {
   return daemonJson("/api/tournament/sessions");
 }
 
+// Prediction API functions
+
+import type { PredictionReadiness } from "@shelf-judge/shared";
+
+export async function predictGame(id: string): Promise<GameWithScore> {
+  return daemonJson(`/api/predictions/${id}`);
+}
+
+export async function getReadiness(): Promise<PredictionReadiness> {
+  return daemonJson("/api/predictions/readiness");
+}
+
+export async function listGamesWithPredictions(): Promise<GameWithScore[]> {
+  return daemonJson("/api/games?includePredicted=true");
+}
+
 // Re-export types for convenience
 export type {
   Game,
@@ -221,4 +237,5 @@ export type {
   ImportProgress,
   ImportComplete,
   CollectionProfile,
+  PredictionReadiness,
 };
