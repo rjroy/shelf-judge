@@ -1,7 +1,7 @@
 ---
 title: "Implementation plan: game-links"
 date: 2026-04-11
-status: draft
+status: approved
 tags: [plan, web-ui, navigation, links]
 modules: [web]
 related:
