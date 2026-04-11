@@ -26,3 +26,8 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
+- 14:45 commission-Celeste-20260411-143938 result: Brainstorm artifact written to `.lore/brainstorms/redundancy-scoring.md` with 6 proposals for redundancy/collection-awareness scoring:
+
+1. **Post-Score Redundancy Penalty via Pairwise Similarity** (Me...
+
+- 14:45 commission-Celeste-20260411-143938 completed
