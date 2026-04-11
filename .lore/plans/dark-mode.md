@@ -23,19 +23,21 @@ Dark mode is implemented entirely through CSS custom property overrides. No comp
 ### Constraints
 
 - **Preserve warmth.** The visual direction defines Shelf Judge as "ink on quality cardboard stock." Dark mode must feel like the same notebook in dim light, not a different app. Warm dark neutrals, not cold grays.
-- **Architecture B stays.** The color system uses Architecture B (semantic roots with derivations). Dark mode is implemented via a `[data-theme="dark"]` override block on `:root`, not a full migration to Architecture A's primitive palette. The `color-mix()` derivations and `var()` aliases cascade automatically when roots are overridden, so only the ~34 explicit hex roots need dark equivalents.
+- **Architecture B stays.** The color system uses Architecture B (semantic roots with derivations). Dark mode is implemented via a `[data-theme="dark"]` override block on `:root`, not a full migration to Architecture A's primitive palette. The `color-mix()` derivations and `var()` aliases cascade automatically when roots are overridden, so only the ~31 explicit hex roots need dark equivalents.
 - **WCAG AA.** All dark-mode foreground/background pairings must meet the same contrast targets documented in the color system spec: 4.5:1 for normal text, 3:1 for large text and non-text UI.
 - **No component CSS changes for color.** Components reference semantic tokens. The theme switch happens at the token definition layer only. Component changes are limited to the toggle UI itself.
 
 ## Codebase Context
 
-### Color system (`packages/web/app/globals.css:1-130`)
+**Post-migration baseline.** The color system consolidation (2026-04-11) replaced the `:root` color block with the canonical block from the color system spec, fixed all `color-mix(in rgb, ...)` syntax to `color-mix(in srgb, ...)`, and eliminated hard-coded hex values from components. The numbers and analysis below reflect the post-migration state.
 
-The `:root` block contains ~117 tokens organized into three kinds:
+### Color system (`packages/web/app/globals.css:1-118`)
 
-- **~34 explicit hex roots** (e.g. `--bg-base: #f4f1ec`, `--bgg-accent: #2e5f8a`). These are the only values that need dark equivalents.
-- **~43 derivations** via `color-mix()` (e.g. `--bgg-bg: color-mix(in hsl, var(--bgg-accent), white 92%)`). These auto-adapt when roots change. In dark mode, the "white 92%" formula inverts poorly (mixing toward white on a dark background produces washed-out pastels). These derivations need to be overridden to mix toward the dark background or use opacity-based alternatives.
-- **~40 aliases** via `var()` (e.g. `--danger: var(--score-low)`). These cascade automatically.
+The `:root` block contains 77 color tokens organized into three kinds:
+
+- **~31 explicit hex roots** (e.g. `--bg-base: #f4f1ec`, `--bgg-accent: #2e5f8a`). These are the only values that need dark equivalents.
+- **~26 derivations** via `color-mix()` (e.g. `--bgg-bg: color-mix(in hsl, var(--bgg-accent), white 92%)`). These auto-adapt when roots change. In dark mode, the "white 92%" formula inverts poorly (mixing toward white on a dark background produces washed-out pastels). These derivations need to be overridden to mix toward the dark background or use opacity-based alternatives. Post-migration, the derivation pattern is systematic: `-bg` at 92%, `-border` at 75-79%, `-badge-bg` at 85%. The dark overrides can follow an equally systematic pattern (see Derivation problem below).
+- **~24 aliases** via `var()` (e.g. `--danger: var(--score-low)`). These cascade automatically and require no overrides. The migration increased the alias count by converting near-duplicate hex values to aliases (e.g. `--success` now references `var(--score-high)` instead of a separate `#2e7d32`).
 
 ### Derivation problem
 
@@ -56,7 +58,7 @@ Approach 1 is preferred because it preserves the Architecture B derivation patte
 
 ### Sidebar is already dark
 
-The sidebar uses `--nav-bg: var(--text-primary)` (dark background) with `--nav-text: #e8e4dc` (light text). In dark mode, the sidebar colors likely need minimal change, or the relationship inverts differently. The sidebar's light-on-dark overlay tokens (`--sidebar-divider`, `--sidebar-item-hover-bg`, `--sidebar-track-bg`) use `color-mix(in srgb, var(--nav-text) N%, transparent)` which will cascade if `--nav-text` changes.
+The sidebar uses `--nav-bg: var(--text-primary)` (dark background) with `--nav-text: #e8e4dc` (light text). In dark mode, the sidebar colors likely need minimal change, or the relationship inverts differently. The sidebar's light-on-dark overlay tokens (`--sidebar-divider`, `--sidebar-item-hover-bg`, `--sidebar-track-bg`) use `color-mix(in srgb, var(--nav-text) N%, transparent)` which will cascade if `--nav-text` changes. Note: these `color-mix` expressions now use the correct `in srgb` syntax (the migration fixed the broken `in rgb` form), so the sidebar overlays actually render for the first time. Any dark-mode work inherits a working baseline.
 
 ### localStorage patterns (`packages/web/lib/collection-utils.ts`)
 
@@ -73,7 +75,7 @@ Single CSS file: `packages/web/app/globals.css` (~5,500 lines). All tokens, comp
 **Files**: `packages/web/app/globals.css`
 **Expertise**: Color design (contrast auditing)
 
-Add a `[data-theme="dark"]` block after the existing `:root` block. Override every explicit hex root with a dark equivalent. Override every `color-mix()` derivation to mix toward the dark base instead of white. If Sienna's `color-palette-review.md` is available, apply any recommended light-mode root value changes first, since dark-mode roots are designed relative to the light palette.
+Add a `[data-theme="dark"]` block after the existing `:root` block (after line 118 in `globals.css`). Override the ~31 explicit hex roots with dark equivalents. Override the ~26 `color-mix()` derivations to mix toward the dark base instead of white. The light-mode palette is finalized (the color system migration landed 2026-04-11), so dark-mode roots can be designed against the current values.
 
 The dark palette design:
 
@@ -100,7 +102,7 @@ The dark palette design:
 
 **Placeholder gradients.** `--placeholder-from` aliases `var(--nav-text)`, and `--placeholder-to` is `#d0cbc0`. In light mode these produce a dark-to-lighter gradient for game thumbnails. In dark mode, if `--nav-text` stays light (see Step 5), both ends of the gradient become light-on-dark, producing a washed-out result. Override both `--placeholder-from` and `--placeholder-to` in the dark block to produce a subtle gradient appropriate for dark surfaces.
 
-**Derivations.** Override `color-mix()` lines to use `color-mix(in hsl, <accent>, var(--bg-base) 85%)` (or similar ratio) instead of mixing toward white.
+**Derivations.** Override the ~26 `color-mix()` lines to use `color-mix(in hsl, <accent>, var(--bg-base) 85%)` (or similar ratio) instead of mixing toward white. The post-migration derivation vocabulary is systematic (`-bg` at 92%, `-border` at 75-79%, `-badge-bg` at 85%), so the dark equivalents can follow a similarly mechanical pattern: replace `white` with `var(--bg-base)` and adjust ratios for appropriate subtlety on dark surfaces.
 
 **Shadows.** `--shadow-menu` may need stronger opacity on dark backgrounds to remain visible.
 
@@ -201,7 +203,7 @@ Key pairings to check:
 Update the color system spec to:
 
 - Remove the statement "Shelf Judge is a single-user, single-theme app" and replace with the current reality.
-- Reframe the Architecture B section: the system remains Architecture B but accommodates dark mode via a `[data-theme="dark"]` override block. This is not Architecture A (no primitive palette layer was introduced). Clarify that Architecture B can support a second theme when the override surface is limited to the ~34 hex roots and their derivations.
+- Reframe the Architecture B section: the system remains Architecture B but accommodates dark mode via a `[data-theme="dark"]` override block. This is not Architecture A (no primitive palette layer was introduced). Clarify that Architecture B can support a second theme when the override surface is limited to the ~31 hex roots and ~26 derivations.
 - Add the dark-mode contrast audit table alongside the existing light-mode table.
 - Document the derivation strategy change (mix toward dark base instead of white).
 - Note any dark-mode-specific "kept explicit" values.
@@ -234,7 +236,7 @@ Launch a sub-agent that reads this plan's Goal section, reviews the implementati
 Check specifically:
 
 - Toggle exists in sidebar footer (desktop) and mobile header (mobile).
-- `[data-theme="dark"]` block defines dark equivalents for all ~34 hex roots.
+- `[data-theme="dark"]` block defines dark equivalents for all ~31 hex roots.
 - All `color-mix()` derivations are overridden for dark mode.
 - `prefers-color-scheme` is respected by default.
 - Preference persists via localStorage.
@@ -252,10 +254,18 @@ Steps requiring specialized expertise:
 
 Consult `.lore/lore-agents.md` if available for domain-specific agents.
 
+## Migration Impact Summary
+
+The color system migration (2026-04-11) simplified dark mode implementation:
+
+- **Fewer tokens to override.** 77 tokens (down from 83). Six near-duplicate hex values became aliases that cascade automatically.
+- **Systematic derivation patterns.** Consistent vocabulary (`-bg` at 92%, `-border` at 75-79%, `-badge-bg` at 85%) means the dark override block can follow an equally systematic pattern rather than handling one-off derivations.
+- **Sidebar overlays now functional.** The `color-mix(in srgb, ...)` sidebar tokens were silently broken before (invalid `in rgb` syntax caused fallback). They now render correctly, giving dark mode a working baseline to adapt from rather than a broken one to fix.
+- **Alias chains verified.** The migration confirmed that alias chains like `--danger` -> `--score-low` and `--conf-strong` -> `--score-high` cascade correctly. Dark mode only needs to override the root, not every alias.
+- **Light palette finalized.** The light-mode hex roots are now their canonical values (including WCAG AA fixes to `--text-muted` and `--score-mid`). Dark-mode palette design can proceed against stable reference values.
+
 ## Open Questions
 
 1. **Three-state toggle UX.** The plan includes light/dark/system as three toggle states. If the user prefers a simpler two-state toggle (light/dark only, with system detection only on first visit), the `resolveTheme` function simplifies and the toggle icon reduces to sun/moon. This is a UX preference, not a technical blocker.
 
 2. **Sidebar in dark mode.** Option 1 (sidebar stays darkest) is assumed. If the user prefers option 2 (sidebar lighter than content in dark mode), the `--nav-bg` override changes but the plan structure is the same.
-
-3. **Sienna's color palette review.** If `color-palette-review.md` lands before implementation starts and recommends changes to light-mode root values, those changes should be applied first (since dark-mode roots are designed in relation to light-mode roots). The plan structure doesn't change, but the specific hex values in Step 1 would shift.
