@@ -49,7 +49,14 @@ Semantic tokens alias specific primitive stops and name them by purpose:
 
 Theme switching redefines the primitives inside a `[data-theme="dark"]` block (or equivalent). The semantic layer is the stable contract; the primitive layer is the swappable identity. Components never touch primitives directly, because that would break theme switching.
 
-This architecture is real work. The strict "components never touch primitives" rule exists to make theming reliable. Without a theming reason, the rule is ceremony.
+**Trade-offs:**
+
+- **Pro:** Theme switching is a one-line change in a theme block. Every color flips coherently.
+- **Pro:** The semantic layer is stable across themes, so component CSS never changes when a theme is added.
+- **Con:** Two layers to maintain. Adding a new color means picking (or adding) a primitive stop _and_ a semantic alias.
+- **Con:** The strict "components never touch primitives" rule needs enforcement, or theming drifts.
+
+Actual dark-mode implementation (the theme toggle, `prefers-color-scheme` media query, JavaScript persistence) is out of scope for this reference. The architecture makes it possible; the wiring is project-specific.
 
 ### B. Semantic roots with derivations
 
@@ -65,7 +72,12 @@ Hex values live directly in semantic tokens. Variants are derived from them via 
 
 One layer, fewer variables, the root and its variants live together. A brand refresh changes `--bgg-accent` and the derivations follow.
 
-The trade-off: switching themes means editing every root, not flipping one variable. For a single-user, single-theme app this is fine. For a product with dark mode on the roadmap, it is a migration you will regret putting off.
+**Trade-offs:**
+
+- **Pro:** Simpler to set up and reason about. Fewer variables overall.
+- **Pro:** Root and variants live together, so a domain is self-contained.
+- **Con:** No theme layer. Adding dark mode later means either introducing a primitive layer (migration cost across every root) or maintaining parallel roots per theme.
+- **Con:** A component could read a root directly, skipping any semantic abstraction, because there is no layer separation to enforce.
 
 ### The rest of this document applies to both
 
@@ -86,9 +98,11 @@ Every value in the system is one of three kinds.
 --conf-strong: var(--score-high); /* strong confidence = high score green */
 ```
 
-**Derivations** (`color-mix()`). Use for predictable light/dark variants of a root. Backgrounds at 90-93% white, borders at 75-80% white. These should never need tuning separately from their source.
+**Derivations** (`color-mix()`). Use for predictable light/dark variants of a root. Rough starting points: backgrounds at 90-93% white, borders at 75-80% white, badge backgrounds around 85%. These percentages are approximate, not canonical. Tune individual derivations by a point or two when the result looks wrong (a saturated red at 92% white may need 93% to match a muted green at 92%), and document the tuning in your project spec so future readers know it is intentional.
 
-**When to stay explicit instead of deriving.** Hover states often need precise contrast control. A "precious" color that defines the app's character (a hero accent) should stay a real hex value even if its variants are derived. Any color where the exact value matters to the design read, not just the structural relationship.
+**Color space matters.** `color-mix(in hsl, ...)` and `color-mix(in oklch, ...)` produce visibly different results for the same percentages. HSL is the safe, predictable default: desaturation toward white happens in a way designers can eyeball. OKLCH is more perceptually uniform (equal percentage steps look equal to the eye), which matters for brand-critical color work or when building heatmaps across many hues. SRGB is literal linear interpolation and is almost never what you want. Pick one color space per project and stick to it; mixing them within a single file guarantees drift.
+
+**Counterpoint: when to stay explicit instead of deriving.** Hover states often need precise contrast control and should not be at the mercy of a `color-mix()` formula. A "precious" color that defines the app's character (a hero accent) should stay a real hex value even if its variants are derived. Any color where the exact value matters to the design read, not just the structural relationship, belongs as an explicit hex even inside a heavily-derived system.
 
 ---
 
@@ -107,7 +121,9 @@ One canonical color with derived variants. Use the same suffix vocabulary across
 --bgg-badge-bg   /* badge background (derived, ~85% white) */
 ```
 
-Every single-accent domain follows this vocabulary. A developer knows that if a domain exists, it has an `-accent`, a `-bg`, and a `-border`, with no guessing required. The predictability is the point.
+Every single-accent domain follows this vocabulary. A developer knows that if a domain exists, it has a root, a `-bg`, and a `-border`, with no guessing required. The predictability is the point.
+
+The root itself is named either `--<domain>-accent` or just `--<domain>`, depending on whether the domain name needs a suffix to read as a noun. `--bgg-accent` reads better than `--bgg`; `--success` reads better than `--success-accent`. Both forms share the same variant suffixes. Pick one form per kind of domain (e.g. data-provenance domains get `-accent`, semantic status gets the bare form) and stay consistent within each kind.
 
 ### Tiered-scale domains
 
@@ -143,7 +159,7 @@ Names answer _what is this for_, not _what does it look like_.
 --color-text-info: #0c447c;
 ```
 
-Good patterns: `--{property}-{context}` (`--color-text-info`) or `--{domain}-{role}` (`--bgg-accent`). Pick one pattern per project and keep it.
+Good patterns: `--{property}-{context}` (`--color-text-info`) or `--{domain}-{role}` (`--bgg-accent`). Pick one pattern per project and keep it. The two "good" examples above deliberately show both conventions; a real project picks one and stops there.
 
 **Never name tokens after components.** `--modal-bg` and `--sidebar-text` couple the token to an implementation. A modal that becomes a popover has to rename its tokens. A sidebar that gets reused in a different context drags its naming along. Name by role.
 
@@ -193,7 +209,7 @@ A color rule that no one enforces is indistinguishable from no rule.
 ## How to audit an existing system
 
 1. Extract every color variable. Separate them into explicit hex, derivations, and aliases.
-2. Group the explicit hex values by hue family. Near-duplicates within a family are consolidation candidates. Verify visually, not by channel math.
+2. Group the explicit hex values by hue family. A practical grouping step: sort by HSL hue angle (0-360°) and cluster values whose hues differ by less than about 20° into the same family. Within each family, near-duplicates are consolidation candidates. Verify visually by rendering swatches side by side, not by channel math. This step requires designer judgment on borderline cases.
 3. For each group, identify the root (the "truest" or most-used value). Other values in the group become aliases or derivations of it.
 4. Classify each token's domain: single-accent, tiered-scale, or application-wide UI plumbing. Check that single-accent domains follow the standard vocabulary.
 5. Check every token name: can a developer pick the right one without looking it up? If not, the naming or the count is wrong.

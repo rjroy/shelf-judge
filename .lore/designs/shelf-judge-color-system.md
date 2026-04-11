@@ -37,48 +37,64 @@ The system has three kinds of color domain. Each follows a different vocabulary,
 
 ### 1. Single-accent domains
 
-One canonical hue with derived variants. These follow the standard domain vocabulary:
+One canonical hue with derived variants. The standard variant vocabulary:
 
-| Suffix      | Purpose                                         | Source                                          |
-| ----------- | ----------------------------------------------- | ----------------------------------------------- |
-| `-accent`   | Canonical color for text, icons, strong borders | Explicit hex                                    |
-| `-bg`       | Light background wash                           | `color-mix(in hsl, var(--X-accent), white 92%)` |
-| `-border`   | Medium outline                                  | `color-mix(in hsl, var(--X-accent), white 78%)` |
-| `-badge-bg` | Slightly stronger background for inline badges  | `color-mix(in hsl, var(--X-accent), white 85%)` |
+| Suffix      | Purpose                                        | Source                                 |
+| ----------- | ---------------------------------------------- | -------------------------------------- |
+| `-bg`       | Light background wash                          | `color-mix(in hsl, <root>, white 92%)` |
+| `-border`   | Medium outline                                 | `color-mix(in hsl, <root>, white 78%)` |
+| `-badge-bg` | Slightly stronger background for inline badges | `color-mix(in hsl, <root>, white 85%)` |
+
+**Root naming.** Single-accent roots come in two forms:
+
+- **Suffixed form**, `--<domain>-accent`, for data-provenance domains where the domain name (`bgg`, `override`, `predict`) needs a suffix to read as a noun.
+- **Bare form**, `--<domain>`, for domains where the domain name is already a complete noun (`--filter-spec`, `--success`, `--warning`, `--danger`, `--action`).
+
+Both forms share the same variant suffixes (`-bg`, `-border`, `-badge-bg`). Which form a domain uses is a naming choice, not a structural one; the derivation rules are identical.
 
 Domains in this archetype:
 
-- **BGG** (`--bgg-*`): community-sourced data
-- **Override** (`--override-*`): user overrides of BGG values
-- **Prediction** (`--predict-*`): predicted ratings
-- **Filter spec** (`--filter-spec-*`): active filter indicators
-- **Tournament** (`--tourney-*`): aliases to BGG since tournament data is BGG-sourced
+| Domain          | Root                | Notes                                                                                                                                                   |
+| --------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Personal**    | `--personal-accent` | Aliases to `--text-primary`. No variants because personal data uses the default surface; the accent is the only token.                                  |
+| **BGG**         | `--bgg-accent`      | Data provenance: community-sourced. Full vocabulary (`-bg`, `-border`, `-badge-bg`).                                                                    |
+| **Override**    | `--override-accent` | Data provenance: user override of BGG. Full vocabulary.                                                                                                 |
+| **Prediction**  | `--predict-accent`  | Data provenance: model-predicted ratings. `-bg` and `-border` only.                                                                                     |
+| **Tournament**  | `--tourney-accent`  | Aliases to BGG palette since tournament data is BGG-sourced. `-accent` and `-bg` only.                                                                  |
+| **Filter spec** | `--filter-spec`     | Bare-form root. Active filter indicators. `-bg` and `-border` only.                                                                                     |
+| **Success**     | `--success`         | Bare-form root. Aliases `--score-high`; `--success-bg` is kept explicit (see "Kept explicit" below).                                                    |
+| **Warning**     | `--warning`         | Bare-form root. Full explicit variants (`-subtle`, `-border`, `-text`) because the orange sits outside the score spectrum and needs independent tuning. |
+| **Danger**      | `--danger`          | Bare-form root. Aliases `--score-low`; subtle/border follow.                                                                                            |
+| **Action**      | `--action`          | Bare-form root. Plus `-hover` (explicit, for contrast control) in addition to the standard variants.                                                    |
 
-Not every domain needs `-badge-bg`. `-accent`, `-bg`, and `-border` are the minimum.
+Not every domain needs every variant. `-badge-bg` is optional; `-border` is the minimum variant alongside `-bg`.
 
 ### 2. Tiered-scale domains
 
 A semantic gradient where each tier is its own root. Each tier uses single-accent-style derivations, but the domain has no single "accent" because the whole point is the gradient.
 
-| Domain                | Roots                                                                                         |
-| --------------------- | --------------------------------------------------------------------------------------------- |
-| **Score spectrum**    | `--score-high`, `--score-mid`, `--score-low`, plus `--score-color` as the hero display accent |
-| **Confidence levels** | `--conf-strong`, `--conf-moderate`, `--conf-weak`, `--conf-insufficient`                      |
+| Domain                | Tier roots                                                                                                                        |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| **Score spectrum**    | `--score-high`, `--score-mid`, `--score-low` (tier indicators), plus `--score-color` (hero display, separate from the tier scale) |
+| **Confidence levels** | `--conf-strong`, `--conf-moderate`, `--conf-weak`, `--conf-insufficient`                                                          |
+
+`--score-color` sits in the score spectrum domain but is not a tier. It is the precious hero accent used for score displays themselves (see Usage guidance below). The three tier roots (`-high`, `-mid`, `-low`) are the actual tiered scale.
 
 Tiered-scale roots alias cross-domain when the semantics match (`--conf-strong: var(--score-high)`). Aliasing is preferred over new hex values when the visual concept is the same.
 
 ### 3. Application-wide UI plumbing
 
-Neutrals, text, action states, navigation, and status feedback. These are not bounded domains but cross-cutting concerns, so they use ad-hoc vocabularies.
+Cross-cutting concerns that are not bounded domains: neutral surfaces, text, navigation, and aliased tag surfaces. These use their own vocabularies because they do not have a single "accent" around which variants cluster.
 
-| Group            | Tokens                                                                                                                                       |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Neutrals**     | `--bg-base`, `--bg-surface`, `--bg-elevated`, `--bg-subtle`, `--bg-muted`, `--border`, `--border-strong`, `--row-hover`, `--table-header-bg` |
-| **Text**         | `--text-primary`, `--text-secondary`, `--text-muted`                                                                                         |
-| **Action**       | `--action`, `--action-hover`, `--action-subtle`, `--action-border`                                                                           |
-| **Status**       | `--success`, `--warning`, `--danger` and variants                                                                                            |
-| **Navigation**   | `--nav-bg`, `--nav-text`, `--nav-active`                                                                                                     |
-| **Outlier tags** | `--outlier-lone`, `--outlier-orphan`, `--outlier-fitness` and variants                                                                       |
+| Group                | Tokens                                                                                                                                       |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Neutrals**         | `--bg-base`, `--bg-surface`, `--bg-elevated`, `--bg-subtle`, `--bg-muted`, `--border`, `--border-strong`, `--row-hover`, `--table-header-bg` |
+| **Text**             | `--text-primary`, `--text-secondary`, `--text-muted`                                                                                         |
+| **Navigation**       | `--nav-bg`, `--nav-text`, `--nav-active`                                                                                                     |
+| **Outlier tags**     | `--outlier-lone`, `--outlier-orphan`, `--outlier-fitness` and variants (all aliases to other domains)                                        |
+| **UI surfaces**      | `--suggest-bg`, `--suggest-border`, `--overlay-bg`, `--placeholder-from`, `--placeholder-to`                                                 |
+| **Shadows**          | `--shadow-menu`                                                                                                                              |
+| **Sidebar overlays** | `--sidebar-divider`, `--sidebar-item-hover-bg`, `--sidebar-track-bg` (light-on-dark composites)                                              |
 
 ---
 
@@ -101,21 +117,43 @@ Never use `--score-color` for tier indication. Never use `--score-high/-mid/-low
 
 ## Contrast requirements
 
-Text tokens must meet WCAG AA (4.5:1 for normal text, 3:1 for text at 18px+ / 14px+ bold) against the background they sit on. The combinations in active use:
+WCAG 2.1 AA targets: **4.5:1** for normal text, **3:1** for large text (18px+ or 14px+ bold), **3:1** for non-text UI components and graphical objects (WCAG 1.4.11). The canonical token values in this spec have been audited against these thresholds. Measured ratios:
 
-| Foreground               | Background                                 | Required  | Used for                              |
-| ------------------------ | ------------------------------------------ | --------- | ------------------------------------- |
-| `--text-primary`         | `--bg-base`, `--bg-surface`, `--bg-subtle` | AA normal | Body text                             |
-| `--text-secondary`       | `--bg-base`, `--bg-surface`                | AA normal | Supporting text                       |
-| `--text-muted`           | `--bg-base`, `--bg-surface`                | AA large  | Labels, hints (only at 15px+)         |
-| `--nav-text`             | `--nav-bg`                                 | AA normal | Sidebar navigation                    |
-| `--action`               | `--bg-base`, `--bg-surface`                | AA normal | Link text                             |
-| `white`                  | `--action`, `--danger`                     | AA normal | Primary and destructive button labels |
-| `--score-high/-mid/-low` | `--bg-base`                                | AA normal | Score tier text                       |
+| Foreground         | Background       |     Ratio | Target         | Status                                                                   |
+| ------------------ | ---------------- | --------: | -------------- | ------------------------------------------------------------------------ |
+| `--text-primary`   | `--bg-base`      | 15.84 : 1 | AA normal text | PASS (AAA)                                                               |
+| `--text-primary`   | `--bg-surface`   | 17.43 : 1 | AA normal text | PASS (AAA)                                                               |
+| `--text-primary`   | `--bg-subtle`    | 16.69 : 1 | AA normal text | PASS (AAA)                                                               |
+| `--text-secondary` | `--bg-base`      |  5.10 : 1 | AA normal text | PASS                                                                     |
+| `--text-secondary` | `--bg-surface`   |  5.61 : 1 | AA normal text | PASS                                                                     |
+| `--text-muted`     | `--bg-base`      |  4.75 : 1 | AA normal text | PASS (after fix, was 2.62 at `#9c9590`)                                  |
+| `--text-muted`     | `--bg-surface`   |  5.22 : 1 | AA normal text | PASS (after fix)                                                         |
+| `--text-muted`     | `--bg-subtle`    |  5.00 : 1 | AA normal text | PASS (after fix)                                                         |
+| `--nav-text`       | `--nav-bg`       | 14.08 : 1 | AA normal text | PASS (AAA)                                                               |
+| `--action`         | `--bg-base`      |  9.92 : 1 | AA normal text | PASS (AAA)                                                               |
+| `--action`         | `--bg-surface`   | 10.92 : 1 | AA normal text | PASS (AAA)                                                               |
+| `--action-hover`   | `--bg-base`      |  6.88 : 1 | AA normal text | PASS                                                                     |
+| `white`            | `--action`       | 11.18 : 1 | AA normal text | PASS (AAA)                                                               |
+| `white`            | `--action-hover` |  7.75 : 1 | AA normal text | PASS (AAA)                                                               |
+| `white`            | `--danger`       |  5.46 : 1 | AA normal text | PASS                                                                     |
+| `--score-high`     | `--bg-base`      |  4.67 : 1 | AA normal text | PASS                                                                     |
+| `--score-mid`      | `--bg-base`      |  4.59 : 1 | AA normal text | PASS (after fix, was 4.26 at `#8a6f20`)                                  |
+| `--score-low`      | `--bg-base`      |  4.85 : 1 | AA normal text | PASS                                                                     |
+| `--warning-text`   | `--bg-base`      |  5.37 : 1 | AA normal text | PASS                                                                     |
+| `--warning`        | `--bg-base`      |  3.36 : 1 | AA non-text UI | PASS (banner background and icon use only; `--warning-text` covers text) |
 
-> **Unverified.** This table names the combinations that exist; a contrast audit has not been run. Before the next color-touching PR: measure each row with a real contrast checker and either confirm the claim or tune the affected tokens. Hover states (`--action-hover`) are kept as explicit hex (not derived) specifically so they can be adjusted for contrast independently of `--action`.
+**Two token values were adjusted by this audit:**
 
-**Rule for new tokens.** Any new foreground/background pair must be checked before adoption. Derived backgrounds at 92% white preserve contrast against warm near-black text in typical use, but "typical use" is not a guarantee.
+- **`--text-muted`**: `#9c9590` → `#706a62`. Original value was 2.62:1 on `--bg-base`, which fails even the AA large threshold. `--text-muted` is used for 11px uppercase labels, which WCAG classifies as normal text (4.5:1). The new value clears AA with modest margin and stays visually distinct from `--text-secondary` (`#6b6560`, 5.10:1).
+- **`--score-mid`**: `#8a6f20` → `#846a1d`. Original value was 4.26:1, a fraction shy of 4.5:1. The shift is a luminance delta of 0.016 (near-imperceptible) and clears AA normal for use as score tier text.
+
+Both changes are reflected in the canonical `:root` block below.
+
+**`--warning` is not text.** The project provides `--warning-text` (`#7a5f10`, 5.37:1) for text that needs to read as "warning-colored." `--warning` itself (`#e65100`) is the orange used on banner backgrounds, icons, and borders, where the 3:1 non-text-UI threshold applies. Components must use `--warning-text` for text, not `--warning`.
+
+**Audit method.** Ratios computed via the WCAG 2.1 relative-luminance formula in a Python script on 2026-04-11. Values cross-checked against the WebAIM Contrast Checker spot-checks. Re-run the audit whenever a root hex value changes.
+
+**Rule for new tokens.** Any new foreground/background pair must be checked before adoption. Derived backgrounds at 92% white preserve contrast against `--text-primary` in typical use (15-17:1), but "typical use" is not a guarantee, especially for non-primary text colors or saturated accents.
 
 ---
 
@@ -123,16 +161,25 @@ Text tokens must meet WCAG AA (4.5:1 for normal text, 3:1 for text at 18px+ / 14
 
 "No hex values in component CSS" is a rule, and a rule without enforcement is a wish.
 
-**Current check (manual).** Before a color-touching PR, run:
+**Hex values in component code (manual check).** Before a color-touching PR, run:
 
 ```bash
-grep -rn '#[0-9a-fA-F]\{3,6\}' packages/web/app packages/web/components \
-  --include='*.tsx' --include='*.css' --exclude='globals.css'
+grep -rn '#[0-9a-fA-F]\{3,6\}' packages/web \
+  --include='*.tsx' --include='*.ts' --include='*.css' \
+  --exclude='globals.css'
 ```
 
-Zero matches is the goal. Any match is either a token that should exist in this file but doesn't, or a violation to fix.
+This covers every TypeScript and CSS file under `packages/web`, not just specific subdirectories, so new folders are caught automatically. Zero matches is the goal. Any match is either a token that should exist in this file but doesn't, or a violation to fix.
 
-**Promotion path.** If the manual grep surfaces drift more than once, promote it to a pre-commit hook or a CI step. Until then, the rule lives in PR review.
+**Invalid `color-mix` syntax (manual check).** The previous implementation used `color-mix(in rgb, ..., <pct>%, transparent)`, which is invalid CSS (the correct color space is `srgb` and the percentage must be adjacent to its color). Grep for residue:
+
+```bash
+grep -rn 'color-mix(in rgb,' packages/web
+```
+
+Zero matches is the goal. Replace any match with the correct form: `color-mix(in srgb, <color> <pct>%, transparent)`.
+
+**Promotion path.** If either manual check surfaces drift more than once, promote it to a pre-commit hook or a CI step. Until then, the rule lives in PR review.
 
 **Adding tokens.** A PR that adds a color token must also update this file. A token that exists in `globals.css` but not here is undocumented state.
 
@@ -158,20 +205,23 @@ This is the authoritative color token block. The existing `:root` color section 
   /* ── Text ─────────────────────────────────────────────────── */
   --text-primary: #1a1714;
   --text-secondary: #6b6560;
-  --text-muted: #9c9590;
+  --text-muted: #706a62; /* darkened from #9c9590 for WCAG AA; see Contrast requirements */
 
   /* ── Score spectrum (tiered-scale domain) ────────────────── */
   --score-color: #b86c1a; /* hero display accent, "precious amber" */
   --score-high: #2d7a4a; /* tier indicator: 7.5-10.0 */
-  --score-mid: #8a6f20; /* tier indicator: 5.0-7.4 */
+  --score-mid: #846a1d; /* tier indicator: 5.0-7.4 (darkened from #8a6f20 for WCAG AA) */
   --score-low: #b84040; /* tier indicator: 1.0-4.9 */
 
   --score-bg: color-mix(in hsl, var(--score-color), white 92%);
   --score-high-bg: color-mix(in hsl, var(--score-high), white 92%);
+  --score-mid-bg: color-mix(in hsl, var(--score-mid), white 93%);
   --score-low-bg: color-mix(in hsl, var(--score-low), white 93%);
   --score-border: color-mix(in hsl, var(--score-color), white 75%);
   --score-mid-border: color-mix(in hsl, var(--score-mid), white 78%);
   --score-low-border: color-mix(in hsl, var(--score-low), white 79%);
+  /* Note: --score-high-border is intentionally absent; no current surface uses it.
+     Add if needed: color-mix(in hsl, var(--score-high), white 78%). */
 
   /* ── Status ───────────────────────────────────────────────── */
   --success: var(--score-high); /* alias: same concept */
@@ -232,7 +282,7 @@ This is the authoritative color token block. The existing `:root` color section 
   --outlier-lone-bg: var(--override-bg);
   --outlier-lone-border: var(--override-border);
   --outlier-orphan: var(--score-mid);
-  --outlier-orphan-bg: color-mix(in hsl, var(--score-mid), white 93%);
+  --outlier-orphan-bg: var(--score-mid-bg);
   --outlier-orphan-border: var(--score-mid-border);
   --outlier-fitness: var(--score-high);
   --outlier-fitness-bg: var(--score-high-bg);
@@ -253,9 +303,9 @@ This is the authoritative color token block. The existing `:root` color section 
   --shadow-menu: 0 8px 32px rgb(0 0 0 / 0.14), 0 2px 8px rgb(0 0 0 / 0.08);
 
   /* ── Sidebar (light-on-dark overlays) ────────────────────── */
-  --sidebar-divider: color-mix(in rgb, var(--nav-text), 8%, transparent);
-  --sidebar-item-hover-bg: color-mix(in rgb, var(--nav-text), 6%, transparent);
-  --sidebar-track-bg: color-mix(in rgb, var(--nav-text), 10%, transparent);
+  --sidebar-divider: color-mix(in srgb, var(--nav-text) 8%, transparent);
+  --sidebar-item-hover-bg: color-mix(in srgb, var(--nav-text) 6%, transparent);
+  --sidebar-track-bg: color-mix(in srgb, var(--nav-text) 10%, transparent);
 }
 ```
 

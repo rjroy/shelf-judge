@@ -1,118 +1,120 @@
 /* ===== Design Tokens ===== */
 
 :root {
-  /* Base */
-  --bg-base: #f4f1ec;
-  --bg-surface: #fefcf9;
-  --bg-elevated: #ffffff;
-  --bg-subtle: #f9f7f4;
-  --bg-muted: #f5f5f5;
+  /* ── Neutral surfaces ─────────────────────────────────────── */
+  --bg-base: #f4f1ec; /* page background, warm parchment */
+  --bg-surface: #fefcf9; /* cards, panels */
+  --bg-elevated: #ffffff; /* modals, popovers */
+  --bg-subtle: #f9f7f4; /* warm-tinted inset areas */
+  --bg-muted: #f5f5f5; /* neutral-gray inset, exception case */
   --border: #ddd8d0;
   --border-strong: #c4bfb8;
+  --row-hover: #f0ede8;
+  --table-header-bg: #ede9e3;
 
-  /* Text */
+  /* ── Text ─────────────────────────────────────────────────── */
   --text-primary: #1a1714;
   --text-secondary: #6b6560;
-  --text-muted: #9c9590;
+  --text-muted: #706a62; /* darkened from #9c9590 for WCAG AA; see color-system spec */
 
-  /* Score spectrum */
-  --score-color: #b86c1a;
-  --score-high: #2d7a4a;
-  --score-mid: #8a6f20;
-  --score-low: #b84040;
-  --score-bg: #fdf3e7;
-  --score-high-bg: #eaf5ef;
-  --score-low-bg: #fdeaea;
-  --score-border: #e8c898;
-  --score-low-border: #f0b8b8;
-  --score-mid-border: #ddd0a0;
+  /* ── Score spectrum (tiered-scale domain) ────────────────── */
+  --score-color: #b86c1a; /* hero display accent, "precious amber" */
+  --score-high: #2d7a4a; /* tier indicator: 7.5-10.0 */
+  --score-mid: #846a1d; /* tier indicator: 5.0-7.4 (darkened from #8a6f20 for WCAG AA) */
+  --score-low: #b84040; /* tier indicator: 1.0-4.9 */
 
-  /* Status */
-  --success: #2e7d32;
-  --success-bg: #d5f0e0;
-  --success-subtle: #e8f5e9;
+  --score-bg: color-mix(in hsl, var(--score-color), white 92%);
+  --score-high-bg: color-mix(in hsl, var(--score-high), white 92%);
+  --score-mid-bg: color-mix(in hsl, var(--score-mid), white 93%);
+  --score-low-bg: color-mix(in hsl, var(--score-low), white 93%);
+  --score-border: color-mix(in hsl, var(--score-color), white 75%);
+  --score-mid-border: color-mix(in hsl, var(--score-mid), white 78%);
+  --score-low-border: color-mix(in hsl, var(--score-low), white 79%);
+  /* Note: --score-high-border is intentionally absent; no current surface uses it. */
+
+  /* ── Status ───────────────────────────────────────────────── */
+  --success: var(--score-high); /* alias: same concept */
+  --success-bg: #d5f0e0; /* kept explicit: deeper green for prominent feedback */
+  --success-subtle: var(--score-high-bg); /* alias */
   --warning: #e65100;
   --warning-subtle: #fff3e0;
-  --warning-bg: #fff8e6;
   --warning-border: #e8d060;
   --warning-text: #7a5f10;
-  --danger: var(--score-low);
-  --danger-subtle: #fdf0f0;
-  --danger-border: #e0c0c0;
+  --danger: var(--score-low); /* alias */
+  --danger-subtle: var(--score-low-bg); /* alias */
+  --danger-border: color-mix(in hsl, var(--score-low), white 75%);
 
-  /* Data source */
-  --personal-accent: var(--text-primary);
+  /* ── Data source languages (single-accent domains) ──────── */
+  --personal-accent: var(--text-primary); /* personal data = default text */
   --bgg-accent: #2e5f8a;
-  --bgg-bg: #edf3f9;
-  --bgg-border: #c0d8ec;
-  --bgg-badge-bg: #d4e7f5;
+  --bgg-bg: color-mix(in hsl, var(--bgg-accent), white 92%);
+  --bgg-border: color-mix(in hsl, var(--bgg-accent), white 78%);
+  --bgg-badge-bg: color-mix(in hsl, var(--bgg-accent), white 85%);
   --override-accent: #5c3d99;
-  --override-bg: #f0ecfa;
-  --override-border: #c5b8e8;
-  --override-badge-bg: #e0d6f5;
+  --override-bg: color-mix(in hsl, var(--override-accent), white 94%);
+  --override-border: color-mix(in hsl, var(--override-accent), white 78%);
+  --override-badge-bg: color-mix(in hsl, var(--override-accent), white 85%);
 
-  /* Actions */
+  /* ── Action (primary interactive color) ──────────────────── */
   --action: #1c3d5e;
-  --action-hover: #2a5580;
-  --action-subtle: #e8eff6;
-  --action-border: #b8ccdc;
+  --action-hover: #2a5580; /* kept explicit: accessibility-contrast control */
+  --action-subtle: color-mix(in hsl, var(--action), white 93%);
+  --action-border: color-mix(in hsl, var(--action), white 77%);
 
-  /* Navigation */
+  /* ── Navigation ───────────────────────────────────────────── */
   --nav-bg: var(--text-primary);
   --nav-text: #e8e4dc;
   --nav-active: var(--score-color);
 
-  /* Filters */
+  /* ── Filter spec (single-accent domain) ──────────────────── */
   --filter-spec: #4a6e42;
-  --filter-spec-bg: #eaf2e8;
-  --filter-spec-border: #c4ddbf;
+  --filter-spec-bg: color-mix(in hsl, var(--filter-spec), white 92%);
+  --filter-spec-border: color-mix(in hsl, var(--filter-spec), white 78%);
 
-  /* Derived palette */
-  --row-hover: #f0ede8;
-  --table-header-bg: #ede9e3;
-  --suggest-bg: var(--bg-subtle);
-  --suggest-border: #c8c0b4;
-  --overlay-bg: rgb(0 0 0 / 0.5);
-  --placeholder-from: #e8e4dc;
-  --placeholder-to: #d0cbc0;
-
-  /* Shadows (black overlays) */
-  --shadow-menu: 0 8px 32px rgb(0 0 0 / 0.14), 0 2px 8px rgb(0 0 0 / 0.08);
-
-  /* Sidebar (light-on-dark overlays) */
-  --sidebar-divider: color-mix(in rgb, var(--nav-text), 8%, transparent);
-  --sidebar-item-hover-bg: color-mix(in rgb, var(--nav-text), 6%, transparent);
-  --sidebar-track-bg: color-mix(in rgb, var(--nav-text), 10%, transparent);
-
-  /* Profile: outlier tags (aliases to semantic colors) */
-  --outlier-lone: var(--override-accent);
-  --outlier-lone-bg: var(--override-bg);
-  --outlier-lone-border: #c8b8e0;
-  --outlier-orphan: var(--score-mid);
-  --outlier-orphan-bg: #f5f0e2;
-  --outlier-orphan-border: #d8c890;
-  --outlier-fitness: var(--score-high);
-  --outlier-fitness-bg: var(--score-high-bg);
-  --outlier-fitness-border: #a8d8b8;
-
-  /* Prediction accent */
+  /* ── Prediction (single-accent domain) ───────────────────── */
   --predict-accent: #1a706a;
-  --predict-bg: #eaf5f3;
-  --predict-border: #a8d9d4;
+  --predict-bg: color-mix(in hsl, var(--predict-accent), white 92%);
+  --predict-border: color-mix(in hsl, var(--predict-accent), white 75%);
 
-  /* Confidence level colors (aliases to shared palette where identical) */
+  /* ── Confidence levels (tiered-scale domain) ─────────────── */
   --conf-strong: var(--score-high);
   --conf-strong-bg: var(--score-high-bg);
-  --conf-moderate: #7a5e1a;
-  --conf-moderate-bg: #f5ecd8;
+  --conf-moderate: #7a5e1a; /* kept explicit; see color-system spec */
+  --conf-moderate-bg: color-mix(in hsl, var(--conf-moderate), white 92%);
   --conf-weak: #8a3a10;
-  --conf-weak-bg: #f5e4d8;
+  --conf-weak-bg: color-mix(in hsl, var(--conf-weak), white 92%);
   --conf-insufficient: var(--text-muted);
   --conf-insufficient-bg: var(--row-hover);
 
-  /* Tournament tension (aliases to BGG palette) */
+  /* ── Outlier tags (aliases to semantic colors) ───────────── */
+  --outlier-lone: var(--override-accent);
+  --outlier-lone-bg: var(--override-bg);
+  --outlier-lone-border: var(--override-border);
+  --outlier-orphan: var(--score-mid);
+  --outlier-orphan-bg: var(--score-mid-bg);
+  --outlier-orphan-border: var(--score-mid-border);
+  --outlier-fitness: var(--score-high);
+  --outlier-fitness-bg: var(--score-high-bg);
+  --outlier-fitness-border: color-mix(in hsl, var(--score-high), white 78%);
+
+  /* ── Tournament (aliases to BGG palette) ─────────────────── */
   --tourney-accent: var(--bgg-accent);
   --tourney-bg: var(--bgg-bg);
+
+  /* ── UI surface tokens ────────────────────────────────────── */
+  --suggest-bg: var(--bg-subtle);
+  --suggest-border: var(--border-strong);
+  --overlay-bg: rgb(0 0 0 / 0.5);
+  --placeholder-from: var(--nav-text);
+  --placeholder-to: #d0cbc0;
+
+  /* ── Shadows ──────────────────────────────────────────────── */
+  --shadow-menu: 0 8px 32px rgb(0 0 0 / 0.14), 0 2px 8px rgb(0 0 0 / 0.08);
+
+  /* ── Sidebar (light-on-dark overlays) ────────────────────── */
+  --sidebar-divider: color-mix(in srgb, var(--nav-text) 8%, transparent);
+  --sidebar-item-hover-bg: color-mix(in srgb, var(--nav-text) 6%, transparent);
+  --sidebar-track-bg: color-mix(in srgb, var(--nav-text) 10%, transparent);
 
   /* Typography scale */
   --text-xs: 11px;
@@ -193,7 +195,7 @@ body {
 
 .sidebar-brand .brand-sub {
   font-size: 11px;
-  color: color-mix(in rgb, var(--nav-text), 40%, transparent);
+  color: color-mix(in srgb, var(--nav-text) 40%, transparent);
   margin-top: 2px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -207,7 +209,7 @@ body {
 .nav-label {
   font-size: 10px;
   font-weight: 600;
-  color: color-mix(in rgb, var(--nav-text), 35%, transparent);
+  color: color-mix(in srgb, var(--nav-text) 35%, transparent);
   text-transform: uppercase;
   letter-spacing: 0.1em;
   padding: 0 20px;
@@ -225,7 +227,7 @@ body {
   gap: 10px;
   padding: 9px 20px;
   font-size: 13px;
-  color: color-mix(in rgb, var(--nav-text), 65%, transparent);
+  color: color-mix(in srgb, var(--nav-text) 65%, transparent);
   cursor: pointer;
   transition: all 0.1s;
   border-left: 3px solid transparent;
@@ -238,7 +240,7 @@ body {
 }
 
 .nav-item.active {
-  background: color-mix(in rgb, var(--score-color), 12%, transparent);
+  background: color-mix(in srgb, var(--score-color) 12%, transparent);
   color: var(--nav-text);
   border-left-color: var(--nav-active);
   font-weight: 500;
@@ -259,7 +261,7 @@ body {
   padding: 16px 20px;
   border-top: 1px solid var(--sidebar-divider);
   font-size: 11px;
-  color: color-mix(in rgb, var(--nav-text), 30%, transparent);
+  color: color-mix(in srgb, var(--nav-text) 30%, transparent);
 }
 
 /* ===== Layout ===== */
@@ -2690,12 +2692,12 @@ body {
 /* Danger ghost button */
 .btn-danger-ghost {
   background: transparent;
-  border: 1px solid color-mix(in rgb, var(--danger), 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
   color: var(--danger);
 }
 
 .btn-danger-ghost:hover:not(:disabled) {
-  background: color-mix(in rgb, var(--danger), 5%, transparent);
+  background: color-mix(in srgb, var(--danger) 5%, transparent);
 }
 
 /* Comparison area */
@@ -2756,7 +2758,7 @@ body {
 
 .game-card:hover {
   border-color: var(--action);
-  box-shadow: 0 0 0 4px color-mix(in rgb, var(--action), 8%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--action) 8%, transparent);
   transform: translateY(-2px);
 }
 
@@ -2962,7 +2964,7 @@ body {
 
 /* Divergence banner */
 .divergence-banner {
-  background: var(--warning-bg);
+  background: var(--warning-subtle);
   border: 1px solid var(--warning-border);
   color: var(--warning-text);
   padding: 12px 20px;
@@ -3190,7 +3192,7 @@ body {
 }
 
 .sort-menu-item.active {
-  background: color-mix(in rgb, var(--score-color), 8%, transparent);
+  background: color-mix(in srgb, var(--score-color) 8%, transparent);
   color: var(--score-color);
   font-weight: 600;
 }
@@ -3227,7 +3229,7 @@ body {
 }
 
 .sort-menu-axis-item.active {
-  background: color-mix(in rgb, var(--action), 8%, transparent);
+  background: color-mix(in srgb, var(--action) 8%, transparent);
   color: var(--action);
   font-weight: 600;
 }
@@ -3524,9 +3526,9 @@ body {
 }
 
 .active-chips-row .filter-chip.chip-rated {
-  background: color-mix(in rgb, var(--score-color), 10%, transparent);
+  background: color-mix(in srgb, var(--score-color) 10%, transparent);
   color: var(--score-color);
-  border-color: color-mix(in rgb, var(--score-color), 25%, transparent);
+  border-color: color-mix(in srgb, var(--score-color) 25%, transparent);
 }
 
 .active-chips-row .filter-chip.chip-spec {
@@ -5122,8 +5124,8 @@ body {
 .readiness-widget {
   margin: 0 12px 12px;
   padding: 12px;
-  background: color-mix(in rgb, var(--predict-accent), 15%, transparent);
-  border: 1px solid color-mix(in rgb, var(--predict-accent), 30%, transparent);
+  background: color-mix(in srgb, var(--predict-accent) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--predict-accent) 30%, transparent);
   border-radius: 8px;
 }
 
@@ -5160,7 +5162,7 @@ body {
 
 .readiness-widget-count {
   font-size: 10px;
-  color: color-mix(in rgb, var(--nav-text), 50%, transparent);
+  color: color-mix(in srgb, var(--nav-text) 50%, transparent);
 }
 
 /* Prediction hint in rating form */
@@ -5209,11 +5211,11 @@ body {
 
 /* Predicted row in collection table */
 .game-row.predicted-row {
-  background: color-mix(in rgb, var(--predict-accent), 4%, transparent);
+  background: color-mix(in srgb, var(--predict-accent) 4%, transparent);
 }
 
 .game-row.predicted-row:hover {
-  background: color-mix(in rgb, var(--predict-accent), 8%, transparent);
+  background: color-mix(in srgb, var(--predict-accent) 8%, transparent);
 }
 
 .predicted-label {
@@ -5308,7 +5310,7 @@ body {
 
 .readiness-stage-banner-progress {
   height: 8px;
-  background: color-mix(in rgb, var(--predict-accent), 15%, transparent);
+  background: color-mix(in srgb, var(--predict-accent) 15%, transparent);
   border-radius: 4px;
   overflow: hidden;
   margin-bottom: 6px;

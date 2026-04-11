@@ -81,11 +81,62 @@ No migration action needed on these; they keep their existing values.
 
 ---
 
+## Contrast-driven value changes
+
+The WCAG AA audit (run 2026-04-11, results captured in the spec's Contrast requirements section) surfaced two tokens with failing contrast ratios. Both were darkened to clear AA normal text on `--bg-base`. The migration must apply these new hex values:
+
+| Token          | Old value | New value | Reason                                                                                                                                                                                                         |
+| -------------- | --------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--text-muted` | `#9c9590` | `#706a62` | Was 2.62:1 on `--bg-base`, failed even AA large. Used for 11px labels which WCAG treats as normal text. New value clears AA normal at 4.75:1 while staying visually distinct from `--text-secondary` (5.10:1). |
+| `--score-mid`  | `#8a6f20` | `#846a1d` | Was 4.26:1, fractionally below AA normal 4.5:1. New value clears at 4.59:1 with a luminance delta of 0.016, essentially imperceptible.                                                                         |
+
+**Derived tokens affected by `--score-mid` shift:** `--score-mid-bg`, `--score-mid-border`, and `--outlier-orphan-bg` (which references `--score-mid-bg`) all recompute slightly when `--score-mid` changes. The changes are imperceptible.
+
+**`--conf-insufficient` is aliased to `--text-muted`** and inherits the new darker value automatically.
+
+**Visual verification during migration.** The `--text-muted` change is visible (noticeably darker gray). Compare label and placeholder surfaces against pre-migration screenshots and confirm the new weight reads as "secondary information" rather than "disabled." If the darker value feels wrong in context, the fallback is to alias `--text-muted` to `--text-secondary` and drop the token entirely.
+
+---
+
+## Invalid `color-mix()` syntax to repair
+
+Separate from the `:root` consolidation, the current `globals.css` uses an invalid `color-mix()` form in 21 places (not limited to the `:root` block; selectors throughout the file use it too). The pattern is:
+
+```css
+color-mix(in rgb, var(--some-token), 8%, transparent)
+```
+
+Two problems:
+
+1. `in rgb` is not a valid CSS color interpolation method. The correct keyword is `in srgb`.
+2. The percentage must be adjacent to its color. `var(--some-token), 8%` is parsed as a stray fourth argument and invalidates the whole expression.
+
+The valid rewrite:
+
+```css
+color-mix(in srgb, var(--some-token) 8%, transparent)
+```
+
+Semantically: 8% of the token color mixed with 92% transparent, i.e. an 8% alpha overlay of the token.
+
+**Why this has not been noticed so far.** The browser rejects the invalid `color-mix()` call and the property falls back. For subtle surfaces (sidebar dividers, 8% overlays) the absence is easy to miss visually. For higher-percentage overlays (30-65%) the absence is more obvious but may have been attributed to other causes.
+
+**Migration step:** during the `:root` replacement, also grep the full `globals.css` for `color-mix(in rgb,` and repair every occurrence. The canonical block in the spec already uses the correct form, so the `:root` section is fixed automatically; the remaining ~18 occurrences in selector rules need individual edits.
+
+```bash
+grep -n 'color-mix(in rgb,' packages/web/app/globals.css
+```
+
+All matches must be gone before the migration is complete.
+
+---
+
 ## Procedure
 
 1. Replace the `:root` color section of `globals.css` with the canonical block from the spec. Non-color tokens (typography, spacing) stay as-is.
-2. Run the enforcement grep from the spec to surface any hex values in component CSS. Fix each one either by using an existing token or by adding a new one to the spec and to `globals.css` in the same change.
-3. Build and run the app. Visually compare against the pre-migration screenshots for:
+2. Repair every `color-mix(in rgb, ..., <pct>%, transparent)` occurrence throughout `globals.css` (selectors, not just `:root`). Use the form in the section above. Verify with `grep -n 'color-mix(in rgb,' packages/web/app/globals.css` returning zero matches.
+3. Run the hex-in-components grep from the spec's Enforcement section. Fix each match either by using an existing token or by adding a new one to the spec and to `globals.css` in the same change.
+4. Build and run the app. Visually compare against pre-migration screenshots for:
    - Score display in collection table and detail view
    - BGG-sourced rows and badges
    - Override indicators
@@ -93,18 +144,20 @@ No migration action needed on these; they keep their existing values.
    - Prediction panels
    - Confidence indicators
    - Success/warning/danger banners
-   - Sidebar and navigation
-4. If any surface looks wrong, the alias or derivation for that token is the suspect. Revert just that token to its old explicit value and document the rationale in the "Kept explicit" section of the spec.
-5. Run the contrast audit called out in the spec. Any failing pair means tuning either the foreground or the background before declaring the migration complete.
-6. Retro: capture what actually changed visually (if anything), what the contrast audit surfaced, and whether any tokens needed to revert. Then delete this notes file.
+   - Sidebar and navigation (especially the dividers, hover backgrounds, and scrollbar tracks, which were previously broken silently)
+5. If any surface looks wrong, the alias or derivation for that token is the suspect. Revert just that token to its old explicit value and document the rationale in the "Kept explicit" section of the spec. Note: sidebar surfaces _should_ look different after the migration, because the previously-broken `color-mix(in rgb, ...)` was silently falling back. Verify they now render the intended subtle overlays.
+6. Re-run the contrast audit script against the final token values. The pre-migration audit on 2026-04-11 passed for every spec-canonical pair; re-running confirms no regression from any last-minute tuning during the migration. Capture the output in the retro.
+7. Retro: capture what actually changed visually (especially the `--text-muted` darkening and the sidebar overlays), what the contrast audit surfaced, and whether any tokens needed to revert. Then delete this notes file.
 
 ---
 
 ## Status
 
-- [ ] `globals.css` `:root` block replaced with canonical
-- [ ] Enforcement grep clean
-- [ ] Visual verification pass
-- [ ] Contrast audit pass
+- [x] Contrast audit run against spec-canonical values (2026-04-11, all pairs pass)
+- [ ] `globals.css` `:root` block replaced with canonical (includes darkened `--text-muted` and `--score-mid`)
+- [ ] `color-mix(in rgb, ...)` occurrences repaired throughout `globals.css`
+- [ ] Enforcement grep (hex in components) clean
+- [ ] Visual verification pass (including `--text-muted` darkening and sidebar overlays previously broken)
+- [ ] Contrast audit re-run post-migration
 - [ ] Retro written
 - [ ] This file deleted
