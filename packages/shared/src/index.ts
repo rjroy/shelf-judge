@@ -70,6 +70,18 @@ export { toErrorMessage, ValidationError, NotFoundError } from "./errors";
 
 export { matchesBggTag, normalizeBggTagTokens } from "./bgg-tag-match";
 
+export {
+  K_FLEXIBLE,
+  K_MODERATE,
+  K_STRICT,
+  LEAN_GENTLE_MULTIPLIER,
+  LEAN_STEEP_MULTIPLIER,
+  getNativeScale,
+  calibrateTolerance,
+  applyLean,
+  applyPreferenceCurve,
+} from "./curve-math";
+
 export type {
   CreateAxisInput,
   UpdateAxisInput,

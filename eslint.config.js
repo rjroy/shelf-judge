@@ -15,11 +15,15 @@ export default tseslint.config(
     },
   },
   {
-    // Web test files use bun:test globals which aren't in the web tsconfig's type scope.
-    // The web tsconfig serves Next.js (no bun-types); projectService can't be overridden
-    // per-file, so we disable type-checked rules here instead.
+    // Web test files need bun-types for bun:test globals, but the main web tsconfig
+    // serves Next.js without bun-types. Use a dedicated test tsconfig instead.
     files: ["packages/web/tests/**/*.ts"],
-    ...tseslint.configs.disableTypeChecked,
+    languageOptions: {
+      parserOptions: {
+        projectService: false,
+        project: "./packages/web/tsconfig.test.json",
+      },
+    },
   },
   {
     ignores: ["**/node_modules/", "**/dist/", "**/.next/"],
