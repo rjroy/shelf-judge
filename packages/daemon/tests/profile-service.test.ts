@@ -90,6 +90,17 @@ function createStubStorage(overrides?: {
       stub.savedProfile = structuredClone(data);
       return Promise.resolve();
     },
+    loadPredictionSettings() {
+      return Promise.resolve({
+        stageThresholds: [5, 15, 30] as [number, number, number],
+        defaultK: 5,
+        minSimilarityThreshold: 0.2,
+        tournamentStabilityBoost: 0.2,
+      });
+    },
+    savePredictionSettings() {
+      return Promise.resolve();
+    },
   };
 
   return stub;

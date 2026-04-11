@@ -3,11 +3,13 @@ import { AddGameSchema, toErrorMessage } from "@shelf-judge/shared";
 import { z } from "zod";
 import type { GameService } from "../services/game-service.js";
 import type { BggClient } from "../services/bgg-client.js";
+import type { PredictionService } from "../services/prediction-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
 
 export interface GameRoutesDeps {
   gameService: GameService;
   bggClient?: BggClient;
+  predictionService?: PredictionService;
 }
 
 const RatingsBodySchema = z.object({
@@ -29,7 +31,7 @@ function bggNotConfiguredResponse(c: Context) {
 }
 
 export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
-  const { gameService, bggClient } = deps;
+  const { gameService, bggClient, predictionService } = deps;
   const routes = new Hono();
 
   // GET /games/search?q={query}
@@ -89,6 +91,11 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
   // GET /games
   routes.get("/games", async (c) => {
     try {
+      const includePredicted = c.req.query("includePredicted") === "true";
+      if (includePredicted && predictionService) {
+        const games = await predictionService.listGamesWithPredictions();
+        return c.json(games);
+      }
       const games = await gameService.listGames();
       return c.json(games);
     } catch (err) {

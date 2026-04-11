@@ -1,11 +1,18 @@
 import * as path from "node:path";
 import * as os from "node:os";
 import { v4 as uuidv4 } from "uuid";
-import type { Collection, AppConfig, TournamentData, ProfileData } from "@shelf-judge/shared";
+import type {
+  Collection,
+  AppConfig,
+  TournamentData,
+  ProfileData,
+  PredictionSettings,
+} from "@shelf-judge/shared";
 import { TournamentDataSchema } from "@shelf-judge/shared";
 import type { FileOps } from "./file-ops.js";
 import { getTempPath } from "./file-ops.js";
 import { migrateTournamentData } from "./tournament-migration.js";
+import { DEFAULT_PREDICTION_SETTINGS } from "./prediction-engine.js";
 
 export interface StorageService {
   loadCollection(): Promise<Collection>;
@@ -16,6 +23,8 @@ export interface StorageService {
   saveTournament(data: TournamentData): Promise<void>;
   loadProfile(): Promise<ProfileData | null>;
   saveProfile(data: ProfileData): Promise<void>;
+  loadPredictionSettings(): Promise<PredictionSettings>;
+  savePredictionSettings(settings: PredictionSettings): Promise<void>;
 }
 
 export interface StorageServiceDeps {
@@ -162,6 +171,21 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     async saveProfile(data: ProfileData): Promise<void> {
       await fileOps.mkdir(dataDir);
       await atomicWrite(profilePath, JSON.stringify(data, null, 2), fileOps);
+    },
+
+    async loadPredictionSettings(): Promise<PredictionSettings> {
+      const predictionSettingsPath = path.join(dataDir, "prediction-settings.json");
+      const exists = await fileOps.exists(predictionSettingsPath);
+      if (!exists) return { ...DEFAULT_PREDICTION_SETTINGS };
+
+      const raw = await fileOps.readFile(predictionSettingsPath);
+      return JSON.parse(raw) as PredictionSettings;
+    },
+
+    async savePredictionSettings(settings: PredictionSettings): Promise<void> {
+      const predictionSettingsPath = path.join(dataDir, "prediction-settings.json");
+      await fileOps.mkdir(dataDir);
+      await atomicWrite(predictionSettingsPath, JSON.stringify(settings, null, 2), fileOps);
     },
   };
 }

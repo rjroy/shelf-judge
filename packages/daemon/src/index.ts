@@ -7,6 +7,7 @@ import { createGameService } from "./services/game-service.js";
 import { createBggClient } from "./services/bgg-client.js";
 import { createTournamentService } from "./services/tournament-service.js";
 import { createProfileService } from "./services/profile-service.js";
+import { createPredictionService } from "./services/prediction-service.js";
 import { createApp } from "./app.js";
 import { createLogger } from "./services/logger.js";
 
@@ -44,6 +45,12 @@ async function main() {
     tournamentService,
   });
 
+  const predictionService = createPredictionService({
+    storageService,
+    fitnessService,
+    tournamentService,
+  });
+
   const socketPath = resolveSocketPath(appConfig, envConfig);
 
   // Forward-declared so the shutdown route can reference the server.
@@ -57,6 +64,7 @@ async function main() {
     gameService,
     tournamentService,
     profileService,
+    predictionService,
     bggClient,
     onShutdown() {
       logger.log("Shutting down via API...");

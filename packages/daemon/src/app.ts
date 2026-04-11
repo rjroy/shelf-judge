@@ -12,8 +12,10 @@ import { createConfigRoutes } from "./routes/config.js";
 import { createShutdownRoutes } from "./routes/shutdown.js";
 import { createTournamentRoutes } from "./routes/tournament.js";
 import { createProfileRoutes } from "./routes/profile.js";
+import { createPredictionRoutes } from "./routes/prediction.js";
 import type { TournamentService } from "./services/tournament-service.js";
 import type { ProfileService } from "./services/profile-service.js";
+import type { PredictionService } from "./services/prediction-service.js";
 import type { OperationDefinition } from "./operations.js";
 
 export interface AppDeps {
@@ -22,6 +24,7 @@ export interface AppDeps {
   gameService: GameService;
   tournamentService: TournamentService;
   profileService: ProfileService;
+  predictionService: PredictionService;
   bggClient?: BggClient;
   onShutdown?: () => void;
 }
@@ -38,17 +41,19 @@ export function createApp(deps: AppDeps): AppResult {
     gameService,
     tournamentService,
     profileService,
+    predictionService,
     bggClient,
     onShutdown,
   } = deps;
 
   // Build routes
-  const gameRouteModule = createGameRoutes({ gameService, bggClient });
+  const gameRouteModule = createGameRoutes({ gameService, bggClient, predictionService });
   const axisRouteModule = createAxisRoutes({ axisService });
   const scoreRouteModule = createScoreRoutes({ gameService });
   const importRouteModule = createImportRoutes({ gameService, bggClient });
   const tournamentRouteModule = createTournamentRoutes({ tournamentService, gameService });
   const profileRouteModule = createProfileRoutes({ profileService });
+  const predictionRouteModule = createPredictionRoutes({ predictionService });
 
   // Collect all operations
   const allOperations: OperationDefinition[] = [
@@ -58,6 +63,7 @@ export function createApp(deps: AppDeps): AppResult {
     ...importRouteModule.operations,
     ...tournamentRouteModule.operations,
     ...profileRouteModule.operations,
+    ...predictionRouteModule.operations,
   ];
 
   const helpRouteModule = createHelpRoutes({ operations: allOperations });
@@ -80,6 +86,7 @@ export function createApp(deps: AppDeps): AppResult {
   app.route("/api", importRouteModule.routes);
   app.route("/api", tournamentRouteModule.routes);
   app.route("/api", profileRouteModule.routes);
+  app.route("/api", predictionRouteModule.routes);
   app.route("/api", helpRouteModule.routes);
   app.route("/api", configRouteModule.routes);
   app.route("/api", shutdownRouteModule.routes);

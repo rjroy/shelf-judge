@@ -8,6 +8,10 @@ import {
   type TournamentService,
 } from "../../src/services/tournament-service.js";
 import { createProfileService, type ProfileService } from "../../src/services/profile-service.js";
+import {
+  createPredictionService,
+  type PredictionService,
+} from "../../src/services/prediction-service.js";
 import type { BggClient } from "../../src/services/bgg-client.js";
 import { createApp, type AppResult } from "../../src/app.js";
 
@@ -20,6 +24,7 @@ export interface TestAppContext {
   gameService: GameService;
   tournamentService: TournamentService;
   profileService: ProfileService;
+  predictionService: PredictionService;
   bggClient: BggClient | undefined;
   fileOps: ReturnType<typeof createMockFileOps>;
 }
@@ -52,12 +57,19 @@ export function createTestApp(options?: TestAppOptions): TestAppContext {
     tournamentService,
   });
 
+  const predictionService = createPredictionService({
+    storageService,
+    fitnessService,
+    tournamentService,
+  });
+
   const { app, operations } = createApp({
     storageService,
     axisService,
     gameService,
     tournamentService,
     profileService,
+    predictionService,
     bggClient,
   });
 
@@ -70,6 +82,7 @@ export function createTestApp(options?: TestAppOptions): TestAppContext {
     gameService,
     tournamentService,
     profileService,
+    predictionService,
     bggClient,
     fileOps,
   };
