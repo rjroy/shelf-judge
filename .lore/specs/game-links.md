@@ -1,7 +1,7 @@
 ---
 title: "Game links"
 date: 2026-04-11
-status: approved
+status: implemented 
 tags: [spec, web-ui, navigation, links]
 modules: [web-ui]
 related:
