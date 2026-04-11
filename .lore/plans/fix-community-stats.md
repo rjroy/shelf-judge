@@ -36,10 +36,10 @@ Fix the data plumbing so every consumer that needs resolved axis values can acce
 **Existing conventions:**
 
 - Pure computation functions (no I/O) go in `*-engine.ts` files in the daemon services directory.
-- The fitness service already normalizes BGG values to 1-10 scale via `computeHigherIsBetterEffective()` from `curve-engine.ts` (daemon-only). Profile distributions expect 1-10 scale values, so the resolved BGG value must be normalized before inclusion.
-- `getNativeScale()` lives in `curve-engine.ts` (daemon). Both `getNativeScale` and `computeHigherIsBetterEffective` are pure functions with no daemon dependencies, so they can move to shared if needed.
+- The fitness service normalizes BGG values to 1-10 scale via `computeHigherIsBetterEffective()` from `curve-engine.ts` (daemon-only) for fitness scoring. This normalization is specific to scoring and must not leak into display contexts.
+- `getNativeScale()` lives in `curve-engine.ts` (daemon). Both `getNativeScale` and `computeHigherIsBetterEffective` are pure functions with no daemon dependencies.
 
-**Normalization note:** Personal ratings are already on the 1-10 scale and must not be re-normalized. Only the BGG fallback path requires scale conversion (weight 1-5 to 1-10). The fitness service is explicit about this distinction at lines 69-82.
+**Scale convention:** Users think in native scales. A BGG weight of 3.25 means something; a normalized value of 6.06 does not. `resolveAxisValues` returns native-scale values. Normalization to 1-10 stays in consumers that need a common scale for computation (fitness scoring, feature vector encoding). Profile distributions and collection sorting display native-scale values.
 
 ## Implementation Steps
 
@@ -51,9 +51,9 @@ Create `packages/shared/src/axis-utils.ts` with two exported functions. Placing 
 
 1. `resolveBggRawValue(axis: Axis, bggData: BggGameData | null): number | null` - moved from fitness-service.ts. Returns the native-scale BGG value (1-5 for weight, 1-10 for communityRating).
 
-2. `resolveAxisValues(game: Game, axes: Axis[]): Record<string, number>` - for each axis, checks `game.ratings[axis.id]` first. Personal ratings are already on the 1-10 scale and must not be re-normalized. If no personal rating exists, falls back to the BGG value normalized to 1-10. Returns a map of axisId to resolved value (1-10 scale). Axes with no value (no personal rating AND no BGG data) are omitted.
+2. `resolveAxisValues(game: Game, axes: Axis[]): Record<string, number>` - for each axis, checks `game.ratings[axis.id]` first (personal rating, already on 1-10 scale). If no personal rating exists, falls back to the native-scale BGG value from `resolveBggRawValue`. Returns a map of axisId to resolved value in the axis's native scale. Axes with no value (no personal rating AND no BGG data) are omitted.
 
-The BGG-to-1-10 normalization for the fallback path uses `getNativeScale()` and `computeHigherIsBetterEffective()`. Both are currently in `curve-engine.ts` (daemon-only) but are pure functions. Move them to `packages/shared/src/curve-math.ts` as part of this step, or inline the equivalent linear interpolation in `resolveAxisValues`. The math is: `(rawValue - nativeMin) / (nativeMax - nativeMin) * 9 + 1`. For communityRating (already 1-10), this is identity. For weight (1-5), this maps to 1-10.
+No normalization happens in this function. Consumers that need values on a common scale (fitness scoring, feature vectors) normalize downstream.
 
 Update `fitness-service.ts` to import `resolveBggRawValue` from `@shelf-judge/shared` instead of defining it locally. Export the new functions from `packages/shared/src/index.ts`.
 
@@ -65,7 +65,7 @@ Update `fitness-service.ts` to import `resolveBggRawValue` from `@shelf-judge/sh
 
 Change `computeAxisDistributions(games, axes)` to resolve BGG axis values. For each game, call `resolveAxisValues(game, axes)` and read from the resolved map instead of `game.ratings[axis.id]`.
 
-This means the distributions for a BGG-sourced "Community Rating" axis will include the actual community rating for every game that has BGG data, rather than showing an empty distribution.
+Values are native-scale: community rating distributions show 1-10, weight distributions show 1-5. This matches what users see on BGG and what they'd expect in their profile.
 
 **Expertise**: None needed.
 
@@ -75,21 +75,26 @@ This means the distributions for a BGG-sourced "Community Rating" axis will incl
 
 The `encodeGame` function takes an optional `axisRatings?: Record<string, number>` parameter. Currently this parameter is used as a **key list**, not a value map: callers pass a record with dummy values (e.g., `{ axisId: 1 }`) and `encodeGame` reads the axis IDs from its keys but ignores the values, looking up `game.ratings[id]` internally instead.
 
-Change the semantics: `axisRatings` becomes the actual resolved values map. Callers pass `resolveAxisValues(game, axes)` which contains both personal and BGG-resolved values on the 1-10 scale.
+Change the semantics: `axisRatings` becomes the actual resolved values map. Callers pass `resolveAxisValues(game, axes)` which contains both personal and BGG-resolved values in their native scales.
 
 **Call sites to update:**
 
 1. `profile-engine.ts:288-294` (`detectOutliers`): Replace the dummy `axisIds` record with `resolveAxisValues(game, axes)`.
 2. `prediction-service.ts:89` (and any other `encodeGame` calls): Currently passes `game.ratings` directly. Replace with `resolveAxisValues(game, axes)` so BGG-sourced axes get resolved values instead of being absent.
 
-**`encodeGame` change** (line 155-159): Instead of reading `game.ratings[id]`, read from the passed `axisRatings` directly:
+**`encodeGame` change** (line 155-159): Instead of reading `game.ratings[id]`, read from the passed `axisRatings` directly. Since `resolveAxisValues` returns native-scale values, `encodeGame` must normalize to a common scale for the feature vector. Look up each axis to determine its native scale and normalize accordingly:
 
 ```typescript
 personalAxes = axisIds.map((id) => {
   const rating = axisRatings[id]; // was: game.ratings[id]
-  return rating != null ? normalize(rating, 1, 10) : 0.5;
+  if (rating == null) return 0.5;
+  const axis = axes.find((a) => a.id === id);
+  const [min, max] = axis ? getNativeScale(axis) : [1, 10];
+  return normalize(rating, min, max);
 });
 ```
+
+This means `encodeGame` needs the `axes` list passed in alongside `axisRatings`, or it needs the native scale embedded in the ratings map. The simpler approach: pass `axes` as an additional parameter.
 
 **Expertise**: None needed.
 
@@ -109,12 +114,7 @@ Thread the `axes` list through to `getSortValue` and `sortGames`. The collection
 
 **Files**: None (runtime operation)
 
-The fix changes how the profile is computed, but the daemon caches the profile in `~/.shelf-judge/profile.json`. A stale cache will continue serving the old (broken) profile until the collection is updated. Document in the PR that users should either:
-
-- Rate a game (triggers collection update, invalidates cache), or
-- Delete `~/.shelf-judge/profile.json` manually
-
-Consider adding a `POST /api/profile/recompute` endpoint or a query param `?force=true` that bypasses the cache. This is optional for this bug fix but would prevent similar stale-cache issues in the future.
+The fix changes how the profile is computed, but the daemon caches the profile in `~/.shelf-judge/profile.json`. After deploying, delete the file. The profile auto-regenerates on next request.
 
 **Expertise**: None needed.
 
@@ -128,19 +128,19 @@ Tests for the shared utility (`axis-utils.ts`):
 - `resolveBggRawValue` returns weight for bggField "weight"
 - `resolveBggRawValue` returns null for personal axes
 - `resolveBggRawValue` returns null when bggData is null
-- `resolveAxisValues` returns personal ratings unchanged (no re-normalization) for personal axes
-- `resolveAxisValues` returns BGG values (normalized to 1-10) for BGG axes
+- `resolveAxisValues` returns personal ratings unchanged for personal axes
+- `resolveAxisValues` returns native-scale BGG values (weight as 1-5, communityRating as 1-10) for BGG axes
 - `resolveAxisValues` prefers personal override when both personal rating and BGG data exist
 - `resolveAxisValues` omits axes with no value (no rating, no bggData)
-- `resolveAxisValues` normalizes weight (1-5) to 1-10 scale, leaves communityRating (already 1-10) unchanged
 
 Tests for profile engine changes:
 
-- `computeAxisDistributions` includes BGG-sourced axis values from bggData
+- `computeAxisDistributions` includes BGG-sourced axis values in native scale from bggData
 - `computeAxisDistributions` prefers personal override for BGG axes when both exist
 
 Tests for feature vector / prediction changes:
 
+- `encodeGame` normalizes native-scale values to common scale using axis-specific ranges
 - `encodeGame` uses passed `axisRatings` values for personalAxes component (not `game.ratings`)
 - Prediction service produces correct similarity vectors for games with BGG-sourced axes
 
@@ -158,18 +158,10 @@ Launch a sub-agent that reads the Goal section above, reviews the implementation
 - Feature vector encoding uses resolved values instead of midpoint defaults (both outlier and prediction paths)
 - Fitness scores are unchanged (no regression)
 - Outlier classifications are reasonable (the improved feature vectors may change which games are flagged)
-- Stale profile cache is handled
+- Profile distributions display native-scale values (weight as 1-5, not normalized to 1-10)
 
 ## Delegation Guide
 
 No specialized expertise needed. All steps are straightforward data-plumbing changes within existing patterns. Steps 1-3 are daemon-only; step 4 touches web. A single implementer can handle all steps sequentially.
 
 Review focus: The fitness service's resolution logic is the source of truth. After the fix, verify that the shared utility produces identical values to what the fitness service currently computes. A reviewer should diff the fitness breakdown output before/after to confirm no regression.
-
-## Open Questions
-
-1. **Profile cache invalidation:** Step 5 suggests an optional `recompute` endpoint. This isn't strictly needed for the bug fix (updating any game triggers recomputation), but it prevents the "why is my profile still wrong" confusion. Worth adding or defer?
-
-2. **BGG weight normalization:** BGG weight is 1-5 scale. When included in axis distributions, should it be reported as the native 1-5 value or normalized to 1-10 to match personal axes? The fitness service normalizes to 1-10 for scoring, and the profile distributions assume 1-10 scale. The plan normalizes to 1-10 for consistency.
-
-3. **Outlier detection sensitivity:** Improving the feature vector encoding (BGG axes get real values instead of midpoint 0.5) will change outlier classifications. Games that were previously flagged may no longer be flagged, and vice versa. This is correct behavior (better data produces better outlier detection), but it's a visible change worth noting in the PR.
