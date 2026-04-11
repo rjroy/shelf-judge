@@ -26,3 +26,9 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
+- 06:53 commission-Octavia-20260411-065239 result: Resolved the document-families-tag-type issue. Added `families` as a peer to mechanics and categories in two documents:
+
+**`.lore/designs/mvp-bgg-integration.md`** (1 edit):
+- Thing endpoint "Provides...
+
+- 06:54 commission-Octavia-20260411-065239 completed
