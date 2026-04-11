@@ -13,6 +13,7 @@ import type {
   PredictionReadiness,
   PredictionSettings,
   ReferenceGame,
+  RevealedPreferenceTension,
 } from "@shelf-judge/shared";
 import { cosineSimilarity } from "./feature-vector";
 import type { Vocabulary } from "./feature-vector";
@@ -96,9 +97,7 @@ export function findKNearestForAxis(
  * - weak: at least 1 match
  * - insufficient: zero matches (returns null)
  */
-export function predictAxisRating(
-  matches: SimilarityMatch[],
-): {
+export function predictAxisRating(matches: SimilarityMatch[]): {
   rating: number;
   confidence: PredictionConfidence;
   variance: number;
@@ -486,5 +485,62 @@ export function assessReadiness(
     nextStageAt,
     weakAxes,
     suggestedActions,
+  };
+}
+
+export interface TournamentRankedGame {
+  gameId: string;
+  gameName: string;
+  vector: number[];
+  normalizedScore: number;
+}
+
+/**
+ * Detect tension between predicted fitness and tournament ranking among similar games.
+ *
+ * Finds the k nearest tournament-ranked neighbors via cosine similarity, computes
+ * their average normalizedScore. Returns tension when the difference exceeds 1.0 point.
+ * Returns null when no tension or no qualifying neighbors.
+ */
+export function detectRevealedPreferenceTension(
+  predictedOverallFitness: number,
+  targetVector: number[],
+  tournamentRankedGames: TournamentRankedGame[],
+  k: number,
+  minSimilarity: number,
+): RevealedPreferenceTension | null {
+  if (tournamentRankedGames.length === 0) return null;
+
+  const neighbors: { similarity: number; normalizedScore: number; gameName: string }[] = [];
+
+  for (const game of tournamentRankedGames) {
+    const similarity = cosineSimilarity(targetVector, game.vector);
+    if (similarity < minSimilarity) continue;
+    neighbors.push({ similarity, normalizedScore: game.normalizedScore, gameName: game.gameName });
+  }
+
+  if (neighbors.length === 0) return null;
+
+  neighbors.sort((a, b) => b.similarity - a.similarity);
+  const topK = neighbors.slice(0, k);
+
+  let scoreSum = 0;
+  for (const n of topK) {
+    scoreSum += n.normalizedScore;
+  }
+  const tournamentClusterAverage = roundToOneDecimal(scoreSum / topK.length);
+
+  const difference = Math.abs(predictedOverallFitness - tournamentClusterAverage);
+  if (difference <= 1.0) return null;
+
+  const direction =
+    predictedOverallFitness > tournamentClusterAverage
+      ? "higher than what similar tournament-ranked games suggest"
+      : "lower than what similar tournament-ranked games suggest";
+
+  return {
+    predictedFitness: predictedOverallFitness,
+    tournamentClusterAverage,
+    note: `Predicted fitness (${predictedOverallFitness}) is ${direction} (${tournamentClusterAverage}).`,
   };
 }
