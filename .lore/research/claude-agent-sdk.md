@@ -23,38 +23,39 @@ The Agent SDK wraps Claude Code's CLI as a subprocess, communicating via JSON ov
 
 **Two primary interfaces (Python):**
 
-| Interface | Session Model | Hooks/Custom Tools | Interrupts | Use Case |
-|-----------|--------------|-------------------|------------|----------|
-| `query()` | New session per call | Not supported | Not supported | One-off tasks, CI/CD |
-| `ClaudeSDKClient` | Persistent session | Supported | Supported | Conversations, interactive apps |
+| Interface         | Session Model        | Hooks/Custom Tools | Interrupts    | Use Case                        |
+| ----------------- | -------------------- | ------------------ | ------------- | ------------------------------- |
+| `query()`         | New session per call | Not supported      | Not supported | One-off tasks, CI/CD            |
+| `ClaudeSDKClient` | Persistent session   | Supported          | Supported     | Conversations, interactive apps |
 
 TypeScript has `query()` that returns a `Query` object (async generator with additional methods like `interrupt()`, `setPermissionMode()`, etc.). A V2 preview with `send()`/`receive()` patterns is also available.
 
-**Current versions (as of 2026-02-11):**
-- TypeScript: `@anthropic-ai/claude-agent-sdk@0.2.39` (npm)
-- Python: `claude-agent-sdk` (PyPI, version TBD)
+**Versioning**: Always pull the latest SDK version before integrating. The SDK ships frequently and older snapshots go stale fast. Check the npm registry (`https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/latest`) or run `bun add @anthropic-ai/claude-agent-sdk@latest` to install the current release. Do not pin to a version quoted in this doc; treat any version number here as a "seen at" marker, not a recommendation.
+
+- TypeScript: `@anthropic-ai/claude-agent-sdk` — install with `bun add @anthropic-ai/claude-agent-sdk@latest` (seen at `0.2.101` on 2026-04-11; was `0.2.39` on 2026-02-11 — verify current latest before use)
+- Python: `claude-agent-sdk` (PyPI) — install with your Python tool of choice; check PyPI for the current version
 
 ### 2. Built-in Tools
 
 The SDK provides the same tools available in Claude Code:
 
-| Tool | Description |
-|------|-------------|
-| Read | Read any file in the working directory |
-| Write | Create new files |
-| Edit | Precise string replacement edits |
-| Bash | Run terminal commands, scripts, git |
-| Glob | File pattern matching |
-| Grep | Content search with regex (ripgrep) |
-| WebSearch | Web search for current information |
-| WebFetch | Fetch and parse web page content |
-| AskUserQuestion | Ask the user clarifying questions |
-| Task | Launch subagents for focused subtasks |
-| NotebookEdit | Edit Jupyter notebooks |
-| TodoWrite | Manage structured task lists |
-| BashOutput / KillBash | Background process management |
-| ListMcpResources / ReadMcpResource | MCP resource access |
-| ExitPlanMode | Exit planning mode |
+| Tool                               | Description                            |
+| ---------------------------------- | -------------------------------------- |
+| Read                               | Read any file in the working directory |
+| Write                              | Create new files                       |
+| Edit                               | Precise string replacement edits       |
+| Bash                               | Run terminal commands, scripts, git    |
+| Glob                               | File pattern matching                  |
+| Grep                               | Content search with regex (ripgrep)    |
+| WebSearch                          | Web search for current information     |
+| WebFetch                           | Fetch and parse web page content       |
+| AskUserQuestion                    | Ask the user clarifying questions      |
+| Task                               | Launch subagents for focused subtasks  |
+| NotebookEdit                       | Edit Jupyter notebooks                 |
+| TodoWrite                          | Manage structured task lists           |
+| BashOutput / KillBash              | Background process management          |
+| ListMcpResources / ReadMcpResource | MCP resource access                    |
+| ExitPlanMode                       | Exit planning mode                     |
 
 ### 3. Permissions Model
 
@@ -67,12 +68,12 @@ Permissions are evaluated in a strict order:
 
 **Permission modes:**
 
-| Mode | Behavior |
-|------|----------|
-| `default` | No auto-approvals; unmatched tools trigger `canUseTool` |
-| `acceptEdits` | Auto-approves file edits and filesystem operations |
-| `dontAsk` | All tools run without prompts (dangerous, inherits to subagents) |
-| `plan` | No tool execution; Claude plans only |
+| Mode          | Behavior                                                         |
+| ------------- | ---------------------------------------------------------------- |
+| `default`     | No auto-approvals; unmatched tools trigger `canUseTool`          |
+| `acceptEdits` | Auto-approves file edits and filesystem operations               |
+| `dontAsk`     | All tools run without prompts (dangerous, inherits to subagents) |
+| `plan`        | No tool execution; Claude plans only                             |
 
 The `canUseTool` callback can modify tool inputs (e.g., redirect file paths to a sandbox), deny with messages, or interrupt execution entirely.
 
@@ -85,6 +86,7 @@ Three transport types for MCP servers:
 - **SDK MCP servers**: In-process custom tools (no separate process needed)
 
 **In-process custom tools (Python):**
+
 ```python
 @tool("greet", "Greet a user", {"name": str})
 async def greet(args):
@@ -102,10 +104,12 @@ MCP tool naming convention: `mcp__<server-name>__<tool-name>`. Wildcard support:
 ### 5. Subagents
 
 Subagents are specialized agents spawned via the `Task` tool. They can be defined:
+
 - **Programmatically**: via the `agents` option in `ClaudeAgentOptions`
 - **Via filesystem**: `.claude/agents/` markdown files (requires `settingSources: ["project"]`)
 
 Each subagent definition includes:
+
 - `description`: When to use this agent (natural language)
 - `prompt`: The agent's system prompt
 - `tools`: Allowed tools (inherits all if omitted)
@@ -116,6 +120,7 @@ Messages from subagents include `parent_tool_use_id` for tracking.
 ### 6. Sessions
 
 Sessions maintain context across multiple exchanges:
+
 - Capture `session_id` from the `init` system message
 - Resume via `resume` option with the session ID
 - Fork sessions with `fork_session: true` to explore different approaches
@@ -125,20 +130,20 @@ Sessions maintain context across multiple exchanges:
 
 SDK hooks use callback functions (not shell commands like CLI hooks):
 
-| Hook Event | Description | Python Support |
-|------------|-------------|---------------|
-| PreToolUse | Before tool execution | Yes |
-| PostToolUse | After tool execution | Yes |
-| PostToolUseFailure | After tool failure | TS only |
-| UserPromptSubmit | When user submits prompt | Yes |
-| Stop | When stopping execution | Yes |
-| SubagentStop | When subagent stops | Yes |
-| SubagentStart | When subagent starts | TS only |
-| SessionStart | Session initialization | TS only |
-| SessionEnd | Session termination | TS only |
-| PreCompact | Before message compaction | Yes |
-| Notification | System notifications | TS only |
-| PermissionRequest | Permission prompt | TS only |
+| Hook Event         | Description               | Python Support |
+| ------------------ | ------------------------- | -------------- |
+| PreToolUse         | Before tool execution     | Yes            |
+| PostToolUse        | After tool execution      | Yes            |
+| PostToolUseFailure | After tool failure        | TS only        |
+| UserPromptSubmit   | When user submits prompt  | Yes            |
+| Stop               | When stopping execution   | Yes            |
+| SubagentStop       | When subagent stops       | Yes            |
+| SubagentStart      | When subagent starts      | TS only        |
+| SessionStart       | Session initialization    | TS only        |
+| SessionEnd         | Session termination       | TS only        |
+| PreCompact         | Before message compaction | Yes            |
+| Notification       | System notifications      | TS only        |
+| PermissionRequest  | Permission prompt         | TS only        |
 
 Hooks use matchers (regex patterns) to target specific tools. They can block actions, add system messages, modify inputs, or log activity.
 
@@ -148,11 +153,11 @@ Hooks use matchers (regex patterns) to target specific tools. They can block act
 
 `settingSources` controls which filesystem settings the SDK loads:
 
-| Value | Location | Description |
-|-------|----------|-------------|
-| `"user"` | `~/.claude/settings.json` | Global user settings |
-| `"project"` | `.claude/settings.json` | Shared project settings |
-| `"local"` | `.claude/settings.local.json` | Local (gitignored) settings |
+| Value       | Location                      | Description                 |
+| ----------- | ----------------------------- | --------------------------- |
+| `"user"`    | `~/.claude/settings.json`     | Global user settings        |
+| `"project"` | `.claude/settings.json`       | Shared project settings     |
+| `"local"`   | `.claude/settings.local.json` | Local (gitignored) settings |
 
 **Default behavior**: SDK loads NO filesystem settings (isolation). Must explicitly set `settingSources: ["project"]` to load CLAUDE.md, skills, slash commands, or agents from the filesystem.
 
@@ -161,6 +166,7 @@ Programmatic options always override filesystem settings.
 ### 9. Sandbox Configuration
 
 The SDK supports sandboxed command execution:
+
 - `enabled`: Turn on sandbox mode
 - `autoAllowBashIfSandboxed`: Auto-approve bash when sandboxed
 - `excludedCommands`: Commands that bypass sandbox (static list)
@@ -180,12 +186,12 @@ The SDK supports sandboxed command execution:
 
 ### 11. Comparison with Client SDK
 
-| Feature | Agent SDK | Client SDK |
-|---------|-----------|------------|
-| Tool execution | Built-in, autonomous | You implement the loop |
-| Agent loop | Handled by SDK | Manual implementation |
-| File/code operations | Built-in tools | You build everything |
-| Use case | Autonomous agents | Direct API access |
+| Feature              | Agent SDK            | Client SDK             |
+| -------------------- | -------------------- | ---------------------- |
+| Tool execution       | Built-in, autonomous | You implement the loop |
+| Agent loop           | Handled by SDK       | Manual implementation  |
+| File/code operations | Built-in tools       | You build everything   |
+| Use case             | Autonomous agents    | Direct API access      |
 
 ### 12. Authentication
 
@@ -207,6 +213,7 @@ The `agent-sdk-dev` plugin is an official Anthropic plugin (`claude-plugins-offi
 ### `/new-sdk-app` Command
 
 Interactive workflow that:
+
 1. Asks language choice (TypeScript or Python), one question at a time
 2. Asks project name
 3. Asks agent type (coding, business, custom)
@@ -218,6 +225,7 @@ Interactive workflow that:
 9. Automatically launches the appropriate verifier agent
 
 **Documentation references fetched by the command:**
+
 - https://docs.claude.com/en/api/agent-sdk/overview
 - Language-specific SDK reference (TypeScript or Python)
 - Relevant guides (streaming, permissions, custom tools, MCP, subagents, sessions)
@@ -254,11 +262,11 @@ The `agent-sdk-dev` plugin demonstrates patterns worth noting:
 
 The [claude-agent-sdk-demos](https://github.com/anthropics/claude-agent-sdk-demos) repo provides:
 
-| Demo | Description |
-|------|-------------|
-| Hello World | Basic getting-started example |
-| Email Agent | IMAP email assistant (inbox, search, AI assistance) |
-| Excel Demo | Spreadsheet/Excel file manipulation |
+| Demo           | Description                                                 |
+| -------------- | ----------------------------------------------------------- |
+| Hello World    | Basic getting-started example                               |
+| Email Agent    | IMAP email assistant (inbox, search, AI assistance)         |
+| Excel Demo     | Spreadsheet/Excel file manipulation                         |
 | Research Agent | Multi-agent system with parallel subagents for web research |
 
 The Email Agent and Research Agent are most interesting as reference implementations: they demonstrate frontend-to-agent patterns (inbox UI, search, agent-assisted workflows).

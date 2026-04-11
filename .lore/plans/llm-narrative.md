@@ -206,9 +206,9 @@ The system prompt also receives:
 
 **Changes**:
 
-1. **Verify TypeScript Agent SDK API** before writing any code. Install `@anthropic-ai/claude-agent-sdk` and confirm: (a) `query()` accepts `outputFormat` for structured JSON output, (b) in-process MCP tool registration works with Zod schemas (the research doc shows the Python `@tool` decorator but the TypeScript equivalent is not documented), (c) `maxBudgetUsd` is a supported option. If any of these APIs have changed since the research (v0.2.39, February 2026), adjust the implementation accordingly. This step prevents building against a stale API.
+1. **Verify TypeScript Agent SDK API** before writing any code. Install the latest `@anthropic-ai/claude-agent-sdk` (do not pin to an older version quoted in prior research — check the npm registry or run `bun add @anthropic-ai/claude-agent-sdk@latest`) and confirm: (a) `query()` accepts `outputFormat` for structured JSON output, (b) in-process MCP tool registration works with Zod schemas (the research doc shows the Python `@tool` decorator but the TypeScript equivalent is not documented), (c) `maxBudgetUsd` is a supported option. If any of these APIs have changed since the last research snapshot, adjust the implementation accordingly. This step prevents building against a stale API.
 
-2. **`packages/daemon/package.json`**: Add `@anthropic-ai/claude-agent-sdk` to dependencies.
+2. **`packages/daemon/package.json`**: Add `@anthropic-ai/claude-agent-sdk` (latest) to dependencies via `bun add @anthropic-ai/claude-agent-sdk@latest --filter daemon` (or equivalent from the daemon package directory).
 
 3. **`packages/daemon/src/services/narration-service.ts`** (new): Create the narration service with a `create*Service(deps)` factory following project conventions.
 
@@ -379,7 +379,7 @@ Typecheck clean.
 
 ## Risk Register
 
-**Agent SDK API instability.** The SDK research is from 2026-02-11. The TypeScript SDK API may have changed (version was `0.2.39`). Phase 2 should start by checking the current SDK version and verifying that `query()`, `outputFormat`, and in-process MCP tool registration still work as documented.
+**Agent SDK API instability.** The SDK ships frequently, so whatever version the research doc quotes will likely be behind by the time this plan is worked. Phase 2 must start by installing the current latest via `bun add @anthropic-ai/claude-agent-sdk@latest` and verifying that `query()`, `outputFormat`, and in-process MCP tool registration still work as documented. Do not rely on version numbers cached in prior research; always pull the current release before building against it.
 
 **Structured output reliability.** If the agent returns malformed JSON despite `outputFormat`, the narration service needs a retry strategy. Decision: one retry on parse failure, then surface the error. No silent fallback to unstructured text.
 
