@@ -1,7 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { getGame, listAxes, getTournamentGameStats } from "@/lib/api";
-import type { TournamentGameStatsDisplay } from "@shelf-judge/shared";
+import { getGame, listAxes, getTournamentGameStats, getProfile, predictGame } from "@/lib/api";
+import type {
+  TournamentGameStatsDisplay,
+  DivergentGame,
+  CollectionOutlier,
+  FitnessResult,
+  RevealedPreferenceTension,
+} from "@shelf-judge/shared";
 import { ScoreBreakdown } from "@/components/score-breakdown";
 import { RatingForm } from "@/components/rating-form";
 import { GameActions } from "@/components/game-actions";
@@ -29,12 +35,34 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
   let data;
   let axes;
   let tournamentStats: TournamentGameStatsDisplay | null = null;
+  let profileDivergence: DivergentGame | null = null;
+  let profileOutlier: CollectionOutlier | null = null;
+  let prediction: { score: FitnessResult; tension?: RevealedPreferenceTension } | null = null;
   try {
     [data, axes] = await Promise.all([getGame(id), listAxes()]);
     try {
       tournamentStats = await getTournamentGameStats(id);
     } catch {
       // Tournament stats may not exist yet
+    }
+    try {
+      const profile = await getProfile();
+      profileDivergence = profile.divergence?.find((d) => d.gameId === id) ?? null;
+      profileOutlier = profile.outliers.find((o) => o.gameId === id) ?? null;
+    } catch {
+      // Profile may not exist yet
+    }
+    // Fetch prediction data for unrated or partially-rated games
+    try {
+      const predicted = await predictGame(id);
+      if (predicted.score?.predictionMeta) {
+        prediction = {
+          score: predicted.score,
+          tension: predicted.tension ?? undefined,
+        };
+      }
+    } catch {
+      // Prediction may not be available (fully rated, no BGG data, etc.)
     }
   } catch (err) {
     return (
@@ -45,24 +73,18 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
   }
 
   const { game, score } = data;
-
-  // Divergence check: > 2.0 difference between fitness and tournament, both non-provisional.
-  // Skip vetoed games entirely: their score is 0 by design, not a meaningful divergence signal.
-  const hasDivergence =
-    score !== null &&
-    !score.vetoed &&
-    tournamentStats !== null &&
-    tournamentStats.normalizedScore !== null &&
-    !tournamentStats.isProvisional &&
-    Math.abs(score.score - tournamentStats.normalizedScore) > 2.0;
+  // Use predicted score when the game has no actual score but has predictions
+  const displayScore = score ?? prediction?.score ?? null;
+  const hasPredictions =
+    displayScore?.predictionMeta !== null && displayScore?.predictionMeta !== undefined;
 
   return (
     <>
       {/* Topbar with breadcrumb */}
       <div className="topbar">
         <div className="breadcrumb">
-          <Link href="/">Collection</Link>
-          <span>›</span>
+          <Link href="/collection">Collection</Link>
+          <span>&rsaquo;</span>
           <strong>{game.name}</strong>
         </div>
         <GameActions gameId={game.id} gameName={game.name} hasBggId={game.bggId !== null} />
@@ -153,30 +175,48 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
             )}
           </div>
           <div className="game-hero-score-section">
-            {score ? (
-              score.vetoed ? (
+            {displayScore ? (
+              displayScore.vetoed ? (
                 <>
                   <div className="score-hero-label">Fitness Score</div>
                   <div className="score-hero-number score-hero-vetoed">VETOED</div>
-                  {score.hypotheticalScore !== null && (
+                  {displayScore.hypotheticalScore !== null && (
                     <div className="score-hero-out-of">
-                      hypothetical: {score.hypotheticalScore.toFixed(1)}
+                      hypothetical: {displayScore.hypotheticalScore.toFixed(1)}
                     </div>
                   )}
-                  <div className="score-hero-rated">{score.ratedAxisCount} axes rated</div>
+                  <div className="score-hero-rated">{displayScore.ratedAxisCount} axes rated</div>
+                </>
+              ) : hasPredictions ? (
+                <>
+                  <span className="predict-badge">PREDICTED</span>
+                  <div className="score-hero-label">Fitness Score</div>
+                  <div className="score-hero-number score-predicted">
+                    <span className="score-predicted-tilde">~</span>
+                    {displayScore.score.toFixed(1)}
+                  </div>
+                  <div className="score-hero-predict-summary">
+                    {displayScore.predictionMeta!.actualAxisCount} actual &middot;{" "}
+                    {displayScore.predictionMeta!.predictedAxisCount} predicted
+                  </div>
+                  <div className="score-hero-predict-summary" style={{ marginTop: 2 }}>
+                    <span className={`conf-badge conf-${displayScore.predictionMeta!.confidence}`}>
+                      {displayScore.predictionMeta!.confidence}
+                    </span>
+                  </div>
                 </>
               ) : (
                 <>
                   <div className="score-hero-label">Fitness Score</div>
-                  <div className="score-hero-number">{score.score.toFixed(1)}</div>
+                  <div className="score-hero-number">{displayScore.score.toFixed(1)}</div>
                   <div className="score-hero-out-of">out of 10.0</div>
-                  <div className="score-hero-rated">{score.ratedAxisCount} axes rated</div>
+                  <div className="score-hero-rated">{displayScore.ratedAxisCount} axes rated</div>
                 </>
               )
             ) : (
               <>
                 <div className="score-hero-label">Fitness Score</div>
-                <div className="score-hero-number score-hero-unrated">—</div>
+                <div className="score-hero-number score-hero-unrated">&mdash;</div>
                 <div className="score-hero-out-of">not yet rated</div>
               </>
             )}
@@ -193,12 +233,86 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
           </div>
         </div>
 
-        {hasDivergence && (
-          <div className="divergence-banner">
-            <strong>Score divergence:</strong> This game&apos;s fitness score (
-            {score.score.toFixed(1)}) and tournament rank (
-            {tournamentStats!.normalizedScore!.toFixed(1)}) differ by more than 2.0 points. This may
-            indicate your axis ratings and head-to-head preferences are measuring different things.
+        {profileDivergence && (
+          <div className="profile-divergence-detail">
+            <div className="profile-detail-title">Profile Divergence</div>
+            <div className="divergence-row">
+              <div className="div-game-name">
+                {profileDivergence.direction === "tournament-outlier"
+                  ? "Tournament rates higher than fitness"
+                  : "Fitness rates higher than tournament"}
+              </div>
+              <div className="div-scores">
+                <div className="div-score">
+                  <span className="div-score-val fitness">
+                    {profileDivergence.fitnessScore.toFixed(1)}
+                  </span>
+                  <span className="div-score-lbl">Fitness</span>
+                </div>
+                <span className="div-arrow">&rarr;</span>
+                <div className="div-score">
+                  <span className="div-score-val tournament">
+                    {profileDivergence.normalizedTournamentScore.toFixed(1)}
+                  </span>
+                  <span className="div-score-lbl">Tournament</span>
+                </div>
+                <span className={`div-gap ${profileDivergence.direction}`}>
+                  {profileDivergence.direction === "tournament-outlier" ? "+" : "\u2212"}
+                  {profileDivergence.gap.toFixed(1)}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {profileOutlier && (
+          <div className="profile-outlier-detail">
+            <div className="profile-detail-title">Collection Outlier</div>
+            <div className="outlier-row">
+              <div className="outlier-info">
+                <div className="outlier-reason">
+                  Composite distance <span>{profileOutlier.distances.composite.toFixed(2)}</span>{" "}
+                  from collection centroid
+                </div>
+                <div className="outlier-distance">
+                  {profileOutlier.distances.binary !== null && (
+                    <span
+                      className={`dist-component${profileOutlier.distances.binary >= 0.7 ? " high" : ""}`}
+                    >
+                      Mechanics: {profileOutlier.distances.binary.toFixed(2)}
+                    </span>
+                  )}
+                  {profileOutlier.distances.continuous !== null && (
+                    <span
+                      className={`dist-component${profileOutlier.distances.continuous >= 0.7 ? " high" : ""}`}
+                    >
+                      BGG attrs: {profileOutlier.distances.continuous.toFixed(2)}
+                    </span>
+                  )}
+                  {profileOutlier.distances.personalAxes !== null && (
+                    <span
+                      className={`dist-component${profileOutlier.distances.personalAxes >= 0.7 ? " high" : ""}`}
+                    >
+                      Axis ratings: {profileOutlier.distances.personalAxes.toFixed(2)}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="outlier-type-tags">
+                {profileOutlier.classifications.map((cls) => (
+                  <span
+                    key={cls}
+                    className={`outlier-type-tag ${cls === "lone-wolf" ? "lone-wolf" : cls === "category-orphan" ? "category-orphan" : "high-fitness"}`}
+                  >
+                    {cls === "lone-wolf"
+                      ? "Lone Wolf"
+                      : cls === "category-orphan"
+                        ? "Category Orphan"
+                        : "High-Fitness"}
+                  </span>
+                ))}
+              </div>
+            </div>
           </div>
         )}
 
@@ -232,7 +346,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
             {tournamentStats.recentComparisons.length > 0 && (
               <div className="tournament-recent">
                 <div className="tournament-recent-title">Last 5 comparisons</div>
-                {tournamentStats.recentComparisons.map((c, i) => (
+                {tournamentStats.recentComparisons.slice(0, 5).map((c, i) => (
                   <div key={i} className={`tournament-recent-row ${c.won ? "win" : "loss"}`}>
                     <span className="tournament-result-badge">{c.won ? "W" : "L"}</span>
                     <span className="tournament-opponent-id">
@@ -253,20 +367,76 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
           <div className="panel-left">
             <div className="panel-section-title">
               Score Breakdown
-              {score && !score.vetoed && (
-                <span className="badge">How {score.score.toFixed(1)} was calculated</span>
+              {displayScore && !displayScore.vetoed && (
+                <span className="badge">
+                  How {hasPredictions ? "~" : ""}
+                  {displayScore.score.toFixed(1)} was calculated
+                </span>
               )}
             </div>
-            <ScoreBreakdown score={score} />
+            <ScoreBreakdown score={displayScore} />
             <div className="calc-explanation">
               <strong>How this is calculated:</strong> weighted average of all rated axes. Formula:{" "}
-              <code>sum(rating × weight) / sum(weight)</code>. Axes without ratings are excluded
-              from both the numerator and denominator.
+              <code>sum(rating &times; weight) / sum(weight)</code>. Axes without ratings are
+              excluded from both the numerator and denominator.
+              {hasPredictions && (
+                <>
+                  {" "}
+                  Predicted axes use similarity-weighted ratings from your most similar rated games.
+                  Insufficient-confidence axes are excluded.
+                </>
+              )}
             </div>
+
+            {/* Revealed preference tension */}
+            {prediction?.score?.predictionMeta &&
+              (() => {
+                // Check if any breakdown entry has tension data available
+                // Tension comes through the prediction response
+                const tensionNote = prediction.score.predictionMeta
+                  ? prediction.tension
+                  : undefined;
+                if (!tensionNote) return null;
+
+                const delta = Math.abs(
+                  tensionNote.predictedFitness - tensionNote.tournamentClusterAverage,
+                );
+
+                return (
+                  <div className="tension-panel">
+                    <div className="tension-header">
+                      <span className="tension-icon">&#x26A1;</span>
+                      <span className="tension-title">Revealed Preference Tension</span>
+                      <span className="tension-delta">&Delta; {delta.toFixed(1)} points</span>
+                    </div>
+                    <div className="tension-body">
+                      <div className="tension-signal">
+                        <div className="tension-signal-label">Axis Prediction</div>
+                        <div className="tension-signal-value predict">
+                          {tensionNote.predictedFitness.toFixed(1)}
+                        </div>
+                      </div>
+                      <span className="tension-vs">vs</span>
+                      <div className="tension-signal">
+                        <div className="tension-signal-label">Tournament Pattern</div>
+                        <div className="tension-signal-value tourney">
+                          {tensionNote.tournamentClusterAverage.toFixed(1)}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="tension-note">{tensionNote.note}</div>
+                  </div>
+                );
+              })()}
           </div>
           <div className="panel-right">
             <div className="panel-section-title">Your Ratings</div>
-            <RatingForm gameId={game.id} axes={axes} currentRatings={game.ratings} />
+            <RatingForm
+              gameId={game.id}
+              axes={axes}
+              currentRatings={game.ratings}
+              predictionScore={hasPredictions ? displayScore : null}
+            />
           </div>
         </div>
       </div>

@@ -1,8 +1,11 @@
 // Unix socket HTTP client for communicating with the shelf-judge daemon.
 
+import type { CollectionProfile } from "@shelf-judge/shared";
 import path from "path";
 
-const DEFAULT_SOCKET_PATH = process.env.SHELF_JUDGE_SOCKET ?? path.join(process.env.HOME ?? ".", ".shelf-judge", "shelf-judge.sock");
+const DEFAULT_SOCKET_PATH =
+  process.env.SHELF_JUDGE_SOCKET ??
+  path.join(process.env.HOME ?? ".", ".shelf-judge", "shelf-judge.sock");
 
 export interface DaemonClientOptions {
   socketPath?: string;
@@ -21,6 +24,7 @@ export interface DaemonClient {
   put<T = unknown>(path: string, body?: unknown): Promise<DaemonResponse<T>>;
   del<T = unknown>(path: string): Promise<DaemonResponse<T>>;
   postSSE(path: string, body: unknown, onEvent: (event: SSEEvent) => void): Promise<void>;
+  getProfile(): Promise<CollectionProfile>;
   isReachable(): Promise<boolean>;
   socketPath: string;
 }
@@ -133,12 +137,19 @@ export function createDaemonClient(options: DaemonClientOptions = {}): DaemonCli
     }
   }
 
+  async function getProfile(): Promise<CollectionProfile> {
+    const res = await request<CollectionProfile>("GET", "/api/profile");
+    if (!res.ok) throw new Error(`Failed to get profile: ${res.status}`);
+    return res.data;
+  }
+
   return {
     get: <T>(path: string) => request<T>("GET", path),
     post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),
     put: <T>(path: string, body?: unknown) => request<T>("PUT", path, body),
     del: <T>(path: string) => request<T>("DELETE", path),
     postSSE,
+    getProfile,
     isReachable,
     socketPath,
   };

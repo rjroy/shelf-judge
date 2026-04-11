@@ -1,54 +1,37 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { listGames, listAxes, getAllTournamentStats } from "@/lib/api";
-import type { TournamentGameStatsDisplay } from "@shelf-judge/shared";
-import { RefreshAllButton } from "@/components/refresh-all-button";
-import { NormalizeFitnessButton } from "@/components/normalize-fitness-button";
-import { CollectionTable } from "@/components/collection-table";
+import { getProfile } from "@/lib/api";
+import { NarrationEmpty } from "@/components/profile/narration-empty";
+import { AxisDistributions } from "@/components/profile/axis-distributions";
+import { AxisWeights } from "@/components/profile/axis-weights";
+import { BggClustering } from "@/components/profile/bgg-clustering";
+import { UtilityCurves } from "@/components/profile/utility-curves";
+import { Divergence } from "@/components/profile/divergence";
+import { Outliers } from "@/components/profile/outliers";
+import { Suggestions } from "@/components/profile/suggestions";
 
 export const metadata: Metadata = { title: "Shelf Judge" };
 export const dynamic = "force-dynamic";
 
-export default async function CollectionPage() {
-  let games;
-  let axes;
-  let tournamentStats: Record<string, TournamentGameStatsDisplay> = {};
+export default async function ProfileOverviewPage() {
+  let profile;
   try {
-    [games, axes] = await Promise.all([listGames(), listAxes()]);
-    try {
-      tournamentStats = await getAllTournamentStats();
-    } catch {
-      // Tournament data may not exist yet
-    }
+    profile = await getProfile();
   } catch {
-    return (
-      <div className="error-banner">
-        Could not connect to the shelf-judge daemon. Is it running?
-      </div>
-    );
-  }
-
-  const hasTournamentData = Object.keys(tournamentStats).length > 0;
-
-  const rated = games.filter(({ score }) => score !== null);
-  const avgFitness =
-    rated.length > 0
-      ? rated.reduce((sum, { score }) => sum + (score?.score ?? 0), 0) / rated.length
-      : null;
-
-  if (games.length === 0) {
     return (
       <>
         <div className="topbar">
-          <div className="topbar-title">My Collection</div>
+          <div className="topbar-title">Collection Profile</div>
         </div>
         <div className="main-scroll">
           <div className="empty-state">
-            <h3>No games yet</h3>
-            <p>Add games to your collection to start rating and tracking fitness scores.</p>
+            <h3>No profile available</h3>
+            <p>
+              Add games to your collection and rate them to generate a profile of your preferences.
+            </p>
             <div className="empty-state-actions">
-              <Link href="/import" className="btn btn-secondary">
-                Import BGG Collection
+              <Link href="/collection" className="btn btn-secondary">
+                View Collection
               </Link>
               <Link href="/search" className="btn btn-primary">
                 Add Game
@@ -60,30 +43,42 @@ export default async function CollectionPage() {
     );
   }
 
+  // Exclude predicted-only scores from actual averages
+  // (profile data comes from the daemon which already handles this, but defensive)
+
+  const computedDate = new Date(profile.computedAt).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+
   return (
     <>
       <div className="topbar">
-        <div className="topbar-title">My Collection</div>
+        <div className="topbar-title">Collection Profile</div>
         <div className="topbar-meta">
+          <span>Computed {computedDate}</span>
           <span>
-            {games.length} game{games.length !== 1 && "s"} &middot; {axes.length} ax
-            {axes.length === 1 ? "is" : "es"}
+            {" "}
+            &middot; {profile.gameCount} {profile.gameCount === 1 ? "game" : "games"} &middot;{" "}
+            {profile.axisDistributions.length}{" "}
+            {profile.axisDistributions.length === 1 ? "axis" : "axes"}
           </span>
-          <NormalizeFitnessButton />
-          <RefreshAllButton />
         </div>
       </div>
 
       <div className="main-scroll">
-        <CollectionTable
-          games={games}
-          axes={axes}
-          tournamentStats={tournamentStats}
-          hasTournamentData={hasTournamentData}
-          totalGames={games.length}
-          ratedCount={rated.length}
-          avgFitness={avgFitness}
+        <NarrationEmpty />
+        <AxisDistributions
+          distributions={profile.axisDistributions}
+          gameCount={profile.gameCount}
         />
+        <AxisWeights weights={profile.axisWeights} />
+        <BggClustering clustering={profile.bggClustering} gameCount={profile.gameCount} />
+        <UtilityCurves curves={profile.utilityCurves} />
+        {profile.divergence !== null && <Divergence games={profile.divergence} />}
+        {profile.outliers.length > 0 && <Outliers outliers={profile.outliers} />}
+        {profile.suggestions.length > 0 && <Suggestions suggestions={profile.suggestions} />}
       </div>
     </>
   );

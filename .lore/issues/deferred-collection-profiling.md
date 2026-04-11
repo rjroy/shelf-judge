@@ -1,7 +1,7 @@
 ---
 title: "Deferred: Collection identity / taste profiling"
 date: 2026-04-06
-status: approved
+status: resolved
 tags: [deferred, feature, profiling, collection]
 modules: [daemon]
 origin: .lore/specs/mvp.md

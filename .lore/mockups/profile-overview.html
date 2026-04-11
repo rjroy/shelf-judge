@@ -1,0 +1,2101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shelf Judge — Profile Overview Mockup</title>
+    <style>
+      /*
+       * Shelf Judge – Profile Overview Page Mockup
+       * Spec: .lore/specs/collection-profiling.md
+       *
+       * Palette tokens (matches existing mockup conventions):
+       *   --bg-base:     #f4f1ec  warm off-white / cardboard texture
+       *   --bg-surface:  #fefcf9  elevated card surface
+       *   --text-primary: #1a1714
+       *   --score-color:  #b86c1a  amber-brown (personal ratings / fitness)
+       *   --bgg-accent:   #2e5f8a  slate blue (BGG-derived data)
+       *   --action:       #1c3d5e  deep navy (navigation / actions)
+       *   --score-high:   #2d7a4a
+       *   --score-mid:    #8a6f20
+       *   --score-low:    #b84040
+       */
+      :root {
+        --bg-base: #f4f1ec;
+        --bg-surface: #fefcf9;
+        --bg-elevated: #ffffff;
+        --border: #ddd8d0;
+        --border-strong: #c4bfb8;
+        --text-primary: #1a1714;
+        --text-secondary: #6b6560;
+        --text-muted: #9c9590;
+        --score-color: #b86c1a;
+        --score-bg: #fdf3e7;
+        --score-high: #2d7a4a;
+        --score-high-bg: #eaf5ef;
+        --score-mid: #8a6f20;
+        --score-low: #b84040;
+        --score-low-bg: #fdeaea;
+        --bgg-accent: #2e5f8a;
+        --bgg-bg: #edf3f9;
+        --action: #1c3d5e;
+        --action-hover: #2a5580;
+        --action-subtle: #e8eff6;
+        --nav-bg: #1a1714;
+        --nav-text: #e8e4dc;
+        --nav-active: #b86c1a;
+        --override-accent: #5c3d99;
+        --override-bg: #f0ecf8;
+        /* Profile-specific */
+        --outlier-lone: #5c3d99;
+        --outlier-lone-bg: #f0ecf8;
+        --outlier-orphan: #8a6f20;
+        --outlier-orphan-bg: #f5f0e2;
+        --outlier-fitness: #2d7a4a;
+        --outlier-fitness-bg: #eaf5ef;
+        --suggest-bg: #f8f6f2;
+        --suggest-border: #c8c0b4;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family:
+          Inter,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        background: #e8e4dc;
+        color: var(--text-primary);
+        font-size: 15px;
+        line-height: 1.5;
+        padding: 40px 32px;
+      }
+
+      /* ─── Annotation wrapper ─── */
+      .annotation-section {
+        margin-bottom: 64px;
+      }
+
+      .annotation-label {
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #9c9590;
+        margin-bottom: 12px;
+        padding-left: 2px;
+      }
+
+      .annotation-note {
+        font-size: 12px;
+        color: #6b6560;
+        margin-top: 12px;
+        padding-left: 2px;
+        max-width: 860px;
+        font-style: italic;
+        line-height: 1.6;
+      }
+
+      /* ─── App chrome ─── */
+      .app-frame {
+        display: flex;
+        background: var(--bg-base);
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow:
+          0 4px 32px rgba(0, 0, 0, 0.18),
+          0 1px 4px rgba(0, 0, 0, 0.08);
+      }
+
+      /* ─── Sidebar ─── */
+      .sidebar {
+        width: 200px;
+        flex-shrink: 0;
+        background: var(--nav-bg);
+        display: flex;
+        flex-direction: column;
+        min-height: 100%;
+      }
+
+      .sidebar-brand {
+        padding: 18px 20px 20px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .brand-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 2px;
+      }
+
+      .brand-icon {
+        width: 24px;
+        height: 24px;
+        background: var(--nav-active);
+        border-radius: 4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        font-weight: 800;
+        color: #fff;
+        letter-spacing: -0.03em;
+      }
+
+      .brand-name {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--nav-text);
+        letter-spacing: -0.02em;
+      }
+
+      .brand-sub {
+        font-size: 10px;
+        color: rgba(232, 228, 220, 0.4);
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+      }
+
+      .nav-section {
+        padding: 12px 0;
+        flex: 1;
+      }
+
+      .nav-label {
+        font-size: 10px;
+        font-weight: 600;
+        color: rgba(232, 228, 220, 0.35);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        padding: 0 20px;
+        margin-bottom: 4px;
+        margin-top: 10px;
+      }
+
+      .nav-label:first-child {
+        margin-top: 0;
+      }
+
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 20px;
+        font-size: 13px;
+        color: rgba(232, 228, 220, 0.65);
+        cursor: default;
+        border-left: 2px solid transparent;
+      }
+
+      .nav-item.active {
+        color: var(--nav-text);
+        background: rgba(184, 108, 26, 0.14);
+        border-left-color: var(--nav-active);
+      }
+
+      .nav-icon {
+        font-size: 14px;
+        opacity: 0.7;
+        width: 16px;
+        text-align: center;
+      }
+
+      .nav-item.active .nav-icon {
+        opacity: 1;
+      }
+
+      /* ─── Main content ─── */
+      .main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        min-height: 600px;
+      }
+
+      /* ─── Topbar ─── */
+      .topbar {
+        height: 52px;
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        padding: 0 24px;
+        gap: 12px;
+        flex-shrink: 0;
+      }
+
+      .topbar-title {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--text-primary);
+        flex: 1;
+      }
+
+      .topbar-meta {
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+
+      .stale-badge {
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 10px;
+        background: #fef3e2;
+        color: #b86c1a;
+        font-weight: 600;
+        border: 1px solid #f0d8b0;
+      }
+
+      .btn-recompute {
+        font-size: 12px;
+        padding: 5px 12px;
+        border-radius: 6px;
+        background: var(--action);
+        color: #fff;
+        border: none;
+        cursor: default;
+        font-weight: 500;
+      }
+
+      /* ─── Scrollable content ─── */
+      .content-scroll {
+        flex: 1;
+        overflow-y: auto;
+        padding: 24px;
+      }
+
+      /* ─── Section card ─── */
+      .section-card {
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        margin-bottom: 16px;
+        overflow: hidden;
+      }
+
+      .section-header {
+        padding: 14px 20px 12px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+      }
+
+      .section-title {
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--text-secondary);
+      }
+
+      .section-title-main {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+
+      .section-count {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-left: auto;
+      }
+
+      .section-body {
+        padding: 16px 20px;
+      }
+
+      /* ─── LLM Narration section (deferred empty state) ─── */
+      .narration-empty {
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 20px 24px;
+        margin-bottom: 16px;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+
+      .narration-icon {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        background: #f0ecf8;
+        border: 1px solid #d4c8e8;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 16px;
+        flex-shrink: 0;
+      }
+
+      .narration-text {
+        flex: 1;
+      }
+
+      .narration-label {
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--text-muted);
+        margin-bottom: 4px;
+      }
+
+      .narration-desc {
+        font-size: 13px;
+        color: var(--text-secondary);
+      }
+
+      .btn-narrate {
+        font-size: 12px;
+        padding: 6px 14px;
+        border-radius: 6px;
+        background: var(--override-bg);
+        color: var(--override-accent);
+        border: 1px solid #d4c8e8;
+        cursor: default;
+        font-weight: 500;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+
+      /* ─── Axis distribution rows ─── */
+      .axis-dist-row {
+        padding: 14px 0;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .axis-dist-row:last-child {
+        border-bottom: none;
+      }
+
+      .axis-dist-top {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .axis-name {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-primary);
+        flex: 1;
+      }
+
+      .axis-stats {
+        display: flex;
+        gap: 16px;
+      }
+
+      .axis-stat {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        min-width: 52px;
+      }
+
+      .axis-stat-val {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--score-color);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .axis-stat-lbl {
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-muted);
+        margin-top: 1px;
+      }
+
+      /* Mini histogram – 10 buckets (1–10) */
+      .mini-histogram {
+        display: flex;
+        gap: 2px;
+        align-items: flex-end;
+        height: 36px;
+        flex: 1;
+      }
+
+      .hist-bar {
+        flex: 1;
+        background: var(--score-color);
+        opacity: 0.55;
+        border-radius: 2px 2px 0 0;
+        min-height: 2px;
+      }
+
+      .hist-bar.peak {
+        opacity: 0.9;
+      }
+      .hist-bar.zero {
+        opacity: 0.12;
+        background: var(--border-strong);
+      }
+
+      .hist-labels {
+        display: flex;
+        justify-content: space-between;
+        padding: 0 0 2px;
+        margin-top: 4px;
+      }
+
+      .hist-label-tick {
+        font-size: 10px;
+        color: var(--text-muted);
+        width: calc(10% - 1px);
+        text-align: center;
+      }
+
+      /* ─── Axis weight breakdown ─── */
+      .weight-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .weight-row:last-child {
+        border-bottom: none;
+      }
+
+      .weight-rank {
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--text-muted);
+        width: 18px;
+        text-align: right;
+        flex-shrink: 0;
+      }
+
+      .weight-name {
+        font-size: 13px;
+        color: var(--text-primary);
+        width: 180px;
+        flex-shrink: 0;
+      }
+
+      .weight-bar-track {
+        flex: 1;
+        height: 8px;
+        background: var(--bg-base);
+        border-radius: 4px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+      }
+
+      .weight-bar-fill {
+        height: 100%;
+        background: var(--action);
+        border-radius: 4px;
+      }
+
+      .weight-pct {
+        font-size: 13px;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        color: var(--action);
+        width: 38px;
+        text-align: right;
+        flex-shrink: 0;
+      }
+
+      /* ─── BGG attribute clustering ─── */
+      .bgg-section-label {
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--bgg-accent);
+        margin-bottom: 8px;
+        margin-top: 16px;
+      }
+
+      .bgg-section-label:first-child {
+        margin-top: 0;
+      }
+
+      .bgg-attr-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 5px 0;
+      }
+
+      .bgg-attr-name {
+        font-size: 13px;
+        color: var(--text-primary);
+        width: 200px;
+        flex-shrink: 0;
+      }
+
+      .bgg-bar-track {
+        flex: 1;
+        height: 10px;
+        background: var(--bgg-bg);
+        border-radius: 4px;
+        overflow: hidden;
+        border: 1px solid #cad9e8;
+      }
+
+      .bgg-bar-fill {
+        height: 100%;
+        background: var(--bgg-accent);
+        border-radius: 4px;
+        opacity: 0.7;
+      }
+
+      .bgg-attr-count {
+        font-size: 12px;
+        color: var(--bgg-accent);
+        font-variant-numeric: tabular-nums;
+        width: 60px;
+        text-align: right;
+        flex-shrink: 0;
+        font-weight: 500;
+      }
+
+      /* Weight range histogram */
+      .weight-range-row {
+        display: flex;
+        gap: 4px;
+        align-items: flex-end;
+        height: 48px;
+        margin-top: 8px;
+      }
+
+      .wt-bucket {
+        flex: 1;
+        background: var(--bgg-accent);
+        opacity: 0.55;
+        border-radius: 2px 2px 0 0;
+        min-height: 4px;
+      }
+
+      .wt-bucket.peak {
+        opacity: 0.85;
+      }
+      .wt-bucket.zero {
+        opacity: 0.12;
+        background: #cad9e8;
+      }
+
+      .weight-range-labels {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 4px;
+        font-size: 10px;
+        color: var(--text-muted);
+      }
+
+      /* ─── Utility curves ─── */
+      .curve-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 12px 0;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .curve-row:last-child {
+        border-bottom: none;
+      }
+
+      .curve-axis-name {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-primary);
+        width: 160px;
+        flex-shrink: 0;
+        padding-top: 2px;
+      }
+
+      .curve-details {
+        flex: 1;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .curve-tag {
+        font-size: 11px;
+        font-weight: 600;
+        padding: 2px 8px;
+        border-radius: 10px;
+        border: 1px solid;
+      }
+
+      .curve-tag.shape {
+        background: var(--action-subtle);
+        color: var(--action);
+        border-color: #b8ccdc;
+      }
+
+      .curve-tag.sweet-spot {
+        background: var(--score-bg);
+        color: var(--score-color);
+        border-color: #e8c898;
+      }
+
+      .curve-tag.veto {
+        background: var(--score-low-bg);
+        color: var(--score-low);
+        border-color: #f0b8b8;
+      }
+
+      .curve-tag.tolerance {
+        background: #f5f0e2;
+        color: var(--score-mid);
+        border-color: #ddd0a0;
+      }
+
+      /* ─── Divergence section ─── */
+      .divergence-row {
+        display: flex;
+        align-items: center;
+        gap: 0;
+        padding: 12px 0;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .divergence-row:last-child {
+        border-bottom: none;
+      }
+
+      .div-game-name {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-primary);
+        flex: 1;
+      }
+
+      .div-game-sub {
+        font-size: 11px;
+        color: var(--text-muted);
+        font-weight: 400;
+      }
+
+      .div-scores {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .div-score {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        min-width: 56px;
+      }
+
+      .div-score-val {
+        font-size: 17px;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        line-height: 1;
+      }
+
+      .div-score-val.fitness {
+        color: var(--score-color);
+      }
+      .div-score-val.tournament {
+        color: var(--bgg-accent);
+      }
+
+      .div-score-lbl {
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        color: var(--text-muted);
+        margin-top: 2px;
+      }
+
+      .div-arrow {
+        font-size: 13px;
+        color: var(--text-muted);
+        padding: 0 4px;
+      }
+
+      .div-gap {
+        font-size: 11px;
+        font-weight: 700;
+        padding: 2px 8px;
+        border-radius: 10px;
+        min-width: 52px;
+        text-align: center;
+        margin-left: 8px;
+      }
+
+      .div-gap.tournament-outlier {
+        background: var(--bgg-bg);
+        color: var(--bgg-accent);
+        border: 1px solid #b8ccdc;
+      }
+
+      .div-gap.fitness-outlier {
+        background: var(--score-bg);
+        color: var(--score-color);
+        border: 1px solid #e8c898;
+      }
+
+      /* ─── Outliers ─── */
+      .outlier-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 12px 0;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .outlier-row:last-child {
+        border-bottom: none;
+      }
+
+      .outlier-info {
+        flex: 1;
+      }
+
+      .outlier-name {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 3px;
+      }
+
+      .outlier-reason {
+        font-size: 12px;
+        color: var(--text-secondary);
+        line-height: 1.4;
+      }
+
+      .outlier-reason span {
+        font-weight: 600;
+      }
+
+      .outlier-type-tags {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 4px;
+        flex-shrink: 0;
+      }
+
+      .outlier-type-tag {
+        font-size: 10px;
+        font-weight: 700;
+        padding: 2px 8px;
+        border-radius: 10px;
+        border: 1px solid;
+        white-space: nowrap;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      .outlier-type-tag.lone-wolf {
+        background: var(--outlier-lone-bg);
+        color: var(--outlier-lone);
+        border-color: #c8b8e0;
+      }
+
+      .outlier-type-tag.category-orphan {
+        background: var(--outlier-orphan-bg);
+        color: var(--outlier-orphan);
+        border-color: #d8c890;
+      }
+
+      .outlier-type-tag.high-fitness {
+        background: var(--outlier-fitness-bg);
+        color: var(--outlier-fitness);
+        border-color: #a8d8b8;
+      }
+
+      .outlier-distance {
+        margin-top: 6px;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .dist-component {
+        font-size: 11px;
+        padding: 1px 6px;
+        border-radius: 4px;
+        background: var(--bg-base);
+        color: var(--text-secondary);
+        border: 1px solid var(--border);
+      }
+
+      .dist-component.high {
+        background: #f0ecf8;
+        color: var(--override-accent);
+        border-color: #c8b8e0;
+        font-weight: 600;
+      }
+
+      /* ─── Axis suggestions ─── */
+      .suggest-card {
+        background: var(--suggest-bg);
+        border: 1px solid var(--suggest-border);
+        border-radius: 6px;
+        padding: 12px 14px;
+        margin-bottom: 8px;
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+      }
+
+      .suggest-card:last-child {
+        margin-bottom: 0;
+      }
+
+      .suggest-type-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+        margin-top: 5px;
+      }
+
+      .suggest-type-dot.concentration {
+        background: var(--score-color);
+      }
+      .suggest-type-dot.variance {
+        background: var(--bgg-accent);
+      }
+      .suggest-type-dot.repair {
+        background: var(--score-low);
+      }
+
+      .suggest-text {
+        flex: 1;
+        font-size: 13px;
+        color: var(--text-primary);
+        line-height: 1.5;
+      }
+
+      .suggest-meta {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-top: 3px;
+      }
+
+      .btn-dismiss {
+        font-size: 11px;
+        padding: 3px 10px;
+        border-radius: 5px;
+        border: 1px solid var(--border-strong);
+        background: transparent;
+        color: var(--text-muted);
+        cursor: default;
+        flex-shrink: 0;
+        align-self: center;
+      }
+
+      /* ─── Small utilities ─── */
+      .two-col {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+
+      @media (max-width: 720px) {
+        .two-col {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .text-muted {
+        color: var(--text-muted);
+      }
+      .text-secondary {
+        color: var(--text-secondary);
+      }
+
+      hr.light {
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 12px 0;
+      }
+
+      /* ─── Mockup page title ─── */
+      .mockup-page-title {
+        font-size: 24px;
+        font-weight: 700;
+        color: #1a1714;
+        margin-bottom: 6px;
+      }
+
+      .mockup-page-sub {
+        font-size: 13px;
+        color: #6b6560;
+        margin-bottom: 32px;
+        max-width: 640px;
+        line-height: 1.6;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ══════════════════════════════════════════════════════════
+         MOCKUP HEADER
+    ═══════════════════════════════════════════════════════════ -->
+    <p class="mockup-page-title">Shelf Judge – Profile Overview</p>
+    <p class="mockup-page-sub">
+      Mockup for the collection profiling page (spec:
+      <code>.lore/specs/collection-profiling.md</code>). Replaces the current home page. Sample
+      data: 42-game collection, 5 axes. Annotated sections explain design decisions and spec
+      requirement mapping.
+    </p>
+
+    <!-- ══════════════════════════════════════════════════════════
+         SECTION 1: FRESH STATE (profile current, no LLM narration)
+    ═══════════════════════════════════════════════════════════ -->
+    <div class="annotation-section">
+      <div class="annotation-label">
+        Primary view — profile current, LLM narration not yet generated
+      </div>
+
+      <div class="app-frame">
+        <!-- Sidebar -->
+        <div class="sidebar">
+          <div class="sidebar-brand">
+            <div class="brand-row">
+              <div class="brand-icon">SJ</div>
+              <span class="brand-name">Shelf Judge</span>
+            </div>
+            <div class="brand-sub">42 games</div>
+          </div>
+          <div class="nav-section">
+            <div class="nav-label">Overview</div>
+            <div class="nav-item active">
+              <span class="nav-icon">◎</span>
+              Profile
+            </div>
+            <div class="nav-label">Library</div>
+            <div class="nav-item">
+              <span class="nav-icon">▤</span>
+              Collection
+            </div>
+            <div class="nav-item">
+              <span class="nav-icon">⊕</span>
+              Add Games
+            </div>
+            <div class="nav-item">
+              <span class="nav-icon">◈</span>
+              Axes
+            </div>
+            <div class="nav-label">Ranking</div>
+            <div class="nav-item">
+              <span class="nav-icon">⚖</span>
+              Tournament
+            </div>
+          </div>
+        </div>
+
+        <!-- Main -->
+        <div class="main">
+          <!-- Topbar -->
+          <div class="topbar">
+            <span class="topbar-title">Collection Profile</span>
+            <span class="topbar-meta">Computed Apr 10, 2026</span>
+          </div>
+
+          <!-- Content -->
+          <div class="content-scroll">
+            <!-- LLM Narration – empty state (deferred post-MVP) -->
+            <!-- Design note: Always present even when deferred — establishes the conceptual slot.
+                 Post-MVP: when narration is available, this becomes a prose card with 4 named sections
+                 (summary, surprises, tensions, blind spots per REQ-PROFILE-19). -->
+            <div class="narration-empty">
+              <div class="narration-icon">✦</div>
+              <div class="narration-text">
+                <div class="narration-label">Collection Narrative</div>
+                <div class="narration-desc">
+                  Generate a natural-language interpretation of your profile — what your collection
+                  says about what you value, and where the tensions are.
+                </div>
+              </div>
+              <button class="btn-narrate">Generate Narrative</button>
+            </div>
+
+            <!-- ── Section A: Axis Rating Distributions (REQ-PROFILE-2) ── -->
+            <!-- Design note: Each axis gets a micro-histogram showing where ratings cluster
+                 (10 buckets for a 1–10 scale), plus mean/median/SD/range inline.
+                 Histogram bars are amber — they represent personal ratings, not BGG data.
+                 SD reads quickly as bar spread (tight cluster vs wide spread). -->
+            <div class="section-card">
+              <div class="section-header">
+                <span class="section-title-main">Axis Rating Distributions</span>
+                <span class="section-count">5 axes · 42 games</span>
+              </div>
+              <div class="section-body" style="padding-bottom: 4px">
+                <!-- Axis 1: Wife Will Play It — tightly clustered low/mid (family filter) -->
+                <div class="axis-dist-row">
+                  <div class="axis-dist-top">
+                    <span class="axis-name">Wife Will Play It</span>
+                    <div class="axis-stats">
+                      <div class="axis-stat">
+                        <span class="axis-stat-val">4.8</span>
+                        <span class="axis-stat-lbl">Mean</span>
+                      </div>
+                      <div class="axis-stat">
+                        <span class="axis-stat-val">5.0</span>
+                        <span class="axis-stat-lbl">Median</span>
+                      </div>
+                      <div class="axis-stat">
+                        <span class="axis-stat-val">2.1</span>
+                        <span class="axis-stat-lbl">Std Dev</span>
+                      </div>
+                      <div class="axis-stat">
+                        <span class="axis-stat-val">1–9</span>
+                        <span class="axis-stat-lbl">Range</span>
+                      </div>
+                    </div>
+                  </div>
+                  <!-- Histogram: moderate spread, peak at 5–6 -->
+                  <div class="mini-histogram">
+                    <div class="hist-bar" style="height: 22%"></div>
+                    <div class="hist-bar" style="height: 32%"></div>
+                    <div class="hist-bar" style="height: 52%"></div>
+                    <div class="hist-bar" style="height: 78%"></div>
+                    <div class="hist-bar peak" style="height: 100%"></div>
+                    <div class="hist-bar peak" style="height: 95%"></div>
+                    <div class="hist-bar" style="height: 62%"></div>
+                    <div class="hist-bar" style="height: 38%"></div>
+                    <div class="hist-bar" style="height: 18%"></div>
+                    <div class="hist-bar zero" style="height: 8%"></div>
+                  </div>
+                  <div class="hist-labels">
+                    <span class="hist-label-tick">1</span>
+                    <span class="hist-label-tick">2</span>
+                    <span class="hist-label-tick">3</span>
+                    <span class="hist-label-tick">4</span>
+                    <span class="hist-label-tick">5</span>
+                    <span class="hist-label-tick">6</span>
+                    <span class="hist-label-tick">7</span>
+                    <span class="hist-label-tick">8</span>
+                    <span class="hist-label-tick">9</span>
+                    <span class="hist-label-tick">10</span>
+                  </div>
+                </div>
+
+                <!-- Axis 2: Strategic Depth — bimodal (gateway games vs heavy euros) -->
+                <div class="axis-dist-row">
+                  <div class="axis-dist-top">
+                    <span class="axis-name">Strategic Depth</span>
+                    <div class="axis-stats">
+                      <div class="axis-stat">
+                        <span class="axis-stat-val">5.9</span>
+                        <span class="axis-stat-lbl">Mean</span>
+                      </div>
+                      <div class="axis-stat">
+                        <span class="axis-stat-val">6.0</span>
+                        <span class="axis-stat-lbl">Median</span>
+                      </div>
+                      <div class="axis-stat">
+                        <span class="axis-stat-val">2.8</span>
+                        <span class="axis-stat-lbl">Std Dev</span>
+                      </div>
+                      <div class="axis-stat">
+                        <span class="axis-stat-val">2–10</span>
+                        <span class="axis-stat-lbl">Range</span>
+                      </div>
+                    </div>
+                  </div>
+                  <!-- Bimodal: peaks at 3–4 and 8–9 -->
+                  <div class="mini-histogram">
+                    <div class="hist-bar zero" style="height: 5%"></div>
+                    <div class="hist-bar" style="height: 45%"></div>
+                    <div class="hist-bar peak" style="height: 90%"></div>
+                    <div class="hist-bar" style="height: 65%"></div>
+                    <div class="hist-bar" style="height: 38%"></div>
+                    <div class="hist-bar" style="height: 30%"></div>
+                    <div class="hist-bar" style="height: 52%"></div>
+                    <div class="hist-bar peak" style="height: 100%"></div>
+                    <div class="hist-bar" style="height: 75%"></div>
+                    <div class="hist-bar" style="height: 42%"></div>
+                  </div>
+                  <div class="hist-labels">
+                    <span class="hist-label-tick">1</span>
+                    <span class="hist-label-tick">2</span>
+                    <span class="hist-label-tick">3</span>
+                    <span class="hist-label-tick">4</span>
+                    <span class="hist-label-tick">5</span>
+                    <span class="hist-label-tick">6</span>
+                    <span class="hist-label-tick">7</span>
+                    <span class="hist-label-tick">8</span>
+                    <span class="hist-label-tick">9</span>
+                    <span class="hist-label-tick">10</span>
+                  </div>
+                </div>
+
+                <!-- Axis 3: Setup / Teardown — skewed high (low tolerance for fiddly setup) -->
+                <div class="axis-dist-row">
+                  <div class="axis-dist-top">
+                    <span class="axis-name">Setup / Teardown</span>
+                    <div class="axis-stats">
+                      <div class="axis-stat">
+                        <span class="axis-stat-val">7.2</span>
+                        <span class="axis-stat-lbl">Mean</span>
+                      </div>
+                      <div class="axis-stat">
+                        <span class="axis-stat-val">7.5</span>
+                        <span class="axis-stat-lbl">Median</span>
+                      </div>
+                      <div class="axis-stat">
+                        <span class="axis-stat-val">1.6</span>
+                        <span class="axis-stat-lbl">Std Dev</span>
+                      </div>
+                      <div class="axis-stat">
+                        <span class="axis-stat-val">3–10</span>
+                        <span class="axis-stat-lbl">Range</span>
+                      </div>
+                    </div>
+                  </div>
+                  <!-- Tight cluster at 7–8, right-skewed -->
+                  <div class="mini-histogram">
+                    <div class="hist-bar zero" style="height: 3%"></div>
+                    <div class="hist-bar zero" style="height: 3%"></div>
+                    <div class="hist-bar" style="height: 12%"></div>
+                    <div class="hist-bar" style="height: 18%"></div>
+                    <div class="hist-bar" style="height: 35%"></div>
+                    <div class="hist-bar" style="height: 58%"></div>
+                    <div class="hist-bar peak" style="height: 100%"></div>
+                    <div class="hist-bar peak" style="height: 95%"></div>
+                    <div class="hist-bar" style="height: 62%"></div>
+                    <div class="hist-bar" style="height: 28%"></div>
+                  </div>
+                  <div class="hist-labels">
+                    <span class="hist-label-tick">1</span>
+                    <span class="hist-label-tick">2</span>
+                    <span class="hist-label-tick">3</span>
+                    <span class="hist-label-tick">4</span>
+                    <span class="hist-label-tick">5</span>
+                    <span class="hist-label-tick">6</span>
+                    <span class="hist-label-tick">7</span>
+                    <span class="hist-label-tick">8</span>
+                    <span class="hist-label-tick">9</span>
+                    <span class="hist-label-tick">10</span>
+                  </div>
+                </div>
+
+                <!-- Axis 4: Replayability — wide spread (high variance = permissive) -->
+                <div class="axis-dist-row">
+                  <div class="axis-dist-top">
+                    <span class="axis-name">Replayability</span>
+                    <div class="axis-stats">
+                      <div class="axis-stat">
+                        <span class="axis-stat-val">6.1</span>
+                        <span class="axis-stat-lbl">Mean</span>
+                      </div>
+                      <div class="axis-stat">
+                        <span class="axis-stat-val">6.5</span>
+                        <span class="axis-stat-lbl">Median</span>
+                      </div>
+                      <div class="axis-stat">
+                        <span class="axis-stat-val">3.0</span>
+                        <span class="axis-stat-lbl">Std Dev</span>
+                      </div>
+                      <div class="axis-stat">
+                        <span class="axis-stat-val">1–10</span>
+                        <span class="axis-stat-lbl">Range</span>
+                      </div>
+                    </div>
+                  </div>
+                  <!-- Wide, relatively flat spread -->
+                  <div class="mini-histogram">
+                    <div class="hist-bar" style="height: 48%"></div>
+                    <div class="hist-bar" style="height: 52%"></div>
+                    <div class="hist-bar" style="height: 60%"></div>
+                    <div class="hist-bar" style="height: 55%"></div>
+                    <div class="hist-bar" style="height: 68%"></div>
+                    <div class="hist-bar" style="height: 72%"></div>
+                    <div class="hist-bar peak" style="height: 100%"></div>
+                    <div class="hist-bar" style="height: 65%"></div>
+                    <div class="hist-bar" style="height: 50%"></div>
+                    <div class="hist-bar" style="height: 58%"></div>
+                  </div>
+                  <div class="hist-labels">
+                    <span class="hist-label-tick">1</span>
+                    <span class="hist-label-tick">2</span>
+                    <span class="hist-label-tick">3</span>
+                    <span class="hist-label-tick">4</span>
+                    <span class="hist-label-tick">5</span>
+                    <span class="hist-label-tick">6</span>
+                    <span class="hist-label-tick">7</span>
+                    <span class="hist-label-tick">8</span>
+                    <span class="hist-label-tick">9</span>
+                    <span class="hist-label-tick">10</span>
+                  </div>
+                </div>
+
+                <!-- Axis 5: Unique Mechanic — right-skewed high (only keeps distinctives) -->
+                <div class="axis-dist-row">
+                  <div class="axis-dist-top">
+                    <span class="axis-name">Unique Mechanic</span>
+                    <div class="axis-stats">
+                      <div class="axis-stat">
+                        <span class="axis-stat-val">7.8</span>
+                        <span class="axis-stat-lbl">Mean</span>
+                      </div>
+                      <div class="axis-stat">
+                        <span class="axis-stat-val">8.0</span>
+                        <span class="axis-stat-lbl">Median</span>
+                      </div>
+                      <div class="axis-stat">
+                        <span class="axis-stat-val">1.4</span>
+                        <span class="axis-stat-lbl">Std Dev</span>
+                      </div>
+                      <div class="axis-stat">
+                        <span class="axis-stat-val">4–10</span>
+                        <span class="axis-stat-lbl">Range</span>
+                      </div>
+                    </div>
+                  </div>
+                  <!-- Tight cluster at 8–9 -->
+                  <div class="mini-histogram">
+                    <div class="hist-bar zero" style="height: 2%"></div>
+                    <div class="hist-bar zero" style="height: 2%"></div>
+                    <div class="hist-bar zero" style="height: 2%"></div>
+                    <div class="hist-bar" style="height: 10%"></div>
+                    <div class="hist-bar" style="height: 18%"></div>
+                    <div class="hist-bar" style="height: 32%"></div>
+                    <div class="hist-bar" style="height: 55%"></div>
+                    <div class="hist-bar peak" style="height: 100%"></div>
+                    <div class="hist-bar peak" style="height: 85%"></div>
+                    <div class="hist-bar" style="height: 45%"></div>
+                  </div>
+                  <div class="hist-labels">
+                    <span class="hist-label-tick">1</span>
+                    <span class="hist-label-tick">2</span>
+                    <span class="hist-label-tick">3</span>
+                    <span class="hist-label-tick">4</span>
+                    <span class="hist-label-tick">5</span>
+                    <span class="hist-label-tick">6</span>
+                    <span class="hist-label-tick">7</span>
+                    <span class="hist-label-tick">8</span>
+                    <span class="hist-label-tick">9</span>
+                    <span class="hist-label-tick">10</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ── Section B: Axis Weight Breakdown (REQ-PROFILE-3) ── -->
+            <!-- Design note: Weights expressed as % of total, sorted descending.
+                 Navy fill bar makes it feel like relative priority, not arbitrary numbers.
+                 This makes implicit axis priority explicit at a glance. -->
+            <div class="section-card">
+              <div class="section-header">
+                <span class="section-title-main">Axis Importance</span>
+                <span class="section-count">% of total weight</span>
+              </div>
+              <div class="section-body" style="padding-top: 8px; padding-bottom: 8px">
+                <div class="weight-row">
+                  <span class="weight-rank">1</span>
+                  <span class="weight-name">Wife Will Play It</span>
+                  <div class="weight-bar-track">
+                    <div class="weight-bar-fill" style="width: 38%"></div>
+                  </div>
+                  <span class="weight-pct">38%</span>
+                </div>
+                <div class="weight-row">
+                  <span class="weight-rank">2</span>
+                  <span class="weight-name">Strategic Depth</span>
+                  <div class="weight-bar-track">
+                    <div class="weight-bar-fill" style="width: 25%"></div>
+                  </div>
+                  <span class="weight-pct">25%</span>
+                </div>
+                <div class="weight-row">
+                  <span class="weight-rank">3</span>
+                  <span class="weight-name">Replayability</span>
+                  <div class="weight-bar-track">
+                    <div class="weight-bar-fill" style="width: 18%"></div>
+                  </div>
+                  <span class="weight-pct">18%</span>
+                </div>
+                <div class="weight-row">
+                  <span class="weight-rank">4</span>
+                  <span class="weight-name">Unique Mechanic</span>
+                  <div class="weight-bar-track">
+                    <div class="weight-bar-fill" style="width: 12%"></div>
+                  </div>
+                  <span class="weight-pct">12%</span>
+                </div>
+                <div class="weight-row">
+                  <span class="weight-rank">5</span>
+                  <span class="weight-name">Setup / Teardown</span>
+                  <div class="weight-bar-track">
+                    <div class="weight-bar-fill" style="width: 7%"></div>
+                  </div>
+                  <span class="weight-pct">7%</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- ── Section C: BGG Attribute Clustering (REQ-PROFILE-4) ── -->
+            <!-- Design note: BGG data in slate blue throughout — provenance matters.
+                 Top mechanics, categories, subdomains each get a sub-header.
+                 Weight range shown as a histogram (BGG-blue bars).
+                 Attributes in <2 games are not shown here (they'd appear in outlier detection instead). -->
+            <div class="section-card">
+              <div class="section-header">
+                <span class="section-title-main">BGG Attribute Concentrations</span>
+                <span class="section-count">42 games</span>
+              </div>
+              <div class="section-body">
+                <div class="two-col">
+                  <div>
+                    <!-- Top Mechanics -->
+                    <div class="bgg-section-label">Top Mechanics</div>
+                    <div class="bgg-attr-row">
+                      <span class="bgg-attr-name">Worker Placement</span>
+                      <div class="bgg-bar-track">
+                        <div class="bgg-bar-fill" style="width: 83%"></div>
+                      </div>
+                      <span class="bgg-attr-count">35 (83%)</span>
+                    </div>
+                    <div class="bgg-attr-row">
+                      <span class="bgg-attr-name">Hand Management</span>
+                      <div class="bgg-bar-track">
+                        <div class="bgg-bar-fill" style="width: 69%"></div>
+                      </div>
+                      <span class="bgg-attr-count">29 (69%)</span>
+                    </div>
+                    <div class="bgg-attr-row">
+                      <span class="bgg-attr-name">Set Collection</span>
+                      <div class="bgg-bar-track">
+                        <div class="bgg-bar-fill" style="width: 57%"></div>
+                      </div>
+                      <span class="bgg-attr-count">24 (57%)</span>
+                    </div>
+                    <div class="bgg-attr-row">
+                      <span class="bgg-attr-name">Engine Building</span>
+                      <div class="bgg-bar-track">
+                        <div class="bgg-bar-fill" style="width: 50%"></div>
+                      </div>
+                      <span class="bgg-attr-count">21 (50%)</span>
+                    </div>
+                    <div class="bgg-attr-row">
+                      <span class="bgg-attr-name">Variable Player Powers</span>
+                      <div class="bgg-bar-track">
+                        <div class="bgg-bar-fill" style="width: 38%"></div>
+                      </div>
+                      <span class="bgg-attr-count">16 (38%)</span>
+                    </div>
+                    <div class="bgg-attr-row">
+                      <span class="bgg-attr-name">Network and Route Building</span>
+                      <div class="bgg-bar-track">
+                        <div class="bgg-bar-fill" style="width: 21%"></div>
+                      </div>
+                      <span class="bgg-attr-count">9 (21%)</span>
+                    </div>
+
+                    <!-- Top Categories -->
+                    <div class="bgg-section-label" style="margin-top: 20px">Top Categories</div>
+                    <div class="bgg-attr-row">
+                      <span class="bgg-attr-name">Economic</span>
+                      <div class="bgg-bar-track">
+                        <div class="bgg-bar-fill" style="width: 76%"></div>
+                      </div>
+                      <span class="bgg-attr-count">32 (76%)</span>
+                    </div>
+                    <div class="bgg-attr-row">
+                      <span class="bgg-attr-name">Medieval</span>
+                      <div class="bgg-bar-track">
+                        <div class="bgg-bar-fill" style="width: 52%"></div>
+                      </div>
+                      <span class="bgg-attr-count">22 (52%)</span>
+                    </div>
+                    <div class="bgg-attr-row">
+                      <span class="bgg-attr-name">City Building</span>
+                      <div class="bgg-bar-track">
+                        <div class="bgg-bar-fill" style="width: 43%"></div>
+                      </div>
+                      <span class="bgg-attr-count">18 (43%)</span>
+                    </div>
+                    <div class="bgg-attr-row">
+                      <span class="bgg-attr-name">Fantasy</span>
+                      <div class="bgg-bar-track">
+                        <div class="bgg-bar-fill" style="width: 19%"></div>
+                      </div>
+                      <span class="bgg-attr-count">8 (19%)</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <!-- Subdomains -->
+                    <div class="bgg-section-label">Subdomains</div>
+                    <div class="bgg-attr-row">
+                      <span class="bgg-attr-name">Strategy Games</span>
+                      <div class="bgg-bar-track">
+                        <div class="bgg-bar-fill" style="width: 90%"></div>
+                      </div>
+                      <span class="bgg-attr-count">38 (90%)</span>
+                    </div>
+                    <div class="bgg-attr-row">
+                      <span class="bgg-attr-name">Family Games</span>
+                      <div class="bgg-bar-track">
+                        <div class="bgg-bar-fill" style="width: 45%"></div>
+                      </div>
+                      <span class="bgg-attr-count">19 (45%)</span>
+                    </div>
+                    <div class="bgg-attr-row">
+                      <span class="bgg-attr-name">Thematic Games</span>
+                      <div class="bgg-bar-track">
+                        <div class="bgg-bar-fill" style="width: 17%"></div>
+                      </div>
+                      <span class="bgg-attr-count">7 (17%)</span>
+                    </div>
+                    <div class="bgg-attr-row">
+                      <span class="bgg-attr-name">War Games</span>
+                      <div class="bgg-bar-track">
+                        <div class="bgg-bar-fill" style="width: 5%"></div>
+                      </div>
+                      <span class="bgg-attr-count">2 (5%)</span>
+                    </div>
+
+                    <!-- BGG Weight Range -->
+                    <div class="bgg-section-label" style="margin-top: 20px">
+                      Complexity (BGG Weight)
+                    </div>
+                    <div class="weight-range-row">
+                      <div class="wt-bucket zero" style="height: 6%"></div>
+                      <div class="wt-bucket" style="height: 18%"></div>
+                      <div class="wt-bucket" style="height: 42%"></div>
+                      <div class="wt-bucket peak" style="height: 100%"></div>
+                      <div class="wt-bucket peak" style="height: 95%"></div>
+                      <div class="wt-bucket" style="height: 72%"></div>
+                      <div class="wt-bucket" style="height: 45%"></div>
+                      <div class="wt-bucket" style="height: 22%"></div>
+                      <div class="wt-bucket" style="height: 10%"></div>
+                      <div class="wt-bucket zero" style="height: 4%"></div>
+                    </div>
+                    <div class="weight-range-labels">
+                      <span>1.0</span>
+                      <span>2.0</span>
+                      <span>3.0</span>
+                      <span>4.0</span>
+                      <span>5.0</span>
+                    </div>
+                    <p style="font-size: 12px; color: var(--text-muted); margin-top: 8px">
+                      Collection centers at BGG weight 3.1–3.8. Light games (≤2.0) and very heavy
+                      (≥4.5) are rare.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ── Section D: Utility Curve Declarations (REQ-PROFILE-5) ── -->
+            <!-- Design note: These are "what you declared" not "what BGG says."
+                 Uses action-navy tags (your preference declarations) rather than bgg-blue.
+                 Compact — just enough to confirm curves are contributing.
+                 Veto thresholds in red since they're hard filters on fitness. -->
+            <div class="section-card">
+              <div class="section-header">
+                <span class="section-title-main">Utility Curve Declarations</span>
+                <span class="section-count">2 axes configured</span>
+              </div>
+              <div class="section-body" style="padding-top: 8px; padding-bottom: 4px">
+                <div class="curve-row">
+                  <span class="curve-axis-name">Setup / Teardown</span>
+                  <div class="curve-details">
+                    <span class="curve-tag shape">Sweet spot</span>
+                    <span class="curve-tag sweet-spot">Ideal: 20–30 min</span>
+                    <span class="curve-tag tolerance">Tolerance: ±15 min</span>
+                    <span class="curve-tag veto">Veto below 10 min</span>
+                    <span class="curve-tag veto">Veto above 60 min</span>
+                  </div>
+                </div>
+
+                <div class="curve-row">
+                  <span class="curve-axis-name">Replayability</span>
+                  <div class="curve-details">
+                    <span class="curve-tag shape">Cliff (high-lean)</span>
+                    <span class="curve-tag sweet-spot">Threshold: 6+</span>
+                    <span class="curve-tag tolerance">Rapid falloff below 6</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ── Section E: Tournament / Fitness Divergence (REQ-PROFILE-7 through REQ-PROFILE-9) ── -->
+            <!-- Design note: Two score columns side by side, amber for fitness, slate-blue for tournament.
+                 The visual contrast between the two values IS the communication.
+                 Gap tag labels the direction: "Tournament outlier" = "you keep picking it but rate it low."
+                 "Fitness outlier" = "great on paper, loses in person."
+                 Excluded games (zero comparisons) never appear here. -->
+            <div class="section-card">
+              <div class="section-header">
+                <span class="section-title-main">Preference Divergence</span>
+                <span class="section-count">4 games · gap &gt; 1.5 pts</span>
+              </div>
+              <div class="section-body" style="padding-top: 4px; padding-bottom: 4px">
+                <!-- Tournament outlier: high ELO, low fitness -->
+                <div class="divergence-row">
+                  <div style="flex: 1">
+                    <div class="div-game-name">
+                      Viticulture: Essential Edition
+                      <span class="div-game-sub"> — Worker Placement, Wine</span>
+                    </div>
+                  </div>
+                  <div class="div-scores">
+                    <div class="div-score">
+                      <span class="div-score-val fitness">4.8</span>
+                      <span class="div-score-lbl">Fitness</span>
+                    </div>
+                    <span class="div-arrow">→</span>
+                    <div class="div-score">
+                      <span class="div-score-val tournament">7.6</span>
+                      <span class="div-score-lbl">Tournament</span>
+                    </div>
+                    <span class="div-gap tournament-outlier">+2.8 ▲ T</span>
+                  </div>
+                </div>
+
+                <!-- Tournament outlier -->
+                <div class="divergence-row">
+                  <div style="flex: 1">
+                    <div class="div-game-name">
+                      Root
+                      <span class="div-game-sub"> — Asymmetric Conflict</span>
+                    </div>
+                  </div>
+                  <div class="div-scores">
+                    <div class="div-score">
+                      <span class="div-score-val fitness">5.1</span>
+                      <span class="div-score-lbl">Fitness</span>
+                    </div>
+                    <span class="div-arrow">→</span>
+                    <div class="div-score">
+                      <span class="div-score-val tournament">7.4</span>
+                      <span class="div-score-lbl">Tournament</span>
+                    </div>
+                    <span class="div-gap tournament-outlier">+2.3 ▲ T</span>
+                  </div>
+                </div>
+
+                <!-- Fitness outlier: high fitness, low tournament -->
+                <div class="divergence-row">
+                  <div style="flex: 1">
+                    <div class="div-game-name">
+                      Wingspan
+                      <span class="div-game-sub"> — Engine Building, Nature</span>
+                    </div>
+                  </div>
+                  <div class="div-scores">
+                    <div class="div-score">
+                      <span class="div-score-val fitness">8.3</span>
+                      <span class="div-score-lbl">Fitness</span>
+                    </div>
+                    <span class="div-arrow">→</span>
+                    <div class="div-score">
+                      <span class="div-score-val tournament">5.9</span>
+                      <span class="div-score-lbl">Tournament</span>
+                    </div>
+                    <span class="div-gap fitness-outlier">−2.4 ▲ F</span>
+                  </div>
+                </div>
+
+                <!-- Fitness outlier -->
+                <div class="divergence-row">
+                  <div style="flex: 1">
+                    <div class="div-game-name">
+                      Cascadia
+                      <span class="div-game-sub"> — Tile Placement, Nature</span>
+                    </div>
+                  </div>
+                  <div class="div-scores">
+                    <div class="div-score">
+                      <span class="div-score-val fitness">7.7</span>
+                      <span class="div-score-lbl">Fitness</span>
+                    </div>
+                    <span class="div-arrow">→</span>
+                    <div class="div-score">
+                      <span class="div-score-val tournament">5.9</span>
+                      <span class="div-score-lbl">Tournament</span>
+                    </div>
+                    <span class="div-gap fitness-outlier">−1.8 ▲ F</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ── Section F: Collection Outliers (REQ-PROFILE-11 through REQ-PROFILE-14) ── -->
+            <!-- Design note: Three tags map to the three outlier types from the spec.
+                 Composite distance shown numerically + per-component breakdown
+                 so user can understand *why* a game is flagged.
+                 Observation framing only — no "consider culling" language. -->
+            <div class="section-card">
+              <div class="section-header">
+                <span class="section-title-main">Collection Outliers</span>
+                <span class="section-count">3 games · composite distance &gt; 2σ</span>
+              </div>
+              <div class="section-body" style="padding-top: 4px; padding-bottom: 4px">
+                <!-- Lone wolf + category orphan: heavy wargame in euro collection -->
+                <div class="outlier-row">
+                  <div class="outlier-info">
+                    <div class="outlier-name">Twilight Struggle</div>
+                    <div class="outlier-reason">
+                      Shares <span>zero mechanics</span> with 89% of the collection. Only game in
+                      <span>War</span> category. Composite distance: <strong>0.84</strong>
+                    </div>
+                    <div class="outlier-distance">
+                      <span class="dist-component high">Mechanics: 0.91</span>
+                      <span class="dist-component high">BGG weight: 0.78</span>
+                      <span class="dist-component">Axis ratings: 0.42</span>
+                    </div>
+                  </div>
+                  <div class="outlier-type-tags">
+                    <span class="outlier-type-tag lone-wolf">Lone Wolf</span>
+                    <span class="outlier-type-tag category-orphan">Category Orphan</span>
+                  </div>
+                </div>
+
+                <!-- High-fitness outlier: scores great but unlike the rest -->
+                <div class="outlier-row">
+                  <div class="outlier-info">
+                    <div class="outlier-name">Cryptid</div>
+                    <div class="outlier-reason">
+                      Scores well on your axes (fitness 7.9) but its
+                      <span>Deductive Reasoning</span> mechanic and <span>Puzzle</span> category
+                      don't appear elsewhere in the collection. Composite distance:
+                      <strong>0.71</strong>
+                    </div>
+                    <div class="outlier-distance">
+                      <span class="dist-component high">Mechanics: 0.88</span>
+                      <span class="dist-component">BGG weight: 0.28</span>
+                      <span class="dist-component">Axis ratings: 0.31</span>
+                    </div>
+                  </div>
+                  <div class="outlier-type-tags">
+                    <span class="outlier-type-tag high-fitness">High-Fitness</span>
+                    <span class="outlier-type-tag category-orphan">Category Orphan</span>
+                  </div>
+                </div>
+
+                <!-- Pure lone wolf: no close neighbors -->
+                <div class="outlier-row">
+                  <div class="outlier-info">
+                    <div class="outlier-name">Pandemic Legacy: Season 1</div>
+                    <div class="outlier-reason">
+                      <span>Cooperative</span> mechanic and <span>Legacy</span> mechanic each appear
+                      in only this game. Very different play time and weight profile from the
+                      collection center. Composite distance: <strong>0.68</strong>
+                    </div>
+                    <div class="outlier-distance">
+                      <span class="dist-component high">Mechanics: 0.82</span>
+                      <span class="dist-component">BGG weight: 0.35</span>
+                      <span class="dist-component">Axis ratings: 0.22</span>
+                    </div>
+                  </div>
+                  <div class="outlier-type-tags">
+                    <span class="outlier-type-tag lone-wolf">Lone Wolf</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ── Section G: Axis Suggestions (REQ-PROFILE-15 through REQ-PROFILE-17) ── -->
+            <!-- Design note: Questions, not imperatives (per spec).
+                 Color-dot encodes the suggestion source type.
+                 Amber = unexpressed concentration (your own preference pattern).
+                 Slate-blue = high-variance BGG attribute.
+                 Red = tournament divergence repair.
+                 Dismiss is per-card, session-only (spec: not persisted).
+                 No axis is created here — suggestion leads to axis creation flow. -->
+            <div class="section-card">
+              <div class="section-header">
+                <span class="section-title-main">Axis Suggestions</span>
+                <span class="section-count">3 suggestions</span>
+              </div>
+              <div class="section-body">
+                <!-- Unexpressed concentration: Worker Placement in 83% of collection, no axis -->
+                <div class="suggest-card">
+                  <div class="suggest-type-dot concentration"></div>
+                  <div class="suggest-text">
+                    <strong>Worker Placement</strong> appears in 83% of your collection but you have
+                    no axis measuring it. Is this a deliberate filter, or something you've never
+                    needed to make explicit?
+                    <div class="suggest-meta">Source: Unexpressed mechanic concentration</div>
+                  </div>
+                  <button class="btn-dismiss">Dismiss</button>
+                </div>
+
+                <!-- High-variance BGG attribute: play time spans 30–180 min, no axis -->
+                <div class="suggest-card">
+                  <div class="suggest-type-dot variance"></div>
+                  <div class="suggest-text">
+                    <strong>Play time</strong> ranges from 30 to 180 minutes in your collection. You
+                    have no axis for it. Do games at either extreme belong together, or does play
+                    time matter to how you'd rate them?
+                    <div class="suggest-meta">Source: High-variance BGG attribute (no axis)</div>
+                  </div>
+                  <button class="btn-dismiss">Dismiss</button>
+                </div>
+
+                <!-- Divergence repair: Root + Viticulture share a common unlabeled attribute -->
+                <div class="suggest-card">
+                  <div class="suggest-type-dot repair"></div>
+                  <div class="suggest-text">
+                    <strong>Root</strong> and <strong>Viticulture</strong> both rank higher in
+                    tournament than fitness suggests. Both have <strong>asymmetric play</strong> —
+                    an attribute not covered by any existing axis. Could this explain the gap?
+                    <div class="suggest-meta">
+                      Source: Tournament divergence — shared uncaptured attribute
+                    </div>
+                  </div>
+                  <button class="btn-dismiss">Dismiss</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- /content-scroll -->
+        </div>
+        <!-- /main -->
+      </div>
+      <!-- /app-frame -->
+
+      <div class="annotation-note">
+        Primary state: profile freshly computed, no LLM narration generated yet. The narrative slot
+        is always present to establish the feature's existence and invite the user to generate it.
+        All seven sections defined in REQ-PROFILE-30 are present. Sections with insufficient data
+        are omitted entirely (not shown as empty) per spec constraint.
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════
+         SECTION 2: STALE STATE — profile needs recompute
+    ═══════════════════════════════════════════════════════════ -->
+    <div class="annotation-section">
+      <div class="annotation-label">
+        Stale state — collection changed since last compute (REQ-PROFILE-25)
+      </div>
+
+      <div class="app-frame" style="height: 200px">
+        <div class="sidebar" style="min-height: 0">
+          <div class="sidebar-brand">
+            <div class="brand-row">
+              <div class="brand-icon">SJ</div>
+              <span class="brand-name">Shelf Judge</span>
+            </div>
+          </div>
+          <div class="nav-section">
+            <div class="nav-item active" style="margin-top: 8px">
+              <span class="nav-icon">◎</span>
+              Profile
+            </div>
+          </div>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <span class="topbar-title">Collection Profile</span>
+            <span class="stale-badge">Profile outdated</span>
+            <span class="topbar-meta" style="margin-left: 8px">Last computed Apr 8, 2026</span>
+            <button class="btn-recompute">Recompute</button>
+          </div>
+          <div class="content-scroll">
+            <div
+              style="
+                padding: 24px 0 0;
+                font-size: 13px;
+                color: var(--text-muted);
+                text-align: center;
+                opacity: 0.6;
+              "
+            >
+              Profile data shown below reflects state from Apr 8. Ratings for 3 games have changed
+              since.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="annotation-note">
+        Stale state (REQ-PROFILE-25): when the dirty flag is set after any collection mutation, the
+        topbar shows "Profile outdated" badge + last computed date + Recompute button. The old
+        profile data is still shown below (not blanked) with a note that it's out of date.
+        Recomputing is manual/lazy, not automatic on every page load.
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════
+         SECTION 3: STALE LLM NARRATION (deferred post-MVP)
+    ═══════════════════════════════════════════════════════════ -->
+    <div class="annotation-section">
+      <div class="annotation-label">LLM narration — stale state (post-MVP, REQ-PROFILE-26)</div>
+
+      <div class="app-frame" style="height: 220px">
+        <div class="sidebar" style="min-height: 0">
+          <div class="sidebar-brand">
+            <div class="brand-row">
+              <div class="brand-icon">SJ</div>
+              <span class="brand-name">Shelf Judge</span>
+            </div>
+          </div>
+          <div class="nav-section">
+            <div class="nav-item active" style="margin-top: 8px">
+              <span class="nav-icon">◎</span>
+              Profile
+            </div>
+          </div>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <span class="topbar-title">Collection Profile</span>
+            <span class="topbar-meta">Computed Apr 10, 2026</span>
+          </div>
+          <div class="content-scroll">
+            <!-- LLM Narration – STALE state (post-MVP) -->
+            <div
+              style="
+                background: var(--bg-surface);
+                border: 1px solid var(--border);
+                border-radius: 8px;
+                padding: 16px 20px;
+                margin-bottom: 16px;
+              "
+            >
+              <div style="display: flex; align-items: flex-start; gap: 12px">
+                <div style="flex: 1">
+                  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px">
+                    <span
+                      style="
+                        font-size: 11px;
+                        font-weight: 700;
+                        text-transform: uppercase;
+                        letter-spacing: 0.1em;
+                        color: var(--text-muted);
+                      "
+                      >Collection Narrative</span
+                    >
+                    <span
+                      style="
+                        font-size: 11px;
+                        padding: 2px 7px;
+                        border-radius: 10px;
+                        background: #fef3e2;
+                        color: #b86c1a;
+                        border: 1px solid #f0d8b0;
+                        font-weight: 600;
+                      "
+                      >Stale — generated Apr 7</span
+                    >
+                  </div>
+                  <p
+                    style="
+                      font-size: 13px;
+                      color: var(--text-secondary);
+                      line-height: 1.6;
+                      font-style: italic;
+                    "
+                  >
+                    "Your collection is primarily a Worker Placement collection with a strong
+                    economic theme. The bimodal distribution on Strategic Depth suggests two
+                    distinct collection modes: gateway games for mixed groups and heavy euros for
+                    focused sessions…"
+                  </p>
+                </div>
+                <button class="btn-narrate" style="margin-top: 2px">Regenerate</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="annotation-note">
+        Post-MVP stale narration (REQ-PROFILE-26, REQ-PROFILE-27): when profile data has changed
+        since narration was generated, the old narration remains visible (not hidden) with a "Stale"
+        date badge and a Regenerate button. Regeneration is always user-initiated. The four named
+        sections from the spec (summary, surprises, tensions, blind spots) would appear as
+        sub-sections within this card in the final implementation.
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════
+         SECTION 4: NAV STRUCTURE — Profile replaces Home
+    ═══════════════════════════════════════════════════════════ -->
+    <div class="annotation-section">
+      <div class="annotation-label">
+        Navigation structure — Profile as entry point (REQ-PROFILE-29)
+      </div>
+
+      <div class="app-frame" style="height: 360px">
+        <div class="sidebar">
+          <div class="sidebar-brand">
+            <div class="brand-row">
+              <div class="brand-icon">SJ</div>
+              <span class="brand-name">Shelf Judge</span>
+            </div>
+            <div class="brand-sub">42 games</div>
+          </div>
+          <div class="nav-section">
+            <div class="nav-label">Overview</div>
+            <div class="nav-item active">
+              <span class="nav-icon">◎</span>
+              Profile
+            </div>
+            <div class="nav-label">Library</div>
+            <div class="nav-item">
+              <span class="nav-icon">▤</span>
+              Collection
+            </div>
+            <div class="nav-item">
+              <span class="nav-icon">⊕</span>
+              Add Games
+            </div>
+            <div class="nav-item">
+              <span class="nav-icon">◈</span>
+              Axes
+            </div>
+            <div class="nav-label">Ranking</div>
+            <div class="nav-item">
+              <span class="nav-icon">⚖</span>
+              Tournament
+            </div>
+            <div class="nav-label">Settings</div>
+            <div class="nav-item">
+              <span class="nav-icon">⚙</span>
+              Import / BGG
+            </div>
+          </div>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <span class="topbar-title">Collection Profile</span>
+            <span class="topbar-meta">42 games · 5 axes</span>
+          </div>
+          <div class="content-scroll">
+            <p style="font-size: 13px; color: var(--text-muted); padding: 16px 0">
+              Profile page content here. "Collection" in the Library section now carries the
+              per-game list that was previously the home page.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="annotation-note">
+        REQ-PROFILE-29: Profile becomes the landing page under a new "Overview" nav section. The old
+        per-game Collection list moves to its own "Collection" entry under Library. This separates
+        aggregate understanding (Profile) from per-game browsing (Collection) — two distinct
+        interaction modes that compete on the same screen when combined. Tournament nav stays under
+        Ranking as established.
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════
+         DESIGN DECISIONS SUMMARY
+    ═══════════════════════════════════════════════════════════ -->
+    <div
+      style="
+        background: #1a1714;
+        border-radius: 10px;
+        padding: 32px 36px;
+        color: #e8e4dc;
+        max-width: 860px;
+        margin: 0 auto 48px;
+      "
+    >
+      <h2
+        style="
+          font-size: 16px;
+          font-weight: 700;
+          margin-bottom: 20px;
+          color: #b86c1a;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+        "
+      >
+        Design Decisions
+      </h2>
+
+      <div
+        style="
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 24px;
+          font-size: 13px;
+          line-height: 1.7;
+        "
+      >
+        <div>
+          <p style="font-weight: 700; color: #e8e4dc; margin-bottom: 4px">
+            Provenance color language
+          </p>
+          <p style="color: rgba(232, 228, 220, 0.6)">
+            Amber = personal ratings and weights (your data). Slate blue = BGG-derived (external
+            data). Navy = navigation/actions. This distinction is critical throughout: BGG attribute
+            bars are always blue, histogram bars for personal ratings are always amber.
+          </p>
+        </div>
+        <div>
+          <p style="font-weight: 700; color: #e8e4dc; margin-bottom: 4px">
+            Micro-histograms for distributions
+          </p>
+          <p style="color: rgba(232, 228, 220, 0.6)">
+            Mean/median/SD stats alone don't show shape. A bimodal distribution (Strategic Depth)
+            looks identical to a flat one in a table. The 10-bucket histogram at 36px tall fits
+            inline per axis and makes clustering and bimodality visible at a glance.
+          </p>
+        </div>
+        <div>
+          <p style="font-weight: 700; color: #e8e4dc; margin-bottom: 4px">
+            Divergence as score comparison
+          </p>
+          <p style="color: rgba(232, 228, 220, 0.6)">
+            Showing both fitness and tournament scores side-by-side makes the tension legible
+            without explanatory text. The directional gap tag (▲ T = tournament higher, ▲ F =
+            fitness higher) names which way the divergence runs without requiring the user to do
+            mental subtraction.
+          </p>
+        </div>
+        <div>
+          <p style="font-weight: 700; color: #e8e4dc; margin-bottom: 4px">
+            Outlier component transparency
+          </p>
+          <p style="color: rgba(232, 228, 220, 0.6)">
+            The spec requires per-component distances to be available (REQ-PROFILE-11). Showing them
+            as small chips below each outlier game answers the user's first question: "why?"
+            High-distance components are highlighted purple; low ones read as context.
+          </p>
+        </div>
+        <div>
+          <p style="font-weight: 700; color: #e8e4dc; margin-bottom: 4px">
+            Axis suggestions as questions
+          </p>
+          <p style="color: rgba(232, 228, 220, 0.6)">
+            Spec (REQ-PROFILE-16) requires suggestions as questions, not imperatives. The color dot
+            encodes source type without adding a label field. Dismiss is session-only per spec — no
+            persistence, no "never show again."
+          </p>
+        </div>
+        <div>
+          <p style="font-weight: 700; color: #e8e4dc; margin-bottom: 4px">
+            LLM narration as optional top slot
+          </p>
+          <p style="color: rgba(232, 228, 220, 0.6)">
+            Narration is deferred post-MVP but the slot is always present so users see what's
+            coming. Empty state shows a Generate button. Stale state keeps the old narration visible
+            (not hidden) per REQ-PROFILE-27 — stale narration is better than nothing.
+          </p>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

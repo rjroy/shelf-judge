@@ -1,8 +1,8 @@
 ---
-title: "Deferred: LLM-mediated features"
+title: "LLM-mediated features"
 date: 2026-04-06
 status: open
-tags: [deferred, feature, llm, ai]
+tags: [feature, llm, ai]
 modules: [daemon, web, cli]
 origin: .lore/specs/mvp.md
 stub: "[STUB: llm-integration]"

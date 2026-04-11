@@ -1,8 +1,8 @@
 ---
-title: "Deferred: Redundancy / collection-awareness scoring"
+title: "Redundancy / collection-awareness scoring"
 date: 2026-04-06
-status: open
-tags: [deferred, feature, fitness, scoring]
+status: approved 
+tags: [feature, fitness, scoring]
 modules: [daemon]
 origin: .lore/specs/mvp.md
 stub: "[STUB: redundancy-scoring]"

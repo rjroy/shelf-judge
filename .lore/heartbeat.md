@@ -26,21 +26,11 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
-- 21:08 commission-Dalton-20260409-200933 result: All 6 actionable findings from Thorne's Phase 5+6 review addressed. Typecheck clean, 596 tests pass, 0 failures.
+- 23:30 commission-Dalton-20260410-232057 result: BGG Preview Predictions feature implemented across all layers.
 
-**Finding 1 (DEFECT): Game detail divergence check uses vetoed score**
-- `packages/web...
+- 23:31 commission-Dalton-20260410-232057 completed
+## What was built
 
-- 21:08 commission-Dalton-20260409-200933 completed
-- 21:16 commission-Thorne-20260409-200946 result: ## Phase 7 Integration Verification: Utility Curves
-
-### Gate Status: PASS with 2 findings
-
----
-
-### 1. Build Verification
-
-| Check | Status | Notes |
-|-------|--------|-------|
-| `bun run test` | PAS...
-- 21:18 commission-Thorne-20260409-200946 completed
+### 1. Daemon: `predictBggGame(bggId)` service method
+- Added `bggClient` to `PredictionServiceDeps` interface
+- New ...

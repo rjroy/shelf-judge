@@ -39,6 +39,7 @@ export interface BggGameData {
   mechanics: BggTag[];
   categories: BggTag[];
   families: BggTag[];
+  subdomains: BggTag[]; // BGG subdomains (Strategy Games, Family Games, etc.)
   suggestedPlayerCounts: SuggestedPlayerCount[];
   fetchedAt: string; // ISO 8601
 }
@@ -88,7 +89,7 @@ export interface Collection {
 
 // Fitness score types from .lore/designs/mvp-fitness-model.md
 
-export type FitnessBreakdownSource = "personal" | "bgg" | "override";
+export type FitnessBreakdownSource = "personal" | "bgg" | "override" | "predicted";
 
 export interface FitnessBreakdownEntry {
   axisId: string;
@@ -102,6 +103,8 @@ export interface FitnessBreakdownEntry {
   effectiveRating: number | null; // post-curve 1-10 value (same as rating)
   preferenceShape: PreferenceShape; // which shape was applied
   curveAffected: boolean; // true when curve changed the rating by > 0.5
+  predictionConfidence: PredictionConfidence | null; // null for non-predicted
+  referenceGames: ReferenceGame[] | null; // null for non-predicted
 }
 
 export interface FitnessResult {
@@ -118,6 +121,7 @@ export interface FitnessResult {
     rawValue: number; // native-scale
   } | null;
   hypotheticalScore: number | null; // score without veto, null when not vetoed
+  predictionMeta: PredictionMeta | null; // null for fully-actual results
 }
 
 // Tournament types
@@ -145,6 +149,7 @@ export interface TournamentSession {
   status: SessionStatus;
   createdAt: string;
   updatedAt: string;
+  comparisons: Comparison[]; // Active session only; cleared on completion
 }
 
 export interface Comparison {
@@ -156,15 +161,23 @@ export interface Comparison {
   createdAt: string;
 }
 
+export interface CachedRecentComparison {
+  opponentGameId: string;
+  won: boolean;
+  createdAt: string; // ISO 8601
+}
+
 export interface TournamentGameStats {
   eloRating: number; // Default 1500
   comparisonCount: number; // Default 0
+  wins: number; // Default 0
+  losses: number; // Default 0
+  recentComparisons: CachedRecentComparison[]; // Capped at 10, most-recent-first
 }
 
 export interface TournamentData {
   settings: TournamentSettings;
   sessions: TournamentSession[];
-  comparisons: Comparison[];
   gameStats: Record<string, TournamentGameStats>;
 }
 
@@ -185,7 +198,7 @@ export interface TournamentGameStatsDisplay {
   displayLabel: string; // "not yet ranked" | "8.3 (provisional)" | "8.3"
   wins: number;
   losses: number;
-  recentComparisons: RecentComparison[]; // Last 5, derived from comparison history (never cached)
+  recentComparisons: RecentComparison[]; // Read from cached TournamentGameStats.recentComparisons, enriched with game names at read time
 }
 
 // API response types (shared between daemon, web, and CLI)
@@ -229,4 +242,159 @@ export interface AppConfig {
   dataDir: string;
   socketPath: string;
   username: string | null;
+}
+
+// Profile types (collection-profiling spec)
+
+export interface AxisDistribution {
+  axisId: string;
+  axisName: string;
+  mean: number;
+  median: number;
+  standardDeviation: number;
+  range: { min: number; max: number };
+  ratedGameCount: number;
+  histogram: number[]; // 10-element array: game counts per rating bucket (1-10)
+}
+
+export interface AxisWeightEntry {
+  axisId: string;
+  axisName: string;
+  weight: number;
+  percentage: number; // weight / totalWeight * 100
+}
+
+export interface AttributeCluster {
+  name: string;
+  count: number;
+  percentage: number; // count / totalGames * 100
+}
+
+export interface WeightRangeCluster {
+  range: string; // "Light", "Medium-Light", etc.
+  min: number;
+  max: number;
+  count: number;
+  percentage: number;
+}
+
+export interface UtilityCurveDeclaration {
+  axisId: string;
+  axisName: string;
+  shape: PreferenceShape;
+  idealValue: number | null;
+  tolerance: ToleranceLevel | null;
+  leanDirection: LeanDirection | null;
+  vetoThreshold: VetoConfig | null;
+  nativeScale: NativeScale;
+}
+
+export interface DivergentGame {
+  gameId: string;
+  gameName: string;
+  fitnessScore: number;
+  normalizedTournamentScore: number;
+  gap: number; // absolute difference
+  direction: "tournament-outlier" | "fitness-outlier";
+}
+
+export interface ComponentDistances {
+  binary: number; // Jaccard distance [0,1]
+  continuous: number; // normalized Manhattan [0,1]
+  personalAxes: number | null; // normalized Manhattan [0,1], null when no shared axes
+  composite: number; // weighted combination [0,1]
+}
+
+export type OutlierClassification = "lone-wolf" | "category-orphan" | "high-fitness-outlier";
+
+export interface CollectionOutlier {
+  gameId: string;
+  gameName: string;
+  distances: ComponentDistances;
+  classifications: OutlierClassification[];
+  fitnessScore: number | null;
+}
+
+export interface AxisSuggestion {
+  source: "unexpressed-concentration" | "high-variance" | "divergence-repair";
+  attribute: string; // mechanic name, category name, or BGG field
+  reason: string; // human-readable explanation
+  evidence: { gameCount?: number; percentage?: number; variance?: number };
+}
+
+export interface CollectionProfile {
+  axisDistributions: AxisDistribution[];
+  axisWeights: AxisWeightEntry[];
+  bggClustering: {
+    mechanics: AttributeCluster[];
+    categories: AttributeCluster[];
+    families: AttributeCluster[];
+    subdomains: AttributeCluster[];
+    weightRanges: WeightRangeCluster[];
+  };
+  utilityCurves: UtilityCurveDeclaration[];
+  divergence: DivergentGame[] | null; // null when no tournament data
+  outliers: CollectionOutlier[];
+  suggestions: AxisSuggestion[];
+  gameCount: number;
+  ratedGameCount: number;
+  computedAt: string; // ISO 8601
+}
+
+export interface ProfileData {
+  profile: CollectionProfile;
+  computedAt: string; // ISO 8601
+}
+
+// Prediction types
+
+export type PredictionConfidence = "actual" | "strong" | "moderate" | "weak" | "insufficient";
+
+export interface ReferenceGame {
+  gameId: string;
+  gameName: string;
+  similarity: number;
+}
+
+export interface PredictionMeta {
+  readinessStage: 0 | 1 | 2 | 3;
+  confidence: PredictionConfidence;
+  predictedAxisCount: number;
+  actualAxisCount: number;
+  referenceGameCount: number;
+  coveragePercent: number; // fraction of total axis weight covered by actual or strong-confidence data
+}
+
+export interface PredictionReadiness {
+  stage: 0 | 1 | 2 | 3;
+  ratedGameCount: number;
+  nextStageAt: number;
+  weakAxes: { axisId: string; axisName: string; ratedCount: number }[];
+  suggestedActions: string[];
+}
+
+export interface RevealedPreferenceTension {
+  predictedFitness: number;
+  tournamentClusterAverage: number;
+  note: string;
+}
+
+export interface PredictionSettings {
+  stageThresholds: [number, number, number]; // [stage1, stage2, stage3] defaults [5, 15, 30]
+  defaultK: number; // default 5
+  minSimilarityThreshold: number; // default 0.2
+  tournamentStabilityBoost: number; // default 0.2
+}
+
+export interface PredictionUnavailable {
+  reason: "stage-0";
+  ratedGameCount: number;
+  gamesNeeded: number;
+}
+
+export interface PredictedGameResponse {
+  game: Game;
+  score: FitnessResult;
+  tension: RevealedPreferenceTension | null;
+  predictionUnavailable: PredictionUnavailable | null;
 }

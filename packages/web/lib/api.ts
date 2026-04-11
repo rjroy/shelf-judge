@@ -124,6 +124,14 @@ export async function importBggCollection(username: string): Promise<Response> {
   return response;
 }
 
+// Profile API functions
+
+import type { CollectionProfile } from "@shelf-judge/shared";
+
+export async function getProfile(): Promise<CollectionProfile> {
+  return daemonJson("/api/profile");
+}
+
 // Tournament API functions
 
 import type {
@@ -193,16 +201,32 @@ export async function getAllTournamentStats(): Promise<Record<string, Tournament
   return Object.fromEntries(entries.map((e) => [e.gameId, e.stats]));
 }
 
-export async function recalculateElo(): Promise<{ gamesUpdated: number }> {
-  return daemonJson("/api/tournament/recalculate", { method: "POST" });
-}
-
 export async function getTournamentSettings(): Promise<TournamentSettings> {
   return daemonJson("/api/tournament/settings");
 }
 
 export async function listTournamentSessions(): Promise<TournamentSession[]> {
   return daemonJson("/api/tournament/sessions");
+}
+
+// Prediction API functions
+
+import type { PredictionReadiness, PredictedGameResponse } from "@shelf-judge/shared";
+
+export async function predictGame(id: string): Promise<PredictedGameResponse> {
+  return daemonJson(`/api/predictions/${id}`);
+}
+
+export async function predictBggGame(bggId: number): Promise<PredictedGameResponse> {
+  return daemonJson(`/api/predictions/bgg/${bggId}`);
+}
+
+export async function getReadiness(): Promise<PredictionReadiness> {
+  return daemonJson("/api/predictions/readiness");
+}
+
+export async function listGamesWithPredictions(): Promise<GameWithScore[]> {
+  return daemonJson("/api/games?includePredicted=true");
 }
 
 // Re-export types for convenience
@@ -216,4 +240,6 @@ export type {
   BggSearchResult,
   ImportProgress,
   ImportComplete,
+  CollectionProfile,
+  PredictionReadiness,
 };

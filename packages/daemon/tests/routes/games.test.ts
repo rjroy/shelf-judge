@@ -50,6 +50,7 @@ const wingspanBggResult: BggGameResult = {
     mechanics: [{ id: 2004, name: "Set Collection" }],
     categories: [{ id: 1089, name: "Animals" }],
     families: [],
+    subdomains: [],
     suggestedPlayerCounts: [],
     fetchedAt: new Date().toISOString(),
   },
@@ -241,6 +242,33 @@ describe("Game Routes", () => {
       expect(rateRes.status).toBe(400);
       const body = (await rateRes.json()) as { error: string };
       expect(body.error).toBeDefined();
+    });
+
+    test("null rating clears an existing rating", async () => {
+      const axisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
+        name: "Fun",
+        weight: 50,
+      });
+      const axis = (await axisRes.json()) as Axis;
+
+      const gameRes = await jsonRequest(ctx.app, "POST", "/api/games", {
+        name: "Test Game",
+      });
+      const game = ((await gameRes.json()) as GameAddResponse).game;
+
+      // Set a rating
+      await jsonRequest(ctx.app, "PUT", `/api/games/${game.id}/ratings`, {
+        ratings: { [axis.id]: 8 },
+      });
+
+      // Clear it with null
+      const clearRes = await jsonRequest(ctx.app, "PUT", `/api/games/${game.id}/ratings`, {
+        ratings: { [axis.id]: null },
+      });
+
+      expect(clearRes.status).toBe(200);
+      const body = (await clearRes.json()) as GameRateResponse;
+      expect(body.game.ratings[axis.id]).toBeUndefined();
     });
   });
 

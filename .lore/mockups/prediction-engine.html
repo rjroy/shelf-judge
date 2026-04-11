@@ -1,0 +1,2873 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shelf Judge — Prediction Engine UI Mockup</title>
+    <style>
+      /* ─────────────────────────────────────────────
+         Design tokens (matches existing mockup palette)
+         ───────────────────────────────────────────── */
+      :root {
+        --bg-base: #f4f1ec;
+        --bg-surface: #fefcf9;
+        --bg-elevated: #ffffff;
+        --border: #ddd8d0;
+        --border-strong: #c4bfb8;
+        --text-primary: #1a1714;
+        --text-secondary: #6b6560;
+        --text-muted: #9c9590;
+        --score-color: #b86c1a;
+        --score-high: #2d7a4a;
+        --score-mid: #8a6f20;
+        --score-low: #b84040;
+        --bgg-accent: #2e5f8a;
+        --bgg-bg: #edf3f9;
+        --override-accent: #5c3d99;
+        --override-bg: #f0ecfa;
+        --action: #1c3d5e;
+        --action-hover: #2a5580;
+        --action-subtle: #e8eff6;
+        --nav-bg: #1a1714;
+        --nav-text: #e8e4dc;
+        --nav-active: #b86c1a;
+
+        /* ── New prediction tokens ── */
+        --predict-accent: #1a706a; /* deep teal — distinct from BGG blue and override purple */
+        --predict-bg: #eaf5f3; /* soft teal wash for predicted table rows */
+        --predict-border: #a8d9d4;
+
+        /* ── Confidence level colors ── */
+        --conf-strong: #2d7a4a;
+        --conf-strong-bg: #e8f5ee;
+        --conf-moderate: #7a5e1a;
+        --conf-moderate-bg: #f5ecd8;
+        --conf-weak: #8a3a10;
+        --conf-weak-bg: #f5e4d8;
+        --conf-insufficient: #9c9590;
+        --conf-insufficient-bg: #f0ede8;
+
+        /* ── Tournament tension ── */
+        --tourney-accent: #2e5f8a; /* reuses BGG slate blue — tournament data shares that provenance */
+        --tourney-bg: #edf3f9;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family:
+          Inter,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        background: #e8e4dc;
+        color: var(--text-primary);
+        font-size: 15px;
+        line-height: 1.5;
+        padding: 40px 32px;
+      }
+
+      /* ─── Page header ─── */
+      .doc-header {
+        margin-bottom: 48px;
+        padding-bottom: 24px;
+        border-bottom: 1px solid #c4bfb8;
+      }
+      .doc-title {
+        font-size: 22px;
+        font-weight: 700;
+        color: var(--text-primary);
+        margin-bottom: 6px;
+      }
+      .doc-subtitle {
+        font-size: 13px;
+        color: var(--text-secondary);
+      }
+      .doc-legend {
+        display: flex;
+        gap: 16px;
+        margin-top: 16px;
+        flex-wrap: wrap;
+      }
+      .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--text-secondary);
+      }
+      .legend-swatch {
+        width: 12px;
+        height: 12px;
+        border-radius: 2px;
+        flex-shrink: 0;
+      }
+
+      /* ─── Annotation wrapper ─── */
+      .annotation-section {
+        margin-bottom: 64px;
+      }
+      .annotation-label {
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+        color: #9c9590;
+        margin-bottom: 6px;
+        padding-left: 2px;
+      }
+      .annotation-req {
+        font-size: 11px;
+        color: var(--bgg-accent);
+        margin-bottom: 14px;
+        padding-left: 2px;
+        font-family: "Courier New", monospace;
+      }
+      .annotation-note {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-top: 10px;
+        padding-left: 2px;
+        font-style: italic;
+      }
+
+      /* ─── App chrome ─── */
+      .app-frame {
+        background: var(--bg-base);
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow:
+          0 4px 32px rgba(0, 0, 0, 0.18),
+          0 1px 4px rgba(0, 0, 0, 0.08);
+      }
+      .app-frame.tall {
+        overflow: visible;
+      }
+
+      /* ─── Sidebar ─── */
+      .sidebar {
+        width: 200px;
+        flex-shrink: 0;
+        background: var(--nav-bg);
+        display: flex;
+        flex-direction: column;
+      }
+      .sidebar-brand {
+        padding: 18px 20px 20px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .brand-name {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--nav-text);
+      }
+      .brand-sub {
+        font-size: 11px;
+        color: rgba(232, 228, 220, 0.4);
+        margin-top: 2px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .nav-section {
+        padding: 14px 0;
+        flex: 1;
+      }
+      .nav-label {
+        font-size: 10px;
+        font-weight: 600;
+        color: rgba(232, 228, 220, 0.35);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        padding: 0 20px;
+        margin-bottom: 4px;
+        margin-top: 10px;
+      }
+      .nav-label:first-child {
+        margin-top: 0;
+      }
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 20px;
+        font-size: 13px;
+        color: rgba(232, 228, 220, 0.65);
+        cursor: pointer;
+        border-left: 3px solid transparent;
+        text-decoration: none;
+      }
+      .nav-item.active {
+        background: rgba(184, 108, 26, 0.12);
+        color: var(--nav-text);
+        border-left-color: var(--nav-active);
+        font-weight: 500;
+      }
+      .sidebar-footer {
+        padding: 14px 20px;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        font-size: 11px;
+        color: rgba(232, 228, 220, 0.3);
+      }
+
+      /* ── Readiness badge in sidebar ── */
+      .readiness-widget {
+        margin: 0 12px 12px;
+        border-radius: 6px;
+        background: rgba(26, 112, 106, 0.15);
+        border: 1px solid rgba(26, 112, 106, 0.3);
+        padding: 10px 12px;
+      }
+      .readiness-label {
+        font-size: 9px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: rgba(168, 217, 212, 0.8);
+        margin-bottom: 4px;
+      }
+      .readiness-stage {
+        font-size: 11px;
+        font-weight: 600;
+        color: #a8d9d4;
+        margin-bottom: 6px;
+      }
+      .readiness-bar-track {
+        height: 4px;
+        background: rgba(255, 255, 255, 0.12);
+        border-radius: 2px;
+        margin-bottom: 4px;
+        overflow: hidden;
+      }
+      .readiness-bar-fill {
+        height: 100%;
+        background: #a8d9d4;
+        border-radius: 2px;
+        width: 72%; /* 22/30 games toward Stage 3 */
+      }
+      .readiness-count {
+        font-size: 10px;
+        color: rgba(168, 217, 212, 0.6);
+      }
+
+      /* ─── Topbar ─── */
+      .topbar {
+        height: 48px;
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        padding: 0 32px;
+        gap: 12px;
+        flex-shrink: 0;
+      }
+      .breadcrumb {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        color: var(--text-muted);
+      }
+      .breadcrumb a {
+        color: var(--action);
+        text-decoration: none;
+      }
+      .breadcrumb strong {
+        color: var(--text-primary);
+        font-weight: 600;
+      }
+      .topbar-actions {
+        margin-left: auto;
+        display: flex;
+        gap: 8px;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 13px;
+        border-radius: 5px;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        font-family: inherit;
+      }
+      .btn-primary {
+        background: var(--action);
+        color: white;
+      }
+      .btn-secondary {
+        background: transparent;
+        border: 1px solid var(--border-strong);
+        color: var(--text-secondary);
+      }
+
+      /* ─── Layout helpers ─── */
+      .app-row {
+        display: flex;
+      }
+      .main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .content {
+        flex: 1;
+        overflow-y: auto;
+      }
+
+      /* ─── Game hero ─── */
+      .game-hero {
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        padding: 24px 32px;
+        display: flex;
+        gap: 20px;
+        align-items: flex-start;
+      }
+      .game-cover {
+        width: 96px;
+        height: 96px;
+        border-radius: 8px;
+        background: linear-gradient(135deg, #d0e8e0, #a8c8c0);
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 38px;
+        border: 1px solid var(--border);
+      }
+      .game-hero-info {
+        flex: 1;
+      }
+      .game-hero-title {
+        font-size: 24px;
+        font-weight: 700;
+        color: var(--text-primary);
+        line-height: 1.2;
+        margin-bottom: 4px;
+      }
+      .game-hero-meta {
+        display: flex;
+        gap: 14px;
+        font-size: 13px;
+        color: var(--text-secondary);
+        margin-bottom: 12px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .bgg-link {
+        font-size: 12px;
+        color: var(--bgg-accent);
+        text-decoration: none;
+        background: var(--bgg-bg);
+        padding: 3px 8px;
+        border-radius: 4px;
+        font-weight: 500;
+      }
+      .game-hero-tags {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .tag {
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 20px;
+        background: var(--border);
+        color: var(--text-secondary);
+      }
+
+      /* ─── Predicted score hero ─── */
+      .game-hero-score-section {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        flex-shrink: 0;
+        min-width: 180px;
+      }
+      .score-hero-label {
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 4px;
+      }
+      /* Predicted score: same size as actual, but visually signaled */
+      .score-hero-number {
+        font-size: 52px;
+        font-weight: 700;
+        color: var(--score-color);
+        font-variant-numeric: tabular-nums;
+        line-height: 1;
+        letter-spacing: -0.02em;
+      }
+      .score-hero-number.predicted {
+        /* Teal instead of amber for predicted; unambiguously different (REQ-PRED-14) */
+        color: var(--predict-accent);
+        position: relative;
+      }
+      .score-tilde {
+        font-size: 28px;
+        vertical-align: super;
+        font-weight: 400;
+        margin-right: 2px;
+        opacity: 0.7;
+      }
+      .score-hero-out-of {
+        font-size: 13px;
+        color: var(--text-muted);
+        margin-top: 4px;
+      }
+      .score-hero-meta {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-top: 6px;
+        text-align: right;
+      }
+      .predict-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 10px;
+        font-weight: 700;
+        padding: 3px 8px;
+        border-radius: 12px;
+        background: var(--predict-bg);
+        color: var(--predict-accent);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        border: 1px solid var(--predict-border);
+        margin-bottom: 6px;
+      }
+
+      /* ─── Two-panel layout ─── */
+      .detail-panels {
+        display: grid;
+        grid-template-columns: 1fr 380px;
+        gap: 0;
+      }
+      .panel-left {
+        padding: 24px 32px;
+        border-right: 1px solid var(--border);
+      }
+      .panel-right {
+        padding: 24px 24px;
+        background: var(--bg-surface);
+      }
+      .panel-section-title {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 14px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .section-divider {
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 20px 0;
+      }
+
+      /* ─── Score breakdown table ─── */
+      .breakdown-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 20px;
+      }
+      .breakdown-table th {
+        text-align: left;
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        padding: 6px 10px;
+        background: #ede9e3;
+        border-bottom: 1px solid var(--border-strong);
+        border-top: 1px solid var(--border-strong);
+      }
+      .breakdown-table th.right {
+        text-align: right;
+      }
+      .breakdown-table td {
+        padding: 9px 10px;
+        border-bottom: 1px solid var(--border);
+        font-size: 13px;
+        font-variant-numeric: tabular-nums;
+      }
+      .breakdown-table td.right {
+        text-align: right;
+      }
+      .breakdown-table tr.bgg-row td {
+        background: var(--bgg-bg);
+      }
+      .breakdown-table tr.predicted-row td {
+        background: var(--predict-bg);
+      }
+      .breakdown-table tr.predicted-row.insufficient td {
+        background: var(--conf-insufficient-bg);
+        opacity: 0.65;
+      }
+      .breakdown-table tr.total-row td {
+        background: #ede9e3;
+        font-weight: 700;
+        border-top: 2px solid var(--border-strong);
+        border-bottom: 2px solid var(--border-strong);
+      }
+      .breakdown-table tr.total-row td.score-total {
+        color: var(--predict-accent);
+        font-size: 15px;
+      }
+
+      /* Source badges */
+      .source-badge {
+        display: inline-block;
+        font-size: 9px;
+        font-weight: 700;
+        padding: 2px 5px;
+        border-radius: 3px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .source-personal {
+        color: var(--text-secondary);
+        background: var(--border);
+      }
+      .source-bgg {
+        color: var(--bgg-accent);
+        background: #d4e7f5;
+      }
+      .source-predicted {
+        color: var(--predict-accent);
+        background: #c4e8e4;
+      }
+
+      /* Confidence badges */
+      .conf-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        font-size: 9px;
+        font-weight: 700;
+        padding: 2px 6px;
+        border-radius: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        cursor: pointer;
+      }
+      .conf-strong {
+        color: var(--conf-strong);
+        background: var(--conf-strong-bg);
+      }
+      .conf-moderate {
+        color: var(--conf-moderate);
+        background: var(--conf-moderate-bg);
+      }
+      .conf-weak {
+        color: var(--conf-weak);
+        background: var(--conf-weak-bg);
+      }
+      .conf-insufficient {
+        color: var(--conf-insufficient);
+        background: var(--conf-insufficient-bg);
+      }
+      .conf-actual {
+        color: var(--text-secondary);
+        background: var(--border);
+      }
+
+      /* Contribution bar */
+      .contrib-cell {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        justify-content: flex-end;
+      }
+      .contrib-bar-track {
+        width: 60px;
+        height: 5px;
+        background: var(--border);
+        border-radius: 3px;
+        overflow: hidden;
+      }
+      .contrib-bar-fill {
+        height: 100%;
+        border-radius: 3px;
+        opacity: 0.6;
+      }
+      .contrib-bar-fill.actual {
+        background: var(--score-color);
+      }
+      .contrib-bar-fill.predicted {
+        background: var(--predict-accent);
+      }
+      .contrib-bar-fill.insufficient {
+        background: var(--conf-insufficient);
+      }
+      .contrib-pct {
+        font-size: 12px;
+        color: var(--text-secondary);
+        min-width: 32px;
+        text-align: right;
+      }
+
+      /* ─── Confidence breakdown panel (REQ-PRED-12, REQ-PRED-26) ─── */
+      .conf-panel {
+        border: 1px solid var(--predict-border);
+        border-radius: 8px;
+        background: var(--predict-bg);
+        margin-top: 2px;
+        margin-bottom: 2px;
+        padding: 12px 14px;
+        font-size: 12px;
+      }
+      .conf-panel-title {
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--predict-accent);
+        margin-bottom: 10px;
+      }
+      .conf-stats {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+      .conf-stat {
+        background: rgba(255, 255, 255, 0.6);
+        border-radius: 5px;
+        padding: 7px 10px;
+        border: 1px solid var(--predict-border);
+      }
+      .conf-stat-value {
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--predict-accent);
+        font-variant-numeric: tabular-nums;
+      }
+      .conf-stat-label {
+        font-size: 10px;
+        color: var(--text-muted);
+        margin-top: 1px;
+      }
+      .ref-games-label {
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-muted);
+        margin-bottom: 6px;
+      }
+      .ref-game-list {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .ref-game-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        padding: 5px 8px;
+        background: rgba(255, 255, 255, 0.7);
+        border-radius: 4px;
+        border: 1px solid rgba(168, 217, 212, 0.4);
+      }
+      .ref-game-name {
+        flex: 1;
+        color: var(--text-primary);
+        font-weight: 500;
+      }
+      .ref-game-sim {
+        font-size: 11px;
+        color: var(--predict-accent);
+        font-variant-numeric: tabular-nums;
+        font-weight: 600;
+      }
+      .ref-game-rating {
+        font-size: 11px;
+        color: var(--text-muted);
+        font-variant-numeric: tabular-nums;
+      }
+      .sim-bar {
+        width: 40px;
+        height: 3px;
+        background: var(--border);
+        border-radius: 2px;
+        overflow: hidden;
+      }
+      .sim-bar-fill {
+        height: 100%;
+        background: var(--predict-accent);
+        border-radius: 2px;
+        opacity: 0.7;
+      }
+
+      /* ─── Tournament divergence (REQ-PRED-16, REQ-PRED-17, REQ-PRED-28) ─── */
+      .tension-panel {
+        border: 1px solid #c0d8ec;
+        border-radius: 8px;
+        background: linear-gradient(135deg, #edf3f9 0%, #f2f7fb 100%);
+        padding: 14px 16px;
+        margin-top: 16px;
+      }
+      .tension-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+      .tension-icon {
+        font-size: 16px;
+      }
+      .tension-title {
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--bgg-accent);
+      }
+      .tension-body {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 10px;
+      }
+      .tension-signal {
+        flex: 1;
+        background: rgba(255, 255, 255, 0.7);
+        border-radius: 6px;
+        padding: 10px 12px;
+        border: 1px solid rgba(46, 95, 138, 0.2);
+      }
+      .tension-signal-label {
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-muted);
+        margin-bottom: 4px;
+      }
+      .tension-signal-value {
+        font-size: 26px;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        line-height: 1;
+      }
+      .tension-signal-value.axis {
+        color: var(--predict-accent);
+      }
+      .tension-signal-value.tourney {
+        color: var(--bgg-accent);
+      }
+      .tension-signal-sublabel {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-top: 3px;
+      }
+      .tension-vs {
+        display: flex;
+        align-items: center;
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--text-muted);
+        flex-shrink: 0;
+      }
+      .tension-explanation {
+        font-size: 12px;
+        color: var(--bgg-accent);
+        line-height: 1.45;
+      }
+      .tension-explanation strong {
+        font-weight: 600;
+      }
+
+      /* ─── Right panel: rating form (for context) ─── */
+      .predict-callout {
+        background: var(--predict-bg);
+        border: 1px solid var(--predict-border);
+        border-radius: 8px;
+        padding: 14px 16px;
+        margin-bottom: 16px;
+      }
+      .predict-callout-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--predict-accent);
+        margin-bottom: 6px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .predict-callout-body {
+        font-size: 12px;
+        color: var(--text-secondary);
+        line-height: 1.5;
+      }
+
+      .rating-form {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      .rating-field {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+      .rating-field-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .rating-field-name {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+      .rating-field-weight {
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+      .rating-field-desc {
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+      .rating-input-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .rating-slider {
+        flex: 1;
+        height: 4px;
+        border-radius: 2px;
+        background: var(--border);
+        appearance: none;
+        cursor: pointer;
+        accent-color: var(--score-color);
+      }
+      .rating-value-input {
+        width: 44px;
+        border: 1px solid var(--border-strong);
+        border-radius: 4px;
+        padding: 4px 8px;
+        font-size: 14px;
+        font-weight: 700;
+        font-family: inherit;
+        text-align: center;
+        color: var(--score-color);
+        background: var(--bg-surface);
+        font-variant-numeric: tabular-nums;
+      }
+      .bgg-auto-value {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        background: var(--bgg-bg);
+        border: 1px solid #c0d8ec;
+        border-radius: 4px;
+        font-size: 12px;
+        color: var(--bgg-accent);
+      }
+      .bgg-auto-value .value {
+        font-weight: 700;
+        font-size: 14px;
+      }
+      .bgg-auto-value .override-link {
+        margin-left: auto;
+        font-size: 11px;
+        cursor: pointer;
+        color: var(--action);
+      }
+      /* Empty input with predicted hint */
+      .rating-predict-hint {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        background: var(--predict-bg);
+        border: 1px dashed var(--predict-border);
+        border-radius: 4px;
+        font-size: 12px;
+        color: var(--predict-accent);
+      }
+      .rating-predict-hint .hint-value {
+        font-weight: 700;
+        font-size: 14px;
+      }
+      .rating-predict-hint .hint-label {
+        color: var(--text-muted);
+        flex: 1;
+      }
+      .rating-predict-hint .rate-link {
+        font-size: 11px;
+        color: var(--action);
+        cursor: pointer;
+      }
+
+      /* ─── Collection list (REQ-PRED-24, REQ-PRED-27) ─── */
+      .collection-topbar {
+        display: flex;
+        align-items: center;
+        padding: 10px 24px;
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        gap: 12px;
+      }
+      .search-input {
+        flex: 1;
+        max-width: 260px;
+        height: 32px;
+        border: 1px solid var(--border-strong);
+        border-radius: 5px;
+        padding: 0 10px;
+        font-size: 13px;
+        background: var(--bg-elevated);
+        color: var(--text-primary);
+        font-family: inherit;
+      }
+      .sort-control {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        color: var(--text-secondary);
+        cursor: pointer;
+        padding: 5px 10px;
+        border: 1px solid var(--border-strong);
+        border-radius: 5px;
+        background: var(--bg-elevated);
+      }
+      .sort-label {
+        color: var(--text-muted);
+        font-size: 12px;
+      }
+      .sort-value {
+        color: var(--predict-accent);
+        font-weight: 600;
+      }
+      .collection-stats {
+        padding: 6px 24px;
+        background: var(--bg-base);
+        border-bottom: 1px solid var(--border);
+        font-size: 11px;
+        color: var(--text-muted);
+        display: flex;
+        gap: 16px;
+        align-items: center;
+      }
+      .collection-stats .pred-toggle {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        color: var(--predict-accent);
+        cursor: pointer;
+        font-weight: 600;
+      }
+
+      /* Collection table */
+      .coll-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .coll-table th {
+        text-align: left;
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        padding: 7px 12px;
+        background: #ede9e3;
+        border-bottom: 1px solid var(--border-strong);
+        border-top: 1px solid var(--border-strong);
+        white-space: nowrap;
+        cursor: pointer;
+      }
+      .coll-table th.sort-active {
+        color: var(--predict-accent);
+      }
+      .coll-table th.right {
+        text-align: right;
+      }
+      .coll-table td {
+        padding: 9px 12px;
+        border-bottom: 1px solid var(--border);
+        font-size: 13px;
+        font-variant-numeric: tabular-nums;
+        vertical-align: middle;
+      }
+      .coll-table td.right {
+        text-align: right;
+      }
+      .coll-table tr:hover td {
+        background: rgba(0, 0, 0, 0.02);
+      }
+      .game-name-cell {
+        font-weight: 500;
+      }
+      .game-year {
+        font-size: 11px;
+        color: var(--text-muted);
+        font-weight: 400;
+      }
+
+      /* Predicted score cell */
+      .score-actual {
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--score-color);
+        font-variant-numeric: tabular-nums;
+      }
+      .score-predicted {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 2px;
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--predict-accent);
+        font-variant-numeric: tabular-nums;
+      }
+      .score-predicted-tilde {
+        font-size: 10px;
+        font-weight: 400;
+        opacity: 0.7;
+        vertical-align: super;
+      }
+      .score-missing {
+        color: var(--text-muted);
+        font-style: italic;
+        font-weight: 400;
+        font-size: 12px;
+      }
+      .conf-pip {
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        margin-left: 4px;
+        vertical-align: middle;
+      }
+      .conf-pip.strong {
+        background: var(--conf-strong);
+      }
+      .conf-pip.moderate {
+        background: var(--conf-moderate);
+      }
+      .conf-pip.weak {
+        background: var(--conf-weak);
+      }
+
+      /* ─── Readiness / "Improve predictions" (REQ-PRED-20, REQ-PRED-29) ─── */
+      .readiness-page {
+        padding: 24px 32px;
+      }
+      .readiness-stage-banner {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        background: var(--predict-bg);
+        border: 1px solid var(--predict-border);
+        border-radius: 10px;
+        padding: 18px 22px;
+        margin-bottom: 24px;
+      }
+      .readiness-stage-icon {
+        font-size: 32px;
+        flex-shrink: 0;
+      }
+      .readiness-stage-info {
+        flex: 1;
+      }
+      .readiness-stage-name {
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--predict-accent);
+        margin-bottom: 3px;
+      }
+      .readiness-stage-desc {
+        font-size: 13px;
+        color: var(--text-secondary);
+      }
+      .readiness-progress {
+        width: 160px;
+        flex-shrink: 0;
+        text-align: right;
+      }
+      .readiness-progress-label {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-bottom: 5px;
+      }
+      .readiness-progress-bar {
+        height: 8px;
+        background: var(--border);
+        border-radius: 4px;
+        overflow: hidden;
+        margin-bottom: 5px;
+      }
+      .readiness-progress-fill {
+        height: 100%;
+        background: var(--predict-accent);
+        border-radius: 4px;
+        width: 73%; /* 22 of 30 */
+        opacity: 0.75;
+      }
+      .readiness-progress-counts {
+        font-size: 11px;
+        color: var(--predict-accent);
+        font-variant-numeric: tabular-nums;
+        font-weight: 600;
+      }
+
+      .improve-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+      .improve-card {
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 16px 18px;
+      }
+      .improve-card-header {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+      .improve-card-icon {
+        font-size: 20px;
+        flex-shrink: 0;
+        margin-top: 1px;
+      }
+      .improve-card-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 2px;
+      }
+      .improve-card-subtitle {
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+      .improve-card-body {
+        font-size: 12px;
+        color: var(--text-secondary);
+        line-height: 1.55;
+      }
+      .improve-axis-list {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-top: 8px;
+      }
+      .improve-axis-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        color: var(--text-primary);
+      }
+      .improve-axis-bar {
+        flex: 1;
+        height: 4px;
+        background: var(--border);
+        border-radius: 2px;
+        overflow: hidden;
+      }
+      .improve-axis-fill {
+        height: 100%;
+        border-radius: 2px;
+      }
+      .improve-axis-fill.low {
+        background: var(--conf-weak);
+        width: 20%;
+      }
+      .improve-axis-fill.medium {
+        background: var(--conf-moderate);
+        width: 50%;
+      }
+      .improve-axis-fill.high {
+        background: var(--conf-strong);
+        width: 85%;
+      }
+      .improve-axis-count {
+        font-size: 11px;
+        color: var(--text-muted);
+        width: 60px;
+        text-align: right;
+      }
+
+      .suggest-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .suggest-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 10px 12px;
+        font-size: 12px;
+      }
+      .suggest-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--predict-accent);
+        flex-shrink: 0;
+        margin-top: 5px;
+      }
+      .suggest-item-body {
+        color: var(--text-secondary);
+        line-height: 1.5;
+      }
+      .suggest-item-body strong {
+        color: var(--text-primary);
+        font-weight: 600;
+      }
+
+      /* ─── Responsive breakpoints ─── */
+      @media (max-width: 800px) {
+        body {
+          padding: 20px 16px;
+        }
+        .app-row {
+          flex-direction: column;
+        }
+        .sidebar {
+          width: 100%;
+          flex-direction: row;
+          flex-wrap: wrap;
+        }
+        .sidebar-brand {
+          padding: 12px 16px;
+        }
+        .nav-section {
+          display: flex;
+          flex-direction: row;
+          flex-wrap: wrap;
+          padding: 8px 0;
+        }
+        .nav-label {
+          display: none;
+        }
+        .nav-item {
+          padding: 6px 12px;
+          font-size: 12px;
+        }
+        .game-hero {
+          flex-wrap: wrap;
+          padding: 16px;
+        }
+        .game-hero-score-section {
+          min-width: 100%;
+          flex-direction: row;
+          align-items: center;
+          gap: 12px;
+          margin-top: 8px;
+        }
+        .score-hero-number {
+          font-size: 38px;
+        }
+        .detail-panels {
+          grid-template-columns: 1fr;
+        }
+        .panel-left {
+          padding: 16px;
+          border-right: none;
+          border-bottom: 1px solid var(--border);
+        }
+        .panel-right {
+          padding: 16px;
+        }
+        .improve-grid {
+          grid-template-columns: 1fr;
+        }
+        .tension-body {
+          flex-direction: column;
+        }
+        .tension-vs {
+          justify-content: center;
+        }
+        .conf-stats {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+
+      /* ─── Divider between mockup sections ─── */
+      .section-gap {
+        height: 1px;
+        background: #c4bfb8;
+        margin: 56px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ════════════════════════════════════════════
+         PAGE HEADER
+         ════════════════════════════════════════════ -->
+    <div class="doc-header">
+      <div class="doc-title">Shelf Judge — Prediction Engine UI Mockup</div>
+      <div class="doc-subtitle">
+        5 surfaces: game detail with predicted score, confidence breakdown, tournament divergence,
+        collection list with prediction column, and prediction readiness/improve prompt.
+      </div>
+      <div class="doc-legend">
+        <div class="legend-item">
+          <div
+            class="legend-swatch"
+            style="background: var(--predict-bg); border: 1px solid var(--predict-border)"
+          ></div>
+          Predicted (teal) — estimated from similar rated games
+        </div>
+        <div class="legend-item">
+          <div
+            class="legend-swatch"
+            style="background: var(--bgg-bg); border: 1px solid #c0d8ec"
+          ></div>
+          BGG-derived — deterministic from BGG data + curve
+        </div>
+        <div class="legend-item">
+          <div
+            class="legend-swatch"
+            style="background: var(--conf-strong-bg); border: 1px solid #9dcdb5"
+          ></div>
+          Strong confidence
+        </div>
+        <div class="legend-item">
+          <div
+            class="legend-swatch"
+            style="background: var(--conf-moderate-bg); border: 1px solid #d4b87a"
+          ></div>
+          Moderate confidence
+        </div>
+        <div class="legend-item">
+          <div
+            class="legend-swatch"
+            style="background: var(--conf-weak-bg); border: 1px solid #d4987a"
+          ></div>
+          Weak confidence
+        </div>
+        <div class="legend-item">
+          <div
+            class="legend-swatch"
+            style="background: var(--conf-insufficient-bg); border: 1px solid #c4bfb8"
+          ></div>
+          Insufficient — excluded from score
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════
+         SECTION 1: GAME DETAIL — PREDICTED SCORE
+         REQ-PRED-14, REQ-PRED-26, REQ-PRED-11, REQ-PRED-12, REQ-PRED-13
+         ════════════════════════════════════════════ -->
+    <div class="annotation-section">
+      <div class="annotation-label">Section 1 — Game Detail: Unrated Game with Predicted Score</div>
+      <div class="annotation-req">
+        REQ-PRED-14, REQ-PRED-26, REQ-PRED-11, REQ-PRED-12, REQ-PRED-13
+      </div>
+
+      <div class="app-frame">
+        <div class="app-row">
+          <!-- Sidebar -->
+          <aside class="sidebar">
+            <div class="sidebar-brand">
+              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 2px">
+                <svg width="22" height="18" viewBox="0 0 22 18" fill="none">
+                  <rect x="0" y="6" width="5" height="12" rx="1" fill="#b86c1a" />
+                  <rect x="7" y="0" width="5" height="18" rx="1" fill="#e8e4dc" />
+                  <rect x="14" y="4" width="5" height="14" rx="1" fill="#e8e4dc" opacity="0.6" />
+                </svg>
+                <span class="brand-name">Shelf Judge</span>
+              </div>
+              <div class="brand-sub">Board Game Collection</div>
+            </div>
+            <nav class="nav-section">
+              <div class="nav-label">Library</div>
+              <a class="nav-item active" href="#">Collection</a>
+              <a class="nav-item" href="#">Axes</a>
+              <div class="nav-label">Ranking</div>
+              <a class="nav-item" href="#">Tournament</a>
+              <div class="nav-label">Add</div>
+              <a class="nav-item" href="#">Add Game</a>
+              <a class="nav-item" href="#">Import BGG</a>
+            </nav>
+            <!-- Readiness widget in sidebar (REQ-PRED-29) -->
+            <div class="readiness-widget">
+              <div class="readiness-label">Predictions</div>
+              <div class="readiness-stage">Stage 2 — Usable</div>
+              <div class="readiness-bar-track">
+                <div class="readiness-bar-fill"></div>
+              </div>
+              <div class="readiness-count">22 rated · 8 more for Stage 3</div>
+            </div>
+            <div class="sidebar-footer">Last synced: 2h ago</div>
+          </aside>
+
+          <main class="main">
+            <!-- Topbar -->
+            <div class="topbar">
+              <div class="breadcrumb">
+                <a href="#">Collection</a>
+                <span>›</span>
+                <strong>Spirit Island</strong>
+              </div>
+              <div class="topbar-actions">
+                <button class="btn btn-secondary">Remove from Collection</button>
+                <button class="btn btn-primary">Rate This Game</button>
+              </div>
+            </div>
+
+            <div class="content">
+              <!-- Game hero -->
+              <div class="game-hero">
+                <div class="game-cover">🌊</div>
+                <div class="game-hero-info">
+                  <div class="game-hero-title">Spirit Island</div>
+                  <div class="game-hero-meta">
+                    <span>2017 · R. Eric Reuss</span>
+                    <span>1–4 players · 90–120 min</span>
+                    <span style="color: var(--bgg-accent)">BGG ★ 8.5</span>
+                    <span style="color: var(--text-muted)">Weight 4.1/5</span>
+                    <a href="#" class="bgg-link">BGG #1</a>
+                  </div>
+                  <div class="game-hero-tags">
+                    <span class="tag">Cooperative</span>
+                    <span class="tag">Variable Player Powers</span>
+                    <span class="tag">Hand Management</span>
+                    <span class="tag">Fantasy</span>
+                  </div>
+                </div>
+
+                <!-- Predicted score hero (REQ-PRED-14: visually distinct from actual) -->
+                <div class="game-hero-score-section">
+                  <div class="predict-badge">
+                    <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+                      <circle
+                        cx="5"
+                        cy="5"
+                        r="4"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                      />
+                      <circle cx="5" cy="5" r="1.5" />
+                    </svg>
+                    Predicted
+                  </div>
+                  <div class="score-hero-label">Fitness Score</div>
+                  <div class="score-hero-number predicted">
+                    <span class="score-tilde">~</span>7.4
+                  </div>
+                  <div class="score-hero-out-of">out of 10</div>
+                  <div class="score-hero-meta">4 axes predicted · 1 actual</div>
+                  <div
+                    class="score-hero-meta"
+                    style="color: var(--conf-moderate); font-weight: 600; margin-top: 3px"
+                  >
+                    Overall: Moderate confidence
+                  </div>
+                </div>
+              </div>
+
+              <!-- Detail panels -->
+              <div class="detail-panels">
+                <!-- Left panel: breakdown table -->
+                <div class="panel-left">
+                  <div class="panel-section-title">
+                    Score Breakdown
+                    <span
+                      style="
+                        font-size: 10px;
+                        padding: 2px 7px;
+                        border-radius: 10px;
+                        background: var(--predict-bg);
+                        color: var(--predict-accent);
+                        border: 1px solid var(--predict-border);
+                        font-weight: 700;
+                        text-transform: uppercase;
+                        letter-spacing: 0.04em;
+                      "
+                    >
+                      Predicted
+                    </span>
+                  </div>
+
+                  <table class="breakdown-table">
+                    <thead>
+                      <tr>
+                        <th>Axis</th>
+                        <th class="right">Rating</th>
+                        <th class="right">Weight</th>
+                        <th class="right">Contribution</th>
+                        <th class="right">Source</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <!-- Strategic Depth — predicted, strong -->
+                      <tr class="predicted-row">
+                        <td>
+                          Strategic Depth
+                          <span
+                            class="conf-badge conf-strong"
+                            title="5 reference games · avg similarity 0.85 · variance 0.9"
+                          >
+                            ● Strong
+                          </span>
+                        </td>
+                        <td class="right" style="color: var(--predict-accent); font-weight: 700">
+                          8.7
+                        </td>
+                        <td class="right">3×</td>
+                        <td class="right">
+                          <div class="contrib-cell">
+                            <div class="contrib-bar-track">
+                              <div class="contrib-bar-fill predicted" style="width: 38%"></div>
+                            </div>
+                            <div class="contrib-pct">38%</div>
+                          </div>
+                        </td>
+                        <td class="right">
+                          <span class="source-badge source-predicted">Predicted</span>
+                        </td>
+                      </tr>
+
+                      <!-- Confidence breakdown panel for Strategic Depth (Section 2 preview inline) -->
+                      <tr class="predicted-row" style="background: #e2f3f0">
+                        <td colspan="5" style="padding: 0 10px 10px">
+                          <div class="conf-panel">
+                            <div class="conf-panel-title">
+                              Strategic Depth — Confidence Breakdown
+                            </div>
+                            <div class="conf-stats">
+                              <div class="conf-stat">
+                                <div class="conf-stat-value">5</div>
+                                <div class="conf-stat-label">Reference games</div>
+                              </div>
+                              <div class="conf-stat">
+                                <div class="conf-stat-value">0.85</div>
+                                <div class="conf-stat-label">Avg similarity</div>
+                              </div>
+                              <div class="conf-stat">
+                                <div class="conf-stat-value">0.9</div>
+                                <div class="conf-stat-label">Rating variance</div>
+                              </div>
+                            </div>
+                            <div class="ref-games-label">Reference Games</div>
+                            <div class="ref-game-list">
+                              <div class="ref-game-item">
+                                <span class="ref-game-name">Gloomhaven</span>
+                                <div class="sim-bar">
+                                  <div class="sim-bar-fill" style="width: 91%"></div>
+                                </div>
+                                <span class="ref-game-sim">0.91</span>
+                                <span class="ref-game-rating">rated 9</span>
+                              </div>
+                              <div class="ref-game-item">
+                                <span class="ref-game-name">Terraforming Mars</span>
+                                <div class="sim-bar">
+                                  <div class="sim-bar-fill" style="width: 86%"></div>
+                                </div>
+                                <span class="ref-game-sim">0.86</span>
+                                <span class="ref-game-rating">rated 8</span>
+                              </div>
+                              <div class="ref-game-item">
+                                <span class="ref-game-name">Wingspan</span>
+                                <div class="sim-bar">
+                                  <div class="sim-bar-fill" style="width: 79%"></div>
+                                </div>
+                                <span class="ref-game-sim">0.79</span>
+                                <span class="ref-game-rating">rated 8</span>
+                              </div>
+                              <div class="ref-game-item">
+                                <span class="ref-game-name">Ark Nova</span>
+                                <div class="sim-bar">
+                                  <div class="sim-bar-fill" style="width: 82%"></div>
+                                </div>
+                                <span class="ref-game-sim">0.82</span>
+                                <span class="ref-game-rating">rated 9</span>
+                              </div>
+                              <div class="ref-game-item">
+                                <span class="ref-game-name">Pandemic Legacy S1</span>
+                                <div class="sim-bar">
+                                  <div class="sim-bar-fill" style="width: 77%"></div>
+                                </div>
+                                <span class="ref-game-sim">0.77</span>
+                                <span class="ref-game-rating">rated 8</span>
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+
+                      <!-- Wife Will Play It — predicted, moderate -->
+                      <tr class="predicted-row">
+                        <td>
+                          Wife Will Play It
+                          <span
+                            class="conf-badge conf-moderate"
+                            title="3 reference games · avg similarity 0.72 · variance 1.3"
+                          >
+                            ● Moderate
+                          </span>
+                        </td>
+                        <td class="right" style="color: var(--predict-accent); font-weight: 700">
+                          5.2
+                        </td>
+                        <td class="right">2×</td>
+                        <td class="right">
+                          <div class="contrib-cell">
+                            <div class="contrib-bar-track">
+                              <div class="contrib-bar-fill predicted" style="width: 20%"></div>
+                            </div>
+                            <div class="contrib-pct">20%</div>
+                          </div>
+                        </td>
+                        <td class="right">
+                          <span class="source-badge source-predicted">Predicted</span>
+                        </td>
+                      </tr>
+
+                      <!-- Solo Playability — predicted, moderate -->
+                      <tr class="predicted-row">
+                        <td>
+                          Solo Playability
+                          <span
+                            class="conf-badge conf-moderate"
+                            title="2 reference games · avg similarity 0.61"
+                          >
+                            ● Moderate
+                          </span>
+                        </td>
+                        <td class="right" style="color: var(--predict-accent); font-weight: 700">
+                          7.8
+                        </td>
+                        <td class="right">2×</td>
+                        <td class="right">
+                          <div class="contrib-cell">
+                            <div class="contrib-bar-track">
+                              <div class="contrib-bar-fill predicted" style="width: 25%"></div>
+                            </div>
+                            <div class="contrib-pct">25%</div>
+                          </div>
+                        </td>
+                        <td class="right">
+                          <span class="source-badge source-predicted">Predicted</span>
+                        </td>
+                      </tr>
+
+                      <!-- Table Appeal — predicted, weak -->
+                      <tr class="predicted-row">
+                        <td>
+                          Table Appeal
+                          <span
+                            class="conf-badge conf-weak"
+                            title="1 reference game · avg similarity 0.31"
+                          >
+                            ● Weak
+                          </span>
+                        </td>
+                        <td class="right" style="color: var(--conf-weak); font-weight: 700">6.1</td>
+                        <td class="right">1×</td>
+                        <td class="right">
+                          <div class="contrib-cell">
+                            <div class="contrib-bar-track">
+                              <div
+                                class="contrib-bar-fill"
+                                style="width: 10%; background: var(--conf-weak)"
+                              ></div>
+                            </div>
+                            <div class="contrib-pct">10%</div>
+                          </div>
+                        </td>
+                        <td class="right">
+                          <span class="source-badge source-predicted">Predicted</span>
+                        </td>
+                      </tr>
+
+                      <!-- Complexity — BGG-derived, actual -->
+                      <tr class="bgg-row">
+                        <td>
+                          Complexity
+                          <span class="conf-badge conf-actual">Actual</span>
+                        </td>
+                        <td class="right" style="color: var(--bgg-accent); font-weight: 700">
+                          8.2
+                        </td>
+                        <td class="right">2×</td>
+                        <td class="right">
+                          <div class="contrib-cell">
+                            <div class="contrib-bar-track">
+                              <div class="contrib-bar-fill actual" style="width: 27%"></div>
+                            </div>
+                            <div class="contrib-pct">27%</div>
+                          </div>
+                        </td>
+                        <td class="right"><span class="source-badge source-bgg">BGG</span></td>
+                      </tr>
+
+                      <!-- Theme Immersion — insufficient, excluded -->
+                      <tr class="predicted-row insufficient">
+                        <td>
+                          Theme Immersion
+                          <span class="conf-badge conf-insufficient">Insufficient</span>
+                        </td>
+                        <td class="right" style="color: var(--text-muted); font-style: italic">
+                          —
+                        </td>
+                        <td class="right" style="color: var(--text-muted)">2×</td>
+                        <td class="right">
+                          <div class="contrib-cell">
+                            <div class="contrib-bar-track">
+                              <div class="contrib-bar-fill insufficient" style="width: 0%"></div>
+                            </div>
+                            <div class="contrib-pct" style="color: var(--text-muted)">excl.</div>
+                          </div>
+                        </td>
+                        <td class="right">
+                          <span class="source-badge source-predicted">Predicted</span>
+                        </td>
+                      </tr>
+
+                      <!-- Total -->
+                      <tr class="total-row">
+                        <td>
+                          <span class="score-tilde" style="font-size: 14px; opacity: 0.7">~</span>
+                          Predicted Fitness
+                        </td>
+                        <td
+                          class="right"
+                          colspan="3"
+                          style="color: var(--text-muted); font-size: 12px; font-weight: 400"
+                        >
+                          5 of 6 axes contributing · 1 excluded (insufficient)
+                        </td>
+                        <td class="right score-total">7.4</td>
+                      </tr>
+                    </tbody>
+                  </table>
+
+                  <!-- Tournament divergence signal (Section 3) -->
+                  <!-- REQ-PRED-16, REQ-PRED-17, REQ-PRED-28 -->
+                  <div class="tension-panel">
+                    <div class="tension-header">
+                      <span class="tension-icon">⚡</span>
+                      <span class="tension-title">Revealed Preference Tension</span>
+                    </div>
+                    <div class="tension-body">
+                      <div class="tension-signal">
+                        <div class="tension-signal-label">Axis Prediction</div>
+                        <div class="tension-signal-value axis">7.4</div>
+                        <div class="tension-signal-sublabel">What your ratings predict</div>
+                      </div>
+                      <div class="tension-vs">vs</div>
+                      <div class="tension-signal">
+                        <div class="tension-signal-label">Tournament Pattern</div>
+                        <div class="tension-signal-value tourney">5.8</div>
+                        <div class="tension-signal-sublabel">Similar games in your matches</div>
+                      </div>
+                    </div>
+                    <div class="tension-explanation">
+                      Your axis ratings predict <strong>7.4</strong> for games like this. In
+                      tournament matchups, similar cooperative games (Gloomhaven, Pandemic Legacy,
+                      Arkham Horror) average <strong>5.8</strong>. You may rate complexity highly
+                      but choose lighter games when playing. <br /><br />
+                      <em>This is context, not a correction. Both numbers are yours.</em>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Right panel: rating form with prediction hints -->
+                <div class="panel-right">
+                  <div class="panel-section-title">Rate This Game</div>
+
+                  <div class="predict-callout">
+                    <div class="predict-callout-title">
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 12 12"
+                        fill="currentColor"
+                        style="opacity: 0.7"
+                      >
+                        <circle
+                          cx="6"
+                          cy="6"
+                          r="5"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.5"
+                        />
+                        <circle cx="6" cy="6" r="2" />
+                      </svg>
+                      Predicted scores shown below
+                    </div>
+                    <div class="predict-callout-body">
+                      Your ratings override these predictions. Dashed fields show the k-NN estimate
+                      based on similar games you've rated. Rate any axis to replace its prediction
+                      with your actual score.
+                    </div>
+                  </div>
+
+                  <div class="rating-form">
+                    <!-- Strategic Depth — has strong prediction hint -->
+                    <div class="rating-field">
+                      <div class="rating-field-header">
+                        <div class="rating-field-name">
+                          Strategic Depth
+                          <span class="conf-badge conf-strong" style="margin-left: 5px"
+                            >Strong</span
+                          >
+                        </div>
+                        <div class="rating-field-weight">weight 3×</div>
+                      </div>
+                      <div class="rating-field-desc">
+                        How deep and meaningful are the decisions?
+                      </div>
+                      <div class="rating-predict-hint">
+                        <span class="hint-label">Predicted from 5 similar games</span>
+                        <span class="hint-value" style="color: var(--predict-accent)">~ 8.7</span>
+                        <span class="rate-link">Rate →</span>
+                      </div>
+                    </div>
+
+                    <!-- Wife Will Play It — moderate prediction -->
+                    <div class="rating-field">
+                      <div class="rating-field-header">
+                        <div class="rating-field-name">
+                          Wife Will Play It
+                          <span class="conf-badge conf-moderate" style="margin-left: 5px"
+                            >Moderate</span
+                          >
+                        </div>
+                        <div class="rating-field-weight">weight 2×</div>
+                      </div>
+                      <div class="rating-field-desc">Would Meagan actually want to play this?</div>
+                      <div class="rating-predict-hint">
+                        <span class="hint-label">Predicted from Azul, Patchwork, Kingdomino</span>
+                        <span class="hint-value" style="color: var(--predict-accent)">~ 5.2</span>
+                        <span class="rate-link">Rate →</span>
+                      </div>
+                    </div>
+
+                    <!-- Complexity — BGG auto, actual -->
+                    <div class="rating-field">
+                      <div class="rating-field-header">
+                        <div class="rating-field-name">
+                          Complexity
+                          <span
+                            style="
+                              font-size: 9px;
+                              font-weight: 700;
+                              color: var(--bgg-accent);
+                              background: var(--bgg-bg);
+                              padding: 1px 5px;
+                              border-radius: 3px;
+                              margin-left: 6px;
+                              text-transform: uppercase;
+                              letter-spacing: 0.04em;
+                              vertical-align: middle;
+                            "
+                            >BGG</span
+                          >
+                        </div>
+                        <div class="rating-field-weight">weight 2×</div>
+                      </div>
+                      <div class="bgg-auto-value">
+                        <span>Weight 4.1 / 5</span>
+                        <span class="value">→ 8.2</span>
+                        <span class="override-link">Override</span>
+                      </div>
+                    </div>
+
+                    <!-- Theme Immersion — insufficient, needs data -->
+                    <div class="rating-field">
+                      <div class="rating-field-header">
+                        <div class="rating-field-name">
+                          Theme Immersion
+                          <span class="conf-badge conf-insufficient" style="margin-left: 5px"
+                            >Insufficient data</span
+                          >
+                        </div>
+                        <div class="rating-field-weight">weight 2×</div>
+                      </div>
+                      <div class="rating-field-desc">How well does the theme come through?</div>
+                      <div
+                        class="rating-predict-hint"
+                        style="background: var(--conf-insufficient-bg); border-color: #c4bfb8"
+                      >
+                        <span class="hint-label" style="color: var(--text-muted)"
+                          >No similar games rated on this axis</span
+                        >
+                        <span class="rate-link">Rate →</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <!-- /detail-panels -->
+            </div>
+            <!-- /content -->
+          </main>
+        </div>
+        <!-- /app-row -->
+      </div>
+      <!-- /app-frame -->
+      <div class="annotation-note">
+        Predicted score hero uses teal (#1a706a) vs amber (#b86c1a) for actual — unambiguous at a
+        glance (REQ-PRED-14). Tilde prefix reinforces estimated nature. Insufficient axes shown but
+        labeled "excl." — transparent about what's missing. Confidence breakdown panel shown
+        expanded for Strategic Depth (see Section 2 for standalone treatment).
+      </div>
+    </div>
+
+    <div class="section-gap"></div>
+
+    <!-- ════════════════════════════════════════════
+         SECTION 2: CONFIDENCE BREAKDOWN (standalone popover)
+         REQ-PRED-12, REQ-PRED-13, REQ-PRED-26
+         ════════════════════════════════════════════ -->
+    <div class="annotation-section">
+      <div class="annotation-label">Section 2 — Confidence Breakdown (popover, expanded view)</div>
+      <div class="annotation-req">
+        REQ-PRED-12, REQ-PRED-13 · Clicking a confidence badge reveals this panel
+      </div>
+
+      <div class="app-frame" style="max-width: 480px; padding: 0">
+        <!-- Standalone confidence panel shown floating over the breakdown table -->
+        <div
+          style="
+            background: var(--bg-surface);
+            padding: 20px;
+            border-bottom: 1px solid var(--border);
+          "
+        >
+          <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 4px">
+            Spirit Island · Wife Will Play It axis
+          </div>
+          <div
+            style="
+              font-size: 15px;
+              font-weight: 700;
+              color: var(--predict-accent);
+              display: flex;
+              align-items: center;
+              gap: 8px;
+            "
+          >
+            ~ 5.2 predicted
+            <span class="conf-badge conf-moderate">● Moderate confidence</span>
+          </div>
+        </div>
+        <div style="padding: 20px">
+          <div class="conf-panel" style="background: white; border-color: var(--predict-border)">
+            <div class="conf-panel-title">How this prediction was made</div>
+            <div class="conf-stats">
+              <div class="conf-stat">
+                <div class="conf-stat-value">3</div>
+                <div class="conf-stat-label">Reference games</div>
+              </div>
+              <div class="conf-stat">
+                <div class="conf-stat-value">0.72</div>
+                <div class="conf-stat-label">Avg similarity</div>
+              </div>
+              <div class="conf-stat">
+                <div class="conf-stat-value">1.3</div>
+                <div class="conf-stat-label">Rating variance</div>
+              </div>
+            </div>
+            <div
+              style="
+                font-size: 11px;
+                color: var(--text-muted);
+                margin-bottom: 10px;
+                line-height: 1.5;
+              "
+            >
+              Confidence is <strong style="color: var(--conf-moderate)">moderate</strong>: 3
+              reference games (minimum 3 met), average similarity 0.72 (threshold 0.4 met), variance
+              1.3 (threshold 3.0 met). Would need 5+ games at avg similarity &gt;0.7 and variance
+              &lt;1.5 for <strong style="color: var(--conf-strong)">strong</strong>.
+            </div>
+            <div class="ref-games-label">Reference Games · Wife Will Play It ratings</div>
+            <div class="ref-game-list">
+              <div class="ref-game-item">
+                <span class="ref-game-name">Azul</span>
+                <div class="sim-bar"><div class="sim-bar-fill" style="width: 87%"></div></div>
+                <span class="ref-game-sim">0.87</span>
+                <span class="ref-game-rating">rated 6</span>
+              </div>
+              <div class="ref-game-item">
+                <span class="ref-game-name">Patchwork</span>
+                <div class="sim-bar"><div class="sim-bar-fill" style="width: 81%"></div></div>
+                <span class="ref-game-sim">0.81</span>
+                <span class="ref-game-rating">rated 5</span>
+              </div>
+              <div class="ref-game-item">
+                <span class="ref-game-name">Kingdomino</span>
+                <div class="sim-bar"><div class="sim-bar-fill" style="width: 51%"></div></div>
+                <span class="ref-game-sim">0.51</span>
+                <span class="ref-game-rating">rated 4</span>
+              </div>
+            </div>
+            <div
+              style="
+                margin-top: 12px;
+                padding-top: 10px;
+                border-top: 1px solid var(--predict-border);
+                font-size: 11px;
+                color: var(--text-muted);
+              "
+            >
+              Weighted average: (6 × 0.87 + 5 × 0.81 + 4 × 0.51) / (0.87 + 0.81 + 0.51) =
+              <strong style="color: var(--predict-accent)">5.22 → 5.2</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="annotation-note">
+        REQ-PRED-12: each predicted axis includes game ID, name, and similarity score. REQ-PRED-13:
+        prediction meta shows count/avg/variance. The weighted average formula is shown explicitly —
+        satisfies the "transparent derivation" vision principle.
+      </div>
+    </div>
+
+    <div class="section-gap"></div>
+
+    <!-- ════════════════════════════════════════════
+         SECTION 3: TOURNAMENT DIVERGENCE SIGNAL (standalone)
+         REQ-PRED-16, REQ-PRED-17, REQ-PRED-28
+         ════════════════════════════════════════════ -->
+    <div class="annotation-section">
+      <div class="annotation-label">Section 3 — Tournament Divergence Signal (isolated view)</div>
+      <div class="annotation-req">
+        REQ-PRED-16, REQ-PRED-17, REQ-PRED-28 · Only appears when delta &gt; 1.0 point (REQ-PRED-16)
+      </div>
+
+      <div class="app-frame" style="max-width: 640px">
+        <div style="padding: 24px 28px">
+          <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 4px">
+            Spirit Island
+          </div>
+          <div
+            style="
+              font-size: 14px;
+              font-weight: 700;
+              color: var(--text-primary);
+              margin-bottom: 20px;
+            "
+          >
+            Predicted Fitness: ~7.4
+          </div>
+          <div class="tension-panel" style="margin-top: 0">
+            <div class="tension-header">
+              <span class="tension-icon">⚡</span>
+              <span class="tension-title">Revealed Preference Tension</span>
+              <span style="margin-left: auto; font-size: 11px; color: var(--text-muted)"
+                >Δ 1.6 points</span
+              >
+            </div>
+            <div class="tension-body">
+              <div class="tension-signal">
+                <div class="tension-signal-label">Axis Prediction</div>
+                <div class="tension-signal-value axis">7.4</div>
+                <div class="tension-signal-sublabel">Based on your ratings of similar games</div>
+              </div>
+              <div class="tension-vs">vs</div>
+              <div class="tension-signal">
+                <div class="tension-signal-label">Tournament Pattern</div>
+                <div class="tension-signal-value tourney">5.8</div>
+                <div class="tension-signal-sublabel">Avg of 4 similar games in your matches</div>
+              </div>
+            </div>
+            <div style="margin-bottom: 12px">
+              <div
+                style="
+                  font-size: 10px;
+                  font-weight: 600;
+                  text-transform: uppercase;
+                  letter-spacing: 0.06em;
+                  color: var(--text-muted);
+                  margin-bottom: 6px;
+                "
+              >
+                Tournament Neighbors Used
+              </div>
+              <div style="display: flex; flex-wrap: wrap; gap: 6px">
+                <span
+                  style="
+                    font-size: 11px;
+                    background: rgba(255, 255, 255, 0.7);
+                    border: 1px solid #c0d8ec;
+                    border-radius: 4px;
+                    padding: 3px 8px;
+                    color: var(--bgg-accent);
+                  "
+                  >Gloomhaven · 6.1</span
+                >
+                <span
+                  style="
+                    font-size: 11px;
+                    background: rgba(255, 255, 255, 0.7);
+                    border: 1px solid #c0d8ec;
+                    border-radius: 4px;
+                    padding: 3px 8px;
+                    color: var(--bgg-accent);
+                  "
+                  >Pandemic Legacy S1 · 5.9</span
+                >
+                <span
+                  style="
+                    font-size: 11px;
+                    background: rgba(255, 255, 255, 0.7);
+                    border: 1px solid #c0d8ec;
+                    border-radius: 4px;
+                    padding: 3px 8px;
+                    color: var(--bgg-accent);
+                  "
+                  >Arkham Horror LCG · 5.6</span
+                >
+                <span
+                  style="
+                    font-size: 11px;
+                    background: rgba(255, 255, 255, 0.7);
+                    border: 1px solid #c0d8ec;
+                    border-radius: 4px;
+                    padding: 3px 8px;
+                    color: var(--bgg-accent);
+                  "
+                  >Robinson Crusoe · 5.6</span
+                >
+              </div>
+            </div>
+            <div class="tension-explanation">
+              Your axis ratings predict <strong>7.4</strong> for games like Spirit Island. When
+              these cooperative, high-complexity games appear in your tournament matchups, similar
+              games average <strong>5.8</strong> — you tend to pick lighter opponents. <br /><br />
+              <em style="color: var(--text-muted)">
+                The tournament signal is contextual, not a correction (REQ-PRED-17). Your predicted
+                score remains 7.4. This gap may mean Spirit Island would surprise you, or that your
+                axis weights don't fully capture your play preferences.
+              </em>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="annotation-note">
+        Teal for axis prediction, slate blue for tournament pattern — consistent with the existing
+        "BGG provenance = slate blue" convention. Tournament data shares that origin
+        (community/match data). Delta shown in corner (Δ 1.6). Note text clarifies: contextual, not
+        a correction.
+      </div>
+    </div>
+
+    <div class="section-gap"></div>
+
+    <!-- ════════════════════════════════════════════
+         SECTION 4: COLLECTION LIST WITH PREDICTION COLUMNS
+         REQ-PRED-24, REQ-PRED-27, REQ-PRED-14
+         ════════════════════════════════════════════ -->
+    <div class="annotation-section">
+      <div class="annotation-label">Section 4 — Collection List with Predicted Scores</div>
+      <div class="annotation-req">
+        REQ-PRED-24, REQ-PRED-27, REQ-PRED-14 · Sorted by predicted fitness (teal column header)
+      </div>
+
+      <div class="app-frame" style="min-height: 520px">
+        <div class="app-row" style="height: 520px">
+          <aside class="sidebar" style="flex-shrink: 0">
+            <div class="sidebar-brand">
+              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 2px">
+                <svg width="22" height="18" viewBox="0 0 22 18" fill="none">
+                  <rect x="0" y="6" width="5" height="12" rx="1" fill="#b86c1a" />
+                  <rect x="7" y="0" width="5" height="18" rx="1" fill="#e8e4dc" />
+                  <rect x="14" y="4" width="5" height="14" rx="1" fill="#e8e4dc" opacity="0.6" />
+                </svg>
+                <span class="brand-name">Shelf Judge</span>
+              </div>
+              <div class="brand-sub">Board Game Collection</div>
+            </div>
+            <nav class="nav-section">
+              <div class="nav-label">Library</div>
+              <a class="nav-item active" href="#">Collection</a>
+              <a class="nav-item" href="#">Axes</a>
+              <div class="nav-label">Ranking</div>
+              <a class="nav-item" href="#">Tournament</a>
+              <div class="nav-label">Add</div>
+              <a class="nav-item" href="#">Add Game</a>
+              <a class="nav-item" href="#">Import BGG</a>
+            </nav>
+            <div class="readiness-widget">
+              <div class="readiness-label">Predictions</div>
+              <div class="readiness-stage">Stage 2 — Usable</div>
+              <div class="readiness-bar-track"><div class="readiness-bar-fill"></div></div>
+              <div class="readiness-count">22 rated · 8 more for Stage 3</div>
+            </div>
+            <div class="sidebar-footer">Last synced: 2h ago</div>
+          </aside>
+
+          <main class="main" style="overflow: hidden">
+            <!-- Topbar with sort -->
+            <div class="topbar">
+              <div class="breadcrumb"><strong>Collection</strong></div>
+              <div
+                class="collection-topbar"
+                style="
+                  height: auto;
+                  padding: 0;
+                  background: none;
+                  border: none;
+                  gap: 10px;
+                  margin-left: auto;
+                "
+              >
+                <input class="search-input" placeholder="Search…" value="" style="width: 180px" />
+                <div class="sort-control">
+                  <span class="sort-label">Sort</span>
+                  <span class="sort-value" style="color: var(--predict-accent)"
+                    >Predicted Fitness</span
+                  >
+                  <span style="font-size: 11px; color: var(--text-muted)">↓</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Stats strip -->
+            <div class="collection-stats">
+              <span>27 games</span>
+              <span style="color: var(--predict-accent)">7 with predicted scores</span>
+              <div class="pred-toggle">
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 12 12"
+                  fill="currentColor"
+                  style="opacity: 0.8"
+                >
+                  <circle
+                    cx="6"
+                    cy="6"
+                    r="5"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                  />
+                  <circle cx="6" cy="6" r="2" />
+                </svg>
+                Predictions on
+              </div>
+            </div>
+
+            <!-- Collection table (scrollable area) -->
+            <div style="flex: 1; overflow-y: auto">
+              <table class="coll-table">
+                <thead>
+                  <tr>
+                    <th style="width: 38%">Game</th>
+                    <th class="right sort-active" style="width: 14%; color: var(--predict-accent)">
+                      Score ↓
+                      <div
+                        style="
+                          font-size: 9px;
+                          font-weight: 500;
+                          color: var(--predict-accent);
+                          opacity: 0.7;
+                          letter-spacing: 0;
+                        "
+                      >
+                        Pred. Fitness
+                      </div>
+                    </th>
+                    <th class="right" style="width: 14%">Confidence</th>
+                    <th class="right" style="width: 12%">BGG ★</th>
+                    <th class="right" style="width: 11%">Players</th>
+                    <th class="right" style="width: 11%">Added</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Gloomhaven — actual score -->
+                  <tr>
+                    <td class="game-name-cell">Gloomhaven <span class="game-year">2017</span></td>
+                    <td class="right"><span class="score-actual">8.8</span></td>
+                    <td class="right">
+                      <span class="conf-badge conf-actual" style="font-size: 10px">Actual</span>
+                    </td>
+                    <td class="right" style="color: var(--bgg-accent)">8.6</td>
+                    <td class="right" style="color: var(--text-muted)">1–4</td>
+                    <td class="right" style="color: var(--text-muted)">Jan 15</td>
+                  </tr>
+
+                  <!-- Azul — actual score -->
+                  <tr>
+                    <td class="game-name-cell">Azul <span class="game-year">2017</span></td>
+                    <td class="right"><span class="score-actual">8.2</span></td>
+                    <td class="right">
+                      <span class="conf-badge conf-actual" style="font-size: 10px">Actual</span>
+                    </td>
+                    <td class="right" style="color: var(--bgg-accent)">7.9</td>
+                    <td class="right" style="color: var(--text-muted)">2–4</td>
+                    <td class="right" style="color: var(--text-muted)">Mar 2</td>
+                  </tr>
+
+                  <!-- Spirit Island — predicted, sorted correctly among actuals -->
+                  <tr style="background: rgba(26, 112, 106, 0.04)">
+                    <td class="game-name-cell">
+                      Spirit Island <span class="game-year">2017</span>
+                      <span style="font-size: 10px; color: var(--text-muted); font-weight: 400">
+                        · not rated</span
+                      >
+                    </td>
+                    <td class="right">
+                      <span class="score-predicted">
+                        <span class="score-predicted-tilde">~</span>7.4
+                      </span>
+                    </td>
+                    <td class="right">
+                      <span class="conf-badge conf-moderate" style="font-size: 10px">Moderate</span>
+                    </td>
+                    <td class="right" style="color: var(--bgg-accent)">8.5</td>
+                    <td class="right" style="color: var(--text-muted)">1–4</td>
+                    <td class="right" style="color: var(--text-muted)">Feb 8</td>
+                  </tr>
+
+                  <!-- Wingspan — actual score -->
+                  <tr>
+                    <td class="game-name-cell">Wingspan <span class="game-year">2019</span></td>
+                    <td class="right"><span class="score-actual">7.9</span></td>
+                    <td class="right">
+                      <span class="conf-badge conf-actual" style="font-size: 10px">Actual</span>
+                    </td>
+                    <td class="right" style="color: var(--bgg-accent)">8.2</td>
+                    <td class="right" style="color: var(--text-muted)">1–5</td>
+                    <td class="right" style="color: var(--text-muted)">Oct 30</td>
+                  </tr>
+
+                  <!-- Flamecraft — predicted, weak -->
+                  <tr style="background: rgba(26, 112, 106, 0.04)">
+                    <td class="game-name-cell">
+                      Flamecraft <span class="game-year">2022</span>
+                      <span style="font-size: 10px; color: var(--text-muted); font-weight: 400">
+                        · not rated</span
+                      >
+                    </td>
+                    <td class="right">
+                      <span class="score-predicted">
+                        <span class="score-predicted-tilde">~</span>7.2
+                      </span>
+                    </td>
+                    <td class="right">
+                      <span class="conf-badge conf-weak" style="font-size: 10px">Weak</span>
+                    </td>
+                    <td class="right" style="color: var(--bgg-accent)">7.5</td>
+                    <td class="right" style="color: var(--text-muted)">1–5</td>
+                    <td class="right" style="color: var(--text-muted)">Apr 2</td>
+                  </tr>
+
+                  <!-- Patchwork — actual score -->
+                  <tr>
+                    <td class="game-name-cell">Patchwork <span class="game-year">2014</span></td>
+                    <td class="right"><span class="score-actual">7.1</span></td>
+                    <td class="right">
+                      <span class="conf-badge conf-actual" style="font-size: 10px">Actual</span>
+                    </td>
+                    <td class="right" style="color: var(--bgg-accent)">7.8</td>
+                    <td class="right" style="color: var(--text-muted)">2</td>
+                    <td class="right" style="color: var(--text-muted)">Nov 14</td>
+                  </tr>
+
+                  <!-- 7 Wonders — actual score -->
+                  <tr>
+                    <td class="game-name-cell">7 Wonders <span class="game-year">2010</span></td>
+                    <td class="right"><span class="score-actual">6.8</span></td>
+                    <td class="right">
+                      <span class="conf-badge conf-actual" style="font-size: 10px">Actual</span>
+                    </td>
+                    <td class="right" style="color: var(--bgg-accent)">7.7</td>
+                    <td class="right" style="color: var(--text-muted)">2–7</td>
+                    <td class="right" style="color: var(--text-muted)">Dec 5</td>
+                  </tr>
+
+                  <!-- Sushi Go Party — predicted, strong -->
+                  <tr style="background: rgba(26, 112, 106, 0.04)">
+                    <td class="game-name-cell">
+                      Sushi Go Party! <span class="game-year">2016</span>
+                      <span style="font-size: 10px; color: var(--text-muted); font-weight: 400">
+                        · not rated</span
+                      >
+                    </td>
+                    <td class="right">
+                      <span class="score-predicted">
+                        <span class="score-predicted-tilde">~</span>6.5
+                      </span>
+                    </td>
+                    <td class="right">
+                      <span class="conf-badge conf-strong" style="font-size: 10px">Strong</span>
+                    </td>
+                    <td class="right" style="color: var(--bgg-accent)">7.4</td>
+                    <td class="right" style="color: var(--text-muted)">2–8</td>
+                    <td class="right" style="color: var(--text-muted)">Mar 28</td>
+                  </tr>
+
+                  <!-- Terraforming Mars — actual -->
+                  <tr>
+                    <td class="game-name-cell">
+                      Terraforming Mars <span class="game-year">2016</span>
+                    </td>
+                    <td class="right"><span class="score-actual">6.3</span></td>
+                    <td class="right">
+                      <span class="conf-badge conf-actual" style="font-size: 10px">Actual</span>
+                    </td>
+                    <td class="right" style="color: var(--bgg-accent)">8.4</td>
+                    <td class="right" style="color: var(--text-muted)">1–5</td>
+                    <td class="right" style="color: var(--text-muted)">Feb 20</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </main>
+        </div>
+      </div>
+      <div class="annotation-note">
+        Predicted rows have a faint teal wash (rgba(26,112,106,0.04)) and use ~ prefix. Confidence
+        column makes the distinction explicit without requiring the user to click through. Sort
+        treats ~7.4 the same as 7.4 for ordering (REQ-PRED-27) while the visual language prevents
+        confusion. "Predictions on" toggle in stats strip (REQ-PRED-24 optional param).
+      </div>
+    </div>
+
+    <div class="section-gap"></div>
+
+    <!-- ════════════════════════════════════════════
+         SECTION 5: "IMPROVE PREDICTIONS" PROMPT
+         REQ-PRED-20, REQ-PRED-29
+         ════════════════════════════════════════════ -->
+    <div class="annotation-section">
+      <div class="annotation-label">
+        Section 5 — Prediction Readiness &amp; "Improve Predictions" Prompt
+      </div>
+      <div class="annotation-req">
+        REQ-PRED-19, REQ-PRED-20, REQ-PRED-29 · Linked from sidebar widget at Stages 0 and 1;
+        visible at all stages
+      </div>
+
+      <div class="app-frame">
+        <div class="app-row" style="min-height: 680px">
+          <aside class="sidebar">
+            <div class="sidebar-brand">
+              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 2px">
+                <svg width="22" height="18" viewBox="0 0 22 18" fill="none">
+                  <rect x="0" y="6" width="5" height="12" rx="1" fill="#b86c1a" />
+                  <rect x="7" y="0" width="5" height="18" rx="1" fill="#e8e4dc" />
+                  <rect x="14" y="4" width="5" height="14" rx="1" fill="#e8e4dc" opacity="0.6" />
+                </svg>
+                <span class="brand-name">Shelf Judge</span>
+              </div>
+              <div class="brand-sub">Board Game Collection</div>
+            </div>
+            <nav class="nav-section">
+              <div class="nav-label">Library</div>
+              <a class="nav-item" href="#">Collection</a>
+              <a class="nav-item" href="#">Axes</a>
+              <div class="nav-label">Ranking</div>
+              <a class="nav-item" href="#">Tournament</a>
+              <div class="nav-label">Predictions</div>
+              <a class="nav-item active" href="#">Readiness</a>
+              <div class="nav-label">Add</div>
+              <a class="nav-item" href="#">Add Game</a>
+            </nav>
+            <div class="readiness-widget">
+              <div class="readiness-label">Predictions</div>
+              <div class="readiness-stage">Stage 2 — Usable</div>
+              <div class="readiness-bar-track"><div class="readiness-bar-fill"></div></div>
+              <div class="readiness-count">22 rated · 8 more for Stage 3</div>
+            </div>
+            <div class="sidebar-footer">Last synced: 2h ago</div>
+          </aside>
+
+          <main class="main">
+            <div class="topbar">
+              <div class="breadcrumb"><strong>Prediction Readiness</strong></div>
+            </div>
+            <div class="content">
+              <div class="readiness-page">
+                <!-- Stage banner -->
+                <div class="readiness-stage-banner">
+                  <div class="readiness-stage-icon">📊</div>
+                  <div class="readiness-stage-info">
+                    <div class="readiness-stage-name">Stage 2 — Usable Predictions</div>
+                    <div class="readiness-stage-desc">
+                      Strong-confidence predictions are reliable. Moderate and weak confidence
+                      predictions are available but should be treated as directional, not
+                      definitive. At Stage 3 (30 rated games), strong confidence becomes the norm.
+                    </div>
+                  </div>
+                  <div class="readiness-progress">
+                    <div class="readiness-progress-label">Toward Stage 3</div>
+                    <div class="readiness-progress-bar">
+                      <div class="readiness-progress-fill"></div>
+                    </div>
+                    <div class="readiness-progress-counts">22 / 30 rated</div>
+                  </div>
+                </div>
+
+                <!-- Stage explanation strip (all four stages shown for reference) -->
+                <div
+                  style="
+                    display: grid;
+                    grid-template-columns: repeat(4, 1fr);
+                    gap: 10px;
+                    margin-bottom: 24px;
+                  "
+                >
+                  <div
+                    style="
+                      background: var(--conf-insufficient-bg);
+                      border: 1px solid #c4bfb8;
+                      border-radius: 7px;
+                      padding: 12px;
+                      opacity: 0.6;
+                    "
+                  >
+                    <div
+                      style="
+                        font-size: 10px;
+                        font-weight: 700;
+                        text-transform: uppercase;
+                        letter-spacing: 0.08em;
+                        color: var(--text-muted);
+                        margin-bottom: 4px;
+                      "
+                    >
+                      Stage 0
+                    </div>
+                    <div
+                      style="
+                        font-size: 12px;
+                        font-weight: 600;
+                        color: var(--text-primary);
+                        margin-bottom: 3px;
+                      "
+                    >
+                      &lt; 5 rated
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-muted)">
+                      No personal axis predictions. BGG-derived axes only.
+                    </div>
+                  </div>
+                  <div
+                    style="
+                      background: var(--conf-weak-bg);
+                      border: 1px solid #d4987a;
+                      border-radius: 7px;
+                      padding: 12px;
+                      opacity: 0.6;
+                    "
+                  >
+                    <div
+                      style="
+                        font-size: 10px;
+                        font-weight: 700;
+                        text-transform: uppercase;
+                        letter-spacing: 0.08em;
+                        color: var(--conf-weak);
+                        margin-bottom: 4px;
+                      "
+                    >
+                      Stage 1
+                    </div>
+                    <div
+                      style="
+                        font-size: 12px;
+                        font-weight: 600;
+                        color: var(--text-primary);
+                        margin-bottom: 3px;
+                      "
+                    >
+                      5–14 rated
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-muted)">
+                      Experimental predictions. All marked as such.
+                    </div>
+                  </div>
+                  <div
+                    style="
+                      background: var(--predict-bg);
+                      border: 2px solid var(--predict-accent);
+                      border-radius: 7px;
+                      padding: 12px;
+                    "
+                  >
+                    <div
+                      style="
+                        font-size: 10px;
+                        font-weight: 700;
+                        text-transform: uppercase;
+                        letter-spacing: 0.08em;
+                        color: var(--predict-accent);
+                        margin-bottom: 4px;
+                      "
+                    >
+                      Stage 2 ← You
+                    </div>
+                    <div
+                      style="
+                        font-size: 12px;
+                        font-weight: 600;
+                        color: var(--text-primary);
+                        margin-bottom: 3px;
+                      "
+                    >
+                      15–29 rated
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-secondary)">
+                      Usable. Strong-confidence predictions are unlocked.
+                    </div>
+                  </div>
+                  <div
+                    style="
+                      background: var(--conf-strong-bg);
+                      border: 1px solid #9dcdb5;
+                      border-radius: 7px;
+                      padding: 12px;
+                      opacity: 0.7;
+                    "
+                  >
+                    <div
+                      style="
+                        font-size: 10px;
+                        font-weight: 700;
+                        text-transform: uppercase;
+                        letter-spacing: 0.08em;
+                        color: var(--conf-strong);
+                        margin-bottom: 4px;
+                      "
+                    >
+                      Stage 3
+                    </div>
+                    <div
+                      style="
+                        font-size: 12px;
+                        font-weight: 600;
+                        color: var(--text-primary);
+                        margin-bottom: 3px;
+                      "
+                    >
+                      30+ rated
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-muted)">
+                      Reliable. Strong confidence expected to be common.
+                    </div>
+                  </div>
+                </div>
+
+                <hr class="section-divider" />
+
+                <!-- Weak axes section -->
+                <div class="panel-section-title" style="margin-bottom: 14px">
+                  Axes with Thin Coverage
+                  <span
+                    style="
+                      font-size: 11px;
+                      font-weight: 400;
+                      text-transform: none;
+                      letter-spacing: 0;
+                      color: var(--text-muted);
+                    "
+                    >— rate these to strengthen predictions</span
+                  >
+                </div>
+                <div class="improve-grid">
+                  <div class="improve-card">
+                    <div class="improve-card-header">
+                      <div class="improve-card-icon">📋</div>
+                      <div>
+                        <div class="improve-card-title">Coverage per axis</div>
+                        <div class="improve-card-subtitle">
+                          How many rated games contribute to each axis's predictions
+                        </div>
+                      </div>
+                    </div>
+                    <div class="improve-axis-list">
+                      <div class="improve-axis-item">
+                        <span style="width: 110px; font-size: 12px">Theme Immersion</span>
+                        <div class="improve-axis-bar">
+                          <div class="improve-axis-fill low"></div>
+                        </div>
+                        <span class="improve-axis-count">2 games</span>
+                      </div>
+                      <div class="improve-axis-item">
+                        <span style="width: 110px; font-size: 12px">Table Appeal</span>
+                        <div class="improve-axis-bar">
+                          <div class="improve-axis-fill low"></div>
+                        </div>
+                        <span class="improve-axis-count">3 games</span>
+                      </div>
+                      <div class="improve-axis-item">
+                        <span style="width: 110px; font-size: 12px">Wife Will Play It</span>
+                        <div class="improve-axis-bar">
+                          <div class="improve-axis-fill medium"></div>
+                        </div>
+                        <span class="improve-axis-count">11 games</span>
+                      </div>
+                      <div class="improve-axis-item">
+                        <span style="width: 110px; font-size: 12px">Solo Playability</span>
+                        <div class="improve-axis-bar">
+                          <div class="improve-axis-fill medium"></div>
+                        </div>
+                        <span class="improve-axis-count">14 games</span>
+                      </div>
+                      <div class="improve-axis-item">
+                        <span style="width: 110px; font-size: 12px">Strategic Depth</span>
+                        <div class="improve-axis-bar">
+                          <div class="improve-axis-fill high"></div>
+                        </div>
+                        <span class="improve-axis-count">19 games</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="improve-card">
+                    <div class="improve-card-header">
+                      <div class="improve-card-icon">🗂</div>
+                      <div>
+                        <div class="improve-card-title">Underrepresented mechanic clusters</div>
+                        <div class="improve-card-subtitle">
+                          Game types where predictions are weakest
+                        </div>
+                      </div>
+                    </div>
+                    <div class="improve-card-body">
+                      Your collection is weighted toward engine-builders and tile-layers. These
+                      mechanic clusters have fewer rated examples, making predictions less reliable
+                      for unrated games in those categories:
+                    </div>
+                    <div style="margin-top: 10px; display: flex; flex-direction: column; gap: 5px">
+                      <div style="display: flex; align-items: center; gap: 8px; font-size: 12px">
+                        <div class="conf-pip weak"></div>
+                        <span style="flex: 1">Deck-building / Deckstruction</span>
+                        <span style="color: var(--text-muted); font-size: 11px">1 rated</span>
+                      </div>
+                      <div style="display: flex; align-items: center; gap: 8px; font-size: 12px">
+                        <div class="conf-pip weak"></div>
+                        <span style="flex: 1">Wargame / Area Control</span>
+                        <span style="color: var(--text-muted); font-size: 11px">2 rated</span>
+                      </div>
+                      <div style="display: flex; align-items: center; gap: 8px; font-size: 12px">
+                        <div class="conf-pip moderate"></div>
+                        <span style="flex: 1">Deduction / Traitor mechanics</span>
+                        <span style="color: var(--text-muted); font-size: 11px">4 rated</span>
+                      </div>
+                      <div style="display: flex; align-items: center; gap: 8px; font-size: 12px">
+                        <div class="conf-pip moderate"></div>
+                        <span style="flex: 1">Social Deduction / Party</span>
+                        <span style="color: var(--text-muted); font-size: 11px">5 rated</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Suggested actions (REQ-PRED-20) -->
+                <div class="panel-section-title" style="margin-bottom: 14px">Suggested Actions</div>
+                <div class="suggest-list">
+                  <div class="suggest-item">
+                    <div class="suggest-dot"></div>
+                    <div class="suggest-item-body">
+                      Rate <strong>Theme Immersion</strong> and <strong>Table Appeal</strong> on
+                      games already in your collection — these axes have fewer than 5 rated
+                      examples. Even 3 more ratings per axis would move predictions from
+                      "insufficient" to "moderate" for most unrated games.
+                    </div>
+                  </div>
+                  <div class="suggest-item">
+                    <div class="suggest-dot"></div>
+                    <div class="suggest-item-body">
+                      Add and rate a <strong>deck-building game</strong> (e.g., Dominion, Star
+                      Realms, Clank!) to improve predictions for the deck-building mechanic cluster.
+                      Your collection currently has only 1 rated game with that mechanic.
+                    </div>
+                  </div>
+                  <div class="suggest-item">
+                    <div class="suggest-dot"></div>
+                    <div class="suggest-item-body">
+                      Add and rate a <strong>wargame or area-control game</strong> (e.g., Twilight
+                      Imperium, Root, Blood Rage) to improve predictions for that cluster.
+                      Prediction quality for games with significant area-control elements is
+                      currently weak.
+                    </div>
+                  </div>
+                  <div class="suggest-item">
+                    <div class="suggest-dot"></div>
+                    <div class="suggest-item-body">
+                      You are <strong>8 rated games away from Stage 3</strong>. Any ratings count —
+                      prioritize games in the underrepresented clusters above for maximum
+                      improvement per rating.
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <!-- /readiness-page -->
+            </div>
+            <!-- /content -->
+          </main>
+        </div>
+      </div>
+      <div class="annotation-note">
+        REQ-PRED-20: readiness response includes stage, rated count, games to next stage, weak axes,
+        and suggested actions. REQ-PRED-29: stage visible in sidebar widget at all times;
+        "Readiness" nav item visible at Stages 0–1 (per spec: shown at all stages here for
+        discoverability). Stage timeline shows all four stages with current position marked — no
+        magic numbers in the UI text.
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════
+         RESPONSIVE NOTE
+         ════════════════════════════════════════════ -->
+    <div
+      class="annotation-section"
+      style="
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 20px 24px;
+        margin-bottom: 40px;
+      "
+    >
+      <div class="annotation-label" style="margin-bottom: 10px">Responsive behavior notes</div>
+      <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.6">
+        <strong>Mobile (&lt;800px):</strong> Sidebar collapses to a top strip (brand + horizontal
+        nav items). Game hero stacks vertically: cover, info, then score hero as a full-width row.
+        Detail panels stack: breakdown table first, rating form below. Tension panel stacks its two
+        signal cards. Collection table compresses: Game + Score + Confidence columns always visible;
+        BGG/Players/Added columns hidden behind swipe or a "More" expansion. Confidence breakdown
+        popover becomes a full-screen bottom sheet. <br /><br />
+        <strong>Tablet (800–1100px):</strong> Sidebar stays but detail panels use a single column.
+        Collection table shows all columns but compressed. Improve grid collapses to 1 column.
+      </div>
+    </div>
+  </body>
+</html>

@@ -16,6 +16,7 @@ export type {
   SessionStatus,
   TournamentSession,
   Comparison,
+  CachedRecentComparison,
   TournamentGameStats,
   TournamentData,
   RecentComparison,
@@ -30,6 +31,26 @@ export type {
   LeanDirection,
   VetoConfig,
   NativeScale,
+  AxisDistribution,
+  AxisWeightEntry,
+  AttributeCluster,
+  WeightRangeCluster,
+  UtilityCurveDeclaration,
+  DivergentGame,
+  ComponentDistances,
+  OutlierClassification,
+  CollectionOutlier,
+  AxisSuggestion,
+  CollectionProfile,
+  ProfileData,
+  PredictionConfidence,
+  ReferenceGame,
+  PredictionMeta,
+  PredictionReadiness,
+  RevealedPreferenceTension,
+  PredictionSettings,
+  PredictionUnavailable,
+  PredictedGameResponse,
 } from "./types";
 
 export {
@@ -41,6 +62,8 @@ export {
   StartSessionSchema,
   SubmitComparisonSchema,
   TournamentSettingsUpdateSchema,
+  TournamentSettingsSchema,
+  TournamentDataSchema,
 } from "./validation";
 
 export { toErrorMessage, ValidationError, NotFoundError } from "./errors";

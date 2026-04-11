@@ -1,7 +1,7 @@
 ---
 title: "Deferred: BGG user authentication"
 date: 2026-04-06
-status: open
+status: parked
 tags: [deferred, feature, bgg, auth]
 modules: [daemon]
 origin: .lore/specs/mvp.md

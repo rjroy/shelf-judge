@@ -26,22 +26,26 @@ import {
 
 interface CollectionTableProps {
   games: GameWithScore[];
+  predictedGames: GameWithScore[] | null;
   axes: Axis[];
   tournamentStats: Record<string, TournamentGameStatsDisplay>;
   hasTournamentData: boolean;
   totalGames: number;
   ratedCount: number;
   avgFitness: number | null;
+  predictedCount: number;
 }
 
 export function CollectionTable({
   games,
+  predictedGames,
   axes,
   tournamentStats,
   hasTournamentData,
   totalGames,
   ratedCount,
   avgFitness,
+  predictedCount,
 }: CollectionTableProps) {
   // Sort state: default on SSR, hydrate from localStorage after mount
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
@@ -50,6 +54,7 @@ export function CollectionTable({
   const [menuOpen, setMenuOpen] = useState(false);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   const [playerCountInput, setPlayerCountInput] = useState("");
+  const [predictionsOn, setPredictionsOn] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -80,8 +85,10 @@ export function CollectionTable({
     return () => document.removeEventListener("mousedown", handleClick);
   }, [menuOpen]);
 
-  const hasBggData = games.some((g) => g.game.bggData !== null);
-  // Finding #5 fix: memoize sortFields so useCallback deps are stable
+  // Use predicted games when toggle is on, otherwise use standard games
+  const activeGames = predictionsOn && predictedGames ? predictedGames : games;
+
+  const hasBggData = activeGames.some((g) => g.game.bggData !== null);
   const sortFields = useMemo(
     () => buildSortFields(axes, hasTournamentData, hasBggData),
     [axes, hasTournamentData, hasBggData],
@@ -148,7 +155,10 @@ export function CollectionTable({
   );
 
   // Apply filters then sort
-  const filtered = useMemo(() => games.filter((g) => matchesFilters(g, filters)), [games, filters]);
+  const filtered = useMemo(
+    () => activeGames.filter((g) => matchesFilters(g, filters)),
+    [activeGames, filters],
+  );
   const { withValue, withoutValue } = useMemo(
     () => sortGames(filtered, sort.field, sort.direction, tournamentStats),
     [filtered, sort.field, sort.direction, tournamentStats],
@@ -159,7 +169,6 @@ export function CollectionTable({
     withoutValue.length > 0 ? getSeparatorLabel(sort.field, withoutValue.length, axes) : null;
   const scoreSubtitle = getScoreSubtitle(sort.field, axes);
   const dirArrow = sort.direction === "asc" ? "\u2191" : "\u2193";
-  // Finding #1 fix: score column only owns the arrow when it's the active sort target
   const scoreOwnsSort = sort.field !== "name" && sort.field !== "updatedAt";
 
   // Filter chip state
@@ -170,7 +179,8 @@ export function CollectionTable({
   const activeFilterCount =
     (hasRatedFilter ? 1 : 0) + (hasPlayedFilter ? 1 : 0) + (hasPlayerCount ? 1 : 0);
   const hasAnyFilter = hasSearch || hasRatedFilter || hasPlayedFilter || hasPlayerCount;
-  const hiddenCount = totalGames - filtered.length;
+  const hiddenCount =
+    (predictionsOn && predictedGames ? predictedGames.length : totalGames) - filtered.length;
 
   // Group fields for the dropdown menu
   const groupedFields = GROUP_ORDER.map((group) => ({
@@ -385,6 +395,23 @@ export function CollectionTable({
           <div className="stat-value">{axes.length}</div>
           <div className="stat-label">Axes</div>
         </div>
+
+        {/* Predictions toggle */}
+        {predictedGames && predictedCount > 0 && (
+          <>
+            <div className="predictions-toggle" onClick={() => setPredictionsOn((v) => !v)}>
+              <div className={`predictions-toggle-switch${predictionsOn ? " active" : ""}`} />
+              <span className="predictions-toggle-label">Predictions</span>
+            </div>
+            {predictionsOn && (
+              <div className="stat-block">
+                <div className="stat-value predictions-stat">{predictedCount}</div>
+                <div className="stat-label">Predicted</div>
+              </div>
+            )}
+          </>
+        )}
+
         {hasAnyFilter && hiddenCount > 0 && (
           <div className="filtered-note">Filtered, {hiddenCount} games hidden</div>
         )}
@@ -403,6 +430,7 @@ export function CollectionTable({
           {sort.field === "name" && <span className="sort-arrow">{dirArrow}</span>}
         </div>
         <div className="axes-used-col col-label">{isAxisSort ? "Scores" : "Axes Rated"}</div>
+        {predictionsOn && <div className="col-label">Confidence</div>}
         <div
           className={`col-label sortable${sort.field === "updatedAt" ? " sort-active" : ""}`}
           onClick={handleLastRatedHeaderClick}
@@ -419,7 +447,13 @@ export function CollectionTable({
             Score
             {scoreOwnsSort && <span className="sort-arrow">{dirArrow}</span>}
           </span>
-          <span className="score-col-sub">{scoreSubtitle}</span>
+          <span className="score-col-sub">
+            {predictionsOn && sort.field === "fitness" ? (
+              <span style={{ color: "var(--predict-accent)" }}>Pred. Fitness</span>
+            ) : (
+              scoreSubtitle
+            )}
+          </span>
         </div>
       </div>
 
@@ -433,6 +467,7 @@ export function CollectionTable({
           tournamentStats={tournamentStats}
           axisMap={axisMap}
           isAxisSort={isAxisSort}
+          showConfidence={predictionsOn}
         />
       ))}
 
@@ -454,6 +489,7 @@ export function CollectionTable({
           tournamentStats={tournamentStats}
           axisMap={axisMap}
           isAxisSort={isAxisSort}
+          showConfidence={predictionsOn}
         />
       ))}
     </>
@@ -471,11 +507,23 @@ interface GameRowProps {
   tournamentStats: Record<string, TournamentGameStatsDisplay>;
   axisMap: Map<string, Axis>;
   isAxisSort: boolean;
+  showConfidence: boolean;
 }
 
-function GameRow({ gws, rank, sortField, tournamentStats, axisMap, isAxisSort }: GameRowProps) {
+function GameRow({
+  gws,
+  rank,
+  sortField,
+  tournamentStats,
+  axisMap,
+  isAxisSort,
+  showConfidence,
+}: GameRowProps) {
   const { game, score } = gws;
   const display = getScoreDisplay(gws, sortField, tournamentStats);
+  const isPredictedOnly =
+    score !== null && score.predictionMeta !== null && score.ratedAxisCount === 0;
+  const hasPrediction = score?.predictionMeta !== null && score?.predictionMeta !== undefined;
   const isUnrated = score === null && rank === null;
 
   const ratedAxisIds = Object.keys(game.ratings);
@@ -485,8 +533,14 @@ function GameRow({ gws, rank, sortField, tournamentStats, axisMap, isAxisSort }:
   const visibleAxes = ratedAxisNames.slice(0, 3);
   const extraCount = ratedAxisNames.length - visibleAxes.length;
 
+  const rowClass = [
+    "game-row",
+    isUnrated || isPredictedOnly ? " unrated" : "",
+    isPredictedOnly ? " predicted-row" : "",
+  ].join("");
+
   return (
-    <Link href={`/games/${game.id}`} className={`game-row${isUnrated ? " unrated" : ""}`}>
+    <Link href={`/games/${game.id}`} className={rowClass}>
       <div className="rank">{rank !== null ? rank : "\u2014"}</div>
       <div className="game-thumb-col">
         {game.imageUrl ? (
@@ -496,7 +550,10 @@ function GameRow({ gws, rank, sortField, tournamentStats, axisMap, isAxisSort }:
         )}
       </div>
       <div className="game-info">
-        <div className="game-name">{game.name}</div>
+        <div className="game-name">
+          {game.name}
+          {isPredictedOnly && <span className="predicted-label">&middot; not rated</span>}
+        </div>
         <div className="game-meta">
           {game.numPlays != null && game.numPlays > 0 && <span>x{game.numPlays}</span>}
           {game.yearPublished && <span>{game.yearPublished}</span>}
@@ -513,8 +570,8 @@ function GameRow({ gws, rank, sortField, tournamentStats, axisMap, isAxisSort }:
       <div className="axes-used">
         {isAxisSort ? (
           <AxisSortAltScores gws={gws} tournamentStats={tournamentStats} />
-        ) : isUnrated ? (
-          <span className="no-ratings">No ratings yet</span>
+        ) : isUnrated || isPredictedOnly ? (
+          <span className="no-ratings">{isPredictedOnly ? "Predicted" : "No ratings yet"}</span>
         ) : (
           <>
             {visibleAxes.map((name) => (
@@ -526,6 +583,17 @@ function GameRow({ gws, rank, sortField, tournamentStats, axisMap, isAxisSort }:
           </>
         )}
       </div>
+      {showConfidence && (
+        <div className="axes-used">
+          {hasPrediction ? (
+            <ConfidencePill level={score.predictionMeta!.confidence} />
+          ) : score ? (
+            <ConfidencePill level="actual" />
+          ) : (
+            <span className="breakdown-dash">&mdash;</span>
+          )}
+        </div>
+      )}
       <div className="last-rated">{relativeDate(game.updatedAt)}</div>
       <div className="score-cell">
         {score?.vetoed ? (
@@ -535,6 +603,11 @@ function GameRow({ gws, rank, sortField, tournamentStats, axisMap, isAxisSort }:
               <span className="vetoed-hypothetical">{score.hypotheticalScore.toFixed(1)}</span>
             )}
           </div>
+        ) : isPredictedOnly ? (
+          <span className="score-predicted-inline">
+            <span className="score-predicted-tilde-inline">~</span>
+            {score.score.toFixed(1)}
+          </span>
         ) : display.className === "score-unrated" ? (
           <span className="score-unrated">{display.text}</span>
         ) : (
@@ -546,6 +619,25 @@ function GameRow({ gws, rank, sortField, tournamentStats, axisMap, isAxisSort }:
       </div>
     </Link>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Confidence pill for collection table
+// ---------------------------------------------------------------------------
+
+function ConfidencePill({ level }: { level: string }) {
+  const label =
+    level === "actual"
+      ? "Actual"
+      : level === "strong"
+        ? "Strong"
+        : level === "moderate"
+          ? "Moderate"
+          : level === "weak"
+            ? "Weak"
+            : "Insufficient";
+
+  return <span className={`conf-badge conf-${level}`}>{label}</span>;
 }
 
 // ---------------------------------------------------------------------------

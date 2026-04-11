@@ -355,15 +355,6 @@ describe("Tournament Routes", () => {
     });
   });
 
-  describe("POST /api/tournament/recalculate", () => {
-    test("recalculates and returns games updated count", async () => {
-      const res = await jsonRequest(ctx.app, "POST", "/api/tournament/recalculate");
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { gamesUpdated: number };
-      expect(body.gamesUpdated).toBe(0);
-    });
-  });
-
   describe("GET /api/tournament/settings", () => {
     test("returns default settings", async () => {
       const res = await jsonRequest(ctx.app, "GET", "/api/tournament/settings");

@@ -49,6 +49,8 @@ export interface BreakdownEntry {
   effectiveRating?: number | null;
   preferenceShape?: string;
   curveAffected?: boolean;
+  predictionConfidence?: string | null;
+  referenceGames?: { gameId: string; gameName: string; similarity: number }[] | null;
 }
 
 export function formatBreakdown(breakdown: BreakdownEntry[]): string {

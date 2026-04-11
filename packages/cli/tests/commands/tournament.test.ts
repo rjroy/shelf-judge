@@ -5,7 +5,6 @@ import {
   tournamentPick,
   tournamentStop,
   tournamentStats,
-  tournamentRecalculate,
   parseFilterFlags,
 } from "../../src/commands/tournament.js";
 import { createMockClient } from "../helpers/mock-client.js";
@@ -437,29 +436,6 @@ describe("tournament stats (all games)", () => {
     const parsed = JSON.parse(output) as Array<{ gameName: string }>;
     expect(Array.isArray(parsed)).toBe(true);
     expect(parsed).toHaveLength(3);
-  });
-});
-
-// --- tournament recalculate ---
-
-describe("tournament recalculate", () => {
-  const client = createMockClient({
-    routes: {
-      "POST /api/tournament/recalculate": {
-        response: { ok: true, status: 200, data: { gamesUpdated: 15 } },
-      },
-    },
-  });
-
-  test("human-readable output shows games updated count", async () => {
-    const output = await tournamentRecalculate(client, [], { json: false });
-    expect(output).toContain("Recalculated ELO for 15 game(s)");
-  });
-
-  test("--json outputs parseable JSON", async () => {
-    const output = await tournamentRecalculate(client, [], { json: true });
-    const parsed = JSON.parse(output) as { gamesUpdated: number };
-    expect(parsed.gamesUpdated).toBe(15);
   });
 });
 

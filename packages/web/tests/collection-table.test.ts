@@ -37,12 +37,19 @@ function makeGame(overrides: Partial<Game> = {}): Game {
   };
 }
 
-function makeScore(score: number): FitnessResult {
+function makeScore(
+  score: number,
+  predictionMeta: FitnessResult["predictionMeta"] = null,
+): FitnessResult {
   return {
     score,
-    ratedAxisCount: 3,
+    ratedAxisCount: predictionMeta ? predictionMeta.actualAxisCount : 3,
     totalAxisCount: 5,
     breakdown: [],
+    vetoed: false,
+    vetoedBy: null,
+    hypotheticalScore: null,
+    predictionMeta,
   };
 }
 
@@ -237,7 +244,7 @@ describe("sortGames", () => {
       description: null,
       mechanics: [] as { id: number; name: string }[],
       categories: [] as { id: number; name: string }[],
-      families: [] as { id: number; name: string }[], 
+      families: [] as { id: number; name: string }[],
       suggestedPlayerCounts: [] as {
         playerCount: string;
         best: number;
@@ -303,7 +310,12 @@ describe("sortGames", () => {
 // ---------------------------------------------------------------------------
 
 describe("matchesFilters", () => {
-  const defaultFilters: FilterState = { search: "", ratedStatus: "all", playedStatus: "all", playerCount: null };
+  const defaultFilters: FilterState = {
+    search: "",
+    ratedStatus: "all",
+    playedStatus: "all",
+    playerCount: null,
+  };
 
   test("default filters match everything", () => {
     expect(matchesFilters(makeGWS(), defaultFilters)).toBe(true);
@@ -346,9 +358,47 @@ describe("matchesFilters", () => {
     expect(matchesFilters(game, { ...defaultFilters, playerCount: 3 })).toBe(false);
   });
 
+  test("predicted-only game (score non-null, ratedAxisCount 0) is 'unrated'", () => {
+    const predictedOnly = makeGWS(
+      {},
+      makeScore(6.5, {
+        readinessStage: 2,
+        confidence: "moderate",
+        predictedAxisCount: 3,
+        actualAxisCount: 0,
+        referenceGameCount: 5,
+        coveragePercent: 0.6,
+      }),
+    );
+    // Has a score, but all axes are predicted, so it's "unrated"
+    expect(matchesFilters(predictedOnly, { ...defaultFilters, ratedStatus: "rated" })).toBe(false);
+    expect(matchesFilters(predictedOnly, { ...defaultFilters, ratedStatus: "unrated" })).toBe(true);
+  });
+
+  test("partially predicted game (some actual, some predicted) is 'rated'", () => {
+    const partial = makeGWS(
+      {},
+      makeScore(7.2, {
+        readinessStage: 2,
+        confidence: "strong",
+        predictedAxisCount: 2,
+        actualAxisCount: 3,
+        referenceGameCount: 5,
+        coveragePercent: 0.8,
+      }),
+    );
+    expect(matchesFilters(partial, { ...defaultFilters, ratedStatus: "rated" })).toBe(true);
+    expect(matchesFilters(partial, { ...defaultFilters, ratedStatus: "unrated" })).toBe(false);
+  });
+
   test("AND combination of multiple filters", () => {
     const rated = makeGWS({ name: "Wingspan", minPlayers: 1, maxPlayers: 5 }, makeScore(8.0));
-    const filter: FilterState = { search: "wing", ratedStatus: "rated", playedStatus: "all" , playerCount: 3 };
+    const filter: FilterState = {
+      search: "wing",
+      ratedStatus: "rated",
+      playedStatus: "all",
+      playerCount: 3,
+    };
     expect(matchesFilters(rated, filter)).toBe(true);
 
     // Fails search

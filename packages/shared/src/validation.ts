@@ -99,6 +99,55 @@ export const TournamentSettingsUpdateSchema = z
   })
   .strict();
 
+// Storage format schemas (used by loadTournament for validation and migration)
+
+export const TournamentSettingsSchema = z.object({
+  kFactorThreshold: z.number(),
+  normalizationHalfWidth: z.number(),
+  provisionalThreshold: z.number(),
+});
+
+const CachedRecentComparisonSchema = z.object({
+  opponentGameId: z.string(),
+  won: z.boolean(),
+  createdAt: z.string(),
+});
+
+const ComparisonSchema = z.object({
+  id: z.string(),
+  gameAId: z.string(),
+  gameBId: z.string(),
+  winnerId: z.string(),
+  sessionId: z.string(),
+  createdAt: z.string(),
+});
+
+const TournamentGameStatsSchema = z.object({
+  eloRating: z.number(),
+  comparisonCount: z.number(),
+  wins: z.number().optional().default(0),
+  losses: z.number().optional().default(0),
+  recentComparisons: z.array(CachedRecentComparisonSchema).optional().default([]),
+});
+
+const TournamentSessionSchema = z.object({
+  id: z.string(),
+  filters: z.array(SessionFilterSchema).nullable(),
+  gameIds: z.array(z.string()),
+  comparisonCount: z.number(),
+  status: z.enum(["active", "completed"]),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  comparisons: z.array(ComparisonSchema).optional().default([]),
+});
+
+export const TournamentDataSchema = z.object({
+  settings: TournamentSettingsSchema,
+  sessions: z.array(TournamentSessionSchema),
+  comparisons: z.array(ComparisonSchema).optional(), // pre-migration only
+  gameStats: z.record(TournamentGameStatsSchema),
+});
+
 export type CreateAxisInput = z.input<typeof CreateAxisSchema>;
 export type UpdateAxisInput = z.input<typeof UpdateAxisSchema>;
 export type RateGameInput = z.input<typeof RateGameSchema>;

@@ -1,9 +1,18 @@
 import * as path from "node:path";
 import * as os from "node:os";
 import { v4 as uuidv4 } from "uuid";
-import type { Collection, AppConfig, TournamentData } from "@shelf-judge/shared";
+import type {
+  Collection,
+  AppConfig,
+  TournamentData,
+  ProfileData,
+  PredictionSettings,
+} from "@shelf-judge/shared";
+import { TournamentDataSchema } from "@shelf-judge/shared";
 import type { FileOps } from "./file-ops.js";
 import { getTempPath } from "./file-ops.js";
+import { migrateTournamentData } from "./tournament-migration.js";
+import { DEFAULT_PREDICTION_SETTINGS } from "./prediction-engine.js";
 
 export interface StorageService {
   loadCollection(): Promise<Collection>;
@@ -12,6 +21,10 @@ export interface StorageService {
   saveConfig(config: AppConfig): Promise<void>;
   loadTournament(): Promise<TournamentData>;
   saveTournament(data: TournamentData): Promise<void>;
+  loadProfile(): Promise<ProfileData | null>;
+  saveProfile(data: ProfileData): Promise<void>;
+  loadPredictionSettings(): Promise<PredictionSettings>;
+  savePredictionSettings(settings: PredictionSettings): Promise<void>;
 }
 
 export interface StorageServiceDeps {
@@ -57,7 +70,6 @@ function createDefaultTournament(): TournamentData {
   return {
     settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
     sessions: [],
-    comparisons: [],
     gameStats: {},
   };
 }
@@ -81,6 +93,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
   const { dataDir, configPath, fileOps } = deps;
   const collectionPath = path.join(dataDir, "collection.json");
   const tournamentPath = path.join(dataDir, "tournament.json");
+  const profilePath = path.join(dataDir, "profile.json");
 
   return {
     async loadCollection(): Promise<Collection> {
@@ -131,12 +144,48 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
       }
 
       const raw = await fileOps.readFile(tournamentPath);
-      return JSON.parse(raw) as TournamentData;
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const { data, migrated } = migrateTournamentData(parsed);
+      const validated = TournamentDataSchema.parse(data);
+
+      if (migrated) {
+        await atomicWrite(tournamentPath, JSON.stringify(validated, null, 2), fileOps);
+      }
+
+      return validated;
     },
 
     async saveTournament(data: TournamentData): Promise<void> {
       await fileOps.mkdir(dataDir);
       await atomicWrite(tournamentPath, JSON.stringify(data, null, 2), fileOps);
+    },
+
+    async loadProfile(): Promise<ProfileData | null> {
+      const exists = await fileOps.exists(profilePath);
+      if (!exists) return null;
+
+      const raw = await fileOps.readFile(profilePath);
+      return JSON.parse(raw) as ProfileData;
+    },
+
+    async saveProfile(data: ProfileData): Promise<void> {
+      await fileOps.mkdir(dataDir);
+      await atomicWrite(profilePath, JSON.stringify(data, null, 2), fileOps);
+    },
+
+    async loadPredictionSettings(): Promise<PredictionSettings> {
+      const predictionSettingsPath = path.join(dataDir, "prediction-settings.json");
+      const exists = await fileOps.exists(predictionSettingsPath);
+      if (!exists) return { ...DEFAULT_PREDICTION_SETTINGS };
+
+      const raw = await fileOps.readFile(predictionSettingsPath);
+      return JSON.parse(raw) as PredictionSettings;
+    },
+
+    async savePredictionSettings(settings: PredictionSettings): Promise<void> {
+      const predictionSettingsPath = path.join(dataDir, "prediction-settings.json");
+      await fileOps.mkdir(dataDir);
+      await atomicWrite(predictionSettingsPath, JSON.stringify(settings, null, 2), fileOps);
     },
   };
 }

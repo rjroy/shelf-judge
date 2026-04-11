@@ -41,7 +41,7 @@ export interface GameService {
   addGame(input: AddGameInput): Promise<AddGameResult>;
   getGame(id: string): Promise<GameWithScore>;
   listGames(): Promise<GameWithScore[]>;
-  rateGame(id: string, ratings: Record<string, number>): Promise<GameWithScore>;
+  rateGame(id: string, ratings: Record<string, number | null>): Promise<GameWithScore>;
   removeGame(id: string): Promise<void>;
   searchGames(query: string): Promise<BggSearchResult[]>;
   refreshBggData(gameId: string): Promise<Game>;
@@ -177,7 +177,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
       return results;
     },
 
-    async rateGame(id: string, ratings: Record<string, number>): Promise<GameWithScore> {
+    async rateGame(id: string, ratings: Record<string, number | null>): Promise<GameWithScore> {
       const collection = await storageService.loadCollection();
       const game = collection.games.find((g) => g.id === id);
 
@@ -191,16 +191,20 @@ export function createGameService(deps: GameServiceDeps): GameService {
         if (!axis) {
           throw new Error(`Axis not found: ${axisId}`);
         }
-        if (!Number.isInteger(rating) || rating < 1 || rating > 10) {
+        if (rating !== null && (!Number.isInteger(rating) || rating < 1 || rating > 10)) {
           throw new Error(
             `Rating must be an integer between 1 and 10, got ${rating} for axis "${axis.name}"`,
           );
         }
       }
 
-      // Apply ratings
+      // Apply ratings (null = clear)
       for (const [axisId, rating] of Object.entries(ratings)) {
-        game.ratings[axisId] = rating;
+        if (rating === null) {
+          delete game.ratings[axisId];
+        } else {
+          game.ratings[axisId] = rating;
+        }
       }
 
       game.updatedAt = new Date().toISOString();

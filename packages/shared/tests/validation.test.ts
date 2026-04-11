@@ -8,6 +8,8 @@ import {
   StartSessionSchema,
   SubmitComparisonSchema,
   TournamentSettingsUpdateSchema,
+  TournamentDataSchema,
+  TournamentSettingsSchema,
 } from "../src/index";
 
 describe("CreateAxisSchema", () => {
@@ -497,6 +499,160 @@ describe("TournamentSettingsUpdateSchema", () => {
     const result = TournamentSettingsUpdateSchema.safeParse({
       kFactorThreshold: 20,
       garbage: true,
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("TournamentSettingsSchema", () => {
+  test("accepts valid settings", () => {
+    const result = TournamentSettingsSchema.safeParse({
+      kFactorThreshold: 15,
+      normalizationHalfWidth: 400,
+      provisionalThreshold: 6,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("rejects missing required fields", () => {
+    const result = TournamentSettingsSchema.safeParse({ kFactorThreshold: 15 });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("TournamentDataSchema", () => {
+  const baseSettings = {
+    kFactorThreshold: 15,
+    normalizationHalfWidth: 400,
+    provisionalThreshold: 6,
+  };
+
+  test("accepts pre-migration format (top-level comparisons, no new fields)", () => {
+    const preMigration = {
+      settings: baseSettings,
+      sessions: [
+        {
+          id: "s1",
+          filters: null,
+          gameIds: ["g1", "g2"],
+          comparisonCount: 1,
+          status: "active",
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
+          // no comparisons field on session
+        },
+      ],
+      comparisons: [
+        {
+          id: "c1",
+          gameAId: "g1",
+          gameBId: "g2",
+          winnerId: "g1",
+          sessionId: "s1",
+          createdAt: "2026-01-01T00:00:00Z",
+        },
+      ],
+      gameStats: {
+        g1: { eloRating: 1516, comparisonCount: 1 },
+        g2: { eloRating: 1484, comparisonCount: 1 },
+      },
+    };
+    const result = TournamentDataSchema.safeParse(preMigration);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      // defaults applied for missing optional fields
+      expect(result.data.gameStats.g1.wins).toBe(0);
+      expect(result.data.gameStats.g1.losses).toBe(0);
+      expect(result.data.gameStats.g1.recentComparisons).toEqual([]);
+      expect(result.data.sessions[0].comparisons).toEqual([]);
+    }
+  });
+
+  test("accepts post-migration format (no top-level comparisons, all new fields)", () => {
+    const postMigration = {
+      settings: baseSettings,
+      sessions: [
+        {
+          id: "s1",
+          filters: null,
+          gameIds: ["g1", "g2"],
+          comparisonCount: 1,
+          status: "completed",
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
+          comparisons: [],
+        },
+      ],
+      gameStats: {
+        g1: {
+          eloRating: 1516,
+          comparisonCount: 1,
+          wins: 1,
+          losses: 0,
+          recentComparisons: [
+            { opponentGameId: "g2", won: true, createdAt: "2026-01-01T00:00:00Z" },
+          ],
+        },
+        g2: {
+          eloRating: 1484,
+          comparisonCount: 1,
+          wins: 0,
+          losses: 1,
+          recentComparisons: [
+            { opponentGameId: "g1", won: false, createdAt: "2026-01-01T00:00:00Z" },
+          ],
+        },
+      },
+    };
+    const result = TournamentDataSchema.safeParse(postMigration);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.comparisons).toBeUndefined();
+      expect(result.data.gameStats.g1.wins).toBe(1);
+      expect(result.data.sessions[0].comparisons).toEqual([]);
+    }
+  });
+
+  test("applies defaults for missing optional fields", () => {
+    const minimal = {
+      settings: baseSettings,
+      sessions: [],
+      gameStats: {
+        g1: { eloRating: 1500, comparisonCount: 0 },
+      },
+    };
+    const result = TournamentDataSchema.safeParse(minimal);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.gameStats.g1.wins).toBe(0);
+      expect(result.data.gameStats.g1.losses).toBe(0);
+      expect(result.data.gameStats.g1.recentComparisons).toEqual([]);
+    }
+  });
+
+  test("rejects missing settings", () => {
+    const result = TournamentDataSchema.safeParse({
+      sessions: [],
+      gameStats: {},
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test("rejects invalid session status", () => {
+    const result = TournamentDataSchema.safeParse({
+      settings: baseSettings,
+      sessions: [
+        {
+          id: "s1",
+          filters: null,
+          gameIds: [],
+          comparisonCount: 0,
+          status: "invalid",
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
+        },
+      ],
+      gameStats: {},
     });
     expect(result.success).toBe(false);
   });

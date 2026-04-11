@@ -3,17 +3,48 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import type { PredictionReadiness } from "@shelf-judge/shared";
+
+const STAGE_LABELS: Record<number, string> = {
+  0: "Not Ready",
+  1: "Basic",
+  2: "Moderate",
+  3: "Strong",
+};
 
 const navGroups = [
+  {
+    label: "Overview",
+    items: [
+      {
+        href: "/",
+        name: "Profile",
+        icon: (
+          <svg className="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 2a5 5 0 110 10A5 5 0 018 3zm0 2a3 3 0 100 6 3 3 0 000-6zm0 2a1 1 0 110 2 1 1 0 010-2z" />
+          </svg>
+        ),
+      },
+    ],
+  },
   {
     label: "Library",
     items: [
       {
-        href: "/",
+        href: "/collection",
         name: "Collection",
         icon: (
           <svg className="nav-icon" viewBox="0 0 16 16" fill="currentColor">
             <path d="M2 2h12v12H2V2zm1 1v10h10V3H3zm2 2h6v1H5V5zm0 3h6v1H5V8zm0 3h4v1H5v-1z" />
+          </svg>
+        ),
+      },
+      {
+        href: "/search",
+        name: "Add Games",
+        icon: (
+          <svg className="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 1a6 6 0 110 12A6 6 0 018 2zm0 3v2H6v1h2v2h1V8h2V7H9V5H8z" />
           </svg>
         ),
       },
@@ -43,20 +74,25 @@ const navGroups = [
     ],
   },
   {
-    label: "Add",
+    label: "Predictions",
     items: [
       {
-        href: "/search",
-        name: "Add Game",
+        href: "/readiness",
+        name: "Readiness",
         icon: (
           <svg className="nav-icon" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 1a6 6 0 110 12A6 6 0 018 2zm0 3v2H6v1h2v2h1V8h2V7H9V5H8z" />
+            <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 2a5 5 0 110 10A5 5 0 018 3zm0 1.5a3.5 3.5 0 100 7 3.5 3.5 0 000-7zm0 1.5a2 2 0 110 4 2 2 0 010-4z" />
           </svg>
         ),
       },
+    ],
+  },
+  {
+    label: "Settings",
+    items: [
       {
         href: "/import",
-        name: "Import BGG",
+        name: "Import / BGG",
         icon: (
           <svg className="nav-icon" viewBox="0 0 16 16" fill="currentColor">
             <path d="M14 3H2a1 1 0 00-1 1v8a1 1 0 001 1h12a1 1 0 001-1V4a1 1 0 00-1-1zM8 11l-4-3h2.5V7h3v1H12L8 11z" />
@@ -69,7 +105,7 @@ const navGroups = [
 
 function isActive(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";
-  return pathname.startsWith(href);
+  return pathname === href || pathname.startsWith(href + "/");
 }
 
 const SidebarContext = createContext<{ open: boolean; toggle: () => void; close: () => void }>({
@@ -127,6 +163,29 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 export function Sidebar() {
   const pathname = usePathname();
   const { open, close } = useSidebar();
+  const [readiness, setReadiness] = useState<PredictionReadiness | null>(null);
+
+  useEffect(() => {
+    fetch("/api/daemon/predictions/readiness")
+      .then((res) => {
+        if (!res.ok) return null;
+        return res.json() as Promise<PredictionReadiness>;
+      })
+      .then((data) => setReadiness(data))
+      .catch(() => {
+        // Readiness not available
+      });
+  }, []);
+
+  const progressPercent =
+    readiness && readiness.nextStageAt > 0
+      ? Math.min(100, Math.round((readiness.ratedGameCount / readiness.nextStageAt) * 100))
+      : readiness?.stage === 3
+        ? 100
+        : 0;
+
+  const moreNeeded =
+    readiness && readiness.stage < 3 ? readiness.nextStageAt - readiness.ratedGameCount : 0;
 
   return (
     <aside className={`sidebar${open ? " sidebar-open" : ""}`}>
@@ -170,6 +229,30 @@ export function Sidebar() {
           </div>
         ))}
       </nav>
+
+      {/* Prediction readiness widget */}
+      {readiness && (
+        <Link href="/readiness" style={{ textDecoration: "none" }}>
+          <div className="readiness-widget">
+            <div className="readiness-widget-label">Predictions</div>
+            <div className="readiness-widget-stage">
+              Stage {readiness.stage} &mdash; {STAGE_LABELS[readiness.stage]}
+            </div>
+            <div className="readiness-progress">
+              <div className="readiness-progress-fill" style={{ width: `${progressPercent}%` }} />
+            </div>
+            <div className="readiness-widget-count">
+              {readiness.ratedGameCount} rated
+              {moreNeeded > 0 && (
+                <>
+                  {" "}
+                  &middot; {moreNeeded} more for Stage {readiness.stage + 1}
+                </>
+              )}
+            </div>
+          </div>
+        </Link>
+      )}
 
       <div className="sidebar-footer">Shelf Judge v0.1</div>
     </aside>

@@ -2,7 +2,7 @@
 import type { DaemonClient } from "../client.js";
 import type { OutputOptions, BreakdownEntry } from "../output.js";
 import { formatTable, formatScore, formatBreakdown, printOutput } from "../output.js";
-import type { TournamentGameStatsDisplay } from "@shelf-judge/shared";
+import type { TournamentGameStatsDisplay, GameWithScore } from "@shelf-judge/shared";
 
 interface VetoInfo {
   axisId: string;
@@ -36,11 +36,19 @@ interface ScoreListResponse {
   unscored: UnscoredGame[];
 }
 
+interface IncludePredictedOpts extends OutputOptions {
+  includePredicted?: boolean;
+}
+
 export async function scoreList(
   client: DaemonClient,
   _args: string[],
-  opts: OutputOptions,
+  opts: IncludePredictedOpts,
 ): Promise<string> {
+  if (opts.includePredicted) {
+    return scoreListWithPredictions(client, opts);
+  }
+
   const { ok, data } = await client.get<ScoreListResponse>("/api/scores");
 
   if (!ok) {
@@ -160,6 +168,59 @@ export async function scoreGet(
 
   if (data.breakdown && data.breakdown.length > 0) {
     lines.push(formatBreakdown(data.breakdown));
+  }
+
+  return lines.join("\n");
+}
+
+async function scoreListWithPredictions(
+  client: DaemonClient,
+  opts: OutputOptions,
+): Promise<string> {
+  const { ok, data } = await client.get<GameWithScore[]>("/api/games?includePredicted=true");
+
+  if (!ok) {
+    const err = data as unknown as { error: string };
+    throw new Error(err.error ?? "List failed");
+  }
+
+  if (opts.json) return printOutput(data, opts);
+
+  const scored = data.filter((e) => e.score !== null);
+  const unscored = data.filter((e) => e.score === null);
+
+  const lines: string[] = [];
+
+  if (scored.length > 0) {
+    lines.push(
+      formatTable(
+        ["#", "Name", "Score", "Rated Axes", ""],
+        scored.map((e, i) => {
+          const s = e.score!;
+          const isPredicted = s.predictionMeta !== null && s.predictionMeta !== undefined;
+          const marker = isPredicted ? "[P]" : "";
+          return [
+            String(i + 1),
+            e.game.name,
+            s.vetoed ? `VETOED (${formatScore(s.hypotheticalScore)})` : formatScore(s.score),
+            `${s.ratedAxisCount}/${s.totalAxisCount}`,
+            marker,
+          ];
+        }),
+      ),
+    );
+  }
+
+  if (unscored.length > 0) {
+    if (lines.length > 0) lines.push("");
+    lines.push("Unscored:");
+    for (const e of unscored) {
+      lines.push(`  ${e.game.name} - not yet rated`);
+    }
+  }
+
+  if (lines.length === 0) {
+    return "(no games)";
   }
 
   return lines.join("\n");

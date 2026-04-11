@@ -2,16 +2,18 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import type { Axis } from "@shelf-judge/shared";
+import type { Axis, FitnessResult } from "@shelf-judge/shared";
 
 export function RatingForm({
   gameId,
   axes,
   currentRatings,
+  predictionScore,
 }: {
   gameId: string;
   axes: Axis[];
   currentRatings: Record<string, number>;
+  predictionScore?: FitnessResult | null;
 }) {
   const router = useRouter();
   const [ratings, setRatings] = useState<Record<string, string>>(() => {
@@ -29,6 +31,23 @@ export function RatingForm({
   const personalAxes = axes.filter((a) => a.source === "personal");
   const bggAxes = axes.filter((a) => a.source === "bgg");
 
+  // Build a map of predicted values per axis from the prediction breakdown
+  const predictionHints = new Map<
+    string,
+    { rating: number | null; confidence: string | null; refCount: number }
+  >();
+  if (predictionScore?.predictionMeta) {
+    for (const entry of predictionScore.breakdown) {
+      if (entry.source === "predicted") {
+        predictionHints.set(entry.axisId, {
+          rating: entry.rating,
+          confidence: entry.predictionConfidence,
+          refCount: entry.referenceGames?.length ?? 0,
+        });
+      }
+    }
+  }
+
   function handleChange(axisId: string, value: string) {
     setRatings((prev) => ({ ...prev, [axisId]: value }));
   }
@@ -38,7 +57,7 @@ export function RatingForm({
     setSaving(true);
     setError(null);
 
-    const numericRatings: Record<string, number> = {};
+    const numericRatings: Record<string, number | null> = {};
     const invalidAxes: string[] = [];
     for (const [axisId, value] of Object.entries(ratings)) {
       if (value !== "") {
@@ -49,6 +68,13 @@ export function RatingForm({
           const axis = axes.find((a) => a.id === axisId);
           invalidAxes.push(axis?.name ?? axisId);
         }
+      }
+    }
+
+    // Send null for axes that had a rating but were cleared
+    for (const axis of axes) {
+      if (currentRatings[axis.id] !== undefined && !(axis.id in numericRatings)) {
+        numericRatings[axis.id] = null;
       }
     }
 
@@ -91,6 +117,8 @@ export function RatingForm({
     setError(null);
   }
 
+  const hasPredictionHints = predictionHints.size > 0;
+
   return (
     <form
       onSubmit={(e) => {
@@ -99,34 +127,77 @@ export function RatingForm({
     >
       {error && <div className="error-banner">{error}</div>}
 
+      {hasPredictionHints && (
+        <div className="predict-callout">
+          Predicted scores shown below. Your ratings override these predictions.
+        </div>
+      )}
+
       <div className="rating-form">
-        {personalAxes.map((axis) => (
-          <div key={axis.id} className="rating-field">
-            <div className="rating-field-header">
-              <div className="rating-field-name">{axis.name}</div>
-              <div className="rating-field-weight">Weight: {axis.weight}</div>
+        {personalAxes.map((axis) => {
+          const isRated = currentRatings[axis.id] !== undefined;
+          const hint = !isRated ? predictionHints.get(axis.id) : undefined;
+
+          return (
+            <div key={axis.id}>
+              {hint && ratings[axis.id] === undefined ? (
+                <div className="rating-predict-hint">
+                  <div className="rating-predict-hint-label">
+                    {hint.confidence === "insufficient"
+                      ? "No similar games rated on this axis"
+                      : `Predicted from ${hint.refCount} similar games`}
+                  </div>
+                  <div className="rating-field-header">
+                    <div className="rating-field-name">{axis.name}</div>
+                    <div className="rating-field-weight">Weight: {axis.weight}</div>
+                  </div>
+                  {hint.confidence !== "insufficient" && hint.rating !== null && (
+                    <div>
+                      <span className="rating-predict-hint-value">~{hint.rating}</span>
+                      <span
+                        className="rating-predict-hint-link"
+                        onClick={() => handleChange(axis.id, String(hint.rating))}
+                      >
+                        Rate &rarr;
+                      </span>
+                    </div>
+                  )}
+                  {hint.confidence === "insufficient" && (
+                    <div className="rating-predict-hint-insufficient">
+                      Not enough data for prediction
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="rating-field">
+                  <div className="rating-field-header">
+                    <div className="rating-field-name">{axis.name}</div>
+                    <div className="rating-field-weight">Weight: {axis.weight}</div>
+                  </div>
+                  {axis.description && <div className="rating-field-desc">{axis.description}</div>}
+                  <div className="rating-input-row">
+                    <input
+                      type="range"
+                      className="rating-slider"
+                      min={1}
+                      max={10}
+                      value={ratings[axis.id] || "5"}
+                      onChange={(e) => handleChange(axis.id, e.target.value)}
+                    />
+                    <input
+                      type="number"
+                      className="rating-value-input"
+                      min={1}
+                      max={10}
+                      value={ratings[axis.id] ?? ""}
+                      onChange={(e) => handleChange(axis.id, e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
-            {axis.description && <div className="rating-field-desc">{axis.description}</div>}
-            <div className="rating-input-row">
-              <input
-                type="range"
-                className="rating-slider"
-                min={1}
-                max={10}
-                value={ratings[axis.id] || "5"}
-                onChange={(e) => handleChange(axis.id, e.target.value)}
-              />
-              <input
-                type="number"
-                className="rating-value-input"
-                min={1}
-                max={10}
-                value={ratings[axis.id] ?? ""}
-                onChange={(e) => handleChange(axis.id, e.target.value)}
-              />
-            </div>
-          </div>
-        ))}
+          );
+        })}
 
         {bggAxes.length > 0 && (
           <>
@@ -160,7 +231,7 @@ export function RatingForm({
                             });
                           }}
                         >
-                          Revert to BGG ›
+                          Revert to BGG &rsaquo;
                         </span>
                       </div>
                       <div className="rating-input-row">
@@ -185,12 +256,12 @@ export function RatingForm({
                   ) : (
                     <div className="bgg-auto-value">
                       <span>Auto-populated from BGG</span>
-                      <span className="value">{currentRatings[axis.id] ?? "—"}</span>
+                      <span className="value">{currentRatings[axis.id] ?? "\u2014"}</span>
                       <span
                         className="override-link"
                         onClick={() => handleChange(axis.id, String(currentRatings[axis.id] ?? 5))}
                       >
-                        Override ›
+                        Override &rsaquo;
                       </span>
                     </div>
                   )}

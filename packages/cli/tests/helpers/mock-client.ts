@@ -52,6 +52,14 @@ export function createMockClient(config: MockClientConfig = {}): DaemonClient {
       }
       return Promise.resolve();
     },
+    async getProfile() {
+      const res = await request<import("@shelf-judge/shared").CollectionProfile>(
+        "GET",
+        "/api/profile",
+      );
+      if (!res.ok) throw new Error(`Failed to get profile: ${res.status}`);
+      return res.data;
+    },
     isReachable(): Promise<boolean> {
       return Promise.resolve(reachable);
     },

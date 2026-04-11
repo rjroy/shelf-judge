@@ -24,8 +24,9 @@ import {
   tournamentPick,
   tournamentStop,
   tournamentStats,
-  tournamentRecalculate,
 } from "./commands/tournament.js";
+import { profileCommand } from "./commands/profile.js";
+import { predictGame, predictBggGame, predictReadiness } from "./commands/predict.js";
 
 // Known command paths and their token depths.
 // Dispatch matches on the first N tokens; everything after is positional.
@@ -47,10 +48,13 @@ const COMMANDS: Record<string, number> = {
   "tournament pick": 2,
   "tournament stop": 2,
   "tournament stats": 2,
-  "tournament recalculate": 2,
+  "predict bgg": 2,
+  "predict readiness": 2,
   "import bgg-collection": 2,
   "config get": 2,
   "config set": 2,
+  predict: 1,
+  profile: 1,
   start: 1,
   stop: 1,
   help: 1,
@@ -73,6 +77,7 @@ interface ParsedArgs {
   vetoBelow?: number;
   vetoAbove?: number;
   noVeto?: boolean;
+  includePredicted?: boolean;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -94,6 +99,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let vetoBelow: number | undefined;
   let vetoAbove: number | undefined;
   let noVeto = false;
+  let includePredicted = false;
 
   for (let i = 0; i < raw.length; i++) {
     const arg = raw[i];
@@ -122,6 +128,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       vetoAbove = Number(raw[++i]);
     } else if (arg === "--no-veto") {
       noVeto = true;
+    } else if (arg === "--include-predicted") {
+      includePredicted = true;
     } else if (arg === "--axis") {
       axisFlags.push(raw[++i]);
       axisFlags.push(raw[++i]);
@@ -172,6 +180,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     vetoBelow,
     vetoAbove,
     noVeto: noVeto || undefined,
+    includePredicted: includePredicted || undefined,
   };
 }
 
@@ -253,7 +262,10 @@ async function main(): Promise<void> {
       output = await axisDelete(client, args, opts);
       break;
     case "score list":
-      output = await scoreList(client, args, opts);
+      output = await scoreList(client, args, {
+        ...opts,
+        includePredicted: parsed.includePredicted,
+      });
       break;
     case "score get":
       output = await scoreGet(client, args, opts);
@@ -276,8 +288,14 @@ async function main(): Promise<void> {
     case "tournament stats":
       output = await tournamentStats(client, args, opts);
       break;
-    case "tournament recalculate":
-      output = await tournamentRecalculate(client, args, opts);
+    case "predict bgg":
+      output = await predictBggGame(client, args, opts);
+      break;
+    case "predict readiness":
+      output = await predictReadiness(client, args, opts);
+      break;
+    case "predict":
+      output = await predictGame(client, args, opts);
       break;
     case "import bgg-collection":
       output = await importBggCollection(client, args, opts);
@@ -287,6 +305,9 @@ async function main(): Promise<void> {
       break;
     case "config set":
       output = await configSet(client, args, opts);
+      break;
+    case "profile":
+      output = await profileCommand(client, args, opts);
       break;
     case "start":
       output = await daemonStart(client, args, opts);

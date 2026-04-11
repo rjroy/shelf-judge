@@ -161,6 +161,7 @@ export function parseThingResponse(xml: string): BggGameData[] {
       mechanics: extractLinks(links, "boardgamemechanic"),
       categories: extractLinks(links, "boardgamecategory"),
       families: extractLinks(links, "boardgamefamily"),
+      subdomains: extractLinks(links, "boardgamesubdomain"),
       suggestedPlayerCounts: extractSuggestedPlayerCounts(playerCountPoll),
       fetchedAt: new Date().toISOString(),
     };
@@ -240,6 +241,7 @@ export function parseThingItems(xml: string): ThingItem[] {
         mechanics: extractLinks(links, "boardgamemechanic"),
         categories: extractLinks(links, "boardgamecategory"),
         families: extractLinks(links, "boardgamefamily"),
+        subdomains: extractLinks(links, "boardgamesubdomain"),
         suggestedPlayerCounts: extractSuggestedPlayerCounts(playerCountPoll),
         fetchedAt: new Date().toISOString(),
       },
