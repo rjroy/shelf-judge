@@ -217,6 +217,10 @@ export async function predictGame(id: string): Promise<PredictedGameResponse> {
   return daemonJson(`/api/predictions/${id}`);
 }
 
+export async function predictBggGame(bggId: number): Promise<PredictedGameResponse> {
+  return daemonJson(`/api/predictions/bgg/${bggId}`);
+}
+
 export async function getReadiness(): Promise<PredictionReadiness> {
   return daemonJson("/api/predictions/readiness");
 }

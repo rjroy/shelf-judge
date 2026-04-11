@@ -9,8 +9,10 @@ import type {
 } from "@shelf-judge/shared";
 import { createPredictionService } from "../../src/services/prediction-service.js";
 import { createFitnessService } from "../../src/services/fitness-service.js";
+import type { BggGameData } from "@shelf-judge/shared";
 import type { StorageService } from "../../src/services/storage-service.js";
 import type { TournamentService } from "../../src/services/tournament-service.js";
+import type { BggClient, BggGameResult } from "../../src/services/bgg-client.js";
 import { DEFAULT_PREDICTION_SETTINGS } from "../../src/services/prediction-engine.js";
 
 const now = new Date().toISOString();
@@ -378,6 +380,180 @@ describe("prediction-service", () => {
 
       const result = await service.predictGame("target");
       expect(result.tension).toBeNull();
+    });
+  });
+
+  describe("predictBggGame", () => {
+    const makeBggData = (
+      mechanics: string[] = ["Dice Rolling"],
+      categories: string[] = ["Strategy"],
+    ): BggGameData => ({
+      communityRating: 7.5,
+      bayesAverage: 7.0,
+      weight: 3.0,
+      numWeightVotes: 100,
+      description: null,
+      mechanics: mechanics.map((name, i) => ({ id: i + 1, name })),
+      categories: categories.map((name, i) => ({ id: i + 1, name })),
+      families: [],
+      subdomains: [],
+      suggestedPlayerCounts: [],
+      fetchedAt: now,
+    });
+
+    const makeBggResult = (name: string, bggData?: BggGameData): BggGameResult => ({
+      metadata: {
+        bggId: 99999,
+        name,
+        yearPublished: 2023,
+        minPlayers: 1,
+        maxPlayers: 4,
+        playingTime: 90,
+        imageUrl: null,
+      },
+      bggData: bggData ?? makeBggData(),
+    });
+
+    function createStubBggClient(getGameResult?: BggGameResult, getGameError?: Error): BggClient {
+      return {
+        searchGames: () => Promise.reject(new Error("not implemented")),
+        getGame: getGameError
+          ? () => Promise.reject(getGameError)
+          : () => Promise.resolve(getGameResult ?? makeBggResult("Test Game")),
+        getGames: () => Promise.reject(new Error("not implemented")),
+        getUserCollection: () => Promise.reject(new Error("not implemented")),
+        isConfigured: () => true,
+      };
+    }
+
+    test("returns prediction for a game not in collection", async () => {
+      const collection = buildRatedCollection(6);
+      const bggClient = createStubBggClient(makeBggResult("New Game"));
+
+      const service = createPredictionService({
+        storageService: createStubStorage(collection),
+        fitnessService: createFitnessService(),
+        tournamentService: createStubTournamentService(),
+        bggClient,
+      });
+
+      const result = await service.predictBggGame(99999);
+      expect(result.game.id).toBe("preview-99999");
+      expect(result.game.name).toBe("New Game");
+      expect(result.game.bggId).toBe(99999);
+      expect(result.score).toBeDefined();
+      // Temporary game has no ratings, so all personal axes should be predicted
+      const themeEntry = result.score.breakdown.find((e) => e.axisId === "theme");
+      expect(themeEntry).toBeDefined();
+    });
+
+    test("delegates to predictGame when bggId exists in collection", async () => {
+      const collection = buildRatedCollection(6);
+      // Give one game a specific bggId
+      collection.games[0].bggId = 42;
+      const bggClient = createStubBggClient();
+
+      const service = createPredictionService({
+        storageService: createStubStorage(collection),
+        fitnessService: createFitnessService(),
+        tournamentService: createStubTournamentService(),
+        bggClient,
+      });
+
+      const result = await service.predictBggGame(42);
+      // Should return the existing game, not a preview
+      expect(result.game.id).toBe("rated-0");
+      expect(result.game.bggId).toBe(42);
+    });
+
+    test("throws when BGG returns no game (404)", async () => {
+      const collection = buildRatedCollection(6);
+      const bggClient = createStubBggClient(
+        undefined,
+        new Error("No game found with BGG ID 99999"),
+      );
+
+      const service = createPredictionService({
+        storageService: createStubStorage(collection),
+        fitnessService: createFitnessService(),
+        tournamentService: createStubTournamentService(),
+        bggClient,
+      });
+
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(service.predictBggGame(99999)).rejects.toThrow("No game found with BGG ID");
+    });
+
+    test("throws when bggClient is not configured", async () => {
+      const collection = buildRatedCollection(6);
+
+      const service = createPredictionService({
+        storageService: createStubStorage(collection),
+        fitnessService: createFitnessService(),
+        tournamentService: createStubTournamentService(),
+        // no bggClient
+      });
+
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(service.predictBggGame(99999)).rejects.toThrow("not configured");
+    });
+
+    test("produces prediction even with empty mechanics/categories", async () => {
+      const collection = buildRatedCollection(6);
+      const bggResult = makeBggResult("Bare Game", makeBggData([], []));
+      const bggClient = createStubBggClient(bggResult);
+
+      const service = createPredictionService({
+        storageService: createStubStorage(collection),
+        fitnessService: createFitnessService(),
+        tournamentService: createStubTournamentService(),
+        bggClient,
+      });
+
+      const result = await service.predictBggGame(99999);
+      expect(result.game.id).toBe("preview-99999");
+      expect(result.score).toBeDefined();
+      // Should still produce a score (from BGG-derived axes at least)
+      expect(typeof result.score.score).toBe("number");
+    });
+
+    test("does not persist the temporary game", async () => {
+      const collection = buildRatedCollection(6);
+      const bggClient = createStubBggClient(makeBggResult("Temp Game"));
+      let savedCollection = false;
+
+      const stubStorage = createStubStorage(collection);
+      stubStorage.saveCollection = () => {
+        savedCollection = true;
+        return Promise.resolve();
+      };
+
+      const service = createPredictionService({
+        storageService: stubStorage,
+        fitnessService: createFitnessService(),
+        tournamentService: createStubTournamentService(),
+        bggClient,
+      });
+
+      await service.predictBggGame(99999);
+      expect(savedCollection).toBe(false);
+    });
+
+    test("returns predictionUnavailable at stage 0", async () => {
+      const collection = buildRatedCollection(3); // stage 0
+      const bggClient = createStubBggClient(makeBggResult("Preview Game"));
+
+      const service = createPredictionService({
+        storageService: createStubStorage(collection),
+        fitnessService: createFitnessService(),
+        tournamentService: createStubTournamentService(),
+        bggClient,
+      });
+
+      const result = await service.predictBggGame(99999);
+      expect(result.predictionUnavailable).not.toBeNull();
+      expect(result.predictionUnavailable!.reason).toBe("stage-0");
+      expect(result.predictionUnavailable!.gamesNeeded).toBe(2); // 5 - 3
     });
   });
 });

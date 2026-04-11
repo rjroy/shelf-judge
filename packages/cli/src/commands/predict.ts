@@ -84,6 +84,98 @@ export async function predictGame(
   return lines.join("\n");
 }
 
+export async function predictBggGame(
+  client: DaemonClient,
+  args: string[],
+  opts: OutputOptions,
+): Promise<string> {
+  const bggIdStr = args[0];
+  if (!bggIdStr) {
+    throw new Error("Usage: shelf-judge predict bgg <bgg-id>");
+  }
+  const bggId = Number(bggIdStr);
+  if (!Number.isFinite(bggId) || bggId <= 0) {
+    throw new Error(`Invalid BGG ID: ${bggIdStr}`);
+  }
+
+  const { ok, data } = await client.get<PredictedGameResponse>(`/api/predictions/bgg/${bggId}`);
+
+  if (!ok) {
+    const err = data as unknown as { error: string };
+    throw new Error(err.error ?? "Prediction failed");
+  }
+
+  if (opts.json) return printOutput(data, opts);
+
+  const lines: string[] = [];
+  const { game, score, tension, predictionUnavailable } = data;
+
+  const isInCollection = !game.id.startsWith("preview-");
+  lines.push(`${game.name}${isInCollection ? " (already in collection)" : ""}`);
+
+  if (predictionUnavailable) {
+    lines.push(
+      `Predictions unavailable: need ${predictionUnavailable.gamesNeeded} more rated game(s) to reach Stage 1`,
+    );
+    if (score) {
+      lines.push(`BGG-derived score: ${formatScore(score.score)}`);
+    }
+    return lines.join("\n");
+  }
+
+  if (score.vetoed && score.vetoedBy) {
+    lines.push(`Predicted Fitness: VETOED (hypothetical: ${formatScore(score.hypotheticalScore)})`);
+    const dir = score.vetoedBy.direction === "below" ? "below" : "above";
+    lines.push(
+      `Veto: "${score.vetoedBy.axisName}" scored ${score.vetoedBy.rawValue} (threshold: ${dir} ${score.vetoedBy.threshold})`,
+    );
+  } else {
+    lines.push(
+      `Predicted Fitness: ${formatScore(score.score)} (${score.ratedAxisCount}/${score.totalAxisCount} axes rated)`,
+    );
+  }
+
+  if (score.predictionMeta) {
+    const meta = score.predictionMeta;
+    lines.push(
+      `Prediction: ${meta.predictedAxisCount} predicted, ${meta.actualAxisCount} actual, ${meta.referenceGameCount} reference games`,
+    );
+    lines.push(
+      `Confidence: ${meta.confidence} (${(meta.coveragePercent * 100).toFixed(0)}% coverage, stage ${meta.readinessStage})`,
+    );
+  }
+
+  if (tension) {
+    lines.push("");
+    lines.push(
+      `[tension] Predicted fitness (${formatScore(tension.predictedFitness)}) vs tournament cluster (${formatScore(tension.tournamentClusterAverage)})`,
+    );
+    lines.push(`  ${tension.note}`);
+  }
+
+  lines.push("");
+
+  if (score.breakdown && score.breakdown.length > 0) {
+    lines.push(formatBreakdown(score.breakdown));
+
+    const predictedAxes = score.breakdown.filter(
+      (e) => e.source === "predicted" && e.referenceGames && e.referenceGames.length > 0,
+    );
+    if (predictedAxes.length > 0) {
+      lines.push("");
+      lines.push("Reference Games:");
+      for (const axis of predictedAxes) {
+        lines.push(`  ${axis.axisName}:`);
+        for (const ref of axis.referenceGames!) {
+          lines.push(`    ${ref.gameName} (similarity: ${ref.similarity.toFixed(2)})`);
+        }
+      }
+    }
+  }
+
+  return lines.join("\n");
+}
+
 export async function predictReadiness(
   client: DaemonClient,
   _args: string[],

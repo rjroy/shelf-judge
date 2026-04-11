@@ -10,6 +10,7 @@ import type {
 import type { StorageService } from "./storage-service.js";
 import type { FitnessService } from "./fitness-service.js";
 import type { TournamentService } from "./tournament-service.js";
+import type { BggClient } from "./bgg-client.js";
 import { buildVocabulary, computeContinuousRanges, encodeGame } from "./feature-vector.js";
 import type { FeatureVector } from "./feature-vector.js";
 import {
@@ -32,6 +33,7 @@ export interface PredictedGameResult {
 
 export interface PredictionService {
   predictGame(gameId: string): Promise<PredictedGameResult>;
+  predictBggGame(bggId: number): Promise<PredictedGameResult>;
   getReadiness(): Promise<PredictionReadiness>;
   listGamesWithPredictions(): Promise<GameWithScore[]>;
   getSettings(): Promise<PredictionSettings>;
@@ -42,6 +44,7 @@ export interface PredictionServiceDeps {
   storageService: StorageService;
   fitnessService: FitnessService;
   tournamentService: TournamentService;
+  bggClient?: BggClient;
 }
 
 function flattenVector(fv: FeatureVector): number[] {
@@ -49,7 +52,7 @@ function flattenVector(fv: FeatureVector): number[] {
 }
 
 export function createPredictionService(deps: PredictionServiceDeps): PredictionService {
-  const { storageService, fitnessService, tournamentService } = deps;
+  const { storageService, fitnessService, tournamentService, bggClient } = deps;
 
   async function loadPredictionContext() {
     const [collection, settings] = await Promise.all([
@@ -204,6 +207,81 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
       }
 
       return { game, score: fitnessResult, tension, predictionUnavailable };
+    },
+
+    async predictBggGame(bggId: number): Promise<PredictedGameResult> {
+      if (!bggClient) {
+        throw new Error("BGG integration is not configured. Cannot predict games by BGG ID.");
+      }
+
+      // Check if this bggId already exists in the collection
+      const ctx = await loadPredictionContext();
+      const existingGame = ctx.games.find((g) => g.bggId === bggId);
+      if (existingGame) {
+        // Delegate to existing predictGame path
+        return this.predictGame(existingGame.id);
+      }
+
+      // Fetch BGG data for the game
+      const bggResult = await bggClient.getGame(bggId);
+
+      // Build a temporary Game object (not persisted)
+      const now = new Date().toISOString();
+      const tempGame: Game = {
+        id: `preview-${bggId}`,
+        bggId,
+        name: bggResult.metadata.name,
+        yearPublished: bggResult.metadata.yearPublished,
+        minPlayers: bggResult.metadata.minPlayers,
+        maxPlayers: bggResult.metadata.maxPlayers,
+        playingTime: bggResult.metadata.playingTime,
+        imageUrl: bggResult.metadata.imageUrl,
+        numPlays: bggResult.collectionData?.numPlays ?? null,
+        bggData: bggResult.bggData,
+        ratings: {},
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      // Encode the temporary game using the collection's vocabulary and ranges
+      const fv = encodeGame(tempGame, ctx.vocabulary, undefined, ctx.ranges);
+      const targetVector = flattenVector(fv);
+
+      const { fitnessResult } = computePredictedFitness(
+        tempGame,
+        ctx.axes,
+        bggResult.bggData,
+        ctx.referenceGames,
+        targetVector,
+        ctx.settings,
+        ctx.readinessStage,
+        (g, a, b) => fitnessService.calculateScore(g, a, b),
+      );
+
+      // Detect revealed preference tension if tournament data exists
+      let tension: RevealedPreferenceTension | null = null;
+      if (ctx.tournamentRankedGames.length > 0 && fitnessResult.predictionMeta) {
+        tension = detectRevealedPreferenceTension(
+          fitnessResult.score,
+          targetVector,
+          ctx.tournamentRankedGames,
+          ctx.settings.defaultK,
+          ctx.settings.minSimilarityThreshold,
+        );
+      }
+
+      // REQ-PRED-22: indicate when personal-axis prediction is unavailable at Stage 0
+      let predictionUnavailable: PredictionUnavailable | null = null;
+      if (ctx.readinessStage === 0) {
+        const nextStageAt = ctx.settings.stageThresholds[0];
+        predictionUnavailable = {
+          reason: "stage-0",
+          ratedGameCount: ctx.ratedGameCount,
+          gamesNeeded: nextStageAt - ctx.ratedGameCount,
+        };
+      }
+
+      return { game: tempGame, score: fitnessResult, tension, predictionUnavailable };
     },
 
     async getReadiness(): Promise<PredictionReadiness> {

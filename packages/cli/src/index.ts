@@ -26,7 +26,7 @@ import {
   tournamentStats,
 } from "./commands/tournament.js";
 import { profileCommand } from "./commands/profile.js";
-import { predictGame, predictReadiness } from "./commands/predict.js";
+import { predictGame, predictBggGame, predictReadiness } from "./commands/predict.js";
 
 // Known command paths and their token depths.
 // Dispatch matches on the first N tokens; everything after is positional.
@@ -48,6 +48,7 @@ const COMMANDS: Record<string, number> = {
   "tournament pick": 2,
   "tournament stop": 2,
   "tournament stats": 2,
+  "predict bgg": 2,
   "predict readiness": 2,
   "import bgg-collection": 2,
   "config get": 2,
@@ -286,6 +287,9 @@ async function main(): Promise<void> {
       break;
     case "tournament stats":
       output = await tournamentStats(client, args, opts);
+      break;
+    case "predict bgg":
+      output = await predictBggGame(client, args, opts);
       break;
     case "predict readiness":
       output = await predictReadiness(client, args, opts);

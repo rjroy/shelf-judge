@@ -234,6 +234,114 @@ describe("prediction routes", () => {
     });
   });
 
+  describe("GET /api/predictions/bgg/:bggId", () => {
+    const makeBggResult = (bggId: number, name: string): BggGameResult => ({
+      metadata: {
+        bggId,
+        name,
+        yearPublished: 2023,
+        minPlayers: 1,
+        maxPlayers: 4,
+        playingTime: 90,
+        imageUrl: null,
+      },
+      bggData: {
+        communityRating: 7.5,
+        bayesAverage: 7.2,
+        weight: 2.5,
+        numWeightVotes: 100,
+        description: null,
+        mechanics: [{ id: 1, name: "Dice Rolling" }],
+        categories: [{ id: 1, name: "Strategy" }],
+        families: [],
+        subdomains: [],
+        suggestedPlayerCounts: [],
+        fetchedAt: new Date().toISOString(),
+      },
+    });
+
+    test("returns prediction for a game by BGG ID", async () => {
+      const bggClient = createMockBggClient({
+        getGame: (bggId: number) => Promise.resolve(makeBggResult(bggId, `Game-${bggId}`)),
+      });
+      ctx = createTestApp({ bggClient });
+
+      // Lower stage threshold and add rated games to get past stage 0
+      await jsonRequest(ctx.app, "PATCH", "/api/predictions/settings", {
+        stageThresholds: [2, 8, 15],
+      });
+
+      const axisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
+        name: "Fun",
+        weight: 50,
+      });
+      const axis = (await axisRes.json()) as Axis;
+
+      for (let i = 1; i <= 3; i++) {
+        const res = await jsonRequest(ctx.app, "POST", "/api/games", {
+          name: `Ref ${i}`,
+          bggId: i,
+        });
+        const { game } = (await res.json()) as { game: { id: string } };
+        await jsonRequest(ctx.app, "PUT", `/api/games/${game.id}/ratings`, {
+          ratings: { [axis.id]: 5 + i },
+        });
+      }
+
+      const res = await jsonRequest(ctx.app, "GET", "/api/predictions/bgg/999");
+      expect(res.status).toBe(200);
+
+      const prediction = (await res.json()) as PredictedGameResponse;
+      expect(prediction.game.id).toBe("preview-999");
+      expect(prediction.game.name).toBe("Game-999");
+      expect(prediction.score).toBeDefined();
+      expect(prediction.score.score).toBeGreaterThan(0);
+    });
+
+    test("returns existing game prediction when bggId is in collection", async () => {
+      const bggClient = createMockBggClient({
+        getGame: (bggId: number) => Promise.resolve(makeBggResult(bggId, `Game-${bggId}`)),
+      });
+      ctx = createTestApp({ bggClient });
+
+      // Add a game with bggId 42
+      const addRes = await jsonRequest(ctx.app, "POST", "/api/games", {
+        name: "Existing Game",
+        bggId: 42,
+      });
+      expect(addRes.status).toBe(201);
+
+      const res = await jsonRequest(ctx.app, "GET", "/api/predictions/bgg/42");
+      expect(res.status).toBe(200);
+
+      const prediction = (await res.json()) as PredictedGameResponse;
+      // Should return the existing game, not a preview
+      expect(prediction.game.id).not.toStartWith("preview-");
+      expect(prediction.game.bggId).toBe(42);
+    });
+
+    test("returns 404 when BGG ID does not exist", async () => {
+      const bggClient = createMockBggClient({
+        getGame: () => Promise.reject(new Error("No game found with BGG ID 99999")),
+      });
+      ctx = createTestApp({ bggClient });
+
+      const res = await jsonRequest(ctx.app, "GET", "/api/predictions/bgg/99999");
+      expect(res.status).toBe(404);
+    });
+
+    test("returns 400 for invalid BGG ID", async () => {
+      const res = await jsonRequest(ctx.app, "GET", "/api/predictions/bgg/notanumber");
+      expect(res.status).toBe(400);
+    });
+
+    test("returns 503 when BGG client not configured", async () => {
+      // Default ctx has no bggClient
+      const res = await jsonRequest(ctx.app, "GET", "/api/predictions/bgg/12345");
+      expect(res.status).toBe(503);
+    });
+  });
+
   describe("GET /api/games?includePredicted=true", () => {
     test("returns games list without prediction when flag absent", async () => {
       await addGameWithRating("Test Game");

@@ -49,6 +49,7 @@ async function main() {
     storageService,
     fitnessService,
     tournamentService,
+    bggClient,
   });
 
   const socketPath = resolveSocketPath(appConfig, envConfig);

@@ -1650,6 +1650,132 @@ body {
   color: var(--text-muted);
 }
 
+.search-result-item {
+  border-bottom: 1px solid var(--border);
+}
+
+.search-result-item .search-result-row {
+  border-bottom: none;
+}
+
+.search-result-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.preview-panel {
+  padding: 10px 0 12px 0;
+  font-size: 13px;
+}
+
+.preview-loading {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.preview-error {
+  color: var(--danger);
+}
+
+.preview-unavailable {
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.preview-in-collection {
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.preview-link {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.preview-score-line {
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.preview-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.preview-tension {
+  font-size: 12px;
+  color: var(--warning);
+  margin-bottom: 6px;
+}
+
+.preview-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+}
+
+.preview-breakdown-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.preview-axis-name {
+  flex: 1;
+  color: var(--text-secondary);
+}
+
+.preview-axis-rating {
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 28px;
+  text-align: right;
+}
+
+.confidence-badge {
+  display: inline-block;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  margin-left: 6px;
+  font-weight: 500;
+}
+
+.confidence-badge-sm {
+  font-size: 10px;
+  padding: 0 4px;
+  margin-left: 4px;
+}
+
+.confidence-actual {
+  background: var(--success-subtle, #e8f5e9);
+  color: var(--success, #2e7d32);
+}
+
+.confidence-strong {
+  background: var(--success-subtle, #e8f5e9);
+  color: var(--success, #2e7d32);
+}
+
+.confidence-moderate {
+  background: var(--warning-subtle, #fff3e0);
+  color: var(--warning, #e65100);
+}
+
+.confidence-weak {
+  background: var(--danger-subtle, #fbe9e7);
+  color: var(--danger, #c62828);
+}
+
+.confidence-insufficient {
+  background: var(--bg-muted, #f5f5f5);
+  color: var(--text-muted);
+}
+
 .manual-add-card {
   background: var(--bg-surface);
   border: 2px dashed var(--border-strong);

@@ -54,6 +54,31 @@ export function createPredictionRoutes(deps: PredictionRoutesDeps): RouteModule 
     }
   });
 
+  // GET /predictions/bgg/:bggId
+  routes.get("/predictions/bgg/:bggId", async (c) => {
+    const bggIdParam = c.req.param("bggId");
+    const bggId = Number(bggIdParam);
+    if (!Number.isFinite(bggId) || bggId <= 0) {
+      return c.json({ error: `Invalid BGG ID: ${bggIdParam}` }, 400);
+    }
+    try {
+      const result = await predictionService.predictBggGame(bggId);
+      return c.json(result);
+    } catch (err) {
+      const message = toErrorMessage(err);
+      if (message.includes("No game found with BGG ID")) {
+        return c.json({ error: message }, 404);
+      }
+      if (message.includes("not configured")) {
+        return c.json({ error: message }, 503);
+      }
+      if (message.includes("Failed to parse") || message.includes("returned HTTP")) {
+        return c.json({ error: message }, 422);
+      }
+      return c.json({ error: message }, 500);
+    }
+  });
+
   // GET /predictions/:gameId
   routes.get("/predictions/:gameId", async (c) => {
     const gameId = c.req.param("gameId");
@@ -80,6 +105,15 @@ export function createPredictionRoutes(deps: PredictionRoutesDeps): RouteModule 
       invocation: { method: "GET", path: "/api/predictions/:gameId" },
       hierarchy: { root: "shelf", feature: "prediction" },
       parameters: [{ name: "gameId", in: "path", description: "Game ID", required: true }],
+      idempotent: true,
+    },
+    {
+      operationId: "shelf.prediction.predict-bgg",
+      name: "predict-bgg",
+      description: "Get predicted fitness score for a game by BGG ID (preview before adding)",
+      invocation: { method: "GET", path: "/api/predictions/bgg/:bggId" },
+      hierarchy: { root: "shelf", feature: "prediction" },
+      parameters: [{ name: "bggId", in: "path", description: "BGG game ID", required: true }],
       idempotent: true,
     },
     {

@@ -61,6 +61,7 @@ export function createTestApp(options?: TestAppOptions): TestAppContext {
     storageService,
     fitnessService,
     tournamentService,
+    bggClient,
   });
 
   const { app, operations } = createApp({
