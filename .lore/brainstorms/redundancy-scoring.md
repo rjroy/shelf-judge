@@ -1,7 +1,7 @@
 ---
 title: "Redundancy and Collection-Awareness Scoring"
 date: 2026-04-11
-status: open
+status: approved
 tags: [brainstorm, fitness, redundancy, scoring, collection-awareness]
 related:
   - .lore/issues/deferred-redundancy-scoring.md
