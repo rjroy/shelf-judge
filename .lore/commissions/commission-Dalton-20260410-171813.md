@@ -1,7 +1,7 @@
 ---
 title: "Commission: Prediction Engine Phase 5: Web UI"
 date: 2026-04-11
-status: failed
+status: dispatched
 tags: [commission]
 worker: Dalton
 workerDisplayTitle: "Guild Artificer"
@@ -32,6 +32,16 @@ activity_timeline:
   - timestamp: 2026-04-11T00:58:16.745Z
     event: status_failed
     reason: "Session error: Claude Code returned an error result: You've hit your limit · resets 9pm (America/Los_Angeles)"
+  - timestamp: 2026-04-11T04:10:24.612Z
+    event: status_pending
+    reason: "Redispatched for retry"
+    from: "failed"
+    to: "pending"
+  - timestamp: 2026-04-11T04:10:24.614Z
+    event: status_dispatched
+    reason: "Dispatched to worker"
+    from: "pending"
+    to: "dispatched"
 current_progress: ""
 projectName: shelf-judge
 ---
