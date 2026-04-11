@@ -5,6 +5,8 @@
   --bg-base: #f4f1ec;
   --bg-surface: #fefcf9;
   --bg-elevated: #ffffff;
+  --bg-subtle: #f9f7f4;
+  --bg-muted: #f5f5f5;
   --border: #ddd8d0;
   --border-strong: #c4bfb8;
 
@@ -18,53 +20,72 @@
   --score-high: #2d7a4a;
   --score-mid: #8a6f20;
   --score-low: #b84040;
+  --score-bg: #fdf3e7;
+  --score-high-bg: #eaf5ef;
+  --score-low-bg: #fdeaea;
+  --score-border: #e8c898;
+  --score-low-border: #f0b8b8;
+  --score-mid-border: #ddd0a0;
+
+  /* Status */
+  --success: #2e7d32;
+  --success-bg: #d5f0e0;
+  --success-subtle: #e8f5e9;
+  --warning: #e65100;
+  --warning-subtle: #fff3e0;
+  --warning-bg: #fff8e6;
+  --warning-border: #e8d060;
+  --warning-text: #7a5f10;
+  --danger: var(--score-low);
+  --danger-subtle: #fdf0f0;
+  --danger-border: #e0c0c0;
 
   /* Data source */
-  --personal-accent: #1a1714;
+  --personal-accent: var(--text-primary);
   --bgg-accent: #2e5f8a;
   --bgg-bg: #edf3f9;
+  --bgg-border: #c0d8ec;
+  --bgg-badge-bg: #d4e7f5;
   --override-accent: #5c3d99;
   --override-bg: #f0ecfa;
+  --override-border: #c5b8e8;
+  --override-badge-bg: #e0d6f5;
 
   /* Actions */
   --action: #1c3d5e;
   --action-hover: #2a5580;
   --action-subtle: #e8eff6;
-  --danger: #b84040;
-  --danger-subtle: #fdf0f0;
+  --action-border: #b8ccdc;
 
   /* Navigation */
-  --nav-bg: #1a1714;
+  --nav-bg: var(--text-primary);
   --nav-text: #e8e4dc;
-  --nav-active: #b86c1a;
+  --nav-active: var(--score-color);
 
   /* Filters */
   --filter-spec: #4a6e42;
   --filter-spec-bg: #eaf2e8;
+  --filter-spec-border: #c4ddbf;
 
   /* Derived palette */
   --row-hover: #f0ede8;
   --table-header-bg: #ede9e3;
-  --bgg-badge-bg: #d4e7f5;
-  --override-badge-bg: #e0d6f5;
-  --bgg-border: #c0d8ec;
-  --override-border: #c5b8e8;
-  --danger-border: #e0c0c0;
-  --bg-subtle: #f9f7f4;
-  --success-bg: #d5f0e0;
-
-  /* Profile page */
-  --score-bg: #fdf3e7;
-  --score-high-bg: #eaf5ef;
-  --score-low-bg: #fdeaea;
-  --outlier-lone: #5c3d99;
-  --outlier-lone-bg: #f0ecf8;
-  --outlier-orphan: #8a6f20;
-  --outlier-orphan-bg: #f5f0e2;
-  --outlier-fitness: #2d7a4a;
-  --outlier-fitness-bg: #eaf5ef;
-  --suggest-bg: #f8f6f2;
+  --suggest-bg: var(--bg-subtle);
   --suggest-border: #c8c0b4;
+  --overlay-bg: rgba(0, 0, 0, 0.5);
+  --placeholder-from: #e8e4dc;
+  --placeholder-to: #d0cbc0;
+
+  /* Profile: outlier tags (aliases to semantic colors) */
+  --outlier-lone: var(--override-accent);
+  --outlier-lone-bg: var(--override-bg);
+  --outlier-lone-border: #c8b8e0;
+  --outlier-orphan: var(--score-mid);
+  --outlier-orphan-bg: #f5f0e2;
+  --outlier-orphan-border: #d8c890;
+  --outlier-fitness: var(--score-high);
+  --outlier-fitness-bg: var(--score-high-bg);
+  --outlier-fitness-border: #a8d8b8;
 
   /* Typography scale */
   --text-xs: 11px;
@@ -466,7 +487,7 @@ body {
 }
 
 .game-thumb-placeholder {
-  background: linear-gradient(135deg, #e8e4dc, #d8d4cc);
+  background: linear-gradient(135deg, var(--placeholder-from), var(--placeholder-to));
   width: 100%;
   height: 100%;
   display: flex;
@@ -700,7 +721,7 @@ body {
   width: 100px;
   height: 100px;
   border-radius: 8px;
-  background: linear-gradient(135deg, #e0dcd5, #ccc8c0);
+  background: linear-gradient(135deg, var(--placeholder-from), var(--placeholder-to));
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -1752,27 +1773,27 @@ body {
 }
 
 .confidence-actual {
-  background: var(--success-subtle, #e8f5e9);
-  color: var(--success, #2e7d32);
+  background: var(--success-subtle);
+  color: var(--success);
 }
 
 .confidence-strong {
-  background: var(--success-subtle, #e8f5e9);
-  color: var(--success, #2e7d32);
+  background: var(--success-subtle);
+  color: var(--success);
 }
 
 .confidence-moderate {
-  background: var(--warning-subtle, #fff3e0);
-  color: var(--warning, #e65100);
+  background: var(--warning-subtle);
+  color: var(--warning);
 }
 
 .confidence-weak {
-  background: var(--danger-subtle, #fbe9e7);
-  color: var(--danger, #c62828);
+  background: var(--danger-subtle);
+  color: var(--danger);
 }
 
 .confidence-insufficient {
-  background: var(--bg-muted, #f5f5f5);
+  background: var(--bg-muted);
   color: var(--text-muted);
 }
 
@@ -2271,7 +2292,7 @@ body {
   display: none;
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--overlay-bg);
   z-index: 99;
   opacity: 0;
   visibility: hidden;
@@ -2721,7 +2742,7 @@ body {
   width: 120px;
   height: 120px;
   border-radius: 8px;
-  background: linear-gradient(135deg, #e8e4dc, #d0cbc0);
+  background: linear-gradient(135deg, var(--placeholder-from), var(--placeholder-to));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2914,9 +2935,9 @@ body {
 
 /* Divergence banner */
 .divergence-banner {
-  background: #fff8e6;
-  border: 1px solid #e8d060;
-  color: #7a5f10;
+  background: var(--warning-bg);
+  border: 1px solid var(--warning-border);
+  color: var(--warning-text);
   padding: 12px 20px;
   font-size: 13px;
   line-height: 1.5;
@@ -3472,7 +3493,7 @@ body {
 }
 
 .active-chips-row .filter-chip.chip-search {
-  background: #f0ede8;
+  background: var(--row-hover);
   color: var(--text-secondary);
   border-color: var(--border-strong);
 }
@@ -3486,7 +3507,7 @@ body {
 .active-chips-row .filter-chip.chip-spec {
   background: var(--filter-spec-bg);
   color: var(--filter-spec);
-  border-color: #c4ddbf;
+  border-color: var(--filter-spec-border);
 }
 
 .chip-x {
@@ -3709,7 +3730,7 @@ body {
     display: block;
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.4);
+    background: var(--overlay-bg);
     z-index: 199;
   }
 
@@ -4088,8 +4109,8 @@ body {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: #f0ecf8;
-  border: 1px solid #d4c8e8;
+  background: var(--override-bg);
+  border: 1px solid var(--override-border);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4121,7 +4142,7 @@ body {
   border-radius: 6px;
   background: var(--override-bg);
   color: var(--override-accent);
-  border: 1px solid #d4c8e8;
+  border: 1px solid var(--override-border);
   cursor: default;
   font-weight: 500;
   white-space: nowrap;
@@ -4344,7 +4365,7 @@ body {
   background: var(--bgg-bg);
   border-radius: 4px;
   overflow: hidden;
-  border: 1px solid #cad9e8;
+  border: 1px solid var(--bgg-border);
 }
 
 .bgg-bar-fill {
@@ -4387,7 +4408,7 @@ body {
 
 .wt-bucket.zero {
   opacity: 0.12;
-  background: #cad9e8;
+  background: var(--bgg-border);
 }
 
 .weight-range-labels {
@@ -4438,25 +4459,25 @@ body {
 .curve-tag.shape {
   background: var(--action-subtle);
   color: var(--action);
-  border-color: #b8ccdc;
+  border-color: var(--action-border);
 }
 
 .curve-tag.sweet-spot {
   background: var(--score-bg);
   color: var(--score-color);
-  border-color: #e8c898;
+  border-color: var(--score-border);
 }
 
 .curve-tag.veto {
   background: var(--score-low-bg);
   color: var(--score-low);
-  border-color: #f0b8b8;
+  border-color: var(--score-low-border);
 }
 
 .curve-tag.tolerance {
-  background: #f5f0e2;
+  background: var(--outlier-orphan-bg);
   color: var(--score-mid);
-  border-color: #ddd0a0;
+  border-color: var(--score-mid-border);
 }
 
 /* Divergence section */
@@ -4541,13 +4562,13 @@ body {
 .div-gap.tournament-outlier {
   background: var(--bgg-bg);
   color: var(--bgg-accent);
-  border: 1px solid #b8ccdc;
+  border: 1px solid var(--action-border);
 }
 
 .div-gap.fitness-outlier {
   background: var(--score-bg);
   color: var(--score-color);
-  border: 1px solid #e8c898;
+  border: 1px solid var(--score-border);
 }
 
 /* Outliers */
@@ -4606,19 +4627,19 @@ body {
 .outlier-type-tag.lone-wolf {
   background: var(--outlier-lone-bg);
   color: var(--outlier-lone);
-  border-color: #c8b8e0;
+  border-color: var(--outlier-lone-border);
 }
 
 .outlier-type-tag.category-orphan {
   background: var(--outlier-orphan-bg);
   color: var(--outlier-orphan);
-  border-color: #d8c890;
+  border-color: var(--outlier-orphan-border);
 }
 
 .outlier-type-tag.high-fitness {
   background: var(--outlier-fitness-bg);
   color: var(--outlier-fitness);
-  border-color: #a8d8b8;
+  border-color: var(--outlier-fitness-border);
 }
 
 .outlier-distance {
@@ -4638,9 +4659,9 @@ body {
 }
 
 .dist-component.high {
-  background: #f0ecf8;
+  background: var(--override-bg);
   color: var(--override-accent);
-  border-color: #c8b8e0;
+  border-color: var(--outlier-lone-border);
   font-weight: 600;
 }
 
@@ -4723,10 +4744,10 @@ body {
   font-size: var(--text-xs);
   padding: 2px 8px;
   border-radius: 10px;
-  background: #fef3e2;
+  background: var(--score-bg);
   color: var(--score-color);
   font-weight: 600;
-  border: 1px solid #f0d8b0;
+  border: 1px solid var(--score-border);
 }
 
 .btn-recompute {
@@ -4734,7 +4755,7 @@ body {
   padding: 5px 12px;
   border-radius: 6px;
   background: var(--action);
-  color: #fff;
+  color: var(--bg-elevated);
   border: none;
   cursor: pointer;
   font-weight: 500;
@@ -4767,19 +4788,19 @@ body {
   --predict-bg: #eaf5f3;
   --predict-border: #a8d9d4;
 
-  /* Confidence level colors */
-  --conf-strong: #2d7a4a;
-  --conf-strong-bg: #e8f5ee;
+  /* Confidence level colors (aliases to shared palette where identical) */
+  --conf-strong: var(--score-high);
+  --conf-strong-bg: var(--score-high-bg);
   --conf-moderate: #7a5e1a;
   --conf-moderate-bg: #f5ecd8;
   --conf-weak: #8a3a10;
   --conf-weak-bg: #f5e4d8;
-  --conf-insufficient: #9c9590;
-  --conf-insufficient-bg: #f0ede8;
+  --conf-insufficient: var(--text-muted);
+  --conf-insufficient-bg: var(--row-hover);
 
-  /* Tournament tension */
-  --tourney-accent: #2e5f8a;
-  --tourney-bg: #edf3f9;
+  /* Tournament tension (aliases to BGG palette) */
+  --tourney-accent: var(--bgg-accent);
+  --tourney-bg: var(--bgg-bg);
 }
 
 /* ===== Prediction Components ===== */
@@ -4994,7 +5015,7 @@ body {
 
 /* Revealed preference tension panel */
 .tension-panel {
-  background: linear-gradient(135deg, var(--tourney-bg), #f5f8fc);
+  background: linear-gradient(135deg, var(--tourney-bg), var(--bg-surface));
   border: 1px solid var(--bgg-border);
   border-radius: 8px;
   padding: 16px 20px;
@@ -5261,7 +5282,7 @@ body {
 /* ===== Readiness Page ===== */
 
 .readiness-stage-banner {
-  background: linear-gradient(135deg, var(--predict-bg), #dff0ed);
+  background: linear-gradient(135deg, var(--predict-bg), var(--bg-surface));
   border: 1px solid var(--predict-border);
   border-radius: 10px;
   padding: 24px 28px;

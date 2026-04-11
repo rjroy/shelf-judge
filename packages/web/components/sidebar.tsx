@@ -203,9 +203,9 @@ export function Sidebar() {
             fill="none"
             xmlns="http://www.w3.org/2000/svg"
           >
-            <rect x="0" y="6" width="5" height="12" rx="1" fill="#b86c1a" />
-            <rect x="7" y="0" width="5" height="18" rx="1" fill="#e8e4dc" />
-            <rect x="14" y="4" width="5" height="14" rx="1" fill="#e8e4dc" opacity="0.6" />
+            <rect x="0" y="6" width="5" height="12" rx="1" fill="var(--nav-active)" />
+            <rect x="7" y="0" width="5" height="18" rx="1" fill="var(--nav-text)" />
+            <rect x="14" y="4" width="5" height="14" rx="1" fill="var(--nav-text)" opacity="0.6" />
           </svg>
           <span className="brand-name">Shelf Judge</span>
         </div>
