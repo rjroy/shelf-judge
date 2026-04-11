@@ -160,8 +160,8 @@ export function CollectionTable({
     [activeGames, filters],
   );
   const { withValue, withoutValue } = useMemo(
-    () => sortGames(filtered, sort.field, sort.direction, tournamentStats),
-    [filtered, sort.field, sort.direction, tournamentStats],
+    () => sortGames(filtered, sort.field, sort.direction, tournamentStats, axes),
+    [filtered, sort.field, sort.direction, tournamentStats, axes],
   );
   const axisMap = useMemo(() => new Map(axes.map((a) => [a.id, a])), [axes]);
   const isAxisSort = sort.field.startsWith("axis:");
@@ -466,6 +466,7 @@ export function CollectionTable({
           sortField={sort.field}
           tournamentStats={tournamentStats}
           axisMap={axisMap}
+          axes={axes}
           isAxisSort={isAxisSort}
           showConfidence={predictionsOn}
         />
@@ -488,6 +489,7 @@ export function CollectionTable({
           sortField={sort.field}
           tournamentStats={tournamentStats}
           axisMap={axisMap}
+          axes={axes}
           isAxisSort={isAxisSort}
           showConfidence={predictionsOn}
         />
@@ -506,6 +508,7 @@ interface GameRowProps {
   sortField: string;
   tournamentStats: Record<string, TournamentGameStatsDisplay>;
   axisMap: Map<string, Axis>;
+  axes: Axis[];
   isAxisSort: boolean;
   showConfidence: boolean;
 }
@@ -516,11 +519,12 @@ function GameRow({
   sortField,
   tournamentStats,
   axisMap,
+  axes,
   isAxisSort,
   showConfidence,
 }: GameRowProps) {
   const { game, score } = gws;
-  const display = getScoreDisplay(gws, sortField, tournamentStats);
+  const display = getScoreDisplay(gws, sortField, tournamentStats, axes);
   const isPredictedOnly =
     score !== null && score.predictionMeta !== null && score.ratedAxisCount === 0;
   const hasPrediction = score?.predictionMeta !== null && score?.predictionMeta !== undefined;

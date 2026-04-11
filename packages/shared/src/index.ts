@@ -70,6 +70,8 @@ export { toErrorMessage, ValidationError, NotFoundError } from "./errors";
 
 export { matchesBggTag, normalizeBggTagTokens } from "./bgg-tag-match";
 
+export { resolveBggRawValue, resolveAxisValues } from "./axis-utils";
+
 export {
   K_FLEXIBLE,
   K_MODERATE,

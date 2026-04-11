@@ -2,7 +2,8 @@
 // Implements REQ-PROFILE-11 (composite distance), REQ-PRED-4 (shared module).
 // Follows the elo-engine.ts and curve-engine.ts pattern.
 
-import type { ComponentDistances, Game } from "@shelf-judge/shared";
+import type { Axis, ComponentDistances, Game } from "@shelf-judge/shared";
+import { getNativeScale } from "@shelf-judge/shared";
 
 export interface Vocabulary {
   mechanics: string[];
@@ -111,6 +112,7 @@ export function encodeGame(
   vocabulary: Vocabulary,
   axisRatings?: Record<string, number>,
   ranges?: ContinuousRanges,
+  axes?: Axis[],
 ): FeatureVector {
   const allTerms = [...vocabulary.mechanics, ...vocabulary.categories];
   const gameTerms = new Set<string>();
@@ -153,9 +155,11 @@ export function encodeGame(
     const axisIds = Object.keys(axisRatings).sort();
     if (axisIds.length > 0) {
       personalAxes = axisIds.map((id) => {
-        const rating = game.ratings[id];
-        // Normalize 1-10 rating to 0-1. Unrated axes get midpoint (0.5).
-        return rating != null ? normalize(rating, 1, 10) : 0.5;
+        const rating = axisRatings[id];
+        if (rating == null) return 0.5;
+        const axis = axes?.find((a) => a.id === id);
+        const scale = axis ? getNativeScale(axis.source, axis.bggField) : { min: 1, max: 10 };
+        return normalize(rating, scale.min, scale.max);
       });
     }
   }

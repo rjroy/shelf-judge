@@ -141,27 +141,52 @@ describe("encodeGame", () => {
 
   test("encodes personal axis ratings when provided", () => {
     const game = makeGame();
-    game.ratings = { "axis-a": 8, "axis-b": 3 };
-    const axisRatings = { "axis-a": 0, "axis-b": 0 }; // keys define which axes
+    const axisRatings = { "axis-a": 8, "axis-b": 3 };
 
     const vocab = { mechanics: [], categories: [] };
     const vec = encodeGame(game, vocab, axisRatings);
 
     expect(vec.personalAxes).not.toBeNull();
     expect(vec.personalAxes!.length).toBe(2);
-    // axis-a rating 8: (8-1)/9 ≈ 0.778
+    // axis-a rating 8: (8-1)/9 ≈ 0.778 (default 1-10 scale when no axes passed)
     expect(vec.personalAxes![0]).toBeCloseTo(7 / 9, 5);
     // axis-b rating 3: (3-1)/9 ≈ 0.222
     expect(vec.personalAxes![1]).toBeCloseTo(2 / 9, 5);
   });
 
-  test("uses midpoint for unrated axes", () => {
+  test("normalizes using axis-specific native scale", () => {
     const game = makeGame();
-    game.ratings = {}; // no ratings
-    const axisRatings = { "axis-a": 0 };
+    // BGG weight axis value 3.0 on 1-5 scale
+    const axisRatings = { w: 3.0 };
+    const axes = [
+      {
+        id: "w",
+        name: "Weight",
+        description: null,
+        weight: 50,
+        source: "bgg" as const,
+        bggField: "weight",
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    ];
 
     const vocab = { mechanics: [], categories: [] };
-    const vec = encodeGame(game, vocab, axisRatings);
+    const vec = encodeGame(game, vocab, axisRatings, undefined, axes);
+
+    expect(vec.personalAxes).not.toBeNull();
+    // weight 3.0: (3-1)/(5-1) = 0.5
+    expect(vec.personalAxes![0]).toBeCloseTo(0.5, 5);
+  });
+
+  test("uses midpoint for unrated axes", () => {
+    const game = makeGame();
+    // Axis key present but value is undefined/null, treated as unrated
+    const axisRatings: Record<string, number> = {};
+
+    const vocab = { mechanics: [], categories: [] };
+    // Pass a record with one key that has no value in axisRatings
+    const vec = encodeGame(game, vocab, { "axis-a": undefined as unknown as number });
 
     expect(vec.personalAxes![0]).toBe(0.5);
   });

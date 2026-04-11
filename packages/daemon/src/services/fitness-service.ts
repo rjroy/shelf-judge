@@ -6,6 +6,7 @@ import type {
   FitnessBreakdownEntry,
   FitnessBreakdownSource,
 } from "@shelf-judge/shared";
+import { resolveBggRawValue } from "@shelf-judge/shared";
 import {
   getNativeScale,
   applyPreferenceCurve,
@@ -15,23 +16,6 @@ import {
 
 export interface FitnessService {
   calculateScore(game: Game, axes: Axis[], bggData: BggGameData | null): FitnessResult | null;
-}
-
-/**
- * Returns the raw native-scale BGG value for an axis.
- * No normalization: weight returns 1-5, communityRating returns 1-10.
- */
-function resolveBggRawValue(axis: Axis, bggData: BggGameData | null): number | null {
-  if (axis.source !== "bgg" || !axis.bggField || !bggData) return null;
-
-  switch (axis.bggField) {
-    case "communityRating":
-      return bggData.communityRating;
-    case "weight":
-      return bggData.weight;
-    default:
-      return null;
-  }
 }
 
 function roundToOneDecimal(value: number): number {

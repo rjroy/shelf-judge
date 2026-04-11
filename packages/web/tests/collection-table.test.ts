@@ -4,6 +4,7 @@ import type {
   GameWithScore,
   FitnessResult,
   Axis,
+  BggGameData,
   TournamentGameStatsDisplay,
 } from "@shelf-judge/shared";
 import {
@@ -72,6 +73,23 @@ const AXES: Axis[] = [
     updatedAt: "2026-01-01T00:00:00.000Z",
   },
 ];
+
+function makeBggData(overrides: Partial<BggGameData> = {}): BggGameData {
+  return {
+    communityRating: 7.5,
+    bayesAverage: 7.0,
+    weight: 3.0,
+    numWeightVotes: 100,
+    description: null,
+    mechanics: [],
+    categories: [],
+    families: [],
+    subdomains: [],
+    suggestedPlayerCounts: [],
+    fetchedAt: "2026-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
 
 const EMPTY_TOURNAMENT: Record<string, TournamentGameStatsDisplay> = {};
 
@@ -270,6 +288,35 @@ describe("sortGames", () => {
     const { withValue, withoutValue } = sortGames(games, "axis:fun", "desc", EMPTY_TOURNAMENT);
     expect(withValue.map((g) => g.game.name)).toEqual(["Charlie", "Alpha", "Bravo"]);
     expect(withoutValue.map((g) => g.game.name)).toEqual(["Delta"]);
+  });
+
+  test("sort by BGG-sourced axis resolves values from bggData", () => {
+    const bggAxes: Axis[] = [
+      {
+        id: "w",
+        name: "Weight",
+        description: null,
+        weight: 50,
+        source: "bgg",
+        bggField: "weight",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    ];
+    const g1 = makeGWS({ id: "1", name: "Light", bggData: makeBggData({ weight: 1.5 }) });
+    const g2 = makeGWS({ id: "2", name: "Heavy", bggData: makeBggData({ weight: 4.0 }) });
+    const g3 = makeGWS({ id: "3", name: "Medium", bggData: makeBggData({ weight: 2.8 }) });
+    const g4 = makeGWS({ id: "4", name: "NoBgg" });
+
+    const { withValue, withoutValue } = sortGames(
+      [g1, g2, g3, g4],
+      "axis:w",
+      "desc",
+      EMPTY_TOURNAMENT,
+      bggAxes,
+    );
+    expect(withValue.map((g) => g.game.name)).toEqual(["Heavy", "Medium", "Light"]);
+    expect(withoutValue.map((g) => g.game.name)).toEqual(["NoBgg"]);
   });
 
   test("nulls sort to bottom regardless of direction", () => {

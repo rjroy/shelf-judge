@@ -1,4 +1,5 @@
 import type { GameWithScore, Axis, TournamentGameStatsDisplay } from "@shelf-judge/shared";
+import { resolveAxisValues } from "@shelf-judge/shared";
 import { scoreRangeClass } from "@/lib/score-utils";
 import { relativeDate } from "@/lib/date-utils";
 
@@ -187,6 +188,7 @@ export function getSortValue(
   gws: GameWithScore,
   field: string,
   tournamentStats: Record<string, TournamentGameStatsDisplay>,
+  axes?: Axis[],
 ): SortValue {
   const { game, score } = gws;
   switch (field) {
@@ -215,6 +217,10 @@ export function getSortValue(
     default:
       if (field.startsWith("axis:")) {
         const axisId = field.slice(5);
+        if (axes) {
+          const resolved = resolveAxisValues(game, axes);
+          return resolved[axisId] ?? null;
+        }
         return game.ratings[axisId] ?? null;
       }
       return null;
@@ -226,12 +232,13 @@ export function sortGames(
   field: string,
   direction: "asc" | "desc",
   tournamentStats: Record<string, TournamentGameStatsDisplay>,
+  axes?: Axis[],
 ): { withValue: GameWithScore[]; withoutValue: GameWithScore[] } {
   const withValue: GameWithScore[] = [];
   const withoutValue: GameWithScore[] = [];
 
   for (const g of games) {
-    const v = getSortValue(g, field, tournamentStats);
+    const v = getSortValue(g, field, tournamentStats, axes);
     if (v === null) {
       withoutValue.push(g);
     } else {
@@ -241,8 +248,8 @@ export function sortGames(
 
   const dir = direction === "asc" ? 1 : -1;
   withValue.sort((a, b) => {
-    const av = getSortValue(a, field, tournamentStats)!;
-    const bv = getSortValue(b, field, tournamentStats)!;
+    const av = getSortValue(a, field, tournamentStats, axes)!;
+    const bv = getSortValue(b, field, tournamentStats, axes)!;
     if (typeof av === "string" && typeof bv === "string") {
       return dir * av.localeCompare(bv);
     }
@@ -268,6 +275,7 @@ export function getScoreDisplay(
   gws: GameWithScore,
   field: string,
   tournamentStats: Record<string, TournamentGameStatsDisplay>,
+  axes?: Axis[],
 ): ScoreDisplay {
   const { game, score } = gws;
 
@@ -330,6 +338,12 @@ export function getScoreDisplay(
     default: {
       if (field.startsWith("axis:")) {
         const axisId = field.slice(5);
+        if (axes) {
+          const resolved = resolveAxisValues(game, axes);
+          const value = resolved[axisId];
+          if (value == null) return { text: "---", className: "score-value" };
+          return { text: String(value), className: "score-value axis-score" };
+        }
         const rating = game.ratings[axisId];
         if (rating == null) return { text: "---", className: "score-value" };
         return { text: String(rating), className: "score-value axis-score" };

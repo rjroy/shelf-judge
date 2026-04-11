@@ -189,6 +189,39 @@ describe("computeAxisDistributions", () => {
     expect(result[0].standardDeviation).toBe(0);
     expect(result[0].range).toEqual({ min: 7, max: 7 });
   });
+
+  test("includes BGG-sourced axis values in native scale from bggData", () => {
+    const axes = [makeAxis({ id: "w", name: "Weight", source: "bgg", bggField: "weight" })];
+    const games = [
+      makeGame({ id: "g1", name: "G1", bggData: makeBggData({ weight: 2.5 }) }),
+      makeGame({ id: "g2", name: "G2", bggData: makeBggData({ weight: 3.5 }) }),
+      makeGame({ id: "g3", name: "G3", bggData: makeBggData({ weight: 4.0 }) }),
+    ];
+
+    const result = computeAxisDistributions(games, axes);
+    expect(result[0].ratedGameCount).toBe(3);
+    expect(result[0].mean).toBeCloseTo(10 / 3);
+    expect(result[0].median).toBe(3.5);
+    expect(result[0].range).toEqual({ min: 2.5, max: 4.0 });
+  });
+
+  test("prefers personal override for BGG axes when both exist", () => {
+    const axes = [
+      makeAxis({ id: "cr", name: "Rating", source: "bgg", bggField: "communityRating" }),
+    ];
+    const games = [
+      makeGame({
+        id: "g1",
+        name: "G1",
+        ratings: { cr: 9 },
+        bggData: makeBggData({ communityRating: 7.0 }),
+      }),
+    ];
+
+    const result = computeAxisDistributions(games, axes);
+    expect(result[0].ratedGameCount).toBe(1);
+    expect(result[0].mean).toBe(9);
+  });
 });
 
 // --- Axis Weights ---
