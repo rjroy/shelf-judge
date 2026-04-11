@@ -1,7 +1,7 @@
 ---
 title: "dark mode"
 date: 2026-04-10
-status: open
+status: resolved
 tags: [feature, web-ui, css]
 ---
 The dark mode should be a toggle available on the tab.
