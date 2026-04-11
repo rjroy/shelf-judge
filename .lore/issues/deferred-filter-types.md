@@ -9,6 +9,8 @@ related: [.lore/retros/commission-cleanup-2026-04-10.md]
 
 # Deferred Filter Types Have No Backlog Visibility
 
+USER NOTE: I'm dubious of this claim. Validate before further action.
+
 ## What Happened
 
 The filter/sort spec lists 8 deferred filter types that were never filed as issues:
