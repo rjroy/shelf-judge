@@ -1,7 +1,7 @@
 ---
 title: "The Community Stats Are Empty"
 date: 2026-04-11
-status: approved
+status: resolved
 tags: [bug, profiling, derived-data]
 ---
 
