@@ -1,7 +1,7 @@
 ---
 title: "Commission: Prediction Engine Phase 2: k-NN Estimation, Confidence, Readiness"
 date: 2026-04-11
-status: pending
+status: dispatched
 tags: [commission]
 worker: Dalton
 workerDisplayTitle: "Guild Artificer"
@@ -14,6 +14,11 @@ activity_timeline:
   - timestamp: 2026-04-11T00:17:16.465Z
     event: created
     reason: "Commission created"
+  - timestamp: 2026-04-11T00:20:46.080Z
+    event: status_dispatched
+    reason: "Dispatched to worker"
+    from: "pending"
+    to: "dispatched"
 current_progress: ""
 projectName: shelf-judge
 ---

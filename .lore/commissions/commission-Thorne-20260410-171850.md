@@ -1,7 +1,7 @@
 ---
 title: "Commission: Final Validation: Prediction Engine"
 date: 2026-04-11
-status: pending
+status: blocked
 tags: [commission]
 worker: Thorne
 workerDisplayTitle: "Guild Warden"
@@ -14,6 +14,11 @@ activity_timeline:
   - timestamp: 2026-04-11T00:18:50.578Z
     event: created
     reason: "Commission created"
+  - timestamp: 2026-04-11T00:20:46.078Z
+    event: status_blocked
+    reason: "Dependencies not satisfied"
+    from: "pending"
+    to: "blocked"
 current_progress: ""
 projectName: shelf-judge
 ---

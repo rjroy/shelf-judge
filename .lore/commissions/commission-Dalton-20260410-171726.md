@@ -1,7 +1,7 @@
 ---
 title: "Commission: Prediction Engine Phase 3: Tournament Prior"
 date: 2026-04-11
-status: pending
+status: blocked
 tags: [commission]
 worker: Dalton
 workerDisplayTitle: "Guild Artificer"
@@ -14,6 +14,11 @@ activity_timeline:
   - timestamp: 2026-04-11T00:17:26.032Z
     event: created
     reason: "Commission created"
+  - timestamp: 2026-04-11T00:20:46.076Z
+    event: status_blocked
+    reason: "Dependencies not satisfied"
+    from: "pending"
+    to: "blocked"
 current_progress: ""
 projectName: shelf-judge
 ---
