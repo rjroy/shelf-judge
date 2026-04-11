@@ -26,20 +26,3 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
-- 06:53 commission-Octavia-20260411-065239 result: Resolved the document-families-tag-type issue. Added `families` as a peer to mechanics and categories in two documents:
-
-**`.lore/designs/mvp-bgg-integration.md`** (1 edit):
-- Thing endpoint "Provides...
-
-- 06:54 commission-Octavia-20260411-065239 completed
-- 06:59 commission-Dalton-20260411-065323 result: Fixed all three code quality issues. Typecheck, lint, and tests (825 pass, 0 fail) all green.
-
-**1. curve-math.ts consolidated into shared package**
-- Created `packages/shared/src/curve-math.ts` with ...
-- 06:59 commission-Dalton-20260411-065323 completed
-- 06:59 commission-Octavia-20260411-065235 result: Back-propagated the prediction engine spec (`.lore/specs/prediction-engine.md`) against the PR #14 implementation. 
-
-**Changes made:**
-
-1. **Status**: `implemented` -> `revised`, date updated to 2026-...
-- 06:59 commission-Octavia-20260411-065235 completed
