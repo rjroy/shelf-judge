@@ -1,5 +1,5 @@
 ---
-title: "Audience with Guild Master"
+title: "Prediction Preview for Search Results"
 date: 2026-04-10
 status: open
 tags: [meeting]
@@ -12,4 +12,7 @@ meeting_log:
   - timestamp: 2026-04-10T13:10:02.221Z
     event: opened
     reason: "User started audience"
+  - timestamp: 2026-04-11T06:20:06.522Z
+    event: renamed
+    reason: "Renamed to: Prediction Preview for Search Results"
 ---
