@@ -1,7 +1,7 @@
 ---
 title: "Implementation plan: dark-mode"
 date: 2026-04-11
-status: approved
+status: executed
 tags: [plan, web-ui, css, dark-mode, theming, color]
 modules: [web]
 related:
