@@ -328,6 +328,7 @@ export interface CollectionProfile {
   bggClustering: {
     mechanics: AttributeCluster[];
     categories: AttributeCluster[];
+    families: AttributeCluster[];
     subdomains: AttributeCluster[];
     weightRanges: WeightRangeCluster[];
   };

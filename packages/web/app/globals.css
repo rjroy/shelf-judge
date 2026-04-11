@@ -4033,6 +4033,8 @@ body {
 
 .section-body {
   padding: 16px 20px;
+  overflow-y: auto;
+  max-height: 300px;
 }
 
 /* Axis distribution rows */

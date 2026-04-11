@@ -234,6 +234,7 @@ describe("computeBggClustering", () => {
             { id: 2, name: "Hand Management" },
           ],
           categories: [{ id: 10, name: "Adventure" }],
+          families: [{ id: 50, name: "Eurogames" }],
           subdomains: [{ id: 100, name: "Strategy Games" }],
         }),
       }),
@@ -246,6 +247,7 @@ describe("computeBggClustering", () => {
             { id: 10, name: "Adventure" },
             { id: 11, name: "Fantasy" },
           ],
+          families: [{ id: 50, name: "Eurogames" }],
           subdomains: [{ id: 100, name: "Strategy Games" }],
         }),
       }),
@@ -255,6 +257,7 @@ describe("computeBggClustering", () => {
         bggData: makeBggData({
           mechanics: [{ id: 3, name: "Worker Placement" }],
           categories: [{ id: 12, name: "Economic" }],
+          families: [{ id: 51, name: "Ameritrash" }],
           subdomains: [{ id: 101, name: "Family Games" }],
         }),
       }),
@@ -282,6 +285,13 @@ describe("computeBggClustering", () => {
     // Subdomains: Strategy Games=2, Family Games=1
     expect(result.subdomains[0]).toEqual({
       name: "Strategy Games",
+      count: 2,
+      percentage: (2 / 3) * 100,
+    });
+
+    // Families: Eurogames=2, Ameritrash=1
+    expect(result.families[0]).toEqual({
+      name: "Eurogames",
       count: 2,
       percentage: (2 / 3) * 100,
     });
@@ -333,6 +343,7 @@ describe("computeBggClustering", () => {
     expect(result.mechanics).toEqual([]);
     expect(result.categories).toEqual([]);
     expect(result.subdomains).toEqual([]);
+    expect(result.families).toEqual([]);
     expect(result.weightRanges.every((r) => r.count === 0)).toBe(true);
   });
 });

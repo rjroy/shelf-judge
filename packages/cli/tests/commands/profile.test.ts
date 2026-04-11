@@ -19,6 +19,7 @@ const sampleProfile: CollectionProfile = {
   bggClustering: {
     mechanics: [{ attribute: "Deck Building", count: 5, percentage: 50 }],
     categories: [],
+    families: [],
     subdomains: [],
     weightRanges: [{ range: "Medium", min: 2.5, max: 3.0, count: 4, percentage: 40 }],
   },

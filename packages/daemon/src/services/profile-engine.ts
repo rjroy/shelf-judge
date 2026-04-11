@@ -152,7 +152,7 @@ export function computeAxisWeights(axes: Axis[]): AxisWeightEntry[] {
 }
 
 /**
- * Cluster games by BGG mechanics, categories, subdomains, and weight ranges.
+ * Cluster games by BGG mechanics, categories, subdomains, families, and weight ranges.
  * Games without BGG data are excluded from the denominator.
  */
 export function computeBggClustering(games: Game[]): CollectionProfile["bggClustering"] {
@@ -178,7 +178,7 @@ export function computeBggClustering(games: Game[]): CollectionProfile["bggClust
   const mechanics = countAttributes((g) => g.bggData!.mechanics);
   const categories = countAttributes((g) => g.bggData!.categories);
   const subdomains = countAttributes((g) => g.bggData!.subdomains ?? []);
-
+  const families = countAttributes((g) => g.bggData!.families ?? []);
   // Weight ranges
   const gamesWithWeight = gamesWithBgg.filter((g) => g.bggData!.weight !== null);
   const totalWithWeight = gamesWithWeight.length;
@@ -199,7 +199,7 @@ export function computeBggClustering(games: Game[]): CollectionProfile["bggClust
     };
   });
 
-  return { mechanics, categories, subdomains, weightRanges };
+  return { mechanics, categories, subdomains, families, weightRanges };
 }
 
 /**
@@ -328,18 +328,22 @@ export function detectOutliers(
     // Category orphan: game is in a BGG category or subdomain appearing only once
     const categoryCounts = new Map<string, number>();
     const subdomainCounts = new Map<string, number>();
+    const familyCounts = new Map<string, number>();
     for (const g of gamesWithBgg) {
       if (g.bggData) {
         for (const c of g.bggData.categories)
           categoryCounts.set(c.name, (categoryCounts.get(c.name) ?? 0) + 1);
         for (const s of g.bggData.subdomains ?? [])
           subdomainCounts.set(s.name, (subdomainCounts.get(s.name) ?? 0) + 1);
+        for (const f of g.bggData.families ?? [])
+          familyCounts.set(f.name, (familyCounts.get(f.name) ?? 0) + 1);
       }
     }
     const isOrphan =
       (game.bggData?.categories.some((c) => (categoryCounts.get(c.name) ?? 0) === 1) ?? false) ||
       ((game.bggData?.subdomains ?? []).some((s) => (subdomainCounts.get(s.name) ?? 0) === 1) ??
-        false);
+        false) ||
+      ((game.bggData?.families ?? []).some((f) => (familyCounts.get(f.name) ?? 0) === 1) ?? false);
     if (isOrphan) {
       classifications.push("category-orphan");
     }

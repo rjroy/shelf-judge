@@ -56,6 +56,7 @@ export default async function ProfileOverviewPage() {
         <div className="topbar-meta">
           <span>Computed {computedDate}</span>
           <span>
+            {" "}&middot;{" "}
             {profile.gameCount} {profile.gameCount === 1 ? "game" : "games"} &middot;{" "}
             {profile.axisDistributions.length}{" "}
             {profile.axisDistributions.length === 1 ? "axis" : "axes"}

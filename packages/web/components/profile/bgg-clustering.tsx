@@ -14,7 +14,7 @@ function AttributeList({
   return (
     <div>
       <div className="bgg-section-label">{label}</div>
-      {clusters.map((cluster) => {
+      {clusters.slice(0, 5).map((cluster) => {
         const pct = gameCount > 0 ? (cluster.count / gameCount) * 100 : 0;
         return (
           <div key={cluster.name} className="bgg-attr-row">
@@ -72,16 +72,18 @@ export function BggClustering({
     mechanics: AttributeCluster[];
     categories: AttributeCluster[];
     subdomains: AttributeCluster[];
+    families: AttributeCluster[];
     weightRanges: WeightRangeCluster[];
   };
   gameCount: number;
 }) {
   const hasMechanics = clustering.mechanics.length > 0;
   const hasCategories = clustering.categories.length > 0;
+  const hasFamilies = clustering.families.length > 0;
   const hasSubdomains = clustering.subdomains.length > 0;
   const hasWeightRanges = clustering.weightRanges.length > 0;
 
-  if (!hasMechanics && !hasCategories && !hasSubdomains && !hasWeightRanges) return null;
+  if (!hasMechanics && !hasCategories && !hasSubdomains && !hasFamilies && !hasWeightRanges) return null;
 
   return (
     <div className="section-card">
@@ -91,30 +93,43 @@ export function BggClustering({
       </div>
       <div className="section-body">
         <div className="two-col">
-          <div>
-            {hasMechanics && (
+          {hasMechanics && (
+            <div>
               <AttributeList
                 label="Top Mechanics"
                 clusters={clustering.mechanics}
                 gameCount={gameCount}
               />
-            )}
-            {hasCategories && (
+            </div>
+          )}
+          {hasCategories && (
+            <div>
               <AttributeList
                 label="Top Categories"
                 clusters={clustering.categories}
                 gameCount={gameCount}
               />
-            )}
-          </div>
-          <div>
-            {hasSubdomains && (
+            </div>
+          )}
+          {hasFamilies && (
+            <div>
               <AttributeList
-                label="Subdomains"
+                label="Top Families"
+                clusters={clustering.families}
+                gameCount={gameCount}
+              />
+            </div>
+          )}
+          {hasSubdomains && (
+            <div>
+              <AttributeList
+                label="Top Subdomains"
                 clusters={clustering.subdomains}
                 gameCount={gameCount}
               />
-            )}
+            </div>
+          )}
+          <div>
             {hasWeightRanges && <WeightRangeHistogram ranges={clustering.weightRanges} />}
           </div>
         </div>
