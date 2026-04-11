@@ -1,7 +1,7 @@
 ---
 title: "Implementation plan: niche-champion-display"
 date: 2026-04-11
-status: draft
+status: approved
 tags: [plan, niche, redundancy, collection-awareness, display, daemon, web, cli]
 modules: [shared, daemon, web, cli]
 related:
