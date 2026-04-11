@@ -1,7 +1,7 @@
 ---
 title: "curve-math.ts duplicated between web and daemon"
 date: 2026-04-10
-status: open
+status: approved
 tags: [debt, duplication, utility-curves]
 modules: [web, daemon]
 related: [.lore/retros/commission-cleanup-2026-04-10.md]
