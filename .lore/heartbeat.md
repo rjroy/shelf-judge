@@ -26,6 +26,3 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
-- 12:28 commission-Octavia-20260411-102358 result: Wrote the game-links spec at `.lore/specs/game-links.md`. The spec catalogs all 10 surfaces where game names appear in the web UI, makes explicit decisions about which ones get links (4 surfaces: prof...
-
-- 12:29 commission-Octavia-20260411-102358 completed
