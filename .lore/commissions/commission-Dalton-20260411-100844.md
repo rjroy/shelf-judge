@@ -1,7 +1,7 @@
 ---
 title: "Commission: Execute color system migration per consolidation notes"
 date: 2026-04-11
-status: pending
+status: dispatched
 tags: [commission]
 worker: Dalton
 workerDisplayTitle: "Guild Artificer"
@@ -13,6 +13,11 @@ activity_timeline:
   - timestamp: 2026-04-11T17:08:44.208Z
     event: created
     reason: "Commission created"
+  - timestamp: 2026-04-11T17:09:05.447Z
+    event: status_dispatched
+    reason: "Dispatched to worker"
+    from: "pending"
+    to: "dispatched"
 current_progress: ""
 projectName: shelf-judge
 ---
