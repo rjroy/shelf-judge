@@ -1,7 +1,7 @@
 ---
 title: "Implementation plan: fix-community-stats"
 date: 2026-04-11
-status: draft
+status: approved
 tags: [plan, bug, profiling, derived-data, bgg]
 modules: [daemon, web, shared]
 related:
