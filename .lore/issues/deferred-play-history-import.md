@@ -1,7 +1,7 @@
 ---
 title: "Deferred: Play history import from BGG"
 date: 2026-04-06
-status: wontfix
+status: declined
 tags: [deferred, feature, bgg, play-history]
 modules: [daemon]
 origin: .lore/specs/mvp.md
