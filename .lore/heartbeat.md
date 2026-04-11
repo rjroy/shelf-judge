@@ -26,8 +26,3 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
-- 08:31 commission-Sienna-20260411-082730 result: Palette review complete. Artifact at `.lore/designs/color-palette-review.md`.
-
-**Finding:** `globals.css` defines 83 color-related custom properties — 67 unique hex values, 12 existing aliases, 3 side...
-
-- 08:32 commission-Sienna-20260411-082730 completed
