@@ -1,7 +1,7 @@
 ---
 title: "Actually Implement the LLM Narrative"
 date: 2026-04-11
-status: approved
+status: resolved
 tags: [feature, llm, profiling, agent-sdk]
 ---
 
