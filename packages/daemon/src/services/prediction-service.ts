@@ -4,6 +4,7 @@ import type {
   FitnessResult,
   PredictionReadiness,
   PredictionSettings,
+  PredictionUnavailable,
   RevealedPreferenceTension,
 } from "@shelf-judge/shared";
 import type { StorageService } from "./storage-service.js";
@@ -32,6 +33,7 @@ export interface PredictedGameResult {
   game: Game;
   score: FitnessResult;
   tension: RevealedPreferenceTension | null;
+  predictionUnavailable: PredictionUnavailable | null;
 }
 
 export interface PredictionService {
@@ -106,9 +108,7 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
       // REQ-PRED-18: when no tournament data, stability is 1.0
       let tournamentStability = 1.0;
       if (comparisonCount >= provisionalThreshold) {
-        tournamentStability =
-          1.0 +
-          settings.tournamentStabilityBoost * Math.min(comparisonCount / provisionalThreshold, 1.0);
+        tournamentStability = 1.0 + settings.tournamentStabilityBoost;
       }
 
       referenceGames.push({
@@ -198,7 +198,18 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
         );
       }
 
-      return { game, score: fitnessResult, tension };
+      // REQ-PRED-22: indicate when personal-axis prediction is unavailable at Stage 0
+      let predictionUnavailable: PredictionUnavailable | null = null;
+      if (ctx.readinessStage === 0) {
+        const nextStageAt = ctx.settings.stageThresholds[0];
+        predictionUnavailable = {
+          reason: "stage-0",
+          ratedGameCount: ctx.ratedGameCount,
+          gamesNeeded: nextStageAt - ctx.ratedGameCount,
+        };
+      }
+
+      return { game, score: fitnessResult, tension, predictionUnavailable };
     },
 
     async getReadiness(): Promise<PredictionReadiness> {

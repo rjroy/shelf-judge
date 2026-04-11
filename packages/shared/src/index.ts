@@ -49,6 +49,8 @@ export type {
   PredictionReadiness,
   RevealedPreferenceTension,
   PredictionSettings,
+  PredictionUnavailable,
+  PredictedGameResponse,
 } from "./types";
 
 export {

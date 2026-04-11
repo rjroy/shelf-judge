@@ -385,3 +385,16 @@ export interface PredictionSettings {
   minSimilarityThreshold: number; // default 0.2
   tournamentStabilityBoost: number; // default 0.2
 }
+
+export interface PredictionUnavailable {
+  reason: "stage-0";
+  ratedGameCount: number;
+  gamesNeeded: number;
+}
+
+export interface PredictedGameResponse {
+  game: Game;
+  score: FitnessResult;
+  tension: RevealedPreferenceTension | null;
+  predictionUnavailable: PredictionUnavailable | null;
+}

@@ -1,49 +1,8 @@
 // Predict commands: predict <game-id>, predict readiness
 import type { DaemonClient } from "../client.js";
-import type { OutputOptions, BreakdownEntry } from "../output.js";
+import type { OutputOptions } from "../output.js";
 import { formatTable, formatScore, formatBreakdown, printOutput } from "../output.js";
-
-interface PredictionMeta {
-  readinessStage: number;
-  confidence: string;
-  predictedAxisCount: number;
-  actualAxisCount: number;
-  referenceGameCount: number;
-  coveragePercent: number;
-}
-
-interface PredictGameResponse {
-  game: { id: string; name: string };
-  score: {
-    score: number;
-    ratedAxisCount: number;
-    totalAxisCount: number;
-    breakdown: BreakdownEntry[];
-    vetoed: boolean;
-    vetoedBy: {
-      axisId: string;
-      axisName: string;
-      threshold: number;
-      direction: "below" | "above";
-      rawValue: number;
-    } | null;
-    hypotheticalScore: number | null;
-    predictionMeta: PredictionMeta | null;
-  };
-  tension: {
-    predictedFitness: number;
-    tournamentClusterAverage: number;
-    note: string;
-  } | null;
-}
-
-interface ReadinessResponse {
-  stage: number;
-  ratedGameCount: number;
-  nextStageAt: number;
-  weakAxes: { axisId: string; axisName: string; ratedCount: number }[];
-  suggestedActions: string[];
-}
+import type { PredictedGameResponse, PredictionReadiness } from "@shelf-judge/shared";
 
 export async function predictGame(
   client: DaemonClient,
@@ -55,7 +14,7 @@ export async function predictGame(
     throw new Error("Usage: shelf-judge predict <game-id>");
   }
 
-  const { ok, data } = await client.get<PredictGameResponse>(
+  const { ok, data } = await client.get<PredictedGameResponse>(
     `/api/predictions/${encodeURIComponent(id)}`,
   );
 
@@ -130,7 +89,7 @@ export async function predictReadiness(
   _args: string[],
   opts: OutputOptions,
 ): Promise<string> {
-  const { ok, data } = await client.get<ReadinessResponse>("/api/predictions/readiness");
+  const { ok, data } = await client.get<PredictionReadiness>("/api/predictions/readiness");
 
   if (!ok) {
     const err = data as unknown as { error: string };

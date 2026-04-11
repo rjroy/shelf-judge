@@ -221,7 +221,6 @@ export function computePredictedFitness(
 
       if (prediction && prediction.confidence !== "insufficient") {
         const effectiveRating = roundToOneDecimal(prediction.rating);
-        const contribution = roundToOneDecimal(effectiveRating * axis.weight);
 
         const refGames: ReferenceGame[] = matches.map((m) => ({
           gameId: m.gameId,
@@ -236,7 +235,7 @@ export function computePredictedFitness(
           axisName: axis.name,
           rating: effectiveRating,
           weight: axis.weight,
-          contribution,
+          contribution: 0, // placeholder, overwritten by normalization below
           source: "predicted",
           bggOriginal: null,
           rawValue: effectiveRating,

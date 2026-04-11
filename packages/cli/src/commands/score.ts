@@ -2,7 +2,7 @@
 import type { DaemonClient } from "../client.js";
 import type { OutputOptions, BreakdownEntry } from "../output.js";
 import { formatTable, formatScore, formatBreakdown, printOutput } from "../output.js";
-import type { TournamentGameStatsDisplay } from "@shelf-judge/shared";
+import type { TournamentGameStatsDisplay, GameWithScore } from "@shelf-judge/shared";
 
 interface VetoInfo {
   axisId: string;
@@ -38,23 +38,6 @@ interface ScoreListResponse {
 
 interface IncludePredictedOpts extends OutputOptions {
   includePredicted?: boolean;
-}
-
-interface PredictedGameEntry {
-  game: { id: string; name: string };
-  score: {
-    score: number;
-    ratedAxisCount: number;
-    totalAxisCount: number;
-    breakdown: BreakdownEntry[];
-    vetoed: boolean;
-    vetoedBy: unknown;
-    hypotheticalScore: number | null;
-    predictionMeta: {
-      predictedAxisCount: number;
-      actualAxisCount: number;
-    } | null;
-  } | null;
 }
 
 export async function scoreList(
@@ -194,7 +177,7 @@ async function scoreListWithPredictions(
   client: DaemonClient,
   opts: OutputOptions,
 ): Promise<string> {
-  const { ok, data } = await client.get<PredictedGameEntry[]>("/api/games?includePredicted=true");
+  const { ok, data } = await client.get<GameWithScore[]>("/api/games?includePredicted=true");
 
   if (!ok) {
     const err = data as unknown as { error: string };

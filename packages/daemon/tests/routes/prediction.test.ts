@@ -1,6 +1,17 @@
 import { describe, test, expect, beforeEach } from "bun:test";
-import { createTestApp, jsonRequest, type TestAppContext } from "../helpers/test-app.js";
-import type { PredictionReadiness, PredictionSettings } from "@shelf-judge/shared";
+import {
+  createTestApp,
+  createMockBggClient,
+  jsonRequest,
+  type TestAppContext,
+} from "../helpers/test-app.js";
+import type {
+  Axis,
+  PredictionReadiness,
+  PredictionSettings,
+  PredictedGameResponse,
+} from "@shelf-judge/shared";
+import type { BggGameResult } from "../../src/services/bgg-client.js";
 
 describe("prediction routes", () => {
   let ctx: TestAppContext;
@@ -86,14 +97,140 @@ describe("prediction routes", () => {
       expect(res.status).toBe(422);
     });
 
-    test("returns prediction result for game with BGG data", async () => {
-      // Use the test app which has default axes (Community Rating + Complexity, both BGG)
-      // Add a manual game (no BGG, so it won't predict, but we can test the route shape)
-      const gameId = await addGameWithRating("Test Game");
+    test("returns successful prediction with predictionMeta and breakdown", async () => {
+      // Set up a mock BGG client that returns distinct game data
+      const makeBggResult = (bggId: number, name: string, weight: number): BggGameResult => ({
+        metadata: {
+          bggId,
+          name,
+          yearPublished: 2020,
+          minPlayers: 2,
+          maxPlayers: 4,
+          playingTime: 60,
+          imageUrl: null,
+        },
+        bggData: {
+          communityRating: 7.5,
+          bayesAverage: 7.2,
+          weight,
+          numWeightVotes: 100,
+          description: null,
+          mechanics: [{ id: 1, name: "Deck Building" }],
+          categories: [{ id: 1, name: "Card Game" }],
+          families: [],
+          subdomains: [],
+          suggestedPlayerCounts: [],
+          fetchedAt: new Date().toISOString(),
+        },
+      });
 
-      // Since game has no BGG data, this will return 422
-      const res = await jsonRequest(ctx.app, "GET", `/api/predictions/${gameId}`);
-      expect(res.status).toBe(422);
+      const bggClient = createMockBggClient({
+        getGame: (bggId: number) =>
+          Promise.resolve(makeBggResult(bggId, `Game-${bggId}`, 2.0 + bggId * 0.1)),
+      });
+      ctx = createTestApp({ bggClient });
+
+      // Lower the stage threshold so we can reach Stage 1 with fewer games
+      await jsonRequest(ctx.app, "PATCH", "/api/predictions/settings", {
+        stageThresholds: [3, 8, 15],
+      });
+
+      // Create a personal axis
+      const axisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
+        name: "Fun",
+        weight: 50,
+      });
+      expect(axisRes.status).toBe(201);
+      const axis = (await axisRes.json()) as Axis;
+
+      // Add reference games with BGG data and rate them to reach Stage 1
+      const refGameIds: string[] = [];
+      for (let i = 1; i <= 4; i++) {
+        const res = await jsonRequest(ctx.app, "POST", "/api/games", {
+          name: `Ref Game ${i}`,
+          bggId: i,
+        });
+        expect(res.status).toBe(201);
+        const { game } = (await res.json()) as { game: { id: string } };
+        refGameIds.push(game.id);
+
+        // Rate each game
+        const rateRes = await jsonRequest(ctx.app, "PUT", `/api/games/${game.id}/ratings`, {
+          ratings: { [axis.id]: 5 + i },
+        });
+        expect(rateRes.status).toBe(200);
+      }
+
+      // Add target game with BGG data but no rating
+      const targetRes = await jsonRequest(ctx.app, "POST", "/api/games", {
+        name: "Target Game",
+        bggId: 99,
+      });
+      expect(targetRes.status).toBe(201);
+      const { game: targetGame } = (await targetRes.json()) as { game: { id: string } };
+
+      // Now predict the target game
+      const res = await jsonRequest(ctx.app, "GET", `/api/predictions/${targetGame.id}`);
+      expect(res.status).toBe(200);
+
+      const prediction = (await res.json()) as PredictedGameResponse;
+      expect(prediction.game.id).toBe(targetGame.id);
+      expect(prediction.score).toBeDefined();
+      expect(prediction.score.score).toBeGreaterThan(0);
+      expect(prediction.score.breakdown.length).toBeGreaterThan(0);
+      expect(prediction.score.predictionMeta).not.toBeNull();
+      expect(prediction.score.predictionMeta!.predictedAxisCount).toBeGreaterThan(0);
+      expect(prediction.score.predictionMeta!.confidence).toBeDefined();
+      expect(prediction.score.predictionMeta!.referenceGameCount).toBeGreaterThan(0);
+      expect(prediction.tension).toBeDefined(); // null or object, but field exists
+      expect(prediction.predictionUnavailable).toBeNull();
+    });
+
+    test("returns predictionUnavailable at Stage 0", async () => {
+      const bggClient = createMockBggClient({
+        getGame: (bggId: number) =>
+          Promise.resolve({
+            metadata: {
+              bggId,
+              name: `Game-${bggId}`,
+              yearPublished: 2020,
+              minPlayers: 2,
+              maxPlayers: 4,
+              playingTime: 60,
+              imageUrl: null,
+            },
+            bggData: {
+              communityRating: 7.5,
+              bayesAverage: 7.2,
+              weight: 2.5,
+              numWeightVotes: 100,
+              description: null,
+              mechanics: [{ id: 1, name: "Deck Building" }],
+              categories: [{ id: 1, name: "Card Game" }],
+              families: [],
+              subdomains: [],
+              suggestedPlayerCounts: [],
+              fetchedAt: new Date().toISOString(),
+            },
+          }),
+      });
+      ctx = createTestApp({ bggClient });
+
+      // Add a game with BGG data (no ratings, so Stage 0)
+      const res = await jsonRequest(ctx.app, "POST", "/api/games", {
+        name: "Stage 0 Game",
+        bggId: 42,
+      });
+      expect(res.status).toBe(201);
+      const { game } = (await res.json()) as { game: { id: string } };
+
+      const predRes = await jsonRequest(ctx.app, "GET", `/api/predictions/${game.id}`);
+      expect(predRes.status).toBe(200);
+
+      const prediction = (await predRes.json()) as PredictedGameResponse;
+      expect(prediction.predictionUnavailable).not.toBeNull();
+      expect(prediction.predictionUnavailable!.reason).toBe("stage-0");
+      expect(prediction.predictionUnavailable!.gamesNeeded).toBeGreaterThan(0);
     });
   });
 

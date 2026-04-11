@@ -211,9 +211,9 @@ export async function listTournamentSessions(): Promise<TournamentSession[]> {
 
 // Prediction API functions
 
-import type { PredictionReadiness } from "@shelf-judge/shared";
+import type { PredictionReadiness, PredictedGameResponse } from "@shelf-judge/shared";
 
-export async function predictGame(id: string): Promise<GameWithScore> {
+export async function predictGame(id: string): Promise<PredictedGameResponse> {
   return daemonJson(`/api/predictions/${id}`);
 }
 

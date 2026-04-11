@@ -58,9 +58,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
       if (predicted.score?.predictionMeta) {
         prediction = {
           score: predicted.score,
-          tension: predicted.score.predictionMeta
-            ? undefined // tension comes from the prediction response
-            : undefined,
+          tension: predicted.tension ?? undefined,
         };
       }
     } catch {
