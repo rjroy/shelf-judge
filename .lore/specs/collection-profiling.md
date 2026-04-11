@@ -48,7 +48,7 @@ This is the realization of Vision Principle 3: "Your collection has an identity.
 
 - REQ-PROFILE-3: The profile interprets the user's axis weights as a relative importance ranking. Weights are expressed as percentages of total weight, making the implicit priority ordering explicit.
 
-- REQ-PROFILE-4: The profile groups the collection by BGG mechanics, categories, subdomains, and weight ranges. For each attribute, the profile reports the count and percentage of games that share it. Attributes that appear in fewer than two games are still reported but not highlighted as concentrations.
+- REQ-PROFILE-4: The profile groups the collection by BGG mechanics, categories, families, subdomains, and weight ranges. For each attribute, the profile reports the count and percentage of games that share it. Attributes that appear in fewer than two games are still reported but not highlighted as concentrations.
 
 - REQ-PROFILE-5: When utility curves are configured on an axis, the profile includes them as explicit preference declarations: the shape, ideal value (if sweet spot), tolerance, lean direction, and veto thresholds. These are reported in native-scale terms (per the utility curves spec).
 
@@ -67,7 +67,7 @@ This is the realization of Vision Principle 3: "Your collection has an identity.
 ### Collection Outlier Detection
 
 - REQ-PROFILE-11: The profile identifies games whose BGG attributes place them far from the collection's statistical center across multiple dimensions. Distance from the centroid is measured using a composite metric with type-appropriate components:
-  - **Binary attributes** (mechanics, categories): Jaccard distance. Measures set overlap between a game's attributes and the collection centroid's attribute frequency vector. Shared absence (neither the game nor the collection center has a mechanic) does not count as similarity.
+  - **Binary attributes** (mechanics, categories, families): Jaccard distance. Measures set overlap between a game's attributes and the collection centroid's attribute frequency vector. Shared absence (neither the game nor the collection center has a mechanic) does not count as similarity.
   - **Continuous BGG attributes** (weight, player count range, play time): Normalized Manhattan distance. Each attribute is normalized to [0,1] by the observed range in the collection.
   - **Personal axis ratings** (where available): Normalized Manhattan distance on the subset of axes where both the game and the centroid have values. Games without axis ratings are scored on the binary and continuous components only.
   - **Combination**: Weighted average of the three component distances, producing a final [0,1] composite distance. Default weights: binary attributes 0.4, continuous BGG attributes 0.3, personal axis ratings 0.3. When personal axis ratings are unavailable for a game, the weight redistributes proportionally to the other two components.
@@ -80,7 +80,7 @@ This is the realization of Vision Principle 3: "Your collection has an identity.
 
 - REQ-PROFILE-13: Three outlier classifications are reported:
   - **Lone wolves**: games with no close neighbors in the collection across multiple attribute dimensions.
-  - **Category orphans**: games in BGG categories or subdomains that appear nowhere else in the collection.
+  - **Category orphans**: games in BGG categories, families, or subdomains that appear nowhere else in the collection.
   - **High-fitness outliers**: games whose axes say "keep it" but whose BGG attributes say "this doesn't fit the collection's identity."
 
 - REQ-PROFILE-14: Outlier detection is observation, not judgment. The profile surfaces which games are statistically unusual without recommending action. "This game doesn't look like the rest of your collection" is the limit of what the system says.
@@ -88,7 +88,7 @@ This is the realization of Vision Principle 3: "Your collection has an identity.
 ### Axis Suggestions
 
 - REQ-PROFILE-15: The profile suggests new axes the user might create, drawn from three sources:
-  - **Unexpressed concentration**: a BGG mechanic or category shared by 80%+ of the collection with no corresponding axis.
+  - **Unexpressed concentration**: a BGG mechanic, category, or family shared by 80%+ of the collection with no corresponding axis.
   - **High-variance BGG attributes**: a BGG dimension (e.g., play time, player count) that spans a wide range across the collection with no corresponding axis.
   - **Tournament divergence repair**: when divergent games (per REQ-PROFILE-8) share a BGG attribute not captured by existing axes.
 
@@ -139,7 +139,7 @@ The LLM narration layer ships after the algorithmic profile is stable. The algor
   - LLM narration summary at the top [DEFERRED: post-MVP, depends on REQ-PROFILE-18]
   - Axis rating distributions with statistical summaries
   - Axis weight breakdown as percentages
-  - BGG attribute clustering (top mechanics, categories, subdomains, weight distribution)
+  - BGG attribute clustering (top mechanics, categories, families, subdomains, weight distribution)
   - Utility curve declarations (when configured)
   - Tournament/fitness divergence list (when tournament data exists)
   - Collection outlier list
@@ -180,7 +180,7 @@ The LLM narration layer ships after the algorithmic profile is stable. The algor
 ### Automated Tests
 
 - [ ] Axis rating distributions compute correct mean, median, standard deviation, and range for a known dataset
-- [ ] BGG attribute clustering correctly counts and percentages mechanics, categories, and subdomains
+- [ ] BGG attribute clustering correctly counts and percentages mechanics, categories, families, and subdomains
 - [ ] Tournament/fitness divergence correctly identifies games above the 1.5-point threshold in both directions
 - [ ] Divergence analysis excludes games with zero tournament comparisons
 - [ ] Divergence section is omitted (not empty) when no tournament data exists

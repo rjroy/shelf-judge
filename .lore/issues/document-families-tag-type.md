@@ -1,7 +1,7 @@
 ---
 title: "Document 'families' as a BGG tag type alongside mechanics/categories"
 date: 2026-04-11
-status: open
+status: resolved
 tags: [docs, bgg, profiling, data-model]
 ---
 

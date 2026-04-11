@@ -26,7 +26,7 @@ The daemon validates the token is present on startup. If missing, API-dependent 
 - Used when adding a game by BGG ID or after search
 - Parameters: `id={bggId}&stats=1&type=boardgame`
 - Supports comma-delimited IDs for batch fetch (up to 250 per request)
-- Provides: name, player count, play time, year, mechanics, categories, community rating, weight, suggested player counts
+- Provides: name, player count, play time, year, mechanics, categories, families, community rating, weight, suggested player counts
 
 **Search endpoint** (`/xmlapi2/search`):
 
