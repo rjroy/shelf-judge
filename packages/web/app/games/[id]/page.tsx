@@ -309,7 +309,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
             {tournamentStats.recentComparisons.length > 0 && (
               <div className="tournament-recent">
                 <div className="tournament-recent-title">Last 5 comparisons</div>
-                {tournamentStats.recentComparisons.map((c, i) => (
+                {tournamentStats.recentComparisons.slice(0, 5).map((c, i) => (
                   <div key={i} className={`tournament-recent-row ${c.won ? "win" : "loss"}`}>
                     <span className="tournament-result-badge">{c.won ? "W" : "L"}</span>
                     <span className="tournament-opponent-id">

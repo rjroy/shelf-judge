@@ -107,7 +107,7 @@ export function ScoreBreakdown({ score }: { score: FitnessResult | null }) {
                       <span className="contrib-pct">{contribPct}%</span>
                     </div>
                   ) : (
-                    "&mdash;"
+                    <span className="breakdown-dash">&mdash;</span>
                   )}
                 </td>
                 <td className="right">
