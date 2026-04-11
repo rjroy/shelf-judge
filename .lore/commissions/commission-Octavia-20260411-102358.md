@@ -18,6 +18,19 @@ activity_timeline:
     reason: "Dispatched to worker"
     from: "pending"
     to: "dispatched"
+  - timestamp: 2026-04-11T17:27:27.612Z
+    event: status_failed
+    reason: "Session error: Claude Code returned an error result: You've hit your limit · resets 12pm (America/Los_Angeles)"
+  - timestamp: 2026-04-11T19:20:36.460Z
+    event: status_pending
+    reason: "Redispatched for retry"
+    from: "failed"
+    to: "pending"
+  - timestamp: 2026-04-11T19:20:36.462Z
+    event: status_dispatched
+    reason: "Dispatched to worker"
+    from: "pending"
+    to: "dispatched"
 current_progress: ""
 projectName: shelf-judge
 ---
