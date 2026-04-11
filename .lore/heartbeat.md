@@ -38,3 +38,4 @@ The plan covers 9 steps: dark-mode CSS token overrides via `[data-theme="dark"]`
 
 1. **`:root` block** - Already matches the canonical spec exactly (77 tokens, darkene...
 - 10:11 commission-Octavia-20260411-100052 completed
+- 10:11 commission-Dalton-20260411-100844 completed
