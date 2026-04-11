@@ -26,11 +26,3 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
-- 23:30 commission-Dalton-20260410-232057 result: BGG Preview Predictions feature implemented across all layers.
-
-- 23:31 commission-Dalton-20260410-232057 completed
-## What was built
-
-### 1. Daemon: `predictBggGame(bggId)` service method
-- Added `bggClient` to `PredictionServiceDeps` interface
-- New ...
