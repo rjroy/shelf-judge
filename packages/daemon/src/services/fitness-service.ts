@@ -134,6 +134,8 @@ export function createFitnessService(): FitnessService {
           effectiveRating: displayedRating,
           preferenceShape: shape,
           curveAffected,
+          predictionConfidence: null,
+          referenceGames: null,
         });
 
         if (rawContribution !== null) {
@@ -151,7 +153,12 @@ export function createFitnessService(): FitnessService {
       }
 
       breakdown.sort((a, b) => {
-        const sourceOrder = { override: 0, bgg: 1, personal: 2 };
+        const sourceOrder: Record<FitnessBreakdownSource, number> = {
+          override: 0,
+          bgg: 1,
+          personal: 2,
+          predicted: 3,
+        };
         if (sourceOrder[a.source] !== sourceOrder[b.source]) {
           return sourceOrder[a.source] - sourceOrder[b.source];
         }
@@ -172,6 +179,7 @@ export function createFitnessService(): FitnessService {
           vetoed: true,
           vetoedBy: vetoInfo,
           hypotheticalScore,
+          predictionMeta: null,
         };
       }
 
@@ -183,6 +191,7 @@ export function createFitnessService(): FitnessService {
         vetoed: false,
         vetoedBy: null,
         hypotheticalScore: null,
+        predictionMeta: null,
       };
     },
   };

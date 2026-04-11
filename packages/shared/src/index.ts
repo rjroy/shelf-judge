@@ -43,6 +43,12 @@ export type {
   AxisSuggestion,
   CollectionProfile,
   ProfileData,
+  PredictionConfidence,
+  ReferenceGame,
+  PredictionMeta,
+  PredictionReadiness,
+  RevealedPreferenceTension,
+  PredictionSettings,
 } from "./types";
 
 export {

@@ -89,7 +89,7 @@ export interface Collection {
 
 // Fitness score types from .lore/designs/mvp-fitness-model.md
 
-export type FitnessBreakdownSource = "personal" | "bgg" | "override";
+export type FitnessBreakdownSource = "personal" | "bgg" | "override" | "predicted";
 
 export interface FitnessBreakdownEntry {
   axisId: string;
@@ -103,6 +103,8 @@ export interface FitnessBreakdownEntry {
   effectiveRating: number | null; // post-curve 1-10 value (same as rating)
   preferenceShape: PreferenceShape; // which shape was applied
   curveAffected: boolean; // true when curve changed the rating by > 0.5
+  predictionConfidence: PredictionConfidence | null; // null for non-predicted
+  referenceGames: ReferenceGame[] | null; // null for non-predicted
 }
 
 export interface FitnessResult {
@@ -119,6 +121,7 @@ export interface FitnessResult {
     rawValue: number; // native-scale
   } | null;
   hypotheticalScore: number | null; // score without veto, null when not vetoed
+  predictionMeta: PredictionMeta | null; // null for fully-actual results
 }
 
 // Tournament types
@@ -340,4 +343,44 @@ export interface CollectionProfile {
 export interface ProfileData {
   profile: CollectionProfile;
   computedAt: string; // ISO 8601
+}
+
+// Prediction types
+
+export type PredictionConfidence = "actual" | "strong" | "moderate" | "weak" | "insufficient";
+
+export interface ReferenceGame {
+  gameId: string;
+  gameName: string;
+  similarity: number;
+}
+
+export interface PredictionMeta {
+  readinessStage: 0 | 1 | 2 | 3;
+  confidence: PredictionConfidence;
+  predictedAxisCount: number;
+  actualAxisCount: number;
+  referenceGameCount: number;
+  coveragePercent: number; // fraction of total axis weight covered by actual or strong-confidence data
+}
+
+export interface PredictionReadiness {
+  stage: 0 | 1 | 2 | 3;
+  ratedGameCount: number;
+  nextStageAt: number;
+  weakAxes: { axisId: string; axisName: string; ratedCount: number }[];
+  suggestedActions: string[];
+}
+
+export interface RevealedPreferenceTension {
+  predictedFitness: number;
+  tournamentClusterAverage: number;
+  note: string;
+}
+
+export interface PredictionSettings {
+  stageThresholds: [number, number, number]; // [stage1, stage2, stage3] defaults [5, 15, 30]
+  defaultK: number; // default 5
+  minSimilarityThreshold: number; // default 0.2
+  tournamentStabilityBoost: number; // default 0.2
 }
