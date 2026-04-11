@@ -1,7 +1,7 @@
 ---
 title: "Implementation plan: search-result-thumbnails"
 date: 2026-04-11
-status: draft
+status: approved
 tags: [plan, web-ui, bgg, search, thumbnails]
 modules: [shared, daemon, web]
 related:
