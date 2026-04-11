@@ -47,3 +47,8 @@ Workers can also add entries to this file during their sessions.
 
 **Satisfied**: REQ-PRED-1 through 13, 15 through 19, 21, 22, 33, 34. The core k-NN math, confidence ...
 - 17:34 commission-Thorne-20260410-171740 completed
+- 17:37 commission-Dalton-20260410-171748 result: All four findings from Thorne's review addressed:
+
+**1. DEFECT FIXED: `ratedAxisCount` now actual-only (REQ-PRED-35)**
+`prediction-engine.ts:332-374` - Changed `ratedAxisCount` on `FitnessResult` to u...
+- 17:37 commission-Dalton-20260410-171748 completed
