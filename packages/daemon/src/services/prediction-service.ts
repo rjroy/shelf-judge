@@ -10,18 +10,12 @@ import type {
 import type { StorageService } from "./storage-service.js";
 import type { FitnessService } from "./fitness-service.js";
 import type { TournamentService } from "./tournament-service.js";
-import {
-  buildVocabulary,
-  computeContinuousRanges,
-  encodeGame,
-  cosineSimilarity,
-} from "./feature-vector.js";
+import { buildVocabulary, computeContinuousRanges, encodeGame } from "./feature-vector.js";
 import type { FeatureVector } from "./feature-vector.js";
 import {
   computePredictedFitness,
   assessReadiness,
   detectRevealedPreferenceTension,
-  DEFAULT_PREDICTION_SETTINGS,
 } from "./prediction-engine.js";
 import type {
   ReferenceGameCandidate,

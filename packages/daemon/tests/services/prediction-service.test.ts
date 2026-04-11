@@ -4,7 +4,6 @@ import type {
   Collection,
   Game,
   PredictionSettings,
-  TournamentData,
   TournamentGameStatsDisplay,
   TournamentSettings,
 } from "@shelf-judge/shared";
@@ -23,7 +22,7 @@ function makeAxis(id: string, name: string, source: "personal" | "bgg", weight =
     description: "",
     weight,
     source,
-    bggField: source === "bgg" ? "communityRating" : undefined,
+    bggField: source === "bgg" ? "communityRating" : null,
     createdAt: now,
     updatedAt: now,
   };
@@ -49,10 +48,14 @@ function makeGame(
     bggData: hasBgg
       ? {
           communityRating: 7.5,
+          bayesAverage: 7.0,
           weight: 3.0,
+          numWeightVotes: 100,
+          description: null,
           mechanics: [{ id: 1, name: "Dice Rolling" }],
           categories: [{ id: 1, name: "Strategy" }],
           families: [],
+          subdomains: [],
           suggestedPlayerCounts: [],
           fetchedAt: now,
         }
@@ -188,6 +191,7 @@ describe("prediction-service", () => {
         tournamentService: createStubTournamentService(),
       });
 
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
       await expect(service.predictGame("no-such-game")).rejects.toThrow("not found");
     });
 
@@ -200,6 +204,7 @@ describe("prediction-service", () => {
         tournamentService: createStubTournamentService(),
       });
 
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
       await expect(service.predictGame("no-bgg")).rejects.toThrow("no BGG data");
     });
 

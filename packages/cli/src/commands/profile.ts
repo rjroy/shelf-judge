@@ -6,8 +6,9 @@ import { printOutput } from "../output.js";
 export async function profileCommand(
   client: DaemonClient,
   _args: string[],
-  _opts: OutputOptions,
+  opts: OutputOptions,
 ): Promise<string> {
   const profile = await client.getProfile();
-  return printOutput(profile, { json: true });
+  // Profile is complex nested data; always render as JSON regardless of opts.json.
+  return printOutput(profile, { ...opts, json: true });
 }

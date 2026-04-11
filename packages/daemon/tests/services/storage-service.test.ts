@@ -204,7 +204,13 @@ function makeEmptyProfile(): CollectionProfile {
   return {
     axisDistributions: [],
     axisWeights: [],
-    bggClustering: { mechanics: [], categories: [], subdomains: [], weightRanges: [] },
+    bggClustering: {
+      mechanics: [],
+      categories: [],
+      families: [],
+      subdomains: [],
+      weightRanges: [],
+    },
     utilityCurves: [],
     divergence: null,
     outliers: [],

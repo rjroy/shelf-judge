@@ -585,7 +585,7 @@ describe("computePredictedFitness", () => {
     const game = makeGame("target", {});
 
     // Mock that returns a vetoed result
-    function vetoCalcScore(g: Game, ax: Axis[], bd: BggGameData | null): FitnessResult | null {
+    function vetoCalcScore(g: Game, ax: Axis[]): FitnessResult | null {
       return {
         score: 0,
         ratedAxisCount: 1,

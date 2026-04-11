@@ -586,7 +586,7 @@ function GameRow({
       {showConfidence && (
         <div className="axes-used">
           {hasPrediction ? (
-            <ConfidencePill level={score!.predictionMeta!.confidence} />
+            <ConfidencePill level={score.predictionMeta!.confidence} />
           ) : score ? (
             <ConfidencePill level="actual" />
           ) : (
@@ -606,7 +606,7 @@ function GameRow({
         ) : isPredictedOnly ? (
           <span className="score-predicted-inline">
             <span className="score-predicted-tilde-inline">~</span>
-            {score!.score.toFixed(1)}
+            {score.score.toFixed(1)}
           </span>
         ) : display.className === "score-unrated" ? (
           <span className="score-unrated">{display.text}</span>

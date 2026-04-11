@@ -13,11 +13,12 @@ const sampleProfile: CollectionProfile = {
       standardDeviation: 1.2,
       range: { min: 3, max: 10 },
       ratedGameCount: 10,
+      histogram: [0, 0, 1, 0, 0, 1, 2, 3, 2, 1],
     },
   ],
   axisWeights: [{ axisId: "fun", axisName: "Fun", weight: 50, percentage: 100 }],
   bggClustering: {
-    mechanics: [{ attribute: "Deck Building", count: 5, percentage: 50 }],
+    mechanics: [{ name: "Deck Building", count: 5, percentage: 50 }],
     categories: [],
     families: [],
     subdomains: [],

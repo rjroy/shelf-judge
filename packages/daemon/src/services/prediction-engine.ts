@@ -185,7 +185,7 @@ export function computePredictedFitness(
   let lowestPredictionConfidence: PredictionConfidence | null = null;
   let totalWeight = 0;
   let coveredWeight = 0;
-  let totalReferenceGames = new Set<string>();
+  const totalReferenceGames = new Set<string>();
 
   for (const axis of axes) {
     totalWeight += axis.weight;

@@ -171,7 +171,13 @@ describe("ProfileService", () => {
     const cachedProfile: CollectionProfile = {
       axisDistributions: [],
       axisWeights: [],
-      bggClustering: { mechanics: [], categories: [], subdomains: [], weightRanges: [] },
+      bggClustering: {
+        mechanics: [],
+        categories: [],
+        families: [],
+        subdomains: [],
+        weightRanges: [],
+      },
       utilityCurves: [],
       divergence: null,
       outliers: [],
@@ -207,7 +213,13 @@ describe("ProfileService", () => {
     const cachedProfile: CollectionProfile = {
       axisDistributions: [],
       axisWeights: [],
-      bggClustering: { mechanics: [], categories: [], subdomains: [], weightRanges: [] },
+      bggClustering: {
+        mechanics: [],
+        categories: [],
+        families: [],
+        subdomains: [],
+        weightRanges: [],
+      },
       utilityCurves: [],
       divergence: null,
       outliers: [],
@@ -244,7 +256,13 @@ describe("ProfileService", () => {
     const cachedProfile: CollectionProfile = {
       axisDistributions: [],
       axisWeights: [],
-      bggClustering: { mechanics: [], categories: [], subdomains: [], weightRanges: [] },
+      bggClustering: {
+        mechanics: [],
+        categories: [],
+        families: [],
+        subdomains: [],
+        weightRanges: [],
+      },
       utilityCurves: [],
       divergence: null,
       outliers: [],
@@ -297,7 +315,13 @@ describe("ProfileService", () => {
     const cachedProfile: CollectionProfile = {
       axisDistributions: [],
       axisWeights: [],
-      bggClustering: { mechanics: [], categories: [], subdomains: [], weightRanges: [] },
+      bggClustering: {
+        mechanics: [],
+        categories: [],
+        families: [],
+        subdomains: [],
+        weightRanges: [],
+      },
       utilityCurves: [],
       divergence: null,
       outliers: [],
