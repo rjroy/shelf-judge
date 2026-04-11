@@ -68,6 +68,7 @@ describe("POST /api/import/bgg", () => {
         maxPlayers: 4,
         playingTime: 60,
         imageUrl: "https://example.com/game1.jpg",
+        thumbnailUrl: null,
       },
       bggData: {
         communityRating: 7.5,
@@ -92,6 +93,7 @@ describe("POST /api/import/bgg", () => {
         maxPlayers: 6,
         playingTime: 90,
         imageUrl: "https://example.com/game2.jpg",
+        thumbnailUrl: null,
       },
       bggData: {
         communityRating: 8.0,

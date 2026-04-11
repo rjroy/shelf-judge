@@ -82,7 +82,9 @@ describe("GameService BGG Integration", () => {
   describe("searchGames", () => {
     test("returns search results from BGG", async () => {
       const searchXml = await readFixture("search-wingspan.xml");
+      const thingBatchXml = await readFixture("thing-search-batch.xml");
       mockFetch.enqueue(200, searchXml);
+      mockFetch.enqueue(200, thingBatchXml);
 
       const results = await gameService.searchGames("Wingspan");
 

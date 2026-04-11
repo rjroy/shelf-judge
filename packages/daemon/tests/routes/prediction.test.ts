@@ -108,6 +108,7 @@ describe("prediction routes", () => {
           maxPlayers: 4,
           playingTime: 60,
           imageUrl: null,
+          thumbnailUrl: null,
         },
         bggData: {
           communityRating: 7.5,
@@ -198,6 +199,7 @@ describe("prediction routes", () => {
               maxPlayers: 4,
               playingTime: 60,
               imageUrl: null,
+              thumbnailUrl: null,
             },
             bggData: {
               communityRating: 7.5,
@@ -244,6 +246,7 @@ describe("prediction routes", () => {
         maxPlayers: 4,
         playingTime: 90,
         imageUrl: null,
+        thumbnailUrl: null,
       },
       bggData: {
         communityRating: 7.5,

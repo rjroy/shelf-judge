@@ -59,6 +59,7 @@ interface BggXmlItem extends BggXmlAttribute {
   playingtime?: BggXmlValueElement;
   description?: string;
   image?: string;
+  thumbnail?: string;
   "#text"?: string;
   rank?: BggXmlAttribute[];
 }
@@ -176,6 +177,7 @@ export interface ThingMetadata {
   maxPlayers: number | null;
   playingTime: number | null;
   imageUrl: string | null;
+  thumbnailUrl: string | null;
 }
 
 export interface CollectiomItemMetadata {
@@ -197,6 +199,7 @@ export function parseThingMetadata(xml: string): ThingMetadata[] {
       maxPlayers: parseNumber(item.maxplayers?.["@_value"]),
       playingTime: parseNumber(item.playingtime?.["@_value"]),
       imageUrl: item.image ?? null,
+      thumbnailUrl: item.thumbnail ?? null,
     };
   });
 }
@@ -231,6 +234,7 @@ export function parseThingItems(xml: string): ThingItem[] {
         maxPlayers: parseNumber(item.maxplayers?.["@_value"]),
         playingTime: parseNumber(item.playingtime?.["@_value"]),
         imageUrl: item.image ?? null,
+        thumbnailUrl: item.thumbnail ?? null,
       },
       bggData: {
         communityRating: parseNumber(ratings?.average?.["@_value"]) ?? 0,
@@ -260,6 +264,7 @@ export function parseSearchResponse(xml: string): BggSearchResult[] {
       bggId: Number(item["@_id"]),
       name: extractPrimaryName(names),
       yearPublished: parseNumber(item.yearpublished?.["@_value"]),
+      thumbnailUrl: null,
     };
   });
 }

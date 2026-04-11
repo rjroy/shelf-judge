@@ -40,6 +40,7 @@ const wingspanBggResult: BggGameResult = {
     maxPlayers: 5,
     playingTime: 70,
     imageUrl: "https://example.com/wingspan.jpg",
+    thumbnailUrl: null,
   },
   bggData: {
     communityRating: 8.1,
@@ -293,8 +294,13 @@ describe("Game Routes", () => {
       const bggClient = createMockBggClient({
         searchGames: () =>
           Promise.resolve([
-            { bggId: 266192, name: "Wingspan", yearPublished: 2019 },
-            { bggId: 290837, name: "Wingspan: European Expansion", yearPublished: 2019 },
+            { bggId: 266192, name: "Wingspan", yearPublished: 2019, thumbnailUrl: null },
+            {
+              bggId: 290837,
+              name: "Wingspan: European Expansion",
+              yearPublished: 2019,
+              thumbnailUrl: null,
+            },
           ]),
       });
       ctx = createTestApp({ bggClient });

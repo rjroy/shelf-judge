@@ -3,6 +3,7 @@ import * as path from "node:path";
 import {
   parseThingResponse,
   parseThingMetadata,
+  parseThingItems,
   parseSearchResponse,
   parseCollectionResponse,
 } from "../../src/services/bgg-xml-parser.js";
@@ -118,6 +119,7 @@ describe("BGG XML Parser", () => {
       expect(m.maxPlayers).toBe(5);
       expect(m.playingTime).toBe(70);
       expect(m.imageUrl).toContain("geekdo-images.com");
+      expect(m.thumbnailUrl).toContain("geekdo-images.com");
     });
 
     test("extracts Gloomhaven metadata", async () => {
@@ -144,12 +146,40 @@ describe("BGG XML Parser", () => {
       expect(results[0].yearPublished).toBe(2020);
       expect(results[1].bggId).toBe(266192);
       expect(results[1].name).toBe("Wingspan");
+
+      // Search results have no thumbnails (BGG search endpoint doesn't include them)
+      for (const result of results) {
+        expect(result.thumbnailUrl).toBeNull();
+      }
     });
 
     test("handles empty search results", () => {
       const xml = `<?xml version="1.0" encoding="utf-8"?><items total="0"></items>`;
       const results = parseSearchResponse(xml);
       expect(results).toHaveLength(0);
+    });
+  });
+
+  describe("parseThingItems", () => {
+    test("extracts thumbnailUrl from batch thing response", async () => {
+      const xml = await readFixture("thing-search-batch.xml");
+      const items = parseThingItems(xml);
+
+      expect(items).toHaveLength(3);
+
+      // First two items have thumbnails
+      const wingspan = items.find((i) => i.bggId === 266192);
+      expect(wingspan).toBeDefined();
+      expect(wingspan!.metadata.thumbnailUrl).toContain("geekdo-images.com");
+
+      const frogmouth = items.find((i) => i.bggId === 339017);
+      expect(frogmouth).toBeDefined();
+      expect(frogmouth!.metadata.thumbnailUrl).toContain("frogmouth");
+
+      // Third item has no thumbnail
+      const asia = items.find((i) => i.bggId === 366161);
+      expect(asia).toBeDefined();
+      expect(asia!.metadata.thumbnailUrl).toBeNull();
     });
   });
 

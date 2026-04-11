@@ -12,6 +12,7 @@ interface BggSearchResult {
   bggId: number;
   name: string;
   yearPublished: number | null;
+  thumbnailUrl: string | null;
 }
 
 type PreviewState =
@@ -290,6 +291,13 @@ export default function SearchPage() {
                 return (
                   <div key={r.bggId} className="search-result-item">
                     <div className="search-result-row">
+                      <div className="search-result-thumb">
+                        {r.thumbnailUrl ? (
+                          <img src={r.thumbnailUrl} alt={r.name} />
+                        ) : (
+                          <span className="search-result-thumb-placeholder"></span>
+                        )}
+                      </div>
                       <div className="search-result-info">
                         <div className="search-result-name">{r.name}</div>
                         {r.yearPublished && (

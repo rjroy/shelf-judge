@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<items termsofuse="https://boardgamegeek.com/xmlapi/termsofuse">
+  <item type="boardgame" id="266192">
+    <thumbnail>https://cf.geekdo-images.com/yLZJCVLlIx4c7eJEWUNJ7w__thumb/img/VKMFz35u7Zu8njNMt1XKqFrF-6I=/fit-in/200x150/filters:strip_icc()/pic4458123.jpg</thumbnail>
+    <name type="primary" sortindex="1" value="Wingspan"/>
+    <yearpublished value="2019"/>
+    <minplayers value="1"/>
+    <maxplayers value="5"/>
+    <playingtime value="70"/>
+  </item>
+  <item type="boardgame" id="339017">
+    <thumbnail>https://cf.geekdo-images.com/example/__thumb/img/example/fit-in/200x150/frogmouth.jpg</thumbnail>
+    <name type="primary" sortindex="1" value="Frogmouth Fan Pack (fan expansion for Wingspan)"/>
+    <yearpublished value="2020"/>
+    <minplayers value="1"/>
+    <maxplayers value="5"/>
+    <playingtime value="70"/>
+  </item>
+  <item type="boardgame" id="366161">
+    <name type="primary" sortindex="1" value="Wingspan Asia"/>
+    <yearpublished value="2022"/>
+    <minplayers value="1"/>
+    <maxplayers value="2"/>
+    <playingtime value="60"/>
+  </item>
+</items>

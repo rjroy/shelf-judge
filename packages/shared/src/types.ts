@@ -219,6 +219,7 @@ export interface BggSearchResult {
   bggId: number;
   name: string;
   yearPublished: number | null;
+  thumbnailUrl: string | null;
 }
 
 // SSE event types for BGG collection import (wire format between daemon and clients)
