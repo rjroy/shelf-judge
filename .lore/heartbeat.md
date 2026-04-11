@@ -31,3 +31,11 @@ Workers can also add entries to this file during their sessions.
 1. **Post-Score Redundancy Penalty via Pairwise Similarity** (Me...
 
 - 14:45 commission-Celeste-20260411-143938 completed
+- 14:47 commission-Dalton-20260411-143524 result: Dark mode implemented across all 9 plan steps. All verification checks pass: typecheck, lint, tests (834 tests, 0 failures), and both color enforcement greps return zero matches.
+
+**What was built:**
+...
+- 14:47 commission-Octavia-20260411-144148 result: Created implementation plan at `.lore/plans/game-links.md` for the game links feature. The plan covers all 8 requirements (REQ-GLINK-1 through REQ-GLINK-8) across 8 steps:
+
+- Steps 1-4: Add `<Link>` c...
+- 14:47 commission-Dalton-20260411-143524 completed
