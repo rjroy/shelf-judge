@@ -1,7 +1,7 @@
 ---
 title: "Redundancy Scoring Penalty"
 date: 2026-04-11
-status: draft
+status: approved
 tags: [spec, redundancy, fitness, scoring, collection-awareness]
 modules: [daemon, shared, web, cli]
 req-prefix: REDUN
