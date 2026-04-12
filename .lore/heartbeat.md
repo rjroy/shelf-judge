@@ -26,3 +26,10 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
+- 22:19 commission-Dalton-20260411-221107 result: Phases 1-5 implemented. All 925 tests pass, typecheck and lint clean.
+
+**Phase 1**: Added `NicheTagFilter` and `NicheSettings` types to `packages/shared/src/types.ts`, exported from index.
+
+**Phase 2*...
+
+- 22:19 commission-Dalton-20260411-221107 completed
