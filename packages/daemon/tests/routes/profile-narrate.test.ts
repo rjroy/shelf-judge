@@ -13,7 +13,6 @@ const sampleNarration: ProfileNarration = {
 
 function createMockNarrationService(overrides?: Partial<NarrationService>): NarrationService {
   return {
-    isAvailable: () => true,
     generateNarration: () => Promise.resolve(sampleNarration),
     ...overrides,
   };
@@ -21,25 +20,6 @@ function createMockNarrationService(overrides?: Partial<NarrationService>): Narr
 
 describe("profile narrate routes", () => {
   describe("POST /api/profile/narrate", () => {
-    test("returns 503 when narration service is unavailable", async () => {
-      const ctx = createTestApp({
-        narrationService: createMockNarrationService({ isAvailable: () => false }),
-      });
-
-      const res = await jsonRequest(ctx.app, "POST", "/api/profile/narrate");
-      expect(res.status).toBe(503);
-
-      const body = (await res.json()) as { error: string };
-      expect(body.error).toContain("unavailable");
-    });
-
-    test("returns 503 when no narration service is provided", async () => {
-      const ctx = createTestApp();
-
-      const res = await jsonRequest(ctx.app, "POST", "/api/profile/narrate");
-      expect(res.status).toBe(503);
-    });
-
     test("returns 200 with narration when SDK is available", async () => {
       const ctx = createTestApp({
         narrationService: createMockNarrationService(),

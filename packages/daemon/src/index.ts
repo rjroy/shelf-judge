@@ -70,7 +70,6 @@ async function main() {
     tournamentService,
     profileService,
     predictionService,
-    narrationService,
     bggClient,
     onShutdown() {
       logger.log("Shutting down via API...");

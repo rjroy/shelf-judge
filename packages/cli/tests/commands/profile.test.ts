@@ -98,24 +98,7 @@ describe("profile narrate", () => {
     expect(parsed.narrationState).toBe("fresh");
   });
 
-  test("falls back to plain profile on 503", async () => {
-    const unavailableClient = createMockClient({
-      routes: {
-        "POST /api/profile/narrate": {
-          response: { ok: false, status: 503, data: { error: "LLM not configured" } },
-        },
-        "GET /api/profile": {
-          response: { ok: true, status: 200, data: sampleProfile },
-        },
-      },
-    });
-    const output = await profileNarrateCommand(unavailableClient, [], { json: false });
-    const parsed = JSON.parse(output) as CollectionProfile;
-    expect(parsed.narration).toBeNull();
-    expect(parsed.narrationState).toBe("empty");
-  });
-
-  test("throws on non-503 error", () => {
+  test("throws on daemon error", () => {
     const errorClient = createMockClient({
       routes: {
         "POST /api/profile/narrate": {

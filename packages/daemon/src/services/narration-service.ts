@@ -3,7 +3,6 @@ import type { GameService } from "./game-service.js";
 
 export interface NarrationService {
   generateNarration(profile: CollectionProfile): Promise<ProfileNarration>;
-  isAvailable(): boolean;
 }
 
 export interface NarrationServiceDeps {
@@ -94,10 +93,6 @@ Respond ONLY with the structured JSON output. Do not include any other text.`;
 
 export function createNarrationService(deps: NarrationServiceDeps): NarrationService {
   const { gameService } = deps;
-
-  function isAvailable(): boolean {
-    return !!process.env.ANTHROPIC_API_KEY;
-  }
 
   async function generateNarration(profile: CollectionProfile): Promise<ProfileNarration> {
     // Dynamic import to avoid loading the SDK (and its subprocess machinery)
@@ -255,5 +250,5 @@ export function createNarrationService(deps: NarrationServiceDeps): NarrationSer
     return result;
   }
 
-  return { generateNarration, isAvailable };
+  return { generateNarration };
 }

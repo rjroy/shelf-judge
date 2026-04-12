@@ -1,16 +1,14 @@
 import { Hono } from "hono";
 import { toErrorMessage } from "@shelf-judge/shared";
 import type { ProfileService } from "../services/profile-service.js";
-import type { NarrationService } from "../services/narration-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
 
 export interface ProfileRoutesDeps {
   profileService: ProfileService;
-  narrationService?: NarrationService;
 }
 
 export function createProfileRoutes(deps: ProfileRoutesDeps): RouteModule {
-  const { profileService, narrationService } = deps;
+  const { profileService } = deps;
   const routes = new Hono();
 
   routes.get("/profile", async (c) => {
@@ -23,10 +21,6 @@ export function createProfileRoutes(deps: ProfileRoutesDeps): RouteModule {
   });
 
   routes.post("/profile/narrate", async (c) => {
-    if (!narrationService || !narrationService.isAvailable()) {
-      return c.json({ error: "LLM narration unavailable: Agent SDK not configured" }, 503);
-    }
-
     try {
       const profile = await profileService.generateNarration();
       return c.json(profile);

@@ -18,10 +18,6 @@ export function NarrationActions({ state }: NarrationActionsProps) {
     setError(null);
     try {
       const res = await fetch("/api/daemon/profile/narrate", { method: "POST" });
-      if (res.status === 503) {
-        setError("LLM narration unavailable. Set ANTHROPIC_API_KEY on the daemon to enable.");
-        return;
-      }
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
         setError(data.error ?? `Generation failed (${res.status})`);

@@ -75,7 +75,6 @@ export function createTestApp(options?: TestAppOptions): TestAppContext {
     tournamentService,
     profileService,
     predictionService,
-    narrationService,
     bggClient,
   });
 

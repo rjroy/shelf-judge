@@ -58,3 +58,7 @@ Reviewed against REQ-PROFILE-18 through REQ-PROFILE-28 and REQ-PROFILE-34, plus 
 
 **DEFECT fixed** (REQ-NICHE-8): `isChampion` now correctly returns `false` for predicted games when an actual ...
 - 17:56 commission-Dalton-20260411-174456 completed
+- 18:00 commission-Dalton-20260411-174506 result: Phase 4 complete. All three daemon routes now include niche data.
+
+**GET /games/:id** (REQ-NICHE-12): Always includes `nichePosition` in the response. Loads full collection via `predictionService.list...
+- 18:00 commission-Dalton-20260411-174506 completed
