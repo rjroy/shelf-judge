@@ -1,7 +1,7 @@
 ---
 title: "Commission: Final review: Niche tag filtering (all phases)"
 date: 2026-04-12
-status: pending
+status: blocked
 tags: [commission]
 worker: Thorne
 workerDisplayTitle: "Guild Warden"
@@ -15,6 +15,11 @@ activity_timeline:
   - timestamp: 2026-04-12T05:11:48.234Z
     event: created
     reason: "Commission created"
+  - timestamp: 2026-04-12T05:19:25.235Z
+    event: status_blocked
+    reason: "Dependencies not satisfied"
+    from: "pending"
+    to: "blocked"
 current_progress: ""
 projectName: shelf-judge
 ---

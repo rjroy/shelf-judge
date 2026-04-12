@@ -1,7 +1,7 @@
 ---
 title: "Commission: Fix: Niche tag filtering final review findings"
 date: 2026-04-12
-status: pending
+status: blocked
 tags: [commission]
 worker: Dalton
 workerDisplayTitle: "Guild Artificer"
@@ -14,6 +14,11 @@ activity_timeline:
   - timestamp: 2026-04-12T05:11:52.457Z
     event: created
     reason: "Commission created"
+  - timestamp: 2026-04-12T05:19:25.236Z
+    event: status_blocked
+    reason: "Dependencies not satisfied"
+    from: "pending"
+    to: "blocked"
 current_progress: ""
 projectName: shelf-judge
 ---

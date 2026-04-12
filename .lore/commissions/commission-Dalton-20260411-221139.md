@@ -1,7 +1,7 @@
 ---
 title: "Commission: Niche tag filtering: Phase 7 (CLI)"
 date: 2026-04-12
-status: pending
+status: blocked
 tags: [commission]
 worker: Dalton
 workerDisplayTitle: "Guild Artificer"
@@ -14,6 +14,11 @@ activity_timeline:
   - timestamp: 2026-04-12T05:11:39.796Z
     event: created
     reason: "Commission created"
+  - timestamp: 2026-04-12T05:19:25.235Z
+    event: status_blocked
+    reason: "Dependencies not satisfied"
+    from: "pending"
+    to: "blocked"
 current_progress: ""
 projectName: shelf-judge
 ---

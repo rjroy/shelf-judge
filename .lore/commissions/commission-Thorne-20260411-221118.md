@@ -1,7 +1,7 @@
 ---
 title: "Commission: Review: Niche tag filtering Phases 1-5"
 date: 2026-04-12
-status: pending
+status: dispatched
 tags: [commission]
 worker: Thorne
 workerDisplayTitle: "Guild Warden"
@@ -14,6 +14,11 @@ activity_timeline:
   - timestamp: 2026-04-12T05:11:18.938Z
     event: created
     reason: "Commission created"
+  - timestamp: 2026-04-12T05:19:25.238Z
+    event: status_dispatched
+    reason: "Dispatched to worker"
+    from: "pending"
+    to: "dispatched"
 current_progress: ""
 projectName: shelf-judge
 ---
