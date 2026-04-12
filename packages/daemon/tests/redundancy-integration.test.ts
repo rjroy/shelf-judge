@@ -321,6 +321,49 @@ describe("redundancy integration: GET /predictions/bgg/:bggId", () => {
   });
 });
 
+describe("redundancy integration: penalty consistency across routes", () => {
+  test("GET /games/:id penalties match GET /games penalties", async () => {
+    const app = buildApp(enabledAnnotation);
+
+    // Fetch collection
+    const listRes = await app.request("/api/games");
+    expect(listRes.status).toBe(200);
+    const list = (await listRes.json()) as GameWithScore[];
+
+    // Fetch each game individually and compare penalties
+    for (const gws of list) {
+      if (!gws.score?.redundancyAdjustment) continue;
+      const detailRes = await app.request(`/api/games/${gws.game.id}`);
+      expect(detailRes.status).toBe(200);
+      const detail = (await detailRes.json()) as GameWithScore;
+      expect(detail.score!.redundancyAdjustment!.penalty).toBe(
+        gws.score.redundancyAdjustment.penalty,
+      );
+      expect(detail.score!.redundancyAdjustment!.adjustedScore).toBe(
+        gws.score.redundancyAdjustment.adjustedScore,
+      );
+    }
+  });
+
+  test("GET /games and GET /games?includePredicted=true produce same penalties", async () => {
+    const app = buildApp(enabledAnnotation);
+
+    const plainRes = await app.request("/api/games");
+    const predictedRes = await app.request("/api/games?includePredicted=true");
+    expect(plainRes.status).toBe(200);
+    expect(predictedRes.status).toBe(200);
+
+    const plain = (await plainRes.json()) as GameWithScore[];
+    const predicted = (await predictedRes.json()) as GameWithScore[];
+
+    for (const pg of plain) {
+      const match = predicted.find((g) => g.game.id === pg.game.id);
+      if (!pg.score?.redundancyAdjustment || !match?.score?.redundancyAdjustment) continue;
+      expect(pg.score.redundancyAdjustment.penalty).toBe(match.score.redundancyAdjustment.penalty);
+    }
+  });
+});
+
 describe("redundancy integration: niche positions use pre-redundancy scores", () => {
   test("niche rankings are not affected by redundancy in integrated mode", async () => {
     // Build two apps: one annotation, one integrated

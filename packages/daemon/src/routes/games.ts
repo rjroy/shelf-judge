@@ -46,13 +46,20 @@ function bggNotConfiguredResponse(c: Context) {
  * Shared logic for GET /games and GET /games/:id.
  * Order: scores first, niches second (on pre-redundancy scores per REQ-REDUN-26),
  * redundancy third.
+ *
+ * When `universe` is provided, pairwise similarity and penalties are computed against
+ * the universe (e.g. prediction-enriched games), but only `games` are annotated.
+ * This ensures the same game gets the same penalty regardless of which route returns it.
  */
 async function applyRedundancy(
   games: GameWithScore[],
   settings: RedundancySettings,
   storageService: StorageService,
+  universe?: GameWithScore[],
 ): Promise<void> {
   if (!settings.enabled) return;
+
+  const computeGames = universe ?? games;
 
   const collection = await storageService.loadCollection();
   const gamesWithBgg = collection.games.filter((g) => g.bggData);
@@ -69,7 +76,7 @@ async function applyRedundancy(
     return vec;
   };
 
-  const adjustments = computeRedundancyAdjustments(games, settings, getFeatureVector);
+  const adjustments = computeRedundancyAdjustments(computeGames, settings, getFeatureVector);
 
   for (const gws of games) {
     if (!gws.score) continue;
@@ -178,10 +185,14 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
         }
       }
 
-      // Redundancy: after niches, on the returned games
+      // Redundancy: after niches, computed against prediction-enriched universe
+      // for consistency with the includePredicted=true path and GET /games/:id
       if (storageService) {
         const redundancySettings = await storageService.loadRedundancySettings();
-        await applyRedundancy(games, redundancySettings, storageService);
+        const universe = predictionService
+          ? await predictionService.listGamesWithPredictions()
+          : undefined;
+        await applyRedundancy(games, redundancySettings, storageService, universe);
       }
 
       return c.json(games);
@@ -206,11 +217,13 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
         result.nichePosition = null;
       }
 
-      // Redundancy: use non-enriched scores to match GET /games list endpoint
+      // Redundancy: use prediction-enriched set for consistency with GET /games
       if (storageService) {
         const redundancySettings = await storageService.loadRedundancySettings();
         if (redundancySettings.enabled) {
-          const allGames = await gameService.listGames();
+          const allGames = predictionService
+            ? await predictionService.listGamesWithPredictions()
+            : await gameService.listGames();
           await applyRedundancy(allGames, redundancySettings, storageService);
           const thisGame = allGames.find((g) => g.game.id === id);
           if (result.score && thisGame?.score) {
