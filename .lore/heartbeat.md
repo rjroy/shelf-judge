@@ -26,3 +26,9 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
+- 17:40 commission-Dalton-20260411-172109 result: LLM Narrative feature implemented across all four phases. Typecheck clean, lint clean, 883 tests pass / 0 fail.
+
+**Phase 1 (Shared Types + Cache Logic):**
+- Added `ProfileNarration` and `NarrationCach...
+
+- 17:40 commission-Dalton-20260411-172109 completed
