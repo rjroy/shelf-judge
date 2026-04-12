@@ -41,3 +41,9 @@ Workers can also add entries to this file during their sessions.
 
 File: `packages/cli/src/commands/score...
 - 18:16 commission-Thorne-20260411-174532 completed
+- 18:21 commission-Octavia-20260411-181624 result: Wrote the redundancy scoring penalty spec at `.lore/specs/redundancy-scoring.md`.
+
+The spec covers 41 requirements (REQ-REDUN-1 through REQ-REDUN-41) across these sections:
+
+**Redundancy Settings (REQ...
+- 18:21 commission-Octavia-20260411-181624 completed
