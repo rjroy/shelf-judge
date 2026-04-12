@@ -39,3 +39,8 @@ The spec defines:
 
 **Data model:** `WishlistEntry` stores BGG identity (bggId, name, year, thu...
 - 00:33 commission-Octavia-20260412-002912 completed
+- 00:34 commission-Celeste-20260412-003019 result: Wrote brainstorm to `.lore/brainstorms/shelf-layout-designer.md` with 6 proposals exploring the shelf layout designer idea at two altitudes.
+
+**Curation-aligned proposals (extend existing vision):**
+-...
+- 00:34 commission-Celeste-20260412-003019 completed
