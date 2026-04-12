@@ -26,44 +26,9 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
-- 17:40 commission-Dalton-20260411-172109 result: LLM Narrative feature implemented across all four phases. Typecheck clean, lint clean, 883 tests pass / 0 fail.
+- 18:09 commission-Dalton-20260411-174516 result: Phase 5 (Web UI) implemented. All verification passes: typecheck, lint, 908 tests green.
 
-**Phase 1 (Shared Types + Cache Logic):**
-- Added `ProfileNarration` and `NarrationCach...
+**5a: Web API helpers** (`packages/web/lib/api.ts`)
+- `listGames()` now accepts optional `{ includeNiches?: bo...
 
-- 17:40 commission-Dalton-20260411-172109 completed
-- 17:43 commission-Dalton-20260411-174220 cancelled
-- 17:49 commission-Dalton-20260411-174435 result: Phases 1-3 of the niche champion display plan implemented and verified.
-
-**Phase 1 (Shared Types):** Added `NicheNeighbor`, `NicheEntry`, `NichePosition`, `NicheImpactEntry`, `NicheImpact` to `package...
-- 17:49 commission-Dalton-20260411-174435 completed
-- 17:51 commission-Thorne-20260411-174549 result: ## LLM Narrative Implementation Review
-
-Reviewed against REQ-PROFILE-18 through REQ-PROFILE-28 and REQ-PROFILE-34, plus the plan at `.lore/plans/llm-narrative.md`.
-
----
-
-### Findings (Priority Order)
-...
-- 17:51 commission-Thorne-20260411-174549 completed
-- 17:54 commission-Thorne-20260411-174451 result: ## Niche Champion Display — Phases 1-3 Review
-
-### Verdict: One defect, one test gap, two observations. Foundation is solid.
-
----
-
-### DEFECT: `isChampion` incorrectly true for predicted games tied wi...
-- 17:54 commission-Thorne-20260411-174451 completed
-- 17:55 commission-Dalton-20260411-174456 result: Fixed all actionable findings from Thorne's review of niche champion display Phases 1-3.
-
-**DEFECT fixed** (REQ-NICHE-8): `isChampion` now correctly returns `false` for predicted games when an actual ...
-- 17:56 commission-Dalton-20260411-174456 completed
-- 18:00 commission-Dalton-20260411-174506 result: Phase 4 complete. All three daemon routes now include niche data.
-
-**GET /games/:id** (REQ-NICHE-12): Always includes `nichePosition` in the response. Loads full collection via `predictionService.list...
-- 18:00 commission-Dalton-20260411-174506 completed
-- 18:04 commission-Dalton-20260411-174522 result: Implemented Phase 6 (CLI) of the niche champion display plan. All three sub-tasks complete:
-
-**6a: Game detail niche position (REQ-NICHE-28)**
-- Added niche position display to `scoreGet` in `packages...
-- 18:04 commission-Dalton-20260411-174522 completed
+- 18:09 commission-Dalton-20260411-174516 completed
