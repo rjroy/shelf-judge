@@ -39,3 +39,8 @@ Workers can also add entries to this file during their sessions.
 
 Solid implementation. Follows the plan faithfully with one confirmed defect and two coverage gaps. The niche engine stays pure, the storage pa...
 - 22:22 commission-Thorne-20260411-221118 completed
+- 22:27 commission-Dalton-20260411-221125 result: ## Thorne's Review Findings: All Addressed
+
+### Finding 1: PATCH endpoint arbitrary property injection (Defect)
+**Fix**: `packages/daemon/src/routes/niche.ts:70-76`. Replaced `{ ...current, ...patch }...
+- 22:27 commission-Dalton-20260411-221125 completed
