@@ -50,15 +50,6 @@ const navGroups = [
           </svg>
         ),
       },
-      {
-        href: "/axes",
-        name: "Axes",
-        icon: (
-          <svg className="nav-icon" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M1 3a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h8a1 1 0 010 2H2a1 1 0 01-1-1z" />
-          </svg>
-        ),
-      },
     ],
   },
   {
@@ -76,22 +67,17 @@ const navGroups = [
     ],
   },
   {
-    label: "Predictions",
+    label: "Settings",
     items: [
       {
-        href: "/readiness",
-        name: "Readiness",
+        href: "/axes",
+        name: "Axes",
         icon: (
           <svg className="nav-icon" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 2a5 5 0 110 10A5 5 0 018 3zm0 1.5a3.5 3.5 0 100 7 3.5 3.5 0 000-7zm0 1.5a2 2 0 110 4 2 2 0 010-4z" />
+            <path d="M1 3a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h8a1 1 0 010 2H2a1 1 0 01-1-1z" />
           </svg>
         ),
       },
-    ],
-  },
-  {
-    label: "Settings",
-    items: [
       {
         href: "/import",
         name: "Import / BGG",
@@ -166,8 +152,8 @@ function isActive(pathname: string, href: string): boolean {
 
 const SidebarContext = createContext<{ open: boolean; toggle: () => void; close: () => void }>({
   open: false,
-  toggle: () => {},
-  close: () => {},
+  toggle: () => { },
+  close: () => { },
 });
 
 export function useSidebar() {
