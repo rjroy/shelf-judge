@@ -1,7 +1,7 @@
 ---
 title: "Commission: Review: Redundancy scoring Phases 5-6"
 date: 2026-04-12
-status: pending
+status: blocked
 tags: [commission]
 worker: Thorne
 workerDisplayTitle: "Guild Warden"
@@ -14,6 +14,11 @@ activity_timeline:
   - timestamp: 2026-04-12T13:41:59.277Z
     event: created
     reason: "Commission created"
+  - timestamp: 2026-04-12T13:45:52.839Z
+    event: status_blocked
+    reason: "Dependencies not satisfied"
+    from: "pending"
+    to: "blocked"
 current_progress: ""
 projectName: shelf-judge
 ---

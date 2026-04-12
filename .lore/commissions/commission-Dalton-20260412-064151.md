@@ -1,7 +1,7 @@
 ---
 title: "Commission: Redundancy scoring: Phases 5-6 (route integration + web helpers)"
 date: 2026-04-12
-status: pending
+status: blocked
 tags: [commission]
 worker: Dalton
 workerDisplayTitle: "Guild Artificer"
@@ -14,6 +14,11 @@ activity_timeline:
   - timestamp: 2026-04-12T13:41:51.203Z
     event: created
     reason: "Commission created"
+  - timestamp: 2026-04-12T13:45:52.839Z
+    event: status_blocked
+    reason: "Dependencies not satisfied"
+    from: "pending"
+    to: "blocked"
 current_progress: ""
 projectName: shelf-judge
 ---
