@@ -79,6 +79,7 @@ interface ParsedArgs {
   vetoAbove?: number;
   noVeto?: boolean;
   includePredicted?: boolean;
+  showNiches?: boolean;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -101,6 +102,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let vetoAbove: number | undefined;
   let noVeto = false;
   let includePredicted = false;
+  let showNiches = false;
 
   for (let i = 0; i < raw.length; i++) {
     const arg = raw[i];
@@ -131,6 +133,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       noVeto = true;
     } else if (arg === "--include-predicted") {
       includePredicted = true;
+    } else if (arg === "--show-niches") {
+      showNiches = true;
     } else if (arg === "--axis") {
       axisFlags.push(raw[++i]);
       axisFlags.push(raw[++i]);
@@ -182,6 +186,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     vetoAbove,
     noVeto: noVeto || undefined,
     includePredicted: includePredicted || undefined,
+    showNiches: showNiches || undefined,
   };
 }
 
@@ -266,6 +271,7 @@ async function main(): Promise<void> {
       output = await scoreList(client, args, {
         ...opts,
         includePredicted: parsed.includePredicted,
+        showNiches: parsed.showNiches,
       });
       break;
     case "score get":
