@@ -1,7 +1,7 @@
 ---
 title: "Implementation plan: wishlist"
 date: 2026-04-12
-status: draft
+status: approved
 tags: [plan, wishlist, search, prediction, curation]
 modules: [shared, daemon, web, cli]
 related:
