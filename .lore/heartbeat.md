@@ -44,3 +44,9 @@ Solid implementation. Follows the plan faithfully with one confirmed defect and 
 ### Finding 1: PATCH endpoint arbitrary property injection (Defect)
 **Fix**: `packages/daemon/src/routes/niche.ts:70-76`. Replaced `{ ...current, ...patch }...
 - 22:27 commission-Dalton-20260411-221125 completed
+- 22:29 commission-Dalton-20260411-221139 result: ## Phase 7: CLI niche commands — Done
+
+### Created
+- `packages/cli/src/commands/niche.ts` — Three commands:
+  - `shelf-judge niche ignored` — lists ignored tags as a text table (or JSON with `--json`)...
+- 22:29 commission-Dalton-20260411-221139 completed
