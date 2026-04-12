@@ -62,3 +62,8 @@ Reviewed against REQ-PROFILE-18 through REQ-PROFILE-28 and REQ-PROFILE-34, plus 
 
 **GET /games/:id** (REQ-NICHE-12): Always includes `nichePosition` in the response. Loads full collection via `predictionService.list...
 - 18:00 commission-Dalton-20260411-174506 completed
+- 18:04 commission-Dalton-20260411-174522 result: Implemented Phase 6 (CLI) of the niche champion display plan. All three sub-tasks complete:
+
+**6a: Game detail niche position (REQ-NICHE-28)**
+- Added niche position display to `scoreGet` in `packages...
+- 18:04 commission-Dalton-20260411-174522 completed
