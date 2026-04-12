@@ -33,3 +33,9 @@ The plan has 12 phases covering all 41 spec requirements:
 1. **Shared Types** (REQ-REDUN-1,2,14-16): `RedundancySett...
 
 - 00:32 commission-Octavia-20260412-002610 completed
+- 00:33 commission-Octavia-20260412-002912 result: Wrote wishlist specification to `.lore/specs/wishlist.md` (status: draft, 29 requirements, prefix WISH).
+
+The spec defines:
+
+**Data model:** `WishlistEntry` stores BGG identity (bggId, name, year, thu...
+- 00:33 commission-Octavia-20260412-002912 completed
