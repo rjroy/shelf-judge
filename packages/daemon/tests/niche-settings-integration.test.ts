@@ -177,6 +177,86 @@ describe("niche settings integration: GET /games/:id passthrough", () => {
   });
 });
 
+describe("niche settings integration: GET /games?includeNiches=true passthrough", () => {
+  test("niche positions reflect ignored tags (includePredicted=false)", async () => {
+    // Without ignored tags: games should have "Deck Building" niche
+    const appNoFilter = new Hono();
+    const { routes: routesNoFilter } = createGameRoutes({
+      gameService: createMockGameService() as GameService,
+      predictionService: createMockPredictionService() as PredictionService,
+      storageService: createMockStorageService({ ignoredTags: [] }) as StorageService,
+    });
+    appNoFilter.route("/api", routesNoFilter);
+
+    const resNoFilter = await appNoFilter.request("/api/games?includeNiches=true");
+    expect(resNoFilter.status).toBe(200);
+    const bodyNoFilter = (await resNoFilter.json()) as GameWithScore[];
+    const gameANoFilter = bodyNoFilter.find((g) => g.game.id === "a")!;
+    const nicheNames = gameANoFilter.nichePosition!.niches.map((n) => n.name);
+    expect(nicheNames).toContain("Deck Building");
+    expect(nicheNames).toContain("Card Game");
+
+    // With "Deck Building" ignored: games should not have that niche
+    const appWithFilter = new Hono();
+    const { routes: routesWithFilter } = createGameRoutes({
+      gameService: createMockGameService() as GameService,
+      predictionService: createMockPredictionService() as PredictionService,
+      storageService: createMockStorageService({
+        ignoredTags: [{ type: "mechanic", name: "Deck Building" }],
+      }) as StorageService,
+    });
+    appWithFilter.route("/api", routesWithFilter);
+
+    const resFiltered = await appWithFilter.request("/api/games?includeNiches=true");
+    expect(resFiltered.status).toBe(200);
+    const bodyFiltered = (await resFiltered.json()) as GameWithScore[];
+    const gameAFiltered = bodyFiltered.find((g) => g.game.id === "a")!;
+    const filteredNames = gameAFiltered.nichePosition!.niches.map((n) => n.name);
+    expect(filteredNames).not.toContain("Deck Building");
+    expect(filteredNames).toContain("Card Game");
+  });
+
+  test("niche positions reflect ignored tags (includePredicted=true)", async () => {
+    // Without ignored tags: games should have "Deck Building" niche
+    const appNoFilter = new Hono();
+    const { routes: routesNoFilter } = createGameRoutes({
+      gameService: createMockGameService() as GameService,
+      predictionService: createMockPredictionService() as PredictionService,
+      storageService: createMockStorageService({ ignoredTags: [] }) as StorageService,
+    });
+    appNoFilter.route("/api", routesNoFilter);
+
+    const resNoFilter = await appNoFilter.request(
+      "/api/games?includeNiches=true&includePredicted=true",
+    );
+    expect(resNoFilter.status).toBe(200);
+    const bodyNoFilter = (await resNoFilter.json()) as GameWithScore[];
+    const gameANoFilter = bodyNoFilter.find((g) => g.game.id === "a")!;
+    const nicheNames = gameANoFilter.nichePosition!.niches.map((n) => n.name);
+    expect(nicheNames).toContain("Deck Building");
+
+    // With "Deck Building" ignored
+    const appWithFilter = new Hono();
+    const { routes: routesWithFilter } = createGameRoutes({
+      gameService: createMockGameService() as GameService,
+      predictionService: createMockPredictionService() as PredictionService,
+      storageService: createMockStorageService({
+        ignoredTags: [{ type: "mechanic", name: "Deck Building" }],
+      }) as StorageService,
+    });
+    appWithFilter.route("/api", routesWithFilter);
+
+    const resFiltered = await appWithFilter.request(
+      "/api/games?includeNiches=true&includePredicted=true",
+    );
+    expect(resFiltered.status).toBe(200);
+    const bodyFiltered = (await resFiltered.json()) as GameWithScore[];
+    const gameAFiltered = bodyFiltered.find((g) => g.game.id === "a")!;
+    const filteredNames = gameAFiltered.nichePosition!.niches.map((n) => n.name);
+    expect(filteredNames).not.toContain("Deck Building");
+  });
+});
+
 describe("niche settings integration: GET /predictions/bgg/:bggId passthrough", () => {
   test("niche impact excludes ignored tags", async () => {
     // Without ignored tags: candidate's "Deck Building" should appear in impact

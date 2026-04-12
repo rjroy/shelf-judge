@@ -39,7 +39,7 @@ export function NicheIgnoreButton({
   return (
     <button
       className="niche-ignore-btn"
-      onClick={handleIgnore}
+      onClick={() => void handleIgnore()}
       disabled={busy}
       title={`Hide "${name}" niche`}
       aria-label={`Hide ${name} niche`}
@@ -85,7 +85,7 @@ export function NicheRestoreButton({
   return (
     <button
       className="niche-restore-btn"
-      onClick={handleRestore}
+      onClick={() => void handleRestore()}
       disabled={busy}
       title={`Restore "${name}" niche`}
       aria-label={`Restore ${name} niche`}
