@@ -129,6 +129,11 @@
   --sidebar-divider: color-mix(in srgb, var(--nav-text) 8%, transparent);
   --sidebar-item-hover-bg: color-mix(in srgb, var(--nav-text) 6%, transparent);
   --sidebar-track-bg: color-mix(in srgb, var(--nav-text) 10%, transparent);
+
+  /* ── Scrollbar ─────────────────────────────────────────────── */
+  --scrollbar-track: var(--bg-subtle);
+  --scrollbar-thumb: var(--border-strong);
+  --scrollbar-thumb-hover: var(--text-muted);
 }
 
 /* ===== Dark Mode Overrides ===== */
@@ -234,6 +239,10 @@
 
   /* ── Overlay ──────────────────────────────────────────────── */
   --overlay-bg: rgb(0 0 0 / 0.65);
+
+  /* ── Scrollbar ─────────────────────────────────────────────── */
+  --scrollbar-thumb: var(--border-strong);
+  --scrollbar-thumb-hover: var(--text-muted);
 }
 
 :root {
@@ -256,6 +265,37 @@
 *::before,
 *::after {
   box-sizing: border-box;
+}
+
+/* ===== Scrollbar ===== */
+
+/* Firefox / standards-track */
+* {
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  scrollbar-width: thin;
+}
+
+/* Webkit (Chrome, Safari, Edge) */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+::-webkit-scrollbar-corner {
+  background: var(--scrollbar-track);
 }
 
 /* ===== Base Styles ===== */
