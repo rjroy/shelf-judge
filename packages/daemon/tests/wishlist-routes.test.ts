@@ -208,6 +208,24 @@ describe("wishlist routes", () => {
       expect(body.refreshed).toBe(2);
       expect(body.errors).toHaveLength(0);
     });
+
+    test("returns partial failure response shape", async () => {
+      const partialSvc = createMockWishlistService();
+      partialSvc.entries = [makeEntry("e1", 100, "A", NOW), makeEntry("e2", 200, "B", NOW)];
+      partialSvc.refreshAll = () =>
+        Promise.resolve({ refreshed: 1, errors: ["B: BGG API timeout"] });
+
+      const { routes: wRoutes } = createWishlistRoutes({ wishlistService: partialSvc });
+      const partialApp = new Hono();
+      partialApp.route("/api", wRoutes);
+
+      const res = await partialApp.request(jsonPost("/api/wishlist/refresh", {}));
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { refreshed: number; errors: string[] };
+      expect(body.refreshed).toBe(1);
+      expect(body.errors).toHaveLength(1);
+      expect(body.errors[0]).toContain("B: BGG API timeout");
+    });
   });
 
   describe("POST /api/wishlist (collection conflict)", () => {

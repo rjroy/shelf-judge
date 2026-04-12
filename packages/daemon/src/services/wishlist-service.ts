@@ -35,7 +35,7 @@ function buildEntry(
       .map((b) => ({
         axisName: b.axisName,
         rating: b.rating!,
-        confidence: b.predictionConfidence ?? "strong",
+        confidence: b.predictionConfidence ?? "weak",
       }));
   }
 
@@ -142,14 +142,19 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
       let refreshed = 0;
       const errors: string[] = [];
 
+      // Preload shared data once rather than per-entry
+      const nicheSettings = await storageService.loadNicheSettings();
+      const allGames = await predictionService.listGamesWithPredictions();
+
       for (let i = 0; i < wishlist.length; i++) {
         const existing = wishlist[i];
         try {
           const result = await predictionService.predictBggGame(existing.bggId);
-          const nicheImpact = await computeNicheImpactForResult(
-            predictionService,
-            storageService,
-            result,
+          const nicheImpact = computeNicheImpact(
+            allGames,
+            result.game,
+            result.score,
+            nicheSettings,
           );
 
           const updated = buildEntry(existing.bggId, result, nicheImpact);

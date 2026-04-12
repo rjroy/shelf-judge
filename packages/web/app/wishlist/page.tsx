@@ -108,8 +108,8 @@ function WishlistCard({
 }: {
   entry: WishlistEntry;
   onRemove: (id: string) => void;
-  onRefresh: (id: string) => void;
-  onAddToCollection: (entry: WishlistEntry) => void;
+  onRefresh: (id: string) => Promise<void>;
+  onAddToCollection: (entry: WishlistEntry) => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -153,7 +153,7 @@ function WishlistCard({
                   className="wishlist-refresh-link"
                   onClick={() => {
                     setRefreshing(true);
-                    onRefresh(entry.id);
+                    void onRefresh(entry.id).finally(() => setRefreshing(false));
                   }}
                 >
                   Refresh to check again
@@ -168,7 +168,7 @@ function WishlistCard({
             className="btn btn-primary btn-sm"
             onClick={() => {
               setAddingToCollection(true);
-              onAddToCollection(entry);
+              void onAddToCollection(entry).finally(() => setAddingToCollection(false));
             }}
             disabled={addingToCollection}
           >
@@ -178,7 +178,7 @@ function WishlistCard({
             className="btn btn-ghost btn-sm"
             onClick={() => {
               setRefreshing(true);
-              onRefresh(entry.id);
+              void onRefresh(entry.id).finally(() => setRefreshing(false));
             }}
             disabled={refreshing}
           >
@@ -489,12 +489,8 @@ export default function WishlistPage() {
                   onRemove={(id) => {
                     void handleRemove(id);
                   }}
-                  onRefresh={(id) => {
-                    void handleRefresh(id);
-                  }}
-                  onAddToCollection={(e) => {
-                    void handleAddToCollection(e);
-                  }}
+                  onRefresh={handleRefresh}
+                  onAddToCollection={handleAddToCollection}
                 />
               ))}
 

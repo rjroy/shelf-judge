@@ -6393,6 +6393,9 @@ body {
   color: var(--score-high);
   font-weight: 500;
 }
+[data-theme="dark"] .btn-wishlisted {
+  border-color: color-mix(in hsl, var(--score-high), var(--bg-base) 70%);
+}
 
 /* ===== Wishlist ===== */
 
