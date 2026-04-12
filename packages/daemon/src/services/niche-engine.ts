@@ -151,9 +151,17 @@ export function computeNichePositions(
   const eligible = filterEligible(gamesWithScores);
   const index = buildAttributeIndex(eligible);
 
+  // remove uniniteresting niches
   // Remove groups with <2 members (REQ-NICHE-2)
   for (const [key, group] of index) {
     if (group.games.length < 2) {
+      index.delete(key);
+    }
+  }
+  // Remove groups with too many members
+  const tooManyThreshold = gamesWithScores.length * 0.40; // arbitrary threshold, can be tuned
+  for (const [key, group] of index) {
+    if (group.games.length > tooManyThreshold) {
       index.delete(key);
     }
   }
