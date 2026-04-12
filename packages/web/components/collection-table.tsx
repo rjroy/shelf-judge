@@ -42,6 +42,7 @@ interface CollectionTableProps {
   avgFitness: number | null;
   predictedCount: number;
   ignoredTags: NicheTagFilter[];
+  isIntegratedRedundancy: boolean;
 }
 
 export function CollectionTable({
@@ -56,6 +57,7 @@ export function CollectionTable({
   avgFitness,
   predictedCount,
   ignoredTags,
+  isIntegratedRedundancy,
 }: CollectionTableProps) {
   // Sort state: default on SSR, hydrate from localStorage after mount
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
@@ -459,7 +461,7 @@ export function CollectionTable({
         </div>
 
         {/* Predictions toggle */}
-        {predictedGames && predictedCount > 0 && (
+        {predictedGames && (
           <>
             <div className="predictions-toggle" onClick={() => setPredictionsOn((v) => !v)}>
               <div className={`predictions-toggle-switch${predictionsOn ? " active" : ""}`} />
@@ -519,7 +521,7 @@ export function CollectionTable({
           Game
           {sort.field === "name" && <span className="sort-arrow">{dirArrow}</span>}
         </div>
-        <div className="axes-used-col col-label">{isAxisSort ? "Scores" : "Axes Rated"}</div>
+        {!predictionsOn && <div className="axes-used-col col-label">{isAxisSort ? "Scores" : "Axes Rated"}</div>}
         {predictionsOn && <div className="col-label">Confidence</div>}
         <div
           className={`col-label sortable${sort.field === "updatedAt" ? " sort-active" : ""}`}
@@ -581,6 +583,7 @@ export function CollectionTable({
                       showConfidence={predictionsOn}
                       nicheHighlight={nicheEntry?.isChampion ? "champion" : undefined}
                       nicheSummary={null}
+                      isIntegratedRedundancy={isIntegratedRedundancy}
                     />
                   );
                 })}
@@ -621,6 +624,7 @@ export function CollectionTable({
               isAxisSort={isAxisSort}
               showConfidence={predictionsOn}
               nicheSummary={nichesOn ? (gws.nichePosition ?? null) : null}
+              isIntegratedRedundancy={isIntegratedRedundancy}
             />
           ))}
 
@@ -645,6 +649,7 @@ export function CollectionTable({
               isAxisSort={isAxisSort}
               showConfidence={predictionsOn}
               nicheSummary={nichesOn ? (gws.nichePosition ?? null) : null}
+              isIntegratedRedundancy={isIntegratedRedundancy}
             />
           ))}
         </>
@@ -668,6 +673,7 @@ interface GameRowProps {
   showConfidence: boolean;
   nicheSummary?: import("@shelf-judge/shared").NichePosition | null;
   nicheHighlight?: "champion";
+  isIntegratedRedundancy: boolean;
 }
 
 function GameRow({
@@ -679,6 +685,7 @@ function GameRow({
   axes,
   isAxisSort,
   showConfidence,
+  isIntegratedRedundancy,
   nicheSummary,
   nicheHighlight,
 }: GameRowProps) {
@@ -741,6 +748,7 @@ function GameRow({
           </div>
         )}
       </div>
+      {!showConfidence && (
       <div className="axes-used">
         {isAxisSort ? (
           <AxisSortAltScores gws={gws} tournamentStats={tournamentStats} />
@@ -757,6 +765,7 @@ function GameRow({
           </>
         )}
       </div>
+      )}
       {showConfidence && (
         <div className="axes-used">
           {hasPrediction ? (
@@ -770,7 +779,7 @@ function GameRow({
       )}
       <div className="last-rated">{relativeDate(game.updatedAt)}</div>
       <div className="score-cell">
-        {score?.vetoed ? (
+         {score?.vetoed ? (
           <div className="score-vetoed-cell">
             <span className="vetoed-badge">VETOED</span>
             {score.hypotheticalScore !== null && (
@@ -793,7 +802,7 @@ function GameRow({
         {display?.isFitnessValue && score?.redundancyAdjustment && score.redundancyAdjustment.penalty > 0 && (
           <RedundancyBadge
             penalty={score.redundancyAdjustment.penalty}
-            isIntegrated={score.score !== score.redundancyAdjustment.originalScore}
+            isIntegrated={isIntegratedRedundancy}
           />
         )}
       </div>

@@ -6,6 +6,7 @@ import {
   getAllTournamentStats,
   listGamesWithPredictions,
   getNicheSettings,
+  getRedundancySettings,
 } from "@/lib/api";
 import type { TournamentGameStatsDisplay, NicheTagFilter } from "@shelf-judge/shared";
 import { RefreshAllButton } from "@/components/refresh-all-button";
@@ -21,6 +22,7 @@ export default async function CollectionPage() {
   let predictedGames;
   let nicheGames;
   let axes;
+  let isIntegrated = false;
   let tournamentStats: Record<string, TournamentGameStatsDisplay> = {};
   let ignoredTags: NicheTagFilter[] = [];
   try {
@@ -45,6 +47,12 @@ export default async function CollectionPage() {
       ignoredTags = nicheSettings.ignoredTags;
     } catch {
       // Niche settings may not be available
+    }
+    try {
+      const redundancySettings = await getRedundancySettings();
+      isIntegrated = redundancySettings.enabled && redundancySettings.stage === "integrated";
+    } catch {
+      // Redundancy settings may not be available
     }
   } catch {
     return (
@@ -121,6 +129,7 @@ export default async function CollectionPage() {
           avgFitness={avgFitness}
           predictedCount={predictedCount > 0 ? predictedCount : 0}
           ignoredTags={ignoredTags}
+          isIntegratedRedundancy={isIntegrated}
         />
       </div>
     </>
