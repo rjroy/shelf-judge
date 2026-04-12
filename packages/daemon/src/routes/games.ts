@@ -5,6 +5,7 @@ import type { GameService } from "../services/game-service.js";
 import type { BggClient } from "../services/bgg-client.js";
 import type { PredictionService } from "../services/prediction-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
+import { computeNichePositions } from "../services/niche-engine.js";
 
 export interface GameRoutesDeps {
   gameService: GameService;
@@ -92,11 +93,32 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
   routes.get("/games", async (c) => {
     try {
       const includePredicted = c.req.query("includePredicted") === "true";
+      const includeNiches = c.req.query("includeNiches") === "true";
+
       if (includePredicted && predictionService) {
         const games = await predictionService.listGamesWithPredictions();
+        if (includeNiches) {
+          const nicheMap = computeNichePositions(games);
+          for (const gws of games) {
+            gws.nichePosition = nicheMap.get(gws.game.id) ?? null;
+          }
+        }
         return c.json(games);
       }
+
       const games = await gameService.listGames();
+
+      if (includeNiches && predictionService) {
+        // Niche ranking needs predicted scores (REQ-NICHE-4), but the client
+        // didn't ask for predicted games in the response. Compute niches from
+        // the full list, then attach positions only to the standard game list.
+        const allGames = await predictionService.listGamesWithPredictions();
+        const nicheMap = computeNichePositions(allGames);
+        for (const gws of games) {
+          gws.nichePosition = nicheMap.get(gws.game.id) ?? null;
+        }
+      }
+
       return c.json(games);
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 500);
@@ -108,6 +130,16 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     const id = c.req.param("id");
     try {
       const result = await gameService.getGame(id);
+
+      // Compute niche position from the full collection including predicted scores
+      if (predictionService) {
+        const allGames = await predictionService.listGamesWithPredictions();
+        const nicheMap = computeNichePositions(allGames);
+        result.nichePosition = nicheMap.get(id) ?? null;
+      } else {
+        result.nichePosition = null;
+      }
+
       return c.json(result);
     } catch (err) {
       const message = toErrorMessage(err);
