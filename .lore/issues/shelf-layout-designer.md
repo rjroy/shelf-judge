@@ -2,6 +2,7 @@
 title: "shelf layout designer"
 date: 2026-04-12
 status: open
+tags: [ new-feature ]
 ---
 
 Store the box size of all games (w x h x l).
