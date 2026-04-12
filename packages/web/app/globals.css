@@ -6060,3 +6060,266 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Redundancy panel (game detail) - REQ-REDUN-31, 32, 33
+   --------------------------------------------------------------------------- */
+
+.redundancy-panel {
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  padding: 20px var(--content-padding);
+}
+
+.redundancy-summary {
+  font-size: 14px;
+  color: var(--text-primary);
+  margin-top: 4px;
+}
+
+.redundancy-summary.redundancy-annotation {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.redundancy-detail {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.redundancy-rank {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.redundancy-neighbors {
+  margin-top: 12px;
+}
+
+.redundancy-neighbors-title {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+
+.redundancy-neighbor-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 13px;
+}
+
+.redundancy-neighbor-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.redundancy-neighbor-link:hover {
+  text-decoration: underline;
+}
+
+.redundancy-neighbor-sim {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.redundancy-neighbor-score {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+/* ---------------------------------------------------------------------------
+   Redundancy badge (collection rows) - REQ-REDUN-34, 35
+   --------------------------------------------------------------------------- */
+
+.redundancy-badge {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.redundancy-badge.integrated {
+  background: var(--score-low-bg, rgba(239, 68, 68, 0.15));
+  color: var(--score-low, #ef4444);
+  font-weight: 600;
+}
+
+.redundancy-badge.annotation {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* ---------------------------------------------------------------------------
+   Redundancy preview (search page) - REQ-REDUN-36
+   --------------------------------------------------------------------------- */
+
+.preview-redundancy {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.preview-redundancy-title {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+
+.preview-redundancy-score {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.preview-redundancy-penalty {
+  color: var(--score-low, #ef4444);
+}
+
+.preview-redundancy-neighbors {
+  margin-top: 6px;
+}
+
+.preview-redundancy-neighbor {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 2px 0;
+}
+
+.preview-redundancy-neighbor-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-redundancy-neighbor-sim {
+  color: var(--text-muted);
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+
+.preview-redundancy-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+  margin-top: 4px;
+}
+
+/* ---------------------------------------------------------------------------
+   Redundancy settings panel (collection page) - REQ-REDUN-41
+   --------------------------------------------------------------------------- */
+
+.redundancy-settings {
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0 var(--content-padding);
+}
+
+.redundancy-settings-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 12px 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.redundancy-settings-toggle:hover {
+  color: var(--accent);
+}
+
+.redundancy-settings-body {
+  padding-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.redundancy-settings-error {
+  color: var(--score-low, #ef4444);
+  font-size: 12px;
+  padding: 6px 8px;
+  background: var(--score-low-bg, rgba(239, 68, 68, 0.1));
+  border-radius: 4px;
+}
+
+.redundancy-setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.redundancy-setting-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.redundancy-stage-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.redundancy-stage-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+  margin-top: -8px;
+}
+
+.redundancy-slider {
+  flex: 1;
+  max-width: 200px;
+  accent-color: var(--accent);
+}
+
+.redundancy-weights-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.redundancy-weight-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.redundancy-weight-row label {
+  font-size: 12px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.redundancy-number-input {
+  width: 60px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: center;
+}
+
+.redundancy-reset-btn {
+  align-self: flex-start;
+  margin-top: 4px;
+}

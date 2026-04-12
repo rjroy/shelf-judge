@@ -18,6 +18,7 @@ import type {
   NicheEntry,
   NicheNeighbor,
   NicheTagFilter,
+  RedundancyAdjustment,
 } from "@shelf-judge/shared";
 import { ScoreBreakdown } from "@/components/score-breakdown";
 import { RatingForm } from "@/components/rating-form";
@@ -384,6 +385,11 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
           </div>
         )}
 
+        {/* Redundancy panel (REQ-REDUN-31, REQ-REDUN-32, REQ-REDUN-33) */}
+        {displayScore?.redundancyAdjustment && (
+          <RedundancyPanel score={displayScore} adjustment={displayScore.redundancyAdjustment} />
+        )}
+
         {/* Niche Position panel (REQ-NICHE-18, REQ-NICHE-19) */}
         {displayScore?.vetoed ? (
           <div className="niche-panel">
@@ -577,6 +583,72 @@ function NeighborLink({ neighbor }: { neighbor: NicheNeighbor }) {
       <span className="niche-neighbor-score">({neighbor.fitnessScore.toFixed(1)})</span>
     </span>
   );
+}
+
+function RedundancyPanel({
+  score,
+  adjustment,
+}: {
+  score: FitnessResult;
+  adjustment: RedundancyAdjustment;
+}) {
+  // Infer mode from data: if score.score differs from originalScore, integrated mode is active
+  const isIntegrated = score.score !== adjustment.originalScore;
+  const zeroPenalty = adjustment.penalty === 0;
+
+  return (
+    <div className="redundancy-panel">
+      <div className="panel-section-title">Redundancy{!isIntegrated && " (preview)"}</div>
+
+      {zeroPenalty ? (
+        <div className="redundancy-summary">Best among similar games</div>
+      ) : isIntegrated ? (
+        <div className="redundancy-summary">
+          Fitness: {adjustment.adjustedScore.toFixed(1)}{" "}
+          <span className="redundancy-detail">
+            (was {adjustment.originalScore.toFixed(1)}, -{adjustment.penalty.toFixed(1)} redundancy)
+          </span>
+        </div>
+      ) : (
+        <div className="redundancy-summary redundancy-annotation">
+          Would be {adjustment.adjustedScore.toFixed(1)} with redundancy applied{" "}
+          <span className="redundancy-detail">
+            (current {adjustment.originalScore.toFixed(1)}, -{adjustment.penalty.toFixed(1)}{" "}
+            penalty)
+          </span>
+        </div>
+      )}
+
+      <div className="redundancy-rank">
+        {ordinalSuffix(adjustment.nicheRank)} of {adjustment.nicheSize} similar game
+        {adjustment.nicheSize !== 1 ? "s" : ""}
+      </div>
+
+      {adjustment.nicheNeighbors.length > 0 && (
+        <div className="redundancy-neighbors">
+          <div className="redundancy-neighbors-title">Similar games</div>
+          {adjustment.nicheNeighbors.map((n) => (
+            <div key={n.gameId} className="redundancy-neighbor-row">
+              <Link href={`/games/${n.gameId}`} className="redundancy-neighbor-link">
+                {n.gameName}
+              </Link>
+              {n.isPredicted && <span className="niche-predicted-indicator">~</span>}
+              <span className="redundancy-neighbor-sim">
+                {(n.similarity * 100).toFixed(0)}% similar
+              </span>
+              <span className="redundancy-neighbor-score">({n.fitnessScore.toFixed(1)})</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ordinalSuffix(n: number): string {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 
 function formatRelativeDate(dateStr: string): string {

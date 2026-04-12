@@ -18,6 +18,7 @@ export interface SortFieldDef {
 
 const BUILT_IN_SORT_FIELDS: SortFieldDef[] = [
   { id: "fitness", label: "Fitness Score", group: "score", defaultDirection: "desc" },
+  { id: "redundancy", label: "Redundancy-Adjusted", group: "score", defaultDirection: "desc" },
   { id: "tournament", label: "Tournament ELO", group: "score", defaultDirection: "desc" },
   { id: "name", label: "Name", group: "identity", defaultDirection: "asc" },
   { id: "yearPublished", label: "Year Published", group: "identity", defaultDirection: "desc" },
@@ -194,6 +195,8 @@ export function getSortValue(
   switch (field) {
     case "fitness":
       return score?.score ?? null;
+    case "redundancy":
+      return score?.redundancyAdjustment?.adjustedScore ?? score?.score ?? null;
     case "tournament":
       return tournamentStats[game.id]?.normalizedScore ?? null;
     case "name":
@@ -289,6 +292,16 @@ export function getScoreDisplay(
         dotClass: scoreRangeClass(score.score),
       };
     }
+    case "redundancy": {
+      if (!score) return { text: "not rated", className: "score-unrated" };
+      const adj = score.redundancyAdjustment;
+      const val = adj ? adj.adjustedScore : score.score;
+      return {
+        text: val.toFixed(1),
+        className: "score-value",
+        dotClass: scoreRangeClass(val),
+      };
+    }
     case "tournament": {
       const stats = tournamentStats[game.id];
       return {
@@ -363,6 +376,8 @@ export function getSeparatorLabel(field: string, count: number, axes: Axis[]): s
   switch (field) {
     case "fitness":
       return `Not yet rated - ${n}`;
+    case "redundancy":
+      return `Not yet rated - ${n}`;
     case "tournament":
       return `Not yet ranked - ${n}`;
     case "playerCount":
@@ -401,6 +416,8 @@ export function getScoreSubtitle(field: string, axes: Axis[]): string {
     case "fitness":
     case "name":
       return "Fitness";
+    case "redundancy":
+      return "Adj. Fitness";
     case "tournament":
       return "Tournament ELO";
     case "yearPublished":

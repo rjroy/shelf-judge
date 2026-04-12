@@ -790,6 +790,12 @@ function GameRow({
             <span className={display.className}>{display.text}</span>
           </>
         )}
+        {score?.redundancyAdjustment && score.redundancyAdjustment.penalty > 0 && (
+          <RedundancyBadge
+            penalty={score.redundancyAdjustment.penalty}
+            isIntegrated={score.score !== score.redundancyAdjustment.originalScore}
+          />
+        )}
       </div>
     </Link>
   );
@@ -845,6 +851,18 @@ function AxisSortAltScores({
         <span className="axis-sort-fitness muted">--</span>
       )}
       {eloStats && <span className="axis-sort-elo">{eloStats.displayLabel}</span>}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Redundancy penalty badge for collection rows (REQ-REDUN-34, REQ-REDUN-35)
+// ---------------------------------------------------------------------------
+
+function RedundancyBadge({ penalty, isIntegrated }: { penalty: number; isIntegrated: boolean }) {
+  return (
+    <span className={`redundancy-badge${isIntegrated ? " integrated" : " annotation"}`}>
+      {isIntegrated ? `-${penalty.toFixed(1)}` : `(-${penalty.toFixed(1)})`}
     </span>
   );
 }
