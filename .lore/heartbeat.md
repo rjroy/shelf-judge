@@ -53,6 +53,11 @@ Four phases:
 Commands implemented:
 - `wishlist list` - GET /api/wishlist, table o...
 - 11:39 commission-Dalton-20260412-111723 completed
+- 11:44 commission-Dalton-20260412-111714 result: # Phases 6-8: Web UI Complete
+
+- 11:45 commission-Dalton-20260412-111714 completed
+## Phase 6: Search Page Wishlist Button (`packages/web/app/search/page.tsx`)
+- Added `wishlistedIds` state (`Set<number>`) populated from `GET /api/daemon/wishlist` on m...
 ## Finding 1: DEFECT — Auto-removal race condition (games.ts:144-145)
 **Fix:** Added `await` to `wishlistService.removeByBggId()` call. The `.catch(() => {})` st...
 ## Summary
