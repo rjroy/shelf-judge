@@ -106,7 +106,7 @@ LLM Narrative feature implemented across all four phases. Typecheck clean, lint 
 - Dynamic import of `@anthropic-ai/claude-agent-sdk` to avoid loading at daemon startup
 - Two MCP tools: `get_collection_games` (with mechanic/category filters) and `get_profile_detail` (6 profile sections)
 - Structured output via JSON schema for the five narration sections
-- Budget cap at $0.05, model `claude-sonnet-4-6`, system prompt enforces narrate-only constraint
+- Model `sonnet`, system prompt enforces narrate-only constraint
 - 3 unit tests for `isAvailable()` (key set, not set, empty)
 
 **Phase 3 (Daemon Route + Profile Service):**

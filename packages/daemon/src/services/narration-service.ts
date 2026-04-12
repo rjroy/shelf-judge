@@ -219,6 +219,7 @@ export function createNarrationService(deps: NarrationServiceDeps): NarrationSer
         outputFormat: { type: "json_schema", schema: NARRATION_JSON_SCHEMA },
         mcpServers: { "shelf-judge-profile": mcpServer },
         tools: [],
+        effort: "low",
         permissionMode: "dontAsk",
         persistSession: false,
       },
