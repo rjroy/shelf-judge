@@ -5911,6 +5911,116 @@ body {
   font-size: 14px;
 }
 
+/* Niche ignore/restore buttons */
+.niche-ignore-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-secondary);
+  padding: 2px 6px;
+  border-radius: 3px;
+  opacity: 0.5;
+  transition:
+    opacity 0.15s,
+    color 0.15s;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.niche-ignore-btn:hover {
+  opacity: 1;
+  color: var(--text-primary);
+  background: var(--bg-subtle);
+}
+
+.niche-ignore-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* In collection niche group header, don't push count to the left */
+.niche-group-header .niche-ignore-btn {
+  margin-left: 8px;
+}
+
+.niche-group-header .niche-group-count {
+  margin-left: auto;
+}
+
+/* Ignored niches section */
+.niche-ignored-section {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.niche-ignored-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+}
+
+.niche-ignored-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.niche-ignored-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  opacity: 0.6;
+}
+
+.niche-ignored-chip-name {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.niche-ignored-chip .niche-type-badge {
+  font-size: 10px;
+}
+
+.niche-restore-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 1px 6px;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
+}
+
+.niche-restore-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.niche-restore-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* Collection niche view: ignored section uses content padding */
+.niche-group + .niche-ignored-section,
+.niche-empty + .niche-ignored-section {
+  padding-left: var(--content-padding);
+  padding-right: var(--content-padding);
+}
+
 /* Search preview: Niche Impact (REQ-NICHE-26, REQ-NICHE-27) */
 .preview-niche-impact {
   border-top: 1px solid var(--border);

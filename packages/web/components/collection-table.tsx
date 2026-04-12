@@ -2,7 +2,13 @@
 
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import Link from "next/link";
-import type { GameWithScore, Axis, TournamentGameStatsDisplay } from "@shelf-judge/shared";
+import type {
+  GameWithScore,
+  Axis,
+  TournamentGameStatsDisplay,
+  NicheTagFilter,
+} from "@shelf-judge/shared";
+import { NicheIgnoreButton, NicheRestoreButton } from "@/components/niche-ignore-button";
 import { scoreRangeClass } from "@/lib/score-utils";
 import { relativeDate } from "@/lib/date-utils";
 import {
@@ -35,6 +41,7 @@ interface CollectionTableProps {
   ratedCount: number;
   avgFitness: number | null;
   predictedCount: number;
+  ignoredTags: NicheTagFilter[];
 }
 
 export function CollectionTable({
@@ -48,6 +55,7 @@ export function CollectionTable({
   ratedCount,
   avgFitness,
   predictedCount,
+  ignoredTags,
 }: CollectionTableProps) {
   // Sort state: default on SSR, hydrate from localStorage after mount
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
@@ -541,43 +549,63 @@ export function CollectionTable({
 
       {nicheViewMode && nichesOn ? (
         /* Group by Niche view (REQ-NICHE-24, REQ-NICHE-25) */
-        nicheGroups.length > 0 ? (
-          nicheGroups.map((group) => (
-            <div key={`${group.type}:${group.name}`} className="niche-group">
-              <div className="niche-group-header">
-                <span className="niche-group-name">{group.name}</span>
-                <span className={`niche-type-badge niche-type-${group.type}`}>{group.type}</span>
-                <span className="niche-group-count">
-                  {group.games.length} game{group.games.length !== 1 ? "s" : ""}
-                </span>
-              </div>
-              {group.games.map((gws, i) => {
-                const nicheEntry = gws.nichePosition?.niches.find(
-                  (n) => n.type === group.type && n.name === group.name,
-                );
-                return (
-                  <GameRow
-                    key={gws.game.id}
-                    gws={gws}
-                    rank={i + 1}
-                    sortField={sort.field}
-                    tournamentStats={tournamentStats}
-                    axisMap={axisMap}
-                    axes={axes}
-                    isAxisSort={isAxisSort}
-                    showConfidence={predictionsOn}
-                    nicheHighlight={nicheEntry?.isChampion ? "champion" : undefined}
-                    nicheSummary={null}
+        <>
+          {nicheGroups.length > 0 ? (
+            nicheGroups.map((group) => (
+              <div key={`${group.type}:${group.name}`} className="niche-group">
+                <div className="niche-group-header">
+                  <span className="niche-group-name">{group.name}</span>
+                  <span className={`niche-type-badge niche-type-${group.type}`}>{group.type}</span>
+                  <span className="niche-group-count">
+                    {group.games.length} game{group.games.length !== 1 ? "s" : ""}
+                  </span>
+                  <NicheIgnoreButton
+                    type={group.type as NicheTagFilter["type"]}
+                    name={group.name}
                   />
-                );
-              })}
+                </div>
+                {group.games.map((gws, i) => {
+                  const nicheEntry = gws.nichePosition?.niches.find(
+                    (n) => n.type === group.type && n.name === group.name,
+                  );
+                  return (
+                    <GameRow
+                      key={gws.game.id}
+                      gws={gws}
+                      rank={i + 1}
+                      sortField={sort.field}
+                      tournamentStats={tournamentStats}
+                      axisMap={axisMap}
+                      axes={axes}
+                      isAxisSort={isAxisSort}
+                      showConfidence={predictionsOn}
+                      nicheHighlight={nicheEntry?.isChampion ? "champion" : undefined}
+                      nicheSummary={null}
+                    />
+                  );
+                })}
+              </div>
+            ))
+          ) : (
+            <div className="niche-empty">
+              No niches found with 2 or more games in the filtered set.
             </div>
-          ))
-        ) : (
-          <div className="niche-empty">
-            No niches found with 2 or more games in the filtered set.
-          </div>
-        )
+          )}
+          {ignoredTags.length > 0 && (
+            <div className="niche-ignored-section">
+              <div className="niche-ignored-title">Ignored Niches</div>
+              <div className="niche-ignored-chips">
+                {ignoredTags.map((tag) => (
+                  <span key={`${tag.type}:${tag.name}`} className="niche-ignored-chip">
+                    <span className="niche-ignored-chip-name">{tag.name}</span>
+                    <span className={`niche-type-badge niche-type-${tag.type}`}>{tag.type}</span>
+                    <NicheRestoreButton type={tag.type} name={tag.name} />
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       ) : (
         <>
           {/* Rows with value */}

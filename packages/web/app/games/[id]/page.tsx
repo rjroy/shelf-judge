@@ -1,6 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { getGame, listAxes, getTournamentGameStats, getProfile, predictGame } from "@/lib/api";
+import {
+  getGame,
+  listAxes,
+  getTournamentGameStats,
+  getProfile,
+  predictGame,
+  getNicheSettings,
+} from "@/lib/api";
 import type {
   TournamentGameStatsDisplay,
   DivergentGame,
@@ -10,10 +17,12 @@ import type {
   NichePosition,
   NicheEntry,
   NicheNeighbor,
+  NicheTagFilter,
 } from "@shelf-judge/shared";
 import { ScoreBreakdown } from "@/components/score-breakdown";
 import { RatingForm } from "@/components/rating-form";
 import { GameActions } from "@/components/game-actions";
+import { NicheIgnoreButton, NicheRestoreButton } from "@/components/niche-ignore-button";
 
 export async function generateMetadata({
   params,
@@ -41,6 +50,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
   let profileDivergence: DivergentGame | null = null;
   let profileOutlier: CollectionOutlier | null = null;
   let prediction: { score: FitnessResult; tension?: RevealedPreferenceTension } | null = null;
+  let ignoredTags: NicheTagFilter[] = [];
   try {
     [data, axes] = await Promise.all([getGame(id), listAxes()]);
     try {
@@ -66,6 +76,12 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
       }
     } catch {
       // Prediction may not be available (fully rated, no BGG data, etc.)
+    }
+    try {
+      const nicheSettings = await getNicheSettings();
+      ignoredTags = nicheSettings.ignoredTags;
+    } catch {
+      // Niche settings may not be available
     }
   } catch (err) {
     return (
@@ -378,7 +394,9 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
           </div>
         ) : (
           nichePosition &&
-          nichePosition.niches.length > 0 && <NichePositionPanel nichePosition={nichePosition} />
+          (nichePosition.niches.length > 0 || ignoredTags.length > 0) && (
+            <NichePositionPanel nichePosition={nichePosition} ignoredTags={ignoredTags} />
+          )
         )}
 
         {/* Two-panel layout */}
@@ -463,15 +481,37 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
   );
 }
 
-function NichePositionPanel({ nichePosition }: { nichePosition: NichePosition }) {
+function NichePositionPanel({
+  nichePosition,
+  ignoredTags,
+}: {
+  nichePosition: NichePosition;
+  ignoredTags: NicheTagFilter[];
+}) {
   return (
     <div className="niche-panel">
       <div className="panel-section-title">Niche Position</div>
-      <div className="niche-grid">
-        {nichePosition.niches.map((niche) => (
-          <NicheEntryCard key={`${niche.type}:${niche.name}`} niche={niche} />
-        ))}
-      </div>
+      {nichePosition.niches.length > 0 && (
+        <div className="niche-grid">
+          {nichePosition.niches.map((niche) => (
+            <NicheEntryCard key={`${niche.type}:${niche.name}`} niche={niche} />
+          ))}
+        </div>
+      )}
+      {ignoredTags.length > 0 && (
+        <div className="niche-ignored-section">
+          <div className="niche-ignored-title">Ignored Niches</div>
+          <div className="niche-ignored-chips">
+            {ignoredTags.map((tag) => (
+              <span key={`${tag.type}:${tag.name}`} className="niche-ignored-chip">
+                <span className="niche-ignored-chip-name">{tag.name}</span>
+                <span className={`niche-type-badge niche-type-${tag.type}`}>{tag.type}</span>
+                <NicheRestoreButton type={tag.type} name={tag.name} />
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -482,6 +522,7 @@ function NicheEntryCard({ niche }: { niche: NicheEntry }) {
       <div className="niche-card-header">
         <span className="niche-card-name">{niche.name}</span>
         <span className={`niche-type-badge niche-type-${niche.type}`}>{niche.type}</span>
+        <NicheIgnoreButton type={niche.type} name={niche.name} />
       </div>
       <div className="niche-card-rank">
         {niche.isChampion ? (

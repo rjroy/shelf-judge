@@ -1,7 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { listGames, listAxes, getAllTournamentStats, listGamesWithPredictions } from "@/lib/api";
-import type { TournamentGameStatsDisplay } from "@shelf-judge/shared";
+import {
+  listGames,
+  listAxes,
+  getAllTournamentStats,
+  listGamesWithPredictions,
+  getNicheSettings,
+} from "@/lib/api";
+import type { TournamentGameStatsDisplay, NicheTagFilter } from "@shelf-judge/shared";
 import { RefreshAllButton } from "@/components/refresh-all-button";
 import { NormalizeFitnessButton } from "@/components/normalize-fitness-button";
 import { CollectionTable } from "@/components/collection-table";
@@ -15,6 +21,7 @@ export default async function CollectionPage() {
   let nicheGames;
   let axes;
   let tournamentStats: Record<string, TournamentGameStatsDisplay> = {};
+  let ignoredTags: NicheTagFilter[] = [];
   try {
     [games, axes] = await Promise.all([listGames(), listAxes()]);
     try {
@@ -31,6 +38,12 @@ export default async function CollectionPage() {
       nicheGames = await listGames({ includeNiches: true });
     } catch {
       // Niche data may not be available
+    }
+    try {
+      const nicheSettings = await getNicheSettings();
+      ignoredTags = nicheSettings.ignoredTags;
+    } catch {
+      // Niche settings may not be available
     }
   } catch {
     return (
@@ -105,6 +118,7 @@ export default async function CollectionPage() {
           ratedCount={rated.length}
           avgFitness={avgFitness}
           predictedCount={predictedCount > 0 ? predictedCount : 0}
+          ignoredTags={ignoredTags}
         />
       </div>
     </>
