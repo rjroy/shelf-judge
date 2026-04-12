@@ -29,6 +29,13 @@ import { profileCommand, profileNarrateCommand } from "./commands/profile.js";
 import { predictGame, predictBggGame, predictReadiness } from "./commands/predict.js";
 import { nicheIgnored, nicheIgnore, nicheUnignore } from "./commands/niche.js";
 import {
+  wishlistList,
+  wishlistAdd,
+  wishlistRemove,
+  wishlistClear,
+  wishlistRefresh,
+} from "./commands/wishlist.js";
+import {
   redundancySettings,
   redundancyEnable,
   redundancyDisable,
@@ -67,6 +74,11 @@ const COMMANDS: Record<string, number> = {
   "redundancy disable": 2,
   "redundancy stage": 2,
   "redundancy set": 2,
+  "wishlist list": 2,
+  "wishlist add": 2,
+  "wishlist remove": 2,
+  "wishlist clear": 2,
+  "wishlist refresh": 2,
   "import bgg-collection": 2,
   "config get": 2,
   "config set": 2,
@@ -349,6 +361,21 @@ async function main(): Promise<void> {
       break;
     case "redundancy set":
       output = await redundancySet(client, args, opts);
+      break;
+    case "wishlist list":
+      output = await wishlistList(client, args, opts);
+      break;
+    case "wishlist add":
+      output = await wishlistAdd(client, args, opts);
+      break;
+    case "wishlist remove":
+      output = await wishlistRemove(client, args, opts);
+      break;
+    case "wishlist clear":
+      output = await wishlistClear(client, args, opts);
+      break;
+    case "wishlist refresh":
+      output = await wishlistRefresh(client, args, opts);
       break;
     case "import bgg-collection":
       output = await importBggCollection(client, args, opts);

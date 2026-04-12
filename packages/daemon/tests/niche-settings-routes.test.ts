@@ -42,6 +42,8 @@ function createMockStorageService(): StorageService & { settings: NicheSettings 
         expectedNeighbors: 5,
       }),
     saveRedundancySettings: () => Promise.resolve(),
+    loadWishlist: () => Promise.resolve([]),
+    saveWishlist: () => Promise.resolve(),
   };
   return mock;
 }

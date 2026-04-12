@@ -64,6 +64,8 @@ export type {
   RedundancyNeighbor,
   RedundancyAdjustment,
   RedundancySettings,
+  WishlistBreakdownEntry,
+  WishlistEntry,
 } from "./types";
 
 export {

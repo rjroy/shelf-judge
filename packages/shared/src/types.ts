@@ -511,3 +511,24 @@ export interface RedundancySettings {
   minNeighbors: number;
   expectedNeighbors: number;
 }
+
+// Wishlist types (wishlist spec)
+
+export interface WishlistBreakdownEntry {
+  axisName: string;
+  rating: number;
+  confidence: PredictionConfidence;
+}
+
+export interface WishlistEntry {
+  id: string; // UUID
+  bggId: number;
+  name: string;
+  yearPublished: number | null;
+  thumbnailUrl: string | null;
+  predictedScore: number | null;
+  predictionConfidence: PredictionConfidence | null;
+  predictedBreakdown: WishlistBreakdownEntry[] | null;
+  nicheImpact: NicheImpact | null;
+  addedAt: string; // ISO 8601
+}

@@ -34,6 +34,8 @@ function createMockStorageService(): StorageService & { settings: RedundancySett
     savePredictionSettings: () => Promise.resolve(),
     loadNicheSettings: () => Promise.resolve({ ignoredTags: [] }),
     saveNicheSettings: () => Promise.resolve(),
+    loadWishlist: () => Promise.resolve([]),
+    saveWishlist: () => Promise.resolve(),
   };
   return mock;
 }

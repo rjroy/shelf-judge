@@ -42,6 +42,15 @@ const navGroups = [
         ),
       },
       {
+        href: "/wishlist",
+        name: "Wishlist",
+        icon: (
+          <svg className="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M3 2h10a1 1 0 011 1v11l-2-1.5L10 14l-2-1.5L6 14l-2-1.5L2 14V3a1 1 0 011-1zm1 3v1h8V5H4zm0 3v1h8V8H4zm0 3v1h5v-1H4z" />
+          </svg>
+        ),
+      },
+      {
         href: "/search",
         name: "Add Games",
         icon: (
@@ -75,6 +84,16 @@ const navGroups = [
         icon: (
           <svg className="nav-icon" viewBox="0 0 16 16" fill="currentColor">
             <path d="M1 3a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h8a1 1 0 010 2H2a1 1 0 01-1-1z" />
+          </svg>
+        ),
+      },
+      {
+        href: "/redundancy",
+        name: "Redundancy",
+        icon: (
+          <svg className="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <circle cx="6" cy="8" r="4.5" fillOpacity="0.5" />
+            <circle cx="10" cy="8" r="4.5" fillOpacity="0.5" />
           </svg>
         ),
       },
@@ -152,8 +171,8 @@ function isActive(pathname: string, href: string): boolean {
 
 const SidebarContext = createContext<{ open: boolean; toggle: () => void; close: () => void }>({
   open: false,
-  toggle: () => { },
-  close: () => { },
+  toggle: () => {},
+  close: () => {},
 });
 
 export function useSidebar() {

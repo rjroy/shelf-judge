@@ -1,7 +1,7 @@
 ---
 title: "Wishlist"
 date: 2026-04-12
-status: approved
+status: implemented
 tags: [spec, wishlist, search, prediction, curation]
 modules: [daemon, shared, web, cli]
 req-prefix: WISH

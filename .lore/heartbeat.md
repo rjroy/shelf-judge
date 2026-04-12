@@ -26,3 +26,20 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
+- 11:59 commission-Dalton-20260412-115042 result: Phases 3-4 complete.
+
+**Phase 3 (Remove from Collection page):**
+- Removed `RedundancySettingsPanel` import (line 15) and render (line 119) from `packages/web/app/collection/page.tsx`
+- Kept `getRedun...
+
+- 12:00 commission-Dalton-20260412-115042 completed
+- 12:05 commission-Thorne-20260412-115052 result: # Redundancy Settings Page Move: Review
+
+- 12:05 commission-Thorne-20260412-115052 completed
+## Verdict
+
+Implementation is solid. All plan requirements satisfied. Two low-severity findings, one unverifiable item.
+
+## Requirement Compliance
+
+| # | Requi...

@@ -291,6 +291,37 @@ export async function updateRedundancySettings(
   });
 }
 
+// Wishlist API functions
+
+import type { WishlistEntry, WishlistBreakdownEntry } from "@shelf-judge/shared";
+
+export async function listWishlist(): Promise<WishlistEntry[]> {
+  return daemonJson("/api/wishlist");
+}
+
+export async function addToWishlist(bggId: number): Promise<{ entry: WishlistEntry }> {
+  return daemonJson("/api/wishlist", {
+    method: "POST",
+    body: { bggId },
+  });
+}
+
+export async function removeFromWishlist(id: string): Promise<{ removed: boolean }> {
+  return daemonJson(`/api/wishlist/${id}`, { method: "DELETE" });
+}
+
+export async function clearWishlist(): Promise<{ removed: number }> {
+  return daemonJson("/api/wishlist", { method: "DELETE" });
+}
+
+export async function refreshWishlistEntry(id: string): Promise<{ entry: WishlistEntry }> {
+  return daemonJson(`/api/wishlist/${id}/refresh`, { method: "POST" });
+}
+
+export async function refreshAllWishlist(): Promise<{ refreshed: number; errors: string[] }> {
+  return daemonJson("/api/wishlist/refresh", { method: "POST" });
+}
+
 // Re-export types for convenience
 export type {
   Game,
@@ -314,4 +345,6 @@ export type {
   RedundancySettings,
   RedundancyAdjustment,
   RedundancyNeighbor,
+  WishlistEntry,
+  WishlistBreakdownEntry,
 };

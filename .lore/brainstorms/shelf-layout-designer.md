@@ -1,7 +1,7 @@
 ---
 title: "Shelf Layout Designer"
 date: 2026-04-12
-status: active
+status: open
 tags: [brainstorm, shelf-layout, physical, spatial, optimization]
 related:
   - .lore/issues/shelf-layout-designer.md

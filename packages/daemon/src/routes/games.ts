@@ -16,11 +16,14 @@ import {
 } from "../services/feature-vector.js";
 import type { FeatureVector } from "../services/feature-vector.js";
 
+import type { WishlistService } from "../services/wishlist-service.js";
+
 export interface GameRoutesDeps {
   gameService: GameService;
   bggClient?: BggClient;
   predictionService?: PredictionService;
   storageService?: StorageService;
+  wishlistService?: WishlistService;
 }
 
 const RatingsBodySchema = z.object({
@@ -89,7 +92,7 @@ async function applyRedundancy(
 }
 
 export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
-  const { gameService, bggClient, predictionService, storageService } = deps;
+  const { gameService, bggClient, predictionService, storageService, wishlistService } = deps;
   const routes = new Hono();
 
   // GET /games/search?q={query}
@@ -136,6 +139,12 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
 
     try {
       const result = await gameService.addGame(parsed.data);
+
+      // REQ-WISH-10: auto-remove matching wishlist entry (fire-and-forget on error, not on completion)
+      if (parsed.data.bggId && wishlistService) {
+        await wishlistService.removeByBggId(parsed.data.bggId).catch(() => {});
+      }
+
       return c.json(result, 201);
     } catch (err) {
       const message = toErrorMessage(err);
