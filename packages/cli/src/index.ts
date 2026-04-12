@@ -27,6 +27,7 @@ import {
 } from "./commands/tournament.js";
 import { profileCommand, profileNarrateCommand } from "./commands/profile.js";
 import { predictGame, predictBggGame, predictReadiness } from "./commands/predict.js";
+import { nicheIgnored, nicheIgnore, nicheUnignore } from "./commands/niche.js";
 
 // Known command paths and their token depths.
 // Dispatch matches on the first N tokens; everything after is positional.
@@ -51,6 +52,9 @@ const COMMANDS: Record<string, number> = {
   "profile narrate": 2,
   "predict bgg": 2,
   "predict readiness": 2,
+  "niche ignored": 2,
+  "niche ignore": 2,
+  "niche unignore": 2,
   "import bgg-collection": 2,
   "config get": 2,
   "config set": 2,
@@ -303,6 +307,15 @@ async function main(): Promise<void> {
       break;
     case "predict":
       output = await predictGame(client, args, opts);
+      break;
+    case "niche ignored":
+      output = await nicheIgnored(client, args, opts);
+      break;
+    case "niche ignore":
+      output = await nicheIgnore(client, args, opts);
+      break;
+    case "niche unignore":
+      output = await nicheUnignore(client, args, opts);
       break;
     case "import bgg-collection":
       output = await importBggCollection(client, args, opts);

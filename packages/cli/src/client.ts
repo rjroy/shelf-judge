@@ -22,7 +22,7 @@ export interface DaemonClient {
   get<T = unknown>(path: string): Promise<DaemonResponse<T>>;
   post<T = unknown>(path: string, body?: unknown): Promise<DaemonResponse<T>>;
   put<T = unknown>(path: string, body?: unknown): Promise<DaemonResponse<T>>;
-  del<T = unknown>(path: string): Promise<DaemonResponse<T>>;
+  del<T = unknown>(path: string, body?: unknown): Promise<DaemonResponse<T>>;
   postSSE(path: string, body: unknown, onEvent: (event: SSEEvent) => void): Promise<void>;
   getProfile(): Promise<CollectionProfile>;
   generateNarration(): Promise<DaemonResponse<CollectionProfile>>;
@@ -152,7 +152,7 @@ export function createDaemonClient(options: DaemonClientOptions = {}): DaemonCli
     get: <T>(path: string) => request<T>("GET", path),
     post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),
     put: <T>(path: string, body?: unknown) => request<T>("PUT", path, body),
-    del: <T>(path: string) => request<T>("DELETE", path),
+    del: <T>(path: string, body?: unknown) => request<T>("DELETE", path, body),
     postSSE,
     getProfile,
     generateNarration,
