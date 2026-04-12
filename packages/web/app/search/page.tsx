@@ -210,6 +210,23 @@ export default function SearchPage() {
   const [manualYear, setManualYear] = useState("");
   const [previews, setPreviews] = useState<Record<number, PreviewState>>({});
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [wishlistedIds, setWishlistedIds] = useState<Set<number>>(new Set());
+  const [wishlisting, setWishlisting] = useState<number | null>(null);
+
+  // Fetch wishlisted BGG IDs on mount (non-blocking)
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch("/api/daemon/wishlist");
+        if (res.ok) {
+          const entries = (await res.json()) as { bggId: number }[];
+          setWishlistedIds(new Set(entries.map((e) => e.bggId)));
+        }
+      } catch {
+        // Wishlist fetch failure is non-blocking
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -338,6 +355,55 @@ export default function SearchPage() {
     }
   }
 
+  async function handleWishlist(bggId: number) {
+    setWishlisting(bggId);
+    setError(null);
+    // Optimistic update
+    setWishlistedIds((prev) => new Set([...prev, bggId]));
+    try {
+      const res = await fetch("/api/daemon/wishlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bggId }),
+      });
+      if (res.status === 409) {
+        const data = (await res.json()) as { error?: string };
+        setError(data.error ?? "Already wishlisted or in collection");
+        // Revert optimistic update only if it's a "already in collection" error
+        if (data.error?.includes("collection")) {
+          setWishlistedIds((prev) => {
+            const next = new Set(prev);
+            next.delete(bggId);
+            return next;
+          });
+        }
+        return;
+      }
+      if (!res.ok) {
+        // Revert optimistic update
+        setWishlistedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(bggId);
+          return next;
+        });
+        const data = (await res.json().catch(() => ({ error: "Unknown error" }))) as {
+          error?: string;
+        };
+        setError(data.error ?? `Failed: ${res.status}`);
+      }
+    } catch (err) {
+      // Revert optimistic update
+      setWishlistedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(bggId);
+        return next;
+      });
+      setError(err instanceof Error ? err.message : "Failed to wishlist game");
+    } finally {
+      setWishlisting(null);
+    }
+  }
+
   return (
     <>
       <div className="topbar">
@@ -395,6 +461,33 @@ export default function SearchPage() {
                               ? "Hide Preview"
                               : "Preview"}
                         </button>
+                        {wishlistedIds.has(r.bggId) ? (
+                          <button className="btn btn-wishlisted btn-sm" disabled>
+                            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                              <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
+                            </svg>
+                            Wishlisted
+                          </button>
+                        ) : (
+                          <button
+                            className="btn btn-wishlist btn-sm"
+                            onClick={() => {
+                              void handleWishlist(r.bggId);
+                            }}
+                            disabled={wishlisting === r.bggId}
+                          >
+                            {wishlisting === r.bggId ? (
+                              "..."
+                            ) : (
+                              <>
+                                <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                                  <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 1a6 6 0 110 12A6 6 0 018 2zm0 3v2H6v1h2v2h1V8h2V7H9V5H8z" />
+                                </svg>
+                                Wishlist
+                              </>
+                            )}
+                          </button>
+                        )}
                         <button
                           className="btn btn-primary btn-sm"
                           onClick={() => {

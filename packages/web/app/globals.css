@@ -6376,3 +6376,327 @@ body {
   align-self: flex-start;
   margin-top: 4px;
 }
+
+/* ===== Wishlist Button (search page) ===== */
+
+.btn-wishlist {
+  background: transparent;
+  border: 1px solid var(--action-border);
+  color: var(--action);
+}
+.btn-wishlist:hover {
+  background: var(--action-subtle);
+}
+.btn-wishlisted {
+  background: var(--score-high-bg);
+  border: 1px solid color-mix(in hsl, var(--score-high), white 75%);
+  color: var(--score-high);
+  font-weight: 500;
+}
+
+/* ===== Wishlist ===== */
+
+.sort-widget {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  font-size: 13px;
+  cursor: pointer;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-family: inherit;
+}
+.sort-widget:hover {
+  border-color: var(--action);
+  color: var(--text-primary);
+}
+.sort-widget-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+/* Wishlist Page */
+
+.wishlist-content {
+  max-width: 840px;
+  margin: 0 auto;
+  padding: 24px 32px 48px;
+}
+
+.wishlist-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 12px;
+  transition: border-color 0.1s;
+}
+.wishlist-card:hover {
+  border-color: var(--border-strong);
+}
+
+.wc-main {
+  display: flex;
+  align-items: flex-start;
+  padding: 16px;
+  gap: 14px;
+}
+
+.wc-thumb {
+  width: 60px;
+  height: 60px;
+  border-radius: 5px;
+  background: var(--bg-subtle);
+  overflow: hidden;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+}
+.wc-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.wc-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.wc-name {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.wc-year {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.wc-score-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.wc-score {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--predict-accent);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  line-height: 1;
+}
+
+.wc-score-prefix {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--predict-accent);
+  opacity: 0.7;
+}
+
+.wc-no-prediction {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 2px 0;
+}
+
+.wc-added {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.wc-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.wc-expand {
+  border-top: 1px solid var(--border);
+  background: var(--bg-subtle);
+}
+
+.wc-expand-toggle {
+  display: flex;
+  align-items: center;
+  padding: 8px 16px;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-muted);
+  user-select: none;
+  border-bottom: 1px solid var(--border);
+  background: none;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+}
+.wc-expand-toggle:hover {
+  background: var(--border);
+  color: var(--text-secondary);
+}
+
+.wc-expand-caret {
+  font-size: 10px;
+  transition: transform 0.15s;
+}
+.wc-expand-caret.open {
+  transform: rotate(90deg);
+}
+
+.wc-breakdown {
+  padding: 12px 16px;
+}
+
+.wc-breakdown-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.wc-breakdown-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+}
+.wc-breakdown-row:last-child {
+  border-bottom: none;
+}
+
+.wc-axis-name {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.wc-axis-rating {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--predict-accent);
+  font-variant-numeric: tabular-nums;
+  min-width: 28px;
+  text-align: right;
+}
+
+.conf-badge-sm {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  min-width: 60px;
+  text-align: center;
+}
+.conf-badge-sm.strong {
+  background: var(--conf-strong-bg);
+  color: var(--conf-strong);
+}
+.conf-badge-sm.moderate {
+  background: var(--conf-moderate-bg);
+  color: var(--conf-moderate);
+}
+.conf-badge-sm.weak {
+  background: var(--conf-weak-bg);
+  color: var(--conf-weak);
+}
+.conf-badge-sm.insufficient {
+  background: var(--conf-insufficient-bg);
+  color: var(--conf-insufficient);
+}
+
+.wc-niche {
+  padding: 0 16px 12px;
+}
+.wc-niche-inner {
+  padding: 10px 12px;
+  background: var(--niche-bg);
+  border: 1px solid var(--niche-border);
+  border-radius: 5px;
+}
+.wc-niche-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--niche-accent);
+  margin-bottom: 6px;
+}
+.wc-niche-entry {
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 2px 0;
+}
+
+.wc-no-pred-panel {
+  padding: 12px 16px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-style: italic;
+}
+
+.wishlist-empty {
+  text-align: center;
+  padding: 64px 32px;
+  color: var(--text-muted);
+}
+.wishlist-empty-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--text-secondary);
+}
+.wishlist-empty a {
+  color: var(--action);
+}
+
+.wishlist-clear-row {
+  text-align: center;
+  padding: 16px 0 32px;
+}
+.wishlist-clear-btn {
+  background: none;
+  border: none;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: inherit;
+  text-decoration: underline;
+}
+.wishlist-clear-btn:hover {
+  color: var(--danger);
+}
+
+.wishlist-refresh-link {
+  color: var(--action);
+  font-size: 11px;
+  cursor: pointer;
+  background: none;
+  border: none;
+  font-family: inherit;
+  text-decoration: underline;
+  padding: 0;
+}
