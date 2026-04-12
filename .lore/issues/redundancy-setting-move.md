@@ -1,7 +1,7 @@
 ---
 title: "Redundancy Setting Move"
 date: 2026-04-12
-status: approved
+status: resolved
 tags: [ ux, critical ]
 ---
 
