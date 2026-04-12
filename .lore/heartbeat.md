@@ -26,3 +26,9 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
+- 14:23 commission-Sienna-20260412-141555 result: Delivered two HTML mockup files covering all three requested states for the Previously Owned feature.
+
+**Files:**
+- `.lore/mockups/mockup-previously-owned-collection.html` — Collection page with owner...
+
+- 14:23 commission-Sienna-20260412-141555 completed
