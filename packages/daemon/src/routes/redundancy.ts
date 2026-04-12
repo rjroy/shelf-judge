@@ -42,6 +42,13 @@ function validatePatch(patch: Record<string, unknown>): { error: string } | null
     }
   }
 
+  if ("expectedNeighbors" in patch) {
+    const v = patch.expectedNeighbors;
+    if (typeof v !== "number" || !Number.isInteger(v) || v < 1) {
+      return { error: "expectedNeighbors must be an integer >= 1" };
+    }
+  }
+
   if ("componentWeights" in patch) {
     const cw = patch.componentWeights;
     if (typeof cw !== "object" || cw === null || Array.isArray(cw)) {
@@ -106,6 +113,7 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
         updated.similarityThreshold = patch.similarityThreshold as number;
       if ("maxPenalty" in patch) updated.maxPenalty = patch.maxPenalty as number;
       if ("minNeighbors" in patch) updated.minNeighbors = patch.minNeighbors as number;
+      if ("expectedNeighbors" in patch) updated.expectedNeighbors = patch.expectedNeighbors as number;
       if ("componentWeights" in patch) {
         const cw = patch.componentWeights as Record<string, unknown>;
         updated.componentWeights = {

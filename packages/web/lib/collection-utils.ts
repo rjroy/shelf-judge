@@ -18,7 +18,7 @@ export interface SortFieldDef {
 
 const BUILT_IN_SORT_FIELDS: SortFieldDef[] = [
   { id: "fitness", label: "Fitness Score", group: "score", defaultDirection: "desc" },
-  { id: "redundancy", label: "Redundancy-Adjusted", group: "score", defaultDirection: "desc" },
+  { id: "redundancy", label: "Redundancy Penalty", group: "score", defaultDirection: "desc" },
   { id: "tournament", label: "Tournament ELO", group: "score", defaultDirection: "desc" },
   { id: "name", label: "Name", group: "identity", defaultDirection: "asc" },
   { id: "yearPublished", label: "Year Published", group: "identity", defaultDirection: "desc" },
@@ -196,7 +196,7 @@ export function getSortValue(
     case "fitness":
       return score?.score ?? null;
     case "redundancy":
-      return score?.redundancyAdjustment?.adjustedScore ?? score?.score ?? null;
+      return score?.redundancyAdjustment?.penalty ?? null;
     case "tournament":
       return tournamentStats[game.id]?.normalizedScore ?? null;
     case "name":
@@ -272,6 +272,7 @@ export interface ScoreDisplay {
   text: string;
   className: string;
   dotClass?: string;
+  isFitnessValue?: boolean;
 }
 
 export function getScoreDisplay(
@@ -285,17 +286,19 @@ export function getScoreDisplay(
   switch (field) {
     case "fitness":
     case "name": {
-      if (!score) return { text: "not rated", className: "score-unrated" };
+      if (!score || !score.score) return { text: "not rated", className: "score-unrated" };
       return {
         text: score.score.toFixed(1),
         className: "score-value",
         dotClass: scoreRangeClass(score.score),
+        isFitnessValue: true,
       };
     }
     case "redundancy": {
       if (!score) return { text: "not rated", className: "score-unrated" };
       const adj = score.redundancyAdjustment;
-      const val = adj ? adj.adjustedScore : score.score;
+      const val = adj ? adj.penalty : null;
+      if (val == null) return { text: "no penalty", className: "score-unrated" };
       return {
         text: val.toFixed(1),
         className: "score-value",
@@ -417,7 +420,7 @@ export function getScoreSubtitle(field: string, axes: Axis[]): string {
     case "name":
       return "Fitness";
     case "redundancy":
-      return "Adj. Fitness";
+      return "Penalty";
     case "tournament":
       return "Tournament ELO";
     case "yearPublished":

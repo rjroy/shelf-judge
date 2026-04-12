@@ -192,6 +192,7 @@ const enabledAnnotation: RedundancySettings = {
   stage: "annotation",
   similarityThreshold: 0.1, // low threshold to guarantee neighbors
   minNeighbors: 1,
+  expectedNeighbors: 5,
 };
 
 const enabledIntegrated: RedundancySettings = {

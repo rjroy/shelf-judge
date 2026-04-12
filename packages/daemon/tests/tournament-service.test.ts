@@ -68,6 +68,7 @@ function createStubStorage(): StorageService & { tournamentData: TournamentData 
         maxPenalty: 2.0,
         componentWeights: { binary: 0.4, continuous: 0.3, personalAxes: 0.3 },
         minNeighbors: 1,
+        expectedNeighbors: 5,
       });
     },
     saveRedundancySettings() {

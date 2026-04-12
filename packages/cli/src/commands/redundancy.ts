@@ -14,6 +14,7 @@ function formatSettings(settings: RedundancySettings): string {
       ["similarityThreshold", String(settings.similarityThreshold)],
       ["maxPenalty", String(settings.maxPenalty)],
       ["minNeighbors", String(settings.minNeighbors)],
+      ["expectedNeighbors", String(settings.expectedNeighbors)],
       ["componentWeights.binary", String(cw.binary)],
       ["componentWeights.continuous", String(cw.continuous)],
       ["componentWeights.personalAxes", String(cw.personalAxes)],
@@ -101,13 +102,14 @@ export async function redundancyStage(
   return `Redundancy stage set to "${stage}".\n\n` + formatSettings(data);
 }
 
-const NUMERIC_KEYS = new Set(["similarityThreshold", "maxPenalty", "minNeighbors"]);
+const NUMERIC_KEYS = new Set(["similarityThreshold", "maxPenalty", "minNeighbors", "expectedNeighbors"]);
 const VALID_KEYS = new Set([
   "enabled",
   "stage",
   "similarityThreshold",
   "maxPenalty",
   "minNeighbors",
+  "expectedNeighbors",
   "componentWeights",
 ]);
 

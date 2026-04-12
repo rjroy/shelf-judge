@@ -19,6 +19,7 @@ export const DEFAULT_REDUNDANCY_SETTINGS: RedundancySettings = {
   maxPenalty: 2.0,
   componentWeights: { binary: 0.4, continuous: 0.3, personalAxes: 0.3 },
   minNeighbors: 1,
+  expectedNeighbors: 5,
 };
 
 /**
@@ -175,7 +176,7 @@ export function computeRedundancyAdjustments(
       }
     }
 
-    const nicheSize = neighbors.length;
+    const nicheSize = Math.max(neighbors.length, settings.expectedNeighbors);
     const coverageRatio = betterCount / nicheSize;
     const penalty = coverageRatio * settings.maxPenalty;
     const adjustedScore = Math.max(1.0, gameScore - penalty);

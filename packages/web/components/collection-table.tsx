@@ -790,7 +790,7 @@ function GameRow({
             <span className={display.className}>{display.text}</span>
           </>
         )}
-        {score?.redundancyAdjustment && score.redundancyAdjustment.penalty > 0 && (
+        {display?.isFitnessValue && score?.redundancyAdjustment && score.redundancyAdjustment.penalty > 0 && (
           <RedundancyBadge
             penalty={score.redundancyAdjustment.penalty}
             isIntegrated={score.score !== score.redundancyAdjustment.originalScore}

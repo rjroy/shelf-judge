@@ -509,4 +509,5 @@ export interface RedundancySettings {
   maxPenalty: number;
   componentWeights: ComponentWeights;
   minNeighbors: number;
+  expectedNeighbors: number;
 }

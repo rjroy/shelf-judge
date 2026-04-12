@@ -6102,6 +6102,8 @@ body {
 
 .redundancy-neighbors {
   margin-top: 12px;
+  overflow-y: auto;
+  max-height: 200px;
 }
 
 .redundancy-neighbors-title {

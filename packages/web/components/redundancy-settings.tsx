@@ -10,6 +10,7 @@ const DEFAULT_SETTINGS: RedundancySettings = {
   maxPenalty: 2.0,
   componentWeights: { binary: 0.4, continuous: 0.3, personalAxes: 0.3 },
   minNeighbors: 1,
+  expectedNeighbors: 5,
 };
 
 export function RedundancySettingsPanel() {
@@ -217,6 +218,21 @@ export function RedundancySettingsPanel() {
               onChange={(e) => {
                 const val = parseInt(e.target.value, 10);
                 if (!isNaN(val) && val >= 1) update({ minNeighbors: val });
+              }}
+              className="redundancy-number-input"
+            />
+          </div>
+
+          {/* Expected neighbors */}
+          <div className="redundancy-setting-row">
+            <label className="redundancy-setting-label">Expected Neighbors</label>
+            <input
+              type="number"
+              min="1"
+              value={settings.expectedNeighbors}
+              onChange={(e) => {
+                const val = parseInt(e.target.value, 10);
+                if (!isNaN(val) && val >= 1) update({ expectedNeighbors : val });
               }}
               className="redundancy-number-input"
             />
