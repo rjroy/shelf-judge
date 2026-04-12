@@ -60,6 +60,19 @@ function createStubStorage(): StorageService & { tournamentData: TournamentData 
     saveNicheSettings() {
       return Promise.resolve();
     },
+    loadRedundancySettings() {
+      return Promise.resolve({
+        enabled: false,
+        stage: "annotation" as const,
+        similarityThreshold: 0.6,
+        maxPenalty: 2.0,
+        componentWeights: { binary: 0.4, continuous: 0.3, personalAxes: 0.3 },
+        minNeighbors: 1,
+      });
+    },
+    saveRedundancySettings() {
+      return Promise.resolve();
+    },
   };
 
   return stub;
@@ -104,6 +117,7 @@ function makeGameWithScore(
             vetoedBy: null,
             hypotheticalScore: null,
             predictionMeta: null,
+            redundancyAdjustment: null,
           }
         : null,
   };

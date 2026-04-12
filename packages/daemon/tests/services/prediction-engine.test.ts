@@ -404,6 +404,7 @@ describe("computePredictedFitness", () => {
       vetoedBy: null,
       hypotheticalScore: null,
       predictionMeta: null,
+      redundancyAdjustment: null,
     };
   }
 
@@ -617,6 +618,7 @@ describe("computePredictedFitness", () => {
         },
         hypotheticalScore: 5.0,
         predictionMeta: null,
+        redundancyAdjustment: null,
       };
     }
 

@@ -60,6 +60,10 @@ export type {
   NicheImpact,
   NicheTagFilter,
   NicheSettings,
+  ComponentWeights,
+  RedundancyNeighbor,
+  RedundancyAdjustment,
+  RedundancySettings,
 } from "./types";
 
 export {

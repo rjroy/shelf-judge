@@ -101,6 +101,16 @@ function createStubStorage(
     savePredictionSettings: () => Promise.resolve(),
     loadNicheSettings: () => Promise.resolve({ ignoredTags: [] }),
     saveNicheSettings: () => Promise.resolve(),
+    loadRedundancySettings: () =>
+      Promise.resolve({
+        enabled: false,
+        stage: "annotation" as const,
+        similarityThreshold: 0.6,
+        maxPenalty: 2.0,
+        componentWeights: { binary: 0.4, continuous: 0.3, personalAxes: 0.3 },
+        minNeighbors: 1,
+      }),
+    saveRedundancySettings: () => Promise.resolve(),
   };
 }
 

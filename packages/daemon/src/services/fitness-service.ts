@@ -164,6 +164,7 @@ export function createFitnessService(): FitnessService {
           vetoedBy: vetoInfo,
           hypotheticalScore,
           predictionMeta: null,
+          redundancyAdjustment: null,
         };
       }
 
@@ -176,6 +177,7 @@ export function createFitnessService(): FitnessService {
         vetoedBy: null,
         hypotheticalScore: null,
         predictionMeta: null,
+        redundancyAdjustment: null,
       };
     },
   };

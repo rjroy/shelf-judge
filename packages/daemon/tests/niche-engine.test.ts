@@ -77,6 +77,7 @@ function makeScore(
           coveragePercent: 60,
         }
       : null,
+    redundancyAdjustment: null,
   };
 }
 

@@ -51,6 +51,7 @@ function makeScore(
     vetoedBy: null,
     hypotheticalScore: null,
     predictionMeta,
+    redundancyAdjustment: null,
   };
 }
 

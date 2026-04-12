@@ -66,6 +66,7 @@ function makeScore(score: number): FitnessResult {
     vetoedBy: null,
     hypotheticalScore: null,
     predictionMeta: null,
+    redundancyAdjustment: null,
   };
 }
 

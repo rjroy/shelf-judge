@@ -122,6 +122,7 @@ export interface FitnessResult {
   } | null;
   hypotheticalScore: number | null; // score without veto, null when not vetoed
   predictionMeta: PredictionMeta | null; // null for fully-actual results
+  redundancyAdjustment: RedundancyAdjustment | null; // null when redundancy disabled or no neighbors
 }
 
 // Tournament types
@@ -473,4 +474,38 @@ export interface NicheTagFilter {
 
 export interface NicheSettings {
   ignoredTags: NicheTagFilter[];
+}
+
+// Redundancy scoring types (redundancy-scoring spec)
+
+export interface ComponentWeights {
+  binary: number;
+  continuous: number;
+  personalAxes: number;
+}
+
+export interface RedundancyNeighbor {
+  gameId: string;
+  gameName: string;
+  similarity: number;
+  fitnessScore: number;
+  isPredicted: boolean;
+}
+
+export interface RedundancyAdjustment {
+  penalty: number;
+  originalScore: number;
+  adjustedScore: number;
+  nicheNeighbors: RedundancyNeighbor[];
+  nicheRank: number;
+  nicheSize: number;
+}
+
+export interface RedundancySettings {
+  enabled: boolean;
+  stage: "annotation" | "integrated";
+  similarityThreshold: number;
+  maxPenalty: number;
+  componentWeights: ComponentWeights;
+  minNeighbors: number;
 }
