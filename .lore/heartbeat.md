@@ -41,6 +41,9 @@ Four phases:
 - 11:28 commission-Thorne-20260412-111653 result: # Wishlist Backend Review (Phases 1-5)
 
 - 11:28 commission-Thorne-20260412-111653 completed
+- 11:28 commission-Celeste-20260412-112407 result: Brainstorm written to `.lore/brainstorms/previously-owned-state.md`. Six proposals exploring the previously-owned state from different angles:
+
+1. **Ownership Status Field on Game** (Medium) - The ful...
 ## Summary
 
 The implementation is solid and follows established project patterns. Types, storage, service, routes, and client helpers are all correctly wired. T...
