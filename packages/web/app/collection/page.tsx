@@ -12,7 +12,6 @@ import type { TournamentGameStatsDisplay, NicheTagFilter } from "@shelf-judge/sh
 import { RefreshAllButton } from "@/components/refresh-all-button";
 import { NormalizeFitnessButton } from "@/components/normalize-fitness-button";
 import { CollectionTable } from "@/components/collection-table";
-import { RedundancySettingsPanel } from "@/components/redundancy-settings";
 
 export const metadata: Metadata = { title: "Collection" };
 export const dynamic = "force-dynamic";
@@ -116,7 +115,6 @@ export default async function CollectionPage() {
       </div>
 
       <div className="main-scroll">
-        <RedundancySettingsPanel />
         <CollectionTable
           games={games}
           predictedGames={predictedGames ?? null}
