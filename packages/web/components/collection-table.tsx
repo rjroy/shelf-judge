@@ -27,6 +27,7 @@ import {
 interface CollectionTableProps {
   games: GameWithScore[];
   predictedGames: GameWithScore[] | null;
+  nicheGames: GameWithScore[] | null;
   axes: Axis[];
   tournamentStats: Record<string, TournamentGameStatsDisplay>;
   hasTournamentData: boolean;
@@ -39,6 +40,7 @@ interface CollectionTableProps {
 export function CollectionTable({
   games,
   predictedGames,
+  nicheGames,
   axes,
   tournamentStats,
   hasTournamentData,
@@ -55,6 +57,8 @@ export function CollectionTable({
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   const [playerCountInput, setPlayerCountInput] = useState("");
   const [predictionsOn, setPredictionsOn] = useState(false);
+  const [nichesOn, setNichesOn] = useState(false);
+  const [nicheViewMode, setNicheViewMode] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -86,7 +90,19 @@ export function CollectionTable({
   }, [menuOpen]);
 
   // Use predicted games when toggle is on, otherwise use standard games
-  const activeGames = predictionsOn && predictedGames ? predictedGames : games;
+  const baseGames = predictionsOn && predictedGames ? predictedGames : games;
+
+  // When niches toggle is on, merge nichePosition data from nicheGames onto active games
+  const activeGames = useMemo(() => {
+    if (!nichesOn || !nicheGames) return baseGames;
+    const nicheMap = new Map(
+      nicheGames.filter((g) => g.nichePosition).map((g) => [g.game.id, g.nichePosition!]),
+    );
+    return baseGames.map((g) => {
+      const np = nicheMap.get(g.game.id);
+      return np ? { ...g, nichePosition: np } : g;
+    });
+  }, [baseGames, nichesOn, nicheGames]);
 
   const hasBggData = activeGames.some((g) => g.game.bggData !== null);
   const sortFields = useMemo(
@@ -181,6 +197,44 @@ export function CollectionTable({
   const hasAnyFilter = hasSearch || hasRatedFilter || hasPlayedFilter || hasPlayerCount;
   const hiddenCount =
     (predictionsOn && predictedGames ? predictedGames.length : totalGames) - filtered.length;
+
+  // Build niche groups for "Group by Niche" view (REQ-NICHE-24, REQ-NICHE-25)
+  const nicheGroups = useMemo(() => {
+    if (!nicheViewMode || !nichesOn) return [];
+    const groupMap = new Map<string, { type: string; name: string; games: GameWithScore[] }>();
+
+    for (const gws of filtered) {
+      const niches = gws.nichePosition?.niches;
+      if (!niches) continue;
+      for (const niche of niches) {
+        const key = `${niche.type}:${niche.name}`;
+        let group = groupMap.get(key);
+        if (!group) {
+          group = { type: niche.type, name: niche.name, games: [] };
+          groupMap.set(key, group);
+        }
+        group.games.push(gws);
+      }
+    }
+
+    // Discard groups with <2 filtered members
+    return Array.from(groupMap.values())
+      .filter((g) => g.games.length >= 2)
+      .sort((a, b) => b.games.length - a.games.length || a.name.localeCompare(b.name))
+      .map((group) => ({
+        ...group,
+        games: group.games.sort((a, b) => {
+          // Sort by niche rank within this niche
+          const aNiche = a.nichePosition?.niches.find(
+            (n) => n.type === group.type && n.name === group.name,
+          );
+          const bNiche = b.nichePosition?.niches.find(
+            (n) => n.type === group.type && n.name === group.name,
+          );
+          return (aNiche?.rank ?? 999) - (bNiche?.rank ?? 999);
+        }),
+      }));
+  }, [nicheViewMode, nichesOn, filtered]);
 
   // Group fields for the dropdown menu
   const groupedFields = GROUP_ORDER.map((group) => ({
@@ -412,6 +466,34 @@ export function CollectionTable({
           </>
         )}
 
+        {/* Show Niches toggle (REQ-NICHE-22) */}
+        {nicheGames && (
+          <>
+            <div
+              className="predictions-toggle"
+              onClick={() => {
+                setNichesOn((v) => {
+                  if (v) setNicheViewMode(false);
+                  return !v;
+                });
+              }}
+            >
+              <div
+                className={`predictions-toggle-switch${nichesOn ? " active niche-toggle" : ""}`}
+              />
+              <span className="predictions-toggle-label">Niches</span>
+            </div>
+            {nichesOn && (
+              <div className="predictions-toggle" onClick={() => setNicheViewMode((v) => !v)}>
+                <div
+                  className={`predictions-toggle-switch${nicheViewMode ? " active niche-toggle" : ""}`}
+                />
+                <span className="predictions-toggle-label">Group by Niche</span>
+              </div>
+            )}
+          </>
+        )}
+
         {hasAnyFilter && hiddenCount > 0 && (
           <div className="filtered-note">Filtered, {hiddenCount} games hidden</div>
         )}
@@ -457,43 +539,88 @@ export function CollectionTable({
         </div>
       </div>
 
-      {/* Rows with value */}
-      {withValue.map((gws, i) => (
-        <GameRow
-          key={gws.game.id}
-          gws={gws}
-          rank={i + 1}
-          sortField={sort.field}
-          tournamentStats={tournamentStats}
-          axisMap={axisMap}
-          axes={axes}
-          isAxisSort={isAxisSort}
-          showConfidence={predictionsOn}
-        />
-      ))}
+      {nicheViewMode && nichesOn ? (
+        /* Group by Niche view (REQ-NICHE-24, REQ-NICHE-25) */
+        nicheGroups.length > 0 ? (
+          nicheGroups.map((group) => (
+            <div key={`${group.type}:${group.name}`} className="niche-group">
+              <div className="niche-group-header">
+                <span className="niche-group-name">{group.name}</span>
+                <span className={`niche-type-badge niche-type-${group.type}`}>{group.type}</span>
+                <span className="niche-group-count">
+                  {group.games.length} game{group.games.length !== 1 ? "s" : ""}
+                </span>
+              </div>
+              {group.games.map((gws, i) => {
+                const nicheEntry = gws.nichePosition?.niches.find(
+                  (n) => n.type === group.type && n.name === group.name,
+                );
+                return (
+                  <GameRow
+                    key={gws.game.id}
+                    gws={gws}
+                    rank={i + 1}
+                    sortField={sort.field}
+                    tournamentStats={tournamentStats}
+                    axisMap={axisMap}
+                    axes={axes}
+                    isAxisSort={isAxisSort}
+                    showConfidence={predictionsOn}
+                    nicheHighlight={nicheEntry?.isChampion ? "champion" : undefined}
+                    nicheSummary={null}
+                  />
+                );
+              })}
+            </div>
+          ))
+        ) : (
+          <div className="niche-empty">
+            No niches found with 2 or more games in the filtered set.
+          </div>
+        )
+      ) : (
+        <>
+          {/* Rows with value */}
+          {withValue.map((gws, i) => (
+            <GameRow
+              key={gws.game.id}
+              gws={gws}
+              rank={i + 1}
+              sortField={sort.field}
+              tournamentStats={tournamentStats}
+              axisMap={axisMap}
+              axes={axes}
+              isAxisSort={isAxisSort}
+              showConfidence={predictionsOn}
+              nicheSummary={nichesOn ? (gws.nichePosition ?? null) : null}
+            />
+          ))}
 
-      {/* Separator */}
-      {separatorLabel && (
-        <div className="section-sep">
-          <span className="section-sep-label">{separatorLabel}</span>
-          <span className="section-sep-line" />
-        </div>
+          {/* Separator */}
+          {separatorLabel && (
+            <div className="section-sep">
+              <span className="section-sep-label">{separatorLabel}</span>
+              <span className="section-sep-line" />
+            </div>
+          )}
+
+          {/* Rows without value */}
+          {withoutValue.map((gws) => (
+            <GameRow
+              key={gws.game.id}
+              gws={gws}
+              rank={null}
+              sortField={sort.field}
+              tournamentStats={tournamentStats}
+              axisMap={axisMap}
+              axes={axes}
+              isAxisSort={isAxisSort}
+              showConfidence={predictionsOn}
+              nicheSummary={nichesOn ? (gws.nichePosition ?? null) : null}
+            />
+          ))}
+        </>
       )}
-
-      {/* Rows without value */}
-      {withoutValue.map((gws) => (
-        <GameRow
-          key={gws.game.id}
-          gws={gws}
-          rank={null}
-          sortField={sort.field}
-          tournamentStats={tournamentStats}
-          axisMap={axisMap}
-          axes={axes}
-          isAxisSort={isAxisSort}
-          showConfidence={predictionsOn}
-        />
-      ))}
     </>
   );
 }
@@ -511,6 +638,8 @@ interface GameRowProps {
   axes: Axis[];
   isAxisSort: boolean;
   showConfidence: boolean;
+  nicheSummary?: import("@shelf-judge/shared").NichePosition | null;
+  nicheHighlight?: "champion";
 }
 
 function GameRow({
@@ -522,6 +651,8 @@ function GameRow({
   axes,
   isAxisSort,
   showConfidence,
+  nicheSummary,
+  nicheHighlight,
 }: GameRowProps) {
   const { game, score } = gws;
   const display = getScoreDisplay(gws, sortField, tournamentStats, axes);
@@ -537,10 +668,14 @@ function GameRow({
   const visibleAxes = ratedAxisNames.slice(0, 3);
   const extraCount = ratedAxisNames.length - visibleAxes.length;
 
+  const nicheCount = nicheSummary?.niches.length ?? 0;
+  const championCount = nicheSummary?.niches.filter((n) => n.isChampion).length ?? 0;
+
   const rowClass = [
     "game-row",
     isUnrated || isPredictedOnly ? " unrated" : "",
     isPredictedOnly ? " predicted-row" : "",
+    nicheHighlight === "champion" ? " niche-champion-row" : "",
   ].join("");
 
   return (
@@ -570,6 +705,13 @@ function GameRow({
           )}
           {game.bggData && <span className="bgg-badge">BGG</span>}
         </div>
+        {/* Compact niche summary (REQ-NICHE-23) */}
+        {nicheCount > 0 && (
+          <div className="game-niche-summary">
+            {nicheCount} niche{nicheCount !== 1 ? "s" : ""}
+            {championCount > 0 && `, champion of ${championCount}`}
+          </div>
+        )}
       </div>
       <div className="axes-used">
         {isAxisSort ? (

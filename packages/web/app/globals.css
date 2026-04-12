@@ -97,6 +97,15 @@
   --outlier-fitness-bg: var(--score-high-bg);
   --outlier-fitness-border: color-mix(in hsl, var(--score-high), white 78%);
 
+  /* ── Niche (single-accent domain) ───────────────────────── */
+  --niche-accent: #6b4c8a;
+  --niche-bg: color-mix(in hsl, var(--niche-accent), white 93%);
+  --niche-border: color-mix(in hsl, var(--niche-accent), white 78%);
+  --niche-champion: #b86c1a;
+  --niche-mechanic: #2e5f8a;
+  --niche-category: #6b4c8a;
+  --niche-family: #4a6e42;
+
   /* ── Tournament (aliases to BGG palette) ─────────────────── */
   --tourney-accent: var(--bgg-accent);
   --tourney-bg: var(--bgg-bg);
@@ -5675,6 +5684,252 @@ body {
 
 @media (max-width: 600px) {
   .readiness-timeline {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============================================================
+   Niche Champion Display
+   ============================================================ */
+
+/* Niche type badges */
+.niche-type-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 1px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+
+.niche-type-mechanic {
+  color: var(--niche-mechanic);
+  background: color-mix(in hsl, var(--niche-mechanic), white 90%);
+}
+
+.niche-type-category {
+  color: var(--niche-category);
+  background: color-mix(in hsl, var(--niche-category), white 90%);
+}
+
+.niche-type-family {
+  color: var(--niche-family);
+  background: color-mix(in hsl, var(--niche-family), white 90%);
+}
+
+/* Game detail: Niche Position panel */
+.niche-panel {
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  padding: 20px var(--content-padding);
+}
+
+.niche-vetoed-note {
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-style: italic;
+  margin-top: 4px;
+}
+
+.niche-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.niche-card {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.niche-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.niche-card-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.niche-card-rank {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.niche-champion-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--niche-champion);
+  background: color-mix(in hsl, var(--niche-champion), white 88%);
+  padding: 1px 8px;
+  border-radius: 3px;
+  letter-spacing: 0.03em;
+}
+
+.niche-rank-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.niche-size-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.niche-card-champion {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.niche-neighbors {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.niche-neighbor-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+
+.niche-neighbor-dir {
+  color: var(--text-muted);
+  font-weight: 500;
+  min-width: 44px;
+}
+
+.niche-neighbor-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+}
+
+.niche-neighbor-link {
+  color: var(--action);
+  text-decoration: none;
+}
+
+.niche-neighbor-link:hover {
+  text-decoration: underline;
+}
+
+.niche-neighbor-score {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.niche-predicted-indicator {
+  color: var(--predict-accent);
+  font-weight: 600;
+  font-size: 11px;
+}
+
+/* Collection: niche summary in game rows (REQ-NICHE-23) */
+.game-niche-summary {
+  font-size: 11px;
+  color: var(--niche-accent);
+  margin-top: 1px;
+}
+
+/* Collection: niche champion highlight in grouped view */
+.niche-champion-row {
+  border-left: 3px solid var(--niche-champion);
+}
+
+/* Collection: niche toggle active color */
+.niche-toggle {
+  background: var(--niche-accent) !important;
+}
+
+/* Collection: Group by Niche view (REQ-NICHE-24) */
+.niche-group {
+  margin-bottom: 4px;
+}
+
+.niche-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px var(--content-padding);
+  background: var(--niche-bg);
+  border-top: 1px solid var(--niche-border);
+  border-bottom: 1px solid var(--niche-border);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.niche-group-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.niche-group-count {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-left: auto;
+}
+
+.niche-empty {
+  padding: 40px var(--content-padding);
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+/* Search preview: Niche Impact (REQ-NICHE-26, REQ-NICHE-27) */
+.preview-niche-impact {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  margin-top: 10px;
+}
+
+.preview-niche-impact-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+
+.preview-niche-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+
+.preview-niche-text {
+  color: var(--text-primary);
+}
+
+.preview-niche-champion {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+@media (max-width: 800px) {
+  .niche-grid {
     grid-template-columns: 1fr;
   }
 }

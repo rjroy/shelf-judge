@@ -12,6 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function CollectionPage() {
   let games;
   let predictedGames;
+  let nicheGames;
   let axes;
   let tournamentStats: Record<string, TournamentGameStatsDisplay> = {};
   try {
@@ -25,6 +26,11 @@ export default async function CollectionPage() {
       predictedGames = await listGamesWithPredictions();
     } catch {
       // Prediction data may not be available
+    }
+    try {
+      nicheGames = await listGames({ includeNiches: true });
+    } catch {
+      // Niche data may not be available
     }
   } catch {
     return (
@@ -91,6 +97,7 @@ export default async function CollectionPage() {
         <CollectionTable
           games={games}
           predictedGames={predictedGames ?? null}
+          nicheGames={nicheGames ?? null}
           axes={axes}
           tournamentStats={tournamentStats}
           hasTournamentData={hasTournamentData}
