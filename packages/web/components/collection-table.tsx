@@ -100,7 +100,9 @@ export function CollectionTable({
   }, [menuOpen]);
 
   // Use predicted games when toggle is on, otherwise use standard games
-  const baseGames = predictionsOn && predictedGames ? predictedGames : games;
+  const usePredictions = predictionsOn || (predictedCount > 0 && isIntegratedRedundancy);
+  const baseGames = usePredictions && predictedGames ? predictedGames : games;
+
 
   // When niches toggle is on, merge nichePosition data from nicheGames onto active games
   const activeGames = useMemo(() => {
@@ -206,7 +208,7 @@ export function CollectionTable({
     (hasRatedFilter ? 1 : 0) + (hasPlayedFilter ? 1 : 0) + (hasPlayerCount ? 1 : 0);
   const hasAnyFilter = hasSearch || hasRatedFilter || hasPlayedFilter || hasPlayerCount;
   const hiddenCount =
-    (predictionsOn && predictedGames ? predictedGames.length : totalGames) - filtered.length;
+    (usePredictions && predictedGames ? predictedGames.length : totalGames) - filtered.length;
 
   // Build niche groups for "Group by Niche" view (REQ-NICHE-24, REQ-NICHE-25)
   const nicheGroups = useMemo(() => {
@@ -464,10 +466,10 @@ export function CollectionTable({
         {predictedGames && (
           <>
             <div className="predictions-toggle" onClick={() => setPredictionsOn((v) => !v)}>
-              <div className={`predictions-toggle-switch${predictionsOn ? " active" : ""}`} />
+              <div className={`predictions-toggle-switch${usePredictions ? " active" : ""}`} />
               <span className="predictions-toggle-label">Predictions</span>
             </div>
-            {predictionsOn && (
+            {usePredictions && (
               <div className="stat-block">
                 <div className="stat-value predictions-stat">{predictedCount}</div>
                 <div className="stat-label">Predicted</div>
@@ -521,8 +523,8 @@ export function CollectionTable({
           Game
           {sort.field === "name" && <span className="sort-arrow">{dirArrow}</span>}
         </div>
-        {!predictionsOn && <div className="axes-used-col col-label">{isAxisSort ? "Scores" : "Axes Rated"}</div>}
-        {predictionsOn && <div className="col-label">Confidence</div>}
+        {!usePredictions && <div className="axes-used-col col-label">{isAxisSort ? "Scores" : "Axes Rated"}</div>}
+        {usePredictions && <div className="col-label">Confidence</div>}
         <div
           className={`col-label sortable${sort.field === "updatedAt" ? " sort-active" : ""}`}
           onClick={handleLastRatedHeaderClick}
@@ -540,7 +542,7 @@ export function CollectionTable({
             {scoreOwnsSort && <span className="sort-arrow">{dirArrow}</span>}
           </span>
           <span className="score-col-sub">
-            {predictionsOn && sort.field === "fitness" ? (
+            {usePredictions && sort.field === "fitness" ? (
               <span style={{ color: "var(--predict-accent)" }}>Pred. Fitness</span>
             ) : (
               scoreSubtitle
@@ -580,7 +582,7 @@ export function CollectionTable({
                       axisMap={axisMap}
                       axes={axes}
                       isAxisSort={isAxisSort}
-                      showConfidence={predictionsOn}
+                      showConfidence={usePredictions}
                       nicheHighlight={nicheEntry?.isChampion ? "champion" : undefined}
                       nicheSummary={null}
                       isIntegratedRedundancy={isIntegratedRedundancy}
@@ -622,7 +624,7 @@ export function CollectionTable({
               axisMap={axisMap}
               axes={axes}
               isAxisSort={isAxisSort}
-              showConfidence={predictionsOn}
+              showConfidence={usePredictions}
               nicheSummary={nichesOn ? (gws.nichePosition ?? null) : null}
               isIntegratedRedundancy={isIntegratedRedundancy}
             />
@@ -647,7 +649,7 @@ export function CollectionTable({
               axisMap={axisMap}
               axes={axes}
               isAxisSort={isAxisSort}
-              showConfidence={predictionsOn}
+              showConfidence={usePredictions}
               nicheSummary={nichesOn ? (gws.nichePosition ?? null) : null}
               isIntegratedRedundancy={isIntegratedRedundancy}
             />

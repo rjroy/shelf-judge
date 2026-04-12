@@ -74,7 +74,7 @@ export default async function CollectionPage() {
   const predictedCount = predictedGames
     ? predictedGames.filter(
         (g) => g.score?.predictionMeta !== null && g.score?.predictionMeta !== undefined,
-      ).length - rated.length
+      ).length
     : 0;
 
   if (games.length === 0) {

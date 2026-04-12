@@ -18,8 +18,8 @@ export interface SortFieldDef {
 
 const BUILT_IN_SORT_FIELDS: SortFieldDef[] = [
   { id: "fitness", label: "Fitness Score", group: "score", defaultDirection: "desc" },
-  { id: "redundancy", label: "Redundancy Penalty", group: "score", defaultDirection: "desc" },
   { id: "tournament", label: "Tournament ELO", group: "score", defaultDirection: "desc" },
+  { id: "redundancy", label: "Redundancy Penalty", group: "score", defaultDirection: "desc" },
   { id: "name", label: "Name", group: "identity", defaultDirection: "asc" },
   { id: "yearPublished", label: "Year Published", group: "identity", defaultDirection: "desc" },
   { id: "createdAt", label: "Date Added", group: "identity", defaultDirection: "desc" },
@@ -301,14 +301,14 @@ export function getScoreDisplay(
       if (val == null) return { text: "no penalty", className: "score-unrated" };
       return {
         text: val.toFixed(1),
-        className: "score-value",
-        dotClass: scoreRangeClass(val),
+        className: "score-value"
       };
     }
     case "tournament": {
       const stats = tournamentStats[game.id];
       return {
         text: stats?.displayLabel ?? "-",
+        dotClass: stats?.normalizedScore ? scoreRangeClass(stats.normalizedScore) : undefined,
         className: "score-value tournament-score",
       };
     }

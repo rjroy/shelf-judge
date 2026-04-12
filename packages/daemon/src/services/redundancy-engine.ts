@@ -193,17 +193,6 @@ export function computeRedundancyAdjustments(
       isPredicted: isFullyPredicted(n.gws),
     }));
 
-    if (penalty > 0 && settings.stage === "annotation" && gws.game.name == 'Elimino') {
-      // For debugging and transparency, log the redundancy adjustment details
-      console.log(`Redundancy adjustment for "${gws.game.name}":`);
-      console.log(`  Original score: ${gameScore}`);
-      console.log(`  Niche size: ${nicheSize}`);
-      console.log(`  Better neighbors: ${betterCount}`);
-      console.log(`  Coverage ratio: ${coverageRatio.toFixed(2)}`);
-      console.log(`  Penalty: ${penalty.toFixed(2)}`);
-      console.log(`  Adjusted score: ${adjustedScore.toFixed(2)}`);
-    }
-
     result.set(gws.game.id, {
       penalty: Math.round(penalty * 100) / 100,
       originalScore: gameScore,
