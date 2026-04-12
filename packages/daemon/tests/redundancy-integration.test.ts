@@ -8,7 +8,6 @@ import type {
   FitnessResult,
   BggGameData,
   RedundancySettings,
-  RedundancyAdjustment,
   NicheSettings,
   Collection,
   PredictedGameResponse,
@@ -299,21 +298,25 @@ describe("redundancy integration: GET /predictions/bgg/:bggId", () => {
     const app = buildApp(enabledAnnotation);
     const res = await app.request("/api/predictions/bgg/12345");
     expect(res.status).toBe(200);
-    const body = (await res.json()) as PredictedGameResponse & {
-      redundancyPreview: RedundancyAdjustment | null;
-    };
+    const body = (await res.json()) as PredictedGameResponse;
     // The candidate shares mechanics with existing games, so preview should be non-null
     expect(body.redundancyPreview).not.toBeNull();
     expect(body.redundancyPreview!.nicheNeighbors.length).toBeGreaterThanOrEqual(1);
+
+    // REQ-REDUN-23: preview uses pre-redundancy scores for existing games.
+    // Neighbor fitness scores should match the original fixture scores (8.0, 6.0, 4.0).
+    const neighborScores = body.redundancyPreview!.nicheNeighbors.map((n) => n.fitnessScore);
+    const knownScores = [8.0, 6.0, 4.0];
+    for (const ns of neighborScores) {
+      expect(knownScores).toContain(ns);
+    }
   });
 
   test("redundancyPreview is null when disabled", async () => {
     const app = buildApp({ ...DEFAULT_REDUNDANCY_SETTINGS, enabled: false });
     const res = await app.request("/api/predictions/bgg/12345");
     expect(res.status).toBe(200);
-    const body = (await res.json()) as PredictedGameResponse & {
-      redundancyPreview: RedundancyAdjustment | null;
-    };
+    const body = (await res.json()) as PredictedGameResponse;
     expect(body.redundancyPreview).toBeNull();
   });
 });
@@ -332,6 +335,8 @@ describe("redundancy integration: niche positions use pre-redundancy scores", ()
 
     // Niche positions should be the same because they're computed on pre-redundancy scores
     // (niches run before redundancy in both modes)
+    expect(bodyAnnotation.nichePosition).not.toBeNull();
+    expect(bodyIntegrated.nichePosition).not.toBeNull();
     if (bodyAnnotation.nichePosition && bodyIntegrated.nichePosition) {
       expect(bodyAnnotation.nichePosition.niches.length).toBe(
         bodyIntegrated.nichePosition.niches.length,

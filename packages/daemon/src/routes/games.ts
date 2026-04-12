@@ -202,26 +202,24 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
         const allGames = await predictionService.listGamesWithPredictions();
         const nicheMap = computeNichePositions(allGames, nicheSettings);
         result.nichePosition = nicheMap.get(id) ?? null;
+      } else {
+        result.nichePosition = null;
+      }
 
-        // Redundancy: compute on all games, extract this game's adjustment
-        if (storageService) {
-          const redundancySettings = await storageService.loadRedundancySettings();
-          if (redundancySettings.enabled) {
-            await applyRedundancy(allGames, redundancySettings, storageService);
-            const thisGame = allGames.find((g) => g.game.id === id);
-            if (thisGame?.score) {
-              result.score!.redundancyAdjustment = thisGame.score.redundancyAdjustment;
-              if (
-                redundancySettings.stage === "integrated" &&
-                thisGame.score.redundancyAdjustment
-              ) {
-                result.score!.score = thisGame.score.redundancyAdjustment.adjustedScore;
-              }
+      // Redundancy: use non-enriched scores to match GET /games list endpoint
+      if (storageService) {
+        const redundancySettings = await storageService.loadRedundancySettings();
+        if (redundancySettings.enabled) {
+          const allGames = await gameService.listGames();
+          await applyRedundancy(allGames, redundancySettings, storageService);
+          const thisGame = allGames.find((g) => g.game.id === id);
+          if (result.score && thisGame?.score) {
+            result.score.redundancyAdjustment = thisGame.score.redundancyAdjustment;
+            if (redundancySettings.stage === "integrated" && thisGame.score.redundancyAdjustment) {
+              result.score.score = thisGame.score.redundancyAdjustment.adjustedScore;
             }
           }
         }
-      } else {
-        result.nichePosition = null;
       }
 
       return c.json(result);
