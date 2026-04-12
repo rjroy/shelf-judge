@@ -1,7 +1,7 @@
 ---
 title: "Commission: Redundancy scoring: Phase 11 (CLI)"
 date: 2026-04-12
-status: blocked
+status: pending
 tags: [commission]
 worker: Dalton
 workerDisplayTitle: "Guild Artificer"
@@ -19,6 +19,11 @@ activity_timeline:
     reason: "Dependencies not satisfied"
     from: "pending"
     to: "blocked"
+  - timestamp: 2026-04-12T14:20:56.815Z
+    event: status_pending
+    reason: "Dependencies satisfied"
+    from: "blocked"
+    to: "pending"
 current_progress: ""
 projectName: shelf-judge
 ---
