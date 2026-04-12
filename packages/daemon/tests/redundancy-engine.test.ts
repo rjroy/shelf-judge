@@ -73,8 +73,8 @@ const vectors: Record<string, FeatureVector> = {
   f: { binary: [1, 1, 0, 0], continuous: [0.8, 0.6], personalAxes: [0.9, 0.7] },
 };
 
-function getVector(gws: GameWithScore): FeatureVector {
-  return vectors[gws.game.id] ?? { binary: [0, 0, 0, 0], continuous: [0, 0], personalAxes: null };
+function getVector(game: Game): FeatureVector {
+  return vectors[game.id] ?? { binary: [0, 0, 0, 0], continuous: [0, 0], personalAxes: null };
 }
 
 function enabledSettings(overrides: Partial<RedundancySettings> = {}): RedundancySettings {
@@ -101,12 +101,15 @@ describe("flattenWeighted", () => {
     expect(flat).toHaveLength(3); // 2 binary + 1 continuous, no personalAxes
   });
 
-  test("handles null personalAxes with includePersonalAxes=true gracefully", () => {
+  test("null personalAxes with includePersonalAxes=true falls back to binary+continuous weights", () => {
     const vec: FeatureVector = { binary: [1, 0], continuous: [0.5], personalAxes: null };
     const weights = { binary: 0.4, continuous: 0.3, personalAxes: 0.3 };
     const flat = flattenWeighted(vec, weights, true);
-    // personalAxes is null so nothing appended even though flag is true
+    // personalAxes is null so treated as includePersonalAxes=false
     expect(flat).toHaveLength(3);
+    // Weights should be redistributed over binary+continuous only (same as includePersonalAxes=false)
+    const flatExplicitFalse = flattenWeighted(vec, weights, false);
+    expect(flat).toEqual(flatExplicitFalse);
   });
 });
 
@@ -301,6 +304,125 @@ describe("computeRedundancyAdjustments", () => {
         );
       }
     }
+  });
+
+  test("3 games with identical scores and high similarity all get zero penalty", () => {
+    // Spec AI Validation: "3 games with identical fitness scores and high mutual similarity,
+    // verifying all receive zero penalty (no game is 'better')."
+    const games = [
+      makeGws(makeGame("a", "A"), makeScore(8.0)),
+      makeGws(makeGame("b", "B"), makeScore(8.0)),
+      makeGws(makeGame("c", "C"), makeScore(8.0)),
+    ];
+    // A, B, C all have similar vectors (a/b are near-identical, c is somewhat similar)
+    // Use low threshold so all are neighbors
+    const result = computeRedundancyAdjustments(
+      games,
+      enabledSettings({ similarityThreshold: 0.3 }),
+      getVector,
+    );
+    for (const [, adj] of result) {
+      expect(adj.penalty).toBe(0);
+      expect(adj.nicheRank).toBe(1);
+    }
+  });
+
+  test("5 neighbors where 3 score higher: penalty is (3/5) * maxPenalty", () => {
+    // Spec AI Validation: "A game with 5 neighbors where 3 score higher,
+    // verifying penalty is (3/5) * maxPenalty."
+    // Need 6 games total: the subject + 5 neighbors.
+    // All use similar vectors so they're all neighbors at a low threshold.
+    const extraVectors: Record<string, FeatureVector> = {
+      g1: { binary: [1, 1, 0, 0], continuous: [0.8, 0.6], personalAxes: [0.9, 0.7] },
+      g2: { binary: [1, 1, 0, 0], continuous: [0.8, 0.5], personalAxes: [0.85, 0.75] },
+      g3: { binary: [1, 1, 0, 0], continuous: [0.7, 0.6], personalAxes: [0.9, 0.65] },
+      g4: { binary: [1, 1, 0, 0], continuous: [0.75, 0.55], personalAxes: [0.88, 0.72] },
+      g5: { binary: [1, 1, 0, 0], continuous: [0.8, 0.55], personalAxes: [0.87, 0.73] },
+      subject: { binary: [1, 1, 0, 0], continuous: [0.8, 0.6], personalAxes: [0.9, 0.7] },
+    };
+    const localGetVector = (game: Game): FeatureVector => extraVectors[game.id];
+
+    const games = [
+      makeGws(makeGame("g1", "G1"), makeScore(9.0)), // better
+      makeGws(makeGame("g2", "G2"), makeScore(8.5)), // better
+      makeGws(makeGame("g3", "G3"), makeScore(8.0)), // better
+      makeGws(makeGame("g4", "G4"), makeScore(6.0)), // worse
+      makeGws(makeGame("g5", "G5"), makeScore(5.0)), // worse
+      makeGws(makeGame("subject", "Subject"), makeScore(7.0)),
+    ];
+    const settings = enabledSettings({ similarityThreshold: 0.3, maxPenalty: 2.0 });
+    const result = computeRedundancyAdjustments(games, settings, localGetVector);
+    const adj = result.get("subject");
+    expect(adj).toBeDefined();
+    // 3 better out of 5 neighbors = 0.6 coverage, penalty = 0.6 * 2.0 = 1.2
+    expect(adj!.penalty).toBe(1.2);
+    expect(adj!.adjustedScore).toBe(5.8);
+  });
+
+  test("zero-sum componentWeights returns empty map instead of NaN", () => {
+    const games = [
+      makeGws(makeGame("a", "A"), makeScore(8.0)),
+      makeGws(makeGame("b", "B"), makeScore(7.0)),
+    ];
+    const settings = enabledSettings({
+      componentWeights: { binary: 0, continuous: 0, personalAxes: 0 },
+    });
+    const result = computeRedundancyAdjustments(games, settings, getVector);
+    expect(result.size).toBe(0);
+  });
+
+  test("zero-magnitude feature vectors produce zero similarity, not NaN", () => {
+    const zeroVectors: Record<string, FeatureVector> = {
+      z1: { binary: [0, 0, 0, 0], continuous: [0, 0], personalAxes: null },
+      z2: { binary: [0, 0, 0, 0], continuous: [0, 0], personalAxes: null },
+    };
+    const localGetVector = (game: Game): FeatureVector => zeroVectors[game.id];
+    const games = [
+      makeGws(makeGame("z1", "Z1"), makeScore(8.0)),
+      makeGws(makeGame("z2", "Z2"), makeScore(7.0)),
+    ];
+    // Threshold 0 so zero similarity would still need to meet >= 0 to be a neighbor
+    const result = computeRedundancyAdjustments(
+      games,
+      enabledSettings({ similarityThreshold: 0 }),
+      localGetVector,
+    );
+    // Zero-magnitude vectors produce similarity=0, which meets threshold=0
+    // No NaN should appear anywhere
+    for (const [, adj] of result) {
+      expect(isNaN(adj.penalty)).toBe(false);
+      expect(isNaN(adj.adjustedScore)).toBe(false);
+      for (const n of adj.nicheNeighbors) {
+        expect(isNaN(n.similarity)).toBe(false);
+      }
+    }
+  });
+
+  test("nicheRank respects predicted authority (matches penalty semantics)", () => {
+    // A is actual score=7.0, B is predicted score=9.0, C is actual score=8.0
+    // For A: B is predicted (doesn't count), C is actual and better
+    // betterCount=1, nicheRank should be 2 (not 3)
+    const games = [
+      makeGws(makeGame("a", "A"), makeScore(7.0)),
+      makeGws(makeGame("b", "B"), makeScore(9.0, { predictedOnly: true })),
+      makeGws(makeGame("c", "C"), makeScore(8.0)),
+    ];
+    // Need all to be neighbors; use c's vector similar to a/b
+    const localVectors: Record<string, FeatureVector> = {
+      a: { binary: [1, 1, 0, 0], continuous: [0.8, 0.6], personalAxes: [0.9, 0.7] },
+      b: { binary: [1, 1, 0, 0], continuous: [0.8, 0.6], personalAxes: [0.85, 0.75] },
+      c: { binary: [1, 1, 0, 0], continuous: [0.8, 0.5], personalAxes: [0.88, 0.72] },
+    };
+    const localGetVector = (game: Game): FeatureVector => localVectors[game.id];
+    const result = computeRedundancyAdjustments(
+      games,
+      enabledSettings({ similarityThreshold: 0.3 }),
+      localGetVector,
+    );
+    const adjA = result.get("a");
+    expect(adjA).toBeDefined();
+    // Only C counts as better (B is predicted), so nicheRank=2
+    expect(adjA!.nicheRank).toBe(2);
   });
 
   test("deterministic output (same input, same result)", () => {

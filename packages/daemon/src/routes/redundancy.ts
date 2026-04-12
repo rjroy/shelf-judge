@@ -56,14 +56,7 @@ function validatePatch(patch: Record<string, unknown>): { error: string } | null
         }
       }
     }
-    // Validate sum > 0: merge with current to check, but we can validate the provided values
-    const b = typeof obj.binary === "number" ? obj.binary : undefined;
-    const c = typeof obj.continuous === "number" ? obj.continuous : undefined;
-    const p = typeof obj.personalAxes === "number" ? obj.personalAxes : undefined;
-    // If all three are provided, check sum > 0
-    if (b !== undefined && c !== undefined && p !== undefined && b + c + p === 0) {
-      return { error: "componentWeights sum must be greater than 0" };
-    }
+    // Sum > 0 is enforced post-merge at line 131, which correctly handles partial patches.
   }
 
   return null;

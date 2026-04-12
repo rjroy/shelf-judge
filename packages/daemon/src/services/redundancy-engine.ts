@@ -3,6 +3,7 @@
 // Follows the niche-engine.ts and prediction-engine.ts pattern.
 
 import type {
+  Game,
   GameWithScore,
   RedundancyAdjustment,
   RedundancyNeighbor,
@@ -34,7 +35,11 @@ export function flattenWeighted(
   let cw: number;
   let pw: number;
 
-  if (includePersonalAxes) {
+  // If personalAxes is null, force includePersonalAxes=false to avoid
+  // including personalAxes weight in the denominator without any dimensions
+  const includePA = includePersonalAxes && vec.personalAxes !== null;
+
+  if (includePA) {
     const total = weights.binary + weights.continuous + weights.personalAxes;
     bw = Math.sqrt(weights.binary / total);
     cw = Math.sqrt(weights.continuous / total);
@@ -49,7 +54,7 @@ export function flattenWeighted(
   const flat: number[] = [];
   for (const v of vec.binary) flat.push(v * bw);
   for (const v of vec.continuous) flat.push(v * cw);
-  if (includePersonalAxes && vec.personalAxes) {
+  if (includePA && vec.personalAxes) {
     for (const v of vec.personalAxes) flat.push(v * pw);
   }
   return flat;
@@ -85,11 +90,16 @@ function isFullyPredicted(gws: GameWithScore): boolean {
 export function computeRedundancyAdjustments(
   gamesWithScores: GameWithScore[],
   settings: RedundancySettings,
-  getFeatureVector: (game: GameWithScore) => FeatureVector,
+  getFeatureVector: (game: Game) => FeatureVector,
 ): Map<string, RedundancyAdjustment> {
   const result = new Map<string, RedundancyAdjustment>();
 
   if (!settings.enabled) return result;
+
+  // Guard against zero-sum weights producing NaN (route validation prevents this,
+  // but the engine must be safe when called directly)
+  const { binary, continuous, personalAxes } = settings.componentWeights;
+  if (binary + continuous + personalAxes === 0) return result;
 
   // Filter to eligible games: non-vetoed, non-null score, score > 0
   const eligible = gamesWithScores.filter(
@@ -101,7 +111,7 @@ export function computeRedundancyAdjustments(
   // Cache feature vectors
   const vectors = new Map<string, FeatureVector>();
   for (const gws of eligible) {
-    vectors.set(gws.game.id, getFeatureVector(gws));
+    vectors.set(gws.game.id, getFeatureVector(gws.game));
   }
 
   // Cache pairwise similarities (symmetric)
@@ -123,7 +133,9 @@ export function computeRedundancyAdjustments(
     const flatA = flattenWeighted(vecA, settings.componentWeights, includePA);
     const flatB = flattenWeighted(vecB, settings.componentWeights, includePA);
 
-    const sim = cosineSimilarity(flatA, flatB);
+    const raw = cosineSimilarity(flatA, flatB);
+    // Zero-magnitude vectors produce NaN; treat as zero similarity
+    const sim = isNaN(raw) ? 0 : raw;
     similarities.set(key, sim);
     return sim;
   }
@@ -168,15 +180,9 @@ export function computeRedundancyAdjustments(
     const penalty = coverageRatio * settings.maxPenalty;
     const adjustedScore = Math.max(1.0, gameScore - penalty);
 
-    // Rank among niche: count games with strictly better score + 1
-    // (same as betterCount + 1, but without the predicted authority filter)
-    let rankBetter = 0;
-    for (const n of neighbors) {
-      if (n.gws.score!.score > gameScore && !scoresAreTied(gameScore, n.gws.score!.score)) {
-        rankBetter++;
-      }
-    }
-    const nicheRank = rankBetter + 1;
+    // Rank among niche: betterCount + 1. Uses the same predicted authority filter
+    // as penalty computation so rank and penalty agree.
+    const nicheRank = betterCount + 1;
 
     const nicheNeighbors: RedundancyNeighbor[] = neighbors.map((n) => ({
       gameId: n.gws.game.id,
@@ -189,7 +195,7 @@ export function computeRedundancyAdjustments(
     result.set(gws.game.id, {
       penalty: Math.round(penalty * 100) / 100,
       originalScore: gameScore,
-      adjustedScore: Math.round(adjustedScore * 10) / 10,
+      adjustedScore: Math.round(adjustedScore * 100) / 100,
       nicheNeighbors,
       nicheRank,
       nicheSize,
