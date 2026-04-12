@@ -126,7 +126,16 @@ function WishlistCard({
         </div>
 
         <div className="wc-info">
-          <div className="wc-name">{entry.name}</div>
+          <div className="wc-name">
+            <a
+              href={`https://boardgamegeek.com/boardgame/${entry.bggId}`}
+              className="game-link"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {entry.name}
+            </a>
+          </div>
           {entry.yearPublished && <div className="wc-year">{entry.yearPublished}</div>}
           <div className="wc-score-row">
             {hasPrediction ? (
