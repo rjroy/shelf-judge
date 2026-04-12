@@ -1,6 +1,6 @@
 ---
 title: Redundancy Settings Page
-status: draft
+status: approved
 issue: .lore/issues/redundancy-setting-move.md
 date: 2026-04-12
 tags: [ux, settings, redundancy]
