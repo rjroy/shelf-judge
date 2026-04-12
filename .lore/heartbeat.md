@@ -59,6 +59,10 @@ Commands implemented:
 - 11:49 commission-Thorne-20260412-111733 result: # Wishlist Feature Review
 
 - 11:49 commission-Thorne-20260412-111733 completed
+- 11:53 commission-Dalton-20260412-111740 result: All six findings from Thorne's review addressed:
+
+**Defect #1 (Refresh button stuck):** Changed `onRefresh` prop type to `Promise<void>` and added `.finally(() => setRefreshing(false))` to both refres...
+- 11:53 commission-Dalton-20260412-111740 completed
 ## Verdict
 
 The implementation satisfies all 29 spec requirements (REQ-WISH-1 through REQ-WISH-29). The backend is clean, well-tested, and correctly structured. Two UI state...
