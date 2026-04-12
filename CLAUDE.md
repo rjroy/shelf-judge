@@ -51,3 +51,7 @@ Design docs, specs, plans, and research live in `.lore/`. Check there before ask
 ## Critical Lessons
 
 - When a daemon route's response shape changes, grep every client helper (web and CLI) in the same change, not just the one that prompted the edit.
+- Distance and aggregation functions should throw on dimension mismatch, not quietly iterate off the end of the shorter array. `for (let i = 0; i < a.length; i++) b[i]` is a silent failure waiting to happen the moment vector shapes aren't enforced by a wrapping type.
+- When a refactor replaces "build a complete keyset" with "return only populated entries", check every downstream consumer that assumed fixed shape. Dimensional invariants that used to hold by construction need to be reasserted.
+- Daemon caches that survive schema-shape bugs extend the blast radius. Version the cache or validate on load so corrupted stored state doesn't keep leaking into clients after the code is fixed. Shelf Judge caches profile/tournament/collection under `~/.shelf-judge/data/`; any shape change needs a load-time guard or a cache reset.
+- When stored data contradicts the declared type, trust the data over the type and find the serialization hole. A lopsided split (e.g. 4 valid vs 172 null) is decisive evidence about which code path is broken.

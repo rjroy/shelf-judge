@@ -181,11 +181,8 @@ describe("encodeGame", () => {
 
   test("uses midpoint for unrated axes", () => {
     const game = makeGame();
-    // Axis key present but value is undefined/null, treated as unrated
-    const axisRatings: Record<string, number> = {};
-
     const vocab = { mechanics: [], categories: [] };
-    // Pass a record with one key that has no value in axisRatings
+    // Pass a record with one key whose value is undefined (unrated)
     const vec = encodeGame(game, vocab, { "axis-a": undefined as unknown as number });
 
     expect(vec.personalAxes![0]).toBe(0.5);
@@ -196,6 +193,61 @@ describe("encodeGame", () => {
     const vocab = { mechanics: [], categories: [] };
     const vec = encodeGame(game, vocab);
     expect(vec.personalAxes).toBeNull();
+  });
+
+  test("produces fixed-dimension personalAxes vector when axes list provided", () => {
+    // Regression: previously encodeGame iterated over axisRatings keys, so games
+    // with different resolved axis sets produced different-length vectors.
+    // Pairwise distances then read past the end of the shorter vector and
+    // returned NaN, which serialized to `null` in stored profiles.
+    const game = makeGame();
+    const vocab = { mechanics: [], categories: [] };
+    const axes = [
+      {
+        id: "a",
+        name: "A",
+        description: null,
+        weight: 50,
+        source: "personal" as const,
+        bggField: null,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+      {
+        id: "b",
+        name: "B",
+        description: null,
+        weight: 50,
+        source: "personal" as const,
+        bggField: null,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+      {
+        id: "c",
+        name: "C",
+        description: null,
+        weight: 50,
+        source: "personal" as const,
+        bggField: null,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    ];
+
+    // One game has only axis `a`, another has `b` and `c`. Both vectors must
+    // have length 3 so centroid/pairwise math is well-defined.
+    const vecA = encodeGame(game, vocab, { a: 8 }, undefined, axes);
+    const vecBC = encodeGame(game, vocab, { b: 3, c: 9 }, undefined, axes);
+
+    expect(vecA.personalAxes!.length).toBe(3);
+    expect(vecBC.personalAxes!.length).toBe(3);
+    // Slot 0 is axis `a`: vecA has a rating, vecBC falls back to 0.5
+    expect(vecA.personalAxes![0]).toBeCloseTo(7 / 9, 5);
+    expect(vecBC.personalAxes![0]).toBe(0.5);
+    // Slot 1 is axis `b`: vecA falls back to 0.5, vecBC has rating 3
+    expect(vecA.personalAxes![1]).toBe(0.5);
+    expect(vecBC.personalAxes![1]).toBeCloseTo(2 / 9, 5);
   });
 
   test("uses observed ranges when provided", () => {
@@ -351,6 +403,17 @@ describe("compositeDistance", () => {
 
     // binary: Jaccard 1, continuous: Manhattan 1, personal: Manhattan 1
     expect(result.composite).toBeCloseTo(0.5 * 1 + 0.25 * 1 + 0.25 * 1, 10);
+  });
+
+  test("rejects mismatched personalAxes dimensions", () => {
+    // Regression: silently iterating off the end of the shorter vector produced
+    // NaN distances that serialized to `null` in stored profiles. Dimension
+    // mismatches must now surface as thrown errors so the caller knows to
+    // build fixed-shape vectors before comparing.
+    const a: FeatureVector = { binary: [1, 0], continuous: [0.5], personalAxes: [0.5, 0.5] };
+    const b: FeatureVector = { binary: [0, 1], continuous: [0.7], personalAxes: [0.5] };
+
+    expect(() => compositeDistance(a, b)).toThrow(/dimension mismatch/);
   });
 });
 
