@@ -88,15 +88,20 @@ activity_timeline:
 current_progress: "Phase 4 complete. All source files updated (CLI client, commands, index; web api, narration-section, narration-actions, page.tsx). Tests written for CLI profile narrate command (success, 503 fallback, error). Typecheck clean, lint clean, 883 tests pass / 0 fail. Starting Phase 5: requirement traceability verification."
 projectName: shelf-judge
 ---
+
+> **Post-completion correction (2026-04-11):** The Phase 2 instructions in this commission directed the implementer to add `isAvailable()` checks on `ANTHROPIC_API_KEY`, and the implementation faithfully did so. That direction was wrong at the plan level: the Claude Agent SDK resolves credentials from subscription login, Bedrock, Vertex, and the env var, not just `ANTHROPIC_API_KEY`. The gate has been removed and `narration-service.test.ts` has been deleted (its three tests were all coverage of the removed method). The matching 503 branches in the web component and CLI command have also been stripped. See `.lore/retros/narration-isavailable-gate-removal.md`.
+
 LLM Narrative feature implemented across all four phases. Typecheck clean, lint clean, 883 tests pass / 0 fail.
 
 **Phase 1 (Shared Types + Cache Logic):**
+
 - Added `ProfileNarration` and `NarrationCacheState` types to shared package
 - Extended `CollectionProfile` with `narration` and `narrationState` fields
 - Extended `ProfileData` with `narration` and `narrationComputedAt` for persistence
 - Exported `deriveNarrationState()` with 6 unit tests covering all state transitions
 
 **Phase 2 (Agent SDK Integration):**
+
 - Created `narration-service.ts` with `createNarrationService({ gameService })` factory
 - Dynamic import of `@anthropic-ai/claude-agent-sdk` to avoid loading at daemon startup
 - Two MCP tools: `get_collection_games` (with mechanic/category filters) and `get_profile_detail` (6 profile sections)
@@ -105,12 +110,14 @@ LLM Narrative feature implemented across all four phases. Typecheck clean, lint 
 - 3 unit tests for `isAvailable()` (key set, not set, empty)
 
 **Phase 3 (Daemon Route + Profile Service):**
+
 - POST `/api/profile/narrate` route: 503 when unavailable, 200 on success, 502 on SDK error
 - Profile service extended with `generateNarration()` method
 - Profile recomputation preserves existing narration, derives cache state correctly
 - 5 route tests covering all HTTP paths plus persistence and REQ-PROFILE-27
 
 **Phase 4 (CLI + Web Clients):**
+
 - CLI: `generateNarration()` on DaemonClient, `profileNarrateCommand` with 503 fallback, registered as `profile narrate` subcommand
 - Web: `NarrationSection` server component with empty/fresh/stale states, `NarrationActions` client component with generate/regenerate button
 - 3 CLI tests (success, 503 fallback, error throw)

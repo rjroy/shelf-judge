@@ -11,7 +11,10 @@ related:
   - .lore/plans/collection-profiling.md
   - .lore/designs/mvp-data-model.md
   - .lore/vision.md
+  - .lore/retros/narration-isavailable-gate-removal.md
 ---
+
+> **Post-execution correction (2026-04-11):** This plan prescribed an `isAvailable()` method on the narration service that gated on `ANTHROPIC_API_KEY` presence, with the daemon returning 503 when absent. That was wrong. The Claude Agent SDK resolves credentials from several sources (subscription login in `~/.claude/`, `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, and the env var), so the env-var check produced false negatives for any user authenticated through subscription or cloud provider. The gate has been removed entirely; the SDK's own auth error now surfaces through the existing 502 path. See `.lore/retros/narration-isavailable-gate-removal.md` for the full analysis. Phase 2's interface block below still reads as originally written for historical fidelity.
 
 # Plan: LLM Narrative for Collection Profile
 

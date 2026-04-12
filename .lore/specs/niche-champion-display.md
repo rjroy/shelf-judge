@@ -1,7 +1,7 @@
 ---
 title: "Niche Champion Display"
 date: 2026-04-11
-status: approved
+status: implemented 
 tags: [spec, redundancy, niche, collection-awareness, display]
 modules: [daemon, shared, web, cli]
 req-prefix: NICHE
