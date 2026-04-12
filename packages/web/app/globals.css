@@ -105,6 +105,7 @@
   --niche-mechanic: #2e5f8a;
   --niche-category: #6b4c8a;
   --niche-family: #4a6e42;
+  --niche-badge-bg: color-mix(in hsl, var(--niche-accent), white 90%);
 
   /* ── Tournament (aliases to BGG palette) ─────────────────── */
   --tourney-accent: var(--bgg-accent);
@@ -200,6 +201,16 @@
   --predict-accent: #2aaa98;
   --predict-bg: color-mix(in hsl, var(--predict-accent), var(--bg-base) 85%);
   --predict-border: color-mix(in hsl, var(--predict-accent), var(--bg-base) 70%);
+
+  /* ── Niche (single-accent domain) ───────────────────────── */
+  --niche-accent: #8a6aaa;
+  --niche-bg: color-mix(in hsl, var(--niche-accent), var(--bg-base) 85%);
+  --niche-border: color-mix(in hsl, var(--niche-accent), var(--bg-base) 70%);
+  --niche-champion: #d4882e;
+  --niche-mechanic: #5a9acc;
+  --niche-category: #8a6aaa;
+  --niche-family: #6a9a62;
+  --niche-badge-bg: color-mix(in hsl, var(--niche-accent), var(--bg-base) 80%);
 
   /* ── Confidence levels (tiered-scale domain) ─────────────── */
   --conf-moderate: #c09828;
@@ -5705,17 +5716,17 @@ body {
 
 .niche-type-mechanic {
   color: var(--niche-mechanic);
-  background: color-mix(in hsl, var(--niche-mechanic), white 90%);
+  background: color-mix(in hsl, var(--niche-mechanic), var(--bg-base) 90%);
 }
 
 .niche-type-category {
   color: var(--niche-category);
-  background: color-mix(in hsl, var(--niche-category), white 90%);
+  background: color-mix(in hsl, var(--niche-category), var(--bg-base) 90%);
 }
 
 .niche-type-family {
   color: var(--niche-family);
-  background: color-mix(in hsl, var(--niche-family), white 90%);
+  background: color-mix(in hsl, var(--niche-family), var(--bg-base) 90%);
 }
 
 /* Game detail: Niche Position panel */
@@ -5737,6 +5748,8 @@ body {
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 12px;
   margin-top: 12px;
+  overflow-y: auto;
+  max-height: 400px;
 }
 
 .niche-card {
@@ -5771,7 +5784,7 @@ body {
   font-size: 11px;
   font-weight: 700;
   color: var(--niche-champion);
-  background: color-mix(in hsl, var(--niche-champion), white 88%);
+  background: color-mix(in hsl, var(--niche-champion), var(--bg-base) 88%);
   padding: 1px 8px;
   border-radius: 3px;
   letter-spacing: 0.03em;
