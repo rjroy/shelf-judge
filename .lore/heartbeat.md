@@ -31,3 +31,7 @@ Workers can also add entries to this file during their sessions.
 **Phase 1 (Types)**: Added `ComponentWeights`, `RedundancyNeighbor`, `RedundancyAdjustment`, `RedundancySettings` to `packages/shared/src/ty...
 
 - 06:55 commission-Dalton-20260412-064124 completed
+- 06:55 commission-Sienna-20260412-064945 result: Created two HTML mockups for the Wishlist feature:
+
+**`.lore/mockups/mockup-search-wishlist.html`** — Search page with wishlist integration
+- Shows the updated Library nav group: Collection → Wishlist...
