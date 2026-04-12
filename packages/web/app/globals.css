@@ -4316,20 +4316,6 @@ body {
   gap: 16px;
 }
 
-.narration-icon {
-  width: 30px;
-  height: 30px;
-  margin: 6px;
-  border-radius: 50%;
-  background: var(--override-bg);
-  border: 1px solid var(--override-border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-  flex-shrink: 0;
-}
-
 .narration-text {
   flex: 1;
 }
@@ -4338,6 +4324,21 @@ body {
   overflow-y: auto;
   max-height: 300px;
   padding: 0 5px;
+}
+
+.narration-summary {
+  text-align: justify;
+  text-justify: inter-word;
+  text-indent: 1.5em;
+}
+
+.narration-block {
+  text-align: justify;
+  text-justify: inter-word;
+}
+
+.narration-block li {
+  margin-bottom: 6px;
 }
 
 .narration-label {
@@ -5431,6 +5432,7 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
+  margin: 0 4px;
   cursor: pointer;
   font-size: var(--text-sm);
   color: var(--text-secondary);

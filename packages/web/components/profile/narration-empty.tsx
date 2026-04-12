@@ -1,7 +1,6 @@
 export function NarrationEmpty() {
   return (
     <div className="narration-empty">
-      <div className="narration-icon">&#10022;</div>
       <div className="narration-text">
         <div className="narration-label">Collection Narrative</div>
         <div className="narration-desc">

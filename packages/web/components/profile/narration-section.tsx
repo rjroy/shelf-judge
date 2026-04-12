@@ -11,7 +11,6 @@ export function NarrationSection({ profile }: NarrationSectionProps) {
   if (narrationState === "empty" || !narration) {
     return (
       <div className="narration-empty">
-        <div className="narration-icon">&#10022;</div>
         <div className="narration-text">
           <div className="narration-label">Collection Narrative</div>
           <div className="narration-desc">
@@ -27,7 +26,6 @@ export function NarrationSection({ profile }: NarrationSectionProps) {
   return (
     <div className="narration-section">
       <div className="narration-header">
-        <div className="narration-icon">&#10022;</div>
         <div className="narration-label">Collection Narrative</div>
         {narrationState === "stale" && (
           <span className="narration-stale-badge">Based on an older profile</span>
