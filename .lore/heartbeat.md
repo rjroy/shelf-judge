@@ -26,3 +26,8 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
+- 06:54 commission-Dalton-20260412-064124 result: Phases 1-4 of redundancy scoring implemented and verified.
+
+**Phase 1 (Types)**: Added `ComponentWeights`, `RedundancyNeighbor`, `RedundancyAdjustment`, `RedundancySettings` to `packages/shared/src/ty...
+
+- 06:55 commission-Dalton-20260412-064124 completed
