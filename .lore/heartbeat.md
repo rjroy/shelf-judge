@@ -44,6 +44,7 @@ Four phases:
 - 11:28 commission-Celeste-20260412-112407 result: Brainstorm written to `.lore/brainstorms/previously-owned-state.md`. Six proposals exploring the previously-owned state from different angles:
 
 1. **Ownership Status Field on Game** (Medium) - The ful...
+- 11:28 commission-Celeste-20260412-112407 completed
 ## Summary
 
 The implementation is solid and follows established project patterns. Types, storage, service, routes, and client helpers are all correctly wired. T...
