@@ -1,10 +1,18 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { listGames, listAxes, getAllTournamentStats, listGamesWithPredictions } from "@/lib/api";
-import type { TournamentGameStatsDisplay } from "@shelf-judge/shared";
+import {
+  listGames,
+  listAxes,
+  getAllTournamentStats,
+  listGamesWithPredictions,
+  getNicheSettings,
+  getRedundancySettings,
+} from "@/lib/api";
+import type { TournamentGameStatsDisplay, NicheTagFilter } from "@shelf-judge/shared";
 import { RefreshAllButton } from "@/components/refresh-all-button";
 import { NormalizeFitnessButton } from "@/components/normalize-fitness-button";
 import { CollectionTable } from "@/components/collection-table";
+import { RedundancySettingsPanel } from "@/components/redundancy-settings";
 
 export const metadata: Metadata = { title: "Collection" };
 export const dynamic = "force-dynamic";
@@ -14,7 +22,9 @@ export default async function CollectionPage() {
   let predictedGames;
   let nicheGames;
   let axes;
+  let isIntegrated = false;
   let tournamentStats: Record<string, TournamentGameStatsDisplay> = {};
+  let ignoredTags: NicheTagFilter[] = [];
   try {
     [games, axes] = await Promise.all([listGames(), listAxes()]);
     try {
@@ -31,6 +41,18 @@ export default async function CollectionPage() {
       nicheGames = await listGames({ includeNiches: true });
     } catch {
       // Niche data may not be available
+    }
+    try {
+      const nicheSettings = await getNicheSettings();
+      ignoredTags = nicheSettings.ignoredTags;
+    } catch {
+      // Niche settings may not be available
+    }
+    try {
+      const redundancySettings = await getRedundancySettings();
+      isIntegrated = redundancySettings.enabled && redundancySettings.stage === "integrated";
+    } catch {
+      // Redundancy settings may not be available
     }
   } catch {
     return (
@@ -52,7 +74,7 @@ export default async function CollectionPage() {
   const predictedCount = predictedGames
     ? predictedGames.filter(
         (g) => g.score?.predictionMeta !== null && g.score?.predictionMeta !== undefined,
-      ).length - rated.length
+      ).length
     : 0;
 
   if (games.length === 0) {
@@ -94,6 +116,7 @@ export default async function CollectionPage() {
       </div>
 
       <div className="main-scroll">
+        <RedundancySettingsPanel />
         <CollectionTable
           games={games}
           predictedGames={predictedGames ?? null}
@@ -105,6 +128,8 @@ export default async function CollectionPage() {
           ratedCount={rated.length}
           avgFitness={avgFitness}
           predictedCount={predictedCount > 0 ? predictedCount : 0}
+          ignoredTags={ignoredTags}
+          isIntegratedRedundancy={isIntegrated}
         />
       </div>
     </>

@@ -2,7 +2,7 @@
 // Implements REQ-PROFILE-11 (composite distance), REQ-PRED-4 (shared module).
 // Follows the elo-engine.ts and curve-engine.ts pattern.
 
-import type { Axis, ComponentDistances, Game } from "@shelf-judge/shared";
+import type { Axis, ComponentDistances, ComponentWeights, Game } from "@shelf-judge/shared";
 import { getNativeScale } from "@shelf-judge/shared";
 
 export interface Vocabulary {
@@ -22,13 +22,7 @@ export interface FeatureVector {
   personalAxes: number[] | null; // axis ratings normalized 0-1, null when no ratings
 }
 
-export interface ComponentWeights {
-  binary: number;
-  continuous: number;
-  personalAxes: number;
-}
-
-export type { ComponentDistances };
+export type { ComponentDistances, ComponentWeights };
 
 export const DEFAULT_WEIGHTS: ComponentWeights = {
   binary: 0.4,

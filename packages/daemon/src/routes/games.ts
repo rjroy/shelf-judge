@@ -1,16 +1,26 @@
 import { Hono, type Context } from "hono";
 import { AddGameSchema, toErrorMessage } from "@shelf-judge/shared";
+import type { Game, GameWithScore, RedundancySettings } from "@shelf-judge/shared";
 import { z } from "zod";
 import type { GameService } from "../services/game-service.js";
 import type { BggClient } from "../services/bgg-client.js";
 import type { PredictionService } from "../services/prediction-service.js";
+import type { StorageService } from "../services/storage-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
 import { computeNichePositions } from "../services/niche-engine.js";
+import { computeRedundancyAdjustments } from "../services/redundancy-engine.js";
+import {
+  buildVocabulary,
+  computeContinuousRanges,
+  encodeGame,
+} from "../services/feature-vector.js";
+import type { FeatureVector } from "../services/feature-vector.js";
 
 export interface GameRoutesDeps {
   gameService: GameService;
   bggClient?: BggClient;
   predictionService?: PredictionService;
+  storageService?: StorageService;
 }
 
 const RatingsBodySchema = z.object({
@@ -31,8 +41,55 @@ function bggNotConfiguredResponse(c: Context) {
   );
 }
 
+/**
+ * Build a getFeatureVector callback and apply redundancy adjustments to scored games.
+ * Shared logic for GET /games and GET /games/:id.
+ * Order: scores first, niches second (on pre-redundancy scores per REQ-REDUN-26),
+ * redundancy third.
+ *
+ * When `universe` is provided, pairwise similarity and penalties are computed against
+ * the universe (e.g. prediction-enriched games), but only `games` are annotated.
+ * This ensures the same game gets the same penalty regardless of which route returns it.
+ */
+async function applyRedundancy(
+  games: GameWithScore[],
+  settings: RedundancySettings,
+  storageService: StorageService,
+  universe?: GameWithScore[],
+): Promise<void> {
+  if (!settings.enabled) return;
+
+  const computeGames = universe ?? games;
+
+  const collection = await storageService.loadCollection();
+  const gamesWithBgg = collection.games.filter((g) => g.bggData);
+  const vocabulary = buildVocabulary(gamesWithBgg);
+  const ranges = computeContinuousRanges(gamesWithBgg);
+
+  // Per-request feature vector cache (Open Question 1 from the plan)
+  const vectorCache = new Map<string, FeatureVector>();
+  const getFeatureVector = (game: Game): FeatureVector => {
+    const cached = vectorCache.get(game.id);
+    if (cached) return cached;
+    const vec = encodeGame(game, vocabulary, game.ratings, ranges, collection.axes);
+    vectorCache.set(game.id, vec);
+    return vec;
+  };
+
+  const adjustments = computeRedundancyAdjustments(computeGames, settings, getFeatureVector);
+
+  for (const gws of games) {
+    if (!gws.score) continue;
+    const adj = adjustments.get(gws.game.id) ?? null;
+    gws.score.redundancyAdjustment = adj;
+    if (adj && settings.stage === "integrated") {
+      gws.score.score = adj.adjustedScore;
+    }
+  }
+}
+
 export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
-  const { gameService, bggClient, predictionService } = deps;
+  const { gameService, bggClient, predictionService, storageService } = deps;
   const routes = new Hono();
 
   // GET /games/search?q={query}
@@ -98,10 +155,18 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       if (includePredicted && predictionService) {
         const games = await predictionService.listGamesWithPredictions();
         if (includeNiches) {
-          const nicheMap = computeNichePositions(games);
+          const nicheSettings = storageService
+            ? await storageService.loadNicheSettings()
+            : undefined;
+          const nicheMap = computeNichePositions(games, nicheSettings);
           for (const gws of games) {
             gws.nichePosition = nicheMap.get(gws.game.id) ?? null;
           }
+        }
+        // Redundancy: after niches (which use pre-redundancy scores per REQ-REDUN-26)
+        if (storageService) {
+          const redundancySettings = await storageService.loadRedundancySettings();
+          await applyRedundancy(games, redundancySettings, storageService);
         }
         return c.json(games);
       }
@@ -112,11 +177,22 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
         // Niche ranking needs predicted scores (REQ-NICHE-4), but the client
         // didn't ask for predicted games in the response. Compute niches from
         // the full list, then attach positions only to the standard game list.
+        const nicheSettings = storageService ? await storageService.loadNicheSettings() : undefined;
         const allGames = await predictionService.listGamesWithPredictions();
-        const nicheMap = computeNichePositions(allGames);
+        const nicheMap = computeNichePositions(allGames, nicheSettings);
         for (const gws of games) {
           gws.nichePosition = nicheMap.get(gws.game.id) ?? null;
         }
+      }
+
+      // Redundancy: after niches, computed against prediction-enriched universe
+      // for consistency with the includePredicted=true path and GET /games/:id
+      if (storageService) {
+        const redundancySettings = await storageService.loadRedundancySettings();
+        const universe = predictionService
+          ? await predictionService.listGamesWithPredictions()
+          : undefined;
+        await applyRedundancy(games, redundancySettings, storageService, universe);
       }
 
       return c.json(games);
@@ -133,11 +209,30 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
 
       // Compute niche position from the full collection including predicted scores
       if (predictionService) {
+        const nicheSettings = storageService ? await storageService.loadNicheSettings() : undefined;
         const allGames = await predictionService.listGamesWithPredictions();
-        const nicheMap = computeNichePositions(allGames);
+        const nicheMap = computeNichePositions(allGames, nicheSettings);
         result.nichePosition = nicheMap.get(id) ?? null;
       } else {
         result.nichePosition = null;
+      }
+
+      // Redundancy: use prediction-enriched set for consistency with GET /games
+      if (storageService) {
+        const redundancySettings = await storageService.loadRedundancySettings();
+        if (redundancySettings.enabled) {
+          const allGames = predictionService
+            ? await predictionService.listGamesWithPredictions()
+            : await gameService.listGames();
+          await applyRedundancy(allGames, redundancySettings, storageService);
+          const thisGame = allGames.find((g) => g.game.id === id);
+          if (result.score && thisGame?.score) {
+            result.score.redundancyAdjustment = thisGame.score.redundancyAdjustment;
+            if (redundancySettings.stage === "integrated" && thisGame.score.redundancyAdjustment) {
+              result.score.score = thisGame.score.redundancyAdjustment.adjustedScore;
+            }
+          }
+        }
       }
 
       return c.json(result);

@@ -2,7 +2,13 @@
 
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import Link from "next/link";
-import type { GameWithScore, Axis, TournamentGameStatsDisplay } from "@shelf-judge/shared";
+import type {
+  GameWithScore,
+  Axis,
+  TournamentGameStatsDisplay,
+  NicheTagFilter,
+} from "@shelf-judge/shared";
+import { NicheIgnoreButton, NicheRestoreButton } from "@/components/niche-ignore-button";
 import { scoreRangeClass } from "@/lib/score-utils";
 import { relativeDate } from "@/lib/date-utils";
 import {
@@ -35,6 +41,8 @@ interface CollectionTableProps {
   ratedCount: number;
   avgFitness: number | null;
   predictedCount: number;
+  ignoredTags: NicheTagFilter[];
+  isIntegratedRedundancy: boolean;
 }
 
 export function CollectionTable({
@@ -48,6 +56,8 @@ export function CollectionTable({
   ratedCount,
   avgFitness,
   predictedCount,
+  ignoredTags,
+  isIntegratedRedundancy,
 }: CollectionTableProps) {
   // Sort state: default on SSR, hydrate from localStorage after mount
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
@@ -90,7 +100,9 @@ export function CollectionTable({
   }, [menuOpen]);
 
   // Use predicted games when toggle is on, otherwise use standard games
-  const baseGames = predictionsOn && predictedGames ? predictedGames : games;
+  const usePredictions = predictionsOn || (predictedCount > 0 && isIntegratedRedundancy);
+  const baseGames = usePredictions && predictedGames ? predictedGames : games;
+
 
   // When niches toggle is on, merge nichePosition data from nicheGames onto active games
   const activeGames = useMemo(() => {
@@ -196,7 +208,7 @@ export function CollectionTable({
     (hasRatedFilter ? 1 : 0) + (hasPlayedFilter ? 1 : 0) + (hasPlayerCount ? 1 : 0);
   const hasAnyFilter = hasSearch || hasRatedFilter || hasPlayedFilter || hasPlayerCount;
   const hiddenCount =
-    (predictionsOn && predictedGames ? predictedGames.length : totalGames) - filtered.length;
+    (usePredictions && predictedGames ? predictedGames.length : totalGames) - filtered.length;
 
   // Build niche groups for "Group by Niche" view (REQ-NICHE-24, REQ-NICHE-25)
   const nicheGroups = useMemo(() => {
@@ -451,13 +463,13 @@ export function CollectionTable({
         </div>
 
         {/* Predictions toggle */}
-        {predictedGames && predictedCount > 0 && (
+        {predictedGames && (
           <>
             <div className="predictions-toggle" onClick={() => setPredictionsOn((v) => !v)}>
-              <div className={`predictions-toggle-switch${predictionsOn ? " active" : ""}`} />
+              <div className={`predictions-toggle-switch${usePredictions ? " active" : ""}`} />
               <span className="predictions-toggle-label">Predictions</span>
             </div>
-            {predictionsOn && (
+            {usePredictions && (
               <div className="stat-block">
                 <div className="stat-value predictions-stat">{predictedCount}</div>
                 <div className="stat-label">Predicted</div>
@@ -511,8 +523,8 @@ export function CollectionTable({
           Game
           {sort.field === "name" && <span className="sort-arrow">{dirArrow}</span>}
         </div>
-        <div className="axes-used-col col-label">{isAxisSort ? "Scores" : "Axes Rated"}</div>
-        {predictionsOn && <div className="col-label">Confidence</div>}
+        {!usePredictions && <div className="axes-used-col col-label">{isAxisSort ? "Scores" : "Axes Rated"}</div>}
+        {usePredictions && <div className="col-label">Confidence</div>}
         <div
           className={`col-label sortable${sort.field === "updatedAt" ? " sort-active" : ""}`}
           onClick={handleLastRatedHeaderClick}
@@ -530,7 +542,7 @@ export function CollectionTable({
             {scoreOwnsSort && <span className="sort-arrow">{dirArrow}</span>}
           </span>
           <span className="score-col-sub">
-            {predictionsOn && sort.field === "fitness" ? (
+            {usePredictions && sort.field === "fitness" ? (
               <span style={{ color: "var(--predict-accent)" }}>Pred. Fitness</span>
             ) : (
               scoreSubtitle
@@ -541,43 +553,64 @@ export function CollectionTable({
 
       {nicheViewMode && nichesOn ? (
         /* Group by Niche view (REQ-NICHE-24, REQ-NICHE-25) */
-        nicheGroups.length > 0 ? (
-          nicheGroups.map((group) => (
-            <div key={`${group.type}:${group.name}`} className="niche-group">
-              <div className="niche-group-header">
-                <span className="niche-group-name">{group.name}</span>
-                <span className={`niche-type-badge niche-type-${group.type}`}>{group.type}</span>
-                <span className="niche-group-count">
-                  {group.games.length} game{group.games.length !== 1 ? "s" : ""}
-                </span>
-              </div>
-              {group.games.map((gws, i) => {
-                const nicheEntry = gws.nichePosition?.niches.find(
-                  (n) => n.type === group.type && n.name === group.name,
-                );
-                return (
-                  <GameRow
-                    key={gws.game.id}
-                    gws={gws}
-                    rank={i + 1}
-                    sortField={sort.field}
-                    tournamentStats={tournamentStats}
-                    axisMap={axisMap}
-                    axes={axes}
-                    isAxisSort={isAxisSort}
-                    showConfidence={predictionsOn}
-                    nicheHighlight={nicheEntry?.isChampion ? "champion" : undefined}
-                    nicheSummary={null}
+        <>
+          {nicheGroups.length > 0 ? (
+            nicheGroups.map((group) => (
+              <div key={`${group.type}:${group.name}`} className="niche-group">
+                <div className="niche-group-header">
+                  <span className="niche-group-name">{group.name}</span>
+                  <span className={`niche-type-badge niche-type-${group.type}`}>{group.type}</span>
+                  <span className="niche-group-count">
+                    {group.games.length} game{group.games.length !== 1 ? "s" : ""}
+                  </span>
+                  <NicheIgnoreButton
+                    type={group.type as NicheTagFilter["type"]}
+                    name={group.name}
                   />
-                );
-              })}
+                </div>
+                {group.games.map((gws, i) => {
+                  const nicheEntry = gws.nichePosition?.niches.find(
+                    (n) => n.type === group.type && n.name === group.name,
+                  );
+                  return (
+                    <GameRow
+                      key={gws.game.id}
+                      gws={gws}
+                      rank={i + 1}
+                      sortField={sort.field}
+                      tournamentStats={tournamentStats}
+                      axisMap={axisMap}
+                      axes={axes}
+                      isAxisSort={isAxisSort}
+                      showConfidence={usePredictions}
+                      nicheHighlight={nicheEntry?.isChampion ? "champion" : undefined}
+                      nicheSummary={null}
+                      isIntegratedRedundancy={isIntegratedRedundancy}
+                    />
+                  );
+                })}
+              </div>
+            ))
+          ) : (
+            <div className="niche-empty">
+              No niches found with 2 or more games in the filtered set.
             </div>
-          ))
-        ) : (
-          <div className="niche-empty">
-            No niches found with 2 or more games in the filtered set.
-          </div>
-        )
+          )}
+          {ignoredTags.length > 0 && (
+            <div className="niche-ignored-section">
+              <div className="niche-ignored-title">Ignored Niches</div>
+              <div className="niche-ignored-chips">
+                {ignoredTags.map((tag) => (
+                  <span key={`${tag.type}:${tag.name}`} className="niche-ignored-chip">
+                    <span className="niche-ignored-chip-name">{tag.name}</span>
+                    <span className={`niche-type-badge niche-type-${tag.type}`}>{tag.type}</span>
+                    <NicheRestoreButton type={tag.type} name={tag.name} />
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       ) : (
         <>
           {/* Rows with value */}
@@ -591,8 +624,9 @@ export function CollectionTable({
               axisMap={axisMap}
               axes={axes}
               isAxisSort={isAxisSort}
-              showConfidence={predictionsOn}
+              showConfidence={usePredictions}
               nicheSummary={nichesOn ? (gws.nichePosition ?? null) : null}
+              isIntegratedRedundancy={isIntegratedRedundancy}
             />
           ))}
 
@@ -615,8 +649,9 @@ export function CollectionTable({
               axisMap={axisMap}
               axes={axes}
               isAxisSort={isAxisSort}
-              showConfidence={predictionsOn}
+              showConfidence={usePredictions}
               nicheSummary={nichesOn ? (gws.nichePosition ?? null) : null}
+              isIntegratedRedundancy={isIntegratedRedundancy}
             />
           ))}
         </>
@@ -640,6 +675,7 @@ interface GameRowProps {
   showConfidence: boolean;
   nicheSummary?: import("@shelf-judge/shared").NichePosition | null;
   nicheHighlight?: "champion";
+  isIntegratedRedundancy: boolean;
 }
 
 function GameRow({
@@ -651,6 +687,7 @@ function GameRow({
   axes,
   isAxisSort,
   showConfidence,
+  isIntegratedRedundancy,
   nicheSummary,
   nicheHighlight,
 }: GameRowProps) {
@@ -713,6 +750,7 @@ function GameRow({
           </div>
         )}
       </div>
+      {!showConfidence && (
       <div className="axes-used">
         {isAxisSort ? (
           <AxisSortAltScores gws={gws} tournamentStats={tournamentStats} />
@@ -729,6 +767,7 @@ function GameRow({
           </>
         )}
       </div>
+      )}
       {showConfidence && (
         <div className="axes-used">
           {hasPrediction ? (
@@ -742,7 +781,7 @@ function GameRow({
       )}
       <div className="last-rated">{relativeDate(game.updatedAt)}</div>
       <div className="score-cell">
-        {score?.vetoed ? (
+         {score?.vetoed ? (
           <div className="score-vetoed-cell">
             <span className="vetoed-badge">VETOED</span>
             {score.hypotheticalScore !== null && (
@@ -761,6 +800,12 @@ function GameRow({
             {display.dotClass && <span className={`score-dot ${display.dotClass}`} />}
             <span className={display.className}>{display.text}</span>
           </>
+        )}
+        {display?.isFitnessValue && score?.redundancyAdjustment && score.redundancyAdjustment.penalty > 0 && (
+          <RedundancyBadge
+            penalty={score.redundancyAdjustment.penalty}
+            isIntegrated={isIntegratedRedundancy}
+          />
         )}
       </div>
     </Link>
@@ -817,6 +862,18 @@ function AxisSortAltScores({
         <span className="axis-sort-fitness muted">--</span>
       )}
       {eloStats && <span className="axis-sort-elo">{eloStats.displayLabel}</span>}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Redundancy penalty badge for collection rows (REQ-REDUN-34, REQ-REDUN-35)
+// ---------------------------------------------------------------------------
+
+function RedundancyBadge({ penalty, isIntegrated }: { penalty: number; isIntegrated: boolean }) {
+  return (
+    <span className={`redundancy-badge${isIntegrated ? " integrated" : " annotation"}`}>
+      {isIntegrated ? `-${penalty.toFixed(1)}` : `(-${penalty.toFixed(1)})`}
     </span>
   );
 }

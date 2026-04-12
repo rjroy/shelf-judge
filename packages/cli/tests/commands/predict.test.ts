@@ -81,6 +81,7 @@ const predictGameData = {
       referenceGameCount: 5,
       coveragePercent: 0.8,
     },
+    redundancyAdjustment: null,
   },
   tension: null,
 };
@@ -238,6 +239,7 @@ const predictedScoresData = [
       vetoedBy: null,
       hypotheticalScore: null,
       predictionMeta: null,
+      redundancyAdjustment: null,
     },
   },
   {
@@ -258,6 +260,7 @@ const predictedScoresData = [
         referenceGameCount: 5,
         coveragePercent: 0.6,
       },
+      redundancyAdjustment: null,
     },
   },
   {

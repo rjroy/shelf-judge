@@ -1,6 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { getGame, listAxes, getTournamentGameStats, getProfile, predictGame } from "@/lib/api";
+import {
+  getGame,
+  listAxes,
+  getTournamentGameStats,
+  getProfile,
+  predictGame,
+  getNicheSettings,
+} from "@/lib/api";
 import type {
   TournamentGameStatsDisplay,
   DivergentGame,
@@ -10,10 +17,13 @@ import type {
   NichePosition,
   NicheEntry,
   NicheNeighbor,
+  NicheTagFilter,
+  RedundancyAdjustment,
 } from "@shelf-judge/shared";
 import { ScoreBreakdown } from "@/components/score-breakdown";
 import { RatingForm } from "@/components/rating-form";
 import { GameActions } from "@/components/game-actions";
+import { NicheIgnoreButton, NicheRestoreButton } from "@/components/niche-ignore-button";
 
 export async function generateMetadata({
   params,
@@ -41,6 +51,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
   let profileDivergence: DivergentGame | null = null;
   let profileOutlier: CollectionOutlier | null = null;
   let prediction: { score: FitnessResult; tension?: RevealedPreferenceTension } | null = null;
+  let ignoredTags: NicheTagFilter[] = [];
   try {
     [data, axes] = await Promise.all([getGame(id), listAxes()]);
     try {
@@ -66,6 +77,12 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
       }
     } catch {
       // Prediction may not be available (fully rated, no BGG data, etc.)
+    }
+    try {
+      const nicheSettings = await getNicheSettings();
+      ignoredTags = nicheSettings.ignoredTags;
+    } catch {
+      // Niche settings may not be available
     }
   } catch (err) {
     return (
@@ -368,6 +385,11 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
           </div>
         )}
 
+        {/* Redundancy panel (REQ-REDUN-31, REQ-REDUN-32, REQ-REDUN-33) */}
+        {displayScore?.redundancyAdjustment && (
+          <RedundancyPanel score={displayScore} adjustment={displayScore.redundancyAdjustment} />
+        )}
+
         {/* Niche Position panel (REQ-NICHE-18, REQ-NICHE-19) */}
         {displayScore?.vetoed ? (
           <div className="niche-panel">
@@ -378,7 +400,9 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
           </div>
         ) : (
           nichePosition &&
-          nichePosition.niches.length > 0 && <NichePositionPanel nichePosition={nichePosition} />
+          (nichePosition.niches.length > 0 || ignoredTags.length > 0) && (
+            <NichePositionPanel nichePosition={nichePosition} ignoredTags={ignoredTags} />
+          )
         )}
 
         {/* Two-panel layout */}
@@ -463,15 +487,37 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
   );
 }
 
-function NichePositionPanel({ nichePosition }: { nichePosition: NichePosition }) {
+function NichePositionPanel({
+  nichePosition,
+  ignoredTags,
+}: {
+  nichePosition: NichePosition;
+  ignoredTags: NicheTagFilter[];
+}) {
   return (
     <div className="niche-panel">
       <div className="panel-section-title">Niche Position</div>
-      <div className="niche-grid">
-        {nichePosition.niches.map((niche) => (
-          <NicheEntryCard key={`${niche.type}:${niche.name}`} niche={niche} />
-        ))}
-      </div>
+      {nichePosition.niches.length > 0 && (
+        <div className="niche-grid">
+          {nichePosition.niches.map((niche) => (
+            <NicheEntryCard key={`${niche.type}:${niche.name}`} niche={niche} />
+          ))}
+        </div>
+      )}
+      {ignoredTags.length > 0 && (
+        <div className="niche-ignored-section">
+          <div className="niche-ignored-title">Ignored Niches</div>
+          <div className="niche-ignored-chips">
+            {ignoredTags.map((tag) => (
+              <span key={`${tag.type}:${tag.name}`} className="niche-ignored-chip">
+                <span className="niche-ignored-chip-name">{tag.name}</span>
+                <span className={`niche-type-badge niche-type-${tag.type}`}>{tag.type}</span>
+                <NicheRestoreButton type={tag.type} name={tag.name} />
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -482,6 +528,7 @@ function NicheEntryCard({ niche }: { niche: NicheEntry }) {
       <div className="niche-card-header">
         <span className="niche-card-name">{niche.name}</span>
         <span className={`niche-type-badge niche-type-${niche.type}`}>{niche.type}</span>
+        <NicheIgnoreButton type={niche.type} name={niche.name} />
       </div>
       <div className="niche-card-rank">
         {niche.isChampion ? (
@@ -536,6 +583,72 @@ function NeighborLink({ neighbor }: { neighbor: NicheNeighbor }) {
       <span className="niche-neighbor-score">({neighbor.fitnessScore.toFixed(1)})</span>
     </span>
   );
+}
+
+function RedundancyPanel({
+  score,
+  adjustment,
+}: {
+  score: FitnessResult;
+  adjustment: RedundancyAdjustment;
+}) {
+  // Infer mode from data: if score.score differs from originalScore, integrated mode is active
+  const isIntegrated = score.score !== adjustment.originalScore;
+  const zeroPenalty = adjustment.penalty === 0;
+
+  return (
+    <div className="redundancy-panel">
+      <div className="panel-section-title">Redundancy{!isIntegrated && " (preview)"}</div>
+
+      {zeroPenalty ? (
+        <div className="redundancy-summary">Best among similar games</div>
+      ) : isIntegrated ? (
+        <div className="redundancy-summary">
+          Fitness: {adjustment.adjustedScore.toFixed(1)}{" "}
+          <span className="redundancy-detail">
+            (was {adjustment.originalScore.toFixed(1)}, -{adjustment.penalty.toFixed(1)} redundancy)
+          </span>
+        </div>
+      ) : (
+        <div className="redundancy-summary redundancy-annotation">
+          Would be {adjustment.adjustedScore.toFixed(1)} with redundancy applied{" "}
+          <span className="redundancy-detail">
+            (current {adjustment.originalScore.toFixed(1)}, -{adjustment.penalty.toFixed(1)}{" "}
+            penalty)
+          </span>
+        </div>
+      )}
+
+      <div className="redundancy-rank">
+        {ordinalSuffix(adjustment.nicheRank)} of {adjustment.nicheSize} similar game
+        {adjustment.nicheSize !== 1 ? "s" : ""}
+      </div>
+
+      {adjustment.nicheNeighbors.length > 0 && (
+        <div className="redundancy-neighbors">
+          <div className="redundancy-neighbors-title">Similar games</div>
+          {adjustment.nicheNeighbors.map((n) => (
+            <div key={n.gameId} className="redundancy-neighbor-row">
+              <Link href={`/games/${n.gameId}`} className="redundancy-neighbor-link">
+                {n.gameName}
+              </Link>
+              {n.isPredicted && <span className="niche-predicted-indicator">~</span>}
+              <span className="redundancy-neighbor-sim">
+                {(n.similarity * 100).toFixed(0)}% similar
+              </span>
+              <span className="redundancy-neighbor-score">({n.fitnessScore.toFixed(1)})</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ordinalSuffix(n: number): string {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 
 function formatRelativeDate(dateStr: string): string {

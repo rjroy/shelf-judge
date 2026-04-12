@@ -75,6 +75,7 @@ function makeFitness(score: number, vetoed = false): FitnessResult {
     vetoedBy: null,
     hypotheticalScore: vetoed ? score : null,
     predictionMeta: null,
+    redundancyAdjustment: null,
   };
 }
 

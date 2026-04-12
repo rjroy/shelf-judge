@@ -2,7 +2,12 @@
 import type { DaemonClient } from "../client.js";
 import type { OutputOptions } from "../output.js";
 import { formatTable, formatScore, formatBreakdown, printOutput } from "../output.js";
-import type { PredictedGameResponse, PredictionReadiness, NicheImpact } from "@shelf-judge/shared";
+import type {
+  PredictedGameResponse,
+  PredictionReadiness,
+  NicheImpact,
+  RedundancyAdjustment,
+} from "@shelf-judge/shared";
 
 export async function predictGame(
   client: DaemonClient,
@@ -173,9 +178,39 @@ export async function predictBggGame(
     }
   }
 
+  if (data.redundancyPreview) {
+    lines.push("");
+    lines.push(formatRedundancyPreview(data.redundancyPreview));
+  }
+
   if (data.nicheImpact) {
     lines.push("");
     lines.push(formatNicheImpact(data.nicheImpact));
+  }
+
+  return lines.join("\n");
+}
+
+function formatRedundancyPreview(adj: RedundancyAdjustment): string {
+  const lines: string[] = ["Redundancy Preview:"];
+
+  if (adj.penalty === 0) {
+    lines.push(`  No redundancy penalty (best among ${adj.nicheSize} similar games)`);
+  } else {
+    lines.push(`  With redundancy: ${formatScore(adj.adjustedScore)} (-${adj.penalty.toFixed(1)})`);
+    lines.push(`  Rank: #${adj.nicheRank} of ${adj.nicheSize} similar games`);
+  }
+
+  const top = adj.nicheNeighbors.slice(0, 3);
+  if (top.length > 0) {
+    lines.push("  Most similar in collection:");
+    for (const n of top) {
+      lines.push(
+        `    ${n.gameName} (similarity: ${(n.similarity * 100).toFixed(0)}%, fitness: ${formatScore(n.fitnessScore)})`,
+      );
+    }
+  } else {
+    lines.push("  No similar games in collection.");
   }
 
   return lines.join("\n");

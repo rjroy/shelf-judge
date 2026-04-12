@@ -1,0 +1,716 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shelf Judge — Add Game (with Wishlist integration)</title>
+    <style>
+      :root {
+        --bg-base: #f4f1ec;
+        --bg-surface: #fefcf9;
+        --bg-elevated: #ffffff;
+        --bg-subtle: #f9f7f4;
+        --border: #ddd8d0;
+        --border-strong: #c4bfb8;
+        --text-primary: #1a1714;
+        --text-secondary: #6b6560;
+        --text-muted: #9c9590;
+        --score-color: #b86c1a;
+        --score-high: #2d7a4a;
+        --score-mid: #8a6f20;
+        --score-low: #b84040;
+        --bgg-accent: #2e5f8a;
+        --bgg-bg: #edf3f9;
+        --action: #1c3d5e;
+        --action-hover: #2a5580;
+        --action-subtle: #e8eff6;
+        --action-border: #c0cfe0;
+        --nav-bg: #1a1714;
+        --nav-text: #e8e4dc;
+        --nav-active: #b86c1a;
+        --predict-accent: #1a706a;
+        --predict-bg: #eaf5f3;
+        --predict-border: #a8d9d4;
+        --conf-strong: #2d7a4a;
+        --conf-strong-bg: #e8f5ee;
+        --conf-moderate: #7a5e1a;
+        --conf-moderate-bg: #f5ecd8;
+        --conf-weak: #8a3a10;
+        --conf-weak-bg: #f5e4d8;
+        --niche-accent: #6b4c8a;
+        --niche-bg: #f0eaf8;
+        --niche-border: #cbbfe4;
+        --wishlist-accent: #1c3d5e;
+        --wishlist-success: #2d7a4a;
+        --wishlist-success-bg: #e8f5ee;
+        --wishlist-success-border: #a8d9b4;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family:
+          Inter,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        background: var(--bg-base);
+        color: var(--text-primary);
+        font-size: 15px;
+        line-height: 1.5;
+        display: flex;
+        height: 100vh;
+        overflow: hidden;
+      }
+
+      /* ── Sidebar ── */
+      .sidebar {
+        width: 200px;
+        flex-shrink: 0;
+        background: var(--nav-bg);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      .sidebar-brand {
+        padding: 20px 20px 24px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .brand-name {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--nav-text);
+        letter-spacing: -0.01em;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .brand-sub {
+        font-size: 11px;
+        color: rgba(232, 228, 220, 0.4);
+        margin-top: 2px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      .nav-section {
+        padding: 16px 0;
+        flex: 1;
+      }
+
+      .nav-label {
+        font-size: 10px;
+        font-weight: 600;
+        color: rgba(232, 228, 220, 0.35);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        padding: 0 20px;
+        margin-bottom: 6px;
+        margin-top: 12px;
+      }
+
+      .nav-label:first-child {
+        margin-top: 0;
+      }
+
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 20px;
+        font-size: 13px;
+        color: rgba(232, 228, 220, 0.65);
+        cursor: pointer;
+        border-left: 3px solid transparent;
+        text-decoration: none;
+      }
+
+      .nav-item:hover {
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--nav-text);
+      }
+
+      .nav-item.active {
+        background: rgba(184, 108, 26, 0.12);
+        color: var(--nav-text);
+        border-left-color: var(--nav-active);
+        font-weight: 500;
+      }
+
+      .nav-icon {
+        width: 16px;
+        height: 16px;
+        opacity: 0.7;
+        flex-shrink: 0;
+      }
+      .nav-item.active .nav-icon {
+        opacity: 1;
+      }
+
+      .sidebar-footer {
+        padding: 16px 20px;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        font-size: 11px;
+        color: rgba(232, 228, 220, 0.3);
+      }
+
+      /* ── Main ── */
+      .main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      .topbar {
+        height: 56px;
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        padding: 0 32px;
+        flex-shrink: 0;
+      }
+
+      .topbar-title {
+        font-size: 16px;
+        font-weight: 600;
+        flex: 1;
+      }
+
+      .content {
+        flex: 1;
+        overflow-y: auto;
+      }
+
+      .search-content {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 24px 32px 48px;
+      }
+
+      /* ── Search input ── */
+      .search-input-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 20px;
+      }
+
+      .form-input {
+        width: 100%;
+        padding: 9px 12px;
+        border: 1px solid var(--border-strong);
+        border-radius: 5px;
+        font-size: 14px;
+        font-family: inherit;
+        background: var(--bg-elevated);
+        color: var(--text-primary);
+        outline: none;
+      }
+
+      .form-input:focus {
+        border-color: var(--action);
+        box-shadow: 0 0 0 2px rgba(28, 61, 94, 0.12);
+      }
+
+      /* ── Buttons ── */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 7px 13px;
+        border-radius: 5px;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        font-family: inherit;
+        white-space: nowrap;
+      }
+
+      .btn-sm {
+        padding: 5px 10px;
+        font-size: 12px;
+      }
+
+      .btn-primary {
+        background: var(--action);
+        color: white;
+      }
+      .btn-primary:hover {
+        background: var(--action-hover);
+      }
+
+      .btn-ghost {
+        background: transparent;
+        border: 1px solid var(--border-strong);
+        color: var(--text-secondary);
+      }
+      .btn-ghost:hover {
+        border-color: var(--border-strong);
+        background: var(--bg-subtle);
+      }
+
+      /* Wishlist button — default (not wishlisted) */
+      .btn-wishlist {
+        background: transparent;
+        border: 1px solid var(--action-border);
+        color: var(--action);
+      }
+      .btn-wishlist:hover {
+        background: var(--action-subtle);
+      }
+
+      /* Wishlist button — wishlisted state */
+      .btn-wishlisted {
+        background: var(--wishlist-success-bg);
+        border: 1px solid var(--wishlist-success-border);
+        color: var(--wishlist-success);
+        font-weight: 500;
+      }
+
+      /* ── Search results ── */
+      .search-results {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+      }
+
+      .search-result-item {
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        overflow: hidden;
+        margin-bottom: 8px;
+      }
+
+      .search-result-row {
+        display: flex;
+        align-items: center;
+        padding: 12px 16px;
+        gap: 14px;
+      }
+
+      .search-result-thumb {
+        width: 48px;
+        height: 48px;
+        border-radius: 4px;
+        background: var(--border);
+        overflow: hidden;
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+      }
+
+      .search-result-thumb img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .search-result-info {
+        flex: 1;
+        min-width: 0;
+      }
+      .search-result-name {
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .search-result-year {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-top: 2px;
+      }
+
+      .search-result-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-shrink: 0;
+      }
+
+      /* Preview panel */
+      .preview-panel {
+        border-top: 1px solid var(--border);
+        background: var(--bg-subtle);
+        padding: 14px 16px;
+      }
+
+      .preview-score-line {
+        font-size: 14px;
+        margin-bottom: 6px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .preview-score-line strong {
+        font-size: 16px;
+        color: var(--predict-accent);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .preview-meta {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-bottom: 10px;
+      }
+
+      .confidence-badge {
+        display: inline-block;
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        padding: 2px 6px;
+        border-radius: 3px;
+      }
+
+      .confidence-badge.strong {
+        background: var(--conf-strong-bg);
+        color: var(--conf-strong);
+      }
+      .confidence-badge.moderate {
+        background: var(--conf-moderate-bg);
+        color: var(--conf-moderate);
+      }
+      .confidence-badge.weak {
+        background: var(--conf-weak-bg);
+        color: var(--conf-weak);
+      }
+
+      .preview-breakdown {
+        font-size: 13px;
+      }
+
+      .preview-breakdown-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 0;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .preview-breakdown-row:last-child {
+        border-bottom: none;
+      }
+
+      .preview-axis-name {
+        flex: 1;
+        color: var(--text-secondary);
+        font-size: 12px;
+      }
+      .preview-axis-rating {
+        font-variant-numeric: tabular-nums;
+        font-weight: 600;
+        color: var(--predict-accent);
+        font-size: 13px;
+      }
+
+      .preview-niche-impact {
+        margin-top: 10px;
+        padding: 10px 12px;
+        background: var(--niche-bg);
+        border: 1px solid var(--niche-border);
+        border-radius: 5px;
+      }
+
+      .preview-niche-impact-title {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        color: var(--niche-accent);
+        margin-bottom: 6px;
+      }
+
+      .preview-niche-entry {
+        font-size: 12px;
+        color: var(--text-secondary);
+        padding: 2px 0;
+      }
+
+      .niche-type-badge {
+        display: inline-block;
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: 1px 5px;
+        border-radius: 3px;
+        margin-right: 6px;
+        background: var(--niche-bg);
+        color: var(--niche-accent);
+        border: 1px solid var(--niche-border);
+      }
+
+      /* ── Section divider ── */
+      .section-label {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-muted);
+        margin: 8px 0 12px;
+        padding-top: 4px;
+      }
+
+      /* ── Callout note ── */
+      .callout {
+        background: var(--action-subtle);
+        border: 1px solid var(--action-border);
+        border-radius: 5px;
+        padding: 10px 14px;
+        font-size: 12px;
+        color: var(--action);
+        margin-bottom: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-name">
+          <svg width="22" height="18" viewBox="0 0 22 18" fill="none">
+            <rect x="0" y="6" width="5" height="12" rx="1" fill="#b86c1a" />
+            <rect x="7" y="0" width="5" height="18" rx="1" fill="#e8e4dc" />
+            <rect x="14" y="4" width="5" height="14" rx="1" fill="#e8e4dc" opacity="0.6" />
+          </svg>
+          Shelf Judge
+        </div>
+        <div class="brand-sub">Board Game Collection</div>
+      </div>
+
+      <nav class="nav-section">
+        <div class="nav-label">Overview</div>
+        <a class="nav-item" href="#">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path
+              d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 2a5 5 0 110 10A5 5 0 018 3zm0 2a3 3 0 100 6 3 3 0 000-6zm0 2a1 1 0 110 2 1 1 0 010-2z"
+            />
+          </svg>
+          Profile
+        </a>
+
+        <div class="nav-label">Library</div>
+        <a class="nav-item" href="#">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M2 2h12v12H2V2zm1 1v10h10V3H3zm2 2h6v1H5V5zm0 3h6v1H5V8zm0 3h4v1H5v-1z" />
+          </svg>
+          Collection
+        </a>
+        <!-- NEW: Wishlist nav item -->
+        <a class="nav-item" href="#">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path
+              d="M8 2a6 6 0 100 12A6 6 0 008 2zM3.5 8a4.5 4.5 0 119 0 4.5 4.5 0 01-9 0zm4.5-2v1.5H6.5v1H8V10h1V8.5h1.5v-1H9V5H8z"
+            />
+          </svg>
+          Wishlist
+        </a>
+        <a class="nav-item active" href="#">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path
+              d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 1a6 6 0 110 12A6 6 0 018 2zm0 3v2H6v1h2v2h1V8h2V7H9V5H8z"
+            />
+          </svg>
+          Add Games
+        </a>
+
+        <div class="nav-label">Ranking</div>
+        <a class="nav-item" href="#">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path
+              d="M4 2h8v1H4V2zm-2 2h12v1h-1.5l-1 3H12l-.5 1.5h-1L10 11H9l-.5 1.5h-1L7 11H6l-.5-1.5h-1L4 6.5H2.5L1.5 5H4V4zM5.5 5l1 3h3l1-3h-5zM6.5 12h3v1.5h-3V12z"
+            />
+          </svg>
+          Tournament
+        </a>
+
+        <div class="nav-label">Settings</div>
+        <a class="nav-item" href="#">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path
+              d="M1 3a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h8a1 1 0 010 2H2a1 1 0 01-1-1z"
+            />
+          </svg>
+          Axes
+        </a>
+        <a class="nav-item" href="#">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path
+              d="M14 3H2a1 1 0 00-1 1v8a1 1 0 001 1h12a1 1 0 001-1V4a1 1 0 00-1-1zM8 11l-4-3h2.5V7h3v1H12L8 11z"
+            />
+          </svg>
+          Import / BGG
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">Shelf Judge v0.1</div>
+    </aside>
+
+    <!-- Main -->
+    <div class="main">
+      <div class="topbar">
+        <div class="topbar-title">Add Game</div>
+      </div>
+
+      <div class="content">
+        <div class="search-content">
+          <div class="callout">
+            <strong>Note (REQ-WISH-18/19):</strong> The wishlist state is preloaded on mount — a
+            single <code>GET /api/wishlist</code> call populates a <code>Set&lt;number&gt;</code> of
+            wishlisted BGG IDs. Buttons reflect that state immediately when results load.
+          </div>
+
+          <!-- Search input -->
+          <div class="search-input-row">
+            <input
+              class="form-input"
+              type="text"
+              value="wingspan"
+              placeholder="Search BoardGameGeek..."
+            />
+          </div>
+
+          <!-- Results -->
+          <div class="search-results">
+            <!-- Result 1: Normal state — Wishlist + Add available -->
+            <div class="search-result-item">
+              <div class="search-result-row">
+                <div class="search-result-thumb">🐦</div>
+                <div class="search-result-info">
+                  <div class="search-result-name">Wingspan</div>
+                  <div class="search-result-year">2019</div>
+                </div>
+                <div class="search-result-actions">
+                  <button class="btn btn-ghost btn-sm">Preview</button>
+                  <!-- Wishlist button: default state -->
+                  <button class="btn btn-wishlist btn-sm">
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                      <path
+                        d="M8 2a6 6 0 100 12A6 6 0 008 2zM3.5 8a4.5 4.5 0 119 0 4.5 4.5 0 01-9 0zm4.5-2v1.5H6.5v1H8V10h1V8.5h1.5v-1H9V5H8z"
+                      />
+                    </svg>
+                    Wishlist
+                  </button>
+                  <button class="btn btn-primary btn-sm">Add</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Result 2: Already wishlisted — shows "Wishlisted ✓" button -->
+            <div class="search-result-item">
+              <div class="search-result-row">
+                <div class="search-result-thumb">🦊</div>
+                <div class="search-result-info">
+                  <div class="search-result-name">Everdell</div>
+                  <div class="search-result-year">2018</div>
+                </div>
+                <div class="search-result-actions">
+                  <button class="btn btn-ghost btn-sm">Preview</button>
+                  <!-- Wishlist button: WISHLISTED state -->
+                  <button class="btn btn-wishlisted btn-sm">
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M6.5 11L3 7.5l1.1-1.1 2.4 2.4 5-5L12.6 5 6.5 11z" />
+                    </svg>
+                    Wishlisted
+                  </button>
+                  <button class="btn btn-primary btn-sm">Add</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Result 3: With preview loaded -->
+            <div class="search-result-item">
+              <div class="search-result-row">
+                <div class="search-result-thumb">🌿</div>
+                <div class="search-result-info">
+                  <div class="search-result-name">Wingspan: Oceania Expansion</div>
+                  <div class="search-result-year">2020</div>
+                </div>
+                <div class="search-result-actions">
+                  <button class="btn btn-ghost btn-sm">Hide Preview</button>
+                  <button class="btn btn-wishlist btn-sm">
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                      <path
+                        d="M8 2a6 6 0 100 12A6 6 0 008 2zM3.5 8a4.5 4.5 0 119 0 4.5 4.5 0 01-9 0zm4.5-2v1.5H6.5v1H8V10h1V8.5h1.5v-1H9V5H8z"
+                      />
+                    </svg>
+                    Wishlist
+                  </button>
+                  <button class="btn btn-primary btn-sm">Add</button>
+                </div>
+              </div>
+
+              <!-- Expanded preview panel -->
+              <div class="preview-panel">
+                <div class="preview-score-line">
+                  Predicted Fitness: <strong>7.4</strong>
+                  <span class="confidence-badge moderate">moderate</span>
+                </div>
+                <div class="preview-meta">Stage 2 · 3 predicted, 4 actual · 70% coverage</div>
+
+                <div class="preview-breakdown">
+                  <div class="preview-breakdown-row">
+                    <span class="preview-axis-name">Wife Will Play It</span>
+                    <span class="preview-axis-rating">8.0</span>
+                    <span class="confidence-badge strong" style="font-size: 10px; padding: 1px 5px"
+                      >strong</span
+                    >
+                  </div>
+                  <div class="preview-breakdown-row">
+                    <span class="preview-axis-name">Complexity Sweet Spot</span>
+                    <span class="preview-axis-rating">6.5</span>
+                    <span
+                      class="confidence-badge moderate"
+                      style="font-size: 10px; padding: 1px 5px"
+                      >moderate</span
+                    >
+                  </div>
+                  <div class="preview-breakdown-row">
+                    <span class="preview-axis-name">Replayability</span>
+                    <span class="preview-axis-rating">7.1</span>
+                    <span class="confidence-badge weak" style="font-size: 10px; padding: 1px 5px"
+                      >weak</span
+                    >
+                  </div>
+                </div>
+
+                <div class="preview-niche-impact">
+                  <div class="preview-niche-impact-title">Niche Impact</div>
+                  <div class="preview-niche-entry">
+                    <span class="niche-type-badge">mechanic</span>
+                    Would be your 2nd <strong>Engine Building</strong> game, ranked #1
+                  </div>
+                  <div class="preview-niche-entry">
+                    <span class="niche-type-badge">category</span>
+                    Would be your 3rd <strong>Nature / Animals</strong> game, ranked #2
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- /search-results -->
+
+          <!-- Manual add toggle (unchanged) -->
+          <div style="margin-top: 24px">
+            <button class="btn btn-ghost">Add a game manually (not on BGG)</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

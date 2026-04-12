@@ -19,6 +19,7 @@ export interface SortFieldDef {
 const BUILT_IN_SORT_FIELDS: SortFieldDef[] = [
   { id: "fitness", label: "Fitness Score", group: "score", defaultDirection: "desc" },
   { id: "tournament", label: "Tournament ELO", group: "score", defaultDirection: "desc" },
+  { id: "redundancy", label: "Redundancy Penalty", group: "score", defaultDirection: "desc" },
   { id: "name", label: "Name", group: "identity", defaultDirection: "asc" },
   { id: "yearPublished", label: "Year Published", group: "identity", defaultDirection: "desc" },
   { id: "createdAt", label: "Date Added", group: "identity", defaultDirection: "desc" },
@@ -194,6 +195,8 @@ export function getSortValue(
   switch (field) {
     case "fitness":
       return score?.score ?? null;
+    case "redundancy":
+      return score?.redundancyAdjustment?.penalty ?? null;
     case "tournament":
       return tournamentStats[game.id]?.normalizedScore ?? null;
     case "name":
@@ -269,6 +272,7 @@ export interface ScoreDisplay {
   text: string;
   className: string;
   dotClass?: string;
+  isFitnessValue?: boolean;
 }
 
 export function getScoreDisplay(
@@ -282,17 +286,29 @@ export function getScoreDisplay(
   switch (field) {
     case "fitness":
     case "name": {
-      if (!score) return { text: "not rated", className: "score-unrated" };
+      if (!score || !score.score) return { text: "not rated", className: "score-unrated" };
       return {
         text: score.score.toFixed(1),
         className: "score-value",
         dotClass: scoreRangeClass(score.score),
+        isFitnessValue: true,
+      };
+    }
+    case "redundancy": {
+      if (!score) return { text: "not rated", className: "score-unrated" };
+      const adj = score.redundancyAdjustment;
+      const val = adj ? adj.penalty : null;
+      if (val == null) return { text: "no penalty", className: "score-unrated" };
+      return {
+        text: val.toFixed(1),
+        className: "score-value"
       };
     }
     case "tournament": {
       const stats = tournamentStats[game.id];
       return {
         text: stats?.displayLabel ?? "-",
+        dotClass: stats?.normalizedScore ? scoreRangeClass(stats.normalizedScore) : undefined,
         className: "score-value tournament-score",
       };
     }
@@ -363,6 +379,8 @@ export function getSeparatorLabel(field: string, count: number, axes: Axis[]): s
   switch (field) {
     case "fitness":
       return `Not yet rated - ${n}`;
+    case "redundancy":
+      return `Not yet rated - ${n}`;
     case "tournament":
       return `Not yet ranked - ${n}`;
     case "playerCount":
@@ -401,6 +419,8 @@ export function getScoreSubtitle(field: string, axes: Axis[]): string {
     case "fitness":
     case "name":
       return "Fitness";
+    case "redundancy":
+      return "Penalty";
     case "tournament":
       return "Tournament ELO";
     case "yearPublished":

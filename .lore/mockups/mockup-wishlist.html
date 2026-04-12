@@ -1,0 +1,974 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shelf Judge — Wishlist</title>
+    <style>
+      :root {
+        --bg-base: #f4f1ec;
+        --bg-surface: #fefcf9;
+        --bg-elevated: #ffffff;
+        --bg-subtle: #f9f7f4;
+        --border: #ddd8d0;
+        --border-strong: #c4bfb8;
+        --text-primary: #1a1714;
+        --text-secondary: #6b6560;
+        --text-muted: #9c9590;
+        --score-color: #b86c1a;
+        --score-high: #2d7a4a;
+        --score-mid: #8a6f20;
+        --score-low: #b84040;
+        --bgg-accent: #2e5f8a;
+        --bgg-bg: #edf3f9;
+        --action: #1c3d5e;
+        --action-hover: #2a5580;
+        --action-subtle: #e8eff6;
+        --action-border: #c0cfe0;
+        --nav-bg: #1a1714;
+        --nav-text: #e8e4dc;
+        --nav-active: #b86c1a;
+        --predict-accent: #1a706a;
+        --predict-bg: #eaf5f3;
+        --predict-border: #a8d9d4;
+        --conf-strong: #2d7a4a;
+        --conf-strong-bg: #e8f5ee;
+        --conf-moderate: #7a5e1a;
+        --conf-moderate-bg: #f5ecd8;
+        --conf-weak: #8a3a10;
+        --conf-weak-bg: #f5e4d8;
+        --conf-insufficient: #706a62;
+        --conf-insufficient-bg: #f0ede8;
+        --niche-accent: #6b4c8a;
+        --niche-bg: #f0eaf8;
+        --niche-border: #cbbfe4;
+        --danger: #b84040;
+        --danger-subtle: #fdf0f0;
+        --danger-border: #e8c0c0;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family:
+          Inter,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        background: var(--bg-base);
+        color: var(--text-primary);
+        font-size: 15px;
+        line-height: 1.5;
+        display: flex;
+        height: 100vh;
+        overflow: hidden;
+      }
+
+      /* ── Sidebar ── */
+      .sidebar {
+        width: 200px;
+        flex-shrink: 0;
+        background: var(--nav-bg);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      .sidebar-brand {
+        padding: 20px 20px 24px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .brand-name {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--nav-text);
+        letter-spacing: -0.01em;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .brand-sub {
+        font-size: 11px;
+        color: rgba(232, 228, 220, 0.4);
+        margin-top: 2px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      .nav-section {
+        padding: 16px 0;
+        flex: 1;
+      }
+
+      .nav-label {
+        font-size: 10px;
+        font-weight: 600;
+        color: rgba(232, 228, 220, 0.35);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        padding: 0 20px;
+        margin-bottom: 6px;
+        margin-top: 12px;
+      }
+
+      .nav-label:first-child {
+        margin-top: 0;
+      }
+
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 20px;
+        font-size: 13px;
+        color: rgba(232, 228, 220, 0.65);
+        cursor: pointer;
+        border-left: 3px solid transparent;
+        text-decoration: none;
+      }
+
+      .nav-item:hover {
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--nav-text);
+      }
+
+      .nav-item.active {
+        background: rgba(184, 108, 26, 0.12);
+        color: var(--nav-text);
+        border-left-color: var(--nav-active);
+        font-weight: 500;
+      }
+
+      .nav-icon {
+        width: 16px;
+        height: 16px;
+        opacity: 0.7;
+        flex-shrink: 0;
+      }
+      .nav-item.active .nav-icon {
+        opacity: 1;
+      }
+
+      /* Readiness widget */
+      .readiness-widget {
+        margin: 8px 12px 12px;
+        background: rgba(26, 112, 106, 0.12);
+        border: 1px solid rgba(26, 112, 106, 0.2);
+        border-radius: 6px;
+        padding: 10px 12px;
+        cursor: pointer;
+      }
+
+      .readiness-widget-label {
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: rgba(26, 112, 106, 0.9);
+        margin-bottom: 2px;
+      }
+
+      .readiness-widget-stage {
+        font-size: 12px;
+        font-weight: 600;
+        color: rgba(232, 228, 220, 0.9);
+        margin-bottom: 6px;
+      }
+
+      .readiness-progress {
+        height: 3px;
+        background: rgba(232, 228, 220, 0.12);
+        border-radius: 2px;
+        overflow: hidden;
+        margin-bottom: 4px;
+      }
+
+      .readiness-progress-fill {
+        height: 100%;
+        background: rgba(26, 112, 106, 0.7);
+        border-radius: 2px;
+      }
+
+      .readiness-widget-count {
+        font-size: 11px;
+        color: rgba(232, 228, 220, 0.4);
+      }
+
+      .sidebar-footer {
+        padding: 16px 20px;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        font-size: 11px;
+        color: rgba(232, 228, 220, 0.3);
+      }
+
+      /* ── Main ── */
+      .main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      .topbar {
+        height: 56px;
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        padding: 0 24px 0 32px;
+        gap: 12px;
+        flex-shrink: 0;
+      }
+
+      .topbar-title {
+        font-size: 16px;
+        font-weight: 600;
+        flex: 1;
+      }
+
+      .topbar-meta {
+        font-size: 13px;
+        color: var(--text-muted);
+      }
+
+      /* ── Buttons ── */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 7px 13px;
+        border-radius: 5px;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        font-family: inherit;
+        white-space: nowrap;
+      }
+
+      .btn-sm {
+        padding: 5px 10px;
+        font-size: 12px;
+      }
+      .btn-xs {
+        padding: 3px 8px;
+        font-size: 11px;
+      }
+
+      .btn-primary {
+        background: var(--action);
+        color: white;
+      }
+      .btn-primary:hover {
+        background: var(--action-hover);
+      }
+
+      .btn-ghost {
+        background: transparent;
+        border: 1px solid var(--border-strong);
+        color: var(--text-secondary);
+      }
+      .btn-ghost:hover {
+        background: var(--bg-subtle);
+      }
+
+      .btn-danger-ghost {
+        background: transparent;
+        border: 1px solid var(--danger-border);
+        color: var(--danger);
+      }
+      .btn-danger-ghost:hover {
+        background: var(--danger-subtle);
+      }
+
+      /* Sort widget */
+      .sort-widget {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        border: 1px solid var(--border-strong);
+        border-radius: 5px;
+        font-size: 13px;
+        cursor: pointer;
+        background: var(--bg-elevated);
+        color: var(--text-secondary);
+        font-family: inherit;
+      }
+
+      .sort-widget:hover {
+        border-color: var(--action);
+        color: var(--text-primary);
+      }
+
+      .sort-widget-label {
+        font-size: 11px;
+        color: var(--text-muted);
+        font-weight: 500;
+      }
+
+      /* ── Content ── */
+      .content {
+        flex: 1;
+        overflow-y: auto;
+      }
+
+      .wishlist-content {
+        max-width: 840px;
+        margin: 0 auto;
+        padding: 24px 32px 48px;
+      }
+
+      /* Empty state */
+      .empty-state {
+        text-align: center;
+        padding: 64px 32px;
+        color: var(--text-muted);
+      }
+
+      /* ── Wishlist entry card ── */
+      .wishlist-card {
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+        margin-bottom: 12px;
+        transition: border-color 0.1s;
+      }
+
+      .wishlist-card:hover {
+        border-color: var(--border-strong);
+      }
+
+      /* Card main row */
+      .wc-main {
+        display: flex;
+        align-items: flex-start;
+        padding: 16px;
+        gap: 14px;
+      }
+
+      .wc-thumb {
+        width: 60px;
+        height: 60px;
+        border-radius: 5px;
+        background: var(--border);
+        overflow: hidden;
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 26px;
+        border: 1px solid var(--border);
+      }
+
+      .wc-thumb img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .wc-info {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .wc-name {
+        font-size: 15px;
+        font-weight: 600;
+        margin-bottom: 2px;
+      }
+
+      .wc-year {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-bottom: 8px;
+      }
+
+      .wc-score-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .wc-score {
+        font-size: 24px;
+        font-weight: 700;
+        color: var(--predict-accent);
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.01em;
+        line-height: 1;
+      }
+
+      .wc-score-prefix {
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--predict-accent);
+        opacity: 0.7;
+      }
+
+      .wc-no-prediction {
+        font-size: 13px;
+        color: var(--text-muted);
+        font-style: italic;
+        padding: 2px 0;
+      }
+
+      .confidence-badge {
+        display: inline-block;
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        padding: 2px 7px;
+        border-radius: 3px;
+        line-height: 1.4;
+      }
+
+      .confidence-badge.strong {
+        background: var(--conf-strong-bg);
+        color: var(--conf-strong);
+      }
+      .confidence-badge.moderate {
+        background: var(--conf-moderate-bg);
+        color: var(--conf-moderate);
+      }
+      .confidence-badge.weak {
+        background: var(--conf-weak-bg);
+        color: var(--conf-weak);
+      }
+      .confidence-badge.insufficient {
+        background: var(--conf-insufficient-bg);
+        color: var(--conf-insufficient);
+      }
+
+      .wc-added {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-top: 4px;
+      }
+
+      /* Card actions column */
+      .wc-actions {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+
+      /* Card expansion area */
+      .wc-expand {
+        border-top: 1px solid var(--border);
+        background: var(--bg-subtle);
+      }
+
+      /* Expand toggle row */
+      .wc-expand-toggle {
+        display: flex;
+        align-items: center;
+        padding: 8px 16px;
+        gap: 8px;
+        cursor: pointer;
+        font-size: 12px;
+        color: var(--text-muted);
+        user-select: none;
+        border-bottom: 1px solid var(--border);
+        background: none;
+        width: 100%;
+        text-align: left;
+        font-family: inherit;
+        border-top: none;
+      }
+
+      .wc-expand-toggle:hover {
+        background: var(--border);
+        color: var(--text-secondary);
+      }
+
+      .wc-expand-caret {
+        font-size: 10px;
+        transition: transform 0.15s;
+      }
+
+      .wc-expand-caret.open {
+        transform: rotate(90deg);
+      }
+
+      /* Axis breakdown */
+      .wc-breakdown {
+        padding: 12px 16px;
+      }
+
+      .wc-breakdown-title {
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-muted);
+        margin-bottom: 8px;
+      }
+
+      .wc-breakdown-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 0;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .wc-breakdown-row:last-child {
+        border-bottom: none;
+      }
+
+      .wc-axis-name {
+        flex: 1;
+        font-size: 13px;
+        color: var(--text-secondary);
+      }
+
+      .wc-axis-rating {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--predict-accent);
+        font-variant-numeric: tabular-nums;
+        min-width: 28px;
+        text-align: right;
+      }
+
+      .conf-badge-sm {
+        display: inline-block;
+        font-size: 9px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: 1px 5px;
+        border-radius: 3px;
+        min-width: 60px;
+        text-align: center;
+      }
+
+      .conf-badge-sm.strong {
+        background: var(--conf-strong-bg);
+        color: var(--conf-strong);
+      }
+      .conf-badge-sm.moderate {
+        background: var(--conf-moderate-bg);
+        color: var(--conf-moderate);
+      }
+      .conf-badge-sm.weak {
+        background: var(--conf-weak-bg);
+        color: var(--conf-weak);
+      }
+
+      /* Niche impact */
+      .wc-niche {
+        padding: 0 16px 12px;
+      }
+
+      .wc-niche-inner {
+        padding: 10px 12px;
+        background: var(--niche-bg);
+        border: 1px solid var(--niche-border);
+        border-radius: 5px;
+      }
+
+      .wc-niche-title {
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        color: var(--niche-accent);
+        margin-bottom: 6px;
+      }
+
+      .niche-entry {
+        font-size: 12px;
+        color: var(--text-secondary);
+        padding: 2px 0;
+      }
+
+      .niche-type-badge {
+        display: inline-block;
+        font-size: 9px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: 1px 5px;
+        border-radius: 3px;
+        margin-right: 6px;
+        background: var(--niche-bg);
+        color: var(--niche-accent);
+        border: 1px solid var(--niche-border);
+      }
+
+      /* Stage 0 / no-prediction inset */
+      .wc-no-pred-panel {
+        padding: 12px 16px;
+        color: var(--text-muted);
+        font-size: 13px;
+        font-style: italic;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-name">
+          <svg width="22" height="18" viewBox="0 0 22 18" fill="none">
+            <rect x="0" y="6" width="5" height="12" rx="1" fill="#b86c1a" />
+            <rect x="7" y="0" width="5" height="18" rx="1" fill="#e8e4dc" />
+            <rect x="14" y="4" width="5" height="14" rx="1" fill="#e8e4dc" opacity="0.6" />
+          </svg>
+          Shelf Judge
+        </div>
+        <div class="brand-sub">Board Game Collection</div>
+      </div>
+
+      <nav class="nav-section">
+        <div class="nav-label">Overview</div>
+        <a class="nav-item" href="#">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path
+              d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 2a5 5 0 110 10A5 5 0 018 3zm0 2a3 3 0 100 6 3 3 0 000-6zm0 2a1 1 0 110 2 1 1 0 010-2z"
+            />
+          </svg>
+          Profile
+        </a>
+
+        <!-- Library group: Collection → Wishlist (active) → Add Games -->
+        <div class="nav-label">Library</div>
+        <a class="nav-item" href="#">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M2 2h12v12H2V2zm1 1v10h10V3H3zm2 2h6v1H5V5zm0 3h6v1H5V8zm0 3h4v1H5v-1z" />
+          </svg>
+          Collection
+        </a>
+        <!-- Wishlist — ACTIVE -->
+        <a class="nav-item active" href="#">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path
+              d="M3 2h10a1 1 0 011 1v11l-2-1.5L10 14l-2-1.5L6 14l-2-1.5L2 14V3a1 1 0 011-1zm1 3v1h8V5H4zm0 3v1h8V8H4zm0 3v1h5v-1H4z"
+            />
+          </svg>
+          Wishlist
+        </a>
+        <a class="nav-item" href="#">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path
+              d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 1a6 6 0 110 12A6 6 0 018 2zm0 3v2H6v1h2v2h1V8h2V7H9V5H8z"
+            />
+          </svg>
+          Add Games
+        </a>
+
+        <div class="nav-label">Ranking</div>
+        <a class="nav-item" href="#">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path
+              d="M4 2h8v1H4V2zm-2 2h12v1h-1.5l-1 3H12l-.5 1.5h-1L10 11H9l-.5 1.5h-1L7 11H6l-.5-1.5h-1L4 6.5H2.5L1.5 5H4V4zM5.5 5l1 3h3l1-3h-5zM6.5 12h3v1.5h-3V12z"
+            />
+          </svg>
+          Tournament
+        </a>
+
+        <div class="nav-label">Settings</div>
+        <a class="nav-item" href="#">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path
+              d="M1 3a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h8a1 1 0 010 2H2a1 1 0 01-1-1z"
+            />
+          </svg>
+          Axes
+        </a>
+        <a class="nav-item" href="#">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path
+              d="M14 3H2a1 1 0 00-1 1v8a1 1 0 001 1h12a1 1 0 001-1V4a1 1 0 00-1-1zM8 11l-4-3h2.5V7h3v1H12L8 11z"
+            />
+          </svg>
+          Import / BGG
+        </a>
+      </nav>
+
+      <!-- Readiness widget -->
+      <div class="readiness-widget">
+        <div class="readiness-widget-label">Predictions</div>
+        <div class="readiness-widget-stage">Stage 2 — Moderate</div>
+        <div class="readiness-progress">
+          <div class="readiness-progress-fill" style="width: 68%"></div>
+        </div>
+        <div class="readiness-widget-count">17 rated · 8 more for Stage 3</div>
+      </div>
+
+      <div class="sidebar-footer">Shelf Judge v0.1</div>
+    </aside>
+
+    <!-- Main -->
+    <div class="main">
+      <!-- Topbar: title, sort, refresh all -->
+      <div class="topbar">
+        <div class="topbar-title">Wishlist</div>
+        <span class="topbar-meta">4 games</span>
+
+        <!-- Sort widget: matches collection page pattern -->
+        <button class="sort-widget">
+          <span class="sort-widget-label">Sort</span>
+          Date Added
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor" style="opacity: 0.5">
+            <path d="M5 7L1 3h8L5 7z" />
+          </svg>
+        </button>
+
+        <!-- Refresh All -->
+        <button class="btn btn-ghost btn-sm">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M13.65 2.35A8 8 0 102 13.65M13.65 2.35V6h-3.6M2 13.65V10h3.6" />
+          </svg>
+          Refresh All
+        </button>
+      </div>
+
+      <!-- Content -->
+      <div class="content">
+        <div class="wishlist-content">
+          <!-- ═══════════════════════════════════════════════════════
+               ENTRY 1: Wingspan — ~7.8 score, strong confidence
+               Axis breakdown EXPANDED + niche impact
+               ══════════════════════════════════════════════════════ -->
+          <div class="wishlist-card">
+            <div class="wc-main">
+              <div class="wc-thumb">🐦</div>
+
+              <div class="wc-info">
+                <div class="wc-name">Wingspan</div>
+                <div class="wc-year">2019</div>
+                <div class="wc-score-row">
+                  <span class="wc-score-prefix">~</span>
+                  <span class="wc-score">7.8</span>
+                  <span class="confidence-badge strong">strong</span>
+                </div>
+                <div class="wc-added">Added Apr 10</div>
+              </div>
+
+              <div class="wc-actions">
+                <button class="btn btn-primary btn-sm">Add to Collection</button>
+                <button class="btn btn-ghost btn-sm">
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M13.65 2.35A8 8 0 102 13.65M13.65 2.35V6h-3.6M2 13.65V10h3.6" />
+                  </svg>
+                  Refresh
+                </button>
+                <button class="btn btn-danger-ghost btn-xs">Remove</button>
+              </div>
+            </div>
+
+            <!-- Expand toggle — OPEN state -->
+            <div class="wc-expand">
+              <button class="wc-expand-toggle">
+                <span class="wc-expand-caret open">▶</span>
+                <span>Per-axis breakdown</span>
+                <span style="color: var(--predict-accent); font-size: 11px; margin-left: 4px"
+                  >4 axes</span
+                >
+              </button>
+
+              <div class="wc-breakdown">
+                <div class="wc-breakdown-row">
+                  <span class="wc-axis-name">Wife Will Play It</span>
+                  <span class="wc-axis-rating">9.0</span>
+                  <span class="conf-badge-sm strong">strong</span>
+                </div>
+                <div class="wc-breakdown-row">
+                  <span class="wc-axis-name">Complexity Sweet Spot</span>
+                  <span class="wc-axis-rating">7.5</span>
+                  <span class="conf-badge-sm strong">strong</span>
+                </div>
+                <div class="wc-breakdown-row">
+                  <span class="wc-axis-name">Replayability</span>
+                  <span class="wc-axis-rating">8.0</span>
+                  <span class="conf-badge-sm moderate">moderate</span>
+                </div>
+                <div class="wc-breakdown-row">
+                  <span class="wc-axis-name">Player Count Fit</span>
+                  <span class="wc-axis-rating">7.0</span>
+                  <span class="conf-badge-sm moderate">moderate</span>
+                </div>
+              </div>
+
+              <!-- Niche impact -->
+              <div class="wc-niche">
+                <div class="wc-niche-inner">
+                  <div class="wc-niche-title">Niche Impact</div>
+                  <div class="niche-entry">
+                    <span class="niche-type-badge">mechanic</span>
+                    Would be your 1st <strong>Engine Building</strong> game — new niche
+                  </div>
+                  <div class="niche-entry">
+                    <span class="niche-type-badge">category</span>
+                    Would be your 2nd <strong>Nature / Animals</strong> game, ranked #1
+                  </div>
+                  <div
+                    class="niche-entry"
+                    style="
+                      margin-top: 4px;
+                      padding-top: 6px;
+                      border-top: 1px solid var(--niche-border);
+                      color: var(--niche-accent);
+                      font-size: 11px;
+                    "
+                  >
+                    Current best Nature / Animals: Spirit Island (8.2)
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ═══════════════════════════════════════════════════════
+               ENTRY 2: Everdell — ~6.4 score, moderate confidence
+               Axis breakdown COLLAPSED
+               ══════════════════════════════════════════════════════ -->
+          <div class="wishlist-card">
+            <div class="wc-main">
+              <div class="wc-thumb">🦊</div>
+
+              <div class="wc-info">
+                <div class="wc-name">Everdell</div>
+                <div class="wc-year">2018</div>
+                <div class="wc-score-row">
+                  <span class="wc-score-prefix">~</span>
+                  <span class="wc-score">6.4</span>
+                  <span class="confidence-badge moderate">moderate</span>
+                </div>
+                <div class="wc-added">Added Apr 9</div>
+              </div>
+
+              <div class="wc-actions">
+                <button class="btn btn-primary btn-sm">Add to Collection</button>
+                <button class="btn btn-ghost btn-sm">
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M13.65 2.35A8 8 0 102 13.65M13.65 2.35V6h-3.6M2 13.65V10h3.6" />
+                  </svg>
+                  Refresh
+                </button>
+                <button class="btn btn-danger-ghost btn-xs">Remove</button>
+              </div>
+            </div>
+
+            <!-- Expand toggle — CLOSED state -->
+            <div class="wc-expand">
+              <button class="wc-expand-toggle">
+                <span class="wc-expand-caret">▶</span>
+                <span>Per-axis breakdown</span>
+                <span style="color: var(--text-muted); font-size: 11px; margin-left: 4px"
+                  >4 axes</span
+                >
+              </button>
+            </div>
+          </div>
+
+          <!-- ═══════════════════════════════════════════════════════
+               ENTRY 3: Root — ~8.2 score, weak confidence
+               Shows weak confidence badge + niche impact collapsed
+               ══════════════════════════════════════════════════════ -->
+          <div class="wishlist-card">
+            <div class="wc-main">
+              <div class="wc-thumb">🐺</div>
+
+              <div class="wc-info">
+                <div class="wc-name">Root</div>
+                <div class="wc-year">2018</div>
+                <div class="wc-score-row">
+                  <span class="wc-score-prefix">~</span>
+                  <span class="wc-score" style="color: var(--predict-accent)">8.2</span>
+                  <span class="confidence-badge weak">weak</span>
+                </div>
+                <div class="wc-added">Added Apr 8</div>
+              </div>
+
+              <div class="wc-actions">
+                <button class="btn btn-primary btn-sm">Add to Collection</button>
+                <button class="btn btn-ghost btn-sm">
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M13.65 2.35A8 8 0 102 13.65M13.65 2.35V6h-3.6M2 13.65V10h3.6" />
+                  </svg>
+                  Refresh
+                </button>
+                <button class="btn btn-danger-ghost btn-xs">Remove</button>
+              </div>
+            </div>
+
+            <!-- Expand toggle — CLOSED -->
+            <div class="wc-expand">
+              <button class="wc-expand-toggle">
+                <span class="wc-expand-caret">▶</span>
+                <span>Per-axis breakdown</span>
+                <span style="color: var(--text-muted); font-size: 11px; margin-left: 4px"
+                  >3 axes</span
+                >
+              </button>
+            </div>
+          </div>
+
+          <!-- ═══════════════════════════════════════════════════════
+               ENTRY 4: Spirit Island — NULL prediction (Stage 0)
+               No score, no confidence, no breakdown
+               ══════════════════════════════════════════════════════ -->
+          <div class="wishlist-card">
+            <div class="wc-main">
+              <div class="wc-thumb">🌊</div>
+
+              <div class="wc-info">
+                <div class="wc-name">Spirit Island</div>
+                <div class="wc-year">2017</div>
+                <div class="wc-score-row">
+                  <span class="wc-no-prediction"
+                    >No prediction — not enough rated games at time of save</span
+                  >
+                </div>
+                <div class="wc-added">
+                  Added Apr 7 ·
+                  <a href="#" style="color: var(--action); font-size: 11px"
+                    >Refresh to check again</a
+                  >
+                </div>
+              </div>
+
+              <div class="wc-actions">
+                <button class="btn btn-primary btn-sm">Add to Collection</button>
+                <button class="btn btn-ghost btn-sm">
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M13.65 2.35A8 8 0 102 13.65M13.65 2.35V6h-3.6M2 13.65V10h3.6" />
+                  </svg>
+                  Refresh
+                </button>
+                <button class="btn btn-danger-ghost btn-xs">Remove</button>
+              </div>
+            </div>
+
+            <!-- No expand section: no breakdown available -->
+            <div class="wc-expand">
+              <div class="wc-no-pred-panel">
+                Prediction was unavailable at Stage 0. Click Refresh to run a new prediction with
+                your current collection.
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- /wishlist-content -->
+      </div>
+      <!-- /content -->
+    </div>
+    <!-- /main -->
+  </body>
+</html>

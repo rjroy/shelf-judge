@@ -58,6 +58,12 @@ export type {
   NichePosition,
   NicheImpactEntry,
   NicheImpact,
+  NicheTagFilter,
+  NicheSettings,
+  ComponentWeights,
+  RedundancyNeighbor,
+  RedundancyAdjustment,
+  RedundancySettings,
 } from "./types";
 
 export {

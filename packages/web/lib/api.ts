@@ -241,6 +241,56 @@ export async function listGamesWithPredictions(): Promise<GameWithScore[]> {
   return daemonJson("/api/games?includePredicted=true");
 }
 
+// Niche settings API functions
+
+import type { NicheSettings, NicheTagFilter } from "@shelf-judge/shared";
+
+export async function getNicheSettings(): Promise<NicheSettings> {
+  return daemonJson("/api/niches/settings");
+}
+
+export async function updateNicheSettings(patch: Partial<NicheSettings>): Promise<NicheSettings> {
+  return daemonJson("/api/niches/settings", {
+    method: "PATCH",
+    body: patch,
+  });
+}
+
+export async function ignoreNicheTag(tag: NicheTagFilter): Promise<NicheSettings> {
+  return daemonJson("/api/niches/settings/ignore", {
+    method: "POST",
+    body: tag,
+  });
+}
+
+export async function unignoreNicheTag(tag: NicheTagFilter): Promise<NicheSettings> {
+  return daemonJson("/api/niches/settings/ignore", {
+    method: "DELETE",
+    body: tag,
+  });
+}
+
+// Redundancy settings API functions
+
+import type {
+  RedundancySettings,
+  RedundancyAdjustment,
+  RedundancyNeighbor,
+} from "@shelf-judge/shared";
+
+export async function getRedundancySettings(): Promise<RedundancySettings> {
+  return daemonJson("/api/redundancy/settings");
+}
+
+export async function updateRedundancySettings(
+  patch: Partial<RedundancySettings>,
+): Promise<RedundancySettings> {
+  return daemonJson("/api/redundancy/settings", {
+    method: "PATCH",
+    body: patch,
+  });
+}
+
 // Re-export types for convenience
 export type {
   Game,
@@ -259,4 +309,9 @@ export type {
   NicheNeighbor,
   NicheImpact,
   NicheImpactEntry,
+  NicheSettings,
+  NicheTagFilter,
+  RedundancySettings,
+  RedundancyAdjustment,
+  RedundancyNeighbor,
 };

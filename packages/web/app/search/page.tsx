@@ -123,6 +123,36 @@ function PreviewPanel({ data }: { data: PredictedGameResponse }) {
       {data.nicheImpact && data.nicheImpact.wouldJoin.length > 0 && (
         <NicheImpactSection entries={data.nicheImpact.wouldJoin} />
       )}
+
+      {/* Redundancy preview (REQ-REDUN-36) */}
+      {data.redundancyPreview && (
+        <div className="preview-redundancy">
+          <div className="preview-redundancy-title">Redundancy</div>
+          <div className="preview-redundancy-score">
+            With redundancy: <strong>{data.redundancyPreview.adjustedScore.toFixed(1)}</strong>
+            {data.redundancyPreview.penalty > 0 && (
+              <span className="preview-redundancy-penalty">
+                {" "}
+                (-{data.redundancyPreview.penalty.toFixed(1)})
+              </span>
+            )}
+          </div>
+          {data.redundancyPreview.nicheNeighbors.length > 0 ? (
+            <div className="preview-redundancy-neighbors">
+              {data.redundancyPreview.nicheNeighbors.slice(0, 3).map((n) => (
+                <div key={n.gameId} className="preview-redundancy-neighbor">
+                  <span className="preview-redundancy-neighbor-name">{n.gameName}</span>
+                  <span className="preview-redundancy-neighbor-sim">
+                    {(n.similarity * 100).toFixed(0)}%
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="preview-redundancy-empty">No similar games in collection.</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -7,12 +7,16 @@ import type {
   TournamentData,
   ProfileData,
   PredictionSettings,
+  NicheSettings,
+  RedundancySettings,
 } from "@shelf-judge/shared";
 import { TournamentDataSchema } from "@shelf-judge/shared";
 import type { FileOps } from "./file-ops.js";
 import { getTempPath } from "./file-ops.js";
 import { migrateTournamentData } from "./tournament-migration.js";
 import { DEFAULT_PREDICTION_SETTINGS } from "./prediction-engine.js";
+import { DEFAULT_NICHE_SETTINGS } from "./niche-engine.js";
+import { DEFAULT_REDUNDANCY_SETTINGS } from "./redundancy-engine.js";
 
 export interface StorageService {
   loadCollection(): Promise<Collection>;
@@ -25,6 +29,10 @@ export interface StorageService {
   saveProfile(data: ProfileData): Promise<void>;
   loadPredictionSettings(): Promise<PredictionSettings>;
   savePredictionSettings(settings: PredictionSettings): Promise<void>;
+  loadNicheSettings(): Promise<NicheSettings>;
+  saveNicheSettings(settings: NicheSettings): Promise<void>;
+  loadRedundancySettings(): Promise<RedundancySettings>;
+  saveRedundancySettings(settings: RedundancySettings): Promise<void>;
 }
 
 export interface StorageServiceDeps {
@@ -186,6 +194,36 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
       const predictionSettingsPath = path.join(dataDir, "prediction-settings.json");
       await fileOps.mkdir(dataDir);
       await atomicWrite(predictionSettingsPath, JSON.stringify(settings, null, 2), fileOps);
+    },
+
+    async loadNicheSettings(): Promise<NicheSettings> {
+      const nicheSettingsPath = path.join(dataDir, "niche-settings.json");
+      const exists = await fileOps.exists(nicheSettingsPath);
+      if (!exists) return { ...DEFAULT_NICHE_SETTINGS };
+
+      const raw = await fileOps.readFile(nicheSettingsPath);
+      return JSON.parse(raw) as NicheSettings;
+    },
+
+    async saveNicheSettings(settings: NicheSettings): Promise<void> {
+      const nicheSettingsPath = path.join(dataDir, "niche-settings.json");
+      await fileOps.mkdir(dataDir);
+      await atomicWrite(nicheSettingsPath, JSON.stringify(settings, null, 2), fileOps);
+    },
+
+    async loadRedundancySettings(): Promise<RedundancySettings> {
+      const redundancySettingsPath = path.join(dataDir, "redundancy-settings.json");
+      const exists = await fileOps.exists(redundancySettingsPath);
+      if (!exists) return { ...DEFAULT_REDUNDANCY_SETTINGS };
+
+      const raw = await fileOps.readFile(redundancySettingsPath);
+      return JSON.parse(raw) as RedundancySettings;
+    },
+
+    async saveRedundancySettings(settings: RedundancySettings): Promise<void> {
+      const redundancySettingsPath = path.join(dataDir, "redundancy-settings.json");
+      await fileOps.mkdir(dataDir);
+      await atomicWrite(redundancySettingsPath, JSON.stringify(settings, null, 2), fileOps);
     },
   };
 }

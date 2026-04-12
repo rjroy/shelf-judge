@@ -362,6 +362,7 @@ export function computePredictedFitness(
         vetoedBy: vetoInfo,
         hypotheticalScore,
         predictionMeta,
+        redundancyAdjustment: null,
       }
     : {
         score: combinedCount > 0 ? score : 0,
@@ -372,6 +373,7 @@ export function computePredictedFitness(
         vetoedBy: null,
         hypotheticalScore: null,
         predictionMeta,
+        redundancyAdjustment: null,
       };
 
   return {
