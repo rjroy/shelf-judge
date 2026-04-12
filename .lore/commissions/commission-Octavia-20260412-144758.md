@@ -1,7 +1,7 @@
 ---
 title: "Commission: Plan: Previously Owned State"
 date: 2026-04-12
-status: dispatched
+status: failed
 tags: [commission]
 worker: Octavia
 workerDisplayTitle: "Guild Chronicler"
@@ -18,6 +18,9 @@ activity_timeline:
     reason: "Dispatched to worker"
     from: "pending"
     to: "dispatched"
+  - timestamp: 2026-04-12T21:48:06.656Z
+    event: status_failed
+    reason: "Session error: Claude Code returned an error result: You've hit your limit · resets 4pm (America/Los_Angeles)"
 current_progress: ""
 projectName: shelf-judge
 ---
