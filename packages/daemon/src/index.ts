@@ -8,6 +8,7 @@ import { createBggClient } from "./services/bgg-client.js";
 import { createTournamentService } from "./services/tournament-service.js";
 import { createProfileService } from "./services/profile-service.js";
 import { createPredictionService } from "./services/prediction-service.js";
+import { createNarrationService } from "./services/narration-service.js";
 import { createApp } from "./app.js";
 import { createLogger } from "./services/logger.js";
 
@@ -39,10 +40,13 @@ async function main() {
     onGameDeleted: (gameId) => tournamentService.onGameDeleted(gameId),
   });
 
+  const narrationService = createNarrationService({ gameService });
+
   const profileService = createProfileService({
     storageService,
     gameService,
     tournamentService,
+    narrationService,
   });
 
   const predictionService = createPredictionService({

@@ -1,7 +1,7 @@
 ---
 title: "Prediction Engine for Unrated Games"
-date: 2026-04-10
-status: implemented 
+date: 2026-04-11
+status: implemented
 tags: [spec, prediction, fitness, similarity, k-nn, confidence]
 modules: [daemon, shared, web, cli]
 related:
@@ -32,7 +32,9 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 
 - User views a game detail page for a game with missing personal axis ratings (owned or searched via BGG)
 - User requests predicted fitness for a game via CLI (`shelf-judge predict <game-id>`)
+- User previews predicted fitness for a BGG game before adding it, via search page preview panel or CLI (`shelf-judge predict bgg <bgg-id>`)
 - Collection list displays predicted scores alongside actual scores for partially-rated games
+- Sidebar readiness widget shows prediction stage on every page
 
 ## Requirements
 
@@ -75,17 +77,18 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 
 - REQ-PRED-12: Each predicted axis entry in the breakdown includes the reference games that contributed: game ID, game name, and similarity score. This is the explanation layer. The user can see "predicted 7.2 based on Azul (0.87, rated 8), Patchwork (0.81, rated 7), Kingdomino (0.79, rated 6)."
 
-- REQ-PRED-13: The overall predicted fitness result includes prediction metadata:
-  - Overall confidence (the lowest confidence level among all contributing predicted axes, or "actual" if no axes are predicted)
-  - Count of predicted axes vs. actual axes
-  - Count of reference games that informed any prediction
-  - Coverage percent: what fraction of total axis weight is covered by actual or strong-confidence data
+- REQ-PRED-13: The overall predicted fitness result includes prediction metadata (`PredictionMeta`):
+  - `readinessStage`: current prediction readiness stage (0-3)
+  - `confidence`: overall confidence (the lowest confidence level among all contributing predicted axes, or "actual" if no axes are predicted)
+  - `predictedAxisCount` and `actualAxisCount`
+  - `referenceGameCount`: count of distinct reference games that informed any prediction
+  - `coveragePercent`: fraction of total axis weight covered by actual or strong-confidence data
 
 - REQ-PRED-14: The UI always visually distinguishes predicted scores from actual scores. A predicted score is never presented identically to an actual score. The specific visual treatment is an implementation decision, but the distinction must be unambiguous.
 
 ### Tournament ELO as Prediction Prior
 
-- REQ-PRED-15: When computing k-NN similarity, reference games with stable tournament data (comparison count >= the configured `provisionalThreshold`, default 6) have their similarity scores weighted by a tournament stability factor. The factor is > 1.0 for stable games and 1.0 for provisional or unranked games. The exact multiplier is an implementation decision, but a reference game with stable tournament data must have a measurably higher effective similarity than the same game would with provisional or no tournament data.
+- REQ-PRED-15: When computing k-NN similarity, reference games with stable tournament data (comparison count >= the configured `provisionalThreshold`, default 6) have their similarity scores weighted by a tournament stability factor. Effective similarity = cosine similarity \* tournament stability, where stability is `1.0 + tournamentStabilityBoost` (default 0.2) for stable games and 1.0 for provisional or unranked games. The `tournamentStabilityBoost` is a configurable field in `PredictionSettings`.
 
 - REQ-PRED-16: After computing the predicted overall fitness score, the system checks whether the user has tournament-ranked games similar to the target. It computes the average `normalizedScore` (from `TournamentGameStatsDisplay`, already on the 1-10 scale) of the k nearest tournament-ranked neighbors. If this average differs from the predicted overall fitness score by more than 1.0 point, the system surfaces a "revealed preference tension" indicator showing: the predicted fitness score, the tournament-cluster average, and a plain-language note ("Your axis ratings predict 8.2 for games like this. In tournament matchups, similar games average 6.5."). Only neighbors with a non-null `normalizedScore` (5+ games ranked, game has comparisons) contribute.
 
@@ -96,38 +99,48 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 ### Cold Start and Prediction Readiness
 
 - REQ-PRED-19: The system reports prediction readiness as one of four stages based on the number of games with at least one personal axis rating:
-  - **Stage 0** (< 5 rated games): No personal-axis predictions. BGG-derived axes with curves still produce actual scores.
-  - **Stage 1** (5-14 rated games): Experimental predictions. Clients derive the "experimental" label from the readiness stage at render time; it is not a separate field on breakdown entries. All predicted scores at this stage are displayed with an experimental marker.
-  - **Stage 2** (15-29 rated games): Usable predictions. Experimental marker drops for strong-confidence predictions.
-  - **Stage 3** (30+ rated games): Reliable predictions. Strong-confidence predictions are expected to be common.
+  - **Stage 0** "Not Ready" (< 5 rated games): No personal-axis predictions. BGG-derived axes with curves still produce actual scores.
+  - **Stage 1** "Basic" (5-14 rated games): Basic predictions available. Confidence is limited by the small reference pool. All predictions carry confidence badges; no separate "experimental" marker.
+  - **Stage 2** "Moderate" (15-29 rated games): Moderate predictions. Most axes have enough reference data for useful estimates.
+  - **Stage 3** "Strong" (30+ rated games): Strong prediction confidence. Rich reference pool across rated axes.
 
-- REQ-PRED-20: The readiness response includes: current stage, rated game count, games needed for the next stage, axes with the fewest rated games (weak axes), and suggested actions. Suggested actions identify axes with the fewest contributing reference games and name the mechanic/category clusters that are underrepresented (e.g., "Rate a deck-building game to improve predictions for that mechanic cluster").
+  Stage labels ("Not Ready", "Basic", "Moderate", "Strong") are presentation-level. The daemon returns the numeric stage; clients render the labels.
 
-- REQ-PRED-21: The stage thresholds (5, 15, 30) are configurable in the daemon, not hardcoded as magic numbers. They can be adjusted as prediction quality is observed in practice.
+- REQ-PRED-20: The readiness response (`PredictionReadiness`) includes: `stage`, `ratedGameCount`, `nextStageAt` (the threshold for the next stage, not the count of games needed; clients compute the difference), `weakAxes` (personal axes with fewer than k rated games, each with `axisId`, `axisName`, `ratedCount`), and `suggestedActions` (plain-text strings). Suggested actions identify axes with the fewest contributing reference games and name the mechanic/category clusters that are underrepresented (e.g., "Rate a Deck Building game to improve predictions for that cluster (2/7 rated)").
+
+- REQ-PRED-21: All prediction parameters are configurable via `PredictionSettings`, persisted to `prediction-settings.json`. Settings include `stageThresholds` ([5, 15, 30] defaults), `defaultK` (5), `minSimilarityThreshold` (0.2), and `tournamentStabilityBoost` (0.2). A GET/PATCH API at `/predictions/settings` allows reading and updating settings at runtime.
 
 - REQ-PRED-22: At Stage 0, the prediction API still returns results for BGG-derived axes (actual confidence from curves). It does not return predicted personal axis ratings. The response clearly indicates that personal-axis prediction is not yet available and how many more rated games are needed.
 
 ### API
 
-- REQ-PRED-23: A new daemon endpoint accepts a game ID and returns the predicted fitness result for that game. The response uses the same `FitnessResult` structure as actual fitness, extended with `PredictionMeta` and per-axis `PredictionConfidence`. If the game already has full actual ratings on all axes, the response returns the actual fitness score with all confidence levels set to "actual."
+- REQ-PRED-23: `GET /predictions/:gameId` returns a `PredictedGameResponse` containing `{ game, score, tension, predictionUnavailable }`. The `score` field is a standard `FitnessResult` with `predictionMeta` and per-axis `predictionConfidence`/`referenceGames` populated. The `tension` field carries revealed preference tension when detected (null otherwise). The `predictionUnavailable` field is non-null at Stage 0, containing `{ reason: "stage-0", ratedGameCount, gamesNeeded }`. If the game has full actual ratings on all axes, the response returns the actual fitness score with `predictionMeta: null`.
 
-- REQ-PRED-24: The collection list endpoint gains an optional parameter to include predicted scores alongside actual scores. When enabled, games with missing ratings receive predicted scores. The response distinguishes predicted from actual at both the game level and the per-axis level.
+- REQ-PRED-23a: `GET /predictions/bgg/:bggId` accepts a BGG game ID and returns the same `PredictedGameResponse` shape. If the game already exists in the collection, it delegates to the standard prediction path. If not, the daemon fetches BGG data, creates a temporary non-persisted `Game` object (ID prefixed with `preview-`), encodes it against the collection's vocabulary and ranges, and runs prediction. This enables search-time preview without adding the game to the collection.
 
-- REQ-PRED-25: A prediction readiness endpoint returns the current `PredictionReadiness` object (stage, rated count, weak axes, suggested actions). This is a lightweight query, not a full prediction computation.
+- REQ-PRED-24: The existing `GET /games` endpoint gains an optional `?includePredicted=true` query parameter. When enabled, games with missing ratings receive predicted scores via the prediction service's `listGamesWithPredictions()` method. The response is `GameWithScore[]` with `FitnessResult` including `predictionMeta` where applicable.
+
+- REQ-PRED-25: `GET /predictions/readiness` returns the current `PredictionReadiness` object (stage, rated count, next stage threshold, weak axes, suggested actions). This is a lightweight query, not a full prediction computation.
+
+- REQ-PRED-25a: `GET /predictions/settings` returns the current `PredictionSettings`. `PATCH /predictions/settings` accepts a partial settings object and merges it with current settings. Both endpoints support runtime tuning of k, thresholds, similarity minimum, and tournament boost.
 
 ### Web UI
 
-- REQ-PRED-26: The game detail view shows predicted axis ratings inline with actual ratings, visually distinguished. Clicking a predicted rating shows the reference games and confidence level.
+- REQ-PRED-26: The game detail view shows predicted axis ratings inline with actual ratings, visually distinguished. The score breakdown table shows a "Predicted" source badge and per-axis confidence badges. Clicking a confidence badge expands an inline panel showing the reference games, their similarity scores, and an average similarity stat.
 
 - REQ-PRED-27: The collection list can be sorted by predicted fitness. Games with predicted scores sort among games with actual scores. The sort treats a predicted 7.5 the same as an actual 7.5 for ordering purposes, but the visual distinction (REQ-PRED-14) prevents confusion about which is which.
 
-- REQ-PRED-28: When revealed preference tension exists (REQ-PRED-16), the game detail view shows both the predicted fitness score and the tournament-cluster context. The display makes clear that the tournament signal is contextual, not a correction.
+- REQ-PRED-28: When revealed preference tension exists (REQ-PRED-16), the game detail view shows a "Revealed Preference Tension" panel below the score breakdown. The panel displays the axis prediction score, the tournament pattern score, the delta, and the plain-language note. The display makes clear that the tournament signal is contextual, not a correction.
 
-- REQ-PRED-29: The prediction readiness stage is visible somewhere in the UI (location is an implementation decision). At Stages 0 and 1, the display includes the suggested actions from REQ-PRED-20 to guide the user toward better predictions.
+- REQ-PRED-29: The prediction readiness stage is visible in two locations: (1) a compact readiness widget in the sidebar, showing stage number, label, a progress bar, rated count, and games to next stage, visible on every page; and (2) a dedicated `/readiness` page with a stage banner, stage timeline, axis coverage bars, and suggested actions. At all stages, the suggested actions from REQ-PRED-20 guide the user toward better predictions.
+
+- REQ-PRED-29a: The BGG search page (`/search`) shows an inline prediction preview panel when the user clicks a search result. The panel calls `GET /predictions/bgg/:bggId` and displays the predicted fitness score, confidence badge, per-axis breakdown with confidence indicators, and reference games. If the game is already in the collection, the panel links to the game detail page. If prediction is unavailable (Stage 0), the panel shows the BGG-derived score and a message about how many more rated games are needed.
 
 ### CLI
 
 - REQ-PRED-30: `shelf-judge predict <game-id>` displays the predicted fitness breakdown for a game. The output distinguishes predicted from actual axis ratings, shows confidence levels, and lists reference games for each predicted axis. Supports `--json` for structured output.
+
+- REQ-PRED-30a: `shelf-judge predict bgg <bgg-id>` displays the predicted fitness for a game by BGG ID, using the same preview mechanism as the search page (REQ-PRED-23a). If the game is already in the collection, it notes this. If prediction is unavailable (Stage 0), it shows the BGG-derived score and the games-needed count. Supports `--json`.
 
 - REQ-PRED-31: `shelf-judge predict readiness` displays the current prediction readiness stage, rated game count, weak axes, and suggested actions. Supports `--json`.
 
@@ -141,20 +154,28 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 
 - REQ-PRED-35: `FitnessResult` gains an optional `predictionMeta` field (`PredictionMeta | null`). Null for fully-actual results. The existing `ratedAxisCount` field counts axes with actual ratings only (personal or BGG-derived). In predicted results, `ratedAxisCount` may be 0 even when a valid predicted score exists. Clients that currently treat `ratedAxisCount == 0` as "unscored" must check `predictionMeta` before making that determination. The `predictionMeta.actualAxisCount + predictionMeta.predictedAxisCount` gives the full count of contributing axes.
 
+### Additional Types
+
+- REQ-PRED-35a: `PredictionSettings` is a new shared type: `{ stageThresholds: [number, number, number], defaultK: number, minSimilarityThreshold: number, tournamentStabilityBoost: number }`. Persisted to `prediction-settings.json` in the daemon data directory. Defaults are [5, 15, 30], 5, 0.2, 0.2 respectively.
+
+- REQ-PRED-35b: `PredictionUnavailable` is a new shared type: `{ reason: "stage-0", ratedGameCount: number, gamesNeeded: number }`. Returned in prediction responses at Stage 0 to communicate why personal-axis predictions are absent.
+
+- REQ-PRED-35c: `PredictedGameResponse` is a new shared type: `{ game: Game, score: FitnessResult, tension: RevealedPreferenceTension | null, predictionUnavailable: PredictionUnavailable | null }`. This is the response envelope for all prediction endpoints (REQ-PRED-23, REQ-PRED-23a).
+
 ### Data and Storage
 
-- REQ-PRED-36: Prediction does not introduce new persistent storage. Feature vectors are computed on demand from existing game and BGG data. Prediction results are not cached. The computation is local math over the existing collection, expected to be fast enough for collections up to several hundred games without caching.
+- REQ-PRED-36: Prediction results and feature vectors are computed on demand from existing game and BGG data. Prediction results are not cached. The computation is local math over the existing collection. One new persistent file is introduced: `prediction-settings.json` stores `PredictionSettings` (stage thresholds, k, similarity threshold, tournament boost). This follows the existing storage pattern and is necessary for settings to survive daemon restarts.
 
 - REQ-PRED-37: If prediction computation becomes a performance concern (measured, not assumed), the feature vector vocabulary and per-game vectors can be cached and invalidated when the collection changes. This is an optimization, not a requirement. Do not build caching infrastructure preemptively.
 
 ## Exit Points
 
-| Exit                      | Triggers When                                                         | Target                                                                      |
-| ------------------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| Collection profiling      | User wants taste profile inference from the same feature vectors      | **Implemented**: `.lore/specs/collection-profiling.md`, `profile-engine.ts` |
-| Redundancy scoring        | Feature vector overlap computation feeds mechanic/category redundancy | [STUB: redundancy-scoring]                                                  |
-| Prediction caching        | Computation becomes slow for large collections                        | [STUB: prediction-caching]                                                  |
-| Custom k/threshold tuning | User wants to adjust k, similarity thresholds, or stage boundaries    | [STUB: prediction-tuning]                                                   |
+| Exit                      | Triggers When                                                         | Target                                                                                                  |
+| ------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Collection profiling      | User wants taste profile inference from the same feature vectors      | **Implemented**: `.lore/specs/collection-profiling.md`, `profile-engine.ts`                             |
+| Redundancy scoring        | Feature vector overlap computation feeds mechanic/category redundancy | [STUB: redundancy-scoring]                                                                              |
+| Prediction caching        | Computation becomes slow for large collections                        | [STUB: prediction-caching]                                                                              |
+| Custom k/threshold tuning | User wants a UI for adjusting prediction settings                     | API-level tuning implemented (REQ-PRED-25a); a dedicated UI is deferred to [STUB: prediction-tuning-ui] |
 
 ## Success Criteria
 
@@ -170,7 +191,7 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 - [ ] Vetoes fire on BGG-derived axis values but not on predicted personal axis values
 - [ ] A reference game with stable tournament data has a higher effective similarity score than the same game would with provisional or no tournament data
 - [ ] Revealed preference tension is surfaced when predicted overall fitness and tournament cluster `normalizedScore` average differ by > 1.0, and not surfaced when they differ by <= 1.0
-- [ ] Prediction readiness stages gate output correctly: Stage 0 returns only BGG-derived actual scores, Stages 1-2 mark experimental, Stage 3 is unrestricted
+- [ ] Prediction readiness stages gate output correctly: Stage 0 returns only BGG-derived actual scores with `predictionUnavailable` populated, Stages 1+ include predicted personal axes with confidence badges
 - [ ] When stage thresholds are changed from defaults, the readiness stage reported matches the new thresholds
 - [ ] `PredictionMeta` correctly reports predicted vs. actual axis counts, reference game count, and coverage percent
 - [ ] Predicted fitness uses the same weighted average formula as actual fitness (verified against hand-calculated examples)
@@ -181,8 +202,10 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 - [ ] Add a game via BGG search that has not been rated on any personal axis. View its detail page and see predicted scores with confidence indicators and reference games listed.
 - [ ] Rate a game that previously had strong-confidence predictions on most axes. Compare the predicted score to the actual score. If the prediction is off by more than 3 points on most axes, flag as a calibration concern.
 - [ ] View the collection list with predicted scores enabled. Predicted and actual scores are visually distinct.
-- [ ] With tournament data: view a predicted game where the tournament cluster average diverges from the axis prediction. Both numbers are visible.
+- [ ] With tournament data: view a predicted game where the tournament cluster average diverges from the axis prediction. Both numbers are visible in the tension panel.
+- [ ] On the search page, click a BGG search result and see the prediction preview panel with score, confidence badge, and breakdown.
 - [ ] CLI: run `shelf-judge predict <id>` and verify the breakdown shows reference games, confidence levels, and the same score as the web UI.
+- [ ] CLI: run `shelf-judge predict bgg <bgg-id>` and verify preview prediction for a game not in the collection.
 - [ ] CLI: run `shelf-judge predict readiness` and verify the stage, weak axes, and suggested actions are correct.
 
 ## AI Validation
@@ -213,11 +236,11 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 
 ## Open Questions
 
-1. **k value tuning.** Starting at k=5. This may need adjustment based on how collection size and mechanic diversity affect prediction quality. The value should be easy to change (constant, not deeply embedded). Whether to expose it as a user setting is deferred to [STUB: prediction-tuning].
+1. ~~**k value tuning.**~~ **Resolved.** k=5 is the default. Now configurable at runtime via `PredictionSettings.defaultK` and the settings API (REQ-PRED-25a). No UI for tuning yet; deferred to [STUB: prediction-tuning-ui].
 
-2. **Minimum similarity threshold.** REQ-PRED-11 defines "insufficient" as including neighbors below 0.2 similarity. The right threshold depends on how the feature vectors behave in practice. If most games in a diverse collection have similarity > 0.3, then 0.2 is fine. If similarity scores cluster near 0.5, the threshold may need raising. Calibrate against the actual collection during implementation.
+2. ~~**Minimum similarity threshold.**~~ **Resolved.** Threshold is 0.2 default, configurable via `PredictionSettings.minSimilarityThreshold`. Can be adjusted at runtime through the settings API.
 
-3. **Feature vector performance.** REQ-PRED-36 says no caching preemptively. For a 100-game collection with ~50 unique mechanics and ~20 categories, the vector is ~75 dimensions per game and similarity computation is ~100 dot products per prediction. This should be sub-millisecond. If collection size grows significantly, revisit per [STUB: prediction-caching].
+3. **Feature vector performance.** No caching built. For a 100-game collection with ~50 unique mechanics and ~20 categories, the vector is ~75 dimensions per game and similarity computation is ~100 dot products per prediction. This should be sub-millisecond. If collection size grows significantly, revisit per [STUB: prediction-caching].
 
 ## Context
 
@@ -234,9 +257,21 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 - `.lore/specs/utility-curves.md` (curves make BGG-derived prediction exact)
 - `.lore/specs/tournament-ranking.md` (tournament data as prediction input)
 
-**Implementation artifacts (post-profiling):**
+**Implementation artifacts:**
 
-- `packages/daemon/src/services/feature-vector.ts` (shared feature vector module, already exists)
-- `packages/daemon/src/services/profile-engine.ts` (profiling consumer, reference for how to use feature-vector.ts)
-- `packages/shared/src/types.ts` (profile types already added: `ComponentDistances`, `CollectionProfile`, `CollectionOutlier`, `AxisDistribution`, etc.)
-- `packages/web/components/sidebar.tsx` (sidebar navigation structure with "Profile" at `/`)
+- `packages/daemon/src/services/feature-vector.ts` (shared feature vector module, built during profiling)
+- `packages/daemon/src/services/prediction-engine.ts` (pure-function prediction math: k-NN, confidence, readiness, tension)
+- `packages/daemon/src/services/prediction-service.ts` (service layer: context loading, DI wiring, BGG preview)
+- `packages/daemon/src/routes/prediction.ts` (HTTP routes for prediction, readiness, settings)
+- `packages/shared/src/types.ts` (prediction types: `PredictionConfidence`, `PredictionMeta`, `PredictionReadiness`, `PredictionSettings`, `PredictionUnavailable`, `PredictedGameResponse`, `RevealedPreferenceTension`, `ReferenceGame`)
+- `packages/web/app/games/[id]/page.tsx` (game detail with prediction display and tension panel)
+- `packages/web/app/search/page.tsx` (BGG search with prediction preview panel)
+- `packages/web/app/readiness/page.tsx` (dedicated readiness page)
+- `packages/web/app/collection/page.tsx` (collection list with predicted scores)
+- `packages/web/components/score-breakdown.tsx` (breakdown table with prediction confidence UI)
+- `packages/web/components/sidebar.tsx` (readiness widget)
+- `packages/cli/src/commands/predict.ts` (CLI predict, predict bgg, predict readiness)
+
+## Revision History
+
+- 2026-04-11: Back-propagated from implementation (PR #14). Stage labels changed from "Experimental/Usable/Reliable" to "Not Ready/Basic/Moderate/Strong". Added BGG preview prediction (REQ-PRED-23a, 29a, 30a), settings CRUD API (REQ-PRED-25a), PredictionUnavailable type (REQ-PRED-35b), PredictedGameResponse envelope (REQ-PRED-35c). Updated REQ-PRED-13 to include readinessStage field. Updated REQ-PRED-15 to document configurable tournamentStabilityBoost. Updated REQ-PRED-20 to reflect nextStageAt vs games-needed-count. Updated REQ-PRED-21 to document full PredictionSettings scope. Updated REQ-PRED-36 to acknowledge prediction-settings.json. Resolved open questions 1-2 (now runtime-configurable). Updated exit point for prediction tuning (API exists, UI deferred).

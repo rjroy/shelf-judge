@@ -1,7 +1,7 @@
 ---
 title: "Outlier Distance Metric Research"
 date: 2026-04-10
-status: complete
+status: archived
 tags: [research, outlier, distance-metric, profiling, similarity]
 related:
   - .lore/specs/collection-profiling.md
@@ -21,15 +21,15 @@ This research evaluates distance metrics and outlier detection approaches for th
 
 The feature vector per game combines several types:
 
-| Component | Type | Dimensionality | Sparsity | Scale |
-|-----------|------|---------------|----------|-------|
-| BGG mechanics | Binary flags | ~200 possible, 3-8 per game | Very sparse (~96-98% zeros) | 0/1 |
-| BGG categories | Binary flags | ~80 possible, 1-4 per game | Very sparse (~95-98% zeros) | 0/1 |
-| BGG weight | Continuous | 1 | Dense | 1.0-5.0 |
-| Community rating | Continuous | 1 | Dense | 1.0-10.0 |
-| Player count | Tuple | 2 (min, max) | Dense | 1-12+ |
-| Play time | Continuous | 1 | Dense | 5-480+ minutes |
-| Personal axis ratings | Continuous | N (user-defined, typically 3-8) | Sparse (not every game rated on every axis) | 1-10 |
+| Component             | Type         | Dimensionality                  | Sparsity                                    | Scale          |
+| --------------------- | ------------ | ------------------------------- | ------------------------------------------- | -------------- |
+| BGG mechanics         | Binary flags | ~200 possible, 3-8 per game     | Very sparse (~96-98% zeros)                 | 0/1            |
+| BGG categories        | Binary flags | ~80 possible, 1-4 per game      | Very sparse (~95-98% zeros)                 | 0/1            |
+| BGG weight            | Continuous   | 1                               | Dense                                       | 1.0-5.0        |
+| Community rating      | Continuous   | 1                               | Dense                                       | 1.0-10.0       |
+| Player count          | Tuple        | 2 (min, max)                    | Dense                                       | 1-12+          |
+| Play time             | Continuous   | 1                               | Dense                                       | 5-480+ minutes |
+| Personal axis ratings | Continuous   | N (user-defined, typically 3-8) | Sparse (not every game rated on every axis) | 1-10           |
 
 Total dimensionality: ~290+ features, dominated by sparse binary flags. Typical dataset: 100-400 games. The binary portion massively outnumbers the continuous portion in dimension count.
 
@@ -40,6 +40,7 @@ Total dimensionality: ~290+ features, dominated by sparse binary flags. Typical 
 **How it works:** L2 norm, `sqrt(sum((a_i - b_i)^2))`. Treats all dimensions equally.
 
 **For this data:**
+
 - On the sparse binary portion (mechanics/categories), Euclidean distance is dominated by shared zeros. Two games that lack the same 190 mechanics appear "close" even if they share nothing positive. This is the wrong signal: absence of a mechanic is not a meaningful similarity. Verified: this is a well-documented failure mode of Euclidean distance on sparse binary data ([IBM cosine similarity documentation](https://www.ibm.com/think/topics/cosine-similarity), [Quora discussion on curse of dimensionality](https://www.quora.com/Is-the-cosine-similarity-metric-slightly-less-cursed-by-the-curse-of-dimensionality-than-say-Euclidean-distance-when-computing-distance-between-two-high-dimensional-sparse-vectors-and-if-so-why)).
 - On the continuous portion (weight, rating, player count), Euclidean distance works well after normalization.
 - In high-dimensional spaces, Euclidean distances between points concentrate (all pairs become similarly distant), reducing discriminative power. With ~280 binary dimensions, this effect is significant ([Surpassing Cosine Similarity paper](https://arxiv.org/html/2407.08623v4)).
@@ -51,6 +52,7 @@ Total dimensionality: ~290+ features, dominated by sparse binary flags. Typical 
 **How it works:** Measures angle between vectors, `dot(a,b) / (||a|| * ||b||)`. Ignores magnitude, focuses on direction.
 
 **For this data:**
+
 - On sparse binary data, cosine similarity has an advantage: it only considers non-zero dimensions. Two games sharing 3 mechanics out of 200 possible yields a meaningful similarity score based on those 3 shared mechanics, not the 197 shared absences. This is the Otsuka-Ochiai coefficient when applied to binary data ([Wikipedia: Cosine similarity](https://en.wikipedia.org/wiki/Cosine_similarity)).
 - However, cosine similarity's discriminative power also diminishes in very high dimensions. As dimensionality increases, similarities between random vectors concentrate near a constant. With ~280 binary dimensions, this effect is present but less severe than for Euclidean distance because only non-zero elements participate.
 - On the continuous portion, cosine similarity measures proportional relationships rather than absolute differences. A game with BGG weight 2.0 and another with weight 4.0 would be considered "similar" if other continuous features maintain the same ratio. This is not the right semantic: for complexity, we care about absolute difference, not ratio.
@@ -63,6 +65,7 @@ Total dimensionality: ~290+ features, dominated by sparse binary flags. Typical 
 **How it works:** For binary vectors, `|A intersection B| / |A union B|`. Only considers presence, never absence.
 
 **For this data:**
+
 - Purpose-built for comparing sets. Measures what fraction of combined mechanics/categories are shared between two games. This captures exactly the right semantic: "how much do these games overlap in what they are, ignoring what they aren't?"
 - Well-established in recommendation systems for comparing item attributes ([Jaccard deep dive](https://www.numberanalytics.com/blog/jaccard-similarity-deep-dive), [Milvus metric types](https://milvus.io/docs/metric.md)).
 - Only applies to binary data. Cannot handle the continuous features directly.
@@ -76,6 +79,7 @@ Total dimensionality: ~290+ features, dominated by sparse binary flags. Typical 
 **How it works:** Computes a per-feature distance using the appropriate method for each feature type, then averages them. Continuous features use normalized Manhattan distance (`|a-b|/range`). Binary features use exact match (1 if same, 0 if different). Dichotomous features (like mechanics flags) use asymmetric matching: only scores 1 when both are present, treats shared absence as uninformative. All component distances are on [0,1] scale. Final distance is the mean across all features ([Gower distance explanation](https://crispinagar.github.io/blogs/gower-distance.html), [Wikipedia](https://en.wikipedia.org/wiki/Gower's_distance)).
 
 **For this data:**
+
 - Designed specifically for mixed-type feature vectors. Handles binary mechanics/categories and continuous weight/rating/player-count in a single metric without manual normalization schemes.
 - The asymmetric treatment of binary features (shared absence is ignored) solves the same problem cosine similarity addresses, but within a framework that also handles continuous features correctly.
 - Each feature contributes equally to the final distance by default. With ~280 binary features and ~5-10 continuous features, the binary portion would dominate unless weights are applied. This is configurable: Gower supports per-feature weights ([Modified Gower with weights](https://link.springer.com/article/10.1186/s12874-024-02427-8)).
@@ -90,6 +94,7 @@ Total dimensionality: ~290+ features, dominated by sparse binary flags. Typical 
 **How it works:** Euclidean distance weighted by the inverse covariance matrix. Accounts for feature correlations and different scales.
 
 **For this data:**
+
 - Requires inverting the covariance matrix, which is numerically unstable when dimensionality approaches or exceeds sample size. With ~290 features and 100-400 games, this is right at the danger zone. For a 100-game collection, the covariance matrix is singular and cannot be inverted ([Wikipedia: Mahalanobis distance](https://en.wikipedia.org/wiki/Mahalanobis_distance)).
 - Robust estimators (Minimum Covariance Determinant) help but are designed for continuous data, not mixed binary/continuous vectors ([Robust distance approach](https://pmc.ncbi.nlm.nih.gov/articles/PMC12035934/)).
 - Binary features violate the continuous-distribution assumptions underlying covariance estimation.
@@ -102,12 +107,14 @@ Total dimensionality: ~290+ features, dominated by sparse binary flags. Typical 
 **How it works:** Compute separate, type-appropriate distance measures for the binary and continuous portions, then combine them with explicit weights.
 
 Concretely:
+
 - **Binary portion:** Jaccard distance on mechanics/categories (optionally subdomains). Produces a [0,1] distance. Higher means less overlap.
 - **Continuous portion:** Normalized Manhattan or Euclidean distance on weight, rating, player count range, play time. Each feature normalized to [0,1] by range. Produces a [0,1] distance.
 - **Personal axes:** Normalized Manhattan distance on the subset of axes where both the game and the centroid have values. Produces a [0,1] distance (or excluded if no shared axes).
 - **Combination:** Weighted average of the three component distances, producing a final [0,1] distance.
 
 **For this data:**
+
 - Each component uses the metric best suited to its data type.
 - Weights are explicit and tunable (e.g., mechanics/categories: 0.4, continuous BGG attributes: 0.3, personal axes: 0.3).
 - Transparent: the per-component distances are individually meaningful and can be displayed in the UI ("this game is an outlier because: mechanics distance 0.85, complexity distance 0.12").
@@ -120,15 +127,15 @@ Concretely:
 
 These two are the viable options. The choice is a tradeoff:
 
-| Criterion | Gower | Composite |
-|-----------|-------|-----------|
-| Theoretical correctness | Single unified framework | Ad hoc but well-justified per component |
-| Implementation effort | Need correct asymmetric binary handling; `ml-distance` may not suffice | Simple arithmetic, no dependencies |
-| Transparency | Single number; component contributions are implicit | Per-component distances visible, useful for UI |
-| Weight control | Per-feature weights (280 binary features need grouping) | Per-group weights (mechanics, continuous, axes) |
-| Missing data | Built-in exclusion | Manual but straightforward |
-| Reuse by prediction engine | Feature vector is shared; distance metric may differ | Components reusable; Jaccard for k-NN, normalized distance for continuous |
-| Debuggability | Hard to explain why a game is an outlier | Easy: "mechanics distance is 0.85, that's the driver" |
+| Criterion                  | Gower                                                                  | Composite                                                                 |
+| -------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Theoretical correctness    | Single unified framework                                               | Ad hoc but well-justified per component                                   |
+| Implementation effort      | Need correct asymmetric binary handling; `ml-distance` may not suffice | Simple arithmetic, no dependencies                                        |
+| Transparency               | Single number; component contributions are implicit                    | Per-component distances visible, useful for UI                            |
+| Weight control             | Per-feature weights (280 binary features need grouping)                | Per-group weights (mechanics, continuous, axes)                           |
+| Missing data               | Built-in exclusion                                                     | Manual but straightforward                                                |
+| Reuse by prediction engine | Feature vector is shared; distance metric may differ                   | Components reusable; Jaccard for k-NN, normalized distance for continuous |
+| Debuggability              | Hard to explain why a game is an outlier                               | Easy: "mechanics distance is 0.85, that's the driver"                     |
 
 The composite approach has one structural advantage for this project: the prediction engine brainstorm (Proposal 2) already specifies cosine similarity for k-NN estimation over the same feature vectors. A composite metric with Jaccard for binary features and normalized distance for continuous features is more compatible with that future use than Gower, because the individual components can be reused or swapped without redesigning the whole metric.
 
@@ -139,6 +146,7 @@ The composite approach has one structural advantage for this project: the predic
 **How it works:** Compute the collection centroid (mean feature vector), measure each game's distance from it, flag games beyond a threshold (spec says 2 standard deviations).
 
 **For this data:**
+
 - For binary features, the "centroid" is the frequency vector: what fraction of the collection has each mechanic. A game's Jaccard distance from this centroid measures how well its mechanic set overlaps with the collection's common mechanics.
 - For continuous features, the centroid is the mean value. Straightforward.
 - Simple, interpretable, deterministic. No parameters to tune beyond the threshold.
@@ -152,6 +160,7 @@ The composite approach has one structural advantage for this project: the predic
 **How it works:** For each point, compute the ratio of its local density to the density of its k neighbors. Points with substantially lower density than their neighbors are outliers. This catches outliers relative to local clusters, not just the global centroid ([scikit-learn LOF docs](https://scikit-learn.org/stable/modules/generated/sklearn.neighbors.LocalOutlierFactor.html)).
 
 **For this data:**
+
 - Handles bimodal collections correctly: a heavy euro among heavy euros is not an outlier, even if the collection also has party games.
 - The LOF score is hard to interpret. A value of 1 means "similar density to neighbors." Values above 1 indicate lower density (more outlier-like), but there's no standard threshold. The spec's "2 standard deviations" framing doesn't map to LOF scores.
 - Requires a distance metric as input (any of the above would work).
@@ -166,6 +175,7 @@ The composite approach has one structural advantage for this project: the predic
 **How it works:** Builds random trees that partition the feature space. Points that are isolated in fewer splits are more likely outliers.
 
 **For this data:**
+
 - Handles mixed data poorly. Random splits on binary features (0/1) produce trivial partitions. The algorithm is designed for continuous features.
 - Good at detecting global outliers but weak on local outliers ([ResearchGate comparison](https://www.researchgate.net/publication/337204025_Outlier_detection_using_isolation_forest_and_local_outlier_factor)).
 - Randomized: different runs produce slightly different results. The spec requires deterministic profile computation (REQ-PROFILE-18 success criteria: "identical results on repeated calls with unchanged data").

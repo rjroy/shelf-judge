@@ -1,7 +1,7 @@
 ---
 title: CLI axis commands use names but daemon API expects UUIDs
 date: 2026-04-06
-status: open
+status: declined
 tags: [cli, integration, api-contract]
 modules: [cli, daemon-routes]
 ---

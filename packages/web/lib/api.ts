@@ -15,11 +15,19 @@ import type {
   ToleranceLevel,
   LeanDirection,
   VetoConfig,
+  NichePosition,
+  NicheEntry,
+  NicheNeighbor,
+  NicheImpact,
+  NicheImpactEntry,
 } from "@shelf-judge/shared";
 import { daemonRequest, daemonJson } from "./daemon";
 
-export async function listGames(): Promise<GameWithScore[]> {
-  return daemonJson("/api/games");
+export async function listGames(opts?: { includeNiches?: boolean }): Promise<GameWithScore[]> {
+  const params = new URLSearchParams();
+  if (opts?.includeNiches) params.set("includeNiches", "true");
+  const qs = params.toString();
+  return daemonJson(`/api/games${qs ? `?${qs}` : ""}`);
 }
 
 export async function getGame(id: string): Promise<GameWithScore> {
@@ -132,6 +140,10 @@ export async function getProfile(): Promise<CollectionProfile> {
   return daemonJson("/api/profile");
 }
 
+export async function generateNarration(): Promise<CollectionProfile> {
+  return daemonJson("/api/profile/narrate", { method: "POST" });
+}
+
 // Tournament API functions
 
 import type {
@@ -242,4 +254,9 @@ export type {
   ImportComplete,
   CollectionProfile,
   PredictionReadiness,
+  NichePosition,
+  NicheEntry,
+  NicheNeighbor,
+  NicheImpact,
+  NicheImpactEntry,
 };

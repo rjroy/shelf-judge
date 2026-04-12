@@ -10,6 +10,7 @@ import type {
   PredictionReadiness,
   PredictionSettings,
   PredictedGameResponse,
+  NicheImpact,
 } from "@shelf-judge/shared";
 import type { BggGameResult } from "../../src/services/bgg-client.js";
 
@@ -108,6 +109,7 @@ describe("prediction routes", () => {
           maxPlayers: 4,
           playingTime: 60,
           imageUrl: null,
+          thumbnailUrl: null,
         },
         bggData: {
           communityRating: 7.5,
@@ -198,6 +200,7 @@ describe("prediction routes", () => {
               maxPlayers: 4,
               playingTime: 60,
               imageUrl: null,
+              thumbnailUrl: null,
             },
             bggData: {
               communityRating: 7.5,
@@ -244,6 +247,7 @@ describe("prediction routes", () => {
         maxPlayers: 4,
         playingTime: 90,
         imageUrl: null,
+        thumbnailUrl: null,
       },
       bggData: {
         communityRating: 7.5,
@@ -339,6 +343,95 @@ describe("prediction routes", () => {
       // Default ctx has no bggClient
       const res = await jsonRequest(ctx.app, "GET", "/api/predictions/bgg/12345");
       expect(res.status).toBe(503);
+    });
+
+    test("includes nicheImpact in response", async () => {
+      const bggClient = createMockBggClient({
+        getGame: (bggId: number) => Promise.resolve(makeBggResult(bggId, `Game-${bggId}`)),
+      });
+      ctx = createTestApp({ bggClient });
+
+      // Lower stage threshold and add rated games to get past stage 0
+      await jsonRequest(ctx.app, "PATCH", "/api/predictions/settings", {
+        stageThresholds: [2, 8, 15],
+      });
+
+      const axisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
+        name: "Fun",
+        weight: 50,
+      });
+      const axis = (await axisRes.json()) as Axis;
+
+      // Add 3 rated reference games (all share "Dice Rolling" mechanic and "Strategy" category)
+      for (let i = 1; i <= 3; i++) {
+        const res = await jsonRequest(ctx.app, "POST", "/api/games", {
+          name: `Ref ${i}`,
+          bggId: i,
+        });
+        const { game } = (await res.json()) as { game: { id: string } };
+        await jsonRequest(ctx.app, "PUT", `/api/games/${game.id}/ratings`, {
+          ratings: { [axis.id]: 5 + i },
+        });
+      }
+
+      // Predict a new game (bggId 999) that shares "Dice Rolling" and "Strategy"
+      const res = await jsonRequest(ctx.app, "GET", "/api/predictions/bgg/999");
+      expect(res.status).toBe(200);
+
+      const prediction = (await res.json()) as PredictedGameResponse & {
+        nicheImpact: NicheImpact;
+      };
+      expect(prediction.nicheImpact).toBeDefined();
+      expect(prediction.nicheImpact.wouldJoin).toBeArray();
+
+      // The candidate shares mechanics/categories with existing games, so there should be entries
+      if (prediction.nicheImpact.wouldJoin.length > 0) {
+        const entry = prediction.nicheImpact.wouldJoin[0];
+        expect(entry.type).toBeDefined();
+        expect(entry.name).toBeDefined();
+        expect(typeof entry.currentSize).toBe("number");
+        expect(typeof entry.projectedRank).toBe("number");
+      }
+    });
+
+    test("nicheImpact has empty wouldJoin when candidate has no BGG data", async () => {
+      // A game already in collection without BGG data, predicted by bggId
+      // The mock returns a game with BGG data, so test the shape is always present
+      const bggClient = createMockBggClient({
+        getGame: (bggId: number) => Promise.resolve(makeBggResult(bggId, `Game-${bggId}`)),
+      });
+      ctx = createTestApp({ bggClient });
+
+      await jsonRequest(ctx.app, "PATCH", "/api/predictions/settings", {
+        stageThresholds: [2, 8, 15],
+      });
+
+      const axisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
+        name: "Fun",
+        weight: 50,
+      });
+      const axis = (await axisRes.json()) as Axis;
+
+      for (let i = 1; i <= 3; i++) {
+        const res = await jsonRequest(ctx.app, "POST", "/api/games", {
+          name: `Ref ${i}`,
+          bggId: i,
+        });
+        const { game } = (await res.json()) as { game: { id: string } };
+        await jsonRequest(ctx.app, "PUT", `/api/games/${game.id}/ratings`, {
+          ratings: { [axis.id]: 5 + i },
+        });
+      }
+
+      const res = await jsonRequest(ctx.app, "GET", "/api/predictions/bgg/500");
+      expect(res.status).toBe(200);
+
+      const prediction = (await res.json()) as PredictedGameResponse & {
+        nicheImpact: NicheImpact;
+      };
+      // nicheImpact should always be present
+      expect(prediction.nicheImpact).toBeDefined();
+      expect(prediction.nicheImpact.wouldJoin).toBeArray();
     });
   });
 

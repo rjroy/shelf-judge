@@ -1,7 +1,7 @@
 ---
 title: "LLM-mediated features"
 date: 2026-04-06
-status: open
+status: parked
 tags: [feature, llm, ai]
 modules: [daemon, web, cli]
 origin: .lore/specs/mvp.md

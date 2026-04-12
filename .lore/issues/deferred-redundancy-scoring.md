@@ -1,7 +1,7 @@
 ---
 title: "Redundancy / collection-awareness scoring"
 date: 2026-04-06
-status: approved 
+status: resolved 
 tags: [feature, fitness, scoring]
 modules: [daemon]
 origin: .lore/specs/mvp.md

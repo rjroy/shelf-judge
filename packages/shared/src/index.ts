@@ -41,6 +41,8 @@ export type {
   OutlierClassification,
   CollectionOutlier,
   AxisSuggestion,
+  ProfileNarration,
+  NarrationCacheState,
   CollectionProfile,
   ProfileData,
   PredictionConfidence,
@@ -51,6 +53,11 @@ export type {
   PredictionSettings,
   PredictionUnavailable,
   PredictedGameResponse,
+  NicheNeighbor,
+  NicheEntry,
+  NichePosition,
+  NicheImpactEntry,
+  NicheImpact,
 } from "./types";
 
 export {
@@ -69,6 +76,20 @@ export {
 export { toErrorMessage, ValidationError, NotFoundError } from "./errors";
 
 export { matchesBggTag, normalizeBggTagTokens } from "./bgg-tag-match";
+
+export { resolveBggRawValue, resolveAxisValues } from "./axis-utils";
+
+export {
+  K_FLEXIBLE,
+  K_MODERATE,
+  K_STRICT,
+  LEAN_GENTLE_MULTIPLIER,
+  LEAN_STEEP_MULTIPLIER,
+  getNativeScale,
+  calibrateTolerance,
+  applyLean,
+  applyPreferenceCurve,
+} from "./curve-math";
 
 export type {
   CreateAxisInput,

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { DivergentGame } from "@shelf-judge/shared";
 
 export function Divergence({ games }: { games: DivergentGame[] }) {
@@ -14,7 +15,11 @@ export function Divergence({ games }: { games: DivergentGame[] }) {
       <div className="section-body">
         {games.map((game) => (
           <div key={game.gameId} className="divergence-row">
-            <div className="div-game-name">{game.gameName}</div>
+            <div className="div-game-name">
+              <Link href={`/games/${game.gameId}`} className="game-link">
+                {game.gameName}
+              </Link>
+            </div>
             <div className="div-scores">
               <div className="div-score">
                 <span className="div-score-val fitness">{game.fitnessScore.toFixed(1)}</span>

@@ -6,7 +6,7 @@ tags: [spec, web-ui, filtering, sorting, ux, collection]
 modules: [web-ui]
 related:
   - .lore/brainstorms/collection-filter-sort.md
-  - .lore/art/mockup-collection-filter-sort.html
+  - .lore/mockups/mockup-collection-filter-sort.html
   - .lore/designs/mvp-web-ui.md
   - .lore/designs/mvp-data-model.md
   - .lore/specs/mvp.md
@@ -190,7 +190,7 @@ These can be added incrementally by extending the filter panel. The architecture
 
 ## Visual Reference
 
-Sienna's mockup at `.lore/art/mockup-collection-filter-sort.html` shows three panels:
+Sienna's mockup at `.lore/mockups/mockup-collection-filter-sort.html` shows three panels:
 
 1. **Desktop: full filter/sort state.** Sort dropdown expanded with four groups (Score, Identity, Specs, Your Axes). Filter bar with search input and expanded panel (rated status, player count range). Active filter chips row. Stats strip shows filtered count. Score column header: "Score" with sort arrow and subtitle.
 

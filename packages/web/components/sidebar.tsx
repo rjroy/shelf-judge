@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { PredictionReadiness } from "@shelf-judge/shared";
+import { useTheme } from "./theme-provider";
+import type { Theme } from "@/lib/theme";
 
 const STAGE_LABELS: Record<number, string> = {
   0: "Not Ready",
@@ -48,15 +50,6 @@ const navGroups = [
           </svg>
         ),
       },
-      {
-        href: "/axes",
-        name: "Axes",
-        icon: (
-          <svg className="nav-icon" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M1 3a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h8a1 1 0 010 2H2a1 1 0 01-1-1z" />
-          </svg>
-        ),
-      },
     ],
   },
   {
@@ -74,22 +67,17 @@ const navGroups = [
     ],
   },
   {
-    label: "Predictions",
+    label: "Settings",
     items: [
       {
-        href: "/readiness",
-        name: "Readiness",
+        href: "/axes",
+        name: "Axes",
         icon: (
           <svg className="nav-icon" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 2a5 5 0 110 10A5 5 0 018 3zm0 1.5a3.5 3.5 0 100 7 3.5 3.5 0 000-7zm0 1.5a2 2 0 110 4 2 2 0 010-4z" />
+            <path d="M1 3a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 010 2H2a1 1 0 01-1-1zm0 5a1 1 0 011-1h8a1 1 0 010 2H2a1 1 0 01-1-1z" />
           </svg>
         ),
       },
-    ],
-  },
-  {
-    label: "Settings",
-    items: [
       {
         href: "/import",
         name: "Import / BGG",
@@ -103,6 +91,60 @@ const navGroups = [
   },
 ];
 
+const THEME_CYCLE: Theme[] = ["light", "dark", "system"];
+const THEME_LABELS: Record<Theme, string> = { light: "Light", dark: "Dark", system: "System" };
+
+function SunIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41M8 4.5a3.5 3.5 0 100 7 3.5 3.5 0 000-7z" />
+    </svg>
+  );
+}
+
+function MoonIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M6.2 1A7 7 0 0015 9.8 5.5 5.5 0 016.2 1z" />
+    </svg>
+  );
+}
+
+function MonitorIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M2 3h12a1 1 0 011 1v7a1 1 0 01-1 1H2a1 1 0 01-1-1V4a1 1 0 011-1zm0 1v7h12V4H2zm4 9h4v1H6v-1z" />
+    </svg>
+  );
+}
+
+function ThemeToggle({ variant }: { variant: "sidebar" | "mobile" }) {
+  const { theme, setTheme } = useTheme();
+
+  const cycle = () => {
+    const idx = THEME_CYCLE.indexOf(theme);
+    setTheme(THEME_CYCLE[(idx + 1) % THEME_CYCLE.length]);
+  };
+
+  const icon = theme === "light" ? <SunIcon /> : theme === "dark" ? <MoonIcon /> : <MonitorIcon />;
+  const className =
+    variant === "sidebar"
+      ? "theme-toggle theme-toggle-sidebar"
+      : "theme-toggle theme-toggle-mobile";
+
+  return (
+    <button
+      className={className}
+      onClick={cycle}
+      aria-label={`Theme: ${THEME_LABELS[theme]}`}
+      title={`Theme: ${THEME_LABELS[theme]}`}
+    >
+      {icon}
+      {variant === "sidebar" && <span className="theme-toggle-label">{THEME_LABELS[theme]}</span>}
+    </button>
+  );
+}
+
 function isActive(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";
   return pathname === href || pathname.startsWith(href + "/");
@@ -110,8 +152,8 @@ function isActive(pathname: string, href: string): boolean {
 
 const SidebarContext = createContext<{ open: boolean; toggle: () => void; close: () => void }>({
   open: false,
-  toggle: () => {},
-  close: () => {},
+  toggle: () => { },
+  close: () => { },
 });
 
 export function useSidebar() {
@@ -203,9 +245,9 @@ export function Sidebar() {
             fill="none"
             xmlns="http://www.w3.org/2000/svg"
           >
-            <rect x="0" y="6" width="5" height="12" rx="1" fill="#b86c1a" />
-            <rect x="7" y="0" width="5" height="18" rx="1" fill="#e8e4dc" />
-            <rect x="14" y="4" width="5" height="14" rx="1" fill="#e8e4dc" opacity="0.6" />
+            <rect x="0" y="6" width="5" height="12" rx="1" fill="var(--nav-active)" />
+            <rect x="7" y="0" width="5" height="18" rx="1" fill="var(--nav-text)" />
+            <rect x="14" y="4" width="5" height="14" rx="1" fill="var(--nav-text)" opacity="0.6" />
           </svg>
           <span className="brand-name">Shelf Judge</span>
         </div>
@@ -254,7 +296,10 @@ export function Sidebar() {
         </Link>
       )}
 
-      <div className="sidebar-footer">Shelf Judge v0.1</div>
+      <div className="sidebar-footer">
+        <span>Shelf Judge v0.1</span>
+        <ThemeToggle variant="sidebar" />
+      </div>
     </aside>
   );
 }
@@ -270,6 +315,7 @@ export function MobileHeader() {
         </svg>
       </button>
       <span className="topbar-brand">Shelf Judge</span>
+      <ThemeToggle variant="mobile" />
     </div>
   );
 }

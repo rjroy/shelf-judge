@@ -1,7 +1,7 @@
 ---
 title: "axes/page.tsx has a local Axis type"
 date: 2026-04-10
-status: open
+status: resolved
 tags: [debt, duplication, types]
 modules: [web]
 related: [.lore/retros/commission-cleanup-2026-04-10.md]

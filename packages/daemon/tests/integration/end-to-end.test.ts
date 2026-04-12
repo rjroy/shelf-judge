@@ -64,6 +64,7 @@ const wingspanBgg: BggGameResult = {
     maxPlayers: 5,
     playingTime: 70,
     imageUrl: "https://example.com/wingspan.jpg",
+    thumbnailUrl: null,
   },
   bggData: {
     communityRating: 8.1,
@@ -89,6 +90,7 @@ const gloomhavenBgg: BggGameResult = {
     maxPlayers: 4,
     playingTime: 120,
     imageUrl: "https://example.com/gloomhaven.jpg",
+    thumbnailUrl: null,
   },
   bggData: {
     communityRating: 8.7,

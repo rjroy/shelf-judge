@@ -18,6 +18,7 @@ import type {
   UtilityCurveDeclaration,
   WeightRangeCluster,
 } from "@shelf-judge/shared";
+import { resolveAxisValues } from "@shelf-judge/shared";
 
 import { getNativeScale } from "./curve-engine.js";
 import {
@@ -46,7 +47,9 @@ const WEIGHT_RANGES: { range: string; min: number; max: number }[] = [
 /**
  * Main entry point. Computes a full collection profile from input data.
  */
-export function computeProfile(input: ProfileInput): Omit<CollectionProfile, "computedAt"> {
+export function computeProfile(
+  input: ProfileInput,
+): Omit<CollectionProfile, "computedAt" | "narration" | "narrationState"> {
   const { games, axes, fitnessResults, tournamentStats } = input;
 
   const axisDistributions = computeAxisDistributions(games, axes);
@@ -81,7 +84,8 @@ export function computeAxisDistributions(games: Game[], axes: Axis[]): AxisDistr
   return axes.map((axis) => {
     const ratings: number[] = [];
     for (const game of games) {
-      const r = game.ratings[axis.id];
+      const resolved = resolveAxisValues(game, [axis]);
+      const r = resolved[axis.id];
       if (r != null) ratings.push(r);
     }
 
@@ -284,15 +288,16 @@ export function detectOutliers(
   const vocabulary = buildVocabulary(gamesWithBgg);
   const ranges = computeContinuousRanges(gamesWithBgg);
 
-  // Build axis ratings map for encoding
-  const axisIds = axes.reduce<Record<string, number>>((acc, a) => {
-    acc[a.id] = 1; // value doesn't matter, just need the keys
-    return acc;
-  }, {});
-
-  const vectors = gamesWithBgg.map((game) =>
-    encodeGame(game, vocabulary, Object.keys(axisIds).length > 0 ? axisIds : undefined, ranges),
-  );
+  const vectors = gamesWithBgg.map((game) => {
+    const resolved = resolveAxisValues(game, axes);
+    return encodeGame(
+      game,
+      vocabulary,
+      Object.keys(resolved).length > 0 ? resolved : undefined,
+      ranges,
+      axes,
+    );
+  });
   const centroid = computeCentroid(vectors);
 
   // Compute distances from centroid

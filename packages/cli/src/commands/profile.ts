@@ -12,3 +12,16 @@ export async function profileCommand(
   // Profile is complex nested data; always render as JSON regardless of opts.json.
   return printOutput(profile, { ...opts, json: true });
 }
+
+export async function profileNarrateCommand(
+  client: DaemonClient,
+  _args: string[],
+  opts: OutputOptions,
+): Promise<string> {
+  const res = await client.generateNarration();
+  if (!res.ok) {
+    const errorData = res.data as { error?: string };
+    throw new Error(errorData.error ?? `Narration failed: ${res.status}`);
+  }
+  return printOutput(res.data, { ...opts, json: true });
+}

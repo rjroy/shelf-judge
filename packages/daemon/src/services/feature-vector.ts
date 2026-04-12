@@ -2,7 +2,8 @@
 // Implements REQ-PROFILE-11 (composite distance), REQ-PRED-4 (shared module).
 // Follows the elo-engine.ts and curve-engine.ts pattern.
 
-import type { ComponentDistances, Game } from "@shelf-judge/shared";
+import type { Axis, ComponentDistances, Game } from "@shelf-judge/shared";
+import { getNativeScale } from "@shelf-judge/shared";
 
 export interface Vocabulary {
   mechanics: string[];
@@ -111,6 +112,7 @@ export function encodeGame(
   vocabulary: Vocabulary,
   axisRatings?: Record<string, number>,
   ranges?: ContinuousRanges,
+  axes?: Axis[],
 ): FeatureVector {
   const allTerms = [...vocabulary.mechanics, ...vocabulary.categories];
   const gameTerms = new Set<string>();
@@ -148,14 +150,26 @@ export function encodeGame(
     continuous[i] = Math.max(0, Math.min(1, continuous[i]));
   }
 
+  // Personal axes: when `axes` is provided, iterate over the axis list so every
+  // game in the same profile produces a fixed-dimension vector (slot i = axes[i]).
+  // This matters for centroid/pairwise distance math: mismatched dimensions produce
+  // NaN distances which serialize to JSON `null`. When `axes` is absent, fall back
+  // to the legacy keyset-driven shape for call sites that don't know the axis list.
   let personalAxes: number[] | null = null;
-  if (axisRatings) {
+  if (axes && axes.length > 0) {
+    personalAxes = axes.map((axis) => {
+      const rating = axisRatings?.[axis.id];
+      if (rating == null) return 0.5;
+      const scale = getNativeScale(axis.source, axis.bggField);
+      return normalize(rating, scale.min, scale.max);
+    });
+  } else if (axisRatings) {
     const axisIds = Object.keys(axisRatings).sort();
     if (axisIds.length > 0) {
       personalAxes = axisIds.map((id) => {
-        const rating = game.ratings[id];
-        // Normalize 1-10 rating to 0-1. Unrated axes get midpoint (0.5).
-        return rating != null ? normalize(rating, 1, 10) : 0.5;
+        const rating = axisRatings[id];
+        if (rating == null) return 0.5;
+        return normalize(rating, 1, 10);
       });
     }
   }
@@ -170,6 +184,11 @@ export function encodeGame(
  * When both vectors are all zeros, returns 0 (no distance).
  */
 export function jaccardDistance(a: number[], b: number[]): number {
+  if (a.length !== b.length) {
+    throw new Error(
+      `jaccardDistance: dimension mismatch (a.length=${a.length}, b.length=${b.length})`,
+    );
+  }
   let minSum = 0;
   let maxSum = 0;
 
@@ -186,8 +205,15 @@ export function jaccardDistance(a: number[], b: number[]): number {
  * Normalized Manhattan distance: sum(|a_i - b_i|) / n.
  * Each element is already [0,1] from encoding, so result is [0,1].
  * Returns 0 when vectors are empty.
+ * Throws on dimension mismatch: iterating off the end of `b` silently produces
+ * NaN distances (NaN → null in JSON), which has bitten the profile outlier path.
  */
 export function normalizedManhattanDistance(a: number[], b: number[]): number {
+  if (a.length !== b.length) {
+    throw new Error(
+      `normalizedManhattanDistance: dimension mismatch (a.length=${a.length}, b.length=${b.length})`,
+    );
+  }
   if (a.length === 0) return 0;
 
   let sum = 0;

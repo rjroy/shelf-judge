@@ -6,12 +6,14 @@ import type {
   PredictedGameResponse,
   FitnessBreakdownEntry,
   PredictionConfidence,
+  NicheImpactEntry,
 } from "@shelf-judge/shared";
 
 interface BggSearchResult {
   bggId: number;
   name: string;
   yearPublished: number | null;
+  thumbnailUrl: string | null;
 }
 
 type PreviewState =
@@ -116,6 +118,52 @@ function PreviewPanel({ data }: { data: PredictedGameResponse }) {
             ))}
         </div>
       )}
+
+      {/* Niche Impact section (REQ-NICHE-26, REQ-NICHE-27) */}
+      {data.nicheImpact && data.nicheImpact.wouldJoin.length > 0 && (
+        <NicheImpactSection entries={data.nicheImpact.wouldJoin} />
+      )}
+    </div>
+  );
+}
+
+function ordinal(n: number): string {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
+function NicheImpactSection({ entries }: { entries: NicheImpactEntry[] }) {
+  return (
+    <div className="preview-niche-impact">
+      <div className="preview-niche-impact-title">Niche Impact</div>
+      {entries.map((entry) => (
+        <div key={`${entry.type}:${entry.name}`} className="preview-niche-entry">
+          <span className={`niche-type-badge niche-type-${entry.type}`}>{entry.type}</span>
+          <span className="preview-niche-text">
+            {entry.currentSize === 0 ? (
+              <>
+                Would be your 1st <strong>{entry.name}</strong> game
+              </>
+            ) : entry.projectedRank === 1 ? (
+              <>
+                Would be your best <strong>{entry.name}</strong> game
+              </>
+            ) : (
+              <>
+                Would be your {ordinal(entry.currentSize + 1)} <strong>{entry.name}</strong> game,
+                ranked #{entry.projectedRank}
+              </>
+            )}
+          </span>
+          {entry.currentChampion && (
+            <span className="preview-niche-champion">
+              Current best: {entry.currentChampion.gameName} (
+              {entry.currentChampion.fitnessScore.toFixed(1)})
+            </span>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -290,6 +338,13 @@ export default function SearchPage() {
                 return (
                   <div key={r.bggId} className="search-result-item">
                     <div className="search-result-row">
+                      <div className="search-result-thumb">
+                        {r.thumbnailUrl ? (
+                          <img src={r.thumbnailUrl} alt={r.name} />
+                        ) : (
+                          <span className="search-result-thumb-placeholder"></span>
+                        )}
+                      </div>
                       <div className="search-result-info">
                         <div className="search-result-name">{r.name}</div>
                         {r.yearPublished && (

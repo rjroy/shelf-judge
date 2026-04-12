@@ -1,29 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import type {
-  PreferenceShape,
-  ToleranceLevel,
-  LeanDirection,
-  VetoConfig,
-} from "@shelf-judge/shared";
-import { getNativeScale, applyPreferenceCurve } from "@/lib/curve-math";
-
-interface Axis {
-  id: string;
-  name: string;
-  description: string | null;
-  weight: number;
-  source: "personal" | "bgg";
-  bggField: string | null;
-  preferenceShape?: PreferenceShape;
-  idealValue?: number | null;
-  tolerance?: ToleranceLevel;
-  leanDirection?: LeanDirection | null;
-  veto?: VetoConfig | null;
-  createdAt: string;
-  updatedAt: string;
-}
+import type { Axis, PreferenceShape, ToleranceLevel, LeanDirection } from "@shelf-judge/shared";
+import { getNativeScale, applyPreferenceCurve } from "@shelf-judge/shared";
 
 interface GameWithScore {
   game: {

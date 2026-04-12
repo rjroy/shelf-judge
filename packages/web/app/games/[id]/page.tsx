@@ -7,6 +7,9 @@ import type {
   CollectionOutlier,
   FitnessResult,
   RevealedPreferenceTension,
+  NichePosition,
+  NicheEntry,
+  NicheNeighbor,
 } from "@shelf-judge/shared";
 import { ScoreBreakdown } from "@/components/score-breakdown";
 import { RatingForm } from "@/components/rating-form";
@@ -72,7 +75,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
     );
   }
 
-  const { game, score } = data;
+  const { game, score, nichePosition } = data;
   // Use predicted score when the game has no actual score but has predictions
   const displayScore = score ?? prediction?.score ?? null;
   const hasPredictions =
@@ -350,7 +353,10 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
                   <div key={i} className={`tournament-recent-row ${c.won ? "win" : "loss"}`}>
                     <span className="tournament-result-badge">{c.won ? "W" : "L"}</span>
                     <span className="tournament-opponent-id">
-                      vs {c.opponentGameName ?? c.opponentGameId.slice(0, 8)}
+                      vs{" "}
+                      <Link href={`/games/${c.opponentGameId}`} className="game-link">
+                        {c.opponentGameName ?? c.opponentGameId.slice(0, 8)}
+                      </Link>
                     </span>
                     <span className="tournament-recent-date">
                       {new Date(c.createdAt).toLocaleDateString()}
@@ -360,6 +366,19 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
               </div>
             )}
           </div>
+        )}
+
+        {/* Niche Position panel (REQ-NICHE-18, REQ-NICHE-19) */}
+        {displayScore?.vetoed ? (
+          <div className="niche-panel">
+            <div className="panel-section-title">Niche Position</div>
+            <div className="niche-vetoed-note">
+              This game is vetoed and excluded from niche rankings.
+            </div>
+          </div>
+        ) : (
+          nichePosition &&
+          nichePosition.niches.length > 0 && <NichePositionPanel nichePosition={nichePosition} />
         )}
 
         {/* Two-panel layout */}
@@ -441,6 +460,81 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
         </div>
       </div>
     </>
+  );
+}
+
+function NichePositionPanel({ nichePosition }: { nichePosition: NichePosition }) {
+  return (
+    <div className="niche-panel">
+      <div className="panel-section-title">Niche Position</div>
+      <div className="niche-grid">
+        {nichePosition.niches.map((niche) => (
+          <NicheEntryCard key={`${niche.type}:${niche.name}`} niche={niche} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function NicheEntryCard({ niche }: { niche: NicheEntry }) {
+  return (
+    <div className="niche-card">
+      <div className="niche-card-header">
+        <span className="niche-card-name">{niche.name}</span>
+        <span className={`niche-type-badge niche-type-${niche.type}`}>{niche.type}</span>
+      </div>
+      <div className="niche-card-rank">
+        {niche.isChampion ? (
+          <span className="niche-champion-badge">Champion</span>
+        ) : (
+          <span className="niche-rank-label">
+            #{niche.rank} of {niche.size}
+          </span>
+        )}
+        <span className="niche-size-label">
+          {niche.size} game{niche.size !== 1 ? "s" : ""}
+        </span>
+      </div>
+      {!niche.isChampion && (
+        <div className="niche-card-champion">
+          Champion:{" "}
+          <Link href={`/games/${niche.champion.gameId}`} className="niche-neighbor-link">
+            {niche.champion.gameName}
+          </Link>{" "}
+          <span className="niche-neighbor-score">({niche.champion.fitnessScore.toFixed(1)})</span>
+        </div>
+      )}
+      <div className="niche-neighbors">
+        {niche.above.length > 0 && (
+          <div className="niche-neighbor-row">
+            <span className="niche-neighbor-dir">Above:</span>
+            {niche.above.map((n) => (
+              <NeighborLink key={n.gameId} neighbor={n} />
+            ))}
+          </div>
+        )}
+        {niche.below.length > 0 && (
+          <div className="niche-neighbor-row">
+            <span className="niche-neighbor-dir">Below:</span>
+            {niche.below.map((n) => (
+              <NeighborLink key={n.gameId} neighbor={n} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function NeighborLink({ neighbor }: { neighbor: NicheNeighbor }) {
+  return (
+    <span className="niche-neighbor-item">
+      <Link href={`/games/${neighbor.gameId}`} className="niche-neighbor-link">
+        {neighbor.gameName}
+      </Link>
+      {neighbor.isPredicted && <span className="niche-predicted-indicator">~</span>}
+      <span className="niche-neighbor-score">({neighbor.fitnessScore.toFixed(1)})</span>
+    </span>
   );
 }
 

@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { toErrorMessage } from "@shelf-judge/shared";
 import type { PredictionService } from "../services/prediction-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
+import { computeNicheImpact } from "../services/niche-engine.js";
 
 export interface PredictionRoutesDeps {
   predictionService: PredictionService;
@@ -63,7 +64,12 @@ export function createPredictionRoutes(deps: PredictionRoutesDeps): RouteModule 
     }
     try {
       const result = await predictionService.predictBggGame(bggId);
-      return c.json(result);
+
+      // Compute niche impact: how would this candidate affect the collection's niches?
+      const allGames = await predictionService.listGamesWithPredictions();
+      const nicheImpact = computeNicheImpact(allGames, result.game, result.score);
+
+      return c.json({ ...result, nicheImpact });
     } catch (err) {
       const message = toErrorMessage(err);
       if (message.includes("No game found with BGG ID")) {

@@ -410,6 +410,7 @@ describe("prediction-service", () => {
         maxPlayers: 4,
         playingTime: 90,
         imageUrl: null,
+        thumbnailUrl: null,
       },
       bggData: bggData ?? makeBggData(),
     });

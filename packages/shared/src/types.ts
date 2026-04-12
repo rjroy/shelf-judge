@@ -207,6 +207,7 @@ export interface GameWithScore {
   game: Game;
   score: FitnessResult | null;
   bggDataStale?: boolean;
+  nichePosition?: NichePosition | null;
 }
 
 export interface AddGameResult {
@@ -219,6 +220,7 @@ export interface BggSearchResult {
   bggId: number;
   name: string;
   yearPublished: number | null;
+  thumbnailUrl: string | null;
 }
 
 // SSE event types for BGG collection import (wire format between daemon and clients)
@@ -322,6 +324,18 @@ export interface AxisSuggestion {
   evidence: { gameCount?: number; percentage?: number; variance?: number };
 }
 
+// LLM narration types (collection-profiling spec, LLM Narration section)
+
+export interface ProfileNarration {
+  summary: string; // 2-4 paragraph overview of collection identity
+  surprises: string[]; // Unexpected patterns
+  tensions: string[]; // Disagreements between stated and revealed preferences
+  blindSpots: string[]; // Absent or underrepresented attribute categories
+  curveInsights: string[]; // Utility curve observations
+}
+
+export type NarrationCacheState = "fresh" | "stale" | "empty";
+
 export interface CollectionProfile {
   axisDistributions: AxisDistribution[];
   axisWeights: AxisWeightEntry[];
@@ -336,6 +350,8 @@ export interface CollectionProfile {
   divergence: DivergentGame[] | null; // null when no tournament data
   outliers: CollectionOutlier[];
   suggestions: AxisSuggestion[];
+  narration: ProfileNarration | null;
+  narrationState: NarrationCacheState;
   gameCount: number;
   ratedGameCount: number;
   computedAt: string; // ISO 8601
@@ -344,6 +360,8 @@ export interface CollectionProfile {
 export interface ProfileData {
   profile: CollectionProfile;
   computedAt: string; // ISO 8601
+  narration: ProfileNarration | null;
+  narrationComputedAt: string | null; // ISO 8601
 }
 
 // Prediction types
@@ -397,4 +415,53 @@ export interface PredictedGameResponse {
   score: FitnessResult;
   tension: RevealedPreferenceTension | null;
   predictionUnavailable: PredictionUnavailable | null;
+  nicheImpact?: NicheImpact;
+}
+
+// Niche champion display types (niche-champion-display spec)
+
+export interface NicheNeighbor {
+  gameId: string;
+  gameName: string;
+  fitnessScore: number;
+  isPredicted: boolean;
+}
+
+export interface NicheEntry {
+  /** Attribute type that defines this niche */
+  type: "mechanic" | "category" | "family";
+  /** Attribute name (e.g., "Deck Building", "Card Game") */
+  name: string;
+  /** Total games in this niche (excluding vetoed) */
+  size: number;
+  /** This game's rank within the niche (1 = champion) */
+  rank: number;
+  /** Whether this game is the niche champion */
+  isChampion: boolean;
+  /** The niche champion game */
+  champion: NicheNeighbor;
+  /** Games ranked immediately above (better fitness), up to 2 */
+  above: NicheNeighbor[];
+  /** Games ranked immediately below (worse fitness), up to 2 */
+  below: NicheNeighbor[];
+}
+
+export interface NichePosition {
+  niches: NicheEntry[];
+}
+
+export interface NicheImpactEntry {
+  type: "mechanic" | "category" | "family";
+  name: string;
+  /** Current niche size (before adding this game) */
+  currentSize: number;
+  /** What rank this game would hold in the niche */
+  projectedRank: number;
+  /** Current champion of this niche */
+  currentChampion: NicheNeighbor | null;
+}
+
+export interface NicheImpact {
+  /** Niches this game would join if added to the collection */
+  wouldJoin: NicheImpactEntry[];
 }

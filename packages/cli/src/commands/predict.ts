@@ -2,7 +2,7 @@
 import type { DaemonClient } from "../client.js";
 import type { OutputOptions } from "../output.js";
 import { formatTable, formatScore, formatBreakdown, printOutput } from "../output.js";
-import type { PredictedGameResponse, PredictionReadiness } from "@shelf-judge/shared";
+import type { PredictedGameResponse, PredictionReadiness, NicheImpact } from "@shelf-judge/shared";
 
 export async function predictGame(
   client: DaemonClient,
@@ -173,7 +173,43 @@ export async function predictBggGame(
     }
   }
 
+  if (data.nicheImpact) {
+    lines.push("");
+    lines.push(formatNicheImpact(data.nicheImpact));
+  }
+
   return lines.join("\n");
+}
+
+function formatNicheImpact(impact: NicheImpact): string {
+  if (impact.wouldJoin.length === 0) return "";
+
+  const lines: string[] = ["Niche Impact:"];
+  for (const entry of impact.wouldJoin) {
+    if (entry.currentSize === 0) {
+      lines.push(`  Would be your 1st ${entry.name} game (${entry.type}).`);
+    } else if (entry.projectedRank === 1) {
+      lines.push(`  Would be your best ${entry.name} game (${entry.type}).`);
+    } else {
+      const ordinal = formatOrdinal(entry.currentSize + 1);
+      lines.push(
+        `  Would be your ${ordinal} ${entry.name} game (${entry.type}), ranked #${entry.projectedRank}`,
+      );
+      if (entry.currentChampion) {
+        lines.push(
+          `    Current champion: ${entry.currentChampion.gameName} (${formatScore(entry.currentChampion.fitnessScore)})`,
+        );
+      }
+    }
+  }
+  return lines.join("\n");
+}
+
+function formatOrdinal(n: number): string {
+  const suffixes = ["th", "st", "nd", "rd"];
+  const mod100 = n % 100;
+  const suffix = mod100 >= 11 && mod100 <= 13 ? "th" : (suffixes[n % 10] ?? "th");
+  return `${n}${suffix}`;
 }
 
 export async function predictReadiness(

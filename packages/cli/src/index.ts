@@ -25,7 +25,7 @@ import {
   tournamentStop,
   tournamentStats,
 } from "./commands/tournament.js";
-import { profileCommand } from "./commands/profile.js";
+import { profileCommand, profileNarrateCommand } from "./commands/profile.js";
 import { predictGame, predictBggGame, predictReadiness } from "./commands/predict.js";
 
 // Known command paths and their token depths.
@@ -48,6 +48,7 @@ const COMMANDS: Record<string, number> = {
   "tournament pick": 2,
   "tournament stop": 2,
   "tournament stats": 2,
+  "profile narrate": 2,
   "predict bgg": 2,
   "predict readiness": 2,
   "import bgg-collection": 2,
@@ -78,6 +79,7 @@ interface ParsedArgs {
   vetoAbove?: number;
   noVeto?: boolean;
   includePredicted?: boolean;
+  showNiches?: boolean;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -100,6 +102,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let vetoAbove: number | undefined;
   let noVeto = false;
   let includePredicted = false;
+  let showNiches = false;
 
   for (let i = 0; i < raw.length; i++) {
     const arg = raw[i];
@@ -130,6 +133,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       noVeto = true;
     } else if (arg === "--include-predicted") {
       includePredicted = true;
+    } else if (arg === "--show-niches") {
+      showNiches = true;
     } else if (arg === "--axis") {
       axisFlags.push(raw[++i]);
       axisFlags.push(raw[++i]);
@@ -181,6 +186,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     vetoAbove,
     noVeto: noVeto || undefined,
     includePredicted: includePredicted || undefined,
+    showNiches: showNiches || undefined,
   };
 }
 
@@ -265,6 +271,7 @@ async function main(): Promise<void> {
       output = await scoreList(client, args, {
         ...opts,
         includePredicted: parsed.includePredicted,
+        showNiches: parsed.showNiches,
       });
       break;
     case "score get":
@@ -305,6 +312,9 @@ async function main(): Promise<void> {
       break;
     case "config set":
       output = await configSet(client, args, opts);
+      break;
+    case "profile narrate":
+      output = await profileNarrateCommand(client, args, opts);
       break;
     case "profile":
       output = await profileCommand(client, args, opts);

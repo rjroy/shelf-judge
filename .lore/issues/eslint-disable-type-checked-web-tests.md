@@ -1,7 +1,7 @@
 ---
 title: "ESLint disableTypeChecked for web test files"
 date: 2026-04-10
-status: open
+status: resolved
 tags: [debt, lint, testing, workaround]
 modules: [web]
 related: [.lore/retros/commission-cleanup-2026-04-10.md]

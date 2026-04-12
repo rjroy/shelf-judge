@@ -218,6 +218,8 @@ function makeEmptyProfile(): CollectionProfile {
     gameCount: 0,
     ratedGameCount: 0,
     computedAt: "2026-01-01T00:00:00.000Z",
+    narration: null,
+    narrationState: "empty",
   };
 }
 
@@ -232,6 +234,8 @@ describe("StorageService.loadProfile", () => {
     const profileData: ProfileData = {
       profile: makeEmptyProfile(),
       computedAt: "2026-01-01T00:00:00.000Z",
+      narration: null,
+      narrationComputedAt: null,
     };
     const { service } = makeService({
       [PROFILE_PATH]: JSON.stringify(profileData),
@@ -250,6 +254,8 @@ describe("StorageService.saveProfile", () => {
     const profileData: ProfileData = {
       profile: { ...makeEmptyProfile(), gameCount: 42 },
       computedAt: "2026-03-15T12:00:00.000Z",
+      narration: null,
+      narrationComputedAt: null,
     };
 
     await service.saveProfile(profileData);

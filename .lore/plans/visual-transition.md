@@ -17,7 +17,7 @@ related:
 
 Transition the Shelf Judge web UI from its current inline-styled state to match the approved visual direction and HTML mockups. The functional behavior stays the same. Only the visual layer changes.
 
-The current web UI (`packages/web/`) has all 5 screens working (collection, game detail, search/add, axes management, BGG import) but uses 195+ inline `style` objects with hardcoded hex values, system fonts, and a light grey sidebar. The target is the warm, paper-stock aesthetic defined in the visual direction doc and demonstrated in the HTML mockups at `.lore/art/mockup-*.html`.
+The current web UI (`packages/web/`) has all 5 screens working (collection, game detail, search/add, axes management, BGG import) but uses 195+ inline `style` objects with hardcoded hex values, system fonts, and a light grey sidebar. The target is the warm, paper-stock aesthetic defined in the visual direction doc and demonstrated in the HTML mockups at `.lore/mockups/mockup-*.html`.
 
 **Key constraint**: All colors must be CSS custom properties. No hardcoded hex values in component code. This is foundational for future theming.
 
@@ -26,10 +26,10 @@ The current web UI (`packages/web/`) has all 5 screens working (collection, game
 **Visual direction**: `.lore/designs/visual-direction.md` (approved)
 **Target mockups**:
 
-- `.lore/art/mockup-collection-view.html` (collection table with stats strip, score dots, axis chips)
-- `.lore/art/mockup-game-detail.html` (hero score, breakdown table, rating form, two-panel layout)
-- `.lore/art/mockup-axes.html` (axis cards with weight bars, source tags, stats strips)
-- `.lore/art/mockup-bgg-import.html` (progress bar, status banner, game log)
+- `.lore/mockups/mockup-collection-view.html` (collection table with stats strip, score dots, axis chips)
+- `.lore/mockups/mockup-game-detail.html` (hero score, breakdown table, rating form, two-panel layout)
+- `.lore/mockups/mockup-axes.html` (axis cards with weight bars, source tags, stats strips)
+- `.lore/mockups/mockup-bgg-import.html` (progress bar, status banner, game log)
 
 ## Codebase Context
 

@@ -1,71 +1,242 @@
 /* ===== Design Tokens ===== */
 
 :root {
-  /* Base */
-  --bg-base: #f4f1ec;
-  --bg-surface: #fefcf9;
-  --bg-elevated: #ffffff;
+  /* ── Neutral surfaces ─────────────────────────────────────── */
+  --bg-base: #f4f1ec; /* page background, warm parchment */
+  --bg-surface: #fefcf9; /* cards, panels */
+  --bg-elevated: #ffffff; /* modals, popovers */
+  --bg-subtle: #f9f7f4; /* warm-tinted inset areas */
+  --bg-muted: #f5f5f5; /* neutral-gray inset, exception case */
   --border: #ddd8d0;
   --border-strong: #c4bfb8;
-
-  /* Text */
-  --text-primary: #1a1714;
-  --text-secondary: #6b6560;
-  --text-muted: #9c9590;
-
-  /* Score spectrum */
-  --score-color: #b86c1a;
-  --score-high: #2d7a4a;
-  --score-mid: #8a6f20;
-  --score-low: #b84040;
-
-  /* Data source */
-  --personal-accent: #1a1714;
-  --bgg-accent: #2e5f8a;
-  --bgg-bg: #edf3f9;
-  --override-accent: #5c3d99;
-  --override-bg: #f0ecfa;
-
-  /* Actions */
-  --action: #1c3d5e;
-  --action-hover: #2a5580;
-  --action-subtle: #e8eff6;
-  --danger: #b84040;
-  --danger-subtle: #fdf0f0;
-
-  /* Navigation */
-  --nav-bg: #1a1714;
-  --nav-text: #e8e4dc;
-  --nav-active: #b86c1a;
-
-  /* Filters */
-  --filter-spec: #4a6e42;
-  --filter-spec-bg: #eaf2e8;
-
-  /* Derived palette */
   --row-hover: #f0ede8;
   --table-header-bg: #ede9e3;
-  --bgg-badge-bg: #d4e7f5;
-  --override-badge-bg: #e0d6f5;
-  --bgg-border: #c0d8ec;
-  --override-border: #c5b8e8;
-  --danger-border: #e0c0c0;
-  --bg-subtle: #f9f7f4;
-  --success-bg: #d5f0e0;
 
-  /* Profile page */
-  --score-bg: #fdf3e7;
-  --score-high-bg: #eaf5ef;
-  --score-low-bg: #fdeaea;
-  --outlier-lone: #5c3d99;
-  --outlier-lone-bg: #f0ecf8;
-  --outlier-orphan: #8a6f20;
-  --outlier-orphan-bg: #f5f0e2;
-  --outlier-fitness: #2d7a4a;
-  --outlier-fitness-bg: #eaf5ef;
-  --suggest-bg: #f8f6f2;
-  --suggest-border: #c8c0b4;
+  /* ── Text ─────────────────────────────────────────────────── */
+  --text-primary: #1a1714;
+  --text-secondary: #6b6560;
+  --text-muted: #706a62; /* darkened from #9c9590 for WCAG AA; see color-system spec */
 
+  /* ── Score spectrum (tiered-scale domain) ────────────────── */
+  --score-color: #b86c1a; /* hero display accent, "precious amber" */
+  --score-high: #2d7a4a; /* tier indicator: 7.5-10.0 */
+  --score-mid: #846a1d; /* tier indicator: 5.0-7.4 (darkened from #8a6f20 for WCAG AA) */
+  --score-low: #b84040; /* tier indicator: 1.0-4.9 */
+
+  --score-bg: color-mix(in hsl, var(--score-color), white 92%);
+  --score-high-bg: color-mix(in hsl, var(--score-high), white 92%);
+  --score-mid-bg: color-mix(in hsl, var(--score-mid), white 93%);
+  --score-low-bg: color-mix(in hsl, var(--score-low), white 93%);
+  --score-border: color-mix(in hsl, var(--score-color), white 75%);
+  --score-mid-border: color-mix(in hsl, var(--score-mid), white 78%);
+  --score-low-border: color-mix(in hsl, var(--score-low), white 79%);
+  /* Note: --score-high-border is intentionally absent; no current surface uses it. */
+
+  /* ── Status ───────────────────────────────────────────────── */
+  --success: var(--score-high); /* alias: same concept */
+  --success-bg: #d5f0e0; /* kept explicit: deeper green for prominent feedback */
+  --success-subtle: var(--score-high-bg); /* alias */
+  --warning: #e65100;
+  --warning-subtle: #fff3e0;
+  --warning-border: #e8d060;
+  --warning-text: #7a5f10;
+  --danger: var(--score-low); /* alias */
+  --danger-subtle: var(--score-low-bg); /* alias */
+  --danger-border: color-mix(in hsl, var(--score-low), white 75%);
+
+  /* ── Data source languages (single-accent domains) ──────── */
+  --personal-accent: var(--text-primary); /* personal data = default text */
+  --bgg-accent: #2e5f8a;
+  --bgg-bg: color-mix(in hsl, var(--bgg-accent), white 92%);
+  --bgg-border: color-mix(in hsl, var(--bgg-accent), white 78%);
+  --bgg-badge-bg: color-mix(in hsl, var(--bgg-accent), white 85%);
+  --override-accent: #5c3d99;
+  --override-bg: color-mix(in hsl, var(--override-accent), white 94%);
+  --override-border: color-mix(in hsl, var(--override-accent), white 78%);
+  --override-badge-bg: color-mix(in hsl, var(--override-accent), white 85%);
+
+  /* ── Action (primary interactive color) ──────────────────── */
+  --action: #1c3d5e;
+  --action-hover: #2a5580; /* kept explicit: accessibility-contrast control */
+  --action-subtle: color-mix(in hsl, var(--action), white 93%);
+  --action-border: color-mix(in hsl, var(--action), white 77%);
+
+  /* ── Navigation ───────────────────────────────────────────── */
+  --nav-bg: var(--text-primary);
+  --nav-text: #e8e4dc;
+  --nav-active: var(--score-color);
+
+  /* ── Filter spec (single-accent domain) ──────────────────── */
+  --filter-spec: #4a6e42;
+  --filter-spec-bg: color-mix(in hsl, var(--filter-spec), white 92%);
+  --filter-spec-border: color-mix(in hsl, var(--filter-spec), white 78%);
+
+  /* ── Prediction (single-accent domain) ───────────────────── */
+  --predict-accent: #1a706a;
+  --predict-bg: color-mix(in hsl, var(--predict-accent), white 92%);
+  --predict-border: color-mix(in hsl, var(--predict-accent), white 75%);
+
+  /* ── Confidence levels (tiered-scale domain) ─────────────── */
+  --conf-strong: var(--score-high);
+  --conf-strong-bg: var(--score-high-bg);
+  --conf-moderate: #7a5e1a; /* kept explicit; see color-system spec */
+  --conf-moderate-bg: color-mix(in hsl, var(--conf-moderate), white 92%);
+  --conf-weak: #8a3a10;
+  --conf-weak-bg: color-mix(in hsl, var(--conf-weak), white 92%);
+  --conf-insufficient: var(--text-muted);
+  --conf-insufficient-bg: var(--row-hover);
+
+  /* ── Outlier tags (aliases to semantic colors) ───────────── */
+  --outlier-lone: var(--override-accent);
+  --outlier-lone-bg: var(--override-bg);
+  --outlier-lone-border: var(--override-border);
+  --outlier-orphan: var(--score-mid);
+  --outlier-orphan-bg: var(--score-mid-bg);
+  --outlier-orphan-border: var(--score-mid-border);
+  --outlier-fitness: var(--score-high);
+  --outlier-fitness-bg: var(--score-high-bg);
+  --outlier-fitness-border: color-mix(in hsl, var(--score-high), white 78%);
+
+  /* ── Niche (single-accent domain) ───────────────────────── */
+  --niche-accent: #6b4c8a;
+  --niche-bg: color-mix(in hsl, var(--niche-accent), white 93%);
+  --niche-border: color-mix(in hsl, var(--niche-accent), white 78%);
+  --niche-champion: #b86c1a;
+  --niche-mechanic: #2e5f8a;
+  --niche-category: #6b4c8a;
+  --niche-family: #4a6e42;
+  --niche-badge-bg: color-mix(in hsl, var(--niche-accent), white 90%);
+
+  /* ── Tournament (aliases to BGG palette) ─────────────────── */
+  --tourney-accent: var(--bgg-accent);
+  --tourney-bg: var(--bgg-bg);
+
+  /* ── UI surface tokens ────────────────────────────────────── */
+  --suggest-bg: var(--bg-subtle);
+  --suggest-border: var(--border-strong);
+  --overlay-bg: rgb(0 0 0 / 0.5);
+  --placeholder-from: var(--nav-text);
+  --placeholder-to: #d0cbc0;
+
+  /* ── Button text (on filled backgrounds) ──────────────────── */
+  --on-action: white;
+  --on-danger: white;
+
+  /* ── Shadows ──────────────────────────────────────────────── */
+  --shadow-menu: 0 8px 32px rgb(0 0 0 / 0.14), 0 2px 8px rgb(0 0 0 / 0.08);
+
+  /* ── Sidebar (light-on-dark overlays) ────────────────────── */
+  --sidebar-divider: color-mix(in srgb, var(--nav-text) 8%, transparent);
+  --sidebar-item-hover-bg: color-mix(in srgb, var(--nav-text) 6%, transparent);
+  --sidebar-track-bg: color-mix(in srgb, var(--nav-text) 10%, transparent);
+}
+
+/* ===== Dark Mode Overrides ===== */
+
+[data-theme="dark"] {
+  /* ── Neutral surfaces ─────────────────────────────────────── */
+  --bg-base: #1a1916;
+  --bg-surface: #242320;
+  --bg-elevated: #2e2d29;
+  --bg-subtle: #201f1c;
+  --bg-muted: #2a2a28;
+  --border: #3d3a35;
+  --border-strong: #524e48;
+  --row-hover: #2a2825;
+  --table-header-bg: #282724;
+
+  /* ── Text ─────────────────────────────────────────────────── */
+  --text-primary: #e8e4dc;
+  --text-secondary: #a09a90;
+  --text-muted: #908a80;
+
+  /* ── Score spectrum (tiered-scale domain) ────────────────── */
+  --score-color: #d4882e;
+  --score-high: #40a060;
+  --score-mid: #b89030;
+  --score-low: #e06060;
+
+  --score-bg: color-mix(in hsl, var(--score-color), var(--bg-base) 85%);
+  --score-high-bg: color-mix(in hsl, var(--score-high), var(--bg-base) 85%);
+  --score-mid-bg: color-mix(in hsl, var(--score-mid), var(--bg-base) 85%);
+  --score-low-bg: color-mix(in hsl, var(--score-low), var(--bg-base) 85%);
+  --score-border: color-mix(in hsl, var(--score-color), var(--bg-base) 70%);
+  --score-mid-border: color-mix(in hsl, var(--score-mid), var(--bg-base) 70%);
+  --score-low-border: color-mix(in hsl, var(--score-low), var(--bg-base) 70%);
+
+  /* ── Status ───────────────────────────────────────────────── */
+  --success-bg: #1a3828;
+  --warning: #f06820;
+  --warning-subtle: #2e2010;
+  --warning-border: #a08830;
+  --warning-text: #d4a830;
+  --danger-border: color-mix(in hsl, var(--score-low), var(--bg-base) 70%);
+
+  /* ── Data source languages (single-accent domains) ──────── */
+  --bgg-accent: #4a8bc4;
+  --bgg-bg: color-mix(in hsl, var(--bgg-accent), var(--bg-base) 85%);
+  --bgg-border: color-mix(in hsl, var(--bgg-accent), var(--bg-base) 70%);
+  --bgg-badge-bg: color-mix(in hsl, var(--bgg-accent), var(--bg-base) 80%);
+  --override-accent: #9a7ed8;
+  --override-bg: color-mix(in hsl, var(--override-accent), var(--bg-base) 85%);
+  --override-border: color-mix(in hsl, var(--override-accent), var(--bg-base) 70%);
+  --override-badge-bg: color-mix(in hsl, var(--override-accent), var(--bg-base) 80%);
+
+  /* ── Action (primary interactive color) ──────────────────── */
+  --action: #5a90c0;
+  --action-hover: #6aa0d0;
+  --action-subtle: color-mix(in hsl, var(--action), var(--bg-base) 85%);
+  --action-border: color-mix(in hsl, var(--action), var(--bg-base) 70%);
+
+  /* ── Navigation ───────────────────────────────────────────── */
+  --nav-bg: #121110;
+  --nav-text: #e8e4dc;
+
+  /* ── Filter spec (single-accent domain) ──────────────────── */
+  --filter-spec: #5d9054;
+  --filter-spec-bg: color-mix(in hsl, var(--filter-spec), var(--bg-base) 85%);
+  --filter-spec-border: color-mix(in hsl, var(--filter-spec), var(--bg-base) 70%);
+
+  /* ── Prediction (single-accent domain) ───────────────────── */
+  --predict-accent: #2aaa98;
+  --predict-bg: color-mix(in hsl, var(--predict-accent), var(--bg-base) 85%);
+  --predict-border: color-mix(in hsl, var(--predict-accent), var(--bg-base) 70%);
+
+  /* ── Niche (single-accent domain) ───────────────────────── */
+  --niche-accent: #8a6aaa;
+  --niche-bg: color-mix(in hsl, var(--niche-accent), var(--bg-base) 85%);
+  --niche-border: color-mix(in hsl, var(--niche-accent), var(--bg-base) 70%);
+  --niche-champion: #d4882e;
+  --niche-mechanic: #5a9acc;
+  --niche-category: #8a6aaa;
+  --niche-family: #6a9a62;
+  --niche-badge-bg: color-mix(in hsl, var(--niche-accent), var(--bg-base) 80%);
+
+  /* ── Confidence levels (tiered-scale domain) ─────────────── */
+  --conf-moderate: #c09828;
+  --conf-moderate-bg: color-mix(in hsl, var(--conf-moderate), var(--bg-base) 85%);
+  --conf-weak: #d06030;
+  --conf-weak-bg: color-mix(in hsl, var(--conf-weak), var(--bg-base) 85%);
+
+  /* ── Outlier tags ────────────────────────────────────────── */
+  --outlier-fitness-border: color-mix(in hsl, var(--score-high), var(--bg-base) 70%);
+
+  /* ── UI surface tokens ────────────────────────────────────── */
+  --placeholder-from: #3a3835;
+  --placeholder-to: #2a2825;
+
+  /* ── Button text (on filled backgrounds) ──────────────────── */
+  --on-action: var(--bg-base);
+  --on-danger: var(--bg-base);
+
+  /* ── Shadows (stronger for dark backgrounds) ──────────────── */
+  --shadow-menu: 0 8px 32px rgb(0 0 0 / 0.4), 0 2px 8px rgb(0 0 0 / 0.3);
+
+  /* ── Overlay ──────────────────────────────────────────────── */
+  --overlay-bg: rgb(0 0 0 / 0.65);
+}
+
+:root {
   /* Typography scale */
   --text-xs: 11px;
   --text-sm: 13px;
@@ -126,7 +297,7 @@ body {
 
 .sidebar-brand {
   padding: 20px 20px 24px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--sidebar-divider);
 }
 
 .sidebar-brand-row {
@@ -145,7 +316,7 @@ body {
 
 .sidebar-brand .brand-sub {
   font-size: 11px;
-  color: rgba(232, 228, 220, 0.4);
+  color: color-mix(in srgb, var(--nav-text) 40%, transparent);
   margin-top: 2px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -159,7 +330,7 @@ body {
 .nav-label {
   font-size: 10px;
   font-weight: 600;
-  color: rgba(232, 228, 220, 0.35);
+  color: color-mix(in srgb, var(--nav-text) 35%, transparent);
   text-transform: uppercase;
   letter-spacing: 0.1em;
   padding: 0 20px;
@@ -177,7 +348,7 @@ body {
   gap: 10px;
   padding: 9px 20px;
   font-size: 13px;
-  color: rgba(232, 228, 220, 0.65);
+  color: color-mix(in srgb, var(--nav-text) 65%, transparent);
   cursor: pointer;
   transition: all 0.1s;
   border-left: 3px solid transparent;
@@ -185,12 +356,12 @@ body {
 }
 
 .nav-item:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--sidebar-item-hover-bg);
   color: var(--nav-text);
 }
 
 .nav-item.active {
-  background: rgba(184, 108, 26, 0.12);
+  background: color-mix(in srgb, var(--score-color) 12%, transparent);
   color: var(--nav-text);
   border-left-color: var(--nav-active);
   font-weight: 500;
@@ -209,9 +380,46 @@ body {
 
 .sidebar-footer {
   padding: 16px 20px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--sidebar-divider);
   font-size: 11px;
-  color: rgba(232, 228, 220, 0.3);
+  color: color-mix(in srgb, var(--nav-text) 30%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+
+.theme-toggle-sidebar {
+  color: var(--nav-text);
+}
+
+.theme-toggle-sidebar:hover {
+  background: var(--sidebar-item-hover-bg);
+}
+
+.theme-toggle-label {
+  opacity: 0.7;
+}
+
+.theme-toggle-mobile {
+  margin-left: auto;
+  color: var(--text-secondary);
+}
+
+.theme-toggle-mobile:hover {
+  background: var(--row-hover);
 }
 
 /* ===== Layout ===== */
@@ -271,7 +479,7 @@ body {
 
 .btn-primary {
   background: var(--action);
-  color: white;
+  color: var(--on-action);
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -291,7 +499,7 @@ body {
 
 .btn-danger {
   background: var(--danger);
-  color: white;
+  color: var(--on-danger);
 }
 
 .btn-danger:hover:not(:disabled) {
@@ -466,7 +674,7 @@ body {
 }
 
 .game-thumb-placeholder {
-  background: linear-gradient(135deg, #e8e4dc, #d8d4cc);
+  background: linear-gradient(135deg, var(--placeholder-from), var(--placeholder-to));
   width: 100%;
   height: 100%;
   display: flex;
@@ -700,7 +908,7 @@ body {
   width: 100px;
   height: 100px;
   border-radius: 8px;
-  background: linear-gradient(135deg, #e0dcd5, #ccc8c0);
+  background: linear-gradient(135deg, var(--placeholder-from), var(--placeholder-to));
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -741,6 +949,17 @@ body {
   display: flex;
   align-items: center;
   gap: 5px;
+}
+
+.game-link {
+  color: var(--bgg-accent);
+  text-decoration: none;
+  font-weight: inherit;
+  font-size: inherit;
+}
+
+.game-link:hover {
+  text-decoration: underline;
 }
 
 .bgg-link {
@@ -1658,6 +1877,21 @@ body {
   border-bottom: none;
 }
 
+.search-result-thumb {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--bg-secondary);
+}
+
+.search-result-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .search-result-actions {
   display: flex;
   gap: 6px;
@@ -1752,27 +1986,27 @@ body {
 }
 
 .confidence-actual {
-  background: var(--success-subtle, #e8f5e9);
-  color: var(--success, #2e7d32);
+  background: var(--success-subtle);
+  color: var(--success);
 }
 
 .confidence-strong {
-  background: var(--success-subtle, #e8f5e9);
-  color: var(--success, #2e7d32);
+  background: var(--success-subtle);
+  color: var(--success);
 }
 
 .confidence-moderate {
-  background: var(--warning-subtle, #fff3e0);
-  color: var(--warning, #e65100);
+  background: var(--warning-subtle);
+  color: var(--warning);
 }
 
 .confidence-weak {
-  background: var(--danger-subtle, #fbe9e7);
-  color: var(--danger, #c62828);
+  background: var(--danger-subtle);
+  color: var(--danger);
 }
 
 .confidence-insufficient {
-  background: var(--bg-muted, #f5f5f5);
+  background: var(--bg-muted);
   color: var(--text-muted);
 }
 
@@ -2271,7 +2505,7 @@ body {
   display: none;
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--overlay-bg);
   z-index: 99;
   opacity: 0;
   visibility: hidden;
@@ -2642,12 +2876,12 @@ body {
 /* Danger ghost button */
 .btn-danger-ghost {
   background: transparent;
-  border: 1px solid rgba(184, 64, 64, 0.3);
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
   color: var(--danger);
 }
 
 .btn-danger-ghost:hover:not(:disabled) {
-  background: rgba(184, 64, 64, 0.05);
+  background: color-mix(in srgb, var(--danger) 5%, transparent);
 }
 
 /* Comparison area */
@@ -2708,7 +2942,7 @@ body {
 
 .game-card:hover {
   border-color: var(--action);
-  box-shadow: 0 0 0 4px rgba(28, 61, 94, 0.08);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--action) 8%, transparent);
   transform: translateY(-2px);
 }
 
@@ -2721,7 +2955,7 @@ body {
   width: 120px;
   height: 120px;
   border-radius: 8px;
-  background: linear-gradient(135deg, #e8e4dc, #d0cbc0);
+  background: linear-gradient(135deg, var(--placeholder-from), var(--placeholder-to));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2812,7 +3046,7 @@ body {
 .pick-btn:hover:not(:disabled) {
   background: var(--action);
   border-color: var(--action);
-  color: white;
+  color: var(--on-action);
 }
 
 .pick-btn:disabled {
@@ -2914,9 +3148,9 @@ body {
 
 /* Divergence banner */
 .divergence-banner {
-  background: #fff8e6;
-  border: 1px solid #e8d060;
-  color: #7a5f10;
+  background: var(--warning-subtle);
+  border: 1px solid var(--warning-border);
+  color: var(--warning-text);
   padding: 12px 20px;
   font-size: 13px;
   line-height: 1.5;
@@ -3089,9 +3323,7 @@ body {
   background: var(--bg-elevated);
   border: 1px solid var(--border-strong);
   border-radius: 8px;
-  box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.14),
-    0 2px 8px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-menu);
   z-index: 100;
   overflow: hidden;
 }
@@ -3144,7 +3376,7 @@ body {
 }
 
 .sort-menu-item.active {
-  background: rgba(184, 108, 26, 0.08);
+  background: color-mix(in srgb, var(--score-color) 8%, transparent);
   color: var(--score-color);
   font-weight: 600;
 }
@@ -3181,7 +3413,7 @@ body {
 }
 
 .sort-menu-axis-item.active {
-  background: rgba(28, 61, 94, 0.08);
+  background: color-mix(in srgb, var(--action) 8%, transparent);
   color: var(--action);
   font-weight: 600;
 }
@@ -3380,7 +3612,7 @@ body {
   height: 17px;
   border-radius: 50%;
   background: var(--action);
-  color: white;
+  color: var(--on-action);
   font-size: 10px;
   font-weight: 700;
 }
@@ -3430,7 +3662,7 @@ body {
 .seg-btn.active {
   background: var(--action);
   border-color: var(--action);
-  color: white;
+  color: var(--on-action);
 }
 
 .range-input {
@@ -3472,21 +3704,21 @@ body {
 }
 
 .active-chips-row .filter-chip.chip-search {
-  background: #f0ede8;
+  background: var(--row-hover);
   color: var(--text-secondary);
   border-color: var(--border-strong);
 }
 
 .active-chips-row .filter-chip.chip-rated {
-  background: rgba(184, 108, 26, 0.1);
+  background: color-mix(in srgb, var(--score-color) 10%, transparent);
   color: var(--score-color);
-  border-color: rgba(184, 108, 26, 0.25);
+  border-color: color-mix(in srgb, var(--score-color) 25%, transparent);
 }
 
 .active-chips-row .filter-chip.chip-spec {
   background: var(--filter-spec-bg);
   color: var(--filter-spec);
-  border-color: #c4ddbf;
+  border-color: var(--filter-spec-border);
 }
 
 .chip-x {
@@ -3709,7 +3941,7 @@ body {
     display: block;
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.4);
+    background: var(--overlay-bg);
     z-index: 199;
   }
 
@@ -4088,8 +4320,8 @@ body {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: #f0ecf8;
-  border: 1px solid #d4c8e8;
+  background: var(--override-bg);
+  border: 1px solid var(--override-border);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4121,7 +4353,7 @@ body {
   border-radius: 6px;
   background: var(--override-bg);
   color: var(--override-accent);
-  border: 1px solid #d4c8e8;
+  border: 1px solid var(--override-border);
   cursor: default;
   font-weight: 500;
   white-space: nowrap;
@@ -4344,7 +4576,7 @@ body {
   background: var(--bgg-bg);
   border-radius: 4px;
   overflow: hidden;
-  border: 1px solid #cad9e8;
+  border: 1px solid var(--bgg-border);
 }
 
 .bgg-bar-fill {
@@ -4387,7 +4619,7 @@ body {
 
 .wt-bucket.zero {
   opacity: 0.12;
-  background: #cad9e8;
+  background: var(--bgg-border);
 }
 
 .weight-range-labels {
@@ -4438,25 +4670,25 @@ body {
 .curve-tag.shape {
   background: var(--action-subtle);
   color: var(--action);
-  border-color: #b8ccdc;
+  border-color: var(--action-border);
 }
 
 .curve-tag.sweet-spot {
   background: var(--score-bg);
   color: var(--score-color);
-  border-color: #e8c898;
+  border-color: var(--score-border);
 }
 
 .curve-tag.veto {
   background: var(--score-low-bg);
   color: var(--score-low);
-  border-color: #f0b8b8;
+  border-color: var(--score-low-border);
 }
 
 .curve-tag.tolerance {
-  background: #f5f0e2;
+  background: var(--outlier-orphan-bg);
   color: var(--score-mid);
-  border-color: #ddd0a0;
+  border-color: var(--score-mid-border);
 }
 
 /* Divergence section */
@@ -4541,13 +4773,13 @@ body {
 .div-gap.tournament-outlier {
   background: var(--bgg-bg);
   color: var(--bgg-accent);
-  border: 1px solid #b8ccdc;
+  border: 1px solid var(--action-border);
 }
 
 .div-gap.fitness-outlier {
   background: var(--score-bg);
   color: var(--score-color);
-  border: 1px solid #e8c898;
+  border: 1px solid var(--score-border);
 }
 
 /* Outliers */
@@ -4606,19 +4838,19 @@ body {
 .outlier-type-tag.lone-wolf {
   background: var(--outlier-lone-bg);
   color: var(--outlier-lone);
-  border-color: #c8b8e0;
+  border-color: var(--outlier-lone-border);
 }
 
 .outlier-type-tag.category-orphan {
   background: var(--outlier-orphan-bg);
   color: var(--outlier-orphan);
-  border-color: #d8c890;
+  border-color: var(--outlier-orphan-border);
 }
 
 .outlier-type-tag.high-fitness {
   background: var(--outlier-fitness-bg);
   color: var(--outlier-fitness);
-  border-color: #a8d8b8;
+  border-color: var(--outlier-fitness-border);
 }
 
 .outlier-distance {
@@ -4638,9 +4870,9 @@ body {
 }
 
 .dist-component.high {
-  background: #f0ecf8;
+  background: var(--override-bg);
   color: var(--override-accent);
-  border-color: #c8b8e0;
+  border-color: var(--outlier-lone-border);
   font-weight: 600;
 }
 
@@ -4723,10 +4955,10 @@ body {
   font-size: var(--text-xs);
   padding: 2px 8px;
   border-radius: 10px;
-  background: #fef3e2;
+  background: var(--score-bg);
   color: var(--score-color);
   font-weight: 600;
-  border: 1px solid #f0d8b0;
+  border: 1px solid var(--score-border);
 }
 
 .btn-recompute {
@@ -4734,7 +4966,7 @@ body {
   padding: 5px 12px;
   border-radius: 6px;
   background: var(--action);
-  color: #fff;
+  color: var(--bg-elevated);
   border: none;
   cursor: pointer;
   font-weight: 500;
@@ -4760,27 +4992,6 @@ body {
 }
 
 /* ===== Prediction Design Tokens ===== */
-
-:root {
-  /* Prediction accent */
-  --predict-accent: #1a706a;
-  --predict-bg: #eaf5f3;
-  --predict-border: #a8d9d4;
-
-  /* Confidence level colors */
-  --conf-strong: #2d7a4a;
-  --conf-strong-bg: #e8f5ee;
-  --conf-moderate: #7a5e1a;
-  --conf-moderate-bg: #f5ecd8;
-  --conf-weak: #8a3a10;
-  --conf-weak-bg: #f5e4d8;
-  --conf-insufficient: #9c9590;
-  --conf-insufficient-bg: #f0ede8;
-
-  /* Tournament tension */
-  --tourney-accent: #2e5f8a;
-  --tourney-bg: #edf3f9;
-}
 
 /* ===== Prediction Components ===== */
 
@@ -4994,7 +5205,7 @@ body {
 
 /* Revealed preference tension panel */
 .tension-panel {
-  background: linear-gradient(135deg, var(--tourney-bg), #f5f8fc);
+  background: linear-gradient(135deg, var(--tourney-bg), var(--bg-surface));
   border: 1px solid var(--bgg-border);
   border-radius: 8px;
   padding: 16px 20px;
@@ -5097,8 +5308,8 @@ body {
 .readiness-widget {
   margin: 0 12px 12px;
   padding: 12px;
-  background: rgba(26, 112, 106, 0.15);
-  border: 1px solid rgba(26, 112, 106, 0.3);
+  background: color-mix(in srgb, var(--predict-accent) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--predict-accent) 30%, transparent);
   border-radius: 8px;
 }
 
@@ -5120,7 +5331,7 @@ body {
 
 .readiness-progress {
   height: 4px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--sidebar-track-bg);
   border-radius: 2px;
   overflow: hidden;
   margin-bottom: 4px;
@@ -5135,7 +5346,7 @@ body {
 
 .readiness-widget-count {
   font-size: 10px;
-  color: rgba(232, 228, 220, 0.5);
+  color: color-mix(in srgb, var(--nav-text) 50%, transparent);
 }
 
 /* Prediction hint in rating form */
@@ -5184,11 +5395,11 @@ body {
 
 /* Predicted row in collection table */
 .game-row.predicted-row {
-  background: rgba(26, 112, 106, 0.04);
+  background: color-mix(in srgb, var(--predict-accent) 4%, transparent);
 }
 
 .game-row.predicted-row:hover {
-  background: rgba(26, 112, 106, 0.08);
+  background: color-mix(in srgb, var(--predict-accent) 8%, transparent);
 }
 
 .predicted-label {
@@ -5261,7 +5472,7 @@ body {
 /* ===== Readiness Page ===== */
 
 .readiness-stage-banner {
-  background: linear-gradient(135deg, var(--predict-bg), #dff0ed);
+  background: linear-gradient(135deg, var(--predict-bg), var(--bg-surface));
   border: 1px solid var(--predict-border);
   border-radius: 10px;
   padding: 24px 28px;
@@ -5283,7 +5494,7 @@ body {
 
 .readiness-stage-banner-progress {
   height: 8px;
-  background: rgba(26, 112, 106, 0.15);
+  background: color-mix(in srgb, var(--predict-accent) 15%, transparent);
   border-radius: 4px;
   overflow: hidden;
   margin-bottom: 6px;
@@ -5484,6 +5695,258 @@ body {
 
 @media (max-width: 600px) {
   .readiness-timeline {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============================================================
+   Niche Champion Display
+   ============================================================ */
+
+/* Niche type badges */
+.niche-type-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 1px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+
+.niche-type-mechanic {
+  color: var(--niche-mechanic);
+  background: color-mix(in hsl, var(--niche-mechanic), var(--bg-base) 90%);
+}
+
+.niche-type-category {
+  color: var(--niche-category);
+  background: color-mix(in hsl, var(--niche-category), var(--bg-base) 90%);
+}
+
+.niche-type-family {
+  color: var(--niche-family);
+  background: color-mix(in hsl, var(--niche-family), var(--bg-base) 90%);
+}
+
+/* Game detail: Niche Position panel */
+.niche-panel {
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  padding: 20px var(--content-padding);
+}
+
+.niche-vetoed-note {
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-style: italic;
+  margin-top: 4px;
+}
+
+.niche-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+  overflow-y: auto;
+  max-height: 400px;
+}
+
+.niche-card {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.niche-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.niche-card-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.niche-card-rank {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.niche-champion-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--niche-champion);
+  background: color-mix(in hsl, var(--niche-champion), var(--bg-base) 88%);
+  padding: 1px 8px;
+  border-radius: 3px;
+  letter-spacing: 0.03em;
+}
+
+.niche-rank-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.niche-size-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.niche-card-champion {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.niche-neighbors {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.niche-neighbor-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+
+.niche-neighbor-dir {
+  color: var(--text-muted);
+  font-weight: 500;
+  min-width: 44px;
+}
+
+.niche-neighbor-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  max-width: 275px;
+}
+
+.niche-neighbor-link {
+  color: var(--action);
+  text-decoration: none;
+  overflow-x: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.niche-neighbor-link:hover {
+  text-decoration: underline;
+}
+
+.niche-neighbor-score {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.niche-predicted-indicator {
+  color: var(--predict-accent);
+  font-weight: 600;
+  font-size: 11px;
+}
+
+/* Collection: niche summary in game rows (REQ-NICHE-23) */
+.game-niche-summary {
+  font-size: 11px;
+  color: var(--niche-accent);
+  margin-top: 1px;
+}
+
+/* Collection: niche champion highlight in grouped view */
+.niche-champion-row {
+  border-left: 3px solid var(--niche-champion);
+}
+
+/* Collection: niche toggle active color */
+.niche-toggle {
+  background: var(--niche-accent) !important;
+}
+
+/* Collection: Group by Niche view (REQ-NICHE-24) */
+.niche-group {
+  margin-bottom: 4px;
+}
+
+.niche-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px var(--content-padding);
+  background: var(--niche-bg);
+  border-top: 1px solid var(--niche-border);
+  border-bottom: 1px solid var(--niche-border);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.niche-group-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.niche-group-count {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-left: auto;
+}
+
+.niche-empty {
+  padding: 40px var(--content-padding);
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+/* Search preview: Niche Impact (REQ-NICHE-26, REQ-NICHE-27) */
+.preview-niche-impact {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  margin-top: 10px;
+}
+
+.preview-niche-impact-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+
+.preview-niche-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+
+.preview-niche-text {
+  color: var(--text-primary);
+}
+
+.preview-niche-champion {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+@media (max-width: 800px) {
+  .niche-grid {
     grid-template-columns: 1fr;
   }
 }

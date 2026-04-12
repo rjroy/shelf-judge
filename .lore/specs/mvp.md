@@ -2,7 +2,7 @@
 title: "Shelf Judge MVP"
 date: 2026-04-04
 status: implemented
-tags: [spec, mvp, fitness, scoring, bgg, board-games]
+tags: [spec, mvp, fitness, scoring, bgg]
 modules: [daemon, web-ui, cli]
 related:
   - .lore/vision.md

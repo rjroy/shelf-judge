@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { profileCommand } from "../../src/commands/profile.js";
+import { profileCommand, profileNarrateCommand } from "../../src/commands/profile.js";
 import { createMockClient } from "../helpers/mock-client.js";
 import type { CollectionProfile } from "@shelf-judge/shared";
 
@@ -31,6 +31,20 @@ const sampleProfile: CollectionProfile = {
   gameCount: 10,
   ratedGameCount: 8,
   computedAt: "2026-04-10T12:00:00.000Z",
+  narration: null,
+  narrationState: "empty",
+};
+
+const sampleProfileWithNarration: CollectionProfile = {
+  ...sampleProfile,
+  narration: {
+    summary: "Your collection leans heavily into deck builders.",
+    surprises: ["You rate complexity higher than expected."],
+    tensions: ["Fun vs. depth tension visible."],
+    blindSpots: ["No area control games."],
+    curveInsights: ["Diminishing returns on player count above 4."],
+  },
+  narrationState: "fresh",
 };
 
 const client = createMockClient({
@@ -65,5 +79,33 @@ describe("profile", () => {
     expect(parsed.divergence).toBeNull();
     expect(parsed.outliers).toHaveLength(0);
     expect(parsed.suggestions).toHaveLength(0);
+  });
+});
+
+describe("profile narrate", () => {
+  test("returns profile with narration on success", async () => {
+    const narrationClient = createMockClient({
+      routes: {
+        "POST /api/profile/narrate": {
+          response: { ok: true, status: 200, data: sampleProfileWithNarration },
+        },
+      },
+    });
+    const output = await profileNarrateCommand(narrationClient, [], { json: false });
+    const parsed = JSON.parse(output) as CollectionProfile;
+    expect(parsed.narration).not.toBeNull();
+    expect(parsed.narration!.summary).toBe("Your collection leans heavily into deck builders.");
+    expect(parsed.narrationState).toBe("fresh");
+  });
+
+  test("throws on daemon error", () => {
+    const errorClient = createMockClient({
+      routes: {
+        "POST /api/profile/narrate": {
+          response: { ok: false, status: 502, data: { error: "SDK crashed" } },
+        },
+      },
+    });
+    expect(profileNarrateCommand(errorClient, [], { json: false })).rejects.toThrow("SDK crashed");
   });
 });

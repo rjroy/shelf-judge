@@ -1,7 +1,7 @@
 ---
 title: "MVP Implementation Plan"
 date: 2026-04-05
-status: resolved
+status: executed
 tags: [plan, mvp, implementation]
 spec: .lore/specs/mvp.md
 related:

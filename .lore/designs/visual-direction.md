@@ -2,10 +2,11 @@
 title: "Shelf Judge Visual Direction"
 date: 2026-04-05
 status: active
-tags: [design, visual, ui, branding]
+tags: [design, visual, web-ui, branding]
 modules: [web-ui]
 related:
   - .lore/designs/mvp-web-ui.md
+  - .lore/designs/shelf-judge-color-system.md
   - .lore/vision.md
 ---
 
@@ -21,55 +22,23 @@ The fitness score is the hero of the product. The UI exists to support that numb
 
 ## Color Palette
 
-### Base
+> **Source of truth:** All color token values live in [`shelf-judge-color-system.md`](./shelf-judge-color-system.md). This section covers _intent_ — what the palette is trying to communicate. For token names, hex values, and derivation rules, see that spec.
 
-| Token             | Value     | Use                                                            |
-| ----------------- | --------- | -------------------------------------------------------------- |
-| `--bg-base`       | `#f4f1ec` | Page background — warm off-white, like quality cardboard stock |
-| `--bg-surface`    | `#fefcf9` | Card and panel backgrounds                                     |
-| `--bg-elevated`   | `#ffffff` | Modals, dropdowns, overlays                                    |
-| `--border`        | `#ddd8d0` | Default borders and dividers                                   |
-| `--border-strong` | `#c4bfb8` | Emphasized borders (table headers, active states)              |
+The palette has four jobs, in order of importance:
 
-### Text
+**1. Warm parchment neutrals.** Backgrounds are off-white with a warm cast (`--bg-base`, `--bg-surface`), not gray. Text is a warm near-black (`--text-primary`), not pure black. The mental image is ink on quality cardboard stock — a tool someone uses on purpose, not a dashboard they happened to land on. The one neutral-gray exception is `--bg-muted`, used only where warmth would look wrong.
 
-| Token              | Value     | Use                                        |
-| ------------------ | --------- | ------------------------------------------ |
-| `--text-primary`   | `#1a1714` | Body text — warm near-black (ink on paper) |
-| `--text-secondary` | `#6b6560` | Supporting text, descriptions              |
-| `--text-muted`     | `#9c9590` | Labels, hints, placeholders                |
+**2. Score as hero.** The fitness score has its own amber (`--score-color`) — a "precious" color that nothing else in the UI uses. The score spectrum (`--score-high/mid/low`) gives the eye rapid orientation across 1.0–10.0 without feeling gamified: a muted green, an amber, a muted red. High scores at 7.5+, mid at 5.0–7.4, low below 5.0.
 
-### Score Spectrum
+**3. Data provenance as language.** BGG-derived data, personal ratings, and user overrides are three different authorities. Each gets a distinct hue that appears consistently wherever that data surfaces: personal = default text, BGG = slate blue (`--bgg-accent`), override = purple (`--override-accent`). A user should be able to tell at a glance where a number came from.
 
-The fitness score has a range of 1.0–10.0. Use color to convey where a score sits within that range — not as gamification, but as rapid orientation for the eye.
+**4. Actions and status.** Actions use a deep navy (`--action`). Destructive actions reuse the score-low red via alias (`--danger` → `--score-low`) — "dangerous" and "low score" are the same visual concept. Success and confidence colors alias into the score spectrum for the same reason.
 
-| Token           | Value     | Range    | Use                                              |
-| --------------- | --------- | -------- | ------------------------------------------------ |
-| `--score-color` | `#b86c1a` | —        | Primary score color (large display, hero number) |
-| `--score-high`  | `#2d7a4a` | 7.5–10.0 | High fitness scores                              |
-| `--score-mid`   | `#8a6f20` | 5.0–7.4  | Mid-range fitness scores                         |
-| `--score-low`   | `#b84040` | 1.0–4.9  | Low fitness scores                               |
+### Why these choices
 
-### Data Source Distinction
-
-BGG-derived data and personal ratings are fundamentally different in provenance. They get different visual treatment so the user always knows what came from the community vs. themselves.
-
-| Token               | Value     | Use                                                                     |
-| ------------------- | --------- | ----------------------------------------------------------------------- |
-| `--personal-accent` | `#1a1714` | Personal ratings — default text color (these are the user's own words)  |
-| `--bgg-accent`      | `#2e5f8a` | BGG-derived values — slate blue (third-party data, different authority) |
-| `--bgg-bg`          | `#edf3f9` | Background tint for BGG-sourced rows or cells                           |
-| `--override-accent` | `#5c3d99` | User override of a BGG value — purple (intersection of both)            |
-
-### Actions
-
-| Token             | Value     | Use                                 |
-| ----------------- | --------- | ----------------------------------- |
-| `--action`        | `#1c3d5e` | Primary buttons, links              |
-| `--action-hover`  | `#2a5580` | Hover state                         |
-| `--action-subtle` | `#e8eff6` | Subtle action backgrounds           |
-| `--danger`        | `#b84040` | Delete, remove, destructive actions |
-| `--danger-subtle` | `#fdf0f0` | Danger confirmation backgrounds     |
+- **Warm over cool neutrals:** cool grays read as corporate SaaS; warm off-whites read as considered craft.
+- **Muted saturations:** bright colors draw attention to themselves; this UI needs attention on the numbers, not the chrome.
+- **Aliasing semantic concepts:** when "danger" and "score-low" are the same red, they can't drift, and a brand refresh only touches one value.
 
 ---
 
@@ -122,8 +91,8 @@ Single-level elevation. All cards use:
 The collection view is a table. Embrace that — don't card-ify rows.
 
 - `border-collapse: collapse`
-- Row hover: `background: #f0ede8`
-- Header row: `background: #ede9e3; text-transform: uppercase; font-size: 11px; letter-spacing: 0.06em`
+- Row hover: `background: var(--row-hover)`
+- Header row: `background: var(--table-header-bg); text-transform: uppercase; font-size: 11px; letter-spacing: 0.06em`
 - Score column: right-aligned, tabular numerals, `--score-color` tint
 - Thumbnail: 40×40px in a circle or rounded square, left of game name
 
@@ -170,7 +139,7 @@ Three tiers:
 
 ### Navigation
 
-Left sidebar, 200px. Dark background (`#1a1714`) with white text — the nav is a dark panel against the warm cream content area. This creates a strong visual anchor without being heavy.
+Left sidebar, 200px. Dark background (`var(--nav-bg)`, which aliases `--text-primary`) with `var(--nav-text)` — the nav is a dark panel against the warm cream content area. This creates a strong visual anchor without being heavy.
 
 Nav items: uppercase, 12px, letter-spaced. Active state: amber-tinted left border `4px solid var(--score-color)`.
 
@@ -184,7 +153,7 @@ Import progress uses a linear bar, not a spinner. The user should see the count 
 
 **Concept:** Three vertical bars of uneven heights inside a rounded square frame. The bars represent ranked scores — the tallest bar has an upward caret above it indicating "ranked #1." Simple enough to read at 32px. Distinctive enough to not look like a generic chart icon.
 
-**Color:** Deep navy (`#1c3d5e`) on transparent background. The navbar uses dark background, so the icon renders in reverse there. For the web app favicon: deep navy on warm off-white.
+**Color:** Deep navy (`var(--action)`) on transparent background. The navbar uses dark background, so the icon renders in reverse there. For the web app favicon: deep navy on warm off-white.
 
 **File targets:**
 

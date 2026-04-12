@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import type {
   FitnessResult,
   FitnessBreakdownEntry,
@@ -288,7 +289,9 @@ function ConfidenceBreakdownPanel({
       <div className="ref-game-list">
         {referenceGames.map((ref) => (
           <div key={ref.gameId} className="ref-game-item">
-            <span className="ref-game-name">{ref.gameName}</span>
+            <Link href={`/games/${ref.gameId}`} className="game-link ref-game-name">
+              {ref.gameName}
+            </Link>
             <div className="ref-game-sim-track">
               <div
                 className="ref-game-sim-fill"

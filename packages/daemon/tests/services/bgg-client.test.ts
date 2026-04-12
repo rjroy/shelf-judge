@@ -48,21 +48,54 @@ describe("BggClient", () => {
   });
 
   describe("searchGames", () => {
-    test("delegates to fetch with correct URL and auth header", async () => {
+    test("enriches results with thumbnail URLs from thing batch", async () => {
       const searchXml = await readFixture("search-wingspan.xml");
+      const thingBatchXml = await readFixture("thing-search-batch.xml");
       mockFetch.enqueue(200, searchXml);
+      mockFetch.enqueue(200, thingBatchXml);
 
       const results = await client.searchGames("Wingspan");
 
-      expect(mockFetch.calls).toHaveLength(1);
+      // Two fetches: search + thing batch
+      expect(mockFetch.calls).toHaveLength(2);
       expect(mockFetch.calls[0].url).toContain("/xmlapi2/search");
       expect(mockFetch.calls[0].url).toContain("query=Wingspan");
       expect(mockFetch.calls[0].url).toContain("type=boardgame");
       expect(mockFetch.calls[0].headers.Authorization).toBe("Bearer test-token");
 
+      // Thing batch URL should contain IDs from search results
+      expect(mockFetch.calls[1].url).toContain("/xmlapi2/thing");
+      expect(mockFetch.calls[1].url).toContain("266192");
+
       expect(results).toHaveLength(14);
       expect(results[1].bggId).toBe(266192);
       expect(results[1].name).toBe("Wingspan");
+
+      // Wingspan should have a thumbnail from the batch response
+      const wingspan = results.find((r) => r.bggId === 266192);
+      expect(wingspan?.thumbnailUrl).toContain("geekdo-images.com");
+
+      // Result not in the thing batch should have null thumbnail
+      const noThumb = results.find((r) => r.bggId === 290448);
+      expect(noThumb?.thumbnailUrl).toBeNull();
+    });
+
+    test("returns results with null thumbnails when thing batch fails", async () => {
+      const searchXml = await readFixture("search-wingspan.xml");
+      // Thing batch gets server errors until retry exhaustion
+      mockFetch.enqueue(200, searchXml);
+      mockFetch.enqueue(502, "Bad Gateway");
+      mockFetch.enqueue(502, "Bad Gateway");
+      mockFetch.enqueue(502, "Bad Gateway");
+
+      const results = await client.searchGames("Wingspan");
+
+      // Search still returns results
+      expect(results).toHaveLength(14);
+      // All thumbnails should be null (graceful degradation)
+      for (const result of results) {
+        expect(result.thumbnailUrl).toBeNull();
+      }
     });
   });
 
@@ -167,12 +200,14 @@ describe("BggClient", () => {
       });
 
       const searchXml = await readFixture("search-wingspan.xml");
+      const thingBatchXml = await readFixture("thing-search-batch.xml");
       mockFetch.enqueue(429, ""); // Rate limited
       mockFetch.enqueue(200, searchXml); // Success after backoff
+      mockFetch.enqueue(200, thingBatchXml); // Thing batch for thumbnail enrichment
 
       const results = await trackingClient.searchGames("Wingspan");
 
-      expect(mockFetch.calls).toHaveLength(2);
+      expect(mockFetch.calls).toHaveLength(3);
       expect(results).toHaveLength(14);
 
       // Should have called delayFn with BACKOFF_429_MS (30000)
@@ -192,9 +227,12 @@ describe("BggClient", () => {
       });
 
       const searchXml = await readFixture("search-wingspan.xml");
+      const thingBatchXml = await readFixture("thing-search-batch.xml");
       mockFetch.enqueue(429, ""); // Rate limited
       mockFetch.enqueue(200, searchXml); // Success after backoff
-      mockFetch.enqueue(200, searchXml); // Second request at slower rate
+      mockFetch.enqueue(200, thingBatchXml); // Thing batch for first search
+      mockFetch.enqueue(200, searchXml); // Second search
+      mockFetch.enqueue(200, thingBatchXml); // Thing batch for second search
 
       await trackingClient.searchGames("Wingspan");
 
@@ -211,12 +249,14 @@ describe("BggClient", () => {
   describe("502/503 retry", () => {
     test("retries on 502", async () => {
       const searchXml = await readFixture("search-wingspan.xml");
+      const thingBatchXml = await readFixture("thing-search-batch.xml");
       mockFetch.enqueue(502, "Bad Gateway");
       mockFetch.enqueue(200, searchXml);
+      mockFetch.enqueue(200, thingBatchXml); // Thing batch for thumbnail enrichment
 
       const results = await client.searchGames("Wingspan");
 
-      expect(mockFetch.calls).toHaveLength(2);
+      expect(mockFetch.calls).toHaveLength(3);
       expect(results).toHaveLength(14);
     });
 
@@ -332,12 +372,16 @@ describe("BggClient", () => {
       });
 
       const searchXml = await readFixture("search-wingspan.xml");
+      const thingBatchXml = await readFixture("thing-search-batch.xml");
 
       // 429 sets delay to 10000
       recoveryMock.enqueue(429, "");
-      recoveryMock.enqueue(200, searchXml); // success, delay halves to 5000
-      recoveryMock.enqueue(200, searchXml); // success, delay halves to 2500
-      recoveryMock.enqueue(200, searchXml); // success, delay halves to 1250
+      recoveryMock.enqueue(200, searchXml); // search A success
+      recoveryMock.enqueue(200, thingBatchXml); // search A thing batch
+      recoveryMock.enqueue(200, searchXml); // search B
+      recoveryMock.enqueue(200, thingBatchXml); // search B thing batch
+      recoveryMock.enqueue(200, searchXml); // search C
+      recoveryMock.enqueue(200, thingBatchXml); // search C thing batch
 
       await recoveryClient.searchGames("A");
       await recoveryClient.searchGames("B");

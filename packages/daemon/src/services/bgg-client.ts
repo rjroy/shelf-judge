@@ -39,9 +39,7 @@ export interface BatchProgressEvent {
 
 export interface BggClient {
   searchGames(query: string): Promise<BggSearchResult[]>;
-  getGame(
-      bggId: number, 
-  ): Promise<BggGameResult>;
+  getGame(bggId: number): Promise<BggGameResult>;
   getGames(
     bggIds: number[],
     onBatch?: (event: BatchProgressEvent) => Promise<void> | void,
@@ -199,11 +197,40 @@ export function createBggClient(deps: BggClientDeps): BggClient {
       const response = await throttledFetch(url);
       const xml = await response.text();
 
+      let results: BggSearchResult[];
       try {
-        return parseSearchResponse(xml);
+        results = parseSearchResponse(xml);
       } catch (err) {
         throw new Error(`Failed to parse BGG search response: ${toErrorMessage(err)}`);
       }
+
+      // Enrich first 20 results with thumbnail URLs from the /thing endpoint
+      if (results.length > 0) {
+        const enrichIds = results.slice(0, MAX_BATCH_SIZE).map((r) => r.bggId);
+        try {
+          const thingUrl = `${BGG_BASE_URL}/thing?id=${enrichIds.join(",")}&type=boardgame`;
+          const thingResponse = await throttledFetch(thingUrl);
+          const thingXml = await thingResponse.text();
+          const thingItems = parseThingItems(thingXml);
+
+          const thumbnailMap = new Map<number, string>();
+          for (const item of thingItems) {
+            if (item.metadata.thumbnailUrl) {
+              thumbnailMap.set(item.bggId, item.metadata.thumbnailUrl);
+            }
+          }
+
+          for (const result of results) {
+            result.thumbnailUrl = thumbnailMap.get(result.bggId) ?? null;
+          }
+        } catch (err) {
+          logger.warn(
+            `thumbnail enrichment failed, returning results without thumbnails: ${toErrorMessage(err)}`,
+          );
+        }
+      }
+
+      return results;
     },
 
     async getGame(bggId: number): Promise<BggGameResult> {
@@ -224,7 +251,9 @@ export function createBggClient(deps: BggClientDeps): BggClient {
       }
 
       if (config.username) {
-        logger.log(`getGame: fetched data for "${items[0].metadata.name}", checking collection for "${config.username}"`);
+        logger.log(
+          `getGame: fetched data for "${items[0].metadata.name}", checking collection for "${config.username}"`,
+        );
         const collectionUrl = `${BGG_BASE_URL}/collection?username=${encodeURIComponent(config.username)}&id=${bggId}&stats=1`;
         const collectionXml = await fetchWithRetry202(collectionUrl);
         const collectionItems = parseCollectionResponse(collectionXml);
@@ -234,7 +263,7 @@ export function createBggClient(deps: BggClientDeps): BggClient {
             bggData: items[0].bggData,
             collectionData: {
               numPlays: collectionItems[0].numplays,
-            }
+            },
           };
         }
       }

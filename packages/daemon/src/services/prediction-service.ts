@@ -7,6 +7,7 @@ import type {
   PredictionUnavailable,
   RevealedPreferenceTension,
 } from "@shelf-judge/shared";
+import { resolveAxisValues } from "@shelf-judge/shared";
 import type { StorageService } from "./storage-service.js";
 import type { FitnessService } from "./fitness-service.js";
 import type { TournamentService } from "./tournament-service.js";
@@ -86,7 +87,14 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
       }
 
       if (game.bggData) {
-        const fv = encodeGame(game, vocabulary, game.ratings ?? undefined, ranges);
+        const resolved = resolveAxisValues(game, axes);
+        const fv = encodeGame(
+          game,
+          vocabulary,
+          Object.keys(resolved).length > 0 ? resolved : undefined,
+          ranges,
+          axes,
+        );
         gameVectors.set(game.id, flattenVector(fv));
       }
     }
@@ -244,7 +252,14 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
       };
 
       // Encode the temporary game using the collection's vocabulary and ranges
-      const fv = encodeGame(tempGame, ctx.vocabulary, undefined, ctx.ranges);
+      const resolved = resolveAxisValues(tempGame, ctx.axes);
+      const fv = encodeGame(
+        tempGame,
+        ctx.vocabulary,
+        Object.keys(resolved).length > 0 ? resolved : undefined,
+        ctx.ranges,
+        ctx.axes,
+      );
       const targetVector = flattenVector(fv);
 
       const { fitnessResult } = computePredictedFitness(

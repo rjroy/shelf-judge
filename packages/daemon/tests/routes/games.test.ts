@@ -40,6 +40,7 @@ const wingspanBggResult: BggGameResult = {
     maxPlayers: 5,
     playingTime: 70,
     imageUrl: "https://example.com/wingspan.jpg",
+    thumbnailUrl: null,
   },
   bggData: {
     communityRating: 8.1,
@@ -293,8 +294,13 @@ describe("Game Routes", () => {
       const bggClient = createMockBggClient({
         searchGames: () =>
           Promise.resolve([
-            { bggId: 266192, name: "Wingspan", yearPublished: 2019 },
-            { bggId: 290837, name: "Wingspan: European Expansion", yearPublished: 2019 },
+            { bggId: 266192, name: "Wingspan", yearPublished: 2019, thumbnailUrl: null },
+            {
+              bggId: 290837,
+              name: "Wingspan: European Expansion",
+              yearPublished: 2019,
+              thumbnailUrl: null,
+            },
           ]),
       });
       ctx = createTestApp({ bggClient });
@@ -411,6 +417,223 @@ describe("Game Routes", () => {
       const body = (await res.json()) as { error: string };
       expect(body.error).toContain("not configured");
       expect(body.error).toContain("shelf-judge config set bgg-token");
+    });
+  });
+
+  describe("niche position integration", () => {
+    // Build a collection of 3 games sharing "Deck Building" mechanic to form a niche
+    const makeBggResult = (
+      bggId: number,
+      name: string,
+      mechanics: { id: number; name: string }[],
+      categories: { id: number; name: string }[] = [],
+    ): BggGameResult => ({
+      metadata: {
+        bggId,
+        name,
+        yearPublished: 2020,
+        minPlayers: 2,
+        maxPlayers: 4,
+        playingTime: 60,
+        imageUrl: null,
+        thumbnailUrl: null,
+      },
+      bggData: {
+        communityRating: 7.5,
+        bayesAverage: 7.2,
+        weight: 2.5,
+        numWeightVotes: 100,
+        description: null,
+        mechanics,
+        categories,
+        families: [],
+        subdomains: [],
+        suggestedPlayerCounts: [],
+        fetchedAt: new Date().toISOString(),
+      },
+    });
+
+    async function setupNicheCollection() {
+      const bggClient = createMockBggClient({
+        getGame: (bggId: number) => {
+          const games: Record<number, BggGameResult> = {
+            1: makeBggResult(
+              1,
+              "Game Alpha",
+              [{ id: 1, name: "Deck Building" }],
+              [{ id: 10, name: "Card Game" }],
+            ),
+            2: makeBggResult(
+              2,
+              "Game Beta",
+              [{ id: 1, name: "Deck Building" }],
+              [{ id: 10, name: "Card Game" }],
+            ),
+            3: makeBggResult(3, "Game Gamma", [{ id: 1, name: "Deck Building" }]),
+          };
+          const result = games[bggId];
+          if (!result) return Promise.reject(new Error(`No game found with BGG ID ${bggId}`));
+          return Promise.resolve(result);
+        },
+      });
+      ctx = createTestApp({ bggClient });
+
+      const axisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
+        name: "Fun",
+        weight: 50,
+      });
+      const axis = (await axisRes.json()) as Axis;
+
+      const gameIds: string[] = [];
+      const ratings = [9, 7, 5]; // Alpha=9, Beta=7, Gamma=5
+      for (let i = 1; i <= 3; i++) {
+        const res = await jsonRequest(ctx.app, "POST", "/api/games", {
+          name: `Game ${["Alpha", "Beta", "Gamma"][i - 1]}`,
+          bggId: i,
+        });
+        expect(res.status).toBe(201);
+        const { game } = (await res.json()) as { game: { id: string } };
+        gameIds.push(game.id);
+
+        await jsonRequest(ctx.app, "PUT", `/api/games/${game.id}/ratings`, {
+          ratings: { [axis.id]: ratings[i - 1] },
+        });
+      }
+
+      return { gameIds, axis };
+    }
+
+    describe("GET /api/games/:id nichePosition", () => {
+      test("includes nichePosition with niche entries for a game in niches", async () => {
+        const { gameIds } = await setupNicheCollection();
+
+        const res = await jsonRequest(ctx.app, "GET", `/api/games/${gameIds[0]}`);
+        expect(res.status).toBe(200);
+
+        const body = (await res.json()) as GameWithScore;
+        expect(body.nichePosition).toBeDefined();
+        expect(body.nichePosition).not.toBeNull();
+
+        const niches = body.nichePosition!.niches;
+        expect(niches.length).toBeGreaterThan(0);
+
+        // Alpha is highest rated, should be champion in Deck Building
+        const deckBuilding = niches.find((n) => n.name === "Deck Building");
+        expect(deckBuilding).toBeDefined();
+        expect(deckBuilding!.rank).toBe(1);
+        expect(deckBuilding!.isChampion).toBe(true);
+        expect(deckBuilding!.size).toBe(3);
+      });
+
+      test("returns nichePosition: null for game without BGG data", async () => {
+        // Add a manual game (no BGG data)
+        const addRes = await jsonRequest(ctx.app, "POST", "/api/games", {
+          name: "Manual Game",
+        });
+        const { game } = (await addRes.json()) as { game: { id: string } };
+
+        const res = await jsonRequest(ctx.app, "GET", `/api/games/${game.id}`);
+        expect(res.status).toBe(200);
+
+        const body = (await res.json()) as GameWithScore;
+        expect(body.nichePosition).toBeNull();
+      });
+
+      test("niche entries sorted by size descending", async () => {
+        const { gameIds } = await setupNicheCollection();
+
+        // Alpha is in Deck Building (3 games) and Card Game (2 games)
+        const res = await jsonRequest(ctx.app, "GET", `/api/games/${gameIds[0]}`);
+        const body = (await res.json()) as GameWithScore;
+        const niches = body.nichePosition!.niches;
+
+        // Should have at least 2 niches (Deck Building size 3, Card Game size 2)
+        expect(niches.length).toBeGreaterThanOrEqual(2);
+        for (let i = 0; i < niches.length - 1; i++) {
+          if (niches[i].size === niches[i + 1].size) {
+            // Same size: alphabetical
+            expect(niches[i].name.localeCompare(niches[i + 1].name)).toBeLessThanOrEqual(0);
+          } else {
+            expect(niches[i].size).toBeGreaterThan(niches[i + 1].size);
+          }
+        }
+      });
+
+      test("neighbors are populated correctly", async () => {
+        const { gameIds } = await setupNicheCollection();
+
+        // Beta is rank 2 in Deck Building: above=[Alpha], below=[Gamma]
+        const res = await jsonRequest(ctx.app, "GET", `/api/games/${gameIds[1]}`);
+        const body = (await res.json()) as GameWithScore;
+        const deckBuilding = body.nichePosition!.niches.find((n) => n.name === "Deck Building");
+
+        expect(deckBuilding!.rank).toBe(2);
+        expect(deckBuilding!.above.length).toBe(1);
+        expect(deckBuilding!.above[0].gameName).toBe("Game Alpha");
+        expect(deckBuilding!.below.length).toBe(1);
+        expect(deckBuilding!.below[0].gameName).toBe("Game Gamma");
+      });
+    });
+
+    describe("GET /api/games?includeNiches=true", () => {
+      test("attaches nichePosition to each game when includeNiches=true", async () => {
+        await setupNicheCollection();
+
+        const res = await jsonRequest(ctx.app, "GET", "/api/games?includeNiches=true");
+        expect(res.status).toBe(200);
+
+        const games = (await res.json()) as GameWithScore[];
+        for (const gws of games) {
+          expect(gws.nichePosition).toBeDefined();
+          // Every game has BGG data and a rating, so all should have niches
+          expect(gws.nichePosition).not.toBeNull();
+        }
+      });
+
+      test("nichePosition absent when includeNiches is not set", async () => {
+        await setupNicheCollection();
+
+        const res = await jsonRequest(ctx.app, "GET", "/api/games");
+        expect(res.status).toBe(200);
+
+        const games = (await res.json()) as GameWithScore[];
+        for (const gws of games) {
+          expect(gws.nichePosition).toBeUndefined();
+        }
+      });
+
+      test("includeNiches without includePredicted returns standard list with niches", async () => {
+        await setupNicheCollection();
+
+        const withNiches = await jsonRequest(ctx.app, "GET", "/api/games?includeNiches=true");
+        const withoutNiches = await jsonRequest(ctx.app, "GET", "/api/games");
+
+        const gamesWithNiches = (await withNiches.json()) as GameWithScore[];
+        const gamesWithout = (await withoutNiches.json()) as GameWithScore[];
+
+        // Same games, same count
+        expect(gamesWithNiches.length).toBe(gamesWithout.length);
+        // But with niches attached
+        expect(gamesWithNiches[0].nichePosition).toBeDefined();
+        expect(gamesWithout[0].nichePosition).toBeUndefined();
+      });
+
+      test("includeNiches=true with includePredicted=true returns predicted games with niches", async () => {
+        await setupNicheCollection();
+
+        const res = await jsonRequest(
+          ctx.app,
+          "GET",
+          "/api/games?includePredicted=true&includeNiches=true",
+        );
+        expect(res.status).toBe(200);
+
+        const games = (await res.json()) as GameWithScore[];
+        expect(games.length).toBe(3);
+        for (const gws of games) {
+          expect(gws.nichePosition).toBeDefined();
+        }
+      });
     });
   });
 });
