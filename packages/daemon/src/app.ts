@@ -15,6 +15,8 @@ import { createProfileRoutes } from "./routes/profile.js";
 import { createPredictionRoutes } from "./routes/prediction.js";
 import { createNicheRoutes } from "./routes/niche.js";
 import { createRedundancyRoutes } from "./routes/redundancy.js";
+import { createWishlistRoutes } from "./routes/wishlist.js";
+import { createWishlistService } from "./services/wishlist-service.js";
 import type { TournamentService } from "./services/tournament-service.js";
 import type { ProfileService } from "./services/profile-service.js";
 import type { PredictionService } from "./services/prediction-service.js";
@@ -48,12 +50,20 @@ export function createApp(deps: AppDeps): AppResult {
     onShutdown,
   } = deps;
 
+  // Build wishlist service (used by both wishlist routes and game routes for auto-removal)
+  const wishlistService = createWishlistService({
+    storageService,
+    predictionService,
+    gameService,
+  });
+
   // Build routes
   const gameRouteModule = createGameRoutes({
     gameService,
     bggClient,
     predictionService,
     storageService,
+    wishlistService,
   });
   const axisRouteModule = createAxisRoutes({ axisService });
   const scoreRouteModule = createScoreRoutes({ gameService });
@@ -63,6 +73,7 @@ export function createApp(deps: AppDeps): AppResult {
   const predictionRouteModule = createPredictionRoutes({ predictionService, storageService });
   const nicheRouteModule = createNicheRoutes({ storageService });
   const redundancyRouteModule = createRedundancyRoutes({ storageService });
+  const wishlistRouteModule = createWishlistRoutes({ wishlistService });
 
   // Collect all operations
   const allOperations: OperationDefinition[] = [
@@ -75,6 +86,7 @@ export function createApp(deps: AppDeps): AppResult {
     ...predictionRouteModule.operations,
     ...nicheRouteModule.operations,
     ...redundancyRouteModule.operations,
+    ...wishlistRouteModule.operations,
   ];
 
   const helpRouteModule = createHelpRoutes({ operations: allOperations });
@@ -100,6 +112,7 @@ export function createApp(deps: AppDeps): AppResult {
   app.route("/api", predictionRouteModule.routes);
   app.route("/api", nicheRouteModule.routes);
   app.route("/api", redundancyRouteModule.routes);
+  app.route("/api", wishlistRouteModule.routes);
   app.route("/api", helpRouteModule.routes);
   app.route("/api", configRouteModule.routes);
   app.route("/api", shutdownRouteModule.routes);

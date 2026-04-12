@@ -112,6 +112,8 @@ function createStubStorage(
         expectedNeighbors: 5,
       }),
     saveRedundancySettings: () => Promise.resolve(),
+    loadWishlist: () => Promise.resolve([]),
+    saveWishlist: () => Promise.resolve(),
   };
 }
 
