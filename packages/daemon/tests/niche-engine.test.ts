@@ -1,6 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { computeNichePositions, computeNicheImpact } from "../src/services/niche-engine";
-import type { Game, GameWithScore, FitnessResult, BggGameData } from "@shelf-judge/shared";
+import {
+  computeNichePositions,
+  computeNicheImpact,
+  DEFAULT_NICHE_SETTINGS,
+} from "../src/services/niche-engine";
+import type {
+  Game,
+  GameWithScore,
+  FitnessResult,
+  BggGameData,
+  NicheSettings,
+} from "@shelf-judge/shared";
 
 // --- Test fixture helpers ---
 
@@ -453,5 +463,87 @@ describe("computeNicheImpact", () => {
     const db = impact.wouldJoin.find((e) => e.name === "Deck Building")!;
     // Tied score, so shares rank 1
     expect(db.projectedRank).toBe(1);
+  });
+});
+
+describe("niche tag filtering", () => {
+  test("ignored mechanic tag is excluded from niche grouping", () => {
+    const settings: NicheSettings = {
+      ignoredTags: [{ type: "mechanic", name: "Deck Building" }],
+    };
+    const result = computeNichePositions(allGames, settings);
+
+    // No game should have a "Deck Building" niche
+    for (const [, pos] of result) {
+      for (const niche of pos.niches) {
+        expect(niche.name).not.toBe("Deck Building");
+      }
+    }
+  });
+
+  test("ignoring a tag that reduces a niche below 2 members eliminates that niche", () => {
+    // Worker Placement has only C and D. If we ignore Worker Placement, the niche disappears.
+    // But let's test a subtler case: Area Control has E and D.
+    // If we ignore Area Control, it disappears.
+    const settings: NicheSettings = {
+      ignoredTags: [{ type: "mechanic", name: "Area Control" }],
+    };
+    const result = computeNichePositions(allGames, settings);
+
+    for (const [, pos] of result) {
+      for (const niche of pos.niches) {
+        expect(niche.name).not.toBe("Area Control");
+      }
+    }
+  });
+
+  test("computeNicheImpact with ignored tags does not report impact for ignored tags", () => {
+    const settings: NicheSettings = {
+      ignoredTags: [{ type: "mechanic", name: "Deck Building" }],
+    };
+    const candidate = makeGame(
+      "x",
+      "X-Ray",
+      makeBggData({ mechanics: [mech("Deck Building"), mech("Hand Management")] }),
+    );
+    const candidateScore = makeScore(7.5);
+
+    const impact = computeNicheImpact(allGames, candidate, candidateScore, settings);
+    const names = impact.wouldJoin.map((e) => e.name);
+    expect(names).not.toContain("Deck Building");
+    expect(names).toContain("Hand Management");
+  });
+
+  test("empty ignore list produces identical results to no settings parameter", () => {
+    const withEmptySettings = computeNichePositions(allGames, { ignoredTags: [] });
+    const withDefault = computeNichePositions(allGames);
+    const withoutSettings = computeNichePositions(allGames, DEFAULT_NICHE_SETTINGS);
+
+    expect(withEmptySettings.size).toBe(withDefault.size);
+    expect(withEmptySettings.size).toBe(withoutSettings.size);
+
+    for (const [gameId, pos1] of withDefault) {
+      const pos2 = withEmptySettings.get(gameId)!;
+      expect(pos1.niches.length).toBe(pos2.niches.length);
+    }
+  });
+
+  test("multiple ignored tags across different types all filtered correctly", () => {
+    const settings: NicheSettings = {
+      ignoredTags: [
+        { type: "mechanic", name: "Deck Building" },
+        { type: "category", name: "Strategy" },
+        { type: "family", name: "Kosmos Two-Player" },
+      ],
+    };
+    const result = computeNichePositions(allGames, settings);
+
+    for (const [, pos] of result) {
+      for (const niche of pos.niches) {
+        expect(niche.name).not.toBe("Deck Building");
+        expect(niche.name).not.toBe("Strategy");
+        expect(niche.name).not.toBe("Kosmos Two-Player");
+      }
+    }
   });
 });

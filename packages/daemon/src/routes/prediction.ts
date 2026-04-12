@@ -1,15 +1,17 @@
 import { Hono } from "hono";
 import { toErrorMessage } from "@shelf-judge/shared";
 import type { PredictionService } from "../services/prediction-service.js";
+import type { StorageService } from "../services/storage-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
 import { computeNicheImpact } from "../services/niche-engine.js";
 
 export interface PredictionRoutesDeps {
   predictionService: PredictionService;
+  storageService?: StorageService;
 }
 
 export function createPredictionRoutes(deps: PredictionRoutesDeps): RouteModule {
-  const { predictionService } = deps;
+  const { predictionService, storageService } = deps;
   const routes = new Hono();
 
   // GET /predictions/readiness (must be before :gameId to avoid matching "readiness" as a gameId)
@@ -66,8 +68,9 @@ export function createPredictionRoutes(deps: PredictionRoutesDeps): RouteModule 
       const result = await predictionService.predictBggGame(bggId);
 
       // Compute niche impact: how would this candidate affect the collection's niches?
+      const nicheSettings = storageService ? await storageService.loadNicheSettings() : undefined;
       const allGames = await predictionService.listGamesWithPredictions();
-      const nicheImpact = computeNicheImpact(allGames, result.game, result.score);
+      const nicheImpact = computeNicheImpact(allGames, result.game, result.score, nicheSettings);
 
       return c.json({ ...result, nicheImpact });
     } catch (err) {

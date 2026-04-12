@@ -54,6 +54,12 @@ function createStubStorage(): StorageService & { tournamentData: TournamentData 
     savePredictionSettings(): Promise<void> {
       return Promise.resolve();
     },
+    loadNicheSettings() {
+      return Promise.resolve({ ignoredTags: [] });
+    },
+    saveNicheSettings() {
+      return Promise.resolve();
+    },
   };
 
   return stub;

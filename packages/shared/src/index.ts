@@ -58,6 +58,8 @@ export type {
   NichePosition,
   NicheImpactEntry,
   NicheImpact,
+  NicheTagFilter,
+  NicheSettings,
 } from "./types";
 
 export {

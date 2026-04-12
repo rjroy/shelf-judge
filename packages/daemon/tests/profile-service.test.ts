@@ -101,6 +101,12 @@ function createStubStorage(overrides?: {
     savePredictionSettings() {
       return Promise.resolve();
     },
+    loadNicheSettings() {
+      return Promise.resolve({ ignoredTags: [] });
+    },
+    saveNicheSettings() {
+      return Promise.resolve();
+    },
   };
 
   return stub;

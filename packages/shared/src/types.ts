@@ -465,3 +465,12 @@ export interface NicheImpact {
   /** Niches this game would join if added to the collection */
   wouldJoin: NicheImpactEntry[];
 }
+
+export interface NicheTagFilter {
+  type: "mechanic" | "category" | "family";
+  name: string;
+}
+
+export interface NicheSettings {
+  ignoredTags: NicheTagFilter[];
+}

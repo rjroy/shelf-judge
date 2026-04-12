@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { GameService } from "../services/game-service.js";
 import type { BggClient } from "../services/bgg-client.js";
 import type { PredictionService } from "../services/prediction-service.js";
+import type { StorageService } from "../services/storage-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
 import { computeNichePositions } from "../services/niche-engine.js";
 
@@ -11,6 +12,7 @@ export interface GameRoutesDeps {
   gameService: GameService;
   bggClient?: BggClient;
   predictionService?: PredictionService;
+  storageService?: StorageService;
 }
 
 const RatingsBodySchema = z.object({
@@ -32,7 +34,7 @@ function bggNotConfiguredResponse(c: Context) {
 }
 
 export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
-  const { gameService, bggClient, predictionService } = deps;
+  const { gameService, bggClient, predictionService, storageService } = deps;
   const routes = new Hono();
 
   // GET /games/search?q={query}
@@ -98,7 +100,10 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       if (includePredicted && predictionService) {
         const games = await predictionService.listGamesWithPredictions();
         if (includeNiches) {
-          const nicheMap = computeNichePositions(games);
+          const nicheSettings = storageService
+            ? await storageService.loadNicheSettings()
+            : undefined;
+          const nicheMap = computeNichePositions(games, nicheSettings);
           for (const gws of games) {
             gws.nichePosition = nicheMap.get(gws.game.id) ?? null;
           }
@@ -112,8 +117,9 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
         // Niche ranking needs predicted scores (REQ-NICHE-4), but the client
         // didn't ask for predicted games in the response. Compute niches from
         // the full list, then attach positions only to the standard game list.
+        const nicheSettings = storageService ? await storageService.loadNicheSettings() : undefined;
         const allGames = await predictionService.listGamesWithPredictions();
-        const nicheMap = computeNichePositions(allGames);
+        const nicheMap = computeNichePositions(allGames, nicheSettings);
         for (const gws of games) {
           gws.nichePosition = nicheMap.get(gws.game.id) ?? null;
         }
@@ -133,8 +139,9 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
 
       // Compute niche position from the full collection including predicted scores
       if (predictionService) {
+        const nicheSettings = storageService ? await storageService.loadNicheSettings() : undefined;
         const allGames = await predictionService.listGamesWithPredictions();
-        const nicheMap = computeNichePositions(allGames);
+        const nicheMap = computeNichePositions(allGames, nicheSettings);
         result.nichePosition = nicheMap.get(id) ?? null;
       } else {
         result.nichePosition = null;

@@ -99,6 +99,8 @@ function createStubStorage(
     loadPredictionSettings: () =>
       Promise.resolve(predictionSettings ?? { ...DEFAULT_PREDICTION_SETTINGS }),
     savePredictionSettings: () => Promise.resolve(),
+    loadNicheSettings: () => Promise.resolve({ ignoredTags: [] }),
+    saveNicheSettings: () => Promise.resolve(),
   };
 }
 
