@@ -5831,11 +5831,15 @@ body {
   display: inline-flex;
   align-items: baseline;
   gap: 3px;
+  max-width: 275px;
 }
 
 .niche-neighbor-link {
   color: var(--action);
   text-decoration: none;
+  overflow-x: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .niche-neighbor-link:hover {

@@ -507,19 +507,17 @@ function NicheEntryCard({ niche }: { niche: NicheEntry }) {
       <div className="niche-neighbors">
         {niche.above.length > 0 && (
           <div className="niche-neighbor-row">
+            <span className="niche-neighbor-dir">Above:</span>
             {niche.above.map((n) => (
-              <span className="niche-neighbor-dir">Above:
-                <NeighborLink key={n.gameId} neighbor={n} />
-              </span>
+              <NeighborLink key={n.gameId} neighbor={n} />
             ))}
           </div>
         )}
         {niche.below.length > 0 && (
           <div className="niche-neighbor-row">
+            <span className="niche-neighbor-dir">Below:</span>
             {niche.below.map((n) => (
-              <span className="niche-neighbor-dir">Below:
-                <NeighborLink key={n.gameId} neighbor={n} />
-              </span>
+              <NeighborLink key={n.gameId} neighbor={n} />
             ))}
           </div>
         )}

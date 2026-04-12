@@ -1,7 +1,7 @@
 ---
 title: "Implementation plan: niche-tag-filtering"
 date: 2026-04-11
-status: draft
+status: approved
 tags: [plan, niche, settings, filtering, tags]
 modules: [shared, daemon, web, cli]
 related:
