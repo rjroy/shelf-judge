@@ -50,3 +50,8 @@ Solid implementation. Follows the plan faithfully with one confirmed defect and 
 - `packages/cli/src/commands/niche.ts` — Three commands:
   - `shelf-judge niche ignored` — lists ignored tags as a text table (or JSON with `--json`)...
 - 22:29 commission-Dalton-20260411-221139 completed
+- 22:34 commission-Dalton-20260411-221133 result: ## Phase 6 Complete: Web UI for Niche Tag Filtering
+
+### 6a: Web API Helpers
+`packages/web/lib/api.ts`: Added `getNicheSettings()`, `updateNicheSettings()`, `ignoreNicheTag()`, `unignoreNicheTag()`. R...
+- 22:34 commission-Dalton-20260411-221133 completed
