@@ -53,6 +53,11 @@ export type {
   PredictionSettings,
   PredictionUnavailable,
   PredictedGameResponse,
+  NicheNeighbor,
+  NicheEntry,
+  NichePosition,
+  NicheImpactEntry,
+  NicheImpact,
 } from "./types";
 
 export {

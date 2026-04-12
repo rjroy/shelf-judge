@@ -207,6 +207,7 @@ export interface GameWithScore {
   game: Game;
   score: FitnessResult | null;
   bggDataStale?: boolean;
+  nichePosition?: NichePosition | null;
 }
 
 export interface AddGameResult {
@@ -414,4 +415,53 @@ export interface PredictedGameResponse {
   score: FitnessResult;
   tension: RevealedPreferenceTension | null;
   predictionUnavailable: PredictionUnavailable | null;
+  nicheImpact?: NicheImpact;
+}
+
+// Niche champion display types (niche-champion-display spec)
+
+export interface NicheNeighbor {
+  gameId: string;
+  gameName: string;
+  fitnessScore: number;
+  isPredicted: boolean;
+}
+
+export interface NicheEntry {
+  /** Attribute type that defines this niche */
+  type: "mechanic" | "category" | "family";
+  /** Attribute name (e.g., "Deck Building", "Card Game") */
+  name: string;
+  /** Total games in this niche (excluding vetoed) */
+  size: number;
+  /** This game's rank within the niche (1 = champion) */
+  rank: number;
+  /** Whether this game is the niche champion */
+  isChampion: boolean;
+  /** The niche champion game */
+  champion: NicheNeighbor;
+  /** Games ranked immediately above (better fitness), up to 2 */
+  above: NicheNeighbor[];
+  /** Games ranked immediately below (worse fitness), up to 2 */
+  below: NicheNeighbor[];
+}
+
+export interface NichePosition {
+  niches: NicheEntry[];
+}
+
+export interface NicheImpactEntry {
+  type: "mechanic" | "category" | "family";
+  name: string;
+  /** Current niche size (before adding this game) */
+  currentSize: number;
+  /** What rank this game would hold in the niche */
+  projectedRank: number;
+  /** Current champion of this niche */
+  currentChampion: NicheNeighbor | null;
+}
+
+export interface NicheImpact {
+  /** Niches this game would join if added to the collection */
+  wouldJoin: NicheImpactEntry[];
 }
