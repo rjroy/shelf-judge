@@ -4317,8 +4317,9 @@ body {
 }
 
 .narration-icon {
-  width: 36px;
-  height: 36px;
+  width: 30px;
+  height: 30px;
+  margin: 6px;
   border-radius: 50%;
   background: var(--override-bg);
   border: 1px solid var(--override-border);
@@ -4331,6 +4332,12 @@ body {
 
 .narration-text {
   flex: 1;
+}
+
+.narration-section {
+  overflow-y: auto;
+  max-height: 300px;
+  padding: 0 5px;
 }
 
 .narration-label {
