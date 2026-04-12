@@ -97,11 +97,14 @@ interface NicheGroup {
  * Build an attribute index from eligible games.
  * Returns groups keyed by "type:name".
  */
+function buildIgnoreSet(ignoredTags: NicheTagFilter[]): Set<string> {
+  return new Set(ignoredTags.map((t) => `${t.type}:${t.name}`));
+}
+
 function buildAttributeIndex(
   eligibleGames: GameWithScore[],
-  ignoredTags: NicheTagFilter[],
+  ignoreSet: Set<string>,
 ): Map<string, NicheGroup> {
-  const ignoreSet = new Set(ignoredTags.map((t) => `${t.type}:${t.name}`));
   const index = new Map<string, NicheGroup>();
 
   for (const gws of eligibleGames) {
@@ -159,7 +162,8 @@ export function computeNichePositions(
   settings: NicheSettings = DEFAULT_NICHE_SETTINGS,
 ): Map<string, NichePosition> {
   const eligible = filterEligible(gamesWithScores);
-  const index = buildAttributeIndex(eligible, settings.ignoredTags);
+  const ignoreSet = buildIgnoreSet(settings.ignoredTags);
+  const index = buildAttributeIndex(eligible, ignoreSet);
 
   // Remove groups with <2 members (REQ-NICHE-2)
   for (const [key, group] of index) {
@@ -239,9 +243,8 @@ export function computeNicheImpact(
   }
 
   const eligible = filterEligible(existingGamesWithScores);
-  const index = buildAttributeIndex(eligible, settings.ignoredTags);
-
-  const ignoreSet = new Set(settings.ignoredTags.map((t) => `${t.type}:${t.name}`));
+  const ignoreSet = buildIgnoreSet(settings.ignoredTags);
+  const index = buildAttributeIndex(eligible, ignoreSet);
   const entries: NicheImpactEntry[] = [];
 
   const tagSets: [NicheTagType, { name: string }[]][] = [

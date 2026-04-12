@@ -97,6 +97,23 @@ describe("niche settings routes", () => {
       expect(res.status).toBe(400);
     });
 
+    test("strips unknown properties from patch", async () => {
+      const res = await app.request("/api/niches/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ignoredTags: [{ type: "mechanic", name: "Deck Building" }],
+          arbitraryField: "should be stripped",
+        }),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body.ignoredTags).toHaveLength(1);
+      expect(body).not.toHaveProperty("arbitraryField");
+      // Verify storage also doesn't have it
+      expect(storage.settings).not.toHaveProperty("arbitraryField");
+    });
+
     test("rejects non-array ignoredTags", async () => {
       const res = await app.request("/api/niches/settings", {
         method: "PATCH",

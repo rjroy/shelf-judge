@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { toErrorMessage } from "@shelf-judge/shared";
-import type { NicheTagFilter } from "@shelf-judge/shared";
+import type { NicheSettings, NicheTagFilter } from "@shelf-judge/shared";
 import type { StorageService } from "../services/storage-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
 
@@ -69,7 +69,11 @@ export function createNicheRoutes(deps: NicheRoutesDeps): RouteModule {
 
     try {
       const current = await storageService.loadNicheSettings();
-      const updated = { ...current, ...patch };
+      // Only merge known keys to prevent arbitrary property injection
+      const updated = { ...current };
+      if ("ignoredTags" in patch) {
+        updated.ignoredTags = patch.ignoredTags as NicheSettings["ignoredTags"];
+      }
       await storageService.saveNicheSettings(updated);
       return c.json(updated);
     } catch (err) {
