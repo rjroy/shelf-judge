@@ -165,6 +165,9 @@ export function computeNichePositions(
     const ranked = sortAndRank(group.games);
     const champion = toNeighbor(ranked[0]);
 
+    // Predicted games don't get champion status when an actual game shares rank 1 (REQ-NICHE-8)
+    const actualAtRank1 = ranked.some((r) => r.rank === 1 && !r.isPredicted);
+
     for (let i = 0; i < ranked.length; i++) {
       const game = ranked[i];
 
@@ -185,7 +188,7 @@ export function computeNichePositions(
         name: group.name,
         size: ranked.length,
         rank: game.rank,
-        isChampion: game.rank === 1,
+        isChampion: game.rank === 1 && (!game.isPredicted || !actualAtRank1),
         champion,
         above,
         below,

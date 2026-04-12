@@ -255,7 +255,8 @@ describe("computeNichePositions", () => {
     const deckB = posB.niches.find((n) => n.name === "Deck Building")!;
     // B also shares rank 1 (tied score)
     expect(deckB.rank).toBe(1);
-    // But B is not listed first (A is champion due to sort order)
+    // But B is predicted, so not champion when actual game A shares rank 1 (REQ-NICHE-8)
+    expect(deckB.isChampion).toBe(false);
     expect(deckB.champion.gameId).toBe("a");
   });
 
@@ -342,6 +343,8 @@ describe("computeNichePositions", () => {
     const posB = result.get("b")!;
     const cardB = posB.niches.find((n) => n.name === "Card Game")!;
     expect(cardB.rank).toBe(1); // tied
+    // B is predicted, not champion when actual games A and H share rank 1 (REQ-NICHE-8)
+    expect(cardB.isChampion).toBe(false);
     // B's above should include A and H (the two actual-scored games above it in sort order)
     expect(cardB.above.length).toBe(2);
     expect(cardB.above[0].gameId).toBe("h"); // immediately above B
