@@ -168,18 +168,47 @@ describe("computeRedundancyAdjustments", () => {
     expect(adjA!.nicheRank).toBe(1);
   });
 
-  test("penalty proportional to coverageRatio", () => {
+  test("penalty capped at maxPenalty", () => {
     // A=9.0, B=7.0: B has 1 better neighbor out of 1, so coverage=1.0, penalty=maxPenalty
     const games = [
       makeGws(makeGame("a", "A"), makeScore(9.0)),
       makeGws(makeGame("b", "B"), makeScore(7.0)),
     ];
-    const settings = enabledSettings({ maxPenalty: 2.0 });
+    const settings = enabledSettings({ maxPenalty: 2.0, expectedNeighbors: 1 });
     const result = computeRedundancyAdjustments(games, settings, getVector);
     const adjB = result.get("b");
     expect(adjB).toBeDefined();
     expect(adjB!.penalty).toBe(2.0);
     expect(adjB!.adjustedScore).toBe(5.0);
+  });
+
+  test("penalty proportional to coverageRatio", () => {
+    // A=9.0, B=9.0, C=7.0: B has 1 better neighbor out of 2, so coverage=0.5, penalty=maxPenalty * 0.5
+    const games = [
+      makeGws(makeGame("a", "A"), makeScore(9.0)),
+      makeGws(makeGame("b", "B"), makeScore(8.0)),
+      makeGws(makeGame("c", "C"), makeScore(7.0)),
+    ];
+    const settings = enabledSettings({ maxPenalty: 2.0, expectedNeighbors: 1 });
+    const result = computeRedundancyAdjustments(games, settings, getVector);
+    const adjB = result.get("b");
+    expect(adjB).toBeDefined();
+    expect(adjB!.penalty).toBe(1.0);
+    expect(adjB!.adjustedScore).toBe(7.0);
+  });
+
+  test("penalty proportional to coverageRatio adjusted for expectedNeighbors", () => {
+    // A=9.0, B=7.0: B has 1 better neighbor out of 1 but expected 2, so coverage=0.5, penalty=maxPenalty * 0.5
+    const games = [
+      makeGws(makeGame("a", "A"), makeScore(9.0)),
+      makeGws(makeGame("b", "B"), makeScore(7.0)),
+    ];
+    const settings = enabledSettings({ maxPenalty: 2.0, expectedNeighbors: 2 });
+    const result = computeRedundancyAdjustments(games, settings, getVector);
+    const adjB = result.get("b");
+    expect(adjB).toBeDefined();
+    expect(adjB!.penalty).toBe(1.0);
+    expect(adjB!.adjustedScore).toBe(6.0);
   });
 
   test("score floor at 1.0", () => {
