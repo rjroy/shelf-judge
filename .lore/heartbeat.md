@@ -48,6 +48,11 @@ Four phases:
 - 11:37 commission-Dalton-20260412-111701 result: # Thorne's Review Findings: All Fixed
 
 - 11:37 commission-Dalton-20260412-111701 completed
+- 11:39 commission-Dalton-20260412-111723 result: Phase 9 complete. Created `packages/cli/src/commands/wishlist.ts` (5 commands) and registered them in `packages/cli/src/index.ts`.
+
+Commands implemented:
+- `wishlist list` - GET /api/wishlist, table o...
+- 11:39 commission-Dalton-20260412-111723 completed
 ## Finding 1: DEFECT — Auto-removal race condition (games.ts:144-145)
 **Fix:** Added `await` to `wishlistService.removeByBggId()` call. The `.catch(() => {})` st...
 ## Summary
