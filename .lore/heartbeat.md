@@ -45,6 +45,11 @@ Four phases:
 
 1. **Ownership Status Field on Game** (Medium) - The ful...
 - 11:28 commission-Celeste-20260412-112407 completed
+- 11:37 commission-Dalton-20260412-111701 result: # Thorne's Review Findings: All Fixed
+
+- 11:37 commission-Dalton-20260412-111701 completed
+## Finding 1: DEFECT — Auto-removal race condition (games.ts:144-145)
+**Fix:** Added `await` to `wishlistService.removeByBggId()` call. The `.catch(() => {})` st...
 ## Summary
 
 The implementation is solid and follows established project patterns. Types, storage, service, routes, and client helpers are all correctly wired. T...
