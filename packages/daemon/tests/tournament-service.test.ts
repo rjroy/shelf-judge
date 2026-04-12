@@ -74,6 +74,12 @@ function createStubStorage(): StorageService & { tournamentData: TournamentData 
     saveRedundancySettings() {
       return Promise.resolve();
     },
+    loadWishlist() {
+      return Promise.resolve([]);
+    },
+    saveWishlist() {
+      return Promise.resolve();
+    },
   };
 
   return stub;

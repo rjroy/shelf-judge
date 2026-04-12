@@ -121,6 +121,12 @@ function createStubStorage(overrides?: {
     saveRedundancySettings() {
       return Promise.resolve();
     },
+    loadWishlist() {
+      return Promise.resolve([]);
+    },
+    saveWishlist() {
+      return Promise.resolve();
+    },
   };
 
   return stub;

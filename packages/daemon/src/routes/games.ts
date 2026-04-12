@@ -140,9 +140,9 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     try {
       const result = await gameService.addGame(parsed.data);
 
-      // REQ-WISH-10: auto-remove matching wishlist entry (fire-and-forget)
+      // REQ-WISH-10: auto-remove matching wishlist entry (fire-and-forget on error, not on completion)
       if (parsed.data.bggId && wishlistService) {
-        wishlistService.removeByBggId(parsed.data.bggId).catch(() => {});
+        await wishlistService.removeByBggId(parsed.data.bggId).catch(() => {});
       }
 
       return c.json(result, 201);

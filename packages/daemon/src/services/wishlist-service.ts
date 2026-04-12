@@ -35,7 +35,7 @@ function buildEntry(
       .map((b) => ({
         axisName: b.axisName,
         rating: b.rating!,
-        confidence: b.confidence,
+        confidence: b.predictionConfidence ?? "strong",
       }));
   }
 
@@ -46,7 +46,7 @@ function buildEntry(
     yearPublished: result.game.yearPublished,
     thumbnailUrl: result.game.imageUrl,
     predictedScore: isUnavailable ? null : result.score.score,
-    predictionConfidence: result.score.predictionMeta?.confidence ?? null,
+    predictionConfidence: isUnavailable ? null : (result.score.predictionMeta?.confidence ?? null),
     predictedBreakdown,
     nicheImpact: nicheImpact.wouldJoin.length > 0 ? nicheImpact : null,
     addedAt: new Date().toISOString(),
@@ -64,7 +64,7 @@ async function computeNicheImpactForResult(
 }
 
 export function createWishlistService(deps: WishlistServiceDeps): WishlistService {
-  const { storageService, predictionService, gameService } = deps;
+  const { storageService, predictionService } = deps;
 
   return {
     async list(): Promise<WishlistEntry[]> {

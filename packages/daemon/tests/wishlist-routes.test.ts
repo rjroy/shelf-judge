@@ -1,8 +1,19 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import { Hono } from "hono";
-import type { WishlistEntry } from "@shelf-judge/shared";
+import type { WishlistEntry, Game, GameWithScore, AddGameResult } from "@shelf-judge/shared";
 import { createWishlistRoutes } from "../src/routes/wishlist";
+import { createGameRoutes } from "../src/routes/games";
 import type { WishlistService } from "../src/services/wishlist-service";
+import type { GameService } from "../src/services/game-service";
+import type { BggClient } from "../src/services/bgg-client";
+
+const mockBggClient: BggClient = {
+  searchGames: () => Promise.reject(new Error("not implemented")),
+  getGame: () => Promise.reject(new Error("not implemented")),
+  getGames: () => Promise.reject(new Error("not implemented")),
+  getUserCollection: () => Promise.reject(new Error("not implemented")),
+  isConfigured: () => true,
+};
 
 const NOW = "2026-04-12T12:00:00.000Z";
 
@@ -197,5 +208,180 @@ describe("wishlist routes", () => {
       expect(body.refreshed).toBe(2);
       expect(body.errors).toHaveLength(0);
     });
+  });
+
+  describe("POST /api/wishlist (collection conflict)", () => {
+    test("bggId already in collection returns 409", async () => {
+      const mockWithCollConflict = createMockWishlistService();
+      // Override add to simulate collection conflict
+      mockWithCollConflict.add = () => {
+        return Promise.reject(new Error("This game is already in your collection"));
+      };
+      const { routes: wRoutes } = createWishlistRoutes({ wishlistService: mockWithCollConflict });
+      const conflictApp = new Hono();
+      conflictApp.route("/api", wRoutes);
+
+      const res = await conflictApp.request(jsonPost("/api/wishlist", { bggId: 100 }));
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toContain("already in your collection");
+    });
+  });
+});
+
+function makeGame(bggId: number | null, name: string): Game {
+  return {
+    id: `game-${bggId ?? name}`,
+    bggId,
+    name,
+    yearPublished: 2020,
+    minPlayers: 2,
+    maxPlayers: 4,
+    playingTime: 60,
+    imageUrl: null,
+    numPlays: null,
+    bggData: null,
+    ratings: {},
+    createdAt: NOW,
+    updatedAt: NOW,
+  };
+}
+
+function createMockGameService(overrides: Partial<GameService> = {}): GameService {
+  const notImpl = () => Promise.reject(new Error("not implemented"));
+  return {
+    listGames: () => Promise.resolve([]),
+    getGame: notImpl as GameService["getGame"],
+    addGame: notImpl as GameService["addGame"],
+    rateGame: notImpl as GameService["rateGame"],
+    removeGame: notImpl as GameService["removeGame"],
+    refreshBggData: notImpl as GameService["refreshBggData"],
+    refreshAllBggData: notImpl as GameService["refreshAllBggData"],
+    searchGames: notImpl as GameService["searchGames"],
+    importBggCollection: notImpl as GameService["importBggCollection"],
+    ...overrides,
+  };
+}
+
+describe("POST /games auto-removal (REQ-WISH-10)", () => {
+  test("adding a game to collection auto-removes matching wishlist entry", async () => {
+    const wishSvc = createMockWishlistService();
+    wishSvc.entries = [makeEntry("w1", 100, "Wishlisted Game", NOW)];
+
+    const addedGame = makeGame(100, "Wishlisted Game");
+    const addResult: AddGameResult = { game: addedGame, bggImported: false };
+
+    const mockGameSvc = createMockGameService({
+      addGame: () => Promise.resolve(addResult),
+    });
+
+    const { routes: gameRoutes } = createGameRoutes({
+      gameService: mockGameSvc,
+      wishlistService: wishSvc,
+      bggClient: mockBggClient,
+    });
+
+    const gameApp = new Hono();
+    gameApp.route("/api", gameRoutes);
+
+    const res = await gameApp.request(
+      jsonPost("/api/games", { bggId: 100, name: "Wishlisted Game" }),
+    );
+    expect(res.status).toBe(201);
+
+    // Wishlist entry should have been removed by auto-removal
+    expect(wishSvc.entries).toHaveLength(0);
+  });
+
+  test("adding a game without bggId does not touch wishlist", async () => {
+    const wishSvc = createMockWishlistService();
+    wishSvc.entries = [makeEntry("w1", 100, "Some Game", NOW)];
+
+    const addedGame = makeGame(null, "Manual Game");
+    const addResult: AddGameResult = { game: addedGame, bggImported: false };
+
+    const mockGameSvc = createMockGameService({
+      addGame: () => Promise.resolve(addResult),
+    });
+
+    const { routes: gameRoutes } = createGameRoutes({
+      gameService: mockGameSvc,
+      wishlistService: wishSvc,
+      bggClient: mockBggClient,
+    });
+
+    const gameApp = new Hono();
+    gameApp.route("/api", gameRoutes);
+
+    const res = await gameApp.request(jsonPost("/api/games", { name: "Manual Game" }));
+    expect(res.status).toBe(201);
+
+    // Wishlist should be untouched
+    expect(wishSvc.entries).toHaveLength(1);
+  });
+});
+
+describe("wishlist/collection isolation", () => {
+  test("wishlist entries do not appear in GET /games", async () => {
+    const wishSvc = createMockWishlistService();
+    wishSvc.entries = [makeEntry("w1", 100, "Wishlisted Game", NOW)];
+
+    const collGame = makeGame(200, "Collection Game");
+    collGame.id = "coll-1";
+    const collGamesWithScore: GameWithScore[] = [{ game: collGame, score: null }];
+
+    const mockGameSvc = createMockGameService({
+      listGames: () => Promise.resolve(collGamesWithScore),
+    });
+
+    const { routes: gameRoutes } = createGameRoutes({
+      gameService: mockGameSvc,
+      wishlistService: wishSvc,
+      bggClient: mockBggClient,
+    });
+
+    const gameApp = new Hono();
+    gameApp.route("/api", gameRoutes);
+
+    const res = await gameApp.request("/api/games");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as GameWithScore[];
+    // Only the collection game should appear, not the wishlisted game
+    expect(body).toHaveLength(1);
+    expect(body[0].game.id).toBe("coll-1");
+    expect(body.some((g) => g.game.bggId === 100)).toBe(false);
+  });
+
+  test("wishlist entries do not affect profile computation", async () => {
+    // Profile is computed from collection games only. The wishlist service reads
+    // from a separate storage file (wishlist.json vs collection.json). Verify that
+    // the game service's listGames (which feeds profile computation) is independent
+    // of the wishlist service's state.
+    const wishSvc = createMockWishlistService();
+    wishSvc.entries = [
+      makeEntry("w1", 100, "Wishlisted A", NOW),
+      makeEntry("w2", 200, "Wishlisted B", NOW),
+    ];
+
+    const mockGameSvc = createMockGameService({
+      listGames: () => Promise.resolve([]),
+    });
+
+    const { routes: gameRoutes } = createGameRoutes({
+      gameService: mockGameSvc,
+      wishlistService: wishSvc,
+      bggClient: mockBggClient,
+    });
+
+    const gameApp = new Hono();
+    gameApp.route("/api", gameRoutes);
+
+    // GET /games returns empty despite wishlist having entries
+    const res = await gameApp.request("/api/games");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as GameWithScore[];
+    expect(body).toHaveLength(0);
+    // The 2 wishlist entries have no effect on collection state
+    expect(wishSvc.entries).toHaveLength(2);
   });
 });

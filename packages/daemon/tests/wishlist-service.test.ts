@@ -26,13 +26,16 @@ function makeGame(bggId: number, name: string): Game {
     numPlays: null,
     bggData: {
       communityRating: 7.5,
+      bayesAverage: 7.2,
       weight: 3.0,
-      numOwned: 1000,
-      numRatings: 500,
+      numWeightVotes: 100,
+      description: null,
       mechanics: [],
       categories: [],
       families: [],
-      bggLastFetch: NOW,
+      subdomains: [],
+      suggestedPlayerCounts: [],
+      fetchedAt: NOW,
     },
     ratings: {},
     createdAt: NOW,
@@ -44,31 +47,47 @@ function makeFitnessResult(score: number, unavailable: boolean): FitnessResult {
   if (unavailable) {
     return {
       score: 0,
+      ratedAxisCount: 0,
+      totalAxisCount: 0,
       breakdown: [],
+      vetoed: false,
+      vetoedBy: null,
+      hypotheticalScore: null,
       predictionMeta: null,
       redundancyAdjustment: null,
     };
   }
   return {
     score,
+    ratedAxisCount: 1,
+    totalAxisCount: 1,
     breakdown: [
       {
         axisId: "ax1",
         axisName: "Fun",
         weight: 50,
         rating: 7,
-        weightedScore: 3.5,
-        confidence: "strong" as const,
-        isPredicted: true,
-        curveResult: null,
-        vetoResult: null,
+        contribution: 3.5,
+        source: "predicted" as const,
+        bggOriginal: null,
+        rawValue: 7,
+        effectiveRating: 7,
+        preferenceShape: "higher-is-better" as const,
+        curveAffected: false,
+        predictionConfidence: "strong" as const,
+        referenceGames: null,
       },
     ],
+    vetoed: false,
+    vetoedBy: null,
+    hypotheticalScore: null,
     predictionMeta: {
+      readinessStage: 2 as const,
       confidence: "strong" as const,
       predictedAxisCount: 1,
       actualAxisCount: 0,
       referenceGameCount: 5,
+      coveragePercent: 1.0,
     },
     redundancyAdjustment: null,
   };
@@ -153,6 +172,7 @@ function createMockGameService(): GameService {
     refreshBggData: () => Promise.reject(new Error("not implemented")),
     refreshAllBggData: () => Promise.reject(new Error("not implemented")),
     searchGames: () => Promise.reject(new Error("not implemented")),
+    importBggCollection: () => Promise.reject(new Error("not implemented")),
   };
 }
 
@@ -239,6 +259,7 @@ describe("wishlist service", () => {
     storage = createMockStorage([existing]);
     const svc = createWishlistService({ storageService: storage, predictionService, gameService });
 
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- Bun's expect().rejects is thenable
     await expect(svc.add(100)).rejects.toThrow("already on your wishlist");
   });
 
@@ -248,6 +269,7 @@ describe("wishlist service", () => {
     storage = createMockStorage([], { games: [collGame] });
     const svc = createWishlistService({ storageService: storage, predictionService, gameService });
 
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- Bun's expect().rejects is thenable
     await expect(svc.add(100)).rejects.toThrow("already in your collection");
   });
 
@@ -274,6 +296,7 @@ describe("wishlist service", () => {
 
   test("remove throws for nonexistent ID", async () => {
     const svc = createWishlistService({ storageService: storage, predictionService, gameService });
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- Bun's expect().rejects is thenable
     await expect(svc.remove("nonexistent")).rejects.toThrow("not found");
   });
 
