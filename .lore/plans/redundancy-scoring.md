@@ -1,7 +1,7 @@
 ---
 title: "Implementation plan: redundancy-scoring"
 date: 2026-04-12
-status: draft
+status: approved
 tags: [plan, redundancy, fitness, scoring, collection-awareness]
 modules: [shared, daemon, web, cli]
 related:
