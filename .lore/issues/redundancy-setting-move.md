@@ -1,7 +1,8 @@
 ---
 title: "Redundancy Setting Move"
 date: 2026-04-12
-status: open
+status: approved
+tags: [ ux, critical ]
 ---
 
 The Redundancy Setting is embedded in the Collection page right now. This does not feel right.
