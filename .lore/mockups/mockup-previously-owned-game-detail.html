@@ -1,0 +1,1051 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shelf Judge — Previously Owned: Game Detail States</title>
+    <style>
+      :root {
+        --bg-base: #f4f1ec;
+        --bg-surface: #fefcf9;
+        --bg-elevated: #ffffff;
+        --bg-subtle: #f9f7f4;
+        --border: #ddd8d0;
+        --border-strong: #c4bfb8;
+        --table-header-bg: #ede9e3;
+        --text-primary: #1a1714;
+        --text-secondary: #6b6560;
+        --text-muted: #706a62;
+        --score-color: #b86c1a;
+        --score-high: #2d7a4a;
+        --score-mid: #846a1d;
+        --score-low: #b84040;
+        --bgg-accent: #2e5f8a;
+        --bgg-bg: #edf3f9;
+        --override-accent: #5c3d99;
+        --override-bg: #f0ecfa;
+        --niche-accent: #6b4c8a;
+        --niche-bg: #f0eaf8;
+        --niche-border: #cbbfe4;
+        --action: #1c3d5e;
+        --action-hover: #2a5580;
+        --action-subtle: #e8eff6;
+        --action-border: #b8cfe0;
+        --nav-bg: #1a1714;
+        --nav-text: #e8e4dc;
+        --nav-active: #b86c1a;
+        --danger: #b84040;
+        --danger-subtle: #fdf0f0;
+        --danger-border: #e8c0c0;
+        --success: #2d7a4a;
+        --success-subtle: #e8f5ee;
+        --success-border: #a8d9b8;
+
+        /* Previously Owned */
+        --prev-owned-bg: #f0ede6;
+        --prev-owned-badge-bg: #ede9e1;
+        --prev-owned-badge-border: #c4bfb8;
+        --prev-owned-badge-text: #706a62;
+        --prev-owned-notice-bg: #f5f2eb;
+        --prev-owned-notice-border: #c4bfb8;
+        --prev-owned-notice-text: #6b6560;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family:
+          Inter,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        background: #e8e4dc;
+        color: var(--text-primary);
+        font-size: 15px;
+        line-height: 1.5;
+        padding: 40px 32px;
+      }
+
+      /* ─── Annotation wrapper ─── */
+      .annotation-section {
+        margin-bottom: 56px;
+      }
+      .annotation-label {
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #9c9590;
+        margin-bottom: 12px;
+        padding-left: 2px;
+      }
+      .annotation-note {
+        font-size: 12px;
+        color: #706a62;
+        margin-bottom: 12px;
+        padding-left: 2px;
+        max-width: 700px;
+      }
+      code {
+        font-family: monospace;
+        font-size: 11px;
+        background: rgba(0, 0, 0, 0.06);
+        padding: 1px 4px;
+        border-radius: 3px;
+      }
+
+      /* ─── App chrome ─── */
+      .app-frame {
+        display: flex;
+        height: 640px;
+        background: var(--bg-base);
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow:
+          0 4px 32px rgba(0, 0, 0, 0.18),
+          0 1px 4px rgba(0, 0, 0, 0.08);
+      }
+
+      /* ─── Sidebar ─── */
+      .sidebar {
+        width: 200px;
+        flex-shrink: 0;
+        background: var(--nav-bg);
+        display: flex;
+        flex-direction: column;
+      }
+      .sidebar-brand {
+        padding: 18px 20px 20px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .brand-name {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--nav-text);
+        letter-spacing: -0.01em;
+      }
+      .brand-sub {
+        font-size: 11px;
+        color: rgba(232, 228, 220, 0.4);
+        margin-top: 2px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .nav-section {
+        padding: 16px 0;
+        flex: 1;
+      }
+      .nav-label {
+        font-size: 10px;
+        font-weight: 600;
+        color: rgba(232, 228, 220, 0.35);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        padding: 0 20px;
+        margin-bottom: 6px;
+        margin-top: 12px;
+      }
+      .nav-label:first-child {
+        margin-top: 0;
+      }
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 20px;
+        font-size: 13px;
+        color: rgba(232, 228, 220, 0.65);
+        cursor: pointer;
+        border-left: 3px solid transparent;
+        text-decoration: none;
+      }
+      .nav-item.active {
+        background: rgba(184, 108, 26, 0.12);
+        color: var(--nav-text);
+        border-left-color: var(--nav-active);
+        font-weight: 500;
+      }
+
+      /* ─── Main area ─── */
+      .main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        min-width: 0;
+      }
+
+      /* ─── Topbar ─── */
+      .topbar {
+        height: 48px;
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        padding: 0 28px;
+        gap: 10px;
+        flex-shrink: 0;
+      }
+      .breadcrumb {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        color: var(--text-muted);
+        flex: 1;
+      }
+      .breadcrumb a {
+        color: var(--action);
+        text-decoration: none;
+      }
+      .breadcrumb span {
+        color: var(--text-muted);
+      }
+      .breadcrumb strong {
+        color: var(--text-primary);
+        font-weight: 600;
+      }
+
+      .topbar-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      /* ─── Buttons ─── */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 6px 12px;
+        border-radius: 5px;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        font-family: inherit;
+        white-space: nowrap;
+      }
+      .btn-primary {
+        background: var(--action);
+        color: white;
+      }
+      .btn-secondary {
+        background: transparent;
+        border: 1px solid var(--border-strong);
+        color: var(--text-secondary);
+      }
+      .btn-success {
+        background: var(--success);
+        color: white;
+      }
+      .btn-danger-outline {
+        background: transparent;
+        border: 1px solid var(--danger-border);
+        color: var(--danger);
+      }
+      /* Topbar actions separator */
+      .actions-sep {
+        width: 1px;
+        height: 20px;
+        background: var(--border);
+        flex-shrink: 0;
+        margin: 0 2px;
+      }
+
+      /* ─── Content scroll ─── */
+      .content {
+        flex: 1;
+        overflow-y: auto;
+      }
+
+      /* ─── Game hero ─── */
+      .game-hero {
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        padding: 24px 28px;
+        display: flex;
+        gap: 20px;
+        align-items: flex-start;
+      }
+      .game-cover {
+        width: 88px;
+        height: 88px;
+        border-radius: 8px;
+        background: linear-gradient(135deg, #e0dcd5, #ccc8c0);
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 38px;
+        border: 1px solid var(--border);
+      }
+      .game-hero-info {
+        flex: 1;
+        min-width: 0;
+      }
+      .game-hero-title-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 6px;
+      }
+      .game-hero-title {
+        font-size: 22px;
+        font-weight: 700;
+        color: var(--text-primary);
+        line-height: 1.2;
+      }
+      /* Previously Owned status badge (hero) */
+      .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 10px;
+        font-weight: 700;
+        padding: 3px 8px;
+        border-radius: 4px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        flex-shrink: 0;
+      }
+      .status-badge.prev-owned {
+        background: var(--prev-owned-badge-bg);
+        color: var(--prev-owned-badge-text);
+        border: 1px solid var(--prev-owned-badge-border);
+      }
+      .status-badge.owned {
+        background: var(--success-subtle);
+        color: var(--success);
+        border: 1px solid var(--success-border);
+      }
+      .game-hero-meta {
+        display: flex;
+        gap: 14px;
+        font-size: 12px;
+        color: var(--text-secondary);
+        margin-bottom: 10px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .bgg-link {
+        font-size: 11px;
+        color: var(--bgg-accent);
+        text-decoration: none;
+        background: var(--bgg-bg);
+        padding: 2px 7px;
+        border-radius: 4px;
+        font-weight: 500;
+      }
+      .game-hero-score-section {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        flex-shrink: 0;
+        min-width: 140px;
+      }
+      .score-label {
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 4px;
+      }
+      .score-hero-number {
+        font-size: 48px;
+        font-weight: 700;
+        color: var(--score-color);
+        font-variant-numeric: tabular-nums;
+        line-height: 1;
+        letter-spacing: -0.02em;
+      }
+      .score-hero-out-of {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-top: 4px;
+      }
+
+      /* ─── Previously-owned notice panel ─── */
+      .prev-owned-notice {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 12px 16px;
+        background: var(--prev-owned-notice-bg);
+        border: 1px solid var(--prev-owned-notice-border);
+        border-radius: 6px;
+        margin: 20px 28px 0;
+        font-size: 13px;
+        color: var(--prev-owned-notice-text);
+        line-height: 1.5;
+      }
+      .prev-owned-notice-icon {
+        font-size: 15px;
+        flex-shrink: 0;
+        margin-top: 1px;
+        opacity: 0.7;
+      }
+      .prev-owned-notice strong {
+        color: var(--text-primary);
+        font-weight: 600;
+      }
+
+      /* ─── Two-panel layout ─── */
+      .detail-panels {
+        display: grid;
+        grid-template-columns: 1fr 340px;
+        margin-top: 0;
+      }
+      .panel-left {
+        padding: 20px 28px;
+        border-right: 1px solid var(--border);
+      }
+      .panel-right {
+        padding: 20px 22px;
+        background: var(--bg-surface);
+      }
+      .panel-section-title {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 14px;
+      }
+
+      /* ─── Breakdown table ─── */
+      .breakdown-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 20px;
+        font-size: 13px;
+      }
+      .breakdown-table th {
+        text-align: left;
+        padding: 6px 10px;
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        background: var(--table-header-bg);
+        border-top: 1px solid var(--border-strong);
+        border-bottom: 1px solid var(--border-strong);
+      }
+      .breakdown-table th:not(:first-child) {
+        text-align: right;
+      }
+      .breakdown-table td {
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--border);
+        font-variant-numeric: tabular-nums;
+      }
+      .breakdown-table td:not(:first-child) {
+        text-align: right;
+      }
+      .bgg-row td {
+        background: var(--bgg-bg);
+        color: var(--bgg-accent);
+      }
+      .bgg-row td:first-child {
+        color: var(--text-secondary);
+      }
+      .override-row td {
+        background: var(--override-bg);
+      }
+      .fitness-row td {
+        font-weight: 700;
+        color: var(--score-color);
+        border-top: 2px solid var(--border-strong);
+        border-bottom: none;
+        font-size: 14px;
+      }
+      .fitness-row td:first-child {
+        color: var(--text-secondary);
+        font-weight: 600;
+        font-size: 13px;
+      }
+
+      /* Excluded row (greyed, no data) */
+      .excluded-row td {
+        color: var(--text-muted);
+        font-style: italic;
+        font-size: 12px;
+      }
+      .excluded-row td .excluded-label {
+        font-style: normal;
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        background: var(--prev-owned-badge-bg);
+        color: var(--prev-owned-badge-text);
+        border: 1px solid var(--prev-owned-badge-border);
+        padding: 1px 5px;
+        border-radius: 3px;
+        margin-left: 6px;
+        vertical-align: middle;
+      }
+
+      /* ─── Right panel: axis ratings ─── */
+      .axis-list {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        margin-bottom: 20px;
+      }
+      .axis-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 10px;
+        border-radius: 5px;
+        background: var(--bg-base);
+        border: 1px solid var(--border);
+      }
+      .axis-name {
+        flex: 1;
+        font-size: 12px;
+        color: var(--text-secondary);
+      }
+      .axis-rating {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+        min-width: 24px;
+        text-align: right;
+      }
+      .axis-weight {
+        font-size: 11px;
+        color: var(--text-muted);
+        min-width: 32px;
+        text-align: right;
+      }
+
+      /* ─── Action section (right panel) ─── */
+      .action-section {
+        margin-top: 16px;
+        padding-top: 16px;
+        border-top: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .action-group-label {
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 2px;
+      }
+      .action-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .action-desc {
+        font-size: 11px;
+        color: var(--text-muted);
+        line-height: 1.4;
+      }
+      .action-sep {
+        height: 1px;
+        background: var(--border);
+        margin: 4px 0;
+      }
+      .danger-zone {
+        padding: 10px;
+        border: 1px solid var(--danger-border);
+        border-radius: 6px;
+        background: var(--danger-subtle);
+      }
+      .danger-zone-label {
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--danger);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 6px;
+      }
+      .danger-desc {
+        font-size: 11px;
+        color: var(--text-secondary);
+        margin-bottom: 8px;
+        line-height: 1.4;
+      }
+
+      /* ─── Dark mode ─── */
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg-base: #1a1916;
+          --bg-surface: #242320;
+          --bg-elevated: #2e2d29;
+          --bg-subtle: #201f1c;
+          --border: #3d3a35;
+          --border-strong: #524e48;
+          --table-header-bg: #282724;
+          --text-primary: #e8e4dc;
+          --text-secondary: #a09a90;
+          --text-muted: #908a80;
+          --score-color: #d4882e;
+          --score-high: #40a060;
+          --score-mid: #b89030;
+          --score-low: #e06060;
+          --bgg-accent: #4a8bc4;
+          --bgg-bg: #1e2e3e;
+          --override-accent: #9a7ed8;
+          --override-bg: #1e1630;
+          --niche-accent: #9a7ed8;
+          --niche-bg: #1e1630;
+          --niche-border: #3e2c5e;
+          --action: #5a90c0;
+          --action-subtle: #1e2e3e;
+          --action-border: #2e4a62;
+          --nav-bg: #121110;
+          --nav-text: #e8e4dc;
+          --nav-active: #d4882e;
+          --danger: #e06060;
+          --danger-subtle: #2e1616;
+          --danger-border: #5e2828;
+          --success: #40a060;
+          --success-subtle: #1a3828;
+          --success-border: #2a6040;
+          --prev-owned-bg: #222019;
+          --prev-owned-badge-bg: #2e2b24;
+          --prev-owned-badge-border: #524e48;
+          --prev-owned-badge-text: #908a80;
+          --prev-owned-notice-bg: #282520;
+          --prev-owned-notice-border: #524e48;
+          --prev-owned-notice-text: #a09a90;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ════════════════════════════════════════════════════════
+         Section 1: Previously-owned game detail page
+         ════════════════════════════════════════════════════════ -->
+    <div class="annotation-section">
+      <div class="annotation-label">State A — Game detail: previously-owned game</div>
+      <div class="annotation-note">
+        The "Previously Owned" status badge appears in the hero beside the title. Fitness score and
+        axis ratings are shown normally — those calculations are unchanged. The breakdown table
+        shows niche and redundancy as excluded with a brief inline label. An annotation panel below
+        the hero explains why. The primary action in the right panel is "Mark as Owned" (restoration
+        = positive action). The destructive "Remove" action is in a separate danger zone below.
+        REQ-PREV-23, REQ-PREV-24, REQ-PREV-25.
+      </div>
+
+      <div class="app-frame">
+        <!-- Sidebar -->
+        <div class="sidebar">
+          <div class="sidebar-brand">
+            <div class="brand-name">📚 Shelf Judge</div>
+            <div class="brand-sub">Board Game Curator</div>
+          </div>
+          <div class="nav-section">
+            <div class="nav-label">Library</div>
+            <a class="nav-item active"><span>◼</span> Collection</a>
+            <a class="nav-item"><span>◯</span> Wishlist</a>
+            <a class="nav-item"><span>+</span> Add Games</a>
+            <div class="nav-label">Ratings</div>
+            <a class="nav-item"><span>⚖</span> Axes</a>
+            <a class="nav-item"><span>🏆</span> Tournament</a>
+            <div class="nav-label">System</div>
+            <a class="nav-item"><span>⚙</span> Settings</a>
+          </div>
+        </div>
+
+        <!-- Main -->
+        <div class="main">
+          <div class="topbar">
+            <div class="breadcrumb">
+              <a>Collection</a>
+              <span>›</span>
+              <strong>Ticket to Ride</strong>
+            </div>
+            <div class="topbar-actions">
+              <button class="btn btn-secondary">↺ Refresh BGG</button>
+            </div>
+          </div>
+
+          <div class="content">
+            <!-- Hero -->
+            <div class="game-hero">
+              <div class="game-cover">🚂</div>
+              <div class="game-hero-info">
+                <div class="game-hero-title-row">
+                  <div class="game-hero-title">Ticket to Ride</div>
+                  <span class="status-badge prev-owned">Previously Owned</span>
+                </div>
+                <div class="game-hero-meta">
+                  <span>2004</span>
+                  <span>2–5 players</span>
+                  <span>45 min</span>
+                  <a class="bgg-link">BGG ↗</a>
+                </div>
+              </div>
+              <div class="game-hero-score-section">
+                <div class="score-label">Fitness Score</div>
+                <div class="score-hero-number">6.3</div>
+                <div class="score-hero-out-of">out of 10.0</div>
+              </div>
+            </div>
+
+            <!-- Previously-owned annotation panel -->
+            <div class="prev-owned-notice">
+              <span class="prev-owned-notice-icon">◎</span>
+              <div>
+                <strong>Niche and redundancy data excluded.</strong>
+                This game is no longer on your shelf, so it doesn't affect niche rankings or
+                redundancy scores for your current collection. Fitness score and ratings are
+                unchanged — they continue to improve prediction accuracy.
+              </div>
+            </div>
+
+            <!-- Two-panel -->
+            <div class="detail-panels">
+              <!-- Left: breakdown -->
+              <div class="panel-left">
+                <div class="panel-section-title">Fitness Breakdown</div>
+                <table class="breakdown-table">
+                  <thead>
+                    <tr>
+                      <th>Axis</th>
+                      <th>Rating</th>
+                      <th>Weight</th>
+                      <th>Contribution</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>Replayability</td>
+                      <td>6</td>
+                      <td>1.5×</td>
+                      <td>+1.5</td>
+                    </tr>
+                    <tr>
+                      <td>Complexity</td>
+                      <td>4</td>
+                      <td>1.2×</td>
+                      <td>+0.8</td>
+                    </tr>
+                    <tr>
+                      <td>Theme depth</td>
+                      <td>5</td>
+                      <td>1.0×</td>
+                      <td>+0.5</td>
+                    </tr>
+                    <tr class="bgg-row">
+                      <td>BGG rating</td>
+                      <td>7.6</td>
+                      <td>0.3×</td>
+                      <td>+0.4</td>
+                    </tr>
+                    <!-- Niche and Redundancy excluded -->
+                    <tr class="excluded-row">
+                      <td>
+                        Niche bonus
+                        <span class="excluded-label">Excluded</span>
+                      </td>
+                      <td>–</td>
+                      <td>–</td>
+                      <td>–</td>
+                    </tr>
+                    <tr class="excluded-row">
+                      <td>
+                        Redundancy adj.
+                        <span class="excluded-label">Excluded</span>
+                      </td>
+                      <td>–</td>
+                      <td>–</td>
+                      <td>–</td>
+                    </tr>
+                    <tr class="fitness-row">
+                      <td>Fitness</td>
+                      <td colspan="2"></td>
+                      <td>6.3</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- Right: axis ratings + actions -->
+              <div class="panel-right">
+                <div class="panel-section-title">Axis Ratings</div>
+                <div class="axis-list">
+                  <div class="axis-row">
+                    <span class="axis-name">Replayability</span>
+                    <span class="axis-rating">6</span>
+                    <span class="axis-weight">1.5×</span>
+                  </div>
+                  <div class="axis-row">
+                    <span class="axis-name">Complexity</span>
+                    <span class="axis-rating">4</span>
+                    <span class="axis-weight">1.2×</span>
+                  </div>
+                  <div class="axis-row">
+                    <span class="axis-name">Theme depth</span>
+                    <span class="axis-rating">5</span>
+                    <span class="axis-weight">1.0×</span>
+                  </div>
+                  <div class="axis-row">
+                    <span class="axis-name">Player interaction</span>
+                    <span class="axis-rating">7</span>
+                    <span class="axis-weight">0.8×</span>
+                  </div>
+                  <div class="axis-row">
+                    <span class="axis-name">Setup time</span>
+                    <span class="axis-rating">8</span>
+                    <span class="axis-weight">0.6×</span>
+                  </div>
+                </div>
+
+                <!-- Actions -->
+                <div class="action-section">
+                  <div class="action-group-label">Ownership</div>
+                  <div style="display: flex; flex-direction: column; gap: 6px">
+                    <button class="btn btn-success" style="width: 100%; justify-content: center">
+                      ✓ Mark as Owned
+                    </button>
+                    <div class="action-desc">
+                      Reacquired this game? Marking it as owned restores it to your active shelf —
+                      niche and redundancy will update automatically.
+                    </div>
+                  </div>
+
+                  <div class="action-sep"></div>
+
+                  <!-- Danger zone: Remove from Collection -->
+                  <div class="danger-zone">
+                    <div class="danger-zone-label">Danger Zone</div>
+                    <div class="danger-desc">
+                      Permanently removes all ratings, history, and data. This cannot be undone.
+                    </div>
+                    <button
+                      class="btn btn-danger-outline"
+                      style="width: 100%; justify-content: center"
+                    >
+                      Remove from Collection
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════
+         Section 2: Owned game — status toggle visible
+         ════════════════════════════════════════════════════════ -->
+    <div class="annotation-section">
+      <div class="annotation-label">State B — Game detail: owned game with status toggle</div>
+      <div class="annotation-note">
+        The standard owned-game detail page. "Mark as Previously Owned" appears as the primary
+        ownership action (secondary button, reversible). "Remove from Collection" is visually
+        separated in a danger zone — clearly a different category of action. The status badge in the
+        hero shows "Owned" in green. REQ-PREV-24, REQ-PREV-25, REQ-PREV-6.
+      </div>
+
+      <div class="app-frame">
+        <!-- Sidebar -->
+        <div class="sidebar">
+          <div class="sidebar-brand">
+            <div class="brand-name">📚 Shelf Judge</div>
+            <div class="brand-sub">Board Game Curator</div>
+          </div>
+          <div class="nav-section">
+            <div class="nav-label">Library</div>
+            <a class="nav-item active"><span>◼</span> Collection</a>
+            <a class="nav-item"><span>◯</span> Wishlist</a>
+            <a class="nav-item"><span>+</span> Add Games</a>
+            <div class="nav-label">Ratings</div>
+            <a class="nav-item"><span>⚖</span> Axes</a>
+            <a class="nav-item"><span>🏆</span> Tournament</a>
+            <div class="nav-label">System</div>
+            <a class="nav-item"><span>⚙</span> Settings</a>
+          </div>
+        </div>
+
+        <!-- Main -->
+        <div class="main">
+          <div class="topbar">
+            <div class="breadcrumb">
+              <a>Collection</a>
+              <span>›</span>
+              <strong>Wingspan</strong>
+            </div>
+            <div class="topbar-actions">
+              <button class="btn btn-secondary">↺ Refresh BGG</button>
+            </div>
+          </div>
+
+          <div class="content">
+            <!-- Hero -->
+            <div class="game-hero">
+              <div class="game-cover">🦢</div>
+              <div class="game-hero-info">
+                <div class="game-hero-title-row">
+                  <div class="game-hero-title">Wingspan</div>
+                  <!-- No status badge shown for owned games — "owned" is the normal state -->
+                </div>
+                <div class="game-hero-meta">
+                  <span>2019</span>
+                  <span>1–5 players</span>
+                  <span>40–70 min</span>
+                  <a class="bgg-link">BGG ↗</a>
+                </div>
+              </div>
+              <div class="game-hero-score-section">
+                <div class="score-label">Fitness Score</div>
+                <div class="score-hero-number">8.4</div>
+                <div class="score-hero-out-of">out of 10.0</div>
+              </div>
+            </div>
+
+            <!-- No annotation panel for owned games -->
+
+            <!-- Two-panel -->
+            <div class="detail-panels">
+              <!-- Left: breakdown (normal) -->
+              <div class="panel-left">
+                <div class="panel-section-title">Fitness Breakdown</div>
+                <table class="breakdown-table">
+                  <thead>
+                    <tr>
+                      <th>Axis</th>
+                      <th>Rating</th>
+                      <th>Weight</th>
+                      <th>Contribution</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>Replayability</td>
+                      <td>9</td>
+                      <td>1.5×</td>
+                      <td>+2.7</td>
+                    </tr>
+                    <tr>
+                      <td>Complexity</td>
+                      <td>6</td>
+                      <td>1.2×</td>
+                      <td>+1.4</td>
+                    </tr>
+                    <tr>
+                      <td>Theme depth</td>
+                      <td>8</td>
+                      <td>1.0×</td>
+                      <td>+1.6</td>
+                    </tr>
+                    <tr class="bgg-row">
+                      <td>BGG rating</td>
+                      <td>8.0</td>
+                      <td>0.3×</td>
+                      <td>+0.5</td>
+                    </tr>
+                    <tr>
+                      <td>
+                        Niche bonus
+                        <span style="font-size: 10px; color: var(--niche-accent); font-weight: 600"
+                          >★ Patterns</span
+                        >
+                      </td>
+                      <td>–</td>
+                      <td>–</td>
+                      <td style="color: var(--niche-accent); font-weight: 600">+0.5</td>
+                    </tr>
+                    <tr>
+                      <td>Redundancy adj.</td>
+                      <td>–</td>
+                      <td>–</td>
+                      <td>–</td>
+                    </tr>
+                    <tr class="fitness-row">
+                      <td>Fitness</td>
+                      <td colspan="2"></td>
+                      <td>8.4</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- Right: axis ratings + status action -->
+              <div class="panel-right">
+                <div class="panel-section-title">Axis Ratings</div>
+                <div class="axis-list">
+                  <div class="axis-row">
+                    <span class="axis-name">Replayability</span>
+                    <span class="axis-rating">9</span>
+                    <span class="axis-weight">1.5×</span>
+                  </div>
+                  <div class="axis-row">
+                    <span class="axis-name">Complexity</span>
+                    <span class="axis-rating">6</span>
+                    <span class="axis-weight">1.2×</span>
+                  </div>
+                  <div class="axis-row">
+                    <span class="axis-name">Theme depth</span>
+                    <span class="axis-rating">8</span>
+                    <span class="axis-weight">1.0×</span>
+                  </div>
+                  <div class="axis-row">
+                    <span class="axis-name">Player interaction</span>
+                    <span class="axis-rating">6</span>
+                    <span class="axis-weight">0.8×</span>
+                  </div>
+                  <div class="axis-row">
+                    <span class="axis-name">Setup time</span>
+                    <span class="axis-rating">7</span>
+                    <span class="axis-weight">0.6×</span>
+                  </div>
+                </div>
+
+                <!-- Actions for owned game -->
+                <div class="action-section">
+                  <div class="action-group-label">Ownership</div>
+                  <div style="display: flex; flex-direction: column; gap: 6px">
+                    <button class="btn btn-secondary" style="width: 100%; justify-content: center">
+                      Mark as Previously Owned
+                    </button>
+                    <div class="action-desc">
+                      Sold or traded this game? Keeps all ratings and history — you can reverse this
+                      any time. Removes it from niche and redundancy calculations.
+                    </div>
+                  </div>
+
+                  <div class="action-sep"></div>
+
+                  <!-- Danger zone -->
+                  <div class="danger-zone">
+                    <div class="danger-zone-label">Danger Zone</div>
+                    <div class="danger-desc">
+                      Permanently removes all ratings, history, and data. This cannot be undone.
+                    </div>
+                    <button
+                      class="btn btn-danger-outline"
+                      style="width: 100%; justify-content: center"
+                    >
+                      Remove from Collection
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

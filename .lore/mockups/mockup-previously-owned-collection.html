@@ -1,0 +1,901 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shelf Judge — Previously Owned: Collection Toggle</title>
+    <style>
+      :root {
+        --bg-base: #f4f1ec;
+        --bg-surface: #fefcf9;
+        --bg-elevated: #ffffff;
+        --bg-subtle: #f9f7f4;
+        --border: #ddd8d0;
+        --border-strong: #c4bfb8;
+        --row-hover: #f0ede8;
+        --table-header-bg: #ede9e3;
+        --text-primary: #1a1714;
+        --text-secondary: #6b6560;
+        --text-muted: #706a62;
+        --score-color: #b86c1a;
+        --score-high: #2d7a4a;
+        --score-mid: #846a1d;
+        --score-low: #b84040;
+        --bgg-accent: #2e5f8a;
+        --bgg-bg: #edf3f9;
+        --action: #1c3d5e;
+        --action-hover: #2a5580;
+        --action-subtle: #e8eff6;
+        --action-border: #b8cfe0;
+        --niche-accent: #6b4c8a;
+        --niche-bg: #f0eaf8;
+        --niche-border: #cbbfe4;
+        --nav-bg: #1a1714;
+        --nav-text: #e8e4dc;
+        --nav-active: #b86c1a;
+        --danger: #b84040;
+        --danger-subtle: #fdf0f0;
+        --danger-border: #e8c0c0;
+
+        /* Previously Owned */
+        --prev-owned-bg: #f0ede6;
+        --prev-owned-badge-bg: #ede9e1;
+        --prev-owned-badge-border: #c4bfb8;
+        --prev-owned-badge-text: #706a62;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family:
+          Inter,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        background: #e8e4dc;
+        color: var(--text-primary);
+        font-size: 15px;
+        line-height: 1.5;
+        padding: 40px 32px;
+      }
+
+      /* ─── Annotation wrapper ─── */
+      .annotation-section {
+        margin-bottom: 56px;
+      }
+      .annotation-label {
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #9c9590;
+        margin-bottom: 12px;
+        padding-left: 2px;
+      }
+      .annotation-note {
+        font-size: 12px;
+        color: #706a62;
+        margin-bottom: 12px;
+        padding-left: 2px;
+        max-width: 640px;
+      }
+
+      /* ─── App chrome ─── */
+      .app-frame {
+        display: flex;
+        height: 560px;
+        background: var(--bg-base);
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow:
+          0 4px 32px rgba(0, 0, 0, 0.18),
+          0 1px 4px rgba(0, 0, 0, 0.08);
+      }
+
+      /* ─── Sidebar ─── */
+      .sidebar {
+        width: 200px;
+        flex-shrink: 0;
+        background: var(--nav-bg);
+        display: flex;
+        flex-direction: column;
+      }
+      .sidebar-brand {
+        padding: 18px 20px 20px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .brand-name {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--nav-text);
+        letter-spacing: -0.01em;
+      }
+      .brand-sub {
+        font-size: 11px;
+        color: rgba(232, 228, 220, 0.4);
+        margin-top: 2px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .nav-section {
+        padding: 16px 0;
+        flex: 1;
+      }
+      .nav-label {
+        font-size: 10px;
+        font-weight: 600;
+        color: rgba(232, 228, 220, 0.35);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        padding: 0 20px;
+        margin-bottom: 6px;
+        margin-top: 12px;
+      }
+      .nav-label:first-child {
+        margin-top: 0;
+      }
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 20px;
+        font-size: 13px;
+        color: rgba(232, 228, 220, 0.65);
+        cursor: pointer;
+        border-left: 3px solid transparent;
+        text-decoration: none;
+      }
+      .nav-item.active {
+        background: rgba(184, 108, 26, 0.12);
+        color: var(--nav-text);
+        border-left-color: var(--nav-active);
+        font-weight: 500;
+      }
+      .nav-count {
+        margin-left: auto;
+        font-size: 11px;
+        color: rgba(232, 228, 220, 0.4);
+        font-variant-numeric: tabular-nums;
+      }
+      .nav-count.prev {
+        color: rgba(184, 108, 26, 0.5);
+      }
+
+      /* ─── Main area ─── */
+      .main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        min-width: 0;
+      }
+
+      /* ─── Topbar ─── */
+      .topbar {
+        height: 48px;
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        padding: 0 24px;
+        gap: 12px;
+        flex-shrink: 0;
+      }
+      .topbar-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+      .topbar-meta {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      /* ─── Filter bar ─── */
+      .filter-bar {
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        padding: 10px 24px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-shrink: 0;
+        flex-wrap: wrap;
+      }
+      .search-input-wrap {
+        position: relative;
+        width: 240px;
+        flex-shrink: 0;
+      }
+      .search-icon {
+        position: absolute;
+        left: 9px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--text-muted);
+        font-size: 12px;
+        pointer-events: none;
+      }
+      .search-input {
+        width: 100%;
+        padding: 6px 10px 6px 28px;
+        font-size: 13px;
+        font-family: inherit;
+        border: 1px solid var(--border-strong);
+        border-radius: 6px;
+        background: var(--bg-elevated);
+        color: var(--text-primary);
+        outline: none;
+      }
+      .search-input::placeholder {
+        color: var(--text-muted);
+      }
+
+      .filter-toggle-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 11px;
+        font-size: 12px;
+        font-weight: 500;
+        border: 1px solid var(--border-strong);
+        border-radius: 6px;
+        background: var(--bg-elevated);
+        color: var(--text-secondary);
+        cursor: pointer;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .filter-toggle-btn.active {
+        border-color: var(--action);
+        color: var(--action);
+        background: var(--action-subtle);
+      }
+      .toggle-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        border: 1.5px solid currentColor;
+        flex-shrink: 0;
+      }
+      .filter-toggle-btn.active .toggle-dot {
+        background: var(--action);
+        border-color: var(--action);
+      }
+
+      .filter-spacer {
+        flex: 1;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 5px 11px;
+        border-radius: 5px;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        font-family: inherit;
+        white-space: nowrap;
+      }
+      .btn-secondary {
+        background: transparent;
+        border: 1px solid var(--border-strong);
+        color: var(--text-secondary);
+      }
+
+      /* ─── Info notice for mixed view ─── */
+      .view-notice {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 24px;
+        background: var(--action-subtle);
+        border-bottom: 1px solid var(--action-border);
+        font-size: 12px;
+        color: var(--action);
+        flex-shrink: 0;
+      }
+      .view-notice-icon {
+        font-size: 13px;
+      }
+
+      /* ─── Table ─── */
+      .table-wrap {
+        flex: 1;
+        overflow-y: auto;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+      thead th {
+        text-align: left;
+        padding: 8px 12px;
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        background: var(--table-header-bg);
+        border-bottom: 1px solid var(--border-strong);
+        white-space: nowrap;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+      thead th.right {
+        text-align: right;
+      }
+      tbody tr {
+        border-bottom: 1px solid var(--border);
+      }
+      tbody tr:hover td {
+        background: var(--row-hover);
+      }
+      tbody td {
+        padding: 9px 12px;
+        vertical-align: middle;
+      }
+      tbody td.right {
+        text-align: right;
+      }
+
+      /* Previously owned row */
+      tbody tr.prev-owned td {
+        background: var(--prev-owned-bg);
+      }
+      tbody tr.prev-owned:hover td {
+        background: #e8e5dd;
+      }
+
+      /* ─── Game cell ─── */
+      .game-cell {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .game-thumb {
+        width: 36px;
+        height: 36px;
+        border-radius: 5px;
+        background: linear-gradient(135deg, #e0dcd5, #ccc8c0);
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 16px;
+        border: 1px solid var(--border);
+      }
+      .prev-owned .game-thumb {
+        opacity: 0.7;
+      }
+      .game-name-wrap {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+      }
+      .game-name {
+        font-weight: 500;
+        color: var(--text-primary);
+        font-size: 13px;
+      }
+      .prev-owned .game-name {
+        color: var(--text-secondary);
+      }
+      .game-year {
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+
+      /* Previously Owned badge */
+      .badge-prev-owned {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        font-size: 9px;
+        font-weight: 700;
+        padding: 1px 5px;
+        border-radius: 3px;
+        background: var(--prev-owned-badge-bg);
+        color: var(--prev-owned-badge-text);
+        border: 1px solid var(--prev-owned-badge-border);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        white-space: nowrap;
+        flex-shrink: 0;
+        margin-top: 2px;
+        align-self: flex-start;
+      }
+
+      /* ─── Score cell ─── */
+      .score-cell {
+        font-variant-numeric: tabular-nums;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .score-high {
+        color: var(--score-high);
+      }
+      .score-mid {
+        color: var(--score-mid);
+      }
+      .score-low {
+        color: var(--score-low);
+      }
+      .score-none {
+        color: var(--text-muted);
+        font-style: italic;
+        font-weight: 400;
+        font-size: 12px;
+      }
+      .prev-owned .score-cell {
+        opacity: 0.8;
+      }
+
+      /* ─── Niche cell ─── */
+      .niche-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        font-size: 11px;
+        padding: 2px 7px;
+        border-radius: 10px;
+        background: var(--niche-bg);
+        color: var(--niche-accent);
+        border: 1px solid var(--niche-border);
+        font-weight: 500;
+        white-space: nowrap;
+      }
+      .no-data {
+        color: var(--text-muted);
+        font-size: 13px;
+      }
+
+      /* ─── BGG rating ─── */
+      .bgg-score {
+        color: var(--bgg-accent);
+        font-variant-numeric: tabular-nums;
+        font-size: 12px;
+        font-weight: 500;
+      }
+
+      /* ─── Action link ─── */
+      .row-link {
+        font-size: 12px;
+        color: var(--action);
+        text-decoration: none;
+      }
+
+      /* ─── Dark mode ─── */
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg-base: #1a1916;
+          --bg-surface: #242320;
+          --bg-elevated: #2e2d29;
+          --bg-subtle: #201f1c;
+          --border: #3d3a35;
+          --border-strong: #524e48;
+          --row-hover: #2a2825;
+          --table-header-bg: #282724;
+          --text-primary: #e8e4dc;
+          --text-secondary: #a09a90;
+          --text-muted: #908a80;
+          --score-color: #d4882e;
+          --score-high: #40a060;
+          --score-mid: #b89030;
+          --score-low: #e06060;
+          --bgg-accent: #4a8bc4;
+          --bgg-bg: #1e2e3e;
+          --action: #5a90c0;
+          --action-hover: #6aa0d0;
+          --action-subtle: #1e2e3e;
+          --action-border: #2e4a62;
+          --niche-accent: #9a7ed8;
+          --niche-bg: #1e1630;
+          --niche-border: #3e2c5e;
+          --nav-bg: #121110;
+          --nav-text: #e8e4dc;
+          --nav-active: #d4882e;
+          --danger: #e06060;
+          --prev-owned-bg: #222019;
+          --prev-owned-badge-bg: #2e2b24;
+          --prev-owned-badge-border: #524e48;
+          --prev-owned-badge-text: #908a80;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ════════════════════════════════════════════════
+         Section 1: Default view — owned games only
+         ════════════════════════════════════════════════ -->
+    <div class="annotation-section">
+      <div class="annotation-label">State A — Default view: owned games only</div>
+      <div class="annotation-note">
+        The "Show previously owned" toggle is off (default). Only currently-owned games appear. The
+        toggle sits in the filter bar alongside the search and existing Filters button. REQ-PREV-20.
+      </div>
+
+      <div class="app-frame">
+        <!-- Sidebar -->
+        <div class="sidebar">
+          <div class="sidebar-brand">
+            <div class="brand-name">📚 Shelf Judge</div>
+            <div class="brand-sub">Board Game Curator</div>
+          </div>
+          <div class="nav-section">
+            <div class="nav-label">Library</div>
+            <a class="nav-item active">
+              <span>◼</span> Collection
+              <span class="nav-count">42</span>
+            </a>
+            <a class="nav-item">
+              <span>◯</span> Wishlist
+              <span class="nav-count">8</span>
+            </a>
+            <a class="nav-item"><span>+</span> Add Games</a>
+            <div class="nav-label">Ratings</div>
+            <a class="nav-item"><span>⚖</span> Axes</a>
+            <a class="nav-item"><span>🏆</span> Tournament</a>
+            <div class="nav-label">System</div>
+            <a class="nav-item"><span>⚙</span> Settings</a>
+          </div>
+        </div>
+
+        <!-- Main -->
+        <div class="main">
+          <div class="topbar">
+            <div class="topbar-title">My Collection</div>
+            <div class="topbar-meta">
+              42 games · 6 axes
+              <button class="btn btn-secondary">↺ Refresh All</button>
+            </div>
+          </div>
+
+          <!-- Filter bar: toggle OFF -->
+          <div class="filter-bar">
+            <div class="search-input-wrap">
+              <span class="search-icon">⌕</span>
+              <input class="search-input" type="text" placeholder="Search games…" />
+            </div>
+
+            <!-- "Show previously owned" toggle — default OFF state -->
+            <button class="filter-toggle-btn">
+              <span class="toggle-dot"></span>
+              Show Previously Owned
+            </button>
+
+            <button class="filter-toggle-btn">⊞ Filters</button>
+            <div class="filter-spacer"></div>
+            <button class="filter-toggle-btn">Sort: Fitness ↓</button>
+          </div>
+
+          <!-- Table: owned games only -->
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 38%">Game</th>
+                  <th class="right" style="width: 10%">Fitness</th>
+                  <th style="width: 15%">Niche</th>
+                  <th class="right" style="width: 9%">Redundancy</th>
+                  <th class="right" style="width: 9%">BGG</th>
+                  <th style="width: 19%"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <div class="game-cell">
+                      <div class="game-thumb">🦢</div>
+                      <div class="game-name-wrap">
+                        <div class="game-name">Wingspan</div>
+                        <div class="game-year">2019</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="right score-cell score-high">8.4</td>
+                  <td><span class="niche-tag">★ Patterns</span></td>
+                  <td class="right no-data">–</td>
+                  <td class="right bgg-score">8.0</td>
+                  <td><a class="row-link">View →</a></td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="game-cell">
+                      <div class="game-thumb">🌿</div>
+                      <div class="game-name-wrap">
+                        <div class="game-name">Spirit Island</div>
+                        <div class="game-year">2017</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="right score-cell score-high">7.8</td>
+                  <td><span class="niche-tag">★ Coop</span></td>
+                  <td class="right no-data">–</td>
+                  <td class="right bgg-score">8.4</td>
+                  <td><a class="row-link">View →</a></td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="game-cell">
+                      <div class="game-thumb">🏔</div>
+                      <div class="game-name-wrap">
+                        <div class="game-name">Terraforming Mars</div>
+                        <div class="game-year">2016</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="right score-cell score-mid">6.9</td>
+                  <td><span class="niche-tag">#2 Engine</span></td>
+                  <td
+                    class="right"
+                    style="
+                      color: var(--score-low);
+                      font-variant-numeric: tabular-nums;
+                      font-size: 12px;
+                      font-weight: 500;
+                    "
+                  >
+                    −0.4
+                  </td>
+                  <td class="right bgg-score">8.4</td>
+                  <td><a class="row-link">View →</a></td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="game-cell">
+                      <div class="game-thumb">🦠</div>
+                      <div class="game-name-wrap">
+                        <div class="game-name">Pandemic Legacy S1</div>
+                        <div class="game-year">2015</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="right score-cell score-mid">6.1</td>
+                  <td><span class="niche-tag">#3 Coop</span></td>
+                  <td class="right no-data">–</td>
+                  <td class="right bgg-score">8.6</td>
+                  <td><a class="row-link">View →</a></td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="game-cell">
+                      <div class="game-thumb">💬</div>
+                      <div class="game-name-wrap">
+                        <div class="game-name">7 Wonders</div>
+                        <div class="game-year">2010</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="right score-cell score-mid">5.8</td>
+                  <td class="no-data">–</td>
+                  <td class="right no-data">–</td>
+                  <td class="right bgg-score">7.8</td>
+                  <td><a class="row-link">View →</a></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════
+         Section 2: Mixed view — Show previously owned: ON
+         ════════════════════════════════════════════════ -->
+    <div class="annotation-section">
+      <div class="annotation-label">State B — "Show previously owned" toggle enabled</div>
+      <div class="annotation-note">
+        Toggle is active (action-navy tint). The page fetches <code>GET /games?ownership=all</code>.
+        Previously-owned games appear inline with a "Prev Owned" badge, muted row background, and no
+        niche/redundancy data (those computations use the owned-only set). REQ-PREV-21, REQ-PREV-22.
+      </div>
+
+      <div class="app-frame">
+        <!-- Sidebar -->
+        <div class="sidebar">
+          <div class="sidebar-brand">
+            <div class="brand-name">📚 Shelf Judge</div>
+            <div class="brand-sub">Board Game Curator</div>
+          </div>
+          <div class="nav-section">
+            <div class="nav-label">Library</div>
+            <a class="nav-item active">
+              <span>◼</span> Collection
+              <span class="nav-count">42</span>
+            </a>
+            <a class="nav-item">
+              <span>◯</span> Wishlist
+              <span class="nav-count">8</span>
+            </a>
+            <a class="nav-item"><span>+</span> Add Games</a>
+            <div class="nav-label">Ratings</div>
+            <a class="nav-item"><span>⚖</span> Axes</a>
+            <a class="nav-item"><span>🏆</span> Tournament</a>
+            <div class="nav-label">System</div>
+            <a class="nav-item"><span>⚙</span> Settings</a>
+          </div>
+        </div>
+
+        <!-- Main -->
+        <div class="main">
+          <div class="topbar">
+            <div class="topbar-title">My Collection</div>
+            <div class="topbar-meta">
+              44 games (2 previously owned) · 6 axes
+              <button class="btn btn-secondary">↺ Refresh All</button>
+            </div>
+          </div>
+
+          <!-- Filter bar: toggle ON (active) -->
+          <div class="filter-bar">
+            <div class="search-input-wrap">
+              <span class="search-icon">⌕</span>
+              <input class="search-input" type="text" placeholder="Search games…" />
+            </div>
+
+            <!-- "Show previously owned" toggle — ACTIVE state -->
+            <button class="filter-toggle-btn active">
+              <span class="toggle-dot"></span>
+              Show Previously Owned
+            </button>
+
+            <button class="filter-toggle-btn">⊞ Filters</button>
+            <div class="filter-spacer"></div>
+            <button class="filter-toggle-btn">Sort: Fitness ↓</button>
+          </div>
+
+          <!-- Informational banner when in mixed view -->
+          <div class="view-notice">
+            <span class="view-notice-icon">ℹ</span>
+            Previously-owned games are shown. Niche and redundancy data reflects only your current
+            shelf.
+          </div>
+
+          <!-- Table: mixed owned + previously-owned -->
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 38%">Game</th>
+                  <th class="right" style="width: 10%">Fitness</th>
+                  <th style="width: 15%">Niche</th>
+                  <th class="right" style="width: 9%">Redundancy</th>
+                  <th class="right" style="width: 9%">BGG</th>
+                  <th style="width: 19%"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <div class="game-cell">
+                      <div class="game-thumb">🦢</div>
+                      <div class="game-name-wrap">
+                        <div class="game-name">Wingspan</div>
+                        <div class="game-year">2019</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="right score-cell score-high">8.4</td>
+                  <td><span class="niche-tag">★ Patterns</span></td>
+                  <td class="right no-data">–</td>
+                  <td class="right bgg-score">8.0</td>
+                  <td><a class="row-link">View →</a></td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="game-cell">
+                      <div class="game-thumb">🌿</div>
+                      <div class="game-name-wrap">
+                        <div class="game-name">Spirit Island</div>
+                        <div class="game-year">2017</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="right score-cell score-high">7.8</td>
+                  <td><span class="niche-tag">★ Coop</span></td>
+                  <td class="right no-data">–</td>
+                  <td class="right bgg-score">8.4</td>
+                  <td><a class="row-link">View →</a></td>
+                </tr>
+                <!-- Previously Owned row: Ticket to Ride -->
+                <tr class="prev-owned">
+                  <td>
+                    <div class="game-cell">
+                      <div class="game-thumb">🚂</div>
+                      <div class="game-name-wrap">
+                        <div class="game-name">Ticket to Ride</div>
+                        <div class="game-year">2004</div>
+                        <span class="badge-prev-owned">Prev Owned</span>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="right score-cell score-mid" style="opacity: 0.75">6.3</td>
+                  <td class="no-data">–</td>
+                  <td class="right no-data">–</td>
+                  <td class="right bgg-score" style="opacity: 0.75">7.6</td>
+                  <td><a class="row-link">View →</a></td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="game-cell">
+                      <div class="game-thumb">🏔</div>
+                      <div class="game-name-wrap">
+                        <div class="game-name">Terraforming Mars</div>
+                        <div class="game-year">2016</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="right score-cell score-mid">6.9</td>
+                  <td><span class="niche-tag">#2 Engine</span></td>
+                  <td
+                    class="right"
+                    style="
+                      color: var(--score-low);
+                      font-variant-numeric: tabular-nums;
+                      font-size: 12px;
+                      font-weight: 500;
+                    "
+                  >
+                    −0.4
+                  </td>
+                  <td class="right bgg-score">8.4</td>
+                  <td><a class="row-link">View →</a></td>
+                </tr>
+                <!-- Previously Owned row: Codenames -->
+                <tr class="prev-owned">
+                  <td>
+                    <div class="game-cell">
+                      <div class="game-thumb">🕵</div>
+                      <div class="game-name-wrap">
+                        <div class="game-name">Codenames</div>
+                        <div class="game-year">2015</div>
+                        <span class="badge-prev-owned">Prev Owned</span>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="right score-cell score-mid" style="opacity: 0.75">5.2</td>
+                  <td class="no-data">–</td>
+                  <td class="right no-data">–</td>
+                  <td class="right bgg-score" style="opacity: 0.75">7.7</td>
+                  <td><a class="row-link">View →</a></td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="game-cell">
+                      <div class="game-thumb">🦠</div>
+                      <div class="game-name-wrap">
+                        <div class="game-name">Pandemic Legacy S1</div>
+                        <div class="game-year">2015</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="right score-cell score-mid">6.1</td>
+                  <td><span class="niche-tag">#3 Coop</span></td>
+                  <td class="right no-data">–</td>
+                  <td class="right bgg-score">8.6</td>
+                  <td><a class="row-link">View →</a></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
