@@ -61,3 +61,7 @@ Solid implementation. Follows the plan faithfully with one confirmed defect and 
 
 All eight plan phases are implemented. The feature is structurally complete across shared types, daemon storage/routes/engine, web ...
 - 22:38 commission-Thorne-20260411-221148 completed
+- 22:40 commission-Dalton-20260411-221152 result: Addressed all findings from Thorne's review:
+
+**Finding 1 (test gap):** Added two integration tests to `packages/daemon/tests/niche-settings-integration.test.ts` covering GET /games?includeNiches=true...
+- 22:40 commission-Dalton-20260411-221152 completed
