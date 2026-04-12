@@ -88,6 +88,16 @@ const navGroups = [
         ),
       },
       {
+        href: "/redundancy",
+        name: "Redundancy",
+        icon: (
+          <svg className="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <circle cx="6" cy="8" r="4.5" fillOpacity="0.5" />
+            <circle cx="10" cy="8" r="4.5" fillOpacity="0.5" />
+          </svg>
+        ),
+      },
+      {
         href: "/import",
         name: "Import / BGG",
         icon: (

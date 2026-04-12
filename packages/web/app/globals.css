@@ -2066,6 +2066,15 @@ body {
   margin-bottom: 12px;
 }
 
+.success-banner {
+  background: var(--success-subtle);
+  color: var(--success);
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
 .topbar-title {
   font-size: 16px;
   font-weight: 600;
