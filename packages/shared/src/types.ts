@@ -323,6 +323,18 @@ export interface AxisSuggestion {
   evidence: { gameCount?: number; percentage?: number; variance?: number };
 }
 
+// LLM narration types (collection-profiling spec, LLM Narration section)
+
+export interface ProfileNarration {
+  summary: string; // 2-4 paragraph overview of collection identity
+  surprises: string[]; // Unexpected patterns
+  tensions: string[]; // Disagreements between stated and revealed preferences
+  blindSpots: string[]; // Absent or underrepresented attribute categories
+  curveInsights: string[]; // Utility curve observations
+}
+
+export type NarrationCacheState = "fresh" | "stale" | "empty";
+
 export interface CollectionProfile {
   axisDistributions: AxisDistribution[];
   axisWeights: AxisWeightEntry[];
@@ -337,6 +349,8 @@ export interface CollectionProfile {
   divergence: DivergentGame[] | null; // null when no tournament data
   outliers: CollectionOutlier[];
   suggestions: AxisSuggestion[];
+  narration: ProfileNarration | null;
+  narrationState: NarrationCacheState;
   gameCount: number;
   ratedGameCount: number;
   computedAt: string; // ISO 8601
@@ -345,6 +359,8 @@ export interface CollectionProfile {
 export interface ProfileData {
   profile: CollectionProfile;
   computedAt: string; // ISO 8601
+  narration: ProfileNarration | null;
+  narrationComputedAt: string | null; // ISO 8601
 }
 
 // Prediction types

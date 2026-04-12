@@ -132,6 +132,10 @@ export async function getProfile(): Promise<CollectionProfile> {
   return daemonJson("/api/profile");
 }
 
+export async function generateNarration(): Promise<CollectionProfile> {
+  return daemonJson("/api/profile/narrate", { method: "POST" });
+}
+
 // Tournament API functions
 
 import type {

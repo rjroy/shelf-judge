@@ -25,6 +25,7 @@ export interface DaemonClient {
   del<T = unknown>(path: string): Promise<DaemonResponse<T>>;
   postSSE(path: string, body: unknown, onEvent: (event: SSEEvent) => void): Promise<void>;
   getProfile(): Promise<CollectionProfile>;
+  generateNarration(): Promise<DaemonResponse<CollectionProfile>>;
   isReachable(): Promise<boolean>;
   socketPath: string;
 }
@@ -143,6 +144,10 @@ export function createDaemonClient(options: DaemonClientOptions = {}): DaemonCli
     return res.data;
   }
 
+  async function generateNarration(): Promise<DaemonResponse<CollectionProfile>> {
+    return request<CollectionProfile>("POST", "/api/profile/narrate");
+  }
+
   return {
     get: <T>(path: string) => request<T>("GET", path),
     post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),
@@ -150,6 +155,7 @@ export function createDaemonClient(options: DaemonClientOptions = {}): DaemonCli
     del: <T>(path: string) => request<T>("DELETE", path),
     postSSE,
     getProfile,
+    generateNarration,
     isReachable,
     socketPath,
   };

@@ -25,7 +25,7 @@ import {
   tournamentStop,
   tournamentStats,
 } from "./commands/tournament.js";
-import { profileCommand } from "./commands/profile.js";
+import { profileCommand, profileNarrateCommand } from "./commands/profile.js";
 import { predictGame, predictBggGame, predictReadiness } from "./commands/predict.js";
 
 // Known command paths and their token depths.
@@ -48,6 +48,7 @@ const COMMANDS: Record<string, number> = {
   "tournament pick": 2,
   "tournament stop": 2,
   "tournament stats": 2,
+  "profile narrate": 2,
   "predict bgg": 2,
   "predict readiness": 2,
   "import bgg-collection": 2,
@@ -305,6 +306,9 @@ async function main(): Promise<void> {
       break;
     case "config set":
       output = await configSet(client, args, opts);
+      break;
+    case "profile narrate":
+      output = await profileNarrateCommand(client, args, opts);
       break;
     case "profile":
       output = await profileCommand(client, args, opts);

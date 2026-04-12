@@ -16,6 +16,7 @@ import { createPredictionRoutes } from "./routes/prediction.js";
 import type { TournamentService } from "./services/tournament-service.js";
 import type { ProfileService } from "./services/profile-service.js";
 import type { PredictionService } from "./services/prediction-service.js";
+import type { NarrationService } from "./services/narration-service.js";
 import type { OperationDefinition } from "./operations.js";
 
 export interface AppDeps {
@@ -25,6 +26,7 @@ export interface AppDeps {
   tournamentService: TournamentService;
   profileService: ProfileService;
   predictionService: PredictionService;
+  narrationService?: NarrationService;
   bggClient?: BggClient;
   onShutdown?: () => void;
 }
@@ -42,6 +44,7 @@ export function createApp(deps: AppDeps): AppResult {
     tournamentService,
     profileService,
     predictionService,
+    narrationService,
     bggClient,
     onShutdown,
   } = deps;
@@ -52,7 +55,7 @@ export function createApp(deps: AppDeps): AppResult {
   const scoreRouteModule = createScoreRoutes({ gameService });
   const importRouteModule = createImportRoutes({ gameService, bggClient });
   const tournamentRouteModule = createTournamentRoutes({ tournamentService, gameService });
-  const profileRouteModule = createProfileRoutes({ profileService });
+  const profileRouteModule = createProfileRoutes({ profileService, narrationService });
   const predictionRouteModule = createPredictionRoutes({ predictionService });
 
   // Collect all operations

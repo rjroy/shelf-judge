@@ -60,6 +60,12 @@ export function createMockClient(config: MockClientConfig = {}): DaemonClient {
       if (!res.ok) throw new Error(`Failed to get profile: ${res.status}`);
       return res.data;
     },
+    generateNarration() {
+      return request<import("@shelf-judge/shared").CollectionProfile>(
+        "POST",
+        "/api/profile/narrate",
+      );
+    },
     isReachable(): Promise<boolean> {
       return Promise.resolve(reachable);
     },

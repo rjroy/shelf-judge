@@ -182,6 +182,8 @@ describe("ProfileService", () => {
       divergence: null,
       outliers: [],
       suggestions: [],
+      narration: null,
+      narrationState: "empty",
       gameCount: 99,
       ratedGameCount: 0,
       computedAt: futureDate,
@@ -189,7 +191,12 @@ describe("ProfileService", () => {
 
     const storage = createStubStorage({
       collection: makeCollection(pastDate),
-      profile: { profile: cachedProfile, computedAt: futureDate },
+      profile: {
+        profile: cachedProfile,
+        computedAt: futureDate,
+        narration: null,
+        narrationComputedAt: null,
+      },
     });
 
     const service = createProfileService({
@@ -224,6 +231,8 @@ describe("ProfileService", () => {
       divergence: null,
       outliers: [],
       suggestions: [],
+      narration: null,
+      narrationState: "empty",
       gameCount: 99,
       ratedGameCount: 0,
       computedAt: middleDate,
@@ -231,7 +240,12 @@ describe("ProfileService", () => {
 
     const storage = createStubStorage({
       collection: makeCollection(recentDate),
-      profile: { profile: cachedProfile, computedAt: middleDate },
+      profile: {
+        profile: cachedProfile,
+        computedAt: middleDate,
+        narration: null,
+        narrationComputedAt: null,
+      },
     });
 
     const service = createProfileService({
@@ -267,6 +281,8 @@ describe("ProfileService", () => {
       divergence: null,
       outliers: [],
       suggestions: [],
+      narration: null,
+      narrationState: "empty",
       gameCount: 99,
       ratedGameCount: 0,
       computedAt: middleDate,
@@ -290,7 +306,12 @@ describe("ProfileService", () => {
           },
         ],
       },
-      profile: { profile: cachedProfile, computedAt: middleDate },
+      profile: {
+        profile: cachedProfile,
+        computedAt: middleDate,
+        narration: null,
+        narrationComputedAt: null,
+      },
     });
 
     const service = createProfileService({
@@ -326,6 +347,8 @@ describe("ProfileService", () => {
       divergence: null,
       outliers: [],
       suggestions: [],
+      narration: null,
+      narrationState: "empty",
       gameCount: 99,
       ratedGameCount: 0,
       computedAt: middleDate,
@@ -358,7 +381,12 @@ describe("ProfileService", () => {
           },
         ],
       },
-      profile: { profile: cachedProfile, computedAt: middleDate },
+      profile: {
+        profile: cachedProfile,
+        computedAt: middleDate,
+        narration: null,
+        narrationComputedAt: null,
+      },
     });
 
     const service = createProfileService({

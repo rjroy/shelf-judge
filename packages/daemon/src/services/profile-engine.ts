@@ -47,7 +47,9 @@ const WEIGHT_RANGES: { range: string; min: number; max: number }[] = [
 /**
  * Main entry point. Computes a full collection profile from input data.
  */
-export function computeProfile(input: ProfileInput): Omit<CollectionProfile, "computedAt"> {
+export function computeProfile(
+  input: ProfileInput,
+): Omit<CollectionProfile, "computedAt" | "narration" | "narrationState"> {
   const { games, axes, fitnessResults, tournamentStats } = input;
 
   const axisDistributions = computeAxisDistributions(games, axes);

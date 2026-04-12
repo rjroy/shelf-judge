@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { getProfile } from "@/lib/api";
-import { NarrationEmpty } from "@/components/profile/narration-empty";
+import { NarrationSection } from "@/components/profile/narration-section";
 import { AxisDistributions } from "@/components/profile/axis-distributions";
 import { AxisWeights } from "@/components/profile/axis-weights";
 import { BggClustering } from "@/components/profile/bgg-clustering";
@@ -68,7 +68,7 @@ export default async function ProfileOverviewPage() {
       </div>
 
       <div className="main-scroll">
-        <NarrationEmpty />
+        <NarrationSection profile={profile} />
         <AxisDistributions
           distributions={profile.axisDistributions}
           gameCount={profile.gameCount}

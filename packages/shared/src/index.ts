@@ -41,6 +41,8 @@ export type {
   OutlierClassification,
   CollectionOutlier,
   AxisSuggestion,
+  ProfileNarration,
+  NarrationCacheState,
   CollectionProfile,
   ProfileData,
   PredictionConfidence,
