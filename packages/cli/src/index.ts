@@ -28,6 +28,13 @@ import {
 import { profileCommand, profileNarrateCommand } from "./commands/profile.js";
 import { predictGame, predictBggGame, predictReadiness } from "./commands/predict.js";
 import { nicheIgnored, nicheIgnore, nicheUnignore } from "./commands/niche.js";
+import {
+  redundancySettings,
+  redundancyEnable,
+  redundancyDisable,
+  redundancyStage,
+  redundancySet,
+} from "./commands/redundancy.js";
 
 // Known command paths and their token depths.
 // Dispatch matches on the first N tokens; everything after is positional.
@@ -55,6 +62,11 @@ const COMMANDS: Record<string, number> = {
   "niche ignored": 2,
   "niche ignore": 2,
   "niche unignore": 2,
+  "redundancy settings": 2,
+  "redundancy enable": 2,
+  "redundancy disable": 2,
+  "redundancy stage": 2,
+  "redundancy set": 2,
   "import bgg-collection": 2,
   "config get": 2,
   "config set": 2,
@@ -84,6 +96,7 @@ interface ParsedArgs {
   noVeto?: boolean;
   includePredicted?: boolean;
   showNiches?: boolean;
+  showRedundancy?: boolean;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -107,6 +120,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let noVeto = false;
   let includePredicted = false;
   let showNiches = false;
+  let showRedundancy = false;
 
   for (let i = 0; i < raw.length; i++) {
     const arg = raw[i];
@@ -139,6 +153,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       includePredicted = true;
     } else if (arg === "--show-niches") {
       showNiches = true;
+    } else if (arg === "--show-redundancy") {
+      showRedundancy = true;
     } else if (arg === "--axis") {
       axisFlags.push(raw[++i]);
       axisFlags.push(raw[++i]);
@@ -191,6 +207,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     noVeto: noVeto || undefined,
     includePredicted: includePredicted || undefined,
     showNiches: showNiches || undefined,
+    showRedundancy: showRedundancy || undefined,
   };
 }
 
@@ -276,6 +293,7 @@ async function main(): Promise<void> {
         ...opts,
         includePredicted: parsed.includePredicted,
         showNiches: parsed.showNiches,
+        showRedundancy: parsed.showRedundancy,
       });
       break;
     case "score get":
@@ -316,6 +334,21 @@ async function main(): Promise<void> {
       break;
     case "niche unignore":
       output = await nicheUnignore(client, args, opts);
+      break;
+    case "redundancy settings":
+      output = await redundancySettings(client, args, opts);
+      break;
+    case "redundancy enable":
+      output = await redundancyEnable(client, args, opts);
+      break;
+    case "redundancy disable":
+      output = await redundancyDisable(client, args, opts);
+      break;
+    case "redundancy stage":
+      output = await redundancyStage(client, args, opts);
+      break;
+    case "redundancy set":
+      output = await redundancySet(client, args, opts);
       break;
     case "import bgg-collection":
       output = await importBggCollection(client, args, opts);

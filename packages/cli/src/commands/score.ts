@@ -2,7 +2,12 @@
 import type { DaemonClient } from "../client.js";
 import type { OutputOptions, BreakdownEntry } from "../output.js";
 import { formatTable, formatScore, formatBreakdown, printOutput } from "../output.js";
-import type { TournamentGameStatsDisplay, GameWithScore, NichePosition } from "@shelf-judge/shared";
+import type {
+  TournamentGameStatsDisplay,
+  GameWithScore,
+  NichePosition,
+  RedundancyAdjustment,
+} from "@shelf-judge/shared";
 
 interface VetoInfo {
   axisId: string;
@@ -39,6 +44,7 @@ interface ScoreListResponse {
 interface ScoreListOpts extends OutputOptions {
   includePredicted?: boolean;
   showNiches?: boolean;
+  showRedundancy?: boolean;
 }
 
 export async function scoreList(
@@ -46,7 +52,7 @@ export async function scoreList(
   _args: string[],
   opts: ScoreListOpts,
 ): Promise<string> {
-  if (opts.includePredicted || opts.showNiches) {
+  if (opts.includePredicted || opts.showNiches || opts.showRedundancy) {
     return scoreListWithPredictions(client, opts);
   }
 
@@ -171,11 +177,19 @@ export async function scoreGet(
     lines.push(formatBreakdown(data.breakdown));
   }
 
-  // Fetch niche position from the game detail endpoint (best-effort)
-  const nicheRes = await client.get<GameWithScore>(`/api/games/${encodeURIComponent(id)}`);
-  if (nicheRes.ok && nicheRes.data.nichePosition) {
-    lines.push("");
-    lines.push(formatNichePosition(nicheRes.data.nichePosition, data.vetoed ?? false));
+  // Fetch game detail for niche position and redundancy data (best-effort)
+  const detailRes = await client.get<GameWithScore>(`/api/games/${encodeURIComponent(id)}`);
+  if (detailRes.ok) {
+    const adj = detailRes.data.score?.redundancyAdjustment;
+    if (adj) {
+      lines.push("");
+      lines.push(formatRedundancyDetail(adj, detailRes.data.score!.score));
+    }
+
+    if (detailRes.data.nichePosition) {
+      lines.push("");
+      lines.push(formatNichePosition(detailRes.data.nichePosition, data.vetoed ?? false));
+    }
   }
 
   return lines.join("\n");
@@ -206,6 +220,7 @@ async function scoreListWithPredictions(
 
   if (scored.length > 0) {
     const headers = ["#", "Name", "Score", "Rated Axes", ""];
+    if (opts.showRedundancy) headers.push("Adjusted");
     if (opts.showNiches) headers.push("Niches");
 
     lines.push(
@@ -222,6 +237,9 @@ async function scoreListWithPredictions(
             `${s.ratedAxisCount}/${s.totalAxisCount}`,
             marker,
           ];
+          if (opts.showRedundancy) {
+            row.push(formatRedundancySummary(s.redundancyAdjustment ?? null));
+          }
           if (opts.showNiches) {
             row.push(formatNicheSummary(e.nichePosition ?? null, s.vetoed));
           }
@@ -255,6 +273,44 @@ function formatNicheSummary(nichePosition: NichePosition | null, vetoed: boolean
     return `${total} niches, champ of ${champCount}`;
   }
   return `${total} niches`;
+}
+
+function formatRedundancySummary(adj: RedundancyAdjustment | null): string {
+  if (!adj) return "---";
+  if (adj.penalty === 0) return formatScore(adj.adjustedScore);
+  return `${formatScore(adj.adjustedScore)} (-${adj.penalty.toFixed(1)})`;
+}
+
+function formatRedundancyDetail(adj: RedundancyAdjustment, currentScore: number): string {
+  const lines: string[] = ["Redundancy:"];
+  const isIntegrated = currentScore !== adj.originalScore;
+
+  if (adj.penalty === 0) {
+    lines.push(`  Best among ${adj.nicheSize} similar games (rank #${adj.nicheRank})`);
+  } else if (isIntegrated) {
+    lines.push(
+      `  Fitness: ${formatScore(adj.adjustedScore)} (was ${formatScore(adj.originalScore)}, -${adj.penalty.toFixed(1)} redundancy)`,
+    );
+    lines.push(`  Niche rank: #${adj.nicheRank} of ${adj.nicheSize} similar games`);
+  } else {
+    lines.push(
+      `  Would be ${formatScore(adj.adjustedScore)} with redundancy applied (-${adj.penalty.toFixed(1)} penalty)`,
+    );
+    lines.push(`  Niche rank: #${adj.nicheRank} of ${adj.nicheSize} similar games`);
+  }
+
+  if (adj.nicheNeighbors.length > 0) {
+    lines.push("  Top neighbors:");
+    const top = adj.nicheNeighbors.slice(0, 5);
+    for (const n of top) {
+      const predicted = n.isPredicted ? " [P]" : "";
+      lines.push(
+        `    ${n.gameName} (similarity: ${(n.similarity * 100).toFixed(0)}%, fitness: ${formatScore(n.fitnessScore)})${predicted}`,
+      );
+    }
+  }
+
+  return lines.join("\n");
 }
 
 function formatNichePosition(nichePosition: NichePosition, vetoed: boolean): string {

@@ -43,6 +43,7 @@ export function createMockClient(config: MockClientConfig = {}): DaemonClient {
     get: <T>(path: string) => request<T>("GET", path),
     post: <T>(path: string) => request<T>("POST", path),
     put: <T>(path: string) => request<T>("PUT", path),
+    patch: <T>(path: string) => request<T>("PATCH", path),
     del: <T>(path: string) => request<T>("DELETE", path),
     postSSE(path: string, _body: unknown, onEvent: (event: SSEEvent) => void): Promise<void> {
       const route = sseRoutes[path];
