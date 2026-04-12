@@ -1,7 +1,7 @@
 ---
 title: "shelf layout designer"
 date: 2026-04-12
-status: open
+status: resolved
 tags: [ new-feature ]
 ---
 
