@@ -210,18 +210,16 @@ export function createNarrationService(deps: NarrationServiceDeps): NarrationSer
     const systemPrompt = buildSystemPrompt(profile);
     const userPrompt = `Here is the full collection profile to interpret:\n\n${JSON.stringify(profileData, null, 2)}`;
 
-    logger.log("sending query to Claude Agent SDK (model: claude-sonnet-4-6, budget: $0.05)...");
+    logger.log("sending query to Claude Agent SDK (model: haiku)...");
     const queryResult = query({
       prompt: userPrompt,
       options: {
-        model: "claude-sonnet-4-6",
-        maxBudgetUsd: 0.05,
-        maxTurns: 10,
+        model: "haiku",
         systemPrompt,
         outputFormat: { type: "json_schema", schema: NARRATION_JSON_SCHEMA },
         mcpServers: { "shelf-judge-profile": mcpServer },
         tools: [],
-        permissionMode: "plan",
+        permissionMode: "dontAsk",
         persistSession: false,
       },
     });
@@ -236,10 +234,13 @@ export function createNarrationService(deps: NarrationServiceDeps): NarrationSer
         if (message.subtype === "success") {
           logger.log("SDK returned success");
           if (message.structured_output) {
+            logger.log("parsing structured_output");
             result = message.structured_output as ProfileNarration;
           } else {
-            logger.log("no structured_output, parsing result text");
-            result = JSON.parse(message.result) as ProfileNarration;
+            logger.error("no structured_output, parsing result text");
+          throw new Error(
+            `Narration generation failed: ${message.subtype}${message.result ? ` - ${message.result}` : ""}`,
+          );
           }
         } else {
           const errors = (message as { errors?: string[] }).errors ?? [];
