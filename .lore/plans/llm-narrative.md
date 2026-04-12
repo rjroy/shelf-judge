@@ -1,7 +1,7 @@
 ---
 title: "Implementation plan: llm-narrative"
 date: 2026-04-11
-status: approved
+status: executed
 tags: [plan, llm, agent-sdk, profiling, narration, mcp]
 modules: [shared, daemon, web, cli]
 related:
