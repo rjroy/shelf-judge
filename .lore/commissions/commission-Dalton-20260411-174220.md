@@ -1,7 +1,7 @@
 ---
 title: "Commission: Implement niche champion display per plan"
 date: 2026-04-12
-status: cancelled
+status: abandoned
 tags: [commission]
 worker: Dalton
 workerDisplayTitle: "Guild Artificer"
@@ -24,6 +24,11 @@ activity_timeline:
   - timestamp: 2026-04-12T00:43:02.882Z
     event: status_cancelled
     reason: "Commission cancelled by user"
+  - timestamp: 2026-04-12T01:10:36.999Z
+    event: status_abandoned
+    reason: "Replaced by a full sequence "
+    from: "cancelled"
+    to: "abandoned"
 current_progress: ""
 projectName: shelf-judge
 ---

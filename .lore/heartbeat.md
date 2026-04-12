@@ -32,3 +32,12 @@ Workers can also add entries to this file during their sessions.
 - `listGames()` now accepts optional `{ includeNiches?: bo...
 
 - 18:09 commission-Dalton-20260411-174516 completed
+- 18:10 commission-Dalton-20260411-174220 abandoned
+- 18:16 commission-Thorne-20260411-174532 result: ## Niche Champion Display Review: 33 Requirements Verified
+
+### Defects
+
+**DEFECT-1: CLI `score get --json` omits niche position data (REQ-NICHE-28 violation)**
+
+File: `packages/cli/src/commands/score...
+- 18:16 commission-Thorne-20260411-174532 completed
