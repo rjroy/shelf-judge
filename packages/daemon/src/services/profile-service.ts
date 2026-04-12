@@ -12,6 +12,9 @@ import type { TournamentService } from "./tournament-service.js";
 import type { NarrationService } from "./narration-service.js";
 import { computeProfile } from "./profile-engine.js";
 import type { ProfileInput } from "./profile-engine.js";
+import { createLogger } from "./logger.js";
+
+const logger = createLogger("profile-service");
 
 export interface ProfileService {
   getProfile(): Promise<CollectionProfile>;
@@ -146,23 +149,30 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
 
     async generateNarration(): Promise<CollectionProfile> {
       if (!narrationService) {
+        logger.error("narration requested but narrationService is not configured");
         throw new Error("Narration service not configured");
       }
 
-      // Get the current profile (recomputes if stale)
+      logger.log("generating narration — fetching current profile...");
       const profile = await this.getProfile();
+      logger.log(
+        `profile ready: ${profile.gameCount} games, ${profile.ratedGameCount} rated — invoking narration service`,
+      );
       const narration = await narrationService.generateNarration(profile);
+      logger.log("narration service returned successfully");
       const now = new Date().toISOString();
 
       // Load stored data so we can write narration back
       const stored = await storageService.loadProfile();
       if (!stored) {
+        logger.error("no stored profile to attach narration to");
         throw new Error("No stored profile to attach narration to");
       }
 
       stored.narration = narration;
       stored.narrationComputedAt = now;
       await storageService.saveProfile(stored);
+      logger.log("narration saved to profile store");
 
       return { ...profile, narration, narrationState: "fresh" };
     },

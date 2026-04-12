@@ -1,5 +1,8 @@
 import type { CollectionProfile, GameWithScore, ProfileNarration } from "@shelf-judge/shared";
 import type { GameService } from "./game-service.js";
+import { createLogger } from "./logger.js";
+
+const logger = createLogger("narration");
 
 export interface NarrationService {
   generateNarration(profile: CollectionProfile): Promise<ProfileNarration>;
@@ -95,10 +98,20 @@ export function createNarrationService(deps: NarrationServiceDeps): NarrationSer
   const { gameService } = deps;
 
   async function generateNarration(profile: CollectionProfile): Promise<ProfileNarration> {
+    logger.log("starting narration generation...");
+
     // Dynamic import to avoid loading the SDK (and its subprocess machinery)
     // when narration is never requested. This keeps daemon startup fast.
-    const { query, tool, createSdkMcpServer } = await import("@anthropic-ai/claude-agent-sdk");
+    logger.log("loading Claude Agent SDK...");
+    let query, tool, createSdkMcpServer;
+    try {
+      ({ query, tool, createSdkMcpServer } = await import("@anthropic-ai/claude-agent-sdk"));
+    } catch (err) {
+      logger.error("failed to import Claude Agent SDK:", err);
+      throw err;
+    }
     const { z } = await import("zod/v4");
+    logger.log("SDK loaded successfully");
 
     // MCP tools: read-only access to collection data
     const getCollectionGames = tool(
@@ -197,6 +210,7 @@ export function createNarrationService(deps: NarrationServiceDeps): NarrationSer
     const systemPrompt = buildSystemPrompt(profile);
     const userPrompt = `Here is the full collection profile to interpret:\n\n${JSON.stringify(profileData, null, 2)}`;
 
+    logger.log("sending query to Claude Agent SDK (model: claude-sonnet-4-6, budget: $0.05)...");
     const queryResult = query({
       prompt: userPrompt,
       options: {
@@ -214,17 +228,22 @@ export function createNarrationService(deps: NarrationServiceDeps): NarrationSer
 
     // Iterate the async generator to completion
     let result: ProfileNarration | null = null;
+    let turnCount = 0;
     for await (const message of queryResult) {
+      turnCount++;
+      logger.log(`SDK message #${turnCount}: type=${message.type}`);
       if (message.type === "result") {
         if (message.subtype === "success") {
+          logger.log("SDK returned success");
           if (message.structured_output) {
             result = message.structured_output as ProfileNarration;
           } else {
-            // Try parsing the result text
+            logger.log("no structured_output, parsing result text");
             result = JSON.parse(message.result) as ProfileNarration;
           }
         } else {
           const errors = (message as { errors?: string[] }).errors ?? [];
+          logger.error(`SDK returned ${message.subtype}:`, errors);
           throw new Error(
             `Narration generation failed: ${message.subtype}${errors.length > 0 ? ` - ${errors.join(", ")}` : ""}`,
           );
@@ -233,6 +252,7 @@ export function createNarrationService(deps: NarrationServiceDeps): NarrationSer
     }
 
     if (!result) {
+      logger.error(`SDK completed after ${turnCount} messages but produced no result`);
       throw new Error("Narration generation produced no result");
     }
 
@@ -244,9 +264,11 @@ export function createNarrationService(deps: NarrationServiceDeps): NarrationSer
       !Array.isArray(result.blindSpots) ||
       !Array.isArray(result.curveInsights)
     ) {
+      logger.error("narration output missing required fields:", Object.keys(result));
       throw new Error("Narration output missing required fields");
     }
 
+    logger.log("narration generation complete");
     return result;
   }
 
