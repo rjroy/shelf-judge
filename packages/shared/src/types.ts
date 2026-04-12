@@ -417,6 +417,7 @@ export interface PredictedGameResponse {
   tension: RevealedPreferenceTension | null;
   predictionUnavailable: PredictionUnavailable | null;
   nicheImpact?: NicheImpact;
+  redundancyPreview?: RedundancyAdjustment | null;
 }
 
 // Niche champion display types (niche-champion-display spec)

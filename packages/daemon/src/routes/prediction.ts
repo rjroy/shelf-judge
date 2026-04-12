@@ -1,9 +1,17 @@
 import { Hono } from "hono";
 import { toErrorMessage } from "@shelf-judge/shared";
+import type { Game, GameWithScore, RedundancyAdjustment } from "@shelf-judge/shared";
 import type { PredictionService } from "../services/prediction-service.js";
 import type { StorageService } from "../services/storage-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
 import { computeNicheImpact } from "../services/niche-engine.js";
+import { computeRedundancyAdjustments } from "../services/redundancy-engine.js";
+import {
+  buildVocabulary,
+  computeContinuousRanges,
+  encodeGame,
+} from "../services/feature-vector.js";
+import type { FeatureVector } from "../services/feature-vector.js";
 
 export interface PredictionRoutesDeps {
   predictionService: PredictionService;
@@ -72,7 +80,44 @@ export function createPredictionRoutes(deps: PredictionRoutesDeps): RouteModule 
       const allGames = await predictionService.listGamesWithPredictions();
       const nicheImpact = computeNicheImpact(allGames, result.game, result.score, nicheSettings);
 
-      return c.json({ ...result, nicheImpact });
+      // Compute redundancy preview (REQ-REDUN-22): temporarily include the candidate
+      // in the redundancy pass, extract its adjustment as preview.
+      let redundancyPreview: RedundancyAdjustment | null = null;
+      if (storageService) {
+        const redundancySettings = await storageService.loadRedundancySettings();
+        if (redundancySettings.enabled) {
+          const collection = await storageService.loadCollection();
+          const gamesWithBgg = collection.games.filter((g) => g.bggData);
+          const vocabulary = buildVocabulary(gamesWithBgg);
+          const ranges = computeContinuousRanges(gamesWithBgg);
+
+          const vectorCache = new Map<string, FeatureVector>();
+          const getFeatureVector = (game: Game): FeatureVector => {
+            const cached = vectorCache.get(game.id);
+            if (cached) return cached;
+            const vec = encodeGame(game, vocabulary, game.ratings, ranges, collection.axes);
+            vectorCache.set(game.id, vec);
+            return vec;
+          };
+
+          // Create temporary GameWithScore for the candidate
+          const candidateGws: GameWithScore = {
+            game: result.game,
+            score: result.score,
+          };
+
+          // Run full redundancy pass with candidate included.
+          // Pre-redundancy scores are used for existing games (REQ-REDUN-23).
+          const adjustments = computeRedundancyAdjustments(
+            [...allGames, candidateGws],
+            redundancySettings,
+            getFeatureVector,
+          );
+          redundancyPreview = adjustments.get(result.game.id) ?? null;
+        }
+      }
+
+      return c.json({ ...result, nicheImpact, redundancyPreview });
     } catch (err) {
       const message = toErrorMessage(err);
       if (message.includes("No game found with BGG ID")) {

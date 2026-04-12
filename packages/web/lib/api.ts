@@ -270,6 +270,27 @@ export async function unignoreNicheTag(tag: NicheTagFilter): Promise<NicheSettin
   });
 }
 
+// Redundancy settings API functions
+
+import type {
+  RedundancySettings,
+  RedundancyAdjustment,
+  RedundancyNeighbor,
+} from "@shelf-judge/shared";
+
+export async function getRedundancySettings(): Promise<RedundancySettings> {
+  return daemonJson("/api/redundancy/settings");
+}
+
+export async function updateRedundancySettings(
+  patch: Partial<RedundancySettings>,
+): Promise<RedundancySettings> {
+  return daemonJson("/api/redundancy/settings", {
+    method: "PATCH",
+    body: patch,
+  });
+}
+
 // Re-export types for convenience
 export type {
   Game,
@@ -290,4 +311,7 @@ export type {
   NicheImpactEntry,
   NicheSettings,
   NicheTagFilter,
+  RedundancySettings,
+  RedundancyAdjustment,
+  RedundancyNeighbor,
 };

@@ -8,7 +8,9 @@ import type {
   FitnessResult,
   BggGameData,
   NicheSettings,
+  Collection,
 } from "@shelf-judge/shared";
+import { DEFAULT_REDUNDANCY_SETTINGS } from "../src/services/redundancy-engine";
 import type { GameService } from "../src/services/game-service";
 import type { PredictionService } from "../src/services/prediction-service";
 import type { StorageService } from "../src/services/storage-service";
@@ -100,10 +102,22 @@ const allGamesWithScores: GameWithScore[] = [
 
 // --- Mock factories ---
 
+const defaultCollection: Collection = {
+  id: "collection-1",
+  name: "Test",
+  axes: [],
+  games: [gameA, gameB, gameC],
+  createdAt: "2026-01-01T00:00:00Z",
+  updatedAt: "2026-01-01T00:00:00Z",
+};
+
 function createMockStorageService(nicheSettings: NicheSettings): Partial<StorageService> {
   return {
     loadNicheSettings: () => Promise.resolve(structuredClone(nicheSettings)),
     saveNicheSettings: () => Promise.resolve(),
+    // Redundancy defaults to disabled, so loadCollection won't be called, but must exist
+    loadRedundancySettings: () => Promise.resolve({ ...DEFAULT_REDUNDANCY_SETTINGS }),
+    loadCollection: () => Promise.resolve(structuredClone(defaultCollection)),
   };
 }
 

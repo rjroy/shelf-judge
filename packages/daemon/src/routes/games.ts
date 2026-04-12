@@ -1,5 +1,6 @@
 import { Hono, type Context } from "hono";
 import { AddGameSchema, toErrorMessage } from "@shelf-judge/shared";
+import type { Game, GameWithScore, RedundancySettings } from "@shelf-judge/shared";
 import { z } from "zod";
 import type { GameService } from "../services/game-service.js";
 import type { BggClient } from "../services/bgg-client.js";
@@ -7,6 +8,13 @@ import type { PredictionService } from "../services/prediction-service.js";
 import type { StorageService } from "../services/storage-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
 import { computeNichePositions } from "../services/niche-engine.js";
+import { computeRedundancyAdjustments } from "../services/redundancy-engine.js";
+import {
+  buildVocabulary,
+  computeContinuousRanges,
+  encodeGame,
+} from "../services/feature-vector.js";
+import type { FeatureVector } from "../services/feature-vector.js";
 
 export interface GameRoutesDeps {
   gameService: GameService;
@@ -31,6 +39,46 @@ function bggNotConfiguredResponse(c: Context) {
     },
     503,
   );
+}
+
+/**
+ * Build a getFeatureVector callback and apply redundancy adjustments to scored games.
+ * Shared logic for GET /games and GET /games/:id.
+ * Order: scores first, niches second (on pre-redundancy scores per REQ-REDUN-26),
+ * redundancy third.
+ */
+async function applyRedundancy(
+  games: GameWithScore[],
+  settings: RedundancySettings,
+  storageService: StorageService,
+): Promise<void> {
+  if (!settings.enabled) return;
+
+  const collection = await storageService.loadCollection();
+  const gamesWithBgg = collection.games.filter((g) => g.bggData);
+  const vocabulary = buildVocabulary(gamesWithBgg);
+  const ranges = computeContinuousRanges(gamesWithBgg);
+
+  // Per-request feature vector cache (Open Question 1 from the plan)
+  const vectorCache = new Map<string, FeatureVector>();
+  const getFeatureVector = (game: Game): FeatureVector => {
+    const cached = vectorCache.get(game.id);
+    if (cached) return cached;
+    const vec = encodeGame(game, vocabulary, game.ratings, ranges, collection.axes);
+    vectorCache.set(game.id, vec);
+    return vec;
+  };
+
+  const adjustments = computeRedundancyAdjustments(games, settings, getFeatureVector);
+
+  for (const gws of games) {
+    if (!gws.score) continue;
+    const adj = adjustments.get(gws.game.id) ?? null;
+    gws.score.redundancyAdjustment = adj;
+    if (adj && settings.stage === "integrated") {
+      gws.score.score = adj.adjustedScore;
+    }
+  }
 }
 
 export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
@@ -108,6 +156,11 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
             gws.nichePosition = nicheMap.get(gws.game.id) ?? null;
           }
         }
+        // Redundancy: after niches (which use pre-redundancy scores per REQ-REDUN-26)
+        if (storageService) {
+          const redundancySettings = await storageService.loadRedundancySettings();
+          await applyRedundancy(games, redundancySettings, storageService);
+        }
         return c.json(games);
       }
 
@@ -123,6 +176,12 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
         for (const gws of games) {
           gws.nichePosition = nicheMap.get(gws.game.id) ?? null;
         }
+      }
+
+      // Redundancy: after niches, on the returned games
+      if (storageService) {
+        const redundancySettings = await storageService.loadRedundancySettings();
+        await applyRedundancy(games, redundancySettings, storageService);
       }
 
       return c.json(games);
@@ -143,6 +202,24 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
         const allGames = await predictionService.listGamesWithPredictions();
         const nicheMap = computeNichePositions(allGames, nicheSettings);
         result.nichePosition = nicheMap.get(id) ?? null;
+
+        // Redundancy: compute on all games, extract this game's adjustment
+        if (storageService) {
+          const redundancySettings = await storageService.loadRedundancySettings();
+          if (redundancySettings.enabled) {
+            await applyRedundancy(allGames, redundancySettings, storageService);
+            const thisGame = allGames.find((g) => g.game.id === id);
+            if (thisGame?.score) {
+              result.score!.redundancyAdjustment = thisGame.score.redundancyAdjustment;
+              if (
+                redundancySettings.stage === "integrated" &&
+                thisGame.score.redundancyAdjustment
+              ) {
+                result.score!.score = thisGame.score.redundancyAdjustment.adjustedScore;
+              }
+            }
+          }
+        }
       } else {
         result.nichePosition = null;
       }
