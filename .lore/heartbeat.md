@@ -44,6 +44,12 @@ Workers can also add entries to this file during their sessions.
 **6a: `gameSetStatus` command** (`packages/cli/src/commands/game.ts:232-257`)
 - `shelf-judge game set-status <id> <owned|previously-o...
 - 18:14 commission-Dalton-20260412-174506 completed
+- 18:15 commission-Dalton-20260412-174450 result: Phase 5 (game detail page UI) implemented. Changes:
+
+**`packages/web/app/games/[id]/page.tsx`**:
+- Added `isPreviouslyOwned` flag derived from `game.ownership`
+- Hero section now uses a title row (`ga...
+- 18:15 commission-Dalton-20260412-174450 completed
 ## Verdict
 
 The foundation implementation is solid. The critical integration point (ownership filter vs. niche/redundancy computation universe) is corr...
