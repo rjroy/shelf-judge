@@ -1,7 +1,7 @@
 ---
 title: "Previously Owned"
 date: 2026-04-12
-status: approved
+status: implemented
 tags: [spec, ownership, data-model, redundancy, niche, collection, lifecycle]
 modules: [shared, daemon, web, cli]
 req-prefix: PREV
