@@ -1,7 +1,7 @@
 ---
 title: "Implementation plan: shelf capacity"
 date: 2026-04-13
-status: draft
+status: approved
 tags: [plan, shelf-layout, box-dimensions, shelf-config, capacity, overflow, bin-packing, algorithm]
 modules: [shared, daemon, web, cli]
 related:
