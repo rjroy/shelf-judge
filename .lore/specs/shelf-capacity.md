@@ -240,9 +240,9 @@ interface OverflowEntry {
   - Remove shelves and shelf units
   - Reorder shelves within a unit (drag or up/down)
 
-- REQ-SHELF-34: The shelf configuration page shows a live summary: total number of shelves, total capacity (excluding unconstrained-height shelves), and number of unconstrained-height shelves.
+- REQ-SHELF-28: The shelf configuration page shows a live summary: total number of shelves, total capacity (excluding unconstrained-height shelves), and number of unconstrained-height shelves.
 
-- REQ-SHELF-35: Shelf configuration is added to the sidebar navigation under a "Shelves" group or within the existing settings navigation. Exact placement is an implementation decision.
+- REQ-SHELF-29: Shelf configuration is added to the sidebar navigation under a "Shelves" group or within the existing settings navigation. Exact placement is an implementation decision.
 
 ### Web UI: Capacity Display
 
@@ -308,7 +308,7 @@ This spec covers significant scope across three connected concerns. The followin
 **Layer 1: Box Dimensions (REQ-SHELF-1 through REQ-SHELF-4, REQ-SHELF-5 through REQ-SHELF-7, REQ-SHELF-26, REQ-SHELF-42)**
 Types, manual entry UI/CLI, game detail display. No dependencies on shelf config or overflow. Can be implemented and shipped independently.
 
-**Layer 2: Shelf Configuration (REQ-SHELF-8 through REQ-SHELF-15, REQ-SHELF-27 through REQ-SHELF-35, REQ-SHELF-38 shelf-config commands)**
+**Layer 2: Shelf Configuration (REQ-SHELF-8 through REQ-SHELF-15, REQ-SHELF-27 through REQ-SHELF-29, REQ-SHELF-38 shelf-config commands)**
 Data model, storage, CRUD API, web UI for shelf management, CLI commands for shelf setup. Depends on shared types only. Can be implemented in parallel with Layer 1.
 
 **Layer 3: Capacity and Assignment (REQ-SHELF-16 through REQ-SHELF-25, REQ-SHELF-36 through REQ-SHELF-37, REQ-SHELF-40 through REQ-SHELF-41)**
