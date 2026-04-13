@@ -159,13 +159,13 @@ The overflow computation is driven by the similarity-weighted bin-packing algori
 
 - REQ-SHELF-17: A game "fits the configuration" if it fits on at least one shelf in any unit. A game that fits no shelf is "unfittable," it physically cannot be stored in the user's current shelf setup. These games are identified before the algorithm runs (a pre-pass geometric check) and reported separately from algorithm overflow.
 
-- REQ-SHELF-24: The daemon provides a capacity endpoint:
+- REQ-SHELF-18: The daemon provides a capacity endpoint:
 
 | Operation ID     | Method | Path                  | Description                                 |
 | ---------------- | ------ | --------------------- | ------------------------------------------- |
 | `shelf.capacity` | GET    | `/api/shelf/capacity` | Run bin-packing and return capacity results |
 
-- REQ-SHELF-25: The capacity response shape:
+- REQ-SHELF-19: The capacity response shape:
 
 ```typescript
 interface ShelfCapacityResult {
@@ -215,15 +215,15 @@ interface OverflowEntry {
 }
 ```
 
-- REQ-SHELF-26: The `unfittableGames` list contains every game with known dimensions that fits no shelf in the configuration. These are the strongest cull candidates: they literally cannot be stored. The list is sorted by fitness ascending (lowest fitness first). The `reason` field is a human-readable explanation of why the game doesn't fit (e.g., "Box is 25 x 4 x 4 in; widest shelf is 14 in"). Unfittable games are excluded from the packing algorithm; they are identified by a pre-pass geometric check.
+- REQ-SHELF-20: The `unfittableGames` list contains every game with known dimensions that fits no shelf in the configuration. These are the strongest cull candidates: they literally cannot be stored. The list is sorted by fitness ascending (lowest fitness first). The `reason` field is a human-readable explanation of why the game doesn't fit (e.g., "Box is 25 x 4 x 4 in; widest shelf is 14 in"). Unfittable games are excluded from the packing algorithm; they are identified by a pre-pass geometric check.
 
-- REQ-SHELF-27: The `overflowGames` list contains games that the bin-packing algorithm could not place (Phase 4 output). These are games that fit at least one shelf by shape but were displaced because higher-priority games filled the available space first. The list is sorted by fitness ascending (lowest fitness first). The `fittable` flag distinguishes between games that were displaced (fit somewhere by shape but no room) and dimensionless games that bypassed spatial logic. Games without `boxDimensions` are excluded from the algorithm entirely and are counted in `gamesWithoutDimensions`.
+- REQ-SHELF-21: The `overflowGames` list contains games that the bin-packing algorithm could not place (Phase 4 output). These are games that fit at least one shelf by shape but were displaced because higher-priority games filled the available space first. The list is sorted by fitness ascending (lowest fitness first). The `fittable` flag distinguishes between games that were displaced (fit somewhere by shape but no room) and dimensionless games that bypassed spatial logic. Games without `boxDimensions` are excluded from the algorithm entirely and are counted in `gamesWithoutDimensions`.
 
-- REQ-SHELF-28: Shelves with `height: null` (unconstrained) map to bins with a dimensionless height axis in the algorithm. They participate fully in the packing algorithm: games can be assigned to them and their contents are tracked. Their `capacityIn3` is `null` in the response because their volume is undefined (no height to multiply). Their `utilization` is also `null`. "On top of" spaces accept games and show what's assigned to them, but don't contribute to volume-based summary statistics.
+- REQ-SHELF-22: Shelves with `height: null` (unconstrained) map to bins with a dimensionless height axis in the algorithm. They participate fully in the packing algorithm: games can be assigned to them and their contents are tracked. Their `capacityIn3` is `null` in the response because their volume is undefined (no height to multiply). Their `utilization` is also `null`. "On top of" spaces accept games and show what's assigned to them, but don't contribute to volume-based summary statistics.
 
-- REQ-SHELF-29: When no shelf configuration exists (no units), the capacity endpoint returns a valid response with `configured: false` and empty/zero values. No 400 error. The UI uses `configured` to show a "configure your shelves" prompt.
+- REQ-SHELF-23: When no shelf configuration exists (no units), the capacity endpoint returns a valid response with `configured: false` and empty/zero values. No 400 error. The UI uses `configured` to show a "configure your shelves" prompt.
 
-- REQ-SHELF-30: When no games have box dimensions, the capacity endpoint returns a valid response with `gamesWithDimensions: 0`, `overflowing: false`, `unfittableGames: []`, `overflowGames: []`, and empty `assignments`.
+- REQ-SHELF-24: When no games have box dimensions, the capacity endpoint returns a valid response with `gamesWithDimensions: 0`, `overflowing: false`, `unfittableGames: []`, `overflowGames: []`, and empty `assignments`.
 
 - REQ-SHELF-31: The capacity computation uses current fitness scores and current collection state. It does not cache or snapshot scores. Each call runs the bin-packing algorithm fresh against the current data. The algorithm's similarity function uses the existing composite distance from `feature-vector.ts`.
 
