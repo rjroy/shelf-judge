@@ -1,7 +1,7 @@
 ---
 title: "Shelf Capacity (Box Dimensions, Shelf Config, Overflow)"
 date: 2026-04-12
-status: draft
+status: approved
 tags: [spec, shelf-layout, box-dimensions, shelf-config, capacity, overflow, curation, bgg-versions]
 modules: [shared, daemon, web, cli]
 req-prefix: SHELF
