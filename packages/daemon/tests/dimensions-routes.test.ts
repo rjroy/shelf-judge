@@ -163,4 +163,29 @@ describe("PUT /api/games/:id/dimensions", () => {
     });
     expect(res.status).toBe(400);
   });
+
+  test("GET /games/:id includes boxDimensions after setting", async () => {
+    const { app } = createTestApp();
+    await app.request("/api/games/game-1/dimensions", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ width: 11.4, height: 11.4, depth: 2.75 }),
+    });
+    const res = await app.request("/api/games/game-1");
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as GameWithScore;
+    expect(data.game.boxDimensions).toEqual({
+      width: 11.4,
+      height: 11.4,
+      depth: 2.75,
+    });
+  });
+
+  test("game without boxDimensions defaults to null", async () => {
+    const { app } = createTestApp();
+    const res = await app.request("/api/games/game-1");
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as GameWithScore;
+    expect(data.game.boxDimensions).toBeNull();
+  });
 });
