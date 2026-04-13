@@ -40,7 +40,7 @@ export function AxisDistributions({
                   </div>
                   <div className="axis-stat">
                     <span className="axis-stat-val">
-                      {dist.range.min}&ndash;{dist.range.max}
+                      {dist.range.min.toFixed(1)}&ndash;{dist.range.max.toFixed(1)}
                     </span>
                     <span className="axis-stat-lbl">Range</span>
                   </div>

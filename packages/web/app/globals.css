@@ -3918,7 +3918,7 @@ body {
   }
 
   .last-rated,
-  .last-rated-col {
+  .last-rated-col.col-label.sortable {
     display: none;
   }
 
