@@ -26,3 +26,9 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
+- 18:01 commission-Dalton-20260412-174410 result: Phases 1-3 of the previously-owned feature are implemented and verified.
+
+**Phase 1: Shared Types and Schema Default**
+- Added `OwnershipStatus` type ("owned" | "previously-owned") and `ownership` fie...
+
+- 18:01 commission-Dalton-20260412-174410 completed
