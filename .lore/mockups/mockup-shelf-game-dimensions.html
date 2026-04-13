@@ -1,0 +1,798 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shelf Judge — Game Dimensions</title>
+    <style>
+      :root {
+        --bg-base: #f4f1ec;
+        --bg-surface: #fefcf9;
+        --bg-elevated: #ffffff;
+        --bg-subtle: #f9f7f4;
+        --border: #ddd8d0;
+        --border-strong: #c4bfb8;
+        --row-hover: #f0ede8;
+        --table-header-bg: #ede9e3;
+        --text-primary: #1a1714;
+        --text-secondary: #6b6560;
+        --text-muted: #706a62;
+        --score-color: #b86c1a;
+        --score-high: #2d7a4a;
+        --score-mid: #846a1d;
+        --score-low: #b84040;
+        --bgg-accent: #2e5f8a;
+        --bgg-bg: #edf3f9;
+        --action: #1c3d5e;
+        --action-hover: #2a5580;
+        --action-subtle: #e8eff6;
+        --action-border: #b8cfe0;
+        --nav-bg: #1a1714;
+        --nav-text: #e8e4dc;
+        --nav-active: #b86c1a;
+        --danger: #b84040;
+        --danger-subtle: #fdf0f0;
+        --danger-border: #e8c0c0;
+        --override-accent: #5c3d99;
+        --override-bg: #f0ebfa;
+      }
+
+      [data-theme="dark"] {
+        --bg-base: #1a1916;
+        --bg-surface: #242320;
+        --bg-elevated: #2e2d29;
+        --bg-subtle: #201f1c;
+        --border: #3d3a35;
+        --border-strong: #524e48;
+        --row-hover: #2a2825;
+        --table-header-bg: #282724;
+        --text-primary: #e8e4dc;
+        --text-secondary: #a09a90;
+        --text-muted: #908a80;
+        --score-color: #d4882e;
+        --score-high: #40a060;
+        --bgg-accent: #4a8bc4;
+        --bgg-bg: #1a2838;
+        --action: #5a90c0;
+        --action-hover: #6aa0d0;
+        --action-subtle: #162030;
+        --action-border: #2a4060;
+        --nav-bg: #121110;
+        --danger: #e06060;
+        --danger-subtle: #2a1818;
+        --danger-border: #5a2828;
+        --override-accent: #9a7ed8;
+        --override-bg: #211838;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family:
+          Inter,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        background: #e8e4dc;
+        color: var(--text-primary);
+        font-size: 15px;
+        line-height: 1.5;
+        padding: 40px 32px;
+      }
+
+      /* ─── Annotation wrapper ─── */
+      .annotation-section {
+        margin-bottom: 56px;
+      }
+      .annotation-label {
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #9c9590;
+        margin-bottom: 6px;
+        padding-left: 2px;
+      }
+      .annotation-note {
+        font-size: 12px;
+        color: #706a62;
+        margin-bottom: 14px;
+        padding-left: 2px;
+        max-width: 680px;
+      }
+
+      /* ─── App chrome ─── */
+      .app-frame {
+        display: flex;
+        height: 580px;
+        background: var(--bg-base);
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow:
+          0 4px 32px rgba(0, 0, 0, 0.18),
+          0 1px 4px rgba(0, 0, 0, 0.08);
+      }
+      .app-frame.tall {
+        height: 700px;
+      }
+
+      /* ─── Sidebar ─── */
+      .sidebar {
+        width: 200px;
+        flex-shrink: 0;
+        background: var(--nav-bg);
+        display: flex;
+        flex-direction: column;
+      }
+      .sidebar-brand {
+        padding: 18px 20px 20px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .brand-name {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--nav-text);
+        letter-spacing: -0.01em;
+      }
+      .brand-sub {
+        font-size: 11px;
+        color: rgba(232, 228, 220, 0.4);
+        margin-top: 2px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .nav-section {
+        padding: 16px 0;
+        flex: 1;
+      }
+      .nav-label {
+        font-size: 10px;
+        font-weight: 600;
+        color: rgba(232, 228, 220, 0.35);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        padding: 0 20px;
+        margin-bottom: 4px;
+        margin-top: 14px;
+      }
+      .nav-label:first-child {
+        margin-top: 0;
+      }
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 20px;
+        font-size: 13px;
+        color: rgba(232, 228, 220, 0.65);
+        cursor: pointer;
+        border-left: 3px solid transparent;
+        text-decoration: none;
+      }
+      .nav-item.active {
+        background: rgba(184, 108, 26, 0.12);
+        color: var(--nav-text);
+        border-left-color: var(--nav-active);
+        font-weight: 500;
+      }
+
+      /* ─── Main area ─── */
+      .main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        min-width: 0;
+      }
+
+      /* ─── Topbar ─── */
+      .topbar {
+        height: 48px;
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        padding: 0 24px;
+        gap: 12px;
+        flex-shrink: 0;
+      }
+      .topbar-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+      .topbar-meta {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      /* ─── Game detail content ─── */
+      .content-scroll {
+        flex: 1;
+        overflow-y: auto;
+        padding: 24px;
+      }
+
+      .game-header {
+        display: flex;
+        gap: 20px;
+        margin-bottom: 28px;
+      }
+      .game-thumb {
+        width: 80px;
+        height: 80px;
+        border-radius: 6px;
+        background: var(--bg-subtle);
+        border: 1px solid var(--border);
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-muted);
+        font-size: 28px;
+      }
+      .game-title-block {
+      }
+      .game-name {
+        font-size: 20px;
+        font-weight: 700;
+        color: var(--text-primary);
+        line-height: 1.2;
+        margin-bottom: 4px;
+      }
+      .game-year {
+        font-size: 13px;
+        color: var(--text-muted);
+        margin-bottom: 8px;
+      }
+      .game-score-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .score-hero {
+        font-size: 28px;
+        font-weight: 800;
+        color: var(--score-color);
+      }
+      .score-label {
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+
+      /* ─── Metadata section ─── */
+      .section {
+        margin-bottom: 24px;
+      }
+      .section-title {
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--text-muted);
+        margin-bottom: 10px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid var(--border);
+      }
+      .meta-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px 24px;
+      }
+      .meta-item {
+      }
+      .meta-label {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-bottom: 2px;
+      }
+      .meta-value {
+        font-size: 13px;
+        color: var(--text-primary);
+        font-weight: 500;
+      }
+      .meta-value.muted {
+        color: var(--text-muted);
+        font-style: italic;
+        font-weight: 400;
+      }
+
+      /* ─── Box dimensions highlight ─── */
+      .meta-item.box-dims .meta-value {
+        color: var(--action);
+        font-weight: 500;
+      }
+      .meta-item.box-dims .meta-value.muted {
+        color: var(--text-muted);
+        font-style: italic;
+        font-weight: 400;
+      }
+
+      /* ─── Buttons ─── */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 13px;
+        border-radius: 5px;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        font-family: inherit;
+        white-space: nowrap;
+      }
+      .btn-primary {
+        background: var(--action);
+        color: #fff;
+      }
+      .btn-secondary {
+        background: transparent;
+        border: 1px solid var(--border-strong);
+        color: var(--text-secondary);
+      }
+      .btn-ghost {
+        background: transparent;
+        border: none;
+        color: var(--text-secondary);
+        font-size: 12px;
+      }
+      .btn-danger-ghost {
+        background: transparent;
+        border: none;
+        color: var(--danger);
+        font-size: 12px;
+        padding: 4px 8px;
+      }
+
+      /* ─── Edit form ─── */
+      .edit-form {
+        background: var(--bg-subtle);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 16px;
+        margin-top: 12px;
+      }
+      .form-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 10px;
+      }
+      .form-field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .form-label {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .form-input-wrap {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .form-input {
+        width: 72px;
+        padding: 6px 8px;
+        font-size: 13px;
+        font-family: inherit;
+        border: 1px solid var(--border-strong);
+        border-radius: 5px;
+        background: var(--bg-elevated);
+        color: var(--text-primary);
+        outline: none;
+      }
+      .form-input:focus {
+        border-color: var(--action);
+        box-shadow: 0 0 0 2px var(--action-subtle);
+      }
+      .form-unit {
+        font-size: 12px;
+        color: var(--text-muted);
+        flex-shrink: 0;
+      }
+      .form-hint {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-top: 4px;
+      }
+      .form-validation-note {
+        font-size: 12px;
+        color: var(--score-mid);
+        margin-top: 4px;
+      }
+      .form-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid var(--border);
+      }
+
+      /* ─── Dark mode toggle ─── */
+      .mode-toggle {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 6px 14px;
+        font-size: 12px;
+        font-family: inherit;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+        background: #fff;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <button
+      class="mode-toggle"
+      onclick="
+        document
+          .querySelectorAll('.app-frame')
+          .forEach((f) => (f.dataset.theme = f.dataset.theme === 'dark' ? '' : 'dark'))
+      "
+    >
+      Toggle Dark
+    </button>
+
+    <!-- STATE 1: Dimensions known -->
+    <div class="annotation-section">
+      <div class="annotation-label">REQ-SHELF-26 · State A: Dimensions known</div>
+      <div class="annotation-note">
+        Box dimensions display inline in the metadata grid alongside player count, time, weight. The
+        "in" unit is shown. Dimensions section of the edit form shows prefilled values with a Clear
+        button.
+      </div>
+      <div class="app-frame">
+        <div class="sidebar">
+          <div class="sidebar-brand">
+            <div class="brand-name">Shelf Judge</div>
+            <div class="brand-sub">Board Game Curator</div>
+          </div>
+          <div class="nav-section">
+            <div class="nav-label">Library</div>
+            <div class="nav-item active">&#9632; Collection</div>
+            <div class="nav-item">&#9632; Wishlist</div>
+            <div class="nav-item">&#9632; Add Games</div>
+            <div class="nav-label">Settings</div>
+            <div class="nav-item">&#9632; Axes</div>
+            <div class="nav-item">&#9632; Redundancy</div>
+            <div class="nav-item">&#9632; Shelves</div>
+          </div>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <div class="topbar-title">&#8592; Wingspan</div>
+            <div class="topbar-meta">
+              <button class="btn btn-secondary">Edit</button>
+            </div>
+          </div>
+          <div class="content-scroll">
+            <div class="game-header">
+              <div class="game-thumb">&#127899;</div>
+              <div class="game-title-block">
+                <div class="game-name">Wingspan</div>
+                <div class="game-year">2019 · Elizabeth Hargrave</div>
+                <div class="game-score-row">
+                  <div class="score-hero">8.4</div>
+                  <div class="score-label">fitness</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-title">Game Info</div>
+              <div class="meta-grid">
+                <div class="meta-item">
+                  <div class="meta-label">Players</div>
+                  <div class="meta-value">1–5</div>
+                </div>
+                <div class="meta-item">
+                  <div class="meta-label">Playing Time</div>
+                  <div class="meta-value">40–70 min</div>
+                </div>
+                <div class="meta-item">
+                  <div class="meta-label">Weight</div>
+                  <div class="meta-value">2.45 / 5</div>
+                </div>
+                <div class="meta-item box-dims">
+                  <div class="meta-label">Box</div>
+                  <div class="meta-value">11.4 × 11.4 × 2.75 in</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-title">Box Dimensions</div>
+              <div class="edit-form">
+                <div class="form-row">
+                  <div class="form-field">
+                    <div class="form-label">Width</div>
+                    <div class="form-input-wrap">
+                      <input class="form-input" type="number" value="11.4" step="0.1" min="0.1" />
+                      <span class="form-unit">in</span>
+                    </div>
+                  </div>
+                  <div class="form-field">
+                    <div class="form-label">Height</div>
+                    <div class="form-input-wrap">
+                      <input class="form-input" type="number" value="11.4" step="0.1" min="0.1" />
+                      <span class="form-unit">in</span>
+                    </div>
+                  </div>
+                  <div class="form-field">
+                    <div class="form-label">Depth</div>
+                    <div class="form-input-wrap">
+                      <input class="form-input" type="number" value="2.75" step="0.1" min="0.1" />
+                      <span class="form-unit">in</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="form-hint">
+                  Width × Height × Depth. All three are required together.
+                </div>
+                <div class="form-actions">
+                  <button class="btn btn-primary">Save</button>
+                  <button class="btn btn-danger-ghost">Clear dimensions</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STATE 2: Dimensions unknown -->
+    <div class="annotation-section">
+      <div class="annotation-label">REQ-SHELF-26 · State B: Dimensions not measured</div>
+      <div class="annotation-note">
+        "Box: not measured" shown as muted italic in the metadata grid. Edit form shows empty fields
+        with placeholder text. Validation note appears if only partial dimensions are entered.
+      </div>
+      <div class="app-frame">
+        <div class="sidebar">
+          <div class="sidebar-brand">
+            <div class="brand-name">Shelf Judge</div>
+            <div class="brand-sub">Board Game Curator</div>
+          </div>
+          <div class="nav-section">
+            <div class="nav-label">Library</div>
+            <div class="nav-item active">&#9632; Collection</div>
+            <div class="nav-item">&#9632; Wishlist</div>
+            <div class="nav-item">&#9632; Add Games</div>
+            <div class="nav-label">Settings</div>
+            <div class="nav-item">&#9632; Axes</div>
+            <div class="nav-item">&#9632; Redundancy</div>
+            <div class="nav-item">&#9632; Shelves</div>
+          </div>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <div class="topbar-title">&#8592; Gloomhaven</div>
+            <div class="topbar-meta">
+              <button class="btn btn-secondary">Edit</button>
+            </div>
+          </div>
+          <div class="content-scroll">
+            <div class="game-header">
+              <div class="game-thumb">&#127891;</div>
+              <div class="game-title-block">
+                <div class="game-name">Gloomhaven</div>
+                <div class="game-year">2017 · Isaac Childres</div>
+                <div class="game-score-row">
+                  <div class="score-hero">7.9</div>
+                  <div class="score-label">fitness</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-title">Game Info</div>
+              <div class="meta-grid">
+                <div class="meta-item">
+                  <div class="meta-label">Players</div>
+                  <div class="meta-value">1–4</div>
+                </div>
+                <div class="meta-item">
+                  <div class="meta-label">Playing Time</div>
+                  <div class="meta-value">60–120 min</div>
+                </div>
+                <div class="meta-item">
+                  <div class="meta-label">Weight</div>
+                  <div class="meta-value">3.86 / 5</div>
+                </div>
+                <div class="meta-item box-dims">
+                  <div class="meta-label">Box</div>
+                  <div class="meta-value muted">not measured</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-title">Box Dimensions</div>
+              <div class="edit-form">
+                <div class="form-row">
+                  <div class="form-field">
+                    <div class="form-label">Width</div>
+                    <div class="form-input-wrap">
+                      <input
+                        class="form-input"
+                        type="number"
+                        placeholder="e.g. 15"
+                        step="0.1"
+                        min="0.1"
+                      />
+                      <span class="form-unit">in</span>
+                    </div>
+                  </div>
+                  <div class="form-field">
+                    <div class="form-label">Height</div>
+                    <div class="form-input-wrap">
+                      <input
+                        class="form-input"
+                        type="number"
+                        placeholder="e.g. 11"
+                        step="0.1"
+                        min="0.1"
+                      />
+                      <span class="form-unit">in</span>
+                    </div>
+                  </div>
+                  <div class="form-field">
+                    <div class="form-label">Depth</div>
+                    <div class="form-input-wrap">
+                      <input
+                        class="form-input"
+                        type="number"
+                        placeholder="e.g. 6"
+                        step="0.1"
+                        min="0.1"
+                      />
+                      <span class="form-unit">in</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="form-hint">
+                  Width × Height × Depth. All three are required together.
+                </div>
+                <div class="form-validation-note" style="display: none">
+                  All three dimensions are required. Enter all or none.
+                </div>
+                <div class="form-actions">
+                  <button
+                    class="btn btn-primary"
+                    disabled
+                    style="opacity: 0.5; cursor: not-allowed"
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STATE 3: Dark mode — dimensions known -->
+    <div class="annotation-section">
+      <div class="annotation-label">Dark mode — Dimensions known</div>
+      <div class="annotation-note">
+        Same layout in dark theme. Box dimension value uses --action color in dark mode (lighter
+        blue).
+      </div>
+      <div class="app-frame" data-theme="dark">
+        <div class="sidebar">
+          <div class="sidebar-brand">
+            <div class="brand-name">Shelf Judge</div>
+            <div class="brand-sub">Board Game Curator</div>
+          </div>
+          <div class="nav-section">
+            <div class="nav-label">Library</div>
+            <div class="nav-item active">&#9632; Collection</div>
+            <div class="nav-item">&#9632; Wishlist</div>
+            <div class="nav-item">&#9632; Add Games</div>
+            <div class="nav-label">Settings</div>
+            <div class="nav-item">&#9632; Axes</div>
+            <div class="nav-item">&#9632; Redundancy</div>
+            <div class="nav-item">&#9632; Shelves</div>
+          </div>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <div class="topbar-title">&#8592; Wingspan</div>
+            <div class="topbar-meta">
+              <button class="btn btn-secondary">Edit</button>
+            </div>
+          </div>
+          <div class="content-scroll">
+            <div class="game-header">
+              <div class="game-thumb">&#127899;</div>
+              <div class="game-title-block">
+                <div class="game-name">Wingspan</div>
+                <div class="game-year">2019 · Elizabeth Hargrave</div>
+                <div class="game-score-row">
+                  <div class="score-hero">8.4</div>
+                  <div class="score-label">fitness</div>
+                </div>
+              </div>
+            </div>
+            <div class="section">
+              <div class="section-title">Game Info</div>
+              <div class="meta-grid">
+                <div class="meta-item">
+                  <div class="meta-label">Players</div>
+                  <div class="meta-value">1–5</div>
+                </div>
+                <div class="meta-item">
+                  <div class="meta-label">Playing Time</div>
+                  <div class="meta-value">40–70 min</div>
+                </div>
+                <div class="meta-item">
+                  <div class="meta-label">Weight</div>
+                  <div class="meta-value">2.45 / 5</div>
+                </div>
+                <div class="meta-item box-dims">
+                  <div class="meta-label">Box</div>
+                  <div class="meta-value">11.4 × 11.4 × 2.75 in</div>
+                </div>
+              </div>
+            </div>
+            <div class="section">
+              <div class="section-title">Box Dimensions</div>
+              <div class="edit-form">
+                <div class="form-row">
+                  <div class="form-field">
+                    <div class="form-label">Width</div>
+                    <div class="form-input-wrap">
+                      <input class="form-input" type="number" value="11.4" step="0.1" />
+                      <span class="form-unit">in</span>
+                    </div>
+                  </div>
+                  <div class="form-field">
+                    <div class="form-label">Height</div>
+                    <div class="form-input-wrap">
+                      <input class="form-input" type="number" value="11.4" step="0.1" />
+                      <span class="form-unit">in</span>
+                    </div>
+                  </div>
+                  <div class="form-field">
+                    <div class="form-label">Depth</div>
+                    <div class="form-input-wrap">
+                      <input class="form-input" type="number" value="2.75" step="0.1" />
+                      <span class="form-unit">in</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="form-hint">
+                  Width × Height × Depth. All three are required together.
+                </div>
+                <div class="form-actions">
+                  <button class="btn btn-primary">Save</button>
+                  <button class="btn btn-danger-ghost">Clear dimensions</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

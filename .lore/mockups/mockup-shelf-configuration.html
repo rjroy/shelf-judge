@@ -1,0 +1,869 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shelf Judge — Shelf Configuration</title>
+    <style>
+      :root {
+        --bg-base: #f4f1ec;
+        --bg-surface: #fefcf9;
+        --bg-elevated: #ffffff;
+        --bg-subtle: #f9f7f4;
+        --border: #ddd8d0;
+        --border-strong: #c4bfb8;
+        --row-hover: #f0ede8;
+        --table-header-bg: #ede9e3;
+        --text-primary: #1a1714;
+        --text-secondary: #6b6560;
+        --text-muted: #706a62;
+        --score-color: #b86c1a;
+        --score-high: #2d7a4a;
+        --score-mid: #846a1d;
+        --score-low: #b84040;
+        --bgg-accent: #2e5f8a;
+        --bgg-bg: #edf3f9;
+        --action: #1c3d5e;
+        --action-hover: #2a5580;
+        --action-subtle: #e8eff6;
+        --action-border: #b8cfe0;
+        --nav-bg: #1a1714;
+        --nav-text: #e8e4dc;
+        --nav-active: #b86c1a;
+        --danger: #b84040;
+        --danger-subtle: #fdf0f0;
+        --danger-border: #e8c0c0;
+        --warning: #e65100;
+        --warning-subtle: #fff3e0;
+        --warning-border: #e8d060;
+        --warning-text: #7a5f10;
+        --success: #2d7a4a;
+        --success-bg: #d5f0e0;
+      }
+
+      [data-theme="dark"] {
+        --bg-base: #1a1916;
+        --bg-surface: #242320;
+        --bg-elevated: #2e2d29;
+        --bg-subtle: #201f1c;
+        --border: #3d3a35;
+        --border-strong: #524e48;
+        --row-hover: #2a2825;
+        --table-header-bg: #282724;
+        --text-primary: #e8e4dc;
+        --text-secondary: #a09a90;
+        --text-muted: #908a80;
+        --score-color: #d4882e;
+        --score-high: #40a060;
+        --bgg-accent: #4a8bc4;
+        --bgg-bg: #1a2838;
+        --action: #5a90c0;
+        --action-hover: #6aa0d0;
+        --action-subtle: #162030;
+        --action-border: #2a4060;
+        --nav-bg: #121110;
+        --danger: #e06060;
+        --danger-subtle: #2a1818;
+        --danger-border: #5a2828;
+        --warning: #f06820;
+        --warning-subtle: #2e2010;
+        --warning-border: #a08830;
+        --warning-text: #d4a830;
+        --success: #40a060;
+        --success-bg: #1a3828;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family:
+          Inter,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        background: #e8e4dc;
+        color: var(--text-primary);
+        font-size: 15px;
+        line-height: 1.5;
+        padding: 40px 32px;
+      }
+
+      .annotation-section {
+        margin-bottom: 56px;
+      }
+      .annotation-label {
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #9c9590;
+        margin-bottom: 6px;
+        padding-left: 2px;
+      }
+      .annotation-note {
+        font-size: 12px;
+        color: #706a62;
+        margin-bottom: 14px;
+        padding-left: 2px;
+        max-width: 680px;
+      }
+
+      .app-frame {
+        display: flex;
+        height: 640px;
+        background: var(--bg-base);
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow:
+          0 4px 32px rgba(0, 0, 0, 0.18),
+          0 1px 4px rgba(0, 0, 0, 0.08);
+      }
+      .app-frame.tall {
+        height: 760px;
+      }
+
+      .sidebar {
+        width: 200px;
+        flex-shrink: 0;
+        background: var(--nav-bg);
+        display: flex;
+        flex-direction: column;
+      }
+      .sidebar-brand {
+        padding: 18px 20px 20px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .brand-name {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--nav-text);
+        letter-spacing: -0.01em;
+      }
+      .brand-sub {
+        font-size: 11px;
+        color: rgba(232, 228, 220, 0.4);
+        margin-top: 2px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .nav-section {
+        padding: 16px 0;
+        flex: 1;
+      }
+      .nav-label {
+        font-size: 10px;
+        font-weight: 600;
+        color: rgba(232, 228, 220, 0.35);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        padding: 0 20px;
+        margin-bottom: 4px;
+        margin-top: 14px;
+      }
+      .nav-label:first-child {
+        margin-top: 0;
+      }
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 20px;
+        font-size: 13px;
+        color: rgba(232, 228, 220, 0.65);
+        cursor: pointer;
+        border-left: 3px solid transparent;
+      }
+      .nav-item.active {
+        background: rgba(184, 108, 26, 0.12);
+        color: var(--nav-text);
+        border-left-color: var(--nav-active);
+        font-weight: 500;
+      }
+
+      .main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        min-width: 0;
+      }
+
+      .topbar {
+        height: 48px;
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        padding: 0 24px;
+        gap: 12px;
+        flex-shrink: 0;
+      }
+      .topbar-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+      .topbar-actions {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      /* ─── Summary bar ─── */
+      .summary-bar {
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        padding: 8px 24px;
+        display: flex;
+        align-items: center;
+        gap: 20px;
+        flex-shrink: 0;
+      }
+      .summary-stat {
+        display: flex;
+        flex-direction: column;
+      }
+      .summary-value {
+        font-size: 17px;
+        font-weight: 700;
+        color: var(--text-primary);
+        line-height: 1.2;
+      }
+      .summary-label {
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+      .summary-divider {
+        width: 1px;
+        height: 28px;
+        background: var(--border);
+        flex-shrink: 0;
+      }
+
+      /* ─── Content ─── */
+      .content-scroll {
+        flex: 1;
+        overflow-y: auto;
+        padding: 20px 24px;
+      }
+
+      /* ─── Shelf unit card ─── */
+      .unit-card {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--bg-surface);
+        margin-bottom: 12px;
+        overflow: hidden;
+      }
+      .unit-header {
+        display: flex;
+        align-items: center;
+        padding: 12px 16px;
+        background: var(--table-header-bg);
+        border-bottom: 1px solid var(--border);
+        gap: 10px;
+        cursor: pointer;
+        user-select: none;
+      }
+      .unit-expand-icon {
+        font-size: 10px;
+        color: var(--text-muted);
+        width: 16px;
+        flex-shrink: 0;
+        transition: transform 0.15s;
+      }
+      .unit-expand-icon.open {
+        transform: rotate(90deg);
+      }
+      .unit-name {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-primary);
+        flex: 1;
+      }
+      .unit-shelf-count {
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+      .unit-actions {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+      }
+
+      .unit-body {
+        padding: 0;
+      }
+
+      /* ─── Shelf row ─── */
+      .shelf-row {
+        display: flex;
+        align-items: center;
+        padding: 10px 16px;
+        gap: 12px;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-elevated);
+      }
+      .shelf-row:last-child {
+        border-bottom: none;
+      }
+      .shelf-row:hover {
+        background: var(--row-hover);
+      }
+
+      .shelf-drag-handle {
+        color: var(--text-muted);
+        font-size: 12px;
+        cursor: grab;
+        flex-shrink: 0;
+        opacity: 0.5;
+      }
+      .shelf-name {
+        font-size: 13px;
+        color: var(--text-primary);
+        min-width: 120px;
+        flex-shrink: 0;
+      }
+      .shelf-dims {
+        font-size: 12px;
+        color: var(--text-muted);
+        flex: 1;
+        font-variant-numeric: tabular-nums;
+      }
+      .shelf-dims .dim-value {
+        color: var(--text-secondary);
+      }
+      .shelf-badge {
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        padding: 2px 6px;
+        border-radius: 3px;
+        flex-shrink: 0;
+      }
+      .shelf-badge.unconstrained {
+        background: var(--bgg-bg);
+        color: var(--bgg-accent);
+        border: 1px solid color-mix(in hsl, var(--bgg-accent), white 78%);
+      }
+      .shelf-row-actions {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+      }
+
+      /* ─── Add shelf row ─── */
+      .add-shelf-row {
+        display: flex;
+        align-items: center;
+        padding: 8px 16px;
+        border-top: 1px solid var(--border);
+        background: var(--bg-subtle);
+        gap: 10px;
+      }
+      .add-shelf-form {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .add-shelf-input {
+        padding: 5px 8px;
+        font-size: 12px;
+        font-family: inherit;
+        border: 1px solid var(--border-strong);
+        border-radius: 5px;
+        background: var(--bg-elevated);
+        color: var(--text-primary);
+        outline: none;
+        width: 130px;
+      }
+      .add-shelf-input.narrow {
+        width: 60px;
+      }
+      .add-shelf-input::placeholder {
+        color: var(--text-muted);
+      }
+      .add-shelf-unit-label {
+        font-size: 11px;
+        color: var(--text-muted);
+        flex-shrink: 0;
+      }
+      .add-shelf-hint {
+        font-size: 11px;
+        color: var(--text-muted);
+        font-style: italic;
+        flex-shrink: 0;
+      }
+
+      /* ─── Buttons ─── */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 5px 11px;
+        border-radius: 5px;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        font-family: inherit;
+        white-space: nowrap;
+      }
+      .btn-primary {
+        background: var(--action);
+        color: #fff;
+      }
+      .btn-secondary {
+        background: transparent;
+        border: 1px solid var(--border-strong);
+        color: var(--text-secondary);
+      }
+      .btn-ghost {
+        background: transparent;
+        border: none;
+        color: var(--text-secondary);
+        padding: 4px 6px;
+        font-size: 12px;
+      }
+      .btn-ghost:hover {
+        color: var(--text-primary);
+        background: var(--row-hover);
+        border-radius: 4px;
+      }
+      .btn-icon-danger {
+        background: transparent;
+        border: none;
+        color: var(--text-muted);
+        padding: 4px 6px;
+        font-size: 12px;
+        cursor: pointer;
+        font-family: inherit;
+        border-radius: 4px;
+      }
+      .btn-icon-danger:hover {
+        color: var(--danger);
+        background: var(--danger-subtle);
+      }
+      .btn-add {
+        background: transparent;
+        border: 1px dashed var(--border-strong);
+        color: var(--text-secondary);
+        padding: 6px 12px;
+        border-radius: 6px;
+        font-size: 12px;
+        width: 100%;
+        cursor: pointer;
+        text-align: center;
+        font-family: inherit;
+        margin-top: 12px;
+      }
+      .btn-add:hover {
+        border-color: var(--action);
+        color: var(--action);
+        background: var(--action-subtle);
+      }
+
+      .mode-toggle {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 6px 14px;
+        font-size: 12px;
+        font-family: inherit;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+        background: #fff;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <button
+      class="mode-toggle"
+      onclick="
+        document
+          .querySelectorAll('.app-frame')
+          .forEach((f) => (f.dataset.theme = f.dataset.theme === 'dark' ? '' : 'dark'))
+      "
+    >
+      Toggle Dark
+    </button>
+
+    <!-- STATE 1: Configured state with multiple units -->
+    <div class="annotation-section">
+      <div class="annotation-label">REQ-SHELF-27/28/29 · Shelf Configuration — Populated</div>
+      <div class="annotation-note">
+        Three shelf units expanded. Each unit shows its shelves with dimensions. Summary bar at top
+        shows live total shelves, cubic-inch capacity, and unconstrained count. The "On top" shelf
+        shows an "Unconstrained" badge and displays height as "—". Drag handles allow reordering
+        within a unit.
+      </div>
+      <div class="app-frame tall">
+        <div class="sidebar">
+          <div class="sidebar-brand">
+            <div class="brand-name">Shelf Judge</div>
+            <div class="brand-sub">Board Game Curator</div>
+          </div>
+          <div class="nav-section">
+            <div class="nav-label">Library</div>
+            <div class="nav-item">&#9632; Collection</div>
+            <div class="nav-item">&#9632; Wishlist</div>
+            <div class="nav-item">&#9632; Add Games</div>
+            <div class="nav-label">Settings</div>
+            <div class="nav-item">&#9632; Axes</div>
+            <div class="nav-item">&#9632; Redundancy</div>
+            <div class="nav-item active">&#9632; Shelves</div>
+          </div>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <div class="topbar-title">Shelf Configuration</div>
+            <div class="topbar-actions">
+              <button class="btn btn-primary">+ Add unit</button>
+            </div>
+          </div>
+
+          <!-- Summary bar -->
+          <div class="summary-bar">
+            <div class="summary-stat">
+              <div class="summary-value">14</div>
+              <div class="summary-label">total shelves</div>
+            </div>
+            <div class="summary-divider"></div>
+            <div class="summary-stat">
+              <div class="summary-value">38,420 in³</div>
+              <div class="summary-label">constrained capacity</div>
+            </div>
+            <div class="summary-divider"></div>
+            <div class="summary-stat">
+              <div class="summary-value">2</div>
+              <div class="summary-label">unconstrained shelves</div>
+            </div>
+          </div>
+
+          <div class="content-scroll">
+            <!-- Unit 1: Living Room Kallax -->
+            <div class="unit-card">
+              <div class="unit-header">
+                <div class="unit-expand-icon open">&#9658;</div>
+                <div class="unit-name">Living Room Kallax</div>
+                <div class="unit-shelf-count">6 shelves</div>
+                <div class="unit-actions">
+                  <button class="btn-ghost">Rename</button>
+                  <button class="btn-icon-danger" title="Remove unit">✕</button>
+                </div>
+              </div>
+              <div class="unit-body">
+                <div class="shelf-row">
+                  <div class="shelf-drag-handle">⠿</div>
+                  <div class="shelf-name">Cube 1 (top-left)</div>
+                  <div class="shelf-dims">
+                    <span class="dim-value">13</span> × <span class="dim-value">13</span> ×
+                    <span class="dim-value">13</span> in
+                  </div>
+                  <div class="shelf-row-actions">
+                    <button class="btn-ghost">Edit</button>
+                    <button class="btn-icon-danger" title="Remove shelf">✕</button>
+                  </div>
+                </div>
+                <div class="shelf-row">
+                  <div class="shelf-drag-handle">⠿</div>
+                  <div class="shelf-name">Cube 2 (top-right)</div>
+                  <div class="shelf-dims">
+                    <span class="dim-value">13</span> × <span class="dim-value">13</span> ×
+                    <span class="dim-value">13</span> in
+                  </div>
+                  <div class="shelf-row-actions">
+                    <button class="btn-ghost">Edit</button>
+                    <button class="btn-icon-danger">✕</button>
+                  </div>
+                </div>
+                <div class="shelf-row">
+                  <div class="shelf-drag-handle">⠿</div>
+                  <div class="shelf-name">Cube 3 (bottom-left)</div>
+                  <div class="shelf-dims">
+                    <span class="dim-value">13</span> × <span class="dim-value">13</span> ×
+                    <span class="dim-value">13</span> in
+                  </div>
+                  <div class="shelf-row-actions">
+                    <button class="btn-ghost">Edit</button>
+                    <button class="btn-icon-danger">✕</button>
+                  </div>
+                </div>
+                <div class="shelf-row">
+                  <div class="shelf-drag-handle">⠿</div>
+                  <div class="shelf-name">Cube 4 (bottom-right)</div>
+                  <div class="shelf-dims">
+                    <span class="dim-value">13</span> × <span class="dim-value">13</span> ×
+                    <span class="dim-value">13</span> in
+                  </div>
+                  <div class="shelf-row-actions">
+                    <button class="btn-ghost">Edit</button>
+                    <button class="btn-icon-danger">✕</button>
+                  </div>
+                </div>
+                <div class="shelf-row">
+                  <div class="shelf-drag-handle">⠿</div>
+                  <div class="shelf-name">On top (left)</div>
+                  <div class="shelf-dims">
+                    <span class="dim-value">28</span> ×
+                    <span style="color: var(--text-muted); font-style: italic">—</span> ×
+                    <span class="dim-value">14</span> in
+                  </div>
+                  <div class="shelf-badge unconstrained">Unconstrained height</div>
+                  <div class="shelf-row-actions">
+                    <button class="btn-ghost">Edit</button>
+                    <button class="btn-icon-danger">✕</button>
+                  </div>
+                </div>
+                <div class="shelf-row">
+                  <div class="shelf-drag-handle">⠿</div>
+                  <div class="shelf-name">On top (right)</div>
+                  <div class="shelf-dims">
+                    <span class="dim-value">28</span> ×
+                    <span style="color: var(--text-muted); font-style: italic">—</span> ×
+                    <span class="dim-value">14</span> in
+                  </div>
+                  <div class="shelf-badge unconstrained">Unconstrained height</div>
+                  <div class="shelf-row-actions">
+                    <button class="btn-ghost">Edit</button>
+                    <button class="btn-icon-danger">✕</button>
+                  </div>
+                </div>
+                <div class="add-shelf-row">
+                  <div class="add-shelf-form">
+                    <input class="add-shelf-input" placeholder="Shelf name" />
+                    <input class="add-shelf-input narrow" placeholder="W" />
+                    <div class="add-shelf-unit-label">×</div>
+                    <input class="add-shelf-input narrow" placeholder="H" />
+                    <div class="add-shelf-unit-label">×</div>
+                    <input class="add-shelf-input narrow" placeholder="D" />
+                    <div class="add-shelf-unit-label">in</div>
+                    <div class="add-shelf-hint">(leave H blank for unconstrained)</div>
+                    <button class="btn btn-primary" style="padding: 5px 10px">Add shelf</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Unit 2: Office Bookcase -->
+            <div class="unit-card">
+              <div class="unit-header">
+                <div class="unit-expand-icon open">&#9658;</div>
+                <div class="unit-name">Office Bookcase</div>
+                <div class="unit-shelf-count">4 shelves</div>
+                <div class="unit-actions">
+                  <button class="btn-ghost">Rename</button>
+                  <button class="btn-icon-danger">✕</button>
+                </div>
+              </div>
+              <div class="unit-body">
+                <div class="shelf-row">
+                  <div class="shelf-drag-handle">⠿</div>
+                  <div class="shelf-name">Top shelf</div>
+                  <div class="shelf-dims">
+                    <span class="dim-value">30</span> × <span class="dim-value">12</span> ×
+                    <span class="dim-value">11</span> in
+                  </div>
+                  <div class="shelf-row-actions">
+                    <button class="btn-ghost">Edit</button>
+                    <button class="btn-icon-danger">✕</button>
+                  </div>
+                </div>
+                <div class="shelf-row">
+                  <div class="shelf-drag-handle">⠿</div>
+                  <div class="shelf-name">Second shelf</div>
+                  <div class="shelf-dims">
+                    <span class="dim-value">30</span> × <span class="dim-value">12</span> ×
+                    <span class="dim-value">11</span> in
+                  </div>
+                  <div class="shelf-row-actions">
+                    <button class="btn-ghost">Edit</button>
+                    <button class="btn-icon-danger">✕</button>
+                  </div>
+                </div>
+                <div class="shelf-row">
+                  <div class="shelf-drag-handle">⠿</div>
+                  <div class="shelf-name">Third shelf</div>
+                  <div class="shelf-dims">
+                    <span class="dim-value">30</span> × <span class="dim-value">14</span> ×
+                    <span class="dim-value">11</span> in
+                  </div>
+                  <div class="shelf-row-actions">
+                    <button class="btn-ghost">Edit</button>
+                    <button class="btn-icon-danger">✕</button>
+                  </div>
+                </div>
+                <div class="shelf-row">
+                  <div class="shelf-drag-handle">⠿</div>
+                  <div class="shelf-name">Bottom shelf</div>
+                  <div class="shelf-dims">
+                    <span class="dim-value">30</span> × <span class="dim-value">16</span> ×
+                    <span class="dim-value">11</span> in
+                  </div>
+                  <div class="shelf-row-actions">
+                    <button class="btn-ghost">Edit</button>
+                    <button class="btn-icon-danger">✕</button>
+                  </div>
+                </div>
+                <div class="add-shelf-row">
+                  <div class="add-shelf-form">
+                    <input class="add-shelf-input" placeholder="Shelf name" />
+                    <input class="add-shelf-input narrow" placeholder="W" />
+                    <div class="add-shelf-unit-label">×</div>
+                    <input class="add-shelf-input narrow" placeholder="H" />
+                    <div class="add-shelf-unit-label">×</div>
+                    <input class="add-shelf-input narrow" placeholder="D" />
+                    <div class="add-shelf-unit-label">in</div>
+                    <div class="add-shelf-hint">(leave H blank for unconstrained)</div>
+                    <button class="btn btn-primary" style="padding: 5px 10px">Add shelf</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Unit 3: Closet — collapsed -->
+            <div class="unit-card">
+              <div class="unit-header">
+                <div class="unit-expand-icon">&#9658;</div>
+                <div class="unit-name">Closet Storage</div>
+                <div class="unit-shelf-count">4 shelves · collapsed</div>
+                <div class="unit-actions">
+                  <button class="btn-ghost">Rename</button>
+                  <button class="btn-icon-danger">✕</button>
+                </div>
+              </div>
+            </div>
+
+            <button class="btn-add">+ Add shelf unit</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STATE 2: Dark mode -->
+    <div class="annotation-section">
+      <div class="annotation-label">Dark mode — Shelf Configuration</div>
+      <div class="annotation-note">
+        Same layout in dark theme. Unconstrained badge adapts to dark bgg-bg. Action button uses
+        lighter blue.
+      </div>
+      <div class="app-frame" data-theme="dark">
+        <div class="sidebar">
+          <div class="sidebar-brand">
+            <div class="brand-name">Shelf Judge</div>
+            <div class="brand-sub">Board Game Curator</div>
+          </div>
+          <div class="nav-section">
+            <div class="nav-label">Library</div>
+            <div class="nav-item">&#9632; Collection</div>
+            <div class="nav-item">&#9632; Wishlist</div>
+            <div class="nav-item">&#9632; Add Games</div>
+            <div class="nav-label">Settings</div>
+            <div class="nav-item">&#9632; Axes</div>
+            <div class="nav-item">&#9632; Redundancy</div>
+            <div class="nav-item active">&#9632; Shelves</div>
+          </div>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <div class="topbar-title">Shelf Configuration</div>
+            <div class="topbar-actions">
+              <button class="btn btn-primary">+ Add unit</button>
+            </div>
+          </div>
+          <div class="summary-bar">
+            <div class="summary-stat">
+              <div class="summary-value">14</div>
+              <div class="summary-label">total shelves</div>
+            </div>
+            <div class="summary-divider"></div>
+            <div class="summary-stat">
+              <div class="summary-value">38,420 in³</div>
+              <div class="summary-label">constrained capacity</div>
+            </div>
+            <div class="summary-divider"></div>
+            <div class="summary-stat">
+              <div class="summary-value">2</div>
+              <div class="summary-label">unconstrained shelves</div>
+            </div>
+          </div>
+          <div class="content-scroll">
+            <div class="unit-card">
+              <div class="unit-header">
+                <div class="unit-expand-icon open">&#9658;</div>
+                <div class="unit-name">Living Room Kallax</div>
+                <div class="unit-shelf-count">6 shelves</div>
+                <div class="unit-actions">
+                  <button class="btn-ghost">Rename</button>
+                  <button class="btn-icon-danger">✕</button>
+                </div>
+              </div>
+              <div class="unit-body">
+                <div class="shelf-row">
+                  <div class="shelf-drag-handle">⠿</div>
+                  <div class="shelf-name">Cube 1 (top-left)</div>
+                  <div class="shelf-dims">
+                    <span class="dim-value">13</span> × <span class="dim-value">13</span> ×
+                    <span class="dim-value">13</span> in
+                  </div>
+                  <div class="shelf-row-actions">
+                    <button class="btn-ghost">Edit</button>
+                    <button class="btn-icon-danger">✕</button>
+                  </div>
+                </div>
+                <div class="shelf-row">
+                  <div class="shelf-drag-handle">⠿</div>
+                  <div class="shelf-name">Cube 2 (top-right)</div>
+                  <div class="shelf-dims">
+                    <span class="dim-value">13</span> × <span class="dim-value">13</span> ×
+                    <span class="dim-value">13</span> in
+                  </div>
+                  <div class="shelf-row-actions">
+                    <button class="btn-ghost">Edit</button>
+                    <button class="btn-icon-danger">✕</button>
+                  </div>
+                </div>
+                <div class="shelf-row">
+                  <div class="shelf-drag-handle">⠿</div>
+                  <div class="shelf-name">On top</div>
+                  <div class="shelf-dims">
+                    <span class="dim-value">28</span> ×
+                    <span style="color: var(--text-muted); font-style: italic">—</span> ×
+                    <span class="dim-value">14</span> in
+                  </div>
+                  <div class="shelf-badge unconstrained">Unconstrained height</div>
+                  <div class="shelf-row-actions">
+                    <button class="btn-ghost">Edit</button>
+                    <button class="btn-icon-danger">✕</button>
+                  </div>
+                </div>
+                <div class="add-shelf-row">
+                  <div class="add-shelf-form">
+                    <input class="add-shelf-input" placeholder="Shelf name" />
+                    <input class="add-shelf-input narrow" placeholder="W" />
+                    <div class="add-shelf-unit-label">×</div>
+                    <input class="add-shelf-input narrow" placeholder="H" />
+                    <div class="add-shelf-unit-label">×</div>
+                    <input class="add-shelf-input narrow" placeholder="D" />
+                    <div class="add-shelf-unit-label">in</div>
+                    <button class="btn btn-primary" style="padding: 5px 10px">Add shelf</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <button class="btn-add">+ Add shelf unit</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

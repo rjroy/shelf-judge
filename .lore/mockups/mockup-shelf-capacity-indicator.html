@@ -1,0 +1,1007 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shelf Judge — Capacity Indicator</title>
+    <style>
+      :root {
+        --bg-base: #f4f1ec;
+        --bg-surface: #fefcf9;
+        --bg-elevated: #ffffff;
+        --bg-subtle: #f9f7f4;
+        --border: #ddd8d0;
+        --border-strong: #c4bfb8;
+        --row-hover: #f0ede8;
+        --table-header-bg: #ede9e3;
+        --text-primary: #1a1714;
+        --text-secondary: #6b6560;
+        --text-muted: #706a62;
+        --score-color: #b86c1a;
+        --score-high: #2d7a4a;
+        --score-mid: #846a1d;
+        --score-low: #b84040;
+        --score-high-bg: #e8f5ee;
+        --score-low-bg: #fdf0f0;
+        --bgg-accent: #2e5f8a;
+        --bgg-bg: #edf3f9;
+        --action: #1c3d5e;
+        --action-hover: #2a5580;
+        --action-subtle: #e8eff6;
+        --action-border: #b8cfe0;
+        --nav-bg: #1a1714;
+        --nav-text: #e8e4dc;
+        --nav-active: #b86c1a;
+        --danger: #b84040;
+        --danger-subtle: #fdf0f0;
+        --danger-border: #e8c0c0;
+        --warning: #8a4500;
+        --warning-subtle: #fff3e0;
+        --warning-border: #e8c880;
+        --warning-text: #7a5f10;
+        --success: #2d7a4a;
+        --success-bg: #e8f5ee;
+        --success-border: #a8dabb;
+      }
+
+      [data-theme="dark"] {
+        --bg-base: #1a1916;
+        --bg-surface: #242320;
+        --bg-elevated: #2e2d29;
+        --bg-subtle: #201f1c;
+        --border: #3d3a35;
+        --border-strong: #524e48;
+        --row-hover: #2a2825;
+        --table-header-bg: #282724;
+        --text-primary: #e8e4dc;
+        --text-secondary: #a09a90;
+        --text-muted: #908a80;
+        --score-color: #d4882e;
+        --score-high: #40a060;
+        --score-mid: #b89030;
+        --score-low: #e06060;
+        --score-high-bg: #1a3020;
+        --score-low-bg: #2a1818;
+        --bgg-accent: #4a8bc4;
+        --bgg-bg: #1a2838;
+        --action: #5a90c0;
+        --action-hover: #6aa0d0;
+        --action-subtle: #162030;
+        --action-border: #2a4060;
+        --nav-bg: #121110;
+        --danger: #e06060;
+        --danger-subtle: #2a1818;
+        --danger-border: #5a2828;
+        --warning: #d46020;
+        --warning-subtle: #2e2010;
+        --warning-border: #a08830;
+        --warning-text: #d4a830;
+        --success: #40a060;
+        --success-bg: #1a3020;
+        --success-border: #2a5838;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family:
+          Inter,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        background: #e8e4dc;
+        color: var(--text-primary);
+        font-size: 15px;
+        line-height: 1.5;
+        padding: 40px 32px;
+      }
+
+      .annotation-section {
+        margin-bottom: 48px;
+      }
+      .annotation-label {
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #9c9590;
+        margin-bottom: 6px;
+        padding-left: 2px;
+      }
+      .annotation-note {
+        font-size: 12px;
+        color: #706a62;
+        margin-bottom: 14px;
+        padding-left: 2px;
+        max-width: 680px;
+      }
+
+      .app-frame {
+        display: flex;
+        height: 560px;
+        background: var(--bg-base);
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow:
+          0 4px 32px rgba(0, 0, 0, 0.18),
+          0 1px 4px rgba(0, 0, 0, 0.08);
+      }
+
+      .sidebar {
+        width: 200px;
+        flex-shrink: 0;
+        background: var(--nav-bg);
+        display: flex;
+        flex-direction: column;
+      }
+      .sidebar-brand {
+        padding: 18px 20px 20px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .brand-name {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--nav-text);
+        letter-spacing: -0.01em;
+      }
+      .brand-sub {
+        font-size: 11px;
+        color: rgba(232, 228, 220, 0.4);
+        margin-top: 2px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .nav-section {
+        padding: 16px 0;
+        flex: 1;
+      }
+      .nav-label {
+        font-size: 10px;
+        font-weight: 600;
+        color: rgba(232, 228, 220, 0.35);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        padding: 0 20px;
+        margin-bottom: 4px;
+        margin-top: 14px;
+      }
+      .nav-label:first-child {
+        margin-top: 0;
+      }
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 20px;
+        font-size: 13px;
+        color: rgba(232, 228, 220, 0.65);
+        cursor: pointer;
+        border-left: 3px solid transparent;
+      }
+      .nav-item.active {
+        background: rgba(184, 108, 26, 0.12);
+        color: var(--nav-text);
+        border-left-color: var(--nav-active);
+        font-weight: 500;
+      }
+
+      .main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        min-width: 0;
+      }
+
+      .topbar {
+        height: 48px;
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        padding: 0 24px;
+        gap: 12px;
+        flex-shrink: 0;
+      }
+      .topbar-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+      .topbar-meta {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      /* ─── Filter bar (contains capacity indicator) ─── */
+      .filter-bar {
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+      }
+      .filter-controls {
+        padding: 10px 24px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .search-input {
+        padding: 6px 10px;
+        font-size: 13px;
+        font-family: inherit;
+        border: 1px solid var(--border-strong);
+        border-radius: 6px;
+        background: var(--bg-elevated);
+        color: var(--text-primary);
+        outline: none;
+        width: 220px;
+      }
+      .filter-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 11px;
+        font-size: 12px;
+        font-weight: 500;
+        border: 1px solid var(--border-strong);
+        border-radius: 6px;
+        background: var(--bg-elevated);
+        color: var(--text-secondary);
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .filter-spacer {
+        flex: 1;
+      }
+      .filter-toggle-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 11px;
+        font-size: 12px;
+        font-weight: 500;
+        border: 1px solid var(--border-strong);
+        border-radius: 6px;
+        background: var(--bg-elevated);
+        color: var(--text-secondary);
+        cursor: pointer;
+        white-space: nowrap;
+      }
+
+      /* ─── Capacity indicator band ─── */
+      .capacity-indicator {
+        padding: 8px 24px;
+        border-top: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      /* State A: success (all placed) */
+      .capacity-indicator.success {
+        background: var(--success-bg);
+      }
+      .cap-icon {
+        font-size: 14px;
+        flex-shrink: 0;
+      }
+      .cap-text {
+        font-size: 12px;
+      }
+      .cap-text strong {
+        font-weight: 600;
+      }
+      .cap-text.success-text {
+        color: var(--success);
+      }
+      .cap-text.success-text strong {
+        color: var(--success);
+      }
+      .cap-detail-link {
+        font-size: 12px;
+        color: var(--action);
+        text-decoration: underline;
+        cursor: pointer;
+        margin-left: auto;
+        flex-shrink: 0;
+      }
+
+      /* State B: overflow warning */
+      .capacity-indicator.warning {
+        background: var(--warning-subtle);
+        border-top-color: var(--warning-border);
+      }
+      .cap-text.warning-text {
+        color: var(--warning);
+      }
+      .cap-text.warning-text strong {
+        color: var(--warning);
+      }
+
+      /* State C: unfittable error */
+      .capacity-indicator.danger {
+        background: var(--danger-subtle);
+        border-top-color: var(--danger-border);
+      }
+      .cap-text.danger-text {
+        color: var(--danger);
+      }
+      .cap-text.danger-text strong {
+        color: var(--danger);
+      }
+
+      /* State D: configured but no dimensions */
+      .capacity-indicator.neutral {
+        background: var(--bg-subtle);
+      }
+      .cap-text.neutral-text {
+        color: var(--text-secondary);
+      }
+
+      /* Multi-warning: overflow + unfittable (shown together) */
+      .cap-warnings {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+      }
+
+      /* ─── Table area ─── */
+      .table-scroll {
+        flex: 1;
+        overflow-y: auto;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th {
+        text-align: left;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        padding: 8px 12px;
+        background: var(--table-header-bg);
+        border-bottom: 1px solid var(--border);
+        position: sticky;
+        top: 0;
+      }
+      td {
+        padding: 9px 12px;
+        font-size: 13px;
+        color: var(--text-primary);
+        border-bottom: 1px solid var(--border);
+      }
+      tr:hover td {
+        background: var(--row-hover);
+      }
+      .score-chip {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 22px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .score-chip.high {
+        background: var(--score-high-bg);
+        color: var(--score-high);
+      }
+      .score-chip.mid {
+        background: #fef6e4;
+        color: var(--score-mid);
+      }
+      .score-chip.low {
+        background: var(--score-low-bg);
+        color: var(--score-low);
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 5px 11px;
+        border-radius: 5px;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        font-family: inherit;
+        white-space: nowrap;
+      }
+      .btn-primary {
+        background: var(--action);
+        color: #fff;
+      }
+
+      .mode-toggle {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 6px 14px;
+        font-size: 12px;
+        font-family: inherit;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+        background: #fff;
+        cursor: pointer;
+      }
+
+      /* Sidebar for all frames */
+      .std-sidebar .nav-item.active {
+        background: rgba(184, 108, 26, 0.12);
+        color: var(--nav-text);
+        border-left-color: var(--nav-active);
+        font-weight: 500;
+      }
+    </style>
+  </head>
+  <body>
+    <button
+      class="mode-toggle"
+      onclick="
+        document
+          .querySelectorAll('.app-frame')
+          .forEach((f) => (f.dataset.theme = f.dataset.theme === 'dark' ? '' : 'dark'))
+      "
+    >
+      Toggle Dark
+    </button>
+
+    <!-- ── STATE A: All games placed ── -->
+    <div class="annotation-section">
+      <div class="annotation-label">REQ-SHELF-30 · State A: All games placed</div>
+      <div class="annotation-note">
+        Green success band. "All 87 games placed" with shelf utilization summary. No link to
+        capacity detail (nothing to act on, but link is still provided for inspection).
+        Non-intrusive — the band is thin and visually subordinate to the table.
+      </div>
+      <div class="app-frame">
+        <div class="sidebar">
+          <div class="sidebar-brand">
+            <div class="brand-name">Shelf Judge</div>
+            <div class="brand-sub">Board Game Curator</div>
+          </div>
+          <div class="nav-section">
+            <div class="nav-label">Library</div>
+            <div class="nav-item active">&#9632; Collection</div>
+            <div class="nav-item">&#9632; Wishlist</div>
+            <div class="nav-item">&#9632; Add Games</div>
+            <div class="nav-label">Settings</div>
+            <div class="nav-item">&#9632; Axes</div>
+            <div class="nav-item">&#9632; Redundancy</div>
+            <div class="nav-item">&#9632; Shelves</div>
+          </div>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <div class="topbar-title">Collection</div>
+            <div class="topbar-meta">94 games</div>
+          </div>
+          <div class="filter-bar">
+            <div class="filter-controls">
+              <input class="search-input" placeholder="Search games..." />
+              <button class="filter-btn">▾ Sort: Fitness</button>
+              <button class="filter-btn">⊟ Filters</button>
+              <div class="filter-spacer"></div>
+              <button class="btn btn-primary">+ Add game</button>
+            </div>
+            <div class="capacity-indicator success">
+              <div class="cap-icon">✓</div>
+              <div class="cap-text success-text">
+                <strong>All 87 measured games placed</strong> · 14 shelves, avg 68% full
+              </div>
+              <a class="cap-detail-link">View shelf assignments</a>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Game</th>
+                  <th>Fitness</th>
+                  <th>Niche</th>
+                  <th>Redundancy</th>
+                  <th>BGG</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Wingspan</td>
+                  <td><span class="score-chip high">8.4</span></td>
+                  <td>Engine builder</td>
+                  <td>—</td>
+                  <td>8.1</td>
+                </tr>
+                <tr>
+                  <td>Ark Nova</td>
+                  <td><span class="score-chip high">8.1</span></td>
+                  <td>Engine builder</td>
+                  <td>—</td>
+                  <td>8.6</td>
+                </tr>
+                <tr>
+                  <td>Spirit Island</td>
+                  <td><span class="score-chip high">7.9</span></td>
+                  <td>Co-op</td>
+                  <td>—</td>
+                  <td>8.4</td>
+                </tr>
+                <tr>
+                  <td>Gloomhaven</td>
+                  <td><span class="score-chip high">7.8</span></td>
+                  <td>Dungeon crawler</td>
+                  <td>—</td>
+                  <td>8.8</td>
+                </tr>
+                <tr>
+                  <td>Terraforming Mars</td>
+                  <td><span class="score-chip mid">6.9</span></td>
+                  <td>Engine builder</td>
+                  <td>-0.4</td>
+                  <td>8.4</td>
+                </tr>
+                <tr>
+                  <td>7 Wonders Duel</td>
+                  <td><span class="score-chip mid">6.5</span></td>
+                  <td>Card game</td>
+                  <td>—</td>
+                  <td>8.2</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── STATE B: Overflow warning ── -->
+    <div class="annotation-section">
+      <div class="annotation-label">
+        REQ-SHELF-30 · State B: Games couldn't be placed (overflow only)
+      </div>
+      <div class="annotation-note">
+        Amber/warning band. "7 games couldn't be placed" with link to capacity detail. These fit by
+        shape but were displaced. The band is visually prominent but not alarming — lower urgency
+        than unfittable games.
+      </div>
+      <div class="app-frame">
+        <div class="sidebar">
+          <div class="sidebar-brand">
+            <div class="brand-name">Shelf Judge</div>
+            <div class="brand-sub">Board Game Curator</div>
+          </div>
+          <div class="nav-section">
+            <div class="nav-label">Library</div>
+            <div class="nav-item active">&#9632; Collection</div>
+            <div class="nav-item">&#9632; Wishlist</div>
+            <div class="nav-item">&#9632; Add Games</div>
+            <div class="nav-label">Settings</div>
+            <div class="nav-item">&#9632; Axes</div>
+            <div class="nav-item">&#9632; Redundancy</div>
+            <div class="nav-item">&#9632; Shelves</div>
+          </div>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <div class="topbar-title">Collection</div>
+            <div class="topbar-meta">94 games</div>
+          </div>
+          <div class="filter-bar">
+            <div class="filter-controls">
+              <input class="search-input" placeholder="Search games..." />
+              <button class="filter-btn">▾ Sort: Fitness</button>
+              <button class="filter-btn">⊟ Filters</button>
+              <div class="filter-spacer"></div>
+              <button class="btn btn-primary">+ Add game</button>
+            </div>
+            <div class="capacity-indicator warning">
+              <div class="cap-icon">⚠</div>
+              <div class="cap-text warning-text">
+                <strong>7 games couldn't be placed</strong> — shelves are full. These games fit by
+                shape but have no room.
+              </div>
+              <a class="cap-detail-link">View overflow →</a>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Game</th>
+                  <th>Fitness</th>
+                  <th>Niche</th>
+                  <th>Redundancy</th>
+                  <th>BGG</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Wingspan</td>
+                  <td><span class="score-chip high">8.4</span></td>
+                  <td>Engine builder</td>
+                  <td>—</td>
+                  <td>8.1</td>
+                </tr>
+                <tr>
+                  <td>Ark Nova</td>
+                  <td><span class="score-chip high">8.1</span></td>
+                  <td>Engine builder</td>
+                  <td>—</td>
+                  <td>8.6</td>
+                </tr>
+                <tr>
+                  <td>Spirit Island</td>
+                  <td><span class="score-chip high">7.9</span></td>
+                  <td>Co-op</td>
+                  <td>—</td>
+                  <td>8.4</td>
+                </tr>
+                <tr>
+                  <td>Gloomhaven</td>
+                  <td><span class="score-chip high">7.8</span></td>
+                  <td>Dungeon crawler</td>
+                  <td>—</td>
+                  <td>8.8</td>
+                </tr>
+                <tr>
+                  <td>Terraforming Mars</td>
+                  <td><span class="score-chip mid">6.9</span></td>
+                  <td>Engine builder</td>
+                  <td>-0.4</td>
+                  <td>8.4</td>
+                </tr>
+                <tr>
+                  <td>7 Wonders Duel</td>
+                  <td><span class="score-chip mid">6.5</span></td>
+                  <td>Card game</td>
+                  <td>—</td>
+                  <td>8.2</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── STATE C: Unfittable games ── -->
+    <div class="annotation-section">
+      <div class="annotation-label">
+        REQ-SHELF-30 · State C: Unfittable games (strongest cull signal)
+      </div>
+      <div class="annotation-note">
+        Red/danger band for unfittable. These games physically cannot go on any shelf — the
+        strongest cull signal. Combined with displaced games count in a secondary line. Two-row
+        presentation in the band to keep each message legible.
+      </div>
+      <div class="app-frame">
+        <div class="sidebar">
+          <div class="sidebar-brand">
+            <div class="brand-name">Shelf Judge</div>
+            <div class="brand-sub">Board Game Curator</div>
+          </div>
+          <div class="nav-section">
+            <div class="nav-label">Library</div>
+            <div class="nav-item active">&#9632; Collection</div>
+            <div class="nav-item">&#9632; Wishlist</div>
+            <div class="nav-item">&#9632; Add Games</div>
+            <div class="nav-label">Settings</div>
+            <div class="nav-item">&#9632; Axes</div>
+            <div class="nav-item">&#9632; Redundancy</div>
+            <div class="nav-item">&#9632; Shelves</div>
+          </div>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <div class="topbar-title">Collection</div>
+            <div class="topbar-meta">94 games</div>
+          </div>
+          <div class="filter-bar">
+            <div class="filter-controls">
+              <input class="search-input" placeholder="Search games..." />
+              <button class="filter-btn">▾ Sort: Fitness</button>
+              <button class="filter-btn">⊟ Filters</button>
+              <div class="filter-spacer"></div>
+              <button class="btn btn-primary">+ Add game</button>
+            </div>
+            <div
+              class="capacity-indicator danger"
+              style="flex-direction: column; align-items: flex-start; gap: 4px"
+            >
+              <div style="display: flex; align-items: center; gap: 10px; width: 100%">
+                <div class="cap-icon">✕</div>
+                <div class="cap-text danger-text">
+                  <strong>3 games don't fit any shelf</strong> — cull candidates. Box is too large
+                  for all configured shelves.
+                </div>
+                <a class="cap-detail-link">View unfittable →</a>
+              </div>
+              <div
+                style="
+                  display: flex;
+                  align-items: center;
+                  gap: 10px;
+                  width: 100%;
+                  padding-left: 24px;
+                "
+              >
+                <div class="cap-text warning-text">
+                  Also: <strong>5 games displaced</strong> — shelves full.
+                </div>
+                <a class="cap-detail-link">View all overflow →</a>
+              </div>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Game</th>
+                  <th>Fitness</th>
+                  <th>Niche</th>
+                  <th>Redundancy</th>
+                  <th>BGG</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Wingspan</td>
+                  <td><span class="score-chip high">8.4</span></td>
+                  <td>Engine builder</td>
+                  <td>—</td>
+                  <td>8.1</td>
+                </tr>
+                <tr>
+                  <td>Ark Nova</td>
+                  <td><span class="score-chip high">8.1</span></td>
+                  <td>Engine builder</td>
+                  <td>—</td>
+                  <td>8.6</td>
+                </tr>
+                <tr>
+                  <td>Spirit Island</td>
+                  <td><span class="score-chip high">7.9</span></td>
+                  <td>Co-op</td>
+                  <td>—</td>
+                  <td>8.4</td>
+                </tr>
+                <tr>
+                  <td>Gloomhaven</td>
+                  <td><span class="score-chip high">7.8</span></td>
+                  <td>Dungeon crawler</td>
+                  <td>—</td>
+                  <td>8.8</td>
+                </tr>
+                <tr>
+                  <td>Terraforming Mars</td>
+                  <td><span class="score-chip mid">6.9</span></td>
+                  <td>Engine builder</td>
+                  <td>-0.4</td>
+                  <td>8.4</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── STATE D: Configured but no dimensions ── -->
+    <div class="annotation-section">
+      <div class="annotation-label">
+        REQ-SHELF-30 · State D: Shelves configured, no game dimensions
+      </div>
+      <div class="annotation-note">
+        Neutral muted band. Shelves are set up but no game has been measured yet, so the algorithm
+        has nothing to run on. Prompt to add dimensions with a link. Non-alarming — this is the
+        expected initial state after configuring shelves.
+      </div>
+      <div class="app-frame">
+        <div class="sidebar">
+          <div class="sidebar-brand">
+            <div class="brand-name">Shelf Judge</div>
+            <div class="brand-sub">Board Game Curator</div>
+          </div>
+          <div class="nav-section">
+            <div class="nav-label">Library</div>
+            <div class="nav-item active">&#9632; Collection</div>
+            <div class="nav-item">&#9632; Wishlist</div>
+            <div class="nav-item">&#9632; Add Games</div>
+            <div class="nav-label">Settings</div>
+            <div class="nav-item">&#9632; Axes</div>
+            <div class="nav-item">&#9632; Redundancy</div>
+            <div class="nav-item">&#9632; Shelves</div>
+          </div>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <div class="topbar-title">Collection</div>
+            <div class="topbar-meta">94 games</div>
+          </div>
+          <div class="filter-bar">
+            <div class="filter-controls">
+              <input class="search-input" placeholder="Search games..." />
+              <button class="filter-btn">▾ Sort: Fitness</button>
+              <button class="filter-btn">⊟ Filters</button>
+              <div class="filter-spacer"></div>
+              <button class="btn btn-primary">+ Add game</button>
+            </div>
+            <div class="capacity-indicator neutral">
+              <div class="cap-icon" style="color: var(--text-muted)">□</div>
+              <div class="cap-text neutral-text">
+                Shelves configured, but no game dimensions available.
+                <a style="color: var(--action); text-decoration: underline; cursor: pointer"
+                  >Add box dimensions</a
+                >
+                to enable capacity analysis.
+              </div>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Game</th>
+                  <th>Fitness</th>
+                  <th>Niche</th>
+                  <th>Redundancy</th>
+                  <th>BGG</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Wingspan</td>
+                  <td><span class="score-chip high">8.4</span></td>
+                  <td>Engine builder</td>
+                  <td>—</td>
+                  <td>8.1</td>
+                </tr>
+                <tr>
+                  <td>Ark Nova</td>
+                  <td><span class="score-chip high">8.1</span></td>
+                  <td>Engine builder</td>
+                  <td>—</td>
+                  <td>8.6</td>
+                </tr>
+                <tr>
+                  <td>Spirit Island</td>
+                  <td><span class="score-chip high">7.9</span></td>
+                  <td>Co-op</td>
+                  <td>—</td>
+                  <td>8.4</td>
+                </tr>
+                <tr>
+                  <td>Gloomhaven</td>
+                  <td><span class="score-chip high">7.8</span></td>
+                  <td>Dungeon crawler</td>
+                  <td>—</td>
+                  <td>8.8</td>
+                </tr>
+                <tr>
+                  <td>Terraforming Mars</td>
+                  <td><span class="score-chip mid">6.9</span></td>
+                  <td>Engine builder</td>
+                  <td>-0.4</td>
+                  <td>8.4</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── DARK MODE (State B) ── -->
+    <div class="annotation-section">
+      <div class="annotation-label">Dark mode — Overflow warning</div>
+      <div class="annotation-note">
+        Same overflow state in dark theme. Warning band uses dark warning-subtle (#2e2010) with gold
+        warning text.
+      </div>
+      <div class="app-frame" data-theme="dark">
+        <div class="sidebar">
+          <div class="sidebar-brand">
+            <div class="brand-name">Shelf Judge</div>
+            <div class="brand-sub">Board Game Curator</div>
+          </div>
+          <div class="nav-section">
+            <div class="nav-label">Library</div>
+            <div class="nav-item active">&#9632; Collection</div>
+            <div class="nav-item">&#9632; Wishlist</div>
+            <div class="nav-item">&#9632; Add Games</div>
+            <div class="nav-label">Settings</div>
+            <div class="nav-item">&#9632; Axes</div>
+            <div class="nav-item">&#9632; Redundancy</div>
+            <div class="nav-item">&#9632; Shelves</div>
+          </div>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <div class="topbar-title">Collection</div>
+            <div class="topbar-meta">94 games</div>
+          </div>
+          <div class="filter-bar">
+            <div class="filter-controls">
+              <input class="search-input" placeholder="Search games..." />
+              <button class="filter-btn">▾ Sort: Fitness</button>
+              <button class="filter-btn">⊟ Filters</button>
+              <div class="filter-spacer"></div>
+              <button class="btn btn-primary">+ Add game</button>
+            </div>
+            <div class="capacity-indicator warning">
+              <div class="cap-icon">⚠</div>
+              <div class="cap-text warning-text">
+                <strong>7 games couldn't be placed</strong> — shelves are full. These games fit by
+                shape but have no room.
+              </div>
+              <a class="cap-detail-link">View overflow →</a>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Game</th>
+                  <th>Fitness</th>
+                  <th>Niche</th>
+                  <th>Redundancy</th>
+                  <th>BGG</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Wingspan</td>
+                  <td><span class="score-chip high">8.4</span></td>
+                  <td>Engine builder</td>
+                  <td>—</td>
+                  <td>8.1</td>
+                </tr>
+                <tr>
+                  <td>Ark Nova</td>
+                  <td><span class="score-chip high">8.1</span></td>
+                  <td>Engine builder</td>
+                  <td>—</td>
+                  <td>8.6</td>
+                </tr>
+                <tr>
+                  <td>Spirit Island</td>
+                  <td><span class="score-chip high">7.9</span></td>
+                  <td>Co-op</td>
+                  <td>—</td>
+                  <td>8.4</td>
+                </tr>
+                <tr>
+                  <td>Gloomhaven</td>
+                  <td><span class="score-chip high">7.8</span></td>
+                  <td>Dungeon crawler</td>
+                  <td>—</td>
+                  <td>8.8</td>
+                </tr>
+                <tr>
+                  <td>Terraforming Mars</td>
+                  <td><span class="score-chip mid">6.9</span></td>
+                  <td>Engine builder</td>
+                  <td>-0.4</td>
+                  <td>8.4</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
