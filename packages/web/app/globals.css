@@ -824,6 +824,12 @@ body {
   width: 100px;
 }
 
+.score-cell-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
 .score-dot {
   width: 8px;
   height: 8px;
@@ -850,6 +856,18 @@ body {
   font-variant-numeric: tabular-nums;
   min-width: 36px;
   text-align: right;
+}
+
+.score-value.high {
+  color: var(--score-high);
+}
+
+.score-value.mid {
+  color: var(--score-mid);
+}
+
+.score-value.low {
+  color: var(--score-low);
 }
 
 .score-unrated {

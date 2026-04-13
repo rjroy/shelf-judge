@@ -853,34 +853,35 @@ function GameRow({
       )}
       <div className="last-rated">{relativeDate(game.updatedAt)}</div>
       <div className="score-cell">
-        {score?.vetoed ? (
-          <div className="score-vetoed-cell">
-            <span className="vetoed-badge">VETOED</span>
-            {score.hypotheticalScore !== null && (
-              <span className="vetoed-hypothetical">{score.hypotheticalScore.toFixed(1)}</span>
-            )}
-          </div>
-        ) : isPredictedOnly ? (
-          <span className="score-predicted-inline">
-            <span className="score-predicted-tilde-inline">~</span>
-            {score.score.toFixed(1)}
-          </span>
-        ) : display.className === "score-unrated" ? (
-          <span className="score-unrated">{display.text}</span>
-        ) : (
-          <>
-            {display.dotClass && <span className={`score-dot ${display.dotClass}`} />}
-            <span className={display.className}>{display.text}</span>
-          </>
-        )}
-        {display?.isFitnessValue &&
-          score?.redundancyAdjustment &&
-          score.redundancyAdjustment.penalty > 0 && (
-            <RedundancyBadge
-              penalty={score.redundancyAdjustment.penalty}
-              isIntegrated={isIntegratedRedundancy}
-            />
+        <div className="score-cell-inner">
+          {score?.vetoed ? (
+            <div className="score-vetoed-cell">
+              <span className="vetoed-badge">VETOED</span>
+              {score.hypotheticalScore !== null && (
+                <span className="vetoed-hypothetical">{score.hypotheticalScore.toFixed(1)}</span>
+              )}
+            </div>
+          ) : isPredictedOnly ? (
+            <span className="score-predicted-inline">
+              <span className="score-predicted-tilde-inline">~</span>
+              {score.score.toFixed(1)}
+            </span>
+          ) : display.className === "score-unrated" ? (
+            <span className="score-unrated">{display.text}</span>
+          ) : (
+            <span className={`${display.className} ${display.dotClass ? display.dotClass : ""}`}>
+              {display.text}
+            </span>
           )}
+          {display?.isFitnessValue &&
+            score?.redundancyAdjustment &&
+            score.redundancyAdjustment.penalty > 0 && (
+              <RedundancyBadge
+                penalty={score.redundancyAdjustment.penalty}
+                isIntegrated={isIntegratedRedundancy}
+              />
+            )}
+        </div>
       </div>
     </Link>
   );
