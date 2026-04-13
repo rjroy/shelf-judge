@@ -107,6 +107,14 @@ All 7 findings from Thorne's review addressed:
 
 - Added 5 client helpers to `packages/web/lib/api.ts`: `getShelfConfig`, `setShelfConfig`, `addShelf...
 - 15:38 commission-Dalton-20260413-150205 completed
+- 15:44 commission-Thorne-20260413-150213 result: ## Review: Shelf Configuration Web UI and CLI (Phases 6-7)
+
+### Requirement Coverage
+
+| Requirement | Status | Evidence |
+|---|---|---|
+| REQ-SHELF-27 (shelf config page with CRUD) | **Satisfied** | p...
+- 15:44 commission-Thorne-20260413-150213 completed
 ## Finding 1: BoxDimensionsForm bypasses typed client helper — No action needed
 
 Investigated the pattern across all client components. `rating-fo...
