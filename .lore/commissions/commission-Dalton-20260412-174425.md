@@ -1,7 +1,7 @@
 ---
 title: "Commission: Previously Owned: Fix Foundation Review Findings"
 date: 2026-04-13
-status: pending
+status: blocked
 tags: [commission]
 worker: Dalton
 workerDisplayTitle: "Guild Artificer"
@@ -14,6 +14,11 @@ activity_timeline:
   - timestamp: 2026-04-13T00:44:25.488Z
     event: created
     reason: "Commission created"
+  - timestamp: 2026-04-13T01:01:48.761Z
+    event: status_blocked
+    reason: "Dependencies not satisfied"
+    from: "pending"
+    to: "blocked"
 current_progress: ""
 projectName: shelf-judge
 ---

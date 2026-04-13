@@ -1,7 +1,7 @@
 ---
 title: "Commission: Previously Owned: Review Foundation (Phases 1-3)"
 date: 2026-04-13
-status: pending
+status: dispatched
 tags: [commission]
 worker: Thorne
 workerDisplayTitle: "Guild Warden"
@@ -14,6 +14,11 @@ activity_timeline:
   - timestamp: 2026-04-13T00:44:19.417Z
     event: created
     reason: "Commission created"
+  - timestamp: 2026-04-13T01:01:48.763Z
+    event: status_dispatched
+    reason: "Dispatched to worker"
+    from: "pending"
+    to: "dispatched"
 current_progress: ""
 projectName: shelf-judge
 ---
