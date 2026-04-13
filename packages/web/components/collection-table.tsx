@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type {
   GameWithScore,
   Axis,
@@ -43,6 +44,8 @@ interface CollectionTableProps {
   predictedCount: number;
   ignoredTags: NicheTagFilter[];
   isIntegratedRedundancy: boolean;
+  previouslyOwnedCount: number;
+  showPreviouslyOwned: boolean;
 }
 
 export function CollectionTable({
@@ -58,7 +61,10 @@ export function CollectionTable({
   predictedCount,
   ignoredTags,
   isIntegratedRedundancy,
+  previouslyOwnedCount,
+  showPreviouslyOwned,
 }: CollectionTableProps) {
+  const router = useRouter();
   // Sort state: default on SSR, hydrate from localStorage after mount
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
@@ -102,7 +108,6 @@ export function CollectionTable({
   // Use predicted games when toggle is on, otherwise use standard games
   const usePredictions = predictionsOn || (predictedCount > 0 && isIntegratedRedundancy);
   const baseGames = usePredictions && predictedGames ? predictedGames : games;
-
 
   // When niches toggle is on, merge nichePosition data from nicheGames onto active games
   const activeGames = useMemo(() => {
@@ -199,14 +204,27 @@ export function CollectionTable({
   const dirArrow = sort.direction === "asc" ? "\u2191" : "\u2193";
   const scoreOwnsSort = sort.field !== "name" && sort.field !== "updatedAt";
 
+  // Ownership toggle: navigates via URL search param to trigger server re-fetch
+  const toggleOwnership = useCallback(() => {
+    if (showPreviouslyOwned) {
+      router.push("/collection");
+    } else {
+      router.push("/collection?ownership=all");
+    }
+  }, [showPreviouslyOwned, router]);
+
   // Filter chip state
   const hasSearch = filters.search !== "";
   const hasRatedFilter = filters.ratedStatus !== "all";
   const hasPlayedFilter = filters.playedStatus !== "all";
   const hasPlayerCount = filters.playerCount !== null;
   const activeFilterCount =
-    (hasRatedFilter ? 1 : 0) + (hasPlayedFilter ? 1 : 0) + (hasPlayerCount ? 1 : 0);
-  const hasAnyFilter = hasSearch || hasRatedFilter || hasPlayedFilter || hasPlayerCount;
+    (hasRatedFilter ? 1 : 0) +
+    (hasPlayedFilter ? 1 : 0) +
+    (hasPlayerCount ? 1 : 0) +
+    (showPreviouslyOwned ? 1 : 0);
+  const hasAnyFilter =
+    hasSearch || hasRatedFilter || hasPlayedFilter || hasPlayerCount || showPreviouslyOwned;
   const hiddenCount =
     (usePredictions && predictedGames ? predictedGames.length : totalGames) - filtered.length;
 
@@ -381,6 +399,30 @@ export function CollectionTable({
                 <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>players</span>
               </div>
             </div>
+            {previouslyOwnedCount > 0 && (
+              <div className="filter-group">
+                <div className="filter-group-label">Owned Status</div>
+                <div className="filter-group-controls">
+                  <button
+                    className={`seg-btn${!showPreviouslyOwned ? " active" : ""}`}
+                    onClick={() => {
+                      if (showPreviouslyOwned) toggleOwnership();
+                    }}
+                  >
+                    Owned only
+                  </button>
+                  <button
+                    className={`seg-btn${showPreviouslyOwned ? " active" : ""}`}
+                    onClick={() => {
+                      if (!showPreviouslyOwned) toggleOwnership();
+                    }}
+                  >
+                    + Prev Owned
+                  </button>
+                </div>
+                <div className="filter-group-hint">{previouslyOwnedCount} previously owned</div>
+              </div>
+            )}
           </div>
         )}
 
@@ -426,18 +468,42 @@ export function CollectionTable({
                 </button>
               </span>
             )}
+            {showPreviouslyOwned && (
+              <span className="filter-chip chip-prev-owned">
+                Prev Owned{" "}
+                <button className="chip-x" onClick={toggleOwnership}>
+                  &times;
+                </button>
+              </span>
+            )}
             {(hasSearch ? 1 : 0) +
               (hasRatedFilter ? 1 : 0) +
               (hasPlayedFilter ? 1 : 0) +
-              (hasPlayerCount ? 1 : 0) >=
+              (hasPlayerCount ? 1 : 0) +
+              (showPreviouslyOwned ? 1 : 0) >=
               2 && (
-              <button className="clear-all-link" onClick={clearAllFilters}>
+              <button
+                className="clear-all-link"
+                onClick={() => {
+                  clearAllFilters();
+                  if (showPreviouslyOwned) toggleOwnership();
+                }}
+              >
                 Clear all
               </button>
             )}
           </div>
         )}
       </div>
+
+      {/* Info banner when previously-owned games are visible */}
+      {showPreviouslyOwned && (
+        <div className="view-notice">
+          <span className="view-notice-icon">&#x2139;</span>
+          Previously-owned games are shown. Niche and redundancy data reflects only your current
+          shelf.
+        </div>
+      )}
 
       {/* Stats strip (REQ-CFS-19) */}
       <div className="stats-strip">
@@ -523,7 +589,9 @@ export function CollectionTable({
           Game
           {sort.field === "name" && <span className="sort-arrow">{dirArrow}</span>}
         </div>
-        {!usePredictions && <div className="axes-used-col col-label">{isAxisSort ? "Scores" : "Axes Rated"}</div>}
+        {!usePredictions && (
+          <div className="axes-used-col col-label">{isAxisSort ? "Scores" : "Axes Rated"}</div>
+        )}
         {usePredictions && <div className="col-label">Confidence</div>}
         <div
           className={`col-label sortable${sort.field === "updatedAt" ? " sort-active" : ""}`}
@@ -708,11 +776,14 @@ function GameRow({
   const nicheCount = nicheSummary?.niches.length ?? 0;
   const championCount = nicheSummary?.niches.filter((n) => n.isChampion).length ?? 0;
 
+  const isPrevOwned = game.ownership === "previously-owned";
+
   const rowClass = [
     "game-row",
     isUnrated || isPredictedOnly ? " unrated" : "",
     isPredictedOnly ? " predicted-row" : "",
     nicheHighlight === "champion" ? " niche-champion-row" : "",
+    isPrevOwned ? " prev-owned" : "",
   ].join("");
 
   return (
@@ -730,6 +801,7 @@ function GameRow({
           {game.name}
           {isPredictedOnly && <span className="predicted-label">&middot; not rated</span>}
         </div>
+        {isPrevOwned && <span className="badge-prev-owned">Prev Owned</span>}
         <div className="game-meta">
           {game.numPlays != null && game.numPlays > 0 && <span>x{game.numPlays}</span>}
           {game.yearPublished && <span>{game.yearPublished}</span>}
@@ -751,22 +823,22 @@ function GameRow({
         )}
       </div>
       {!showConfidence && (
-      <div className="axes-used">
-        {isAxisSort ? (
-          <AxisSortAltScores gws={gws} tournamentStats={tournamentStats} />
-        ) : isUnrated || isPredictedOnly ? (
-          <span className="no-ratings">{isPredictedOnly ? "Predicted" : "No ratings yet"}</span>
-        ) : (
-          <>
-            {visibleAxes.map((name) => (
-              <span key={name} className="axis-chip">
-                {name}
-              </span>
-            ))}
-            {extraCount > 0 && <span className="axis-chip-more">+{extraCount}</span>}
-          </>
-        )}
-      </div>
+        <div className="axes-used">
+          {isAxisSort ? (
+            <AxisSortAltScores gws={gws} tournamentStats={tournamentStats} />
+          ) : isUnrated || isPredictedOnly ? (
+            <span className="no-ratings">{isPredictedOnly ? "Predicted" : "No ratings yet"}</span>
+          ) : (
+            <>
+              {visibleAxes.map((name) => (
+                <span key={name} className="axis-chip">
+                  {name}
+                </span>
+              ))}
+              {extraCount > 0 && <span className="axis-chip-more">+{extraCount}</span>}
+            </>
+          )}
+        </div>
       )}
       {showConfidence && (
         <div className="axes-used">
@@ -781,7 +853,7 @@ function GameRow({
       )}
       <div className="last-rated">{relativeDate(game.updatedAt)}</div>
       <div className="score-cell">
-         {score?.vetoed ? (
+        {score?.vetoed ? (
           <div className="score-vetoed-cell">
             <span className="vetoed-badge">VETOED</span>
             {score.hypotheticalScore !== null && (
@@ -801,12 +873,14 @@ function GameRow({
             <span className={display.className}>{display.text}</span>
           </>
         )}
-        {display?.isFitnessValue && score?.redundancyAdjustment && score.redundancyAdjustment.penalty > 0 && (
-          <RedundancyBadge
-            penalty={score.redundancyAdjustment.penalty}
-            isIntegrated={isIntegratedRedundancy}
-          />
-        )}
+        {display?.isFitnessValue &&
+          score?.redundancyAdjustment &&
+          score.redundancyAdjustment.penalty > 0 && (
+            <RedundancyBadge
+              penalty={score.redundancyAdjustment.penalty}
+              isIntegrated={isIntegratedRedundancy}
+            />
+          )}
       </div>
     </Link>
   );

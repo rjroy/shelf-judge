@@ -97,6 +97,12 @@
   --outlier-fitness-bg: var(--score-high-bg);
   --outlier-fitness-border: color-mix(in hsl, var(--score-high), white 78%);
 
+  /* ── Previously Owned ───────────────────────────────────── */
+  --prev-owned-bg: #f0ede6;
+  --prev-owned-badge-bg: #ede9e1;
+  --prev-owned-badge-border: #c4bfb8;
+  --prev-owned-badge-text: #706a62;
+
   /* ── Niche (single-accent domain) ───────────────────────── */
   --niche-accent: #6b4c8a;
   --niche-bg: color-mix(in hsl, var(--niche-accent), white 93%);
@@ -206,6 +212,12 @@
   /* ── Navigation ───────────────────────────────────────────── */
   --nav-bg: #121110;
   --nav-text: #e8e4dc;
+
+  /* ── Previously Owned ───────────────────────────────────── */
+  --prev-owned-bg: #222019;
+  --prev-owned-badge-bg: #2e2b24;
+  --prev-owned-badge-border: #524e48;
+  --prev-owned-badge-text: #908a80;
 
   /* ── Filter spec (single-accent domain) ──────────────────── */
   --filter-spec: #5d9054;
@@ -5494,6 +5506,67 @@ body {
   font-size: 11px;
   opacity: 0.6;
   color: var(--predict-accent);
+}
+
+/* Previously-owned row styling */
+.game-row.prev-owned {
+  background: var(--prev-owned-bg);
+}
+
+.game-row.prev-owned:hover {
+  background: color-mix(in srgb, var(--prev-owned-bg) 80%, var(--row-hover) 20%);
+}
+
+.game-row.prev-owned .game-thumb {
+  opacity: 0.7;
+}
+
+.game-row.prev-owned .game-name {
+  color: var(--text-secondary);
+}
+
+.game-row.prev-owned .score-cell {
+  opacity: 0.8;
+}
+
+.badge-prev-owned {
+  display: inline-flex;
+  align-items: center;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--prev-owned-badge-bg);
+  color: var(--prev-owned-badge-text);
+  border: 1px solid var(--prev-owned-badge-border);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-top: 2px;
+  align-self: flex-start;
+}
+
+.filter-chip.chip-prev-owned {
+  background: var(--prev-owned-badge-bg);
+  color: var(--prev-owned-badge-text);
+  border-color: var(--prev-owned-badge-border);
+}
+
+.view-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 24px;
+  background: var(--action-subtle);
+  border-bottom: 1px solid var(--action-border);
+  font-size: 12px;
+  color: var(--action);
+  flex-shrink: 0;
+}
+
+.view-notice-icon {
+  font-size: 13px;
 }
 
 /* Predictions toggle in stats strip */
