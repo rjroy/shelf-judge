@@ -93,6 +93,12 @@ All requirements in scope (REQ-SHELF-8 thro...
 All 7 findings from Thorne's review addressed:
 
 - 15:31 commission-Dalton-20260413-150257 completed
+- 15:32 commission-Dalton-20260413-150119 result: # Thorne's Box Dimensions Review: Findings Addressed
+
+- 15:32 commission-Dalton-20260413-150119 completed
+## Finding 1: BoxDimensionsForm bypasses typed client helper — No action needed
+
+Investigated the pattern across all client components. `rating-fo...
 ## Bugs Fixed (2)
 
 1. **Rotation swap duplicate dimension bug** (`bin-packing.ts:185`): Added `if (i === prevItemIdx)...
