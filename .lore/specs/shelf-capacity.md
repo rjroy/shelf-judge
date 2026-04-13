@@ -2,7 +2,7 @@
 title: "Shelf Capacity (Box Dimensions, Shelf Config, Overflow)"
 date: 2026-04-12
 status: approved
-tags: [spec, shelf-layout, box-dimensions, shelf-config, capacity, overflow, curation, bgg-versions]
+tags: [spec, shelf-layout, box-dimensions, shelf-config, capacity, overflow, curation]
 modules: [shared, daemon, web, cli]
 req-prefix: SHELF
 related:
@@ -24,8 +24,7 @@ The core curation question is "do I have space, and if not, what goes?" But that
 
 ## Entry Points
 
-- BGG import flow (daemon): box dimensions are fetched alongside existing game data when `versions=1` data is available
-- Game edit form (web): manual entry/override of box dimensions
+- Game edit form (web): manual entry of box dimensions
 - CLI `shelf-judge game edit`: manual dimension entry
 - Shelf configuration page (web): user defines shelf units and their shelves
 - CLI `shelf-judge shelf`: manage shelf configuration, view capacity and overflow
@@ -39,54 +38,39 @@ The core curation question is "do I have space, and if not, what goes?" But that
 
 ```typescript
 interface BoxDimensions {
-  width: number; // cm
-  height: number; // cm
-  depth: number; // cm
-  source: "bgg" | "manual";
+  width: number; // in
+  height: number; // in
+  depth: number; // in
 }
 ```
 
-All three dimensions are in centimeters. The `source` field records where the data came from. Semantics: `width` is the longest face edge (what you see from the front), `height` is the vertical dimension when the box is stored upright, `depth` is front-to-back. For the purpose of shelf fitting, the system checks all orientations (see REQ-SHELF-22), so the labeling convention is informational, not load-bearing.
+All three dimensions are in inches. Semantics: `width` is the longest face edge (what you see from the front), `height` is the vertical dimension when the box is stored upright, `depth` is front-to-back. For the purpose of shelf fitting, the system checks all orientations (see REQ-SHELF-22), so the labeling convention is informational, not load-bearing.
 
 - REQ-SHELF-2: `BoxDimensions` is a shared type defined in `packages/shared/src/types.ts`.
 
 - REQ-SHELF-3: The `Game` type gains an optional field: `boxDimensions: BoxDimensions | null`. Default is `null` (no dimensions known). This is an additive, non-breaking change to the existing type.
 
-- REQ-SHELF-4: Box volume is computed as `width * height * depth` (cubic centimeters). This is a derived value, not stored. Games with `boxDimensions: null` have unknown volume.
-
-### BGG Version Data Import
-
-- REQ-SHELF-5: The BGG Thing endpoint supports a `versions=1` query parameter that returns physical edition data for each game. When fetching game data, the daemon MUST include `versions=1` alongside the existing `stats=1` parameter. This applies to all Thing endpoint calls: single-game fetch (`getGame`), batch fetch (`getGames`), and search enrichment.
-
-- REQ-SHELF-6: The BGG `versions=1` response includes `<versions>` containing `<item>` elements. Each version item may include `<width value="..."/>`, `<length value="..."/>`, and `<depth value="..."/>` elements with dimensions. The dimension units in BGG data are inches. The parser MUST convert to centimeters (multiply by 2.54) before storing.
-
-- REQ-SHELF-7: When multiple versions exist for a game (e.g., different editions), use the first version entry that has all three dimension fields populated (width, length, depth). If no version has complete dimensions, `boxDimensions` remains `null`. Rationale: edition-specific selection would require tracking which edition the user owns, which is out of scope. The first complete entry is a reasonable default for most games.
-
-- REQ-SHELF-8: BGG dimension data may be zero, negative, or absurdly large (community-contributed data has noise). Reject dimensions where any single value is <= 0 or > 100 (cm). Treat rejected dimensions the same as missing: `boxDimensions` remains `null`. The threshold of 100 cm (~39 inches) accommodates the largest known board game boxes with margin.
-
-- REQ-SHELF-9: The BGG XML parser gains a new function or extends the existing `parseThingItems` to extract version dimension data. The parsed result is returned alongside the existing `BggGameData` so the caller can populate `boxDimensions` on the `Game` object.
-
-- REQ-SHELF-10: Existing games in the collection that were imported before this feature have `boxDimensions: null`. A "Refresh BGG Data" action (already exists for staleness refresh) MUST also populate `boxDimensions` from BGG version data when refreshing a game. No separate "fetch dimensions" action is needed.
+- REQ-SHELF-4: Box volume is computed as `width * height * depth` (cubic inches). This is a derived value, not stored. Games with `boxDimensions: null` have unknown volume.
 
 ### Manual Dimension Entry
 
-- REQ-SHELF-11: Users can manually set or override box dimensions for any game. Manual entry sets `source: "manual"`. Manual values override BGG-sourced values. There is no way to "revert to BGG" other than manually entering the BGG values or deleting dimensions and refreshing.
+- REQ-SHELF-5: Users can manually set box dimensions for any game. A `--clear-box` flag (CLI) or empty state (web) removes dimensions entirely.
 
-- REQ-SHELF-12: The game edit form (web) gains three numeric fields for width, height, and depth (cm). These are optional. If any dimension is provided, all three MUST be provided (partial dimensions are rejected). An "auto" or empty state means "no dimensions known."
+- REQ-SHELF-6: The game edit form (web) gains three numeric fields for width, height, and depth (in). These are optional. If any dimension is provided, all three MUST be provided (partial dimensions are rejected). An "auto" or empty state means "no dimensions known."
 
-- REQ-SHELF-13: The CLI `shelf-judge game edit` command accepts `--box-width`, `--box-height`, and `--box-depth` flags (cm). All three must be provided together or none. A `--clear-box` flag removes dimensions (sets `boxDimensions` to `null`).
+- REQ-SHELF-7: The CLI `shelf-judge game edit` command accepts `--box-width`, `--box-height`, and `--box-depth` flags (in). All three must be provided together or none. `--clear-box` removes dimensions (sets `boxDimensions` to `null`).
 
 ### Shelf Configuration Data Model
 
-- REQ-SHELF-14: The shelf configuration models the user's physical storage as a hierarchy: shelf units contain shelves. A shelf unit is a piece of furniture (a Kallax, a bookcase). A shelf is one storage space within that unit (one Kallax cube, one bookcase shelf).
+- REQ-SHELF-8: The shelf configuration models the user's physical storage as a hierarchy: shelf units contain shelves. A shelf unit is a piece of furniture (a Kallax, a bookcase). A shelf is one storage space within that unit (one Kallax cube, one bookcase shelf).
 
 ```typescript
 interface Shelf {
   id: string; // UUID
   name: string; // "Top shelf", "Kallax row 2", "On top"
-  width: number; // interior cm
-  height: number | null; // interior cm, null = unconstrained (e.g., top of a unit)
-  depth: number; // interior cm
+  width: number; // interior in
+  height: number | null; // interior in, null = unconstrained (e.g., top of a unit)
+  depth: number; // interior in
 }
 
 interface ShelfUnit {
@@ -102,13 +86,13 @@ interface ShelfConfiguration {
 }
 ```
 
-- REQ-SHELF-15: A shelf's `height` can be `null`, meaning the vertical dimension is unconstrained. This models "on top of" spaces: the top of a Kallax unit, the top of a bookcase, or any open surface where height is limited only by the ceiling or the user's tolerance. When `height` is null, a game fits the shelf if its box width and depth fit (in some orientation), regardless of box height.
+- REQ-SHELF-9: A shelf's `height` can be `null`, meaning the vertical dimension is unconstrained. This models "on top of" spaces: the top of a Kallax unit, the top of a bookcase, or any open surface where height is limited only by the ceiling or the user's tolerance. When `height` is null, a game fits the shelf if its box width and depth fit (in some orientation), regardless of box height.
 
-- REQ-SHELF-16: `Shelf`, `ShelfUnit`, and `ShelfConfiguration` are shared types defined in `packages/shared/src/types.ts`.
+- REQ-SHELF-10: `Shelf`, `ShelfUnit`, and `ShelfConfiguration` are shared types defined in `packages/shared/src/types.ts`.
 
-- REQ-SHELF-17: The shelf configuration is stored in `~/.shelf-judge/data/shelf-config.json`. This is a separate file from `collection.json`. The shelf configuration describes the user's physical environment, not their game collection. These have different lifecycles: the configuration changes when the user buys a new bookcase, not when they add a game. An empty configuration is `{ units: [], createdAt: "...", updatedAt: "..." }`.
+- REQ-SHELF-11: The shelf configuration is stored in `~/.shelf-judge/data/shelf-config.json`. This is a separate file from `collection.json`. The shelf configuration describes the user's physical environment, not their game collection. These have different lifecycles: the configuration changes when the user buys a new bookcase, not when they add a game. An empty configuration is `{ units: [], createdAt: "...", updatedAt: "..." }`.
 
-- REQ-SHELF-18: Shelf configuration storage follows the same atomic write pattern as all other storage files (write to temp file, rename into place).
+- REQ-SHELF-12: Shelf configuration storage follows the same atomic write pattern as all other storage files (write to temp file, rename into place).
 
 ### Shelf Configuration API
 
@@ -200,9 +184,9 @@ interface ShelfAssignment {
   shelfName: string;
   unitId: string;
   unitName: string;
-  capacityCm3: number | null; // null for unconstrained-height shelves
-  usedCm3: number; // sum of assigned game volumes
-  utilization: number | null; // usedCm3 / capacityCm3, null if unconstrained
+  capacityIn3: number | null; // null for unconstrained-height shelves
+  usedIn3: number; // sum of assigned game volumes
+  utilization: number | null; // usedIn3 / capacityIn3, null if unconstrained
   games: AssignedGame[]; // games placed on this shelf by the algorithm
   grade: string; // S, A, B, C, D, F from algorithm grading (see design doc)
 }
@@ -211,7 +195,7 @@ interface AssignedGame {
   gameId: string;
   gameName: string;
   fitnessScore: number;
-  volumeCm3: number;
+  volumeIn3: number;
 }
 
 interface UnfittableEntry {
@@ -219,23 +203,23 @@ interface UnfittableEntry {
   gameName: string;
   fitnessScore: number;
   boxDimensions: BoxDimensions;
-  reason: string; // e.g., "Box is 63 x 10 x 10 cm; widest shelf is 36 cm"
+  reason: string; // e.g., "Box is 25 x 4 x 4 in; widest shelf is 14 in"
 }
 
 interface OverflowEntry {
   gameId: string;
   gameName: string;
   fitnessScore: number;
-  volumeCm3: number;
+  volumeIn3: number;
   fittable: boolean; // true = fits a shelf by shape but displaced; false = dimensionless
 }
 ```
 
-- REQ-SHELF-26: The `unfittableGames` list contains every game with known dimensions that fits no shelf in the configuration. These are the strongest cull candidates: they literally cannot be stored. The list is sorted by fitness ascending (lowest fitness first). The `reason` field is a human-readable explanation of why the game doesn't fit (e.g., which dimension exceeds all available shelves). Unfittable games are excluded from the packing algorithm; they are identified by a pre-pass geometric check.
+- REQ-SHELF-26: The `unfittableGames` list contains every game with known dimensions that fits no shelf in the configuration. These are the strongest cull candidates: they literally cannot be stored. The list is sorted by fitness ascending (lowest fitness first). The `reason` field is a human-readable explanation of why the game doesn't fit (e.g., "Box is 25 x 4 x 4 in; widest shelf is 14 in"). Unfittable games are excluded from the packing algorithm; they are identified by a pre-pass geometric check.
 
 - REQ-SHELF-27: The `overflowGames` list contains games that the bin-packing algorithm could not place (Phase 4 output). These are games that fit at least one shelf by shape but were displaced because higher-priority games filled the available space first. The list is sorted by fitness ascending (lowest fitness first). The `fittable` flag distinguishes between games that were displaced (fit somewhere by shape but no room) and dimensionless games that bypassed spatial logic. Games without `boxDimensions` are excluded from the algorithm entirely and are counted in `gamesWithoutDimensions`.
 
-- REQ-SHELF-28: Shelves with `height: null` (unconstrained) map to bins with a dimensionless height axis in the algorithm. They participate fully in the packing algorithm: games can be assigned to them and their contents are tracked. Their `capacityCm3` is `null` in the response because their volume is undefined (no height to multiply). Their `utilization` is also `null`. "On top of" spaces accept games and show what's assigned to them, but don't contribute to volume-based summary statistics.
+- REQ-SHELF-28: Shelves with `height: null` (unconstrained) map to bins with a dimensionless height axis in the algorithm. They participate fully in the packing algorithm: games can be assigned to them and their contents are tracked. Their `capacityIn3` is `null` in the response because their volume is undefined (no height to multiply). Their `utilization` is also `null`. "On top of" spaces accept games and show what's assigned to them, but don't contribute to volume-based summary statistics.
 
 - REQ-SHELF-29: When no shelf configuration exists (no units), the capacity endpoint returns a valid response with `configured: false` and empty/zero values. No 400 error. The UI uses `configured` to show a "configure your shelves" prompt.
 
@@ -245,7 +229,7 @@ interface OverflowEntry {
 
 ### Web UI: Game Dimensions Display
 
-- REQ-SHELF-32: The game detail page shows box dimensions when available: "Box: 29 x 29 x 7 cm" (or "Box: not measured" when null). Displayed alongside existing metadata (player count, playing time, etc.).
+- REQ-SHELF-32: The game detail page shows box dimensions when available: "Box: 11.4 x 11.4 x 2.75 in" (or "Box: not measured" when null). Displayed alongside existing metadata (player count, playing time, etc.).
 
 ### Web UI: Shelf Configuration
 
@@ -321,10 +305,10 @@ All measured games placed successfully.
 
 This spec covers significant scope across three connected concerns. The following layering supports clean implementation by independent agents:
 
-**Layer 1: Box Dimensions (REQ-SHELF-1 through REQ-SHELF-13, REQ-SHELF-32, REQ-SHELF-42)**
-Types, BGG parser extension, manual entry UI/CLI, game detail display. No dependencies on shelf config or overflow. Can be implemented and shipped independently.
+**Layer 1: Box Dimensions (REQ-SHELF-1 through REQ-SHELF-4, REQ-SHELF-5 through REQ-SHELF-7, REQ-SHELF-32, REQ-SHELF-42)**
+Types, manual entry UI/CLI, game detail display. No dependencies on shelf config or overflow. Can be implemented and shipped independently.
 
-**Layer 2: Shelf Configuration (REQ-SHELF-14 through REQ-SHELF-21, REQ-SHELF-33 through REQ-SHELF-35, REQ-SHELF-38 shelf-config commands)**
+**Layer 2: Shelf Configuration (REQ-SHELF-8 through REQ-SHELF-21, REQ-SHELF-33 through REQ-SHELF-35, REQ-SHELF-38 shelf-config commands)**
 Data model, storage, CRUD API, web UI for shelf management, CLI commands for shelf setup. Depends on shared types only. Can be implemented in parallel with Layer 1.
 
 **Layer 3: Capacity and Assignment (REQ-SHELF-22 through REQ-SHELF-31, REQ-SHELF-36 through REQ-SHELF-37, REQ-SHELF-40 through REQ-SHELF-41)**
@@ -337,8 +321,7 @@ Bin-packing algorithm integration, capacity endpoint, per-shelf assignments, col
 - **Niche-aware shelf annotations.** No "your deck-building games are scattered" annotations. That is Proposal 6 scope. (The algorithm's similarity-based grouping achieves this implicitly through placement, but the annotations are a separate display concern.)
 - **Manual assignment overrides.** The algorithm assigns games to shelves automatically. Users cannot manually override assignments in this spec. Manual overrides would map to the algorithm's "soft location override" concept and are a natural follow-up.
 - **Box dimension sorting/filtering.** The collection page does not gain sort-by-volume or filter-by-size in this spec.
-- **Estimation for missing dimensions.** Games without BGG version data and no manual entry have `null` dimensions. The system does not estimate box sizes. These games are excluded from the packing algorithm.
-- **BGG version/edition selection.** The system takes the first version with complete dimensions. No UI for choosing which edition's dimensions to use.
+- **Estimation for missing dimensions.** Games without manual dimension entry have `null` dimensions. The system does not estimate box sizes. These games are excluded from the packing algorithm.
 - **Weight limits.** Physical weight of games is not considered. A shelf might hold 5 heavy games by volume but sag under their weight. This is too variable to model usefully.
 - **Algorithm tuning UI.** The bin-packing algorithm has configurable weights (space vs. similarity vs. neighbor). This spec uses sensible defaults. A settings UI for tuning these weights is deferred.
 
@@ -350,7 +333,6 @@ Bin-packing algorithm integration, capacity endpoint, per-shelf assignments, col
 | Manual assignment         | User wants to override the algorithm's game-to-shelf assignments | [STUB: manual-assignment] |
 | Algorithm tuning          | User wants to adjust packing weights (space vs. similarity)      | [STUB: algorithm-tuning]  |
 | Dimension-based filtering | User wants to sort/filter collection by box size                 | [STUB: dimension-filter]  |
-| Edition selection         | User wants to pick which BGG edition's dimensions to use         | [STUB: edition-selection] |
 | Shelf visualization       | User wants a visual representation of their shelves              | [STUB: shelf-visualizer]  |
 | Niche shelf annotations   | User wants "your deck-building games are on shelf 3" display     | [STUB: niche-annotations] |
 
@@ -360,15 +342,10 @@ Bin-packing algorithm integration, capacity endpoint, per-shelf assignments, col
 
 **Box Dimensions:**
 
-- [ ] Adding a game via BGG import populates `boxDimensions` when version data includes dimensions
-- [ ] Adding a game via BGG import leaves `boxDimensions: null` when no version has complete dimensions
-- [ ] BGG dimension values are converted from inches to centimeters
-- [ ] BGG dimension values <= 0 or > 100 cm are rejected (treated as null)
-- [ ] When multiple versions exist, the first with complete dimensions is used
-- [ ] Manual dimension entry sets `source: "manual"` and overrides BGG values
+- [ ] Manual dimension entry persists all three values correctly
 - [ ] Partial manual dimensions (e.g., width without height) are rejected
 - [ ] `--clear-box` CLI flag sets `boxDimensions` to `null`
-- [ ] Refreshing BGG data for an existing game populates `boxDimensions` if previously null
+- [ ] Dimension validation rejects values <= 0 or > 40 in
 
 **Shelf Configuration:**
 
@@ -384,7 +361,7 @@ Bin-packing algorithm integration, capacity endpoint, per-shelf assignments, col
 - [ ] A box that fits a shelf in any valid rotation is reported as fitting
 - [ ] A box that exceeds all shelves in every orientation is reported as unfittable with a correct reason
 - [ ] Unconstrained-height shelves allow any box height but still check width and depth
-- [ ] Unconstrained-height shelves have `capacityCm3: null` and `utilization: null`
+- [ ] Unconstrained-height shelves have `capacityIn3: null` and `utilization: null`
 - [ ] `unfittableGames` is sorted by fitness ascending
 - [ ] `overflowGames` contains only games displaced by the algorithm (not unfittable games)
 - [ ] Per-shelf assignments list the games placed by the algorithm with correct utilization
@@ -396,8 +373,8 @@ Bin-packing algorithm integration, capacity endpoint, per-shelf assignments, col
 
 ### Manual Verification
 
-- [ ] Add a game with known BGG dimensions, verify "Box: W x H x D cm" appears on game detail page
-- [ ] Manually edit box dimensions in the game edit form, verify they persist
+- [ ] Manually enter box dimensions for a game, verify "Box: W x H x D cm" appears on game detail page
+- [ ] Edit box dimensions in the game edit form, verify they persist
 - [ ] Create a shelf configuration with multiple units and shelves of different sizes
 - [ ] Add an unconstrained-height shelf ("on top of"), verify it accepts any box height
 - [ ] With a large-box game that exceeds all shelf widths, verify it appears in unfittable games with a clear reason
@@ -417,8 +394,6 @@ Bin-packing algorithm integration, capacity endpoint, per-shelf assignments, col
 
 **Custom:**
 
-- Verify BGG XML parser correctly handles the `<versions>` XML block structure (new parsing code, not a modification of existing item parsing)
-- Verify all three Thing endpoint call sites in `bgg-client.ts` include `versions=1`
 - Verify both web proxy route and CLI client helper are updated for all new endpoints (shelf config CRUD, overflow)
 - Verify `Game` type change does not break existing serialization/deserialization (null default for new field)
 - Test the rotation/fit check with edge cases: a box that fits only when rotated, a box that is exactly shelf-sized, a box 1mm too large
@@ -430,14 +405,7 @@ Bin-packing algorithm integration, capacity endpoint, per-shelf assignments, col
 ## Constraints
 
 - No modification to `FitnessResult`, `CollectionProfile`, `NichePosition`, or any collection-level computation type. Box dimensions, shelf config, and overflow are orthogonal to fitness scoring.
-- The BGG `versions=1` parameter adds data to the API response but does not change the structure of existing fields. Existing parsing must not break.
 - Shelf configuration storage follows the same atomic write pattern as all other storage files. The capacity endpoint computes results on demand (no cached capacity state).
 - The capacity computation requires fitness scores for overflow ordering and the algorithm's similarity function requires feature vectors from the niche engine. If a game has no fitness score (no axes rated), it receives fitness 0 and is a natural cull candidate. If a game has no feature vector, its similarity to other games is 0 and it will be placed based on spatial fit alone.
 - The bin-packing algorithm is defined in `.lore/designs/similarity-weighted-bin-packing.md`. Layer 3 implements an adapter between Shelf Judge's data model and the algorithm's generic item/bin interface. The algorithm module itself should be implemented as a standalone service with no Shelf Judge domain knowledge, accepting items and bins as inputs.
-- Dimension display uses centimeters throughout. No unit conversion UI. Users in imperial-unit countries enter centimeters.
-
-## Open Issues
-
-**BGG `versions=1` response structure is unverified.** REQ-SHELF-6 prescribes a parser for a response format that hasn't been confirmed against actual BGG output. Implementation must inspect real BGG responses before committing to the parser.
-
-**Refresh vs. manual override interaction is unspecified.** The interaction between REQ-SHELF-10 (refresh populates dimensions) and REQ-SHELF-11 (manual overrides BGG) needs explicit handling: refresh should NOT overwrite `source: "manual"` dimensions. Refresh should only populate `boxDimensions` when it is `null` or `source` is `"bgg"`.
+- Dimension display uses inches throughout. No unit conversion UI.
