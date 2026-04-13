@@ -1,7 +1,7 @@
 ---
 title: "Commission: Shelf Capacity: Bin-Packing Algorithm (C13)"
 date: 2026-04-13
-status: pending
+status: dispatched
 tags: [commission]
 worker: Dalton
 workerDisplayTitle: "Guild Artificer"
@@ -27,6 +27,11 @@ activity_timeline:
     reason: "Dependencies satisfied"
     from: "blocked"
     to: "pending"
+  - timestamp: 2026-04-13T22:16:42.848Z
+    event: status_dispatched
+    reason: "Dispatched to worker"
+    from: "pending"
+    to: "dispatched"
 current_progress: ""
 projectName: shelf-judge
 ---
