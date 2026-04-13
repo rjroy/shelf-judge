@@ -225,15 +225,15 @@ interface OverflowEntry {
 
 - REQ-SHELF-24: When no games have box dimensions, the capacity endpoint returns a valid response with `gamesWithDimensions: 0`, `overflowing: false`, `unfittableGames: []`, `overflowGames: []`, and empty `assignments`.
 
-- REQ-SHELF-31: The capacity computation uses current fitness scores and current collection state. It does not cache or snapshot scores. Each call runs the bin-packing algorithm fresh against the current data. The algorithm's similarity function uses the existing composite distance from `feature-vector.ts`.
+- REQ-SHELF-25: The capacity computation uses current fitness scores and current collection state. It does not cache or snapshot scores. Each call runs the bin-packing algorithm fresh against the current data. The algorithm's similarity function uses the existing composite distance from `feature-vector.ts`.
 
 ### Web UI: Game Dimensions Display
 
-- REQ-SHELF-32: The game detail page shows box dimensions when available: "Box: 11.4 x 11.4 x 2.75 in" (or "Box: not measured" when null). Displayed alongside existing metadata (player count, playing time, etc.).
+- REQ-SHELF-26: The game detail page shows box dimensions when available: "Box: 11.4 x 11.4 x 2.75 in" (or "Box: not measured" when null). Displayed alongside existing metadata (player count, playing time, etc.).
 
 ### Web UI: Shelf Configuration
 
-- REQ-SHELF-33: A "Shelf Configuration" page is accessible from the settings area. The page shows the user's shelf units, each with its list of shelves. The user can:
+- REQ-SHELF-27: A "Shelf Configuration" page is accessible from the settings area. The page shows the user's shelf units, each with its list of shelves. The user can:
   - Add a shelf unit (name, then add shelves to it)
   - Add a shelf to an existing unit (name, width, height, depth; height is optional for "on top of" spaces)
   - Edit shelf names and dimensions
@@ -305,13 +305,13 @@ All measured games placed successfully.
 
 This spec covers significant scope across three connected concerns. The following layering supports clean implementation by independent agents:
 
-**Layer 1: Box Dimensions (REQ-SHELF-1 through REQ-SHELF-4, REQ-SHELF-5 through REQ-SHELF-7, REQ-SHELF-32, REQ-SHELF-42)**
+**Layer 1: Box Dimensions (REQ-SHELF-1 through REQ-SHELF-4, REQ-SHELF-5 through REQ-SHELF-7, REQ-SHELF-26, REQ-SHELF-42)**
 Types, manual entry UI/CLI, game detail display. No dependencies on shelf config or overflow. Can be implemented and shipped independently.
 
-**Layer 2: Shelf Configuration (REQ-SHELF-8 through REQ-SHELF-15, REQ-SHELF-33 through REQ-SHELF-35, REQ-SHELF-38 shelf-config commands)**
+**Layer 2: Shelf Configuration (REQ-SHELF-8 through REQ-SHELF-15, REQ-SHELF-27 through REQ-SHELF-35, REQ-SHELF-38 shelf-config commands)**
 Data model, storage, CRUD API, web UI for shelf management, CLI commands for shelf setup. Depends on shared types only. Can be implemented in parallel with Layer 1.
 
-**Layer 3: Capacity and Assignment (REQ-SHELF-16 through REQ-SHELF-31, REQ-SHELF-36 through REQ-SHELF-37, REQ-SHELF-40 through REQ-SHELF-41)**
+**Layer 3: Capacity and Assignment (REQ-SHELF-16 through REQ-SHELF-25, REQ-SHELF-36 through REQ-SHELF-37, REQ-SHELF-40 through REQ-SHELF-41)**
 Bin-packing algorithm integration, capacity endpoint, per-shelf assignments, collection page capacity indicator, capacity detail view, CLI capacity commands. Depends on both Layer 1 (box dimensions on games) and Layer 2 (shelf configuration). The bin-packing algorithm itself is defined in `.lore/designs/similarity-weighted-bin-packing.md`; this layer implements the adapter between Shelf Judge's data model and the algorithm's input/output.
 
 ## Scope Exclusions
