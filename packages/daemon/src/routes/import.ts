@@ -1,10 +1,10 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
-import type { GameService } from "../services/game-service.js";
-import type { BggClient } from "../services/bgg-client.js";
-import type { RouteModule, OperationDefinition } from "../operations.js";
-import { createLogger } from "../services/logger.js";
+import type { GameService } from "../services/game-service";
+import type { BggClient } from "../services/bgg-client";
+import type { RouteModule, OperationDefinition } from "../operations";
+import { createLogger } from "../services/logger";
 
 export interface ImportRoutesDeps {
   gameService: GameService;

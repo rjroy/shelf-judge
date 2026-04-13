@@ -34,19 +34,9 @@ export default async function CollectionPage({
   let ignoredTags: NicheTagFilter[] = [];
   try {
     const ownershipParam = showPrevOwned ? ("all" as const) : undefined;
-    [games, axes] = await Promise.all([listGames({ ownership: ownershipParam }), listAxes()]);
+    [games, axes] = await Promise.all([listGames({ ownership: "all" }), listAxes()]);
 
-    // Fetch previously-owned count to decide if the filter group should appear
-    if (!showPrevOwned) {
-      try {
-        const prevOwned = await listGames({ ownership: "previously-owned" });
-        previouslyOwnedCount = prevOwned.length;
-      } catch {
-        // Previously-owned count unavailable
-      }
-    } else {
-      previouslyOwnedCount = games.filter((g) => g.game.ownership === "previously-owned").length;
-    }
+    previouslyOwnedCount = games.filter((g) => g.game.ownership === "previously-owned").length;
 
     try {
       tournamentStats = await getAllTournamentStats();
@@ -59,7 +49,7 @@ export default async function CollectionPage({
       // Prediction data may not be available
     }
     try {
-      nicheGames = await listGames({ includeNiches: true });
+      nicheGames = await listGames({ includeNiches: true, ownership: ownershipParam });
     } catch {
       // Niche data may not be available
     }
@@ -92,6 +82,8 @@ export default async function CollectionPage({
     rated.length > 0
       ? rated.reduce((sum, { score }) => sum + (score?.score ?? 0), 0) / rated.length
       : null;
+
+  console.log(`CollectionPage data: ${games.length} total games, ${predictedGames ? predictedGames.length : 0} predicted games, ${nicheGames ? nicheGames.length : 0} niche games, ${axes.length} axes, previously owned count: ${previouslyOwnedCount}, avg fitness: ${avgFitness}, hasTournamentData: ${hasTournamentData}, ignoredTags: ${ignoredTags.length}, isIntegratedRedundancy: ${isIntegrated}`); 
 
   const predictedCount = predictedGames
     ? predictedGames.filter(

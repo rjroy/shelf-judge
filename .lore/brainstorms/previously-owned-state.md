@@ -1,7 +1,7 @@
 ---
 title: "Previously Owned and Game Ownership State"
 date: 2026-04-12
-status: open
+status: resolved
 tags: [brainstorm, data-model, ownership, lifecycle, redundancy, prediction, profiling]
 related:
   - .lore/issues/previously-owned-state.md

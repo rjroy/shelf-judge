@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shelf Judge — Capacity Detail: Empty States</title>
+    <style>
+      :root {
+        --bg-base: #f4f1ec;
+        --bg-surface: #fefcf9;
+        --bg-elevated: #ffffff;
+        --bg-subtle: #f9f7f4;
+        --border: #ddd8d0;
+        --border-strong: #c4bfb8;
+        --text-primary: #1a1714;
+        --text-secondary: #6b6560;
+        --text-muted: #706a62;
+        --score-color: #b86c1a;
+        --bgg-accent: #2e5f8a;
+        --bgg-bg: #edf3f9;
+        --action: #1c3d5e;
+        --action-subtle: #e8eff6;
+        --action-border: #b8cfe0;
+        --nav-bg: #1a1714;
+        --nav-text: #e8e4dc;
+        --nav-active: #b86c1a;
+        --danger: #b84040;
+      }
+
+      [data-theme="dark"] {
+        --bg-base: #1a1916;
+        --bg-surface: #242320;
+        --bg-elevated: #2e2d29;
+        --bg-subtle: #201f1c;
+        --border: #3d3a35;
+        --border-strong: #524e48;
+        --text-primary: #e8e4dc;
+        --text-secondary: #a09a90;
+        --text-muted: #908a80;
+        --score-color: #d4882e;
+        --bgg-accent: #4a8bc4;
+        --bgg-bg: #1a2838;
+        --action: #5a90c0;
+        --action-subtle: #162030;
+        --action-border: #2a4060;
+        --nav-bg: #121110;
+        --danger: #e06060;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family:
+          Inter,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        background: #e8e4dc;
+        color: var(--text-primary);
+        font-size: 15px;
+        line-height: 1.5;
+        padding: 40px 32px;
+      }
+
+      .annotation-section {
+        margin-bottom: 56px;
+      }
+      .annotation-label {
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #9c9590;
+        margin-bottom: 6px;
+        padding-left: 2px;
+      }
+      .annotation-note {
+        font-size: 12px;
+        color: #706a62;
+        margin-bottom: 14px;
+        padding-left: 2px;
+        max-width: 680px;
+      }
+
+      .app-frame {
+        display: flex;
+        height: 540px;
+        background: var(--bg-base);
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow:
+          0 4px 32px rgba(0, 0, 0, 0.18),
+          0 1px 4px rgba(0, 0, 0, 0.08);
+      }
+
+      .sidebar {
+        width: 200px;
+        flex-shrink: 0;
+        background: var(--nav-bg);
+        display: flex;
+        flex-direction: column;
+      }
+      .sidebar-brand {
+        padding: 18px 20px 20px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .brand-name {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--nav-text);
+        letter-spacing: -0.01em;
+      }
+      .brand-sub {
+        font-size: 11px;
+        color: rgba(232, 228, 220, 0.4);
+        margin-top: 2px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .nav-section {
+        padding: 16px 0;
+        flex: 1;
+      }
+      .nav-label {
+        font-size: 10px;
+        font-weight: 600;
+        color: rgba(232, 228, 220, 0.35);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        padding: 0 20px;
+        margin-bottom: 4px;
+        margin-top: 14px;
+      }
+      .nav-label:first-child {
+        margin-top: 0;
+      }
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 20px;
+        font-size: 13px;
+        color: rgba(232, 228, 220, 0.65);
+        cursor: pointer;
+        border-left: 3px solid transparent;
+      }
+      .nav-item.active {
+        background: rgba(184, 108, 26, 0.12);
+        color: var(--nav-text);
+        border-left-color: var(--nav-active);
+        font-weight: 500;
+      }
+
+      .main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        min-width: 0;
+      }
+
+      .topbar {
+        height: 48px;
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        padding: 0 24px;
+        gap: 12px;
+        flex-shrink: 0;
+      }
+      .topbar-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+      .topbar-back {
+        font-size: 13px;
+        color: var(--action);
+        cursor: pointer;
+        text-decoration: none;
+      }
+
+      .content-area {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 40px 48px;
+      }
+
+      /* ─── Empty state card ─── */
+      .empty-card {
+        text-align: center;
+        max-width: 420px;
+        width: 100%;
+      }
+      .empty-icon {
+        font-size: 48px;
+        margin-bottom: 16px;
+        opacity: 0.5;
+      }
+      .empty-title {
+        font-size: 17px;
+        font-weight: 700;
+        color: var(--text-primary);
+        margin-bottom: 8px;
+        line-height: 1.3;
+      }
+      .empty-body {
+        font-size: 13px;
+        color: var(--text-secondary);
+        margin-bottom: 20px;
+        line-height: 1.6;
+      }
+      .empty-body a {
+        color: var(--action);
+        text-decoration: underline;
+        cursor: pointer;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 18px;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        border: none;
+        font-family: inherit;
+        white-space: nowrap;
+      }
+      .btn-primary {
+        background: var(--action);
+        color: #fff;
+      }
+      .btn-secondary {
+        background: transparent;
+        border: 2px solid var(--border-strong);
+        color: var(--text-secondary);
+      }
+      .btn-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        justify-content: center;
+      }
+
+      /* ─── Shelf configure illustration (CSS only) ─── */
+      .shelf-illustration {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        margin-bottom: 20px;
+      }
+      .shelf-row-illus {
+        display: flex;
+        gap: 4px;
+      }
+      .shelf-box {
+        width: 28px;
+        height: 20px;
+        border-radius: 3px;
+        border: 2px solid var(--border-strong);
+        background: var(--bg-subtle);
+      }
+      .shelf-box.phantom {
+        border-style: dashed;
+        background: transparent;
+        opacity: 0.4;
+      }
+      .shelf-line {
+        width: 100px;
+        height: 3px;
+        background: var(--border-strong);
+        border-radius: 2px;
+      }
+
+      /* Dimension illustration */
+      .dim-illustration {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 20px;
+        justify-content: center;
+        opacity: 0.6;
+      }
+      .dim-box {
+        width: 52px;
+        height: 42px;
+        border: 2px solid var(--border-strong);
+        border-radius: 4px;
+        background: var(--bg-subtle);
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        color: var(--text-muted);
+        font-weight: 600;
+      }
+      .dim-arrow {
+        font-size: 20px;
+        color: var(--border-strong);
+      }
+
+      .mode-toggle {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 6px 14px;
+        font-size: 12px;
+        font-family: inherit;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+        background: #fff;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <button
+      class="mode-toggle"
+      onclick="
+        document
+          .querySelectorAll('.app-frame')
+          .forEach((f) => (f.dataset.theme = f.dataset.theme === 'dark' ? '' : 'dark'))
+      "
+    >
+      Toggle Dark
+    </button>
+
+    <!-- STATE A: No shelf configuration exists -->
+    <div class="annotation-section">
+      <div class="annotation-label">REQ-SHELF-23 · Empty state A: No shelf configuration</div>
+      <div class="annotation-note">
+        User navigates to capacity but has no shelves configured. configured: false from the API.
+        Clear call to action to set up shelves. The page title still appears since this is a valid
+        route, but the content is an onboarding prompt rather than an empty table.
+      </div>
+      <div class="app-frame">
+        <div class="sidebar">
+          <div class="sidebar-brand">
+            <div class="brand-name">Shelf Judge</div>
+            <div class="brand-sub">Board Game Curator</div>
+          </div>
+          <div class="nav-section">
+            <div class="nav-label">Library</div>
+            <div class="nav-item active">&#9632; Collection</div>
+            <div class="nav-item">&#9632; Wishlist</div>
+            <div class="nav-item">&#9632; Add Games</div>
+            <div class="nav-label">Settings</div>
+            <div class="nav-item">&#9632; Axes</div>
+            <div class="nav-item">&#9632; Redundancy</div>
+            <div class="nav-item">&#9632; Shelves</div>
+          </div>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <a class="topbar-back">← Collection</a>
+            <div class="topbar-title">Shelf Capacity</div>
+          </div>
+          <div class="content-area">
+            <div class="empty-card">
+              <div class="shelf-illustration">
+                <div class="shelf-row-illus">
+                  <div class="shelf-box phantom"></div>
+                  <div class="shelf-box phantom"></div>
+                  <div class="shelf-box phantom"></div>
+                </div>
+                <div class="shelf-line"></div>
+                <div class="shelf-row-illus">
+                  <div class="shelf-box phantom"></div>
+                  <div class="shelf-box phantom"></div>
+                  <div class="shelf-box phantom"></div>
+                  <div class="shelf-box phantom"></div>
+                </div>
+                <div class="shelf-line"></div>
+              </div>
+              <div class="empty-title">No shelves configured</div>
+              <div class="empty-body">
+                To see shelf assignments and capacity analysis, you need to describe your physical
+                shelves first. Add your shelf units and their dimensions to get started.
+              </div>
+              <div class="btn-row">
+                <button class="btn btn-primary">Configure shelves →</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STATE B: Configured but no dimensions -->
+    <div class="annotation-section">
+      <div class="annotation-label">
+        REQ-SHELF-24 · Empty state B: Shelves configured, no game dimensions
+      </div>
+      <div class="annotation-note">
+        Shelves exist (configured: true), but gamesWithDimensions: 0. The algorithm has nothing to
+        run on. Two actions: add dimensions to individual games, or link to the collection filtered
+        to show games without dimensions.
+      </div>
+      <div class="app-frame">
+        <div class="sidebar">
+          <div class="sidebar-brand">
+            <div class="brand-name">Shelf Judge</div>
+            <div class="brand-sub">Board Game Curator</div>
+          </div>
+          <div class="nav-section">
+            <div class="nav-label">Library</div>
+            <div class="nav-item active">&#9632; Collection</div>
+            <div class="nav-item">&#9632; Wishlist</div>
+            <div class="nav-item">&#9632; Add Games</div>
+            <div class="nav-label">Settings</div>
+            <div class="nav-item">&#9632; Axes</div>
+            <div class="nav-item">&#9632; Redundancy</div>
+            <div class="nav-item">&#9632; Shelves</div>
+          </div>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <a class="topbar-back">← Collection</a>
+            <div class="topbar-title">Shelf Capacity</div>
+            <div style="margin-left: auto; font-size: 12px; color: var(--text-muted)">
+              14 shelves configured
+            </div>
+          </div>
+          <div class="content-area">
+            <div class="empty-card">
+              <div class="dim-illustration">
+                <div class="dim-box">?</div>
+                <div class="dim-arrow">→</div>
+                <div class="dim-box" style="opacity: 0.3">W×H×D</div>
+              </div>
+              <div class="empty-title">No game dimensions yet</div>
+              <div class="empty-body">
+                Your 14 shelves are configured, but no games have box dimensions entered. The
+                capacity algorithm needs at least one game measured to produce assignments.
+                <br /><br />
+                Open any game and enter its box dimensions, or
+                <a>view all games without dimensions</a> in the collection.
+              </div>
+              <div class="btn-row">
+                <button class="btn btn-secondary">View unmeasured games</button>
+                <button class="btn btn-primary">Go to collection →</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DARK MODE: State A -->
+    <div class="annotation-section">
+      <div class="annotation-label">Dark mode — No shelf configuration</div>
+      <div class="annotation-note">
+        Empty state in dark theme. Dashed boxes and illustration adapt to dark border tokens.
+      </div>
+      <div class="app-frame" data-theme="dark">
+        <div class="sidebar">
+          <div class="sidebar-brand">
+            <div class="brand-name">Shelf Judge</div>
+            <div class="brand-sub">Board Game Curator</div>
+          </div>
+          <div class="nav-section">
+            <div class="nav-label">Library</div>
+            <div class="nav-item active">&#9632; Collection</div>
+            <div class="nav-item">&#9632; Wishlist</div>
+            <div class="nav-item">&#9632; Add Games</div>
+            <div class="nav-label">Settings</div>
+            <div class="nav-item">&#9632; Axes</div>
+            <div class="nav-item">&#9632; Redundancy</div>
+            <div class="nav-item">&#9632; Shelves</div>
+          </div>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <a class="topbar-back">← Collection</a>
+            <div class="topbar-title">Shelf Capacity</div>
+          </div>
+          <div class="content-area">
+            <div class="empty-card">
+              <div class="shelf-illustration">
+                <div class="shelf-row-illus">
+                  <div class="shelf-box phantom"></div>
+                  <div class="shelf-box phantom"></div>
+                  <div class="shelf-box phantom"></div>
+                </div>
+                <div class="shelf-line"></div>
+                <div class="shelf-row-illus">
+                  <div class="shelf-box phantom"></div>
+                  <div class="shelf-box phantom"></div>
+                  <div class="shelf-box phantom"></div>
+                  <div class="shelf-box phantom"></div>
+                </div>
+                <div class="shelf-line"></div>
+              </div>
+              <div class="empty-title">No shelves configured</div>
+              <div class="empty-body">
+                To see shelf assignments and capacity analysis, you need to describe your physical
+                shelves first. Add your shelf units and their dimensions to get started.
+              </div>
+              <div class="btn-row">
+                <button class="btn btn-primary">Configure shelves →</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DARK MODE: State B -->
+    <div class="annotation-section">
+      <div class="annotation-label">Dark mode — Shelves configured, no dimensions</div>
+      <div class="annotation-note">No-dimensions empty state in dark theme.</div>
+      <div class="app-frame" data-theme="dark">
+        <div class="sidebar">
+          <div class="sidebar-brand">
+            <div class="brand-name">Shelf Judge</div>
+            <div class="brand-sub">Board Game Curator</div>
+          </div>
+          <div class="nav-section">
+            <div class="nav-label">Library</div>
+            <div class="nav-item active">&#9632; Collection</div>
+            <div class="nav-item">&#9632; Wishlist</div>
+            <div class="nav-item">&#9632; Add Games</div>
+            <div class="nav-label">Settings</div>
+            <div class="nav-item">&#9632; Axes</div>
+            <div class="nav-item">&#9632; Redundancy</div>
+            <div class="nav-item">&#9632; Shelves</div>
+          </div>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <a class="topbar-back">← Collection</a>
+            <div class="topbar-title">Shelf Capacity</div>
+            <div style="margin-left: auto; font-size: 12px; color: var(--text-muted)">
+              14 shelves configured
+            </div>
+          </div>
+          <div class="content-area">
+            <div class="empty-card">
+              <div class="dim-illustration">
+                <div class="dim-box">?</div>
+                <div class="dim-arrow">→</div>
+                <div class="dim-box" style="opacity: 0.3">W×H×D</div>
+              </div>
+              <div class="empty-title">No game dimensions yet</div>
+              <div class="empty-body">
+                Your 14 shelves are configured, but no games have box dimensions entered. Open any
+                game and enter its box dimensions, or <a>view all games without dimensions</a> in
+                the collection.
+              </div>
+              <div class="btn-row">
+                <button class="btn btn-secondary">View unmeasured games</button>
+                <button class="btn btn-primary">Go to collection →</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

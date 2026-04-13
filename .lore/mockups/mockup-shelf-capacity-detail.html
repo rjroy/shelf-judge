@@ -1,0 +1,1031 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shelf Judge — Capacity Detail</title>
+    <style>
+      :root {
+        --bg-base: #f4f1ec;
+        --bg-surface: #fefcf9;
+        --bg-elevated: #ffffff;
+        --bg-subtle: #f9f7f4;
+        --border: #ddd8d0;
+        --border-strong: #c4bfb8;
+        --row-hover: #f0ede8;
+        --table-header-bg: #ede9e3;
+        --text-primary: #1a1714;
+        --text-secondary: #6b6560;
+        --text-muted: #706a62;
+        --score-color: #b86c1a;
+        --score-high: #2d7a4a;
+        --score-mid: #846a1d;
+        --score-low: #b84040;
+        --score-high-bg: #e8f5ee;
+        --score-mid-bg: #fef6e4;
+        --score-low-bg: #fdf0f0;
+        --bgg-accent: #2e5f8a;
+        --bgg-bg: #edf3f9;
+        --action: #1c3d5e;
+        --action-subtle: #e8eff6;
+        --action-border: #b8cfe0;
+        --nav-bg: #1a1714;
+        --nav-text: #e8e4dc;
+        --nav-active: #b86c1a;
+        --danger: #b84040;
+        --danger-subtle: #fdf0f0;
+        --danger-border: #e8c0c0;
+        --warning: #8a4500;
+        --warning-subtle: #fff3e0;
+        --warning-border: #e8c880;
+        --warning-text: #7a5f10;
+
+        /* Grade colors */
+        --grade-s: #9a6800;
+        --grade-s-bg: #fff8e6;
+        --grade-s-border: #e8c060;
+        --grade-a: #2d7a4a;
+        --grade-a-bg: #e8f5ee;
+        --grade-a-border: #a0d8b8;
+        --grade-b: #1c5080;
+        --grade-b-bg: #e8f0fa;
+        --grade-b-border: #9ab8d8;
+        --grade-c: #5a5450;
+        --grade-c-bg: #f0ede8;
+        --grade-c-border: #c4bfb8;
+        --grade-d: #7a4800;
+        --grade-d-bg: #fff0dc;
+        --grade-d-border: #e0b870;
+        --grade-f: #b84040;
+        --grade-f-bg: #fdf0f0;
+        --grade-f-border: #e8c0c0;
+      }
+
+      [data-theme="dark"] {
+        --bg-base: #1a1916;
+        --bg-surface: #242320;
+        --bg-elevated: #2e2d29;
+        --bg-subtle: #201f1c;
+        --border: #3d3a35;
+        --border-strong: #524e48;
+        --row-hover: #2a2825;
+        --table-header-bg: #282724;
+        --text-primary: #e8e4dc;
+        --text-secondary: #a09a90;
+        --text-muted: #908a80;
+        --score-color: #d4882e;
+        --score-high: #40a060;
+        --score-mid: #b89030;
+        --score-low: #e06060;
+        --score-high-bg: #1a3020;
+        --score-mid-bg: #2a2210;
+        --score-low-bg: #2a1818;
+        --bgg-accent: #4a8bc4;
+        --bgg-bg: #1a2838;
+        --action: #5a90c0;
+        --action-subtle: #162030;
+        --action-border: #2a4060;
+        --nav-bg: #121110;
+        --danger: #e06060;
+        --danger-subtle: #2a1818;
+        --danger-border: #5a2828;
+        --warning: #d46020;
+        --warning-subtle: #2e2010;
+        --warning-border: #a08830;
+        --warning-text: #d4a830;
+
+        --grade-s: #d4a030;
+        --grade-s-bg: #2a2010;
+        --grade-s-border: #a07820;
+        --grade-a: #40a060;
+        --grade-a-bg: #1a3020;
+        --grade-a-border: #2a6040;
+        --grade-b: #5a90c0;
+        --grade-b-bg: #162030;
+        --grade-b-border: #2a4870;
+        --grade-c: #a09a90;
+        --grade-c-bg: #282724;
+        --grade-c-border: #3d3a35;
+        --grade-d: #c07030;
+        --grade-d-bg: #2a1e10;
+        --grade-d-border: #806030;
+        --grade-f: #e06060;
+        --grade-f-bg: #2a1818;
+        --grade-f-border: #5a2828;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family:
+          Inter,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        background: #e8e4dc;
+        color: var(--text-primary);
+        font-size: 15px;
+        line-height: 1.5;
+        padding: 40px 32px;
+      }
+
+      .annotation-section {
+        margin-bottom: 56px;
+      }
+      .annotation-label {
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #9c9590;
+        margin-bottom: 6px;
+        padding-left: 2px;
+      }
+      .annotation-note {
+        font-size: 12px;
+        color: #706a62;
+        margin-bottom: 14px;
+        padding-left: 2px;
+        max-width: 680px;
+      }
+
+      .app-frame {
+        display: flex;
+        height: 780px;
+        background: var(--bg-base);
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow:
+          0 4px 32px rgba(0, 0, 0, 0.18),
+          0 1px 4px rgba(0, 0, 0, 0.08);
+      }
+
+      .sidebar {
+        width: 200px;
+        flex-shrink: 0;
+        background: var(--nav-bg);
+        display: flex;
+        flex-direction: column;
+      }
+      .sidebar-brand {
+        padding: 18px 20px 20px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .brand-name {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--nav-text);
+        letter-spacing: -0.01em;
+      }
+      .brand-sub {
+        font-size: 11px;
+        color: rgba(232, 228, 220, 0.4);
+        margin-top: 2px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .nav-section {
+        padding: 16px 0;
+        flex: 1;
+      }
+      .nav-label {
+        font-size: 10px;
+        font-weight: 600;
+        color: rgba(232, 228, 220, 0.35);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        padding: 0 20px;
+        margin-bottom: 4px;
+        margin-top: 14px;
+      }
+      .nav-label:first-child {
+        margin-top: 0;
+      }
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 20px;
+        font-size: 13px;
+        color: rgba(232, 228, 220, 0.65);
+        cursor: pointer;
+        border-left: 3px solid transparent;
+      }
+      .nav-item.active {
+        background: rgba(184, 108, 26, 0.12);
+        color: var(--nav-text);
+        border-left-color: var(--nav-active);
+        font-weight: 500;
+      }
+
+      .main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        min-width: 0;
+      }
+
+      .topbar {
+        height: 48px;
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        padding: 0 24px;
+        gap: 12px;
+        flex-shrink: 0;
+      }
+      .topbar-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+      .topbar-back {
+        font-size: 13px;
+        color: var(--action);
+        cursor: pointer;
+        text-decoration: none;
+      }
+
+      .content-scroll {
+        flex: 1;
+        overflow-y: auto;
+        padding: 20px 24px;
+      }
+
+      /* ─── Section headers ─── */
+      .cap-section {
+        margin-bottom: 28px;
+      }
+      .cap-section-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 12px;
+        padding-bottom: 8px;
+        border-bottom: 2px solid var(--border);
+      }
+      .cap-section-title {
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--text-primary);
+      }
+      .cap-section-count {
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+      .cap-section-icon {
+        font-size: 14px;
+      }
+
+      /* ─── Grade badge ─── */
+      .grade-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        border-radius: 5px;
+        font-size: 14px;
+        font-weight: 800;
+        flex-shrink: 0;
+        border: 1px solid;
+      }
+      .grade-S {
+        background: var(--grade-s-bg);
+        color: var(--grade-s);
+        border-color: var(--grade-s-border);
+      }
+      .grade-A {
+        background: var(--grade-a-bg);
+        color: var(--grade-a);
+        border-color: var(--grade-a-border);
+      }
+      .grade-B {
+        background: var(--grade-b-bg);
+        color: var(--grade-b);
+        border-color: var(--grade-b-border);
+      }
+      .grade-C {
+        background: var(--grade-c-bg);
+        color: var(--grade-c);
+        border-color: var(--grade-c-border);
+      }
+      .grade-D {
+        background: var(--grade-d-bg);
+        color: var(--grade-d);
+        border-color: var(--grade-d-border);
+      }
+      .grade-F {
+        background: var(--grade-f-bg);
+        color: var(--grade-f);
+        border-color: var(--grade-f-border);
+      }
+
+      /* ─── Shelf assignment card ─── */
+      .shelf-assign-card {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--bg-surface);
+        margin-bottom: 10px;
+        overflow: hidden;
+      }
+      .shelf-assign-header {
+        display: flex;
+        align-items: center;
+        padding: 10px 14px;
+        gap: 10px;
+        background: var(--table-header-bg);
+        border-bottom: 1px solid var(--border);
+      }
+      .shelf-assign-meta {
+        flex: 1;
+      }
+      .shelf-assign-name {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+      .shelf-assign-unit {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-top: 1px;
+      }
+
+      /* Utilization bar */
+      .util-bar-wrap {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 6px;
+      }
+      .util-bar-track {
+        flex: 1;
+        height: 6px;
+        border-radius: 3px;
+        background: var(--border);
+        overflow: hidden;
+        max-width: 200px;
+      }
+      .util-bar-fill {
+        height: 100%;
+        border-radius: 3px;
+        transition: width 0.3s;
+      }
+      .util-bar-fill.high {
+        background: var(--score-high);
+      }
+      .util-bar-fill.mid {
+        background: var(--score-mid);
+      }
+      .util-bar-fill.warn {
+        background: var(--warning);
+      }
+      .util-bar-fill.low {
+        background: var(--score-high);
+        opacity: 0.4;
+      }
+      .util-pct {
+        font-size: 11px;
+        color: var(--text-muted);
+        white-space: nowrap;
+      }
+      .util-unconstrained {
+        font-size: 11px;
+        color: var(--text-muted);
+        font-style: italic;
+      }
+
+      /* Games list inside shelf */
+      .shelf-games {
+        padding: 0;
+      }
+      .shelf-game-row {
+        display: flex;
+        align-items: center;
+        padding: 7px 14px;
+        gap: 10px;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-elevated);
+      }
+      .shelf-game-row:last-child {
+        border-bottom: none;
+      }
+      .shelf-game-row:hover {
+        background: var(--row-hover);
+      }
+      .shelf-game-name {
+        font-size: 13px;
+        color: var(--text-primary);
+        flex: 1;
+      }
+      .shelf-game-score {
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .shelf-game-score.high {
+        color: var(--score-high);
+      }
+      .shelf-game-score.mid {
+        color: var(--score-mid);
+      }
+      .shelf-game-score.low {
+        color: var(--score-low);
+      }
+      .shelf-game-vol {
+        font-size: 11px;
+        color: var(--text-muted);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ─── Unfittable table ─── */
+      .cull-table {
+        width: 100%;
+        border-collapse: collapse;
+        border-radius: 8px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+      }
+      .cull-table th {
+        text-align: left;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        padding: 8px 12px;
+        background: var(--table-header-bg);
+        border-bottom: 1px solid var(--border);
+      }
+      .cull-table td {
+        padding: 9px 12px;
+        font-size: 13px;
+        color: var(--text-primary);
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-elevated);
+      }
+      .cull-table tr:last-child td {
+        border-bottom: none;
+      }
+      .cull-table tr:hover td {
+        background: var(--row-hover);
+      }
+      .cull-reason {
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+      .cull-dims {
+        font-size: 12px;
+        color: var(--text-secondary);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .score-chip {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 22px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .score-chip.high {
+        background: var(--score-high-bg);
+        color: var(--score-high);
+      }
+      .score-chip.mid {
+        background: var(--score-mid-bg);
+        color: var(--score-mid);
+      }
+      .score-chip.low {
+        background: var(--score-low-bg);
+        color: var(--score-low);
+      }
+
+      /* ─── Unfittable badge on table row ─── */
+      .unfittable-flag {
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        padding: 2px 6px;
+        border-radius: 3px;
+        background: var(--danger-subtle);
+        color: var(--danger);
+        border: 1px solid var(--danger-border);
+        white-space: nowrap;
+      }
+
+      /* ─── Dimension coverage note ─── */
+      .coverage-note {
+        font-size: 12px;
+        color: var(--text-secondary);
+        background: var(--bg-subtle);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 10px 14px;
+        margin-top: 20px;
+      }
+      .coverage-note a {
+        color: var(--action);
+        text-decoration: underline;
+        cursor: pointer;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 5px 11px;
+        border-radius: 5px;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        font-family: inherit;
+        white-space: nowrap;
+      }
+      .btn-secondary {
+        background: transparent;
+        border: 1px solid var(--border-strong);
+        color: var(--text-secondary);
+      }
+
+      .mode-toggle {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 6px 14px;
+        font-size: 12px;
+        font-family: inherit;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+        background: #fff;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <button
+      class="mode-toggle"
+      onclick="
+        document
+          .querySelectorAll('.app-frame')
+          .forEach((f) => (f.dataset.theme = f.dataset.theme === 'dark' ? '' : 'dark'))
+      "
+    >
+      Toggle Dark
+    </button>
+
+    <!-- MAIN STATE: Capacity detail with all three sections -->
+    <div class="annotation-section">
+      <div class="annotation-label">REQ-SHELF-31 · Capacity Detail View</div>
+      <div class="annotation-note">
+        Three sections: (a) per-shelf assignments with utilization bar and grade badge, (b)
+        unfittable games with dimensions and reason — visually emphasized as the strongest cull
+        candidates, (c) displaced games sorted by fitness ascending. Dimension coverage note at the
+        bottom. Accessible from the collection page capacity indicator link.
+      </div>
+      <div class="app-frame">
+        <div class="sidebar">
+          <div class="sidebar-brand">
+            <div class="brand-name">Shelf Judge</div>
+            <div class="brand-sub">Board Game Curator</div>
+          </div>
+          <div class="nav-section">
+            <div class="nav-label">Library</div>
+            <div class="nav-item active">&#9632; Collection</div>
+            <div class="nav-item">&#9632; Wishlist</div>
+            <div class="nav-item">&#9632; Add Games</div>
+            <div class="nav-label">Settings</div>
+            <div class="nav-item">&#9632; Axes</div>
+            <div class="nav-item">&#9632; Redundancy</div>
+            <div class="nav-item">&#9632; Shelves</div>
+          </div>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <a class="topbar-back">← Collection</a>
+            <div class="topbar-title">Shelf Capacity</div>
+            <div style="margin-left: auto; font-size: 12px; color: var(--text-muted)">
+              87 measured · 7 unmeasured
+            </div>
+          </div>
+          <div class="content-scroll">
+            <!-- Section A: Shelf Assignments -->
+            <div class="cap-section">
+              <div class="cap-section-header">
+                <div class="cap-section-icon">📦</div>
+                <div class="cap-section-title">Shelf Assignments</div>
+                <div class="cap-section-count">14 shelves · 82 games placed</div>
+              </div>
+
+              <!-- Shelf card: Grade A, high utilization -->
+              <div class="shelf-assign-card">
+                <div class="shelf-assign-header">
+                  <div class="shelf-assign-meta">
+                    <div class="shelf-assign-name">Cube 1 (top-left)</div>
+                    <div class="shelf-assign-unit">Living Room Kallax · 13 × 13 × 13 in</div>
+                    <div class="util-bar-wrap">
+                      <div class="util-bar-track">
+                        <div class="util-bar-fill high" style="width: 82%"></div>
+                      </div>
+                      <div class="util-pct">82% · 1,803 / 2,197 in³</div>
+                    </div>
+                  </div>
+                  <div class="grade-badge grade-A">A</div>
+                </div>
+                <div class="shelf-games">
+                  <div class="shelf-game-row">
+                    <div class="shelf-game-name">Wingspan</div>
+                    <div class="shelf-game-score high">8.4</div>
+                    <div class="shelf-game-vol">358 in³</div>
+                  </div>
+                  <div class="shelf-game-row">
+                    <div class="shelf-game-name">Ark Nova</div>
+                    <div class="shelf-game-score high">8.1</div>
+                    <div class="shelf-game-vol">411 in³</div>
+                  </div>
+                  <div class="shelf-game-row">
+                    <div class="shelf-game-name">7 Wonders</div>
+                    <div class="shelf-game-score mid">6.9</div>
+                    <div class="shelf-game-vol">230 in³</div>
+                  </div>
+                  <div class="shelf-game-row">
+                    <div class="shelf-game-name">Ticket to Ride</div>
+                    <div class="shelf-game-score mid">6.2</div>
+                    <div class="shelf-game-vol">804 in³</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Shelf card: Grade S, near-perfect -->
+              <div class="shelf-assign-card">
+                <div class="shelf-assign-header">
+                  <div class="shelf-assign-meta">
+                    <div class="shelf-assign-name">Top shelf</div>
+                    <div class="shelf-assign-unit">Office Bookcase · 30 × 12 × 11 in</div>
+                    <div class="util-bar-wrap">
+                      <div class="util-bar-track">
+                        <div class="util-bar-fill high" style="width: 94%"></div>
+                      </div>
+                      <div class="util-pct">94% · 3,707 / 3,960 in³</div>
+                    </div>
+                  </div>
+                  <div class="grade-badge grade-S">S</div>
+                </div>
+                <div class="shelf-games">
+                  <div class="shelf-game-row">
+                    <div class="shelf-game-name">Spirit Island</div>
+                    <div class="shelf-game-score high">7.9</div>
+                    <div class="shelf-game-vol">560 in³</div>
+                  </div>
+                  <div class="shelf-game-row">
+                    <div class="shelf-game-name">Terraforming Mars</div>
+                    <div class="shelf-game-score mid">6.9</div>
+                    <div class="shelf-game-vol">820 in³</div>
+                  </div>
+                  <div class="shelf-game-row">
+                    <div class="shelf-game-name">Pandemic</div>
+                    <div class="shelf-game-score mid">6.1</div>
+                    <div class="shelf-game-vol">480 in³</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Shelf card: On top — unconstrained -->
+              <div class="shelf-assign-card">
+                <div class="shelf-assign-header">
+                  <div class="shelf-assign-meta">
+                    <div class="shelf-assign-name">On top (left)</div>
+                    <div class="shelf-assign-unit">
+                      Living Room Kallax · 28 × — × 14 in ·
+                      <span style="font-style: italic">unconstrained height</span>
+                    </div>
+                    <div class="util-bar-wrap">
+                      <div class="util-unconstrained">
+                        No utilization tracked (unconstrained height)
+                      </div>
+                    </div>
+                  </div>
+                  <div class="grade-badge grade-B">B</div>
+                </div>
+                <div class="shelf-games">
+                  <div class="shelf-game-row">
+                    <div class="shelf-game-name">Gloomhaven</div>
+                    <div class="shelf-game-score high">7.8</div>
+                    <div class="shelf-game-vol">—</div>
+                  </div>
+                  <div class="shelf-game-row">
+                    <div class="shelf-game-name">Massive Darkness 2</div>
+                    <div class="shelf-game-score mid">5.8</div>
+                    <div class="shelf-game-vol">—</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Shelf card: Grade D, low utilization -->
+              <div class="shelf-assign-card">
+                <div class="shelf-assign-header">
+                  <div class="shelf-assign-meta">
+                    <div class="shelf-assign-name">Bottom shelf</div>
+                    <div class="shelf-assign-unit">Office Bookcase · 30 × 16 × 11 in</div>
+                    <div class="util-bar-wrap">
+                      <div class="util-bar-track">
+                        <div class="util-bar-fill low" style="width: 28%"></div>
+                      </div>
+                      <div class="util-pct">28% · 1,478 / 5,280 in³</div>
+                    </div>
+                  </div>
+                  <div class="grade-badge grade-D">D</div>
+                </div>
+                <div class="shelf-games">
+                  <div class="shelf-game-row">
+                    <div class="shelf-game-name">Dead of Winter</div>
+                    <div class="shelf-game-score mid">5.2</div>
+                    <div class="shelf-game-vol">740 in³</div>
+                  </div>
+                  <div class="shelf-game-row">
+                    <div class="shelf-game-name">Betrayal at Baldur's Gate</div>
+                    <div class="shelf-game-score mid">4.9</div>
+                    <div class="shelf-game-vol">738 in³</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Section B: Unfittable Games -->
+            <div class="cap-section">
+              <div class="cap-section-header">
+                <div class="cap-section-icon">✕</div>
+                <div class="cap-section-title" style="color: var(--danger)">Unfittable Games</div>
+                <div class="cap-section-count">
+                  3 games · don't fit any shelf · strongest cull candidates
+                </div>
+              </div>
+              <table class="cull-table">
+                <thead>
+                  <tr>
+                    <th>Game</th>
+                    <th>Fitness</th>
+                    <th>Box Dimensions</th>
+                    <th>Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>
+                      <div>Axis &amp; Allies (1984 edition)</div>
+                      <span class="unfittable-flag">Unfittable</span>
+                    </td>
+                    <td><span class="score-chip low">2.1</span></td>
+                    <td class="cull-dims">25 × 18 × 3 in</td>
+                    <td class="cull-reason">Box is 25 in wide; widest shelf is 14 in</td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <div>Twilight Imperium (4th ed.)</div>
+                      <span class="unfittable-flag">Unfittable</span>
+                    </td>
+                    <td><span class="score-chip mid">4.8</span></td>
+                    <td class="cull-dims">17.3 × 17.3 × 5 in</td>
+                    <td class="cull-reason">Box is 17.3 in wide; widest shelf is 14 in</td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <div>HeroQuest (2021)</div>
+                      <span class="unfittable-flag">Unfittable</span>
+                    </td>
+                    <td><span class="score-chip low">3.2</span></td>
+                    <td class="cull-dims">14.6 × 11 × 4 in</td>
+                    <td class="cull-reason">Box is 14.6 in wide; widest shelf is 14 in</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Section C: Displaced Games -->
+            <div class="cap-section">
+              <div class="cap-section-header">
+                <div class="cap-section-icon">⇱</div>
+                <div class="cap-section-title" style="color: var(--warning)">Displaced Games</div>
+                <div class="cap-section-count">5 games · fit by shape but no room</div>
+              </div>
+              <table class="cull-table">
+                <thead>
+                  <tr>
+                    <th>Game</th>
+                    <th>Fitness</th>
+                    <th>Volume</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Talisman (4th ed.)</td>
+                    <td><span class="score-chip low">3.4</span></td>
+                    <td class="cull-dims">450 in³</td>
+                    <td class="cull-reason" style="color: var(--warning-text)">
+                      Fits shelf, displaced by higher-priority games
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Runebound</td>
+                    <td><span class="score-chip low">3.8</span></td>
+                    <td class="cull-dims">680 in³</td>
+                    <td class="cull-reason" style="color: var(--warning-text)">
+                      Fits shelf, displaced by higher-priority games
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Eldritch Horror</td>
+                    <td><span class="score-chip mid">4.2</span></td>
+                    <td class="cull-dims">890 in³</td>
+                    <td class="cull-reason" style="color: var(--warning-text)">
+                      Fits shelf, displaced by higher-priority games
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Robinson Crusoe</td>
+                    <td><span class="score-chip mid">4.4</span></td>
+                    <td class="cull-dims">510 in³</td>
+                    <td class="cull-reason" style="color: var(--warning-text)">
+                      Fits shelf, displaced by higher-priority games
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Mice and Mystics</td>
+                    <td><span class="score-chip mid">4.8</span></td>
+                    <td class="cull-dims">720 in³</td>
+                    <td class="cull-reason" style="color: var(--warning-text)">
+                      Fits shelf, displaced by higher-priority games
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Dimension coverage note -->
+            <div class="coverage-note">
+              7 games have no box dimensions and are excluded from this calculation.
+              <a>Add dimensions for unmeasured games</a>.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DARK MODE -->
+    <div class="annotation-section">
+      <div class="annotation-label">Dark mode — Capacity Detail</div>
+      <div class="annotation-note">
+        Grade badges adapt to dark palette. S=gold, A=green, B=blue, D=amber, F=red on dark
+        backgrounds. Unfittable section header uses dark danger color. Utilization bar uses dark
+        score-high.
+      </div>
+      <div class="app-frame" data-theme="dark">
+        <div class="sidebar">
+          <div class="sidebar-brand">
+            <div class="brand-name">Shelf Judge</div>
+            <div class="brand-sub">Board Game Curator</div>
+          </div>
+          <div class="nav-section">
+            <div class="nav-label">Library</div>
+            <div class="nav-item active">&#9632; Collection</div>
+            <div class="nav-item">&#9632; Wishlist</div>
+            <div class="nav-item">&#9632; Add Games</div>
+            <div class="nav-label">Settings</div>
+            <div class="nav-item">&#9632; Axes</div>
+            <div class="nav-item">&#9632; Redundancy</div>
+            <div class="nav-item">&#9632; Shelves</div>
+          </div>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <a class="topbar-back">← Collection</a>
+            <div class="topbar-title">Shelf Capacity</div>
+            <div style="margin-left: auto; font-size: 12px; color: var(--text-muted)">
+              87 measured · 7 unmeasured
+            </div>
+          </div>
+          <div class="content-scroll">
+            <div class="cap-section">
+              <div class="cap-section-header">
+                <div class="cap-section-icon">📦</div>
+                <div class="cap-section-title">Shelf Assignments</div>
+                <div class="cap-section-count">14 shelves · 82 games placed</div>
+              </div>
+              <div class="shelf-assign-card">
+                <div class="shelf-assign-header">
+                  <div class="shelf-assign-meta">
+                    <div class="shelf-assign-name">Cube 1 (top-left)</div>
+                    <div class="shelf-assign-unit">Living Room Kallax · 13 × 13 × 13 in</div>
+                    <div class="util-bar-wrap">
+                      <div class="util-bar-track">
+                        <div class="util-bar-fill high" style="width: 82%"></div>
+                      </div>
+                      <div class="util-pct">82% · 1,803 / 2,197 in³</div>
+                    </div>
+                  </div>
+                  <div class="grade-badge grade-A">A</div>
+                </div>
+                <div class="shelf-games">
+                  <div class="shelf-game-row">
+                    <div class="shelf-game-name">Wingspan</div>
+                    <div class="shelf-game-score high">8.4</div>
+                    <div class="shelf-game-vol">358 in³</div>
+                  </div>
+                  <div class="shelf-game-row">
+                    <div class="shelf-game-name">Ark Nova</div>
+                    <div class="shelf-game-score high">8.1</div>
+                    <div class="shelf-game-vol">411 in³</div>
+                  </div>
+                  <div class="shelf-game-row">
+                    <div class="shelf-game-name">Ticket to Ride</div>
+                    <div class="shelf-game-score mid">6.2</div>
+                    <div class="shelf-game-vol">804 in³</div>
+                  </div>
+                </div>
+              </div>
+              <div class="shelf-assign-card">
+                <div class="shelf-assign-header">
+                  <div class="shelf-assign-meta">
+                    <div class="shelf-assign-name">Top shelf</div>
+                    <div class="shelf-assign-unit">Office Bookcase · 30 × 12 × 11 in</div>
+                    <div class="util-bar-wrap">
+                      <div class="util-bar-track">
+                        <div class="util-bar-fill high" style="width: 94%"></div>
+                      </div>
+                      <div class="util-pct">94% · 3,707 / 3,960 in³</div>
+                    </div>
+                  </div>
+                  <div class="grade-badge grade-S">S</div>
+                </div>
+                <div class="shelf-games">
+                  <div class="shelf-game-row">
+                    <div class="shelf-game-name">Spirit Island</div>
+                    <div class="shelf-game-score high">7.9</div>
+                    <div class="shelf-game-vol">560 in³</div>
+                  </div>
+                  <div class="shelf-game-row">
+                    <div class="shelf-game-name">Terraforming Mars</div>
+                    <div class="shelf-game-score mid">6.9</div>
+                    <div class="shelf-game-vol">820 in³</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="cap-section">
+              <div class="cap-section-header">
+                <div class="cap-section-icon">✕</div>
+                <div class="cap-section-title" style="color: var(--danger)">Unfittable Games</div>
+                <div class="cap-section-count">3 games · strongest cull candidates</div>
+              </div>
+              <table class="cull-table">
+                <thead>
+                  <tr>
+                    <th>Game</th>
+                    <th>Fitness</th>
+                    <th>Box Dimensions</th>
+                    <th>Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>
+                      <div>Axis &amp; Allies</div>
+                      <span class="unfittable-flag">Unfittable</span>
+                    </td>
+                    <td><span class="score-chip low">2.1</span></td>
+                    <td class="cull-dims">25 × 18 × 3 in</td>
+                    <td class="cull-reason">Box is 25 in wide; widest shelf is 14 in</td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <div>Twilight Imperium (4th)</div>
+                      <span class="unfittable-flag">Unfittable</span>
+                    </td>
+                    <td><span class="score-chip mid">4.8</span></td>
+                    <td class="cull-dims">17.3 × 17.3 × 5 in</td>
+                    <td class="cull-reason">Box is 17.3 in wide; widest shelf is 14 in</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="coverage-note">
+              7 games have no box dimensions and are excluded from this calculation.
+              <a>Add dimensions for unmeasured games</a>.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
