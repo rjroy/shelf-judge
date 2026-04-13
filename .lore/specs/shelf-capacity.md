@@ -246,13 +246,13 @@ interface OverflowEntry {
 
 ### Web UI: Capacity Display
 
-- REQ-SHELF-36: The collection page gains a capacity indicator when shelves are configured and at least one game has dimensions. The indicator shows:
+- REQ-SHELF-30: The collection page gains a capacity indicator when shelves are configured and at least one game has dimensions. The indicator shows:
   - When not overflowing and no unfittable games: "All N games placed" with a summary of shelf utilization (e.g., "14 shelves, avg 68% full").
   - When overflowing: "M games couldn't be placed" with visual emphasis (warning color). The count is `unfittableGames.length + overflowGames.length`.
   - When unfittable games exist: "N games don't fit any shelf" as a separate warning, regardless of displacement overflow.
   - When configured but no games have dimensions: "Shelves configured, but no game dimensions available."
 
-- REQ-SHELF-37: When there are unfittable games or overflow games, the collection page shows a link to a capacity detail view. This view displays:
+- REQ-SHELF-31: When there are unfittable games or overflow games, the collection page shows a link to a capacity detail view. This view displays:
   - **Shelf assignments section**: each shelf with its assigned games, utilization percentage (for constrained-height shelves), and grade from the algorithm. This is the primary output: a concrete answer to "what goes where."
   - **Unfittable games section** (if any): games that fit no shelf, sorted by fitness ascending, with the reason each doesn't fit. These are the strongest cull candidates.
   - **Displaced games section** (if any): games that fit somewhere by shape but were displaced by higher-priority games. Sorted by fitness ascending. These are the next cull candidates, or the user needs more shelf space.
@@ -262,7 +262,7 @@ This can be a dedicated sub-page, a modal, or a section on the collection page.
 
 ### CLI
 
-- REQ-SHELF-38: New CLI commands:
+- REQ-SHELF-32: New CLI commands:
 
 | Command                                                                 | Description                                        |
 | ----------------------------------------------------------------------- | -------------------------------------------------- |
@@ -274,9 +274,9 @@ This can be a dedicated sub-page, a modal, or a section on the collection page.
 | `shelf-judge shelf list`                                                | List all units and shelves                         |
 | `shelf-judge shelf capacity`                                            | Show assignments, unfittable, and displaced games  |
 
-- REQ-SHELF-39: `shelf-judge shelf add-shelf` accepts height=0 as a convention for "unconstrained height" (stored as `null`). This avoids optional positional arguments.
+- REQ-SHELF-33: `shelf-judge shelf add-shelf` accepts height=0 as a convention for "unconstrained height" (stored as `null`). This avoids optional positional arguments.
 
-- REQ-SHELF-40: `shelf-judge shelf status` output:
+- REQ-SHELF-34: `shelf-judge shelf status` output:
 
 ```
 Shelf Configuration: 3 units, 14 shelves (2 unconstrained-height)
@@ -295,7 +295,7 @@ Placed: 87 games across 14 shelves
 All measured games placed successfully.
 ```
 
-- REQ-SHELF-41: `shelf-judge shelf capacity` prints three sections. First: per-shelf assignments (shelf name, game count, utilization, grade). Second: unfittable games (name, fitness, dimensions, reason). Third: displaced games (name, fitness, volume). In `--json` mode, returns the full `ShelfCapacityResult` object.
+- REQ-SHELF-35: `shelf-judge shelf capacity` prints three sections. First: per-shelf assignments (shelf name, game count, utilization, grade). Second: unfittable games (name, fitness, dimensions, reason). Third: displaced games (name, fitness, volume). In `--json` mode, returns the full `ShelfCapacityResult` object.
 
 ### Game Display Enrichment
 
@@ -308,10 +308,10 @@ This spec covers significant scope across three connected concerns. The followin
 **Layer 1: Box Dimensions (REQ-SHELF-1 through REQ-SHELF-4, REQ-SHELF-5 through REQ-SHELF-7, REQ-SHELF-26, REQ-SHELF-42)**
 Types, manual entry UI/CLI, game detail display. No dependencies on shelf config or overflow. Can be implemented and shipped independently.
 
-**Layer 2: Shelf Configuration (REQ-SHELF-8 through REQ-SHELF-15, REQ-SHELF-27 through REQ-SHELF-29, REQ-SHELF-38 shelf-config commands)**
+**Layer 2: Shelf Configuration (REQ-SHELF-8 through REQ-SHELF-15, REQ-SHELF-27 through REQ-SHELF-29, REQ-SHELF-32 shelf-config commands)**
 Data model, storage, CRUD API, web UI for shelf management, CLI commands for shelf setup. Depends on shared types only. Can be implemented in parallel with Layer 1.
 
-**Layer 3: Capacity and Assignment (REQ-SHELF-16 through REQ-SHELF-25, REQ-SHELF-36 through REQ-SHELF-37, REQ-SHELF-40 through REQ-SHELF-41)**
+**Layer 3: Capacity and Assignment (REQ-SHELF-16 through REQ-SHELF-25, REQ-SHELF-30 through REQ-SHELF-31, REQ-SHELF-36 through REQ-SHELF-37)**
 Bin-packing algorithm integration, capacity endpoint, per-shelf assignments, collection page capacity indicator, capacity detail view, CLI capacity commands. Depends on both Layer 1 (box dimensions on games) and Layer 2 (shelf configuration). The bin-packing algorithm itself is defined in `.lore/designs/similarity-weighted-bin-packing.md`; this layer implements the adapter between Shelf Judge's data model and the algorithm's input/output.
 
 ## Scope Exclusions
