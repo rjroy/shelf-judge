@@ -524,6 +524,19 @@ export interface WishlistBreakdownEntry {
   confidence: PredictionConfidence;
 }
 
+export interface WishlistEntry {
+  id: string; // UUID
+  bggId: number;
+  name: string;
+  yearPublished: number | null;
+  thumbnailUrl: string | null;
+  predictedScore: number | null;
+  predictionConfidence: PredictionConfidence | null;
+  predictedBreakdown: WishlistBreakdownEntry[] | null;
+  nicheImpact: NicheImpact | null;
+  addedAt: string; // ISO 8601
+}
+
 // Shelf capacity types (shelf-capacity spec)
 
 export interface BoxDimensions {
@@ -550,17 +563,4 @@ export interface ShelfConfiguration {
   units: ShelfUnit[];
   createdAt: string; // ISO 8601
   updatedAt: string; // ISO 8601
-}
-
-export interface WishlistEntry {
-  id: string; // UUID
-  bggId: number;
-  name: string;
-  yearPublished: number | null;
-  thumbnailUrl: string | null;
-  predictedScore: number | null;
-  predictionConfidence: PredictionConfidence | null;
-  predictedBreakdown: WishlistBreakdownEntry[] | null;
-  nicheImpact: NicheImpact | null;
-  addedAt: string; // ISO 8601
 }
