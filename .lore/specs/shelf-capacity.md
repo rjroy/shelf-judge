@@ -1,7 +1,7 @@
 ---
 title: "Shelf Capacity (Box Dimensions, Shelf Config, Overflow)"
 date: 2026-04-12
-status: draft # FLAWED - see "Known Flaws" section before implementing
+status: draft
 tags: [spec, shelf-layout, box-dimensions, shelf-config, capacity, overflow, curation, bgg-versions]
 modules: [shared, daemon, web, cli]
 req-prefix: SHELF
@@ -10,6 +10,7 @@ related:
   - .lore/issues/shelf-layout-designer.md
   - .lore/vision.md
   - .lore/designs/mvp-data-model.md
+  - .lore/designs/similarity-weighted-bin-packing.md
   - .lore/research/bgg-api.md
 ---
 
@@ -19,9 +20,9 @@ related:
 
 This spec covers three connected layers of the shelf layout designer: storing physical box dimensions per game (brainstorm Proposal 1), modeling the user's shelf configuration (a minimal cut of brainstorm Proposal 2), and computing shelf capacity overflow (brainstorm Proposal 4).
 
-The core curation question is "do I have space, and if not, what goes?" But that question is meaningless without shape. A single total-volume number fails because the constraint isn't cubic centimeters, it's whether a box physically fits on a shelf. A 25-inch vintage game box doesn't fit in a 14-inch Kallax cube regardless of how much total volume remains. The overflow calculation must check each game against individual shelf dimensions.
+The core curation question is "do I have space, and if not, what goes?" But that question is meaningless without shape. A single total-volume number fails because the constraint isn't cubic centimeters, it's whether a box physically fits on a shelf. A 25-inch vintage game box doesn't fit in a 14-inch Kallax cube regardless of how much total volume remains.
 
-This requires three things: knowing each game's box size, knowing each shelf's interior dimensions, and comparing the two per-shelf to find games that don't fit anywhere.
+This requires three things: knowing each game's box size, knowing each shelf's interior dimensions, and running a bin-packing algorithm that assigns games to specific shelves. The overflow computation is driven by the algorithm's placement results: games the algorithm couldn't place are the overflow. The algorithm is defined in `.lore/designs/similarity-weighted-bin-packing.md` and handles spatial fitting, similarity-based grouping, and overflow detection as a unified process.
 
 ## Entry Points
 
@@ -170,30 +171,49 @@ When shelves are provided in a unit update, shelves with an `id` are updated, sh
 
 ### Overflow Computation
 
-- REQ-SHELF-22: A game "fits" on a shelf if its box can be oriented so that the box dimensions fit within the shelf dimensions. The system checks all six orientations of the box (three axis-aligned rotations, each with two flips). For each orientation, the three box dimensions are compared against shelf width, height, and depth. If the shelf's height is null (unconstrained), only width and depth are checked. A game fits a shelf if at least one orientation fits.
+The overflow computation is driven by the similarity-weighted bin-packing algorithm defined in `.lore/designs/similarity-weighted-bin-packing.md`. Shelves map to bins, games map to items. The algorithm assigns games to specific shelves and produces overflow (Phase 4) for games that don't fit. The spec below defines how the daemon maps Shelf Judge's data into the algorithm's inputs and what the API exposes from the algorithm's output.
 
-- REQ-SHELF-23: A game "fits the configuration" if it fits on at least one shelf in any unit. A game that fits no shelf is "unfittable" - it physically cannot be stored in the user's current shelf setup.
+- REQ-SHELF-22: A game "fits" on a shelf if its box can be oriented so that the box dimensions fit within the shelf dimensions. The algorithm's rotation logic (see design doc, "Item Rotation and Fit") handles this: it checks orientations according to axis priority and minimization flags. For shelves with `height: null` (unconstrained), the height axis is unconstrained and only width and depth are checked. The six-orientation fit check from the original spec maps to the algorithm's rotation with `force_axis_0_width: true` (games face outward on the shelf).
 
-- REQ-SHELF-24: The daemon provides an overflow endpoint:
+- REQ-SHELF-23: A game "fits the configuration" if it fits on at least one shelf in any unit. A game that fits no shelf is "unfittable," it physically cannot be stored in the user's current shelf setup. These games are identified before the algorithm runs (a pre-pass geometric check) and reported separately from algorithm overflow.
 
-| Operation ID     | Method | Path                  | Description               |
-| ---------------- | ------ | --------------------- | ------------------------- |
-| `shelf.overflow` | GET    | `/api/shelf/overflow` | Compute capacity overflow |
+- REQ-SHELF-24: The daemon provides a capacity endpoint:
 
-- REQ-SHELF-25: The overflow response shape:
+| Operation ID     | Method | Path                  | Description                                 |
+| ---------------- | ------ | --------------------- | ------------------------------------------- |
+| `shelf.capacity` | GET    | `/api/shelf/capacity` | Run bin-packing and return capacity results |
+
+- REQ-SHELF-25: The capacity response shape:
 
 ```typescript
-interface ShelfOverflow {
+interface ShelfCapacityResult {
   configured: boolean; // true if at least one shelf exists
   totalShelfCount: number; // total number of shelves across all units
-  totalCapacityCm3: number; // sum of all shelf volumes (null-height shelves excluded from volume)
-  totalCollectionCm3: number; // sum of known game volumes
   gamesWithDimensions: number; // count of games with boxDimensions
   gamesWithoutDimensions: number; // count of games with boxDimensions: null
-  unfittableGames: UnfittableEntry[]; // games that fit NO shelf
-  perShelfUtilization: ShelfUtilization[]; // per-shelf capacity summary
-  overflowing: boolean; // totalCollectionCm3 > totalCapacityCm3 (volume overflow)
-  overflowList: OverflowEntry[] | null; // null when not overflowing (volume)
+  overflowing: boolean; // true if overflowGames is non-empty
+  assignments: ShelfAssignment[]; // per-shelf: which games were assigned, utilization
+  unfittableGames: UnfittableEntry[]; // games that fit NO shelf by shape
+  overflowGames: OverflowEntry[]; // games that fit somewhere by shape but were displaced
+}
+
+interface ShelfAssignment {
+  shelfId: string;
+  shelfName: string;
+  unitId: string;
+  unitName: string;
+  capacityCm3: number | null; // null for unconstrained-height shelves
+  usedCm3: number; // sum of assigned game volumes
+  utilization: number | null; // usedCm3 / capacityCm3, null if unconstrained
+  games: AssignedGame[]; // games placed on this shelf by the algorithm
+  grade: string; // S, A, B, C, D, F from algorithm grading (see design doc)
+}
+
+interface AssignedGame {
+  gameId: string;
+  gameName: string;
+  fitnessScore: number;
+  volumeCm3: number;
 }
 
 interface UnfittableEntry {
@@ -204,35 +224,26 @@ interface UnfittableEntry {
   reason: string; // e.g., "Box is 63 x 10 x 10 cm; widest shelf is 36 cm"
 }
 
-interface ShelfUtilization {
-  shelfId: string;
-  shelfName: string;
-  unitName: string;
-  capacityCm3: number | null; // null for unconstrained-height shelves
-  fittableGameCount: number; // how many games COULD fit on this shelf (by shape)
-}
-
 interface OverflowEntry {
   gameId: string;
   gameName: string;
-  fitnessScore: number; // current fitness score (0 if vetoed)
-  volumeCm3: number; // this game's box volume
-  cumulativeFreedCm3: number; // running total if this game and all above it were removed
-  wouldResolveOverflow: boolean; // true if cumulativeFreedCm3 >= overflow amount
+  fitnessScore: number;
+  volumeCm3: number;
+  fittable: boolean; // true = fits a shelf by shape but displaced; false = dimensionless
 }
 ```
 
-- REQ-SHELF-26: The `unfittableGames` list contains every game with known dimensions that fits no shelf in the configuration. These are the strongest cull candidates: they literally cannot be stored. The list is sorted by fitness ascending (lowest fitness first). The `reason` field is a human-readable explanation of why the game doesn't fit (e.g., which dimension exceeds all available shelves).
+- REQ-SHELF-26: The `unfittableGames` list contains every game with known dimensions that fits no shelf in the configuration. These are the strongest cull candidates: they literally cannot be stored. The list is sorted by fitness ascending (lowest fitness first). The `reason` field is a human-readable explanation of why the game doesn't fit (e.g., which dimension exceeds all available shelves). Unfittable games are excluded from the packing algorithm; they are identified by a pre-pass geometric check.
 
-- REQ-SHELF-27: The `overflowList` addresses volume overflow separately from shape overflow. Even after removing unfittable games, the remaining games may exceed total shelf volume. The overflow list is ordered by fitness ascending and includes games with known dimensions that DO fit at least one shelf. It shows which lowest-fitness fittable games would need to be removed to bring volume under capacity. The list includes entries up to and including the first entry where `wouldResolveOverflow` is true, plus up to 3 additional entries. If no combination resolves the overflow, the entire list of fittable dimensioned games is returned.
+- REQ-SHELF-27: The `overflowGames` list contains games that the bin-packing algorithm could not place (Phase 4 output). These are games that fit at least one shelf by shape but were displaced because higher-priority games filled the available space first. The list is sorted by fitness ascending (lowest fitness first). The `fittable` flag distinguishes between games that were displaced (fit somewhere by shape but no room) and dimensionless games that bypassed spatial logic. Games without `boxDimensions` are excluded from the algorithm entirely and are counted in `gamesWithoutDimensions`.
 
-- REQ-SHELF-28: Shelves with `height: null` (unconstrained) are excluded from the `totalCapacityCm3` sum because their volume is undefined. They still participate in shape-fitting: a game can fit on an unconstrained shelf if its width and depth fit. This means "on top of" spaces contribute to answering "can this game be stored?" without contributing to the volume math.
+- REQ-SHELF-28: Shelves with `height: null` (unconstrained) map to bins with a dimensionless height axis in the algorithm. They participate fully in the packing algorithm: games can be assigned to them and their contents are tracked. Their `capacityCm3` is `null` in the response because their volume is undefined (no height to multiply). Their `utilization` is also `null`. "On top of" spaces accept games and show what's assigned to them, but don't contribute to volume-based summary statistics.
 
-- REQ-SHELF-29: When no shelf configuration exists (no units), the overflow endpoint returns a valid response with `configured: false` and empty/zero values. No 400 error. The UI uses `configured` to show a "configure your shelves" prompt.
+- REQ-SHELF-29: When no shelf configuration exists (no units), the capacity endpoint returns a valid response with `configured: false` and empty/zero values. No 400 error. The UI uses `configured` to show a "configure your shelves" prompt.
 
-- REQ-SHELF-30: When no games have box dimensions, the overflow endpoint returns a valid response with `gamesWithDimensions: 0`, `overflowing: false`, `unfittableGames: []`, and `overflowList: null`.
+- REQ-SHELF-30: When no games have box dimensions, the capacity endpoint returns a valid response with `gamesWithDimensions: 0`, `overflowing: false`, `unfittableGames: []`, `overflowGames: []`, and empty `assignments`.
 
-- REQ-SHELF-31: The overflow computation uses current fitness scores. It does not cache or snapshot scores. Each call recomputes against the current collection state.
+- REQ-SHELF-31: The capacity computation uses current fitness scores and current collection state. It does not cache or snapshot scores. Each call runs the bin-packing algorithm fresh against the current data. The algorithm's similarity function uses the existing composite distance from `feature-vector.ts`.
 
 ### Web UI: Game Dimensions Display
 
@@ -251,17 +262,18 @@ interface OverflowEntry {
 
 - REQ-SHELF-35: Shelf configuration is added to the sidebar navigation under a "Shelves" group or within the existing settings navigation. Exact placement is an implementation decision.
 
-### Web UI: Overflow Display
+### Web UI: Capacity Display
 
 - REQ-SHELF-36: The collection page gains a capacity indicator when shelves are configured and at least one game has dimensions. The indicator shows:
-  - When not overflowing and no unfittable games: "Shelf: 72% full (145L of 200L)" using liters (cm3 / 1000) for readability.
-  - When overflowing: "Shelf: 112% full (224L of 200L), 24L over capacity" with visual emphasis (warning color).
-  - When unfittable games exist: "N games don't fit any shelf" as a separate warning, regardless of volume overflow.
+  - When not overflowing and no unfittable games: "All N games placed" with a summary of shelf utilization (e.g., "14 shelves, avg 68% full").
+  - When overflowing: "M games couldn't be placed" with visual emphasis (warning color). The count is `unfittableGames.length + overflowGames.length`.
+  - When unfittable games exist: "N games don't fit any shelf" as a separate warning, regardless of displacement overflow.
   - When configured but no games have dimensions: "Shelves configured, but no game dimensions available."
 
-- REQ-SHELF-37: When there are unfittable games or volume overflow, the collection page shows a link to an overflow detail view. This view displays:
-  - **Unfittable games section** (if any): games that fit no shelf, sorted by fitness ascending, with the reason each doesn't fit.
-  - **Volume overflow section** (if overflowing): the overflow list from REQ-SHELF-27, showing game name, fitness score, box volume, cumulative freed volume, and a marker on the row that would resolve volume overflow.
+- REQ-SHELF-37: When there are unfittable games or overflow games, the collection page shows a link to a capacity detail view. This view displays:
+  - **Shelf assignments section**: each shelf with its assigned games, utilization percentage (for constrained-height shelves), and grade from the algorithm. This is the primary output: a concrete answer to "what goes where."
+  - **Unfittable games section** (if any): games that fit no shelf, sorted by fitness ascending, with the reason each doesn't fit. These are the strongest cull candidates.
+  - **Displaced games section** (if any): games that fit somewhere by shape but were displaced by higher-priority games. Sorted by fitness ascending. These are the next cull candidates, or the user needs more shelf space.
   - **Dimension coverage note**: "N games have no box dimensions and are excluded from this calculation. [Add dimensions]" with a link to filter the collection to games without dimensions.
 
 This can be a dedicated sub-page, a modal, or a section on the collection page.
@@ -270,15 +282,15 @@ This can be a dedicated sub-page, a modal, or a section on the collection page.
 
 - REQ-SHELF-38: New CLI commands:
 
-| Command                                                                 | Description                                          |
-| ----------------------------------------------------------------------- | ---------------------------------------------------- |
-| `shelf-judge shelf status`                                              | Show shelf config summary, capacity, overflow        |
-| `shelf-judge shelf add-unit <name>`                                     | Add a shelf unit                                     |
-| `shelf-judge shelf add-shelf <unit-id> <name> <width> <height> <depth>` | Add a shelf to a unit (height=0 for unconstrained)   |
-| `shelf-judge shelf remove-unit <unit-id>`                               | Remove a shelf unit                                  |
-| `shelf-judge shelf remove-shelf <shelf-id>`                             | Remove a shelf                                       |
-| `shelf-judge shelf list`                                                | List all units and shelves                           |
-| `shelf-judge shelf overflow`                                            | Show overflow details (unfittable + volume overflow) |
+| Command                                                                 | Description                                        |
+| ----------------------------------------------------------------------- | -------------------------------------------------- |
+| `shelf-judge shelf status`                                              | Show shelf config summary and placement status     |
+| `shelf-judge shelf add-unit <name>`                                     | Add a shelf unit                                   |
+| `shelf-judge shelf add-shelf <unit-id> <name> <width> <height> <depth>` | Add a shelf to a unit (height=0 for unconstrained) |
+| `shelf-judge shelf remove-unit <unit-id>`                               | Remove a shelf unit                                |
+| `shelf-judge shelf remove-shelf <shelf-id>`                             | Remove a shelf                                     |
+| `shelf-judge shelf list`                                                | List all units and shelves                         |
+| `shelf-judge shelf capacity`                                            | Show assignments, unfittable, and displaced games  |
 
 - REQ-SHELF-39: `shelf-judge shelf add-shelf` accepts height=0 as a convention for "unconstrained height" (stored as `null`). This avoids optional positional arguments.
 
@@ -286,23 +298,22 @@ This can be a dedicated sub-page, a modal, or a section on the collection page.
 
 ```
 Shelf Configuration: 3 units, 14 shelves (2 unconstrained-height)
-Total Capacity: 200.0L (excluding unconstrained shelves)
-Collection Volume: 224.3L (87 of 94 games measured)
-Volume Status: OVER CAPACITY by 24.3L
-Unfittable Games: 3 (don't fit any shelf)
+Games Measured: 87 of 94
+Placed: 82 games across 14 shelves
+Unfittable: 3 (don't fit any shelf)
+Displaced: 2 (fit by shape but no room)
 ```
 
-Or when not overflowing:
+Or when everything fits:
 
 ```
 Shelf Configuration: 3 units, 14 shelves (2 unconstrained-height)
-Total Capacity: 200.0L (excluding unconstrained shelves)
-Collection Volume: 145.2L (87 of 94 games measured)
-Volume Status: 54.8L remaining (72% full)
-Unfittable Games: 0
+Games Measured: 87 of 94
+Placed: 87 games across 14 shelves
+All measured games placed successfully.
 ```
 
-- REQ-SHELF-41: `shelf-judge shelf overflow` prints two sections. First: unfittable games (name, fitness, dimensions, reason). Second: volume overflow list (rank, name, fitness, volume, cumulative freed, resolution marker). In `--json` mode, returns the full `ShelfOverflow` object.
+- REQ-SHELF-41: `shelf-judge shelf capacity` prints three sections. First: per-shelf assignments (shelf name, game count, utilization, grade). Second: unfittable games (name, fitness, dimensions, reason). Third: displaced games (name, fitness, volume). In `--json` mode, returns the full `ShelfCapacityResult` object.
 
 ### Game Display Enrichment
 
@@ -318,30 +329,32 @@ Types, BGG parser extension, manual entry UI/CLI, game detail display. No depend
 **Layer 2: Shelf Configuration (REQ-SHELF-14 through REQ-SHELF-21, REQ-SHELF-33 through REQ-SHELF-35, REQ-SHELF-38 shelf-config commands)**
 Data model, storage, CRUD API, web UI for shelf management, CLI commands for shelf setup. Depends on shared types only. Can be implemented in parallel with Layer 1.
 
-**Layer 3: Overflow Computation (REQ-SHELF-22 through REQ-SHELF-31, REQ-SHELF-36 through REQ-SHELF-37, REQ-SHELF-40 through REQ-SHELF-41)**
-Fit-checking algorithm, overflow endpoint, collection page indicator, overflow detail view, CLI overflow commands. Depends on both Layer 1 (box dimensions on games) and Layer 2 (shelf configuration).
+**Layer 3: Capacity and Assignment (REQ-SHELF-22 through REQ-SHELF-31, REQ-SHELF-36 through REQ-SHELF-37, REQ-SHELF-40 through REQ-SHELF-41)**
+Bin-packing algorithm integration, capacity endpoint, per-shelf assignments, collection page capacity indicator, capacity detail view, CLI capacity commands. Depends on both Layer 1 (box dimensions on games) and Layer 2 (shelf configuration). The bin-packing algorithm itself is defined in `.lore/designs/similarity-weighted-bin-packing.md`; this layer implements the adapter between Shelf Judge's data model and the algorithm's input/output.
 
 ## Scope Exclusions
 
-- **Shelf neighbor relationships.** The brainstorm's `ShelfNeighbor` model (adjacent, same-room, different-room) is deferred. It matters for similarity-aware shelf assignment (Proposal 3/6) but not for capacity overflow. Neighbor relationships have no effect on "does this box fit."
-- **Game-to-shelf assignment.** No tracking of which game lives on which shelf. Games have dimensions; shelves have dimensions; the system checks fit. Which game goes where is Proposal 3 scope.
+- **Shelf neighbor relationships.** The brainstorm's `ShelfNeighbor` model (adjacent, same-room, different-room) is deferred. The bin-packing algorithm supports neighbor coherence scoring, but the shelf configuration data model in this spec does not include neighbor relationships. Neighbor weights in the algorithm config should be set to 0 until the neighbor model is added.
 - **Spatial visualization.** No shelf rendering, no drag-and-drop. That is Proposal 5 scope.
-- **Niche-aware shelf annotations.** No "your deck-building games are scattered" annotations. That is Proposal 6 scope.
+- **Niche-aware shelf annotations.** No "your deck-building games are scattered" annotations. That is Proposal 6 scope. (The algorithm's similarity-based grouping achieves this implicitly through placement, but the annotations are a separate display concern.)
+- **Manual assignment overrides.** The algorithm assigns games to shelves automatically. Users cannot manually override assignments in this spec. Manual overrides would map to the algorithm's "soft location override" concept and are a natural follow-up.
 - **Box dimension sorting/filtering.** The collection page does not gain sort-by-volume or filter-by-size in this spec.
-- **Estimation for missing dimensions.** Games without BGG version data and no manual entry have `null` dimensions. The system does not estimate box sizes.
+- **Estimation for missing dimensions.** Games without BGG version data and no manual entry have `null` dimensions. The system does not estimate box sizes. These games are excluded from the packing algorithm.
 - **BGG version/edition selection.** The system takes the first version with complete dimensions. No UI for choosing which edition's dimensions to use.
-- **Optimal packing.** The overflow calculation checks whether a game CAN fit on a shelf, not whether all games fit simultaneously. True bin-packing (assigning games to specific shelves to maximize utilization) is Proposal 3 scope.
 - **Weight limits.** Physical weight of games is not considered. A shelf might hold 5 heavy games by volume but sag under their weight. This is too variable to model usefully.
+- **Algorithm tuning UI.** The bin-packing algorithm has configurable weights (space vs. similarity vs. neighbor). This spec uses sensible defaults. A settings UI for tuning these weights is deferred.
 
 ## Exit Points
 
-| Exit                      | Triggers When                                                 | Target                    |
-| ------------------------- | ------------------------------------------------------------- | ------------------------- |
-| Shelf neighbors           | User wants to model spatial relationships between shelf units | [STUB: shelf-neighbors]   |
-| Shelf assignment          | User wants to assign games to specific shelves                | [STUB: shelf-assignment]  |
-| Dimension-based filtering | User wants to sort/filter collection by box size              | [STUB: dimension-filter]  |
-| Edition selection         | User wants to pick which BGG edition's dimensions to use      | [STUB: edition-selection] |
-| Shelf visualization       | User wants a visual representation of their shelves           | [STUB: shelf-visualizer]  |
+| Exit                      | Triggers When                                                    | Target                    |
+| ------------------------- | ---------------------------------------------------------------- | ------------------------- |
+| Shelf neighbors           | User wants to model spatial relationships between shelf units    | [STUB: shelf-neighbors]   |
+| Manual assignment         | User wants to override the algorithm's game-to-shelf assignments | [STUB: manual-assignment] |
+| Algorithm tuning          | User wants to adjust packing weights (space vs. similarity)      | [STUB: algorithm-tuning]  |
+| Dimension-based filtering | User wants to sort/filter collection by box size                 | [STUB: dimension-filter]  |
+| Edition selection         | User wants to pick which BGG edition's dimensions to use         | [STUB: edition-selection] |
+| Shelf visualization       | User wants a visual representation of their shelves              | [STUB: shelf-visualizer]  |
+| Niche shelf annotations   | User wants "your deck-building games are on shelf 3" display     | [STUB: niche-annotations] |
 
 ## Success Criteria
 
@@ -368,19 +381,20 @@ Fit-checking algorithm, overflow endpoint, collection page indicator, overflow d
 - [ ] Empty name is rejected for both units and shelves
 - [ ] Full config PUT replaces the entire configuration
 
-**Overflow Computation:**
+**Capacity (Bin-Packing):**
 
-- [ ] A box that fits a shelf in any of the six orientations is reported as fitting
+- [ ] A box that fits a shelf in any valid rotation is reported as fitting
 - [ ] A box that exceeds all shelves in every orientation is reported as unfittable with a correct reason
 - [ ] Unconstrained-height shelves allow any box height but still check width and depth
-- [ ] Unconstrained-height shelves are excluded from `totalCapacityCm3`
+- [ ] Unconstrained-height shelves have `capacityCm3: null` and `utilization: null`
 - [ ] `unfittableGames` is sorted by fitness ascending
-- [ ] Volume overflow list includes only fittable games, sorted by fitness ascending
-- [ ] `wouldResolveOverflow` is true on the correct entry
-- [ ] `cumulativeFreedCm3` is a running total
-- [ ] Games without dimensions are excluded from all overflow calculations
-- [ ] Overflow endpoint returns `configured: false` when no shelf units exist
-- [ ] Overflow endpoint handles mixed dimensioned and undimensioned games correctly
+- [ ] `overflowGames` contains only games displaced by the algorithm (not unfittable games)
+- [ ] Per-shelf assignments list the games placed by the algorithm with correct utilization
+- [ ] Games without dimensions are excluded from the packing algorithm and counted in `gamesWithoutDimensions`
+- [ ] Capacity endpoint returns `configured: false` when no shelf units exist
+- [ ] Capacity endpoint handles mixed dimensioned and undimensioned games correctly
+- [ ] Algorithm similarity function uses composite distance from `feature-vector.ts`
+- [ ] Shelf grades (S through F) are computed and included in per-shelf assignments
 
 ### Manual Verification
 
@@ -389,10 +403,11 @@ Fit-checking algorithm, overflow endpoint, collection page indicator, overflow d
 - [ ] Create a shelf configuration with multiple units and shelves of different sizes
 - [ ] Add an unconstrained-height shelf ("on top of"), verify it accepts any box height
 - [ ] With a large-box game that exceeds all shelf widths, verify it appears in unfittable games with a clear reason
-- [ ] With collection exceeding shelf capacity, verify capacity indicator shows overflow on collection page
-- [ ] Click through to overflow detail view, verify unfittable games and volume overflow are both shown
+- [ ] With collection exceeding shelf capacity, verify capacity indicator shows overflow count on collection page
+- [ ] Click through to capacity detail view, verify per-shelf assignments, unfittable games, and displaced games are shown
+- [ ] Verify shelf grades (S through F) appear on each shelf in the capacity detail view
 - [ ] CLI `shelf-judge shelf list` shows all units and shelves with dimensions
-- [ ] CLI `shelf-judge shelf overflow` shows unfittable and overflow sections
+- [ ] CLI `shelf-judge shelf capacity` shows assignments, unfittable, and displaced sections
 
 ## AI Validation
 
@@ -408,64 +423,58 @@ Fit-checking algorithm, overflow endpoint, collection page indicator, overflow d
 - Verify all three Thing endpoint call sites in `bgg-client.ts` include `versions=1`
 - Verify both web proxy route and CLI client helper are updated for all new endpoints (shelf config CRUD, overflow)
 - Verify `Game` type change does not break existing serialization/deserialization (null default for new field)
-- Test the six-orientation fit check with edge cases: a box that fits only when rotated, a box that is exactly shelf-sized, a box 1mm too large
-- Test overflow calculation with a mix of dimensioned and undimensioned games, unfittable and fittable games, and both volume overflow and no-overflow scenarios
-- Verify that shelves with `height: null` participate in fit-checking but not in volume totals
+- Test the rotation/fit check with edge cases: a box that fits only when rotated, a box that is exactly shelf-sized, a box 1mm too large
+- Test capacity computation with a mix of dimensioned and undimensioned games, unfittable and fittable games, and both overflowing and non-overflowing scenarios
+- Verify that shelves with `height: null` participate in the packing algorithm but report `null` for capacity and utilization
+- Verify the algorithm's similarity function correctly uses composite distance and that games with similar niches cluster on the same shelf
+- Verify displaced games (fittable by shape but crowded out) are correctly distinguished from unfittable games
 
 ## Constraints
 
 - No modification to `FitnessResult`, `CollectionProfile`, `NichePosition`, or any collection-level computation type. Box dimensions, shelf config, and overflow are orthogonal to fitness scoring.
 - The BGG `versions=1` parameter adds data to the API response but does not change the structure of existing fields. Existing parsing must not break.
-- Shelf configuration and overflow storage follow the same atomic write pattern as all other storage files.
-- The overflow list requires fitness scores, which means it depends on the fitness computation pipeline. If a game has no fitness score (no axes rated), it appears at the bottom of the overflow list (fitness 0) and is a natural cull candidate.
+- Shelf configuration storage follows the same atomic write pattern as all other storage files. The capacity endpoint computes results on demand (no cached capacity state).
+- The capacity computation requires fitness scores for overflow ordering and the algorithm's similarity function requires feature vectors from the niche engine. If a game has no fitness score (no axes rated), it receives fitness 0 and is a natural cull candidate. If a game has no feature vector, its similarity to other games is 0 and it will be placed based on spatial fit alone.
+- The bin-packing algorithm is defined in `.lore/designs/similarity-weighted-bin-packing.md`. Layer 3 implements an adapter between Shelf Judge's data model and the algorithm's generic item/bin interface. The algorithm module itself should be implemented as a standalone service with no Shelf Judge domain knowledge, accepting items and bins as inputs.
 - Dimension display uses centimeters throughout. No unit conversion UI. Users in imperial-unit countries enter centimeters.
 
-## Known Flaws (2026-04-12 review)
+## Known Flaws (2026-04-12 review, reconciled 2026-04-12)
 
-This spec has structural problems that need resolution before implementation. They are documented here so the next session can address them with fresh context, potentially informed by the user's prior implementation of this feature.
+The original spec had structural problems in Layer 3 (overflow computation). Most were resolved by adopting the similarity-weighted bin-packing algorithm (`.lore/designs/similarity-weighted-bin-packing.md`) as the computation engine. Resolution status for each flaw:
 
-### Flaw 1: The volume overflow calculation contradicts the spec's own premise
+### Flaw 1: Volume pooling. **Resolved.**
 
-The overview argues that a single total-volume number fails because shape matters: "A 25-inch vintage game box doesn't fit in a 14-inch Kallax cube regardless of how much total volume remains." The spec then introduces per-shelf dimensions and a shape-aware unfittable check to solve this. But `overflowing` (REQ-SHELF-25) is defined as `totalCollectionCm3 > totalCapacityCm3`, which is exactly the pooled-volume comparison the overview just argued against.
+The original spec defined `overflowing` as `totalCollectionCm3 > totalCapacityCm3`, which pooled volume across mismatched shelves. The algorithm doesn't pool volume. It assigns games to specific shelves with per-bin spatial tracking. Overflow is now determined by algorithm output: games that the packing algorithm couldn't place. No aggregate volume comparison exists in the revised spec.
 
-Volume from mismatched shelves is pooled. A game that only fits the bookcase gets its volume credited against Kallax capacity. The system can report "not overflowing" when every individual shelf is actually full, because volume from shelves where the game can't fit is counted as available space.
+### Flaw 2: No game-to-shelf assignment. **Resolved.**
 
-The unfittable check is clean and self-contained. The volume overflow is not. It produces numbers that are misleading in exactly the way the spec says a single-volume number would be.
+The original spec deferred assignment. The bin-packing algorithm IS an assignment algorithm. The revised `ShelfCapacityResult` includes per-shelf `assignments` showing which games the algorithm placed where. The overflow list is Phase 4 output: games that fit somewhere by shape but were displaced by higher-priority games.
 
-### Flaw 2: No game-to-shelf assignment makes the overflow list fictional
+### Flaw 3: `perShelfUtilization` was fictional. **Resolved.**
 
-The overflow list (REQ-SHELF-27) shows "which lowest-fitness fittable games would need to be removed to bring volume under capacity." But without knowing which games are on which shelves, the system treats the entire collection as simultaneously occupying all shelf space. A game sitting in a box in the garage counts against shelf capacity. A game the user hasn't placed yet counts. The overflow list answers "if your entire collection were somehow distributed across your shelves, you'd be over by X liters" which is not the same question as "your shelves are full."
+The original `ShelfUtilization` type promised utilization but could only deliver theoretical fit counts. The revised `ShelfAssignment` type has concrete data: actual assigned games, real `usedCm3`, and computed `utilization` ratios. The algorithm also provides per-shelf `grade` ratings.
 
-The spec explicitly defers assignment to a stub (shelf-assignment). But the overflow calculation implicitly assumes assignment (all games are assigned to all shelves) without acknowledging it.
+### Flaw 4: Unconstrained-height shelves created a display gap. **Resolved.**
 
-### Flaw 3: `perShelfUtilization` cannot be computed without assignment
+The original spec excluded unconstrained-height shelves from volume totals, making the "72% full" display misleading. The revised spec avoids aggregate volume percentages entirely. Unconstrained-height shelves participate in the packing algorithm (games are assigned to them) and report their contents, but show `null` for capacity and utilization. The collection page indicator reports placement counts ("All N games placed" or "M games couldn't be placed"), not volume percentages.
 
-The `ShelfUtilization` type in REQ-SHELF-25 has `fittableGameCount` (how many games could fit by shape) and `capacityCm3`. Without assignment, there is no way to know how full any individual shelf is. The field name promises utilization but can only deliver capacity and a theoretical shape-fit count. An implementer will have to invent what this field means.
+### Flaw 5: BGG `versions=1` response structure is unverified. **Unresolved.**
 
-### Flaw 4: Unconstrained-height shelves create a display gap
+This flaw is unrelated to the overflow computation. REQ-SHELF-6 still prescribes a parser for a response format that hasn't been confirmed against actual BGG output. Implementation must inspect real BGG responses before committing to the parser. The risk is low (the format is plausible) but the spec should not claim certainty about an unverified structure.
 
-REQ-SHELF-28 excludes unconstrained-height shelves from `totalCapacityCm3` because their volume is undefined. But REQ-SHELF-36 shows "72% full (145L of 200L)" which uses `totalCapacityCm3` as the denominator. If a significant portion of the user's storage is "on top of" spaces, the capacity number excludes where their oversized games actually live. The percentage is misleading.
+### Flaw 6: Refresh vs. manual override interaction is unspecified. **Unresolved.**
 
-### Flaw 5: BGG `versions=1` response structure is unverified
+This flaw is unrelated to the overflow computation. The interaction between REQ-SHELF-10 (refresh populates dimensions) and REQ-SHELF-11 (manual overrides BGG) still needs an explicit statement. Recommended resolution: refresh should NOT overwrite `source: "manual"` dimensions. If the user manually measured a box, that measurement should survive a BGG refresh. The refresh should only populate dimensions when `boxDimensions` is `null` or `source` is `"bgg"`.
 
-REQ-SHELF-6 describes the expected XML structure (`<width value="..."/>`, `<length value="..."/>`, `<depth value="..."/>`) but the BGG API research doc doesn't document this structure, and the brainstorm's description is sourced from its own investigation, not from verified API responses. The spec is prescribing a parser for a response format that hasn't been confirmed against actual BGG output. Units (inches vs. cm vs. unspecified) are assumed, not verified.
+### Flaw 7: Spec may be overcomplicated. **Partially resolved.**
 
-### Flaw 6: Refresh vs. manual override interaction is unspecified
-
-REQ-SHELF-10 says refreshing BGG data "MUST also populate `boxDimensions`." REQ-SHELF-11 says manual values override BGG values. But if a user manually sets dimensions and then refreshes BGG data, does the refresh overwrite the manual entry? The spec implies no (manual overrides BGG) but doesn't state what happens during an active refresh action. A refresh is user-initiated, not passive import. The behavior needs an explicit statement.
-
-### Flaw 7: The spec may be overcomplicated
-
-The user has implemented this feature before and observed that this spec is "either currently over complicating this or not trying hard enough." The three-layer approach (box dimensions + shelf config + overflow) with full CRUD APIs, shape-fitting algorithms, and two overflow categories (unfittable + volume) may be solving a harder problem than the user's prior implementation required. The prior implementation may have found a simpler model that worked. This spec was written without reference to that prior work.
-
-### What works
-
-The unfittable-games check (REQ-SHELF-22 through REQ-SHELF-26) is the one genuinely self-contained overflow output. Given box dimensions and shelf dimensions, "does this game fit anywhere?" has a crisp yes/no answer that doesn't require assignment. The box dimensions layer (REQ-SHELF-1 through REQ-SHELF-13) is clean and independent. The shelf configuration data model (REQ-SHELF-14 through REQ-SHELF-21) is reasonable for what it describes. The problems are in how the overflow calculation uses these inputs.
+The bin-packing algorithm simplifies the spec by replacing the hand-built overflow logic (volume pooling, cumulative freed volume, `wouldResolveOverflow` markers) with "run the packer, report results." The three-category output (assigned, unfittable, displaced) is cleaner than the original two-category model (unfittable + volume overflow). However, the algorithm itself is substantial machinery. Whether this is overcomplication or appropriate complexity depends on whether the similarity-based grouping adds value for the user. The algorithm can be configured to weight space heavily and similarity lightly for a simpler initial experience.
 
 ## Context
 
 - [Brainstorm: Shelf Layout Designer](.lore/brainstorms/shelf-layout-designer.md): Proposals 1, 2, and 4, with resolved open questions. The brainstorm confirms box dimensions are load-bearing for capacity math, that the user's collection exceeds shelf capacity as a default state, and that shape-fitting matters more than volume totals (Kallax cubes vs. long vintage boxes).
+- [Design: Similarity-Weighted 3D Bin Packing](.lore/designs/similarity-weighted-bin-packing.md): The algorithm that drives Layer 3. Defines item rotation, fitness functions, the four-phase packing algorithm, and post-packing grading. The spec adapts this algorithm's input/output to Shelf Judge's data model. The algorithm design stands on its own and should not be modified as part of this spec's implementation.
 - [Issue: Shelf Layout Designer](.lore/issues/shelf-layout-designer.md): Original three-sentence idea.
-- [Vision](.lore/vision.md): Principle 5 ("the shelf has a carrying capacity") directly supports this feature. The overflow list connects physical reality to the curation question without making removal decisions for the user.
+- [Vision](.lore/vision.md): Principle 5 ("the shelf has a carrying capacity") directly supports this feature. The capacity result connects physical reality to the curation question without making removal decisions for the user.
 - [BGG API Research](.lore/research/bgg-api.md): Documents `versions=1` as an optional enrichment parameter. The response structure for version data is not documented in the research; implementation will need to inspect actual BGG responses.
 - [Data Model Design](.lore/designs/mvp-data-model.md): Current `Game` type has no dimension fields. The `boxDimensions` addition is an additive change.
