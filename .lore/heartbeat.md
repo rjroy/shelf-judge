@@ -26,3 +26,9 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
+- 00:22 commission-Sienna-20260413-001504 result: 5 HTML mockups for the Shelf Capacity feature, covering all specified screens and states.
+
+**Files created:**
+- `.lore/mockups/mockup-shelf-game-dimensions.html` — Game detail page, 3 states: dimensio...
+
+- 00:23 commission-Sienna-20260413-001504 completed
