@@ -212,6 +212,28 @@ describe("Tournament recent comparison links", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Wishlist BGG links (REQ-WISH-LINK)
+// ---------------------------------------------------------------------------
+
+describe("Wishlist BGG links", () => {
+  test("game name links to BGG using bggId", async () => {
+    const file = await Bun.file("packages/web/app/wishlist/page.tsx").text();
+    expect(file).toContain("href={`https://boardgamegeek.com/boardgame/${entry.bggId}`}");
+  });
+
+  test("wishlist game name link has game-link class", async () => {
+    const file = await Bun.file("packages/web/app/wishlist/page.tsx").text();
+    expect(file).toContain('className="game-link"');
+  });
+
+  test("wishlist game name link opens in new tab", async () => {
+    const file = await Bun.file("packages/web/app/wishlist/page.tsx").text();
+    expect(file).toContain('target="_blank"');
+    expect(file).toContain('rel="noopener noreferrer"');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Negative cases: surfaces that should NOT have links
 // ---------------------------------------------------------------------------
 

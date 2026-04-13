@@ -16,16 +16,38 @@ import { CollectionTable } from "@/components/collection-table";
 export const metadata: Metadata = { title: "Collection" };
 export const dynamic = "force-dynamic";
 
-export default async function CollectionPage() {
+export default async function CollectionPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const showPrevOwned = params.ownership === "all";
+
   let games;
   let predictedGames;
   let nicheGames;
   let axes;
   let isIntegrated = false;
+  let previouslyOwnedCount = 0;
   let tournamentStats: Record<string, TournamentGameStatsDisplay> = {};
   let ignoredTags: NicheTagFilter[] = [];
   try {
-    [games, axes] = await Promise.all([listGames(), listAxes()]);
+    const ownershipParam = showPrevOwned ? ("all" as const) : undefined;
+    [games, axes] = await Promise.all([listGames({ ownership: ownershipParam }), listAxes()]);
+
+    // Fetch previously-owned count to decide if the filter group should appear
+    if (!showPrevOwned) {
+      try {
+        const prevOwned = await listGames({ ownership: "previously-owned" });
+        previouslyOwnedCount = prevOwned.length;
+      } catch {
+        // Previously-owned count unavailable
+      }
+    } else {
+      previouslyOwnedCount = games.filter((g) => g.game.ownership === "previously-owned").length;
+    }
+
     try {
       tournamentStats = await getAllTournamentStats();
     } catch {
@@ -63,8 +85,9 @@ export default async function CollectionPage() {
 
   const hasTournamentData = Object.keys(tournamentStats).length > 0;
 
-  // Exclude predicted-only scores from the "rated" average
-  const rated = games.filter(({ score }) => score !== null);
+  // Exclude predicted-only scores and previously-owned from the "rated" average
+  const ownedGames = games.filter((g) => g.game.ownership !== "previously-owned");
+  const rated = ownedGames.filter(({ score }) => score !== null);
   const avgFitness =
     rated.length > 0
       ? rated.reduce((sum, { score }) => sum + (score?.score ?? 0), 0) / rated.length
@@ -76,7 +99,7 @@ export default async function CollectionPage() {
       ).length
     : 0;
 
-  if (games.length === 0) {
+  if (games.length === 0 && previouslyOwnedCount === 0) {
     return (
       <>
         <div className="topbar">
@@ -100,13 +123,17 @@ export default async function CollectionPage() {
     );
   }
 
+  const displayCount = showPrevOwned
+    ? `${games.length} games (${previouslyOwnedCount} previously owned)`
+    : `${games.length} game${games.length !== 1 ? "s" : ""}`;
+
   return (
     <>
       <div className="topbar">
         <div className="topbar-title">My Collection</div>
         <div className="topbar-meta">
           <span>
-            {games.length} game{games.length !== 1 && "s"} &middot; {axes.length} ax
+            {displayCount} &middot; {axes.length} ax
             {axes.length === 1 ? "is" : "es"}
           </span>
           <NormalizeFitnessButton />
@@ -122,12 +149,14 @@ export default async function CollectionPage() {
           axes={axes}
           tournamentStats={tournamentStats}
           hasTournamentData={hasTournamentData}
-          totalGames={games.length}
+          totalGames={ownedGames.length}
           ratedCount={rated.length}
           avgFitness={avgFitness}
           predictedCount={predictedCount > 0 ? predictedCount : 0}
           ignoredTags={ignoredTags}
           isIntegratedRedundancy={isIntegrated}
+          previouslyOwnedCount={previouslyOwnedCount}
+          showPreviouslyOwned={showPrevOwned}
         />
       </div>
     </>

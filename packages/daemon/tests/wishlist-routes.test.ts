@@ -259,6 +259,7 @@ function makeGame(bggId: number | null, name: string): Game {
     imageUrl: null,
     numPlays: null,
     bggData: null,
+    ownership: "owned",
     ratings: {},
     createdAt: NOW,
     updatedAt: NOW,
@@ -277,6 +278,7 @@ function createMockGameService(overrides: Partial<GameService> = {}): GameServic
     refreshAllBggData: notImpl as GameService["refreshAllBggData"],
     searchGames: notImpl as GameService["searchGames"],
     importBggCollection: notImpl as GameService["importBggCollection"],
+    setOwnership: notImpl as GameService["setOwnership"],
     ...overrides,
   };
 }

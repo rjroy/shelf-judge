@@ -97,6 +97,12 @@
   --outlier-fitness-bg: var(--score-high-bg);
   --outlier-fitness-border: color-mix(in hsl, var(--score-high), white 78%);
 
+  /* ── Previously Owned ───────────────────────────────────── */
+  --prev-owned-bg: #f0ede6;
+  --prev-owned-badge-bg: #ede9e1;
+  --prev-owned-badge-border: #c4bfb8;
+  --prev-owned-badge-text: #706a62;
+
   /* ── Niche (single-accent domain) ───────────────────────── */
   --niche-accent: #6b4c8a;
   --niche-bg: color-mix(in hsl, var(--niche-accent), white 93%);
@@ -129,6 +135,16 @@
   --sidebar-divider: color-mix(in srgb, var(--nav-text) 8%, transparent);
   --sidebar-item-hover-bg: color-mix(in srgb, var(--nav-text) 6%, transparent);
   --sidebar-track-bg: color-mix(in srgb, var(--nav-text) 10%, transparent);
+
+  /* ── Previously Owned ────────────────────────────────────── */
+  --prev-owned-bg: #f0ede6;
+  --prev-owned-badge-bg: #ede9e1;
+  --prev-owned-badge-border: var(--border-strong);
+  --prev-owned-badge-text: var(--text-muted);
+  --prev-owned-notice-bg: #f5f2eb;
+  --prev-owned-notice-border: var(--border-strong);
+  --prev-owned-notice-text: var(--text-secondary);
+  --success-border: color-mix(in hsl, var(--score-high), white 75%);
 
   /* ── Scrollbar ─────────────────────────────────────────────── */
   --scrollbar-track: var(--bg-subtle);
@@ -197,6 +213,12 @@
   --nav-bg: #121110;
   --nav-text: #e8e4dc;
 
+  /* ── Previously Owned ───────────────────────────────────── */
+  --prev-owned-bg: #222019;
+  --prev-owned-badge-bg: #2e2b24;
+  --prev-owned-badge-border: #524e48;
+  --prev-owned-badge-text: #908a80;
+
   /* ── Filter spec (single-accent domain) ──────────────────── */
   --filter-spec: #5d9054;
   --filter-spec-bg: color-mix(in hsl, var(--filter-spec), var(--bg-base) 85%);
@@ -239,6 +261,16 @@
 
   /* ── Overlay ──────────────────────────────────────────────── */
   --overlay-bg: rgb(0 0 0 / 0.65);
+
+  /* ── Previously Owned ────────────────────────────────────── */
+  --prev-owned-bg: #222019;
+  --prev-owned-badge-bg: #2e2b24;
+  --prev-owned-badge-border: var(--border-strong);
+  --prev-owned-badge-text: var(--text-muted);
+  --prev-owned-notice-bg: #282520;
+  --prev-owned-notice-border: var(--border-strong);
+  --prev-owned-notice-text: var(--text-secondary);
+  --success-border: color-mix(in hsl, var(--score-high), var(--bg-base) 70%);
 
   /* ── Scrollbar ─────────────────────────────────────────────── */
   --scrollbar-thumb: var(--border-strong);
@@ -5476,6 +5508,67 @@ body {
   color: var(--predict-accent);
 }
 
+/* Previously-owned row styling */
+.game-row.prev-owned {
+  background: var(--prev-owned-bg);
+}
+
+.game-row.prev-owned:hover {
+  background: color-mix(in srgb, var(--prev-owned-bg) 80%, var(--row-hover) 20%);
+}
+
+.game-row.prev-owned .game-thumb {
+  opacity: 0.7;
+}
+
+.game-row.prev-owned .game-name {
+  color: var(--text-secondary);
+}
+
+.game-row.prev-owned .score-cell {
+  opacity: 0.8;
+}
+
+.badge-prev-owned {
+  display: inline-flex;
+  align-items: center;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--prev-owned-badge-bg);
+  color: var(--prev-owned-badge-text);
+  border: 1px solid var(--prev-owned-badge-border);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-top: 2px;
+  align-self: flex-start;
+}
+
+.filter-chip.chip-prev-owned {
+  background: var(--prev-owned-badge-bg);
+  color: var(--prev-owned-badge-text);
+  border-color: var(--prev-owned-badge-border);
+}
+
+.view-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 24px;
+  background: var(--action-subtle);
+  border-bottom: 1px solid var(--action-border);
+  font-size: 12px;
+  color: var(--action);
+  flex-shrink: 0;
+}
+
+.view-notice-icon {
+  font-size: 13px;
+}
+
 /* Predictions toggle in stats strip */
 .predictions-toggle {
   display: flex;
@@ -6679,4 +6772,149 @@ body {
   font-family: inherit;
   text-decoration: underline;
   padding: 0;
+}
+
+/* ===== Previously Owned: Game Detail ===== */
+
+.game-hero-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+}
+
+.status-badge.prev-owned {
+  background: var(--prev-owned-badge-bg);
+  color: var(--prev-owned-badge-text);
+  border: 1px solid var(--prev-owned-badge-border);
+}
+
+.status-badge.owned {
+  background: var(--success-subtle);
+  color: var(--success);
+  border: 1px solid var(--success-border);
+}
+
+.prev-owned-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 16px;
+  background: var(--prev-owned-notice-bg);
+  border: 1px solid var(--prev-owned-notice-border);
+  border-radius: 6px;
+  margin: 20px 28px 0;
+  font-size: 13px;
+  color: var(--prev-owned-notice-text);
+  line-height: 1.5;
+}
+
+.prev-owned-notice-icon {
+  font-size: 15px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  opacity: 0.7;
+}
+
+.prev-owned-notice strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.excluded-row td {
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 12px;
+}
+
+.excluded-row td .excluded-label {
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--prev-owned-badge-bg);
+  color: var(--prev-owned-badge-text);
+  border: 1px solid var(--prev-owned-badge-border);
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.btn-success {
+  background: var(--success);
+  color: var(--on-action);
+  border: none;
+}
+
+.btn-success:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.action-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.action-group-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 2px;
+}
+
+.action-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.action-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+.danger-zone {
+  padding: 10px;
+  border: 1px solid var(--danger-border);
+  border-radius: 6px;
+  background: var(--danger-subtle);
+}
+
+.danger-zone-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--danger);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 6px;
+}
+
+.danger-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  line-height: 1.4;
 }

@@ -23,6 +23,7 @@ function makeGame(id: string, name: string): Game {
     maxPlayers: null,
     playingTime: null,
     numPlays: null,
+    ownership: "owned",
     ratings: {},
     imageUrl: null,
     bggData: null,
@@ -149,6 +150,7 @@ function createStubGameService(games: Game[]): GameService {
     refreshBggData: () => Promise.reject(new Error("not implemented")),
     refreshAllBggData: () => Promise.reject(new Error("not implemented")),
     importBggCollection: () => Promise.reject(new Error("not implemented")),
+    setOwnership: () => Promise.reject(new Error("not implemented")),
   };
 }
 

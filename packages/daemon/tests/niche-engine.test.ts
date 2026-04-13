@@ -49,6 +49,7 @@ function makeGame(id: string, name: string, bggData: BggGameData | null): Game {
     imageUrl: null,
     bggData,
     numPlays: null,
+    ownership: "owned",
     ratings: {},
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:00Z",

@@ -39,6 +39,7 @@ function makeGame(overrides: Partial<Game> = {}): Game {
       fetchedAt: "2025-01-01T00:00:00.000Z",
     },
     numPlays: null,
+    ownership: "owned",
     ratings: {},
     createdAt: "2025-01-01T00:00:00.000Z",
     updatedAt: "2025-01-01T00:00:00.000Z",

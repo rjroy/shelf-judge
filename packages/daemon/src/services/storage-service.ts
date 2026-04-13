@@ -117,7 +117,16 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
       }
 
       const raw = await fileOps.readFile(collectionPath);
-      return JSON.parse(raw) as Collection;
+      const collection = JSON.parse(raw) as Collection;
+
+      // Backfill ownership for legacy data (pre-ownership-feature games)
+      for (const game of collection.games) {
+        if (!game.ownership) {
+          game.ownership = "owned";
+        }
+      }
+
+      return collection;
     },
 
     async saveCollection(collection: Collection): Promise<void> {

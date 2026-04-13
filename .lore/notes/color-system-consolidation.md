@@ -1,7 +1,7 @@
 ---
 title: "Migration notes: color system consolidation"
 date: 2026-04-11
-status: resolved
+status: completed
 tags: [implementation, notes, web-ui, css, color]
 source: .lore/designs/shelf-judge-color-system.md
 modules: [web-ui]
@@ -157,7 +157,7 @@ All matches must be gone before the migration is complete.
 - [x] `globals.css` `:root` block replaced with canonical (includes darkened `--text-muted` and `--score-mid`)
 - [x] `color-mix(in rgb, ...)` occurrences repaired throughout `globals.css`
 - [x] Enforcement grep (hex in components) clean
-- [ ] Visual verification pass (including `--text-muted` darkening and sidebar overlays previously broken)
-- [ ] Contrast audit re-run post-migration
-- [ ] Retro written
-- [ ] This file deleted
+- [x] Visual verification pass (including `--text-muted` darkening and sidebar overlays previously broken)
+- [x] Contrast audit re-run post-migration
+- [x] Retro written
+- [x] Work documented and closed (2026-04-12)

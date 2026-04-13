@@ -1,5 +1,6 @@
-// Game commands: search, add, list, rate, remove
+// Game commands: search, add, list, rate, remove, set-status
 import type { DaemonClient } from "../client.js";
+import type { OwnershipStatus } from "@shelf-judge/shared";
 import type { OutputOptions } from "../output.js";
 import { formatTable, formatScore, printOutput } from "../output.js";
 
@@ -63,7 +64,7 @@ export async function gameAdd(
 }
 
 interface GameListItem {
-  game: { id: string; name: string; yearPublished: number | null };
+  game: { id: string; name: string; yearPublished: number | null; ownership?: OwnershipStatus };
   score: { score: number } | null;
 }
 
@@ -76,9 +77,11 @@ interface TournamentStatsEntry {
 export async function gameList(
   client: DaemonClient,
   _args: string[],
-  opts: OutputOptions,
+  opts: OutputOptions & { ownership?: string },
 ): Promise<string> {
-  const { ok, data } = await client.get<GameListItem[]>("/api/games");
+  const ownership = opts.ownership ?? "owned";
+  const query = ownership !== "owned" ? `?ownership=${encodeURIComponent(ownership)}` : "";
+  const { ok, data } = await client.get<GameListItem[]>(`/api/games${query}`);
 
   if (!ok) {
     const err = data as unknown as { error: string };
@@ -104,9 +107,11 @@ export async function gameList(
   return formatTable(
     headers,
     data.map((g) => {
+      const displayName =
+        g.game.ownership === "previously-owned" ? `${g.game.name} [prev]` : g.game.name;
       const row = [
         g.game.id.slice(0, 8),
-        g.game.name,
+        displayName,
         g.game.yearPublished ? String(g.game.yearPublished) : "---",
         formatScore(g.score?.score ?? null),
       ];
@@ -222,4 +227,29 @@ export async function gameRemove(
   if (opts.json) return printOutput({ removed: true, id }, opts);
 
   return status === 204 ? `Removed game ${id}` : `Removed game ${id}`;
+}
+
+export async function gameSetStatus(
+  client: DaemonClient,
+  args: string[],
+  opts: OutputOptions,
+): Promise<string> {
+  const [id, status] = args;
+  if (!id || !status) {
+    throw new Error("Usage: shelf-judge game set-status <id> <owned|previously-owned>");
+  }
+
+  const { ok, data } = await client.patch<{ game: { name: string; ownership: OwnershipStatus } }>(
+    `/api/games/${encodeURIComponent(id)}/ownership`,
+    { ownership: status },
+  );
+
+  if (!ok) {
+    const err = data as unknown as { error: string };
+    throw new Error(err.error ?? "Set status failed");
+  }
+
+  if (opts.json) return printOutput(data, opts);
+
+  return `"${data.game.name}" marked as ${data.game.ownership}.`;
 }

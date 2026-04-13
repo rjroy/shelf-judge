@@ -22,7 +22,7 @@ import type {
 } from "@shelf-judge/shared";
 import { ScoreBreakdown } from "@/components/score-breakdown";
 import { RatingForm } from "@/components/rating-form";
-import { GameActions } from "@/components/game-actions";
+import { GameActions, OwnershipActions } from "@/components/game-actions";
 import { NicheIgnoreButton, NicheRestoreButton } from "@/components/niche-ignore-button";
 
 export async function generateMetadata({
@@ -93,6 +93,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
   }
 
   const { game, score, nichePosition } = data;
+  const isPreviouslyOwned = game.ownership === "previously-owned";
   // Use predicted score when the game has no actual score but has predictions
   const displayScore = score ?? prediction?.score ?? null;
   const hasPredictions =
@@ -117,7 +118,12 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
             {game.imageUrl ? <img src={game.imageUrl} alt={game.name} /> : <span>🎲</span>}
           </div>
           <div className="game-hero-info">
-            <div className="game-hero-title">{game.name}</div>
+            <div className="game-hero-title-row">
+              <div className="game-hero-title">{game.name}</div>
+              {isPreviouslyOwned && (
+                <span className="status-badge prev-owned">Previously Owned</span>
+              )}
+            </div>
             <div className="game-hero-meta">
               {game.yearPublished && <span>📅 {game.yearPublished}</span>}
               {game.minPlayers && (
@@ -253,6 +259,18 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
           </div>
         </div>
 
+        {isPreviouslyOwned && (
+          <div className="prev-owned-notice">
+            <span className="prev-owned-notice-icon">&#x25CE;</span>
+            <div>
+              <strong>Niche and redundancy data excluded.</strong> This game is no longer on your
+              shelf, so it doesn&apos;t affect niche rankings or redundancy scores for your current
+              collection. Fitness score and ratings are unchanged — they continue to improve
+              prediction accuracy.
+            </div>
+          </div>
+        )}
+
         {profileDivergence && (
           <div className="profile-divergence-detail">
             <div className="profile-detail-title">Profile Divergence</div>
@@ -386,24 +404,25 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
         )}
 
         {/* Redundancy panel (REQ-REDUN-31, REQ-REDUN-32, REQ-REDUN-33) */}
-        {displayScore?.redundancyAdjustment && (
+        {!isPreviouslyOwned && displayScore?.redundancyAdjustment && (
           <RedundancyPanel score={displayScore} adjustment={displayScore.redundancyAdjustment} />
         )}
 
         {/* Niche Position panel (REQ-NICHE-18, REQ-NICHE-19) */}
-        {displayScore?.vetoed ? (
-          <div className="niche-panel">
-            <div className="panel-section-title">Niche Position</div>
-            <div className="niche-vetoed-note">
-              This game is vetoed and excluded from niche rankings.
+        {!isPreviouslyOwned &&
+          (displayScore?.vetoed ? (
+            <div className="niche-panel">
+              <div className="panel-section-title">Niche Position</div>
+              <div className="niche-vetoed-note">
+                This game is vetoed and excluded from niche rankings.
+              </div>
             </div>
-          </div>
-        ) : (
-          nichePosition &&
-          (nichePosition.niches.length > 0 || ignoredTags.length > 0) && (
-            <NichePositionPanel nichePosition={nichePosition} ignoredTags={ignoredTags} />
-          )
-        )}
+          ) : (
+            nichePosition &&
+            (nichePosition.niches.length > 0 || ignoredTags.length > 0) && (
+              <NichePositionPanel nichePosition={nichePosition} ignoredTags={ignoredTags} />
+            )
+          ))}
 
         {/* Two-panel layout */}
         <div className="detail-panels">
@@ -417,7 +436,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
                 </span>
               )}
             </div>
-            <ScoreBreakdown score={displayScore} />
+            <ScoreBreakdown score={displayScore} isPreviouslyOwned={isPreviouslyOwned} />
             <div className="calc-explanation">
               <strong>How this is calculated:</strong> weighted average of all rated axes. Formula:{" "}
               <code>sum(rating &times; weight) / sum(weight)</code>. Axes without ratings are
@@ -480,6 +499,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
               currentRatings={game.ratings}
               predictionScore={hasPredictions ? displayScore : null}
             />
+            <OwnershipActions gameId={game.id} gameName={game.name} ownership={game.ownership} />
           </div>
         </div>
       </div>

@@ -30,6 +30,8 @@ export interface SuggestedPlayerCount {
   notRecommended: number;
 }
 
+export type OwnershipStatus = "owned" | "previously-owned";
+
 export interface BggGameData {
   communityRating: number; // BGG average (1-10)
   bayesAverage: number; // BGG Geek Rating (Bayesian)
@@ -55,6 +57,7 @@ export interface Game {
   imageUrl: string | null;
   bggData: BggGameData | null;
   numPlays: number | null;
+  ownership: OwnershipStatus;
   ratings: Record<string, number>; // axisId -> rating (1-10)
   createdAt: string; // ISO 8601
   updatedAt: string; // ISO 8601
