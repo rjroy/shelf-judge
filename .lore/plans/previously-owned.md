@@ -1,7 +1,7 @@
 ---
 title: "Implementation plan: previously owned"
 date: 2026-04-12
-status: draft
+status: approved
 tags: [plan, ownership, data-model, redundancy, niche, collection, lifecycle]
 modules: [shared, daemon, web, cli]
 related:
