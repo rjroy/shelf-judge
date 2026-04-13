@@ -88,6 +88,14 @@ All requirements in scope (REQ-SHELF-8 thro...
 - 15:29 commission-Thorne-20260413-150114 result: # Box Dimensions Review (Phases 2 and 5)
 
 - 15:29 commission-Thorne-20260413-150114 completed
+- 15:31 commission-Dalton-20260413-150257 result: # Algorithm Review Fixes Complete
+
+All 7 findings from Thorne's review addressed:
+
+- 15:31 commission-Dalton-20260413-150257 completed
+## Bugs Fixed (2)
+
+1. **Rotation swap duplicate dimension bug** (`bin-packing.ts:185`): Added `if (i === prevItemIdx)...
 ## Scope
 
 Reviewed against REQ-SHELF-3 through REQ-SHELF-7, REQ-SHELF-26, REQ-SHELF-36 and the Phase 2/5 plan. Files reviewed:
