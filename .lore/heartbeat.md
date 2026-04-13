@@ -26,9 +26,10 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
-- 00:22 commission-Sienna-20260413-001504 result: 5 HTML mockups for the Shelf Capacity feature, covering all specified screens and states.
+- 00:59 commission-Octavia-20260413-005213 result: Implementation plan written at `.lore/plans/shelf-capacity.md`.
 
-**Files created:**
-- `.lore/mockups/mockup-shelf-game-dimensions.html` — Game detail page, 3 states: dimensio...
+**Structure:** 12 phases across 3 layers plus a standalone bin-packing algorithm, mapped to a 20-commission chain.
 
-- 00:23 commission-Sienna-20260413-001504 completed
+**Phase breakdown:*...
+
+- 00:59 commission-Octavia-20260413-005213 completed
