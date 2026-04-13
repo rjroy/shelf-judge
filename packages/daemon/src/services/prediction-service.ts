@@ -246,6 +246,7 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
         imageUrl: bggResult.metadata.imageUrl,
         numPlays: bggResult.collectionData?.numPlays ?? null,
         bggData: bggResult.bggData,
+        ownership: "owned",
         ratings: {},
         createdAt: now,
         updatedAt: now,

@@ -3,6 +3,7 @@ import {
   AddGameSchema,
   toErrorMessage,
   type Game,
+  type OwnershipStatus,
   type AddGameInput,
   type FitnessResult,
   type GameWithScore,
@@ -46,6 +47,7 @@ export interface GameService {
   searchGames(query: string): Promise<BggSearchResult[]>;
   refreshBggData(gameId: string): Promise<Game>;
   refreshAllBggData(): Promise<RefreshSummary>;
+  setOwnership(id: string, ownership: OwnershipStatus): Promise<Game>;
   importBggCollection(
     onProgress?: (event: ImportProgressEvent) => Promise<void> | void,
   ): Promise<ImportSummary>;
@@ -119,6 +121,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
         imageUrl: parsed.imageUrl ?? null,
         numPlays: parsed.numPlays ?? null,
         bggData: null,
+        ownership: "owned",
         ratings: {},
         createdAt: now,
         updatedAt: now,
@@ -227,6 +230,26 @@ export function createGameService(deps: GameServiceDeps): GameService {
       collection.updatedAt = new Date().toISOString();
       await storageService.saveCollection(collection);
       await deps.onGameDeleted?.(id);
+    },
+
+    async setOwnership(id: string, ownership: OwnershipStatus): Promise<Game> {
+      const collection = await storageService.loadCollection();
+      const game = collection.games.find((g) => g.id === id);
+
+      if (!game) {
+        throw new Error(`Game not found: ${id}`);
+      }
+
+      if (game.ownership === ownership) {
+        return game;
+      }
+
+      game.ownership = ownership;
+      game.updatedAt = new Date().toISOString();
+      collection.updatedAt = game.updatedAt;
+      await storageService.saveCollection(collection);
+
+      return game;
     },
 
     async searchGames(query: string): Promise<BggSearchResult[]> {
@@ -373,6 +396,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
                 imageUrl: result.metadata.imageUrl,
                 numPlays: result.collectionData?.numPlays ?? null,
                 bggData: result.bggData,
+                ownership: "owned",
                 ratings: {},
                 createdAt: now,
                 updatedAt: now,

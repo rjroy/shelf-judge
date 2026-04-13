@@ -3,6 +3,7 @@
 
 import type {
   Game,
+  OwnershipStatus,
   Axis,
   FitnessResult,
   FitnessBreakdownEntry,
@@ -23,9 +24,13 @@ import type {
 } from "@shelf-judge/shared";
 import { daemonRequest, daemonJson } from "./daemon";
 
-export async function listGames(opts?: { includeNiches?: boolean }): Promise<GameWithScore[]> {
+export async function listGames(opts?: {
+  includeNiches?: boolean;
+  ownership?: "owned" | "previously-owned" | "all";
+}): Promise<GameWithScore[]> {
   const params = new URLSearchParams();
   if (opts?.includeNiches) params.set("includeNiches", "true");
+  if (opts?.ownership) params.set("ownership", opts.ownership);
   const qs = params.toString();
   return daemonJson(`/api/games${qs ? `?${qs}` : ""}`);
 }
@@ -67,6 +72,16 @@ export async function rateGame(
 export async function removeGame(id: string): Promise<void> {
   const { response: res } = await daemonRequest(`/api/games/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error(`Failed to remove game: ${res.status}`);
+}
+
+export async function setGameOwnership(
+  id: string,
+  ownership: "owned" | "previously-owned",
+): Promise<{ game: Game }> {
+  return daemonJson(`/api/games/${id}/ownership`, {
+    method: "PATCH",
+    body: { ownership },
+  });
 }
 
 export async function refreshBggData(id: string): Promise<{ game: Game }> {
@@ -325,6 +340,7 @@ export async function refreshAllWishlist(): Promise<{ refreshed: number; errors:
 // Re-export types for convenience
 export type {
   Game,
+  OwnershipStatus,
   Axis,
   FitnessResult,
   FitnessBreakdownEntry,

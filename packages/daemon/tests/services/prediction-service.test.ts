@@ -45,6 +45,7 @@ function makeGame(
     maxPlayers: 4,
     playingTime: 60,
     numPlays: null,
+    ownership: "owned",
     ratings,
     imageUrl: null,
     bggData: hasBgg

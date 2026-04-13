@@ -1,6 +1,7 @@
 export type {
   BggTag,
   SuggestedPlayerCount,
+  OwnershipStatus,
   BggGameData,
   Game,
   AxisSource,

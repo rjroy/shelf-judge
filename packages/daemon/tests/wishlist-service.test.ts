@@ -37,6 +37,7 @@ function makeGame(bggId: number, name: string): Game {
       suggestedPlayerCounts: [],
       fetchedAt: NOW,
     },
+    ownership: "owned",
     ratings: {},
     createdAt: NOW,
     updatedAt: NOW,
@@ -173,6 +174,7 @@ function createMockGameService(): GameService {
     refreshAllBggData: () => Promise.reject(new Error("not implemented")),
     searchGames: () => Promise.reject(new Error("not implemented")),
     importBggCollection: () => Promise.reject(new Error("not implemented")),
+    setOwnership: () => Promise.reject(new Error("not implemented")),
   };
 }
 

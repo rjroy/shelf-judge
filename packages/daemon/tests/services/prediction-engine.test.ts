@@ -62,6 +62,7 @@ function makeGame(id: string, ratings: Record<string, number> = {}): Game {
     imageUrl: null,
     bggData: null,
     numPlays: null,
+    ownership: "owned",
     ratings,
     createdAt: "2025-01-01T00:00:00Z",
     updatedAt: "2025-01-01T00:00:00Z",

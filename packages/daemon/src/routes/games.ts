@@ -30,6 +30,10 @@ const RatingsBodySchema = z.object({
   ratings: z.record(z.string(), z.number().int().min(1).max(10).nullable()),
 });
 
+const OwnershipBodySchema = z.object({
+  ownership: z.enum(["owned", "previously-owned"]),
+});
+
 function isBggConfigured(bggClient?: BggClient): boolean {
   return bggClient !== undefined && bggClient.isConfigured();
 }
@@ -89,6 +93,15 @@ async function applyRedundancy(
       gws.score.score = adj.adjustedScore;
     }
   }
+}
+
+function filterByOwnership(games: GameWithScore[], ownership: string): GameWithScore[] {
+  if (ownership === "all") return games;
+  if (ownership === "previously-owned") {
+    return games.filter((g) => g.game.ownership === "previously-owned");
+  }
+  // Default: "owned" (backward-compatible)
+  return games.filter((g) => g.game.ownership !== "previously-owned");
 }
 
 export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
@@ -160,51 +173,65 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     try {
       const includePredicted = c.req.query("includePredicted") === "true";
       const includeNiches = c.req.query("includeNiches") === "true";
+      const ownershipFilter = c.req.query("ownership") ?? "owned";
 
       if (includePredicted && predictionService) {
-        const games = await predictionService.listGamesWithPredictions();
+        const allGames = await predictionService.listGamesWithPredictions();
+
+        // Owned-only set for niche/redundancy computation (REQ-PREV-19)
+        const ownedGames = allGames.filter((g) => g.game.ownership !== "previously-owned");
+
         if (includeNiches) {
           const nicheSettings = storageService
             ? await storageService.loadNicheSettings()
             : undefined;
-          const nicheMap = computeNichePositions(games, nicheSettings);
-          for (const gws of games) {
+          const nicheMap = computeNichePositions(ownedGames, nicheSettings);
+          for (const gws of allGames) {
             gws.nichePosition = nicheMap.get(gws.game.id) ?? null;
           }
         }
         // Redundancy: after niches (which use pre-redundancy scores per REQ-REDUN-26)
         if (storageService) {
           const redundancySettings = await storageService.loadRedundancySettings();
-          await applyRedundancy(games, redundancySettings, storageService);
+          await applyRedundancy(ownedGames, redundancySettings, storageService);
         }
-        return c.json(games);
+
+        const response = filterByOwnership(allGames, ownershipFilter);
+        return c.json(response);
       }
 
-      const games = await gameService.listGames();
+      const allGames = await gameService.listGames();
+
+      // Owned-only set for niche/redundancy computation (REQ-PREV-19)
+      const ownedGames = allGames.filter((g) => g.game.ownership !== "previously-owned");
 
       if (includeNiches && predictionService) {
         // Niche ranking needs predicted scores (REQ-NICHE-4), but the client
         // didn't ask for predicted games in the response. Compute niches from
-        // the full list, then attach positions only to the standard game list.
+        // the owned set with predictions, then attach positions to the response set.
         const nicheSettings = storageService ? await storageService.loadNicheSettings() : undefined;
-        const allGames = await predictionService.listGamesWithPredictions();
-        const nicheMap = computeNichePositions(allGames, nicheSettings);
-        for (const gws of games) {
+        const ownedWithPredictions = (await predictionService.listGamesWithPredictions()).filter(
+          (g) => g.game.ownership !== "previously-owned",
+        );
+        const nicheMap = computeNichePositions(ownedWithPredictions, nicheSettings);
+        for (const gws of allGames) {
           gws.nichePosition = nicheMap.get(gws.game.id) ?? null;
         }
       }
 
-      // Redundancy: after niches, computed against prediction-enriched universe
-      // for consistency with the includePredicted=true path and GET /games/:id
+      // Redundancy: after niches, computed against owned prediction-enriched universe
       if (storageService) {
         const redundancySettings = await storageService.loadRedundancySettings();
         const universe = predictionService
-          ? await predictionService.listGamesWithPredictions()
+          ? (await predictionService.listGamesWithPredictions()).filter(
+              (g) => g.game.ownership !== "previously-owned",
+            )
           : undefined;
-        await applyRedundancy(games, redundancySettings, storageService, universe);
+        await applyRedundancy(ownedGames, redundancySettings, storageService, universe);
       }
 
-      return c.json(games);
+      const response = filterByOwnership(allGames, ownershipFilter);
+      return c.json(response);
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 500);
     }
@@ -216,25 +243,27 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     try {
       const result = await gameService.getGame(id);
 
-      // Compute niche position from the full collection including predicted scores
+      // Compute niche position from owned-only set with predicted scores (REQ-PREV-19)
       if (predictionService) {
         const nicheSettings = storageService ? await storageService.loadNicheSettings() : undefined;
         const allGames = await predictionService.listGamesWithPredictions();
-        const nicheMap = computeNichePositions(allGames, nicheSettings);
+        const ownedGames = allGames.filter((g) => g.game.ownership !== "previously-owned");
+        const nicheMap = computeNichePositions(ownedGames, nicheSettings);
         result.nichePosition = nicheMap.get(id) ?? null;
       } else {
         result.nichePosition = null;
       }
 
-      // Redundancy: use prediction-enriched set for consistency with GET /games
+      // Redundancy: use owned prediction-enriched set (REQ-PREV-19)
       if (storageService) {
         const redundancySettings = await storageService.loadRedundancySettings();
         if (redundancySettings.enabled) {
           const allGames = predictionService
             ? await predictionService.listGamesWithPredictions()
             : await gameService.listGames();
-          await applyRedundancy(allGames, redundancySettings, storageService);
-          const thisGame = allGames.find((g) => g.game.id === id);
+          const ownedGames = allGames.filter((g) => g.game.ownership !== "previously-owned");
+          await applyRedundancy(ownedGames, redundancySettings, storageService);
+          const thisGame = ownedGames.find((g) => g.game.id === id);
           if (result.score && thisGame?.score) {
             result.score.redundancyAdjustment = thisGame.score.redundancyAdjustment;
             if (redundancySettings.stage === "integrated" && thisGame.score.redundancyAdjustment) {
@@ -291,6 +320,40 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     try {
       await gameService.removeGame(id);
       return c.body(null, 204);
+    } catch (err) {
+      const message = toErrorMessage(err);
+      if (message.includes("not found")) {
+        return c.json({ error: message }, 404);
+      }
+      return c.json({ error: message }, 500);
+    }
+  });
+
+  // PATCH /games/:id/ownership
+  routes.patch("/games/:id/ownership", async (c) => {
+    const id = c.req.param("id");
+
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json(
+        { error: 'Invalid ownership status. Must be "owned" or "previously-owned"' },
+        400,
+      );
+    }
+
+    const parsed = OwnershipBodySchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json(
+        { error: 'Invalid ownership status. Must be "owned" or "previously-owned"' },
+        400,
+      );
+    }
+
+    try {
+      const game = await gameService.setOwnership(id, parsed.data.ownership);
+      return c.json({ game });
     } catch (err) {
       const message = toErrorMessage(err);
       if (message.includes("not found")) {
@@ -374,6 +437,15 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       name: "rate",
       description: "Set ratings for a game on one or more axes",
       invocation: { method: "PUT", path: "/api/games/:id/ratings" },
+      hierarchy: { root: "shelf", feature: "game" },
+      parameters: [{ name: "id", in: "path", description: "Game ID", required: true }],
+      idempotent: true,
+    },
+    {
+      operationId: "shelf.game.set-status",
+      name: "set-status",
+      description: "Change a game's ownership status",
+      invocation: { method: "PATCH", path: "/api/games/:id/ownership" },
       hierarchy: { root: "shelf", feature: "game" },
       parameters: [{ name: "id", in: "path", description: "Game ID", required: true }],
       idempotent: true,

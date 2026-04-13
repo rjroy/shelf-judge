@@ -16,6 +16,7 @@ function makeGame(overrides: Partial<Game> = {}): Game {
     imageUrl: null,
     bggData: null,
     numPlays: null,
+    ownership: "owned",
     ratings: {},
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
