@@ -306,33 +306,44 @@ Manual shelf assignment (dropdown in game edit form), one annotation line in nic
 
 ## The Vision Question
 
-This brainstorm contains proposals at two different altitudes. Proposals 1, 4, and 6 extend Shelf Judge's existing identity as a curation tool. They use physical shelf constraints to say something new about the collection: what doesn't fit (Proposal 4), which niches are physically scattered (Proposal 6), what box sizes exist (Proposal 1). Each adds a lens, not a feature domain.
+This brainstorm originally framed Proposals 2, 3, and 5 as a potential scope expansion beyond Shelf Judge's curation identity. Discussion with the user resolved this:
 
-Proposals 2, 3, and 5 build toward a shelf layout optimizer. They model furniture, compute assignments, and render spatial visualizations. These are interesting and feasible, but they serve a different goal: "where should I put my games?" rather than "which games should I keep?" The vision says Shelf Judge helps with the second question. The first question is adjacent but not the same.
+**"Where does this go?" is a curation question.** Organizing the shelf is part of judging what goes on it. "Do I have space for this?" is a keep/cull decision, not a logistics decision. "What do I have to get rid of to make space?" is the curation question that Shelf Judge exists to answer, expressed through a physical constraint. All six proposals belong inside the vision's scope.
 
-The vision document doesn't have an anti-goal that explicitly prohibits spatial layout features. But the spirit of the anti-goals (no purchase automation, no social features, no BGG replacement) is about scope discipline. Each one says "we are not that tool." A shelf layout optimizer would need a similar gut check: is this a feature of a curation tool, or is it a separate tool that happens to share game data?
+The altitude difference between the proposal groups still matters for prioritization, but it's a sequencing concern, not a scope boundary. The curation-lens proposals (1, 4, 6) deliver value sooner with less risk. The spatial proposals (2, 3, 5) build on top and can follow.
 
-My read: Proposals 1 and 4 clearly belong. Box dimensions are useful metadata (Proposal 1). "Your shelf is full and these are the weakest games" is a pure curation insight (Proposal 4). Proposal 6 is a natural extension of the niche display that earns its place by connecting abstract similarity to physical reality.
+**Box dimensions are load-bearing, not optional enrichment.** The user's collection includes wallet games where 100 fit in the space of one standard box. Volume-based overflow math without actual box dimensions would treat every game equally, which badly misrepresents reality. Proposal 1 is a prerequisite for Proposal 4 to produce honest results, not a nice-to-have data layer.
 
-Proposals 2, 3, and 5 are worth building if the user wants them, but they should be understood as a scope expansion, not a natural extension of the current vision. The vision might need a revision to accommodate them, or they might belong in a separate tool that reads Shelf Judge's data.
+**The user has more games than shelves, distributed across the house.** The overflow scenario is the default state, not an edge case. The neighbor relationships in Proposal 2 ("adjacent," "same-room," "different-room") matter because shelves aren't co-located. The "what doesn't fit" view (Proposal 4) is immediately valuable, not hypothetically useful.
+
+**Box dimensions have standalone utility beyond shelf layout** (e.g., "what fits in my board game backpack?"), but those use cases are stretch goals and possibly belong in a separate plugin or app. The primary justification for Proposal 1 is accurate capacity math for the shelf features.
 
 ---
 
 ## Implementation Sequence
 
-If this moves forward, the dependency chain is:
+The dependency chain, confirmed by discussion:
 
-1. **Proposal 1 (Box Dimensions)** first. Pure data, no dependencies, useful independently.
-2. **Proposal 4 (What Doesn't Fit)** second. Requires Proposal 1 plus basic shelf capacity data (could be a single "total shelf volume" number, no full shelf model needed). Delivers the strongest curation value for the least scope.
-3. **Proposal 2 (Shelf Configuration)** third, if the user wants the full spatial model. This is infrastructure for Proposals 3, 5, and 6.
+1. **Proposal 1 (Box Dimensions)** first. Prerequisite for accurate capacity math. Without real dimensions, overflow calculations are fiction (wallet games vs. Gloomhaven boxes make volume-blind math misleading).
+2. **Proposal 4 (What Doesn't Fit)** second. Requires Proposal 1 plus basic shelf capacity data (could be a single "total shelf volume" number, no full shelf model needed). Delivers the strongest curation value for the least scope. This is the first thing that answers "do I have space, and if not, what goes?"
+3. **Proposal 2 (Shelf Configuration)** third. Infrastructure for spatial features. The distributed-shelves-across-the-house reality makes the neighbor model meaningful.
 4. **Proposal 6 (Shelf-Aware Niche Display)** after Proposal 2. Lightweight, curation-aligned, validates that shelf assignments are useful before investing in optimization.
-5. **Proposals 3 and 5 (Assignment Algorithm + Visualizer)** last, and only if the user has affirmed that spatial optimization is in scope. These are the largest proposals and the ones most likely to be "a different tool."
+5. **Proposals 3 and 5 (Assignment Algorithm + Visualizer)** last. Largest scope, builds on everything above.
 
 ---
 
-## Open Questions for the User
+## Open Questions (Resolved)
 
-1. **Is "where do I put my games?" a question Shelf Judge should answer, or just "which games should I keep?"** The answer determines whether Proposals 3/5 belong here or in a separate project.
-2. **How many games do you own, and how many shelves?** The algorithm complexity matters a lot for 50 games vs. 500.
-3. **Would you use box dimensions for anything besides shelf layout?** If yes (sorting by size, filtering "travel-friendly games"), Proposal 1 justifies itself independently. If not, it's only useful as infrastructure for the rest.
-4. **Would a simple "your shelf is full, here are the weakest games" view (Proposal 4) satisfy the itch that prompted this idea?** If so, the full spatial optimizer may be unnecessary scope.
+_Discussed 2026-04-12. Answers below._
+
+1. **Is "where do I put my games?" a question Shelf Judge should answer, or just "which games should I keep?"**
+   Yes, both. Organizing the shelf is part of curation. "Do I have space?" and "what do I get rid of to make space?" are curation questions expressed through physical constraints. All six proposals are in scope.
+
+2. **How many games do you own, and how many shelves?**
+   More games than shelves. Shelves are distributed throughout the house. The overflow scenario is the default state.
+
+3. **Would you use box dimensions for anything besides shelf layout?**
+   Yes. "What fits in my board game backpack?" is a real use case, but it's a stretch goal and possibly a separate plugin/app. The primary value is accurate shelf capacity math. Box dimensions are essential, not optional, because wallet games and standard boxes have wildly different volumes.
+
+4. **Would a simple "your shelf is full, here are the weakest games" view (Proposal 4) satisfy the itch that prompted this idea?**
+   Proposal 4 is the right starting point and delivers immediate value. The full spatial features (Proposals 2, 3, 5, 6) belong in the roadmap and build on top. Start with 1 and 4, then layer the rest.
