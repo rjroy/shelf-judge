@@ -13,7 +13,12 @@ import { createGameRoutes } from "../src/routes/games";
 import type { GameService } from "../src/services/game-service";
 import type { PredictionService } from "../src/services/prediction-service";
 import type { StorageService } from "../src/services/storage-service";
+import { createStorageService } from "../src/services/storage-service";
+import type { FileOps } from "../src/services/file-ops";
 import { DEFAULT_REDUNDANCY_SETTINGS } from "../src/services/redundancy-engine";
+import { createWishlistRoutes } from "../src/routes/wishlist";
+import type { WishlistService } from "../src/services/wishlist-service";
+import { computeProfile } from "../src/services/profile-engine";
 
 const now = "2026-01-01T00:00:00Z";
 
@@ -352,13 +357,34 @@ describe("GET /games/:id regardless of ownership", () => {
     expect(data.game.ownership).toBe("owned");
   });
 
-  test("returns previously-owned game", async () => {
-    const app = buildApp();
+  test("returns previously-owned game with null niche and redundancy", async () => {
+    const coll = makeCollection();
+    const enabledRedundancy: RedundancySettings = {
+      ...DEFAULT_REDUNDANCY_SETTINGS,
+      enabled: true,
+      stage: "annotation",
+      similarityThreshold: 0.1,
+      minNeighbors: 1,
+      expectedNeighbors: 5,
+    };
+    const storage = createMockStorageService(coll, enabledRedundancy);
+    const gameService = createMockGameService(coll);
+    const predictionService = createMockPredictionService(coll);
+    const app = new Hono();
+    const { routes } = createGameRoutes({
+      gameService,
+      predictionService,
+      storageService: storage,
+    });
+    app.route("/api", routes);
+
     const res = await app.request("/api/games/prev");
     expect(res.status).toBe(200);
     const data = (await res.json()) as GameWithScore;
     expect(data.game.id).toBe("prev");
     expect(data.game.ownership).toBe("previously-owned");
+    expect(data.nichePosition).toBeNull();
+    expect(data.score!.redundancyAdjustment).toBeNull();
   });
 });
 
@@ -372,9 +398,9 @@ describe("niche/redundancy exclusion for previously-owned games", () => {
     expectedNeighbors: 5,
   };
 
-  test("previously-owned games in ownership=all have null nichePosition", async () => {
+  test("previously-owned games in ownership=all have null nichePosition and null redundancyAdjustment", async () => {
     const coll = makeCollection();
-    const storage = createMockStorageService(coll);
+    const storage = createMockStorageService(coll, enabledRedundancy);
     const gameService = createMockGameService(coll);
     const predictionService = createMockPredictionService(coll);
     const app = new Hono();
@@ -391,6 +417,7 @@ describe("niche/redundancy exclusion for previously-owned games", () => {
     const prevGame = games.find((g) => g.game.id === "prev");
     expect(prevGame).toBeDefined();
     expect(prevGame!.nichePosition).toBeNull();
+    expect(prevGame!.score!.redundancyAdjustment).toBeNull();
   });
 
   test("fitness scores are computed for previously-owned games", async () => {
@@ -444,30 +471,123 @@ describe("niche/redundancy exclusion for previously-owned games", () => {
   });
 });
 
-describe("legacy data migration", () => {
-  test("game without ownership field defaults to owned at parse time", () => {
-    // Simulates what loadCollection does for legacy data
-    const legacyGame = {
-      id: "legacy",
-      bggId: null,
-      name: "Legacy Game",
-      yearPublished: null,
-      minPlayers: null,
-      maxPlayers: null,
-      playingTime: null,
-      imageUrl: null,
-      bggData: null,
-      numPlays: null,
-      ratings: {},
-      createdAt: now,
-      updatedAt: now,
-    } as unknown as Game;
+describe("wishlist interaction with previously-owned games", () => {
+  test("previously-owned game cannot be wishlisted (returns 409)", async () => {
+    const coll = makeCollection();
+    // Give prevOwned a unique bggId so the wishlist check matches
+    coll.games.find((g) => g.id === "prev")!.bggId = 999;
 
-    // The backfill logic from storage-service.ts
-    if (!legacyGame.ownership) {
-      legacyGame.ownership = "owned";
+    const storage = createMockStorageService(coll);
+    const mockWishlistService: WishlistService = {
+      list: () => Promise.resolve([]),
+      add: async (bggId: number) => {
+        // Replicate the real wishlist service's collection check
+        const collection = await storage.loadCollection();
+        if (collection.games.some((g) => g.bggId === bggId)) {
+          throw new Error("This game is already in your collection");
+        }
+        throw new Error("not implemented");
+      },
+      remove: () => Promise.reject(new Error("not implemented")),
+      clear: () => Promise.reject(new Error("not implemented")),
+      refresh: () => Promise.reject(new Error("not implemented")),
+      refreshAll: () => Promise.reject(new Error("not implemented")),
+      removeByBggId: () => Promise.reject(new Error("not implemented")),
+    };
+
+    const app = new Hono();
+    const { routes } = createWishlistRoutes({ wishlistService: mockWishlistService });
+    app.route("/api", routes);
+
+    const res = await app.request("/api/wishlist", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bggId: 999 }),
+    });
+    expect(res.status).toBe(409);
+    const data = (await res.json()) as { error: string };
+    expect(data.error).toContain("already in your collection");
+  });
+});
+
+describe("profile computation includes previously-owned games", () => {
+  test("previously-owned games contribute to profile game count", () => {
+    const coll = makeCollection();
+    const games = coll.games;
+    const fitnessResults = new Map<string, FitnessResult>();
+    for (const game of games) {
+      fitnessResults.set(game.id, makeScore(7.0));
     }
 
-    expect(legacyGame.ownership).toBe("owned");
+    const profile = computeProfile({
+      games,
+      axes: coll.axes,
+      fitnessResults,
+      tournamentStats: null,
+    });
+
+    // All 4 games (3 owned + 1 previously-owned) should be counted
+    expect(profile.gameCount).toBe(4);
+  });
+});
+
+describe("legacy data migration", () => {
+  test("game without ownership field defaults to owned when loaded through storage service", async () => {
+    const legacyCollection = {
+      id: "coll-1",
+      name: "Test",
+      axes: [],
+      games: [
+        {
+          id: "legacy",
+          bggId: null,
+          name: "Legacy Game",
+          yearPublished: null,
+          minPlayers: null,
+          maxPlayers: null,
+          playingTime: null,
+          imageUrl: null,
+          bggData: null,
+          numPlays: null,
+          ratings: {},
+          createdAt: now,
+          updatedAt: now,
+          // No ownership field — this is the legacy state
+        },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const files: Record<string, string> = {
+      "/data/collection.json": JSON.stringify(legacyCollection),
+    };
+    const inMemoryFileOps: FileOps = {
+      readFile: (p: string) => {
+        if (files[p] !== undefined) return Promise.resolve(files[p]);
+        return Promise.reject(new Error(`ENOENT: ${p}`));
+      },
+      writeFile: (p: string, content: string) => {
+        files[p] = content;
+        return Promise.resolve();
+      },
+      rename: (oldP: string, newP: string) => {
+        files[newP] = files[oldP];
+        delete files[oldP];
+        return Promise.resolve();
+      },
+      exists: (p: string) => Promise.resolve(p in files),
+      mkdir: () => Promise.resolve(),
+    };
+
+    const storage = createStorageService({
+      dataDir: "/data",
+      configPath: "/config.json",
+      fileOps: inMemoryFileOps,
+    });
+
+    const loaded = await storage.loadCollection();
+    expect(loaded.games).toHaveLength(1);
+    expect(loaded.games[0].ownership).toBe("owned");
   });
 });
