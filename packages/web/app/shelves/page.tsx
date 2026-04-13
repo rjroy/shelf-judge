@@ -79,11 +79,7 @@ export default function ShelvesPage() {
     setError(null);
     try {
       const unit = await addShelfUnit({ name: newUnitName.trim(), shelves: [] });
-      setConfig((prev) =>
-        prev
-          ? { ...prev, units: [...prev.units, unit], updatedAt: new Date().toISOString() }
-          : prev,
-      );
+      setConfig((prev) => (prev ? { ...prev, units: [...prev.units, unit] } : prev));
       setExpandedUnits((prev) => new Set([...prev, unit.id]));
       setNewUnitName("");
       setAddingUnit(false);
@@ -93,6 +89,13 @@ export default function ShelvesPage() {
   };
 
   const handleRemoveUnit = async (unitId: string) => {
+    const unit = config?.units.find((u) => u.id === unitId);
+    const shelfCount = unit?.shelves.length ?? 0;
+    const message =
+      shelfCount > 0
+        ? `Remove "${unit?.name}" and its ${shelfCount} ${shelfCount === 1 ? "shelf" : "shelves"}?`
+        : `Remove "${unit?.name}"?`;
+    if (!window.confirm(message)) return;
     setError(null);
     try {
       await removeShelfUnit(unitId);
@@ -174,6 +177,8 @@ export default function ShelvesPage() {
   };
 
   const handleRemoveShelf = async (unit: ShelfUnit, shelfId: string) => {
+    const shelf = unit.shelves.find((s) => s.id === shelfId);
+    if (!window.confirm(`Remove shelf "${shelf?.name}"?`)) return;
     setError(null);
     try {
       const newShelves = unit.shelves
