@@ -20,9 +20,7 @@ related:
 
 This spec covers three connected layers of the shelf layout designer: storing physical box dimensions per game (brainstorm Proposal 1), modeling the user's shelf configuration (a minimal cut of brainstorm Proposal 2), and computing shelf capacity overflow (brainstorm Proposal 4).
 
-The core curation question is "do I have space, and if not, what goes?" But that question is meaningless without shape. A single total-volume number fails because the constraint isn't cubic centimeters, it's whether a box physically fits on a shelf. A 25-inch vintage game box doesn't fit in a 14-inch Kallax cube regardless of how much total volume remains.
-
-This requires three things: knowing each game's box size, knowing each shelf's interior dimensions, and running a bin-packing algorithm that assigns games to specific shelves. The overflow computation is driven by the algorithm's placement results: games the algorithm couldn't place are the overflow. The algorithm is defined in `.lore/designs/similarity-weighted-bin-packing.md` and handles spatial fitting, similarity-based grouping, and overflow detection as a unified process.
+The core curation question is "do I have space, and if not, what goes?" But that question is meaningless without shape. A single total-volume number fails because the constraint isn't cubic centimeters, it's whether a box physically fits on a shelf. A 25-inch vintage game box doesn't fit in a 14-inch Kallax cube regardless of how much total volume remains. The overflow computation is driven by the similarity-weighted bin-packing algorithm (`.lore/designs/similarity-weighted-bin-packing.md`): games the algorithm couldn't place are the overflow.
 
 ## Entry Points
 
@@ -438,43 +436,8 @@ Bin-packing algorithm integration, capacity endpoint, per-shelf assignments, col
 - The bin-packing algorithm is defined in `.lore/designs/similarity-weighted-bin-packing.md`. Layer 3 implements an adapter between Shelf Judge's data model and the algorithm's generic item/bin interface. The algorithm module itself should be implemented as a standalone service with no Shelf Judge domain knowledge, accepting items and bins as inputs.
 - Dimension display uses centimeters throughout. No unit conversion UI. Users in imperial-unit countries enter centimeters.
 
-## Known Flaws (2026-04-12 review, reconciled 2026-04-12)
+## Open Issues
 
-The original spec had structural problems in Layer 3 (overflow computation). Most were resolved by adopting the similarity-weighted bin-packing algorithm (`.lore/designs/similarity-weighted-bin-packing.md`) as the computation engine. Resolution status for each flaw:
+**BGG `versions=1` response structure is unverified.** REQ-SHELF-6 prescribes a parser for a response format that hasn't been confirmed against actual BGG output. Implementation must inspect real BGG responses before committing to the parser.
 
-### Flaw 1: Volume pooling. **Resolved.**
-
-The original spec defined `overflowing` as `totalCollectionCm3 > totalCapacityCm3`, which pooled volume across mismatched shelves. The algorithm doesn't pool volume. It assigns games to specific shelves with per-bin spatial tracking. Overflow is now determined by algorithm output: games that the packing algorithm couldn't place. No aggregate volume comparison exists in the revised spec.
-
-### Flaw 2: No game-to-shelf assignment. **Resolved.**
-
-The original spec deferred assignment. The bin-packing algorithm IS an assignment algorithm. The revised `ShelfCapacityResult` includes per-shelf `assignments` showing which games the algorithm placed where. The overflow list is Phase 4 output: games that fit somewhere by shape but were displaced by higher-priority games.
-
-### Flaw 3: `perShelfUtilization` was fictional. **Resolved.**
-
-The original `ShelfUtilization` type promised utilization but could only deliver theoretical fit counts. The revised `ShelfAssignment` type has concrete data: actual assigned games, real `usedCm3`, and computed `utilization` ratios. The algorithm also provides per-shelf `grade` ratings.
-
-### Flaw 4: Unconstrained-height shelves created a display gap. **Resolved.**
-
-The original spec excluded unconstrained-height shelves from volume totals, making the "72% full" display misleading. The revised spec avoids aggregate volume percentages entirely. Unconstrained-height shelves participate in the packing algorithm (games are assigned to them) and report their contents, but show `null` for capacity and utilization. The collection page indicator reports placement counts ("All N games placed" or "M games couldn't be placed"), not volume percentages.
-
-### Flaw 5: BGG `versions=1` response structure is unverified. **Unresolved.**
-
-This flaw is unrelated to the overflow computation. REQ-SHELF-6 still prescribes a parser for a response format that hasn't been confirmed against actual BGG output. Implementation must inspect real BGG responses before committing to the parser. The risk is low (the format is plausible) but the spec should not claim certainty about an unverified structure.
-
-### Flaw 6: Refresh vs. manual override interaction is unspecified. **Unresolved.**
-
-This flaw is unrelated to the overflow computation. The interaction between REQ-SHELF-10 (refresh populates dimensions) and REQ-SHELF-11 (manual overrides BGG) still needs an explicit statement. Recommended resolution: refresh should NOT overwrite `source: "manual"` dimensions. If the user manually measured a box, that measurement should survive a BGG refresh. The refresh should only populate dimensions when `boxDimensions` is `null` or `source` is `"bgg"`.
-
-### Flaw 7: Spec may be overcomplicated. **Partially resolved.**
-
-The bin-packing algorithm simplifies the spec by replacing the hand-built overflow logic (volume pooling, cumulative freed volume, `wouldResolveOverflow` markers) with "run the packer, report results." The three-category output (assigned, unfittable, displaced) is cleaner than the original two-category model (unfittable + volume overflow). However, the algorithm itself is substantial machinery. Whether this is overcomplication or appropriate complexity depends on whether the similarity-based grouping adds value for the user. The algorithm can be configured to weight space heavily and similarity lightly for a simpler initial experience.
-
-## Context
-
-- [Brainstorm: Shelf Layout Designer](.lore/brainstorms/shelf-layout-designer.md): Proposals 1, 2, and 4, with resolved open questions. The brainstorm confirms box dimensions are load-bearing for capacity math, that the user's collection exceeds shelf capacity as a default state, and that shape-fitting matters more than volume totals (Kallax cubes vs. long vintage boxes).
-- [Design: Similarity-Weighted 3D Bin Packing](.lore/designs/similarity-weighted-bin-packing.md): The algorithm that drives Layer 3. Defines item rotation, fitness functions, the four-phase packing algorithm, and post-packing grading. The spec adapts this algorithm's input/output to Shelf Judge's data model. The algorithm design stands on its own and should not be modified as part of this spec's implementation.
-- [Issue: Shelf Layout Designer](.lore/issues/shelf-layout-designer.md): Original three-sentence idea.
-- [Vision](.lore/vision.md): Principle 5 ("the shelf has a carrying capacity") directly supports this feature. The capacity result connects physical reality to the curation question without making removal decisions for the user.
-- [BGG API Research](.lore/research/bgg-api.md): Documents `versions=1` as an optional enrichment parameter. The response structure for version data is not documented in the research; implementation will need to inspect actual BGG responses.
-- [Data Model Design](.lore/designs/mvp-data-model.md): Current `Game` type has no dimension fields. The `boxDimensions` addition is an additive change.
+**Refresh vs. manual override interaction is unspecified.** The interaction between REQ-SHELF-10 (refresh populates dimensions) and REQ-SHELF-11 (manual overrides BGG) needs explicit handling: refresh should NOT overwrite `source: "manual"` dimensions. Refresh should only populate `boxDimensions` when it is `null` or `source` is `"bgg"`.
