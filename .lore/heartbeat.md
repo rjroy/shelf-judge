@@ -69,3 +69,8 @@ Changes made:
 Changes:
 1. Added `setBoxDimensions(id, dimensions)` to the `GameService` interface and its implementation in...
 - 15:23 commission-Dalton-20260413-150131 completed
+- 15:25 commission-Dalton-20260413-150049 result: Phases 2 and 5 of the shelf capacity feature are complete. Box dimensions can be set and cleared across all layers.
+
+**Phase 2 (Daemon):**
+- `PUT /games/:id/dimensions` endpoint with Zod validation: a...
+- 15:26 commission-Dalton-20260413-150049 completed
