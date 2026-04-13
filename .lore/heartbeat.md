@@ -85,6 +85,14 @@ All requirements in scope (REQ-SHELF-8 thro...
 - 15:28 commission-Thorne-20260413-150252 result: # Bin-Packing Algorithm Review (Phase 8)
 
 - 15:28 commission-Thorne-20260413-150252 completed
+- 15:29 commission-Thorne-20260413-150114 result: # Box Dimensions Review (Phases 2 and 5)
+
+- 15:29 commission-Thorne-20260413-150114 completed
+## Scope
+
+Reviewed against REQ-SHELF-3 through REQ-SHELF-7, REQ-SHELF-26, REQ-SHELF-36 and the Phase 2/5 plan. Files reviewed:
+
+- `packages/daemon/src/routes/...
 ## Verdict
 
 Solid implementation. The algorithm matches the design doc across all major areas: merge strategies, fitness functions, four-phase loop, post-plac...
