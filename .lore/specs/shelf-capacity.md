@@ -299,13 +299,13 @@ All measured games placed successfully.
 
 ### Game Display Enrichment
 
-- REQ-SHELF-42: The `GameWithScore` API response type (used by `GET /games`) includes box dimensions. Since `GameWithScore` already contains the full `Game` object and `Game` now has `boxDimensions`, no new field is needed on `GameWithScore` itself. Clients read `game.boxDimensions`.
+- REQ-SHELF-36: The `GameWithScore` API response type (used by `GET /games`) includes box dimensions. Since `GameWithScore` already contains the full `Game` object and `Game` now has `boxDimensions`, no new field is needed on `GameWithScore` itself. Clients read `game.boxDimensions`.
 
 ## Implementation Layers
 
 This spec covers significant scope across three connected concerns. The following layering supports clean implementation by independent agents:
 
-**Layer 1: Box Dimensions (REQ-SHELF-1 through REQ-SHELF-4, REQ-SHELF-5 through REQ-SHELF-7, REQ-SHELF-26, REQ-SHELF-42)**
+**Layer 1: Box Dimensions (REQ-SHELF-1 through REQ-SHELF-4, REQ-SHELF-5 through REQ-SHELF-7, REQ-SHELF-26, REQ-SHELF-36)**
 Types, manual entry UI/CLI, game detail display. No dependencies on shelf config or overflow. Can be implemented and shipped independently.
 
 **Layer 2: Shelf Configuration (REQ-SHELF-8 through REQ-SHELF-15, REQ-SHELF-27 through REQ-SHELF-29, REQ-SHELF-32 shelf-config commands)**
