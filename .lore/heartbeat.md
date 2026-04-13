@@ -96,6 +96,11 @@ All 7 findings from Thorne's review addressed:
 - 15:32 commission-Dalton-20260413-150119 result: # Thorne's Box Dimensions Review: Findings Addressed
 
 - 15:32 commission-Dalton-20260413-150119 completed
+- 15:32 commission-Dalton-20260413-150152 result: ## Thorne Review Findings: Addressed
+
+**Finding 1 (Fixed): Phantom shelf IDs silently become new shelves**
+- `shelf-service.ts:158-164`: When `updateUnit` receives a shelf with an ID that doesn't matc...
+- 15:32 commission-Dalton-20260413-150152 completed
 ## Finding 1: BoxDimensionsForm bypasses typed client helper — No action needed
 
 Investigated the pattern across all client components. `rating-fo...
