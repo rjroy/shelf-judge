@@ -1,7 +1,7 @@
 ---
 title: Similarity-weighted 3D bin packing algorithm
 date: 2026-04-12
-status: draft
+status: approved
 tags: [algorithm, bin-packing, optimization, fitness, spatial]
 ---
 
