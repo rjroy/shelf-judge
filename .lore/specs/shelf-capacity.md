@@ -44,7 +44,7 @@ interface BoxDimensions {
 }
 ```
 
-All three dimensions are in inches. Semantics: `width` is the longest face edge (what you see from the front), `height` is the vertical dimension when the box is stored upright, `depth` is front-to-back. For the purpose of shelf fitting, the system checks all orientations (see REQ-SHELF-22), so the labeling convention is informational, not load-bearing.
+All three dimensions are in inches. Semantics: `width` is the longest face edge (what you see from the front), `height` is the vertical dimension when the box is stored upright, `depth` is front-to-back. For the purpose of shelf fitting, the system checks all orientations (see REQ-SHELF-16), so the labeling convention is informational, not load-bearing.
 
 - REQ-SHELF-2: `BoxDimensions` is a shared type defined in `packages/shared/src/types.ts`.
 
@@ -96,7 +96,7 @@ interface ShelfConfiguration {
 
 ### Shelf Configuration API
 
-- REQ-SHELF-19: Daemon API endpoints for shelf configuration:
+- REQ-SHELF-13: Daemon API endpoints for shelf configuration:
 
 | Operation ID         | Method | Path                   | Description                            |
 | -------------------- | ------ | ---------------------- | -------------------------------------- |
@@ -106,7 +106,7 @@ interface ShelfConfiguration {
 | `shelf.units.update` | PUT    | `/api/shelf/units/:id` | Update a shelf unit (name and shelves) |
 | `shelf.units.remove` | DELETE | `/api/shelf/units/:id` | Remove a shelf unit                    |
 
-- REQ-SHELF-20: The full-config PUT (`/api/shelf/config`) accepts a complete `ShelfConfiguration` and replaces the stored config. This supports bulk editing in the web UI. The individual unit endpoints (`POST`, `PUT`, `DELETE`) support incremental changes from the CLI.
+- REQ-SHELF-14: The full-config PUT (`/api/shelf/config`) accepts a complete `ShelfConfiguration` and replaces the stored config. This supports bulk editing in the web UI. The individual unit endpoints (`POST`, `PUT`, `DELETE`) support incremental changes from the CLI.
 
 **PUT `/api/shelf/config`**:
 
@@ -149,13 +149,13 @@ When shelves are provided in a unit update, shelves with an `id` are updated, sh
 }
 ```
 
-- REQ-SHELF-21: Shelf dimensions are validated on write. Width and depth MUST be > 0. Height MUST be > 0 or null. Name MUST be non-empty. Shelf unit name MUST be non-empty. Validation errors return 400 with a descriptive message.
+- REQ-SHELF-15: Shelf dimensions are validated on write. Width and depth MUST be > 0. Height MUST be > 0 or null. Name MUST be non-empty. Shelf unit name MUST be non-empty. Validation errors return 400 with a descriptive message.
 
 ### Overflow Computation
 
 The overflow computation is driven by the similarity-weighted bin-packing algorithm defined in `.lore/designs/similarity-weighted-bin-packing.md`. Shelves map to bins, games map to items. The algorithm assigns games to specific shelves and produces overflow (Phase 4) for games that don't fit. The spec below defines how the daemon maps Shelf Judge's data into the algorithm's inputs and what the API exposes from the algorithm's output.
 
-- REQ-SHELF-22: A game "fits" on a shelf if its box can be oriented so that the box dimensions fit within the shelf dimensions. The algorithm's rotation logic (see design doc, "Item Rotation and Fit") handles this: it checks orientations according to axis priority and minimization flags. For shelves with `height: null` (unconstrained), the height axis is unconstrained and only width and depth are checked. The six-orientation fit check from the original spec maps to the algorithm's rotation with `force_axis_0_width: true` (games face outward on the shelf).
+- REQ-SHELF-16: A game "fits" on a shelf if its box can be oriented so that the box dimensions fit within the shelf dimensions. The algorithm's rotation logic (see design doc, "Item Rotation and Fit") handles this: it checks orientations according to axis priority and minimization flags. For shelves with `height: null` (unconstrained), the height axis is unconstrained and only width and depth are checked. The six-orientation fit check from the original spec maps to the algorithm's rotation with `force_axis_0_width: true` (games face outward on the shelf).
 
 - REQ-SHELF-23: A game "fits the configuration" if it fits on at least one shelf in any unit. A game that fits no shelf is "unfittable," it physically cannot be stored in the user's current shelf setup. These games are identified before the algorithm runs (a pre-pass geometric check) and reported separately from algorithm overflow.
 
@@ -308,10 +308,10 @@ This spec covers significant scope across three connected concerns. The followin
 **Layer 1: Box Dimensions (REQ-SHELF-1 through REQ-SHELF-4, REQ-SHELF-5 through REQ-SHELF-7, REQ-SHELF-32, REQ-SHELF-42)**
 Types, manual entry UI/CLI, game detail display. No dependencies on shelf config or overflow. Can be implemented and shipped independently.
 
-**Layer 2: Shelf Configuration (REQ-SHELF-8 through REQ-SHELF-21, REQ-SHELF-33 through REQ-SHELF-35, REQ-SHELF-38 shelf-config commands)**
+**Layer 2: Shelf Configuration (REQ-SHELF-8 through REQ-SHELF-15, REQ-SHELF-33 through REQ-SHELF-35, REQ-SHELF-38 shelf-config commands)**
 Data model, storage, CRUD API, web UI for shelf management, CLI commands for shelf setup. Depends on shared types only. Can be implemented in parallel with Layer 1.
 
-**Layer 3: Capacity and Assignment (REQ-SHELF-22 through REQ-SHELF-31, REQ-SHELF-36 through REQ-SHELF-37, REQ-SHELF-40 through REQ-SHELF-41)**
+**Layer 3: Capacity and Assignment (REQ-SHELF-16 through REQ-SHELF-31, REQ-SHELF-36 through REQ-SHELF-37, REQ-SHELF-40 through REQ-SHELF-41)**
 Bin-packing algorithm integration, capacity endpoint, per-shelf assignments, collection page capacity indicator, capacity detail view, CLI capacity commands. Depends on both Layer 1 (box dimensions on games) and Layer 2 (shelf configuration). The bin-packing algorithm itself is defined in `.lore/designs/similarity-weighted-bin-packing.md`; this layer implements the adapter between Shelf Judge's data model and the algorithm's input/output.
 
 ## Scope Exclusions
