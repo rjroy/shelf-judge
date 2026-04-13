@@ -11,6 +11,7 @@ import {
   gameRate,
   gameRemove,
   gameRefreshAllBgg,
+  gameSetStatus,
 } from "./commands/game.js";
 import { axisList, axisCreate, axisUpdate, axisDelete } from "./commands/axis.js";
 import { scoreList, scoreGet } from "./commands/score.js";
@@ -52,6 +53,7 @@ const COMMANDS: Record<string, number> = {
   "game rate": 2,
   "game remove": 2,
   "game refresh-all-bgg": 2,
+  "game set-status": 2,
   "axis list": 2,
   "axis create": 2,
   "axis update": 2,
@@ -109,6 +111,7 @@ interface ParsedArgs {
   includePredicted?: boolean;
   showNiches?: boolean;
   showRedundancy?: boolean;
+  ownership?: string;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -133,6 +136,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let includePredicted = false;
   let showNiches = false;
   let showRedundancy = false;
+  let ownership: string | undefined;
 
   for (let i = 0; i < raw.length; i++) {
     const arg = raw[i];
@@ -167,6 +171,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       showNiches = true;
     } else if (arg === "--show-redundancy") {
       showRedundancy = true;
+    } else if (arg === "--ownership") {
+      ownership = raw[++i];
     } else if (arg === "--axis") {
       axisFlags.push(raw[++i]);
       axisFlags.push(raw[++i]);
@@ -220,6 +226,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     includePredicted: includePredicted || undefined,
     showNiches: showNiches || undefined,
     showRedundancy: showRedundancy || undefined,
+    ownership,
   };
 }
 
@@ -254,13 +261,16 @@ async function main(): Promise<void> {
       output = await gameAdd(client, args, { ...opts, bggId: parsed.bggId, name: parsed.name });
       break;
     case "game list":
-      output = await gameList(client, args, opts);
+      output = await gameList(client, args, { ...opts, ownership: parsed.ownership });
       break;
     case "game rate":
       output = await gameRate(client, args, { ...opts, axisFlags: parsed.axisFlags });
       break;
     case "game remove":
       output = await gameRemove(client, args, opts);
+      break;
+    case "game set-status":
+      output = await gameSetStatus(client, args, opts);
       break;
     case "game refresh-all-bgg":
       output = await gameRefreshAllBgg(client, args, opts);
