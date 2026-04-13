@@ -44,6 +44,13 @@ import {
   redundancyStage,
   redundancySet,
 } from "./commands/redundancy.js";
+import {
+  shelfList,
+  shelfAddUnit,
+  shelfAddShelf,
+  shelfRemoveUnit,
+  shelfRemoveShelf,
+} from "./commands/shelf.js";
 
 // Known command paths and their token depths.
 // Dispatch matches on the first N tokens; everything after is positional.
@@ -83,6 +90,11 @@ const COMMANDS: Record<string, number> = {
   "wishlist remove": 2,
   "wishlist clear": 2,
   "wishlist refresh": 2,
+  "shelf list": 2,
+  "shelf add-unit": 2,
+  "shelf add-shelf": 2,
+  "shelf remove-unit": 2,
+  "shelf remove-shelf": 2,
   "import bgg-collection": 2,
   "config get": 2,
   "config set": 2,
@@ -417,6 +429,21 @@ async function main(): Promise<void> {
       break;
     case "wishlist refresh":
       output = await wishlistRefresh(client, args, opts);
+      break;
+    case "shelf list":
+      output = await shelfList(client, args, opts);
+      break;
+    case "shelf add-unit":
+      output = await shelfAddUnit(client, args, opts);
+      break;
+    case "shelf add-shelf":
+      output = await shelfAddShelf(client, args, opts);
+      break;
+    case "shelf remove-unit":
+      output = await shelfRemoveUnit(client, args, opts);
+      break;
+    case "shelf remove-shelf":
+      output = await shelfRemoveShelf(client, args, opts);
       break;
     case "import bgg-collection":
       output = await importBggCollection(client, args, opts);

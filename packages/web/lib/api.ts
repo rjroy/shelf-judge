@@ -296,6 +296,45 @@ export async function unignoreNicheTag(tag: NicheTagFilter): Promise<NicheSettin
   });
 }
 
+// Shelf configuration API functions
+
+import type { Shelf, ShelfUnit, ShelfConfiguration } from "@shelf-judge/shared";
+
+export async function getShelfConfig(): Promise<ShelfConfiguration> {
+  return daemonJson("/api/shelf/config");
+}
+
+export async function setShelfConfig(units: ShelfUnit[]): Promise<ShelfConfiguration> {
+  return daemonJson("/api/shelf/config", { method: "PUT", body: { units } });
+}
+
+export async function addShelfUnit(input: {
+  name: string;
+  shelves: Array<{ name: string; width: number; height: number | null; depth: number }>;
+}): Promise<ShelfUnit> {
+  return daemonJson("/api/shelf/units", { method: "POST", body: input });
+}
+
+export async function updateShelfUnit(
+  id: string,
+  input: {
+    name?: string;
+    shelves?: Array<{
+      id?: string;
+      name: string;
+      width: number;
+      height: number | null;
+      depth: number;
+    }>;
+  },
+): Promise<ShelfUnit> {
+  return daemonJson(`/api/shelf/units/${id}`, { method: "PUT", body: input });
+}
+
+export async function removeShelfUnit(id: string): Promise<{ removed: true }> {
+  return daemonJson(`/api/shelf/units/${id}`, { method: "DELETE" });
+}
+
 // Redundancy settings API functions
 
 import type {
@@ -375,4 +414,7 @@ export type {
   RedundancyNeighbor,
   WishlistEntry,
   WishlistBreakdownEntry,
+  Shelf,
+  ShelfUnit,
+  ShelfConfiguration,
 };
