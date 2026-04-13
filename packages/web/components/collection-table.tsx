@@ -592,7 +592,7 @@ export function CollectionTable({
         {!usePredictions && (
           <div className="axes-used-col col-label">{isAxisSort ? "Scores" : "Axes Rated"}</div>
         )}
-        {usePredictions && <div className="col-label">Confidence</div>}
+        {usePredictions && <div className="axes-used-col col-label">Confidence</div>}
         <div
           className={`col-label sortable${sort.field === "updatedAt" ? " sort-active" : ""}`}
           onClick={handleLastRatedHeaderClick}

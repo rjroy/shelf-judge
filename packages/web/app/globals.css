@@ -3899,8 +3899,8 @@ body {
     grid-template-columns: 30px 50px 1fr 100px 100px;
   }
 
-  .axes-used-col,
-  .axes-used {
+  .last-rated,
+  .last-rated-col {
     display: none;
   }
 
