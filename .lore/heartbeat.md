@@ -46,3 +46,17 @@ I cannot run `bun run typecheck` or `bun run lint` directly. I do not have shell
 
 1. **[Required] Missing barrel exports** — Added `BoxDimensions`, `Shelf`, `ShelfUnit`, `ShelfConfiguration` to the type export block in `packages/shared/src/index.ts`...
 - 15:16 commission-Dalton-20260413-150034 completed
+- 15:21 commission-Dalton-20260413-150049 result: Phase 5d complete: added box dimension flags to the CLI.
+
+Changes made to two files:
+
+1. `packages/cli/src/commands/game.ts` - Added `gameEdit` function after `gameSetStatus`. Validates that all three...
+- 15:22 commission-Dalton-20260413-150049 result: Implemented Phase 5a-5c: box dimensions display and edit in the web UI.
+
+Changes made:
+
+1. **packages/web/lib/api.ts** - Added `setGameDimensions` function after `setGameOwnership`, imported `BoxDimen...
+- 15:22 commission-Dalton-20260413-150240 result: Implemented Phase 8: standalone bin-packing algorithm in `packages/daemon/src/services/bin-packing.ts` with 51 tests in `packages/daemon/tests/bin-packing.test.ts`.
+
+**Module**: `packages/daemon/src/s...
+- 15:22 commission-Dalton-20260413-150240 completed
