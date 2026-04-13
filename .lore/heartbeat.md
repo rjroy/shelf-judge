@@ -39,6 +39,11 @@ Workers can also add entries to this file during their sessions.
 
 **F1** (wishlist blocks previously-owned): Added test that marks a game as previously-owned and verifies `POST ...
 - 18:11 commission-Dalton-20260412-174425 completed
+- 18:14 commission-Dalton-20260412-174506 result: Phase 6 CLI commands implemented. All three requirements covered:
+
+**6a: `gameSetStatus` command** (`packages/cli/src/commands/game.ts:232-257`)
+- `shelf-judge game set-status <id> <owned|previously-o...
+- 18:14 commission-Dalton-20260412-174506 completed
 ## Verdict
 
 The foundation implementation is solid. The critical integration point (ownership filter vs. niche/redundancy computation universe) is corr...
