@@ -219,6 +219,21 @@ describe("shelf service", () => {
       await expect(service.updateUnit(unit.id, { name: "" })).rejects.toThrow(ShelfValidationError);
     });
 
+    test("rejects phantom shelf ID that doesn't match any existing shelf", async () => {
+      const unit = await service.addUnit({
+        name: "Kallax",
+        shelves: [{ name: "Shelf A", width: 13, height: 13, depth: 15 }],
+      });
+
+      await expect(
+        service.updateUnit(unit.id, {
+          shelves: [
+            { id: "nonexistent-shelf-id", name: "Ghost", width: 10, height: 10, depth: 10 },
+          ],
+        }),
+      ).rejects.toThrow(ShelfValidationError);
+    });
+
     test("validates shelf dimensions on update", async () => {
       const unit = await service.addUnit({
         name: "Kallax",

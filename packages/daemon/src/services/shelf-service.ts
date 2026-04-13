@@ -156,7 +156,12 @@ export function createShelfService(deps: ShelfServiceDeps): ShelfService {
         const newShelves: Shelf[] = [];
 
         for (const shelfInput of input.shelves) {
-          if (shelfInput.id && existingShelfIds.has(shelfInput.id)) {
+          if (shelfInput.id) {
+            if (!existingShelfIds.has(shelfInput.id)) {
+              throw new ShelfValidationError(
+                `Shelf id "${shelfInput.id}" does not match any existing shelf in this unit`,
+              );
+            }
             // Update existing shelf
             newShelves.push(buildShelf({ ...shelfInput, id: shelfInput.id }));
           } else {
