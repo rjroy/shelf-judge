@@ -1,7 +1,7 @@
 ---
 title: "Commission: Shelf Capacity: Shelf Config Service+Routes (C7)"
 date: 2026-04-13
-status: blocked
+status: pending
 tags: [commission]
 worker: Dalton
 workerDisplayTitle: "Guild Artificer"
@@ -19,6 +19,11 @@ activity_timeline:
     reason: "Dependencies not satisfied"
     from: "pending"
     to: "blocked"
+  - timestamp: 2026-04-13T22:16:42.786Z
+    event: status_pending
+    reason: "Dependencies satisfied"
+    from: "blocked"
+    to: "pending"
 current_progress: ""
 projectName: shelf-judge
 ---
