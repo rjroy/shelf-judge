@@ -115,6 +115,13 @@ All 7 findings from Thorne's review addressed:
 |---|---|---|
 | REQ-SHELF-27 (shelf config page with CRUD) | **Satisfied** | p...
 - 15:44 commission-Thorne-20260413-150213 completed
+- 15:51 commission-Dalton-20260413-150218 result: ## Shelf Config UI Review Fixes
+
+Addressed all 5 findings from Thorne's review (commission-Thorne-20260413-150213):
+
+### Finding 1 [Medium]: Missing CLI test file
+**Fixed.** Created `packages/cli/test...
+- 15:51 commission-Dalton-20260413-150218 completed
 ## Finding 1: BoxDimensionsForm bypasses typed client helper — No action needed
 
 Investigated the pattern across all client components. `rating-fo...
