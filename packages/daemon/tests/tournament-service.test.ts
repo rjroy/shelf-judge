@@ -80,6 +80,12 @@ function createStubStorage(): StorageService & { tournamentData: TournamentData 
     saveWishlist() {
       return Promise.resolve();
     },
+    loadShelfConfig() {
+      return Promise.resolve({ units: [], createdAt: "", updatedAt: "" });
+    },
+    saveShelfConfig() {
+      return Promise.resolve();
+    },
   };
 
   return stub;

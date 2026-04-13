@@ -16,7 +16,9 @@ import { createPredictionRoutes } from "./routes/prediction.js";
 import { createNicheRoutes } from "./routes/niche.js";
 import { createRedundancyRoutes } from "./routes/redundancy.js";
 import { createWishlistRoutes } from "./routes/wishlist.js";
+import { createShelfRoutes } from "./routes/shelf.js";
 import { createWishlistService } from "./services/wishlist-service.js";
+import { createShelfService } from "./services/shelf-service.js";
 import type { TournamentService } from "./services/tournament-service.js";
 import type { ProfileService } from "./services/profile-service.js";
 import type { PredictionService } from "./services/prediction-service.js";
@@ -73,6 +75,8 @@ export function createApp(deps: AppDeps): AppResult {
   const predictionRouteModule = createPredictionRoutes({ predictionService, storageService });
   const nicheRouteModule = createNicheRoutes({ storageService });
   const redundancyRouteModule = createRedundancyRoutes({ storageService });
+  const shelfService = createShelfService({ storageService });
+  const shelfRouteModule = createShelfRoutes({ shelfService });
   const wishlistRouteModule = createWishlistRoutes({ wishlistService });
 
   // Collect all operations
@@ -87,6 +91,7 @@ export function createApp(deps: AppDeps): AppResult {
     ...nicheRouteModule.operations,
     ...redundancyRouteModule.operations,
     ...wishlistRouteModule.operations,
+    ...shelfRouteModule.operations,
   ];
 
   const helpRouteModule = createHelpRoutes({ operations: allOperations });
@@ -113,6 +118,7 @@ export function createApp(deps: AppDeps): AppResult {
   app.route("/api", nicheRouteModule.routes);
   app.route("/api", redundancyRouteModule.routes);
   app.route("/api", wishlistRouteModule.routes);
+  app.route("/api", shelfRouteModule.routes);
   app.route("/api", helpRouteModule.routes);
   app.route("/api", configRouteModule.routes);
   app.route("/api", shutdownRouteModule.routes);

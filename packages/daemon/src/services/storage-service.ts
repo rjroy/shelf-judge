@@ -10,6 +10,7 @@ import type {
   NicheSettings,
   RedundancySettings,
   WishlistEntry,
+  ShelfConfiguration,
 } from "@shelf-judge/shared";
 import { TournamentDataSchema } from "@shelf-judge/shared";
 import type { FileOps } from "./file-ops.js";
@@ -36,6 +37,8 @@ export interface StorageService {
   saveRedundancySettings(settings: RedundancySettings): Promise<void>;
   loadWishlist(): Promise<WishlistEntry[]>;
   saveWishlist(entries: WishlistEntry[]): Promise<void>;
+  loadShelfConfig(): Promise<ShelfConfiguration>;
+  saveShelfConfig(config: ShelfConfiguration): Promise<void>;
 }
 
 export interface StorageServiceDeps {
@@ -254,6 +257,24 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
       const wishlistPath = path.join(dataDir, "wishlist.json");
       await fileOps.mkdir(dataDir);
       await atomicWrite(wishlistPath, JSON.stringify(entries, null, 2), fileOps);
+    },
+
+    async loadShelfConfig(): Promise<ShelfConfiguration> {
+      const shelfConfigPath = path.join(dataDir, "shelf-config.json");
+      const exists = await fileOps.exists(shelfConfigPath);
+      if (!exists) {
+        const now = new Date().toISOString();
+        return { units: [], createdAt: now, updatedAt: now };
+      }
+
+      const raw = await fileOps.readFile(shelfConfigPath);
+      return JSON.parse(raw) as ShelfConfiguration;
+    },
+
+    async saveShelfConfig(config: ShelfConfiguration): Promise<void> {
+      const shelfConfigPath = path.join(dataDir, "shelf-config.json");
+      await fileOps.mkdir(dataDir);
+      await atomicWrite(shelfConfigPath, JSON.stringify(config, null, 2), fileOps);
     },
   };
 }

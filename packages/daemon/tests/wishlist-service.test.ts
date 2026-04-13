@@ -146,6 +146,8 @@ function createMockStorage(
         expectedNeighbors: 5,
       }),
     saveRedundancySettings: () => Promise.resolve(),
+    loadShelfConfig: () => Promise.resolve({ units: [], createdAt: "", updatedAt: "" }),
+    saveShelfConfig: () => Promise.resolve(),
   };
 }
 

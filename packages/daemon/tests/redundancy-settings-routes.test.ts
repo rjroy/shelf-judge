@@ -36,6 +36,8 @@ function createMockStorageService(): StorageService & { settings: RedundancySett
     saveNicheSettings: () => Promise.resolve(),
     loadWishlist: () => Promise.resolve([]),
     saveWishlist: () => Promise.resolve(),
+    loadShelfConfig: () => Promise.resolve({ units: [], createdAt: "", updatedAt: "" }),
+    saveShelfConfig: () => Promise.resolve(),
   };
   return mock;
 }
