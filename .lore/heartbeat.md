@@ -35,6 +35,10 @@ Workers can also add entries to this file during their sessions.
 - 18:06 commission-Thorne-20260412-174419 result: # Review: Previously-Owned Feature (Phases 1-3)
 
 - 18:06 commission-Thorne-20260412-174419 completed
+- 18:11 commission-Dalton-20260412-174425 result: All five Thorne findings addressed in `packages/daemon/tests/ownership-routes.test.ts`:
+
+**F1** (wishlist blocks previously-owned): Added test that marks a game as previously-owned and verifies `POST ...
+- 18:11 commission-Dalton-20260412-174425 completed
 ## Verdict
 
 The foundation implementation is solid. The critical integration point (ownership filter vs. niche/redundancy computation universe) is corr...
