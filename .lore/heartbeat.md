@@ -60,3 +60,12 @@ Changes made:
 
 **Module**: `packages/daemon/src/s...
 - 15:22 commission-Dalton-20260413-150240 completed
+- 15:23 commission-Dalton-20260413-150131 result: Implemented Phases 3 and 4 of the shelf capacity feature: shelf configuration backend.
+
+**Phase 3: Storage + Service**
+- Added `loadShelfConfig`/`saveShelfConfig` to `StorageService` interface and imp...
+- 15:23 commission-Dalton-20260413-150049 result: Implemented PUT /games/:id/dimensions endpoint for Phase 2 of the shelf capacity feature.
+
+Changes:
+1. Added `setBoxDimensions(id, dimensions)` to the `GameService` interface and its implementation in...
+- 15:23 commission-Dalton-20260413-150131 completed
