@@ -157,7 +157,7 @@ The overflow computation is driven by the similarity-weighted bin-packing algori
 
 - REQ-SHELF-16: A game "fits" on a shelf if its box can be oriented so that the box dimensions fit within the shelf dimensions. The algorithm's rotation logic (see design doc, "Item Rotation and Fit") handles this: it checks orientations according to axis priority and minimization flags. For shelves with `height: null` (unconstrained), the height axis is unconstrained and only width and depth are checked. The six-orientation fit check from the original spec maps to the algorithm's rotation with `force_axis_0_width: true` (games face outward on the shelf).
 
-- REQ-SHELF-23: A game "fits the configuration" if it fits on at least one shelf in any unit. A game that fits no shelf is "unfittable," it physically cannot be stored in the user's current shelf setup. These games are identified before the algorithm runs (a pre-pass geometric check) and reported separately from algorithm overflow.
+- REQ-SHELF-17: A game "fits the configuration" if it fits on at least one shelf in any unit. A game that fits no shelf is "unfittable," it physically cannot be stored in the user's current shelf setup. These games are identified before the algorithm runs (a pre-pass geometric check) and reported separately from algorithm overflow.
 
 - REQ-SHELF-24: The daemon provides a capacity endpoint:
 
