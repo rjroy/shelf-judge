@@ -280,6 +280,7 @@ function createMockGameService(overrides: Partial<GameService> = {}): GameServic
     searchGames: notImpl as GameService["searchGames"],
     importBggCollection: notImpl as GameService["importBggCollection"],
     setOwnership: notImpl as GameService["setOwnership"],
+    setBoxDimensions: notImpl as GameService["setBoxDimensions"],
     ...overrides,
   };
 }

@@ -12,6 +12,7 @@ import {
   gameRemove,
   gameRefreshAllBgg,
   gameSetStatus,
+  gameEdit,
 } from "./commands/game.js";
 import { axisList, axisCreate, axisUpdate, axisDelete } from "./commands/axis.js";
 import { scoreList, scoreGet } from "./commands/score.js";
@@ -54,6 +55,7 @@ const COMMANDS: Record<string, number> = {
   "game remove": 2,
   "game refresh-all-bgg": 2,
   "game set-status": 2,
+  "game edit": 2,
   "axis list": 2,
   "axis create": 2,
   "axis update": 2,
@@ -112,6 +114,10 @@ interface ParsedArgs {
   showNiches?: boolean;
   showRedundancy?: boolean;
   ownership?: string;
+  boxWidth?: number;
+  boxHeight?: number;
+  boxDepth?: number;
+  clearBox?: boolean;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -137,6 +143,10 @@ function parseArgs(argv: string[]): ParsedArgs {
   let showNiches = false;
   let showRedundancy = false;
   let ownership: string | undefined;
+  let boxWidth: number | undefined;
+  let boxHeight: number | undefined;
+  let boxDepth: number | undefined;
+  let clearBox = false;
 
   for (let i = 0; i < raw.length; i++) {
     const arg = raw[i];
@@ -173,6 +183,14 @@ function parseArgs(argv: string[]): ParsedArgs {
       showRedundancy = true;
     } else if (arg === "--ownership") {
       ownership = raw[++i];
+    } else if (arg === "--box-width") {
+      boxWidth = Number(raw[++i]);
+    } else if (arg === "--box-height") {
+      boxHeight = Number(raw[++i]);
+    } else if (arg === "--box-depth") {
+      boxDepth = Number(raw[++i]);
+    } else if (arg === "--clear-box") {
+      clearBox = true;
     } else if (arg === "--axis") {
       axisFlags.push(raw[++i]);
       axisFlags.push(raw[++i]);
@@ -227,6 +245,10 @@ function parseArgs(argv: string[]): ParsedArgs {
     showNiches: showNiches || undefined,
     showRedundancy: showRedundancy || undefined,
     ownership,
+    boxWidth,
+    boxHeight,
+    boxDepth,
+    clearBox: clearBox || undefined,
   };
 }
 
@@ -271,6 +293,15 @@ async function main(): Promise<void> {
       break;
     case "game set-status":
       output = await gameSetStatus(client, args, opts);
+      break;
+    case "game edit":
+      output = await gameEdit(client, args, {
+        ...opts,
+        boxWidth: parsed.boxWidth,
+        boxHeight: parsed.boxHeight,
+        boxDepth: parsed.boxDepth,
+        clearBox: parsed.clearBox,
+      });
       break;
     case "game refresh-all-bgg":
       output = await gameRefreshAllBgg(client, args, opts);

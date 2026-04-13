@@ -24,6 +24,7 @@ import { ScoreBreakdown } from "@/components/score-breakdown";
 import { RatingForm } from "@/components/rating-form";
 import { GameActions, OwnershipActions } from "@/components/game-actions";
 import { NicheIgnoreButton, NicheRestoreButton } from "@/components/niche-ignore-button";
+import { BoxDimensionsForm } from "@/components/box-dimensions-form";
 
 export async function generateMetadata({
   params,
@@ -138,6 +139,14 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
               {game.playingTime && <span>⏱ {game.playingTime} min</span>}
               {game.bggData?.weight && <span>⚖️ BGG Weight: {game.bggData.weight.toFixed(2)}</span>}
               {game.numPlays && game.numPlays > 0 && <span>🎲 Plays: {game.numPlays}</span>}
+              {game.boxDimensions ? (
+                <span className="box-dims-display">
+                  📦 {game.boxDimensions.width} × {game.boxDimensions.height} ×{" "}
+                  {game.boxDimensions.depth} in
+                </span>
+              ) : (
+                <span className="box-dims-display box-dims-muted">📦 not measured</span>
+              )}
               {game.bggId && (
                 <a
                   className="bgg-link"
@@ -500,6 +509,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
               predictionScore={hasPredictions ? displayScore : null}
             />
             <OwnershipActions gameId={game.id} gameName={game.name} ownership={game.ownership} />
+            <BoxDimensionsForm gameId={game.id} currentDimensions={game.boxDimensions} />
           </div>
         </div>
       </div>

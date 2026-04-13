@@ -5,6 +5,7 @@ import type {
   Game,
   OwnershipStatus,
   Axis,
+  BoxDimensions,
   FitnessResult,
   FitnessBreakdownEntry,
   GameWithScore,
@@ -81,6 +82,16 @@ export async function setGameOwnership(
   return daemonJson(`/api/games/${id}/ownership`, {
     method: "PATCH",
     body: { ownership },
+  });
+}
+
+export async function setGameDimensions(
+  id: string,
+  dimensions: { width: number; height: number; depth: number } | { clear: true },
+): Promise<{ game: Game }> {
+  return daemonJson(`/api/games/${id}/dimensions`, {
+    method: "PUT",
+    body: dimensions,
   });
 }
 
@@ -342,6 +353,7 @@ export type {
   Game,
   OwnershipStatus,
   Axis,
+  BoxDimensions,
   FitnessResult,
   FitnessBreakdownEntry,
   GameWithScore,

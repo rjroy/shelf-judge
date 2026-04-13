@@ -185,6 +185,7 @@ function createMockGameService(collection?: Collection): GameService {
       coll.updatedAt = game.updatedAt;
       return Promise.resolve(structuredClone(game));
     },
+    setBoxDimensions: () => Promise.reject(new Error("not implemented")),
     searchGames: () => Promise.reject(new Error("not implemented")),
     refreshBggData: () => Promise.reject(new Error("not implemented")),
     refreshAllBggData: () => Promise.reject(new Error("not implemented")),

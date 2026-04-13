@@ -178,6 +178,7 @@ function createMockGameService(): GameService {
     searchGames: () => Promise.reject(new Error("not implemented")),
     importBggCollection: () => Promise.reject(new Error("not implemented")),
     setOwnership: () => Promise.reject(new Error("not implemented")),
+    setBoxDimensions: () => Promise.reject(new Error("not implemented")),
   };
 }
 

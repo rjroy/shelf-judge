@@ -2983,6 +2983,84 @@ body {
   background: color-mix(in srgb, var(--danger) 5%, transparent);
 }
 
+/* Box dimensions */
+.box-dims-display {
+  white-space: nowrap;
+}
+.box-dims-muted {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.box-dims-form {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+.box-dims-inputs {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.box-dims-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.box-dims-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.box-dims-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.box-dims-input {
+  width: 72px;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  outline: none;
+}
+.box-dims-input:focus {
+  border-color: var(--action);
+  box-shadow: 0 0 0 2px var(--action-subtle);
+}
+.box-dims-unit {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.box-dims-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+.box-dims-validation {
+  font-size: 12px;
+  color: var(--score-mid);
+  margin-top: 4px;
+}
+.box-dims-error {
+  font-size: 12px;
+  color: var(--danger);
+  margin-top: 4px;
+}
+.box-dims-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 /* Comparison area */
 .comparison-area {
   flex: 1;

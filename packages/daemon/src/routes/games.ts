@@ -34,6 +34,17 @@ const OwnershipBodySchema = z.object({
   ownership: z.enum(["owned", "previously-owned"]),
 });
 
+const BoxDimensionsSchema = z.object({
+  width: z.number().gt(0).lte(40),
+  height: z.number().gt(0).lte(40),
+  depth: z.number().gt(0).lte(40),
+});
+
+const SetDimensionsBodySchema = z.union([
+  BoxDimensionsSchema,
+  z.object({ clear: z.literal(true) }),
+]);
+
 function isBggConfigured(bggClient?: BggClient): boolean {
   return bggClient !== undefined && bggClient.isConfigured();
 }
@@ -363,6 +374,35 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     }
   });
 
+  // PUT /games/:id/dimensions
+  routes.put("/games/:id/dimensions", async (c) => {
+    const id = c.req.param("id");
+
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+
+    const parsed = SetDimensionsBodySchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json({ error: "Validation failed", details: parsed.error.issues }, 400);
+    }
+
+    try {
+      const dimensions = "clear" in parsed.data ? null : parsed.data;
+      const game = await gameService.setBoxDimensions(id, dimensions);
+      return c.json({ game });
+    } catch (err) {
+      const message = toErrorMessage(err);
+      if (message.includes("not found")) {
+        return c.json({ error: message }, 404);
+      }
+      return c.json({ error: message }, 500);
+    }
+  });
+
   // POST /games/refresh - refresh all BGG data (must be before :id/refresh)
   routes.post("/games/refresh", async (c) => {
     if (!isBggConfigured(bggClient)) {
@@ -446,6 +486,15 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       name: "set-status",
       description: "Change a game's ownership status",
       invocation: { method: "PATCH", path: "/api/games/:id/ownership" },
+      hierarchy: { root: "shelf", feature: "game" },
+      parameters: [{ name: "id", in: "path", description: "Game ID", required: true }],
+      idempotent: true,
+    },
+    {
+      operationId: "shelf.game.dimensions",
+      name: "set-dimensions",
+      description: "Set or clear box dimensions for a game",
+      invocation: { method: "PUT", path: "/api/games/:id/dimensions" },
       hierarchy: { root: "shelf", feature: "game" },
       parameters: [{ name: "id", in: "path", description: "Game ID", required: true }],
       idempotent: true,
