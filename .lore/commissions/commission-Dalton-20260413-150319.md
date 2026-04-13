@@ -1,7 +1,7 @@
 ---
 title: "Commission: Shelf Capacity: Adapter+Endpoint+Helpers (C16)"
 date: 2026-04-13
-status: pending
+status: blocked
 tags: [commission]
 worker: Dalton
 workerDisplayTitle: "Guild Artificer"
@@ -16,6 +16,11 @@ activity_timeline:
   - timestamp: 2026-04-13T22:03:19.777Z
     event: created
     reason: "Commission created"
+  - timestamp: 2026-04-13T22:10:22.777Z
+    event: status_blocked
+    reason: "Dependencies not satisfied"
+    from: "pending"
+    to: "blocked"
 current_progress: ""
 projectName: shelf-judge
 ---

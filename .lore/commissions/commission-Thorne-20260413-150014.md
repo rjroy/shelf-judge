@@ -1,7 +1,7 @@
 ---
 title: "Commission: Shelf Capacity: Review Foundation (C2)"
 date: 2026-04-13
-status: pending
+status: dispatched
 tags: [commission]
 worker: Thorne
 workerDisplayTitle: "Guild Warden"
@@ -14,6 +14,11 @@ activity_timeline:
   - timestamp: 2026-04-13T22:00:14.742Z
     event: created
     reason: "Commission created"
+  - timestamp: 2026-04-13T22:10:22.778Z
+    event: status_dispatched
+    reason: "Dispatched to worker"
+    from: "pending"
+    to: "dispatched"
 current_progress: ""
 projectName: shelf-judge
 ---

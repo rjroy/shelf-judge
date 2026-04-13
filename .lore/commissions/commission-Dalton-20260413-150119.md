@@ -1,7 +1,7 @@
 ---
 title: "Commission: Shelf Capacity: Fix Box Dimensions Review (C6)"
 date: 2026-04-13
-status: pending
+status: blocked
 tags: [commission]
 worker: Dalton
 workerDisplayTitle: "Guild Artificer"
@@ -14,6 +14,11 @@ activity_timeline:
   - timestamp: 2026-04-13T22:01:19.518Z
     event: created
     reason: "Commission created"
+  - timestamp: 2026-04-13T22:10:22.776Z
+    event: status_blocked
+    reason: "Dependencies not satisfied"
+    from: "pending"
+    to: "blocked"
 current_progress: ""
 projectName: shelf-judge
 ---

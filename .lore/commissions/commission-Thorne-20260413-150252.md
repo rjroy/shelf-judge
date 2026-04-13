@@ -1,7 +1,7 @@
 ---
 title: "Commission: Shelf Capacity: Review Algorithm (C14)"
 date: 2026-04-13
-status: pending
+status: blocked
 tags: [commission]
 worker: Thorne
 workerDisplayTitle: "Guild Warden"
@@ -17,6 +17,11 @@ activity_timeline:
   - timestamp: 2026-04-13T22:02:52.226Z
     event: created
     reason: "Commission created"
+  - timestamp: 2026-04-13T22:10:22.777Z
+    event: status_blocked
+    reason: "Dependencies not satisfied"
+    from: "pending"
+    to: "blocked"
 current_progress: ""
 projectName: shelf-judge
 ---
