@@ -26,3 +26,8 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
+- 19:21 commission-Octavia-20260412-191444 result: Reconciled `.lore/specs/shelf-capacity.md` against `.lore/designs/similarity-weighted-bin-packing.md`. Changes made:
+
+**Frontmatter and Overview:** Added algorithm design as related document. Removed ...
+
+- 19:21 commission-Octavia-20260412-191444 completed
