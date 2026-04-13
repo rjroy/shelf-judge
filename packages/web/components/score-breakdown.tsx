@@ -9,7 +9,13 @@ import type {
   ReferenceGame,
 } from "@shelf-judge/shared";
 
-export function ScoreBreakdown({ score }: { score: FitnessResult | null }) {
+export function ScoreBreakdown({
+  score,
+  isPreviouslyOwned = false,
+}: {
+  score: FitnessResult | null;
+  isPreviouslyOwned?: boolean;
+}) {
   if (!score) {
     return (
       <p className="bgg-data-line breakdown-empty">
@@ -71,6 +77,30 @@ export function ScoreBreakdown({ score }: { score: FitnessResult | null }) {
               displayScore={displayScore}
             />
           ))}
+          {isPreviouslyOwned && (
+            <>
+              <tr className="excluded-row">
+                <td>
+                  Niche bonus <span className="excluded-label">Excluded</span>
+                </td>
+                <td className="right">&ndash;</td>
+                <td className="right">&ndash;</td>
+                <td className="right">&ndash;</td>
+                <td className="right">&ndash;</td>
+                <td className="right">&ndash;</td>
+              </tr>
+              <tr className="excluded-row">
+                <td>
+                  Redundancy adj. <span className="excluded-label">Excluded</span>
+                </td>
+                <td className="right">&ndash;</td>
+                <td className="right">&ndash;</td>
+                <td className="right">&ndash;</td>
+                <td className="right">&ndash;</td>
+                <td className="right">&ndash;</td>
+              </tr>
+            </>
+          )}
           <tr className="total-row">
             <td colSpan={4} className="total-label">
               {score.vetoed

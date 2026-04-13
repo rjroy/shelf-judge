@@ -130,6 +130,16 @@
   --sidebar-item-hover-bg: color-mix(in srgb, var(--nav-text) 6%, transparent);
   --sidebar-track-bg: color-mix(in srgb, var(--nav-text) 10%, transparent);
 
+  /* ── Previously Owned ────────────────────────────────────── */
+  --prev-owned-bg: #f0ede6;
+  --prev-owned-badge-bg: #ede9e1;
+  --prev-owned-badge-border: var(--border-strong);
+  --prev-owned-badge-text: var(--text-muted);
+  --prev-owned-notice-bg: #f5f2eb;
+  --prev-owned-notice-border: var(--border-strong);
+  --prev-owned-notice-text: var(--text-secondary);
+  --success-border: color-mix(in hsl, var(--score-high), white 75%);
+
   /* ── Scrollbar ─────────────────────────────────────────────── */
   --scrollbar-track: var(--bg-subtle);
   --scrollbar-thumb: var(--border-strong);
@@ -239,6 +249,16 @@
 
   /* ── Overlay ──────────────────────────────────────────────── */
   --overlay-bg: rgb(0 0 0 / 0.65);
+
+  /* ── Previously Owned ────────────────────────────────────── */
+  --prev-owned-bg: #222019;
+  --prev-owned-badge-bg: #2e2b24;
+  --prev-owned-badge-border: var(--border-strong);
+  --prev-owned-badge-text: var(--text-muted);
+  --prev-owned-notice-bg: #282520;
+  --prev-owned-notice-border: var(--border-strong);
+  --prev-owned-notice-text: var(--text-secondary);
+  --success-border: color-mix(in hsl, var(--score-high), var(--bg-base) 70%);
 
   /* ── Scrollbar ─────────────────────────────────────────────── */
   --scrollbar-thumb: var(--border-strong);
@@ -6679,4 +6699,149 @@ body {
   font-family: inherit;
   text-decoration: underline;
   padding: 0;
+}
+
+/* ===== Previously Owned: Game Detail ===== */
+
+.game-hero-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+}
+
+.status-badge.prev-owned {
+  background: var(--prev-owned-badge-bg);
+  color: var(--prev-owned-badge-text);
+  border: 1px solid var(--prev-owned-badge-border);
+}
+
+.status-badge.owned {
+  background: var(--success-subtle);
+  color: var(--success);
+  border: 1px solid var(--success-border);
+}
+
+.prev-owned-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 16px;
+  background: var(--prev-owned-notice-bg);
+  border: 1px solid var(--prev-owned-notice-border);
+  border-radius: 6px;
+  margin: 20px 28px 0;
+  font-size: 13px;
+  color: var(--prev-owned-notice-text);
+  line-height: 1.5;
+}
+
+.prev-owned-notice-icon {
+  font-size: 15px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  opacity: 0.7;
+}
+
+.prev-owned-notice strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.excluded-row td {
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 12px;
+}
+
+.excluded-row td .excluded-label {
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--prev-owned-badge-bg);
+  color: var(--prev-owned-badge-text);
+  border: 1px solid var(--prev-owned-badge-border);
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.btn-success {
+  background: var(--success);
+  color: var(--on-action);
+  border: none;
+}
+
+.btn-success:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.action-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.action-group-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 2px;
+}
+
+.action-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.action-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+.danger-zone {
+  padding: 10px;
+  border: 1px solid var(--danger-border);
+  border-radius: 6px;
+  background: var(--danger-subtle);
+}
+
+.danger-zone-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--danger);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 6px;
+}
+
+.danger-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  line-height: 1.4;
 }
