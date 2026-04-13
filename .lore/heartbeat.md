@@ -50,6 +50,12 @@ Workers can also add entries to this file during their sessions.
 - Added `isPreviouslyOwned` flag derived from `game.ownership`
 - Hero section now uses a title row (`ga...
 - 18:15 commission-Dalton-20260412-174450 completed
+- 18:17 commission-Dalton-20260412-174440 result: Phase 4 (collection page UI) implemented across 3 files.
+
+**`packages/web/app/collection/page.tsx`:**
+- Accepts `searchParams` prop (Next.js 16 async pattern)
+- Reads `?ownership=all` to determine whe...
+- 18:18 commission-Dalton-20260412-174440 completed
 ## Verdict
 
 The foundation implementation is solid. The critical integration point (ownership filter vs. niche/redundancy computation universe) is corr...
