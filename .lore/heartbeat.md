@@ -101,6 +101,12 @@ All 7 findings from Thorne's review addressed:
 **Finding 1 (Fixed): Phantom shelf IDs silently become new shelves**
 - `shelf-service.ts:158-164`: When `updateUnit` receives a shelf with an ID that doesn't matc...
 - 15:32 commission-Dalton-20260413-150152 completed
+- 15:38 commission-Dalton-20260413-150205 result: Implemented Phases 6 and 7 of the shelf capacity feature.
+
+**Phase 6: Shelf Configuration Web UI**
+
+- Added 5 client helpers to `packages/web/lib/api.ts`: `getShelfConfig`, `setShelfConfig`, `addShelf...
+- 15:38 commission-Dalton-20260413-150205 completed
 ## Finding 1: BoxDimensionsForm bypasses typed client helper — No action needed
 
 Investigated the pattern across all client components. `rating-fo...
