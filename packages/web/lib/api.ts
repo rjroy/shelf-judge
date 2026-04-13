@@ -253,7 +253,7 @@ export async function getReadiness(): Promise<PredictionReadiness> {
 }
 
 export async function listGamesWithPredictions(): Promise<GameWithScore[]> {
-  return daemonJson("/api/games?includePredicted=true");
+  return daemonJson("/api/games?includePredicted=true&&ownership=all");
 }
 
 // Niche settings API functions
