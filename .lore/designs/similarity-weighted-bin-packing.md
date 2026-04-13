@@ -18,15 +18,17 @@ The use case is physical shelving where grouping matters: a bookshelf where you 
 ### Items
 
 Each item has:
+
 - **Dimensions**: a 3-tuple `[h, w, d]` representing its bounding box. Optional; dimensionless items exist (cards, accessories) and bypass spatial logic entirely.
 - **Location override**: an optional fixed assignment. Some items must go in a specific bin regardless of fitness. Overrides come in two flavors:
-  - *Hard*: the item is excluded from packing (unowned, culled, in transit). Placed directly.
-  - *Soft*: the item prefers a bin but can be reassigned if it doesn't fit.
+  - _Hard_: the item is excluded from packing (unowned, culled, in transit). Placed directly.
+  - _Soft_: the item prefers a bin but can be reassigned if it doesn't fit.
 - **Similarity function**: `compare(other) -> [0, 1]` where 1 means identical profile and 0 means completely unrelated. The algorithm is agnostic to what "similar" means. The consumer defines it.
 
 ### Bins
 
 Each bin has:
+
 - **Dimensions**: a 3-tuple `[h, w, d]` representing available interior space. Optional; dimensionless bins (overflow, drawer, archive) accept items without spatial constraints.
 - **Axis priority**: an ordered permutation of `[0, 1, 2]` controlling which axis to fill first. Default `[0, 1, 2]` fills height first. Priority `[1, 0, 2]` fills width first.
 - **Axis minimization flags**: per-axis booleans controlling whether the item's dimension along that axis should be maximized (fill the space) or minimized (leave room). Default: `[false, true, true]` (minimize height consumption, maximize width and depth fill).
@@ -41,18 +43,18 @@ All tuning parameters live in a config object:
 ```
 config:
   merge_strategy: "geomax"   # How to combine multiple scores into one
-  
+
   bin_fitness_weights:        # How to rank which bin to fill next
     base:     0.20            # How well current contents relate to each other
     unsorted: 0.70            # How well remaining items would fit here
     neighbor: 0.10            # How well this bin's contents relate to neighbor bins
     top_n:    1               # Consider only the top N candidate items per bin
-  
+
   item_fitness_weights:       # How to score placing a specific item in a specific bin
     space:    0.10            # How well the item fills the remaining space
     game:     0.80            # How similar the item is to existing bin contents
     neighbor: 0.10            # How similar the item is to neighboring bin contents
-  
+
   min_remainder: [0.25, 3, 4] # Minimum useful sub-volume after placement (discard slivers)
   force_axis_0_width: true    # Lock axis 0 to the item's width (items face outward)
 ```
@@ -61,14 +63,14 @@ config:
 
 Multiple similarity or fitness scores need to be collapsed into a single number. The algorithm supports pluggable merge functions:
 
-| Strategy | Formula | Character |
-|----------|---------|-----------|
-| **avg** | arithmetic mean | Balanced, tolerant of outliers |
-| **geo** | geometric mean | Penalizes any single low score more than avg |
-| **harmonic** | harmonic mean | Penalizes low scores heavily |
-| **max** | maximum | Optimistic, driven by best match |
-| **min** | minimum | Pessimistic, driven by worst match |
-| **geomax** | `(cap * product)^(1/(n+1))` where cap = max score | Geometric mean anchored to the best score. Rewards having one strong match while still penalizing zeros. This is the default. |
+| Strategy     | Formula                                           | Character                                                                                                                     |
+| ------------ | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| **avg**      | arithmetic mean                                   | Balanced, tolerant of outliers                                                                                                |
+| **geo**      | geometric mean                                    | Penalizes any single low score more than avg                                                                                  |
+| **harmonic** | harmonic mean                                     | Penalizes low scores heavily                                                                                                  |
+| **max**      | maximum                                           | Optimistic, driven by best match                                                                                              |
+| **min**      | minimum                                           | Pessimistic, driven by worst match                                                                                            |
+| **geomax**   | `(cap * product)^(1/(n+1))` where cap = max score | Geometric mean anchored to the best score. Rewards having one strong match while still penalizing zeros. This is the default. |
 
 The `geomax` strategy deserves explanation. Standard geometric mean treats all scores equally. Geomax seeds the product with the best score, then takes the `(n+1)`th root. This means a bin with one excellent match and several decent ones scores higher than a bin with all mediocre matches. It captures "this item has a home here" better than pure geometric mean.
 
@@ -84,8 +86,8 @@ Given item dimensions `[ih, iw, id]`, bin dimensions `[bh, bw, bd]`, axis priori
 for each axis in priority order P:
   from the item's unused dimensions:
     find one that fits (item_dim <= bin_dim on this axis)
-    if M[axis] is true:  pick the largest fitting dimension (consume space)
-    if M[axis] is false: pick the smallest fitting dimension (conserve space)
+    if M[axis] is true:  pick the smallest fitting dimension (conserve space)
+    if M[axis] is false: pick the largest fitting dimension (consume space)
   if none fits: try swapping the last two assigned dimensions
   if still none fits: item cannot be placed in this bin
 return the rotated dimensions
@@ -146,7 +148,7 @@ With default weights (0.10, 0.80, 0.10), similarity dominates. An item that matc
 
 ### Bin Readiness
 
-Scores how urgently a bin needs filling. Used to decide *which bin to fill next*, not which item to put there. Three components, weighted by `bin_fitness_weights`:
+Scores how urgently a bin needs filling. Used to decide _which bin to fill next_, not which item to put there. Three components, weighted by `bin_fitness_weights`:
 
 **Base fitness**: How well the bin's current contents relate to each other.
 
@@ -202,14 +204,14 @@ while unplaced items remain:
     1. layer (higher first)
     2. remaining volume (smaller first, fill tight spaces before loose ones)
     3. id (stable sort)
-  
+
   for the highest-readiness bin:
     for each unplaced item:
       calculate item_fitness(item, bin)
     select the item with highest fitness
     place it and reduce the bin's remaining dimensions
     restart the loop (re-sort bins with updated state)
-  
+
   if no bin accepted any item: exit loop
 ```
 
@@ -224,7 +226,7 @@ Remaining items (no physical fit anywhere, or dimensionless) go to their safe lo
 A variant exists for packing items into bags/cases instead of shelves. Key differences:
 
 - **No location overrides**: all items are candidates for any bag.
-- **3D sub-volume splitting**: after placing an item, the remaining space is split into up to 3 rectangular sub-volumes (one per axis of the placed item). Each sub-volume is checked against `min_remainder` and discarded if too small. The bin tracks a *list* of available sub-volumes rather than a single remaining dimension.
+- **3D sub-volume splitting**: after placing an item, the remaining space is split into up to 3 rectangular sub-volumes (one per axis of the placed item). Each sub-volume is checked against `min_remainder` and discarded if too small. The bin tracks a _list_ of available sub-volumes rather than a single remaining dimension.
 - **No neighbor coherence**: bags don't have spatial adjacency.
 - **Higher space weight**: item fitness weights shift toward space (0.25) vs similarity (0.75) because bags are about packing efficiency more than browsing.
 - **Post-sort**: after packing, items within each bag are sorted by a configurable score (e.g., overall item quality) for display purposes.
@@ -257,8 +259,8 @@ Grades map to letters: S (top 10%), A, B, C, D, F (bottom 10%). These are displa
 
 - **N** = number of items, **B** = number of bins
 - Phase 1: O(N)
-- Phase 2: O(N * B)
-- Phase 3: O(N^2 * B) worst case (N iterations, each re-scoring N items against B bins). In practice closer to O(N * B * k) where k is the average bin size, because similarity scoring is per-item-in-bin.
+- Phase 2: O(N \* B)
+- Phase 3: O(N^2 _ B) worst case (N iterations, each re-scoring N items against B bins). In practice closer to O(N _ B \* k) where k is the average bin size, because similarity scoring is per-item-in-bin.
 - Phase 4: O(N)
 
 The algorithm is quadratic in item count. This is acceptable for hundreds of items (board game collections, personal libraries) but would need optimization for thousands (warehouse-scale).

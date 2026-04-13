@@ -608,10 +608,11 @@ describe("pack: edge cases", () => {
     const items: PackItem[] = [];
     const bins: PackBin[] = [];
     for (let i = 0; i < 50; i++) {
+      const myIndex = i; // Capture in closure for compare
       items.push(
         makeItem(`i${i}`, [2 + (i % 5), 10, 10], {
           compare: (other) => {
-            const myGroup = Math.floor(parseInt(other.id.slice(1)) / 10);
+            const myGroup = Math.floor(myIndex / 10);
             const otherGroup = Math.floor(parseInt(other.id.slice(1)) / 10);
             return myGroup === otherGroup ? 0.7 : 0.2;
           },
@@ -624,5 +625,107 @@ describe("pack: edge cases", () => {
     const result = pack(items, bins);
     const placed = [...result.assignments.values()].reduce((sum, a) => sum + a.itemIds.length, 0);
     expect(placed + result.overflow.length).toBe(50);
+  });
+});
+
+// --- Rotation swap path (Finding 3) ---
+
+describe("findBestRotation: swap recovery", () => {
+  test("swap fires when greedy assignment fails on last axis", () => {
+    // Item [8, 3, 12], bin [10, 14, 6]
+    // Priority [0, 1, 2], minimize [false, true, true]
+    // Axis 0 (maximize): picks 12 (largest fitting <= 10? No, 12 > 10. Next: 8 <= 10 ✓)
+    // Actually let's think through: candidates for axis 0 (<=10): 8, 3. maximize -> 8.
+    // Axis 1 (minimize, <=14): unused are 3, 12. minimize -> 3.
+    // Axis 2 (minimize, <=6): unused is 12. 12 > 6, no candidate.
+    // Swap: give axis 2 what axis 1 had (3 <= 6 ✓). Find replacement for axis 1 (<=14): 12 <=14 ✓.
+    // Result: [8, 12, 3]
+    const result = findBestRotation([8, 3, 12], [10, 14, 6], [0, 1, 2], [false, true, true], false);
+    expect(result).not.toBeNull();
+    expect(result![0]).toBe(8);
+    expect(result![1]).toBe(12);
+    expect(result![2]).toBe(3);
+  });
+
+  test("swap does not assign same dimension to two axes", () => {
+    // This is the bug scenario from Finding 1.
+    // Item [3, 7, 5], bin where axis 1 gets 7, axis 2 can't fit remaining.
+    // Bin [10, 10, 4]: axis 0 (maximize, <=10): picks 7. axis 1 (minimize, <=10): picks 3.
+    // axis 2 (minimize, <=4): 5 > 4, no fit. Swap: give axis 2 what axis 1 had (3 <=4 ✓).
+    // Find replacement for axis 1 (<=10, exclude index used for axis 2): 5 <=10 ✓.
+    // Result: [7, 5, 3]. All three dimensions are distinct and used exactly once.
+    const result = findBestRotation([3, 7, 5], [10, 10, 4], [0, 1, 2], [false, true, true], false);
+    expect(result).not.toBeNull();
+    // Verify all three original dimensions appear exactly once
+    const sorted = [...result!].sort((a, b) => a - b);
+    expect(sorted).toEqual([3, 5, 7]);
+    // Verify each fits its axis
+    expect(result![0]).toBeLessThanOrEqual(10);
+    expect(result![1]).toBeLessThanOrEqual(10);
+    expect(result![2]).toBeLessThanOrEqual(4);
+  });
+
+  test("swap fails when no replacement exists", () => {
+    // Item [15, 15, 3], bin [4, 20, 20]
+    // Axis 0 (maximize, <=4): only 3 fits. Axis 1 (minimize, <=20): 15 fits (both same, pick first).
+    // Axis 2 (minimize, <=20): remaining 15 fits.
+    // Actually this doesn't trigger swap. Let me construct a real failure:
+    // Item [15, 12, 3], bin [4, 5, 20]
+    // Axis 0 (maximize, <=4): only 3 fits.
+    // Axis 1 (minimize, <=5): none of {15, 12} fit. Swap: give axis 1 what axis 0 had (3 <= 5 ✓).
+    // Find replacement for axis 0 (<=4, not the index for 3): {15, 12}, neither <= 4.
+    // Swap fails. Return null.
+    const result = findBestRotation([15, 12, 3], [4, 5, 20], [0, 1, 2], [false, true, true], false);
+    expect(result).toBeNull();
+  });
+});
+
+// --- Neighbor fitness (Finding 4) ---
+
+describe("pack: neighbor fitness", () => {
+  test("neighbor similarity influences item placement", () => {
+    // Two bins are neighbors. b1 has an anchor item. A similar item should
+    // prefer b2 (the neighbor of b1) over b3 (no neighbor relationship).
+    const anchor = makeItem("anchor", [2, 10, 10], {
+      locationOverride: { binId: "b1", hard: true },
+      compare: (other) => (other.id === "nearby" ? 0.9 : 0.1),
+    });
+    const nearby = makeItem("nearby", [2, 10, 10], {
+      compare: (other) => (other.id === "anchor" ? 0.9 : 0.1),
+    });
+
+    const bins = [
+      makeBin("b1", [10, 12, 12], { neighbors: ["b2"] }),
+      makeBin("b2", [10, 12, 12], { neighbors: ["b1"] }),
+      makeBin("b3", [10, 12, 12]),
+    ];
+
+    // Use neighbor-heavy weights to isolate the effect
+    const config: Partial<PackConfig> = {
+      itemFitnessWeights: { space: 0, game: 0.1, neighbor: 0.9 },
+      binFitnessWeights: { base: 0.1, unsorted: 0.5, neighbor: 0.4, topN: 1 },
+    };
+    const result = pack([anchor, nearby], bins, config);
+
+    // nearby should be in b2 (neighbor of b1 which has anchor), not b3
+    expect(result.assignments.get("b2")!.itemIds).toContain("nearby");
+  });
+});
+
+// --- Phase 2: multiple unambiguous items same bin (Finding 5) ---
+
+describe("pack: phase 2 sequencing", () => {
+  test("second unambiguous item falls through when first fills the bin", () => {
+    // Two items each fit only b1. First placement reduces axis-0,
+    // making the second item no longer fit. It should go to phase 3/overflow.
+    const items = [makeItem("i1", [6, 5, 5]), makeItem("i2", [6, 5, 5])];
+    // b1 has height 10: i1 fits (6 <= 10), after placement remaining[0] = 4, i2 (6 > 4) won't fit.
+    // b2 is too small for either item.
+    const bins = [makeBin("b1", [10, 6, 6]), makeBin("b2", [3, 3, 3])];
+    const result = pack(items, bins);
+
+    // i1 placed in b1, i2 overflows (doesn't fit b1 after i1, doesn't fit b2 at all)
+    expect(result.assignments.get("b1")!.itemIds).toContain("i1");
+    expect(result.overflow).toContain("i2");
   });
 });

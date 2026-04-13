@@ -183,6 +183,7 @@ export function findBestRotation(
             const swapCandidates: { idx: number; size: number }[] = [];
             for (let i = 0; i < 3; i++) {
               if (usedItemIndices.has(i)) continue;
+              if (i === prevItemIdx) continue; // Reserved for current axis
               if (itemDims[i] <= binDims[prevAxis]) {
                 swapCandidates.push({ idx: i, size: itemDims[i] });
               }
@@ -440,8 +441,8 @@ function computeGrades(
     const baseW = config.binFitnessWeights.base;
 
     if (!bs.bin.dimensions) {
-      // Dimensionless bin: grade is base fitness alone
-      gradeScores.push({ binId, score: baseFit / maxPairwise, baseFitness: baseFit });
+      // Dimensionless bin: grade is base fitness alone (no normalization per design doc)
+      gradeScores.push({ binId, score: baseFit, baseFitness: baseFit });
     } else if (bs.items.length === 1) {
       // Single item: space fitness only
       let spaceFit = 0;
