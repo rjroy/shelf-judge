@@ -119,10 +119,13 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
       const raw = await fileOps.readFile(collectionPath);
       const collection = JSON.parse(raw) as Collection;
 
-      // Backfill ownership for legacy data (pre-ownership-feature games)
+      // Backfill legacy data for games missing newer fields
       for (const game of collection.games) {
         if (!game.ownership) {
           game.ownership = "owned";
+        }
+        if (game.boxDimensions === undefined) {
+          game.boxDimensions = null;
         }
       }
 

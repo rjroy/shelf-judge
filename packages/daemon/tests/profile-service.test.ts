@@ -24,6 +24,7 @@ function makeGame(id: string, name: string): Game {
     playingTime: null,
     numPlays: null,
     ownership: "owned",
+    boxDimensions: null,
     ratings: {},
     imageUrl: null,
     bggData: null,

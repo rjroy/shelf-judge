@@ -46,6 +46,7 @@ function makeGame(
     playingTime: 60,
     numPlays: null,
     ownership: "owned",
+    boxDimensions: null,
     ratings,
     imageUrl: null,
     bggData: hasBgg

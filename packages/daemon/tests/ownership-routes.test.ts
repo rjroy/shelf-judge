@@ -67,6 +67,7 @@ function makeGame(
       makeBggData({ mechanics: [mech("Deck Building")], categories: [cat("Card Game")] }),
     numPlays: 5,
     ownership,
+    boxDimensions: null,
     ratings: { axis1: 7 },
     createdAt: now,
     updatedAt: now,

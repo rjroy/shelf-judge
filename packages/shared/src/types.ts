@@ -58,6 +58,7 @@ export interface Game {
   bggData: BggGameData | null;
   numPlays: number | null;
   ownership: OwnershipStatus;
+  boxDimensions: BoxDimensions | null;
   ratings: Record<string, number>; // axisId -> rating (1-10)
   createdAt: string; // ISO 8601
   updatedAt: string; // ISO 8601
@@ -521,6 +522,34 @@ export interface WishlistBreakdownEntry {
   axisName: string;
   rating: number;
   confidence: PredictionConfidence;
+}
+
+// Shelf capacity types (shelf-capacity spec)
+
+export interface BoxDimensions {
+  width: number; // in
+  height: number; // in
+  depth: number; // in
+}
+
+export interface Shelf {
+  id: string;
+  name: string;
+  width: number; // interior in
+  height: number | null; // interior in, null = unconstrained
+  depth: number; // interior in
+}
+
+export interface ShelfUnit {
+  id: string;
+  name: string;
+  shelves: Shelf[]; // ordered top-to-bottom
+}
+
+export interface ShelfConfiguration {
+  units: ShelfUnit[];
+  createdAt: string; // ISO 8601
+  updatedAt: string; // ISO 8601
 }
 
 export interface WishlistEntry {

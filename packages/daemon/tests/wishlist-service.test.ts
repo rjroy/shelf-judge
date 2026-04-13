@@ -38,6 +38,7 @@ function makeGame(bggId: number, name: string): Game {
       fetchedAt: NOW,
     },
     ownership: "owned",
+    boxDimensions: null,
     ratings: {},
     createdAt: NOW,
     updatedAt: NOW,

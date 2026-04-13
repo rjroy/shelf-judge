@@ -260,6 +260,7 @@ function makeGame(bggId: number | null, name: string): Game {
     numPlays: null,
     bggData: null,
     ownership: "owned",
+    boxDimensions: null,
     ratings: {},
     createdAt: NOW,
     updatedAt: NOW,
