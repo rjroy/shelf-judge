@@ -42,3 +42,7 @@ I cannot run `bun run typecheck` or `bun run lint` directly. I do not have shell
 
 ### Spec Compliance (REQ-SHELF-1 through REQ-SHELF-3, REQ-SHELF-8 through REQ-...
 - 15:15 commission-Thorne-20260413-150014 completed
+- 15:16 commission-Dalton-20260413-150034 result: Both Thorne findings addressed:
+
+1. **[Required] Missing barrel exports** — Added `BoxDimensions`, `Shelf`, `ShelfUnit`, `ShelfConfiguration` to the type export block in `packages/shared/src/index.ts`...
+- 15:16 commission-Dalton-20260413-150034 completed
