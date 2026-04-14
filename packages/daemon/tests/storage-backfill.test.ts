@@ -4,20 +4,22 @@ import type { FileOps } from "../src/services/file-ops";
 
 function createInMemoryFileOps(files: Record<string, string>): FileOps {
   return {
-    async readFile(filePath: string): Promise<string> {
+    readFile(filePath: string): Promise<string> {
       const content = files[filePath];
       if (content === undefined) throw new Error(`ENOENT: ${filePath}`);
-      return content;
+      return Promise.resolve(content);
     },
-    async writeFile(filePath: string, content: string): Promise<void> {
+    writeFile(filePath: string, content: string): Promise<void> {
       files[filePath] = content;
+      return Promise.resolve();
     },
-    async rename(oldPath: string, newPath: string): Promise<void> {
+    rename(oldPath: string, newPath: string): Promise<void> {
       files[newPath] = files[oldPath]!;
       delete files[oldPath];
+      return Promise.resolve();
     },
-    async exists(filePath: string): Promise<boolean> {
-      return filePath in files;
+    exists(filePath: string): Promise<boolean> {
+      return Promise.resolve(filePath in files);
     },
     async mkdir(): Promise<void> {},
   };

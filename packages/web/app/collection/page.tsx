@@ -115,10 +115,6 @@ export default async function CollectionPage({
     );
   }
 
-  const displayCount = showPrevOwned
-    ? `${games.length} games (${previouslyOwnedCount} previously owned)`
-    : `${games.length} game${games.length !== 1 ? "s" : ""}`;
-
   return (
     <>
       <div className="topbar">

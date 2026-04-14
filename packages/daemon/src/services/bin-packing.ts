@@ -537,7 +537,6 @@ export function pack(
   }
 
   const unplaced = new Set(items.map((item) => item.id));
-  const itemById = new Map(items.map((item) => [item.id, item]));
 
   // --- Phase 1: Place Fixed Items ---
   for (const item of items) {

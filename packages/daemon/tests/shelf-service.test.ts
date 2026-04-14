@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/await-thenable */
 import { describe, expect, test, beforeEach } from "bun:test";
 import type { ShelfConfiguration } from "@shelf-judge/shared";
 import type { StorageService } from "../src/services/storage-service";

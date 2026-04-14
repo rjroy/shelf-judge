@@ -3,7 +3,6 @@ import {
   type PackBin,
   type PackConfig,
   type PackItem,
-  DEFAULT_PACK_CONFIG,
   findBestRotation,
   merge,
   pack,
@@ -415,7 +414,6 @@ describe("pack: phase 3 (greedy fill)", () => {
 
     // i1 and i2 should cluster (high similarity), i3 should go elsewhere
     const b1 = result.assignments.get("b1")!.itemIds;
-    const b2 = result.assignments.get("b2")!.itemIds;
 
     const i1Bin = b1.includes("i1") ? "b1" : "b2";
     const i2Bin = b1.includes("i2") ? "b1" : "b2";
