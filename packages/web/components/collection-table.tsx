@@ -188,9 +188,13 @@ export function CollectionTable({
   );
 
   // Apply filters then sort
-  const filtered = useMemo(
+  const first_filter = useMemo(
     () => activeGames.filter((g) => matchesFilters(g, filters)),
     [activeGames, filters],
+  );
+  const filtered = useMemo(
+    () => showPreviouslyOwned ? first_filter : first_filter.filter((g) => g.game.ownership !== "previously-owned") ,
+    [first_filter, showPreviouslyOwned],
   );
   const { withValue, withoutValue } = useMemo(
     () => sortGames(filtered, sort.field, sort.direction, tournamentStats, axes),
@@ -531,44 +535,48 @@ export function CollectionTable({
         {/* Predictions toggle */}
         {predictedGames && (
           <>
-            <div className="predictions-toggle" onClick={() => setPredictionsOn((v) => !v)}>
-              <div className={`predictions-toggle-switch${usePredictions ? " active" : ""}`} />
-              <span className="predictions-toggle-label">Predictions</span>
-            </div>
-            {usePredictions && (
-              <div className="stat-block">
-                <div className="stat-value predictions-stat">{predictedCount}</div>
-                <div className="stat-label">Predicted</div>
+            <div className="stat-block">
+              <div className="predictions-toggle" onClick={() => setPredictionsOn((v) => !v)}>
+                <div className={`predictions-toggle-switch${usePredictions ? " active" : ""}`} />
+                <span className="predictions-toggle-label">Predictions</span>
               </div>
-            )}
+              {usePredictions && (
+                <div className="stat-block inner">
+                  <div className="stat-value predictions-stat">{predictedCount}</div>
+                  <div className="stat-label">Predicted</div>
+                </div>
+              )}
+            </div>
           </>
         )}
 
         {/* Show Niches toggle (REQ-NICHE-22) */}
         {nicheGames && (
           <>
-            <div
-              className="predictions-toggle"
-              onClick={() => {
-                setNichesOn((v) => {
-                  if (v) setNicheViewMode(false);
-                  return !v;
-                });
-              }}
-            >
+            <div className="stat-block">
               <div
-                className={`predictions-toggle-switch${nichesOn ? " active niche-toggle" : ""}`}
-              />
-              <span className="predictions-toggle-label">Niches</span>
-            </div>
-            {nichesOn && (
-              <div className="predictions-toggle" onClick={() => setNicheViewMode((v) => !v)}>
+                className="predictions-toggle"
+                onClick={() => {
+                  setNichesOn((v) => {
+                    if (v) setNicheViewMode(false);
+                    return !v;
+                  });
+                }}
+              >
                 <div
-                  className={`predictions-toggle-switch${nicheViewMode ? " active niche-toggle" : ""}`}
+                  className={`predictions-toggle-switch${nichesOn ? " active niche-toggle" : ""}`}
                 />
-                <span className="predictions-toggle-label">Group by Niche</span>
+                <span className="predictions-toggle-label">Niches</span>
               </div>
-            )}
+              {nichesOn && (
+                <div className="predictions-toggle" onClick={() => setNicheViewMode((v) => !v)}>
+                  <div
+                    className={`predictions-toggle-switch${nicheViewMode ? " active niche-toggle" : ""}`}
+                  />
+                  <span className="predictions-toggle-label">Group</span>
+                </div>
+              )}
+            </div>
           </>
         )}
 

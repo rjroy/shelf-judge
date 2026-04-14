@@ -9,6 +9,7 @@ import {
   type GameWithScore,
   type AddGameResult,
   type BggSearchResult,
+  type BoxDimensions,
 } from "@shelf-judge/shared";
 import type { StorageService } from "./storage-service.js";
 import type { FitnessService } from "./fitness-service.js";
@@ -48,6 +49,7 @@ export interface GameService {
   refreshBggData(gameId: string): Promise<Game>;
   refreshAllBggData(): Promise<RefreshSummary>;
   setOwnership(id: string, ownership: OwnershipStatus): Promise<Game>;
+  setBoxDimensions(id: string, dimensions: BoxDimensions | null): Promise<Game>;
   importBggCollection(
     onProgress?: (event: ImportProgressEvent) => Promise<void> | void,
   ): Promise<ImportSummary>;
@@ -122,6 +124,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
         numPlays: parsed.numPlays ?? null,
         bggData: null,
         ownership: "owned",
+        boxDimensions: null,
         ratings: {},
         createdAt: now,
         updatedAt: now,
@@ -245,6 +248,22 @@ export function createGameService(deps: GameServiceDeps): GameService {
       }
 
       game.ownership = ownership;
+      game.updatedAt = new Date().toISOString();
+      collection.updatedAt = game.updatedAt;
+      await storageService.saveCollection(collection);
+
+      return game;
+    },
+
+    async setBoxDimensions(id: string, dimensions: BoxDimensions | null): Promise<Game> {
+      const collection = await storageService.loadCollection();
+      const game = collection.games.find((g) => g.id === id);
+
+      if (!game) {
+        throw new Error(`Game not found: ${id}`);
+      }
+
+      game.boxDimensions = dimensions;
       game.updatedAt = new Date().toISOString();
       collection.updatedAt = game.updatedAt;
       await storageService.saveCollection(collection);
@@ -397,6 +416,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
                 numPlays: result.collectionData?.numPlays ?? null,
                 bggData: result.bggData,
                 ownership: "owned",
+                boxDimensions: null,
                 ratings: {},
                 createdAt: now,
                 updatedAt: now,

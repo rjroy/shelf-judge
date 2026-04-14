@@ -67,6 +67,7 @@ function makeGame(
       makeBggData({ mechanics: [mech("Deck Building")], categories: [cat("Card Game")] }),
     numPlays: 5,
     ownership,
+    boxDimensions: null,
     ratings: { axis1: 7 },
     createdAt: now,
     updatedAt: now,
@@ -154,6 +155,8 @@ function createMockStorageService(
     savePredictionSettings: () => Promise.resolve(),
     loadWishlist: () => Promise.resolve([]),
     saveWishlist: () => Promise.resolve(),
+    loadShelfConfig: () => Promise.resolve({ units: [], createdAt: "", updatedAt: "" }),
+    saveShelfConfig: () => Promise.resolve(),
   };
 }
 
@@ -182,6 +185,7 @@ function createMockGameService(collection?: Collection): GameService {
       coll.updatedAt = game.updatedAt;
       return Promise.resolve(structuredClone(game));
     },
+    setBoxDimensions: () => Promise.reject(new Error("not implemented")),
     searchGames: () => Promise.reject(new Error("not implemented")),
     refreshBggData: () => Promise.reject(new Error("not implemented")),
     refreshAllBggData: () => Promise.reject(new Error("not implemented")),

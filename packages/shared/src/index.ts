@@ -67,6 +67,10 @@ export type {
   RedundancySettings,
   WishlistBreakdownEntry,
   WishlistEntry,
+  BoxDimensions,
+  Shelf,
+  ShelfUnit,
+  ShelfConfiguration,
 } from "./types";
 
 export {

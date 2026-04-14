@@ -28,7 +28,7 @@ The collection page is a single server component at `packages/web/app/page.tsx` 
 
 `CollectionSortToggle` (`packages/web/components/collection-sort-toggle.tsx`, 38 lines) is a client component that reads `?sort=` from URL search params and calls `router.push()` to toggle between fitness and tournament sort. It renders as a two-button toggle in the topbar.
 
-CSS for the collection lives in `packages/web/app/globals.css`. Key selectors: `.collection-header` and `.game-row` use `grid-template-columns: 36px 58px 1fr 180px 110px 100px` (6 columns: rank, thumb, info, axes-rated, last-rated, score). Tablet breakpoint (max-width: 899px) hides axes-rated and switches to 5 columns. Phone breakpoint (max-width: 599px) hides the header entirely, renders rows as mini-cards (4-column, 2-row grid), and hides last-rated. The `.sort-toggle` styles will be removed.
+CSS for the collection lives in `packages/web/app/globals.css`. Key selectors: `.collection-header` and `.game-row` use `grid-template-columns: 36px 58px 1fr 180px 110px 100px` (6 columns: rank, thumb, info, axes-rated, last-rated, score). Tablet breakpoint (max-width: 900px) hides axes-rated and switches to 5 columns. Phone breakpoint (max-width: 600px) hides the header entirely, renders rows as mini-cards (4-column, 2-row grid), and hides last-rated. The `.sort-toggle` styles will be removed.
 
 The `relativeDate()` utility function is currently defined at the top of `page.tsx`. It will need to be accessible from the new client component.
 
@@ -236,21 +236,21 @@ All new CSS class names match the mockup HTML exactly to reduce visual discrepan
 - `packages/web/app/globals.css` — remove `.sort-toggle`, `.sort-toggle-btn`, `.sort-toggle-btn.active`, `.sort-toggle-btn:not(.active):hover`, and the phone-breakpoint `.sort-toggle` rule. Add mobile styles for the new sort dropdown and filter bar.
 - `packages/web/components/collection-table.tsx` — add mobile sort overlay behavior.
 
-**Mobile sort overlay (REQ-CFS-24, 25, 26):** On mobile (max-width: 599px), the sort dropdown opens as a full-width fixed overlay rather than an absolutely-positioned dropdown. The overlay dims the background (`.sort-overlay-backdrop`), has the same four groups as desktop, and uses 44px minimum tap targets on each item. Close on selection or backdrop tap.
+**Mobile sort overlay (REQ-CFS-24, 25, 26):** On mobile (max-width: 600px), the sort dropdown opens as a full-width fixed overlay rather than an absolutely-positioned dropdown. The overlay dims the background (`.sort-overlay-backdrop`), has the same four groups as desktop, and uses 44px minimum tap targets on each item. Close on selection or backdrop tap.
 
 **Mobile controls row (REQ-CFS-25):** Search input, sort button (showing current sort label, compact), filter icon. Active filter chips appear below. The sort button replaces the old tournament toggle position.
 
 **CSS responsive additions:**
 
-- Tablet (max-width: 899px): filter bar stacks search and controls more tightly. Sort dropdown position adjusts.
-- Phone (max-width: 599px): filter bar goes full-width. Sort button shows abbreviated label. Sort dropdown becomes full-screen overlay. Filter panel stacks vertically. Chips row wraps.
+- Tablet (max-width: 900px): filter bar stacks search and controls more tightly. Sort dropdown position adjusts.
+- Phone (max-width: 600px): filter bar goes full-width. Sort button shows abbreviated label. Sort dropdown becomes full-screen overlay. Filter panel stacks vertically. Chips row wraps.
 
 **Depends on:** Phases 1, 2, 3 (all features must exist before mobile adaptation).
 
 **Verification:**
 
 - Desktop (900px+): sort dropdown positions below trigger, filter bar has horizontal layout.
-- Tablet (600-899px): layout adapts, sort dropdown still works, filter bar remains usable.
+- Tablet (600-900px): layout adapts, sort dropdown still works, filter bar remains usable.
 - Phone (<600px): sort opens as full-width overlay with dimmed background. Controls row has search + sort button + filter icon. Filter chips below. All tap targets >= 44px.
 - `CollectionSortToggle` file is gone. No remaining imports or references.
 - Typecheck clean. `bun run lint` clean.

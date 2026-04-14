@@ -98,6 +98,15 @@ const navGroups = [
         ),
       },
       {
+        href: "/shelves",
+        name: "Shelves",
+        icon: (
+          <svg className="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M2 2h12v1H2V2zm0 4h12v1H2V6zm0 4h12v1H2v-1zm0 4h12v1H2v-1z" />
+          </svg>
+        ),
+      },
+      {
         href: "/import",
         name: "Import / BGG",
         icon: (

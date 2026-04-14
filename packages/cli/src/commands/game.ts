@@ -253,3 +253,68 @@ export async function gameSetStatus(
 
   return `"${data.game.name}" marked as ${data.game.ownership}.`;
 }
+
+export async function gameEdit(
+  client: DaemonClient,
+  args: string[],
+  opts: OutputOptions & {
+    boxWidth?: number;
+    boxHeight?: number;
+    boxDepth?: number;
+    clearBox?: boolean;
+  },
+): Promise<string> {
+  const id = args[0];
+  if (!id) {
+    throw new Error(
+      "Usage: shelf-judge game edit <id> --box-width <W> --box-height <H> --box-depth <D> | --clear-box",
+    );
+  }
+
+  // Box dimensions handling
+  const hasAnyDim =
+    opts.boxWidth !== undefined || opts.boxHeight !== undefined || opts.boxDepth !== undefined;
+  const hasAllDims =
+    opts.boxWidth !== undefined && opts.boxHeight !== undefined && opts.boxDepth !== undefined;
+
+  if (opts.clearBox && hasAnyDim) {
+    throw new Error("Cannot use --clear-box together with dimension flags");
+  }
+
+  if (hasAnyDim && !hasAllDims) {
+    throw new Error("All three --box-width, --box-height, and --box-depth are required together");
+  }
+
+  if (!opts.clearBox && !hasAnyDim) {
+    throw new Error(
+      "Usage: shelf-judge game edit <id> --box-width <W> --box-height <H> --box-depth <D> | --clear-box",
+    );
+  }
+
+  let body: Record<string, unknown>;
+  if (opts.clearBox) {
+    body = { clear: true };
+  } else {
+    body = { width: opts.boxWidth!, height: opts.boxHeight!, depth: opts.boxDepth! };
+  }
+
+  const { ok, data } = await client.put<{
+    game: {
+      name: string;
+      boxDimensions: { width: number; height: number; depth: number } | null;
+    };
+  }>(`/api/games/${encodeURIComponent(id)}/dimensions`, body);
+
+  if (!ok) {
+    const err = data as unknown as { error: string };
+    throw new Error(err.error ?? "Edit failed");
+  }
+
+  if (opts.json) return printOutput(data, opts);
+
+  const game = data.game;
+  if (game.boxDimensions) {
+    return `${game.name}: box dimensions set to ${game.boxDimensions.width} \u00D7 ${game.boxDimensions.height} \u00D7 ${game.boxDimensions.depth} in`;
+  }
+  return `${game.name}: box dimensions cleared`;
+}

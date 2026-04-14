@@ -66,8 +66,8 @@ Three breakpoints, applied via `@media` queries in `globals.css`:
 
 | Name    | Query              | Viewport       | Sidebar behavior                                                             |
 | ------- | ------------------ | -------------- | ---------------------------------------------------------------------------- |
-| Phone   | `max-width: 599px` | ~375px target  | Hidden by default. Hamburger icon in topbar opens a full-screen overlay nav. |
-| Tablet  | `600px` to `899px` | ~768px target  | Collapsed to icon-only rail (56px) or hidden with toggle.                    |
+| Phone   | `max-width: 600px` | ~375px target  | Hidden by default. Hamburger icon in topbar opens a full-screen overlay nav. |
+| Tablet  | `600px` to `900px` | ~768px target  | Collapsed to icon-only rail (56px) or hidden with toggle.                    |
 | Desktop | `900px+` (default) | Current layout | 200px sidebar, no changes.                                                   |
 
 **Why these breakpoints:**
@@ -86,14 +86,14 @@ Add CSS custom properties for responsive spacing:
   --topbar-padding: 0 32px;
 }
 
-@media (max-width: 599px) {
+@media (max-width: 600px) {
   :root {
     --content-padding: 16px;
     --topbar-padding: 0 16px;
   }
 }
 
-@media (max-width: 899px) and (min-width: 600px) {
+@media (max-width: 900px) and (min-width: 600px) {
   :root {
     --content-padding: 24px;
     --topbar-padding: 0 24px;
@@ -133,24 +133,24 @@ Then update `.topbar`, `.game-hero`, `.axes-content`, `.search-content`, `.impor
 
 This is the highest-leverage change. Once the sidebar collapses, every content area gets the full viewport width.
 
-**2a. Mobile sidebar (phone, `max-width: 599px`):**
+**2a. Mobile sidebar (phone, `max-width: 600px`):**
 
 The sidebar becomes a full-screen overlay triggered by a hamburger button in the topbar. Implementation:
 
 - Add a `SidebarToggle` client component (or expand the existing `Sidebar` component) that manages open/closed state.
 - In `layout.tsx`, wrap the sidebar in a container that responds to the toggle state.
-- CSS: At `max-width: 599px`, the sidebar gets `position: fixed; inset: 0; z-index: 100; transform: translateX(-100%); transition: transform 0.2s ease`. When open class is applied: `transform: translateX(0)`. A backdrop overlay (`position: fixed; inset: 0; background: rgba(0,0,0,0.5)`) covers the content area.
-- Add a hamburger icon (three horizontal lines SVG) to the topbar, visible only at `max-width: 599px`.
+- CSS: At `max-width: 600px`, the sidebar gets `position: fixed; inset: 0; z-index: 100; transform: translateX(-100%); transition: transform 0.2s ease`. When open class is applied: `transform: translateX(0)`. A backdrop overlay (`position: fixed; inset: 0; background: rgba(0,0,0,0.5)`) covers the content area.
+- Add a hamburger icon (three horizontal lines SVG) to the topbar, visible only at `max-width: 600px`.
 - The `.app-shell` drops to `flex-direction: column` (topbar-then-content) since the sidebar isn't in the normal flow.
 
-**2b. Tablet sidebar (600px-899px):**
+**2b. Tablet sidebar (600px-900px):**
 
 Two viable approaches:
 
 1. **Same as phone** (hidden by default, toggle to open). Simpler to implement.
 2. **Icon-only rail** (56px wide, showing only the nav icons without labels). More polished but requires careful icon sizing.
 
-**Decision:** Use the same hidden-with-toggle approach for both phone and tablet. The app has only 4 nav items. An icon rail for 4 items is more confusing than helpful since the icons aren't universally recognizable. A single `max-width: 899px` media query handles both phone and tablet sidebar behavior, reducing CSS complexity.
+**Decision:** Use the same hidden-with-toggle approach for both phone and tablet. The app has only 4 nav items. An icon rail for 4 items is more confusing than helpful since the icons aren't universally recognizable. A single `max-width: 900px` media query handles both phone and tablet sidebar behavior, reducing CSS complexity.
 
 **2c. Topbar modification for mobile:**
 
@@ -159,7 +159,7 @@ On screens where the sidebar is hidden, the topbar needs:
 - A hamburger button (left side) to open the sidebar
 - The brand name "Shelf Judge" (since it's no longer visible in the sidebar)
 
-CSS: `.topbar-hamburger { display: none; }` at desktop. `@media (max-width: 899px) { .topbar-hamburger { display: flex; } }`
+CSS: `.topbar-hamburger { display: none; }` at desktop. `@media (max-width: 900px) { .topbar-hamburger { display: flex; } }`
 
 **Verification:** At 375px and 768px, sidebar is hidden. Hamburger opens overlay. Navigation works. Closing overlay (tap backdrop or select nav item) hides sidebar. Desktop layout unchanged.
 
@@ -169,7 +169,7 @@ CSS: `.topbar-hamburger { display: none; }` at desktop. `@media (max-width: 899p
 
 The collection table is the most complex responsive challenge.
 
-**3a. Phone layout (max-width: 599px):**
+**3a. Phone layout (max-width: 600px):**
 
 The 6-column grid cannot work at 375px. Replace with a card-style layout per game:
 
@@ -178,10 +178,10 @@ The 6-column grid cannot work at 375px. Replace with a card-style layout per gam
                 [Axes chips]
 ```
 
-CSS approach: At `max-width: 599px`, change `.game-row` and `.collection-header` grid to a 2-row layout. Hide the "Axes Rated" and "Last Rated" columns entirely (they're secondary information). The remaining layout is:
+CSS approach: At `max-width: 600px`, change `.game-row` and `.collection-header` grid to a 2-row layout. Hide the "Axes Rated" and "Last Rated" columns entirely (they're secondary information). The remaining layout is:
 
 ```css
-@media (max-width: 599px) {
+@media (max-width: 600px) {
   .collection-header {
     display: none; /* Column headers aren't useful in card layout */
   }
@@ -220,12 +220,12 @@ CSS approach: At `max-width: 599px`, change `.game-row` and `.collection-header`
 }
 ```
 
-**3b. Tablet layout (600px-899px):**
+**3b. Tablet layout (600px-900px):**
 
 The full 6-column grid can work at 768px+ if we reduce the "Axes Rated" column. Change to:
 
 ```css
-@media (min-width: 600px) and (max-width: 899px) {
+@media (min-width: 600px) and (max-width: 900px) {
   .collection-header,
   .game-row {
     grid-template-columns: 30px 50px 1fr 120px 80px;
@@ -244,7 +244,7 @@ This drops the "Axes Rated" column (least critical for scanning) and tightens th
 The 4-stat horizontal strip overflows at 375px. Wrap to 2x2 grid:
 
 ```css
-@media (max-width: 599px) {
+@media (max-width: 600px) {
   .stats-strip {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -266,7 +266,7 @@ The 4-stat horizontal strip overflows at 375px. Wrap to 2x2 grid:
 
 The collection topbar has: title, game count text, "Import BGG" button, "Add Game" button, "Refresh All" button. This won't fit at 375px.
 
-At `max-width: 599px`:
+At `max-width: 600px`:
 
 - Move the count text below the title (or hide it; it's duplicated in the stats strip)
 - Stack the action buttons below the title row, or move them into a "..." overflow menu
@@ -274,7 +274,7 @@ At `max-width: 599px`:
 Simplest approach: wrap `.topbar-meta` to a second line.
 
 ```css
-@media (max-width: 599px) {
+@media (max-width: 600px) {
   .topbar {
     height: auto;
     flex-wrap: wrap;
@@ -301,7 +301,7 @@ Simplest approach: wrap `.topbar-meta` to a second line.
 The hero section is horizontal flex: cover + info + score. At 375px, stack vertically:
 
 ```css
-@media (max-width: 599px) {
+@media (max-width: 600px) {
   .game-hero {
     flex-direction: column;
     align-items: stretch;
@@ -332,7 +332,7 @@ The score section moves below the game info. The cover image shrinks to 72px. Th
 For a slightly more refined phone layout, put the cover and info side-by-side (they still fit at 375px since the cover is only 72px), and put the score below both:
 
 ```css
-@media (max-width: 599px) {
+@media (max-width: 600px) {
   .game-hero {
     flex-wrap: wrap;
   }
@@ -356,7 +356,7 @@ For a slightly more refined phone layout, put the cover and info side-by-side (t
 The two-panel grid (`1fr 380px`) must stack on phone and tablet:
 
 ```css
-@media (max-width: 899px) {
+@media (max-width: 900px) {
   .detail-panels {
     grid-template-columns: 1fr;
   }
@@ -381,7 +381,7 @@ Options:
 **Decision:** Hide the Contribution column on phone. The Source column stays because it's critical for understanding where data came from.
 
 ```css
-@media (max-width: 599px) {
+@media (max-width: 600px) {
   .breakdown-table th:nth-child(4),
   .breakdown-table td:nth-child(4) {
     display: none;
@@ -394,7 +394,7 @@ Options:
 Long game names will overflow the breadcrumb. Add `overflow: hidden; text-overflow: ellipsis` to the breadcrumb `strong` element and ensure the topbar actions don't get pushed off-screen:
 
 ```css
-@media (max-width: 599px) {
+@media (max-width: 600px) {
   .breadcrumb {
     flex: 1;
     min-width: 0;
@@ -418,7 +418,7 @@ Long game names will overflow the breadcrumb. Add `overflow: hidden; text-overfl
 The axis card main row is a 6-column grid: `1fr auto auto auto auto auto`. At 375px, this needs to become a stacked layout:
 
 ```css
-@media (max-width: 599px) {
+@media (max-width: 600px) {
   .axis-card-main {
     grid-template-columns: 1fr auto;
     grid-template-rows: auto auto auto;
@@ -460,7 +460,7 @@ The axis card main row is a 6-column grid: `1fr auto auto auto auto auto`. At 37
 The form row uses `grid-template-columns: 1fr 1fr`. Stack to single column:
 
 ```css
-@media (max-width: 599px) {
+@media (max-width: 600px) {
   .form-row {
     grid-template-columns: 1fr;
   }
@@ -486,7 +486,7 @@ Both pages already use `max-width: 680px` with padding. Once the sidebar collaps
 **6c. Import status banner:** The `.status-banner` is a horizontal flex with icon (44px), text (flex:1), and count display. At 375px:
 
 ```css
-@media (max-width: 599px) {
+@media (max-width: 600px) {
   .status-banner {
     flex-wrap: wrap;
     gap: 12px;
@@ -507,7 +507,7 @@ Both pages already use `max-width: 680px` with padding. Once the sidebar collaps
 **6d. Import summary stats:** The 3-column grid `.summary-stats` works at 375px (three cells each get ~105px), but might benefit from stacking:
 
 ```css
-@media (max-width: 599px) {
+@media (max-width: 600px) {
   .summary-stats {
     grid-template-columns: 1fr;
   }
@@ -529,7 +529,7 @@ Mobile users tap instead of click. Ensure touch targets meet the 44px minimum re
 **7c. Buttons:** `.btn` has `padding: 7px 14px`. The total height with 13px font and line-height is approximately 35px. Increase slightly on phone:
 
 ```css
-@media (max-width: 599px) {
+@media (max-width: 600px) {
   .btn {
     padding: 10px 16px;
   }
@@ -542,7 +542,7 @@ Mobile users tap instead of click. Ensure touch targets meet the 44px minimum re
 **7d. Form inputs:** `.form-input` has `padding: 8px 12px` with 13px font. Total height ~35px. Increase:
 
 ```css
-@media (max-width: 599px) {
+@media (max-width: 600px) {
   .form-input {
     padding: 10px 14px;
     font-size: 16px; /* Prevents iOS zoom on focus */
@@ -563,13 +563,13 @@ The `font-size: 16px` on phone inputs is critical. iOS Safari auto-zooms the pag
 **8a. Add all responsive overrides at the end of `globals.css`**, grouped by breakpoint:
 
 ```css
-/* ===== Responsive: Tablet (600px-899px) ===== */
-@media (min-width: 600px) and (max-width: 899px) {
+/* ===== Responsive: Tablet (600px-900px) ===== */
+@media (min-width: 600px) and (max-width: 900px) {
   /* Sidebar collapse, collection table adjustments, detail panel stack */
 }
 
-/* ===== Responsive: Phone (max-width: 599px) ===== */
-@media (max-width: 599px) {
+/* ===== Responsive: Phone (max-width: 600px) ===== */
+@media (max-width: 600px) {
   /* All phone-specific overrides */
 }
 ```

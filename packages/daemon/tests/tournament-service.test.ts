@@ -80,6 +80,12 @@ function createStubStorage(): StorageService & { tournamentData: TournamentData 
     saveWishlist() {
       return Promise.resolve();
     },
+    loadShelfConfig() {
+      return Promise.resolve({ units: [], createdAt: "", updatedAt: "" });
+    },
+    saveShelfConfig() {
+      return Promise.resolve();
+    },
   };
 
   return stub;
@@ -99,6 +105,7 @@ function makeGame(id: string, name: string, overrides?: Partial<Game>): Game {
     bggData: null,
     numPlays: null,
     ownership: "owned",
+    boxDimensions: null,
     ratings: {},
     createdAt: now,
     updatedAt: now,

@@ -24,6 +24,7 @@ import { ScoreBreakdown } from "@/components/score-breakdown";
 import { RatingForm } from "@/components/rating-form";
 import { GameActions, OwnershipActions } from "@/components/game-actions";
 import { NicheIgnoreButton, NicheRestoreButton } from "@/components/niche-ignore-button";
+import { BoxDimensionsForm } from "@/components/box-dimensions-form";
 
 export async function generateMetadata({
   params,
@@ -95,7 +96,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
   const { game, score, nichePosition } = data;
   const isPreviouslyOwned = game.ownership === "previously-owned";
   // Use predicted score when the game has no actual score but has predictions
-  const displayScore = score ?? prediction?.score ?? null;
+  const displayScore = prediction?.score ?? score ?? null;
   const hasPredictions =
     displayScore?.predictionMeta !== null && displayScore?.predictionMeta !== undefined;
 
@@ -138,6 +139,14 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
               {game.playingTime && <span>⏱ {game.playingTime} min</span>}
               {game.bggData?.weight && <span>⚖️ BGG Weight: {game.bggData.weight.toFixed(2)}</span>}
               {game.numPlays && game.numPlays > 0 && <span>🎲 Plays: {game.numPlays}</span>}
+              {game.boxDimensions ? (
+                <span className="box-dims-display">
+                  📦 {game.boxDimensions.width} × {game.boxDimensions.height} ×{" "}
+                  {game.boxDimensions.depth} in
+                </span>
+              ) : (
+                <span className="box-dims-display box-dims-muted">📦 not measured</span>
+              )}
               {game.bggId && (
                 <a
                   className="bgg-link"
@@ -204,55 +213,63 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
             {displayScore ? (
               displayScore.vetoed ? (
                 <>
-                  <div className="score-hero-label">Fitness Score</div>
-                  <div className="score-hero-number score-hero-vetoed">VETOED</div>
-                  {displayScore.hypotheticalScore !== null && (
-                    <div className="score-hero-out-of">
-                      hypothetical: {displayScore.hypotheticalScore.toFixed(1)}
-                    </div>
-                  )}
-                  <div className="score-hero-rated">{displayScore.ratedAxisCount} axes rated</div>
+                  <div className="game-hero-score-value">
+                    <div className="score-hero-label">Fitness Score</div>
+                    <div className="score-hero-number score-hero-vetoed">VETOED</div>
+                    {displayScore.hypotheticalScore !== null && (
+                      <div className="score-hero-out-of">
+                        hypothetical: {displayScore.hypotheticalScore.toFixed(1)}
+                      </div>
+                    )}
+                  </div>
+                  <div className="game-hero-score-value">
+                    <div className="score-hero-rated">{displayScore.ratedAxisCount} axes rated</div>
+                  </div>
                 </>
               ) : hasPredictions ? (
                 <>
-                  <span className="predict-badge">PREDICTED</span>
-                  <div className="score-hero-label">Fitness Score</div>
-                  <div className="score-hero-number score-predicted">
-                    <span className="score-predicted-tilde">~</span>
-                    {displayScore.score.toFixed(1)}
-                  </div>
-                  <div className="score-hero-predict-summary">
-                    {displayScore.predictionMeta!.actualAxisCount} actual &middot;{" "}
-                    {displayScore.predictionMeta!.predictedAxisCount} predicted
-                  </div>
-                  <div className="score-hero-predict-summary" style={{ marginTop: 2 }}>
-                    <span className={`conf-badge conf-${displayScore.predictionMeta!.confidence}`}>
-                      {displayScore.predictionMeta!.confidence}
-                    </span>
+                  <div className="game-hero-score-value">
+                    <div className="score-hero-label">Fitness Score</div>
+                    <div className="score-hero-number score-predicted">
+                      <span className="score-predicted-tilde">~</span>
+                      {displayScore.score.toFixed(1)}
+                    </div>
+                    <div className="score-hero-predict-summary">
+                      {displayScore.predictionMeta!.actualAxisCount} actual &middot;{" "}
+                      {displayScore.predictionMeta!.predictedAxisCount} predicted
+                    </div>
+                    <div className="score-hero-predict-summary" style={{ marginTop: 2 }}>
+                      <span className={`conf-badge conf-${displayScore.predictionMeta!.confidence}`}>
+                        {displayScore.predictionMeta!.confidence}
+                      </span>
+                    </div>
                   </div>
                 </>
               ) : (
                 <>
-                  <div className="score-hero-label">Fitness Score</div>
-                  <div className="score-hero-number">{displayScore.score.toFixed(1)}</div>
-                  <div className="score-hero-out-of">out of 10.0</div>
-                  <div className="score-hero-rated">{displayScore.ratedAxisCount} axes rated</div>
+                  <div className="game-hero-score-value">
+                    <div className="score-hero-label">Fitness Score</div>
+                    <div className="score-hero-number">{displayScore.score.toFixed(1)}</div>
+                    <div className="score-hero-rated">{displayScore.ratedAxisCount} axes rated</div>
+                  </div>
                 </>
               )
             ) : (
-              <>
+              <div className="game-hero-score-value">
                 <div className="score-hero-label">Fitness Score</div>
                 <div className="score-hero-number score-hero-unrated">&mdash;</div>
                 <div className="score-hero-out-of">not yet rated</div>
-              </>
+              </div>
             )}
             {tournamentStats && (
-              <div className="tournament-hero-rank">
-                <div className="score-hero-label">Tournament Rank</div>
-                <div
-                  className={`tournament-hero-value${tournamentStats.isProvisional ? " provisional" : ""}`}
-                >
-                  {tournamentStats.displayLabel}
+              <div className="game-hero-score-value">
+                <div className="tournament-hero-rank">
+                  <div className="score-hero-label">Tournament Rank</div>
+                  <div
+                    className={`tournament-hero-value${tournamentStats.isProvisional ? " provisional" : ""}`}
+                  >
+                    {tournamentStats.displayLabel}
+                  </div>
                 </div>
               </div>
             )}
@@ -500,6 +517,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
               predictionScore={hasPredictions ? displayScore : null}
             />
             <OwnershipActions gameId={game.id} gameName={game.name} ownership={game.ownership} />
+            <BoxDimensionsForm gameId={game.id} currentDimensions={game.boxDimensions} />
           </div>
         </div>
       </div>

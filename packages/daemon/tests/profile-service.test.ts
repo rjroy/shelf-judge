@@ -24,6 +24,7 @@ function makeGame(id: string, name: string): Game {
     playingTime: null,
     numPlays: null,
     ownership: "owned",
+    boxDimensions: null,
     ratings: {},
     imageUrl: null,
     bggData: null,
@@ -128,6 +129,12 @@ function createStubStorage(overrides?: {
     saveWishlist() {
       return Promise.resolve();
     },
+    loadShelfConfig() {
+      return Promise.resolve({ units: [], createdAt: "", updatedAt: "" });
+    },
+    saveShelfConfig() {
+      return Promise.resolve();
+    },
   };
 
   return stub;
@@ -151,6 +158,7 @@ function createStubGameService(games: Game[]): GameService {
     refreshAllBggData: () => Promise.reject(new Error("not implemented")),
     importBggCollection: () => Promise.reject(new Error("not implemented")),
     setOwnership: () => Promise.reject(new Error("not implemented")),
+    setBoxDimensions: () => Promise.reject(new Error("not implemented")),
   };
 }
 

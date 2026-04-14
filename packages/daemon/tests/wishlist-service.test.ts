@@ -38,6 +38,7 @@ function makeGame(bggId: number, name: string): Game {
       fetchedAt: NOW,
     },
     ownership: "owned",
+    boxDimensions: null,
     ratings: {},
     createdAt: NOW,
     updatedAt: NOW,
@@ -145,6 +146,8 @@ function createMockStorage(
         expectedNeighbors: 5,
       }),
     saveRedundancySettings: () => Promise.resolve(),
+    loadShelfConfig: () => Promise.resolve({ units: [], createdAt: "", updatedAt: "" }),
+    saveShelfConfig: () => Promise.resolve(),
   };
 }
 
@@ -175,6 +178,7 @@ function createMockGameService(): GameService {
     searchGames: () => Promise.reject(new Error("not implemented")),
     importBggCollection: () => Promise.reject(new Error("not implemented")),
     setOwnership: () => Promise.reject(new Error("not implemented")),
+    setBoxDimensions: () => Promise.reject(new Error("not implemented")),
   };
 }
 

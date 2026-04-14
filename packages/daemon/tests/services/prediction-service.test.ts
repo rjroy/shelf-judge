@@ -46,6 +46,7 @@ function makeGame(
     playingTime: 60,
     numPlays: null,
     ownership: "owned",
+    boxDimensions: null,
     ratings,
     imageUrl: null,
     bggData: hasBgg
@@ -115,6 +116,8 @@ function createStubStorage(
     saveRedundancySettings: () => Promise.resolve(),
     loadWishlist: () => Promise.resolve([]),
     saveWishlist: () => Promise.resolve(),
+    loadShelfConfig: () => Promise.resolve({ units: [], createdAt: "", updatedAt: "" }),
+    saveShelfConfig: () => Promise.resolve(),
   };
 }
 
