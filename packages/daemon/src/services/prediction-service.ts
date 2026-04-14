@@ -8,22 +8,22 @@ import type {
   RevealedPreferenceTension,
 } from "@shelf-judge/shared";
 import { resolveAxisValues } from "@shelf-judge/shared";
-import type { StorageService } from "./storage-service.js";
-import type { FitnessService } from "./fitness-service.js";
-import type { TournamentService } from "./tournament-service.js";
-import type { BggClient } from "./bgg-client.js";
-import { buildVocabulary, computeContinuousRanges, encodeGame } from "./feature-vector.js";
-import type { FeatureVector } from "./feature-vector.js";
+import type { StorageService } from "./storage-service";
+import type { FitnessService } from "./fitness-service";
+import type { TournamentService } from "./tournament-service";
+import type { BggClient } from "./bgg-client";
+import { buildVocabulary, computeContinuousRanges, encodeGame } from "./feature-vector";
+import type { FeatureVector } from "./feature-vector";
 import {
   computePredictedFitness,
   assessReadiness,
   detectRevealedPreferenceTension,
-} from "./prediction-engine.js";
+} from "./prediction-engine";
 import type {
   ReferenceGameCandidate,
   TournamentRankedGame,
   ClusterMembership,
-} from "./prediction-engine.js";
+} from "./prediction-engine";
 
 export interface PredictedGameResult {
   game: Game;

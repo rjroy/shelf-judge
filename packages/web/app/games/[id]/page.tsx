@@ -96,7 +96,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
   const { game, score, nichePosition } = data;
   const isPreviouslyOwned = game.ownership === "previously-owned";
   // Use predicted score when the game has no actual score but has predictions
-  const displayScore = score ?? prediction?.score ?? null;
+  const displayScore = prediction?.score ?? score ?? null;
   const hasPredictions =
     displayScore?.predictionMeta !== null && displayScore?.predictionMeta !== undefined;
 
@@ -229,7 +229,6 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
               ) : hasPredictions ? (
                 <>
                   <div className="game-hero-score-value">
-                    <span className="predict-badge">PREDICTED</span>
                     <div className="score-hero-label">Fitness Score</div>
                     <div className="score-hero-number score-predicted">
                       <span className="score-predicted-tilde">~</span>
@@ -251,9 +250,6 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
                   <div className="game-hero-score-value">
                     <div className="score-hero-label">Fitness Score</div>
                     <div className="score-hero-number">{displayScore.score.toFixed(1)}</div>
-                    <div className="score-hero-out-of">out of 10.0</div>
-                  </div>
-                  <div className="game-hero-score-value">
                     <div className="score-hero-rated">{displayScore.ratedAxisCount} axes rated</div>
                   </div>
                 </>
@@ -265,7 +261,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
                 <div className="score-hero-out-of">not yet rated</div>
               </div>
             )}
-          {tournamentStats && (
+            {tournamentStats && (
               <div className="game-hero-score-value">
                 <div className="tournament-hero-rank">
                   <div className="score-hero-label">Tournament Rank</div>
@@ -276,8 +272,8 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
                   </div>
                 </div>
               </div>
-          )}
-            </div>
+            )}
+          </div>
         </div>
 
         {isPreviouslyOwned && (
