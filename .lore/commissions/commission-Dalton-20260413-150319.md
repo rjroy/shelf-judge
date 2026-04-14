@@ -1,7 +1,7 @@
 ---
 title: "Commission: Shelf Capacity: Adapter+Endpoint+Helpers (C16)"
 date: 2026-04-13
-status: dispatched
+status: failed
 tags: [commission]
 worker: Dalton
 workerDisplayTitle: "Guild Artificer"
@@ -31,6 +31,9 @@ activity_timeline:
     reason: "Dispatched to worker"
     from: "pending"
     to: "dispatched"
+  - timestamp: 2026-04-13T22:55:41.949Z
+    event: status_failed
+    reason: "Session error: Claude Code returned an error result: You've hit your limit · resets Apr 16, 8pm (America/Los_Angeles)"
 current_progress: ""
 projectName: shelf-judge
 ---
