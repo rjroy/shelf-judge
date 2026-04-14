@@ -213,59 +213,71 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
             {displayScore ? (
               displayScore.vetoed ? (
                 <>
-                  <div className="score-hero-label">Fitness Score</div>
-                  <div className="score-hero-number score-hero-vetoed">VETOED</div>
-                  {displayScore.hypotheticalScore !== null && (
-                    <div className="score-hero-out-of">
-                      hypothetical: {displayScore.hypotheticalScore.toFixed(1)}
-                    </div>
-                  )}
-                  <div className="score-hero-rated">{displayScore.ratedAxisCount} axes rated</div>
+                  <div className="game-hero-score-value">
+                    <div className="score-hero-label">Fitness Score</div>
+                    <div className="score-hero-number score-hero-vetoed">VETOED</div>
+                    {displayScore.hypotheticalScore !== null && (
+                      <div className="score-hero-out-of">
+                        hypothetical: {displayScore.hypotheticalScore.toFixed(1)}
+                      </div>
+                    )}
+                  </div>
+                  <div className="game-hero-score-value">
+                    <div className="score-hero-rated">{displayScore.ratedAxisCount} axes rated</div>
+                  </div>
                 </>
               ) : hasPredictions ? (
                 <>
-                  <span className="predict-badge">PREDICTED</span>
-                  <div className="score-hero-label">Fitness Score</div>
-                  <div className="score-hero-number score-predicted">
-                    <span className="score-predicted-tilde">~</span>
-                    {displayScore.score.toFixed(1)}
-                  </div>
-                  <div className="score-hero-predict-summary">
-                    {displayScore.predictionMeta!.actualAxisCount} actual &middot;{" "}
-                    {displayScore.predictionMeta!.predictedAxisCount} predicted
-                  </div>
-                  <div className="score-hero-predict-summary" style={{ marginTop: 2 }}>
-                    <span className={`conf-badge conf-${displayScore.predictionMeta!.confidence}`}>
-                      {displayScore.predictionMeta!.confidence}
-                    </span>
+                  <div className="game-hero-score-value">
+                    <span className="predict-badge">PREDICTED</span>
+                    <div className="score-hero-label">Fitness Score</div>
+                    <div className="score-hero-number score-predicted">
+                      <span className="score-predicted-tilde">~</span>
+                      {displayScore.score.toFixed(1)}
+                    </div>
+                    <div className="score-hero-predict-summary">
+                      {displayScore.predictionMeta!.actualAxisCount} actual &middot;{" "}
+                      {displayScore.predictionMeta!.predictedAxisCount} predicted
+                    </div>
+                    <div className="score-hero-predict-summary" style={{ marginTop: 2 }}>
+                      <span className={`conf-badge conf-${displayScore.predictionMeta!.confidence}`}>
+                        {displayScore.predictionMeta!.confidence}
+                      </span>
+                    </div>
                   </div>
                 </>
               ) : (
                 <>
-                  <div className="score-hero-label">Fitness Score</div>
-                  <div className="score-hero-number">{displayScore.score.toFixed(1)}</div>
-                  <div className="score-hero-out-of">out of 10.0</div>
-                  <div className="score-hero-rated">{displayScore.ratedAxisCount} axes rated</div>
+                  <div className="game-hero-score-value">
+                    <div className="score-hero-label">Fitness Score</div>
+                    <div className="score-hero-number">{displayScore.score.toFixed(1)}</div>
+                    <div className="score-hero-out-of">out of 10.0</div>
+                  </div>
+                  <div className="game-hero-score-value">
+                    <div className="score-hero-rated">{displayScore.ratedAxisCount} axes rated</div>
+                  </div>
                 </>
               )
             ) : (
-              <>
+              <div className="game-hero-score-value">
                 <div className="score-hero-label">Fitness Score</div>
                 <div className="score-hero-number score-hero-unrated">&mdash;</div>
                 <div className="score-hero-out-of">not yet rated</div>
-              </>
-            )}
-            {tournamentStats && (
-              <div className="tournament-hero-rank">
-                <div className="score-hero-label">Tournament Rank</div>
-                <div
-                  className={`tournament-hero-value${tournamentStats.isProvisional ? " provisional" : ""}`}
-                >
-                  {tournamentStats.displayLabel}
-                </div>
               </div>
             )}
-          </div>
+          {tournamentStats && (
+              <div className="game-hero-score-value">
+                <div className="tournament-hero-rank">
+                  <div className="score-hero-label">Tournament Rank</div>
+                  <div
+                    className={`tournament-hero-value${tournamentStats.isProvisional ? " provisional" : ""}`}
+                  >
+                    {tournamentStats.displayLabel}
+                  </div>
+                </div>
+              </div>
+          )}
+            </div>
         </div>
 
         {isPreviouslyOwned && (

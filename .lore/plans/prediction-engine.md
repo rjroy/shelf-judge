@@ -614,7 +614,7 @@ The mockup defines a complete set of CSS custom properties. Add to `globals.css`
 - `.improve-grid` / `.improve-card` / `.improve-axis-list` -- readiness page improvement section
 - `.suggest-list` / `.suggest-item` -- suggested actions list
 
-**Responsive breakpoints** (mockup includes `@media (max-width: 800px)`):
+**Responsive breakpoints** (mockup includes `@media (max-width: 900px)`):
 
 - Sidebar collapses to horizontal strip. Game hero stacks vertically. Detail panels go single-column. Tension signal cards stack. Improve grid goes single-column. Confidence stats grid goes 2-column.
 - Tablet (800–1100px): sidebar stays, detail panels single-column, collection table compressed but all columns visible.
@@ -633,7 +633,7 @@ The mockup defines a complete set of CSS custom properties. Add to `globals.css`
 - Readiness page shows stage banner, stage timeline, weak axes cards, and suggested actions (per mockup Section 5).
 - `collection-utils.ts` `ratedStatus` filter correctly classifies predicted-only games (score non-null, ratedAxisCount 0) as "unrated."
 - `app/page.tsx` average fitness computation excludes predicted-only scores from the "actual" average.
-- Responsive layout stacks correctly below 800px.
+- Responsive layout stacks correctly below 900px.
 - Typecheck clean.
 
 **Reqs covered**: REQ-PRED-14, 26, 27, 28, 29.

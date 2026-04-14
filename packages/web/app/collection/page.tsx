@@ -124,12 +124,8 @@ export default async function CollectionPage({
       <div className="topbar">
         <div className="topbar-title">My Collection</div>
         <div className="topbar-meta">
-          <span>
-            {displayCount} &middot; {axes.length} ax
-            {axes.length === 1 ? "is" : "es"}
-          </span>
-          <NormalizeFitnessButton />
-          <RefreshAllButton />
+            <NormalizeFitnessButton />
+            <RefreshAllButton />
         </div>
       </div>
 
