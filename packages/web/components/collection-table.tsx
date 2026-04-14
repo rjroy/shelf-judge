@@ -188,9 +188,13 @@ export function CollectionTable({
   );
 
   // Apply filters then sort
-  const filtered = useMemo(
+  const first_filter = useMemo(
     () => activeGames.filter((g) => matchesFilters(g, filters)),
     [activeGames, filters],
+  );
+  const filtered = useMemo(
+    () => showPreviouslyOwned ? first_filter : first_filter.filter((g) => g.game.ownership !== "previously-owned") ,
+    [first_filter, showPreviouslyOwned],
   );
   const { withValue, withoutValue } = useMemo(
     () => sortGames(filtered, sort.field, sort.direction, tournamentStats, axes),
