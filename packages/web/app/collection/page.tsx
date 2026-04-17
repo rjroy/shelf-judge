@@ -7,11 +7,17 @@ import {
   listGamesWithPredictions,
   getNicheSettings,
   getRedundancySettings,
+  getShelfCapacity,
 } from "@/lib/api";
-import type { TournamentGameStatsDisplay, NicheTagFilter } from "@shelf-judge/shared";
+import type {
+  TournamentGameStatsDisplay,
+  NicheTagFilter,
+  ShelfCapacityResult,
+} from "@shelf-judge/shared";
 import { RefreshAllButton } from "@/components/refresh-all-button";
 import { NormalizeFitnessButton } from "@/components/normalize-fitness-button";
 import { CollectionTable } from "@/components/collection-table";
+import { CapacityIndicator } from "@/components/capacity-indicator";
 
 export const metadata: Metadata = { title: "Collection" };
 export const dynamic = "force-dynamic";
@@ -32,6 +38,7 @@ export default async function CollectionPage({
   let previouslyOwnedCount = 0;
   let tournamentStats: Record<string, TournamentGameStatsDisplay> = {};
   let ignoredTags: NicheTagFilter[] = [];
+  let capacity: ShelfCapacityResult | null = null;
   try {
     const ownershipParam = showPrevOwned ? ("all" as const) : undefined;
     [games, axes] = await Promise.all([listGames({ ownership: "all" }), listAxes()]);
@@ -65,6 +72,11 @@ export default async function CollectionPage({
     } catch {
       // Redundancy settings may not be available
     }
+    try {
+      capacity = await getShelfCapacity();
+    } catch {
+      // Capacity data may not be available
+    }
   } catch {
     return (
       <div className="error-banner">
@@ -83,7 +95,9 @@ export default async function CollectionPage({
       ? rated.reduce((sum, { score }) => sum + (score?.score ?? 0), 0) / rated.length
       : null;
 
-  console.log(`CollectionPage data: ${games.length} total games, ${predictedGames ? predictedGames.length : 0} predicted games, ${nicheGames ? nicheGames.length : 0} niche games, ${axes.length} axes, previously owned count: ${previouslyOwnedCount}, avg fitness: ${avgFitness}, hasTournamentData: ${hasTournamentData}, ignoredTags: ${ignoredTags.length}, isIntegratedRedundancy: ${isIntegrated}`); 
+  console.log(
+    `CollectionPage data: ${games.length} total games, ${predictedGames ? predictedGames.length : 0} predicted games, ${nicheGames ? nicheGames.length : 0} niche games, ${axes.length} axes, previously owned count: ${previouslyOwnedCount}, avg fitness: ${avgFitness}, hasTournamentData: ${hasTournamentData}, ignoredTags: ${ignoredTags.length}, isIntegratedRedundancy: ${isIntegrated}`,
+  );
 
   const predictedCount = predictedGames
     ? predictedGames.filter(
@@ -120,10 +134,12 @@ export default async function CollectionPage({
       <div className="topbar">
         <div className="topbar-title">My Collection</div>
         <div className="topbar-meta">
-            <NormalizeFitnessButton />
-            <RefreshAllButton />
+          <NormalizeFitnessButton />
+          <RefreshAllButton />
         </div>
       </div>
+
+      {capacity ? <CapacityIndicator capacity={capacity} /> : null}
 
       <div className="main-scroll">
         <CollectionTable
