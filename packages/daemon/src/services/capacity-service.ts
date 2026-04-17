@@ -124,11 +124,6 @@ export function createCapacityService(deps: CapacityServiceDeps): CapacityServic
               gameName: gws.game.name,
               fitnessScore: fitnessOf(gws),
               volumeIn3: boxVolume(gws.game.boxDimensions),
-              // Every entry here survived the pre-pass, so fittable is always true today.
-              // The field (REQ-SHELF-19) is reserved for future cases where a game might
-              // appear in overflow without a geometric fit guarantee (e.g. dimensionless
-              // fallbacks or pre-pass bypass).
-              fittable: true,
             },
           ];
         })
@@ -200,15 +195,18 @@ function fitnessOf(gws: GameWithScore): number {
 }
 
 function boxToTuple(dims: BoxDimensions): [number, number, number] {
-  // Algorithm axis 0 = height (the axis that gets consumed along the shelf length
-  // when forceAxis0Width is on). Keep axis 1 = width, axis 2 = depth for symmetry
-  // with the bin mapping below.
-  return [dims.height, dims.width, dims.depth];
+  // Algorithm axis 0 = depth/spine (the facing dimension, locked by forceAxis0Width).
+  // Axis 0 is also the consumption axis — subtracted from the shelf as games are
+  // placed side by side. Mapping depth here means a game's spine faces outward,
+  // and each game consumes shelf-width proportional to its spine thickness.
+  return [dims.depth, dims.width, dims.height];
 }
 
 function shelfToBinDims(shelf: Shelf): [number, number, number] {
+  // Axis 0 = shelf width (the fill direction, consumed as games are placed).
+  // Axis 1 = shelf height (constrained or sentinel). Axis 2 = shelf depth.
   const h = shelf.height === null ? UNCONSTRAINED_HEIGHT_SENTINEL : shelf.height;
-  return [h, shelf.width, shelf.depth];
+  return [shelf.width, h, shelf.depth];
 }
 
 /**

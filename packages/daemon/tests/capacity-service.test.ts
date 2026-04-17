@@ -344,8 +344,9 @@ describe("capacity service", () => {
           unit("u1", "Shallow", [{ id: "s1", name: "Shelf", width: 20, height: 5, depth: 20 }]),
         ]),
         gameService: createMockGameService([
-          // 12x3x15 can't fit with 12 as height (5 shelf height). Rotating so 3 is
-          // height and 12x15 fits on the 20x20 footprint should work.
+          // depth=15 is locked on axis 0 (spine) and fits shelf width (20).
+          // width=12 and height=3 rotate into axes 1-2: 3 fits shelf height (5),
+          // 12 fits shelf depth (20).
           makeGame("g1", "Oddly Shaped", {
             boxDimensions: { width: 12, height: 3, depth: 15 },
             fitness: 7,
@@ -374,6 +375,42 @@ describe("capacity service", () => {
       expect(result.assignments[0].utilization).toBeNull();
       // used volume is still reported
       expect(result.assignments[0].usedIn3).toBe(10 * 2 * 10);
+    });
+
+    test("axis-0 maps to depth/spine: multiple games fit spine-out in a Kallax cube", async () => {
+      // Regression test for axis-0 semantic: with forceAxis0Width the item's
+      // depth (spine) is locked and consumed along the shelf's width. A Wingspan
+      // box (12×12×2.8) should fit ~4 copies spine-out in a 13" Kallax cube.
+      // The old mapping (axis 0 = height) consumed 12 of 13 on the first game,
+      // leaving room for zero more.
+      const svc = createCapacityService({
+        storageService: createMockStorage([
+          unit("u1", "Kallax", [{ id: "s1", name: "Cube", width: 13, height: 13, depth: 15 }]),
+        ]),
+        gameService: createMockGameService([
+          makeGame("g1", "Wingspan 1", {
+            boxDimensions: { width: 12, height: 12, depth: 2.8 },
+            fitness: 8,
+          }),
+          makeGame("g2", "Wingspan 2", {
+            boxDimensions: { width: 12, height: 12, depth: 2.8 },
+            fitness: 7,
+          }),
+          makeGame("g3", "Wingspan 3", {
+            boxDimensions: { width: 12, height: 12, depth: 2.8 },
+            fitness: 6,
+          }),
+          makeGame("g4", "Wingspan 4", {
+            boxDimensions: { width: 12, height: 12, depth: 2.8 },
+            fitness: 5,
+          }),
+        ]),
+      });
+      const result = await svc.computeCapacity();
+      // All 4 should be assigned (not unfittable, not overflow).
+      expect(result.unfittableGames).toHaveLength(0);
+      const assigned = result.assignments[0].games;
+      expect(assigned.length).toBeGreaterThanOrEqual(4);
     });
 
     test("assignment grade is present (one of S/A/B/C/D/F)", async () => {
@@ -418,10 +455,6 @@ describe("capacity service", () => {
       const result = await svc.computeCapacity();
       expect(result.overflowing).toBe(true);
       expect(result.overflowGames.length).toBeGreaterThan(0);
-      // fittable by shape
-      for (const o of result.overflowGames) {
-        expect(o.fittable).toBe(true);
-      }
       // sorted ascending by fitness
       for (let i = 1; i < result.overflowGames.length; i++) {
         expect(result.overflowGames[i - 1].fitnessScore).toBeLessThanOrEqual(

@@ -75,8 +75,8 @@ export default async function CollectionPage({
     }
     try {
       capacity = await getShelfCapacity();
-    } catch {
-      // Capacity data may not be available
+    } catch (err) {
+      console.warn("Failed to load shelf capacity:", err);
     }
   } catch {
     return (

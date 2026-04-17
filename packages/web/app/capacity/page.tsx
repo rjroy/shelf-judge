@@ -17,9 +17,9 @@ function formatVolume(value: number): string {
 }
 
 function scoreChipClass(score: number): string {
-  if (score >= 7.5) return "score-chip high";
-  if (score >= 5.0) return "score-chip mid";
-  return "score-chip low";
+  if (score >= 7.5) return "score-value high";
+  if (score >= 5.0) return "score-value mid";
+  return "score-value low";
 }
 
 function scoreColorClass(score: number): string {

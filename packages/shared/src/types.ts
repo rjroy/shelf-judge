@@ -597,7 +597,6 @@ export interface OverflowEntry {
   gameName: string;
   fitnessScore: number;
   volumeIn3: number;
-  fittable: boolean;
 }
 
 export interface ShelfCapacityResult {

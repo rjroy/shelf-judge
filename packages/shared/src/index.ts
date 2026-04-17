@@ -89,6 +89,7 @@ export {
   TournamentSettingsUpdateSchema,
   TournamentSettingsSchema,
   TournamentDataSchema,
+  ShelfConfigurationSchema,
 } from "./validation";
 
 export { toErrorMessage, ValidationError, NotFoundError } from "./errors";
