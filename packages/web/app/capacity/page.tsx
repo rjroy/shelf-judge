@@ -97,7 +97,7 @@ function ShelfAssignmentCard({ assignment }: { assignment: ShelfAssignment }) {
 function AssignedGameRow({ game, heightless }: { game: AssignedGame; heightless: boolean }) {
   return (
     <div className="shelf-game-row">
-      <Link href={`/game/${game.gameId}`} className="shelf-game-name">
+      <Link href={`/games/${game.gameId}`} className="shelf-game-name game-link">
         {game.gameName}
       </Link>
       <div className={`shelf-game-score ${scoreColorClass(game.fitnessScore)}`}>
@@ -124,7 +124,9 @@ function UnfittableTable({ entries }: { entries: UnfittableEntry[] }) {
           <tr key={entry.gameId}>
             <td>
               <div>
-                <Link href={`/game/${entry.gameId}`}>{entry.gameName}</Link>
+                <Link href={`/games/${entry.gameId}`} className="game-link">
+                  {entry.gameName}
+                </Link>
               </div>
               <span className="unfittable-flag">Unfittable</span>
             </td>
@@ -160,7 +162,9 @@ function DisplacedTable({ entries }: { entries: OverflowEntry[] }) {
         {entries.map((entry) => (
           <tr key={entry.gameId}>
             <td>
-              <Link href={`/game/${entry.gameId}`}>{entry.gameName}</Link>
+              <Link href={`/games/${entry.gameId}`} className="game-link">
+                {entry.gameName}
+              </Link>
             </td>
             <td>
               <span className={scoreChipClass(entry.fitnessScore)}>
@@ -260,10 +264,11 @@ function NoDimensionsEmpty({ capacity }: { capacity: ShelfCapacityResult }) {
             <br />
             <br />
             Open any game and enter its box dimensions, or{" "}
-            <Link href="/collection">view all games without dimensions</Link> in the collection.
+            <Link href="/collection?dimensions=missing">view all games without dimensions</Link> in
+            the collection.
           </div>
           <div className="btn-row">
-            <Link href="/collection" className="btn btn-secondary">
+            <Link href="/collection?dimensions=missing" className="btn btn-secondary">
               View unmeasured games
             </Link>
             <Link href="/collection" className="btn btn-primary">
@@ -358,7 +363,8 @@ export default async function CapacityPage() {
             {capacity.gamesWithoutDimensions}{" "}
             {capacity.gamesWithoutDimensions === 1 ? "game has" : "games have"} no box dimensions
             and {capacity.gamesWithoutDimensions === 1 ? "is" : "are"} excluded from this
-            calculation. <Link href="/collection">Add dimensions for unmeasured games</Link>.
+            calculation.{" "}
+            <Link href="/collection?dimensions=missing">Add dimensions for unmeasured games</Link>.
           </div>
         ) : null}
       </div>

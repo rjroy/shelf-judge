@@ -17,7 +17,6 @@ import type {
 import { RefreshAllButton } from "@/components/refresh-all-button";
 import { NormalizeFitnessButton } from "@/components/normalize-fitness-button";
 import { CollectionTable } from "@/components/collection-table";
-import { CapacityIndicator } from "@/components/capacity-indicator";
 
 export const metadata: Metadata = { title: "Collection" };
 export const dynamic = "force-dynamic";
@@ -29,6 +28,8 @@ export default async function CollectionPage({
 }) {
   const params = await searchParams;
   const showPrevOwned = params.ownership === "all";
+  // Server-side cull filter from capacity surfaces (REQ-SHELF-31).
+  const missingDimensionsOnly = params.dimensions === "missing";
 
   let games;
   let predictedGames;
@@ -139,8 +140,6 @@ export default async function CollectionPage({
         </div>
       </div>
 
-      {capacity ? <CapacityIndicator capacity={capacity} /> : null}
-
       <div className="main-scroll">
         <CollectionTable
           games={games}
@@ -157,6 +156,8 @@ export default async function CollectionPage({
           isIntegratedRedundancy={isIntegrated}
           previouslyOwnedCount={previouslyOwnedCount}
           showPreviouslyOwned={showPrevOwned}
+          missingDimensionsOnly={missingDimensionsOnly}
+          capacity={capacity}
         />
       </div>
     </>

@@ -116,16 +116,6 @@ export function createShelfRoutes(deps: ShelfRoutesDeps): RouteModule {
     }
   });
 
-  // GET /shelf/capacity
-  routes.get("/shelf/capacity", async (c) => {
-    try {
-      const result = await capacityService.computeCapacity();
-      return c.json(result);
-    } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 500);
-    }
-  });
-
   // DELETE /shelf/units/:id
   routes.delete("/shelf/units/:id", async (c) => {
     const id = c.req.param("id");
@@ -137,6 +127,16 @@ export function createShelfRoutes(deps: ShelfRoutesDeps): RouteModule {
       if (err instanceof ShelfNotFoundError) {
         return c.json({ error: err.message }, 404);
       }
+      return c.json({ error: toErrorMessage(err) }, 500);
+    }
+  });
+
+  // GET /shelf/capacity
+  routes.get("/shelf/capacity", async (c) => {
+    try {
+      const result = await capacityService.computeCapacity();
+      return c.json(result);
+    } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 500);
     }
   });

@@ -3722,12 +3722,13 @@ body {
 /* ===== Filter bar (Phase 3) ===== */
 
 .filter-bar {
+  /* Children (filter-row-1, filter-panel, active-chips-row, capacity-indicator)
+     carry their own padding so the capacity indicator can sit flush at the
+     bottom with a full-width border-top separator and no surrounding whitespace. */
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border);
-  padding: 10px var(--content-padding);
   display: flex;
   flex-direction: column;
-  gap: 8px;
   flex-shrink: 0;
 }
 
@@ -3735,6 +3736,7 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
+  padding: 10px var(--content-padding);
 }
 
 .search-input-wrap {
@@ -3811,7 +3813,8 @@ body {
 .filter-panel {
   display: flex;
   gap: 20px;
-  padding: 10px 0 2px;
+  /* No top padding: sits flush with filter-row-1's bottom padding. */
+  padding: 0 var(--content-padding) 10px;
   flex-wrap: wrap;
   align-items: flex-start;
 }
@@ -3873,6 +3876,8 @@ body {
   gap: 6px;
   align-items: center;
   flex-wrap: wrap;
+  /* No top padding: sits flush with the section above (row-1 or filter-panel). */
+  padding: 0 var(--content-padding) 10px;
 }
 
 .chips-label {
@@ -4102,13 +4107,12 @@ body {
   }
 
   /* --- Filter bar: phone layout --- */
-  .filter-bar {
-    padding: 8px var(--content-padding);
-  }
-
+  /* Filter bar keeps zero padding on mobile; children carry their own so the
+     capacity indicator stays edge-to-edge. Tighten child vertical padding. */
   .filter-row-1 {
     flex-wrap: wrap;
     gap: 8px;
+    padding: 8px var(--content-padding);
   }
 
   .search-input-wrap {
@@ -7398,8 +7402,11 @@ body {
 }
 
 /* ---------- Capacity indicator band (on /collection) ---------- */
+/* Lives inside .filter-bar (REQ-SHELF-30). filter-bar handles vertical stacking
+   and borders; capacity-indicator carries its own horizontal padding so it
+   extends edge-to-edge alongside the other filter sections. */
 .capacity-indicator {
-  padding: 10px 32px;
+  padding: 10px var(--content-padding);
   border-top: 1px solid var(--border);
   display: flex;
   align-items: center;

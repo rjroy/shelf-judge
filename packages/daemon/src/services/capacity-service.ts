@@ -85,8 +85,11 @@ export function createCapacityService(deps: CapacityServiceDeps): CapacityServic
         };
       }
 
+      // Resolve config once so the pre-pass and pack() use the same policy.
+      const resolvedConfig: PackConfig = { ...DEFAULT_PACK_CONFIG, ...packConfig };
+
       // REQ-SHELF-17 + REQ-SHELF-20: pre-pass geometric unfittable check.
-      const { unfittable, fittable } = splitUnfittable(dimensioned, shelves);
+      const { unfittable, fittable } = splitUnfittable(dimensioned, shelves, resolvedConfig);
 
       // Sort unfittable by fitness ascending (REQ-SHELF-20).
       unfittable.sort((a, b) => a.fitnessScore - b.fitnessScore);
@@ -101,8 +104,7 @@ export function createCapacityService(deps: CapacityServiceDeps): CapacityServic
       const items = fittable.map((gws) => buildPackItem(gws, vectorCache));
       const bins = shelves.map((ctx) => buildPackBin(ctx.shelf));
 
-      const mergedConfig: Partial<PackConfig> = { ...DEFAULT_PACK_CONFIG, ...packConfig };
-      const result = pack(items, bins, mergedConfig);
+      const result = pack(items, bins, resolvedConfig);
 
       // Index fittable games by id for response assembly.
       const fittableById = new Map(fittable.map((gws) => [gws.game.id, gws]));
@@ -121,6 +123,10 @@ export function createCapacityService(deps: CapacityServiceDeps): CapacityServic
             gameName: gws.game.name,
             fitnessScore: fitnessOf(gws),
             volumeIn3: boxVolume(gws.game.boxDimensions),
+            // Every entry here survived the pre-pass, so fittable is always true today.
+            // The field (REQ-SHELF-19) is reserved for future cases where a game might
+            // appear in overflow without a geometric fit guarantee (e.g. dimensionless
+            // fallbacks or pre-pass bypass).
             fittable: true,
           } satisfies OverflowEntry;
         })
@@ -211,6 +217,7 @@ function shelfToBinDims(shelf: Shelf): [number, number, number] {
 function splitUnfittable(
   dimensioned: GameWithScore[],
   shelves: ShelfContext[],
+  config: PackConfig,
 ): { fittable: GameWithScore[]; unfittable: UnfittableEntry[] } {
   const fittable: GameWithScore[] = [];
   const unfittable: UnfittableEntry[] = [];
@@ -231,7 +238,7 @@ function splitUnfittable(
         binDims,
         defaultAxisPriority,
         defaultAxisMinimize,
-        DEFAULT_PACK_CONFIG.forceAxis0Width,
+        config.forceAxis0Width,
       );
       if (rotated !== null) {
         fitsAnywhere = true;

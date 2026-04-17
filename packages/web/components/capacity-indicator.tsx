@@ -19,7 +19,10 @@ export function CapacityIndicator({ capacity }: { capacity: ShelfCapacityResult 
         <div className="cap-icon cap-icon-neutral">□</div>
         <div className="cap-text neutral-text">
           Shelves configured, but no game dimensions available.{" "}
-          <Link href="/collection" className="cap-detail-link cap-detail-link-inline">
+          <Link
+            href="/collection?dimensions=missing"
+            className="cap-detail-link cap-detail-link-inline"
+          >
             Add box dimensions
           </Link>{" "}
           to enable capacity analysis.
