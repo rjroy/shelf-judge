@@ -115,22 +115,23 @@ export function createCapacityService(deps: CapacityServiceDeps): CapacityServic
       });
 
       const overflowGames: OverflowEntry[] = result.overflow
-        .map((gameId) => {
+        .flatMap((gameId): OverflowEntry[] => {
           const gws = fittableById.get(gameId);
-          if (!gws || !gws.game.boxDimensions) return null;
-          return {
-            gameId: gws.game.id,
-            gameName: gws.game.name,
-            fitnessScore: fitnessOf(gws),
-            volumeIn3: boxVolume(gws.game.boxDimensions),
-            // Every entry here survived the pre-pass, so fittable is always true today.
-            // The field (REQ-SHELF-19) is reserved for future cases where a game might
-            // appear in overflow without a geometric fit guarantee (e.g. dimensionless
-            // fallbacks or pre-pass bypass).
-            fittable: true,
-          } satisfies OverflowEntry;
+          if (!gws || !gws.game.boxDimensions) return [];
+          return [
+            {
+              gameId: gws.game.id,
+              gameName: gws.game.name,
+              fitnessScore: fitnessOf(gws),
+              volumeIn3: boxVolume(gws.game.boxDimensions),
+              // Every entry here survived the pre-pass, so fittable is always true today.
+              // The field (REQ-SHELF-19) is reserved for future cases where a game might
+              // appear in overflow without a geometric fit guarantee (e.g. dimensionless
+              // fallbacks or pre-pass bypass).
+              fittable: true,
+            },
+          ];
         })
-        .filter((e): e is OverflowEntry => e !== null)
         .sort((a, b) => a.fitnessScore - b.fitnessScore);
 
       return {
