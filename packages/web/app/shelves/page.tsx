@@ -301,6 +301,28 @@ export default function ShelvesPage() {
     }
   };
 
+  const handleDuplicateShelf = async (unit: ShelfUnit, shelf: Shelf) => {
+    setError(null);
+    try {
+      const newShelves = [
+        ...unit.shelves.map((s) => ({
+          id: s.id,
+          name: s.name,
+          width: s.width,
+          height: s.height,
+          depth: s.depth,
+        })),
+        { name: `${shelf.name} (copy)`, width: shelf.width, height: shelf.height, depth: shelf.depth },
+      ];
+      const updated = await fetchUpdateShelfUnit(unit.id, { shelves: newShelves });
+      setConfig((prev) =>
+        prev ? { ...prev, units: prev.units.map((u) => (u.id === unit.id ? updated : u)) } : prev,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to duplicate shelf");
+    }
+  };
+
   const handleMoveShelf = async (unit: ShelfUnit, shelfIndex: number, direction: -1 | 1) => {
     const newIndex = shelfIndex + direction;
     if (newIndex < 0 || newIndex >= unit.shelves.length) return;
@@ -530,6 +552,13 @@ export default function ShelvesPage() {
                             <div className="shelf-row-actions">
                               <button className="btn-ghost" onClick={() => handleEditShelf(shelf)}>
                                 Edit
+                              </button>
+                              <button
+                                className="btn-ghost"
+                                title="Duplicate shelf"
+                                onClick={() => void handleDuplicateShelf(unit, shelf)}
+                              >
+                                Duplicate
                               </button>
                               <button
                                 className="shelf-btn-icon-danger"
