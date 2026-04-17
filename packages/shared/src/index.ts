@@ -71,6 +71,11 @@ export type {
   Shelf,
   ShelfUnit,
   ShelfConfiguration,
+  AssignedGame,
+  ShelfAssignment,
+  UnfittableEntry,
+  OverflowEntry,
+  ShelfCapacityResult,
 } from "./types";
 
 export {

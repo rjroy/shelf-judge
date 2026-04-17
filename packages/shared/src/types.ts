@@ -564,3 +564,49 @@ export interface ShelfConfiguration {
   createdAt: string; // ISO 8601
   updatedAt: string; // ISO 8601
 }
+
+export interface AssignedGame {
+  gameId: string;
+  gameName: string;
+  fitnessScore: number;
+  volumeIn3: number;
+}
+
+export interface ShelfAssignment {
+  shelfId: string;
+  shelfName: string;
+  unitId: string;
+  unitName: string;
+  capacityIn3: number | null; // null for unconstrained-height shelves
+  usedIn3: number;
+  utilization: number | null; // usedIn3 / capacityIn3, null if unconstrained
+  games: AssignedGame[];
+  grade: string; // S, A, B, C, D, F
+}
+
+export interface UnfittableEntry {
+  gameId: string;
+  gameName: string;
+  fitnessScore: number;
+  boxDimensions: BoxDimensions;
+  reason: string;
+}
+
+export interface OverflowEntry {
+  gameId: string;
+  gameName: string;
+  fitnessScore: number;
+  volumeIn3: number;
+  fittable: boolean;
+}
+
+export interface ShelfCapacityResult {
+  configured: boolean;
+  totalShelfCount: number;
+  gamesWithDimensions: number;
+  gamesWithoutDimensions: number;
+  overflowing: boolean;
+  assignments: ShelfAssignment[];
+  unfittableGames: UnfittableEntry[];
+  overflowGames: OverflowEntry[];
+}

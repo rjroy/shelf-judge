@@ -1,8 +1,9 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import { Hono } from "hono";
-import type { ShelfConfiguration, ShelfUnit } from "@shelf-judge/shared";
+import type { ShelfCapacityResult, ShelfConfiguration, ShelfUnit } from "@shelf-judge/shared";
 import { createShelfRoutes } from "../src/routes/shelf";
 import { createShelfService } from "../src/services/shelf-service";
+import type { CapacityService } from "../src/services/capacity-service";
 import type { StorageService } from "../src/services/storage-service";
 
 const NOW = "2026-04-13T12:00:00.000Z";
@@ -49,14 +50,44 @@ function jsonRequest(method: string, body: unknown) {
   };
 }
 
+function createMockCapacityService(result?: ShelfCapacityResult): CapacityService & {
+  lastCalled: number;
+  resultOverride: ShelfCapacityResult | Error;
+} {
+  const defaultResult: ShelfCapacityResult = {
+    configured: false,
+    totalShelfCount: 0,
+    gamesWithDimensions: 0,
+    gamesWithoutDimensions: 0,
+    overflowing: false,
+    assignments: [],
+    unfittableGames: [],
+    overflowGames: [],
+  };
+  const mock = {
+    lastCalled: 0,
+    resultOverride: (result ?? defaultResult) as ShelfCapacityResult | Error,
+    computeCapacity() {
+      mock.lastCalled++;
+      if (mock.resultOverride instanceof Error) {
+        return Promise.reject(mock.resultOverride);
+      }
+      return Promise.resolve(structuredClone(mock.resultOverride));
+    },
+  };
+  return mock;
+}
+
 describe("shelf routes", () => {
   let app: Hono;
   let storage: ReturnType<typeof createMockStorage>;
+  let capacityService: ReturnType<typeof createMockCapacityService>;
 
   beforeEach(() => {
     storage = createMockStorage();
     const shelfService = createShelfService({ storageService: storage });
-    const { routes } = createShelfRoutes({ shelfService });
+    capacityService = createMockCapacityService();
+    const { routes } = createShelfRoutes({ shelfService, capacityService });
     app = new Hono();
     app.route("/api", routes);
   });
@@ -267,6 +298,58 @@ describe("shelf routes", () => {
     test("returns 404 for nonexistent unit", async () => {
       const res = await app.request("/api/shelf/units/nonexistent", { method: "DELETE" });
       expect(res.status).toBe(404);
+    });
+  });
+
+  describe("GET /api/shelf/capacity", () => {
+    test("returns the capacity service result verbatim", async () => {
+      capacityService.resultOverride = {
+        configured: true,
+        totalShelfCount: 2,
+        gamesWithDimensions: 3,
+        gamesWithoutDimensions: 1,
+        overflowing: false,
+        assignments: [
+          {
+            shelfId: "s1",
+            shelfName: "Top",
+            unitId: "u1",
+            unitName: "Kallax",
+            capacityIn3: 2535,
+            usedIn3: 200,
+            utilization: 200 / 2535,
+            games: [{ gameId: "g1", gameName: "A", fitnessScore: 7, volumeIn3: 200 }],
+            grade: "B",
+          },
+        ],
+        unfittableGames: [],
+        overflowGames: [],
+      };
+
+      const res = await app.request("/api/shelf/capacity");
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as ShelfCapacityResult;
+      expect(body.configured).toBe(true);
+      expect(body.totalShelfCount).toBe(2);
+      expect(body.assignments).toHaveLength(1);
+      expect(body.assignments[0].games[0].gameId).toBe("g1");
+      expect(capacityService.lastCalled).toBe(1);
+    });
+
+    test("returns configured: false when no shelves exist", async () => {
+      const res = await app.request("/api/shelf/capacity");
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as ShelfCapacityResult;
+      expect(body.configured).toBe(false);
+      expect(body.assignments).toEqual([]);
+    });
+
+    test("returns 500 on service failure", async () => {
+      capacityService.resultOverride = new Error("boom");
+      const res = await app.request("/api/shelf/capacity");
+      expect(res.status).toBe(500);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe("boom");
     });
   });
 });

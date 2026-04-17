@@ -4,13 +4,15 @@ import type { ShelfUnit } from "@shelf-judge/shared";
 import type { RouteModule, OperationDefinition } from "../operations.js";
 import type { ShelfService, ShelfInput } from "../services/shelf-service.js";
 import { ShelfValidationError, ShelfNotFoundError } from "../services/shelf-service.js";
+import type { CapacityService } from "../services/capacity-service.js";
 
 export interface ShelfRoutesDeps {
   shelfService: ShelfService;
+  capacityService: CapacityService;
 }
 
 export function createShelfRoutes(deps: ShelfRoutesDeps): RouteModule {
-  const { shelfService } = deps;
+  const { shelfService, capacityService } = deps;
   const routes = new Hono();
 
   // GET /shelf/config
@@ -114,6 +116,16 @@ export function createShelfRoutes(deps: ShelfRoutesDeps): RouteModule {
     }
   });
 
+  // GET /shelf/capacity
+  routes.get("/shelf/capacity", async (c) => {
+    try {
+      const result = await capacityService.computeCapacity();
+      return c.json(result);
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 500);
+    }
+  });
+
   // DELETE /shelf/units/:id
   routes.delete("/shelf/units/:id", async (c) => {
     const id = c.req.param("id");
@@ -170,6 +182,14 @@ export function createShelfRoutes(deps: ShelfRoutesDeps): RouteModule {
       invocation: { method: "DELETE", path: "/api/shelf/units/:id" },
       hierarchy: { root: "shelf", feature: "config" },
       parameters: [{ name: "id", in: "path", description: "Shelf unit ID", required: true }],
+      idempotent: true,
+    },
+    {
+      operationId: "shelf.capacity.get",
+      name: "get-capacity",
+      description: "Assign owned games to shelves and report capacity",
+      invocation: { method: "GET", path: "/api/shelf/capacity" },
+      hierarchy: { root: "shelf", feature: "capacity" },
       idempotent: true,
     },
   ];
