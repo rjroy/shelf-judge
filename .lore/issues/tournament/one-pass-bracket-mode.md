@@ -1,7 +1,7 @@
 ---
 title: "One Pass Bracket Mode"
 date: 2026-04-14
-status: open
+status: resolved 
 tags: [tournament, feature]
 ---
 
