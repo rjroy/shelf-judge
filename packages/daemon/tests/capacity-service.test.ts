@@ -66,7 +66,8 @@ function createMockStorage(units: ShelfUnit[]): StorageService {
   return {
     loadShelfConfig: () => Promise.resolve(structuredClone(config)),
     saveShelfConfig: () => Promise.resolve(),
-    loadCollection: () => Promise.reject(new Error("not implemented")),
+    loadCollection: () =>
+      Promise.resolve({ games: [], axes: [], createdAt: NOW, updatedAt: NOW }),
     saveCollection: () => Promise.resolve(),
     loadConfig: () => Promise.reject(new Error("not implemented")),
     saveConfig: () => Promise.resolve(),

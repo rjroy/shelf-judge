@@ -4,6 +4,7 @@
 
 import type {
   AssignedGame,
+  Axis,
   BoxDimensions,
   Game,
   GameWithScore,
@@ -94,10 +95,13 @@ export function createCapacityService(deps: CapacityServiceDeps): CapacityServic
       // Sort unfittable by fitness ascending (REQ-SHELF-20).
       unfittable.sort((a, b) => a.fitnessScore - b.fitnessScore);
 
+      const collection = await storageService.loadCollection();
+
       // Pre-encode feature vectors once per request; feed the compare closure.
       const vectorCache = buildVectorCache(
         ownedGames.map((g) => g.game),
         dimensioned,
+        collection.axes,
       );
 
       // Build items/bins and run the packing algorithm.
@@ -309,6 +313,7 @@ function explainUnfittable(dims: BoxDimensions, shelves: ShelfContext[]): string
 function buildVectorCache(
   universe: Game[],
   participating: GameWithScore[],
+  axes: Axis[],
 ): Map<string, FeatureVector> {
   const gamesWithBgg = universe.filter((g) => g.bggData);
   const vocabulary = buildVocabulary(gamesWithBgg);
@@ -316,7 +321,7 @@ function buildVectorCache(
 
   const cache = new Map<string, FeatureVector>();
   for (const gws of participating) {
-    cache.set(gws.game.id, encodeGame(gws.game, vocabulary, gws.game.ratings, ranges));
+    cache.set(gws.game.id, encodeGame(gws.game, vocabulary, gws.game.ratings, ranges, axes));
   }
   return cache;
 }

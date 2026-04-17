@@ -2,7 +2,67 @@
 
 import { useState, useEffect, useCallback } from "react";
 import type { Shelf, ShelfUnit, ShelfConfiguration } from "@shelf-judge/shared";
-import { getShelfConfig, addShelfUnit, updateShelfUnit, removeShelfUnit } from "@/lib/api";
+
+async function fetchShelfConfig(): Promise<ShelfConfiguration> {
+  const res = await fetch("/api/daemon/shelf/config");
+  if (!res.ok) throw new Error(`Failed to load shelf configuration: ${res.status}`);
+  return (await res.json()) as ShelfConfiguration;
+}
+
+async function fetchAddShelfUnit(input: {
+  name: string;
+  shelves: Array<{ name: string; width: number; height: number | null; depth: number }>;
+}): Promise<ShelfUnit> {
+  const res = await fetch("/api/daemon/shelf/units", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({ error: "Unknown error" }))) as {
+      error?: string;
+    };
+    throw new Error(data.error ?? `Failed to add unit: ${res.status}`);
+  }
+  return (await res.json()) as ShelfUnit;
+}
+
+async function fetchUpdateShelfUnit(
+  id: string,
+  input: {
+    name?: string;
+    shelves?: Array<{
+      id?: string;
+      name: string;
+      width: number;
+      height: number | null;
+      depth: number;
+    }>;
+  },
+): Promise<ShelfUnit> {
+  const res = await fetch(`/api/daemon/shelf/units/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({ error: "Unknown error" }))) as {
+      error?: string;
+    };
+    throw new Error(data.error ?? `Failed to update unit: ${res.status}`);
+  }
+  return (await res.json()) as ShelfUnit;
+}
+
+async function fetchRemoveShelfUnit(id: string): Promise<void> {
+  const res = await fetch(`/api/daemon/shelf/units/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({ error: "Unknown error" }))) as {
+      error?: string;
+    };
+    throw new Error(data.error ?? `Failed to remove unit: ${res.status}`);
+  }
+}
 
 interface AddShelfForm {
   name: string;
@@ -51,7 +111,7 @@ export default function ShelvesPage() {
 
   const reload = useCallback(async () => {
     try {
-      const data = await getShelfConfig();
+      const data = await fetchShelfConfig();
       setConfig(data);
       setExpandedUnits(new Set(data.units.map((u) => u.id)));
     } catch (err) {
@@ -78,7 +138,7 @@ export default function ShelvesPage() {
     if (!newUnitName.trim()) return;
     setError(null);
     try {
-      const unit = await addShelfUnit({ name: newUnitName.trim(), shelves: [] });
+      const unit = await fetchAddShelfUnit({ name: newUnitName.trim(), shelves: [] });
       setConfig((prev) => (prev ? { ...prev, units: [...prev.units, unit] } : prev));
       setExpandedUnits((prev) => new Set([...prev, unit.id]));
       setNewUnitName("");
@@ -98,7 +158,7 @@ export default function ShelvesPage() {
     if (!window.confirm(message)) return;
     setError(null);
     try {
-      await removeShelfUnit(unitId);
+      await fetchRemoveShelfUnit(unitId);
       setConfig((prev) =>
         prev ? { ...prev, units: prev.units.filter((u) => u.id !== unitId) } : prev,
       );
@@ -111,7 +171,7 @@ export default function ShelvesPage() {
     if (!renameValue.trim()) return;
     setError(null);
     try {
-      const updated = await updateShelfUnit(unitId, { name: renameValue.trim() });
+      const updated = await fetchUpdateShelfUnit(unitId, { name: renameValue.trim() });
       setConfig((prev) =>
         prev ? { ...prev, units: prev.units.map((u) => (u.id === unitId ? updated : u)) } : prev,
       );
@@ -166,7 +226,7 @@ export default function ShelvesPage() {
         })),
         { name: form.name.trim(), width, height, depth },
       ];
-      const updated = await updateShelfUnit(unit.id, { shelves: newShelves });
+      const updated = await fetchUpdateShelfUnit(unit.id, { shelves: newShelves });
       setConfig((prev) =>
         prev ? { ...prev, units: prev.units.map((u) => (u.id === unit.id ? updated : u)) } : prev,
       );
@@ -184,7 +244,7 @@ export default function ShelvesPage() {
       const newShelves = unit.shelves
         .filter((s) => s.id !== shelfId)
         .map((s) => ({ id: s.id, name: s.name, width: s.width, height: s.height, depth: s.depth }));
-      const updated = await updateShelfUnit(unit.id, { shelves: newShelves });
+      const updated = await fetchUpdateShelfUnit(unit.id, { shelves: newShelves });
       setConfig((prev) =>
         prev ? { ...prev, units: prev.units.map((u) => (u.id === unit.id ? updated : u)) } : prev,
       );
@@ -231,7 +291,7 @@ export default function ShelvesPage() {
           ? { id: s.id, name: editForm.name.trim(), width, height, depth }
           : { id: s.id, name: s.name, width: s.width, height: s.height, depth: s.depth },
       );
-      const updated = await updateShelfUnit(unit.id, { shelves: newShelves });
+      const updated = await fetchUpdateShelfUnit(unit.id, { shelves: newShelves });
       setConfig((prev) =>
         prev ? { ...prev, units: prev.units.map((u) => (u.id === unit.id ? updated : u)) } : prev,
       );
@@ -256,7 +316,7 @@ export default function ShelvesPage() {
         height: s.height,
         depth: s.depth,
       }));
-      const updated = await updateShelfUnit(unit.id, { shelves: newShelves });
+      const updated = await fetchUpdateShelfUnit(unit.id, { shelves: newShelves });
       setConfig((prev) =>
         prev ? { ...prev, units: prev.units.map((u) => (u.id === unit.id ? updated : u)) } : prev,
       );
