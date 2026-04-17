@@ -31,3 +31,8 @@ Workers can also add entries to this file during their sessions.
 **Phase 10b — Collection indicator:** Added `CapacityIndicator` client-agnostic component rendering four states (success/warning/danger/neutral). Wired into `app/colle...
 
 - 20:38 commission-Dalton-20260413-150333 completed
+- 20:46 commission-Thorne-20260413-150348 result: 
+# Review: Shelf Capacity Integration (Phases 9–11)
+
+Scope: capacity-service adapter, GET /shelf/capacity endpoint, web collection indicator, web /capacity detail page, client helpers, CLI shelf comma...
+- 20:46 commission-Thorne-20260413-150348 completed
