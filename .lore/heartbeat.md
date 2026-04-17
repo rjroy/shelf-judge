@@ -36,3 +36,7 @@ Workers can also add entries to this file during their sessions.
 
 Scope: capacity-service adapter, GET /shelf/capacity endpoint, web collection indicator, web /capacity detail page, client helpers, CLI shelf comma...
 - 20:46 commission-Thorne-20260413-150348 completed
+- 20:51 commission-Celeste-20260416-204424 result: Brainstorm on `.lore/issues/one-pass-bracket-mode.md` saved to `.lore/brainstorms/one-pass-bracket-mode.md`. Issue remains open per skill convention.
+
+Five proposals, each with evidence, rationale, vi...
+- 20:51 commission-Celeste-20260416-204424 completed
