@@ -26,9 +26,8 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
-- 20:25 commission-Dalton-20260413-150319 result: Phase 9 and Phase 10a of the shelf capacity feature complete.
+- 20:38 commission-Dalton-20260413-150333 result: Phases 10b-10e and 11 complete.
 
-**Files changed:**
-- `packages/shared/src/types.ts` — added response types: `AssignedGame`, `ShelfAssignment`, `UnfittableEntry`, `Overfl...
+**Phase 10b — Collection indicator:** Added `CapacityIndicator` client-agnostic component rendering four states (success/warning/danger/neutral). Wired into `app/colle...
 
-- 20:25 commission-Dalton-20260413-150319 completed
+- 20:38 commission-Dalton-20260413-150333 completed
