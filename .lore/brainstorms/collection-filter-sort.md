@@ -5,8 +5,8 @@ status: resolved
 tags: [web-ui, filtering, sorting, ux, collection]
 modules: [web-ui]
 related:
-  - .lore/issues/collection-page-filter.md
-  - .lore/issues/collection-page-sorting.md
+  - .lore/issues/collection/collection-page-filter.md
+  - .lore/issues/collection/collection-page-sorting.md
   - .lore/designs/mvp-web-ui.md
   - .lore/designs/mvp-data-model.md
   - .lore/designs/mvp-fitness-model.md

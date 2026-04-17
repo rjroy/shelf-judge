@@ -4,11 +4,11 @@ date: 2026-04-11
 status: resolved
 tags: [brainstorm, fitness, redundancy, scoring, collection-awareness]
 related:
-  - .lore/issues/deferred-redundancy-scoring.md
+  - .lore/issues/fitness/deferred-redundancy-scoring.md
   - .lore/vision.md
   - .lore/designs/mvp-fitness-model.md
-  - .lore/specs/collection-profiling.md
-  - .lore/specs/prediction-engine.md
+  - .lore/specs/collection/collection-profiling.md
+  - .lore/specs/fitness/prediction-engine.md
   - .lore/brainstorms/prediction-engine.md
   - .lore/brainstorms/collection-profiling.md
 ---
@@ -23,8 +23,8 @@ related:
 
 - `.lore/vision.md` (Principle 5: "the shelf has a carrying capacity")
 - `.lore/designs/mvp-fitness-model.md` (weighted average per game, independent)
-- `.lore/specs/collection-profiling.md` (feature vectors, centroid, Jaccard distance, outlier detection)
-- `.lore/specs/prediction-engine.md` (k-NN similarity, cosine similarity, feature vectors)
+- `.lore/specs/collection/collection-profiling.md` (feature vectors, centroid, Jaccard distance, outlier detection)
+- `.lore/specs/fitness/prediction-engine.md` (k-NN similarity, cosine similarity, feature vectors)
 - `.lore/brainstorms/prediction-engine.md` (interaction map mentions redundancy uses same overlap primitives)
 - `.lore/brainstorms/collection-profiling.md` (Proposal 5: outlier detection via composite distance)
 - `packages/daemon/src/services/feature-vector.ts` (vocabulary, encoding, Jaccard, Manhattan, cosine, centroid)

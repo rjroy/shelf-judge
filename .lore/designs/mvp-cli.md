@@ -2,7 +2,7 @@
 title: "MVP CLI Surface"
 date: 2026-04-04
 status: implemented
-tags: [design, cli, commands, mvp]
+tags: [design, cli, mvp]
 modules: [cli]
 related:
   - .lore/specs/mvp.md

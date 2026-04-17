@@ -4,10 +4,10 @@ date: 2026-04-09
 status: resolved
 tags: [brainstorm, profiling, collection, llm, agent-sdk]
 related:
-  - .lore/issues/deferred-collection-profiling.md
-  - .lore/issues/deferred-llm-integration.md
-  - .lore/issues/deferred-prediction-engine.md
-  - .lore/specs/utility-curves.md
+  - .lore/issues/collection/deferred-collection-profiling.md
+  - .lore/issues/features/deferred-llm-integration.md
+  - .lore/issues/fitness/deferred-prediction-engine.md
+  - .lore/specs/fitness/utility-curves.md
   - .lore/designs/mvp-data-model.md
   - .lore/designs/mvp-fitness-model.md
   - .lore/research/claude-agent-sdk.md
@@ -20,7 +20,7 @@ related:
 
 **Vision status:** Active. Four-step alignment analysis applied to each proposal.
 
-**Context scanned:** `.lore/vision.md`, all `.lore/issues/` (open and resolved), `.lore/brainstorms/` (fitness-model-options, collection-filter-sort), `.lore/specs/utility-curves.md`, `.lore/designs/mvp-data-model.md`, `.lore/designs/mvp-fitness-model.md`, `.lore/research/claude-agent-sdk.md`, `packages/shared/src/types.ts`, `packages/daemon/src/services/fitness-service.ts`, recent git history.
+**Context scanned:** `.lore/vision.md`, all `.lore/issues/` (open and resolved), `.lore/brainstorms/` (fitness-model-options, collection-filter-sort), `.lore/specs/fitness/utility-curves.md`, `.lore/designs/mvp-data-model.md`, `.lore/designs/mvp-fitness-model.md`, `.lore/research/claude-agent-sdk.md`, `packages/shared/src/types.ts`, `packages/daemon/src/services/fitness-service.ts`, recent git history.
 
 **Recent brainstorm check:** Two prior brainstorms exist. `fitness-model-options.md` (resolved) explored Approach 3 (Collection Profile + Attribute Similarity) and Approach 5 (LLM-Mediated Synthesis), both adjacent to this territory. Neither was selected as the primary fitness model, but both contain observations that apply here. `collection-filter-sort.md` (resolved) is unrelated. No prior brainstorm addresses collection profiling directly.
 
@@ -44,7 +44,7 @@ The profile page is the primary surface for several distinct insights, each desc
 
 **Parked:**
 
-- **Prediction Engine** (originally Proposal 5): estimating fitness for unowned games based on the profile centroid. Valuable but separate from the profile feature itself. Deferred to `.lore/issues/deferred-prediction-engine.md`.
+- **Prediction Engine** (originally Proposal 5): estimating fitness for unowned games based on the profile centroid. Valuable but separate from the profile feature itself. Deferred to `.lore/issues/fitness/deferred-prediction-engine.md`.
 - **Profile Drift Detection** (originally Proposal 6): tracking how the profile changes over time via periodic snapshots. Rejected for now. Taste drift happens over years, not months, and the snapshot-and-diff model assumes frequent enough change to produce interesting diffs. For a collector who adds a few games a year, most snapshots would be identical. The interesting temporal question ("what changed?") is better answered by the outlier detection in Proposal 5 than by a changelog.
 
 ---

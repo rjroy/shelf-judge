@@ -1,7 +1,7 @@
 ---
 title: "Migration notes: color system consolidation"
 date: 2026-04-11
-status: completed
+status: complete
 tags: [implementation, notes, web-ui, css, color]
 source: .lore/designs/shelf-judge-color-system.md
 modules: [web-ui]

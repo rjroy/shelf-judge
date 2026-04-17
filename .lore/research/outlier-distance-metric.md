@@ -2,9 +2,9 @@
 title: "Outlier Distance Metric Research"
 date: 2026-04-10
 status: archived
-tags: [research, outlier, distance-metric, profiling, similarity]
+tags: [research, outlier, profiling, similarity]
 related:
-  - .lore/specs/collection-profiling.md
+  - .lore/specs/collection/collection-profiling.md
   - .lore/brainstorms/collection-profiling.md
   - .lore/brainstorms/prediction-engine.md
 ---

@@ -2,7 +2,7 @@
 title: "BGG XML API Research"
 date: 2026-04-04
 status: archived
-tags: [research, bgg, api, external]
+tags: [research, bgg, api]
 ---
 
 # BGG XML API Research

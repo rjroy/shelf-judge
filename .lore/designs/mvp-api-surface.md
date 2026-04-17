@@ -2,7 +2,7 @@
 title: "MVP API Surface"
 date: 2026-04-04
 status: implemented
-tags: [design, api, daemon, operations, mvp]
+tags: [design, api, daemon, mvp]
 modules: [daemon]
 related:
   - .lore/specs/mvp.md

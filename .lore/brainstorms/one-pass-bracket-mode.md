@@ -2,12 +2,12 @@
 title: "One-Pass Bracket Mode"
 date: 2026-04-16
 status: open
-tags: [brainstorm, tournament, pairwise, pairing, bracket, transitivity, data-model, ux]
+tags: [brainstorm, tournament, pairwise, data-model, ux]
 modules: [daemon, web, cli, shared]
 related:
-  - .lore/issues/one-pass-bracket-mode.md
-  - .lore/specs/tournament-ranking.md
-  - .lore/specs/reduce-tournament-overhead.md
+  - .lore/issues/tournament/one-pass-bracket-mode.md
+  - .lore/specs/tournament/tournament-ranking.md
+  - .lore/specs/tournament/reduce-tournament-overhead.md
   - .lore/brainstorms/fitness-model-options.md
   - .lore/vision.md
 ---
@@ -18,7 +18,7 @@ related:
 
 **Vision status:** Active. Four-step alignment analysis applied to each proposal.
 
-**Context scanned:** `.lore/vision.md`, `.lore/issues/one-pass-bracket-mode.md`, `.lore/specs/tournament-ranking.md`, `.lore/specs/reduce-tournament-overhead.md`, `.lore/brainstorms/fitness-model-options.md`, `.lore/brainstorms/collection-profiling.md`, `packages/daemon/src/services/tournament-service.ts`, `packages/daemon/src/services/elo-engine.ts`, `packages/web/app/tournament/page.tsx`, `packages/web/app/tournament/session/page.tsx`, tournament-related issues and retros.
+**Context scanned:** `.lore/vision.md`, `.lore/issues/tournament/one-pass-bracket-mode.md`, `.lore/specs/tournament/tournament-ranking.md`, `.lore/specs/tournament/reduce-tournament-overhead.md`, `.lore/brainstorms/fitness-model-options.md`, `.lore/brainstorms/collection-profiling.md`, `packages/daemon/src/services/tournament-service.ts`, `packages/daemon/src/services/elo-engine.ts`, `packages/web/app/tournament/page.tsx`, `packages/web/app/tournament/session/page.tsx`, tournament-related issues and retros.
 
 **Recent brainstorm check:** No prior brainstorm addresses tractability of tournaments at scale. `fitness-model-options.md` (resolved) covered the choice of tournament as a fitness signal and flagged "requires many comparisons to converge" as a weakness but did not propose a structural fix. `collection-profiling.md` (resolved) consumes tournament history for divergence analysis; it assumes history exists but does not shape how it accumulates.
 

@@ -10,6 +10,8 @@ custom_directories:
 filename_exemptions:
   - "^commission-.+-\\d{8}-\\d{6}\\.md$"
   - "^audience-.+-\\d{8}-\\d{6}.*\\.md$"
+  - "^heartbeat\\.md$"
+  - "^(commission|meeting)-cleanup-\\d{4}-\\d{2}-\\d{2}(-batch\\d+)?\\.md$"
 
 custom_fields:
   commissions: [worker, workerDisplayTitle, prompt, dependencies, linked_artifacts]
@@ -38,3 +40,7 @@ Issues in this project use three statuses beyond the schema defaults:
 ## Filename exemptions
 
 Commission and meeting filenames are machine-generated with timestamps as unique identifiers. They follow the pattern `commission-Worker-YYYYMMDD-HHMMSS.md` and `audience-Worker-YYYYMMDD-HHMMSS.md`.
+
+`heartbeat.md` is a guild-hall managed file at the root of `.lore/`. It controls autonomous standing orders and does not conform to the schema's document types.
+
+Cleanup retros are dated snapshots (`commission-cleanup-YYYY-MM-DD.md`, `meeting-cleanup-YYYY-MM-DD.md`, optional `-batch<N>` suffix). The date is the identity of each snapshot, not metadata.

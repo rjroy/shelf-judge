@@ -5,12 +5,12 @@ revised: 2026-04-10
 status: resolved
 tags: [brainstorm, prediction, fitness, similarity, bgg]
 related:
-  - .lore/issues/deferred-prediction-engine.md
+  - .lore/issues/fitness/deferred-prediction-engine.md
   - .lore/designs/mvp-fitness-model.md
-  - .lore/specs/utility-curves.md
+  - .lore/specs/fitness/utility-curves.md
   - .lore/brainstorms/fitness-model-options.md
-  - .lore/issues/deferred-collection-profiling.md
-  - .lore/issues/deferred-redundancy-scoring.md
+  - .lore/issues/collection/deferred-collection-profiling.md
+  - .lore/issues/fitness/deferred-redundancy-scoring.md
   - .lore/vision.md
 ---
 
@@ -24,9 +24,9 @@ related:
 
 - `.lore/vision.md` (5 principles, 3 anti-goals, tension table)
 - `.lore/designs/mvp-fitness-model.md` (weighted average scorecard, implemented)
-- `.lore/specs/utility-curves.md` (preference shapes, veto, native scales, implemented)
+- `.lore/specs/fitness/utility-curves.md` (preference shapes, veto, native scales, implemented)
 - `.lore/brainstorms/fitness-model-options.md` (5 approaches, hybrid conclusion)
-- `.lore/issues/deferred-prediction-engine.md`, `deferred-collection-profiling.md`, `deferred-redundancy-scoring.md`
+- `.lore/issues/fitness/deferred-prediction-engine.md`, `deferred-collection-profiling.md`, `deferred-redundancy-scoring.md`
 - `packages/shared/src/types.ts` (current types: Game, BggGameData, Axis, FitnessResult, TournamentData)
 - `packages/daemon/src/services/fitness-service.ts` (calculateScore, resolveBggRawValue, curve integration)
 - `packages/daemon/src/services/bgg-client.ts` (searchGames, getGame, getGames, getUserCollection)
@@ -255,9 +255,9 @@ How the accepted proposals relate to each other and to adjacent features:
 
 **Build order:** k-NN estimation + confidence architecture first (they're co-dependent). Tournament prior second (extends k-NN). Cold start last (UI/API wrapper, lowest priority given 100+ game collection).
 
-**Collection profiling:** The deferred profiling feature (`.lore/issues/deferred-collection-profiling.md`) would consume the same feature vectors and similarity computations that k-NN builds. Profiling describes "what does your collection say about your taste." Prediction applies that taste to unrated games. They're the same engine pointed in different directions. Building the prediction feature vector module with profiling in mind (expose the taste centroid, the mechanic clusters, the axis-weight patterns) saves significant rework later.
+**Collection profiling:** The deferred profiling feature (`.lore/issues/collection/deferred-collection-profiling.md`) would consume the same feature vectors and similarity computations that k-NN builds. Profiling describes "what does your collection say about your taste." Prediction applies that taste to unrated games. They're the same engine pointed in different directions. Building the prediction feature vector module with profiling in mind (expose the taste centroid, the mechanic clusters, the axis-weight patterns) saves significant rework later.
 
-**Redundancy scoring:** The deferred redundancy feature (`.lore/issues/deferred-redundancy-scoring.md`) needs the same mechanic/category overlap computation that k-NN's similarity function uses. The overlap computation is the shared primitive.
+**Redundancy scoring:** The deferred redundancy feature (`.lore/issues/fitness/deferred-redundancy-scoring.md`) needs the same mechanic/category overlap computation that k-NN's similarity function uses. The overlap computation is the shared primitive.
 
 **Utility curves:** Curves make BGG-derived axis prediction exact. The curve is the user's declared mapping from raw BGG values to personal value. For any axis with a configured curve and available BGG data, the curve produces an "actual" confidence rating, no estimation needed. This means k-NN only needs to estimate personal axes where no curve exists.
 

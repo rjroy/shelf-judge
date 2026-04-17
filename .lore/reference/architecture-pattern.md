@@ -1,7 +1,7 @@
 ---
 title: Daemon-First Architecture Pattern
 status: current
-tags: [architecture, reference, portable]
+tags: [reference, portable]
 date: 2026-04-04
 ---
 
