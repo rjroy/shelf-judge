@@ -107,6 +107,15 @@ const navGroups = [
         ),
       },
       {
+        href: "/capacity",
+        name: "Capacity",
+        icon: (
+          <svg className="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M2 3h12v10H2V3zm1 1v8h10V4H3zm1 1h3v3H4V5zm4 0h4v2H8V5zm0 3h4v2H8V8zm-4 1h3v2H4V9z" />
+          </svg>
+        ),
+      },
+      {
         href: "/import",
         name: "Import / BGG",
         icon: (

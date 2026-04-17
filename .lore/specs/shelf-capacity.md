@@ -44,7 +44,7 @@ interface BoxDimensions {
 }
 ```
 
-All three dimensions are in inches. Semantics: `width` is the longest face edge (what you see from the front), `height` is the vertical dimension when the box is stored upright, `depth` is front-to-back. For the purpose of shelf fitting, the system checks all orientations (see REQ-SHELF-16), so the labeling convention is informational, not load-bearing.
+All three dimensions are in inches. Semantics: `width` is the longest face edge (what you see from the front), `height` is the vertical dimension when the box is stored upright, `depth` is front-to-back (the spine/thickness when stored on a shelf). The `depth` field is load-bearing: with `force_axis_0_width: true` the algorithm locks axis 0 to the item's depth (spine), which is the dimension consumed as games are placed side by side along a shelf's width. The `width` and `height` fields participate in rotation and are assigned to whichever remaining shelf axes produce the best fit.
 
 - REQ-SHELF-2: `BoxDimensions` is a shared type defined in `packages/shared/src/types.ts`.
 
@@ -155,7 +155,7 @@ When shelves are provided in a unit update, shelves with an `id` are updated, sh
 
 The overflow computation is driven by the similarity-weighted bin-packing algorithm defined in `.lore/designs/similarity-weighted-bin-packing.md`. Shelves map to bins, games map to items. The algorithm assigns games to specific shelves and produces overflow (Phase 4) for games that don't fit. The spec below defines how the daemon maps Shelf Judge's data into the algorithm's inputs and what the API exposes from the algorithm's output.
 
-- REQ-SHELF-16: A game "fits" on a shelf if its box can be oriented so that the box dimensions fit within the shelf dimensions. The algorithm's rotation logic (see design doc, "Item Rotation and Fit") handles this: it checks orientations according to axis priority and minimization flags. For shelves with `height: null` (unconstrained), the height axis is unconstrained and only width and depth are checked. The six-orientation fit check from the original spec maps to the algorithm's rotation with `force_axis_0_width: true` (games face outward on the shelf).
+- REQ-SHELF-16: A game "fits" on a shelf if its box can be oriented so that the box dimensions fit within the shelf dimensions. The algorithm's rotation logic (see design doc, "Item Rotation and Fit") handles this: it checks orientations according to axis priority and minimization flags. For shelves with `height: null` (unconstrained), the height axis is unconstrained and only width and depth are checked. With `force_axis_0_width: true`, axis 0 is locked: the item's depth (spine) maps to the shelf's width (the fill direction), ensuring games face outward. Only the item's width and height participate in rotation across the shelf's height and depth axes.
 
 - REQ-SHELF-17: A game "fits the configuration" if it fits on at least one shelf in any unit. A game that fits no shelf is "unfittable," it physically cannot be stored in the user's current shelf setup. These games are identified before the algorithm runs (a pre-pass geometric check) and reported separately from algorithm overflow.
 
@@ -211,13 +211,12 @@ interface OverflowEntry {
   gameName: string;
   fitnessScore: number;
   volumeIn3: number;
-  fittable: boolean; // true = fits a shelf by shape but displaced; false = dimensionless
 }
 ```
 
 - REQ-SHELF-20: The `unfittableGames` list contains every game with known dimensions that fits no shelf in the configuration. These are the strongest cull candidates: they literally cannot be stored. The list is sorted by fitness ascending (lowest fitness first). The `reason` field is a human-readable explanation of why the game doesn't fit (e.g., "Box is 25 x 4 x 4 in; widest shelf is 14 in"). Unfittable games are excluded from the packing algorithm; they are identified by a pre-pass geometric check.
 
-- REQ-SHELF-21: The `overflowGames` list contains games that the bin-packing algorithm could not place (Phase 4 output). These are games that fit at least one shelf by shape but were displaced because higher-priority games filled the available space first. The list is sorted by fitness ascending (lowest fitness first). The `fittable` flag distinguishes between games that were displaced (fit somewhere by shape but no room) and dimensionless games that bypassed spatial logic. Games without `boxDimensions` are excluded from the algorithm entirely and are counted in `gamesWithoutDimensions`.
+- REQ-SHELF-21: The `overflowGames` list contains games that the bin-packing algorithm could not place (Phase 4 output). These are games that fit at least one shelf by shape but were displaced because higher-priority games filled the available space first. The list is sorted by fitness ascending (lowest fitness first). Games without `boxDimensions` are excluded from the algorithm entirely and are counted in `gamesWithoutDimensions`.
 
 - REQ-SHELF-22: Shelves with `height: null` (unconstrained) map to bins with a dimensionless height axis in the algorithm. They participate fully in the packing algorithm: games can be assigned to them and their contents are tracked. Their `capacityIn3` is `null` in the response because their volume is undefined (no height to multiply). Their `utilization` is also `null`. "On top of" spaces accept games and show what's assigned to them, but don't contribute to volume-based summary statistics.
 

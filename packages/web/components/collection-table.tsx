@@ -8,8 +8,10 @@ import type {
   Axis,
   TournamentGameStatsDisplay,
   NicheTagFilter,
+  ShelfCapacityResult,
 } from "@shelf-judge/shared";
 import { NicheIgnoreButton, NicheRestoreButton } from "@/components/niche-ignore-button";
+import { CapacityIndicator } from "@/components/capacity-indicator";
 import { scoreRangeClass } from "@/lib/score-utils";
 import { relativeDate } from "@/lib/date-utils";
 import {
@@ -46,6 +48,8 @@ interface CollectionTableProps {
   isIntegratedRedundancy: boolean;
   previouslyOwnedCount: number;
   showPreviouslyOwned: boolean;
+  missingDimensionsOnly: boolean;
+  capacity: ShelfCapacityResult | null;
 }
 
 export function CollectionTable({
@@ -63,6 +67,8 @@ export function CollectionTable({
   isIntegratedRedundancy,
   previouslyOwnedCount,
   showPreviouslyOwned,
+  missingDimensionsOnly,
+  capacity,
 }: CollectionTableProps) {
   const router = useRouter();
   // Sort state: default on SSR, hydrate from localStorage after mount
@@ -192,9 +198,19 @@ export function CollectionTable({
     () => activeGames.filter((g) => matchesFilters(g, filters)),
     [activeGames, filters],
   );
-  const filtered = useMemo(
-    () => showPreviouslyOwned ? first_filter : first_filter.filter((g) => g.game.ownership !== "previously-owned") ,
+  const after_ownership = useMemo(
+    () =>
+      showPreviouslyOwned
+        ? first_filter
+        : first_filter.filter((g) => g.game.ownership !== "previously-owned"),
     [first_filter, showPreviouslyOwned],
+  );
+  const filtered = useMemo(
+    () =>
+      missingDimensionsOnly
+        ? after_ownership.filter((g) => g.game.boxDimensions === null)
+        : after_ownership,
+    [after_ownership, missingDimensionsOnly],
   );
   const { withValue, withoutValue } = useMemo(
     () => sortGames(filtered, sort.field, sort.direction, tournamentStats, axes),
@@ -208,14 +224,22 @@ export function CollectionTable({
   const dirArrow = sort.direction === "asc" ? "\u2191" : "\u2193";
   const scoreOwnsSort = sort.field !== "name" && sort.field !== "updatedAt";
 
-  // Ownership toggle: navigates via URL search param to trigger server re-fetch
+  // URL-driven filters (ownership and dimensions) navigate to trigger server re-fetch.
+  // Preserve whichever filter isn't being toggled so they can coexist.
+  const buildCollectionUrl = useCallback((nextOwnership: boolean, nextMissing: boolean) => {
+    const parts: string[] = [];
+    if (nextOwnership) parts.push("ownership=all");
+    if (nextMissing) parts.push("dimensions=missing");
+    return parts.length > 0 ? `/collection?${parts.join("&")}` : "/collection";
+  }, []);
+
   const toggleOwnership = useCallback(() => {
-    if (showPreviouslyOwned) {
-      router.push("/collection");
-    } else {
-      router.push("/collection?ownership=all");
-    }
-  }, [showPreviouslyOwned, router]);
+    router.push(buildCollectionUrl(!showPreviouslyOwned, missingDimensionsOnly));
+  }, [showPreviouslyOwned, missingDimensionsOnly, router, buildCollectionUrl]);
+
+  const clearMissingDimensions = useCallback(() => {
+    router.push(buildCollectionUrl(showPreviouslyOwned, false));
+  }, [showPreviouslyOwned, router, buildCollectionUrl]);
 
   // Filter chip state
   const hasSearch = filters.search !== "";
@@ -226,9 +250,15 @@ export function CollectionTable({
     (hasRatedFilter ? 1 : 0) +
     (hasPlayedFilter ? 1 : 0) +
     (hasPlayerCount ? 1 : 0) +
-    (showPreviouslyOwned ? 1 : 0);
+    (showPreviouslyOwned ? 1 : 0) +
+    (missingDimensionsOnly ? 1 : 0);
   const hasAnyFilter =
-    hasSearch || hasRatedFilter || hasPlayedFilter || hasPlayerCount || showPreviouslyOwned;
+    hasSearch ||
+    hasRatedFilter ||
+    hasPlayedFilter ||
+    hasPlayerCount ||
+    showPreviouslyOwned ||
+    missingDimensionsOnly;
   const hiddenCount =
     (usePredictions && predictedGames ? predictedGames.length : totalGames) - filtered.length;
 
@@ -480,17 +510,28 @@ export function CollectionTable({
                 </button>
               </span>
             )}
+            {missingDimensionsOnly && (
+              <span className="filter-chip chip-missing-dimensions">
+                Missing dimensions{" "}
+                <button className="chip-x" onClick={clearMissingDimensions}>
+                  &times;
+                </button>
+              </span>
+            )}
             {(hasSearch ? 1 : 0) +
               (hasRatedFilter ? 1 : 0) +
               (hasPlayedFilter ? 1 : 0) +
               (hasPlayerCount ? 1 : 0) +
-              (showPreviouslyOwned ? 1 : 0) >=
+              (showPreviouslyOwned ? 1 : 0) +
+              (missingDimensionsOnly ? 1 : 0) >=
               2 && (
               <button
                 className="clear-all-link"
                 onClick={() => {
                   clearAllFilters();
-                  if (showPreviouslyOwned) toggleOwnership();
+                  if (showPreviouslyOwned || missingDimensionsOnly) {
+                    router.push("/collection");
+                  }
                 }}
               >
                 Clear all
@@ -498,6 +539,9 @@ export function CollectionTable({
             )}
           </div>
         )}
+
+        {/* Capacity indicator (REQ-SHELF-30) — last child of filter-bar */}
+        {capacity ? <CapacityIndicator capacity={capacity} /> : null}
       </div>
 
       {/* Info banner when previously-owned games are visible */}

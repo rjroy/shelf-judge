@@ -652,7 +652,7 @@ body {
 }
 
 .stat-block.inner {
-  width:100%;
+  width: 100%;
   padding: 0;
   border-right: none;
   align-items: center;
@@ -3722,12 +3722,13 @@ body {
 /* ===== Filter bar (Phase 3) ===== */
 
 .filter-bar {
+  /* Children (filter-row-1, filter-panel, active-chips-row, capacity-indicator)
+     carry their own padding so the capacity indicator can sit flush at the
+     bottom with a full-width border-top separator and no surrounding whitespace. */
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border);
-  padding: 10px var(--content-padding);
   display: flex;
   flex-direction: column;
-  gap: 8px;
   flex-shrink: 0;
 }
 
@@ -3735,6 +3736,7 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
+  padding: 10px var(--content-padding);
 }
 
 .search-input-wrap {
@@ -3811,7 +3813,8 @@ body {
 .filter-panel {
   display: flex;
   gap: 20px;
-  padding: 10px 0 2px;
+  /* No top padding: sits flush with filter-row-1's bottom padding. */
+  padding: 0 var(--content-padding) 10px;
   flex-wrap: wrap;
   align-items: flex-start;
 }
@@ -3873,6 +3876,8 @@ body {
   gap: 6px;
   align-items: center;
   flex-wrap: wrap;
+  /* No top padding: sits flush with the section above (row-1 or filter-panel). */
+  padding: 0 var(--content-padding) 10px;
 }
 
 .chips-label {
@@ -4052,7 +4057,7 @@ body {
   }
 }
 
-@media (min-width:601px) and (max-width: 1000px) {
+@media (min-width: 601px) and (max-width: 1000px) {
   /* --- Stats strip: 3x2 grid --- */
   .stats-strip {
     display: grid;
@@ -4072,7 +4077,6 @@ body {
     border-bottom: none;
   }
 }
-
 
 /* ===== Responsive: Phone (max-width: 600px) ===== */
 
@@ -4103,13 +4107,12 @@ body {
   }
 
   /* --- Filter bar: phone layout --- */
-  .filter-bar {
-    padding: 8px var(--content-padding);
-  }
-
+  /* Filter bar keeps zero padding on mobile; children carry their own so the
+     capacity indicator stays edge-to-edge. Tighten child vertical padding. */
   .filter-row-1 {
     flex-wrap: wrap;
     gap: 8px;
+    padding: 8px var(--content-padding);
   }
 
   .search-input-wrap {
@@ -7339,4 +7342,560 @@ body {
 .shelf-add-unit-form .shelf-add-input {
   flex: 1;
   width: auto;
+}
+
+/* ===================================================================
+ * Shelf Capacity — grade tokens, indicator band, detail view, empties.
+ * Light-mode tokens extend :root; dark overrides extend [data-theme="dark"].
+ * =================================================================== */
+
+:root {
+  --grade-s: #9a6800;
+  --grade-s-bg: #fff8e6;
+  --grade-s-border: #e8c060;
+  --grade-a: var(--score-high);
+  --grade-a-bg: var(--score-high-bg);
+  --grade-a-border: color-mix(in hsl, var(--score-high), white 70%);
+  --grade-b: #1c5080;
+  --grade-b-bg: #e8f0fa;
+  --grade-b-border: #9ab8d8;
+  --grade-c: #5a5450;
+  --grade-c-bg: #f0ede8;
+  --grade-c-border: var(--border-strong);
+  --grade-d: #7a4800;
+  --grade-d-bg: #fff0dc;
+  --grade-d-border: #e0b870;
+  --grade-f: var(--score-low);
+  --grade-f-bg: var(--score-low-bg);
+  --grade-f-border: var(--danger-border);
+}
+
+[data-theme="dark"] {
+  --grade-s: #d4a030;
+  --grade-s-bg: #2a2010;
+  --grade-s-border: #a07820;
+  --grade-a: var(--score-high);
+  --grade-a-bg: var(--score-high-bg);
+  --grade-a-border: color-mix(in hsl, var(--score-high), var(--bg-base) 65%);
+  --grade-b: #5a90c0;
+  --grade-b-bg: #162030;
+  --grade-b-border: #2a4870;
+  --grade-c: #a09a90;
+  --grade-c-bg: #282724;
+  --grade-c-border: #3d3a35;
+  --grade-d: #c07030;
+  --grade-d-bg: #2a1e10;
+  --grade-d-border: #806030;
+  --grade-f: var(--score-low);
+  --grade-f-bg: var(--score-low-bg);
+  --grade-f-border: var(--danger-border);
+}
+
+/* ---------- Topbar back link (used by /capacity) ---------- */
+.topbar-back {
+  font-size: var(--text-sm);
+  color: var(--action);
+  text-decoration: none;
+}
+.topbar-back:hover {
+  text-decoration: underline;
+}
+
+/* ---------- Capacity indicator band (on /collection) ---------- */
+/* Lives inside .filter-bar (REQ-SHELF-30). filter-bar handles vertical stacking
+   and borders; capacity-indicator carries its own horizontal padding so it
+   extends edge-to-edge alongside the other filter sections. */
+.capacity-indicator {
+  padding: 10px var(--content-padding);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.capacity-indicator.success {
+  background: var(--success-bg);
+  border-top-color: var(--success-border);
+}
+.capacity-indicator.warning {
+  background: var(--warning-subtle);
+  border-top-color: var(--warning-border);
+}
+.capacity-indicator.danger {
+  background: var(--danger-subtle);
+  border-top-color: var(--danger-border);
+}
+.capacity-indicator.neutral {
+  background: var(--bg-subtle);
+}
+
+.capacity-indicator-stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+.capacity-indicator-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.capacity-indicator-subrow {
+  padding-left: 22px;
+}
+
+.cap-icon {
+  font-size: var(--text-sm);
+  flex-shrink: 0;
+}
+.cap-icon-neutral {
+  color: var(--text-muted);
+}
+
+.cap-text {
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+.cap-text strong {
+  font-weight: 600;
+}
+.cap-text.success-text,
+.cap-text.success-text strong {
+  color: var(--success);
+}
+.cap-text.warning-text,
+.cap-text.warning-text strong {
+  color: var(--warning);
+}
+.cap-text.danger-text,
+.cap-text.danger-text strong {
+  color: var(--danger);
+}
+.cap-text.neutral-text {
+  color: var(--text-secondary);
+}
+
+.cap-detail-link {
+  font-size: var(--text-xs);
+  color: var(--action);
+  text-decoration: underline;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.cap-detail-link:hover {
+  color: var(--action-hover, var(--action));
+}
+.cap-detail-link-inline {
+  margin-left: 0;
+}
+
+/* ---------- Capacity detail page scroll containers ---------- */
+.capacity-scroll {
+  padding: 20px 32px;
+}
+.capacity-empty-scroll {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 48px;
+}
+
+/* ---------- Section headers ---------- */
+.cap-section {
+  margin-bottom: 28px;
+}
+.cap-section:last-child {
+  margin-bottom: 0;
+}
+.cap-section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid var(--border);
+}
+.cap-section-icon {
+  font-size: var(--text-sm);
+  flex-shrink: 0;
+}
+.cap-section-title {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.cap-section-title-danger {
+  color: var(--danger);
+}
+.cap-section-title-warning {
+  color: var(--warning);
+}
+.cap-section-count {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+
+/* ---------- Grade badge ---------- */
+.grade-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  font-size: var(--text-base);
+  font-weight: 800;
+  flex-shrink: 0;
+  border: 1px solid;
+  font-variant-numeric: tabular-nums;
+}
+.grade-S {
+  background: var(--grade-s-bg);
+  color: var(--grade-s);
+  border-color: var(--grade-s-border);
+}
+.grade-A {
+  background: var(--grade-a-bg);
+  color: var(--grade-a);
+  border-color: var(--grade-a-border);
+}
+.grade-B {
+  background: var(--grade-b-bg);
+  color: var(--grade-b);
+  border-color: var(--grade-b-border);
+}
+.grade-C {
+  background: var(--grade-c-bg);
+  color: var(--grade-c);
+  border-color: var(--grade-c-border);
+}
+.grade-D {
+  background: var(--grade-d-bg);
+  color: var(--grade-d);
+  border-color: var(--grade-d-border);
+}
+.grade-F {
+  background: var(--grade-f-bg);
+  color: var(--grade-f);
+  border-color: var(--grade-f-border);
+}
+
+/* ---------- Shelf assignment card ---------- */
+.shelf-assign-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-surface);
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.shelf-assign-header {
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  gap: 12px;
+  background: var(--table-header-bg);
+  border-bottom: 1px solid var(--border);
+}
+.shelf-assign-meta {
+  flex: 1;
+  min-width: 0;
+}
+.shelf-assign-name {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.shelf-assign-unit {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.shelf-assign-unconstrained {
+  font-style: italic;
+}
+
+/* ---------- Utilization bar ---------- */
+.util-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+.util-bar-track {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+  max-width: 240px;
+}
+.util-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+.util-bar-fill.high {
+  background: var(--score-high);
+}
+.util-bar-fill.mid {
+  background: var(--score-mid);
+}
+.util-bar-fill.warn {
+  background: var(--warning);
+}
+.util-bar-fill.low {
+  background: var(--score-high);
+  opacity: 0.4;
+}
+.util-pct {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.util-unconstrained {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-style: italic;
+  margin-top: 6px;
+}
+
+/* ---------- Games inside shelf card ---------- */
+.shelf-games {
+  padding: 0;
+}
+.shelf-game-row {
+  display: flex;
+  align-items: center;
+  padding: 8px 14px;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+.shelf-game-row:last-child {
+  border-bottom: none;
+}
+.shelf-game-row:hover {
+  background: var(--row-hover);
+}
+.shelf-game-empty {
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: var(--text-xs);
+}
+.shelf-game-name {
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  text-decoration: none;
+  flex: 1;
+  min-width: 0;
+}
+.shelf-game-name:hover {
+  color: var(--action);
+  text-decoration: underline;
+}
+.shelf-game-score {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  min-width: 32px;
+  text-align: right;
+}
+.shelf-game-score.high {
+  color: var(--score-high);
+}
+.shelf-game-score.mid {
+  color: var(--score-mid);
+}
+.shelf-game-score.low {
+  color: var(--score-low);
+}
+.shelf-game-vol {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 72px;
+  text-align: right;
+}
+
+/* ---------- Unfittable / Displaced tables ---------- */
+.cull-table {
+  width: 100%;
+  border-collapse: collapse;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.cull-table th {
+  text-align: left;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  padding: 8px 12px;
+  background: var(--table-header-bg);
+  border-bottom: 1px solid var(--border);
+}
+.cull-table td {
+  padding: 10px 12px;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+  vertical-align: middle;
+}
+.cull-table tr:last-child td {
+  border-bottom: none;
+}
+.cull-table tr:hover td {
+  background: var(--row-hover);
+}
+.cull-table a {
+  color: var(--text-primary);
+  text-decoration: none;
+}
+.cull-table a:hover {
+  color: var(--action);
+  text-decoration: underline;
+}
+.cull-dims {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.cull-reason {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+.cull-reason-displaced {
+  color: var(--warning-text);
+}
+.unfittable-flag {
+  display: inline-block;
+  margin-top: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--danger-subtle);
+  color: var(--danger);
+  border: 1px solid var(--danger-border);
+  white-space: nowrap;
+}
+
+/* ---------- Dimension coverage note ---------- */
+.coverage-note {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin-top: 20px;
+}
+.coverage-note a {
+  color: var(--action);
+  text-decoration: underline;
+}
+
+/* ---------- Empty states (no shelves / no dimensions) ---------- */
+.empty-card {
+  text-align: center;
+  max-width: 460px;
+  width: 100%;
+}
+.empty-title {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+  line-height: 1.3;
+}
+.empty-body {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  margin-bottom: 20px;
+  line-height: 1.6;
+}
+.empty-body a {
+  color: var(--action);
+  text-decoration: underline;
+}
+.btn-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: center;
+}
+
+.shelf-illustration {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 20px;
+}
+.shelf-row-illus {
+  display: flex;
+  gap: 4px;
+}
+.shelf-box {
+  width: 28px;
+  height: 20px;
+  border-radius: 3px;
+  border: 2px solid var(--border-strong);
+  background: var(--bg-subtle);
+}
+.shelf-box.phantom {
+  border-style: dashed;
+  background: transparent;
+  opacity: 0.4;
+}
+.shelf-line {
+  width: 100px;
+  height: 3px;
+  background: var(--border-strong);
+  border-radius: 2px;
+}
+
+.dim-illustration {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+  justify-content: center;
+  opacity: 0.7;
+}
+.dim-box {
+  width: 56px;
+  height: 44px;
+  border: 2px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.dim-box-faint {
+  opacity: 0.35;
+}
+.dim-arrow {
+  font-size: 22px;
+  color: var(--border-strong);
+}
+
+/* Prevent iOS Safari from zooming on focused form fields (triggers at < 16px) */
+@supports (-webkit-touch-callout: none) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
 }

@@ -71,6 +71,11 @@ export type {
   Shelf,
   ShelfUnit,
   ShelfConfiguration,
+  AssignedGame,
+  ShelfAssignment,
+  UnfittableEntry,
+  OverflowEntry,
+  ShelfCapacityResult,
 } from "./types";
 
 export {
@@ -84,6 +89,7 @@ export {
   TournamentSettingsUpdateSchema,
   TournamentSettingsSchema,
   TournamentDataSchema,
+  ShelfConfigurationSchema,
 } from "./validation";
 
 export { toErrorMessage, ValidationError, NotFoundError } from "./errors";

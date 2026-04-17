@@ -12,7 +12,7 @@ import type {
   WishlistEntry,
   ShelfConfiguration,
 } from "@shelf-judge/shared";
-import { TournamentDataSchema } from "@shelf-judge/shared";
+import { TournamentDataSchema, ShelfConfigurationSchema } from "@shelf-judge/shared";
 import type { FileOps } from "./file-ops.js";
 import { getTempPath } from "./file-ops.js";
 import { migrateTournamentData } from "./tournament-migration.js";
@@ -268,7 +268,16 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
       }
 
       const raw = await fileOps.readFile(shelfConfigPath);
-      return JSON.parse(raw) as ShelfConfiguration;
+      const parsed: unknown = JSON.parse(raw);
+      const result = ShelfConfigurationSchema.safeParse(parsed);
+      if (!result.success) {
+        console.warn(
+          `Invalid shelf-config.json: ${result.error.message}. Returning empty config.`,
+        );
+        const now = new Date().toISOString();
+        return { units: [], createdAt: now, updatedAt: now };
+      }
+      return result.data as ShelfConfiguration;
     },
 
     async saveShelfConfig(config: ShelfConfiguration): Promise<void> {

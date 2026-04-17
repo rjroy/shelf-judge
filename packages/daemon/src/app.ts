@@ -19,6 +19,7 @@ import { createWishlistRoutes } from "./routes/wishlist.js";
 import { createShelfRoutes } from "./routes/shelf.js";
 import { createWishlistService } from "./services/wishlist-service.js";
 import { createShelfService } from "./services/shelf-service.js";
+import { createCapacityService } from "./services/capacity-service.js";
 import type { TournamentService } from "./services/tournament-service.js";
 import type { ProfileService } from "./services/profile-service.js";
 import type { PredictionService } from "./services/prediction-service.js";
@@ -76,7 +77,8 @@ export function createApp(deps: AppDeps): AppResult {
   const nicheRouteModule = createNicheRoutes({ storageService });
   const redundancyRouteModule = createRedundancyRoutes({ storageService });
   const shelfService = createShelfService({ storageService });
-  const shelfRouteModule = createShelfRoutes({ shelfService });
+  const capacityService = createCapacityService({ storageService, gameService });
+  const shelfRouteModule = createShelfRoutes({ shelfService, capacityService });
   const wishlistRouteModule = createWishlistRoutes({ wishlistService });
 
   // Collect all operations

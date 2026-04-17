@@ -30,8 +30,8 @@ Each item has:
 Each bin has:
 
 - **Dimensions**: a 3-tuple `[h, w, d]` representing available interior space. Optional; dimensionless bins (overflow, drawer, archive) accept items without spatial constraints.
-- **Axis priority**: an ordered permutation of `[0, 1, 2]` controlling which axis to fill first. Default `[0, 1, 2]` fills height first. Priority `[1, 0, 2]` fills width first.
-- **Axis minimization flags**: per-axis booleans controlling whether the item's dimension along that axis should be maximized (fill the space) or minimized (leave room). Default: `[false, true, true]` (minimize height consumption, maximize width and depth fill).
+- **Axis priority**: an ordered permutation of `[0, 1, 2]` controlling which axis to fill first. Default `[0, 1, 2]` fills axis 0 first. In the shelf-capacity adapter, axis 0 is shelf width (the fill direction).
+- **Axis minimization flags**: per-axis booleans controlling whether the item's dimension along that axis should be maximized (fill the space) or minimized (leave room). Default: `[false, true, true]` (maximize axis-0 consumption, minimize axes 1 and 2 to conserve space).
 - **Neighbors**: references to adjacent bins. Used for neighbor coherence scoring.
 - **Layer**: integer priority tier. Higher layers fill first. Allows "fill the premium shelves before the basement."
 - **Sort group**: integer for display ordering. Separates physical locations (upstairs shelf vs. downstairs shelf vs. overflow).
@@ -56,7 +56,7 @@ config:
     neighbor: 0.10            # How similar the item is to neighboring bin contents
 
   min_remainder: [0.25, 3, 4] # Minimum useful sub-volume after placement (discard slivers)
-  force_axis_0_width: true    # Lock axis 0 to the item's width (items face outward)
+  force_axis_0_width: true    # Lock axis 0 to the item's depth/spine (items face outward)
 ```
 
 ## Merge Strategies
@@ -93,11 +93,11 @@ for each axis in priority order P:
 return the rotated dimensions
 ```
 
-When `force_axis_0_width` is enabled, axis 0 is locked to the item's original axis 0 (the "facing" dimension). Only axes 1 and 2 are eligible for rotation. This ensures items face outward on a shelf.
+When `force_axis_0_width` is enabled, axis 0 is locked to the item's original axis 0 (the depth/spine dimension in the shelf-capacity adapter). Only axes 1 and 2 are eligible for rotation. This ensures items face outward on a shelf: the spine is locked, and width/height rotate to best fill the shelf's height and depth.
 
 ### Post-Placement Dimension Update
 
-After placing an item, only **axis 0** of the bin's remaining dimensions is reduced by the item's rotated axis-0 size. Axes 1 and 2 are unchanged. This is a deliberate simplification: it models a shelf where items are stacked along one axis (typically height or depth), not a true 3D residual space. The bag packing variant uses a different model (see below).
+After placing an item, only **axis 0** of the bin's remaining dimensions is reduced by the item's rotated axis-0 size. Axes 1 and 2 are unchanged. This is a deliberate simplification: it models a shelf where items are stacked along one axis (the shelf's width, consumed by item spines), not a true 3D residual space. The bag packing variant uses a different model (see below).
 
 ### Minimum Remainder Filtering (Bag Packing Variant)
 
@@ -269,7 +269,7 @@ The algorithm is quadratic in item count. This is acceptable for hundreds of ite
 
 **Greedy, not optimal.** The algorithm places one item at a time and never backtracks. It can get stuck in local optima where an early placement blocks a better global arrangement. The re-sorting after each placement mitigates this but doesn't eliminate it.
 
-**Spatial model is 1D after rotation.** Once an item is rotated to fit, only axis 0 (height/facing) is subtracted from the bin's remaining dimensions. The algorithm doesn't track 2D or 3D leftover space within a bin (except in the bag variant's sub-volume splitting). This assumes items are roughly the same width and depth, which holds for board games on a KALLAX shelf but not for arbitrary 3D packing.
+**Spatial model is 1D after rotation.** Once an item is rotated to fit, only axis 0 (shelf width, consumed by item spines) is subtracted from the bin's remaining dimensions. The algorithm doesn't track 2D or 3D leftover space within a bin (except in the bag variant's sub-volume splitting). This assumes items are roughly the same height and depth, which holds for board games on a KALLAX shelf but not for arbitrary 3D packing.
 
 **Similarity function is a black box.** The algorithm's quality depends entirely on the `compare()` function the consumer provides. A bad similarity function produces bad groupings regardless of how well the packing runs.
 

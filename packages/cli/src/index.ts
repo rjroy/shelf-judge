@@ -50,6 +50,8 @@ import {
   shelfAddShelf,
   shelfRemoveUnit,
   shelfRemoveShelf,
+  shelfStatus,
+  shelfCapacity,
 } from "./commands/shelf.js";
 
 // Known command paths and their token depths.
@@ -95,6 +97,8 @@ const COMMANDS: Record<string, number> = {
   "shelf add-shelf": 2,
   "shelf remove-unit": 2,
   "shelf remove-shelf": 2,
+  "shelf status": 2,
+  "shelf capacity": 2,
   "import bgg-collection": 2,
   "config get": 2,
   "config set": 2,
@@ -444,6 +448,12 @@ async function main(): Promise<void> {
       break;
     case "shelf remove-shelf":
       output = await shelfRemoveShelf(client, args, opts);
+      break;
+    case "shelf status":
+      output = await shelfStatus(client, args, opts);
+      break;
+    case "shelf capacity":
+      output = await shelfCapacity(client, args, opts);
       break;
     case "import bgg-collection":
       output = await importBggCollection(client, args, opts);

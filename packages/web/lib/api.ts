@@ -298,7 +298,16 @@ export async function unignoreNicheTag(tag: NicheTagFilter): Promise<NicheSettin
 
 // Shelf configuration API functions
 
-import type { Shelf, ShelfUnit, ShelfConfiguration } from "@shelf-judge/shared";
+import type {
+  Shelf,
+  ShelfUnit,
+  ShelfConfiguration,
+  ShelfCapacityResult,
+  ShelfAssignment,
+  AssignedGame,
+  UnfittableEntry,
+  OverflowEntry,
+} from "@shelf-judge/shared";
 
 export async function getShelfConfig(): Promise<ShelfConfiguration> {
   return daemonJson("/api/shelf/config");
@@ -333,6 +342,10 @@ export async function updateShelfUnit(
 
 export async function removeShelfUnit(id: string): Promise<{ removed: true }> {
   return daemonJson(`/api/shelf/units/${id}`, { method: "DELETE" });
+}
+
+export async function getShelfCapacity(): Promise<ShelfCapacityResult> {
+  return daemonJson("/api/shelf/capacity");
 }
 
 // Redundancy settings API functions
@@ -417,4 +430,9 @@ export type {
   Shelf,
   ShelfUnit,
   ShelfConfiguration,
+  ShelfCapacityResult,
+  ShelfAssignment,
+  AssignedGame,
+  UnfittableEntry,
+  OverflowEntry,
 };

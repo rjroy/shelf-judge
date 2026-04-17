@@ -148,6 +148,28 @@ export const TournamentDataSchema = z.object({
   gameStats: z.record(TournamentGameStatsSchema),
 });
 
+// Shelf configuration schemas (used by loadShelfConfig for validation)
+
+const ShelfSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  width: z.number().positive(),
+  height: z.number().positive().nullable(),
+  depth: z.number().positive(),
+});
+
+const ShelfUnitSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  shelves: z.array(ShelfSchema),
+});
+
+export const ShelfConfigurationSchema = z.object({
+  units: z.array(ShelfUnitSchema),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
 export type CreateAxisInput = z.input<typeof CreateAxisSchema>;
 export type UpdateAxisInput = z.input<typeof UpdateAxisSchema>;
 export type RateGameInput = z.input<typeof RateGameSchema>;

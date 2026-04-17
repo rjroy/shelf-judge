@@ -234,6 +234,33 @@ describe("Wishlist BGG links", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Capacity page links (REQ-SHELF-30, REQ-SHELF-33)
+// ---------------------------------------------------------------------------
+
+describe("Capacity page game links", () => {
+  test("assigned game rows link to /games/{gameId}", async () => {
+    const file = await Bun.file("packages/web/app/capacity/page.tsx").text();
+    expect(file).toContain("href={`/games/${game.gameId}`}");
+  });
+
+  test("unfittable and displaced table entries link to /games/{gameId}", async () => {
+    const file = await Bun.file("packages/web/app/capacity/page.tsx").text();
+    expect(file).toContain("href={`/games/${entry.gameId}`}");
+  });
+
+  test("capacity page game links carry game-link class", async () => {
+    const file = await Bun.file("packages/web/app/capacity/page.tsx").text();
+    expect(file).toContain('className="shelf-game-name game-link"');
+    expect(file).toContain('className="game-link"');
+  });
+
+  test("no /game/{id} singular-path links remain (Thorne finding #1)", async () => {
+    const file = await Bun.file("packages/web/app/capacity/page.tsx").text();
+    expect(file).not.toMatch(/href=\{`\/game\/\$\{/);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Negative cases: surfaces that should NOT have links
 // ---------------------------------------------------------------------------
 
