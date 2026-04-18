@@ -4,14 +4,14 @@ date: 2026-04-12
 status: resolved
 tags: [brainstorm, data-model, ownership, lifecycle, redundancy, prediction, profiling]
 related:
-  - .lore/issues/previously-owned-state.md
+  - .lore/issues/features/previously-owned-state.md
   - .lore/vision.md
   - .lore/specs/mvp.md
   - .lore/designs/mvp-data-model.md
-  - .lore/specs/wishlist.md
+  - .lore/specs/features/wishlist.md
   - .lore/brainstorms/redundancy-scoring.md
   - .lore/brainstorms/shelf-layout-designer.md
-  - .lore/issues/shelf-layout-designer.md
+  - .lore/issues/features/shelf-layout-designer.md
 ---
 
 # Brainstorm: Previously Owned and Game Ownership State
@@ -25,11 +25,11 @@ related:
 - `.lore/vision.md` (principles, anti-goals, tension table)
 - `.lore/designs/mvp-data-model.md` (Game, Collection, Axis types)
 - `.lore/specs/mvp.md` (REQ-MVP-8: removal deletes game and all ratings, not reversible)
-- `.lore/specs/wishlist.md` (WishlistEntry as a separate lightweight entity, not part of collection)
+- `.lore/specs/features/wishlist.md` (WishlistEntry as a separate lightweight entity, not part of collection)
 - `.lore/brainstorms/redundancy-scoring.md` (pairwise similarity on `collection.games`, niche display)
 - `.lore/brainstorms/shelf-layout-designer.md` (box dimensions, physical metadata, "what doesn't fit")
-- `.lore/issues/previously-owned-state.md` (original issue)
-- `.lore/issues/shelf-layout-designer.md` (physical metadata scoped to owned games)
+- `.lore/issues/features/previously-owned-state.md` (original issue)
+- `.lore/issues/features/shelf-layout-designer.md` (physical metadata scoped to owned games)
 - `packages/shared/src/types.ts` (Game interface, no status field)
 - `packages/daemon/src/services/redundancy-engine.ts` (operates on `GameWithScore[]` from `collection.games`)
 - `packages/daemon/src/services/prediction-engine.ts` (k-NN from `collection.games` with BGG data)

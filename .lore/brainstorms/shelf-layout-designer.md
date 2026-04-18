@@ -2,9 +2,9 @@
 title: "Shelf Layout Designer"
 date: 2026-04-12
 status: resolved
-tags: [brainstorm, shelf-layout, physical, spatial, optimization]
+tags: [brainstorm, shelf-layout, spatial, optimization]
 related:
-  - .lore/issues/shelf-layout-designer.md
+  - .lore/issues/features/shelf-layout-designer.md
   - .lore/vision.md
   - .lore/designs/mvp-data-model.md
   - .lore/research/bgg-api.md
@@ -25,7 +25,7 @@ related:
 - `packages/shared/src/types.ts` (Game, BggGameData, NicheEntry, ComponentDistances)
 - `packages/daemon/src/services/feature-vector.ts` (compositeDistance, cosineSimilarity)
 - `.lore/brainstorms/redundancy-scoring.md` (niche display, similarity infrastructure)
-- `.lore/issues/shelf-layout-designer.md` (original idea)
+- `.lore/issues/features/shelf-layout-designer.md` (original idea)
 
 **Recent brainstorm check:** Five prior brainstorms exist. None address physical shelf layout. The `redundancy-scoring.md` brainstorm is the closest neighbor: it proposed niche champion display (Proposal 5, now implemented) and pairwise similarity scoring, both of which produce the "game similarity" data that the shelf layout idea would consume for its "group similar games together" constraint. No duplication.
 

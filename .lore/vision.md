@@ -2,7 +2,7 @@
 title: "Shelf Judge Vision"
 date: 2026-04-03
 status: active
-tags: [vision]
+tags: []
 ---
 
 # Vision

@@ -2,7 +2,7 @@
 title: "MVP BGG Integration"
 date: 2026-04-04
 status: implemented
-tags: [design, bgg, api, integration, caching, mvp]
+tags: [design, bgg, api, integration, mvp]
 modules: [daemon]
 related:
   - .lore/specs/mvp.md

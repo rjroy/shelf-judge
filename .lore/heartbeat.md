@@ -26,22 +26,3 @@ Workers can also add entries to this file during their sessions.
 ## Context Notes
 
 ## Recent Activity
-- 20:38 commission-Dalton-20260413-150333 result: Phases 10b-10e and 11 complete.
-
-**Phase 10b — Collection indicator:** Added `CapacityIndicator` client-agnostic component rendering four states (success/warning/danger/neutral). Wired into `app/colle...
-
-- 20:38 commission-Dalton-20260413-150333 completed
-- 20:46 commission-Thorne-20260413-150348 result: 
-# Review: Shelf Capacity Integration (Phases 9–11)
-
-Scope: capacity-service adapter, GET /shelf/capacity endpoint, web collection indicator, web /capacity detail page, client helpers, CLI shelf comma...
-- 20:46 commission-Thorne-20260413-150348 completed
-- 20:51 commission-Celeste-20260416-204424 result: Brainstorm on `.lore/issues/one-pass-bracket-mode.md` saved to `.lore/brainstorms/one-pass-bracket-mode.md`. Issue remains open per skill convention.
-
-Five proposals, each with evidence, rationale, vi...
-- 20:51 commission-Celeste-20260416-204424 completed
-- 21:00 commission-Dalton-20260413-150356 result: All 6 Thorne findings + 1 observation addressed in code. **Verification commands could not be run**: bash execution is blocked in this sandbox by a seccomp failure (`prctl(PR_SET_SECCOMP) failed: Inva...
-- 21:01 commission-Dalton-20260413-150356 completed
-- 21:13 commission-Thorne-20260413-150412 result: Phase 12 cross-cutting review of the shelf capacity feature. Inspected spec REQ-SHELF-1 through REQ-SHELF-36, daemon services/routes, shared types, web UI pages, CLI commands, and test coverage. Findi...
-- 21:13 commission-Thorne-20260413-150412 completed
-- 21:18 commission-Dalton-20260416-211508 failed

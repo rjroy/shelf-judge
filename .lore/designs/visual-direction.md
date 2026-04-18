@@ -2,7 +2,7 @@
 title: "Shelf Judge Visual Direction"
 date: 2026-04-05
 status: active
-tags: [design, visual, web-ui, branding]
+tags: [design, visual, web-ui]
 modules: [web-ui]
 related:
   - .lore/designs/mvp-web-ui.md

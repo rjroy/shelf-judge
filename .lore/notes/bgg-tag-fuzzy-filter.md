@@ -2,8 +2,8 @@
 title: "Implementation notes: bgg-tag-fuzzy-filter"
 date: 2026-04-06
 status: complete
-tags: [implementation, notes, tournament, filters, bgg]
-source: .lore/specs/bgg-tag-fuzzy-filter.md
+tags: [implementation, notes, tournament, filtering, bgg]
+source: .lore/specs/bgg/bgg-tag-fuzzy-filter.md
 modules: [shared, daemon, web]
 ---
 
