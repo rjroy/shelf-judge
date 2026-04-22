@@ -1,11 +1,7 @@
 // Unix socket HTTP client for communicating with the shelf-judge daemon.
 
 import type { CollectionProfile } from "@shelf-judge/shared";
-import path from "path";
-
-const DEFAULT_SOCKET_PATH =
-  process.env.SHELF_JUDGE_SOCKET ??
-  path.join(process.env.HOME ?? ".", ".shelf-judge", "shelf-judge.sock");
+import { resolveSocketPath } from "@shelf-judge/shared";
 
 export interface DaemonClientOptions {
   socketPath?: string;
@@ -37,7 +33,7 @@ export interface SSEEvent {
 }
 
 export function createDaemonClient(options: DaemonClientOptions = {}): DaemonClient {
-  const socketPath = options.socketPath ?? process.env.SHELF_JUDGE_SOCKET ?? DEFAULT_SOCKET_PATH;
+  const socketPath = options.socketPath ?? resolveSocketPath();
   const fetchFn = options.fetchFn ?? fetch;
 
   async function request<T>(
