@@ -40,7 +40,12 @@ export function createTestApp(options?: TestAppOptions): TestAppContext {
   const dataDir = "/test/data";
   const configPath = "/test/config.json";
 
-  const storageService = createStorageService({ dataDir, configPath, fileOps });
+  const storageService = createStorageService({
+    dataDir,
+    configPath,
+    socketPath: "/tmp/test.sock",
+    fileOps,
+  });
   const fitnessService = createFitnessService();
   const bggClient = options?.bggClient;
   const narrationService = options?.narrationService;

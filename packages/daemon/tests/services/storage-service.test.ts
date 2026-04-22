@@ -14,6 +14,7 @@ function makeService(initialFiles?: Record<string, string>) {
   const service = createStorageService({
     dataDir: DATA_DIR,
     configPath: CONFIG_PATH,
+    socketPath: "/tmp/test.sock",
     fileOps,
   });
   return { service, fileOps };

@@ -587,6 +587,7 @@ describe("legacy data migration", () => {
     const storage = createStorageService({
       dataDir: "/data",
       configPath: "/config.json",
+      socketPath: "/tmp/test.sock",
       fileOps: inMemoryFileOps,
     });
 

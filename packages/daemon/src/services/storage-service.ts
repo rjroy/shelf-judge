@@ -1,5 +1,4 @@
 import * as path from "node:path";
-import * as os from "node:os";
 import { v4 as uuidv4 } from "uuid";
 import type {
   Collection,
@@ -44,6 +43,7 @@ export interface StorageService {
 export interface StorageServiceDeps {
   dataDir: string;
   configPath: string;
+  socketPath: string;
   fileOps: FileOps;
 }
 
@@ -88,11 +88,11 @@ function createDefaultTournament(): TournamentData {
   };
 }
 
-function defaultConfig(dataDir: string): AppConfig {
+function defaultConfig(dataDir: string, socketPath: string): AppConfig {
   return {
     bggAuthToken: null,
     dataDir,
-    socketPath: path.join(os.homedir(), ".shelf-judge", "shelf-judge.sock"),
+    socketPath,
     username: null,
   };
 }
@@ -104,7 +104,7 @@ async function atomicWrite(filePath: string, content: string, fileOps: FileOps):
 }
 
 export function createStorageService(deps: StorageServiceDeps): StorageService {
-  const { dataDir, configPath, fileOps } = deps;
+  const { dataDir, configPath, socketPath, fileOps } = deps;
   const collectionPath = path.join(dataDir, "collection.json");
   const tournamentPath = path.join(dataDir, "tournament.json");
   const profilePath = path.join(dataDir, "profile.json");
@@ -143,7 +143,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     async loadConfig(): Promise<AppConfig> {
       const exists = await fileOps.exists(configPath);
       if (!exists) {
-        const config = defaultConfig(dataDir);
+        const config = defaultConfig(dataDir, socketPath);
         const configDir = path.dirname(configPath);
         await fileOps.mkdir(configDir);
         await atomicWrite(configPath, JSON.stringify(config, null, 2), fileOps);
@@ -271,9 +271,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
       const parsed: unknown = JSON.parse(raw);
       const result = ShelfConfigurationSchema.safeParse(parsed);
       if (!result.success) {
-        console.warn(
-          `Invalid shelf-config.json: ${result.error.message}. Returning empty config.`,
-        );
+        console.warn(`Invalid shelf-config.json: ${result.error.message}. Returning empty config.`);
         const now = new Date().toISOString();
         return { units: [], createdAt: now, updatedAt: now };
       }

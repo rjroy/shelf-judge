@@ -2,9 +2,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import type { AppConfig } from "@shelf-judge/shared";
 
-const DEFAULT_DATA_DIR = path.join(os.homedir(), ".shelf-judge", "data");
-const DEFAULT_CONFIG_PATH = path.join(os.homedir(), ".shelf-judge", "config.json");
-const DEFAULT_SOCKET_PATH = path.join(os.homedir(), ".shelf-judge", "shelf-judge.sock");
+const DEFAULT_BASE_DIR = path.join(os.homedir(), ".shelf-judge");
 
 export interface ResolvedConfig {
   dataDir: string;
@@ -13,10 +11,11 @@ export interface ResolvedConfig {
 }
 
 export function resolveConfig(): ResolvedConfig {
+  const baseDir = process.env.SHELF_JUDGE_DIR ?? DEFAULT_BASE_DIR;
   return {
-    dataDir: process.env.SHELF_JUDGE_DATA_DIR ?? DEFAULT_DATA_DIR,
-    configPath: process.env.SHELF_JUDGE_CONFIG ?? DEFAULT_CONFIG_PATH,
-    socketPath: process.env.SHELF_JUDGE_SOCKET ?? DEFAULT_SOCKET_PATH,
+    dataDir: process.env.SHELF_JUDGE_DATA_DIR ?? path.join(baseDir, "data"),
+    configPath: process.env.SHELF_JUDGE_CONFIG ?? path.join(baseDir, "config.json"),
+    socketPath: process.env.SHELF_JUDGE_SOCKET ?? path.join(baseDir, "shelf-judge.sock"),
   };
 }
 
