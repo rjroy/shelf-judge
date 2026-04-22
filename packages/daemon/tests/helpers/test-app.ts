@@ -43,7 +43,6 @@ export function createTestApp(options?: TestAppOptions): TestAppContext {
   const storageService = createStorageService({
     dataDir,
     configPath,
-    socketPath: "/tmp/test.sock",
     fileOps,
   });
   const fitnessService = createFitnessService();

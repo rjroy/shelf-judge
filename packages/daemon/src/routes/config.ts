@@ -11,7 +11,6 @@ export interface ConfigRoutesDeps {
 const UpdateConfigSchema = z.object({
   bggAuthToken: z.string().nullable().optional(),
   username: z.string().optional(),
-  socketPath: z.string().optional(),
 });
 
 export function createConfigRoutes(deps: ConfigRoutesDeps): RouteModule {
@@ -54,9 +53,6 @@ export function createConfigRoutes(deps: ConfigRoutesDeps): RouteModule {
       }
       if (parsed.data.username !== undefined) {
         config.username = parsed.data.username;
-      }
-      if (parsed.data.socketPath !== undefined) {
-        config.socketPath = parsed.data.socketPath;
       }
 
       await storageService.saveConfig(config);

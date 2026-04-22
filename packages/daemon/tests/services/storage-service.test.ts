@@ -12,7 +12,6 @@ function makeService(initialFiles?: Record<string, string>) {
   const service = createStorageService({
     dataDir: DATA_DIR,
     configPath: CONFIG_PATH,
-    socketPath: "/tmp/test.sock",
     fileOps,
   });
   return { service, fileOps };
@@ -156,7 +155,6 @@ describe("StorageService.loadConfig", () => {
 
     expect(config.bggAuthToken).toBeNull();
     expect(config.dataDir).toBe(DATA_DIR);
-    expect(config.socketPath).toBe("/tmp/test.sock");
   });
 
   test("loads config from existing file", async () => {
@@ -184,7 +182,6 @@ describe("StorageService.saveConfig", () => {
       bggAuthToken: "tok",
       username: null,
       dataDir: DATA_DIR,
-      socketPath: "/tmp/shelf-judge.sock",
     });
 
     const writeCalls = fileOps.calls.filter(

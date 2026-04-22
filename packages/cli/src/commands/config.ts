@@ -6,7 +6,6 @@ import { formatTable, printOutput } from "../output.js";
 interface ConfigData {
   bggAuthToken: string | null;
   dataDir: string;
-  socketPath: string;
 }
 
 export async function configGet(
@@ -28,7 +27,6 @@ export async function configGet(
     [
       ["bgg-token", data.bggAuthToken ?? "(not set)"],
       ["data-dir", data.dataDir],
-      ["socket-path", data.socketPath],
     ],
   );
 }
@@ -47,7 +45,6 @@ export async function configSet(
 
   const bodyMap: Record<string, Record<string, unknown>> = {
     "bgg-token": { bggAuthToken: value },
-    "socket-path": { socketPath: value },
   };
 
   const body = bodyMap[key];

@@ -19,7 +19,6 @@ beforeEach(() => {
   storageService = createStorageService({
     dataDir: "/data",
     configPath: "/config/config.json",
-    socketPath: "/tmp/test.sock",
     fileOps,
   });
   const fitnessService = createFitnessService();

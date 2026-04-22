@@ -5,7 +5,6 @@ import { createMockClient } from "../helpers/mock-client.js";
 const configData = {
   bggAuthToken: "***configured***",
   dataDir: "/home/user/.shelf-judge/data",
-  socketPath: "/home/user/.shelf-judge/shelf-judge.sock",
 };
 
 describe("config get", () => {
@@ -25,8 +24,6 @@ describe("config get", () => {
     expect(output).toContain("***configured***");
     expect(output).toContain("data-dir");
     expect(output).toContain("/home/user/.shelf-judge/data");
-    expect(output).toContain("socket-path");
-    expect(output).toContain("/home/user/.shelf-judge/shelf-judge.sock");
   });
 
   test("--json outputs parseable config object", async () => {
@@ -34,11 +31,9 @@ describe("config get", () => {
     const parsed = JSON.parse(output) as {
       bggAuthToken: string;
       dataDir: string;
-      socketPath: string;
     };
     expect(parsed.bggAuthToken).toBe("***configured***");
     expect(parsed.dataDir).toBe("/home/user/.shelf-judge/data");
-    expect(parsed.socketPath).toBe("/home/user/.shelf-judge/shelf-judge.sock");
   });
 });
 
@@ -61,10 +56,8 @@ describe("config set", () => {
     const parsed = JSON.parse(output) as {
       bggAuthToken: string;
       dataDir: string;
-      socketPath: string;
     };
     expect(parsed.bggAuthToken).toBe("***configured***");
     expect(parsed.dataDir).toBe("/home/user/.shelf-judge/data");
-    expect(parsed.socketPath).toBe("/home/user/.shelf-judge/shelf-judge.sock");
   });
 });
