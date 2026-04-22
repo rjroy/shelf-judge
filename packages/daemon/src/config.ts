@@ -20,5 +20,8 @@ export function resolveConfig(): ResolvedConfig {
 }
 
 export function resolveSocketPath(appConfig: AppConfig, envConfig: ResolvedConfig): string {
+  if (process.env.SHELF_JUDGE_SOCKET || process.env.SHELF_JUDGE_DIR) {
+    return envConfig.socketPath;
+  }
   return appConfig.socketPath || envConfig.socketPath;
 }
