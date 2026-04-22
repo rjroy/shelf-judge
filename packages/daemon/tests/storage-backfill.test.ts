@@ -61,7 +61,6 @@ describe("storage backfill", () => {
     const storage = createStorageService({
       dataDir: "/data",
       configPath: "/config/config.json",
-      socketPath: "/tmp/test.sock",
       fileOps: createInMemoryFileOps(files),
     });
 

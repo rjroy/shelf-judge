@@ -247,7 +247,6 @@ export interface ImportComplete {
 export interface AppConfig {
   bggAuthToken: string | null;
   dataDir: string;
-  socketPath: string;
   username: string | null;
 }
 

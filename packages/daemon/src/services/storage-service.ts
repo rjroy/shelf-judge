@@ -43,7 +43,6 @@ export interface StorageService {
 export interface StorageServiceDeps {
   dataDir: string;
   configPath: string;
-  socketPath: string;
   fileOps: FileOps;
 }
 
@@ -88,11 +87,10 @@ function createDefaultTournament(): TournamentData {
   };
 }
 
-function defaultConfig(dataDir: string, socketPath: string): AppConfig {
+function defaultConfig(dataDir: string): AppConfig {
   return {
     bggAuthToken: null,
     dataDir,
-    socketPath,
     username: null,
   };
 }
@@ -104,7 +102,7 @@ async function atomicWrite(filePath: string, content: string, fileOps: FileOps):
 }
 
 export function createStorageService(deps: StorageServiceDeps): StorageService {
-  const { dataDir, configPath, socketPath, fileOps } = deps;
+  const { dataDir, configPath, fileOps } = deps;
   const collectionPath = path.join(dataDir, "collection.json");
   const tournamentPath = path.join(dataDir, "tournament.json");
   const profilePath = path.join(dataDir, "profile.json");
@@ -143,7 +141,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     async loadConfig(): Promise<AppConfig> {
       const exists = await fileOps.exists(configPath);
       if (!exists) {
-        const config = defaultConfig(dataDir, socketPath);
+        const config = defaultConfig(dataDir);
         const configDir = path.dirname(configPath);
         await fileOps.mkdir(configDir);
         await atomicWrite(configPath, JSON.stringify(config, null, 2), fileOps);

@@ -1,6 +1,5 @@
 import * as path from "node:path";
 import * as os from "node:os";
-import type { AppConfig } from "@shelf-judge/shared";
 
 const DEFAULT_BASE_DIR = path.join(os.homedir(), ".shelf-judge");
 
@@ -17,8 +16,4 @@ export function resolveConfig(): ResolvedConfig {
     configPath: process.env.SHELF_JUDGE_CONFIG ?? path.join(baseDir, "config.json"),
     socketPath: process.env.SHELF_JUDGE_SOCKET ?? path.join(baseDir, "shelf-judge.sock"),
   };
-}
-
-export function resolveSocketPath(appConfig: AppConfig, envConfig: ResolvedConfig): string {
-  return appConfig.socketPath || envConfig.socketPath;
 }

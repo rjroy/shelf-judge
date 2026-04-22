@@ -15,7 +15,6 @@ beforeEach(() => {
   storageService = createStorageService({
     dataDir: "/data",
     configPath: "/config/config.json",
-    socketPath: "/tmp/test.sock",
     fileOps,
   });
   axisService = createAxisService({ storageService });

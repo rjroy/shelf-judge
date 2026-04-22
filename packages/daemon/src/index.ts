@@ -1,4 +1,4 @@
-import { resolveConfig, resolveSocketPath } from "./config.js";
+import { resolveConfig } from "./config.js";
 import { createFileOps } from "./services/file-ops.js";
 import { createStorageService } from "./services/storage-service.js";
 import { createFitnessService } from "./services/fitness-service.js";
@@ -21,7 +21,6 @@ async function main() {
   const storageService = createStorageService({
     dataDir: envConfig.dataDir,
     configPath: envConfig.configPath,
-    socketPath: envConfig.socketPath,
     fileOps,
   });
 
@@ -57,8 +56,6 @@ async function main() {
     bggClient,
   });
 
-  const socketPath = resolveSocketPath(appConfig, envConfig);
-
   // Forward-declared so the shutdown route can reference the server.
   // Using a wrapper object so the reference can be updated after Bun.serve()
   // while keeping the variable const.
@@ -81,11 +78,11 @@ async function main() {
 
   serverRef.current = Bun.serve({
     fetch: app.fetch,
-    unix: socketPath,
+    unix: envConfig.socketPath,
     idleTimeout: 0 as never,
   });
 
-  logger.log(`shelf-judge daemon listening on ${socketPath}`);
+  logger.log(`shelf-judge daemon listening on ${envConfig.socketPath}`);
   logger.log(
     `BGG integration: ${bggClient.isConfigured() ? "configured" : "not configured (set bgg-token to enable)"}`,
   );
