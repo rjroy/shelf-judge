@@ -21,6 +21,7 @@ async function main() {
   const storageService = createStorageService({
     dataDir: envConfig.dataDir,
     configPath: envConfig.configPath,
+    socketPath: envConfig.socketPath,
     fileOps,
   });
 
