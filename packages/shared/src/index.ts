@@ -98,6 +98,8 @@ export { matchesBggTag, normalizeBggTagTokens } from "./bgg-tag-match";
 
 export { resolveBggRawValue, resolveAxisValues } from "./axis-utils";
 
+export { resolveBaseDir, resolveSocketPath, resolveDataDir, resolveConfigPath } from "./paths";
+
 export {
   K_FLEXIBLE,
   K_MODERATE,
