@@ -45,19 +45,34 @@ describe("axis routes", () => {
       const body = (await res.json()) as { error: string };
       expect(body.error).toContain("Validation failed");
     });
+
+    test("rejects a second tournament-source axis (REQ-TAXIS-3)", async () => {
+      // The default collection already contains an auto-created tournament axis
+      // (REQ-TAXIS-4). Attempting to create another must be rejected.
+      const res = await jsonRequest(ctx.app, "POST", "/api/axes", {
+        name: "Second Tournament",
+        weight: 20,
+        source: "tournament",
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe("tournament_axis_already_exists");
+    });
   });
 
   describe("GET /api/axes", () => {
-    test("returns all axes including default BGG axes", async () => {
+    test("returns all axes including default BGG axes and the tournament axis", async () => {
       const res = await jsonRequest(ctx.app, "GET", "/api/axes");
 
       expect(res.status).toBe(200);
       const axes = (await res.json()) as Axis[];
       expect(Array.isArray(axes)).toBe(true);
-      // Default collection has 2 BGG axes
-      expect(axes.length).toBe(2);
+      // Default collection has 2 BGG axes + 1 tournament axis (auto-created per REQ-TAXIS-4)
+      expect(axes.length).toBe(3);
       const sources = axes.map((a) => a.source);
-      expect(sources.every((s: AxisSource) => s === "bgg")).toBe(true);
+      expect(sources.filter((s: AxisSource) => s === "bgg")).toHaveLength(2);
+      expect(sources.filter((s: AxisSource) => s === "tournament")).toHaveLength(1);
     });
   });
 

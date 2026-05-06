@@ -314,3 +314,48 @@ describe("score get (unrated game)", () => {
     expect(parsed.status).toBe("not yet rated");
   });
 });
+
+// REQ-TAXIS-14 supersedes REQ-TOURN-18: the per-game divergence flag that
+// fired when |fitness - normalizedTournamentScore| > 2.0 is removed. With
+// tournament now folded into fitness, the gap is meaningless by construction.
+describe("score get (REQ-TAXIS-14: divergence flag removed)", () => {
+  // Constructed to trigger the old REQ-TOURN-18 banner: gap of 3.5 (> 2.0),
+  // non-provisional, both scores defined. Should NOT print "[divergence]".
+  const divergingScore = {
+    gameId: "div-1",
+    gameName: "Diverging Game",
+    score: 8.5,
+    ratedAxisCount: 4,
+    totalAxisCount: 4,
+    breakdown: [],
+  };
+  const divergingTournamentStats = {
+    gameId: "div-1",
+    eloRating: 1300,
+    normalizedScore: 5.0,
+    isProvisional: false,
+    comparisonCount: 12,
+    wins: 4,
+    losses: 8,
+    displayLabel: "5.0",
+    recentComparisons: [],
+  };
+
+  const client = createMockClient({
+    routes: {
+      "GET /api/games/div-1/score": {
+        response: { ok: true, status: 200, data: divergingScore },
+      },
+      "GET /api/tournament/games/div-1/stats": {
+        response: { ok: true, status: 200, data: divergingTournamentStats },
+      },
+    },
+  });
+
+  test("does not render '[divergence]' line even when fitness/tournament gap > 2.0", async () => {
+    const output = await scoreGet(client, ["div-1"], { json: false });
+    expect(output).toContain("Tournament Rank: 5.0");
+    expect(output).not.toContain("[divergence]");
+    expect(output).not.toContain("differ by more than 2.0");
+  });
+});

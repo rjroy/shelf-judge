@@ -83,7 +83,6 @@ const predictGameData = {
     },
     redundancyAdjustment: null,
   },
-  tension: null,
 };
 
 describe("predict <game-id>", () => {
@@ -132,40 +131,12 @@ describe("predict <game-id>", () => {
     expect(parsed.game.name).toBe("Wingspan");
     expect(parsed.score.score).toBe(7.2);
     expect(parsed.score.predictionMeta.predictedAxisCount).toBe(2);
-    expect(parsed.tension).toBeNull();
   });
 
   test("throws on missing game-id argument", async () => {
     const promise = predictGame(client, [], { json: false });
     // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test rejects pattern requires await
     await expect(promise).rejects.toThrow("Usage: shelf-judge predict <game-id>");
-  });
-});
-
-const predictWithTensionData = {
-  ...predictGameData,
-  tension: {
-    predictedFitness: 7.2,
-    tournamentClusterAverage: 5.1,
-    note: "Predicted fitness significantly higher than similar games' tournament performance.",
-  },
-};
-
-describe("predict <game-id> with tension", () => {
-  const client = createMockClient({
-    routes: {
-      "GET /api/predictions/abc-123": {
-        response: { ok: true, status: 200, data: predictWithTensionData },
-      },
-    },
-  });
-
-  test("human-readable output shows tension section", async () => {
-    const output = await predictGame(client, ["abc-123"], { json: false });
-    expect(output).toContain("[tension]");
-    expect(output).toContain("7.2");
-    expect(output).toContain("5.1");
-    expect(output).toContain("Predicted fitness significantly higher");
   });
 });
 

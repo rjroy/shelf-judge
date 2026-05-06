@@ -743,6 +743,71 @@ describe("detectOutliers", () => {
     const fitnessResults = new Map<string, FitnessResult>();
     expect(detectOutliers(games, axes, fitnessResults)).toEqual([]);
   });
+
+  test("tournament axis presence does not destabilize outlier detection (REQ-TAXIS-8)", () => {
+    // Regression guard for the dimension change in feature-vector.ts when the
+    // tournament axis is added. profile-engine has no tournament data, so the
+    // tournament slot for every game is the 0.5 fallback. The added column
+    // must therefore not change which games are flagged as outliers — the
+    // wargame fixture must still be detected. (Prevents the bug class from
+    // .lore/retros/incident/outlier-composite-null-crash.md, where a missing
+    // axis silently became NaN and serialized to null.)
+    const tournamentAxis = makeAxis({
+      id: "tournament",
+      name: "Tournament",
+      source: "tournament",
+      bggField: null,
+    });
+    const axesWithTournament = [...axes, tournamentAxis];
+
+    const games = [
+      makeEuroGame("e1", "Euro 1"),
+      makeEuroGame("e2", "Euro 2"),
+      makeEuroGame("e3", "Euro 3"),
+      makeEuroGame("e4", "Euro 4"),
+      makeEuroGame("e5", "Euro 5"),
+      makeGame({
+        id: "war1",
+        name: "Heavy Wargame",
+        minPlayers: 2,
+        maxPlayers: 2,
+        playingTime: 240,
+        bggData: makeBggData({
+          weight: 4.5,
+          communityRating: 8.0,
+          mechanics: warMechanics,
+          categories: warCategories,
+          subdomains: [{ id: 101, name: "War Games" }],
+        }),
+        ratings: { a1: 6 },
+      }),
+    ];
+
+    const fitnessResults = new Map<string, FitnessResult>([
+      ["e1", makeFitness(7.0)],
+      ["e2", makeFitness(7.2)],
+      ["e3", makeFitness(6.8)],
+      ["e4", makeFitness(7.1)],
+      ["e5", makeFitness(7.3)],
+      ["war1", makeFitness(6.0)],
+    ]);
+
+    const outliersBefore = detectOutliers(games, axes, fitnessResults);
+    const outliersAfter = detectOutliers(games, axesWithTournament, fitnessResults);
+
+    // Same games flagged as outliers in both cases.
+    const idsBefore = outliersBefore.map((o) => o.gameId).sort();
+    const idsAfter = outliersAfter.map((o) => o.gameId).sort();
+    expect(idsAfter).toEqual(idsBefore);
+    // No NaN/null leaks: every flagged outlier still has a finite composite
+    // distance. NaN serializes through JSON.stringify as null, which is the
+    // exact failure mode the regression test guards against.
+    for (const o of outliersAfter) {
+      expect(Number.isFinite(o.distances.composite)).toBe(true);
+      expect(o.distances.personalAxes).not.toBeNull();
+      expect(Number.isFinite(o.distances.personalAxes!)).toBe(true);
+    }
+  });
 });
 
 // --- Suggestions ---

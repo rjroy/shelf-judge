@@ -10,6 +10,7 @@ import {
   type AddGameResult,
   type BggSearchResult,
   type BoxDimensions,
+  type TournamentData,
 } from "@shelf-judge/shared";
 import type { StorageService } from "./storage-service.js";
 import type { FitnessService } from "./fitness-service.js";
@@ -86,8 +87,9 @@ export function createGameService(deps: GameServiceDeps): GameService {
   function computeScore(
     game: Game,
     axes: import("@shelf-judge/shared").Axis[],
+    tournamentData: TournamentData | null,
   ): FitnessResult | null {
-    return fitnessService.calculateScore(game, axes, game.bggData);
+    return fitnessService.calculateScore(game, axes, game.bggData, tournamentData);
   }
 
   function assertBggConfigured(): void {
@@ -151,22 +153,28 @@ export function createGameService(deps: GameServiceDeps): GameService {
     },
 
     async getGame(id: string): Promise<GameWithScore> {
-      const collection = await storageService.loadCollection();
+      const [collection, tournamentData] = await Promise.all([
+        storageService.loadCollection(),
+        storageService.loadTournament(),
+      ]);
       const game = collection.games.find((g) => g.id === id);
 
       if (!game) {
         throw new Error(`Game not found: ${id}`);
       }
 
-      const score = computeScore(game, collection.axes);
+      const score = computeScore(game, collection.axes, tournamentData);
       return { game, score, bggDataStale: isBggDataStale(game) };
     },
 
     async listGames(): Promise<GameWithScore[]> {
-      const collection = await storageService.loadCollection();
+      const [collection, tournamentData] = await Promise.all([
+        storageService.loadCollection(),
+        storageService.loadTournament(),
+      ]);
       const results: GameWithScore[] = collection.games.map((game) => ({
         game,
-        score: computeScore(game, collection.axes),
+        score: computeScore(game, collection.axes, tournamentData),
         bggDataStale: isBggDataStale(game),
       }));
 
@@ -217,7 +225,8 @@ export function createGameService(deps: GameServiceDeps): GameService {
       collection.updatedAt = game.updatedAt;
       await storageService.saveCollection(collection);
 
-      const score = computeScore(game, collection.axes);
+      const tournamentData = await storageService.loadTournament();
+      const score = computeScore(game, collection.axes, tournamentData);
       return { game, score, bggDataStale: isBggDataStale(game) };
     },
 

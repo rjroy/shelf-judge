@@ -15,6 +15,7 @@ import { TournamentDataSchema, ShelfConfigurationSchema } from "@shelf-judge/sha
 import type { FileOps } from "./file-ops.js";
 import { getTempPath } from "./file-ops.js";
 import { migrateTournamentData } from "./tournament-migration.js";
+import { ensureTournamentAxis } from "./collection-migration.js";
 import { DEFAULT_PREDICTION_SETTINGS } from "./prediction-engine.js";
 import { DEFAULT_NICHE_SETTINGS } from "./niche-engine.js";
 import { DEFAULT_REDUNDANCY_SETTINGS } from "./redundancy-engine.js";
@@ -48,7 +49,10 @@ export interface StorageServiceDeps {
 
 function createDefaultCollection(): Collection {
   const now = new Date().toISOString();
-  return {
+  // Build the base collection with the existing personal/BGG defaults, then route through
+  // the same migration helper used on load so the tournament axis defaults stay in one
+  // place. This guarantees fresh and migrated collections agree on the axis shape.
+  const base: Collection = {
     id: uuidv4(),
     name: "My Collection",
     axes: [
@@ -77,6 +81,7 @@ function createDefaultCollection(): Collection {
     createdAt: now,
     updatedAt: now,
   };
+  return ensureTournamentAxis(base).data;
 }
 
 function createDefaultTournament(): TournamentData {
@@ -106,31 +111,84 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
   const collectionPath = path.join(dataDir, "collection.json");
   const tournamentPath = path.join(dataDir, "tournament.json");
   const profilePath = path.join(dataDir, "profile.json");
+  const wishlistPath = path.join(dataDir, "wishlist.json");
+
+  // Per-file in-flight load promise. Serializes concurrent first-time loads so
+  // two callers don't both race to write `<file>.tmp` and one ends up renaming
+  // a missing tmp. Once the file exists on disk, the read path is idempotent
+  // and the lock has no observable effect.
+  const inFlightLoads = new Map<string, Promise<unknown>>();
+  function withLoadLock<T>(filePath: string, fn: () => Promise<T>): Promise<T> {
+    const existing = inFlightLoads.get(filePath);
+    if (existing) return existing as Promise<T>;
+    const promise = fn().finally(() => {
+      inFlightLoads.delete(filePath);
+    });
+    inFlightLoads.set(filePath, promise);
+    return promise;
+  }
+
+  // Cache invalidation when the tournament axis is added on load (REQ-TAXIS-9).
+  // Stale profile data and wishlist predictions were computed against an axis set
+  // that did not include the new tournament axis; they would otherwise leak through
+  // to clients. We delete the profile cache (regenerable from collection + tournament)
+  // and clear only the prediction fields on wishlist entries (the user's URL/note
+  // metadata is theirs to keep).
+  async function invalidateCachesAfterAxisMigration(): Promise<void> {
+    await fileOps.unlink(profilePath);
+
+    const wishlistExists = await fileOps.exists(wishlistPath);
+    if (!wishlistExists) return;
+
+    const raw = await fileOps.readFile(wishlistPath);
+    const entries = JSON.parse(raw) as WishlistEntry[];
+    const cleared = entries.map((entry) => ({
+      ...entry,
+      predictedScore: null,
+      predictionConfidence: null,
+      predictedBreakdown: null,
+      nicheImpact: null,
+    }));
+    await atomicWrite(wishlistPath, JSON.stringify(cleared, null, 2), fileOps);
+  }
 
   return {
-    async loadCollection(): Promise<Collection> {
-      const exists = await fileOps.exists(collectionPath);
-      if (!exists) {
-        const collection = createDefaultCollection();
-        await fileOps.mkdir(dataDir);
-        await atomicWrite(collectionPath, JSON.stringify(collection, null, 2), fileOps);
+    loadCollection(): Promise<Collection> {
+      return withLoadLock(collectionPath, async () => {
+        const exists = await fileOps.exists(collectionPath);
+        if (!exists) {
+          const collection = createDefaultCollection();
+          await fileOps.mkdir(dataDir);
+          await atomicWrite(collectionPath, JSON.stringify(collection, null, 2), fileOps);
+          return collection;
+        }
+
+        const raw = await fileOps.readFile(collectionPath);
+        const collection = JSON.parse(raw) as Collection;
+
+        // Backfill legacy data for games missing newer fields
+        for (const game of collection.games) {
+          if (!game.ownership) {
+            game.ownership = "owned";
+          }
+          if (game.boxDimensions === undefined) {
+            game.boxDimensions = null;
+          }
+        }
+
+        // Tournament axis migration (REQ-TAXIS-4, REQ-TAXIS-9). Idempotent: a subsequent
+        // load is a no-op once the axis is present.
+        const { data: migrated, migrated: didMigrate } = ensureTournamentAxis(collection);
+        if (didMigrate) {
+          migrated.updatedAt = new Date().toISOString();
+          await fileOps.mkdir(dataDir);
+          await atomicWrite(collectionPath, JSON.stringify(migrated, null, 2), fileOps);
+          await invalidateCachesAfterAxisMigration();
+          return migrated;
+        }
+
         return collection;
-      }
-
-      const raw = await fileOps.readFile(collectionPath);
-      const collection = JSON.parse(raw) as Collection;
-
-      // Backfill legacy data for games missing newer fields
-      for (const game of collection.games) {
-        if (!game.ownership) {
-          game.ownership = "owned";
-        }
-        if (game.boxDimensions === undefined) {
-          game.boxDimensions = null;
-        }
-      }
-
-      return collection;
+      });
     },
 
     async saveCollection(collection: Collection): Promise<void> {
@@ -158,25 +216,27 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
       await atomicWrite(configPath, JSON.stringify(config, null, 2), fileOps);
     },
 
-    async loadTournament(): Promise<TournamentData> {
-      const exists = await fileOps.exists(tournamentPath);
-      if (!exists) {
-        const tournament = createDefaultTournament();
-        await fileOps.mkdir(dataDir);
-        await atomicWrite(tournamentPath, JSON.stringify(tournament, null, 2), fileOps);
-        return tournament;
-      }
+    loadTournament(): Promise<TournamentData> {
+      return withLoadLock(tournamentPath, async () => {
+        const exists = await fileOps.exists(tournamentPath);
+        if (!exists) {
+          const tournament = createDefaultTournament();
+          await fileOps.mkdir(dataDir);
+          await atomicWrite(tournamentPath, JSON.stringify(tournament, null, 2), fileOps);
+          return tournament;
+        }
 
-      const raw = await fileOps.readFile(tournamentPath);
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-      const { data, migrated } = migrateTournamentData(parsed);
-      const validated = TournamentDataSchema.parse(data);
+        const raw = await fileOps.readFile(tournamentPath);
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        const { data, migrated } = migrateTournamentData(parsed);
+        const validated = TournamentDataSchema.parse(data);
 
-      if (migrated) {
-        await atomicWrite(tournamentPath, JSON.stringify(validated, null, 2), fileOps);
-      }
+        if (migrated) {
+          await atomicWrite(tournamentPath, JSON.stringify(validated, null, 2), fileOps);
+        }
 
-      return validated;
+        return validated;
+      });
     },
 
     async saveTournament(data: TournamentData): Promise<void> {

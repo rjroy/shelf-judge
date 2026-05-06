@@ -13,7 +13,6 @@ import type {
   PredictionReadiness,
   PredictionSettings,
   ReferenceGame,
-  RevealedPreferenceTension,
 } from "@shelf-judge/shared";
 import { cosineSimilarity } from "./feature-vector";
 import type { Vocabulary } from "./feature-vector";
@@ -207,7 +206,7 @@ export function computePredictedFitness(
       weightSum += axis.weight;
       actualAxisCount++;
       coveredWeight += axis.weight; // actual always counts toward coverage
-    } else if (axis.source === "personal" && readinessStage > 0) {
+    } else if ((axis.source === "personal" || axis.source === "tournament") && readinessStage > 0) {
       // Predict this axis via k-NN
       const matches = findKNearestForAxis(
         targetVector,
@@ -283,13 +282,15 @@ export function computePredictedFitness(
       }
     } else {
       // Unrated axis with no prediction (stage 0 or BGG axis without data)
+      const fallbackSource: FitnessBreakdownEntry["source"] =
+        axis.source === "bgg" ? "bgg" : axis.source === "tournament" ? "tournament" : "personal";
       breakdown.push({
         axisId: axis.id,
         axisName: axis.name,
         rating: null,
         weight: axis.weight,
         contribution: null,
-        source: axis.source === "bgg" ? "bgg" : "personal",
+        source: fallbackSource,
         bggOriginal: null,
         rawValue: null,
         effectiveRating: null,
@@ -314,12 +315,15 @@ export function computePredictedFitness(
     }
   }
 
-  // Sort breakdown: override, bgg, personal, predicted
+  // Sort breakdown: override, bgg, tournament, personal, predicted.
+  // Tournament between bgg and personal — both system-derived, but tournament
+  // is per-game user signal (matches fitness-service ordering).
   const sourceOrder: Record<string, number> = {
     override: 0,
     bgg: 1,
-    personal: 2,
-    predicted: 3,
+    tournament: 2,
+    personal: 3,
+    predicted: 4,
   };
   breakdown.sort((a, b) => {
     if (sourceOrder[a.source] !== sourceOrder[b.source]) {
@@ -444,11 +448,14 @@ export function assessReadiness(
     nextStageAt = t1;
   }
 
-  // Weak axes: personal axes with fewest rated games
-  const personalAxes = axes.filter((a) => a.source === "personal");
+  // Weak axes: personal + tournament axes with fewest rated games.
+  // REQ-TAXIS-8: tournament axis is a prediction target, so it counts toward
+  // weakAxes thresholds the same way personal axes do. BGG-derived axes are
+  // excluded because their values are always available from BGG data.
+  const ratableAxes = axes.filter((a) => a.source === "personal" || a.source === "tournament");
   const axisCounts: { axisId: string; axisName: string; ratedCount: number }[] = [];
 
-  for (const axis of personalAxes) {
+  for (const axis of ratableAxes) {
     let count = 0;
     for (const ratings of gameRatings.values()) {
       if (ratings[axis.id] !== undefined) count++;
@@ -527,62 +534,5 @@ export function assessReadiness(
     nextStageAt,
     weakAxes,
     suggestedActions,
-  };
-}
-
-export interface TournamentRankedGame {
-  gameId: string;
-  gameName: string;
-  vector: number[];
-  normalizedScore: number;
-}
-
-/**
- * Detect tension between predicted fitness and tournament ranking among similar games.
- *
- * Finds the k nearest tournament-ranked neighbors via cosine similarity, computes
- * their average normalizedScore. Returns tension when the difference exceeds 1.0 point.
- * Returns null when no tension or no qualifying neighbors.
- */
-export function detectRevealedPreferenceTension(
-  predictedOverallFitness: number,
-  targetVector: number[],
-  tournamentRankedGames: TournamentRankedGame[],
-  k: number,
-  minSimilarity: number,
-): RevealedPreferenceTension | null {
-  if (tournamentRankedGames.length === 0) return null;
-
-  const neighbors: { similarity: number; normalizedScore: number; gameName: string }[] = [];
-
-  for (const game of tournamentRankedGames) {
-    const similarity = cosineSimilarity(targetVector, game.vector);
-    if (similarity < minSimilarity) continue;
-    neighbors.push({ similarity, normalizedScore: game.normalizedScore, gameName: game.gameName });
-  }
-
-  if (neighbors.length === 0) return null;
-
-  neighbors.sort((a, b) => b.similarity - a.similarity);
-  const topK = neighbors.slice(0, k);
-
-  let scoreSum = 0;
-  for (const n of topK) {
-    scoreSum += n.normalizedScore;
-  }
-  const tournamentClusterAverage = roundToOneDecimal(scoreSum / topK.length);
-
-  const difference = Math.abs(predictedOverallFitness - tournamentClusterAverage);
-  if (difference <= 1.0) return null;
-
-  const direction =
-    predictedOverallFitness > tournamentClusterAverage
-      ? "higher than what similar tournament-ranked games suggest"
-      : "lower than what similar tournament-ranked games suggest";
-
-  return {
-    predictedFitness: predictedOverallFitness,
-    tournamentClusterAverage,
-    note: `Predicted fitness (${predictedOverallFitness}) is ${direction} (${tournamentClusterAverage}).`,
   };
 }

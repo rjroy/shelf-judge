@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { createFitnessService } from "../../src/services/fitness-service.js";
-import type { Game, Axis, BggGameData } from "@shelf-judge/shared";
+import type { Game, Axis, BggGameData, TournamentData } from "@shelf-judge/shared";
 
 const fitnessService = createFitnessService();
 
@@ -392,6 +392,174 @@ describe("FitnessService", () => {
       const bggEntry = result!.breakdown.find((b) => b.axisId === "bgg1")!;
       expect(bggEntry.rating).toBeNull();
       expect(bggEntry.source).toBe("bgg");
+    });
+  });
+
+  describe("tournament axis", () => {
+    function makeTournament(
+      gameStats: Record<string, { eloRating: number; comparisonCount: number }>,
+      overrides?: Partial<TournamentData["settings"]>,
+    ): TournamentData {
+      return {
+        settings: {
+          kFactorThreshold: 15,
+          normalizationHalfWidth: 400,
+          provisionalThreshold: 6,
+          ...overrides,
+        },
+        sessions: [],
+        gameStats: Object.fromEntries(
+          Object.entries(gameStats).map(([id, s]) => [
+            id,
+            { ...s, wins: 0, losses: 0, recentComparisons: [] },
+          ]),
+        ),
+      };
+    }
+
+    function tournamentAxis(weight = 50): Axis {
+      return makeAxis({
+        id: "tournament",
+        name: "Tournament",
+        weight,
+        source: "tournament",
+        bggField: null,
+      });
+    }
+
+    test("contributes normalized score when cohort has 5+ ranked games", () => {
+      // Build a cohort of 5 games each with one comparison so shouldDisplayRanking returns true.
+      // The target game gets a high ELO so its normalized score is also high.
+      const tournament = makeTournament({
+        "game-1": { eloRating: 1900, comparisonCount: 8 }, // > provisional threshold
+        "game-2": { eloRating: 1500, comparisonCount: 6 },
+        "game-3": { eloRating: 1500, comparisonCount: 6 },
+        "game-4": { eloRating: 1500, comparisonCount: 6 },
+        "game-5": { eloRating: 1500, comparisonCount: 6 },
+      });
+      const axes = [tournamentAxis(50)];
+      const game = makeGame({ id: "game-1" });
+
+      const result = fitnessService.calculateScore(game, axes, null, tournament);
+
+      expect(result).not.toBeNull();
+      // ELO 1900 with halfWidth 400 -> 1 + 9*(1900 - 1100)/800 = 1 + 9 = 10
+      expect(result!.score).toBe(10);
+      const entry = result!.breakdown.find((b) => b.axisId === "tournament")!;
+      expect(entry.source).toBe("tournament");
+      expect(entry.rating).toBe(10);
+      expect(entry.contribution).toBeCloseTo(10);
+      expect(result!.ratedAxisCount).toBe(1);
+    });
+
+    test("provisional games still contribute their normalized score", () => {
+      // game-1 has only 2 comparisons (< default provisionalThreshold of 6) but cohort
+      // is large enough to display. Per REQ-TOURN-10, provisional games still rank.
+      const tournament = makeTournament({
+        "game-1": { eloRating: 1700, comparisonCount: 2 },
+        "game-2": { eloRating: 1500, comparisonCount: 1 },
+        "game-3": { eloRating: 1500, comparisonCount: 1 },
+        "game-4": { eloRating: 1500, comparisonCount: 1 },
+        "game-5": { eloRating: 1500, comparisonCount: 1 },
+      });
+      const axes = [tournamentAxis(50)];
+      const game = makeGame({ id: "game-1" });
+
+      const result = fitnessService.calculateScore(game, axes, null, tournament);
+
+      expect(result).not.toBeNull();
+      // ELO 1700 -> 1 + 9*(1700 - 1100)/800 = 1 + 6.75 = 7.75 -> 7.8
+      expect(result!.score).toBe(7.8);
+      const entry = result!.breakdown.find((b) => b.axisId === "tournament")!;
+      expect(entry.source).toBe("tournament");
+      expect(entry.rating).toBe(7.8);
+    });
+
+    test("excludes axis when cohort has < 5 ranked games", () => {
+      // Only 4 games with comparisons -> shouldDisplayRanking is false -> normalizedScore null.
+      const tournament = makeTournament({
+        "game-1": { eloRating: 1900, comparisonCount: 8 },
+        "game-2": { eloRating: 1500, comparisonCount: 1 },
+        "game-3": { eloRating: 1500, comparisonCount: 1 },
+        "game-4": { eloRating: 1500, comparisonCount: 1 },
+      });
+      const axes = [makeAxis({ id: "fun", name: "Fun", weight: 50 }), tournamentAxis(50)];
+      const game = makeGame({ id: "game-1", ratings: { fun: 7 } });
+
+      const result = fitnessService.calculateScore(game, axes, null, tournament);
+
+      expect(result).not.toBeNull();
+      // Tournament axis excluded; only fun=7 contributes
+      expect(result!.score).toBe(7);
+      expect(result!.ratedAxisCount).toBe(1);
+      const entry = result!.breakdown.find((b) => b.axisId === "tournament")!;
+      expect(entry.rating).toBeNull();
+      expect(entry.contribution).toBeNull();
+      expect(entry.source).toBe("tournament");
+    });
+
+    test("excludes axis when game has zero comparisons", () => {
+      // Cohort is large enough overall but the target game has no comparisons.
+      const tournament = makeTournament({
+        "other-1": { eloRating: 1500, comparisonCount: 6 },
+        "other-2": { eloRating: 1500, comparisonCount: 6 },
+        "other-3": { eloRating: 1500, comparisonCount: 6 },
+        "other-4": { eloRating: 1500, comparisonCount: 6 },
+        "other-5": { eloRating: 1500, comparisonCount: 6 },
+      });
+      const axes = [makeAxis({ id: "fun", name: "Fun", weight: 50 }), tournamentAxis(50)];
+      const game = makeGame({ id: "game-1", ratings: { fun: 7 } });
+
+      const result = fitnessService.calculateScore(game, axes, null, tournament);
+
+      expect(result).not.toBeNull();
+      expect(result!.score).toBe(7);
+      expect(result!.ratedAxisCount).toBe(1);
+      const entry = result!.breakdown.find((b) => b.axisId === "tournament")!;
+      expect(entry.rating).toBeNull();
+    });
+
+    test("excludes axis when tournamentData is null", () => {
+      const axes = [makeAxis({ id: "fun", name: "Fun", weight: 50 }), tournamentAxis(50)];
+      const game = makeGame({ id: "game-1", ratings: { fun: 7 } });
+
+      const result = fitnessService.calculateScore(game, axes, null, null);
+
+      expect(result).not.toBeNull();
+      expect(result!.score).toBe(7);
+      const entry = result!.breakdown.find((b) => b.axisId === "tournament")!;
+      expect(entry.rating).toBeNull();
+    });
+
+    test("excludes axis when tournamentData argument is omitted", () => {
+      const axes = [makeAxis({ id: "fun", name: "Fun", weight: 50 }), tournamentAxis(50)];
+      const game = makeGame({ id: "game-1", ratings: { fun: 7 } });
+
+      const result = fitnessService.calculateScore(game, axes, null);
+
+      expect(result).not.toBeNull();
+      expect(result!.score).toBe(7);
+      const entry = result!.breakdown.find((b) => b.axisId === "tournament")!;
+      expect(entry.rating).toBeNull();
+    });
+
+    test("composes with other axes via weighted average", () => {
+      const tournament = makeTournament({
+        "game-1": { eloRating: 1900, comparisonCount: 8 }, // normalized -> 10
+        "game-2": { eloRating: 1500, comparisonCount: 6 },
+        "game-3": { eloRating: 1500, comparisonCount: 6 },
+        "game-4": { eloRating: 1500, comparisonCount: 6 },
+        "game-5": { eloRating: 1500, comparisonCount: 6 },
+      });
+      const axes = [makeAxis({ id: "fun", name: "Fun", weight: 60 }), tournamentAxis(40)];
+      const game = makeGame({ id: "game-1", ratings: { fun: 5 } });
+
+      const result = fitnessService.calculateScore(game, axes, null, tournament);
+
+      expect(result).not.toBeNull();
+      // (5*60 + 10*40) / 100 = 7.0
+      expect(result!.score).toBe(7);
+      expect(result!.ratedAxisCount).toBe(2);
     });
   });
 });

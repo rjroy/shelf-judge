@@ -155,20 +155,10 @@ export async function scoreGet(
   }
 
   if (tournamentRes.ok) {
-    const compareScore = data.vetoed ? data.hypotheticalScore : data.score;
     lines.push(`Tournament Rank: ${tournamentRes.data.displayLabel}`);
-
-    if (
-      compareScore !== null &&
-      compareScore !== undefined &&
-      tournamentRes.data.normalizedScore !== null &&
-      !tournamentRes.data.isProvisional &&
-      Math.abs(compareScore - tournamentRes.data.normalizedScore) > 2.0
-    ) {
-      lines.push(
-        `[divergence] Fitness (${formatScore(compareScore)}) and tournament rank (${formatScore(tournamentRes.data.normalizedScore)}) differ by more than 2.0`,
-      );
-    }
+    // REQ-TAXIS-14 supersedes REQ-TOURN-18: with tournament now folded into fitness as
+    // its own axis source, the "axis fitness vs tournament rank" delta is meaningless
+    // by construction. The divergence flag previously rendered here has been removed.
   }
 
   lines.push("");

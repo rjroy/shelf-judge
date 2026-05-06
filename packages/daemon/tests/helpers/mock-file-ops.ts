@@ -49,5 +49,12 @@ export function createMockFileOps(initialFiles?: Record<string, string>): MockFi
       // No-op for in-memory mock
       return Promise.resolve();
     },
+
+    unlink(filePath: string): Promise<void> {
+      calls.push({ method: "unlink", args: [filePath] });
+      // ENOENT is swallowed in production; mirror that here.
+      files.delete(filePath);
+      return Promise.resolve();
+    },
   };
 }

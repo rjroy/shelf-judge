@@ -39,6 +39,11 @@ export function getNativeScale(source: AxisSource, bggField: string | null): Nat
     return { min: 1, max: 10 };
   }
 
+  if (source === "tournament") {
+    // Tournament axes feed normalized ELO scores in the 1-10 space, same as personal.
+    return { min: 1, max: 10 };
+  }
+
   switch (bggField) {
     case "communityRating":
       return { min: 1, max: 10 };

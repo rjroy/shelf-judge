@@ -83,6 +83,7 @@ function makeCollection(games: Game[], axes: Axis[]): Collection {
 function createStubStorage(
   collection: Collection,
   predictionSettings?: PredictionSettings,
+  tournamentData?: import("@shelf-judge/shared").TournamentData,
 ): StorageService {
   return {
     loadCollection: () => Promise.resolve(structuredClone(collection)),
@@ -90,11 +91,13 @@ function createStubStorage(
     loadConfig: () => Promise.resolve({} as never),
     saveConfig: () => Promise.resolve(),
     loadTournament: () =>
-      Promise.resolve({
-        settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
-        sessions: [],
-        gameStats: {},
-      }),
+      Promise.resolve(
+        tournamentData ?? {
+          settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
+          sessions: [],
+          gameStats: {},
+        },
+      ),
     saveTournament: () => Promise.resolve(),
     loadProfile: () => Promise.resolve(null),
     saveProfile: () => Promise.resolve(),
@@ -244,6 +247,77 @@ describe("prediction-service", () => {
       expect(themeEntry).toBeDefined();
       expect(themeEntry!.predictionConfidence).toBeNull();
     });
+
+    test("tournament axis is a prediction target for an unranked game (REQ-TAXIS-8 filter-fix regression)", async () => {
+      // Five games each with 10 comparisons → cohort >= 5 → normalizedScore is
+      // populated (non-null). One target game with no comparisons → tournament
+      // axis should be predicted via k-NN over the five.
+      //
+      // Without the prediction-service filter fix this test fails because the
+      // tournament axis never lands in gameRatings, so referenceGames have no
+      // tournament rating to contribute, and findKNearestForAxis returns
+      // empty for axisId "tournament" — predictionConfidence becomes
+      // "insufficient" instead of a real confidence level.
+      const tournamentAxisId = "tournament";
+      const tournamentAxis: Axis = {
+        id: tournamentAxisId,
+        name: "Tournament",
+        description: null,
+        weight: 30,
+        source: "tournament",
+        bggField: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      const axes = [themeAxis, tournamentAxis];
+
+      // Build five rated games with comparisonCount >= 6 (above provisional
+      // threshold) so deriveDisplayStats returns a non-null normalizedScore.
+      // The cohort floor is 5, which we satisfy with five games.
+      const ratedGames: Game[] = [];
+      const gameStats: Record<string, import("@shelf-judge/shared").TournamentGameStats> = {};
+      for (let i = 0; i < 5; i++) {
+        const gameId = `rated-${i}`;
+        ratedGames.push(makeGame(gameId, `Rated Game ${i}`, { theme: 5 + i }));
+        gameStats[gameId] = {
+          eloRating: 1500 + i * 50, // 1500..1700
+          comparisonCount: 10,
+          wins: 5,
+          losses: 5,
+          recentComparisons: [],
+        };
+      }
+      // Target: BGG data present, no rating, no comparisons → predict tournament axis
+      const targetGame = makeGame("target", "Target Game", {});
+      const tournamentData: import("@shelf-judge/shared").TournamentData = {
+        settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
+        sessions: [],
+        gameStats,
+      };
+
+      const collection = makeCollection([...ratedGames, targetGame], axes);
+      const service = createPredictionService({
+        storageService: createStubStorage(collection, undefined, tournamentData),
+        fitnessService: createFitnessService(),
+        tournamentService: createStubTournamentService(),
+      });
+
+      const result = await service.predictGame("target");
+
+      const tournamentEntry = result.score.breakdown.find((e) => e.axisId === tournamentAxisId);
+      expect(tournamentEntry).toBeDefined();
+      // The decisive assertion: with the filter fix, the entry is "predicted"
+      // with a real confidence level. Without the fix, no reference game has
+      // a tournament rating and the entry's predictionConfidence collapses to
+      // "insufficient" with rating=null.
+      expect(tournamentEntry!.source).toBe("predicted");
+      expect(tournamentEntry!.rating).not.toBeNull();
+      const confidence = tournamentEntry!.predictionConfidence;
+      expect(confidence).not.toBeNull();
+      expect(["strong", "moderate", "weak"]).toContain(confidence as string);
+      expect(tournamentEntry!.referenceGames).not.toBeNull();
+      expect(tournamentEntry!.referenceGames!.length).toBeGreaterThan(0);
+    });
   });
 
   describe("getReadiness", () => {
@@ -385,20 +459,6 @@ describe("prediction-service", () => {
       expect(updated.stageThresholds).toEqual([5, 15, 30]);
       expect(saved.length).toBe(1);
       expect(saved[0].defaultK).toBe(7);
-    });
-  });
-
-  describe("tension detection", () => {
-    test("returns null tension when no tournament data", async () => {
-      const collection = buildRatedCollection(6);
-      const service = createPredictionService({
-        storageService: createStubStorage(collection),
-        fitnessService: createFitnessService(),
-        tournamentService: createStubTournamentService(),
-      });
-
-      const result = await service.predictGame("target");
-      expect(result.tension).toBeNull();
     });
   });
 

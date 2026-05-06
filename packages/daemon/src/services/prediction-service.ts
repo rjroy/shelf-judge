@@ -5,30 +5,22 @@ import type {
   PredictionReadiness,
   PredictionSettings,
   PredictionUnavailable,
-  RevealedPreferenceTension,
+  TournamentGameStatsDisplay,
 } from "@shelf-judge/shared";
 import { resolveAxisValues } from "@shelf-judge/shared";
 import type { StorageService } from "./storage-service";
 import type { FitnessService } from "./fitness-service";
 import type { TournamentService } from "./tournament-service";
+import { deriveDisplayStats } from "./tournament-service";
 import type { BggClient } from "./bgg-client";
 import { buildVocabulary, computeContinuousRanges, encodeGame } from "./feature-vector";
 import type { FeatureVector } from "./feature-vector";
-import {
-  computePredictedFitness,
-  assessReadiness,
-  detectRevealedPreferenceTension,
-} from "./prediction-engine";
-import type {
-  ReferenceGameCandidate,
-  TournamentRankedGame,
-  ClusterMembership,
-} from "./prediction-engine";
+import { computePredictedFitness, assessReadiness } from "./prediction-engine";
+import type { ReferenceGameCandidate, ClusterMembership } from "./prediction-engine";
 
 export interface PredictedGameResult {
   game: Game;
   score: FitnessResult;
-  tension: RevealedPreferenceTension | null;
   predictionUnavailable: PredictionUnavailable | null;
 }
 
@@ -53,17 +45,25 @@ function flattenVector(fv: FeatureVector): number[] {
 }
 
 export function createPredictionService(deps: PredictionServiceDeps): PredictionService {
-  const { storageService, fitnessService, tournamentService, bggClient } = deps;
+  const { storageService, fitnessService, bggClient } = deps;
 
   async function loadPredictionContext() {
-    const [collection, settings] = await Promise.all([
+    // Load collection, prediction settings, and tournament data in parallel.
+    // Tournament settings and per-game stats are projected from the same
+    // TournamentData object so we don't read tournament.json three times.
+    // The raw tournament data is also needed by calculateScore so the
+    // tournament axis can contribute its normalized ELO score per the cohort
+    // floor (REQ-TAXIS-6/7).
+    const [collection, settings, tournamentData] = await Promise.all([
       storageService.loadCollection(),
       storageService.loadPredictionSettings(),
+      storageService.loadTournament(),
     ]);
-    // Tournament calls share loadTournament() internally, so serialize them
-    // to avoid concurrent writes to the same file on first access.
-    const tournamentSettings = await tournamentService.getSettings();
-    const allGameStats = await tournamentService.getAllGameStats();
+    const tournamentSettings = tournamentData.settings;
+    const allGameStats: Record<string, TournamentGameStatsDisplay> = {};
+    for (const gameId of Object.keys(tournamentData.gameStats)) {
+      allGameStats[gameId] = deriveDisplayStats(gameId, tournamentData);
+    }
 
     const { games, axes } = collection;
     const gamesWithBgg = games.filter((g) => g.bggData !== null && g.bggData !== undefined);
@@ -80,6 +80,15 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
       for (const axis of axes) {
         if (axis.source === "personal" && game.ratings?.[axis.id] !== undefined) {
           ratings[axis.id] = game.ratings[axis.id];
+        } else if (axis.source === "tournament") {
+          // Tournament axis values are not in game.ratings; they come from
+          // deriveDisplayStats(...).normalizedScore (REQ-TAXIS-6/7).
+          // null when no comparisons or cohort < 5; only populated values
+          // become reference k-NN signal.
+          const normalized = allGameStats[game.id]?.normalizedScore;
+          if (normalized != null) {
+            ratings[axis.id] = normalized;
+          }
         }
       }
       if (Object.keys(ratings).length > 0) {
@@ -88,6 +97,20 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
 
       if (game.bggData) {
         const resolved = resolveAxisValues(game, axes);
+        // Fold tournament axis values into the encoder input so similar
+        // tournament rankings move two games closer in feature space. Without
+        // this the tournament slot is a constant 0.5 default for every game,
+        // making the dimension carry no signal in cosine similarity. Personal
+        // ratings still take priority via resolveAxisValues for personal axes;
+        // tournament axes are not touched by resolveAxisValues today.
+        for (const axis of axes) {
+          if (axis.source === "tournament") {
+            const normalized = allGameStats[game.id]?.normalizedScore;
+            if (normalized != null) {
+              resolved[axis.id] = normalized;
+            }
+          }
+        }
         const fv = encodeGame(
           game,
           vocabulary,
@@ -136,22 +159,6 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
     else if (ratedGameCount >= t1) readinessStage = 1;
     else readinessStage = 0;
 
-    // Build tournament-ranked games for tension detection
-    const tournamentRankedGames: TournamentRankedGame[] = [];
-    for (const game of games) {
-      const stats = allGameStats[game.id];
-      if (!stats || stats.normalizedScore === null) continue;
-      const vector = gameVectors.get(game.id);
-      if (!vector) continue;
-
-      tournamentRankedGames.push({
-        gameId: game.id,
-        gameName: game.name,
-        vector,
-        normalizedScore: stats.normalizedScore,
-      });
-    }
-
     return {
       games,
       axes,
@@ -163,7 +170,7 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
       ratedGameCount,
       readinessStage,
       settings,
-      tournamentRankedGames,
+      tournamentData,
     };
   }
 
@@ -188,20 +195,8 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
         targetVector,
         ctx.settings,
         ctx.readinessStage,
-        (g, a, b) => fitnessService.calculateScore(g, a, b),
+        (g, a, b) => fitnessService.calculateScore(g, a, b, ctx.tournamentData),
       );
-
-      // Detect revealed preference tension if tournament data exists
-      let tension: RevealedPreferenceTension | null = null;
-      if (ctx.tournamentRankedGames.length > 0 && fitnessResult.predictionMeta) {
-        tension = detectRevealedPreferenceTension(
-          fitnessResult.score,
-          targetVector,
-          ctx.tournamentRankedGames,
-          ctx.settings.defaultK,
-          ctx.settings.minSimilarityThreshold,
-        );
-      }
 
       // REQ-PRED-22: indicate when personal-axis prediction is unavailable at Stage 0
       let predictionUnavailable: PredictionUnavailable | null = null;
@@ -214,7 +209,7 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
         };
       }
 
-      return { game, score: fitnessResult, tension, predictionUnavailable };
+      return { game, score: fitnessResult, predictionUnavailable };
     },
 
     async predictBggGame(bggId: number): Promise<PredictedGameResult> {
@@ -272,20 +267,8 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
         targetVector,
         ctx.settings,
         ctx.readinessStage,
-        (g, a, b) => fitnessService.calculateScore(g, a, b),
+        (g, a, b) => fitnessService.calculateScore(g, a, b, ctx.tournamentData),
       );
-
-      // Detect revealed preference tension if tournament data exists
-      let tension: RevealedPreferenceTension | null = null;
-      if (ctx.tournamentRankedGames.length > 0 && fitnessResult.predictionMeta) {
-        tension = detectRevealedPreferenceTension(
-          fitnessResult.score,
-          targetVector,
-          ctx.tournamentRankedGames,
-          ctx.settings.defaultK,
-          ctx.settings.minSimilarityThreshold,
-        );
-      }
 
       // REQ-PRED-22: indicate when personal-axis prediction is unavailable at Stage 0
       let predictionUnavailable: PredictionUnavailable | null = null;
@@ -298,13 +281,14 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
         };
       }
 
-      return { game: tempGame, score: fitnessResult, tension, predictionUnavailable };
+      return { game: tempGame, score: fitnessResult, predictionUnavailable };
     },
 
     async getReadiness(): Promise<PredictionReadiness> {
-      const [collection, settings] = await Promise.all([
+      const [collection, settings, tournamentData] = await Promise.all([
         storageService.loadCollection(),
         storageService.loadPredictionSettings(),
+        storageService.loadTournament(),
       ]);
 
       const { games, axes } = collection;
@@ -317,6 +301,14 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
         for (const axis of axes) {
           if (axis.source === "personal" && game.ratings?.[axis.id] !== undefined) {
             ratings[axis.id] = game.ratings[axis.id];
+          } else if (axis.source === "tournament") {
+            // REQ-TAXIS-8: tournament axis ratings count toward weakAxes
+            // thresholds, but the values come from tournament stats, not
+            // game.ratings. null when no comparisons or cohort < 5.
+            const normalized = deriveDisplayStats(game.id, tournamentData).normalizedScore;
+            if (normalized !== null) {
+              ratings[axis.id] = normalized;
+            }
           }
         }
         if (Object.keys(ratings).length > 0) {
@@ -357,7 +349,12 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
       const results: GameWithScore[] = [];
 
       for (const game of ctx.games) {
-        const actualScore = fitnessService.calculateScore(game, ctx.axes, game.bggData ?? null);
+        const actualScore = fitnessService.calculateScore(
+          game,
+          ctx.axes,
+          game.bggData ?? null,
+          ctx.tournamentData,
+        );
 
         // If all axes are rated (or no prediction possible), use actual score
         const allRated = actualScore && actualScore.ratedAxisCount === ctx.axes.length;
@@ -383,7 +380,7 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
           targetVector,
           ctx.settings,
           ctx.readinessStage,
-          (g, a, b) => fitnessService.calculateScore(g, a, b),
+          (g, a, b) => fitnessService.calculateScore(g, a, b, ctx.tournamentData),
         );
 
         results.push({ game, score: fitnessResult });

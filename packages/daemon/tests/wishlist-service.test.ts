@@ -188,7 +188,6 @@ describe("wishlist service", () => {
   const result100: PredictedGameResult = {
     game: game100,
     score: score100,
-    tension: null,
     predictionUnavailable: null,
   };
 
@@ -197,7 +196,6 @@ describe("wishlist service", () => {
   const result200: PredictedGameResult = {
     game: game200,
     score: score200,
-    tension: null,
     predictionUnavailable: {
       reason: "stage-0",
       ratedGameCount: 2,

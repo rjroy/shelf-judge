@@ -40,6 +40,17 @@ export function createAxisService(deps: AxisServiceDeps): AxisService {
       }
 
       const collection = await storageService.loadCollection();
+
+      // Tournament axis is a singleton (REQ-TAXIS-3). The migration auto-creates one
+      // on load, so the only way this can be hit is a deliberate client attempt to
+      // add a second.
+      if (parsed.source === "tournament") {
+        const hasTournamentAxis = collection.axes.some((a) => a.source === "tournament");
+        if (hasTournamentAxis) {
+          throw new ValidationError("tournament_axis_already_exists");
+        }
+      }
+
       const now = new Date().toISOString();
 
       const axis: Axis = {

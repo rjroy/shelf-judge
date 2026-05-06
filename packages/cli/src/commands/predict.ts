@@ -31,7 +31,7 @@ export async function predictGame(
   if (opts.json) return printOutput(data, opts);
 
   const lines: string[] = [];
-  const { game, score, tension } = data;
+  const { game, score } = data;
 
   lines.push(game.name);
 
@@ -55,14 +55,6 @@ export async function predictGame(
     lines.push(
       `Confidence: ${meta.confidence} (${(meta.coveragePercent * 100).toFixed(0)}% coverage, stage ${meta.readinessStage})`,
     );
-  }
-
-  if (tension) {
-    lines.push("");
-    lines.push(
-      `[tension] Predicted fitness (${formatScore(tension.predictedFitness)}) vs tournament cluster (${formatScore(tension.tournamentClusterAverage)})`,
-    );
-    lines.push(`  ${tension.note}`);
   }
 
   lines.push("");
@@ -113,7 +105,7 @@ export async function predictBggGame(
   if (opts.json) return printOutput(data, opts);
 
   const lines: string[] = [];
-  const { game, score, tension, predictionUnavailable } = data;
+  const { game, score, predictionUnavailable } = data;
 
   const isInCollection = !game.id.startsWith("preview-");
   lines.push(`${game.name}${isInCollection ? " (already in collection)" : ""}`);
@@ -148,14 +140,6 @@ export async function predictBggGame(
     lines.push(
       `Confidence: ${meta.confidence} (${(meta.coveragePercent * 100).toFixed(0)}% coverage, stage ${meta.readinessStage})`,
     );
-  }
-
-  if (tension) {
-    lines.push("");
-    lines.push(
-      `[tension] Predicted fitness (${formatScore(tension.predictedFitness)}) vs tournament cluster (${formatScore(tension.tournamentClusterAverage)})`,
-    );
-    lines.push(`  ${tension.note}`);
   }
 
   lines.push("");

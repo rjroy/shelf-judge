@@ -24,9 +24,9 @@ req-prefix: PRED
 
 The fitness model scores games the user has rated. The prediction engine estimates what unrated games would score if the user rated them, using their existing ratings as training data and BGG attributes as the feature space.
 
-The core approach is k-nearest-neighbor estimation: for each personal axis, find the most similar rated games (measured by BGG mechanic, category, weight, and player count overlap) and use their ratings to predict what the unrated game would score. Tournament ELO data provides a second signal, surfacing tension between what the user says they value (axis predictions) and what they actually choose (tournament patterns). A confidence architecture makes every prediction honest about how much data backs it.
+The core approach is k-nearest-neighbor estimation: for each personal axis, find the most similar rated games (measured by BGG mechanic, category, weight, and player count overlap) and use their ratings to predict what the unrated game would score. Tournament data participates as one axis source among others (per `.lore/specs/tournament/elo-axis-source.md`), so the tournament axis is predicted on the same code path as personal axes when its value is missing. A confidence architecture makes every prediction honest about how much data backs it.
 
-This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants scores for unowned games") and connects to the vision's Principle 2 (transparent derivation), Principle 4 (data serves judgment), and the tension table's rule that prediction honesty always beats coverage.
+This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants scores for unowned games") and connects to the vision's Principle 2 (transparent derivation) and Principle 4 (data serves judgment).
 
 ## Entry Points
 
@@ -90,9 +90,9 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 
 - REQ-PRED-15: When computing k-NN similarity, reference games with stable tournament data (comparison count >= the configured `provisionalThreshold`, default 6) have their similarity scores weighted by a tournament stability factor. Effective similarity = cosine similarity \* tournament stability, where stability is `1.0 + tournamentStabilityBoost` (default 0.2) for stable games and 1.0 for provisional or unranked games. The `tournamentStabilityBoost` is a configurable field in `PredictionSettings`.
 
-- REQ-PRED-16: After computing the predicted overall fitness score, the system checks whether the user has tournament-ranked games similar to the target. It computes the average `normalizedScore` (from `TournamentGameStatsDisplay`, already on the 1-10 scale) of the k nearest tournament-ranked neighbors. If this average differs from the predicted overall fitness score by more than 1.0 point, the system surfaces a "revealed preference tension" indicator showing: the predicted fitness score, the tournament-cluster average, and a plain-language note ("Your axis ratings predict 8.2 for games like this. In tournament matchups, similar games average 6.5."). Only neighbors with a non-null `normalizedScore` (5+ games ranked, game has comparisons) contribute.
+- REQ-PRED-16: [SUPERSEDED by REQ-TAXIS-16 in `.lore/specs/tournament/elo-axis-source.md`] ~~After computing the predicted overall fitness score, the system checks whether the user has tournament-ranked games similar to the target. It computes the average `normalizedScore` (from `TournamentGameStatsDisplay`, already on the 1-10 scale) of the k nearest tournament-ranked neighbors. If this average differs from the predicted overall fitness score by more than 1.0 point, the system surfaces a "revealed preference tension" indicator showing: the predicted fitness score, the tournament-cluster average, and a plain-language note ("Your axis ratings predict 8.2 for games like this. In tournament matchups, similar games average 6.5."). Only neighbors with a non-null `normalizedScore` (5+ games ranked, game has comparisons) contribute.~~ The revealed preference tension surface has been removed; tournament is now an axis source contributing to a single unified fitness score.
 
-- REQ-PRED-17: The revealed preference tension is informational only. It does not modify the predicted score. Both numbers are visible; the user interprets the gap. The tournament signal is always secondary to the axis prediction.
+- REQ-PRED-17: [SUPERSEDED by REQ-TAXIS-16 in `.lore/specs/tournament/elo-axis-source.md`] ~~The revealed preference tension is informational only. It does not modify the predicted score. Both numbers are visible; the user interprets the gap. The tournament signal is always secondary to the axis prediction.~~
 
 - REQ-PRED-18: Tournament prior features are only active when the user has tournament data. If no tournament sessions exist or no games have been compared, all tournament-related prediction features are silently inactive (no error, no empty UI elements).
 
@@ -114,7 +114,7 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 
 ### API
 
-- REQ-PRED-23: `GET /predictions/:gameId` returns a `PredictedGameResponse` containing `{ game, score, tension, predictionUnavailable }`. The `score` field is a standard `FitnessResult` with `predictionMeta` and per-axis `predictionConfidence`/`referenceGames` populated. The `tension` field carries revealed preference tension when detected (null otherwise). The `predictionUnavailable` field is non-null at Stage 0, containing `{ reason: "stage-0", ratedGameCount, gamesNeeded }`. If the game has full actual ratings on all axes, the response returns the actual fitness score with `predictionMeta: null`.
+- REQ-PRED-23: `GET /predictions/:gameId` returns a `PredictedGameResponse` containing `{ game, score, predictionUnavailable }`. The `score` field is a standard `FitnessResult` with `predictionMeta` and per-axis `predictionConfidence`/`referenceGames` populated. The `predictionUnavailable` field is non-null at Stage 0, containing `{ reason: "stage-0", ratedGameCount, gamesNeeded }`. If the game has full actual ratings on all axes, the response returns the actual fitness score with `predictionMeta: null`. (The previous `tension` field was removed by REQ-TAXIS-16.)
 
 - REQ-PRED-23a: `GET /predictions/bgg/:bggId` accepts a BGG game ID and returns the same `PredictedGameResponse` shape. If the game already exists in the collection, it delegates to the standard prediction path. If not, the daemon fetches BGG data, creates a temporary non-persisted `Game` object (ID prefixed with `preview-`), encodes it against the collection's vocabulary and ranges, and runs prediction. This enables search-time preview without adding the game to the collection.
 
@@ -130,7 +130,7 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 
 - REQ-PRED-27: The collection list can be sorted by predicted fitness. Games with predicted scores sort among games with actual scores. The sort treats a predicted 7.5 the same as an actual 7.5 for ordering purposes, but the visual distinction (REQ-PRED-14) prevents confusion about which is which.
 
-- REQ-PRED-28: When revealed preference tension exists (REQ-PRED-16), the game detail view shows a "Revealed Preference Tension" panel below the score breakdown. The panel displays the axis prediction score, the tournament pattern score, the delta, and the plain-language note. The display makes clear that the tournament signal is contextual, not a correction.
+- REQ-PRED-28: [SUPERSEDED by REQ-TAXIS-16 in `.lore/specs/tournament/elo-axis-source.md`] ~~When revealed preference tension exists (REQ-PRED-16), the game detail view shows a "Revealed Preference Tension" panel below the score breakdown. The panel displays the axis prediction score, the tournament pattern score, the delta, and the plain-language note. The display makes clear that the tournament signal is contextual, not a correction.~~ The tension panel has been removed; the tournament axis now appears as a row in the standard fitness breakdown.
 
 - REQ-PRED-29: The prediction readiness stage is visible in two locations: (1) a compact readiness widget in the sidebar, showing stage number, label, a progress bar, rated count, and games to next stage, visible on every page; and (2) a dedicated `/readiness` page with a stage banner, stage timeline, axis coverage bars, and suggested actions. At all stages, the suggested actions from REQ-PRED-20 guide the user toward better predictions.
 
@@ -160,7 +160,7 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 
 - REQ-PRED-35b: `PredictionUnavailable` is a new shared type: `{ reason: "stage-0", ratedGameCount: number, gamesNeeded: number }`. Returned in prediction responses at Stage 0 to communicate why personal-axis predictions are absent.
 
-- REQ-PRED-35c: `PredictedGameResponse` is a new shared type: `{ game: Game, score: FitnessResult, tension: RevealedPreferenceTension | null, predictionUnavailable: PredictionUnavailable | null }`. This is the response envelope for all prediction endpoints (REQ-PRED-23, REQ-PRED-23a).
+- REQ-PRED-35c: `PredictedGameResponse` is a new shared type: `{ game: Game, score: FitnessResult, predictionUnavailable: PredictionUnavailable | null }`. This is the response envelope for all prediction endpoints (REQ-PRED-23, REQ-PRED-23a). (The `tension: RevealedPreferenceTension | null` field was removed by REQ-TAXIS-16; the `RevealedPreferenceTension` type is no longer part of the shared types.)
 
 ### Data and Storage
 
@@ -172,7 +172,7 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 
 | Exit                      | Triggers When                                                         | Target                                                                                                  |
 | ------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| Collection profiling      | User wants taste profile inference from the same feature vectors      | **Implemented**: `.lore/specs/collection/collection-profiling.md`, `profile-engine.ts`                             |
+| Collection profiling      | User wants taste profile inference from the same feature vectors      | **Implemented**: `.lore/specs/collection/collection-profiling.md`, `profile-engine.ts`                  |
 | Redundancy scoring        | Feature vector overlap computation feeds mechanic/category redundancy | [STUB: redundancy-scoring]                                                                              |
 | Prediction caching        | Computation becomes slow for large collections                        | [STUB: prediction-caching]                                                                              |
 | Custom k/threshold tuning | User wants a UI for adjusting prediction settings                     | API-level tuning implemented (REQ-PRED-25a); a dedicated UI is deferred to [STUB: prediction-tuning-ui] |
@@ -190,7 +190,7 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 - [ ] Insufficient-confidence axes are excluded from the predicted score (not counted in numerator or denominator)
 - [ ] Vetoes fire on BGG-derived axis values but not on predicted personal axis values
 - [ ] A reference game with stable tournament data has a higher effective similarity score than the same game would with provisional or no tournament data
-- [ ] Revealed preference tension is surfaced when predicted overall fitness and tournament cluster `normalizedScore` average differ by > 1.0, and not surfaced when they differ by <= 1.0
+- [ ] ~~Revealed preference tension is surfaced when predicted overall fitness and tournament cluster `normalizedScore` average differ by > 1.0, and not surfaced when they differ by <= 1.0~~ (Superseded by REQ-TAXIS-16; tension surface removed)
 - [ ] Prediction readiness stages gate output correctly: Stage 0 returns only BGG-derived actual scores with `predictionUnavailable` populated, Stages 1+ include predicted personal axes with confidence badges
 - [ ] When stage thresholds are changed from defaults, the readiness stage reported matches the new thresholds
 - [ ] `PredictionMeta` correctly reports predicted vs. actual axis counts, reference game count, and coverage percent
@@ -202,7 +202,7 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 - [ ] Add a game via BGG search that has not been rated on any personal axis. View its detail page and see predicted scores with confidence indicators and reference games listed.
 - [ ] Rate a game that previously had strong-confidence predictions on most axes. Compare the predicted score to the actual score. If the prediction is off by more than 3 points on most axes, flag as a calibration concern.
 - [ ] View the collection list with predicted scores enabled. Predicted and actual scores are visually distinct.
-- [ ] With tournament data: view a predicted game where the tournament cluster average diverges from the axis prediction. Both numbers are visible in the tension panel.
+- [ ] ~~With tournament data: view a predicted game where the tournament cluster average diverges from the axis prediction. Both numbers are visible in the tension panel.~~ (Superseded by REQ-TAXIS-16; tension panel removed)
 - [ ] On the search page, click a BGG search result and see the prediction preview panel with score, confidence badge, and breakdown.
 - [ ] CLI: run `shelf-judge predict <id>` and verify the breakdown shows reference games, confidence levels, and the same score as the web UI.
 - [ ] CLI: run `shelf-judge predict bgg <bgg-id>` and verify preview prediction for a game not in the collection.
@@ -222,7 +222,7 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 - k-NN estimation verified with a controlled test collection (5 rated games with known ratings and BGG attributes, predict a 6th, verify the weighted average matches)
 - Confidence level boundaries tested at exact thresholds (4 vs 5 reference games, variance at 1.5, similarity at 0.7)
 - Tournament stability weighting tested with and without tournament data present
-- Revealed preference tension tested with known divergence (> 1.0) and non-divergence (<= 1.0) cases
+- ~~Revealed preference tension tested with known divergence (> 1.0) and non-divergence (<= 1.0) cases~~ (Superseded by REQ-TAXIS-16; tension surface removed)
 - Type extensions verified as backward-compatible: existing `FitnessResult` consumers (web game detail, CLI scores, collection list) render correctly when prediction fields are null
 
 ## Constraints
@@ -231,7 +231,7 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 - Prediction is read-only. It does not modify any stored data: no game ratings, no tournament data, no axis configurations.
 - The feature vector module is designed for reuse. Collection profiling and redundancy scoring will consume the same vectors and similarity computations. The module's API should not be prediction-specific.
 - No external services beyond what the system already uses. Prediction is local math over cached BGG data and stored ratings.
-- The prediction engine does not predict tournament ELO scores. Tournament data is an input to prediction weighting, not a prediction target.
+- The tournament axis IS a prediction target (per REQ-TAXIS-17 in `.lore/specs/tournament/elo-axis-source.md`): the prediction engine fills missing tournament axis values for unrated games on the same code path it uses for personal axes. REQ-PRED-15 (tournament stability factor in similarity weighting) and REQ-PRED-18 (silent inactivity when no tournament data exists) are unaffected; tournament data continues to participate in prediction confidence as it always has.
 - Single-user constraint holds. No collaborative filtering across users. The prediction uses one user's ratings to predict one user's scores.
 
 ## Open Questions
@@ -260,11 +260,11 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 **Implementation artifacts:**
 
 - `packages/daemon/src/services/feature-vector.ts` (shared feature vector module, built during profiling)
-- `packages/daemon/src/services/prediction-engine.ts` (pure-function prediction math: k-NN, confidence, readiness, tension)
+- `packages/daemon/src/services/prediction-engine.ts` (pure-function prediction math: k-NN, confidence, readiness)
 - `packages/daemon/src/services/prediction-service.ts` (service layer: context loading, DI wiring, BGG preview)
 - `packages/daemon/src/routes/prediction.ts` (HTTP routes for prediction, readiness, settings)
-- `packages/shared/src/types.ts` (prediction types: `PredictionConfidence`, `PredictionMeta`, `PredictionReadiness`, `PredictionSettings`, `PredictionUnavailable`, `PredictedGameResponse`, `RevealedPreferenceTension`, `ReferenceGame`)
-- `packages/web/app/games/[id]/page.tsx` (game detail with prediction display and tension panel)
+- `packages/shared/src/types.ts` (prediction types: `PredictionConfidence`, `PredictionMeta`, `PredictionReadiness`, `PredictionSettings`, `PredictionUnavailable`, `PredictedGameResponse`, `ReferenceGame`)
+- `packages/web/app/games/[id]/page.tsx` (game detail with prediction display)
 - `packages/web/app/search/page.tsx` (BGG search with prediction preview panel)
 - `packages/web/app/readiness/page.tsx` (dedicated readiness page)
 - `packages/web/app/collection/page.tsx` (collection list with predicted scores)

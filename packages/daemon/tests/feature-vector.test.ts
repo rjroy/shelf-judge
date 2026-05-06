@@ -252,6 +252,108 @@ describe("encodeGame", () => {
     expect(vecBC.personalAxes![1]).toBeCloseTo(2 / 9, 5);
   });
 
+  test("tournament axis adds exactly one slot to personalAxes", () => {
+    // REQ-TAXIS-8 / REQ-TAXIS-17: tournament-source axes participate in the
+    // feature-vector personalAxes component. Adding a tournament axis must
+    // grow the dimension by exactly 1 and not interfere with other slots.
+    const game = makeGame();
+    const vocab = { mechanics: [], categories: [] };
+    const personalAxis = {
+      id: "fun",
+      name: "Fun",
+      description: null,
+      weight: 50,
+      source: "personal" as const,
+      bggField: null,
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+    const tournamentAxis = {
+      id: "tournament",
+      name: "Tournament",
+      description: null,
+      weight: 30,
+      source: "tournament" as const,
+      bggField: null,
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+
+    const withoutTournament = encodeGame(game, vocab, { fun: 8 }, undefined, [personalAxis]);
+    const withTournament = encodeGame(game, vocab, { fun: 8, tournament: 7.5 }, undefined, [
+      personalAxis,
+      tournamentAxis,
+    ]);
+
+    expect(withoutTournament.personalAxes!.length).toBe(1);
+    expect(withTournament.personalAxes!.length).toBe(2);
+    expect(withTournament.personalAxes![0]).toBeCloseTo(7 / 9, 5); // fun=8 on 1-10
+    // tournament=7.5 on 1-10 → (7.5-1)/9 ≈ 0.7222
+    expect(withTournament.personalAxes![1]).toBeCloseTo(6.5 / 9, 5);
+  });
+
+  test("tournament column populated when value supplied", () => {
+    // Regression for the prediction-service filter fix: without the fix the
+    // tournament column would silently be 0.5 (default) for every game.
+    const game = makeGame();
+    const vocab = { mechanics: [], categories: [] };
+    const tournamentAxis = {
+      id: "t",
+      name: "Tournament",
+      description: null,
+      weight: 30,
+      source: "tournament" as const,
+      bggField: null,
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+
+    // Game with tournament value 10 (top of scale) should encode to 1.0
+    const top = encodeGame(game, vocab, { t: 10 }, undefined, [tournamentAxis]);
+    expect(top.personalAxes![0]).toBeCloseTo(1, 5);
+
+    // Game with no tournament rating falls back to 0.5
+    const empty = encodeGame(game, vocab, {}, undefined, [tournamentAxis]);
+    expect(empty.personalAxes![0]).toBe(0.5);
+  });
+
+  test("cosine similarity over mixed personal+tournament axes is in [0,1]", () => {
+    // Sanity: feeding both personal and tournament values into the encoder
+    // and computing cosine similarity must produce finite, non-NaN values.
+    const game = makeGame();
+    const vocab = { mechanics: [], categories: [] };
+    const axes = [
+      {
+        id: "fun",
+        name: "Fun",
+        description: null,
+        weight: 50,
+        source: "personal" as const,
+        bggField: null,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+      {
+        id: "t",
+        name: "Tournament",
+        description: null,
+        weight: 30,
+        source: "tournament" as const,
+        bggField: null,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    ];
+
+    const a = encodeGame(game, vocab, { fun: 8, t: 7 }, undefined, axes);
+    const b = encodeGame(game, vocab, { fun: 6, t: 9 }, undefined, axes);
+
+    const sim = cosineSimilarity(a.personalAxes!, b.personalAxes!);
+    expect(Number.isNaN(sim)).toBe(false);
+    expect(sim).toBeGreaterThanOrEqual(0);
+    expect(sim).toBeLessThanOrEqual(1);
+  });
+
   test("uses observed ranges when provided", () => {
     const game = makeGame({ minPlayers: 3, maxPlayers: 6, playingTime: 90 });
     const vocab = { mechanics: [], categories: [] };

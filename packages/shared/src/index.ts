@@ -50,7 +50,6 @@ export type {
   ReferenceGame,
   PredictionMeta,
   PredictionReadiness,
-  RevealedPreferenceTension,
   PredictionSettings,
   PredictionUnavailable,
   PredictedGameResponse,

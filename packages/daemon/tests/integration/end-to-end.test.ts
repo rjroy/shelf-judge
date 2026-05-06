@@ -124,11 +124,12 @@ describe("Integration: End-to-end scenarios", () => {
       const { game } = (await addRes.json()) as AddGameResponse;
       const gameId = game.id;
 
-      // Step 2: Get the default axes (Community Rating, Complexity)
+      // Step 2: Get the default axes (Community Rating, Complexity, Tournament)
       const axesRes = await jsonRequest(ctx.app, "GET", "/api/axes");
       expect(axesRes.status).toBe(200);
       const axes = (await axesRes.json()) as Axis[];
-      expect(axes.length).toBe(2);
+      // 2 BGG defaults + 1 auto-created tournament axis (REQ-TAXIS-4)
+      expect(axes.length).toBe(3);
 
       // Step 3: Create a personal axis
       const createAxisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
@@ -167,9 +168,9 @@ describe("Integration: End-to-end scenarios", () => {
       const scoreData = (await scoreRes.json()) as ScoreResponse;
       expect(scoreData.score).toBe(7.2);
       expect(scoreData.breakdown).toBeDefined();
-      expect(scoreData.breakdown.length).toBe(4); // 2 default + 2 personal
+      expect(scoreData.breakdown.length).toBe(5); // 2 BGG default + 1 tournament + 2 personal
       expect(scoreData.ratedAxisCount).toBe(2);
-      expect(scoreData.totalAxisCount).toBe(4);
+      expect(scoreData.totalAxisCount).toBe(5);
 
       // Step 8: Verify via game list
       const listRes = await jsonRequest(ctx.app, "GET", "/api/games");

@@ -94,7 +94,16 @@ function applyFilters(
   return result;
 }
 
-function deriveDisplayStats(gameId: string, data: TournamentData): TournamentGameStatsDisplay {
+/**
+ * Derive display stats (normalized ELO score, provisional flag, label) for a game from
+ * tournament data. Exported so fitness-service can reuse the same cohort-floor and
+ * normalization logic when composing the tournament axis into fitness scores
+ * (REQ-TAXIS-6, REQ-TAXIS-7). Pure function; no I/O.
+ */
+export function deriveDisplayStats(
+  gameId: string,
+  data: TournamentData,
+): TournamentGameStatsDisplay {
   const cached = data.gameStats[gameId];
   const eloRating = cached?.eloRating ?? 1500;
   const comparisonCount = cached?.comparisonCount ?? 0;

@@ -183,6 +183,59 @@ describe("CreateAxisSchema", () => {
       expect(result.data.veto).toBeUndefined();
     }
   });
+
+  // Three-arm bggField refinement: source dictates whether bggField is allowed.
+
+  test("rejects personal source with bggField", () => {
+    const result = CreateAxisSchema.safeParse({
+      name: "Visual design",
+      weight: 50,
+      source: "personal",
+      bggField: "communityRating",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((i) => i.path.includes("bggField"))).toBe(true);
+    }
+  });
+
+  test("rejects bgg source without bggField", () => {
+    const result = CreateAxisSchema.safeParse({
+      name: "Community Rating",
+      weight: 10,
+      source: "bgg",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((i) => i.path.includes("bggField"))).toBe(true);
+    }
+  });
+
+  test("accepts tournament source without bggField", () => {
+    const result = CreateAxisSchema.safeParse({
+      name: "Tournament ELO",
+      weight: 20,
+      source: "tournament",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.source).toBe("tournament");
+      expect(result.data.bggField).toBeNull();
+    }
+  });
+
+  test("rejects tournament source with bggField", () => {
+    const result = CreateAxisSchema.safeParse({
+      name: "Tournament ELO",
+      weight: 20,
+      source: "tournament",
+      bggField: "communityRating",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((i) => i.path.includes("bggField"))).toBe(true);
+    }
+  });
 });
 
 describe("UpdateAxisSchema", () => {

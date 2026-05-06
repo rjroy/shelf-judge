@@ -336,7 +336,7 @@ function ConfidenceBreakdownPanel({
   );
 }
 
-function SourceBadge({ source }: { source: string }) {
+export function SourceBadge({ source }: { source: string }) {
   if (source === "override") {
     return <span className="source-badge source-override">Override</span>;
   }
@@ -345,6 +345,12 @@ function SourceBadge({ source }: { source: string }) {
   }
   if (source === "predicted") {
     return <span className="source-badge source-predicted">Predicted</span>;
+  }
+  if (source === "tournament") {
+    // Tournament shares the personal-source visual treatment: both are per-game
+    // user-derived signals on a 1-10 scale. Avoids introducing a third visual
+    // category (REQ-TAXIS-11).
+    return <span className="source-badge source-personal">Tournament</span>;
   }
   return <span className="source-badge source-personal">Personal</span>;
 }

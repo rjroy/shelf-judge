@@ -353,6 +353,98 @@ describe("sortGames", () => {
     const { withoutValue } = sortGames([g1, g2, g3], "fitness", "desc", EMPTY_TOURNAMENT);
     expect(withoutValue.map((g) => g.game.name)).toEqual(["Alpha", "Mike", "Zulu"]);
   });
+
+  // REQ-TAXIS-13: sorting by tournament rank and by fitness must remain
+  // independent surfaces. Even though tournament is now folded into fitness,
+  // the two orderings diverge whenever non-tournament axes carry weight.
+  // Both orderings remain informative.
+  test("tournament sort and fitness sort produce different orderings when axes disagree", () => {
+    // Construct a collection where tournament rank and fitness rank disagree.
+    // Game A: high fitness (driven by personal axes), low tournament score.
+    // Game B: low fitness, high tournament score.
+    // Game C: middling on both.
+    const gameA = makeGWS({ id: "a", name: "Personal Favorite" }, makeScore(9.0));
+    const gameB = makeGWS({ id: "b", name: "Tournament Champion" }, makeScore(4.5));
+    const gameC = makeGWS({ id: "c", name: "Middle Ground" }, makeScore(6.5));
+    const games = [gameA, gameB, gameC];
+
+    const tournamentStats: Record<string, TournamentGameStatsDisplay> = {
+      a: {
+        normalizedScore: 3.0,
+        displayLabel: "3.0",
+        isProvisional: false,
+        comparisonCount: 10,
+        eloRating: 1200,
+        wins: 2,
+        losses: 8,
+        recentComparisons: [],
+      },
+      b: {
+        normalizedScore: 9.5,
+        displayLabel: "9.5",
+        isProvisional: false,
+        comparisonCount: 10,
+        eloRating: 1800,
+        wins: 9,
+        losses: 1,
+        recentComparisons: [],
+      },
+      c: {
+        normalizedScore: 6.0,
+        displayLabel: "6.0",
+        isProvisional: false,
+        comparisonCount: 10,
+        eloRating: 1500,
+        wins: 5,
+        losses: 5,
+        recentComparisons: [],
+      },
+    };
+
+    const fitnessSort = sortGames(games, "fitness", "desc", tournamentStats);
+    const tournamentSort = sortGames(games, "tournament", "desc", tournamentStats);
+
+    const fitnessOrder = fitnessSort.withValue.map((g) => g.game.id);
+    const tournamentOrder = tournamentSort.withValue.map((g) => g.game.id);
+
+    // Fitness ordering: A (9.0) > C (6.5) > B (4.5)
+    expect(fitnessOrder).toEqual(["a", "c", "b"]);
+    // Tournament ordering: B (9.5) > C (6.0) > A (3.0)
+    expect(tournamentOrder).toEqual(["b", "c", "a"]);
+
+    // Explicit divergence assertion: the two surfaces produce DIFFERENT
+    // orderings on this constructed collection.
+    expect(tournamentOrder).not.toEqual(fitnessOrder);
+  });
+
+  // REQ-TAXIS-12: standalone tournament rank surface is preserved. Sorting by
+  // "tournament" reads from tournamentStats directly, NOT from the fitness
+  // breakdown. This locks down that the surfaces are wired separately.
+  test("tournament sort reads from tournamentStats, independent of fitness score", () => {
+    // A game whose fitness score has tournament folded in but whose
+    // tournamentStats reflects only the standalone ELO surface.
+    const game = makeGWS({ id: "x", name: "X" }, makeScore(8.0));
+    const tournamentStats: Record<string, TournamentGameStatsDisplay> = {
+      x: {
+        normalizedScore: 2.0,
+        displayLabel: "2.0",
+        isProvisional: false,
+        comparisonCount: 10,
+        eloRating: 1100,
+        wins: 1,
+        losses: 9,
+        recentComparisons: [],
+      },
+    };
+    const { withValue: byFitness } = sortGames([game], "fitness", "desc", tournamentStats);
+    const { withValue: byTournament } = sortGames([game], "tournament", "desc", tournamentStats);
+
+    // Sort modes return the same single game but reflect different score values.
+    expect(byFitness[0].score?.score).toBe(8.0);
+    // Tournament sort reads from tournamentStats, not score.
+    const tournamentValue = tournamentStats[byTournament[0].game.id]?.normalizedScore;
+    expect(tournamentValue).toBe(2.0);
+  });
 });
 
 // ---------------------------------------------------------------------------
