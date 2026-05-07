@@ -18,7 +18,7 @@ export const CreateAxisSchema = z
     name: z.string().min(1, "Axis name cannot be empty"),
     description: z.string().nullable().optional().default(null),
     weight: z.number().int("Weight must be an integer").min(0).max(100),
-    source: z.enum(["personal", "bgg"]).optional().default("personal"),
+    source: z.enum(["personal", "bgg", "tournament"]).optional().default("personal"),
     bggField: z.string().nullable().optional().default(null),
     ...curveFields,
   })
@@ -27,6 +27,21 @@ export const CreateAxisSchema = z
       data.preferenceShape !== "sweet-spot" ||
       (data.idealValue !== undefined && data.idealValue !== null),
     { message: "idealValue is required when preferenceShape is sweet-spot", path: ["idealValue"] },
+  )
+  .refine(
+    (data) => {
+      // Three-arm shape: bggField presence is determined by source.
+      // - personal: no bggField
+      // - bgg: bggField required
+      // - tournament: no bggField
+      const hasBggField = data.bggField !== null && data.bggField !== undefined;
+      if (data.source === "bgg") return hasBggField;
+      return !hasBggField;
+    },
+    {
+      message: "bggField is required when source is 'bgg' and must be omitted otherwise",
+      path: ["bggField"],
+    },
   );
 
 // UpdateAxisSchema omits the sweet-spot/idealValue refinement that CreateAxisSchema has.

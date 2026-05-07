@@ -31,6 +31,8 @@ This satisfies the hybrid model identified in the fitness brainstorm: "one tourn
 
 ## Key Decision: ELO and Axis Fitness Are Peers, Not Parent-Child
 
+> **Superseded by `.lore/specs/tournament/elo-axis-source.md` (REQ-TAXIS-15).** Tournament is now a third axis source feeding the unified fitness composition; the peer-score framing below is preserved for historical context only. New work should reference the elo-axis-source spec.
+
 Three options were considered for where ELO sits relative to the existing axis fitness score:
 
 1. **ELO replaces axis fitness.** Axes become descriptive only; the score comes from tournament results. This discards the primary value of axes: that they produce scores from game one, before enough comparisons exist.
@@ -118,7 +120,7 @@ ELO requires knowing the result of each comparison to calculate scores correctly
 
 - REQ-TOURN-17: The collection game list MUST be sortable by tournament rank (normalized ELO) in addition to the existing axis fitness sort. Games with no comparisons sort to the bottom of tournament-ranked lists.
 
-- REQ-TOURN-18: When the axis fitness score and tournament rank for a game differ by more than 2.0 points (on the normalized 1-10 scale), and both scores are non-provisional, the game detail view MUST flag this as a divergence: "Your axis ratings suggest this game is a [higher/lower] fit than your head-to-head choices indicate." This is informational, not prescriptive. The flag is suppressed when either score is provisional or absent.
+- REQ-TOURN-18: [SUPERSEDED by REQ-TAXIS-14 in `.lore/specs/tournament/elo-axis-source.md`] ~~When the axis fitness score and tournament rank for a game differ by more than 2.0 points (on the normalized 1-10 scale), and both scores are non-provisional, the game detail view MUST flag this as a divergence: "Your axis ratings suggest this game is a [higher/lower] fit than your head-to-head choices indicate." This is informational, not prescriptive. The flag is suppressed when either score is provisional or absent.~~ The divergence flag has been removed; tournament is now an axis source contributing to a single unified fitness score, so an axis-vs-tournament gap is no longer a separable concept.
 
 ### API
 
@@ -167,7 +169,7 @@ ELO requires knowing the result of each comparison to calculate scores correctly
 - [ ] Start a tournament session, complete 10 comparisons, see ELO rankings update in real time
 - [ ] Start a filtered session (e.g., mechanic = "Worker Placement"), verify only matching games appear
 - [ ] View a game's detail page showing both axis fitness and tournament rank
-- [ ] Trigger divergence flag by rating a game highly on axes but consistently losing in comparisons
+- [ ] ~~Trigger divergence flag by rating a game highly on axes but consistently losing in comparisons~~ (Superseded by REQ-TAXIS-14; divergence flag removed)
 - [ ] CLI `sj tournament stats` shows win/loss record and recent comparisons
 - [ ] Resume an interrupted session and continue from where it left off
 - [ ] Run `sj tournament recalculate`, verify ELO scores match incrementally-computed values

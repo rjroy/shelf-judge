@@ -7,6 +7,8 @@ export interface FileOps {
   rename(oldPath: string, newPath: string): Promise<void>;
   exists(filePath: string): Promise<boolean>;
   mkdir(dirPath: string): Promise<void>;
+  /** Delete a file. Resolves silently if the file does not exist (ENOENT is swallowed). */
+  unlink(filePath: string): Promise<void>;
 }
 
 export function createFileOps(): FileOps {
@@ -34,6 +36,15 @@ export function createFileOps(): FileOps {
 
     async mkdir(dirPath: string): Promise<void> {
       await fs.mkdir(dirPath, { recursive: true });
+    },
+
+    async unlink(filePath: string): Promise<void> {
+      try {
+        await fs.unlink(filePath);
+      } catch (err) {
+        // ENOENT is the only acceptable failure: deleting a missing file is a no-op.
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+      }
     },
   };
 }

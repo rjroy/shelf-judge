@@ -582,6 +582,10 @@ describe("legacy data migration", () => {
       },
       exists: (p: string) => Promise.resolve(p in files),
       mkdir: () => Promise.resolve(),
+      unlink: (p: string) => {
+        delete files[p];
+        return Promise.resolve();
+      },
     };
 
     const storage = createStorageService({

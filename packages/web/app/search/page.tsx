@@ -38,7 +38,7 @@ function confidenceBadge(confidence: PredictionConfidence): string {
 }
 
 function PreviewPanel({ data }: { data: PredictedGameResponse }) {
-  const { game, score, tension, predictionUnavailable } = data;
+  const { game, score, predictionUnavailable } = data;
 
   if (predictionUnavailable) {
     return (
@@ -87,13 +87,6 @@ function PreviewPanel({ data }: { data: PredictedGameResponse }) {
           {score.predictionMeta.predictedAxisCount} predicted,{" "}
           {score.predictionMeta.actualAxisCount} actual &middot;{" "}
           {(score.predictionMeta.coveragePercent * 100).toFixed(0)}% coverage
-        </div>
-      )}
-
-      {tension && (
-        <div className="preview-tension">
-          Tension: predicted {tension.predictedFitness.toFixed(1)} vs tournament cluster{" "}
-          {tension.tournamentClusterAverage.toFixed(1)}
         </div>
       )}
 

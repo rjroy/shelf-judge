@@ -64,7 +64,7 @@ export interface Game {
   updatedAt: string; // ISO 8601
 }
 
-export type AxisSource = "personal" | "bgg";
+export type AxisSource = "personal" | "bgg" | "tournament";
 
 export interface Axis {
   id: string; // UUID
@@ -93,7 +93,7 @@ export interface Collection {
 
 // Fitness score types from .lore/designs/mvp-fitness-model.md
 
-export type FitnessBreakdownSource = "personal" | "bgg" | "override" | "predicted";
+export type FitnessBreakdownSource = "personal" | "bgg" | "tournament" | "override" | "predicted";
 
 export interface FitnessBreakdownEntry {
   axisId: string;
@@ -395,12 +395,6 @@ export interface PredictionReadiness {
   suggestedActions: string[];
 }
 
-export interface RevealedPreferenceTension {
-  predictedFitness: number;
-  tournamentClusterAverage: number;
-  note: string;
-}
-
 export interface PredictionSettings {
   stageThresholds: [number, number, number]; // [stage1, stage2, stage3] defaults [5, 15, 30]
   defaultK: number; // default 5
@@ -417,7 +411,6 @@ export interface PredictionUnavailable {
 export interface PredictedGameResponse {
   game: Game;
   score: FitnessResult;
-  tension: RevealedPreferenceTension | null;
   predictionUnavailable: PredictionUnavailable | null;
   nicheImpact?: NicheImpact;
   redundancyPreview: RedundancyAdjustment | null;

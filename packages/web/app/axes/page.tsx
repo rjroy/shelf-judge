@@ -1,7 +1,13 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import type { Axis, PreferenceShape, ToleranceLevel, LeanDirection } from "@shelf-judge/shared";
+import type {
+  Axis,
+  AxisSource,
+  PreferenceShape,
+  ToleranceLevel,
+  LeanDirection,
+} from "@shelf-judge/shared";
 import { getNativeScale, applyPreferenceCurve } from "@shelf-judge/shared";
 
 interface GameWithScore {
@@ -170,10 +176,18 @@ export default function AxesPage() {
     try {
       const body: Record<string, unknown> = {};
       const axis = axes.find((a) => a.id === id);
-      if (editName.trim() && editName.trim() !== axis?.name) body.name = editName.trim();
-      if (editWeight) body.weight = parseInt(editWeight, 10);
-      if (editDescription !== axis?.description) body.description = editDescription;
-      Object.assign(body, curveStateToBody(editCurve));
+      // Tournament axis is auto-managed; only weight is user-editable. Sending
+      // name/description/curve fields would let the user drift the singleton's
+      // fixed defaults (REQ-TAXIS-5) and apply curves to an already-normalized
+      // 1-10 ELO score (REQ-CURVE-3a says identity passthrough is the default).
+      if (axis?.source === "tournament") {
+        if (editWeight) body.weight = parseInt(editWeight, 10);
+      } else {
+        if (editName.trim() && editName.trim() !== axis?.name) body.name = editName.trim();
+        if (editWeight) body.weight = parseInt(editWeight, 10);
+        if (editDescription !== axis?.description) body.description = editDescription;
+        Object.assign(body, curveStateToBody(editCurve));
+      }
 
       const res = await fetch(`/api/daemon/axes/${id}`, {
         method: "PUT",
@@ -222,6 +236,7 @@ export default function AxesPage() {
 
   const personalAxes = axes.filter((a) => a.source === "personal");
   const bggAxes = axes.filter((a) => a.source === "bgg");
+  const tournamentAxes = axes.filter((a) => a.source === "tournament");
   const totalWeight = axes.reduce((sum, a) => sum + a.weight, 0);
 
   return (
@@ -396,6 +411,51 @@ export default function AxesPage() {
               ))}
             </>
           )}
+
+          {/* Tournament axis */}
+          {tournamentAxes.length > 0 && (
+            <>
+              <div className="section-label section-label-mt">
+                Tournament axis &middot; {tournamentAxes.length}
+              </div>
+              <p className="bgg-axes-desc">
+                Auto-derived from head-to-head tournament comparisons. Each game{"'"}s score is its
+                normalized ELO. Only the weight is editable.
+              </p>
+
+              {tournamentAxes.map((axis) => (
+                <AxisCard
+                  key={axis.id}
+                  axis={axis}
+                  editingId={editingId}
+                  editName={editName}
+                  editWeight={editWeight}
+                  editDescription={editDescription}
+                  editCurve={editCurve}
+                  totalWeight={totalWeight}
+                  ratingsCount={ratingsCountForAxis(axis.id)}
+                  onStartEdit={() => {
+                    setEditingId(axis.id);
+                    setEditName(axis.name);
+                    setEditWeight(String(axis.weight));
+                    setEditDescription(axis.description ?? "");
+                    setEditCurve(curveStateFromAxis(axis));
+                  }}
+                  onCancelEdit={() => setEditingId(null)}
+                  onSave={() => {
+                    void handleUpdate(axis.id);
+                  }}
+                  onDelete={() => {
+                    void handleDelete(axis);
+                  }}
+                  onCurveChange={setEditCurve}
+                  onNameChange={setEditName}
+                  onWeightChange={setEditWeight}
+                  onDescChange={setEditDescription}
+                />
+              ))}
+            </>
+          )}
         </div>
       </div>
     </>
@@ -445,6 +505,7 @@ function AxisCard({
 }: AxisCardProps) {
   const isEditing = editingId === axis.id;
   const isBgg = axis.source === "bgg";
+  const isTournament = axis.source === "tournament";
   const shapeLabel = formatShape(axis.preferenceShape);
   const hasVeto = axis.veto != null;
 
@@ -452,7 +513,7 @@ function AxisCard({
     <div className="axis-card">
       <div className="axis-card-main">
         <div>
-          {isEditing ? (
+          {isEditing && !isTournament ? (
             <div className="edit-fields">
               <input
                 className="form-input"
@@ -473,22 +534,24 @@ function AxisCard({
             <>
               <div className="axis-name">{axis.name}</div>
               {axis.description && <div className="axis-desc">{axis.description}</div>}
-              <div className="axis-curve-summary">
-                <span className="curve-shape-tag">{shapeLabel}</span>
-                {axis.preferenceShape === "sweet-spot" && axis.idealValue != null && (
-                  <span className="curve-detail">ideal: {axis.idealValue}</span>
-                )}
-                {hasVeto && (
-                  <span className="curve-veto-tag">
-                    Veto {axis.veto!.direction} {axis.veto!.threshold}
-                  </span>
-                )}
-              </div>
+              {!isTournament && (
+                <div className="axis-curve-summary">
+                  <span className="curve-shape-tag">{shapeLabel}</span>
+                  {axis.preferenceShape === "sweet-spot" && axis.idealValue != null && (
+                    <span className="curve-detail">ideal: {axis.idealValue}</span>
+                  )}
+                  {hasVeto && (
+                    <span className="curve-veto-tag">
+                      Veto {axis.veto!.direction} {axis.veto!.threshold}
+                    </span>
+                  )}
+                </div>
+              )}
             </>
           )}
         </div>
         <span className={isBgg ? "bgg-source-tag" : "personal-source-tag"}>
-          {isBgg ? <>&#8599; BGG</> : "Personal"}
+          {isBgg ? <>&#8599; BGG</> : isTournament ? "Tournament" : "Personal"}
         </span>
         <div className="weight-display">
           {isEditing ? (
@@ -530,18 +593,20 @@ function AxisCard({
           ) : (
             <>
               <button className="btn btn-secondary btn-sm" onClick={onStartEdit}>
-                {isBgg ? "Edit" : "Edit"}
+                Edit
               </button>
-              <button className="btn btn-danger-outline btn-sm" onClick={onDelete}>
-                Delete
-              </button>
+              {!isTournament && (
+                <button className="btn btn-danger-outline btn-sm" onClick={onDelete}>
+                  Delete
+                </button>
+              )}
             </>
           )}
         </div>
       </div>
 
-      {/* Curve config shown in edit mode */}
-      {isEditing && (
+      {/* Curve config shown in edit mode (not for tournament — identity passthrough) */}
+      {isEditing && !isTournament && (
         <CurveConfig
           curve={editCurve}
           onChange={onCurveChange}
@@ -552,14 +617,20 @@ function AxisCard({
 
       <div className={`axis-stats-strip${isBgg ? " bgg-strip" : ""}`}>
         <div className="axis-stat">
-          {isBgg ? "Auto-populated on" : "Rated on"} <strong>{ratingsCount} games</strong>
+          {isTournament ? (
+            <>Derived from head-to-head comparisons</>
+          ) : (
+            <>
+              {isBgg ? "Auto-populated on" : "Rated on"} <strong>{ratingsCount} games</strong>
+            </>
+          )}
         </div>
         {isBgg && axis.bggField && (
           <div className="axis-stat">
             BGG source: <strong>{axis.bggField}</strong>
           </div>
         )}
-        {!isBgg && (
+        {!isBgg && !isTournament && (
           <div className="axis-stat">
             Created{" "}
             <strong>
@@ -582,7 +653,7 @@ function AxisCard({
 interface CurveConfigProps {
   curve: CurveState;
   onChange: (curve: CurveState) => void;
-  source: "personal" | "bgg";
+  source: AxisSource;
   bggField: string | null;
 }
 

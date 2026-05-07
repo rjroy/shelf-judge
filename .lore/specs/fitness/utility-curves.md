@@ -47,6 +47,8 @@ The central constraint: the user should not need a calculator. Curve configurati
   - `weight` (complexity): native scale 1 to 5
   - Future BGG fields define their own native scales when added.
 
+- REQ-CURVE-3a: Tournament axes (source: "tournament", added by `.lore/specs/tournament/elo-axis-source.md`) have a fixed native scale of 1 to 10, matching the normalized ELO display score produced by REQ-TOURN-9. The default preference shape is "higher is better" with identity passthrough; the value entering the curve is already on the 1-10 effective scale, so the curve is a no-op by default. Sweet-spot or lower-is-better curves are not meaningful for the tournament axis (revealed preference is monotonic by construction) but are not blocked at the type level.
+
 ### Preference Shapes
 
 - REQ-CURVE-4: Each axis has a **preference shape** that defines how raw values on the native scale map to effective 1-10 ratings. The preference shape is independent of the axis weight. Weight controls importance; shape controls what "good" means. The curve is the normalization: it replaces the current hardcoded BGG mappings (e.g., `weight * 2`) with a configurable, visible transform.

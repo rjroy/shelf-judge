@@ -21,3 +21,4 @@ Thumbs.db
 # next.js
 packages/web/next-env.d.ts
 
+.lore/.design-input

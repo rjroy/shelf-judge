@@ -13,7 +13,6 @@ import type {
   DivergentGame,
   CollectionOutlier,
   FitnessResult,
-  RevealedPreferenceTension,
   NichePosition,
   NicheEntry,
   NicheNeighbor,
@@ -51,7 +50,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
   let tournamentStats: TournamentGameStatsDisplay | null = null;
   let profileDivergence: DivergentGame | null = null;
   let profileOutlier: CollectionOutlier | null = null;
-  let prediction: { score: FitnessResult; tension?: RevealedPreferenceTension } | null = null;
+  let prediction: { score: FitnessResult } | null = null;
   let ignoredTags: NicheTagFilter[] = [];
   try {
     [data, axes] = await Promise.all([getGame(id), listAxes()]);
@@ -73,7 +72,6 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
       if (predicted.score?.predictionMeta) {
         prediction = {
           score: predicted.score,
-          tension: predicted.tension ?? undefined,
         };
       }
     } catch {
@@ -239,7 +237,9 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
                       {displayScore.predictionMeta!.predictedAxisCount} predicted
                     </div>
                     <div className="score-hero-predict-summary" style={{ marginTop: 2 }}>
-                      <span className={`conf-badge conf-${displayScore.predictionMeta!.confidence}`}>
+                      <span
+                        className={`conf-badge conf-${displayScore.predictionMeta!.confidence}`}
+                      >
                         {displayScore.predictionMeta!.confidence}
                       </span>
                     </div>
@@ -466,47 +466,6 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
                 </>
               )}
             </div>
-
-            {/* Revealed preference tension */}
-            {prediction?.score?.predictionMeta &&
-              (() => {
-                // Check if any breakdown entry has tension data available
-                // Tension comes through the prediction response
-                const tensionNote = prediction.score.predictionMeta
-                  ? prediction.tension
-                  : undefined;
-                if (!tensionNote) return null;
-
-                const delta = Math.abs(
-                  tensionNote.predictedFitness - tensionNote.tournamentClusterAverage,
-                );
-
-                return (
-                  <div className="tension-panel">
-                    <div className="tension-header">
-                      <span className="tension-icon">&#x26A1;</span>
-                      <span className="tension-title">Revealed Preference Tension</span>
-                      <span className="tension-delta">&Delta; {delta.toFixed(1)} points</span>
-                    </div>
-                    <div className="tension-body">
-                      <div className="tension-signal">
-                        <div className="tension-signal-label">Axis Prediction</div>
-                        <div className="tension-signal-value predict">
-                          {tensionNote.predictedFitness.toFixed(1)}
-                        </div>
-                      </div>
-                      <span className="tension-vs">vs</span>
-                      <div className="tension-signal">
-                        <div className="tension-signal-label">Tournament Pattern</div>
-                        <div className="tension-signal-value tourney">
-                          {tensionNote.tournamentClusterAverage.toFixed(1)}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="tension-note">{tensionNote.note}</div>
-                  </div>
-                );
-              })()}
           </div>
           <div className="panel-right">
             <div className="panel-section-title">Your Ratings</div>

@@ -147,7 +147,6 @@ function createMockPredictionService(): Partial<PredictionService> {
       return Promise.resolve({
         game: candidateGame,
         score: makeScore(7.5),
-        tension: null,
         predictionUnavailable: null,
       });
     },

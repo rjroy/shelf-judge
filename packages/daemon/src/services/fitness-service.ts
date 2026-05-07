@@ -5,6 +5,7 @@ import type {
   FitnessResult,
   FitnessBreakdownEntry,
   FitnessBreakdownSource,
+  TournamentData,
 } from "@shelf-judge/shared";
 import { resolveBggRawValue } from "@shelf-judge/shared";
 import {
@@ -13,9 +14,24 @@ import {
   checkVeto,
   computeHigherIsBetterEffective,
 } from "./curve-engine";
+import { deriveDisplayStats } from "./tournament-service";
+
+// Empty tournament shape used when no tournament data is supplied. deriveDisplayStats
+// gracefully returns normalizedScore=null for any gameId here, matching the spec's
+// "no comparisons" semantic without requiring callers to fabricate a TournamentData.
+const EMPTY_TOURNAMENT: TournamentData = {
+  settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
+  sessions: [],
+  gameStats: {},
+};
 
 export interface FitnessService {
-  calculateScore(game: Game, axes: Axis[], bggData: BggGameData | null): FitnessResult | null;
+  calculateScore(
+    game: Game,
+    axes: Axis[],
+    bggData: BggGameData | null,
+    tournamentData?: TournamentData | null,
+  ): FitnessResult | null;
 }
 
 function roundToOneDecimal(value: number): number {
@@ -29,7 +45,12 @@ const CURVE_AFFECTED_THRESHOLD = 0.5;
 
 export function createFitnessService(): FitnessService {
   return {
-    calculateScore(game: Game, axes: Axis[], bggData: BggGameData | null): FitnessResult | null {
+    calculateScore(
+      game: Game,
+      axes: Axis[],
+      bggData: BggGameData | null,
+      tournamentData?: TournamentData | null,
+    ): FitnessResult | null {
       const breakdown: FitnessBreakdownEntry[] = [];
       let weightedSum = 0;
       let weightSum = 0;
@@ -46,11 +67,23 @@ export function createFitnessService(): FitnessService {
         // Determine raw value, source, and the appropriate native scale for curve application.
         // Personal overrides use the personal scale (1-10), not the BGG axis scale.
         let rawValue: number | null = null;
-        let source: FitnessBreakdownSource = axis.source === "bgg" ? "bgg" : "personal";
+        let source: FitnessBreakdownSource =
+          axis.source === "bgg" ? "bgg" : axis.source === "tournament" ? "tournament" : "personal";
         let bggOriginal: number | null = null;
         let valueScale = scale;
 
-        if (personalRating !== undefined) {
+        if (axis.source === "tournament") {
+          // Tournament axis: contribute the normalized ELO display score.
+          // deriveDisplayStats returns normalizedScore=null when there are no comparisons
+          // for this game, or the cohort of compared games is < 5 (REQ-TAXIS-7); in either
+          // case the axis is excluded from numerator and denominator, the same way an
+          // unrated personal axis is. (REQ-TAXIS-6)
+          const stats = deriveDisplayStats(game.id, tournamentData ?? EMPTY_TOURNAMENT);
+          if (stats.normalizedScore !== null) {
+            rawValue = stats.normalizedScore;
+            source = "tournament";
+          }
+        } else if (personalRating !== undefined) {
           rawValue = personalRating;
           // Personal ratings are always on the 1-10 scale, even when overriding a BGG axis
           valueScale = getNativeScale("personal", null);
@@ -140,8 +173,9 @@ export function createFitnessService(): FitnessService {
         const sourceOrder: Record<FitnessBreakdownSource, number> = {
           override: 0,
           bgg: 1,
-          personal: 2,
-          predicted: 3,
+          tournament: 2,
+          personal: 3,
+          predicted: 4,
         };
         if (sourceOrder[a.source] !== sourceOrder[b.source]) {
           return sourceOrder[a.source] - sourceOrder[b.source];

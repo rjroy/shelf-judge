@@ -196,6 +196,58 @@ describe("formatBreakdown", () => {
     expect(result).toContain("Fun");
     expect(result).not.toContain("Raw");
   });
+
+  // REQ-TAXIS-11: tournament source flows through unchanged. Verifies the
+  // formatter does not crash on the new enum value and that column padding
+  // accommodates the longer "tournament" string without clobbering neighbors.
+  test("renders tournament source without column misalignment", () => {
+    const result = formatBreakdown([
+      {
+        axisName: "Tournament",
+        rating: 7.2,
+        weight: 30,
+        contribution: 2.16,
+        source: "tournament",
+        bggOriginal: null,
+      },
+      {
+        axisName: "Wife will play it",
+        rating: 8,
+        weight: 40,
+        contribution: 3.2,
+        source: "personal",
+        bggOriginal: null,
+      },
+    ]);
+    expect(result).toContain("tournament");
+    expect(result).toContain("personal");
+    // All non-empty lines (header, separator, data rows) must have equal
+    // length once trailing padding is preserved. formatTable pads every
+    // column to its max width, so every line should be the same length.
+    const lines = result.split("\n").filter((l) => l.length > 0);
+    const firstLen = lines[0].length;
+    for (const line of lines) {
+      expect(line.length).toBe(firstLen);
+    }
+  });
+
+  // REQ-TAXIS-11: tournament axis with null rating renders identical
+  // "not rated" treatment to any other unrated axis.
+  test("renders null-valued tournament entry as '---' (parity with personal)", () => {
+    const result = formatBreakdown([
+      {
+        axisName: "Tournament",
+        rating: null,
+        weight: 30,
+        contribution: null,
+        source: "tournament",
+        bggOriginal: null,
+      },
+    ]);
+    expect(result).toContain("Tournament");
+    expect(result).toContain("---");
+    expect(result).toContain("tournament");
+  });
 });
 
 describe("printOutput", () => {

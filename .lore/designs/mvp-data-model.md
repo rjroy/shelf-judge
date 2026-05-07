@@ -74,7 +74,7 @@ interface Axis {
   name: string; // "Wife will play it", "Visual design", etc.
   description: string | null; // Optional clarification
   weight: number; // 1-100, user-assigned importance
-  source: "personal" | "bgg"; // Personal = user rates manually. BGG = auto-populated.
+  source: "personal" | "bgg" | "tournament"; // Personal = user rates manually. BGG = auto-populated. Tournament = derived from ELO comparisons.
   bggField: string | null; // For source="bgg": which BGG field maps here
   createdAt: string;
   updatedAt: string;
@@ -83,12 +83,13 @@ interface Axis {
 
 BGG-derived axes (`source: "bgg"`) are auto-populated when a game has BGG data. The `bggField` identifies which field maps to this axis. Two BGG-derived axes are created by default (the user can delete or re-weight them):
 
-| Default axis     | `bggField`        | Mapping                                                 |
-| ---------------- | ----------------- | ------------------------------------------------------- |
-| Community Rating | `communityRating` | Pass-through (already 1-10)                             |
-| Complexity       | `weight`          | BGG weight 1-5 normalized to 1-10: `score = weight * 2` |
+| Default axis     | `source`     | `bggField`        | Weight | Mapping                                                                                                      |
+| ---------------- | ------------ | ----------------- | ------ | ------------------------------------------------------------------------------------------------------------ |
+| Community Rating | `bgg`        | `communityRating` | (user) | Pass-through (already 1-10)                                                                                  |
+| Complexity       | `bgg`        | `weight`          | (user) | BGG weight 1-5 normalized to 1-10: `score = weight * 2`                                                      |
+| Tournament       | `tournament` | `null`            | 30     | Value is the normalized ELO display score per REQ-TAXIS-6 (see `.lore/specs/tournament/elo-axis-source.md`). |
 
-The user can create additional BGG-derived axes later (player count fit, for example), but MVP ships with these two.
+The user can create additional BGG-derived axes later (player count fit, for example), but MVP ships with the two BGG-derived axes above. The Tournament axis is a singleton system axis auto-created on collection initialization (REQ-TAXIS-3, REQ-TAXIS-4).
 
 ## Collection
 

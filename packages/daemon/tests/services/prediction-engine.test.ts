@@ -892,6 +892,141 @@ describe("computePredictedFitness", () => {
   });
 });
 
+// --- Tournament axis prediction (REQ-TAXIS-8 / REQ-TAXIS-17) ---
+
+describe("computePredictedFitness with tournament axis", () => {
+  function makeTournamentAxis(): Axis {
+    return {
+      id: "tournament",
+      name: "Tournament",
+      description: null,
+      weight: 30,
+      source: "tournament",
+      bggField: null,
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+  }
+
+  // The fitness service excludes tournament axes for games with null
+  // normalizedScore the same way it excludes unrated personal axes. This
+  // mock mirrors that for the target game (no tournament data) — every axis
+  // is unrated so the actual result is null and computePredictedFitness
+  // routes the tournament axis through the predicted-axis branch.
+  const tournamentMockCalculateScore: (
+    game: Game,
+    axes: Axis[],
+    bggData: BggGameData | null,
+  ) => FitnessResult | null = () => null;
+
+  test("predicts tournament axis for a 6th game from a 5-game cohort (hand-calculated)", () => {
+    // Five reference games each with a tournament value (i.e. comparisons in
+    // a 5+ cohort). Their feature vectors are tuned so cosine similarity to
+    // the target is identical (1.0) for all five — so the predicted value
+    // is simply the arithmetic mean of their tournament ratings.
+    const tournamentAxis = makeTournamentAxis();
+    const target = [1, 0, 0.5];
+    const refs: ReferenceGameCandidate[] = [
+      makeCandidate({ gameId: "r1", vector: [1, 0, 0.5], ratings: { tournament: 6.0 } }),
+      makeCandidate({ gameId: "r2", vector: [1, 0, 0.5], ratings: { tournament: 7.0 } }),
+      makeCandidate({ gameId: "r3", vector: [1, 0, 0.5], ratings: { tournament: 8.0 } }),
+      makeCandidate({ gameId: "r4", vector: [1, 0, 0.5], ratings: { tournament: 9.0 } }),
+      makeCandidate({ gameId: "r5", vector: [1, 0, 0.5], ratings: { tournament: 10.0 } }),
+    ];
+
+    const game = makeGame("target");
+    const result = computePredictedFitness(
+      game,
+      [tournamentAxis],
+      null,
+      refs,
+      target,
+      defaultSettings,
+      2,
+      tournamentMockCalculateScore,
+    );
+
+    // All similarities are 1.0, so weighted mean == arithmetic mean = 8.0.
+    const predictedEntry = result.fitnessResult.breakdown.find((e) => e.axisId === "tournament");
+    expect(predictedEntry).toBeDefined();
+    expect(predictedEntry!.source).toBe("predicted");
+    expect(predictedEntry!.rating).toBeCloseTo(8.0, 5);
+    expect(predictedEntry!.predictionConfidence).not.toBe("insufficient");
+    expect(predictedEntry!.predictionConfidence).not.toBe("actual");
+    expect(predictedEntry!.referenceGames).not.toBeNull();
+    expect(predictedEntry!.referenceGames!.length).toBe(5);
+
+    expect(result.predictedAxisCount).toBe(1);
+    expect(result.actualAxisCount).toBe(0);
+  });
+
+  test("game with non-null tournament value contributes as a reference game (filter-fix regression)", () => {
+    // Without the prediction-service filter fix, ReferenceGameCandidate.ratings
+    // would not include the tournament axis even though the candidate had a
+    // tournament value. Here we simulate the post-fix shape — ratings includes
+    // the tournament axis — and confirm k-NN actually picks the candidate up.
+    const target = [1, 0, 0.5];
+    const refs: ReferenceGameCandidate[] = [
+      makeCandidate({
+        gameId: "with-tournament",
+        vector: [1, 0, 0.5],
+        ratings: { tournament: 7.5 },
+      }),
+    ];
+
+    const matches = findKNearestForAxis(target, refs, "tournament", 5, 0.0);
+    expect(matches).toHaveLength(1);
+    expect(matches[0].gameId).toBe("with-tournament");
+    expect(matches[0].rating).toBe(7.5);
+  });
+
+  test("Stage 0 returns no tournament-axis predictions", () => {
+    const tournamentAxis = makeTournamentAxis();
+    const refs: ReferenceGameCandidate[] = [
+      makeCandidate({ gameId: "r1", vector: [1, 0, 0.5], ratings: { tournament: 7.0 } }),
+    ];
+
+    const result = computePredictedFitness(
+      makeGame("target"),
+      [tournamentAxis],
+      null,
+      refs,
+      [1, 0, 0.5],
+      defaultSettings,
+      0,
+      tournamentMockCalculateScore,
+    );
+
+    const entry = result.fitnessResult.breakdown.find((e) => e.axisId === "tournament");
+    expect(entry).toBeDefined();
+    expect(entry!.source).toBe("tournament"); // unrated, not predicted
+    expect(entry!.rating).toBeNull();
+    expect(entry!.predictionConfidence).toBeNull();
+    expect(result.predictedAxisCount).toBe(0);
+  });
+
+  test("tournament axis with no reference candidates produces insufficient prediction", () => {
+    const tournamentAxis = makeTournamentAxis();
+
+    const result = computePredictedFitness(
+      makeGame("target"),
+      [tournamentAxis],
+      null,
+      [], // no reference games
+      [1, 0, 0.5],
+      defaultSettings,
+      2,
+      tournamentMockCalculateScore,
+    );
+
+    const entry = result.fitnessResult.breakdown.find((e) => e.axisId === "tournament");
+    expect(entry).toBeDefined();
+    expect(entry!.source).toBe("predicted");
+    expect(entry!.predictionConfidence).toBe("insufficient");
+    expect(entry!.rating).toBeNull();
+  });
+});
+
 // --- assessReadiness ---
 
 describe("assessReadiness", () => {
@@ -1082,5 +1217,40 @@ describe("assessReadiness", () => {
     // No cluster suggestions, only weak-axis suggestions
     const clusterActions = result.suggestedActions.filter((a) => a.includes("cluster"));
     expect(clusterActions.length).toBe(0);
+  });
+
+  test("tournament axis ratings count toward weakAxes thresholds (REQ-TAXIS-8)", () => {
+    // Mixed: a personal axis rated on 5 games, and a tournament axis rated on
+    // only 2 games. With defaultK=5 the tournament axis is weak; the personal
+    // axis is not.
+    const mixedAxes: Axis[] = [
+      makeAxis("fun", "Fun", 50, "personal"),
+      {
+        id: "tournament",
+        name: "Tournament",
+        description: null,
+        weight: 30,
+        source: "tournament",
+        bggField: null,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    ];
+
+    const gameRatings = new Map<string, Record<string, number>>([
+      ["g1", { fun: 8, tournament: 7.0 }],
+      ["g2", { fun: 7, tournament: 6.5 }],
+      ["g3", { fun: 6 }],
+      ["g4", { fun: 5 }],
+      ["g5", { fun: 4 }],
+    ]);
+
+    const result = assessReadiness(5, mixedAxes, gameRatings, emptyVocab, defaultSettings);
+    // tournament axis has 2 ratings → weak (< defaultK=5)
+    // fun has 5 ratings → not weak
+    expect(result.weakAxes.map((a) => a.axisId)).toContain("tournament");
+    expect(result.weakAxes.map((a) => a.axisId)).not.toContain("fun");
+    const tournamentWeak = result.weakAxes.find((a) => a.axisId === "tournament");
+    expect(tournamentWeak!.ratedCount).toBe(2);
   });
 });

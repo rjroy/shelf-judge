@@ -184,7 +184,6 @@ describe("prediction routes", () => {
       expect(prediction.score.predictionMeta!.predictedAxisCount).toBeGreaterThan(0);
       expect(prediction.score.predictionMeta!.confidence).toBeDefined();
       expect(prediction.score.predictionMeta!.referenceGameCount).toBeGreaterThan(0);
-      expect(prediction.tension).toBeDefined(); // null or object, but field exists
       expect(prediction.predictionUnavailable).toBeNull();
     });
 

@@ -57,7 +57,7 @@ interface FitnessBreakdownEntry {
   rating: number | null; // null if not rated
   weight: number;
   contribution: number | null; // Points contributed to score, null if not rated
-  source: "personal" | "bgg" | "override"; // "override" = user replaced BGG value
+  source: "personal" | "bgg" | "override" | "predicted" | "tournament"; // "override" = user replaced BGG value; "predicted" added by REQ-PRED-33; "tournament" added by REQ-TAXIS-2
   bggOriginal: number | null; // Original BGG value when source is "override"
 }
 ```

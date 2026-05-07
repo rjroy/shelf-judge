@@ -62,12 +62,14 @@ describe("AxisService", () => {
   });
 
   describe("listAxes", () => {
-    test("returns default BGG-derived axes on fresh collection", async () => {
+    test("returns default BGG-derived axes plus tournament axis on fresh collection", async () => {
       const axes = await axisService.listAxes();
 
-      expect(axes.length).toBe(2);
+      // 2 BGG axes + 1 auto-created tournament axis (REQ-TAXIS-4)
+      expect(axes.length).toBe(3);
       expect(axes.find((a) => a.name === "Community Rating")).toBeTruthy();
       expect(axes.find((a) => a.name === "Complexity")).toBeTruthy();
+      expect(axes.find((a) => a.source === "tournament")).toBeTruthy();
     });
   });
 
@@ -103,6 +105,20 @@ describe("AxisService", () => {
       await expect(axisService.updateAxis("nonexistent", { name: "Nope" })).rejects.toThrow(
         "Axis not found",
       );
+    });
+
+    test("updates weight on the auto-created tournament axis", async () => {
+      // The tournament axis is migrated in by ensureTournamentAxis at first load.
+      // It's a singleton with fixed defaults (REQ-TAXIS-5), but weight is user-tunable
+      // from the Axis Settings page — confirm the update path accepts it.
+      const axes = await axisService.listAxes();
+      const tournamentAxis = axes.find((a) => a.source === "tournament");
+      expect(tournamentAxis).toBeDefined();
+
+      const updated = await axisService.updateAxis(tournamentAxis!.id, { weight: 55 });
+      expect(updated.weight).toBe(55);
+      expect(updated.source).toBe("tournament");
+      expect(updated.name).toBe(tournamentAxis!.name);
     });
   });
 
