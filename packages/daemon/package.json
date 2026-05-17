@@ -9,7 +9,8 @@
     "start": "bun src/index.ts"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.112",
+    "@mariozechner/pi-ai": "^0.73.1",
+    "@mariozechner/pi-coding-agent": "^0.73.1",
     "@shelf-judge/shared": "workspace:*",
     "fast-xml-parser": "^5.2.0",
     "hono": "^4.7.0",
