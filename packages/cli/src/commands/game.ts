@@ -196,7 +196,7 @@ export async function gameRefreshAllBgg(
 
   if (opts.json) return printOutput(data, opts);
 
-  const result = data as { refreshed: number; errors: string[] };
+  const result = data;
   const lines: string[] = [`Refreshed ${result.refreshed} game(s)`];
   if (result.errors.length > 0) {
     lines.push(`Errors (${result.errors.length}):`);

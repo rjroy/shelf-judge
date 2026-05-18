@@ -271,16 +271,16 @@ function createMockGameService(overrides: Partial<GameService> = {}): GameServic
   const notImpl = () => Promise.reject(new Error("not implemented"));
   return {
     listGames: () => Promise.resolve([]),
-    getGame: notImpl as GameService["getGame"],
-    addGame: notImpl as GameService["addGame"],
-    rateGame: notImpl as GameService["rateGame"],
-    removeGame: notImpl as GameService["removeGame"],
-    refreshBggData: notImpl as GameService["refreshBggData"],
-    refreshAllBggData: notImpl as GameService["refreshAllBggData"],
-    searchGames: notImpl as GameService["searchGames"],
-    importBggCollection: notImpl as GameService["importBggCollection"],
-    setOwnership: notImpl as GameService["setOwnership"],
-    setBoxDimensions: notImpl as GameService["setBoxDimensions"],
+    getGame: notImpl,
+    addGame: notImpl,
+    rateGame: notImpl,
+    removeGame: notImpl,
+    refreshBggData: notImpl,
+    refreshAllBggData: notImpl,
+    searchGames: notImpl,
+    importBggCollection: notImpl,
+    setOwnership: notImpl,
+    setBoxDimensions: notImpl,
     ...overrides,
   };
 }

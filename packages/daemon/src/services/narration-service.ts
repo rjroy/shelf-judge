@@ -1,8 +1,27 @@
 import type { CollectionProfile, GameWithScore, ProfileNarration } from "@shelf-judge/shared";
 import type { GameService } from "./game-service.js";
 import { createLogger } from "./logger.js";
+import {
+  createAgentSession,
+  defineTool,
+  DefaultResourceLoader,
+  getAgentDir,
+  SessionManager,
+} from "@earendil-works/pi-coding-agent";
+import { Type } from "@earendil-works/pi-ai";
 
 const logger = createLogger("narration");
+
+const DEFAULT_NARRATION_MODEL = "openrouter:openrouter/free";
+
+/**
+ * Verbose diagnostics. Enables: full registered-model enumeration,
+ * per-message body dumps, raw event payloads. Off by default; turn on
+ * with SHELF_JUDGE_NARRATION_DEBUG=1 to debug agent loop or model issues.
+ */
+const DEBUG =
+  process.env.SHELF_JUDGE_NARRATION_DEBUG === "1" ||
+  process.env.SHELF_JUDGE_NARRATION_DEBUG === "true";
 
 export interface NarrationService {
   generateNarration(profile: CollectionProfile): Promise<ProfileNarration>;
@@ -12,38 +31,15 @@ export interface NarrationServiceDeps {
   gameService: GameService;
 }
 
-const NARRATION_JSON_SCHEMA = {
-  type: "object" as const,
-  properties: {
-    summary: {
-      type: "string" as const,
-      description: "2-4 paragraph overview of collection identity",
-    },
-    surprises: {
-      type: "array" as const,
-      items: { type: "string" as const },
-      description: "Unexpected patterns in the collection",
-    },
-    tensions: {
-      type: "array" as const,
-      items: { type: "string" as const },
-      description: "Disagreements between stated and revealed preferences",
-    },
-    blindSpots: {
-      type: "array" as const,
-      items: { type: "string" as const },
-      description: "Absent or underrepresented attribute categories",
-    },
-    curveInsights: {
-      type: "array" as const,
-      items: { type: "string" as const },
-      description:
-        "Utility curve observations relating configured preferences to actual distributions",
-    },
-  },
-  required: ["summary", "surprises", "tensions", "blindSpots", "curveInsights"],
-  additionalProperties: false,
-};
+function parseModelSpec(spec: string): { provider: string; modelId: string } {
+  const sep = spec.indexOf(":");
+  if (sep < 1 || sep === spec.length - 1) {
+    throw new Error(
+      `Invalid SHELF_JUDGE_NARRATION_MODEL: "${spec}" (expected "provider:model-id")`,
+    );
+  }
+  return { provider: spec.slice(0, sep), modelId: spec.slice(sep + 1) };
+}
 
 function buildSystemPrompt(profile: CollectionProfile): string {
   const axisInfo = profile.axisDistributions
@@ -91,47 +87,106 @@ ${profile.utilityCurves.length > 0 ? "Compare the utility curve configurations a
 
 Collection summary: ${profile.gameCount} games, ${profile.ratedGameCount} rated.
 
-Respond ONLY with the structured JSON output. Do not include any other text.`;
+When you are ready, call \`submit_narration\` exactly once as your final action with the structured output. Do not produce any other final text.`;
 }
 
 export function createNarrationService(deps: NarrationServiceDeps): NarrationService {
   const { gameService } = deps;
 
   async function generateNarration(profile: CollectionProfile): Promise<ProfileNarration> {
-    logger.log("starting narration generation...");
+    logger.log(
+      `starting narration: ${profile.gameCount} games, ${profile.ratedGameCount} rated${DEBUG ? " (DEBUG)" : ""}`,
+    );
 
-    // Dynamic import to avoid loading the SDK (and its subprocess machinery)
-    // when narration is never requested. This keeps daemon startup fast.
-    logger.log("loading Claude Agent SDK...");
-    let query, tool, createSdkMcpServer;
-    try {
-      ({ query, tool, createSdkMcpServer } = await import("@anthropic-ai/claude-agent-sdk"));
-    } catch (err) {
-      logger.error("failed to import Claude Agent SDK:", err);
-      throw err;
-    }
-    const { z } = await import("zod/v4");
-    logger.log("SDK loaded successfully");
-
-    // MCP tools: read-only access to collection data
-    const getCollectionGames = tool(
-      "get_collection_games",
-      "Returns the list of games in the collection with their BGG data, ratings, and fitness scores. Use to drill into specific games when tracing patterns.",
+    const NarrationSchema = Type.Object(
       {
-        mechanic: z.string().optional().describe("Filter by mechanic name"),
-        category: z.string().optional().describe("Filter by category name"),
+        summary: Type.String({ description: "2-4 paragraph overview of collection identity" }),
+        surprises: Type.Array(Type.String(), {
+          description: "Unexpected patterns in the collection",
+        }),
+        tensions: Type.Array(Type.String(), {
+          description: "Disagreements between stated and revealed preferences",
+        }),
+        blindSpots: Type.Array(Type.String(), {
+          description: "Absent or underrepresented attribute categories",
+        }),
+        curveInsights: Type.Array(Type.String(), {
+          description:
+            "Utility curve observations relating configured preferences to actual distributions",
+        }),
       },
-      async (args) => {
+      { additionalProperties: false },
+    );
+
+    const CollectionFilterSchema = Type.Object({
+      mechanic: Type.Optional(Type.String({ description: "Filter by mechanic name" })),
+      category: Type.Optional(Type.String({ description: "Filter by category name" })),
+    });
+
+    const ProfileSectionSchema = Type.Object({
+      section: Type.Union(
+        [
+          Type.Literal("divergence"),
+          Type.Literal("outliers"),
+          Type.Literal("suggestions"),
+          Type.Literal("clustering"),
+          Type.Literal("distributions"),
+          Type.Literal("curves"),
+        ],
+        { description: "Which section to retrieve" },
+      ),
+    });
+
+    // Wrap in an object so TS doesn't narrow it to `null` based on the initializer;
+    // the actual assignment happens inside a tool callback (closure) which TS
+    // doesn't track for control-flow narrowing of the outer variable.
+    const captured: { value: ProfileNarration | null } = { value: null };
+
+    const submitNarration = defineTool({
+      name: "submit_narration",
+      label: "Submit narration",
+      description:
+        "Submit the final structured narration. Call this exactly once as your last action.",
+      parameters: NarrationSchema,
+      // eslint-disable-next-line @typescript-eslint/require-await -- defineTool requires async
+      async execute(_id, params) {
+        if (captured.value) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "submit_narration was already called; ignoring duplicate.",
+              },
+            ],
+            details: undefined,
+          };
+        }
+        captured.value = params;
+        return {
+          content: [{ type: "text" as const, text: "Narration accepted." }],
+          details: undefined,
+          terminate: true,
+        };
+      },
+    });
+
+    const getCollectionGames = defineTool({
+      name: "get_collection_games",
+      label: "Get collection games",
+      description:
+        "Returns the list of games in the collection with their BGG data, ratings, and fitness scores. Use to drill into specific games when tracing patterns.",
+      parameters: CollectionFilterSchema,
+      async execute(_id, params) {
         const games = await gameService.listGames();
         let filtered: GameWithScore[] = games;
-        if (args.mechanic) {
-          const m = args.mechanic.toLowerCase();
+        if (params.mechanic) {
+          const m = params.mechanic.toLowerCase();
           filtered = filtered.filter((g) =>
             g.game.bggData?.mechanics.some((mech) => mech.name.toLowerCase().includes(m)),
           );
         }
-        if (args.category) {
-          const c = args.category.toLowerCase();
+        if (params.category) {
+          const c = params.category.toLowerCase();
           filtered = filtered.filter((g) =>
             g.game.bggData?.categories.some((cat) => cat.name.toLowerCase().includes(c)),
           );
@@ -156,22 +211,20 @@ export function createNarrationService(deps: NarrationServiceDeps): NarrationSer
               ),
             },
           ],
+          details: undefined,
         };
       },
-    );
+    });
 
-    const getProfileDetail = tool(
-      "get_profile_detail",
-      "Returns a specific section of the algorithmic profile in full detail.",
-      {
-        section: z
-          .enum(["divergence", "outliers", "suggestions", "clustering", "distributions", "curves"])
-          .describe("Which section to retrieve"),
-      },
-      // eslint-disable-next-line @typescript-eslint/require-await -- SDK tool() requires async callback
-      async (args) => {
+    const getProfileDetail = defineTool({
+      name: "get_profile_detail",
+      label: "Get profile detail",
+      description: "Returns a specific section of the algorithmic profile in full detail.",
+      parameters: ProfileSectionSchema,
+      // eslint-disable-next-line @typescript-eslint/require-await -- defineTool requires async
+      async execute(_id, params) {
         let data: unknown;
-        switch (args.section) {
+        switch (params.section) {
           case "divergence":
             data = profile.divergence;
             break;
@@ -193,72 +246,153 @@ export function createNarrationService(deps: NarrationServiceDeps): NarrationSer
         }
         return {
           content: [{ type: "text" as const, text: JSON.stringify(data) }],
+          details: undefined,
         };
       },
-    );
-
-    const mcpServer = createSdkMcpServer({
-      name: "shelf-judge-profile",
-      tools: [getCollectionGames, getProfileDetail],
     });
 
-    // Strip narration fields from the profile to avoid self-referential data
-    const profileData = { ...profile } as Record<string, unknown>;
-    delete profileData.narration;
-    delete profileData.narrationState;
+    const cwd = process.cwd();
+    const agentDir = getAgentDir();
+    const resourceLoader = new DefaultResourceLoader({ cwd, agentDir });
+    await resourceLoader.reload();
+    const sessionManager = SessionManager.inMemory();
 
-    const systemPrompt = buildSystemPrompt(profile);
-    const userPrompt = `Here is the full collection profile to interpret:\n\n${JSON.stringify(profileData, null, 2)}`;
-
-    logger.log("sending query to Claude Agent SDK (model: haiku)...");
-    const queryResult = query({
-      prompt: userPrompt,
-      options: {
-        model: "haiku",
-        systemPrompt,
-        outputFormat: { type: "json_schema", schema: NARRATION_JSON_SCHEMA },
-        mcpServers: { "shelf-judge-profile": mcpServer },
-        tools: [],
-        effort: "low",
-        permissionMode: "dontAsk",
-        persistSession: false,
-      },
+    // Create the session WITHOUT a model so extensions get a chance to load
+    // and register their providers. The model is resolved and set below
+    // after bindExtensions fires session_start. Skipping bindExtensions or
+    // resolving via pi-ai's static getModel breaks user-registered providers
+    // (e.g. fallback chains from ~/.pi/agent/extensions/).
+    const { session, modelFallbackMessage } = await createAgentSession({
+      cwd,
+      thinkingLevel: "off",
+      sessionManager,
+      resourceLoader,
+      noTools: "builtin",
+      customTools: [submitNarration, getCollectionGames, getProfileDetail],
     });
+    if (modelFallbackMessage) logger.warn(`pi modelFallbackMessage: ${modelFallbackMessage}`);
 
-    // Iterate the async generator to completion
-    let result: ProfileNarration | null = null;
-    let turnCount = 0;
-    for await (const message of queryResult) {
-      turnCount++;
-      logger.log(`SDK message #${turnCount}: type=${message.type}`);
-      if (message.type === "result") {
-        if (message.subtype === "success") {
-          logger.log("SDK returned success");
-          if (message.structured_output) {
-            logger.log("parsing structured_output");
-            result = message.structured_output as ProfileNarration;
-          } else {
-            logger.error("no structured_output, parsing result text");
-          throw new Error(
-            `Narration generation failed: ${message.subtype}${message.result ? ` - ${message.result}` : ""}`,
-          );
-          }
-        } else {
-          const errors = (message as { errors?: string[] }).errors ?? [];
-          logger.error(`SDK returned ${message.subtype}:`, errors);
-          throw new Error(
-            `Narration generation failed: ${message.subtype}${errors.length > 0 ? ` - ${errors.join(", ")}` : ""}`,
-          );
-        }
+    if (DEBUG) {
+      logger.log(`pi agent dir: ${agentDir}`);
+      const all = session.modelRegistry.getAll();
+      logger.log(`modelRegistry has ${all.length} model(s):`);
+      for (const m of all) {
+        logger.log(`  - ${m.provider}:${m.id}${m.name ? ` (${m.name})` : ""}`);
       }
     }
 
+    const { provider, modelId } = parseModelSpec(
+      process.env.SHELF_JUDGE_NARRATION_MODEL ?? DEFAULT_NARRATION_MODEL,
+    );
+    const model = session.modelRegistry.find(provider, modelId);
+    if (!model) {
+      const msg = `Model "${provider}:${modelId}" not found in session.modelRegistry. Check ~/.pi/agent/models.json and any extensions in ~/.pi/agent/extensions/. Set SHELF_JUDGE_NARRATION_DEBUG=1 to list registered models.`;
+      logger.error(msg);
+      throw new Error(msg);
+    }
+
+    // bindExtensions fires session_start, which is the only event some
+    // extensions use to capture references (e.g. modelRegistry). Calling
+    // setModel before this leaves those extensions in a half-initialized
+    // state and prompt() will fail with extension-specific errors.
+    await session.bindExtensions({});
+    await session.setModel(model);
+    logger.log(`session ready: model=${model.provider}:${model.id}, thinking=off`);
+
+    const unsubscribe = session.subscribe((event) => {
+      switch (event.type) {
+        case "tool_execution_start": {
+          const args = JSON.stringify(event.args);
+          logger.log(
+            `tool start: ${event.toolName} args=${args.length > 200 ? args.slice(0, 200) + "..." : args}`,
+          );
+          break;
+        }
+        case "tool_execution_end": {
+          if (event.isError) {
+            const result = JSON.stringify(event.result);
+            logger.error(
+              `tool failed: ${event.toolName} result=${result.length > 400 ? result.slice(0, 400) + "..." : result}`,
+            );
+          } else if (DEBUG) {
+            const result = JSON.stringify(event.result);
+            logger.log(
+              `tool end: ${event.toolName} result=${result.length > 200 ? result.slice(0, 200) + "..." : result}`,
+            );
+          }
+          break;
+        }
+        case "auto_retry_start":
+          logger.warn(`auto-retry ${event.attempt}/${event.maxAttempts}: ${event.errorMessage}`);
+          break;
+        case "auto_retry_end":
+          if (event.success) {
+            logger.log(`auto-retry recovered on attempt ${event.attempt}`);
+          } else {
+            logger.error(
+              `auto-retry exhausted at attempt ${event.attempt}: ${event.finalError ?? "unknown"}`,
+            );
+          }
+          break;
+        default:
+          if (DEBUG) {
+            const raw = JSON.stringify(event);
+            logger.log(
+              `event ${event.type}: ${raw.length > 300 ? raw.slice(0, 300) + "..." : raw}`,
+            );
+          }
+      }
+    });
+
+    try {
+      // Strip narration fields from the profile to avoid self-referential data
+      const profileData = { ...profile } as Record<string, unknown>;
+      delete profileData.narration;
+      delete profileData.narrationState;
+
+      const systemPrompt = buildSystemPrompt(profile);
+      const userPrompt = `${systemPrompt}
+
+Here is the full collection profile to interpret:
+
+${JSON.stringify(profileData, null, 2)}`;
+
+      logger.log(`sending prompt (${userPrompt.length} chars)`);
+      try {
+        await session.prompt(userPrompt);
+      } catch (err) {
+        logger.error("session.prompt() threw:", err);
+        throw err;
+      }
+
+      const stats = session.getSessionStats();
+      logger.log(
+        `agent loop done: assistant turns=${stats.assistantMessages}, tool calls=${stats.toolCalls}, tokens in/out=${stats.tokens.input}/${stats.tokens.output}, cost=$${stats.cost.toFixed(4)}`,
+      );
+
+      if (DEBUG) {
+        logger.log(`session.messages (${session.messages.length}):`);
+        for (const [i, msg] of session.messages.entries()) {
+          const m = msg as unknown as Record<string, unknown>;
+          const head = JSON.stringify({ role: m.role, type: m.type });
+          const body = JSON.stringify(msg);
+          logger.log(`  [${i}] ${head}`);
+          logger.log(`      body=${body.length > 800 ? body.slice(0, 800) + "..." : body}`);
+        }
+      }
+    } finally {
+      unsubscribe();
+      session.dispose();
+    }
+
+    const result = captured.value;
     if (!result) {
-      logger.error(`SDK completed after ${turnCount} messages but produced no result`);
+      logger.error(
+        "agent finished without calling submit_narration. Set SHELF_JUDGE_NARRATION_DEBUG=1 to inspect the message stream.",
+      );
       throw new Error("Narration generation produced no result");
     }
 
-    // Validate the required fields exist
     if (
       typeof result.summary !== "string" ||
       !Array.isArray(result.surprises) ||

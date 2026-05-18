@@ -163,6 +163,6 @@ export async function axisDelete(
 
   if (opts.json) return printOutput(data, opts);
 
-  const result = data as { deletedRatingsCount: number };
+  const result = data;
   return `Deleted axis. Removed ${result.deletedRatingsCount} rating(s) across games.`;
 }

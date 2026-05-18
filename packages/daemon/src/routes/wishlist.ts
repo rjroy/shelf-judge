@@ -36,7 +36,7 @@ export function createWishlistRoutes(deps: WishlistRoutesDeps): RouteModule {
       return c.json({ error: "Request body must include bggId" }, 400);
     }
 
-    const bggId = (body as { bggId: unknown }).bggId;
+    const bggId = (body).bggId;
     if (typeof bggId !== "number" || !Number.isFinite(bggId) || bggId <= 0) {
       return c.json({ error: "bggId must be a positive number" }, 400);
     }
