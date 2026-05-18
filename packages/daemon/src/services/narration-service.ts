@@ -1,12 +1,27 @@
 import type { CollectionProfile, GameWithScore, ProfileNarration } from "@shelf-judge/shared";
 import type { GameService } from "./game-service.js";
 import { createLogger } from "./logger.js";
-import { createAgentSession, defineTool, DefaultResourceLoader, getAgentDir, SessionManager } from "@earendil-works/pi-coding-agent";
+import {
+  createAgentSession,
+  defineTool,
+  DefaultResourceLoader,
+  getAgentDir,
+  SessionManager,
+} from "@earendil-works/pi-coding-agent";
 import { Type } from "@earendil-works/pi-ai";
 
 const logger = createLogger("narration");
 
 const DEFAULT_NARRATION_MODEL = "openrouter:openrouter/free";
+
+/**
+ * Verbose diagnostics. Enables: full registered-model enumeration,
+ * per-message body dumps, raw event payloads. Off by default; turn on
+ * with SHELF_JUDGE_NARRATION_DEBUG=1 to debug agent loop or model issues.
+ */
+const DEBUG =
+  process.env.SHELF_JUDGE_NARRATION_DEBUG === "1" ||
+  process.env.SHELF_JUDGE_NARRATION_DEBUG === "true";
 
 export interface NarrationService {
   generateNarration(profile: CollectionProfile): Promise<ProfileNarration>;
@@ -79,12 +94,9 @@ export function createNarrationService(deps: NarrationServiceDeps): NarrationSer
   const { gameService } = deps;
 
   async function generateNarration(profile: CollectionProfile): Promise<ProfileNarration> {
-    logger.log("starting narration generation...");
-
-    // Dynamic import keeps pi-agent (which transitively pulls pi-tui) off the
-    // daemon's startup path. The narration code path is rarely exercised.
-    logger.log("loading pi-coding-agent...");
-    logger.log("pi-coding-agent loaded");
+    logger.log(
+      `starting narration: ${profile.gameCount} games, ${profile.ratedGameCount} rated${DEBUG ? " (DEBUG)" : ""}`,
+    );
 
     const NarrationSchema = Type.Object(
       {
@@ -149,7 +161,7 @@ export function createNarrationService(deps: NarrationServiceDeps): NarrationSer
             details: undefined,
           };
         }
-        captured.value = params as ProfileNarration;
+        captured.value = params;
         return {
           content: [{ type: "text" as const, text: "Narration accepted." }],
           details: undefined,
@@ -241,13 +253,15 @@ export function createNarrationService(deps: NarrationServiceDeps): NarrationSer
 
     const cwd = process.cwd();
     const agentDir = getAgentDir();
-    logger.log(`getAgentDir() -> ${agentDir}`);
-
     const resourceLoader = new DefaultResourceLoader({ cwd, agentDir });
     await resourceLoader.reload();
     const sessionManager = SessionManager.inMemory();
 
-    // Create the agent session, skipping the model selection to load the extensions.
+    // Create the session WITHOUT a model so extensions get a chance to load
+    // and register their providers. The model is resolved and set below
+    // after bindExtensions fires session_start. Skipping bindExtensions or
+    // resolving via pi-ai's static getModel breaks user-registered providers
+    // (e.g. fallback chains from ~/.pi/agent/extensions/).
     const { session, modelFallbackMessage } = await createAgentSession({
       cwd,
       thinkingLevel: "off",
@@ -256,72 +270,77 @@ export function createNarrationService(deps: NarrationServiceDeps): NarrationSer
       noTools: "builtin",
       customTools: [submitNarration, getCollectionGames, getProfileDetail],
     });
+    if (modelFallbackMessage) logger.warn(`pi modelFallbackMessage: ${modelFallbackMessage}`);
 
-    session.modelRegistry.getAll().forEach((m) => {
-      logger.log(`Available model: ${JSON.stringify({ provider: m.provider, id: m.id, name: m.name })}`);
-    });
+    if (DEBUG) {
+      logger.log(`pi agent dir: ${agentDir}`);
+      const all = session.modelRegistry.getAll();
+      logger.log(`modelRegistry has ${all.length} model(s):`);
+      for (const m of all) {
+        logger.log(`  - ${m.provider}:${m.id}${m.name ? ` (${m.name})` : ""}`);
+      }
+    }
 
     const { provider, modelId } = parseModelSpec(
       process.env.SHELF_JUDGE_NARRATION_MODEL ?? DEFAULT_NARRATION_MODEL,
     );
-    logger.log(`pi agent directory: ${getAgentDir()}`);
-    logger.log(`requesting model ${provider}:${modelId} from pi-ai static registry`);
-
-    const model = session.modelRegistry.find(provider, modelId); 
-    logger.log(
-      `getModel returned: ${JSON.stringify({
-        provider: (model as { provider?: unknown })?.provider,
-        id: (model as { id?: unknown })?.id,
-        name: (model as { name?: unknown })?.name,
-        truthy: !!model,
-      })}`,
-    );
+    const model = session.modelRegistry.find(provider, modelId);
     if (!model) {
-      logger.error( `Model "${provider}:${modelId}" not found in pi-ai registry`);
-      throw new Error(`Model "${provider}:${modelId}" not found in pi-ai registry`);
+      const msg = `Model "${provider}:${modelId}" not found in session.modelRegistry. Check ~/.pi/agent/models.json and any extensions in ~/.pi/agent/extensions/. Set SHELF_JUDGE_NARRATION_DEBUG=1 to list registered models.`;
+      logger.error(msg);
+      throw new Error(msg);
     }
 
+    // bindExtensions fires session_start, which is the only event some
+    // extensions use to capture references (e.g. modelRegistry). Calling
+    // setModel before this leaves those extensions in a half-initialized
+    // state and prompt() will fail with extension-specific errors.
     await session.bindExtensions({});
     await session.setModel(model);
-
-    if (modelFallbackMessage) logger.warn(`modelFallbackMessage: ${modelFallbackMessage}`);
-    logger.log(
-      `session created. session.model = ${JSON.stringify({
-        provider: session.model?.provider,
-        id: session.model?.id,
-      })}`,
-    );
+    logger.log(`session ready: model=${model.provider}:${model.id}, thinking=off`);
 
     const unsubscribe = session.subscribe((event) => {
       switch (event.type) {
-        case "agent_start":
-        case "agent_end":
-        case "turn_start":
-        case "turn_end":
-        case "message_start":
-        case "message_end":
-          logger.log(`event: ${event.type}: raw=${JSON.stringify(event).slice(0, 400)}`);
-          break;
-        case "tool_execution_start":
-          logger.log(`tool_execution_start: ${event.toolName} args=${JSON.stringify(event.args)}`);
-          break;
-        case "tool_execution_end":
+        case "tool_execution_start": {
+          const args = JSON.stringify(event.args);
           logger.log(
-            `tool_execution_end: ${event.toolName} isError=${event.isError} result=${JSON.stringify(event.result).slice(0, 400)}`,
+            `tool start: ${event.toolName} args=${args.length > 200 ? args.slice(0, 200) + "..." : args}`,
           );
           break;
+        }
+        case "tool_execution_end": {
+          if (event.isError) {
+            const result = JSON.stringify(event.result);
+            logger.error(
+              `tool failed: ${event.toolName} result=${result.length > 400 ? result.slice(0, 400) + "..." : result}`,
+            );
+          } else if (DEBUG) {
+            const result = JSON.stringify(event.result);
+            logger.log(
+              `tool end: ${event.toolName} result=${result.length > 200 ? result.slice(0, 200) + "..." : result}`,
+            );
+          }
+          break;
+        }
         case "auto_retry_start":
-          logger.warn(
-            `auto_retry_start attempt=${event.attempt}/${event.maxAttempts} err=${event.errorMessage}`,
-          );
+          logger.warn(`auto-retry ${event.attempt}/${event.maxAttempts}: ${event.errorMessage}`);
           break;
         case "auto_retry_end":
-          logger.warn(
-            `auto_retry_end success=${event.success} attempt=${event.attempt} err=${event.finalError ?? ""}`,
-          );
+          if (event.success) {
+            logger.log(`auto-retry recovered on attempt ${event.attempt}`);
+          } else {
+            logger.error(
+              `auto-retry exhausted at attempt ${event.attempt}: ${event.finalError ?? "unknown"}`,
+            );
+          }
           break;
         default:
-          logger.log(`event: ${event.type}`);
+          if (DEBUG) {
+            const raw = JSON.stringify(event);
+            logger.log(
+              `event ${event.type}: ${raw.length > 300 ? raw.slice(0, 300) + "..." : raw}`,
+            );
+          }
       }
     });
 
@@ -338,23 +357,29 @@ Here is the full collection profile to interpret:
 
 ${JSON.stringify(profileData, null, 2)}`;
 
-      logger.log("sending prompt to pi-agent...");
+      logger.log(`sending prompt (${userPrompt.length} chars)`);
       try {
         await session.prompt(userPrompt);
       } catch (err) {
         logger.error("session.prompt() threw:", err);
         throw err;
       }
-      logger.log(`session.prompt resolved. message count = ${session.messages.length}`);
-      for (const [i, msg] of session.messages.entries()) {
-        const m = msg as unknown as Record<string, unknown>;
-        logger.log(`msg[${i}] ${JSON.stringify({ role: m.role, type: m.type }).slice(0, 100)}`);
-        logger.log(`msg[${i}] body=${JSON.stringify(msg).slice(0, 800)}`);
-      }
+
       const stats = session.getSessionStats();
       logger.log(
-        `stats: turns(asst=${stats.assistantMessages}) toolCalls=${stats.toolCalls} toolResults=${stats.toolResults} tokens=${JSON.stringify(stats.tokens)} cost=${stats.cost}`,
+        `agent loop done: assistant turns=${stats.assistantMessages}, tool calls=${stats.toolCalls}, tokens in/out=${stats.tokens.input}/${stats.tokens.output}, cost=$${stats.cost.toFixed(4)}`,
       );
+
+      if (DEBUG) {
+        logger.log(`session.messages (${session.messages.length}):`);
+        for (const [i, msg] of session.messages.entries()) {
+          const m = msg as unknown as Record<string, unknown>;
+          const head = JSON.stringify({ role: m.role, type: m.type });
+          const body = JSON.stringify(msg);
+          logger.log(`  [${i}] ${head}`);
+          logger.log(`      body=${body.length > 800 ? body.slice(0, 800) + "..." : body}`);
+        }
+      }
     } finally {
       unsubscribe();
       session.dispose();
@@ -362,7 +387,9 @@ ${JSON.stringify(profileData, null, 2)}`;
 
     const result = captured.value;
     if (!result) {
-      logger.error("agent finished without calling submit_narration");
+      logger.error(
+        "agent finished without calling submit_narration. Set SHELF_JUDGE_NARRATION_DEBUG=1 to inspect the message stream.",
+      );
       throw new Error("Narration generation produced no result");
     }
 
