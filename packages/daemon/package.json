@@ -9,8 +9,8 @@
     "start": "bun src/index.ts"
   },
   "dependencies": {
-    "@mariozechner/pi-ai": "^0.73.1",
-    "@mariozechner/pi-coding-agent": "^0.73.1",
+    "@earendil-works/pi-ai": "^0.75.1",
+    "@earendil-works/pi-coding-agent": "^0.75.1",
     "@shelf-judge/shared": "workspace:*",
     "fast-xml-parser": "^5.2.0",
     "hono": "^4.7.0",

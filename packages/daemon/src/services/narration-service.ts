@@ -1,10 +1,12 @@
 import type { CollectionProfile, GameWithScore, ProfileNarration } from "@shelf-judge/shared";
 import type { GameService } from "./game-service.js";
 import { createLogger } from "./logger.js";
+import { createAgentSession, defineTool, DefaultResourceLoader, getAgentDir, SessionManager } from "@earendil-works/pi-coding-agent";
+import { Type } from "@earendil-works/pi-ai";
 
 const logger = createLogger("narration");
 
-const DEFAULT_NARRATION_MODEL = "anthropic:claude-haiku-4-5-20251001";
+const DEFAULT_NARRATION_MODEL = "openrouter:openrouter/free";
 
 export interface NarrationService {
   generateNarration(profile: CollectionProfile): Promise<ProfileNarration>;
@@ -82,9 +84,6 @@ export function createNarrationService(deps: NarrationServiceDeps): NarrationSer
     // Dynamic import keeps pi-agent (which transitively pulls pi-tui) off the
     // daemon's startup path. The narration code path is rarely exercised.
     logger.log("loading pi-coding-agent...");
-    const { createAgentSession, defineTool, DefaultResourceLoader, getAgentDir, SessionManager } =
-      await import("@mariozechner/pi-coding-agent");
-    const { getModel, Type } = await import("@mariozechner/pi-ai");
     logger.log("pi-coding-agent loaded");
 
     const NarrationSchema = Type.Object(
@@ -240,36 +239,89 @@ export function createNarrationService(deps: NarrationServiceDeps): NarrationSer
       },
     });
 
-    const { provider, modelId } = parseModelSpec(
-      process.env.SHELF_JUDGE_NARRATION_MODEL ?? DEFAULT_NARRATION_MODEL,
-    );
-    logger.log(`using model ${provider}:${modelId}`);
-
-    // pi-ai's getModel is strongly typed against its static MODELS map.
-    // We pass through env-driven strings; the runtime lookup is what matters.
-    const model = getModel(provider as never, modelId as never);
-
     const cwd = process.cwd();
-    const sessionManager = SessionManager.inMemory(cwd);
-    const resourceLoader = new DefaultResourceLoader({ cwd, agentDir: getAgentDir() });
-    await resourceLoader.reload();
+    const agentDir = getAgentDir();
+    logger.log(`getAgentDir() -> ${agentDir}`);
 
+    const resourceLoader = new DefaultResourceLoader({ cwd, agentDir });
+    await resourceLoader.reload();
+    const sessionManager = SessionManager.inMemory();
+
+    // Create the agent session, skipping the model selection to load the extensions.
     const { session, modelFallbackMessage } = await createAgentSession({
       cwd,
-      model,
       thinkingLevel: "off",
       sessionManager,
       resourceLoader,
       noTools: "builtin",
       customTools: [submitNarration, getCollectionGames, getProfileDetail],
     });
-    if (modelFallbackMessage) logger.warn(modelFallbackMessage);
+
+    session.modelRegistry.getAll().forEach((m) => {
+      logger.log(`Available model: ${JSON.stringify({ provider: m.provider, id: m.id, name: m.name })}`);
+    });
+
+    const { provider, modelId } = parseModelSpec(
+      process.env.SHELF_JUDGE_NARRATION_MODEL ?? DEFAULT_NARRATION_MODEL,
+    );
+    logger.log(`pi agent directory: ${getAgentDir()}`);
+    logger.log(`requesting model ${provider}:${modelId} from pi-ai static registry`);
+
+    const model = session.modelRegistry.find(provider, modelId); 
+    logger.log(
+      `getModel returned: ${JSON.stringify({
+        provider: (model as { provider?: unknown })?.provider,
+        id: (model as { id?: unknown })?.id,
+        name: (model as { name?: unknown })?.name,
+        truthy: !!model,
+      })}`,
+    );
+    if (!model) {
+      logger.error( `Model "${provider}:${modelId}" not found in pi-ai registry`);
+      throw new Error(`Model "${provider}:${modelId}" not found in pi-ai registry`);
+    }
+
+    await session.bindExtensions({});
+    await session.setModel(model);
+
+    if (modelFallbackMessage) logger.warn(`modelFallbackMessage: ${modelFallbackMessage}`);
+    logger.log(
+      `session created. session.model = ${JSON.stringify({
+        provider: session.model?.provider,
+        id: session.model?.id,
+      })}`,
+    );
 
     const unsubscribe = session.subscribe((event) => {
-      if (event.type === "tool_execution_start") {
-        logger.log(`tool: ${event.toolName}`);
-      } else if (event.type === "tool_execution_end" && event.isError) {
-        logger.error(`tool failed: ${event.toolName}`);
+      switch (event.type) {
+        case "agent_start":
+        case "agent_end":
+        case "turn_start":
+        case "turn_end":
+        case "message_start":
+        case "message_end":
+          logger.log(`event: ${event.type}: raw=${JSON.stringify(event).slice(0, 400)}`);
+          break;
+        case "tool_execution_start":
+          logger.log(`tool_execution_start: ${event.toolName} args=${JSON.stringify(event.args)}`);
+          break;
+        case "tool_execution_end":
+          logger.log(
+            `tool_execution_end: ${event.toolName} isError=${event.isError} result=${JSON.stringify(event.result).slice(0, 400)}`,
+          );
+          break;
+        case "auto_retry_start":
+          logger.warn(
+            `auto_retry_start attempt=${event.attempt}/${event.maxAttempts} err=${event.errorMessage}`,
+          );
+          break;
+        case "auto_retry_end":
+          logger.warn(
+            `auto_retry_end success=${event.success} attempt=${event.attempt} err=${event.finalError ?? ""}`,
+          );
+          break;
+        default:
+          logger.log(`event: ${event.type}`);
       }
     });
 
@@ -287,7 +339,22 @@ Here is the full collection profile to interpret:
 ${JSON.stringify(profileData, null, 2)}`;
 
       logger.log("sending prompt to pi-agent...");
-      await session.prompt(userPrompt);
+      try {
+        await session.prompt(userPrompt);
+      } catch (err) {
+        logger.error("session.prompt() threw:", err);
+        throw err;
+      }
+      logger.log(`session.prompt resolved. message count = ${session.messages.length}`);
+      for (const [i, msg] of session.messages.entries()) {
+        const m = msg as unknown as Record<string, unknown>;
+        logger.log(`msg[${i}] ${JSON.stringify({ role: m.role, type: m.type }).slice(0, 100)}`);
+        logger.log(`msg[${i}] body=${JSON.stringify(msg).slice(0, 800)}`);
+      }
+      const stats = session.getSessionStats();
+      logger.log(
+        `stats: turns(asst=${stats.assistantMessages}) toolCalls=${stats.toolCalls} toolResults=${stats.toolResults} tokens=${JSON.stringify(stats.tokens)} cost=${stats.cost}`,
+      );
     } finally {
       unsubscribe();
       session.dispose();
