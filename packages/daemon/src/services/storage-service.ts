@@ -333,7 +333,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
         const now = new Date().toISOString();
         return { units: [], createdAt: now, updatedAt: now };
       }
-      return result.data as ShelfConfiguration;
+      return result.data;
     },
 
     async saveShelfConfig(config: ShelfConfiguration): Promise<void> {

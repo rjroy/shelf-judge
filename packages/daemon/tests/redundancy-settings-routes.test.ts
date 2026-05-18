@@ -7,7 +7,7 @@ import { DEFAULT_REDUNDANCY_SETTINGS } from "../src/services/redundancy-engine";
 
 function createMockStorageService(): StorageService & { settings: RedundancySettings } {
   const mock = {
-    settings: { ...DEFAULT_REDUNDANCY_SETTINGS } as RedundancySettings,
+    settings: { ...DEFAULT_REDUNDANCY_SETTINGS },
     loadRedundancySettings() {
       return Promise.resolve(structuredClone(mock.settings));
     },

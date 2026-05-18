@@ -57,7 +57,7 @@ export function createPredictionRoutes(deps: PredictionRoutesDeps): RouteModule 
 
     try {
       const updated = await predictionService.updateSettings(
-        body as Partial<Record<string, unknown>>,
+        body,
       );
       return c.json(updated);
     } catch (err) {
