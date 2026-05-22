@@ -36,12 +36,11 @@ describe("RatingForm — rating label wiring (source inspection)", () => {
   });
 
   // BGG auto-value section: when currentRatings[axis.id] is defined, label is
-  // rendered next to the numeric value.
+  // rendered next to the numeric value via an inline getRatingLabel call.
   test("BGG auto-value section calls getRatingLabel for the current BGG value", async () => {
     const src = await Bun.file(RATING_FORM_PATH).text();
     expect(src).toContain("bgg-auto-value");
-    // bggLabel is extracted before the return and used in the render
-    expect(src).toContain("bggLabel");
+    expect(src).toContain("getRatingLabel(currentRatings[axis.id])");
   });
 
   test("prediction hint block renders label next to the predicted value", async () => {

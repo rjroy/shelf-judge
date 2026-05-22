@@ -137,7 +137,6 @@ export function RatingForm({
           const isRated = currentRatings[axis.id] !== undefined;
           const hint = !isRated ? predictionHints.get(axis.id) : undefined;
           const axisLabel = getRatingLabel(parseInt(ratings[axis.id] ?? "", 10));
-          const bggLabel = getRatingLabel(currentRatings[axis.id] ?? null);
           const hintLabel =
             hint?.rating !== null && hint?.rating !== undefined
               ? getRatingLabel(hint.rating)
@@ -159,7 +158,8 @@ export function RatingForm({
                   {hint.confidence !== "insufficient" && hint.rating !== null && (
                     <div>
                       <span className="rating-predict-hint-value">
-                        ~{hint.rating}{hintLabel !== null ? ` ${hintLabel}` : ""}
+                        ~{hint.rating}
+                        {hintLabel !== null ? ` ${hintLabel}` : ""}
                       </span>
                       <span
                         className="rating-predict-hint-link"
@@ -201,7 +201,10 @@ export function RatingForm({
                     />
                   </div>
                   {axisLabel && (
-                    <div className="rating-label-hint" style={{ fontSize: "0.75em", color: "#888" }}>
+                    <div
+                      className="rating-label-hint"
+                      style={{ fontSize: "0.75em", color: "#888" }}
+                    >
                       {axisLabel}
                     </div>
                   )}
@@ -271,9 +274,11 @@ export function RatingForm({
                       <span className="value">
                         {currentRatings[axis.id] ?? "\u2014"}
                         {currentRatings[axis.id] !== undefined &&
-                          bggLabel && (
-                            <span style={{ fontSize: "0.85em", color: "#888", marginLeft: "0.4em" }}>
-                              {bggLabel}
+                          getRatingLabel(currentRatings[axis.id]) && (
+                            <span
+                              style={{ fontSize: "0.85em", color: "#888", marginLeft: "0.4em" }}
+                            >
+                              {getRatingLabel(currentRatings[axis.id])}
                             </span>
                           )}
                       </span>
