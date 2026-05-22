@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Implementation plan: rating-interpretation-labels</title>
+  <meta name="date" content="2026-05-21">
+  <meta name="status" content="draft">
+  <meta name="tags" content="plan, ratings, ui, shared">
+  <meta name="modules" content="shared, web">
+  <meta name="related" content=".lore/work/specs/rating-interpretation-labels.html">
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      color: #333;
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 24px;
+      background: #f9f9f9;
+      line-height: 1.6;
+    }
+    .plan-header {
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 16px 20px;
+      margin-bottom: 28px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.07);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .plan-header h1 { margin: 0 0 8px 0; font-size: 22px; color: #111; }
+    .plan-meta { font-size: 13px; color: #666; }
+    .plan-meta a { color: #0c5aa0; }
+    .badge {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 3px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-right: 6px;
+    }
+    .badge-draft { background: #fff3cd; color: #856404; border: 1px solid #ffc107; }
+    .badge-step { background: #e7f3ff; color: #0c5aa0; border: 1px solid #0c5aa0; }
+    .badge-gate { background: #e8f5e9; color: #2e7d32; border: 1px solid #4caf50; }
+
+    /* Step sequence */
+    .steps { counter-reset: step; margin-top: 8px; }
+    .step {
+      background: white;
+      border: 1px solid #ddd;
+      border-left: 4px solid #0c5aa0;
+      border-radius: 4px;
+      margin-bottom: 20px;
+      overflow: hidden;
+    }
+    .step-header {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      padding: 14px 18px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .step-header:hover { background: #f5f8ff; }
+    .step-number {
+      counter-increment: step;
+      font-size: 22px;
+      font-weight: 700;
+      color: #0c5aa0;
+      min-width: 28px;
+    }
+    .step-number::before { content: counter(step); }
+    .step-title { font-size: 17px; font-weight: 600; color: #222; flex: 1; }
+    .step-toggle { font-size: 13px; color: #999; }
+    .step-body { padding: 0 18px 18px 58px; display: none; }
+    .step-body.open { display: block; }
+
+    /* Gate blocks */
+    .gate {
+      background: #e8f5e9;
+      border: 1px solid #4caf50;
+      border-radius: 4px;
+      padding: 12px 16px;
+      margin-top: 14px;
+    }
+    .gate-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: #2e7d32;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .gate ul { margin: 0; padding-left: 20px; }
+    .gate li { margin-bottom: 4px; font-size: 14px; }
+
+    /* File/code chips */
+    code {
+      background: #f0f0f0;
+      border: 1px solid #ddd;
+      border-radius: 3px;
+      padding: 1px 5px;
+      font-size: 13px;
+      font-family: monospace;
+    }
+    .files { margin: 10px 0; }
+    .file-chip {
+      display: inline-block;
+      background: #f0f4ff;
+      border: 1px solid #c0cff0;
+      border-radius: 3px;
+      padding: 2px 8px;
+      font-family: monospace;
+      font-size: 12px;
+      margin: 2px 4px 2px 0;
+      color: #2a4a8a;
+    }
+    .dep-arrow { color: #aaa; font-size: 13px; margin: 0 4px; }
+
+    /* Dependency chain */
+    .dep-chain {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin: 12px 0 4px;
+      font-size: 13px;
+    }
+    .dep-box {
+      background: #fff8e1;
+      border: 1px solid #ffc107;
+      border-radius: 3px;
+      padding: 2px 10px;
+      font-size: 12px;
+      color: #7a5800;
+    }
+    h3 { font-size: 15px; color: #444; margin: 14px 0 6px; }
+    ul { margin: 4px 0; padding-left: 20px; }
+    li { margin-bottom: 4px; }
+    p { margin: 8px 0; }
+    .note {
+      background: #f5f5f5;
+      border-left: 4px solid #bbb;
+      padding: 10px 14px;
+      margin: 12px 0;
+      font-size: 14px;
+    }
+    .open-q {
+      background: #fff8e1;
+      border-left: 4px solid #ffc107;
+      padding: 10px 14px;
+      margin: 12px 0;
+      font-size: 14px;
+    }
+    .open-q-title { font-weight: 600; color: #7a5800; margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+
+<div class="plan-header">
+  <h1>Implementation plan: rating-interpretation-labels</h1>
+  <div class="plan-meta">
+    <span class="badge badge-draft">DRAFT</span>
+    Source spec: <a href="../specs/rating-interpretation-labels.html">rating-interpretation-labels.html</a>
+    &nbsp;|&nbsp; 2026-05-21 &nbsp;|&nbsp; Modules: shared, web
+  </div>
+</div>
+
+<p>
+  Add a fixed 1–10 interpretation label set to all rating display surfaces. Labels live in
+  a single shared utility and flow to the score breakdown table, rating form, and BGG-derived
+  rating display without any per-axis customization.
+</p>
+
+<h2>Dependency order</h2>
+<div class="dep-chain">
+  <div class="dep-box">Step 1: shared utility</div>
+  <span class="dep-arrow">→</span>
+  <div class="dep-box">Step 2: shared tests</div>
+  <span class="dep-arrow">→</span>
+  <div class="dep-box">Step 3: ScoreBreakdown</div>
+  <span class="dep-arrow">→</span>
+  <div class="dep-box">Step 4: RatingForm</div>
+  <span class="dep-arrow">→</span>
+  <div class="dep-box">Step 5: BGG display</div>
+  <span class="dep-arrow">→</span>
+  <div class="dep-box">Step 6: web tests</div>
+  <span class="dep-arrow">→</span>
+  <div class="dep-box">Step 7: full suite + typecheck</div>
+</div>
+
+<div class="steps">
+
+  <!-- STEP 1 -->
+  <div class="step" id="step-1">
+    <div class="step-header" onclick="toggle('step-1')">
+      <div class="step-number"></div>
+      <div class="step-title">Create <code>rating-labels.ts</code> in <code>packages/shared/src/</code></div>
+      <div class="step-toggle">click to expand</div>
+    </div>
+    <div class="step-body" id="body-step-1">
+      <div class="files">
+        <span class="file-chip">packages/shared/src/rating-labels.ts</span>
+        <span class="file-chip">packages/shared/src/index.ts</span>
+      </div>
+
+      <h3>New file: <code>rating-labels.ts</code></h3>
+      <ul>
+        <li>Export <code>RATING_LABELS: Record&lt;number, string&gt;</code> mapping 1–10 to the spec-defined labels:
+          <br>1→Offensive, 2→Inexplicable, 3→Just Bad, 4→Not Good, 5→Fine,
+          6→Good, 7→Very Good, 8→Recommended, 9→Definitive, 10→Essential</li>
+        <li>Export <code>getRatingLabel(rating: number | null): string | null</code>:
+          <ul>
+            <li>Returns <code>null</code> for <code>null</code> input</li>
+            <li>Rounds via <code>Math.round()</code> before lookup</li>
+            <li>Returns <code>null</code> for values outside 1–10 after rounding</li>
+          </ul>
+        </li>
+      </ul>
+
+      <h3>Edit <code>packages/shared/src/index.ts</code></h3>
+      <ul>
+        <li>Add export: <code>export { RATING_LABELS, getRatingLabel } from "./rating-labels";</code></li>
+      </ul>
+
+      <div class="gate">
+        <div class="gate-title">Gate — before moving on</div>
+        <ul>
+          <li><code>RATING_LABELS</code> and <code>getRatingLabel</code> are exported from <code>@shelf-judge/shared</code></li>
+          <li>File compiles with no TypeScript errors (<code>bun run typecheck</code>)</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 2 -->
+  <div class="step" id="step-2">
+    <div class="step-header" onclick="toggle('step-2')">
+      <div class="step-number"></div>
+      <div class="step-title">Write unit tests for the shared utility</div>
+      <div class="step-toggle">click to expand</div>
+    </div>
+    <div class="step-body" id="body-step-2">
+      <div class="files">
+        <span class="file-chip">packages/shared/tests/rating-labels.test.ts</span>
+      </div>
+
+      <h3>Test cases (all from spec REQ-RATING-LABELS-2)</h3>
+      <ul>
+        <li>All 10 integer values 1–10 return correct label string</li>
+        <li>Decimal rounding: 5.4 → "Fine", 5.5 → "Good", 5.9 → "Good"</li>
+        <li>BGG-style decimal: 5.8 → "Good", 7.3 → "Very Good"</li>
+        <li>Prediction-style decimal: 6.3 → "Good", 8.7 → "Recommended"</li>
+        <li><code>null</code> input → returns <code>null</code></li>
+        <li>Out-of-range after rounding: 0, 0.4, 10.5, 11, -1 → returns <code>null</code></li>
+      </ul>
+
+      <div class="gate">
+        <div class="gate-title">Gate</div>
+        <ul>
+          <li><code>bun run test</code> in <code>packages/shared/</code> — all tests pass, new tests pass</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 3 -->
+  <div class="step" id="step-3">
+    <div class="step-header" onclick="toggle('step-3')">
+      <div class="step-number"></div>
+      <div class="step-title">Add label to the Effective column in <code>ScoreBreakdown</code></div>
+      <div class="step-toggle">click to expand</div>
+    </div>
+    <div class="step-body" id="body-step-3">
+      <div class="files">
+        <span class="file-chip">packages/web/components/score-breakdown.tsx</span>
+      </div>
+
+      <h3>Changes in <code>BreakdownRow</code></h3>
+      <ul>
+        <li>Import <code>getRatingLabel</code> from <code>@shelf-judge/shared</code></li>
+        <li>In the Effective <code>&lt;td&gt;</code>: when <code>entry.rating !== null</code>, render
+          <code>{entry.rating}</code> followed by the label on a second line (or as a small muted
+          span, decided during implementation based on column density).
+          When <code>entry.rating === null</code>, keep existing <code>&mdash;</code>.</li>
+      </ul>
+
+      <div class="open-q">
+        <div class="open-q-title">Open question (from spec)</div>
+        Same line (<code>8 Recommended</code>) vs two-line layout. The breakdown table is
+        information-dense. Prefer two-line: number on top, label below in smaller muted text.
+        Revisit if it breaks layout — single-line with a non-breaking space is the fallback.
+      </div>
+
+      <h3>BGG-derived rows (REQ-RATING-LABELS-5)</h3>
+      <ul>
+        <li>BGG rows (<code>entry.source === "bgg"</code>) already render in the same table.
+          The label logic applies identically — no special casing needed.</li>
+        <li>The override detail line in the axis name cell already shows
+          <code>BGG: {entry.bggOriginal.toFixed(1)}</code>. Append the rounded label to it:
+          <code>BGG: 5.8 (Fine)</code>.</li>
+      </ul>
+
+      <div class="gate">
+        <div class="gate-title">Gate</div>
+        <ul>
+          <li>No TypeScript errors in the file</li>
+          <li>Null ratings still render <code>&mdash;</code>, not a label</li>
+          <li>BGG override detail line shows label for <code>bggOriginal</code></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 4 -->
+  <div class="step" id="step-4">
+    <div class="step-header" onclick="toggle('step-4')">
+      <div class="step-number"></div>
+      <div class="step-title">Show live label in the personal-axis rating field in <code>RatingForm</code></div>
+      <div class="step-toggle">click to expand</div>
+    </div>
+    <div class="step-body" id="body-step-4">
+      <div class="files">
+        <span class="file-chip">packages/web/components/rating-form.tsx</span>
+      </div>
+
+      <h3>Changes</h3>
+      <ul>
+        <li>Import <code>getRatingLabel</code> from <code>@shelf-judge/shared</code></li>
+        <li>In the personal-axis <code>.rating-field</code> block, below the
+          <code>.rating-input-row</code>, add a label line:
+          <br><code>getRatingLabel(parseInt(ratings[axis.id], 10))</code> — updates on every
+          <code>onChange</code> because it derives from <code>ratings</code> state.</li>
+        <li>Render as a small muted element (e.g. <code>&lt;div className="rating-label-hint"&gt;</code>).
+          Only render when <code>ratings[axis.id]</code> is defined and parses to a valid integer.</li>
+        <li>Do not show the label for empty-string (unrated) state.</li>
+      </ul>
+
+      <h3>BGG auto-populated fields (REQ-RATING-LABELS-5)</h3>
+      <ul>
+        <li>In the <code>bgg-auto-value</code> block (non-override state), the current BGG value is
+          rendered as <code>currentRatings[axis.id] ?? "—"</code>.
+          Append the label: <code>7 Very Good</code> or if decimal,
+          <code>5.8 Fine</code> (round for label, keep raw numeric for display).</li>
+        <li>In the overridden BGG block, the user's override value also shows its label
+          (same pattern as personal axes).</li>
+      </ul>
+
+      <div class="gate">
+        <div class="gate-title">Gate</div>
+        <ul>
+          <li>Label updates synchronously as slider/input changes — no async calls needed</li>
+          <li>No label shown when field is empty</li>
+          <li>BGG auto-value shows rounded label next to its numeric value</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 5 -->
+  <div class="step" id="step-5">
+    <div class="step-header" onclick="toggle('step-5')">
+      <div class="step-number"></div>
+      <div class="step-title">Show label for prediction hints in <code>RatingForm</code></div>
+      <div class="step-toggle">click to expand</div>
+    </div>
+    <div class="step-body" id="body-step-5">
+      <div class="files">
+        <span class="file-chip">packages/web/components/rating-form.tsx</span>
+      </div>
+
+      <h3>Changes</h3>
+      <ul>
+        <li>In the <code>rating-predict-hint</code> block, <code>hint.rating</code> is rendered as
+          <code>~{hint.rating}</code>. Add the label: <code>~{hint.rating} Very Good</code>.</li>
+        <li>Only applies when <code>hint.confidence !== "insufficient"</code> and
+          <code>hint.rating !== null</code> — same guard already present.</li>
+      </ul>
+
+      <div class="note">
+        This is a small change on the same file as Step 4. Batching these in one edit pass
+        avoids a second round-trip through a large component.
+      </div>
+
+      <div class="gate">
+        <div class="gate-title">Gate</div>
+        <ul>
+          <li>Prediction hint block shows label after the numeric value</li>
+          <li>"Insufficient" predictions remain unchanged — no label, no numeric</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 6 -->
+  <div class="step" id="step-6">
+    <div class="step-header" onclick="toggle('step-6')">
+      <div class="step-number"></div>
+      <div class="step-title">Update and add web component tests</div>
+      <div class="step-toggle">click to expand</div>
+    </div>
+    <div class="step-body" id="body-step-6">
+      <div class="files">
+        <span class="file-chip">packages/web/tests/score-breakdown.test.tsx</span>
+        <span class="file-chip">packages/web/tests/rating-form.test.tsx</span>
+      </div>
+
+      <h3><code>score-breakdown.test.tsx</code> additions</h3>
+      <ul>
+        <li>Test that a rated entry with <code>rating: 8</code> renders "Recommended" somewhere in the row output</li>
+        <li>Test that a rated entry with <code>rating: null</code> does not render any label text (only <code>&mdash;</code>)</li>
+        <li>Test the BGG override detail line contains the rounded label when <code>bggOriginal</code> is set</li>
+      </ul>
+
+      <h3><code>rating-form.test.tsx</code> (new or existing)</h3>
+      <ul>
+        <li>Verify that when <code>ratings[axis.id]</code> is "7", the form renders "Very Good"</li>
+        <li>Verify that when the field is empty, no label text appears</li>
+        <li>Verify BGG auto-value section renders label next to the numeric BGG value</li>
+      </ul>
+
+      <div class="note">
+        Check if <code>packages/web/tests/rating-form.test.tsx</code> already exists.
+        If it does, add cases. If not, create it using the <code>renderToString</code>
+        pattern from <code>score-breakdown.test.tsx</code>.
+      </div>
+
+      <div class="gate">
+        <div class="gate-title">Gate</div>
+        <ul>
+          <li><code>bun run test</code> in <code>packages/web/</code> — all new tests pass</li>
+          <li>Existing <code>SourceBadge</code> tests still pass unmodified</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 7 -->
+  <div class="step" id="step-7">
+    <div class="step-header" onclick="toggle('step-7')">
+      <div class="step-number"></div>
+      <div class="step-title">Full suite verification</div>
+      <div class="step-toggle">click to expand</div>
+    </div>
+    <div class="step-body" id="body-step-7">
+
+      <h3>Commands</h3>
+      <ul>
+        <li><code>bun run test</code> — full test suite across all packages</li>
+        <li><code>bun run typecheck</code> — TypeScript strict mode, zero errors</li>
+        <li><code>bun run lint</code> — zero new lint errors</li>
+      </ul>
+
+      <h3>Manual verification checklist (spec §AI Validation)</h3>
+      <ul>
+        <li>Load game detail page for a game with mixed personal/BGG axes</li>
+        <li>Score breakdown table: each rated axis shows its label; null axes show <code>—</code></li>
+        <li>BGG axes in the table: label appears; override detail shows <code>BGG: 5.8 (Fine)</code></li>
+        <li>Edit ratings: slider movement updates label in real time</li>
+        <li>Prediction hint: predicted value shows label inline</li>
+        <li>Visual layout is not broken — no overflowing cells, no clipped text</li>
+      </ul>
+
+      <div class="gate">
+        <div class="gate-title">Gate — plan is executed</div>
+        <ul>
+          <li>All automated tests pass</li>
+          <li>TypeScript strict + lint clean</li>
+          <li>All manual checklist items confirmed</li>
+          <li>Every spec requirement (REQ-RATING-LABELS-1 through -6) maps to at least one test</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /.steps -->
+
+<script>
+  function toggle(stepId) {
+    const body = document.getElementById('body-' + stepId);
+    if (body) body.classList.toggle('open');
+  }
+  // Open step 1 by default
+  document.addEventListener('DOMContentLoaded', () => {
+    const first = document.getElementById('body-step-1');
+    if (first) first.classList.add('open');
+  });
+</script>
+
+</body>
+</html>

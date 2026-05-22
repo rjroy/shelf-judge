@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Simplify notes: rating-interpretation-labels</title>
+  <meta name="date" content="2026-05-21">
+  <meta name="status" content="complete">
+  <meta name="tags" content="simplify, notes, ratings, ui, shared">
+  <meta name="modules" content="shared, web">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #333; max-width: 900px; margin: 0 auto; padding: 24px; background: #f9f9f9; line-height: 1.6; }
+    .banner { background: #e8f5e9; border: 1px solid #4caf50; border-radius: 6px; padding: 14px 20px; margin-bottom: 24px; }
+    .banner-label { font-size: 18px; font-weight: 700; color: #2e7d32; }
+    .banner-sub { font-size: 13px; color: #666; }
+    .files { list-style: none; padding: 0; margin: 0; }
+    .file { background: white; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 10px; overflow: hidden; }
+    .file-header { display: flex; align-items: center; gap: 12px; padding: 11px 16px; cursor: pointer; }
+    .file-header:hover { background: #f5f8ff; }
+    .chip { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+    .chip-simplified { background: #e3f2fd; color: #1565c0; }
+    .chip-unchanged { background: #f0f0f0; color: #666; }
+    .file-name { font-family: monospace; font-size: 13px; flex: 1; }
+    .file-body { padding: 10px 16px 14px; border-top: 1px solid #eee; display: none; font-size: 13.5px; }
+    .file-body ul { margin: 4px 0; padding-left: 18px; }
+    .issue { background: #fff8e1; border: 1px solid #ffc107; border-radius: 4px; padding: 10px 14px; margin-top: 16px; font-size: 13px; }
+    .issue-title { font-weight: 700; color: #7a5800; margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+
+<div class="banner">
+  <div class="banner-label">✅ Complete</div>
+  <div class="banner-sub">Simplify pass on rating-interpretation-labels changes &mdash; 2026-05-21 &mdash; 1272 pass, 0 fail</div>
+</div>
+
+<h2 style="font-size:16px;margin:0 0 12px">Files processed</h2>
+<ul class="files">
+
+  <li class="file">
+    <div class="file-header" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+      <span class="chip chip-unchanged">unchanged</span>
+      <span class="file-name">packages/shared/src/rating-labels.ts</span>
+    </div>
+    <div class="file-body">Already minimal. JSDoc earns its place (documents rounding and null contract).</div>
+  </li>
+
+  <li class="file">
+    <div class="file-header" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+      <span class="chip chip-unchanged">unchanged</span>
+      <span class="file-name">packages/shared/src/index.ts</span>
+    </div>
+    <div class="file-body">Export position was already correct — sits naturally with other utility exports.</div>
+  </li>
+
+  <li class="file">
+    <div class="file-header" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+      <span class="chip chip-simplified">simplified</span>
+      <span class="file-name">packages/shared/tests/rating-labels.test.ts</span>
+    </div>
+    <div class="file-body">
+      <ul>
+        <li>Removed 4 direct <code>RATING_LABELS</code> map tests — identical contract already covered by <code>getRatingLabel</code> integer tests</li>
+        <li>Removed unused <code>RATING_LABELS</code> import</li>
+        <li>Merged three decimal-rounding describe blocks into one — the source split implied behavioral differences that don't exist</li>
+      </ul>
+      Net: 22 tests instead of 26. Same behavioral coverage.
+    </div>
+  </li>
+
+  <li class="file">
+    <div class="file-header" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+      <span class="chip chip-unchanged">unchanged</span>
+      <span class="file-name">packages/web/components/score-breakdown.tsx</span>
+    </div>
+    <div class="file-body">Already clean. Inline styles consistent with file style. No double-calls.</div>
+  </li>
+
+  <li class="file">
+    <div class="file-header" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+      <span class="chip chip-simplified">simplified</span>
+      <span class="file-name">packages/web/components/rating-form.tsx</span>
+    </div>
+    <div class="file-body">
+      <ul>
+        <li>Removed 2 comments that restated the code</li>
+        <li>Extracted <code>axisLabel</code> and <code>hintLabel</code> consts in the personal-axis map callback, eliminating double-calls to <code>getRatingLabel</code></li>
+        <li>Extracted <code>bggLabel</code> const in the same callback for the BGG auto-value block (review caught this was missed in the first pass)</li>
+      </ul>
+    </div>
+  </li>
+
+  <li class="file">
+    <div class="file-header" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+      <span class="chip chip-unchanged">unchanged</span>
+      <span class="file-name">packages/web/tests/score-breakdown.test.tsx</span>
+    </div>
+    <div class="file-body">Already clean. Describe names accurate. Comments explanatory.</div>
+  </li>
+
+  <li class="file">
+    <div class="file-header" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+      <span class="chip chip-simplified">simplified</span>
+      <span class="file-name">packages/web/tests/rating-form.test.tsx</span>
+    </div>
+    <div class="file-body">
+      <ul>
+        <li>Removed redundant comment block inside describe that restated the describe name</li>
+        <li>Updated source-inspection assertions to match the <code>axisLabel</code>/<code>hintLabel</code>/<code>bggLabel</code> const pattern after component refactor</li>
+      </ul>
+    </div>
+  </li>
+
+</ul>
+
+<div class="issue" style="background:#e8f5e9;border-color:#4caf50;margin-top:20px">
+  <div class="issue-title" style="color:#2e7d32">Review finding resolved</div>
+  The first cleanup pass extracted consts in the personal-axis block but missed the BGG auto-value block. Review caught it. Fixed in second pass. Test suite confirmed clean after both passes.
+</div>
+
+</body>
+</html>

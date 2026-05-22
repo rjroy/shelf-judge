@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Implementation notes: rating-interpretation-labels</title>
+  <meta name="date" content="2026-05-21">
+  <meta name="status" content="complete">
+  <meta name="tags" content="implementation, notes, ratings, ui, shared">
+  <meta name="source" content=".lore/work/plans/rating-interpretation-labels.html">
+  <meta name="modules" content="shared, web">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #333; max-width: 960px; margin: 0 auto; padding: 24px; background: #f9f9f9; line-height: 1.6; }
+    .banner { background: #e8f5e9; border: 1px solid #4caf50; border-radius: 6px; padding: 14px 20px; margin-bottom: 24px; display: flex; align-items: center; gap: 16px; }
+    .banner-label { font-size: 20px; font-weight: 700; color: #2e7d32; }
+    .banner-sub { font-size: 13px; color: #666; }
+    .phases { margin: 0; padding: 0; list-style: none; }
+    .phase { background: white; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 12px; overflow: hidden; }
+    .phase-header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; cursor: pointer; }
+    .phase-header:hover { background: #f5f8ff; }
+    .chip { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+    .chip-done { background: #e8f5e9; color: #2e7d32; }
+    .phase-title { font-weight: 600; flex: 1; }
+    .phase-body { padding: 12px 16px 16px; border-top: 1px solid #eee; }
+    .log-entry { font-size: 13px; margin: 6px 0; padding: 8px 12px; background: #f9f9f9; border-left: 3px solid #ccc; border-radius: 2px; }
+    .log-entry.success { border-left-color: #4caf50; }
+    .log-entry.note { border-left-color: #2196f3; }
+    h2 { font-size: 16px; margin: 20px 0 8px; }
+    code { background: #f0f0f0; border-radius: 3px; padding: 1px 5px; font-size: 13px; }
+    .summary { background: white; border: 1px solid #ddd; border-radius: 4px; padding: 16px 20px; margin-bottom: 20px; }
+    .summary h3 { margin: 0 0 8px; font-size: 15px; }
+    .summary ul { margin: 0; padding-left: 20px; }
+  </style>
+</head>
+<body>
+
+<div class="banner">
+  <div>
+    <div class="banner-label">✅ Complete</div>
+    <div class="banner-sub">rating-interpretation-labels &mdash; 6 phases &mdash; completed 2026-05-21 &mdash; 1273 pass, 0 fail</div>
+  </div>
+</div>
+
+<div class="summary">
+  <h3>What was built</h3>
+  <ul>
+    <li><code>packages/shared/src/rating-labels.ts</code> — <code>RATING_LABELS</code> map (1–10) and <code>getRatingLabel(rating: number | null): string | null</code></li>
+    <li>Exported from <code>@shelf-judge/shared</code> index</li>
+    <li><code>packages/shared/tests/rating-labels.test.ts</code> — 26 unit tests covering all integers, decimal rounding, null, out-of-range, NaN</li>
+    <li><code>score-breakdown.tsx</code> — two-line layout in Effective column; BGG override detail shows <code>BGG: 5.8 (Good)</code></li>
+    <li><code>rating-form.tsx</code> — live label on personal-axis fields; label next to BGG auto-value; label inline with prediction hint</li>
+    <li><code>packages/web/tests/score-breakdown.test.tsx</code> — 5 new label cases including pure BGG row</li>
+    <li><code>packages/web/tests/rating-form.test.tsx</code> — 9 tests (source-inspection + correctness; <code>useRouter</code> prevents full render tests)</li>
+  </ul>
+</div>
+
+<h2>Phase Log</h2>
+<ul class="phases">
+  <li class="phase">
+    <div class="phase-header" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">
+      <span class="chip chip-done">done</span>
+      <span class="phase-title">1. Create rating-labels.ts in shared</span>
+    </div>
+    <div class="phase-body" style="display:none">
+      <div class="log-entry success">Created rating-labels.ts with RATING_LABELS map and getRatingLabel. Exported from index.ts. Typecheck clean.</div>
+    </div>
+  </li>
+  <li class="phase">
+    <div class="phase-header" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">
+      <span class="chip chip-done">done</span>
+      <span class="phase-title">2. Unit tests for shared utility</span>
+    </div>
+    <div class="phase-body" style="display:none">
+      <div class="log-entry success">26 tests, all pass. 138 total in shared package.</div>
+      <div class="log-entry note">Plan stated 8.7 → "Recommended" but Math.round(8.7)=9 → "Definitive". Test correctly validates actual behavior.</div>
+    </div>
+  </li>
+  <li class="phase">
+    <div class="phase-header" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">
+      <span class="chip chip-done">done</span>
+      <span class="phase-title">3. ScoreBreakdown — Effective column label</span>
+    </div>
+    <div class="phase-body" style="display:none">
+      <div class="log-entry success">Two-line layout in Effective cell. BGG override detail appends (Label).</div>
+      <div class="log-entry note">Plan example "BGG: 5.8 (Fine)" is wrong — Math.round(5.8)=6 → "Good". Implementation is correct; plan example was wrong.</div>
+    </div>
+  </li>
+  <li class="phase">
+    <div class="phase-header" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">
+      <span class="chip chip-done">done</span>
+      <span class="phase-title">4. RatingForm — live label + BGG auto-value + prediction hints</span>
+    </div>
+    <div class="phase-body" style="display:none">
+      <div class="log-entry success">All three insertion points done. Label on personal axes, BGG auto-value, prediction hint.</div>
+    </div>
+  </li>
+  <li class="phase">
+    <div class="phase-header" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">
+      <span class="chip chip-done">done</span>
+      <span class="phase-title">5. Web component tests</span>
+    </div>
+    <div class="phase-body" style="display:none">
+      <div class="log-entry success">score-breakdown.test.tsx: 5 new label cases (including pure BGG row added in holistic review). rating-form.test.tsx created with source-inspection + correctness tests.</div>
+      <div class="log-entry note">RatingForm uses useRouter — full renderToString tests not possible without mock.module() (forbidden by project rules). Source-inspection pattern used instead, consistent with game-links.test.tsx.</div>
+    </div>
+  </li>
+  <li class="phase">
+    <div class="phase-header" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">
+      <span class="chip chip-done">done</span>
+      <span class="phase-title">6. Full suite + typecheck + lint + holistic spec validation</span>
+    </div>
+    <div class="phase-body" style="display:none">
+      <div class="log-entry success">1273 pass, 1 skip, 0 fail. Typecheck clean. Lint clean.</div>
+      <div class="log-entry success">Holistic review: all REQ-RATING-LABELS-1 through -6 confirmed implemented. One missing test (pure BGG row) added and confirmed passing (110 web tests).</div>
+    </div>
+  </li>
+</ul>
+
+<h2>Divergences from plan</h2>
+<ul>
+  <li>Plan example "5.8 → (Fine)" was wrong (5.8 rounds to 6 → "Good"). Implementation correct; plan example erroneous.</li>
+  <li>Plan example "8.7 → Recommended" was wrong (8.7 rounds to 9 → "Definitive"). Tests reflect actual behavior.</li>
+  <li>Steps 4 and 5 from the plan were merged (both touched rating-form.tsx). No behavioral divergence.</li>
+</ul>
+
+</body>
+</html>

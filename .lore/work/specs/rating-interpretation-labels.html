@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rating Interpretation Labels Spec</title>
+  <meta name="status" content="draft">
+  <meta name="req-prefix" content="RATING-LABELS">
+  <meta name="created" content="2026-05-21">
+  <meta name="updated" content="2026-05-21">
+  <meta name="modules" content="shared,web">
+  <meta name="related" content=".lore/designs/mvp-data-model.md, .lore/designs/mvp-fitness-model.md, .lore/designs/mvp-web-ui.md">
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      color: #333;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f9f9f9;
+      line-height: 1.6;
+    }
+    
+    .spec-header {
+      position: sticky;
+      top: 0;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 16px;
+      margin-bottom: 24px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .spec-status {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    
+    .status-badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 3px;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    
+    .status-draft {
+      background: #fff3cd;
+      color: #856404;
+      border: 1px solid #ffc107;
+    }
+    
+    .status-req-prefix {
+      background: #e7f3ff;
+      color: #0c5aa0;
+      border: 1px solid #0c5aa0;
+      font-family: monospace;
+    }
+    
+    .spec-meta {
+      font-size: 13px;
+      color: #666;
+    }
+    
+    h1, h2, h3 {
+      margin-top: 32px;
+      margin-bottom: 16px;
+    }
+    
+    h1 {
+      margin-top: 0;
+      color: #222;
+      font-size: 28px;
+    }
+    
+    h2 {
+      color: #333;
+      font-size: 20px;
+      border-bottom: 2px solid #0c5aa0;
+      padding-bottom: 8px;
+    }
+    
+    h3 {
+      color: #444;
+      font-size: 16px;
+    }
+    
+    .requirement {
+      border: 1px solid #ddd;
+      border-left: 4px solid #0c5aa0;
+      border-radius: 4px;
+      padding: 16px;
+      margin-bottom: 16px;
+      background: white;
+    }
+    
+    .req-id {
+      font-family: monospace;
+      font-size: 12px;
+      font-weight: 600;
+      color: #0c5aa0;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    
+    .req-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #222;
+      margin-bottom: 8px;
+    }
+    
+    .req-description {
+      color: #555;
+      margin-bottom: 12px;
+    }
+    
+    .rating-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+      background: white;
+      border: 1px solid #ddd;
+    }
+    
+    .rating-table th,
+    .rating-table td {
+      padding: 12px;
+      text-align: left;
+      border-bottom: 1px solid #eee;
+    }
+    
+    .rating-table th {
+      background: #f5f5f5;
+      font-weight: 600;
+      color: #333;
+    }
+    
+    .rating-table tr:last-child td {
+      border-bottom: none;
+    }
+    
+    .rating-col {
+      font-family: monospace;
+      font-size: 14px;
+      font-weight: 600;
+      color: #0c5aa0;
+      width: 60px;
+    }
+    
+    .label-col {
+      font-family: monospace;
+      font-size: 14px;
+    }
+    
+    .validation-section {
+      background: #e8f5e9;
+      border: 1px solid #4caf50;
+      border-radius: 4px;
+      padding: 16px;
+      margin: 24px 0;
+    }
+    
+    .validation-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #2e7d32;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+    }
+    
+    .validation-item {
+      margin: 12px 0;
+      padding-left: 24px;
+      position: relative;
+    }
+    
+    .validation-item:before {
+      content: "✓";
+      position: absolute;
+      left: 0;
+      color: #4caf50;
+      font-weight: bold;
+    }
+    
+    .code-block {
+      background: #f5f5f5;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 12px;
+      margin: 12px 0;
+      font-family: monospace;
+      font-size: 13px;
+      overflow-x: auto;
+    }
+    
+    .note {
+      background: #f0f0f0;
+      border-left: 4px solid #999;
+      padding: 12px;
+      margin: 16px 0;
+    }
+    
+    .note-title {
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 4px;
+    }
+    
+    .clarifying-question {
+      background: #fff8e1;
+      border-left: 4px solid #ffc107;
+      padding: 12px;
+      margin: 16px 0;
+    }
+    
+    .clarifying-question-title {
+      font-weight: 600;
+      color: #f57f17;
+      margin-bottom: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="spec-header">
+    <div class="spec-status">
+      <span class="status-badge status-draft">DRAFT</span>
+      <span class="status-badge status-req-prefix">REQ-RATING-LABELS</span>
+    </div>
+    <div class="spec-meta">
+      Created: 2026-05-21 | Modules: shared, web | 
+      <a href="#validation-ai">AI Validation</a>
+    </div>
+  </div>
+
+  <h1>Rating Interpretation Labels</h1>
+  
+  <p>
+    Enable consistent rating application across all axes by displaying a human-readable interpretation label alongside every numeric rating. Labels anchor the 1-10 scale semantically, helping users calibrate ratings consistently over time and across axes.
+  </p>
+
+  <h2>Requirements</h2>
+
+  <div class="requirement">
+    <div class="req-id">REQ-RATING-LABELS-1</div>
+    <div class="req-title">Define Rating Interpretation Labels</div>
+    <div class="req-description">
+      Establish a fixed 1-10 label mapping that applies to all axes uniformly:
+    </div>
+    <table class="rating-table">
+      <thead>
+        <tr>
+          <th>Rating</th>
+          <th>Label</th>
+          <th>Semantic Meaning</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="rating-col">10</td>
+          <td class="label-col">Essential</td>
+          <td>Perfect for this axis. Sets the standard.</td>
+        </tr>
+        <tr>
+          <td class="rating-col">9</td>
+          <td class="label-col">Definitive</td>
+          <td>Outstanding. No meaningful criticism on this axis.</td>
+        </tr>
+        <tr>
+          <td class="rating-col">8</td>
+          <td class="label-col">Recommended</td>
+          <td>Clearly good. Worth prioritizing.</td>
+        </tr>
+        <tr>
+          <td class="rating-col">7</td>
+          <td class="label-col">Very Good</td>
+          <td>Solid. Exceeds baseline but not standout.</td>
+        </tr>
+        <tr>
+          <td class="rating-col">6</td>
+          <td class="label-col">Good</td>
+          <td>Acceptable. Meets expectations.</td>
+        </tr>
+        <tr>
+          <td class="rating-col">5</td>
+          <td class="label-col">Fine</td>
+          <td>Neutral. Neither good nor bad.</td>
+        </tr>
+        <tr>
+          <td class="rating-col">4</td>
+          <td class="label-col">Not Good</td>
+          <td>Noticeable weaknesses.</td>
+        </tr>
+        <tr>
+          <td class="rating-col">3</td>
+          <td class="label-col">Just Bad</td>
+          <td>Significant problems.</td>
+        </tr>
+        <tr>
+          <td class="rating-col">2</td>
+          <td class="label-col">Inexplicable</td>
+          <td>Hard to justify except as an outlier.</td>
+        </tr>
+        <tr>
+          <td class="rating-col">1</td>
+          <td class="label-col">Offensive</td>
+          <td>Actively unacceptable.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="requirement">
+    <div class="req-id">REQ-RATING-LABELS-2</div>
+    <div class="req-title">Export Label Mapping as a Shared Function</div>
+    <div class="req-description">
+      Create a utility function in <code>packages/shared/src/</code> that maps rating numbers to labels. The function must handle decimal ratings (e.g., from predictions) by rounding to the nearest integer before lookup:
+    </div>
+    <div class="code-block">
+export function getRatingLabel(rating: number | null): string | null {
+  // Returns label string for 1-10
+  // Rounds decimal ratings (e.g., 5.8 -> 6) to nearest integer
+  // Returns null if rating is null or out of range
+}
+
+export const RATING_LABELS: Record&lt;number, string&gt; = {
+  1: "Offensive",
+  2: "Inexplicable",
+  3: "Just Bad",
+  4: "Not Good",
+  5: "Fine",
+  6: "Good",
+  7: "Very Good",
+  8: "Recommended",
+  9: "Definitive",
+  10: "Essential"
+};
+    </div>
+    <div class="note">
+      <div class="note-title">Rounding Behavior</div>
+      Use standard "round half up" (Math.round) so 5.5 becomes 6. This applies to all decimal ratings: BGG-derived (e.g., 5.8 for Complexity), predicted (e.g., 6.3 for prediction), and any future source that produces decimals.
+    </div>
+    <div class="note">
+      <div class="note-title">Note</div>
+      This ensures the mapping is single-source-of-truth and reusable across daemon responses, web components, and CLI output.
+    </div>
+  </div>
+
+  <div class="requirement">
+    <div class="req-id">REQ-RATING-LABELS-3</div>
+    <div class="req-title">Display Label in Score Breakdown Table</div>
+    <div class="req-description">
+      Modify the <code>ScoreBreakdown</code> component to show interpretation labels in the rating column. For each breakdown entry with a rating, append the label:
+    </div>
+    <div class="code-block">
+&lt;td class="right"&gt;
+  {entry.rating !== null 
+    ? `${entry.rating} ${getRatingLabel(entry.rating)}` 
+    : "—"}
+&lt;/td&gt;
+    </div>
+    <div class="note">
+      <div class="note-title">Placement</div>
+      The label appears in the "Effective" column (already displays the numeric rating). Format: <code>8 Recommended</code> or on two lines if space is tight.
+    </div>
+  </div>
+
+  <div class="requirement">
+    <div class="req-id">REQ-RATING-LABELS-4</div>
+    <div class="req-title">Display Label in Rating Form</div>
+    <div class="req-description">
+      Modify the <code>RatingForm</code> component to display the interpretation label as the user sets or changes a rating. The label should update in real-time as the slider/input value changes.
+    </div>
+    <div class="note">
+      <div class="note-title">Location</div>
+      Show the label below or next to the numeric input/slider, updating live as the user adjusts the value.
+    </div>
+  </div>
+
+  <div class="requirement">
+    <div class="req-id">REQ-RATING-LABELS-5</div>
+    <div class="req-title">Display Label for BGG-Derived Ratings</div>
+    <div class="req-description">
+      When a rating is auto-populated from BGG (e.g., Community Rating, Complexity), display its interpretation label alongside the numeric value to help the user understand what the BGG rating means before they override it.
+    </div>
+    <div class="note">
+      <div class="note-title">Applies to</div>
+      <ul>
+        <li>Score breakdown table, for entries where <code>source === "bgg"</code></li>
+        <li>Rating form, for auto-populated BGG fields</li>
+        <li>Override context display (e.g., "BGG: 5.8 Fine")</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="requirement">
+    <div class="req-id">REQ-RATING-LABELS-6</div>
+    <div class="req-title">No Label for Missing or Null Ratings</div>
+    <div class="req-description">
+      When a rating is null (not yet rated), do not display a label. Show only the dash/empty state as currently implemented.
+    </div>
+  </div>
+
+  <h2>Acceptance Criteria</h2>
+  
+  <ul>
+    <li>Every numeric rating (1-10) in the app displays its corresponding interpretation label</li>
+    <li>Labels are consistent across all axes and all contexts (breakdown, form, BGG data)</li>
+    <li>The label mapping is defined once in shared code and reused everywhere</li>
+    <li>Rating form shows live label updates as user adjusts values</li>
+    <li>Score breakdown table shows labels for all rated axes</li>
+    <li>BGG-derived ratings show labels to clarify what the BGG value means</li>
+    <li>No labels appear for null/unrated entries</li>
+    <li>All tests pass; no regressions in existing rating or breakdown functionality</li>
+  </ul>
+
+  <h2 id="validation-ai">AI Validation</h2>
+  
+  <div class="validation-section">
+    <div class="validation-title">How AI Will Verify This is Done</div>
+    
+    <div class="validation-item">
+      <strong>1. Utility function exists:</strong> Inspect <code>packages/shared/src/</code> for <code>getRatingLabel()</code> function that maps 1-10 to labels. Verify export in package <code>index.ts</code>.
+    </div>
+    
+    <div class="validation-item">
+      <strong>2. ScoreBreakdown displays labels:</strong> In <code>packages/web/components/score-breakdown.tsx</code>, the effective rating column shows format like "8 Recommended" for rated entries, and "—" for null ratings.
+    </div>
+    
+    <div class="validation-item">
+      <strong>3. RatingForm displays labels:</strong> In <code>packages/web/components/rating-form.tsx</code>, label text updates in real-time as the slider/input value changes. Label displayed for current rating value.
+    </div>
+    
+    <div class="validation-item">
+      <strong>4. BGG ratings show labels:</strong> In score breakdown and rating form, BGG-derived ratings display their labels (e.g., "5.8 Fine" or "Community Rating: 7 Very Good").
+    </div>
+    
+    <div class="validation-item">
+      <strong>5. Tests pass:</strong> Run <code>bun run test</code> across all packages. No new test failures. Test coverage for <code>getRatingLabel()</code> includes:
+      <ul>
+        <li>All 10 integer ratings (1-10) return correct label</li>
+        <li>Decimal ratings round correctly: 5.4 -> 5, 5.5 -> 6, 5.9 -> 6</li>
+        <li>Null input returns null</li>
+        <li>Out-of-range inputs (0, 11, negative) return null or throw</li>
+        <li>Predicted decimal ratings (e.g., 6.3) resolve to correct label</li>
+        <li>BGG decimal ratings (e.g., 5.8 complexity) resolve to correct label</li>
+      </ul>
+    </div>
+    
+    <div class="validation-item">
+      <strong>6. Manual verification:</strong> Load game detail page, verify:
+      <ul>
+        <li>Breakdown table shows labels for all rated axes</li>
+        <li>Rating form shows current label; label updates when slider moves</li>
+        <li>BGG-derived ratings display with labels</li>
+      </ul>
+    </div>
+    
+    <div class="validation-item">
+      <strong>7. No regressions:</strong> Existing breakdown and rating form tests pass without modification. Visual layout is not broken by label addition.
+    </div>
+  </div>
+
+  <h2>Notes</h2>
+  
+  <div class="note">
+    <div class="note-title">Rationale</div>
+    <p>
+      The label mapping you provided is calibrated for consistency—it's the mental scale you use when rating. By embedding these labels throughout the UI, we remove the gap between rating intention and rating execution. Instead of "what does a 7 mean again?", users see the label immediately and apply it consistently.
+    </p>
+    <p>
+      Rounding decimal ratings to integers preserves the user's intent: a predicted 5.8 is "closer to Good (6)" than "closer to Fine (5)", so the label anchors that interpretation visually.
+    </p>
+  </div>
+
+  <div class="note">
+    <div class="note-title">Future Extensions</div>
+    <p>
+      Axis-specific label overrides (e.g., "Wife will play it" might use different language) are not in scope for MVP but the architecture should allow them. Store labels in the Axis record if customization is added later.
+    </p>
+  </div>
+
+  <div class="clarifying-question">
+    <div class="clarifying-question-title">Open Question</div>
+    <p>
+      Display format in dense tables: should the label appear on the same line as the number (e.g., "8 Recommended") or on a new line? This depends on layout and readability. Current breakdown table is already information-dense; a new line might be clearer. Verify during implementation.
+    </p>
+  </div>
+
+</body>
+</html>
