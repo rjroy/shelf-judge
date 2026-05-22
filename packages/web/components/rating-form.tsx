@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Axis, FitnessResult } from "@shelf-judge/shared";
+import { getRatingLabel } from "@shelf-judge/shared";
 
 export function RatingForm({
   gameId,
@@ -31,7 +32,6 @@ export function RatingForm({
   const personalAxes = axes.filter((a) => a.source === "personal");
   const bggAxes = axes.filter((a) => a.source === "bgg");
 
-  // Build a map of predicted values per axis from the prediction breakdown
   const predictionHints = new Map<
     string,
     { rating: number | null; confidence: string | null; refCount: number }
@@ -71,7 +71,6 @@ export function RatingForm({
       }
     }
 
-    // Send null for axes that had a rating but were cleared
     for (const axis of axes) {
       if (currentRatings[axis.id] !== undefined && !(axis.id in numericRatings)) {
         numericRatings[axis.id] = null;
@@ -137,6 +136,11 @@ export function RatingForm({
         {personalAxes.map((axis) => {
           const isRated = currentRatings[axis.id] !== undefined;
           const hint = !isRated ? predictionHints.get(axis.id) : undefined;
+          const axisLabel = getRatingLabel(parseInt(ratings[axis.id] ?? "", 10));
+          const hintLabel =
+            hint?.rating !== null && hint?.rating !== undefined
+              ? getRatingLabel(hint.rating)
+              : null;
 
           return (
             <div key={axis.id}>
@@ -153,7 +157,10 @@ export function RatingForm({
                   </div>
                   {hint.confidence !== "insufficient" && hint.rating !== null && (
                     <div>
-                      <span className="rating-predict-hint-value">~{hint.rating}</span>
+                      <span className="rating-predict-hint-value">
+                        ~{hint.rating}
+                        {hintLabel !== null ? ` ${hintLabel}` : ""}
+                      </span>
                       <span
                         className="rating-predict-hint-link"
                         onClick={() => handleChange(axis.id, String(hint.rating))}
@@ -193,6 +200,14 @@ export function RatingForm({
                       onChange={(e) => handleChange(axis.id, e.target.value)}
                     />
                   </div>
+                  {axisLabel && (
+                    <div
+                      className="rating-label-hint"
+                      style={{ fontSize: "0.75em", color: "#888" }}
+                    >
+                      {axisLabel}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -256,7 +271,17 @@ export function RatingForm({
                   ) : (
                     <div className="bgg-auto-value">
                       <span>Auto-populated from BGG</span>
-                      <span className="value">{currentRatings[axis.id] ?? "\u2014"}</span>
+                      <span className="value">
+                        {currentRatings[axis.id] ?? "\u2014"}
+                        {currentRatings[axis.id] !== undefined &&
+                          getRatingLabel(currentRatings[axis.id]) && (
+                            <span
+                              style={{ fontSize: "0.85em", color: "#888", marginLeft: "0.4em" }}
+                            >
+                              {getRatingLabel(currentRatings[axis.id])}
+                            </span>
+                          )}
+                      </span>
                       <span
                         className="override-link"
                         onClick={() => handleChange(axis.id, String(currentRatings[axis.id] ?? 5))}

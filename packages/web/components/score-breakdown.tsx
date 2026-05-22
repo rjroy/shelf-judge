@@ -8,6 +8,7 @@ import type {
   PredictionConfidence,
   ReferenceGame,
 } from "@shelf-judge/shared";
+import { getRatingLabel } from "@shelf-judge/shared";
 
 export function ScoreBreakdown({
   score,
@@ -195,7 +196,10 @@ function BreakdownRow({
             />
           )}
           {entry.source === "override" && entry.bggOriginal !== null && (
-            <div className="breakdown-override-detail">BGG: {entry.bggOriginal.toFixed(1)}</div>
+            <div className="breakdown-override-detail">
+              BGG: {entry.bggOriginal.toFixed(1)}{" "}
+              ({getRatingLabel(entry.bggOriginal)})
+            </div>
           )}
         </td>
         <td className="right breakdown-raw">
@@ -206,7 +210,16 @@ function BreakdownRow({
           )}
         </td>
         <td className="right">
-          {entry.rating !== null ? entry.rating : <span className="breakdown-dash">&mdash;</span>}
+          {entry.rating !== null ? (
+            <div>
+              <div>{entry.rating}</div>
+              <div style={{ fontSize: "0.75em", color: "#888", lineHeight: 1.2 }}>
+                {getRatingLabel(entry.rating)}
+              </div>
+            </div>
+          ) : (
+            <span className="breakdown-dash">&mdash;</span>
+          )}
         </td>
         <td className="right">{entry.weight}</td>
         <td className="right">

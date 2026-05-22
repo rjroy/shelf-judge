@@ -99,6 +99,8 @@ export { resolveBggRawValue, resolveAxisValues } from "./axis-utils";
 
 export { resolveBaseDir, resolveSocketPath, resolveDataDir, resolveConfigPath } from "./paths";
 
+export { RATING_LABELS, getRatingLabel } from "./rating-labels";
+
 export {
   K_FLEXIBLE,
   K_MODERATE,
