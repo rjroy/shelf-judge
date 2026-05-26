@@ -1,10 +1,8 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
+<!DOCTYPE html><html lang="en"><head>
   <meta charset="UTF-8">
   <title>Implementation plan: rating-interpretation-labels</title>
   <meta name="date" content="2026-05-21">
-  <meta name="status" content="draft">
+  <meta name="status" content="approved">
   <meta name="tags" content="plan, ratings, ui, shared">
   <meta name="modules" content="shared, web">
   <meta name="related" content=".lore/work/specs/rating-interpretation-labels.html">
@@ -282,7 +280,7 @@
         <li>In the Effective <code>&lt;td&gt;</code>: when <code>entry.rating !== null</code>, render
           <code>{entry.rating}</code> followed by the label on a second line (or as a small muted
           span, decided during implementation based on column density).
-          When <code>entry.rating === null</code>, keep existing <code>&mdash;</code>.</li>
+          When <code>entry.rating === null</code>, keep existing <code>—</code>.</li>
       </ul>
 
       <div class="open-q">
@@ -305,7 +303,7 @@
         <div class="gate-title">Gate</div>
         <ul>
           <li>No TypeScript errors in the file</li>
-          <li>Null ratings still render <code>&mdash;</code>, not a label</li>
+          <li>Null ratings still render <code>—</code>, not a label</li>
           <li>BGG override detail line shows label for <code>bggOriginal</code></li>
         </ul>
       </div>
@@ -408,7 +406,7 @@
       <h3><code>score-breakdown.test.tsx</code> additions</h3>
       <ul>
         <li>Test that a rated entry with <code>rating: 8</code> renders "Recommended" somewhere in the row output</li>
-        <li>Test that a rated entry with <code>rating: null</code> does not render any label text (only <code>&mdash;</code>)</li>
+        <li>Test that a rated entry with <code>rating: null</code> does not render any label text (only <code>—</code>)</li>
         <li>Test the BGG override detail line contains the rounded label when <code>bggOriginal</code> is set</li>
       </ul>
 
@@ -487,5 +485,6 @@
   });
 </script>
 
-</body>
-</html>
+
+
+</body></html>

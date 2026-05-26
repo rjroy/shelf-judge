@@ -1,10 +1,8 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
+<!DOCTYPE html><html lang="en"><head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Rating Interpretation Labels Spec</title>
-  <meta name="status" content="draft">
+  <meta name="status" content="approved">
   <meta name="req-prefix" content="RATING-LABELS">
   <meta name="created" content="2026-05-21">
   <meta name="updated" content="2026-05-21">
@@ -322,7 +320,7 @@
     <div class="code-block">
 export function getRatingLabel(rating: number | null): string | null {
   // Returns label string for 1-10
-  // Rounds decimal ratings (e.g., 5.8 -> 6) to nearest integer
+  // Rounds decimal ratings (e.g., 5.8 -&gt; 6) to nearest integer
   // Returns null if rating is null or out of range
 }
 
@@ -442,7 +440,7 @@ export const RATING_LABELS: Record&lt;number, string&gt; = {
       <strong>5. Tests pass:</strong> Run <code>bun run test</code> across all packages. No new test failures. Test coverage for <code>getRatingLabel()</code> includes:
       <ul>
         <li>All 10 integer ratings (1-10) return correct label</li>
-        <li>Decimal ratings round correctly: 5.4 -> 5, 5.5 -> 6, 5.9 -> 6</li>
+        <li>Decimal ratings round correctly: 5.4 -&gt; 5, 5.5 -&gt; 6, 5.9 -&gt; 6</li>
         <li>Null input returns null</li>
         <li>Out-of-range inputs (0, 11, negative) return null or throw</li>
         <li>Predicted decimal ratings (e.g., 6.3) resolve to correct label</li>
@@ -490,5 +488,6 @@ export const RATING_LABELS: Record&lt;number, string&gt; = {
     </p>
   </div>
 
-</body>
-</html>
+
+
+</body></html>
