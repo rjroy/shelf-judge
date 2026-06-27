@@ -39,6 +39,7 @@ function makeGame(bggId: number, name: string): Game {
     },
     ownership: "owned",
     boxDimensions: null,
+    manualShelfId: null,
     ratings: {},
     createdAt: NOW,
     updatedAt: NOW,
@@ -179,6 +180,7 @@ function createMockGameService(): GameService {
     importBggCollection: () => Promise.reject(new Error("not implemented")),
     setOwnership: () => Promise.reject(new Error("not implemented")),
     setBoxDimensions: () => Promise.reject(new Error("not implemented")),
+    setManualShelf: () => Promise.reject(new Error("not implemented")),
   };
 }
 

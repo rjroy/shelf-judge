@@ -5,12 +5,42 @@ import type { ShelfCapacityResult } from "@shelf-judge/shared";
 // Four visual states: success (all placed), warning (overflow only),
 // danger (unfittable, optionally with displaced), neutral (configured without dimensions).
 export function CapacityIndicator({ capacity }: { capacity: ShelfCapacityResult }) {
-  if (!capacity.configured || capacity.totalShelfCount === 0) {
+  const conflictCount = capacity.assignmentConflicts.length;
+  if ((!capacity.configured || capacity.totalShelfCount === 0) && conflictCount === 0) {
     return null;
   }
 
   const unfittableCount = capacity.unfittableGames.length;
   const displacedCount = capacity.overflowGames.length;
+
+  if (conflictCount > 0) {
+    const additionalProblemCount = unfittableCount + displacedCount;
+    return (
+      <div className="capacity-indicator warning capacity-indicator-stack">
+        <div className="capacity-indicator-row">
+          <div className="cap-icon">⚠</div>
+          <div className="cap-text warning-text">
+            <strong>
+              {conflictCount === 1
+                ? "1 manual shelf assignment needs attention"
+                : `${conflictCount} manual shelf assignments need attention`}
+            </strong>{" "}
+            — selected shelves are missing or cannot fit the pinned games.
+          </div>
+          <Link href="/capacity" className="cap-detail-link">
+            Resolve conflicts →
+          </Link>
+        </div>
+        {additionalProblemCount > 0 ? (
+          <div className="capacity-indicator-row capacity-indicator-subrow">
+            <div className="cap-text warning-text">
+              Also: {unfittableCount} unfittable, {displacedCount} displaced.
+            </div>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
 
   // State D: shelves configured but no game dimensions.
   if (capacity.gamesWithDimensions === 0) {

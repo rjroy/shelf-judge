@@ -36,6 +36,7 @@ describe("shared public surface (Phase 6 strike)", () => {
         bggData: null,
         ownership: "owned",
         boxDimensions: null,
+        manualShelfId: null,
         ratings: {},
         createdAt: "",
         updatedAt: "",

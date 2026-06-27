@@ -20,6 +20,7 @@ function makeGame(
     ownership?: OwnershipStatus;
     boxDimensions?: BoxDimensions | null;
     fitness?: number | null;
+    manualShelfId?: string | null;
   } = {},
 ): GameWithScore {
   const game: Game = {
@@ -35,6 +36,7 @@ function makeGame(
     numPlays: null,
     ownership: opts.ownership ?? "owned",
     boxDimensions: opts.boxDimensions ?? null,
+    manualShelfId: opts.manualShelfId ?? null,
     ratings: {},
     createdAt: NOW,
     updatedAt: NOW,
@@ -67,7 +69,14 @@ function createMockStorage(units: ShelfUnit[]): StorageService {
     loadShelfConfig: () => Promise.resolve(structuredClone(config)),
     saveShelfConfig: () => Promise.resolve(),
     loadCollection: () =>
-      Promise.resolve({ id: "mock", name: "Mock", games: [], axes: [], createdAt: NOW, updatedAt: NOW }),
+      Promise.resolve({
+        id: "mock",
+        name: "Mock",
+        games: [],
+        axes: [],
+        createdAt: NOW,
+        updatedAt: NOW,
+      }),
     saveCollection: () => Promise.resolve(),
     loadConfig: () => Promise.reject(new Error("not implemented")),
     saveConfig: () => Promise.resolve(),
@@ -99,6 +108,7 @@ function createMockGameService(games: GameWithScore[]): GameService {
     importBggCollection: () => Promise.reject(new Error("not implemented")),
     setOwnership: () => Promise.reject(new Error("not implemented")),
     setBoxDimensions: () => Promise.reject(new Error("not implemented")),
+    setManualShelf: () => Promise.reject(new Error("not implemented")),
   };
 }
 
@@ -137,6 +147,48 @@ describe("capacity service", () => {
       const result = await svc.computeCapacity();
       expect(result.configured).toBe(false);
       expect(result.totalShelfCount).toBe(0);
+      expect(result.assignmentConflicts).toEqual([]);
+      expect(result.hasPlacementProblems).toBe(false);
+      expect(result.gamesWithDimensions).toBe(0);
+    });
+
+    test("reports dangling manual assignments when configuration is empty", async () => {
+      const svc = createCapacityService({
+        storageService: createMockStorage([]),
+        gameService: createMockGameService([
+          makeGame("b-game", "Pinned B", {
+            boxDimensions: { width: 10, height: 10, depth: 2 },
+            manualShelfId: "deleted-b",
+          }),
+          makeGame("a-game", "Pinned A", {
+            boxDimensions: { width: 10, height: 10, depth: 2 },
+            manualShelfId: "deleted-a",
+          }),
+          makeGame("automatic", "Automatic", {
+            boxDimensions: { width: 10, height: 10, depth: 2 },
+          }),
+        ]),
+      });
+
+      const result = await svc.computeCapacity();
+      expect(result.configured).toBe(false);
+      expect(result.assignments).toEqual([]);
+      expect(result.assignmentConflicts.map((conflict) => conflict.gameId)).toEqual([
+        "a-game",
+        "b-game",
+      ]);
+      expect(result.assignmentConflicts[0]).toEqual(
+        expect.objectContaining({
+          shelfId: "deleted-a",
+          shelfName: "Unknown shelf",
+          unitName: "Unknown unit",
+          reason: "Selected shelf no longer exists",
+        }),
+      );
+      expect(result.hasPlacementProblems).toBe(true);
+      expect(result.overflowing).toBe(false);
+      expect(result.unfittableGames).toEqual([]);
+      expect(result.overflowGames).toEqual([]);
     });
 
     test("returns empty-ish response when no games have dimensions", async () => {
@@ -333,6 +385,7 @@ describe("capacity service", () => {
       expect(result.assignments).toHaveLength(1);
       expect(result.assignments[0].games).toHaveLength(1);
       expect(result.assignments[0].games[0].gameId).toBe("g1");
+      expect(result.assignments[0].games[0].assignmentSource).toBe("automatic");
       expect(result.assignments[0].games[0].volumeIn3).toBe(10 * 2 * 10);
       expect(result.assignments[0].usedIn3).toBe(10 * 2 * 10);
       expect(result.assignments[0].capacityIn3).toBe(13 * 13 * 15);
@@ -427,6 +480,172 @@ describe("capacity service", () => {
         ]),
       });
       const result = await svc.computeCapacity();
+      expect(["S", "A", "B", "C", "D", "F"]).toContain(result.assignments[0].grade);
+    });
+  });
+
+  describe("manual assignments", () => {
+    test("honors a nonpreferred shelf before placing automatic games", async () => {
+      const svc = createCapacityService({
+        storageService: createMockStorage([
+          unit("u1", "Bookcase", [
+            { id: "s1", name: "First", width: 10, height: 10, depth: 10 },
+            { id: "s2", name: "Pinned target", width: 10, height: 10, depth: 10 },
+          ]),
+        ]),
+        gameService: createMockGameService([
+          makeGame("pinned", "Pinned", {
+            boxDimensions: { width: 10, height: 10, depth: 6 },
+            fitness: 1,
+            manualShelfId: "s2",
+          }),
+          makeGame("automatic", "Automatic", {
+            boxDimensions: { width: 10, height: 10, depth: 6 },
+            fitness: 9,
+          }),
+        ]),
+      });
+
+      const result = await svc.computeCapacity();
+      expect(result.assignments.find((assignment) => assignment.shelfId === "s2")?.games).toEqual([
+        expect.objectContaining({ gameId: "pinned", assignmentSource: "manual" }),
+      ]);
+      expect(result.assignments.find((assignment) => assignment.shelfId === "s1")?.games).toEqual([
+        expect.objectContaining({ gameId: "automatic", assignmentSource: "automatic" }),
+      ]);
+    });
+
+    test("processes pinned games in stable game-ID order", async () => {
+      const games = [
+        makeGame("z-game", "Z", {
+          boxDimensions: { width: 10, height: 10, depth: 3 },
+          manualShelfId: "s1",
+        }),
+        makeGame("a-game", "A", {
+          boxDimensions: { width: 10, height: 10, depth: 3 },
+          manualShelfId: "s1",
+        }),
+      ];
+      const create = () =>
+        createCapacityService({
+          storageService: createMockStorage([
+            unit("u1", "Bookcase", [{ id: "s1", name: "Shelf", width: 10, height: 10, depth: 10 }]),
+          ]),
+          gameService: createMockGameService(games),
+        });
+
+      const first = await create().computeCapacity();
+      const second = await create().computeCapacity();
+      expect(first.assignments[0].games.map((game) => game.gameId)).toEqual(["a-game", "z-game"]);
+      expect(second.assignments).toEqual(first.assignments);
+    });
+
+    test("reports selected-shelf shape failures only as assignment conflicts", async () => {
+      const svc = createCapacityService({
+        storageService: createMockStorage([
+          unit("u1", "Bookcase", [
+            { id: "tiny", name: "Tiny", width: 5, height: 5, depth: 5 },
+            { id: "large", name: "Large", width: 20, height: 20, depth: 20 },
+          ]),
+        ]),
+        gameService: createMockGameService([
+          makeGame("g1", "Wrong Shelf", {
+            boxDimensions: { width: 10, height: 10, depth: 10 },
+            manualShelfId: "tiny",
+          }),
+        ]),
+      });
+
+      const result = await svc.computeCapacity();
+      expect(result.assignmentConflicts).toEqual([
+        expect.objectContaining({
+          gameId: "g1",
+          shelfId: "tiny",
+          shelfName: "Tiny",
+          unitId: "u1",
+          unitName: "Bookcase",
+          boxDimensions: { width: 10, height: 10, depth: 10 },
+        }),
+      ]);
+      expect(result.assignmentConflicts[0].reason).toContain("do not fit");
+      expect(result.unfittableGames).toEqual([]);
+      expect(result.overflowGames).toEqual([]);
+      expect(result.overflowing).toBe(false);
+      expect(result.hasPlacementProblems).toBe(true);
+    });
+
+    test("reports cumulative fixed capacity conflicts without automatic fallback", async () => {
+      const svc = createCapacityService({
+        storageService: createMockStorage([
+          unit("u1", "Bookcase", [
+            { id: "s1", name: "Shelf", width: 10, height: 10, depth: 10 },
+            { id: "s2", name: "Fallback", width: 20, height: 10, depth: 10 },
+          ]),
+        ]),
+        gameService: createMockGameService([
+          makeGame("a", "First", {
+            boxDimensions: { width: 10, height: 10, depth: 6 },
+            manualShelfId: "s1",
+          }),
+          makeGame("b", "Second", {
+            boxDimensions: { width: 10, height: 10, depth: 6 },
+            manualShelfId: "s1",
+          }),
+        ]),
+      });
+
+      const result = await svc.computeCapacity();
+      expect(result.assignments[0].games.map((game) => game.gameId)).toEqual(["a"]);
+      expect(result.assignments[1].games).toEqual([]);
+      expect(result.assignmentConflicts).toEqual([
+        expect.objectContaining({ gameId: "b", shelfId: "s1" }),
+      ]);
+      expect(result.assignmentConflicts[0].reason).toContain("remaining capacity");
+      expect(result.unfittableGames).toEqual([]);
+      expect(result.overflowGames).toEqual([]);
+    });
+
+    test("reports defensive dangling shelf IDs as conflicts", async () => {
+      const svc = createCapacityService({
+        storageService: createMockStorage([
+          unit("u1", "Bookcase", [{ id: "s1", name: "Shelf", width: 10, height: 10, depth: 10 }]),
+        ]),
+        gameService: createMockGameService([
+          makeGame("g1", "Dangling", {
+            boxDimensions: { width: 5, height: 5, depth: 5 },
+            manualShelfId: "deleted-shelf",
+          }),
+        ]),
+      });
+
+      const result = await svc.computeCapacity();
+      expect(result.assignmentConflicts).toEqual([
+        expect.objectContaining({
+          gameId: "g1",
+          shelfId: "deleted-shelf",
+          shelfName: "Unknown shelf",
+          unitName: "Unknown unit",
+        }),
+      ]);
+      expect(result.assignmentConflicts[0].reason).toContain("no longer exists");
+    });
+
+    test("includes successful manual placements in volume and utilization", async () => {
+      const svc = createCapacityService({
+        storageService: createMockStorage([
+          unit("u1", "Bookcase", [{ id: "s1", name: "Shelf", width: 10, height: 10, depth: 10 }]),
+        ]),
+        gameService: createMockGameService([
+          makeGame("g1", "Pinned", {
+            boxDimensions: { width: 5, height: 10, depth: 2 },
+            manualShelfId: "s1",
+          }),
+        ]),
+      });
+
+      const result = await svc.computeCapacity();
+      expect(result.assignments[0].usedIn3).toBe(100);
+      expect(result.assignments[0].utilization).toBe(0.1);
       expect(["S", "A", "B", "C", "D", "F"]).toContain(result.assignments[0].grade);
     });
   });

@@ -41,6 +41,7 @@ function makeGame(overrides: Partial<Game> = {}): Game {
     numPlays: null,
     ownership: "owned",
     boxDimensions: null,
+    manualShelfId: null,
     ratings: {},
     createdAt: "2025-01-01T00:00:00.000Z",
     updatedAt: "2025-01-01T00:00:00.000Z",

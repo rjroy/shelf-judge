@@ -4,6 +4,7 @@
 
 import type {
   AssignedGame,
+  AssignmentConflict,
   Axis,
   BoxDimensions,
   Game,
@@ -59,18 +60,30 @@ export function createCapacityService(deps: CapacityServiceDeps): CapacityServic
     async computeCapacity(): Promise<ShelfCapacityResult> {
       const shelfConfig = await storageService.loadShelfConfig();
       const shelves = flattenShelves(shelfConfig.units);
-
-      // REQ-SHELF-23: no units configured => configured: false, no algorithm run.
-      if (shelfConfig.units.length === 0 || shelves.length === 0) {
-        return emptyResult(shelfConfig.units.length > 0 ? shelves.length : 0);
-      }
-
       const allGames = await gameService.listGames();
       // Previously-owned games aren't on the shelf; capacity is about physical presence.
       const ownedGames = allGames.filter((g) => g.game.ownership !== "previously-owned");
-
       const dimensioned = ownedGames.filter((g) => g.game.boxDimensions !== null);
       const undimensioned = ownedGames.filter((g) => g.game.boxDimensions === null);
+
+      // REQ-SHELF-23: no units configured => configured: false, no algorithm run.
+      if (shelfConfig.units.length === 0 || shelves.length === 0) {
+        const danglingPinned = dimensioned
+          .filter((gws) => gws.game.manualShelfId !== null)
+          .sort((a, b) => a.game.id.localeCompare(b.game.id));
+        if (danglingPinned.length === 0) {
+          return emptyResult(shelfConfig.units.length > 0 ? shelves.length : 0);
+        }
+
+        const result = emptyResult(shelfConfig.units.length > 0 ? shelves.length : 0);
+        result.gamesWithDimensions = dimensioned.length;
+        result.gamesWithoutDimensions = undimensioned.length;
+        result.assignmentConflicts = danglingPinned.map((gws) =>
+          buildAssignmentConflict(gws, "missing-bin", new Map()),
+        );
+        result.hasPlacementProblems = true;
+        return result;
+      }
 
       // REQ-SHELF-24: no games with dimensions => valid empty-ish response.
       if (dimensioned.length === 0) {
@@ -80,7 +93,9 @@ export function createCapacityService(deps: CapacityServiceDeps): CapacityServic
           gamesWithDimensions: 0,
           gamesWithoutDimensions: undimensioned.length,
           overflowing: false,
+          hasPlacementProblems: false,
           assignments: shelves.map((ctx) => emptyAssignment(ctx)),
+          assignmentConflicts: [],
           unfittableGames: [],
           overflowGames: [],
         };
@@ -89,8 +104,18 @@ export function createCapacityService(deps: CapacityServiceDeps): CapacityServic
       // Resolve config once so the pre-pass and pack() use the same policy.
       const resolvedConfig: PackConfig = { ...DEFAULT_PACK_CONFIG, ...packConfig };
 
-      // REQ-SHELF-17 + REQ-SHELF-20: pre-pass geometric unfittable check.
-      const { unfittable, fittable } = splitUnfittable(dimensioned, shelves, resolvedConfig);
+      const pinned = dimensioned
+        .filter((gws) => gws.game.manualShelfId !== null)
+        .sort((a, b) => a.game.id.localeCompare(b.game.id));
+      const automatic = dimensioned.filter((gws) => gws.game.manualShelfId === null);
+
+      // Manual assignments are fixed intent, so only automatic games participate
+      // in the ordinary geometric unfittable pre-pass.
+      const { unfittable, fittable: automaticFittable } = splitUnfittable(
+        automatic,
+        shelves,
+        resolvedConfig,
+      );
 
       // Sort unfittable by fitness ascending (REQ-SHELF-20).
       unfittable.sort((a, b) => a.fitnessScore - b.fitnessScore);
@@ -100,27 +125,41 @@ export function createCapacityService(deps: CapacityServiceDeps): CapacityServic
       // Pre-encode feature vectors once per request; feed the compare closure.
       const vectorCache = buildVectorCache(
         ownedGames.map((g) => g.game),
-        dimensioned,
+        [...pinned, ...automaticFittable],
         collection.axes,
       );
 
-      // Build items/bins and run the packing algorithm.
-      const items = fittable.map((gws) => buildPackItem(gws, vectorCache));
+      // Pinned items are sorted by stable game ID and reserve their selected
+      // shelves before automatic items enter the normal packing phases.
+      const items = [
+        ...pinned.map((gws) => buildPackItem(gws, vectorCache, gws.game.manualShelfId!)),
+        ...automaticFittable.map((gws) => buildPackItem(gws, vectorCache)),
+      ];
       const bins = shelves.map((ctx) => buildPackBin(ctx.shelf));
 
       const result = pack(items, bins, resolvedConfig);
 
-      // Index fittable games by id for response assembly.
-      const fittableById = new Map(fittable.map((gws) => [gws.game.id, gws]));
+      const packableById = new Map(
+        [...pinned, ...automaticFittable].map((gws) => [gws.game.id, gws]),
+      );
+      const shelvesById = new Map(shelves.map((ctx) => [ctx.shelf.id, ctx]));
 
       const assignments = shelves.map((ctx) => {
         const assignment = result.assignments.get(ctx.shelf.id);
-        return buildAssignment(ctx, assignment, fittableById);
+        return buildAssignment(ctx, assignment, packableById);
       });
+
+      const assignmentConflicts: AssignmentConflict[] = result.fixedPlacementRejections.flatMap(
+        ({ itemId, reason }): AssignmentConflict[] => {
+          const gws = packableById.get(itemId);
+          if (!gws?.game.boxDimensions || gws.game.manualShelfId === null) return [];
+          return [buildAssignmentConflict(gws, reason, shelvesById)];
+        },
+      );
 
       const overflowGames: OverflowEntry[] = result.overflow
         .flatMap((gameId): OverflowEntry[] => {
-          const gws = fittableById.get(gameId);
+          const gws = packableById.get(gameId);
           if (!gws || !gws.game.boxDimensions) return [];
           return [
             {
@@ -139,7 +178,10 @@ export function createCapacityService(deps: CapacityServiceDeps): CapacityServic
         gamesWithDimensions: dimensioned.length,
         gamesWithoutDimensions: undimensioned.length,
         overflowing: overflowGames.length > 0,
+        hasPlacementProblems:
+          assignmentConflicts.length > 0 || unfittable.length > 0 || overflowGames.length > 0,
         assignments,
+        assignmentConflicts,
         unfittableGames: unfittable,
         overflowGames,
       };
@@ -154,7 +196,9 @@ function emptyResult(totalShelfCount: number): ShelfCapacityResult {
     gamesWithDimensions: 0,
     gamesWithoutDimensions: 0,
     overflowing: false,
+    hasPlacementProblems: false,
     assignments: [],
+    assignmentConflicts: [],
     unfittableGames: [],
     overflowGames: [],
   };
@@ -326,7 +370,11 @@ function buildVectorCache(
   return cache;
 }
 
-function buildPackItem(gws: GameWithScore, vectorCache: Map<string, FeatureVector>): PackItem {
+function buildPackItem(
+  gws: GameWithScore,
+  vectorCache: Map<string, FeatureVector>,
+  fixedShelfId?: string,
+): PackItem {
   const dims = gws.game.boxDimensions!;
   const thisVector = vectorCache.get(gws.game.id) ?? null;
 
@@ -334,6 +382,9 @@ function buildPackItem(gws: GameWithScore, vectorCache: Map<string, FeatureVecto
     id: gws.game.id,
     dimensions: boxToTuple(dims),
     priority: fitnessOf(gws),
+    ...(fixedShelfId === undefined
+      ? {}
+      : { locationOverride: { binId: fixedShelfId, mode: "fixed-fit" as const } }),
     compare: (other: PackItem) => {
       if (!thisVector) return 0;
       const otherVector = vectorCache.get(other.id);
@@ -341,6 +392,36 @@ function buildPackItem(gws: GameWithScore, vectorCache: Map<string, FeatureVecto
       const dist = compositeDistance(thisVector, otherVector).composite;
       return 1 - dist;
     },
+  };
+}
+
+function explainAssignmentConflict(reason: "missing-bin" | "shape" | "remaining-capacity"): string {
+  switch (reason) {
+    case "missing-bin":
+      return "Selected shelf no longer exists";
+    case "shape":
+      return "Box dimensions do not fit the selected shelf";
+    case "remaining-capacity":
+      return "Selected shelf does not have enough remaining capacity";
+  }
+}
+
+function buildAssignmentConflict(
+  gws: GameWithScore,
+  reason: "missing-bin" | "shape" | "remaining-capacity",
+  shelvesById: Map<string, ShelfContext>,
+): AssignmentConflict {
+  const shelfId = gws.game.manualShelfId!;
+  const shelfContext = shelvesById.get(shelfId);
+  return {
+    gameId: gws.game.id,
+    gameName: gws.game.name,
+    shelfId,
+    shelfName: shelfContext?.shelf.name ?? "Unknown shelf",
+    unitId: shelfContext?.unit.id ?? "unknown",
+    unitName: shelfContext?.unit.name ?? "Unknown unit",
+    boxDimensions: gws.game.boxDimensions!,
+    reason: explainAssignmentConflict(reason),
   };
 }
 
@@ -380,6 +461,7 @@ function buildAssignment(
       gameName: gws.game.name,
       fitnessScore: fitnessOf(gws),
       volumeIn3: vol,
+      assignmentSource: gws.game.manualShelfId === null ? "automatic" : "manual",
     });
   }
   // Keep the algorithm's placement order. It reflects placement priority and

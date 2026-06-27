@@ -44,8 +44,8 @@ export function createShelfRoutes(deps: ShelfRoutesDeps): RouteModule {
     }
 
     try {
-      const config = await shelfService.setConfig(units);
-      return c.json(config);
+      const result = await shelfService.setConfig(units);
+      return c.json(result);
     } catch (err) {
       if (err instanceof ShelfValidationError) {
         return c.json({ error: err.message }, 400);
@@ -103,8 +103,8 @@ export function createShelfRoutes(deps: ShelfRoutesDeps): RouteModule {
     const { name, shelves } = body as { name?: string; shelves?: ShelfInput[] };
 
     try {
-      const unit = await shelfService.updateUnit(id, { name, shelves });
-      return c.json(unit);
+      const result = await shelfService.updateUnit(id, { name, shelves });
+      return c.json(result);
     } catch (err) {
       if (err instanceof ShelfNotFoundError) {
         return c.json({ error: err.message }, 404);
@@ -121,8 +121,8 @@ export function createShelfRoutes(deps: ShelfRoutesDeps): RouteModule {
     const id = c.req.param("id");
 
     try {
-      await shelfService.removeUnit(id);
-      return c.json({ removed: true });
+      const result = await shelfService.removeUnit(id);
+      return c.json(result);
     } catch (err) {
       if (err instanceof ShelfNotFoundError) {
         return c.json({ error: err.message }, 404);

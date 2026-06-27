@@ -261,6 +261,7 @@ function makeGame(bggId: number | null, name: string): Game {
     bggData: null,
     ownership: "owned",
     boxDimensions: null,
+    manualShelfId: null,
     ratings: {},
     createdAt: NOW,
     updatedAt: NOW,
@@ -281,6 +282,7 @@ function createMockGameService(overrides: Partial<GameService> = {}): GameServic
     importBggCollection: notImpl,
     setOwnership: notImpl,
     setBoxDimensions: notImpl,
+    setManualShelf: notImpl,
     ...overrides,
   };
 }

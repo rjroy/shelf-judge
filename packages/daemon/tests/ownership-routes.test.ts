@@ -68,6 +68,7 @@ function makeGame(
     numPlays: 5,
     ownership,
     boxDimensions: null,
+    manualShelfId: null,
     ratings: { axis1: 7 },
     createdAt: now,
     updatedAt: now,
@@ -186,6 +187,7 @@ function createMockGameService(collection?: Collection): GameService {
       return Promise.resolve(structuredClone(game));
     },
     setBoxDimensions: () => Promise.reject(new Error("not implemented")),
+    setManualShelf: () => Promise.reject(new Error("not implemented")),
     searchGames: () => Promise.reject(new Error("not implemented")),
     refreshBggData: () => Promise.reject(new Error("not implemented")),
     refreshAllBggData: () => Promise.reject(new Error("not implemented")),

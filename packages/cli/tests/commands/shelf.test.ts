@@ -196,7 +196,11 @@ describe("shelf add-shelf", () => {
       routes: {
         "GET /api/shelf/config": { response: { ok: true, status: 200, data: config } },
         "PUT /api/shelf/units/unit-1": {
-          response: { ok: true, status: 200, data: updatedUnit },
+          response: {
+            ok: true,
+            status: 200,
+            data: { unit: updatedUnit, clearedAssignmentCount: 0 },
+          },
         },
       },
     });
@@ -220,7 +224,11 @@ describe("shelf add-shelf", () => {
       routes: {
         "GET /api/shelf/config": { response: { ok: true, status: 200, data: config } },
         "PUT /api/shelf/units/unit-1": {
-          response: { ok: true, status: 200, data: updatedUnit },
+          response: {
+            ok: true,
+            status: 200,
+            data: { unit: updatedUnit, clearedAssignmentCount: 0 },
+          },
         },
       },
     });
@@ -254,13 +262,33 @@ describe("shelf remove-unit", () => {
     const client = createMockClient({
       routes: {
         "DELETE /api/shelf/units/unit-1": {
-          response: { ok: true, status: 200, data: { removed: true } },
+          response: {
+            ok: true,
+            status: 200,
+            data: { removed: true, clearedAssignmentCount: 0 },
+          },
         },
       },
     });
     const output = await shelfRemoveUnit(client, ["unit-1"], { json: false });
     expect(output).toContain("Removed");
     expect(output).toContain("unit-1");
+  });
+
+  test("reports cleared assignments", async () => {
+    const client = createMockClient({
+      routes: {
+        "DELETE /api/shelf/units/unit-1": {
+          response: {
+            ok: true,
+            status: 200,
+            data: { removed: true, clearedAssignmentCount: 2 },
+          },
+        },
+      },
+    });
+    const output = await shelfRemoveUnit(client, ["unit-1"], { json: false });
+    expect(output).toContain("cleared 2 manual shelf assignments");
   });
 });
 
@@ -280,7 +308,11 @@ describe("shelf remove-shelf", () => {
       routes: {
         "GET /api/shelf/config": { response: { ok: true, status: 200, data: config } },
         "PUT /api/shelf/units/unit-1": {
-          response: { ok: true, status: 200, data: updatedUnit },
+          response: {
+            ok: true,
+            status: 200,
+            data: { unit: updatedUnit, clearedAssignmentCount: 0 },
+          },
         },
       },
     });
@@ -288,6 +320,23 @@ describe("shelf remove-shelf", () => {
     expect(output).toContain("Removed");
     expect(output).toContain("shelf-2");
     expect(output).toContain("Living Room Kallax");
+  });
+
+  test("reports assignments cleared with a removed shelf", async () => {
+    const client = createMockClient({
+      routes: {
+        "GET /api/shelf/config": { response: { ok: true, status: 200, data: config } },
+        "PUT /api/shelf/units/unit-1": {
+          response: {
+            ok: true,
+            status: 200,
+            data: { unit: unit1, clearedAssignmentCount: 1 },
+          },
+        },
+      },
+    });
+    const output = await shelfRemoveShelf(client, ["shelf-2"], { json: false });
+    expect(output).toContain("cleared 1 manual shelf assignment");
   });
 
   test("throws when shelf not found in any unit", async () => {

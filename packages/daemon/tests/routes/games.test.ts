@@ -637,3 +637,103 @@ describe("Game Routes", () => {
     });
   });
 });
+
+describe("PUT /api/games/:id/shelf-assignment", () => {
+  beforeEach(() => {
+    ctx = createTestApp();
+  });
+
+  async function setupMeasuredGame(): Promise<Game> {
+    await ctx.storageService.saveShelfConfig({
+      units: [
+        {
+          id: "unit-1",
+          name: "Bookcase",
+          shelves: [{ id: "shelf-1", name: "Top", width: 30, height: 12, depth: 12 }],
+        },
+      ],
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    });
+    const { game } = await ctx.gameService.addGame({ name: "Measured" });
+    return ctx.gameService.setBoxDimensions(game.id, { width: 10, height: 10, depth: 2 });
+  }
+
+  test("sets and clears a shelf assignment", async () => {
+    const game = await setupMeasuredGame();
+    const setResponse = await jsonRequest(
+      ctx.app,
+      "PUT",
+      `/api/games/${game.id}/shelf-assignment`,
+      { shelfId: "shelf-1" },
+    );
+    expect(setResponse.status).toBe(200);
+    expect(((await setResponse.json()) as { game: Game }).game.manualShelfId).toBe("shelf-1");
+
+    const clearResponse = await jsonRequest(
+      ctx.app,
+      "PUT",
+      `/api/games/${game.id}/shelf-assignment`,
+      { shelfId: null },
+    );
+    expect(clearResponse.status).toBe(200);
+    expect(((await clearResponse.json()) as { game: Game }).game.manualShelfId).toBeNull();
+  });
+
+  test("returns stable client errors", async () => {
+    const game = await setupMeasuredGame();
+    const unknownShelf = await jsonRequest(
+      ctx.app,
+      "PUT",
+      `/api/games/${game.id}/shelf-assignment`,
+      { shelfId: "missing" },
+    );
+    expect(unknownShelf.status).toBe(404);
+
+    const { game: unmeasured } = await ctx.gameService.addGame({ name: "Unmeasured" });
+    const noDimensions = await jsonRequest(
+      ctx.app,
+      "PUT",
+      `/api/games/${unmeasured.id}/shelf-assignment`,
+      { shelfId: "shelf-1" },
+    );
+    expect(noDimensions.status).toBe(400);
+
+    const previouslyOwned = await setupMeasuredGame();
+    await ctx.gameService.setOwnership(previouslyOwned.id, "previously-owned");
+    const wrongOwnership = await jsonRequest(
+      ctx.app,
+      "PUT",
+      `/api/games/${previouslyOwned.id}/shelf-assignment`,
+      { shelfId: "shelf-1" },
+    );
+    expect(wrongOwnership.status).toBe(400);
+
+    const missingGame = await jsonRequest(ctx.app, "PUT", "/api/games/missing/shelf-assignment", {
+      shelfId: null,
+    });
+    expect(missingGame.status).toBe(404);
+  });
+
+  test("rejects invalid request bodies", async () => {
+    const game = await setupMeasuredGame();
+    const response = await jsonRequest(
+      ctx.app,
+      "PUT",
+      `/api/games/${game.id}/shelf-assignment`,
+      {},
+    );
+    expect(response.status).toBe(400);
+  });
+
+  test("registers an idempotent operation", () => {
+    const operation = ctx.operations.find(
+      (candidate) => candidate.operationId === "shelf.game.shelf-assignment",
+    );
+    expect(operation?.invocation).toEqual({
+      method: "PUT",
+      path: "/api/games/:id/shelf-assignment",
+    });
+    expect(operation?.idempotent).toBe(true);
+  });
+});

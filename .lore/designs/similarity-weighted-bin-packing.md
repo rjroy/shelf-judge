@@ -20,9 +20,10 @@ The use case is physical shelving where grouping matters: a bookshelf where you 
 Each item has:
 
 - **Dimensions**: a 3-tuple `[h, w, d]` representing its bounding box. Optional; dimensionless items exist (cards, accessories) and bypass spatial logic entirely.
-- **Location override**: an optional fixed assignment. Some items must go in a specific bin regardless of fitness. Overrides come in two flavors:
+- **Location override**: an optional location instruction. Overrides come in three flavors:
   - _Hard_: the item is excluded from packing (unowned, culled, in transit). Placed directly.
   - _Soft_: the item prefers a bin but can be reassigned if it doesn't fit.
+  - _Fixed-fit_: the item must use an existing specified bin and must physically fit its current remaining space. A rejected fixed-fit item is not reassigned.
 - **Similarity function**: `compare(other) -> [0, 1]` where 1 means identical profile and 0 means completely unrelated. The algorithm is agnostic to what "similar" means. The consumer defines it.
 
 ### Bins
@@ -187,6 +188,14 @@ Four phases, executed in order.
 Items with hard location overrides go directly to their assigned bin. No fitness calculation. If the bin doesn't exist, create it. This handles items that are unowned, culled, in transit, or manually placed by the user.
 
 Items with soft location overrides that match an existing bin are also placed here. Soft overrides that don't match any existing bin fall through to Phase 3 as regular unplaced items. The override is a preference, not a mandate: if the preferred bin doesn't exist or doesn't fit, the item competes for placement like any other.
+
+Fixed-fit overrides are processed in input order before legacy hard/soft overrides and automatic phases, so a preference cannot consume a fixed reservation. The target bin must already exist. An accepted item consumes remaining dimensions and participates in later similarity and grade calculations like every other placed item. A rejected item is removed from later phases and returned separately from ordinary overflow with one of three machine-readable reasons:
+
+- `missing-bin`: the requested bin does not exist.
+- `shape`: the item cannot fit the bin's original dimensions under the configured rotation rules.
+- `remaining-capacity`: the item fits the original bin shape, but earlier fixed placements consumed the required space.
+
+This mode preserves a fixed user intent without inheriting hard override behavior that can synthesize bins or force impossible placements.
 
 ### Phase 2: Place Unambiguous Items
 

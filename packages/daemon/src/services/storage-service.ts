@@ -174,6 +174,9 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
           if (game.boxDimensions === undefined) {
             game.boxDimensions = null;
           }
+          if (game.manualShelfId === undefined) {
+            game.manualShelfId = null;
+          }
         }
 
         // Tournament axis migration (REQ-TAXIS-4, REQ-TAXIS-9). Idempotent: a subsequent

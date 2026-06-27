@@ -7,6 +7,7 @@ import {
   getProfile,
   predictGame,
   getNicheSettings,
+  getShelfConfig,
 } from "@/lib/api";
 import type {
   TournamentGameStatsDisplay,
@@ -24,6 +25,7 @@ import { RatingForm } from "@/components/rating-form";
 import { GameActions, OwnershipActions } from "@/components/game-actions";
 import { NicheIgnoreButton, NicheRestoreButton } from "@/components/niche-ignore-button";
 import { BoxDimensionsForm } from "@/components/box-dimensions-form";
+import { ShelfAssignmentForm } from "@/components/shelf-assignment-form";
 
 export async function generateMetadata({
   params,
@@ -52,8 +54,18 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
   let profileOutlier: CollectionOutlier | null = null;
   let prediction: { score: FitnessResult } | null = null;
   let ignoredTags: NicheTagFilter[] = [];
+  let shelfOptions: Array<{ shelfId: string; label: string }> = [];
   try {
+    const shelfConfigPromise = getShelfConfig().catch(() => null);
     [data, axes] = await Promise.all([getGame(id), listAxes()]);
+    const shelfConfig = await shelfConfigPromise;
+    shelfOptions =
+      shelfConfig?.units.flatMap((unit) =>
+        unit.shelves.map((shelf) => ({
+          shelfId: shelf.id,
+          label: `${unit.name} — ${shelf.name}`,
+        })),
+      ) ?? [];
     try {
       tournamentStats = await getTournamentGameStats(id);
     } catch {
@@ -477,6 +489,13 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
             />
             <OwnershipActions gameId={game.id} gameName={game.name} ownership={game.ownership} />
             <BoxDimensionsForm gameId={game.id} currentDimensions={game.boxDimensions} />
+            <ShelfAssignmentForm
+              gameId={game.id}
+              currentShelfId={game.manualShelfId}
+              options={shelfOptions}
+              hasDimensions={game.boxDimensions !== null}
+              isPreviouslyOwned={isPreviouslyOwned}
+            />
           </div>
         </div>
       </div>

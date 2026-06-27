@@ -25,6 +25,7 @@ function makeGame(id: string, name: string): Game {
     numPlays: null,
     ownership: "owned",
     boxDimensions: null,
+    manualShelfId: null,
     ratings: {},
     imageUrl: null,
     bggData: null,
@@ -159,6 +160,7 @@ function createStubGameService(games: Game[]): GameService {
     importBggCollection: () => Promise.reject(new Error("not implemented")),
     setOwnership: () => Promise.reject(new Error("not implemented")),
     setBoxDimensions: () => Promise.reject(new Error("not implemented")),
+    setManualShelf: () => Promise.reject(new Error("not implemented")),
   };
 }
 

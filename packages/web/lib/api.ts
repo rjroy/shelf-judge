@@ -302,6 +302,9 @@ import type {
   Shelf,
   ShelfUnit,
   ShelfConfiguration,
+  ShelfConfigMutationResult,
+  ShelfUnitMutationResult,
+  ShelfUnitRemovalResult,
   ShelfCapacityResult,
   ShelfAssignment,
   AssignedGame,
@@ -313,7 +316,7 @@ export async function getShelfConfig(): Promise<ShelfConfiguration> {
   return daemonJson("/api/shelf/config");
 }
 
-export async function setShelfConfig(units: ShelfUnit[]): Promise<ShelfConfiguration> {
+export async function setShelfConfig(units: ShelfUnit[]): Promise<ShelfConfigMutationResult> {
   return daemonJson("/api/shelf/config", { method: "PUT", body: { units } });
 }
 
@@ -336,16 +339,26 @@ export async function updateShelfUnit(
       depth: number;
     }>;
   },
-): Promise<ShelfUnit> {
+): Promise<ShelfUnitMutationResult> {
   return daemonJson(`/api/shelf/units/${id}`, { method: "PUT", body: input });
 }
 
-export async function removeShelfUnit(id: string): Promise<{ removed: true }> {
+export async function removeShelfUnit(id: string): Promise<ShelfUnitRemovalResult> {
   return daemonJson(`/api/shelf/units/${id}`, { method: "DELETE" });
 }
 
 export async function getShelfCapacity(): Promise<ShelfCapacityResult> {
   return daemonJson("/api/shelf/capacity");
+}
+
+export async function setGameShelfAssignment(
+  gameId: string,
+  shelfId: string | null,
+): Promise<{ game: import("@shelf-judge/shared").Game }> {
+  return daemonJson(`/api/games/${gameId}/shelf-assignment`, {
+    method: "PUT",
+    body: { shelfId },
+  });
 }
 
 // Redundancy settings API functions

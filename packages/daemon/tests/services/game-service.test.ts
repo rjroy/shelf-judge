@@ -8,6 +8,7 @@ import type { GameService } from "../../src/services/game-service.js";
 import type { StorageService } from "../../src/services/storage-service.js";
 import type { AxisService } from "../../src/services/axis-service.js";
 import type { MockFileOps } from "../helpers/mock-file-ops.js";
+import type { Game } from "@shelf-judge/shared";
 
 let fileOps: MockFileOps;
 let storageService: StorageService;
@@ -269,6 +270,79 @@ describe("GameService", () => {
     test("throws on non-existent game", async () => {
       // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
       await expect(gameService.removeGame("nonexistent")).rejects.toThrow("Game not found");
+    });
+  });
+
+  describe("setManualShelf", () => {
+    async function addShelf(id: string): Promise<void> {
+      await storageService.saveShelfConfig({
+        units: [
+          {
+            id: "unit-1",
+            name: "Bookcase",
+            shelves: [{ id, name: "Top", width: 30, height: 12, depth: 12 }],
+          },
+        ],
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      });
+    }
+
+    async function addMeasuredGame(): Promise<Game> {
+      const { game } = await gameService.addGame({ name: "Measured" });
+      return gameService.setBoxDimensions(game.id, { width: 10, height: 10, depth: 2 });
+    }
+
+    test("sets, replaces, and clears an assignment", async () => {
+      await addShelf("shelf-1");
+      const game = await addMeasuredGame();
+
+      expect((await gameService.setManualShelf(game.id, "shelf-1")).manualShelfId).toBe("shelf-1");
+
+      await addShelf("shelf-2");
+      expect((await gameService.setManualShelf(game.id, "shelf-2")).manualShelfId).toBe("shelf-2");
+      expect((await gameService.setManualShelf(game.id, null)).manualShelfId).toBeNull();
+    });
+
+    test("rejects unknown shelves without changing the game", async () => {
+      const game = await addMeasuredGame();
+      await expect(gameService.setManualShelf(game.id, "missing")).rejects.toThrow(
+        "Shelf not found: missing",
+      );
+      expect((await gameService.getGame(game.id)).game.manualShelfId).toBeNull();
+    });
+
+    test("rejects unmeasured and previously-owned games", async () => {
+      await addShelf("shelf-1");
+      const { game: unmeasured } = await gameService.addGame({ name: "Unmeasured" });
+      await expect(gameService.setManualShelf(unmeasured.id, "shelf-1")).rejects.toThrow(
+        "Box dimensions are required",
+      );
+
+      const measured = await addMeasuredGame();
+      await gameService.setOwnership(measured.id, "previously-owned");
+      await expect(gameService.setManualShelf(measured.id, "shelf-1")).rejects.toThrow(
+        "requires an owned game",
+      );
+    });
+
+    test("throws for a missing game", async () => {
+      await expect(gameService.setManualShelf("missing", null)).rejects.toThrow(
+        "Game not found: missing",
+      );
+    });
+
+    test("changing ownership clears an assignment in the persisted update", async () => {
+      await addShelf("shelf-1");
+      const game = await addMeasuredGame();
+      await gameService.setManualShelf(game.id, "shelf-1");
+
+      const updated = await gameService.setOwnership(game.id, "previously-owned");
+      expect(updated.manualShelfId).toBeNull();
+      const collection = await storageService.loadCollection();
+      expect(
+        collection.games.find((candidate) => candidate.id === game.id)?.manualShelfId,
+      ).toBeNull();
     });
   });
 });

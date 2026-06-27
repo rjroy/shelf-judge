@@ -243,6 +243,7 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
         bggData: bggResult.bggData,
         ownership: "owned",
         boxDimensions: null,
+        manualShelfId: null,
         ratings: {},
         createdAt: now,
         updatedAt: now,

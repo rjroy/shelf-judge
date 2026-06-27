@@ -1,5 +1,12 @@
 import { v4 as uuidv4 } from "uuid";
-import type { ShelfConfiguration, ShelfUnit, Shelf } from "@shelf-judge/shared";
+import type {
+  ShelfConfiguration,
+  ShelfConfigMutationResult,
+  ShelfUnit,
+  ShelfUnitMutationResult,
+  ShelfUnitRemovalResult,
+  Shelf,
+} from "@shelf-judge/shared";
 import type { StorageService } from "./storage-service.js";
 
 export interface ShelfInput {
@@ -22,10 +29,10 @@ export interface UpdateUnitInput {
 
 export interface ShelfService {
   getConfig(): Promise<ShelfConfiguration>;
-  setConfig(units: ShelfUnit[]): Promise<ShelfConfiguration>;
+  setConfig(units: ShelfUnit[]): Promise<ShelfConfigMutationResult>;
   addUnit(input: AddUnitInput): Promise<ShelfUnit>;
-  updateUnit(id: string, input: UpdateUnitInput): Promise<ShelfUnit>;
-  removeUnit(id: string): Promise<void>;
+  updateUnit(id: string, input: UpdateUnitInput): Promise<ShelfUnitMutationResult>;
+  removeUnit(id: string): Promise<ShelfUnitRemovalResult>;
 }
 
 export interface ShelfServiceDeps {
@@ -82,12 +89,64 @@ export class ShelfNotFoundError extends Error {
 export function createShelfService(deps: ShelfServiceDeps): ShelfService {
   const { storageService } = deps;
 
+  async function persistRemovingShelves(
+    previousConfig: ShelfConfiguration,
+    nextConfig: ShelfConfiguration,
+  ): Promise<number> {
+    const nextShelfIds = new Set(
+      nextConfig.units.flatMap((unit) => unit.shelves.map((shelf) => shelf.id)),
+    );
+    const removedShelfIds = new Set(
+      previousConfig.units
+        .flatMap((unit) => unit.shelves.map((shelf) => shelf.id))
+        .filter((id) => !nextShelfIds.has(id)),
+    );
+
+    if (removedShelfIds.size === 0) {
+      await storageService.saveShelfConfig(nextConfig);
+      return 0;
+    }
+
+    const previousCollection = await storageService.loadCollection();
+    const nextCollection = structuredClone(previousCollection);
+    const now = new Date().toISOString();
+    let clearedAssignmentCount = 0;
+    for (const game of nextCollection.games) {
+      if (game.manualShelfId !== null && removedShelfIds.has(game.manualShelfId)) {
+        game.manualShelfId = null;
+        game.updatedAt = now;
+        clearedAssignmentCount++;
+      }
+    }
+    if (clearedAssignmentCount > 0) {
+      nextCollection.updatedAt = now;
+    }
+
+    await storageService.saveShelfConfig(nextConfig);
+    if (clearedAssignmentCount === 0) return 0;
+
+    try {
+      await storageService.saveCollection(nextCollection);
+    } catch (writeError) {
+      try {
+        await storageService.saveShelfConfig(previousConfig);
+      } catch (rollbackError) {
+        throw new Error(
+          `Shelf assignment cleanup failed and shelf configuration rollback failed: ${String(writeError)}; rollback: ${String(rollbackError)}`,
+        );
+      }
+      throw writeError;
+    }
+
+    return clearedAssignmentCount;
+  }
+
   return {
     async getConfig(): Promise<ShelfConfiguration> {
       return storageService.loadShelfConfig();
     },
 
-    async setConfig(units: ShelfUnit[]): Promise<ShelfConfiguration> {
+    async setConfig(units: ShelfUnit[]): Promise<ShelfConfigMutationResult> {
       // Validate all units and their shelves
       for (const unit of units) {
         const nameErr = validateUnitName(unit.name);
@@ -106,8 +165,8 @@ export function createShelfService(deps: ShelfServiceDeps): ShelfService {
         createdAt: existing.createdAt,
         updatedAt: now,
       };
-      await storageService.saveShelfConfig(config);
-      return config;
+      const clearedAssignmentCount = await persistRemovingShelves(existing, config);
+      return { config, clearedAssignmentCount };
     },
 
     async addUnit(input: AddUnitInput): Promise<ShelfUnit> {
@@ -132,8 +191,9 @@ export function createShelfService(deps: ShelfServiceDeps): ShelfService {
       return unit;
     },
 
-    async updateUnit(id: string, input: UpdateUnitInput): Promise<ShelfUnit> {
-      const config = await storageService.loadShelfConfig();
+    async updateUnit(id: string, input: UpdateUnitInput): Promise<ShelfUnitMutationResult> {
+      const previousConfig = await storageService.loadShelfConfig();
+      const config = structuredClone(previousConfig);
       const unitIndex = config.units.findIndex((u) => u.id === id);
       if (unitIndex === -1) throw new ShelfNotFoundError(id);
 
@@ -175,18 +235,20 @@ export function createShelfService(deps: ShelfServiceDeps): ShelfService {
 
       config.units[unitIndex] = unit;
       config.updatedAt = new Date().toISOString();
-      await storageService.saveShelfConfig(config);
-      return unit;
+      const clearedAssignmentCount = await persistRemovingShelves(previousConfig, config);
+      return { unit, clearedAssignmentCount };
     },
 
-    async removeUnit(id: string): Promise<void> {
-      const config = await storageService.loadShelfConfig();
+    async removeUnit(id: string): Promise<ShelfUnitRemovalResult> {
+      const previousConfig = await storageService.loadShelfConfig();
+      const config = structuredClone(previousConfig);
       const unitIndex = config.units.findIndex((u) => u.id === id);
       if (unitIndex === -1) throw new ShelfNotFoundError(id);
 
       config.units.splice(unitIndex, 1);
       config.updatedAt = new Date().toISOString();
-      await storageService.saveShelfConfig(config);
+      const clearedAssignmentCount = await persistRemovingShelves(previousConfig, config);
+      return { removed: true, clearedAssignmentCount };
     },
   };
 }

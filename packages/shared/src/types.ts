@@ -59,6 +59,7 @@ export interface Game {
   numPlays: number | null;
   ownership: OwnershipStatus;
   boxDimensions: BoxDimensions | null;
+  manualShelfId: string | null;
   ratings: Record<string, number>; // axisId -> rating (1-10)
   createdAt: string; // ISO 8601
   updatedAt: string; // ISO 8601
@@ -557,11 +558,27 @@ export interface ShelfConfiguration {
   updatedAt: string; // ISO 8601
 }
 
+export interface ShelfConfigMutationResult {
+  config: ShelfConfiguration;
+  clearedAssignmentCount: number;
+}
+
+export interface ShelfUnitMutationResult {
+  unit: ShelfUnit;
+  clearedAssignmentCount: number;
+}
+
+export interface ShelfUnitRemovalResult {
+  removed: true;
+  clearedAssignmentCount: number;
+}
+
 export interface AssignedGame {
   gameId: string;
   gameName: string;
   fitnessScore: number;
   volumeIn3: number;
+  assignmentSource: "manual" | "automatic";
 }
 
 export interface ShelfAssignment {
@@ -591,13 +608,26 @@ export interface OverflowEntry {
   volumeIn3: number;
 }
 
+export interface AssignmentConflict {
+  gameId: string;
+  gameName: string;
+  shelfId: string;
+  shelfName: string;
+  unitId: string;
+  unitName: string;
+  boxDimensions: BoxDimensions;
+  reason: string;
+}
+
 export interface ShelfCapacityResult {
   configured: boolean;
   totalShelfCount: number;
   gamesWithDimensions: number;
   gamesWithoutDimensions: number;
   overflowing: boolean;
+  hasPlacementProblems: boolean;
   assignments: ShelfAssignment[];
+  assignmentConflicts: AssignmentConflict[];
   unfittableGames: UnfittableEntry[];
   overflowGames: OverflowEntry[];
 }
