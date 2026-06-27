@@ -5,6 +5,8 @@ import {
   shelfAddShelf,
   shelfRemoveUnit,
   shelfRemoveShelf,
+  shelfCapacity,
+  shelfStatus,
 } from "../../src/commands/shelf.js";
 import { createMockClient } from "../helpers/mock-client.js";
 import type { ShelfConfiguration, ShelfUnit } from "@shelf-judge/shared";
@@ -37,13 +39,18 @@ const emptyConfig: ShelfConfiguration = {
 };
 
 async function expectThrows(fn: () => Promise<unknown>, match: string): Promise<void> {
+  const noError = Symbol("no error");
+  let caught: unknown = noError;
   try {
     await fn();
-    throw new Error(`Expected function to throw matching "${match}" but it did not throw`);
   } catch (err) {
-    expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toContain(match);
+    caught = err;
   }
+  if (caught === noError) {
+    throw new Error(`Expected function to throw matching "${match}" but it did not throw`);
+  }
+  expect(caught).toBeInstanceOf(Error);
+  expect((caught as Error).message).toContain(match);
 }
 
 describe("shelf list", () => {
@@ -196,7 +203,11 @@ describe("shelf add-shelf", () => {
       routes: {
         "GET /api/shelf/config": { response: { ok: true, status: 200, data: config } },
         "PUT /api/shelf/units/unit-1": {
-          response: { ok: true, status: 200, data: updatedUnit },
+          response: {
+            ok: true,
+            status: 200,
+            data: { unit: updatedUnit, clearedAssignmentCount: 0 },
+          },
         },
       },
     });
@@ -220,7 +231,11 @@ describe("shelf add-shelf", () => {
       routes: {
         "GET /api/shelf/config": { response: { ok: true, status: 200, data: config } },
         "PUT /api/shelf/units/unit-1": {
-          response: { ok: true, status: 200, data: updatedUnit },
+          response: {
+            ok: true,
+            status: 200,
+            data: { unit: updatedUnit, clearedAssignmentCount: 0 },
+          },
         },
       },
     });
@@ -254,13 +269,33 @@ describe("shelf remove-unit", () => {
     const client = createMockClient({
       routes: {
         "DELETE /api/shelf/units/unit-1": {
-          response: { ok: true, status: 200, data: { removed: true } },
+          response: {
+            ok: true,
+            status: 200,
+            data: { removed: true, clearedAssignmentCount: 0 },
+          },
         },
       },
     });
     const output = await shelfRemoveUnit(client, ["unit-1"], { json: false });
     expect(output).toContain("Removed");
     expect(output).toContain("unit-1");
+  });
+
+  test("reports cleared assignments", async () => {
+    const client = createMockClient({
+      routes: {
+        "DELETE /api/shelf/units/unit-1": {
+          response: {
+            ok: true,
+            status: 200,
+            data: { removed: true, clearedAssignmentCount: 2 },
+          },
+        },
+      },
+    });
+    const output = await shelfRemoveUnit(client, ["unit-1"], { json: false });
+    expect(output).toContain("cleared 2 manual shelf assignments");
   });
 });
 
@@ -280,7 +315,11 @@ describe("shelf remove-shelf", () => {
       routes: {
         "GET /api/shelf/config": { response: { ok: true, status: 200, data: config } },
         "PUT /api/shelf/units/unit-1": {
-          response: { ok: true, status: 200, data: updatedUnit },
+          response: {
+            ok: true,
+            status: 200,
+            data: { unit: updatedUnit, clearedAssignmentCount: 0 },
+          },
         },
       },
     });
@@ -288,6 +327,23 @@ describe("shelf remove-shelf", () => {
     expect(output).toContain("Removed");
     expect(output).toContain("shelf-2");
     expect(output).toContain("Living Room Kallax");
+  });
+
+  test("reports assignments cleared with a removed shelf", async () => {
+    const client = createMockClient({
+      routes: {
+        "GET /api/shelf/config": { response: { ok: true, status: 200, data: config } },
+        "PUT /api/shelf/units/unit-1": {
+          response: {
+            ok: true,
+            status: 200,
+            data: { unit: unit1, clearedAssignmentCount: 1 },
+          },
+        },
+      },
+    });
+    const output = await shelfRemoveShelf(client, ["shelf-2"], { json: false });
+    expect(output).toContain("cleared 1 manual shelf assignment");
   });
 
   test("throws when shelf not found in any unit", async () => {
@@ -300,5 +356,102 @@ describe("shelf remove-shelf", () => {
       () => shelfRemoveShelf(client, ["nonexistent"], { json: false }),
       "Shelf not found: nonexistent",
     );
+  });
+});
+
+describe("shelf capacity assignment details", () => {
+  const capacity = {
+    configured: true,
+    totalShelfCount: 1,
+    gamesWithDimensions: 3,
+    gamesWithoutDimensions: 0,
+    overflowing: true,
+    hasPlacementProblems: true,
+    assignments: [
+      {
+        shelfId: "shelf-1",
+        shelfName: "Top Shelf",
+        unitId: "unit-1",
+        unitName: "Kallax",
+        capacityIn3: 1000,
+        usedIn3: 100,
+        utilization: 0.1,
+        grade: "A",
+        games: [
+          {
+            gameId: "g1",
+            gameName: "Pinned",
+            fitnessScore: 8,
+            volumeIn3: 50,
+            assignmentSource: "manual",
+          },
+          {
+            gameId: "g2",
+            gameName: "Packed",
+            fitnessScore: 7,
+            volumeIn3: 50,
+            assignmentSource: "automatic",
+          },
+        ],
+      },
+    ],
+    assignmentConflicts: [
+      {
+        gameId: "g3",
+        gameName: "Conflict",
+        shelfId: "shelf-1",
+        shelfName: "Top Shelf",
+        unitId: "unit-1",
+        unitName: "Kallax",
+        boxDimensions: { width: 20, height: 20, depth: 20 },
+        reason: "Not enough remaining capacity",
+      },
+    ],
+    unfittableGames: [
+      {
+        gameId: "g4",
+        gameName: "Too Tall",
+        fitnessScore: 6,
+        boxDimensions: { width: 10, height: 30, depth: 10 },
+        reason: "Too tall",
+      },
+    ],
+    overflowGames: [{ gameId: "g5", gameName: "Displaced", fitnessScore: 5, volumeIn3: 500 }],
+  };
+
+  test("labels manual and automatic assignments and renders conflicts", async () => {
+    const client = createMockClient({
+      routes: {
+        "GET /api/shelf/capacity": { response: { ok: true, status: 200, data: capacity } },
+      },
+    });
+    const output = await shelfCapacity(client, [], { json: false });
+    expect(output).toContain("Pinned (manual)");
+    expect(output).toContain("Packed (automatic)");
+    expect(output).toContain("Assignment Conflicts");
+    expect(output).toContain("Kallax — Top Shelf");
+    expect(output.indexOf("Assignment Conflicts")).toBeLessThan(output.indexOf("Unfittable Games"));
+    expect(output.indexOf("Assignment Conflicts")).toBeLessThan(output.indexOf("Displaced Games"));
+  });
+
+  test("JSON output remains the raw capacity response", async () => {
+    const client = createMockClient({
+      routes: {
+        "GET /api/shelf/capacity": { response: { ok: true, status: 200, data: capacity } },
+      },
+    });
+    expect(JSON.parse(await shelfCapacity(client, [], { json: true }))).toEqual(capacity);
+  });
+
+  test("status does not report success when a manual assignment conflicts", async () => {
+    const client = createMockClient({
+      routes: {
+        "GET /api/shelf/config": { response: { ok: true, status: 200, data: config } },
+        "GET /api/shelf/capacity": { response: { ok: true, status: 200, data: capacity } },
+      },
+    });
+    const output = await shelfStatus(client, [], { json: false });
+    expect(output).toContain("Assignment conflicts: 1");
+    expect(output).not.toContain("All measured games placed successfully");
   });
 });

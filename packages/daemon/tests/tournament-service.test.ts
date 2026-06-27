@@ -106,6 +106,7 @@ function makeGame(id: string, name: string, overrides?: Partial<Game>): Game {
     numPlays: null,
     ownership: "owned",
     boxDimensions: null,
+    manualShelfId: null,
     ratings: {},
     createdAt: now,
     updatedAt: now,

@@ -7485,6 +7485,88 @@ body {
   font-style: italic;
 }
 
+.shelf-assignment-form {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.shelf-assignment-field {
+  display: grid;
+  gap: 6px;
+}
+
+.shelf-assignment-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.shelf-assignment-select {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.shelf-assignment-hint {
+  margin: 8px 0 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.shelf-assignment-error {
+  margin: 8px 0;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.manual-assignment-badge {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border: 1px solid var(--action);
+  border-radius: 999px;
+  color: var(--action);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.assignment-conflicts-section {
+  border-left: 3px solid var(--warning);
+}
+
+.assignment-conflict-unit {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+@media (max-width: 700px) {
+  .assignment-conflict-table thead {
+    display: none;
+  }
+
+  .assignment-conflict-table tr,
+  .assignment-conflict-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .assignment-conflict-table tr {
+    padding: 12px 0;
+  }
+
+  .assignment-conflict-table td {
+    padding: 4px 12px;
+  }
+}
+
 /* ---------- Utilization bar ---------- */
 .util-bar-wrap {
   display: flex;

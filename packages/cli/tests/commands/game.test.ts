@@ -6,8 +6,25 @@ import {
   gameRate,
   gameRemove,
   parseRateArgs,
+  gameAssignShelf,
+  gameClearShelf,
 } from "../../src/commands/game.js";
 import { createMockClient } from "../helpers/mock-client.js";
+
+async function expectThrows(fn: () => Promise<unknown>, match: string): Promise<void> {
+  const noError = Symbol("no error");
+  let caught: unknown = noError;
+  try {
+    await fn();
+  } catch (err) {
+    caught = err;
+  }
+  if (caught === noError) {
+    throw new Error(`Expected function to throw matching "${match}" but it did not throw`);
+  }
+  expect(caught).toBeInstanceOf(Error);
+  expect((caught as Error).message).toContain(match);
+}
 
 describe("game search", () => {
   const searchData = [{ id: 266192, name: "Wingspan", yearPublished: 2019 }];
@@ -192,5 +209,90 @@ describe("parseRateArgs", () => {
 
   test("throws when no axis pairs provided", () => {
     expect(() => parseRateArgs(["abc-123"], [])).toThrow();
+  });
+});
+
+describe("game shelf assignment", () => {
+  test("error assertion helper rejects when the command resolves", async () => {
+    let helperRejected = false;
+    try {
+      await expectThrows(() => Promise.resolve(), "expected failure");
+    } catch {
+      helperRejected = true;
+    }
+    expect(helperRejected).toBe(true);
+  });
+
+  test("assigns a measured owned game and preserves JSON output", async () => {
+    const response = { game: { name: "Wingspan", manualShelfId: "shelf/a" } };
+    const client = createMockClient({
+      routes: {
+        "PUT /api/games/game%2F1/shelf-assignment": {
+          response: { ok: true, status: 200, data: response },
+        },
+      },
+    });
+    const originalPut = client.put.bind(client);
+    const bodies: unknown[] = [];
+    client.put = <T>(path: string, body?: unknown) => {
+      bodies.push(body);
+      return originalPut<T>(path, body);
+    };
+
+    const human = await gameAssignShelf(client, ["game/1", "shelf/a"], { json: false });
+    expect(human).toContain('Assigned "Wingspan" to shelf shelf/a');
+    expect(bodies[0]).toEqual({ shelfId: "shelf/a" });
+
+    const json = await gameAssignShelf(client, ["game/1", "shelf/a"], { json: true });
+    expect(JSON.parse(json)).toEqual(response);
+  });
+
+  test("assignment usage explains dimension precondition", async () => {
+    const client = createMockClient();
+    await expectThrows(
+      () => gameAssignShelf(client, ["game-1"], { json: false }),
+      "must be owned and have box dimensions",
+    );
+  });
+
+  test("surfaces assignment API errors", async () => {
+    const client = createMockClient({
+      routes: {
+        "PUT /api/games/game-1/shelf-assignment": {
+          response: { ok: false, status: 400, data: { error: "Game must have box dimensions" } },
+        },
+      },
+    });
+    await expectThrows(
+      () => gameAssignShelf(client, ["game-1", "shelf-1"], { json: false }),
+      "Game must have box dimensions",
+    );
+  });
+
+  test("clears an assignment with a null shelf ID", async () => {
+    const response = { game: { name: "Wingspan", manualShelfId: null } };
+    const client = createMockClient({
+      routes: {
+        "PUT /api/games/game-1/shelf-assignment": {
+          response: { ok: true, status: 200, data: response },
+        },
+      },
+    });
+    const originalPut = client.put.bind(client);
+    let body: unknown;
+    client.put = <T>(path: string, nextBody?: unknown) => {
+      body = nextBody;
+      return originalPut<T>(path, nextBody);
+    };
+    const output = await gameClearShelf(client, ["game-1"], { json: false });
+    expect(output).toContain("Cleared manual shelf assignment");
+    expect(output).toContain("Wingspan");
+    expect(body).toEqual({ shelfId: null });
+  });
+
+  test("clear requires exactly one game ID", async () => {
+    const client = createMockClient();
+    await expectThrows(() => gameClearShelf(client, [], { json: false }), "Usage");
+    await expectThrows(() => gameClearShelf(client, ["one", "two"], { json: false }), "Usage");
   });
 });

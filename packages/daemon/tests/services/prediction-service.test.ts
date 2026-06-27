@@ -47,6 +47,7 @@ function makeGame(
     numPlays: null,
     ownership: "owned",
     boxDimensions: null,
+    manualShelfId: null,
     ratings,
     imageUrl: null,
     bggData: hasBgg

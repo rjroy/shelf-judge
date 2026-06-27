@@ -11,6 +11,29 @@ interface OperationTreeNode {
   children?: Record<string, OperationTreeNode>;
 }
 
+interface LocalCommandHelp {
+  name: string;
+  usage: string;
+  description: string;
+}
+
+// One API operation can intentionally back multiple CLI commands. Keep those
+// CLI-only aliases here instead of advertising duplicate daemon operations.
+const LOCAL_OPERATION_COMMANDS: Record<string, LocalCommandHelp[]> = {
+  "shelf.game.shelf-assignment": [
+    {
+      name: "assign-shelf",
+      usage: "shelf-judge game assign-shelf <game-id> <shelf-id>",
+      description: "Assign an owned, measured game to a shelf",
+    },
+    {
+      name: "clear-shelf",
+      usage: "shelf-judge game clear-shelf <game-id>",
+      description: "Clear a game's manual shelf assignment and return it to automatic placement",
+    },
+  ],
+};
+
 export async function helpCommand(
   client: DaemonClient,
   args: string[],
@@ -39,7 +62,16 @@ function formatNode(node: OperationTreeNode, lines: string[], depth: number): vo
   if (node.operationId) {
     const indent = "  ".repeat(depth);
     const method = node.invocation?.method ?? "";
-    lines.push(`${indent}${node.name} - ${node.description ?? ""} [${method}]`);
+    const localCommands = LOCAL_OPERATION_COMMANDS[node.operationId];
+    if (localCommands) {
+      for (const command of localCommands) {
+        lines.push(`${indent}${command.name} - ${command.description} [${method}]`);
+        lines.push(`${indent}  Usage: ${command.usage}`);
+      }
+      if (node.description) lines.push(`${indent}  ${node.description}`);
+    } else {
+      lines.push(`${indent}${node.name} - ${node.description ?? ""} [${method}]`);
+    }
   }
 
   if (node.children) {

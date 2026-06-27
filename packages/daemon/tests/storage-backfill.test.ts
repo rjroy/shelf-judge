@@ -70,5 +70,6 @@ describe("storage backfill", () => {
 
     const collection = await storage.loadCollection();
     expect(collection.games[0].boxDimensions).toBeNull();
+    expect(collection.games[0].manualShelfId).toBeNull();
   });
 });

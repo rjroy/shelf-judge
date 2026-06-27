@@ -51,6 +51,7 @@ export interface GameService {
   refreshAllBggData(): Promise<RefreshSummary>;
   setOwnership(id: string, ownership: OwnershipStatus): Promise<Game>;
   setBoxDimensions(id: string, dimensions: BoxDimensions | null): Promise<Game>;
+  setManualShelf(id: string, shelfId: string | null): Promise<Game>;
   importBggCollection(
     onProgress?: (event: ImportProgressEvent) => Promise<void> | void,
   ): Promise<ImportSummary>;
@@ -127,6 +128,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
         bggData: null,
         ownership: "owned",
         boxDimensions: null,
+        manualShelfId: null,
         ratings: {},
         createdAt: now,
         updatedAt: now,
@@ -252,11 +254,15 @@ export function createGameService(deps: GameServiceDeps): GameService {
         throw new Error(`Game not found: ${id}`);
       }
 
-      if (game.ownership === ownership) {
+      const clearsManualShelf = ownership === "previously-owned" && game.manualShelfId !== null;
+      if (game.ownership === ownership && !clearsManualShelf) {
         return game;
       }
 
       game.ownership = ownership;
+      if (ownership === "previously-owned") {
+        game.manualShelfId = null;
+      }
       game.updatedAt = new Date().toISOString();
       collection.updatedAt = game.updatedAt;
       await storageService.saveCollection(collection);
@@ -277,6 +283,42 @@ export function createGameService(deps: GameServiceDeps): GameService {
       collection.updatedAt = game.updatedAt;
       await storageService.saveCollection(collection);
 
+      return game;
+    },
+
+    async setManualShelf(id: string, shelfId: string | null): Promise<Game> {
+      const collection = await storageService.loadCollection();
+      const game = collection.games.find((g) => g.id === id);
+
+      if (!game) {
+        throw new Error(`Game not found: ${id}`);
+      }
+
+      if (shelfId !== null) {
+        if (game.ownership === "previously-owned") {
+          throw new Error("Manual shelf assignment requires an owned game");
+        }
+        if (game.boxDimensions === null) {
+          throw new Error("Box dimensions are required before assigning a shelf");
+        }
+
+        const shelfConfig = await storageService.loadShelfConfig();
+        const shelfExists = shelfConfig.units.some((unit) =>
+          unit.shelves.some((shelf) => shelf.id === shelfId),
+        );
+        if (!shelfExists) {
+          throw new Error(`Shelf not found: ${shelfId}`);
+        }
+      }
+
+      if (game.manualShelfId === shelfId) {
+        return game;
+      }
+
+      game.manualShelfId = shelfId;
+      game.updatedAt = new Date().toISOString();
+      collection.updatedAt = game.updatedAt;
+      await storageService.saveCollection(collection);
       return game;
     },
 
@@ -426,6 +468,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
                 bggData: result.bggData,
                 ownership: "owned",
                 boxDimensions: null,
+                manualShelfId: null,
                 ratings: {},
                 createdAt: now,
                 updatedAt: now,

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getShelfCapacity } from "@/lib/api";
 import type {
   AssignedGame,
+  AssignmentConflict,
   ShelfAssignment,
   ShelfCapacityResult,
   UnfittableEntry,
@@ -37,7 +38,7 @@ function utilBarFillClass(utilization: number): string {
   return "util-bar-fill low";
 }
 
-function ShelfAssignmentCard({ assignment }: { assignment: ShelfAssignment }) {
+export function ShelfAssignmentCard({ assignment }: { assignment: ShelfAssignment }) {
   const heightless = assignment.capacityIn3 === null;
   const pct = assignment.utilization !== null ? Math.round(assignment.utilization * 100) : null;
   const gradeClass = `grade-badge grade-${assignment.grade.toUpperCase()}`;
@@ -100,11 +101,49 @@ function AssignedGameRow({ game, heightless }: { game: AssignedGame; heightless:
       <Link href={`/games/${game.gameId}`} className="shelf-game-name game-link">
         {game.gameName}
       </Link>
+      {game.assignmentSource === "manual" ? (
+        <span className="manual-assignment-badge">Manual</span>
+      ) : null}
       <div className={`shelf-game-score ${scoreColorClass(game.fitnessScore)}`}>
         {game.fitnessScore.toFixed(1)}
       </div>
       <div className="shelf-game-vol">{heightless ? "—" : formatVolume(game.volumeIn3)}</div>
     </div>
+  );
+}
+
+export function AssignmentConflictTable({ entries }: { entries: AssignmentConflict[] }) {
+  return (
+    <table className="cull-table assignment-conflict-table">
+      <thead>
+        <tr>
+          <th>Game</th>
+          <th>Selected Shelf</th>
+          <th>Box Dimensions</th>
+          <th>Reason</th>
+        </tr>
+      </thead>
+      <tbody>
+        {entries.map((entry) => (
+          <tr key={entry.gameId}>
+            <td>
+              <Link href={`/games/${entry.gameId}`} className="game-link">
+                {entry.gameName}
+              </Link>
+            </td>
+            <td>
+              <strong>{entry.shelfName}</strong>
+              <div className="assignment-conflict-unit">{entry.unitName}</div>
+            </td>
+            <td className="cull-dims">
+              {entry.boxDimensions.width} × {entry.boxDimensions.height} ×{" "}
+              {entry.boxDimensions.depth} in
+            </td>
+            <td className="cull-reason">{entry.reason}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
@@ -293,11 +332,14 @@ export default async function CapacityPage() {
     );
   }
 
-  if (!capacity.configured || capacity.totalShelfCount === 0) {
+  if (
+    (!capacity.configured || capacity.totalShelfCount === 0) &&
+    capacity.assignmentConflicts.length === 0
+  ) {
     return <NotConfiguredEmpty />;
   }
 
-  if (capacity.gamesWithDimensions === 0) {
+  if (capacity.gamesWithDimensions === 0 && capacity.assignmentConflicts.length === 0) {
     return <NoDimensionsEmpty capacity={capacity} />;
   }
 
@@ -307,6 +349,27 @@ export default async function CapacityPage() {
     <>
       <CapacityHeader capacity={capacity} />
       <div className="main-scroll capacity-scroll">
+        {capacity.assignmentConflicts.length > 0 ? (
+          <section className="cap-section assignment-conflicts-section">
+            <div className="cap-section-header">
+              <div className="cap-section-icon" aria-hidden="true">
+                ⚠
+              </div>
+              <div className="cap-section-title cap-section-title-warning">
+                Manual Assignment Conflicts
+              </div>
+              <div className="cap-section-count">
+                {capacity.assignmentConflicts.length}{" "}
+                {capacity.assignmentConflicts.length === 1
+                  ? "assignment needs"
+                  : "assignments need"}{" "}
+                attention
+              </div>
+            </div>
+            <AssignmentConflictTable entries={capacity.assignmentConflicts} />
+          </section>
+        ) : null}
+
         {capacity.assignments.length > 0 ? (
           <section className="cap-section">
             <div className="cap-section-header">

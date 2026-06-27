@@ -57,6 +57,7 @@ function makeGame(id: string, name: string, bggData: BggGameData | null): Game {
     numPlays: null,
     ownership: "owned",
     boxDimensions: null,
+    manualShelfId: null,
     ratings: {},
     createdAt: now,
     updatedAt: now,

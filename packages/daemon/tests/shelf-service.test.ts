@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/await-thenable */
 import { describe, expect, test, beforeEach } from "bun:test";
-import type { ShelfConfiguration } from "@shelf-judge/shared";
+import type { Collection, Game, ShelfConfiguration } from "@shelf-judge/shared";
 import type { StorageService } from "../src/services/storage-service";
 import {
   createShelfService,
@@ -11,23 +11,44 @@ import type { ShelfService } from "../src/services/shelf-service";
 
 const NOW = "2026-04-13T12:00:00.000Z";
 
-function createMockStorage(): StorageService & { config: ShelfConfiguration } {
+function createMockStorage(): StorageService & {
+  config: ShelfConfiguration;
+  collection: Collection;
+  shelfSaveFailures: Array<Error | null>;
+  collectionSaveFailure: Error | null;
+} {
   const mock = {
     config: {
       units: [],
       createdAt: NOW,
       updatedAt: NOW,
     } as ShelfConfiguration,
+    collection: {
+      id: "collection-1",
+      name: "Test",
+      axes: [],
+      games: [],
+      createdAt: NOW,
+      updatedAt: NOW,
+    } as Collection,
+    shelfSaveFailures: [] as Array<Error | null>,
+    collectionSaveFailure: null as Error | null,
     loadShelfConfig() {
       return Promise.resolve(structuredClone(mock.config));
     },
     saveShelfConfig(c: ShelfConfiguration) {
+      const failure = mock.shelfSaveFailures.shift();
+      if (failure) return Promise.reject(failure);
       mock.config = structuredClone(c);
       return Promise.resolve();
     },
     // Stubs for unused StorageService methods
-    loadCollection: () => Promise.reject(new Error("not implemented")),
-    saveCollection: () => Promise.resolve(),
+    loadCollection: () => Promise.resolve(structuredClone(mock.collection)),
+    saveCollection(c: Collection) {
+      if (mock.collectionSaveFailure) return Promise.reject(mock.collectionSaveFailure);
+      mock.collection = structuredClone(c);
+      return Promise.resolve();
+    },
     loadConfig: () => Promise.reject(new Error("not implemented")),
     saveConfig: () => Promise.resolve(),
     loadTournament: () => Promise.reject(new Error("not implemented")),
@@ -44,6 +65,27 @@ function createMockStorage(): StorageService & { config: ShelfConfiguration } {
     saveWishlist: () => Promise.resolve(),
   };
   return mock;
+}
+
+function assignedGame(id: string, shelfId: string): Game {
+  return {
+    id,
+    bggId: null,
+    name: id,
+    yearPublished: null,
+    minPlayers: null,
+    maxPlayers: null,
+    playingTime: null,
+    imageUrl: null,
+    bggData: null,
+    numPlays: null,
+    ownership: "owned",
+    boxDimensions: { width: 10, height: 10, depth: 2 },
+    manualShelfId: shelfId,
+    ratings: {},
+    createdAt: NOW,
+    updatedAt: NOW,
+  };
 }
 
 describe("shelf service", () => {
@@ -170,7 +212,7 @@ describe("shelf service", () => {
         shelves: [{ name: "Shelf", width: 13, height: 13, depth: 15 }],
       });
 
-      const updated = await service.updateUnit(unit.id, { name: "New Name" });
+      const { unit: updated } = await service.updateUnit(unit.id, { name: "New Name" });
       expect(updated.name).toBe("New Name");
       expect(updated.shelves).toHaveLength(1); // shelves unchanged
     });
@@ -187,7 +229,7 @@ describe("shelf service", () => {
       const shelfAId = unit.shelves[0].id;
 
       // Update Shelf A, drop Shelf B, add Shelf C
-      const updated = await service.updateUnit(unit.id, {
+      const { unit: updated } = await service.updateUnit(unit.id, {
         shelves: [
           { id: shelfAId, name: "Shelf A Updated", width: 14, height: 14, depth: 16 },
           { name: "Shelf C", width: 10, height: 10, depth: 12 },
@@ -247,6 +289,37 @@ describe("shelf service", () => {
         }),
       ).rejects.toThrow(ShelfValidationError);
     });
+
+    test("clears only assignments to shelves removed by an update", async () => {
+      const unit = await service.addUnit({
+        name: "Kallax",
+        shelves: [
+          { name: "Keep", width: 13, height: 13, depth: 15 },
+          { name: "Remove", width: 13, height: 13, depth: 15 },
+        ],
+      });
+      const [keptShelf, removedShelf] = unit.shelves;
+      storage.collection.games = [
+        assignedGame("keep-game", keptShelf.id),
+        assignedGame("clear-game", removedShelf.id),
+      ];
+
+      const result = await service.updateUnit(unit.id, {
+        shelves: [
+          {
+            id: keptShelf.id,
+            name: "Renamed",
+            width: 14,
+            height: 13,
+            depth: 15,
+          },
+        ],
+      });
+
+      expect(result.clearedAssignmentCount).toBe(1);
+      expect(storage.collection.games[0].manualShelfId).toBe(keptShelf.id);
+      expect(storage.collection.games[1].manualShelfId).toBeNull();
+    });
   });
 
   describe("removeUnit", () => {
@@ -259,6 +332,18 @@ describe("shelf service", () => {
       await service.removeUnit(unit.id);
       const config = await service.getConfig();
       expect(config.units).toHaveLength(0);
+    });
+
+    test("clears assignments to shelves in a removed unit", async () => {
+      const unit = await service.addUnit({
+        name: "Kallax",
+        shelves: [{ name: "Shelf", width: 13, height: 13, depth: 15 }],
+      });
+      storage.collection.games = [assignedGame("game-1", unit.shelves[0].id)];
+
+      const result = await service.removeUnit(unit.id);
+      expect(result).toEqual({ removed: true, clearedAssignmentCount: 1 });
+      expect(storage.collection.games[0].manualShelfId).toBeNull();
     });
 
     test("throws ShelfNotFoundError for nonexistent unit", async () => {
@@ -287,7 +372,7 @@ describe("shelf service", () => {
         },
       ];
 
-      const config = await service.setConfig(newUnits);
+      const { config } = await service.setConfig(newUnits);
       expect(config.units).toHaveLength(2);
       expect(config.units[0].name).toBe("New Unit A");
       expect(config.units[1].name).toBe("New Unit B");
@@ -320,8 +405,85 @@ describe("shelf service", () => {
 
     test("empty units array clears configuration", async () => {
       await service.addUnit({ name: "Unit", shelves: [] });
-      const config = await service.setConfig([]);
+      const { config } = await service.setConfig([]);
       expect(config.units).toHaveLength(0);
+    });
+
+    test("full replacement clears only assignments to removed shelf IDs", async () => {
+      storage.config.units = [
+        {
+          id: "unit-1",
+          name: "Unit",
+          shelves: [
+            { id: "keep", name: "Keep", width: 10, height: 10, depth: 10 },
+            { id: "remove", name: "Remove", width: 10, height: 10, depth: 10 },
+          ],
+        },
+      ];
+      storage.collection.games = [
+        assignedGame("keep-game", "keep"),
+        assignedGame("clear", "remove"),
+      ];
+
+      const result = await service.setConfig([
+        {
+          id: "unit-1",
+          name: "Renamed",
+          shelves: [{ id: "keep", name: "Resized", width: 20, height: 10, depth: 10 }],
+        },
+      ]);
+
+      expect(result.clearedAssignmentCount).toBe(1);
+      expect(storage.collection.games.map((game) => game.manualShelfId)).toEqual(["keep", null]);
+    });
+
+    test("a shelf write failure leaves collection and configuration unchanged", async () => {
+      storage.config.units = [
+        {
+          id: "unit-1",
+          name: "Unit",
+          shelves: [{ id: "remove", name: "Remove", width: 10, height: 10, depth: 10 }],
+        },
+      ];
+      storage.collection.games = [assignedGame("game-1", "remove")];
+      storage.shelfSaveFailures.push(new Error("shelf write failed"));
+
+      await expect(service.setConfig([])).rejects.toThrow("shelf write failed");
+      expect(storage.config.units).toHaveLength(1);
+      expect(storage.collection.games[0].manualShelfId).toBe("remove");
+    });
+
+    test("a collection write failure rolls back the shelf configuration", async () => {
+      storage.config.units = [
+        {
+          id: "unit-1",
+          name: "Unit",
+          shelves: [{ id: "remove", name: "Remove", width: 10, height: 10, depth: 10 }],
+        },
+      ];
+      storage.collection.games = [assignedGame("game-1", "remove")];
+      storage.collectionSaveFailure = new Error("collection write failed");
+
+      await expect(service.setConfig([])).rejects.toThrow("collection write failed");
+      expect(storage.config.units[0].shelves[0].id).toBe("remove");
+      expect(storage.collection.games[0].manualShelfId).toBe("remove");
+    });
+
+    test("reports a hard error when rollback also fails", async () => {
+      storage.config.units = [
+        {
+          id: "unit-1",
+          name: "Unit",
+          shelves: [{ id: "remove", name: "Remove", width: 10, height: 10, depth: 10 }],
+        },
+      ];
+      storage.collection.games = [assignedGame("game-1", "remove")];
+      storage.collectionSaveFailure = new Error("collection write failed");
+      storage.shelfSaveFailures.push(null, new Error("rollback failed"));
+
+      await expect(service.setConfig([])).rejects.toThrow(
+        "cleanup failed and shelf configuration rollback failed",
+      );
     });
   });
 });

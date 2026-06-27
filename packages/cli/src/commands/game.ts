@@ -254,6 +254,57 @@ export async function gameSetStatus(
   return `"${data.game.name}" marked as ${data.game.ownership}.`;
 }
 
+export async function gameAssignShelf(
+  client: DaemonClient,
+  args: string[],
+  opts: OutputOptions,
+): Promise<string> {
+  const [gameId, shelfId, ...extra] = args;
+  if (!gameId || !shelfId || extra.length > 0) {
+    throw new Error(
+      "Usage: shelf-judge game assign-shelf <game-id> <shelf-id>\n" +
+        "       The game must be owned and have box dimensions.",
+    );
+  }
+
+  const { ok, data } = await client.put<{ game: { name: string; manualShelfId: string | null } }>(
+    `/api/games/${encodeURIComponent(gameId)}/shelf-assignment`,
+    { shelfId },
+  );
+
+  if (!ok) {
+    const err = data as unknown as { error: string };
+    throw new Error(err.error ?? "Shelf assignment failed");
+  }
+
+  if (opts.json) return printOutput(data, opts);
+  return `Assigned "${data.game.name}" to shelf ${shelfId}.`;
+}
+
+export async function gameClearShelf(
+  client: DaemonClient,
+  args: string[],
+  opts: OutputOptions,
+): Promise<string> {
+  const [gameId, ...extra] = args;
+  if (!gameId || extra.length > 0) {
+    throw new Error("Usage: shelf-judge game clear-shelf <game-id>");
+  }
+
+  const { ok, data } = await client.put<{ game: { name: string; manualShelfId: string | null } }>(
+    `/api/games/${encodeURIComponent(gameId)}/shelf-assignment`,
+    { shelfId: null },
+  );
+
+  if (!ok) {
+    const err = data as unknown as { error: string };
+    throw new Error(err.error ?? "Clearing shelf assignment failed");
+  }
+
+  if (opts.json) return printOutput(data, opts);
+  return `Cleared manual shelf assignment for "${data.game.name}".`;
+}
+
 export async function gameEdit(
   client: DaemonClient,
   args: string[],

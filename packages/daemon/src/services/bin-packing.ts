@@ -9,7 +9,10 @@ export interface PackItem {
   dimensions: [number, number, number] | null; // [h, w, d], null = dimensionless
   priority: number; // higher = placed first in overflow ordering
   compare: (other: PackItem) => number; // similarity [0,1], 1 = identical
-  locationOverride?: { binId: string; hard: boolean } | undefined;
+  locationOverride?:
+    | { binId: string; hard: boolean }
+    | { binId: string; mode: "fixed-fit" }
+    | undefined;
 }
 
 export interface PackBin {
@@ -34,6 +37,12 @@ export type MergeStrategy = "avg" | "geo" | "harmonic" | "max" | "min" | "geomax
 export interface PackResult {
   assignments: Map<string, PackAssignment>; // binId -> assignment
   overflow: string[]; // item IDs that couldn't be placed
+  fixedPlacementRejections: FixedPlacementRejection[];
+}
+
+export interface FixedPlacementRejection {
+  itemId: string;
+  reason: "missing-bin" | "shape" | "remaining-capacity";
 }
 
 export interface PackAssignment {
@@ -363,6 +372,20 @@ function itemFits(item: PackItem, binState: BinState, config: PackConfig): boole
   );
 }
 
+/** Check whether an item can fit the bin's original, unconsumed shape. */
+function itemFitsEmptyBin(item: PackItem, bin: PackBin, config: PackConfig): boolean {
+  if (!item.dimensions || !bin.dimensions) return true;
+  return (
+    findBestRotation(
+      item.dimensions,
+      bin.dimensions,
+      bin.axisPriority,
+      bin.axisMinimize,
+      config.forceAxis0Width,
+    ) !== null
+  );
+}
+
 /** Place an item in a bin, updating remaining dimensions. */
 function placeItem(item: PackItem, binState: BinState, config: PackConfig): void {
   binState.items.push(item);
@@ -537,13 +560,39 @@ export function pack(
   }
 
   const unplaced = new Set(items.map((item) => item.id));
+  const fixedPlacementRejections: FixedPlacementRejection[] = [];
 
-  // --- Phase 1: Place Fixed Items ---
+  // --- Phase 1a: Reserve Fixed-Fit Items ---
   for (const item of items) {
     if (!item.locationOverride) continue;
     const override = item.locationOverride;
 
-    if (override.hard) {
+    if (!("mode" in override) || override.mode !== "fixed-fit") continue;
+
+    const bs = binStates.get(override.binId);
+    if (!bs) {
+      fixedPlacementRejections.push({ itemId: item.id, reason: "missing-bin" });
+    } else if (!itemFitsEmptyBin(item, bs.bin, config)) {
+      fixedPlacementRejections.push({ itemId: item.id, reason: "shape" });
+    } else if (!itemFits(item, bs, config)) {
+      fixedPlacementRejections.push({ itemId: item.id, reason: "remaining-capacity" });
+    } else {
+      placeItem(item, bs, config);
+    }
+    // Fixed-fit items are terminal whether accepted or rejected. They never
+    // fall through to automatic placement or ordinary overflow.
+    unplaced.delete(item.id);
+  }
+
+  // --- Phase 1b: Place Legacy Hard and Soft Overrides ---
+  // This separate pass ensures preferences cannot consume fixed reservations,
+  // while retaining the original relative order among hard/soft items.
+  for (const item of items) {
+    if (!item.locationOverride) continue;
+    const override = item.locationOverride;
+    if ("mode" in override) continue;
+
+    if ("hard" in override && override.hard) {
       // Hard override: place directly, create bin if needed
       let bs = binStates.get(override.binId);
       if (!bs) {
@@ -653,5 +702,5 @@ export function pack(
     });
   }
 
-  return { assignments, overflow };
+  return { assignments, overflow, fixedPlacementRejections };
 }

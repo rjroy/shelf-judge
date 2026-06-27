@@ -321,6 +321,102 @@ describe("pack: phase 1 (fixed items)", () => {
     expect(result.assignments.has("phantom")).toBe(false);
     expect(result.assignments.get("b1")!.itemIds).toEqual(["i1"]);
   });
+
+  test("fixed-fit reserves capacity before automatic phases", () => {
+    const automatic = makeItem("automatic", [4, 5, 5]);
+    const fixed = makeItem("fixed", [8, 5, 5], {
+      locationOverride: { binId: "b1", mode: "fixed-fit" },
+    });
+
+    const result = pack([automatic, fixed], [makeBin("b1", [10, 10, 10])]);
+
+    expect(result.assignments.get("b1")!.itemIds).toEqual(["fixed"]);
+    expect(result.overflow).toEqual(["automatic"]);
+    expect(result.fixedPlacementRejections).toEqual([]);
+  });
+
+  test("fixed-fit reserves capacity before an earlier soft override", () => {
+    const soft = makeItem("soft", [6, 5, 5], {
+      locationOverride: { binId: "b1", hard: false },
+    });
+    const fixed = makeItem("fixed", [6, 5, 5], {
+      locationOverride: { binId: "b1", mode: "fixed-fit" },
+    });
+
+    const result = pack([soft, fixed], [makeBin("b1", [10, 10, 10])]);
+
+    expect(result.assignments.get("b1")!.itemIds).toEqual(["fixed"]);
+    expect(result.fixedPlacementRejections).toEqual([]);
+    expect(result.overflow).toEqual(["soft"]);
+  });
+
+  test("fixed-fit rejects a missing bin and never creates or reassigns it", () => {
+    const fixed = makeItem("fixed", [2, 2, 2], {
+      locationOverride: { binId: "missing", mode: "fixed-fit" },
+    });
+
+    const result = pack([fixed], [makeBin("other", [10, 10, 10])]);
+
+    expect(result.assignments.has("missing")).toBe(false);
+    expect(result.assignments.get("other")!.itemIds).toEqual([]);
+    expect(result.overflow).toEqual([]);
+    expect(result.fixedPlacementRejections).toEqual([{ itemId: "fixed", reason: "missing-bin" }]);
+  });
+
+  test("fixed-fit distinguishes shape from consumed remaining capacity", () => {
+    const shape = makeItem("shape", [11, 5, 5], {
+      locationOverride: { binId: "b1", mode: "fixed-fit" },
+    });
+    const first = makeItem("first", [6, 5, 5], {
+      locationOverride: { binId: "b1", mode: "fixed-fit" },
+    });
+    const crowded = makeItem("crowded", [6, 5, 5], {
+      locationOverride: { binId: "b1", mode: "fixed-fit" },
+    });
+
+    const result = pack([shape, first, crowded], [makeBin("b1", [10, 10, 10])]);
+
+    expect(result.assignments.get("b1")!.itemIds).toEqual(["first"]);
+    expect(result.fixedPlacementRejections).toEqual([
+      { itemId: "shape", reason: "shape" },
+      { itemId: "crowded", reason: "remaining-capacity" },
+    ]);
+  });
+
+  test("fixed-fit placement and rejection follow deterministic input order", () => {
+    const makeFixed = (id: string) =>
+      makeItem(id, [6, 5, 5], {
+        locationOverride: { binId: "b1", mode: "fixed-fit" },
+      });
+
+    const firstRun = pack([makeFixed("a"), makeFixed("b")], [makeBin("b1", [10, 10, 10])]);
+    const secondRun = pack([makeFixed("b"), makeFixed("a")], [makeBin("b1", [10, 10, 10])]);
+
+    expect(firstRun.assignments.get("b1")!.itemIds).toEqual(["a"]);
+    expect(firstRun.fixedPlacementRejections).toEqual([
+      { itemId: "b", reason: "remaining-capacity" },
+    ]);
+    expect(secondRun.assignments.get("b1")!.itemIds).toEqual(["b"]);
+    expect(secondRun.fixedPlacementRejections).toEqual([
+      { itemId: "a", reason: "remaining-capacity" },
+    ]);
+  });
+
+  test("accepted fixed-fit items participate in similarity and grading", () => {
+    const compare = () => 0.8;
+    const fixed = makeItem("fixed", [2, 5, 5], {
+      compare,
+      locationOverride: { binId: "b1", mode: "fixed-fit" },
+    });
+    const automatic = makeItem("automatic", [2, 5, 5], { compare });
+
+    const result = pack([fixed, automatic], [makeBin("b1", [10, 10, 10])]);
+    const assignment = result.assignments.get("b1")!;
+
+    expect(assignment.itemIds).toEqual(["fixed", "automatic"]);
+    expect(assignment.baseFitness).toBeCloseTo(0.8);
+    expect(assignment.grade).toBe("S");
+  });
 });
 
 // --- Phase 2: Unambiguous placement ---

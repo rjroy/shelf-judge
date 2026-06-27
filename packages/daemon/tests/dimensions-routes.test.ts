@@ -20,6 +20,7 @@ function makeGame(id: string, name: string, boxDimensions: BoxDimensions | null 
     numPlays: null,
     ownership: "owned",
     boxDimensions,
+    manualShelfId: null,
     ratings: {},
     createdAt: now,
     updatedAt: now,
@@ -67,6 +68,7 @@ function createTestApp() {
       };
       return Promise.resolve(storedGame);
     },
+    setManualShelf: () => Promise.reject(new Error("not implemented")),
     importBggCollection() {
       return Promise.resolve({ imported: 0, skipped: 0, errors: [] as string[] });
     },

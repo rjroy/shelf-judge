@@ -1,6 +1,12 @@
 // Shelf configuration commands: list, add-unit, add-shelf, remove-unit, remove-shelf,
 // status (summary), capacity (detailed per-shelf + overflow).
-import type { ShelfCapacityResult, ShelfConfiguration, ShelfUnit } from "@shelf-judge/shared";
+import type {
+  ShelfCapacityResult,
+  ShelfConfiguration,
+  ShelfUnit,
+  ShelfUnitMutationResult,
+  ShelfUnitRemovalResult,
+} from "@shelf-judge/shared";
 import type { DaemonClient } from "../client.js";
 import type { OutputOptions } from "../output.js";
 import { formatTable, printOutput } from "../output.js";
@@ -135,7 +141,7 @@ export async function shelfAddShelf(
     { name, width, height, depth },
   ];
 
-  const { ok, data } = await client.put<ShelfUnit>(`/api/shelf/units/${unitId}`, {
+  const { ok, data } = await client.put<ShelfUnitMutationResult>(`/api/shelf/units/${unitId}`, {
     shelves: newShelves,
   });
 
@@ -147,7 +153,7 @@ export async function shelfAddShelf(
   if (opts.json) return printOutput(data, opts);
 
   const heightDisplay = height === null ? "unconstrained" : `${height}`;
-  return `Added shelf "${name}" (${width} \u00D7 ${heightDisplay} \u00D7 ${depth} in) to "${data.name}"`;
+  return `Added shelf "${name}" (${width} \u00D7 ${heightDisplay} \u00D7 ${depth} in) to "${data.unit.name}"`;
 }
 
 export async function shelfRemoveUnit(
@@ -161,7 +167,7 @@ export async function shelfRemoveUnit(
     throw new Error("Usage: shelf-judge shelf remove-unit <unit-id>");
   }
 
-  const { ok, data } = await client.del<{ removed: true }>(`/api/shelf/units/${unitId}`);
+  const { ok, data } = await client.del<ShelfUnitRemovalResult>(`/api/shelf/units/${unitId}`);
 
   if (!ok) {
     const err = data as unknown as { error: string };
@@ -170,7 +176,11 @@ export async function shelfRemoveUnit(
 
   if (opts.json) return printOutput(data, opts);
 
-  return `Removed shelf unit ${unitId}`;
+  const cleanup =
+    data.clearedAssignmentCount > 0
+      ? `; cleared ${data.clearedAssignmentCount} manual shelf assignment${data.clearedAssignmentCount === 1 ? "" : "s"}`
+      : "";
+  return `Removed shelf unit ${unitId}${cleanup}`;
 }
 
 export async function shelfRemoveShelf(
@@ -206,9 +216,12 @@ export async function shelfRemoveShelf(
     .filter((s) => s.id !== shelfId)
     .map((s) => ({ id: s.id, name: s.name, width: s.width, height: s.height, depth: s.depth }));
 
-  const { ok, data } = await client.put<ShelfUnit>(`/api/shelf/units/${targetUnit.id}`, {
-    shelves: newShelves,
-  });
+  const { ok, data } = await client.put<ShelfUnitMutationResult>(
+    `/api/shelf/units/${targetUnit.id}`,
+    {
+      shelves: newShelves,
+    },
+  );
 
   if (!ok) {
     const err = data as unknown as { error: string };
@@ -217,7 +230,11 @@ export async function shelfRemoveShelf(
 
   if (opts.json) return printOutput(data, opts);
 
-  return `Removed shelf ${shelfId} from "${data.name}"`;
+  const cleanup =
+    data.clearedAssignmentCount > 0
+      ? `; cleared ${data.clearedAssignmentCount} manual shelf assignment${data.clearedAssignmentCount === 1 ? "" : "s"}`
+      : "";
+  return `Removed shelf ${shelfId} from "${data.unit.name}"${cleanup}`;
 }
 
 function countPlacedGames(capacity: ShelfCapacityResult): number {
@@ -283,6 +300,7 @@ export async function shelfStatus(
   const totalGames = measured + capacity.gamesWithoutDimensions;
 
   const placed = countPlacedGames(capacity);
+  const conflicts = capacity.assignmentConflicts.length;
   const unfittable = capacity.unfittableGames.length;
   const displaced = capacity.overflowGames.length;
 
@@ -301,9 +319,12 @@ export async function shelfStatus(
     `Placed: ${placed} ${placed === 1 ? "game" : "games"} across ${shelfCount} ${shelfCount === 1 ? "shelf" : "shelves"}`,
   );
 
-  if (unfittable === 0 && displaced === 0) {
+  if (conflicts === 0 && unfittable === 0 && displaced === 0) {
     lines.push("All measured games placed successfully.");
   } else {
+    lines.push(
+      `Assignment conflicts: ${conflicts}${conflicts > 0 ? " (manual placements need attention)" : ""}`,
+    );
     lines.push(`Unfittable: ${unfittable}${unfittable > 0 ? " (don't fit any shelf)" : ""}`);
     lines.push(`Displaced: ${displaced}${displaced > 0 ? " (fit by shape but no room)" : ""}`);
   }
@@ -343,18 +364,39 @@ export async function shelfCapacity(
   const assignRows = capacity.assignments.map((a) => [
     a.shelfName,
     `${a.unitName}`,
-    String(a.games.length),
+    a.games
+      .map(
+        (game) =>
+          `${game.gameName} (${game.assignmentSource === "manual" ? "manual" : "automatic"})`,
+      )
+      .join(", ") || "---",
     formatUtilization(a),
     a.grade.toUpperCase(),
   ]);
   sections.push(
     [
       `Shelf Assignments (${capacity.totalShelfCount} ${capacity.totalShelfCount === 1 ? "shelf" : "shelves"}, ${countPlacedGames(capacity)} placed)`,
-      formatTable(["Shelf", "Unit", "Games", "Utilization", "Grade"], assignRows),
+      formatTable(["Shelf", "Unit", "Games / Source", "Utilization", "Grade"], assignRows),
     ].join("\n"),
   );
 
-  // Section 2: Unfittable games
+  // Assignment conflicts are distinct from automatic placement failures.
+  if (capacity.assignmentConflicts.length > 0) {
+    const rows = capacity.assignmentConflicts.map((entry) => [
+      entry.gameName,
+      `${entry.unitName} — ${entry.shelfName}`,
+      `${entry.boxDimensions.width}\u00D7${entry.boxDimensions.height}\u00D7${entry.boxDimensions.depth} in`,
+      entry.reason,
+    ]);
+    sections.push(
+      [
+        `Assignment Conflicts (${capacity.assignmentConflicts.length} — manual shelf placement failed)`,
+        formatTable(["Game", "Selected Shelf", "Dimensions", "Reason"], rows),
+      ].join("\n"),
+    );
+  }
+
+  // Unfittable games
   if (capacity.unfittableGames.length > 0) {
     const rows = capacity.unfittableGames.map((entry) => [
       entry.gameName,

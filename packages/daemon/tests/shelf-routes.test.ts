@@ -1,6 +1,11 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import { Hono } from "hono";
-import type { ShelfCapacityResult, ShelfConfiguration, ShelfUnit } from "@shelf-judge/shared";
+import type {
+  Collection,
+  ShelfCapacityResult,
+  ShelfConfiguration,
+  ShelfUnit,
+} from "@shelf-judge/shared";
 import { createShelfRoutes } from "../src/routes/shelf";
 import { createShelfService } from "../src/services/shelf-service";
 import type { CapacityService } from "../src/services/capacity-service";
@@ -8,13 +13,24 @@ import type { StorageService } from "../src/services/storage-service";
 
 const NOW = "2026-04-13T12:00:00.000Z";
 
-function createMockStorage(): StorageService & { config: ShelfConfiguration } {
+function createMockStorage(): StorageService & {
+  config: ShelfConfiguration;
+  collection: Collection;
+} {
   const mock = {
     config: {
       units: [],
       createdAt: NOW,
       updatedAt: NOW,
     } as ShelfConfiguration,
+    collection: {
+      id: "collection-1",
+      name: "Test",
+      axes: [],
+      games: [],
+      createdAt: NOW,
+      updatedAt: NOW,
+    } as Collection,
     loadShelfConfig() {
       return Promise.resolve(structuredClone(mock.config));
     },
@@ -22,8 +38,11 @@ function createMockStorage(): StorageService & { config: ShelfConfiguration } {
       mock.config = structuredClone(c);
       return Promise.resolve();
     },
-    loadCollection: () => Promise.reject(new Error("not implemented")),
-    saveCollection: () => Promise.resolve(),
+    loadCollection: () => Promise.resolve(structuredClone(mock.collection)),
+    saveCollection(c: Collection) {
+      mock.collection = structuredClone(c);
+      return Promise.resolve();
+    },
     loadConfig: () => Promise.reject(new Error("not implemented")),
     saveConfig: () => Promise.resolve(),
     loadTournament: () => Promise.reject(new Error("not implemented")),
@@ -60,7 +79,9 @@ function createMockCapacityService(result?: ShelfCapacityResult): CapacityServic
     gamesWithDimensions: 0,
     gamesWithoutDimensions: 0,
     overflowing: false,
+    hasPlacementProblems: false,
     assignments: [],
+    assignmentConflicts: [],
     unfittableGames: [],
     overflowGames: [],
   };
@@ -129,10 +150,14 @@ describe("shelf routes", () => {
 
       const res = await app.request("/api/shelf/config", jsonRequest("PUT", { units }));
       expect(res.status).toBe(200);
-      const body = (await res.json()) as ShelfConfiguration;
-      expect(body.units).toHaveLength(1);
-      expect(body.units[0].name).toBe("Bookcase");
-      expect(body.createdAt).toBe(NOW); // preserved
+      const body = (await res.json()) as {
+        config: ShelfConfiguration;
+        clearedAssignmentCount: number;
+      };
+      expect(body.config.units).toHaveLength(1);
+      expect(body.config.units[0].name).toBe("Bookcase");
+      expect(body.config.createdAt).toBe(NOW); // preserved
+      expect(body.clearedAssignmentCount).toBe(0);
     });
 
     test("returns 400 for missing units array", async () => {
@@ -236,9 +261,9 @@ describe("shelf routes", () => {
         jsonRequest("PUT", { name: "Renamed Kallax" }),
       );
       expect(res.status).toBe(200);
-      const body = (await res.json()) as ShelfUnit;
-      expect(body.name).toBe("Renamed Kallax");
-      expect(body.shelves).toHaveLength(2); // unchanged
+      const body = (await res.json()) as { unit: ShelfUnit; clearedAssignmentCount: number };
+      expect(body.unit.name).toBe("Renamed Kallax");
+      expect(body.unit.shelves).toHaveLength(2); // unchanged
     });
 
     test("updates shelves: add new, update existing, remove absent", async () => {
@@ -254,11 +279,11 @@ describe("shelf routes", () => {
         }),
       );
       expect(res.status).toBe(200);
-      const body = (await res.json()) as ShelfUnit;
-      expect(body.shelves).toHaveLength(2);
-      expect(body.shelves[0].id).toBe(existingShelfId);
-      expect(body.shelves[0].name).toBe("Shelf A Updated");
-      expect(body.shelves[1].height).toBeNull();
+      const body = (await res.json()) as { unit: ShelfUnit; clearedAssignmentCount: number };
+      expect(body.unit.shelves).toHaveLength(2);
+      expect(body.unit.shelves[0].id).toBe(existingShelfId);
+      expect(body.unit.shelves[0].name).toBe("Shelf A Updated");
+      expect(body.unit.shelves[1].height).toBeNull();
     });
 
     test("returns 404 for nonexistent unit", async () => {
@@ -290,8 +315,9 @@ describe("shelf routes", () => {
     test("removes unit and returns removed: true", async () => {
       const res = await app.request(`/api/shelf/units/${unitId}`, { method: "DELETE" });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { removed: boolean };
+      const body = (await res.json()) as { removed: boolean; clearedAssignmentCount: number };
       expect(body.removed).toBe(true);
+      expect(body.clearedAssignmentCount).toBe(0);
       expect(storage.config.units).toHaveLength(0);
     });
 
@@ -309,6 +335,7 @@ describe("shelf routes", () => {
         gamesWithDimensions: 3,
         gamesWithoutDimensions: 1,
         overflowing: false,
+        hasPlacementProblems: false,
         assignments: [
           {
             shelfId: "s1",
@@ -318,10 +345,19 @@ describe("shelf routes", () => {
             capacityIn3: 2535,
             usedIn3: 200,
             utilization: 200 / 2535,
-            games: [{ gameId: "g1", gameName: "A", fitnessScore: 7, volumeIn3: 200 }],
+            games: [
+              {
+                gameId: "g1",
+                gameName: "A",
+                fitnessScore: 7,
+                volumeIn3: 200,
+                assignmentSource: "automatic",
+              },
+            ],
             grade: "B",
           },
         ],
+        assignmentConflicts: [],
         unfittableGames: [],
         overflowGames: [],
       };

@@ -45,6 +45,10 @@ const SetDimensionsBodySchema = z.union([
   z.object({ clear: z.literal(true) }),
 ]);
 
+const ShelfAssignmentBodySchema = z.object({
+  shelfId: z.string().min(1).nullable(),
+});
+
 function isBggConfigured(bggClient?: BggClient): boolean {
   return bggClient !== undefined && bggClient.isConfigured();
 }
@@ -403,6 +407,40 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     }
   });
 
+  // PUT /games/:id/shelf-assignment
+  routes.put("/games/:id/shelf-assignment", async (c) => {
+    const id = c.req.param("id");
+
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+
+    const parsed = ShelfAssignmentBodySchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json({ error: "Validation failed", details: parsed.error.issues }, 400);
+    }
+
+    try {
+      const game = await gameService.setManualShelf(id, parsed.data.shelfId);
+      return c.json({ game });
+    } catch (err) {
+      const message = toErrorMessage(err);
+      if (message.includes("not found")) {
+        return c.json({ error: message }, 404);
+      }
+      if (
+        message.includes("requires an owned game") ||
+        message.includes("dimensions are required")
+      ) {
+        return c.json({ error: message }, 400);
+      }
+      return c.json({ error: message }, 500);
+    }
+  });
+
   // POST /games/refresh - refresh all BGG data (must be before :id/refresh)
   routes.post("/games/refresh", async (c) => {
     if (!isBggConfigured(bggClient)) {
@@ -495,6 +533,16 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       name: "set-dimensions",
       description: "Set or clear box dimensions for a game",
       invocation: { method: "PUT", path: "/api/games/:id/dimensions" },
+      hierarchy: { root: "shelf", feature: "game" },
+      parameters: [{ name: "id", in: "path", description: "Game ID", required: true }],
+      idempotent: true,
+    },
+    {
+      operationId: "shelf.game.shelf-assignment",
+      name: "assign-shelf",
+      description:
+        "Set or clear a game's manual shelf assignment; assigning requires an owned game with complete box dimensions",
+      invocation: { method: "PUT", path: "/api/games/:id/shelf-assignment" },
       hierarchy: { root: "shelf", feature: "game" },
       parameters: [{ name: "id", in: "path", description: "Game ID", required: true }],
       idempotent: true,
