@@ -13,6 +13,8 @@ import {
   gameRefreshAllBgg,
   gameSetStatus,
   gameEdit,
+  gameAssignShelf,
+  gameClearShelf,
 } from "./commands/game.js";
 import { axisList, axisCreate, axisUpdate, axisDelete } from "./commands/axis.js";
 import { scoreList, scoreGet } from "./commands/score.js";
@@ -65,6 +67,8 @@ const COMMANDS: Record<string, number> = {
   "game refresh-all-bgg": 2,
   "game set-status": 2,
   "game edit": 2,
+  "game assign-shelf": 2,
+  "game clear-shelf": 2,
   "axis list": 2,
   "axis create": 2,
   "axis update": 2,
@@ -318,6 +322,12 @@ async function main(): Promise<void> {
         boxDepth: parsed.boxDepth,
         clearBox: parsed.clearBox,
       });
+      break;
+    case "game assign-shelf":
+      output = await gameAssignShelf(client, args, opts);
+      break;
+    case "game clear-shelf":
+      output = await gameClearShelf(client, args, opts);
       break;
     case "game refresh-all-bgg":
       output = await gameRefreshAllBgg(client, args, opts);

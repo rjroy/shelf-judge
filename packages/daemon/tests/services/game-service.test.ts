@@ -306,6 +306,7 @@ describe("GameService", () => {
 
     test("rejects unknown shelves without changing the game", async () => {
       const game = await addMeasuredGame();
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test rejects matcher is awaitable at runtime
       await expect(gameService.setManualShelf(game.id, "missing")).rejects.toThrow(
         "Shelf not found: missing",
       );
@@ -315,18 +316,21 @@ describe("GameService", () => {
     test("rejects unmeasured and previously-owned games", async () => {
       await addShelf("shelf-1");
       const { game: unmeasured } = await gameService.addGame({ name: "Unmeasured" });
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test rejects matcher is awaitable at runtime
       await expect(gameService.setManualShelf(unmeasured.id, "shelf-1")).rejects.toThrow(
         "Box dimensions are required",
       );
 
       const measured = await addMeasuredGame();
       await gameService.setOwnership(measured.id, "previously-owned");
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test rejects matcher is awaitable at runtime
       await expect(gameService.setManualShelf(measured.id, "shelf-1")).rejects.toThrow(
         "requires an owned game",
       );
     });
 
     test("throws for a missing game", async () => {
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test rejects matcher is awaitable at runtime
       await expect(gameService.setManualShelf("missing", null)).rejects.toThrow(
         "Game not found: missing",
       );

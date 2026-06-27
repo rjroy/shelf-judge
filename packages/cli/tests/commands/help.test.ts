@@ -20,6 +20,13 @@ const mockTree = {
           description: "List all games with fitness scores",
           invocation: { method: "GET", path: "/api/games" },
         },
+        "assign-shelf": {
+          operationId: "shelf.game.shelf-assignment",
+          name: "assign-shelf",
+          description:
+            "Set or clear a game's manual shelf assignment; assigning requires an owned game with complete box dimensions",
+          invocation: { method: "PUT", path: "/api/games/:id/shelf-assignment" },
+        },
       },
     },
   },
@@ -51,5 +58,21 @@ describe("help command", () => {
     const parsed = JSON.parse(result) as { name: string; children: Record<string, unknown> };
     expect(parsed.name).toBe("shelf");
     expect(parsed.children.game).toBeDefined();
+  });
+
+  test("help game exposes both assignment commands with usage and preconditions", async () => {
+    const client = createMockClient({
+      routes: {
+        "GET /api/help/game": { response: { ok: true, status: 200, data: mockTree } },
+      },
+    });
+
+    const result = await helpCommand(client, ["game"], { json: false });
+    expect(result).toContain("assign-shelf");
+    expect(result).toContain("Usage: shelf-judge game assign-shelf <game-id> <shelf-id>");
+    expect(result).toContain("clear-shelf");
+    expect(result).toContain("Usage: shelf-judge game clear-shelf <game-id>");
+    expect(result).toContain("return it to automatic placement");
+    expect(result).toContain("owned game with complete box dimensions");
   });
 });

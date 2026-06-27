@@ -177,14 +177,11 @@ describe("capacity service", () => {
         "a-game",
         "b-game",
       ]);
-      expect(result.assignmentConflicts[0]).toEqual(
-        expect.objectContaining({
-          shelfId: "deleted-a",
-          shelfName: "Unknown shelf",
-          unitName: "Unknown unit",
-          reason: "Selected shelf no longer exists",
-        }),
-      );
+      const firstConflict = result.assignmentConflicts[0];
+      expect(firstConflict.shelfId).toBe("deleted-a");
+      expect(firstConflict.shelfName).toBe("Unknown shelf");
+      expect(firstConflict.unitName).toBe("Unknown unit");
+      expect(firstConflict.reason).toBe("Selected shelf no longer exists");
       expect(result.hasPlacementProblems).toBe(true);
       expect(result.overflowing).toBe(false);
       expect(result.unfittableGames).toEqual([]);
@@ -557,16 +554,14 @@ describe("capacity service", () => {
       });
 
       const result = await svc.computeCapacity();
-      expect(result.assignmentConflicts).toEqual([
-        expect.objectContaining({
-          gameId: "g1",
-          shelfId: "tiny",
-          shelfName: "Tiny",
-          unitId: "u1",
-          unitName: "Bookcase",
-          boxDimensions: { width: 10, height: 10, depth: 10 },
-        }),
-      ]);
+      expect(result.assignmentConflicts).toHaveLength(1);
+      const conflict = result.assignmentConflicts[0];
+      expect(conflict.gameId).toBe("g1");
+      expect(conflict.shelfId).toBe("tiny");
+      expect(conflict.shelfName).toBe("Tiny");
+      expect(conflict.unitId).toBe("u1");
+      expect(conflict.unitName).toBe("Bookcase");
+      expect(conflict.boxDimensions).toEqual({ width: 10, height: 10, depth: 10 });
       expect(result.assignmentConflicts[0].reason).toContain("do not fit");
       expect(result.unfittableGames).toEqual([]);
       expect(result.overflowGames).toEqual([]);
@@ -597,9 +592,9 @@ describe("capacity service", () => {
       const result = await svc.computeCapacity();
       expect(result.assignments[0].games.map((game) => game.gameId)).toEqual(["a"]);
       expect(result.assignments[1].games).toEqual([]);
-      expect(result.assignmentConflicts).toEqual([
-        expect.objectContaining({ gameId: "b", shelfId: "s1" }),
-      ]);
+      expect(result.assignmentConflicts).toHaveLength(1);
+      expect(result.assignmentConflicts[0].gameId).toBe("b");
+      expect(result.assignmentConflicts[0].shelfId).toBe("s1");
       expect(result.assignmentConflicts[0].reason).toContain("remaining capacity");
       expect(result.unfittableGames).toEqual([]);
       expect(result.overflowGames).toEqual([]);
@@ -619,14 +614,11 @@ describe("capacity service", () => {
       });
 
       const result = await svc.computeCapacity();
-      expect(result.assignmentConflicts).toEqual([
-        expect.objectContaining({
-          gameId: "g1",
-          shelfId: "deleted-shelf",
-          shelfName: "Unknown shelf",
-          unitName: "Unknown unit",
-        }),
-      ]);
+      expect(result.assignmentConflicts).toHaveLength(1);
+      expect(result.assignmentConflicts[0].gameId).toBe("g1");
+      expect(result.assignmentConflicts[0].shelfId).toBe("deleted-shelf");
+      expect(result.assignmentConflicts[0].shelfName).toBe("Unknown shelf");
+      expect(result.assignmentConflicts[0].unitName).toBe("Unknown unit");
       expect(result.assignmentConflicts[0].reason).toContain("no longer exists");
     });
 

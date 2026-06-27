@@ -735,5 +735,6 @@ describe("PUT /api/games/:id/shelf-assignment", () => {
       path: "/api/games/:id/shelf-assignment",
     });
     expect(operation?.idempotent).toBe(true);
+    expect(operation?.description).toContain("owned game with complete box dimensions");
   });
 });

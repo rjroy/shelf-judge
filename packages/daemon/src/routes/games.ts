@@ -540,7 +540,8 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     {
       operationId: "shelf.game.shelf-assignment",
       name: "assign-shelf",
-      description: "Set or clear a game's manual shelf assignment",
+      description:
+        "Set or clear a game's manual shelf assignment; assigning requires an owned game with complete box dimensions",
       invocation: { method: "PUT", path: "/api/games/:id/shelf-assignment" },
       hierarchy: { root: "shelf", feature: "game" },
       parameters: [{ name: "id", in: "path", description: "Game ID", required: true }],

@@ -38,7 +38,7 @@ function utilBarFillClass(utilization: number): string {
   return "util-bar-fill low";
 }
 
-function ShelfAssignmentCard({ assignment }: { assignment: ShelfAssignment }) {
+export function ShelfAssignmentCard({ assignment }: { assignment: ShelfAssignment }) {
   const heightless = assignment.capacityIn3 === null;
   const pct = assignment.utilization !== null ? Math.round(assignment.utilization * 100) : null;
   const gradeClass = `grade-badge grade-${assignment.grade.toUpperCase()}`;
@@ -112,7 +112,7 @@ function AssignedGameRow({ game, heightless }: { game: AssignedGame; heightless:
   );
 }
 
-function AssignmentConflictTable({ entries }: { entries: AssignmentConflict[] }) {
+export function AssignmentConflictTable({ entries }: { entries: AssignmentConflict[] }) {
   return (
     <table className="cull-table assignment-conflict-table">
       <thead>
