@@ -430,15 +430,15 @@ describe("capacity service", () => {
       expect(result.assignments[0].usedIn3).toBe(10 * 2 * 10);
     });
 
-    test("free rotation fills axis 0 with the largest fitting face, not the spine", async () => {
+    test("free rotation fills axis 0 with the smallest fitting face, favoring the spine", async () => {
       // Rotation is unconstrained (no forced spine-out lock): axis 0 uses
-      // axisMinimize[0] = false ("maximize"), so findBestRotation picks the
-      // largest item dimension that fits the shelf's width, not necessarily
-      // the box's depth. A Wingspan box (12x12x2.8) fits axis 0 with its 12"
-      // face, consuming 12 of the cube's 13" width on the first game and
-      // leaving room for none of the other three. This is the accepted
-      // tradeoff of dropping the spine-out lock: single-item-per-shelf-run
-      // packing for boxes whose face is close to the shelf's width.
+      // axisMinimize[0] = true ("minimize"), so findBestRotation picks the
+      // smallest item dimension that fits the shelf's width — for a typical
+      // game box, that's the depth (spine). A Wingspan box (12x12x2.8) fits
+      // axis 0 with its 2.8" spine, consuming only 2.8 of the cube's 13"
+      // width per game, so all four boxes fit side by side. This is the
+      // effect of minimizing the consumption axis by default: spine-out
+      // packing emerges from free rotation without a forced lock.
       const svc = createCapacityService({
         storageService: createMockStorage([
           unit("u1", "Kallax", [{ id: "s1", name: "Cube", width: 13, height: 13, depth: 15 }]),
@@ -464,8 +464,8 @@ describe("capacity service", () => {
       });
       const result = await svc.computeCapacity();
       const assigned = result.assignments[0].games;
-      expect(assigned.length).toBe(1);
-      expect(result.overflowGames.length + result.unfittableGames.length).toBe(3);
+      expect(assigned.length).toBe(4);
+      expect(result.overflowGames.length + result.unfittableGames.length).toBe(0);
     });
 
     test("assignment grade is present (one of S/A/B/C/D/F)", async () => {
@@ -538,10 +538,11 @@ describe("capacity service", () => {
       const first = await create().computeCapacity();
       const second = await create().computeCapacity();
       // Pinned games are always processed a-game before z-game (stable ID
-      // order). With free rotation, a-game's 10" face fills the shelf's full
-      // 10" width, so z-game is rejected on remaining capacity rather than
-      // placed alongside it — deterministically, on every run.
-      expect(first.assignments[0].games.map((game) => game.gameId)).toEqual(["a-game"]);
+      // order). With free rotation, axis 0 (shelf width) is minimized, so
+      // each box consumes only its 3" depth (spine) rather than a full 10"
+      // face — both a-game and z-game fit side by side on the 10" shelf,
+      // deterministically, on every run.
+      expect(first.assignments[0].games.map((game) => game.gameId)).toEqual(["a-game", "z-game"]);
       expect(second.assignments).toEqual(first.assignments);
     });
 

@@ -19,7 +19,7 @@ export interface PackBin {
   id: string;
   dimensions: [number, number, number] | null; // [h, w, d], null = dimensionless
   axisPriority: [number, number, number]; // default [0,1,2]
-  axisMinimize: [boolean, boolean, boolean]; // default [false, true, true]
+  axisMinimize: [boolean, boolean, boolean]; // default [true, true, false]
   layer: number; // default 0, higher fills first
   neighbors: string[]; // adjacent bin IDs
 }
@@ -578,7 +578,7 @@ export function pack(
           id: override.binId,
           dimensions: null,
           axisPriority: [0, 1, 2],
-          axisMinimize: [false, true, true],
+          axisMinimize: [true, true, false],
           layer: 0,
           neighbors: [],
         };

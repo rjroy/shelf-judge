@@ -265,7 +265,7 @@ function splitUnfittable(
   const unfittable: UnfittableEntry[] = [];
 
   const defaultAxisPriority: [number, number, number] = [0, 1, 2];
-  const defaultAxisMinimize: [boolean, boolean, boolean] = [false, true, true];
+  const defaultAxisMinimize: [boolean, boolean, boolean] = [true, true, false];
 
   for (const gws of dimensioned) {
     const dims = gws.game.boxDimensions;
@@ -419,7 +419,7 @@ function buildPackBin(shelf: Shelf): PackBin {
     id: shelf.id,
     dimensions: shelfToBinDims(shelf),
     axisPriority: [0, 1, 2],
-    axisMinimize: [false, true, true],
+    axisMinimize: [true, true, false],
     layer: 0,
     neighbors: [],
   };
