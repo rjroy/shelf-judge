@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 export interface ShelfAssignmentOption {
   shelfId: string;
   label: string;
+  dimensionless: boolean;
 }
 
 export async function saveShelfAssignment(
@@ -49,7 +50,11 @@ export function ShelfAssignmentFields({
   descriptionId?: string;
   errorId?: string;
 }) {
-  const manualDisabled = !hasDimensions || isPreviouslyOwned;
+  const selectedOption = options.find((option) => option.shelfId === selectedShelfId);
+  const selectionAllowed = (option: ShelfAssignmentOption | undefined) =>
+    !isPreviouslyOwned && (hasDimensions || (option?.dimensionless ?? false));
+  const saveDisabled = selectedShelfId !== "" && !selectionAllowed(selectedOption);
+  const hasDimensionlessOption = options.some((option) => option.dimensionless);
   const describedBy = error ? `${descriptionId} ${errorId}` : descriptionId;
 
   return (
@@ -66,23 +71,29 @@ export function ShelfAssignmentFields({
         >
           <option value="">Automatic (fill shelves)</option>
           {options.map((option) => (
-            <option key={option.shelfId} value={option.shelfId} disabled={manualDisabled}>
+            <option
+              key={option.shelfId}
+              value={option.shelfId}
+              disabled={!selectionAllowed(option)}
+            >
               {option.label}
+              {option.dimensionless ? " (dimensionless)" : ""}
             </option>
           ))}
         </select>
       </label>
-      {!hasDimensions ? (
-        <div className="shelf-assignment-hint" id={descriptionId}>
-          Box dimensions are required before a shelf can be assigned.
-        </div>
-      ) : isPreviouslyOwned ? (
+      {isPreviouslyOwned ? (
         <div className="shelf-assignment-hint" id={descriptionId}>
           Previously owned games cannot be assigned to a physical shelf.
         </div>
       ) : options.length === 0 ? (
         <div className="shelf-assignment-hint" id={descriptionId}>
           Configure shelves before assigning this game.
+        </div>
+      ) : !hasDimensions ? (
+        <div className="shelf-assignment-hint" id={descriptionId}>
+          Box dimensions are required for most shelves.
+          {hasDimensionlessOption ? " Dimensionless shelves don't need them." : ""}
         </div>
       ) : (
         <div className="shelf-assignment-hint" id={descriptionId}>
@@ -94,11 +105,7 @@ export function ShelfAssignmentFields({
           {error}
         </div>
       )}
-      <button
-        className="btn-primary"
-        onClick={onSave}
-        disabled={saving || (manualDisabled && selectedShelfId !== "")}
-      >
+      <button className="btn-primary" onClick={onSave} disabled={saving || saveDisabled}>
         {saving ? "Saving..." : "Save shelf assignment"}
       </button>
     </div>
@@ -122,10 +129,14 @@ export function ShelfAssignmentForm({
   const [selectedShelfId, setSelectedShelfId] = useState(currentShelfId ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const manualDisabled = !hasDimensions || isPreviouslyOwned;
+  const selectedOption = options.find((option) => option.shelfId === selectedShelfId);
+  const selectionAllowed =
+    selectedShelfId === "" ||
+    (!isPreviouslyOwned && (hasDimensions || (selectedOption?.dimensionless ?? false)));
+  const saveDisabled = !selectionAllowed;
 
   const handleSave = useCallback(async () => {
-    if (manualDisabled && selectedShelfId !== "") return;
+    if (saveDisabled) return;
     setSaving(true);
     setError(null);
     try {
@@ -135,7 +146,7 @@ export function ShelfAssignmentForm({
     } finally {
       setSaving(false);
     }
-  }, [gameId, manualDisabled, router, selectedShelfId]);
+  }, [gameId, saveDisabled, router, selectedShelfId]);
 
   return (
     <ShelfAssignmentFields

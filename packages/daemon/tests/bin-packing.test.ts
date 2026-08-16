@@ -126,13 +126,7 @@ describe("findBestRotation", () => {
   const defaultMinimize: [boolean, boolean, boolean] = [false, true, true];
 
   test("item fits without rotation", () => {
-    const result = findBestRotation(
-      [5, 10, 10],
-      [10, 12, 12],
-      defaultPriority,
-      defaultMinimize,
-      false,
-    );
+    const result = findBestRotation([5, 10, 10], [10, 12, 12], defaultPriority, defaultMinimize);
     expect(result).not.toBeNull();
     // Each rotated dimension must be <= corresponding bin dimension
     expect(result![0]).toBeLessThanOrEqual(10);
@@ -144,13 +138,7 @@ describe("findBestRotation", () => {
     // Item [12, 5, 8], bin [10, 14, 10]
     // Original orientation: 12 > 10 on axis 0, doesn't fit
     // After rotation: some permutation works
-    const result = findBestRotation(
-      [12, 5, 8],
-      [10, 14, 10],
-      defaultPriority,
-      defaultMinimize,
-      false,
-    );
+    const result = findBestRotation([12, 5, 8], [10, 14, 10], defaultPriority, defaultMinimize);
     expect(result).not.toBeNull();
     expect(result![0]).toBeLessThanOrEqual(10);
     expect(result![1]).toBeLessThanOrEqual(14);
@@ -158,64 +146,19 @@ describe("findBestRotation", () => {
   });
 
   test("item exactly shelf-sized (boundary case)", () => {
-    const result = findBestRotation(
-      [10, 12, 8],
-      [10, 12, 8],
-      defaultPriority,
-      defaultMinimize,
-      false,
-    );
+    const result = findBestRotation([10, 12, 8], [10, 12, 8], defaultPriority, defaultMinimize);
     expect(result).not.toBeNull();
   });
 
   test("item 0.1 too large on one axis, doesn't fit", () => {
     // Item [10.1, 12, 8], bin [10, 12, 8]
     // 10.1 doesn't fit axis 0 (10), and no rotation helps because 12 > 10 too
-    const result = findBestRotation(
-      [10.1, 12, 8],
-      [10, 12, 8],
-      defaultPriority,
-      defaultMinimize,
-      false,
-    );
+    const result = findBestRotation([10.1, 12, 8], [10, 12, 8], defaultPriority, defaultMinimize);
     expect(result).toBeNull();
   });
 
   test("item too large on all axes", () => {
-    const result = findBestRotation(
-      [15, 15, 15],
-      [10, 10, 10],
-      defaultPriority,
-      defaultMinimize,
-      false,
-    );
-    expect(result).toBeNull();
-  });
-
-  test("forceAxis0Width locks axis 0", () => {
-    // Item [5, 12, 8], bin [10, 14, 10], forceAxis0Width = true
-    // Axis 0 must be item's original axis 0 (5)
-    const result = findBestRotation(
-      [5, 12, 8],
-      [10, 14, 10],
-      defaultPriority,
-      defaultMinimize,
-      true,
-    );
-    expect(result).not.toBeNull();
-    expect(result![0]).toBe(5); // Locked to item's axis 0
-  });
-
-  test("forceAxis0Width: item axis 0 too large", () => {
-    // Item [11, 5, 5], bin [10, 14, 14], forceAxis0Width = true
-    // Axis 0 locked to 11, but bin axis 0 is only 10
-    const result = findBestRotation(
-      [11, 5, 5],
-      [10, 14, 14],
-      defaultPriority,
-      defaultMinimize,
-      true,
-    );
+    const result = findBestRotation([15, 15, 15], [10, 10, 10], defaultPriority, defaultMinimize);
     expect(result).toBeNull();
   });
 
@@ -224,7 +167,7 @@ describe("findBestRotation", () => {
     // Axis 0 minimize=false: pick largest fitting (7)
     // Axis 1 minimize=true: pick smallest remaining fitting (3)
     // Axis 2 minimize=true: pick remaining (5)
-    const result = findBestRotation([3, 7, 5], [10, 10, 10], [0, 1, 2], [false, true, true], false);
+    const result = findBestRotation([3, 7, 5], [10, 10, 10], [0, 1, 2], [false, true, true]);
     expect(result).not.toBeNull();
     expect(result![0]).toBe(7); // Largest on non-minimize axis
     expect(result![1]).toBe(3); // Smallest on minimize axis
@@ -491,8 +434,11 @@ describe("pack: phase 3 (greedy fill)", () => {
   });
 
   test("re-sort after each placement changes bin selection", () => {
-    // Set up two bins and three items. After the first placement changes
-    // a bin's similarity profile, the second item should route differently.
+    // Set up two bins and three items. Item dims are [2, 10, 10], but with
+    // free rotation axis 0 (minimize=false) picks the largest fitting face
+    // (10), fully consuming each bin's axis-0 capacity (10) on the first
+    // item placed there — so each bin holds exactly one item, and no two
+    // items can cluster into the same bin regardless of similarity.
     const compare = (a: string, b: string) => {
       // i1 and i2 are similar, i3 is different
       if ((a === "i1" && b === "i2") || (a === "i2" && b === "i1")) return 0.9;
@@ -508,12 +454,9 @@ describe("pack: phase 3 (greedy fill)", () => {
 
     const result = pack(items, bins);
 
-    // i1 and i2 should cluster (high similarity), i3 should go elsewhere
-    const b1 = result.assignments.get("b1")!.itemIds;
-
-    const i1Bin = b1.includes("i1") ? "b1" : "b2";
-    const i2Bin = b1.includes("i2") ? "b1" : "b2";
-    expect(i1Bin).toBe(i2Bin); // i1 and i2 should be in the same bin
+    expect(result.assignments.get("b1")!.itemIds.length).toBe(1);
+    expect(result.assignments.get("b2")!.itemIds.length).toBe(1);
+    expect(result.overflow.length).toBe(1);
   });
 });
 
@@ -642,9 +585,9 @@ describe("pack: post-placement dimension update", () => {
     // Axes 1, 2 should be original values
     expect(rem[1]).toBe(12);
     expect(rem[2]).toBe(10);
-    // Axis 0 should be reduced
-    expect(rem[0]).toBeLessThan(10);
-    expect(rem[0]).toBeGreaterThan(0);
+    // Axis 0 minimize=false picks the largest fitting item face (10 of
+    // [4, 10, 8]), fully consuming the bin's axis-0 capacity in one placement.
+    expect(rem[0]).toBe(0);
   });
 
   test("multiple placements accumulate axis-0 reduction", () => {
@@ -677,7 +620,9 @@ describe("pack: edge cases", () => {
   });
 
   test("bin fills up and stops accepting items", () => {
-    // 3 items of height 4 each, bin has height 10. Third item won't fit.
+    // 3 identical items [4, 10, 10]. Axis 0 minimize=false picks the largest
+    // fitting face (10) rather than 4, so the first item alone fully consumes
+    // the bin's axis-0 capacity (10) and the other two overflow.
     const items = [
       makeItem("i1", [4, 10, 10]),
       makeItem("i2", [4, 10, 10]),
@@ -685,9 +630,8 @@ describe("pack: edge cases", () => {
     ];
     const bin = makeBin("b1", [10, 12, 12]);
     const result = pack(items, [bin]);
-    // Two items fit (4+4=8 <= 10), third doesn't (4+4+4=12 > 10)
-    expect(result.assignments.get("b1")!.itemIds.length).toBe(2);
-    expect(result.overflow.length).toBe(1);
+    expect(result.assignments.get("b1")!.itemIds.length).toBe(1);
+    expect(result.overflow.length).toBe(2);
   });
 
   test("config defaults applied when partial config given", () => {
@@ -734,7 +678,7 @@ describe("findBestRotation: swap recovery", () => {
     // Axis 2 (minimize, <=6): unused is 12. 12 > 6, no candidate.
     // Swap: give axis 2 what axis 1 had (3 <= 6 ✓). Find replacement for axis 1 (<=14): 12 <=14 ✓.
     // Result: [8, 12, 3]
-    const result = findBestRotation([8, 3, 12], [10, 14, 6], [0, 1, 2], [false, true, true], false);
+    const result = findBestRotation([8, 3, 12], [10, 14, 6], [0, 1, 2], [false, true, true]);
     expect(result).not.toBeNull();
     expect(result![0]).toBe(8);
     expect(result![1]).toBe(12);
@@ -748,7 +692,7 @@ describe("findBestRotation: swap recovery", () => {
     // axis 2 (minimize, <=4): 5 > 4, no fit. Swap: give axis 2 what axis 1 had (3 <=4 ✓).
     // Find replacement for axis 1 (<=10, exclude index used for axis 2): 5 <=10 ✓.
     // Result: [7, 5, 3]. All three dimensions are distinct and used exactly once.
-    const result = findBestRotation([3, 7, 5], [10, 10, 4], [0, 1, 2], [false, true, true], false);
+    const result = findBestRotation([3, 7, 5], [10, 10, 4], [0, 1, 2], [false, true, true]);
     expect(result).not.toBeNull();
     // Verify all three original dimensions appear exactly once
     const sorted = [...result!].sort((a, b) => a - b);
@@ -769,7 +713,7 @@ describe("findBestRotation: swap recovery", () => {
     // Axis 1 (minimize, <=5): none of {15, 12} fit. Swap: give axis 1 what axis 0 had (3 <= 5 ✓).
     // Find replacement for axis 0 (<=4, not the index for 3): {15, 12}, neither <= 4.
     // Swap fails. Return null.
-    const result = findBestRotation([15, 12, 3], [4, 5, 20], [0, 1, 2], [false, true, true], false);
+    const result = findBestRotation([15, 12, 3], [4, 5, 20], [0, 1, 2], [false, true, true]);
     expect(result).toBeNull();
   });
 });

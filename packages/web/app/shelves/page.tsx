@@ -15,9 +15,18 @@ async function fetchShelfConfig(): Promise<ShelfConfiguration> {
   return (await res.json()) as ShelfConfiguration;
 }
 
+interface ShelfWriteInput {
+  id?: string;
+  name: string;
+  dimensionless: boolean;
+  width: number | null;
+  height: number | null;
+  depth: number | null;
+}
+
 async function fetchAddShelfUnit(input: {
   name: string;
-  shelves: Array<{ name: string; width: number; height: number | null; depth: number }>;
+  shelves: ShelfWriteInput[];
 }): Promise<ShelfUnit> {
   const res = await fetch("/api/daemon/shelf/units", {
     method: "POST",
@@ -37,13 +46,7 @@ async function fetchUpdateShelfUnit(
   id: string,
   input: {
     name?: string;
-    shelves?: Array<{
-      id?: string;
-      name: string;
-      width: number;
-      height: number | null;
-      depth: number;
-    }>;
+    shelves?: ShelfWriteInput[];
   },
 ): Promise<ShelfUnitMutationResult> {
   const res = await fetch(`/api/daemon/shelf/units/${id}`, {
@@ -73,30 +76,40 @@ async function fetchRemoveShelfUnit(id: string): Promise<ShelfUnitRemovalResult>
 
 interface AddShelfForm {
   name: string;
+  dimensionless: boolean;
   width: string;
   height: string;
   depth: string;
 }
 
-const EMPTY_SHELF_FORM: AddShelfForm = { name: "", width: "", height: "", depth: "" };
+const EMPTY_SHELF_FORM: AddShelfForm = {
+  name: "",
+  dimensionless: false,
+  width: "",
+  height: "",
+  depth: "",
+};
 
 function computeSummary(units: ShelfUnit[]) {
   let totalShelves = 0;
   let totalCapacity = 0;
   let unconstrainedCount = 0;
+  let dimensionlessCount = 0;
 
   for (const unit of units) {
     for (const shelf of unit.shelves) {
       totalShelves++;
-      if (shelf.height === null) {
+      if (shelf.dimensionless) {
+        dimensionlessCount++;
+      } else if (shelf.height === null) {
         unconstrainedCount++;
       } else {
-        totalCapacity += shelf.width * shelf.height * shelf.depth;
+        totalCapacity += (shelf.width ?? 0) * shelf.height * (shelf.depth ?? 0);
       }
     }
   }
 
-  return { totalShelves, totalCapacity, unconstrainedCount };
+  return { totalShelves, totalCapacity, unconstrainedCount, dimensionlessCount };
 }
 
 function formatCapacity(volumeIn3: number): string {
@@ -196,6 +209,15 @@ export default function ShelvesPage() {
     }
   };
 
+  const toShelfWrite = (s: Shelf): ShelfWriteInput => ({
+    id: s.id,
+    name: s.name,
+    dimensionless: s.dimensionless,
+    width: s.width,
+    height: s.height,
+    depth: s.depth,
+  });
+
   const getShelfForm = (unitId: string): AddShelfForm => {
     return shelfForms[unitId] ?? EMPTY_SHELF_FORM;
   };
@@ -211,34 +233,34 @@ export default function ShelvesPage() {
     const form = getShelfForm(unit.id);
     if (!form.name.trim()) return;
 
-    const width = parseFloat(form.width);
-    const depth = parseFloat(form.depth);
-    const height = form.height.trim() === "" ? null : parseFloat(form.height);
+    let width: number | null = null;
+    let height: number | null = null;
+    let depth: number | null = null;
 
-    if (!Number.isFinite(width) || width <= 0) {
-      setError("Width must be a positive number");
-      return;
-    }
-    if (!Number.isFinite(depth) || depth <= 0) {
-      setError("Depth must be a positive number");
-      return;
-    }
-    if (height !== null && (!Number.isFinite(height) || height <= 0)) {
-      setError("Height must be a positive number or left blank for unconstrained");
-      return;
+    if (!form.dimensionless) {
+      width = parseFloat(form.width);
+      depth = parseFloat(form.depth);
+      height = form.height.trim() === "" ? null : parseFloat(form.height);
+
+      if (!Number.isFinite(width) || width <= 0) {
+        setError("Width must be a positive number");
+        return;
+      }
+      if (!Number.isFinite(depth) || depth <= 0) {
+        setError("Depth must be a positive number");
+        return;
+      }
+      if (height !== null && (!Number.isFinite(height) || height <= 0)) {
+        setError("Height must be a positive number or left blank for unconstrained");
+        return;
+      }
     }
 
     setError(null);
     try {
       const newShelves = [
-        ...unit.shelves.map((s) => ({
-          id: s.id,
-          name: s.name,
-          width: s.width,
-          height: s.height,
-          depth: s.depth,
-        })),
-        { name: form.name.trim(), width, height, depth },
+        ...unit.shelves.map(toShelfWrite),
+        { name: form.name.trim(), dimensionless: form.dimensionless, width, height, depth },
       ];
       const { unit: updated } = await fetchUpdateShelfUnit(unit.id, { shelves: newShelves });
       setConfig((prev) =>
@@ -256,9 +278,7 @@ export default function ShelvesPage() {
     setError(null);
     setSuccess(null);
     try {
-      const newShelves = unit.shelves
-        .filter((s) => s.id !== shelfId)
-        .map((s) => ({ id: s.id, name: s.name, width: s.width, height: s.height, depth: s.depth }));
+      const newShelves = unit.shelves.filter((s) => s.id !== shelfId).map(toShelfWrite);
       const { unit: updated, clearedAssignmentCount } = await fetchUpdateShelfUnit(unit.id, {
         shelves: newShelves,
       });
@@ -279,39 +299,53 @@ export default function ShelvesPage() {
     setEditingShelf(shelf.id);
     setEditForm({
       name: shelf.name,
-      width: String(shelf.width),
+      dimensionless: shelf.dimensionless,
+      width: shelf.width === null ? "" : String(shelf.width),
       height: shelf.height === null ? "" : String(shelf.height),
-      depth: String(shelf.depth),
+      depth: shelf.depth === null ? "" : String(shelf.depth),
     });
   };
 
   const handleSaveEditShelf = async (unit: ShelfUnit) => {
     if (!editingShelf) return;
-
-    const width = parseFloat(editForm.width);
-    const depth = parseFloat(editForm.depth);
-    const height = editForm.height.trim() === "" ? null : parseFloat(editForm.height);
-
     if (!editForm.name.trim()) return;
-    if (!Number.isFinite(width) || width <= 0) {
-      setError("Width must be a positive number");
-      return;
-    }
-    if (!Number.isFinite(depth) || depth <= 0) {
-      setError("Depth must be a positive number");
-      return;
-    }
-    if (height !== null && (!Number.isFinite(height) || height <= 0)) {
-      setError("Height must be a positive number or left blank for unconstrained");
-      return;
+
+    let width: number | null = null;
+    let height: number | null = null;
+    let depth: number | null = null;
+
+    if (!editForm.dimensionless) {
+      width = parseFloat(editForm.width);
+      depth = parseFloat(editForm.depth);
+      height = editForm.height.trim() === "" ? null : parseFloat(editForm.height);
+
+      if (!Number.isFinite(width) || width <= 0) {
+        setError("Width must be a positive number");
+        return;
+      }
+      if (!Number.isFinite(depth) || depth <= 0) {
+        setError("Depth must be a positive number");
+        return;
+      }
+      if (height !== null && (!Number.isFinite(height) || height <= 0)) {
+        setError("Height must be a positive number or left blank for unconstrained");
+        return;
+      }
     }
 
     setError(null);
     try {
       const newShelves = unit.shelves.map((s) =>
         s.id === editingShelf
-          ? { id: s.id, name: editForm.name.trim(), width, height, depth }
-          : { id: s.id, name: s.name, width: s.width, height: s.height, depth: s.depth },
+          ? {
+              id: s.id,
+              name: editForm.name.trim(),
+              dimensionless: editForm.dimensionless,
+              width,
+              height,
+              depth,
+            }
+          : toShelfWrite(s),
       );
       const { unit: updated } = await fetchUpdateShelfUnit(unit.id, { shelves: newShelves });
       setConfig((prev) =>
@@ -327,15 +361,10 @@ export default function ShelvesPage() {
     setError(null);
     try {
       const newShelves = [
-        ...unit.shelves.map((s) => ({
-          id: s.id,
-          name: s.name,
-          width: s.width,
-          height: s.height,
-          depth: s.depth,
-        })),
+        ...unit.shelves.map(toShelfWrite),
         {
           name: `${shelf.name} (copy)`,
+          dimensionless: shelf.dimensionless,
           width: shelf.width,
           height: shelf.height,
           depth: shelf.depth,
@@ -358,13 +387,7 @@ export default function ShelvesPage() {
     try {
       const reordered = [...unit.shelves];
       [reordered[shelfIndex], reordered[newIndex]] = [reordered[newIndex], reordered[shelfIndex]];
-      const newShelves = reordered.map((s) => ({
-        id: s.id,
-        name: s.name,
-        width: s.width,
-        height: s.height,
-        depth: s.depth,
-      }));
+      const newShelves = reordered.map(toShelfWrite);
       const { unit: updated } = await fetchUpdateShelfUnit(unit.id, { shelves: newShelves });
       setConfig((prev) =>
         prev ? { ...prev, units: prev.units.map((u) => (u.id === unit.id ? updated : u)) } : prev,
@@ -422,6 +445,11 @@ export default function ShelvesPage() {
           <div className="shelf-summary-stat">
             <div className="shelf-summary-value">{summary.unconstrainedCount}</div>
             <div className="shelf-summary-label">unconstrained shelves</div>
+          </div>
+          <div className="shelf-summary-divider" />
+          <div className="shelf-summary-stat">
+            <div className="shelf-summary-value">{summary.dimensionlessCount}</div>
+            <div className="shelf-summary-label">dimensionless shelves</div>
           </div>
         </div>
       )}
@@ -519,33 +547,47 @@ export default function ShelvesPage() {
                               onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
                               placeholder="Name"
                             />
-                            <input
-                              className="shelf-add-input shelf-add-narrow"
-                              value={editForm.width}
-                              onChange={(e) =>
-                                setEditForm((f) => ({ ...f, width: e.target.value }))
-                              }
-                              placeholder="W"
-                            />
-                            <span className="shelf-add-unit-label">&times;</span>
-                            <input
-                              className="shelf-add-input shelf-add-narrow"
-                              value={editForm.height}
-                              onChange={(e) =>
-                                setEditForm((f) => ({ ...f, height: e.target.value }))
-                              }
-                              placeholder="H"
-                            />
-                            <span className="shelf-add-unit-label">&times;</span>
-                            <input
-                              className="shelf-add-input shelf-add-narrow"
-                              value={editForm.depth}
-                              onChange={(e) =>
-                                setEditForm((f) => ({ ...f, depth: e.target.value }))
-                              }
-                              placeholder="D"
-                            />
-                            <span className="shelf-add-unit-label">in</span>
+                            <label className="shelf-dimensionless-toggle">
+                              <input
+                                type="checkbox"
+                                checked={editForm.dimensionless}
+                                onChange={(e) =>
+                                  setEditForm((f) => ({ ...f, dimensionless: e.target.checked }))
+                                }
+                              />
+                              Dimensionless
+                            </label>
+                            {!editForm.dimensionless && (
+                              <>
+                                <input
+                                  className="shelf-add-input shelf-add-narrow"
+                                  value={editForm.width}
+                                  onChange={(e) =>
+                                    setEditForm((f) => ({ ...f, width: e.target.value }))
+                                  }
+                                  placeholder="W"
+                                />
+                                <span className="shelf-add-unit-label">&times;</span>
+                                <input
+                                  className="shelf-add-input shelf-add-narrow"
+                                  value={editForm.height}
+                                  onChange={(e) =>
+                                    setEditForm((f) => ({ ...f, height: e.target.value }))
+                                  }
+                                  placeholder="H"
+                                />
+                                <span className="shelf-add-unit-label">&times;</span>
+                                <input
+                                  className="shelf-add-input shelf-add-narrow"
+                                  value={editForm.depth}
+                                  onChange={(e) =>
+                                    setEditForm((f) => ({ ...f, depth: e.target.value }))
+                                  }
+                                  placeholder="D"
+                                />
+                                <span className="shelf-add-unit-label">in</span>
+                              </>
+                            )}
                             <div className="shelf-row-actions">
                               <button
                                 className="btn-ghost"
@@ -561,22 +603,32 @@ export default function ShelvesPage() {
                         ) : (
                           <>
                             <span className="shelf-name">{shelf.name}</span>
-                            <span className="shelf-dims">
-                              <span className="shelf-dim-value">{shelf.width}</span>
-                              {" \u00D7 "}
-                              {shelf.height === null ? (
-                                <span className="shelf-dim-unconstrained">&mdash;</span>
-                              ) : (
-                                <span className="shelf-dim-value">{shelf.height}</span>
-                              )}
-                              {" \u00D7 "}
-                              <span className="shelf-dim-value">{shelf.depth}</span>
-                              {" in"}
-                            </span>
-                            {shelf.height === null && (
-                              <span className="shelf-badge-unconstrained">
-                                Unconstrained height
+                            {shelf.dimensionless ? (
+                              <span className="shelf-dims">
+                                <span className="shelf-dim-unconstrained">assignment-only</span>
                               </span>
+                            ) : (
+                              <span className="shelf-dims">
+                                <span className="shelf-dim-value">{shelf.width}</span>
+                                {" \u00D7 "}
+                                {shelf.height === null ? (
+                                  <span className="shelf-dim-unconstrained">&mdash;</span>
+                                ) : (
+                                  <span className="shelf-dim-value">{shelf.height}</span>
+                                )}
+                                {" \u00D7 "}
+                                <span className="shelf-dim-value">{shelf.depth}</span>
+                                {" in"}
+                              </span>
+                            )}
+                            {shelf.dimensionless ? (
+                              <span className="shelf-badge-dimensionless">Dimensionless</span>
+                            ) : (
+                              shelf.height === null && (
+                                <span className="shelf-badge-unconstrained">
+                                  Unconstrained height
+                                </span>
+                              )
                             )}
                             <div className="shelf-row-actions">
                               <button className="btn-ghost" onClick={() => handleEditShelf(shelf)}>
@@ -613,37 +665,53 @@ export default function ShelvesPage() {
                             if (e.key === "Enter") void handleAddShelf(unit);
                           }}
                         />
-                        <input
-                          className="shelf-add-input shelf-add-narrow"
-                          placeholder="W"
-                          value={getShelfForm(unit.id).width}
-                          onChange={(e) => updateShelfForm(unit.id, { width: e.target.value })}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") void handleAddShelf(unit);
-                          }}
-                        />
-                        <span className="shelf-add-unit-label">&times;</span>
-                        <input
-                          className="shelf-add-input shelf-add-narrow"
-                          placeholder="H"
-                          value={getShelfForm(unit.id).height}
-                          onChange={(e) => updateShelfForm(unit.id, { height: e.target.value })}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") void handleAddShelf(unit);
-                          }}
-                        />
-                        <span className="shelf-add-unit-label">&times;</span>
-                        <input
-                          className="shelf-add-input shelf-add-narrow"
-                          placeholder="D"
-                          value={getShelfForm(unit.id).depth}
-                          onChange={(e) => updateShelfForm(unit.id, { depth: e.target.value })}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") void handleAddShelf(unit);
-                          }}
-                        />
-                        <span className="shelf-add-unit-label">in</span>
-                        <span className="shelf-add-hint">(leave H blank for unconstrained)</span>
+                        <label className="shelf-dimensionless-toggle">
+                          <input
+                            type="checkbox"
+                            checked={getShelfForm(unit.id).dimensionless}
+                            onChange={(e) =>
+                              updateShelfForm(unit.id, { dimensionless: e.target.checked })
+                            }
+                          />
+                          Dimensionless
+                        </label>
+                        {!getShelfForm(unit.id).dimensionless && (
+                          <>
+                            <input
+                              className="shelf-add-input shelf-add-narrow"
+                              placeholder="W"
+                              value={getShelfForm(unit.id).width}
+                              onChange={(e) => updateShelfForm(unit.id, { width: e.target.value })}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") void handleAddShelf(unit);
+                              }}
+                            />
+                            <span className="shelf-add-unit-label">&times;</span>
+                            <input
+                              className="shelf-add-input shelf-add-narrow"
+                              placeholder="H"
+                              value={getShelfForm(unit.id).height}
+                              onChange={(e) => updateShelfForm(unit.id, { height: e.target.value })}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") void handleAddShelf(unit);
+                              }}
+                            />
+                            <span className="shelf-add-unit-label">&times;</span>
+                            <input
+                              className="shelf-add-input shelf-add-narrow"
+                              placeholder="D"
+                              value={getShelfForm(unit.id).depth}
+                              onChange={(e) => updateShelfForm(unit.id, { depth: e.target.value })}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") void handleAddShelf(unit);
+                              }}
+                            />
+                            <span className="shelf-add-unit-label">in</span>
+                            <span className="shelf-add-hint">
+                              (leave H blank for unconstrained)
+                            </span>
+                          </>
+                        )}
                         <button
                           className="btn btn-primary btn-sm"
                           onClick={() => void handleAddShelf(unit)}

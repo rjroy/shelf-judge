@@ -32,8 +32,8 @@ function renderForm(
     gameId: "game-1",
     currentShelfId: "shelf-a",
     options: [
-      { shelfId: "shelf-a", label: "Room — A" },
-      { shelfId: "shelf-b", label: "Room — B" },
+      { shelfId: "shelf-a", label: "Room — A", dimensionless: false },
+      { shelfId: "shelf-b", label: "Room — B", dimensionless: false },
     ],
     hasDimensions: true,
     isPreviouslyOwned: false,

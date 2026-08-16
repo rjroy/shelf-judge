@@ -15,8 +15,15 @@ const unit1: ShelfUnit = {
   id: "unit-1",
   name: "Living Room Kallax",
   shelves: [
-    { id: "shelf-1", name: "Top Shelf", width: 30, height: 12, depth: 15 },
-    { id: "shelf-2", name: "Bottom Shelf", width: 30, height: null, depth: 15 },
+    { id: "shelf-1", name: "Top Shelf", dimensionless: false, width: 30, height: 12, depth: 15 },
+    {
+      id: "shelf-2",
+      name: "Bottom Shelf",
+      dimensionless: false,
+      width: 30,
+      height: null,
+      depth: 15,
+    },
   ],
 };
 
@@ -196,7 +203,14 @@ describe("shelf add-shelf", () => {
       name: "Living Room Kallax",
       shelves: [
         ...unit1.shelves,
-        { id: "shelf-3", name: "New Shelf", width: 30, height: null, depth: 15 },
+        {
+          id: "shelf-3",
+          name: "New Shelf",
+          dimensionless: false,
+          width: 30,
+          height: null,
+          depth: 15,
+        },
       ],
     };
     const client = createMockClient({
@@ -224,7 +238,14 @@ describe("shelf add-shelf", () => {
       name: "Living Room Kallax",
       shelves: [
         ...unit1.shelves,
-        { id: "shelf-3", name: "Mid Shelf", width: 30, height: 10, depth: 15 },
+        {
+          id: "shelf-3",
+          name: "Mid Shelf",
+          dimensionless: false,
+          width: 30,
+          height: 10,
+          depth: 15,
+        },
       ],
     };
     const client = createMockClient({

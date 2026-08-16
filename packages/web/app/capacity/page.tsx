@@ -50,7 +50,12 @@ export function ShelfAssignmentCard({ assignment }: { assignment: ShelfAssignmen
           <div className="shelf-assign-name">{assignment.shelfName}</div>
           <div className="shelf-assign-unit">
             {assignment.unitName}
-            {heightless ? (
+            {assignment.dimensionless ? (
+              <>
+                {" · "}
+                <span className="shelf-assign-unconstrained">dimensionless</span>
+              </>
+            ) : heightless ? (
               <>
                 {" · "}
                 <span className="shelf-assign-unconstrained">unconstrained height</span>
@@ -58,7 +63,9 @@ export function ShelfAssignmentCard({ assignment }: { assignment: ShelfAssignmen
             ) : null}
           </div>
           <div className="util-bar-wrap">
-            {heightless || assignment.utilization === null ? (
+            {assignment.dimensionless ? (
+              <div className="util-unconstrained">Assignment-only shelf, not part of capacity</div>
+            ) : heightless || assignment.utilization === null ? (
               <div className="util-unconstrained">
                 No utilization tracked (unconstrained height)
               </div>

@@ -649,7 +649,9 @@ describe("PUT /api/games/:id/shelf-assignment", () => {
         {
           id: "unit-1",
           name: "Bookcase",
-          shelves: [{ id: "shelf-1", name: "Top", width: 30, height: 12, depth: 12 }],
+          shelves: [
+            { id: "shelf-1", name: "Top", dimensionless: false, width: 30, height: 12, depth: 12 },
+          ],
         },
       ],
       createdAt: "2026-01-01T00:00:00Z",

@@ -541,9 +541,10 @@ export interface BoxDimensions {
 export interface Shelf {
   id: string;
   name: string;
-  width: number; // interior in
-  height: number | null; // interior in, null = unconstrained
-  depth: number; // interior in
+  dimensionless: boolean; // true = assignment-only bucket, skipped by capacity/packing
+  width: number | null; // interior in, null when dimensionless
+  height: number | null; // interior in, null = unconstrained or dimensionless
+  depth: number | null; // interior in, null when dimensionless
 }
 
 export interface ShelfUnit {
@@ -586,9 +587,10 @@ export interface ShelfAssignment {
   shelfName: string;
   unitId: string;
   unitName: string;
-  capacityIn3: number | null; // null for unconstrained-height shelves
+  dimensionless: boolean; // true = assignment-only bucket, not part of capacity/packing
+  capacityIn3: number | null; // null for unconstrained-height or dimensionless shelves
   usedIn3: number;
-  utilization: number | null; // usedIn3 / capacityIn3, null if unconstrained
+  utilization: number | null; // usedIn3 / capacityIn3, null if unconstrained or dimensionless
   games: AssignedGame[];
   grade: string; // S, A, B, C, D, F
 }

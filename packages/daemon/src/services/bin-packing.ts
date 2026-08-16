@@ -19,7 +19,7 @@ export interface PackBin {
   id: string;
   dimensions: [number, number, number] | null; // [h, w, d], null = dimensionless
   axisPriority: [number, number, number]; // default [0,1,2]
-  axisMinimize: [boolean, boolean, boolean]; // default [false, true, true]
+  axisMinimize: [boolean, boolean, boolean]; // default [true, true, false]
   layer: number; // default 0, higher fills first
   neighbors: string[]; // adjacent bin IDs
 }
@@ -29,7 +29,6 @@ export interface PackConfig {
   binFitnessWeights: { base: number; unsorted: number; neighbor: number; topN: number };
   itemFitnessWeights: { space: number; game: number; neighbor: number };
   minRemainder: [number, number, number];
-  forceAxis0Width: boolean;
 }
 
 export type MergeStrategy = "avg" | "geo" | "harmonic" | "max" | "min" | "geomax";
@@ -58,7 +57,6 @@ export const DEFAULT_PACK_CONFIG: PackConfig = {
   binFitnessWeights: { base: 0.2, unsorted: 0.7, neighbor: 0.1, topN: 1 },
   itemFitnessWeights: { space: 0.1, game: 0.8, neighbor: 0.1 },
   minRemainder: [0.25, 3, 4],
-  forceAxis0Width: true,
 };
 
 // --- Merge Strategies ---
@@ -143,20 +141,11 @@ export function findBestRotation(
   binDims: [number, number, number],
   axisPriority: [number, number, number],
   axisMinimize: [boolean, boolean, boolean],
-  forceAxis0Width: boolean,
 ): [number, number, number] | null {
   const result: [number, number, number] = [0, 0, 0];
   const usedItemIndices = new Set<number>();
 
-  // When forceAxis0Width is on, axis 0 of the result is locked to the item's
-  // original axis 0. Only axes 1 and 2 participate in rotation.
-  if (forceAxis0Width) {
-    if (itemDims[0] > binDims[0]) return null;
-    result[0] = itemDims[0];
-    usedItemIndices.add(0);
-  }
-
-  const axesToAssign = forceAxis0Width ? axisPriority.filter((a) => a !== 0) : [...axisPriority];
+  const axesToAssign = [...axisPriority];
 
   for (let pi = 0; pi < axesToAssign.length; pi++) {
     const axis = axesToAssign[pi];
@@ -251,7 +240,6 @@ export function itemInBinFitness(
       bin.remaining,
       bin.bin.axisPriority,
       bin.bin.axisMinimize,
-      config.forceAxis0Width,
     );
     if (rotated) {
       const ratios = [
@@ -359,7 +347,7 @@ interface BinState {
 }
 
 /** Check whether an item physically fits a bin's remaining space. */
-function itemFits(item: PackItem, binState: BinState, config: PackConfig): boolean {
+function itemFits(item: PackItem, binState: BinState): boolean {
   if (!item.dimensions || !binState.remaining) return true; // dimensionless
   return (
     findBestRotation(
@@ -367,27 +355,20 @@ function itemFits(item: PackItem, binState: BinState, config: PackConfig): boole
       binState.remaining,
       binState.bin.axisPriority,
       binState.bin.axisMinimize,
-      config.forceAxis0Width,
     ) !== null
   );
 }
 
 /** Check whether an item can fit the bin's original, unconsumed shape. */
-function itemFitsEmptyBin(item: PackItem, bin: PackBin, config: PackConfig): boolean {
+function itemFitsEmptyBin(item: PackItem, bin: PackBin): boolean {
   if (!item.dimensions || !bin.dimensions) return true;
   return (
-    findBestRotation(
-      item.dimensions,
-      bin.dimensions,
-      bin.axisPriority,
-      bin.axisMinimize,
-      config.forceAxis0Width,
-    ) !== null
+    findBestRotation(item.dimensions, bin.dimensions, bin.axisPriority, bin.axisMinimize) !== null
   );
 }
 
 /** Place an item in a bin, updating remaining dimensions. */
-function placeItem(item: PackItem, binState: BinState, config: PackConfig): void {
+function placeItem(item: PackItem, binState: BinState): void {
   binState.items.push(item);
   if (item.dimensions && binState.remaining) {
     const rotated = findBestRotation(
@@ -395,7 +376,6 @@ function placeItem(item: PackItem, binState: BinState, config: PackConfig): void
       binState.remaining,
       binState.bin.axisPriority,
       binState.bin.axisMinimize,
-      config.forceAxis0Width,
     )!;
     // Post-placement: subtract rotated axis-0 from bin's remaining axis-0.
     // Axes 1 and 2 unchanged (1D simplification).
@@ -476,7 +456,6 @@ function computeGrades(
           bs.bin.dimensions,
           bs.bin.axisPriority,
           bs.bin.axisMinimize,
-          config.forceAxis0Width,
         );
         if (rotated) {
           const ratios = [
@@ -498,7 +477,6 @@ function computeGrades(
             bs.bin.dimensions,
             bs.bin.axisPriority,
             bs.bin.axisMinimize,
-            config.forceAxis0Width,
           );
           if (rotated) {
             const ratios = [
@@ -572,12 +550,12 @@ export function pack(
     const bs = binStates.get(override.binId);
     if (!bs) {
       fixedPlacementRejections.push({ itemId: item.id, reason: "missing-bin" });
-    } else if (!itemFitsEmptyBin(item, bs.bin, config)) {
+    } else if (!itemFitsEmptyBin(item, bs.bin)) {
       fixedPlacementRejections.push({ itemId: item.id, reason: "shape" });
-    } else if (!itemFits(item, bs, config)) {
+    } else if (!itemFits(item, bs)) {
       fixedPlacementRejections.push({ itemId: item.id, reason: "remaining-capacity" });
     } else {
-      placeItem(item, bs, config);
+      placeItem(item, bs);
     }
     // Fixed-fit items are terminal whether accepted or rejected. They never
     // fall through to automatic placement or ordinary overflow.
@@ -600,20 +578,20 @@ export function pack(
           id: override.binId,
           dimensions: null,
           axisPriority: [0, 1, 2],
-          axisMinimize: [false, true, true],
+          axisMinimize: [true, true, false],
           layer: 0,
           neighbors: [],
         };
         bs = { bin: syntheticBin, items: [], remaining: null };
         binStates.set(override.binId, bs);
       }
-      placeItem(item, bs, config);
+      placeItem(item, bs);
       unplaced.delete(item.id);
     } else {
       // Soft override: place if bin exists and item fits
       const bs = binStates.get(override.binId);
-      if (bs && itemFits(item, bs, config)) {
-        placeItem(item, bs, config);
+      if (bs && itemFits(item, bs)) {
+        placeItem(item, bs);
         unplaced.delete(item.id);
       }
       // Otherwise falls through to later phases
@@ -626,12 +604,12 @@ export function pack(
   for (const item of phase2Items) {
     const fittingBins: string[] = [];
     for (const [binId, bs] of binStates) {
-      if (itemFits(item, bs, config)) {
+      if (itemFits(item, bs)) {
         fittingBins.push(binId);
       }
     }
     if (fittingBins.length === 1) {
-      placeItem(item, binStates.get(fittingBins[0])!, config);
+      placeItem(item, binStates.get(fittingBins[0])!);
       unplaced.delete(item.id);
     }
   }
@@ -663,7 +641,7 @@ export function pack(
       let bestFitness = -Infinity;
 
       for (const item of currentUnplaced) {
-        if (!itemFits(item, bs, config)) continue;
+        if (!itemFits(item, bs)) continue;
         const fit = itemInBinFitness(item, bs, binStates, config);
         if (fit > bestFitness) {
           bestFitness = fit;
@@ -672,7 +650,7 @@ export function pack(
       }
 
       if (bestItem) {
-        placeItem(bestItem, bs, config);
+        placeItem(bestItem, bs);
         unplaced.delete(bestItem.id);
         progress = true;
         break; // Re-sort bins after every placement
