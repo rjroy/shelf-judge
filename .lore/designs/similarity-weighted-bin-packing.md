@@ -57,7 +57,6 @@ config:
     neighbor: 0.10            # How similar the item is to neighboring bin contents
 
   min_remainder: [0.25, 3, 4] # Minimum useful sub-volume after placement (discard slivers)
-  force_axis_0_width: true    # Lock axis 0 to the item's depth/spine (items face outward)
 ```
 
 ## Merge Strategies
@@ -94,7 +93,7 @@ for each axis in priority order P:
 return the rotated dimensions
 ```
 
-When `force_axis_0_width` is enabled, axis 0 is locked to the item's original axis 0 (the depth/spine dimension in the shelf-capacity adapter). Only axes 1 and 2 are eligible for rotation. This ensures items face outward on a shelf: the spine is locked, and width/height rotate to best fill the shelf's height and depth.
+All three axes participate in rotation; there is no lock forcing a particular item dimension onto a particular bin axis. In the shelf-capacity adapter this means a box's depth is not guaranteed to map to the shelf's fill axis (axis 0, shelf width) — with `axis_minimize[0] = false` ("maximize"), the algorithm picks whichever item dimension is largest while still fitting, which for many boxes is the width or height face rather than the depth/spine. A box's depth (spine) does not get preferential placement on the shelf's fill axis; there is no "spine faces outward" guarantee. See `.lore/specs/features/shelf-capacity.md` REQ-SHELF-16 for the resulting fit semantics.
 
 ### Post-Placement Dimension Update
 

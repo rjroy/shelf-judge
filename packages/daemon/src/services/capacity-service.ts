@@ -111,11 +111,7 @@ export function createCapacityService(deps: CapacityServiceDeps): CapacityServic
 
       // Manual assignments are fixed intent, so only automatic games participate
       // in the ordinary geometric unfittable pre-pass.
-      const { unfittable, fittable: automaticFittable } = splitUnfittable(
-        automatic,
-        shelves,
-        resolvedConfig,
-      );
+      const { unfittable, fittable: automaticFittable } = splitUnfittable(automatic, shelves);
 
       // Sort unfittable by fitness ascending (REQ-SHELF-20).
       unfittable.sort((a, b) => a.fitnessScore - b.fitnessScore);
@@ -243,10 +239,10 @@ function fitnessOf(gws: GameWithScore): number {
 }
 
 function boxToTuple(dims: BoxDimensions): [number, number, number] {
-  // Algorithm axis 0 = depth/spine (the facing dimension, locked by forceAxis0Width).
-  // Axis 0 is also the consumption axis — subtracted from the shelf as games are
-  // placed side by side. Mapping depth here means a game's spine faces outward,
-  // and each game consumes shelf-width proportional to its spine thickness.
+  // Axis 0 is the consumption axis — subtracted from the shelf's remaining
+  // width as games are placed side by side. Depth is listed first as a
+  // priority hint (spine-out is the common case), but rotation is free:
+  // the algorithm may pick whichever box dimension best fills each shelf axis.
   return [dims.depth, dims.width, dims.height];
 }
 
@@ -264,7 +260,6 @@ function shelfToBinDims(shelf: Shelf): [number, number, number] {
 function splitUnfittable(
   dimensioned: GameWithScore[],
   shelves: ShelfContext[],
-  config: PackConfig,
 ): { fittable: GameWithScore[]; unfittable: UnfittableEntry[] } {
   const fittable: GameWithScore[] = [];
   const unfittable: UnfittableEntry[] = [];
@@ -280,13 +275,7 @@ function splitUnfittable(
     let fitsAnywhere = false;
     for (const ctx of shelves) {
       const binDims = shelfToBinDims(ctx.shelf);
-      const rotated = findBestRotation(
-        itemDims,
-        binDims,
-        defaultAxisPriority,
-        defaultAxisMinimize,
-        config.forceAxis0Width,
-      );
+      const rotated = findBestRotation(itemDims, binDims, defaultAxisPriority, defaultAxisMinimize);
       if (rotated !== null) {
         fitsAnywhere = true;
         break;
