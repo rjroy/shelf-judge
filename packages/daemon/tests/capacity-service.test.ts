@@ -191,7 +191,9 @@ describe("capacity service", () => {
     test("returns empty-ish response when no games have dimensions", async () => {
       const svc = createCapacityService({
         storageService: createMockStorage([
-          unit("u1", "Kallax", [{ id: "s1", name: "Cube", width: 13, height: 13, depth: 15 }]),
+          unit("u1", "Kallax", [
+            { id: "s1", name: "Cube", dimensionless: false, width: 13, height: 13, depth: 15 },
+          ]),
         ]),
         gameService: createMockGameService([
           makeGame("g1", "Undim Game 1", { fitness: 5 }),
@@ -213,7 +215,9 @@ describe("capacity service", () => {
     test("excludes previously-owned games from packing", async () => {
       const svc = createCapacityService({
         storageService: createMockStorage([
-          unit("u1", "Kallax", [{ id: "s1", name: "Cube 1", width: 13, height: 13, depth: 15 }]),
+          unit("u1", "Kallax", [
+            { id: "s1", name: "Cube 1", dimensionless: false, width: 13, height: 13, depth: 15 },
+          ]),
         ]),
         gameService: createMockGameService([
           makeGame("g1", "Owned", {
@@ -241,7 +245,9 @@ describe("capacity service", () => {
     test("counts undimensioned owned games separately", async () => {
       const svc = createCapacityService({
         storageService: createMockStorage([
-          unit("u1", "Kallax", [{ id: "s1", name: "Cube", width: 13, height: 13, depth: 15 }]),
+          unit("u1", "Kallax", [
+            { id: "s1", name: "Cube", dimensionless: false, width: 13, height: 13, depth: 15 },
+          ]),
         ]),
         gameService: createMockGameService([
           makeGame("g1", "Dim", {
@@ -263,7 +269,9 @@ describe("capacity service", () => {
     test("flags a game that exceeds every shelf in width", async () => {
       const svc = createCapacityService({
         storageService: createMockStorage([
-          unit("u1", "Kallax", [{ id: "s1", name: "Cube", width: 13, height: 13, depth: 15 }]),
+          unit("u1", "Kallax", [
+            { id: "s1", name: "Cube", dimensionless: false, width: 13, height: 13, depth: 15 },
+          ]),
         ]),
         gameService: createMockGameService([
           makeGame("g1", "Too Wide", {
@@ -283,7 +291,9 @@ describe("capacity service", () => {
     test("allows a tall box when any shelf has unconstrained height", async () => {
       const svc = createCapacityService({
         storageService: createMockStorage([
-          unit("u1", "Open Top", [{ id: "s1", name: "Top", width: 20, height: null, depth: 20 }]),
+          unit("u1", "Open Top", [
+            { id: "s1", name: "Top", dimensionless: false, width: 20, height: null, depth: 20 },
+          ]),
         ]),
         gameService: createMockGameService([
           makeGame("g1", "Very Tall", {
@@ -302,7 +312,9 @@ describe("capacity service", () => {
     test("flags a game whose smallest edge exceeds widest shelf", async () => {
       const svc = createCapacityService({
         storageService: createMockStorage([
-          unit("u1", "Small", [{ id: "s1", name: "Tiny", width: 5, height: 5, depth: 5 }]),
+          unit("u1", "Small", [
+            { id: "s1", name: "Tiny", dimensionless: false, width: 5, height: 5, depth: 5 },
+          ]),
         ]),
         gameService: createMockGameService([
           makeGame("g1", "Big Box", {
@@ -319,7 +331,9 @@ describe("capacity service", () => {
     test("sorts unfittable games by fitness ascending", async () => {
       const svc = createCapacityService({
         storageService: createMockStorage([
-          unit("u1", "Tiny", [{ id: "s1", name: "Tiny", width: 3, height: 3, depth: 3 }]),
+          unit("u1", "Tiny", [
+            { id: "s1", name: "Tiny", dimensionless: false, width: 3, height: 3, depth: 3 },
+          ]),
         ]),
         gameService: createMockGameService([
           makeGame("g1", "Big A", {
@@ -343,7 +357,9 @@ describe("capacity service", () => {
     test("uses 0 fitness for unscored games in sort", async () => {
       const svc = createCapacityService({
         storageService: createMockStorage([
-          unit("u1", "Tiny", [{ id: "s1", name: "Tiny", width: 3, height: 3, depth: 3 }]),
+          unit("u1", "Tiny", [
+            { id: "s1", name: "Tiny", dimensionless: false, width: 3, height: 3, depth: 3 },
+          ]),
         ]),
         gameService: createMockGameService([
           makeGame("g1", "Scored", {
@@ -366,7 +382,9 @@ describe("capacity service", () => {
     test("places a box that fits into the matching shelf", async () => {
       const svc = createCapacityService({
         storageService: createMockStorage([
-          unit("u1", "Kallax", [{ id: "s1", name: "Cube", width: 13, height: 13, depth: 15 }]),
+          unit("u1", "Kallax", [
+            { id: "s1", name: "Cube", dimensionless: false, width: 13, height: 13, depth: 15 },
+          ]),
         ]),
         gameService: createMockGameService([
           makeGame("g1", "Small Game", {
@@ -392,7 +410,9 @@ describe("capacity service", () => {
     test("rotates a box that only fits rotated", async () => {
       const svc = createCapacityService({
         storageService: createMockStorage([
-          unit("u1", "Shallow", [{ id: "s1", name: "Shelf", width: 20, height: 5, depth: 20 }]),
+          unit("u1", "Shallow", [
+            { id: "s1", name: "Shelf", dimensionless: false, width: 20, height: 5, depth: 20 },
+          ]),
         ]),
         gameService: createMockGameService([
           // Free rotation: axis 0 (shelf width, minimize=false) picks the
@@ -414,7 +434,9 @@ describe("capacity service", () => {
     test("reports null utilization for unconstrained shelves", async () => {
       const svc = createCapacityService({
         storageService: createMockStorage([
-          unit("u1", "Bookcase", [{ id: "s1", name: "Top", width: 24, height: null, depth: 12 }]),
+          unit("u1", "Bookcase", [
+            { id: "s1", name: "Top", dimensionless: false, width: 24, height: null, depth: 12 },
+          ]),
         ]),
         gameService: createMockGameService([
           makeGame("g1", "Game", {
@@ -441,7 +463,9 @@ describe("capacity service", () => {
       // packing emerges from free rotation without a forced lock.
       const svc = createCapacityService({
         storageService: createMockStorage([
-          unit("u1", "Kallax", [{ id: "s1", name: "Cube", width: 13, height: 13, depth: 15 }]),
+          unit("u1", "Kallax", [
+            { id: "s1", name: "Cube", dimensionless: false, width: 13, height: 13, depth: 15 },
+          ]),
         ]),
         gameService: createMockGameService([
           makeGame("g1", "Wingspan 1", {
@@ -471,7 +495,9 @@ describe("capacity service", () => {
     test("assignment grade is present (one of S/A/B/C/D/F)", async () => {
       const svc = createCapacityService({
         storageService: createMockStorage([
-          unit("u1", "Kallax", [{ id: "s1", name: "Cube", width: 13, height: 13, depth: 15 }]),
+          unit("u1", "Kallax", [
+            { id: "s1", name: "Cube", dimensionless: false, width: 13, height: 13, depth: 15 },
+          ]),
         ]),
         gameService: createMockGameService([
           makeGame("g1", "Game", {
@@ -490,8 +516,15 @@ describe("capacity service", () => {
       const svc = createCapacityService({
         storageService: createMockStorage([
           unit("u1", "Bookcase", [
-            { id: "s1", name: "First", width: 10, height: 10, depth: 10 },
-            { id: "s2", name: "Pinned target", width: 10, height: 10, depth: 10 },
+            { id: "s1", name: "First", dimensionless: false, width: 10, height: 10, depth: 10 },
+            {
+              id: "s2",
+              name: "Pinned target",
+              dimensionless: false,
+              width: 10,
+              height: 10,
+              depth: 10,
+            },
           ]),
         ]),
         gameService: createMockGameService([
@@ -530,7 +563,9 @@ describe("capacity service", () => {
       const create = () =>
         createCapacityService({
           storageService: createMockStorage([
-            unit("u1", "Bookcase", [{ id: "s1", name: "Shelf", width: 10, height: 10, depth: 10 }]),
+            unit("u1", "Bookcase", [
+              { id: "s1", name: "Shelf", dimensionless: false, width: 10, height: 10, depth: 10 },
+            ]),
           ]),
           gameService: createMockGameService(games),
         });
@@ -550,8 +585,8 @@ describe("capacity service", () => {
       const svc = createCapacityService({
         storageService: createMockStorage([
           unit("u1", "Bookcase", [
-            { id: "tiny", name: "Tiny", width: 5, height: 5, depth: 5 },
-            { id: "large", name: "Large", width: 20, height: 20, depth: 20 },
+            { id: "tiny", name: "Tiny", dimensionless: false, width: 5, height: 5, depth: 5 },
+            { id: "large", name: "Large", dimensionless: false, width: 20, height: 20, depth: 20 },
           ]),
         ]),
         gameService: createMockGameService([
@@ -582,8 +617,8 @@ describe("capacity service", () => {
       const svc = createCapacityService({
         storageService: createMockStorage([
           unit("u1", "Bookcase", [
-            { id: "s1", name: "Shelf", width: 10, height: 10, depth: 10 },
-            { id: "s2", name: "Fallback", width: 20, height: 10, depth: 10 },
+            { id: "s1", name: "Shelf", dimensionless: false, width: 10, height: 10, depth: 10 },
+            { id: "s2", name: "Fallback", dimensionless: false, width: 20, height: 10, depth: 10 },
           ]),
         ]),
         gameService: createMockGameService([
@@ -612,7 +647,9 @@ describe("capacity service", () => {
     test("reports defensive dangling shelf IDs as conflicts", async () => {
       const svc = createCapacityService({
         storageService: createMockStorage([
-          unit("u1", "Bookcase", [{ id: "s1", name: "Shelf", width: 10, height: 10, depth: 10 }]),
+          unit("u1", "Bookcase", [
+            { id: "s1", name: "Shelf", dimensionless: false, width: 10, height: 10, depth: 10 },
+          ]),
         ]),
         gameService: createMockGameService([
           makeGame("g1", "Dangling", {
@@ -634,7 +671,9 @@ describe("capacity service", () => {
     test("includes successful manual placements in volume and utilization", async () => {
       const svc = createCapacityService({
         storageService: createMockStorage([
-          unit("u1", "Bookcase", [{ id: "s1", name: "Shelf", width: 10, height: 10, depth: 10 }]),
+          unit("u1", "Bookcase", [
+            { id: "s1", name: "Shelf", dimensionless: false, width: 10, height: 10, depth: 10 },
+          ]),
         ]),
         gameService: createMockGameService([
           makeGame("g1", "Pinned", {
@@ -656,7 +695,9 @@ describe("capacity service", () => {
       // Tiny shelf, many games that each exactly fit but together overflow.
       const svc = createCapacityService({
         storageService: createMockStorage([
-          unit("u1", "Tiny", [{ id: "s1", name: "Only", width: 10, height: 10, depth: 10 }]),
+          unit("u1", "Tiny", [
+            { id: "s1", name: "Only", dimensionless: false, width: 10, height: 10, depth: 10 },
+          ]),
         ]),
         gameService: createMockGameService([
           makeGame("g1", "A", {
@@ -687,7 +728,9 @@ describe("capacity service", () => {
     test("unfittable and overflow are distinct", async () => {
       const svc = createCapacityService({
         storageService: createMockStorage([
-          unit("u1", "Tiny", [{ id: "s1", name: "Only", width: 10, height: 10, depth: 10 }]),
+          unit("u1", "Tiny", [
+            { id: "s1", name: "Only", dimensionless: false, width: 10, height: 10, depth: 10 },
+          ]),
         ]),
         gameService: createMockGameService([
           makeGame("g1", "Fits", {
@@ -720,8 +763,8 @@ describe("capacity service", () => {
       const svc = createCapacityService({
         storageService: createMockStorage([
           unit("u1", "Kallax", [
-            { id: "s1", name: "Cube 1", width: 13, height: 13, depth: 15 },
-            { id: "s2", name: "Cube 2", width: 13, height: 13, depth: 15 },
+            { id: "s1", name: "Cube 1", dimensionless: false, width: 13, height: 13, depth: 15 },
+            { id: "s2", name: "Cube 2", dimensionless: false, width: 13, height: 13, depth: 15 },
           ]),
         ]),
         gameService: createMockGameService([
@@ -746,16 +789,143 @@ describe("capacity service", () => {
       const svc = createCapacityService({
         storageService: createMockStorage([
           unit("u1", "A", [
-            { id: "s1", name: "A top", width: 13, height: 13, depth: 15 },
-            { id: "s2", name: "A bottom", width: 13, height: 13, depth: 15 },
+            { id: "s1", name: "A top", dimensionless: false, width: 13, height: 13, depth: 15 },
+            { id: "s2", name: "A bottom", dimensionless: false, width: 13, height: 13, depth: 15 },
           ]),
-          unit("u2", "B", [{ id: "s3", name: "B only", width: 13, height: 13, depth: 15 }]),
+          unit("u2", "B", [
+            { id: "s3", name: "B only", dimensionless: false, width: 13, height: 13, depth: 15 },
+          ]),
         ]),
         gameService: createMockGameService([]),
       });
       const result = await svc.computeCapacity();
       expect(result.assignments.map((a) => a.shelfId)).toEqual(["s1", "s2", "s3"]);
       expect(result.assignments.map((a) => a.unitName)).toEqual(["A", "A", "B"]);
+    });
+  });
+
+  describe("dimensionless shelves", () => {
+    test("games manually pinned to a dimensionless shelf are placed without any capacity math", async () => {
+      const svc = createCapacityService({
+        storageService: createMockStorage([
+          unit("u1", "Drawers", [
+            {
+              id: "drawer",
+              name: "Wallet drawer",
+              dimensionless: true,
+              width: null,
+              height: null,
+              depth: null,
+            },
+          ]),
+        ]),
+        gameService: createMockGameService([
+          // No box dimensions at all — measuring wallet games is the exact thing
+          // dimensionless shelves exist to avoid.
+          makeGame("wallet-1", "Love Letter", {
+            boxDimensions: null,
+            manualShelfId: "drawer",
+            fitness: 7,
+          }),
+        ]),
+      });
+      const result = await svc.computeCapacity();
+      const assignment = result.assignments.find((a) => a.shelfId === "drawer")!;
+
+      expect(assignment.dimensionless).toBe(true);
+      expect(assignment.capacityIn3).toBeNull();
+      expect(assignment.utilization).toBeNull();
+      expect(assignment.games.map((g) => g.gameId)).toEqual(["wallet-1"]);
+      expect(assignment.games[0].assignmentSource).toBe("manual");
+      // A game without dimensions never counts toward capacity coverage stats.
+      expect(result.gamesWithDimensions).toBe(0);
+      expect(result.gamesWithoutDimensions).toBe(0);
+      expect(result.hasPlacementProblems).toBe(false);
+      expect(result.unfittableGames).toEqual([]);
+      expect(result.assignmentConflicts).toEqual([]);
+    });
+
+    test("a dimensionless shelf never receives automatically placed games", async () => {
+      const svc = createCapacityService({
+        storageService: createMockStorage([
+          unit("u1", "Shelving", [
+            {
+              id: "real",
+              name: "Kallax cube",
+              dimensionless: false,
+              width: 5,
+              height: 13,
+              depth: 15,
+            },
+            {
+              id: "drawer",
+              name: "Drawer",
+              dimensionless: true,
+              width: null,
+              height: null,
+              depth: null,
+            },
+          ]),
+        ]),
+        gameService: createMockGameService([
+          // Too wide for the one real shelf: would need somewhere to overflow to,
+          // but the dimensionless shelf must never absorb it automatically.
+          makeGame("g1", "Big Box", {
+            boxDimensions: { width: 10, height: 10, depth: 10 },
+            fitness: 5,
+          }),
+        ]),
+      });
+      const result = await svc.computeCapacity();
+      const drawer = result.assignments.find((a) => a.shelfId === "drawer")!;
+
+      expect(drawer.games).toEqual([]);
+      expect(
+        result.unfittableGames.some((g) => g.gameId === "g1") ||
+          result.overflowGames.some((g) => g.gameId === "g1"),
+      ).toBe(true);
+    });
+
+    test("dimensioned games pinned to a dimensionless shelf are excluded from packing", async () => {
+      const svc = createCapacityService({
+        storageService: createMockStorage([
+          unit("u1", "Shelving", [
+            {
+              id: "real",
+              name: "Kallax cube",
+              dimensionless: false,
+              width: 13,
+              height: 13,
+              depth: 15,
+            },
+            {
+              id: "drawer",
+              name: "Drawer",
+              dimensionless: true,
+              width: null,
+              height: null,
+              depth: null,
+            },
+          ]),
+        ]),
+        gameService: createMockGameService([
+          makeGame("pinned", "Pinned Game", {
+            boxDimensions: { width: 10, height: 10, depth: 10 },
+            manualShelfId: "drawer",
+            fitness: 6,
+          }),
+          makeGame("auto", "Auto Game", {
+            boxDimensions: { width: 10, height: 10, depth: 10 },
+            fitness: 8,
+          }),
+        ]),
+      });
+      const result = await svc.computeCapacity();
+      const drawer = result.assignments.find((a) => a.shelfId === "drawer")!;
+      const real = result.assignments.find((a) => a.shelfId === "real")!;
+
+      expect(drawer.games.map((g) => g.gameId)).toEqual(["pinned"]);
+      expect(real.games.map((g) => g.gameId)).toEqual(["auto"]);
     });
   });
 });

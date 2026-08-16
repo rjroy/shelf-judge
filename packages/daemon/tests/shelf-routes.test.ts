@@ -127,7 +127,9 @@ describe("shelf routes", () => {
         {
           id: "u1",
           name: "Kallax",
-          shelves: [{ id: "s1", name: "Top", width: 13, height: 13, depth: 15 }],
+          shelves: [
+            { id: "s1", name: "Top", dimensionless: false, width: 13, height: 13, depth: 15 },
+          ],
         },
       ];
       const res = await app.request("/api/shelf/config");
@@ -144,7 +146,9 @@ describe("shelf routes", () => {
         {
           id: "u1",
           name: "Bookcase",
-          shelves: [{ id: "s1", name: "Shelf 1", width: 24, height: 12, depth: 10 }],
+          shelves: [
+            { id: "s1", name: "Shelf 1", dimensionless: false, width: 24, height: 12, depth: 10 },
+          ],
         },
       ];
 
@@ -191,7 +195,7 @@ describe("shelf routes", () => {
         "/api/shelf/units",
         jsonRequest("POST", {
           name: "Kallax",
-          shelves: [{ name: "Cube 1", width: 13, height: 13, depth: 15 }],
+          shelves: [{ name: "Cube 1", dimensionless: false, width: 13, height: 13, depth: 15 }],
         }),
       );
       expect(res.status).toBe(201);
@@ -230,7 +234,7 @@ describe("shelf routes", () => {
         "/api/shelf/units",
         jsonRequest("POST", {
           name: "Kallax",
-          shelves: [{ name: "Bad", width: -1, height: 10, depth: 10 }],
+          shelves: [{ name: "Bad", dimensionless: false, width: -1, height: 10, depth: 10 }],
         }),
       );
       expect(res.status).toBe(400);
@@ -246,8 +250,8 @@ describe("shelf routes", () => {
         jsonRequest("POST", {
           name: "Kallax",
           shelves: [
-            { name: "Shelf A", width: 13, height: 13, depth: 15 },
-            { name: "Shelf B", width: 13, height: 13, depth: 15 },
+            { name: "Shelf A", dimensionless: false, width: 13, height: 13, depth: 15 },
+            { name: "Shelf B", dimensionless: false, width: 13, height: 13, depth: 15 },
           ],
         }),
       );
@@ -273,8 +277,15 @@ describe("shelf routes", () => {
         `/api/shelf/units/${unitId}`,
         jsonRequest("PUT", {
           shelves: [
-            { id: existingShelfId, name: "Shelf A Updated", width: 14, height: 14, depth: 16 },
-            { name: "Shelf C", width: 10, height: null, depth: 12 },
+            {
+              id: existingShelfId,
+              name: "Shelf A Updated",
+              dimensionless: false,
+              width: 14,
+              height: 14,
+              depth: 16,
+            },
+            { name: "Shelf C", dimensionless: false, width: 10, height: null, depth: 12 },
           ],
         }),
       );
@@ -342,6 +353,7 @@ describe("shelf routes", () => {
             shelfName: "Top",
             unitId: "u1",
             unitName: "Kallax",
+            dimensionless: false,
             capacityIn3: 2535,
             usedIn3: 200,
             utilization: 200 / 2535,

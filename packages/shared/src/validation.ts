@@ -168,9 +168,10 @@ export const TournamentDataSchema = z.object({
 const ShelfSchema = z.object({
   id: z.string(),
   name: z.string(),
-  width: z.number().positive(),
+  dimensionless: z.boolean().default(false), // legacy shelves without the field default to measured
+  width: z.number().positive().nullable(),
   height: z.number().positive().nullable(),
-  depth: z.number().positive(),
+  depth: z.number().positive().nullable(),
 });
 
 const ShelfUnitSchema = z.object({

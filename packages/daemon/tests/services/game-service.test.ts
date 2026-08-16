@@ -280,7 +280,7 @@ describe("GameService", () => {
           {
             id: "unit-1",
             name: "Bookcase",
-            shelves: [{ id, name: "Top", width: 30, height: 12, depth: 12 }],
+            shelves: [{ id, name: "Top", dimensionless: false, width: 30, height: 12, depth: 12 }],
           },
         ],
         createdAt: "2026-01-01T00:00:00Z",
@@ -291,6 +291,29 @@ describe("GameService", () => {
     async function addMeasuredGame(): Promise<Game> {
       const { game } = await gameService.addGame({ name: "Measured" });
       return gameService.setBoxDimensions(game.id, { width: 10, height: 10, depth: 2 });
+    }
+
+    async function addDimensionlessShelf(id: string): Promise<void> {
+      await storageService.saveShelfConfig({
+        units: [
+          {
+            id: "unit-drawer",
+            name: "Drawers",
+            shelves: [
+              {
+                id,
+                name: "Wallet drawer",
+                dimensionless: true,
+                width: null,
+                height: null,
+                depth: null,
+              },
+            ],
+          },
+        ],
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      });
     }
 
     test("sets, replaces, and clears an assignment", async () => {
@@ -327,6 +350,14 @@ describe("GameService", () => {
       await expect(gameService.setManualShelf(measured.id, "shelf-1")).rejects.toThrow(
         "requires an owned game",
       );
+    });
+
+    test("allows an unmeasured game to be pinned to a dimensionless shelf", async () => {
+      await addDimensionlessShelf("drawer-1");
+      const { game: unmeasured } = await gameService.addGame({ name: "Love Letter" });
+
+      const updated = await gameService.setManualShelf(unmeasured.id, "drawer-1");
+      expect(updated.manualShelfId).toBe("drawer-1");
     });
 
     test("throws for a missing game", async () => {

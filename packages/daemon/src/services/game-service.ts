@@ -298,16 +298,19 @@ export function createGameService(deps: GameServiceDeps): GameService {
         if (game.ownership === "previously-owned") {
           throw new Error("Manual shelf assignment requires an owned game");
         }
-        if (game.boxDimensions === null) {
-          throw new Error("Box dimensions are required before assigning a shelf");
-        }
 
         const shelfConfig = await storageService.loadShelfConfig();
-        const shelfExists = shelfConfig.units.some((unit) =>
-          unit.shelves.some((shelf) => shelf.id === shelfId),
-        );
-        if (!shelfExists) {
+        const targetShelf = shelfConfig.units
+          .flatMap((unit) => unit.shelves)
+          .find((shelf) => shelf.id === shelfId);
+        if (!targetShelf) {
           throw new Error(`Shelf not found: ${shelfId}`);
+        }
+
+        // Dimensionless shelves are assignment-only buckets: capacity is never
+        // computed for them, so box dimensions are not required to pin a game there.
+        if (!targetShelf.dimensionless && game.boxDimensions === null) {
+          throw new Error("Box dimensions are required before assigning a shelf");
         }
       }
 

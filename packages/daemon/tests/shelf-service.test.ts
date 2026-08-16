@@ -110,8 +110,8 @@ describe("shelf service", () => {
       const unit = await service.addUnit({
         name: "Living Room Kallax",
         shelves: [
-          { name: "Top shelf", width: 13, height: 13, depth: 15 },
-          { name: "Bottom shelf", width: 13, height: 13, depth: 15 },
+          { name: "Top shelf", dimensionless: false, width: 13, height: 13, depth: 15 },
+          { name: "Bottom shelf", dimensionless: false, width: 13, height: 13, depth: 15 },
         ],
       });
 
@@ -132,7 +132,7 @@ describe("shelf service", () => {
     test("allows null height for unconstrained shelves", async () => {
       const unit = await service.addUnit({
         name: "Kallax",
-        shelves: [{ name: "On top", width: 13, height: null, depth: 15 }],
+        shelves: [{ name: "On top", dimensionless: false, width: 13, height: null, depth: 15 }],
       });
 
       expect(unit.shelves[0].height).toBeNull();
@@ -154,7 +154,7 @@ describe("shelf service", () => {
       await expect(
         service.addUnit({
           name: "Kallax",
-          shelves: [{ name: "", width: 13, height: 13, depth: 15 }],
+          shelves: [{ name: "", dimensionless: false, width: 13, height: 13, depth: 15 }],
         }),
       ).rejects.toThrow(ShelfValidationError);
     });
@@ -163,7 +163,7 @@ describe("shelf service", () => {
       await expect(
         service.addUnit({
           name: "Kallax",
-          shelves: [{ name: "Shelf", width: 0, height: 13, depth: 15 }],
+          shelves: [{ name: "Shelf", dimensionless: false, width: 0, height: 13, depth: 15 }],
         }),
       ).rejects.toThrow(ShelfValidationError);
     });
@@ -172,7 +172,7 @@ describe("shelf service", () => {
       await expect(
         service.addUnit({
           name: "Kallax",
-          shelves: [{ name: "Shelf", width: -5, height: 13, depth: 15 }],
+          shelves: [{ name: "Shelf", dimensionless: false, width: -5, height: 13, depth: 15 }],
         }),
       ).rejects.toThrow(ShelfValidationError);
     });
@@ -181,7 +181,7 @@ describe("shelf service", () => {
       await expect(
         service.addUnit({
           name: "Kallax",
-          shelves: [{ name: "Shelf", width: 13, height: 13, depth: 0 }],
+          shelves: [{ name: "Shelf", dimensionless: false, width: 13, height: 13, depth: 0 }],
         }),
       ).rejects.toThrow(ShelfValidationError);
     });
@@ -190,7 +190,7 @@ describe("shelf service", () => {
       await expect(
         service.addUnit({
           name: "Kallax",
-          shelves: [{ name: "Shelf", width: 13, height: 0, depth: 15 }],
+          shelves: [{ name: "Shelf", dimensionless: false, width: 13, height: 0, depth: 15 }],
         }),
       ).rejects.toThrow(ShelfValidationError);
     });
@@ -199,9 +199,40 @@ describe("shelf service", () => {
       await expect(
         service.addUnit({
           name: "Kallax",
-          shelves: [{ name: "Shelf", width: 13, height: -3, depth: 15 }],
+          shelves: [{ name: "Shelf", dimensionless: false, width: 13, height: -3, depth: 15 }],
         }),
       ).rejects.toThrow(ShelfValidationError);
+    });
+
+    test("creates a dimensionless shelf with no dimensions required", async () => {
+      const unit = await service.addUnit({
+        name: "Drawer Unit",
+        shelves: [
+          {
+            name: "Wallet game drawer",
+            dimensionless: true,
+            width: null,
+            height: null,
+            depth: null,
+          },
+        ],
+      });
+
+      expect(unit.shelves[0].dimensionless).toBe(true);
+      expect(unit.shelves[0].width).toBeNull();
+      expect(unit.shelves[0].height).toBeNull();
+      expect(unit.shelves[0].depth).toBeNull();
+    });
+
+    test("forces dimensions to null for a dimensionless shelf even if provided", async () => {
+      const unit = await service.addUnit({
+        name: "Drawer Unit",
+        shelves: [{ name: "Drawer", dimensionless: true, width: 10, height: 10, depth: 10 }],
+      });
+
+      expect(unit.shelves[0].width).toBeNull();
+      expect(unit.shelves[0].height).toBeNull();
+      expect(unit.shelves[0].depth).toBeNull();
     });
   });
 
@@ -209,7 +240,7 @@ describe("shelf service", () => {
     test("updates unit name", async () => {
       const unit = await service.addUnit({
         name: "Old Name",
-        shelves: [{ name: "Shelf", width: 13, height: 13, depth: 15 }],
+        shelves: [{ name: "Shelf", dimensionless: false, width: 13, height: 13, depth: 15 }],
       });
 
       const { unit: updated } = await service.updateUnit(unit.id, { name: "New Name" });
@@ -221,8 +252,8 @@ describe("shelf service", () => {
       const unit = await service.addUnit({
         name: "Kallax",
         shelves: [
-          { name: "Shelf A", width: 13, height: 13, depth: 15 },
-          { name: "Shelf B", width: 13, height: 13, depth: 15 },
+          { name: "Shelf A", dimensionless: false, width: 13, height: 13, depth: 15 },
+          { name: "Shelf B", dimensionless: false, width: 13, height: 13, depth: 15 },
         ],
       });
 
@@ -231,8 +262,15 @@ describe("shelf service", () => {
       // Update Shelf A, drop Shelf B, add Shelf C
       const { unit: updated } = await service.updateUnit(unit.id, {
         shelves: [
-          { id: shelfAId, name: "Shelf A Updated", width: 14, height: 14, depth: 16 },
-          { name: "Shelf C", width: 10, height: 10, depth: 12 },
+          {
+            id: shelfAId,
+            name: "Shelf A Updated",
+            dimensionless: false,
+            width: 14,
+            height: 14,
+            depth: 16,
+          },
+          { name: "Shelf C", dimensionless: false, width: 10, height: 10, depth: 12 },
         ],
       });
 
@@ -265,13 +303,20 @@ describe("shelf service", () => {
     test("rejects phantom shelf ID that doesn't match any existing shelf", async () => {
       const unit = await service.addUnit({
         name: "Kallax",
-        shelves: [{ name: "Shelf A", width: 13, height: 13, depth: 15 }],
+        shelves: [{ name: "Shelf A", dimensionless: false, width: 13, height: 13, depth: 15 }],
       });
 
       await expect(
         service.updateUnit(unit.id, {
           shelves: [
-            { id: "nonexistent-shelf-id", name: "Ghost", width: 10, height: 10, depth: 10 },
+            {
+              id: "nonexistent-shelf-id",
+              name: "Ghost",
+              dimensionless: false,
+              width: 10,
+              height: 10,
+              depth: 10,
+            },
           ],
         }),
       ).rejects.toThrow(ShelfValidationError);
@@ -285,7 +330,7 @@ describe("shelf service", () => {
 
       await expect(
         service.updateUnit(unit.id, {
-          shelves: [{ name: "Bad shelf", width: -1, height: 10, depth: 10 }],
+          shelves: [{ name: "Bad shelf", dimensionless: false, width: -1, height: 10, depth: 10 }],
         }),
       ).rejects.toThrow(ShelfValidationError);
     });
@@ -294,8 +339,8 @@ describe("shelf service", () => {
       const unit = await service.addUnit({
         name: "Kallax",
         shelves: [
-          { name: "Keep", width: 13, height: 13, depth: 15 },
-          { name: "Remove", width: 13, height: 13, depth: 15 },
+          { name: "Keep", dimensionless: false, width: 13, height: 13, depth: 15 },
+          { name: "Remove", dimensionless: false, width: 13, height: 13, depth: 15 },
         ],
       });
       const [keptShelf, removedShelf] = unit.shelves;
@@ -309,6 +354,7 @@ describe("shelf service", () => {
           {
             id: keptShelf.id,
             name: "Renamed",
+            dimensionless: false,
             width: 14,
             height: 13,
             depth: 15,
@@ -326,7 +372,7 @@ describe("shelf service", () => {
     test("removes an existing unit", async () => {
       const unit = await service.addUnit({
         name: "Kallax",
-        shelves: [{ name: "Shelf", width: 13, height: 13, depth: 15 }],
+        shelves: [{ name: "Shelf", dimensionless: false, width: 13, height: 13, depth: 15 }],
       });
 
       await service.removeUnit(unit.id);
@@ -337,7 +383,7 @@ describe("shelf service", () => {
     test("clears assignments to shelves in a removed unit", async () => {
       const unit = await service.addUnit({
         name: "Kallax",
-        shelves: [{ name: "Shelf", width: 13, height: 13, depth: 15 }],
+        shelves: [{ name: "Shelf", dimensionless: false, width: 13, height: 13, depth: 15 }],
       });
       storage.collection.games = [assignedGame("game-1", unit.shelves[0].id)];
 
@@ -356,14 +402,23 @@ describe("shelf service", () => {
       // Add a unit first
       await service.addUnit({
         name: "Old Unit",
-        shelves: [{ name: "Shelf", width: 13, height: 13, depth: 15 }],
+        shelves: [{ name: "Shelf", dimensionless: false, width: 13, height: 13, depth: 15 }],
       });
 
       const newUnits = [
         {
           id: "unit-1",
           name: "New Unit A",
-          shelves: [{ id: "shelf-1", name: "Shelf 1", width: 20, height: 15, depth: 12 }],
+          shelves: [
+            {
+              id: "shelf-1",
+              name: "Shelf 1",
+              dimensionless: false,
+              width: 20,
+              height: 15,
+              depth: 12,
+            },
+          ],
         },
         {
           id: "unit-2",
@@ -397,7 +452,9 @@ describe("shelf service", () => {
           {
             id: "u1",
             name: "Valid Unit",
-            shelves: [{ id: "s1", name: "Bad", width: 0, height: 10, depth: 10 }],
+            shelves: [
+              { id: "s1", name: "Bad", dimensionless: false, width: 0, height: 10, depth: 10 },
+            ],
           },
         ]),
       ).rejects.toThrow(ShelfValidationError);
@@ -415,8 +472,15 @@ describe("shelf service", () => {
           id: "unit-1",
           name: "Unit",
           shelves: [
-            { id: "keep", name: "Keep", width: 10, height: 10, depth: 10 },
-            { id: "remove", name: "Remove", width: 10, height: 10, depth: 10 },
+            { id: "keep", name: "Keep", dimensionless: false, width: 10, height: 10, depth: 10 },
+            {
+              id: "remove",
+              name: "Remove",
+              dimensionless: false,
+              width: 10,
+              height: 10,
+              depth: 10,
+            },
           ],
         },
       ];
@@ -429,7 +493,9 @@ describe("shelf service", () => {
         {
           id: "unit-1",
           name: "Renamed",
-          shelves: [{ id: "keep", name: "Resized", width: 20, height: 10, depth: 10 }],
+          shelves: [
+            { id: "keep", name: "Resized", dimensionless: false, width: 20, height: 10, depth: 10 },
+          ],
         },
       ]);
 
@@ -442,7 +508,16 @@ describe("shelf service", () => {
         {
           id: "unit-1",
           name: "Unit",
-          shelves: [{ id: "remove", name: "Remove", width: 10, height: 10, depth: 10 }],
+          shelves: [
+            {
+              id: "remove",
+              name: "Remove",
+              dimensionless: false,
+              width: 10,
+              height: 10,
+              depth: 10,
+            },
+          ],
         },
       ];
       storage.collection.games = [assignedGame("game-1", "remove")];
@@ -458,7 +533,16 @@ describe("shelf service", () => {
         {
           id: "unit-1",
           name: "Unit",
-          shelves: [{ id: "remove", name: "Remove", width: 10, height: 10, depth: 10 }],
+          shelves: [
+            {
+              id: "remove",
+              name: "Remove",
+              dimensionless: false,
+              width: 10,
+              height: 10,
+              depth: 10,
+            },
+          ],
         },
       ];
       storage.collection.games = [assignedGame("game-1", "remove")];
@@ -474,7 +558,16 @@ describe("shelf service", () => {
         {
           id: "unit-1",
           name: "Unit",
-          shelves: [{ id: "remove", name: "Remove", width: 10, height: 10, depth: 10 }],
+          shelves: [
+            {
+              id: "remove",
+              name: "Remove",
+              dimensionless: false,
+              width: 10,
+              height: 10,
+              depth: 10,
+            },
+          ],
         },
       ];
       storage.collection.games = [assignedGame("game-1", "remove")];

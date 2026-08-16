@@ -26,12 +26,14 @@ function formatShelfConfig(config: ShelfConfiguration): string {
       const rows = unit.shelves.map((s) => [
         s.id,
         s.name,
-        String(s.width),
-        s.height === null ? "---" : String(s.height),
-        String(s.depth),
-        s.height === null
-          ? "unconstrained"
-          : `${(s.width * s.height * s.depth).toLocaleString()} in\u00B3`,
+        s.dimensionless ? "---" : String(s.width),
+        s.dimensionless || s.height === null ? "---" : String(s.height),
+        s.dimensionless ? "---" : String(s.depth),
+        s.dimensionless
+          ? "dimensionless"
+          : s.height === null
+            ? "unconstrained"
+            : `${((s.width ?? 0) * s.height * (s.depth ?? 0)).toLocaleString()} in\u00B3`,
       ]);
       lines.push(
         formatTable(["ID", "Name", "Width", "Height", "Depth", "Volume"], rows)
@@ -94,30 +96,52 @@ export async function shelfAddShelf(
   opts: OutputOptions,
 ): Promise<string> {
   // args: <unit-id> <name> <width> <height> <depth>
-  if (args.length < 5) {
-    throw new Error(
-      "Usage: shelf-judge shelf add-shelf <unit-id> <name> <width> <height> <depth>\n" +
-        "       Use height=0 for unconstrained height.",
-    );
-  }
+  // or:   <unit-id> <name> --dimensionless
+  const dimensionlessFlagIdx = args.indexOf("--dimensionless");
+  const dimensionless = dimensionlessFlagIdx !== -1;
+  const positional = dimensionless
+    ? [...args.slice(0, dimensionlessFlagIdx), ...args.slice(dimensionlessFlagIdx + 1)]
+    : args;
 
-  const [unitId, name, widthStr, heightStr, depthStr] = args;
-  const width = Number(widthStr);
-  const rawHeight = Number(heightStr);
-  const depth = Number(depthStr);
+  const usage =
+    "Usage: shelf-judge shelf add-shelf <unit-id> <name> <width> <height> <depth>\n" +
+    "       shelf-judge shelf add-shelf <unit-id> <name> --dimensionless\n" +
+    "       Use height=0 for unconstrained height.";
 
-  if (!Number.isFinite(width) || width <= 0) {
-    throw new Error("Width must be a positive number");
-  }
-  if (!Number.isFinite(rawHeight) || rawHeight < 0) {
-    throw new Error("Height must be a non-negative number (0 for unconstrained)");
-  }
-  if (!Number.isFinite(depth) || depth <= 0) {
-    throw new Error("Depth must be a positive number");
-  }
+  let unitId: string;
+  let name: string;
+  let width: number | null;
+  let height: number | null;
+  let depth: number | null;
 
-  // REQ-SHELF-33: height=0 maps to null (unconstrained)
-  const height = rawHeight === 0 ? null : rawHeight;
+  if (dimensionless) {
+    if (positional.length < 2) throw new Error(usage);
+    [unitId, name] = positional;
+    width = null;
+    height = null;
+    depth = null;
+  } else {
+    if (positional.length < 5) throw new Error(usage);
+    const [uid, nm, widthStr, heightStr, depthStr] = positional;
+    unitId = uid;
+    name = nm;
+    width = Number(widthStr);
+    const rawHeight = Number(heightStr);
+    depth = Number(depthStr);
+
+    if (!Number.isFinite(width) || width <= 0) {
+      throw new Error("Width must be a positive number");
+    }
+    if (!Number.isFinite(rawHeight) || rawHeight < 0) {
+      throw new Error("Height must be a non-negative number (0 for unconstrained)");
+    }
+    if (!Number.isFinite(depth) || depth <= 0) {
+      throw new Error("Depth must be a positive number");
+    }
+
+    // REQ-SHELF-33: height=0 maps to null (unconstrained)
+    height = rawHeight === 0 ? null : rawHeight;
+  }
 
   // Load current unit to get existing shelves
   const configRes = await client.get<ShelfConfiguration>("/api/shelf/config");
@@ -134,11 +158,12 @@ export async function shelfAddShelf(
     ...unit.shelves.map((s) => ({
       id: s.id,
       name: s.name,
+      dimensionless: s.dimensionless,
       width: s.width,
       height: s.height,
       depth: s.depth,
     })),
-    { name, width, height, depth },
+    { name, dimensionless, width, height, depth },
   ];
 
   const { ok, data } = await client.put<ShelfUnitMutationResult>(`/api/shelf/units/${unitId}`, {
@@ -152,6 +177,9 @@ export async function shelfAddShelf(
 
   if (opts.json) return printOutput(data, opts);
 
+  if (dimensionless) {
+    return `Added dimensionless shelf "${name}" to "${data.unit.name}"`;
+  }
   const heightDisplay = height === null ? "unconstrained" : `${height}`;
   return `Added shelf "${name}" (${width} \u00D7 ${heightDisplay} \u00D7 ${depth} in) to "${data.unit.name}"`;
 }
@@ -214,7 +242,14 @@ export async function shelfRemoveShelf(
 
   const newShelves = targetUnit.shelves
     .filter((s) => s.id !== shelfId)
-    .map((s) => ({ id: s.id, name: s.name, width: s.width, height: s.height, depth: s.depth }));
+    .map((s) => ({
+      id: s.id,
+      name: s.name,
+      dimensionless: s.dimensionless,
+      width: s.width,
+      height: s.height,
+      depth: s.depth,
+    }));
 
   const { ok, data } = await client.put<ShelfUnitMutationResult>(
     `/api/shelf/units/${targetUnit.id}`,

@@ -60,11 +60,48 @@ export function createCapacityService(deps: CapacityServiceDeps): CapacityServic
     async computeCapacity(): Promise<ShelfCapacityResult> {
       const shelfConfig = await storageService.loadShelfConfig();
       const shelves = flattenShelves(shelfConfig.units);
+      const packableShelves = shelves.filter((ctx) => !ctx.shelf.dimensionless);
+      const dimensionlessShelfIds = new Set(
+        shelves.filter((ctx) => ctx.shelf.dimensionless).map((ctx) => ctx.shelf.id),
+      );
+
       const allGames = await gameService.listGames();
       // Previously-owned games aren't on the shelf; capacity is about physical presence.
       const ownedGames = allGames.filter((g) => g.game.ownership !== "previously-owned");
-      const dimensioned = ownedGames.filter((g) => g.game.boxDimensions !== null);
-      const undimensioned = ownedGames.filter((g) => g.game.boxDimensions === null);
+
+      // Games pinned to a dimensionless shelf are pure assignment: they never enter
+      // capacity math or the packing algorithm, and never require box dimensions.
+      const pinnedDimensionless = ownedGames
+        .filter(
+          (gws) =>
+            gws.game.manualShelfId !== null && dimensionlessShelfIds.has(gws.game.manualShelfId),
+        )
+        .sort((a, b) => a.game.id.localeCompare(b.game.id));
+      const dimensionlessAssignments = buildDimensionlessAssignments(
+        shelves.filter((ctx) => ctx.shelf.dimensionless),
+        pinnedDimensionless,
+      );
+      const resolveAssignment = (
+        ctx: ShelfContext,
+        packedAssignment:
+          | {
+              itemIds: string[];
+              grade: string;
+              remainingDimensions: [number, number, number] | null;
+            }
+          | undefined,
+        packableById: Map<string, GameWithScore>,
+      ): ShelfAssignment =>
+        ctx.shelf.dimensionless
+          ? (dimensionlessAssignments.get(ctx.shelf.id) ?? emptyAssignment(ctx))
+          : buildAssignment(ctx, packedAssignment, packableById);
+
+      const packableGames = ownedGames.filter(
+        (gws) =>
+          !(gws.game.manualShelfId !== null && dimensionlessShelfIds.has(gws.game.manualShelfId)),
+      );
+      const dimensioned = packableGames.filter((g) => g.game.boxDimensions !== null);
+      const undimensioned = packableGames.filter((g) => g.game.boxDimensions === null);
 
       // REQ-SHELF-23: no units configured => configured: false, no algorithm run.
       if (shelfConfig.units.length === 0 || shelves.length === 0) {
@@ -94,7 +131,7 @@ export function createCapacityService(deps: CapacityServiceDeps): CapacityServic
           gamesWithoutDimensions: undimensioned.length,
           overflowing: false,
           hasPlacementProblems: false,
-          assignments: shelves.map((ctx) => emptyAssignment(ctx)),
+          assignments: shelves.map((ctx) => resolveAssignment(ctx, undefined, new Map())),
           assignmentConflicts: [],
           unfittableGames: [],
           overflowGames: [],
@@ -111,7 +148,10 @@ export function createCapacityService(deps: CapacityServiceDeps): CapacityServic
 
       // Manual assignments are fixed intent, so only automatic games participate
       // in the ordinary geometric unfittable pre-pass.
-      const { unfittable, fittable: automaticFittable } = splitUnfittable(automatic, shelves);
+      const { unfittable, fittable: automaticFittable } = splitUnfittable(
+        automatic,
+        packableShelves,
+      );
 
       // Sort unfittable by fitness ascending (REQ-SHELF-20).
       unfittable.sort((a, b) => a.fitnessScore - b.fitnessScore);
@@ -131,7 +171,7 @@ export function createCapacityService(deps: CapacityServiceDeps): CapacityServic
         ...pinned.map((gws) => buildPackItem(gws, vectorCache, gws.game.manualShelfId!)),
         ...automaticFittable.map((gws) => buildPackItem(gws, vectorCache)),
       ];
-      const bins = shelves.map((ctx) => buildPackBin(ctx.shelf));
+      const bins = packableShelves.map((ctx) => buildPackBin(ctx.shelf));
 
       const result = pack(items, bins, resolvedConfig);
 
@@ -140,10 +180,9 @@ export function createCapacityService(deps: CapacityServiceDeps): CapacityServic
       );
       const shelvesById = new Map(shelves.map((ctx) => [ctx.shelf.id, ctx]));
 
-      const assignments = shelves.map((ctx) => {
-        const assignment = result.assignments.get(ctx.shelf.id);
-        return buildAssignment(ctx, assignment, packableById);
-      });
+      const assignments = shelves.map((ctx) =>
+        resolveAssignment(ctx, result.assignments.get(ctx.shelf.id), packableById),
+      );
 
       const assignmentConflicts: AssignmentConflict[] = result.fixedPlacementRejections.flatMap(
         ({ itemId, reason }): AssignmentConflict[] => {
@@ -207,12 +246,57 @@ function emptyAssignment(ctx: ShelfContext): ShelfAssignment {
     shelfName: ctx.shelf.name,
     unitId: ctx.unit.id,
     unitName: ctx.unit.name,
+    dimensionless: ctx.shelf.dimensionless,
     capacityIn3: capacity,
     usedIn3: 0,
     utilization: capacity === null ? null : 0,
     games: [],
     grade: "F",
   };
+}
+
+/**
+ * Dimensionless shelves are pure assignment buckets: no capacity math, no
+ * packing algorithm, no shape checks. Every game manually pinned to one is
+ * placed unconditionally, whether or not it has box dimensions.
+ */
+function buildDimensionlessAssignments(
+  dimensionlessShelves: ShelfContext[],
+  pinnedGames: GameWithScore[],
+): Map<string, ShelfAssignment> {
+  const byShelf = new Map<string, GameWithScore[]>();
+  for (const ctx of dimensionlessShelves) {
+    byShelf.set(ctx.shelf.id, []);
+  }
+  for (const gws of pinnedGames) {
+    const shelfId = gws.game.manualShelfId;
+    if (shelfId === null) continue;
+    byShelf.get(shelfId)?.push(gws);
+  }
+
+  const result = new Map<string, ShelfAssignment>();
+  for (const ctx of dimensionlessShelves) {
+    const games: AssignedGame[] = (byShelf.get(ctx.shelf.id) ?? []).map((gws) => ({
+      gameId: gws.game.id,
+      gameName: gws.game.name,
+      fitnessScore: fitnessOf(gws),
+      volumeIn3: gws.game.boxDimensions ? boxVolume(gws.game.boxDimensions) : 0,
+      assignmentSource: "manual" as const,
+    }));
+    result.set(ctx.shelf.id, {
+      shelfId: ctx.shelf.id,
+      shelfName: ctx.shelf.name,
+      unitId: ctx.unit.id,
+      unitName: ctx.unit.name,
+      dimensionless: true,
+      capacityIn3: null,
+      usedIn3: 0,
+      utilization: null,
+      games,
+      grade: "S",
+    });
+  }
+  return result;
 }
 
 function flattenShelves(units: ShelfUnit[]): ShelfContext[] {
@@ -226,7 +310,14 @@ function flattenShelves(units: ShelfUnit[]): ShelfContext[] {
 }
 
 function shelfCapacityIn3(shelf: Shelf): number | null {
-  if (shelf.height === null) return null;
+  if (
+    shelf.dimensionless ||
+    shelf.width === null ||
+    shelf.height === null ||
+    shelf.depth === null
+  ) {
+    return null;
+  }
   return shelf.width * shelf.height * shelf.depth;
 }
 
@@ -249,8 +340,9 @@ function boxToTuple(dims: BoxDimensions): [number, number, number] {
 function shelfToBinDims(shelf: Shelf): [number, number, number] {
   // Axis 0 = shelf width (the fill direction, consumed as games are placed).
   // Axis 1 = shelf height (constrained or sentinel). Axis 2 = shelf depth.
+  // Only called for non-dimensionless shelves, where width/depth are always numbers.
   const h = shelf.height === null ? UNCONSTRAINED_HEIGHT_SENTINEL : shelf.height;
-  return [shelf.width, h, shelf.depth];
+  return [shelf.width ?? 0, h, shelf.depth ?? 0];
 }
 
 /**
@@ -313,8 +405,10 @@ function explainUnfittable(dims: BoxDimensions, shelves: ShelfContext[]): string
   let anyUnconstrainedHeight = false;
 
   for (const ctx of shelves) {
-    if (ctx.shelf.width > maxShelfWidth) maxShelfWidth = ctx.shelf.width;
-    if (ctx.shelf.depth > maxShelfDepth) maxShelfDepth = ctx.shelf.depth;
+    if (ctx.shelf.width !== null && ctx.shelf.width > maxShelfWidth)
+      maxShelfWidth = ctx.shelf.width;
+    if (ctx.shelf.depth !== null && ctx.shelf.depth > maxShelfDepth)
+      maxShelfDepth = ctx.shelf.depth;
     if (ctx.shelf.height === null) {
       anyUnconstrainedHeight = true;
     } else if (ctx.shelf.height > maxShelfHeight) {
@@ -463,6 +557,7 @@ function buildAssignment(
     shelfName: ctx.shelf.name,
     unitId: ctx.unit.id,
     unitName: ctx.unit.name,
+    dimensionless: false,
     capacityIn3: capacity,
     usedIn3,
     utilization,

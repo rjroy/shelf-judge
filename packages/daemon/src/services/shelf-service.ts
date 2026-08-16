@@ -12,9 +12,10 @@ import type { StorageService } from "./storage-service.js";
 export interface ShelfInput {
   id?: string;
   name: string;
-  width: number;
+  dimensionless: boolean;
+  width: number | null;
   height: number | null;
-  depth: number;
+  depth: number | null;
 }
 
 export interface AddUnitInput {
@@ -43,6 +44,11 @@ function validateShelfInput(shelf: ShelfInput): string | null {
   if (!shelf.name || shelf.name.trim().length === 0) {
     return "Shelf name must be non-empty";
   }
+  if (shelf.dimensionless) {
+    // Dimensionless shelves are assignment-only buckets: no capacity math applies,
+    // so dimensions are neither required nor meaningful.
+    return null;
+  }
   if (typeof shelf.width !== "number" || shelf.width <= 0) {
     return "Shelf width must be greater than 0";
   }
@@ -66,9 +72,10 @@ function buildShelf(input: ShelfInput): Shelf {
   return {
     id: input.id ?? uuidv4(),
     name: input.name,
-    width: input.width,
-    height: input.height,
-    depth: input.depth,
+    dimensionless: input.dimensionless,
+    width: input.dimensionless ? null : input.width,
+    height: input.dimensionless ? null : input.height,
+    depth: input.dimensionless ? null : input.depth,
   };
 }
 

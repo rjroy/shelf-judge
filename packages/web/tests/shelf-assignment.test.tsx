@@ -20,8 +20,8 @@ beforeAll(async () => {
 });
 
 const options = [
-  { shelfId: "shelf-a", label: "Living Room — Upper" },
-  { shelfId: "shelf-b", label: "Office — Lower" },
+  { shelfId: "shelf-a", label: "Living Room — Upper", dimensionless: false },
+  { shelfId: "shelf-b", label: "Office — Lower", dimensionless: false },
 ];
 
 function renderFields(
@@ -91,7 +91,7 @@ describe("ShelfAssignmentForm", () => {
     const html = renderFields({ hasDimensions: false, selectedShelfId: "" });
     expect(html).not.toContain('<select class="shelf-assignment-select" disabled="">');
     expect(html).toContain('<option value="shelf-a" disabled="">');
-    expect(html).toContain("Box dimensions are required before a shelf can be assigned.");
+    expect(html).toContain("Box dimensions are required for most shelves.");
     expect(html).not.toContain('<button class="btn-primary" disabled="">');
   });
 
@@ -110,6 +110,7 @@ describe("capacity assignment explanations", () => {
       shelfName: "Upper",
       unitId: "unit-a",
       unitName: "Living Room",
+      dimensionless: false,
       capacityIn3: 1000,
       usedIn3: 200,
       utilization: 0.2,

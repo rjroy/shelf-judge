@@ -26,8 +26,22 @@ describe("manual shelf assignment persisted flow", () => {
           id: "unit-1",
           name: "Bookcase",
           shelves: [
-            { id: "fallback", name: "Fallback", width: 12, height: 12, depth: 12 },
-            { id: "manual", name: "Manual", width: 12, height: 12, depth: 12 },
+            {
+              id: "fallback",
+              name: "Fallback",
+              dimensionless: false,
+              width: 12,
+              height: 12,
+              depth: 12,
+            },
+            {
+              id: "manual",
+              name: "Manual",
+              dimensionless: false,
+              width: 12,
+              height: 12,
+              depth: 12,
+            },
           ],
         },
       ],
@@ -61,7 +75,16 @@ describe("manual shelf assignment persisted flow", () => {
 
     await gameService.setManualShelf(game.id, "manual");
     const deletion = await shelfService.updateUnit("unit-1", {
-      shelves: [{ id: "fallback", name: "Fallback", width: 12, height: 12, depth: 12 }],
+      shelves: [
+        {
+          id: "fallback",
+          name: "Fallback",
+          dimensionless: false,
+          width: 12,
+          height: 12,
+          depth: 12,
+        },
+      ],
     });
     expect(deletion.clearedAssignmentCount).toBe(1);
     expect((await shelfService.getConfig()).units[0].shelves.map((shelf) => shelf.id)).toEqual([

@@ -54,7 +54,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
   let profileOutlier: CollectionOutlier | null = null;
   let prediction: { score: FitnessResult } | null = null;
   let ignoredTags: NicheTagFilter[] = [];
-  let shelfOptions: Array<{ shelfId: string; label: string }> = [];
+  let shelfOptions: Array<{ shelfId: string; label: string; dimensionless: boolean }> = [];
   try {
     const shelfConfigPromise = getShelfConfig().catch(() => null);
     [data, axes] = await Promise.all([getGame(id), listAxes()]);
@@ -64,6 +64,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
         unit.shelves.map((shelf) => ({
           shelfId: shelf.id,
           label: `${unit.name} — ${shelf.name}`,
+          dimensionless: shelf.dimensionless,
         })),
       ) ?? [];
     try {
