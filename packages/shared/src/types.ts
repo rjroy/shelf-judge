@@ -83,6 +83,83 @@ export interface Axis {
   updatedAt: string; // ISO 8601
 }
 
+// Additive current-model contracts. Axis remains the daemon-facing legacy contract
+// until the coordinated runtime migration swaps consumers atomically.
+export type DerivedFieldId = "communityRating" | "weight" | "playerCountFit" | "playingTime";
+
+export type EmptyDerivedAxisConfiguration = Record<string, never>;
+
+export interface PlayerCountFitConfiguration {
+  targetPlayerCount: number;
+}
+
+export interface PlayingTimeConfiguration {
+  maximumScoringTime: number;
+}
+
+export interface DerivedAxisConfigurationByField {
+  communityRating: EmptyDerivedAxisConfiguration;
+  weight: EmptyDerivedAxisConfiguration;
+  playerCountFit: PlayerCountFitConfiguration;
+  playingTime: PlayingTimeConfiguration;
+}
+
+export interface CurrentAxisBase {
+  id: string;
+  name: string;
+  description: string | null;
+  weight: number;
+  enabled: true;
+  preferenceShape?: PreferenceShape;
+  idealValue?: number | null;
+  tolerance?: ToleranceLevel;
+  toleranceWidth?: number | null;
+  leanDirection?: LeanDirection | null;
+  veto?: VetoConfig | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PersonalAxis extends CurrentAxisBase {
+  source: "personal";
+}
+
+export interface TournamentAxis extends CurrentAxisBase {
+  source: "tournament";
+}
+
+export type DerivedAxisByField = {
+  [Field in DerivedFieldId]: CurrentAxisBase & {
+    source: "derived";
+    derivedField: Field;
+    configuration: DerivedAxisConfigurationByField[Field];
+  };
+};
+
+export type DerivedAxis<Field extends DerivedFieldId = DerivedFieldId> = DerivedAxisByField[Field];
+
+export interface DisabledLegacyAxis extends Omit<CurrentAxisBase, "enabled"> {
+  source: "legacy";
+  enabled: false;
+  reason: string;
+  legacyField: string | null;
+  legacyPayload: unknown;
+}
+
+export type CurrentAxis = PersonalAxis | TournamentAxis | DerivedAxis | DisabledLegacyAxis;
+export type CurrentAxisSource = CurrentAxis["source"];
+export type EnabledCurrentAxis = PersonalAxis | TournamentAxis | DerivedAxis;
+
+export interface CurrentCollection {
+  schemaVersion: number;
+  id: string;
+  name: string;
+  axes: CurrentAxis[];
+  games: Game[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Collection {
   id: string; // UUID
   name: string;
@@ -110,6 +187,96 @@ export interface FitnessBreakdownEntry {
   curveAffected: boolean; // true when curve changed the rating by > 0.5
   predictionConfidence: PredictionConfidence | null; // null for non-predicted
   referenceGames: ReferenceGame[] | null; // null for non-predicted
+}
+
+export type CurrentFitnessBreakdownSource =
+  | "personal"
+  | "tournament"
+  | "derived"
+  | "override"
+  | "predicted";
+
+export interface CurrentFitnessBreakdownEntry {
+  axisId: string;
+  axisName: string;
+  weight: number;
+  contribution: number | null;
+  source: CurrentFitnessBreakdownSource;
+  derivedField: DerivedFieldId | null;
+  sourceValue: number | null;
+  scoringRawValue: number | null;
+  effectiveRating: number | null;
+  preferenceShape: PreferenceShape;
+  curveAffected: boolean;
+  unit: string | null;
+  provenance: string | null;
+  configurationSummary: string | null;
+  overridden: boolean;
+  predictionConfidence: PredictionConfidence | null;
+  referenceGames: ReferenceGame[] | null;
+}
+
+export interface DerivedValueResolution {
+  sourceValue: number;
+  scoringRawValue: number;
+}
+
+export interface DerivedConfigurationPropertyDiscovery {
+  name: string;
+  type: "integer";
+  required: boolean;
+  minimum: number;
+  maximum: number;
+  default?: number;
+}
+
+export interface FixedNativeScaleDiscovery {
+  type: "fixed";
+  min: number;
+  max: number;
+}
+
+export interface ConfigurationBoundNativeScaleDiscovery<
+  ConfigurationProperty extends string = string,
+> {
+  type: "configuration-bound";
+  min: number;
+  maxConfigurationProperty: ConfigurationProperty;
+}
+
+export type NativeScaleDiscovery<ConfigurationProperty extends string = string> =
+  | FixedNativeScaleDiscovery
+  | ConfigurationBoundNativeScaleDiscovery<ConfigurationProperty>;
+
+export interface DerivedAxisTemplateDiscovery {
+  name: string;
+  description: string;
+  weight: number;
+  preferenceShape: PreferenceShape;
+  idealValue?: number;
+  toleranceWidth?: number;
+  configuration: {
+    targetPlayerCount?: number;
+    maximumScoringTime?: number;
+  };
+}
+
+export interface DerivedFieldDiscovery {
+  id: DerivedFieldId;
+  label: string;
+  description: string;
+  provenance: string;
+  unit: string;
+  missingValuePolicy: string;
+  nativeScaleDiscovery: NativeScaleDiscovery;
+  nativeScale: NativeScale;
+  configuration: DerivedConfigurationPropertyDiscovery[];
+  template: DerivedAxisTemplateDiscovery;
+}
+
+export interface DerivedFieldDiscoveryResponse {
+  version: 1;
+  fields: DerivedFieldDiscovery[];
 }
 
 export interface FitnessResult {
@@ -291,6 +458,7 @@ export interface UtilityCurveDeclaration {
   shape: PreferenceShape;
   idealValue: number | null;
   tolerance: ToleranceLevel | null;
+  toleranceWidth?: number | null;
   leanDirection: LeanDirection | null;
   vetoThreshold: VetoConfig | null;
   nativeScale: NativeScale;

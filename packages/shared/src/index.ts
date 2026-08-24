@@ -6,9 +6,34 @@ export type {
   Game,
   AxisSource,
   Axis,
+  DerivedFieldId,
+  EmptyDerivedAxisConfiguration,
+  PlayerCountFitConfiguration,
+  PlayingTimeConfiguration,
+  DerivedAxisConfigurationByField,
+  CurrentAxisBase,
+  PersonalAxis,
+  TournamentAxis,
+  DerivedAxisByField,
+  DerivedAxis,
+  DisabledLegacyAxis,
+  CurrentAxis,
+  CurrentAxisSource,
+  EnabledCurrentAxis,
+  CurrentCollection,
   Collection,
   FitnessBreakdownSource,
   FitnessBreakdownEntry,
+  CurrentFitnessBreakdownSource,
+  CurrentFitnessBreakdownEntry,
+  DerivedValueResolution,
+  DerivedConfigurationPropertyDiscovery,
+  FixedNativeScaleDiscovery,
+  ConfigurationBoundNativeScaleDiscovery,
+  NativeScaleDiscovery,
+  DerivedAxisTemplateDiscovery,
+  DerivedFieldDiscovery,
+  DerivedFieldDiscoveryResponse,
   FitnessResult,
   AppConfig,
   TournamentSettings,
@@ -84,6 +109,15 @@ export type {
 export {
   CreateAxisSchema,
   UpdateAxisSchema,
+  CurrentCreateAxisSchema,
+  CurrentUpdateAxisSchema,
+  LegacyAxisRepairSchema,
+  parseCurrentCreateAxisInput,
+  parseCurrentUpdateAxisInput,
+  parseLegacyAxisRepairInput,
+  validateCurrentAxisForNativeScale,
+  mergeAndValidateCurrentAxisUpdate,
+  repairAndValidateLegacyAxis,
   RateGameSchema,
   AddGameSchema,
   SessionFilterSchema,
@@ -95,11 +129,40 @@ export {
   ShelfConfigurationSchema,
 } from "./validation";
 
-export { toErrorMessage, ValidationError, NotFoundError } from "./errors";
+export {
+  toErrorMessage,
+  ValidationError,
+  NotFoundError,
+  AXIS_VALIDATION_CODES,
+  CodedAxisValidationError,
+} from "./errors";
+export type { AxisValidationCode, AxisValidationDetail } from "./errors";
 
 export { matchesBggTag, normalizeBggTagTokens } from "./bgg-tag-match";
 
 export { resolveBggRawValue, resolveAxisValues } from "./axis-utils";
+
+export {
+  DERIVED_AXIS_REGISTRY,
+  DerivedAxisPayloadSchema,
+  DerivedAxisConfigurationSchema,
+  createDerivedAxisFromPayload,
+  validateDerivedAxisPayload,
+  resolveDerivedAxisValue,
+  getCurrentAxisNativeScale,
+  getDerivedAxisNativeScale,
+  isEnabledScoringAxis,
+  isVectorEligibleAxis,
+  summarizeDerivedAxisConfiguration,
+  getDerivedFieldDiscovery,
+} from "./derived-axis-registry";
+export type {
+  DerivedAxisRegistry,
+  DerivedAxisTemplateDefaults,
+  DerivedFieldDefinition,
+  DerivedAxisPayload,
+  DerivedAxisPayloadValidationResult,
+} from "./derived-axis-registry";
 
 export { resolveBaseDir, resolveSocketPath, resolveDataDir, resolveConfigPath } from "./paths";
 
@@ -120,6 +183,12 @@ export {
 export type {
   CreateAxisInput,
   UpdateAxisInput,
+  CurrentCreateAxisInput,
+  CurrentCreateAxisOutput,
+  CurrentUpdateAxisInput,
+  CurrentUpdateAxisOutput,
+  LegacyAxisRepairInput,
+  LegacyAxisRepairOutput,
   RateGameInput,
   AddGameInput,
   SessionFilterInput,

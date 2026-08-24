@@ -103,6 +103,7 @@ export function applyPreferenceCurve(
   config: {
     idealValue?: number | null;
     tolerance?: ToleranceLevel;
+    toleranceWidth?: number | null;
     leanDirection?: LeanDirection | null;
   },
 ): number {
@@ -126,22 +127,45 @@ export function applyPreferenceCurve(
       const ideal = config.idealValue;
       const tolerance = config.tolerance ?? "moderate";
       const leanDirection = config.leanDirection ?? null;
-      const baseK = calibrateTolerance(tolerance);
+      const toleranceWidth = config.toleranceWidth;
+      const leftRange = ideal - scale.min;
+      const rightRange = scale.max - ideal;
+
+      if (config.tolerance !== undefined && toleranceWidth != null) {
+        throw new Error("tolerance and toleranceWidth cannot be used together");
+      }
+
+      if (
+        toleranceWidth != null &&
+        (!Number.isFinite(toleranceWidth) ||
+          toleranceWidth <= 0 ||
+          toleranceWidth >= leftRange ||
+          toleranceWidth >= rightRange)
+      ) {
+        throw new Error(
+          "toleranceWidth must be finite, positive, and remain within both scale endpoints",
+        );
+      }
+
+      const exponentForSide = (sideRange: number): number =>
+        toleranceWidth == null
+          ? calibrateTolerance(tolerance)
+          : Math.log(3.5 / 9) / Math.log(1 - toleranceWidth / sideRange);
 
       if (rawValue === ideal) return 10;
 
       if (rawValue < ideal) {
-        const sideRange = ideal - scale.min;
+        const sideRange = leftRange;
         if (sideRange === 0) return 1;
         const t = (ideal - rawValue) / sideRange;
-        const k = applyLean(baseK, leanDirection, "left");
+        const k = applyLean(exponentForSide(sideRange), leanDirection, "left");
         return clamp(1 + 9 * Math.pow(1 - t, k));
       }
 
-      const sideRange = scale.max - ideal;
+      const sideRange = rightRange;
       if (sideRange === 0) return 1;
       const t = (rawValue - ideal) / sideRange;
-      const k = applyLean(baseK, leanDirection, "right");
+      const k = applyLean(exponentForSide(sideRange), leanDirection, "right");
       return clamp(1 + 9 * Math.pow(1 - t, k));
     }
   }

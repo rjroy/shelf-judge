@@ -10,9 +10,38 @@ import {
   TournamentSettingsUpdateSchema,
   TournamentDataSchema,
   TournamentSettingsSchema,
+  type CreateAxisInput,
+  type UpdateAxisInput,
 } from "../src/index";
 
+const legacyCreateAliasFixture: CreateAxisInput = {
+  name: "Legacy BGG axis",
+  weight: 20,
+  source: "bgg",
+  bggField: "communityRating",
+};
+
+const legacyUpdateAliasFixture: UpdateAxisInput = {
+  preferenceShape: "sweet-spot",
+  idealValue: 5,
+  tolerance: "moderate",
+};
+
 describe("CreateAxisSchema", () => {
+  test("keeps the exported legacy input alias assignable", () => {
+    expect(CreateAxisSchema.safeParse(legacyCreateAliasFixture).success).toBe(true);
+  });
+
+  test("keeps legacy nested veto object parsing permissive", () => {
+    const result = CreateAxisSchema.safeParse({
+      name: "Legacy veto",
+      weight: 20,
+      veto: { direction: "above", threshold: 8, unsupported: true },
+    });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.veto).toEqual({ direction: "above", threshold: 8 });
+  });
+
   test("accepts valid input", () => {
     const result = CreateAxisSchema.safeParse({
       name: "Visual design",
@@ -239,6 +268,18 @@ describe("CreateAxisSchema", () => {
 });
 
 describe("UpdateAxisSchema", () => {
+  test("keeps the exported legacy update alias assignable", () => {
+    expect(UpdateAxisSchema.safeParse(legacyUpdateAliasFixture).success).toBe(true);
+  });
+
+  test("keeps legacy nested veto update parsing permissive", () => {
+    const result = UpdateAxisSchema.safeParse({
+      veto: { direction: "below", threshold: 2, unsupported: true },
+    });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.veto).toEqual({ direction: "below", threshold: 2 });
+  });
+
   test("accepts partial update with name only", () => {
     const result = UpdateAxisSchema.safeParse({ name: "New name" });
     expect(result.success).toBe(true);
