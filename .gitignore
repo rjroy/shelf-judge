@@ -22,3 +22,9 @@ Thumbs.db
 packages/web/next-env.d.ts
 
 .lore/.design-input
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
