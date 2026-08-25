@@ -22,6 +22,7 @@ function entry(overrides: Partial<FitnessBreakdownEntry>): FitnessBreakdownEntry
     predictionConfidence: null,
     referenceGames: null,
     ...overrides,
+    overrideValue: overrides.overrideValue ?? null,
   };
 }
 
@@ -101,12 +102,14 @@ describe("formatBreakdown", () => {
         contribution: 0.9,
         source: "override",
         sourceValue: 8.1,
+        overrideValue: 9,
       }),
     ]);
     expect(result).toContain("Source Value");
     expect(result).toContain("8.1");
     expect(result).toContain("Override");
-    expect(result).toContain("yes");
+    const row = result.split("\n").find((line) => line.includes("Community Rating"));
+    expect(row).toMatch(/8\.1\s+---\s+9\s+9\s+10/);
     expect(result).toContain("override");
   });
 

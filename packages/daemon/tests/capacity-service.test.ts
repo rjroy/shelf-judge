@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type {
+  Axis,
   BoxDimensions,
   Game,
   GameWithScore,
@@ -21,6 +22,9 @@ function makeGame(
     boxDimensions?: BoxDimensions | null;
     fitness?: number | null;
     manualShelfId?: string | null;
+    minPlayers?: number | null;
+    maxPlayers?: number | null;
+    playingTime?: number | null;
   } = {},
 ): GameWithScore {
   const game: Game = {
@@ -28,9 +32,9 @@ function makeGame(
     bggId: null,
     name,
     yearPublished: null,
-    minPlayers: null,
-    maxPlayers: null,
-    playingTime: null,
+    minPlayers: opts.minPlayers ?? null,
+    maxPlayers: opts.maxPlayers ?? null,
+    playingTime: opts.playingTime ?? null,
     imageUrl: null,
     bggData: null,
     numPlays: null,
@@ -63,7 +67,7 @@ function makeGame(
   };
 }
 
-function createMockStorage(units: ShelfUnit[]): StorageService {
+function createMockStorage(units: ShelfUnit[], axes?: Axis[]): StorageService {
   const config: ShelfConfiguration = { units, createdAt: NOW, updatedAt: NOW };
   return {
     loadShelfConfig: () => Promise.resolve(structuredClone(config)),
@@ -74,7 +78,7 @@ function createMockStorage(units: ShelfUnit[]): StorageService {
         id: "mock",
         name: "Mock",
         games: [],
-        axes: [
+        axes: axes ?? [
           {
             id: "players",
             name: "Player Count Fit",
@@ -410,6 +414,43 @@ describe("capacity service", () => {
   });
 
   describe("assignments", () => {
+    test("derived axes do not change capacity packing results", async () => {
+      const units = [
+        unit("u1", "Kallax", [
+          { id: "s1", name: "Cube", dimensionless: false, width: 13, height: 13, depth: 15 },
+        ]),
+      ];
+      const games = [
+        makeGame("g1", "First", {
+          boxDimensions: { width: 12, height: 12, depth: 2.8 },
+          fitness: 8,
+          minPlayers: 2,
+          maxPlayers: 4,
+          playingTime: 60,
+        }),
+        makeGame("g2", "Second", {
+          boxDimensions: { width: 12, height: 12, depth: 2.8 },
+          fitness: 7,
+          minPlayers: 1,
+          maxPlayers: 2,
+          playingTime: 180,
+        }),
+      ];
+      const withDerived = createCapacityService({
+        storageService: createMockStorage(units),
+        gameService: createMockGameService(games),
+      });
+      const withoutDerived = createCapacityService({
+        storageService: createMockStorage(units, []),
+        gameService: createMockGameService(games),
+      });
+
+      const result = await withDerived.computeCapacity();
+      expect(result).toEqual(await withoutDerived.computeCapacity());
+      expect(result.assignments[0].games.map(({ gameId }) => gameId)).toEqual(["g1", "g2"]);
+      expect(Number.isFinite(result.assignments[0].utilization)).toBe(true);
+    });
+
     test("places a box that fits into the matching shelf", async () => {
       const svc = createCapacityService({
         storageService: createMockStorage([

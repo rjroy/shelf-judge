@@ -102,7 +102,12 @@ export async function redundancyStage(
   return `Redundancy stage set to "${stage}".\n\n` + formatSettings(data);
 }
 
-const NUMERIC_KEYS = new Set(["similarityThreshold", "maxPenalty", "minNeighbors", "expectedNeighbors"]);
+const NUMERIC_KEYS = new Set([
+  "similarityThreshold",
+  "maxPenalty",
+  "minNeighbors",
+  "expectedNeighbors",
+]);
 const VALID_KEYS = new Set([
   "enabled",
   "stage",

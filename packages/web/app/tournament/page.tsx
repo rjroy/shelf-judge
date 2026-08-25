@@ -334,7 +334,11 @@ export default function TournamentPage() {
                   <input
                     className="filter-value-input"
                     type={
-                      filterType === "minFitness" || filterType === "maxFitness" || filterType === "staleness" ? "number" : "text"
+                      filterType === "minFitness" ||
+                      filterType === "maxFitness" ||
+                      filterType === "staleness"
+                        ? "number"
+                        : "text"
                     }
                     placeholder={
                       filterType === "name"

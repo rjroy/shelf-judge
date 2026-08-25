@@ -204,7 +204,11 @@ function BreakdownRow({
                 <span>Capped scoring input: {formatValue(entry.scoringRawValue, entry.unit)}</span>
               )}
               {entry.overridden && (
-                <span className="breakdown-override-detail">Personal override applied</span>
+                <span className="breakdown-override-detail">
+                  {entry.overrideValue == null
+                    ? "Personal override applied"
+                    : `Personal override: ${entry.overrideValue}`}
+                </span>
               )}
               {entry.provenance && <span>Provenance: {entry.provenance}</span>}
               {entry.configurationSummary && (

@@ -167,6 +167,7 @@ function makeDistributionResults(games: Game[], axes: EnabledAxis[]): Map<string
           provenance: null,
           configurationSummary: null,
           overridden: false,
+          overrideValue: null,
           predictionConfidence: null,
           referenceGames: null,
         })),
@@ -224,6 +225,7 @@ describe("computeAxisDistributions", () => {
         provenance: "Publisher-listed playing time imported from BoardGameGeek",
         configurationSummary: "Scoring cap: 240 minutes",
         overridden: true,
+        overrideValue: 8,
         predictionConfidence: null,
         referenceGames: null,
       },
@@ -736,6 +738,38 @@ describe("detectOutliers", () => {
     const warOutlier = outliers.find((o) => o.gameId === "war1");
     expect(warOutlier).toBeDefined();
     expect(warOutlier!.gameName).toBe("Heavy Wargame");
+  });
+
+  test("derived axes do not change profile outlier vectors", () => {
+    const games = [
+      makeEuroGame("e1", "Euro 1"),
+      makeEuroGame("e2", "Euro 2"),
+      makeEuroGame("e3", "Euro 3"),
+      makeEuroGame("e4", "Euro 4"),
+      makeEuroGame("e5", "Euro 5"),
+      makeGame({
+        id: "war1",
+        name: "Heavy Wargame",
+        minPlayers: 2,
+        maxPlayers: 2,
+        playingTime: 240,
+        bggData: makeBggData({
+          weight: 4.5,
+          communityRating: 8,
+          mechanics: warMechanics,
+          categories: warCategories,
+          subdomains: [{ id: 101, name: "War Games" }],
+        }),
+        ratings: { a1: 6 },
+      }),
+    ];
+    const fitnessResults = new Map<string, FitnessResult>();
+
+    const withDerived = detectOutliers(games, axes, fitnessResults);
+    const baseline = detectOutliers(games, [axes[0]], fitnessResults);
+    expect(withDerived).toEqual(baseline);
+    expect(withDerived.some((outlier) => outlier.gameId === "war1")).toBe(true);
+    expect(withDerived.every((outlier) => Number.isFinite(outlier.distances.composite))).toBe(true);
   });
 
   test("game unusual on only one dimension is not flagged", () => {

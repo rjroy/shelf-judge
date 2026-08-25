@@ -138,6 +138,7 @@ export function createFitnessService(): FitnessService {
           configurationSummary:
             axis.source === "derived" ? summarizeDerivedAxisConfiguration(axis) : null,
           overridden,
+          overrideValue: overridden ? (personalRating ?? null) : null,
           predictionConfidence: null,
           referenceGames: null,
         });

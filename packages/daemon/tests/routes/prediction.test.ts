@@ -207,6 +207,7 @@ describe("prediction routes", () => {
         provenance: "BoardGameGeek community average rating",
         configurationSummary: "No configuration",
         overridden: false,
+        overrideValue: null,
         predictionConfidence: "actual",
         referenceGames: null,
       });

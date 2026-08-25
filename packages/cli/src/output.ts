@@ -59,7 +59,7 @@ export function formatBreakdown(breakdown: BreakdownEntry[]): string {
       value(entry.sourceValue),
       value(entry.scoringRawValue),
       entry.effectiveRating !== null ? `${entry.effectiveRating}${marker}` : "---",
-      entry.overridden ? "yes" : "no",
+      entry.overridden ? String(entry.overrideValue ?? "yes") : "no",
       String(entry.weight),
       entry.contribution !== null ? entry.contribution.toFixed(2) : "---",
       entry.source,

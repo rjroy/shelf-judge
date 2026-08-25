@@ -1,6 +1,6 @@
 ---
 title: Redundancy Settings Page
-status: executed 
+status: executed
 issue: .lore/issues/ui/redundancy-setting-move.md
 date: 2026-04-12
 tags: [ux, settings, redundancy]

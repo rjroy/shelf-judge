@@ -164,6 +164,7 @@ export interface FitnessBreakdownEntry {
   provenance: string | null;
   configurationSummary: string | null;
   overridden: boolean;
+  overrideValue: number | null;
   predictionConfidence: PredictionConfidence | null;
   referenceGames: ReferenceGame[] | null;
 }

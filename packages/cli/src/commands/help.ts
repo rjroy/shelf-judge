@@ -20,6 +20,22 @@ interface LocalCommandHelp {
 // One API operation can intentionally back multiple CLI commands. Keep those
 // CLI-only aliases here instead of advertising duplicate daemon operations.
 const LOCAL_OPERATION_COMMANDS: Record<string, LocalCommandHelp[]> = {
+  "shelf.axis.create": [
+    {
+      name: "create",
+      usage:
+        "shelf-judge axis create [name] [--template <template-id>] [--target-player-count <count>] [--maximum-scoring-time <minutes>]",
+      description: "Create a personal axis or a registry-backed derived template",
+    },
+  ],
+  "shelf.axis.update": [
+    {
+      name: "update",
+      usage:
+        "shelf-judge axis update <axis-id> [--target-player-count <count>] [--maximum-scoring-time <minutes>]",
+      description: "Update axis settings, including derived configuration",
+    },
+  ],
   "shelf.axis.derived-fields": [
     {
       name: "templates",
@@ -30,7 +46,8 @@ const LOCAL_OPERATION_COMMANDS: Record<string, LocalCommandHelp[]> = {
   "shelf.axis.repair": [
     {
       name: "repair",
-      usage: "shelf-judge axis repair <axis-id> --template <template-id> [configuration options]",
+      usage:
+        "shelf-judge axis repair <axis-id> --template <template-id> [--target-player-count <count>] [--maximum-scoring-time <minutes>]",
       description: "Repair a disabled legacy axis while retaining its ratings and overrides",
     },
   ],

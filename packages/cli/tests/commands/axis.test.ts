@@ -208,18 +208,40 @@ describe("axis create from template", () => {
     });
   });
 
-  test("requires explicit configuration flags before sending a request", async () => {
+  test("requires configuration without a default and applies discovered defaults", async () => {
+    const capturedBodies: unknown[] = [];
     const client = createMockClient({
-      routes: { "GET /api/axes/derived-fields": discoveryRoute },
+      routes: {
+        "GET /api/axes/derived-fields": discoveryRoute,
+        "POST /api/axes": {
+          response: {
+            ok: true,
+            status: 201,
+            data: {
+              id: "play-time",
+              name: "Play Time",
+              weight: 50,
+              source: "derived",
+              derivedField: "playingTime",
+              configuration: { maximumScoringTime: 240 },
+            },
+          },
+        },
+      },
     });
+    const originalPost = client.post.bind(client);
+    client.post = <T>(path: string, body?: unknown) => {
+      capturedBodies.push(body);
+      return originalPost<T>(path, body);
+    };
     // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test rejects pattern requires await
     await expect(
       axisCreate(client, [], { json: false, template: "playerCountFit" }),
     ).rejects.toThrow("--target-player-count is required");
-    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test rejects pattern requires await
-    await expect(axisCreate(client, [], { json: false, template: "playingTime" })).rejects.toThrow(
-      "--maximum-scoring-time is required",
-    );
+    await axisCreate(client, [], { json: false, template: "playingTime" });
+    expect(capturedBodies).toEqual([
+      expect.objectContaining({ configuration: { maximumScoringTime: 240 } }),
+    ]);
   });
 
   test("surfaces stable validation codes and fields", async () => {

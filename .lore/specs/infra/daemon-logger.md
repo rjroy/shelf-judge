@@ -4,7 +4,8 @@ date: 2026-04-06
 status: implemented
 tags: [observability, logging, cleanup, daemon]
 modules: [daemon-services, bgg-client]
-related: [.lore/issues/infra/daemon-logger-factory.md, .lore/retros/incident/bgg-import-double-request.md]
+related:
+  [.lore/issues/infra/daemon-logger-factory.md, .lore/retros/incident/bgg-import-double-request.md]
 req-prefix: LOG
 ---
 

@@ -252,6 +252,7 @@ export function computePredictedFitness(
           provenance: null,
           configurationSummary: null,
           overridden: false,
+          overrideValue: null,
           predictionConfidence: prediction.confidence,
           referenceGames: refGames,
         });
@@ -291,6 +292,7 @@ export function computePredictedFitness(
           provenance: null,
           configurationSummary: null,
           overridden: false,
+          overrideValue: null,
           predictionConfidence: "insufficient",
           referenceGames: [],
         });
@@ -316,6 +318,7 @@ export function computePredictedFitness(
         configurationSummary:
           axis.source === "derived" ? summarizeDerivedAxisConfiguration(axis) : null,
         overridden: false,
+        overrideValue: null,
         predictionConfidence: null,
         referenceGames: null,
       });

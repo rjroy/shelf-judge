@@ -82,6 +82,7 @@ function makeAxisScore(
         provenance: null,
         configurationSummary: null,
         overridden: false,
+        overrideValue: null,
         predictionConfidence: null,
         referenceGames: null,
       },

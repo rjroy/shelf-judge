@@ -143,11 +143,11 @@ function configurationFromOptions(
     const value = flags[property.name];
     if (value !== undefined) {
       configuration[property.name] = value;
+    } else if (requireExplicit && property.default !== undefined) {
+      configuration[property.name] = property.default;
     } else if (requireExplicit && property.required) {
       const flag = `--${property.name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`;
       throw new Error(`${flag} is required for template ${field.id}`);
-    } else if (requireExplicit && property.default !== undefined) {
-      configuration[property.name] = property.default;
     }
   }
   return configuration;

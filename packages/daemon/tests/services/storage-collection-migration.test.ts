@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import { CollectionSchema } from "@shelf-judge/shared";
 import type { Collection } from "@shelf-judge/shared";
 import {
@@ -6,6 +9,7 @@ import {
   type CollectionArtifactDescriptor,
 } from "../../src/services/collection-artifacts.js";
 import { createStorageService } from "../../src/services/storage-service.js";
+import { createFileOps } from "../../src/services/file-ops.js";
 import type { Logger } from "../../src/services/logger.js";
 import { createMockFileOps } from "../helpers/mock-file-ops.js";
 
@@ -81,6 +85,53 @@ function makeService(artifacts: readonly CollectionArtifactDescriptor[] = COLLEC
 }
 
 describe("storage collection migration ordering and recovery", () => {
+  test("persists and idempotently reloads a migration through the real filesystem", async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "shelf-judge-migration-"));
+    const collectionPath = path.join(dataDir, "collection.json");
+    const profilePath = path.join(dataDir, "profile.json");
+    const wishlistPath = path.join(dataDir, "wishlist.json");
+
+    try {
+      await fs.writeFile(collectionPath, JSON.stringify(historicalCollection), "utf8");
+      await fs.writeFile(profilePath, "disposable profile", "utf8");
+      await fs.writeFile(wishlistPath, JSON.stringify(wishlist), "utf8");
+      const service = createStorageService({
+        dataDir,
+        configPath: path.join(dataDir, "config.json"),
+        fileOps: createFileOps(),
+        logger: logger(),
+        collectionMigrationDependencies: {
+          createId: () => "real-filesystem-tournament-axis",
+          now: () => "2026-08-25T00:00:00.000Z",
+        },
+      });
+
+      const migrated = await service.loadCollection();
+      const persistedAfterMigration = await fs.readFile(collectionPath, "utf8");
+      expect(JSON.parse(persistedAfterMigration)).toEqual(migrated);
+      expect(migrated.schemaVersion).toBe(1);
+      expect(
+        await fs.stat(profilePath).then(
+          () => true,
+          () => false,
+        ),
+      ).toBe(false);
+      expect(JSON.parse(await fs.readFile(wishlistPath, "utf8"))).toEqual([
+        {
+          ...wishlist[0],
+          predictedScore: null,
+          predictionConfidence: null,
+          predictedBreakdown: null,
+        },
+      ]);
+
+      expect(await service.loadCollection()).toEqual(migrated);
+      expect(await fs.readFile(collectionPath, "utf8")).toBe(persistedAfterMigration);
+    } finally {
+      await fs.rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
   test("logs collection read, parse, migration, and validation failures at their boundaries", async () => {
     const readFiles = createMockFileOps({ [COLLECTION_PATH]: "present" });
     readFiles.readFile = () => Promise.reject(new Error("injected read failure"));

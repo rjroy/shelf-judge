@@ -81,6 +81,7 @@ function makeFitnessResult(score: number, unavailable: boolean): FitnessResult {
         provenance: null,
         configurationSummary: null,
         overridden: false,
+        overrideValue: null,
         predictionConfidence: "strong" as const,
         referenceGames: null,
       },

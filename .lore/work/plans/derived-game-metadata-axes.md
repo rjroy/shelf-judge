@@ -1,7 +1,7 @@
 ---
 title: "Implementation plan: derived game-metadata axes"
 date: 2026-08-24
-status: approved
+status: executed
 tags: [plan, fitness, derived-axes, bgg, migration, feature-vectors]
 modules: [shared, daemon, web, cli]
 related:

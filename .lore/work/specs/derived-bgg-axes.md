@@ -1,10 +1,15 @@
 ---
 title: Derived game-metadata axes
 date: 2026-08-24
-status: approved
+status: implemented
 tags: [fitness, axes, bgg, player-count, play-time]
 modules: [shared, daemon, web, cli]
-related: [.lore/specs/fitness/utility-curves.md, .lore/specs/collection/collection-profiling.md, .lore/research/bgg-api.md]
+related:
+  [
+    .lore/specs/fitness/utility-curves.md,
+    .lore/specs/collection/collection-profiling.md,
+    .lore/research/bgg-api.md,
+  ]
 req-prefix: DERIVED
 ---
 
@@ -47,6 +52,7 @@ Let a collection owner add optional fitness axes whose factual values are derive
 12. **REQ-DERIVED-12:** `playingTime` shall resolve from the existing published game `playingTime` value when it is positive. The resolver shall retain this published value as `sourceValue`; values greater than the axis's `maximumScoringTime` shall use that configured cap as `scoringRawValue`; absent or zero values shall resolve as missing.
 13. **REQ-DERIVED-13:** `playingTime` shall expose a 1-to-`maximumScoringTime` minute native scale with minute-labelled curve and breakdown inputs. Its curve behavior shall support the existing lower-is-better and sweet-spot preferences without needing a duration-range data model.
 14. **REQ-DERIVED-14:** This release shall not parse, persist, or derive from BGG `minplaytime` or `maxplaytime`. Those fields remain a future extension of the registry and game data model.
+
 ### Migration And Interfaces
 
 15. **REQ-DERIVED-15:** Existing persisted `communityRating` and `weight` BGG axes shall migrate losslessly to the derived-axis representation. Existing weights, curves, vetoes, and personal overrides shall retain their scoring behavior.

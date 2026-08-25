@@ -1,7 +1,7 @@
 ---
 title: "Implementation notes: derived game-metadata axes"
 date: 2026-08-24
-status: in_progress
+status: completed
 tags: [implementation, notes, derived-axes, regression]
 source: .lore/work/plans/derived-game-metadata-axes.md
 modules: [shared, daemon, web, cli]
@@ -26,7 +26,7 @@ related: [.lore/work/specs/derived-bgg-axes.md]
 - [x] Step 9: testing complete
 - [x] Step 9: code review complete
 - [x] Step 9: holistic acceptance validation complete
-- [ ] Step 10: final validation and artifact completion
+- [x] Step 10: final validation and artifact completion
 
 - [x] Phase 1: additive registry, current-axis contracts, helpers, and numeric curve width
 - [x] Phase 2: additive replacement validation schemas and stable validation errors
@@ -109,8 +109,8 @@ related: [.lore/work/specs/derived-bgg-axes.md]
 - [x] Focused web tests, lint, formatting, and diff checks
 - [x] Step 8 CLI workflows
 - [x] Step 9 cross-package regression implementation
-- [ ] Step 9 testing and review
-- [ ] Step 10 final broad validation
+- [x] Step 9 testing and review
+- [x] Step 10 final broad validation
 
 ## Step 7 implementation log
 
@@ -285,3 +285,18 @@ related: [.lore/work/specs/derived-bgg-axes.md]
   ```
 
   Result: PASS, `All matched files use Prettier code style!`
+
+## Step 10 final validation record
+
+- Quality gates: `bun run typecheck`, `bun run lint`, `bun run format:check`, `bun run test`, and `bun run build` pass. The final full suite has 1,531 passing tests and 1 skipped test, including the real-filesystem migration case.
+- AI Validation 1: the five repository quality gates above provide the required broad evidence.
+- AI Validation 2: `packages/shared/tests/current-axis-validation.test.ts` and `packages/shared/tests/derived-axis-registry.test.ts` cover all four IDs, unknown IDs, required configuration, integer and adjacent target/cap boundaries, and merged curve validation.
+- AI Validation 3: `packages/daemon/tests/services/fitness-service.test.ts`, `packages/daemon/tests/services/collection-migration.test.ts`, and `packages/daemon/tests/integration/end-to-end.test.ts` pin Community Rating and Complexity migration equivalence, curves, weights, vetoes, and overrides.
+- AI Validation 4: `packages/shared/tests/derived-axis-registry.test.ts` and `packages/daemon/tests/services/fitness-service.test.ts` cover exact, inclusive, centered, off-center, out-of-range, clamped, malformed, and missing player ranges.
+- AI Validation 5: shared resolver, daemon fitness, feature-vector, prediction-service, web breakdown, and CLI output tests cover normal/missing/capped play time, dynamic caps, denominator behavior, published uncapped vector input, and published-versus-capped display.
+- AI Validation 6: daemon axis routes/storage defaults, web axis workflows/rating forms, and CLI axis command/help tests cover discovery, duplicate creation, editing, actionable errors, overrides, and absence of the optional templates from fresh collections. Final validation corrected CLI Play Time creation to apply the discovered 240-minute default.
+- AI Validation 7: `packages/daemon/tests/integration/end-to-end.test.ts` covers the complete persisted legacy fixture. `packages/daemon/tests/services/storage-collection-migration.test.ts` additionally performs migration, profile deletion, wishlist clearing, atomic persistence, current-schema reload, and byte-stable idempotent reload through the host filesystem with isolated temporary data.
+- AI Validation 8: `packages/daemon/tests/feature-vector.test.ts` pins exact factual names, ordering, dimensions, eligible axis slots, uncapped time, and finite values. Prediction-service, profile-engine, redundancy-integration, and capacity-service tests execute their consumer paths with materially different Player Count Fit and Play Time facts and prove unchanged results with derived axes removed.
+- REQ-DERIVED-1 through REQ-DERIVED-22 were reviewed against the plan's requirement-coverage table and implementation. Final corrections preserve the numeric personal override separately from its curved effective rating, expose complete CLI help, apply discovery defaults, and strengthen consumer-specific vector regressions.
+- Daemon help coverage is in `packages/daemon/tests/routes/help.test.ts`; CLI templates/create/update/repair help coverage is in `packages/cli/tests/commands/help.test.ts`.
+- Final independent diff review reported no semantic regressions or accidental destructive formatting changes. The plan is `executed` and the source specification is `implemented` only after this evidence and all gates passed.

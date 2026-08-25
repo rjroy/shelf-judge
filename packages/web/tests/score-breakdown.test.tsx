@@ -75,6 +75,7 @@ function makeEntry(overrides: Partial<FitnessBreakdownEntry>): FitnessBreakdownE
     predictionConfidence: null,
     referenceGames: null,
     ...overrides,
+    overrideValue: overrides.overrideValue ?? null,
   };
 }
 
@@ -133,6 +134,7 @@ describe("BreakdownRow — rating interpretation labels", () => {
       source: "override",
       sourceValue: 5.8,
       overridden: true,
+      overrideValue: 9,
       effectiveRating: 6,
       contribution: 4.2,
     });
@@ -142,6 +144,7 @@ describe("BreakdownRow — rating interpretation labels", () => {
     );
     expect(html).toContain("breakdown-override-detail");
     expect(html).toContain("5.8");
+    expect(html).toContain("Personal override: 9");
     expect(html).toContain("Good");
   });
 
