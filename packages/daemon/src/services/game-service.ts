@@ -72,6 +72,7 @@ function applyBggResult(game: Game, result: BggGameResult): void {
   game.yearPublished = result.metadata.yearPublished;
   game.minPlayers = result.metadata.minPlayers;
   game.maxPlayers = result.metadata.maxPlayers;
+  game.bestPlayers = result.bggData.bestPlayerCount;
   game.playingTime = result.metadata.playingTime;
   game.imageUrl = result.metadata.imageUrl;
   game.bggData = result.bggData;
@@ -125,6 +126,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
         yearPublished: parsed.yearPublished ?? null,
         minPlayers: parsed.minPlayers ?? null,
         maxPlayers: parsed.maxPlayers ?? null,
+        bestPlayers: parsed.bestPlayers ?? null,
         playingTime: parsed.playingTime ?? null,
         imageUrl: parsed.imageUrl ?? null,
         numPlays: parsed.numPlays ?? null,
@@ -475,6 +477,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
                 yearPublished: result.metadata.yearPublished,
                 minPlayers: result.metadata.minPlayers,
                 maxPlayers: result.metadata.maxPlayers,
+                bestPlayers: result.bggData.bestPlayerCount,
                 playingTime: result.metadata.playingTime,
                 imageUrl: result.metadata.imageUrl,
                 numPlays: result.collectionData?.numPlays ?? null,

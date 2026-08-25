@@ -43,6 +43,7 @@ export interface BggGameData {
   families: BggTag[];
   subdomains: BggTag[]; // BGG subdomains (Strategy Games, Family Games, etc.)
   suggestedPlayerCounts: SuggestedPlayerCount[];
+  bestPlayerCount: number | null;
   fetchedAt: string; // ISO 8601
 }
 
@@ -53,6 +54,7 @@ export interface Game {
   yearPublished: number | null;
   minPlayers: number | null;
   maxPlayers: number | null;
+  bestPlayers: number | null;
   playingTime: number | null; // Minutes
   imageUrl: string | null;
   bggData: BggGameData | null;
@@ -130,7 +132,7 @@ export type Axis = PersonalAxis | TournamentAxis | DerivedAxis | DisabledLegacyA
 export type AxisSource = Axis["source"];
 export type EnabledAxis = PersonalAxis | TournamentAxis | DerivedAxis;
 export interface Collection {
-  schemaVersion: 1;
+  schemaVersion: 2;
   id: string;
   name: string;
   axes: Axis[];

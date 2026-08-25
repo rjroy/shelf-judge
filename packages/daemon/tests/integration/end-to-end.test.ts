@@ -86,6 +86,7 @@ const wingspanBgg: BggGameResult = {
     families: [],
     subdomains: [],
     suggestedPlayerCounts: [],
+    bestPlayerCount: null,
     fetchedAt: new Date().toISOString(),
   },
 };
@@ -112,6 +113,7 @@ const gloomhavenBgg: BggGameResult = {
     families: [],
     subdomains: [],
     suggestedPlayerCounts: [],
+    bestPlayerCount: null,
     fetchedAt: new Date().toISOString(),
   },
 };
@@ -628,7 +630,7 @@ describe("Integration: End-to-end scenarios", () => {
       const migrated = await ctx.storageService.loadCollection();
       const persisted = JSON.parse(ctx.fileOps.files.get(collectionPath) ?? "null") as Collection;
       expect(persisted).toEqual(migrated);
-      expect(persisted.schemaVersion).toBe(1);
+      expect(persisted.schemaVersion).toBe(2);
       expect(persisted.axes).toHaveLength(5);
       expect(persisted.axes.find(({ id }) => id === "community-axis")).toMatchObject({
         id: "community-axis",

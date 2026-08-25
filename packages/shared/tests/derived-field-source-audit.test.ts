@@ -189,7 +189,14 @@ describe("derived-field production ownership", () => {
       vectorInitializer?.elements.map((element) =>
         ts.isStringLiteral(element) ? element.text : null,
       ),
-    ).toEqual(["weight", "communityRating", "minPlayers", "maxPlayers", "playingTime"]);
+    ).toEqual([
+      "weight",
+      "communityRating",
+      "minPlayers",
+      "maxPlayers",
+      "bestPlayers",
+      "playingTime",
+    ]);
   });
 
   test("keeps concrete derived IDs and behavioral dispatch at registry or migration boundaries", async () => {

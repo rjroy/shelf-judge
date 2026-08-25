@@ -27,7 +27,7 @@ function makeService(initialFiles?: Record<string, string>) {
 
 function currentCollection(overrides: Partial<Collection> = {}): Collection {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: "col-1",
     name: "Test",
     axes: [],
@@ -45,7 +45,7 @@ describe("StorageService.loadCollection", () => {
     const collection = await service.loadCollection();
 
     expect(collection.name).toBe("My Collection");
-    expect(collection.schemaVersion).toBe(1);
+    expect(collection.schemaVersion).toBe(2);
     expect(collection.axes).toHaveLength(3);
     expect(collection.games).toHaveLength(0);
 

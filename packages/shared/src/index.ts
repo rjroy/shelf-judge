@@ -113,6 +113,7 @@ export {
   repairAndValidateLegacyAxis,
   CURRENT_COLLECTION_SCHEMA_VERSION,
   AxisSchema,
+  BggGameDataSchema,
   GameSchema,
   CollectionSchema,
   RateGameSchema,

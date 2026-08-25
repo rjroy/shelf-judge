@@ -23,6 +23,7 @@ function makeGame(overrides: Partial<Game> = {}): Game {
     yearPublished: 2020,
     minPlayers: 2,
     maxPlayers: 4,
+    bestPlayers: 3,
     playingTime: 60,
     imageUrl: null,
     bggData: {
@@ -39,6 +40,7 @@ function makeGame(overrides: Partial<Game> = {}): Game {
       families: [],
       subdomains: [],
       suggestedPlayerCounts: [],
+      bestPlayerCount: 3,
       fetchedAt: "2025-01-01T00:00:00.000Z",
     },
     numPlays: null,
@@ -112,11 +114,12 @@ describe("encodeGame", () => {
       "communityRating",
       "minPlayers",
       "maxPlayers",
+      "bestPlayers",
       "playingTime",
     ]);
     const vector = encodeGame(makeGame(), { mechanics: ["Dice Rolling"], categories: [] }, []);
     expect(vector.binary).toHaveLength(1);
-    expect(vector.continuous).toHaveLength(5);
+    expect(vector.continuous).toHaveLength(6);
     expect(vector.personalAxes).toBeNull();
   });
 
@@ -199,6 +202,7 @@ describe("encodeGame", () => {
     const ranges = {
       minPlayers: { min: 1, max: 5 },
       maxPlayers: { min: 2, max: 6 },
+      bestPlayers: { min: 2, max: 4 },
       playingTime: { min: 0, max: 600 },
     };
     const without = encodeGame(game, { mechanics: [], categories: [] }, [], undefined, ranges);
@@ -220,13 +224,14 @@ describe("encodeGame", () => {
       ranges,
     );
     expect(withDerived).toEqual(without);
-    expect(withDerived.continuous[4]).toBe(0.5);
+    expect(withDerived.continuous[5]).toBe(0.5);
   });
 
   test("sanitizes non-finite factual and axis inputs to a finite vector", () => {
     const game = makeGame({
       minPlayers: Number.NaN,
       maxPlayers: Number.POSITIVE_INFINITY,
+      bestPlayers: Number.NaN,
       playingTime: Number.NEGATIVE_INFINITY,
     });
     if (game.bggData !== null) {
@@ -264,7 +269,7 @@ describe("encodeGame", () => {
   });
 
   test("normalizes continuous values to [0,1]", () => {
-    const game = makeGame({ minPlayers: 1, maxPlayers: 10, playingTime: 150 });
+    const game = makeGame({ minPlayers: 1, maxPlayers: 10, bestPlayers: 5.5, playingTime: 150 });
     game.bggData!.weight = 1; // min weight
     game.bggData!.communityRating = 10; // max rating
 
@@ -279,8 +284,10 @@ describe("encodeGame", () => {
     expect(vec.continuous[2]).toBe(0);
     // maxPlayers: (10-1)/(10-1) = 1
     expect(vec.continuous[3]).toBe(1);
-    // playingTime: 150/300 = 0.5
+    // bestPlayers: (5.5-1)/(10-1) = 0.5
     expect(vec.continuous[4]).toBe(0.5);
+    // playingTime: 150/300 = 0.5
+    expect(vec.continuous[5]).toBe(0.5);
   });
 
   test("handles null BGG data with defaults", () => {
@@ -291,7 +298,7 @@ describe("encodeGame", () => {
     // No BGG data: all binary flags 0
     expect(vec.binary).toEqual([0, 0]);
     // Continuous defaults: weight=2.5, rating=5.5, etc.
-    expect(vec.continuous.length).toBe(5);
+    expect(vec.continuous.length).toBe(6);
     expect(vec.continuous[0]).toBeCloseTo(0.375, 5); // (2.5-1)/4
     expect(vec.continuous[1]).toBe(0.5); // (5.5-1)/9
   });
@@ -543,11 +550,12 @@ describe("encodeGame", () => {
   });
 
   test("uses observed ranges when provided", () => {
-    const game = makeGame({ minPlayers: 3, maxPlayers: 6, playingTime: 90 });
+    const game = makeGame({ minPlayers: 3, maxPlayers: 6, bestPlayers: 5, playingTime: 90 });
     const vocab = { mechanics: [], categories: [] };
     const ranges = {
       minPlayers: { min: 2, max: 4 },
       maxPlayers: { min: 4, max: 8 },
+      bestPlayers: { min: 3, max: 7 },
       playingTime: { min: 30, max: 120 },
     };
     const vec = encodeGame(game, vocab, [], undefined, ranges);
@@ -556,31 +564,56 @@ describe("encodeGame", () => {
     expect(vec.continuous[2]).toBeCloseTo(0.5, 10);
     // maxPlayers: (6-4)/(8-4) = 0.5
     expect(vec.continuous[3]).toBeCloseTo(0.5, 10);
+    // bestPlayers: (5-3)/(7-3) = 0.5
+    expect(vec.continuous[4]).toBeCloseTo(0.5, 10);
     // playingTime: (90-30)/(120-30) = 60/90 ≈ 0.667
-    expect(vec.continuous[4]).toBeCloseTo(60 / 90, 10);
+    expect(vec.continuous[5]).toBeCloseTo(60 / 90, 10);
+  });
+
+  test("encodes missing best-player counts at the active range midpoint", () => {
+    const ranges = {
+      minPlayers: { min: 1, max: 5 },
+      maxPlayers: { min: 2, max: 8 },
+      bestPlayers: { min: 6, max: 10 },
+      playingTime: { min: 30, max: 120 },
+    };
+
+    const vec = encodeGame(
+      makeGame({ bestPlayers: null }),
+      { mechanics: [], categories: [] },
+      [],
+      undefined,
+      ranges,
+    );
+
+    expect(vec.continuous[4]).toBe(0.5);
   });
 });
 
 describe("computeContinuousRanges", () => {
   test("computes observed min/max from collection", () => {
     const games = [
-      makeGame({ minPlayers: 2, maxPlayers: 4, playingTime: 30 }),
-      makeGame({ minPlayers: 3, maxPlayers: 8, playingTime: 120 }),
-      makeGame({ minPlayers: 1, maxPlayers: 6, playingTime: 60 }),
+      makeGame({ minPlayers: 2, maxPlayers: 4, bestPlayers: 3, playingTime: 30 }),
+      makeGame({ minPlayers: 3, maxPlayers: 8, bestPlayers: 6, playingTime: 120 }),
+      makeGame({ minPlayers: 1, maxPlayers: 6, bestPlayers: 4, playingTime: 60 }),
     ];
 
     const ranges = computeContinuousRanges(games);
     expect(ranges.minPlayers).toEqual({ min: 1, max: 3 });
     expect(ranges.maxPlayers).toEqual({ min: 4, max: 8 });
+    expect(ranges.bestPlayers).toEqual({ min: 3, max: 6 });
     expect(ranges.playingTime).toEqual({ min: 30, max: 120 });
   });
 
   test("falls back to defaults when no games have the field", () => {
-    const games = [makeGame({ minPlayers: null, maxPlayers: null, playingTime: null })];
+    const games = [
+      makeGame({ minPlayers: null, maxPlayers: null, bestPlayers: null, playingTime: null }),
+    ];
 
     const ranges = computeContinuousRanges(games);
     expect(ranges.minPlayers).toEqual({ min: 1, max: 10 });
     expect(ranges.maxPlayers).toEqual({ min: 1, max: 10 });
+    expect(ranges.bestPlayers).toEqual({ min: 1, max: 10 });
     expect(ranges.playingTime).toEqual({ min: 0, max: 300 });
   });
 });

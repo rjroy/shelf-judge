@@ -603,6 +603,87 @@ describe("current persisted collection validation", () => {
     expect(CollectionSchema.parse(currentCollection)).toEqual(currentCollection);
   });
 
+  test("backfills additive best-player fields in existing schemaVersion 1 collections", () => {
+    const oldGame = {
+      id: "game-1",
+      bggId: 1,
+      name: "Existing Game",
+      yearPublished: 2020,
+      minPlayers: 2,
+      maxPlayers: 4,
+      playingTime: 60,
+      imageUrl: null,
+      bggData: {
+        communityRating: 7,
+        bayesAverage: 6.5,
+        weight: null,
+        numWeightVotes: 0,
+        description: null,
+        mechanics: [],
+        categories: [],
+        families: [],
+        subdomains: [],
+        suggestedPlayerCounts: [],
+        fetchedAt: timestamp,
+      },
+      numPlays: null,
+      ownership: "owned",
+      boxDimensions: null,
+      manualShelfId: null,
+      ratings: {},
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+
+    const parsed = CollectionSchema.parse({ ...currentCollection, games: [oldGame] });
+
+    expect(parsed.games[0]?.bestPlayers).toBeNull();
+    expect(parsed.games[0]?.bggData?.bestPlayerCount).toBeNull();
+  });
+
+  test("preserves explicit null best-player fields in persisted output", () => {
+    const oldCollection = CollectionSchema.parse({
+      ...currentCollection,
+      games: [
+        {
+          id: "game-1",
+          bggId: null,
+          name: "Poll-less Game",
+          yearPublished: null,
+          minPlayers: null,
+          maxPlayers: null,
+          bestPlayers: null,
+          playingTime: null,
+          imageUrl: null,
+          bggData: {
+            communityRating: 0,
+            bayesAverage: 0,
+            weight: null,
+            numWeightVotes: 0,
+            description: null,
+            mechanics: [],
+            categories: [],
+            families: [],
+            subdomains: [],
+            suggestedPlayerCounts: [],
+            bestPlayerCount: null,
+            fetchedAt: timestamp,
+          },
+          numPlays: null,
+          ownership: "owned",
+          boxDimensions: null,
+          manualShelfId: null,
+          ratings: {},
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        },
+      ],
+    });
+
+    expect(oldCollection.games[0]?.bestPlayers).toBeNull();
+    expect(oldCollection.games[0]?.bggData?.bestPlayerCount).toBeNull();
+  });
+
   test("keeps persisted structural validation separate from mutation curve semantics", () => {
     const historicalCurve: DerivedAxis<"communityRating"> = {
       ...communityRatingAxis(),
@@ -631,7 +712,7 @@ describe("current persisted collection validation", () => {
   });
 
   test("rejects future versions and extra persisted fields", () => {
-    expect(CollectionSchema.safeParse({ ...currentCollection, schemaVersion: 2 }).success).toBe(
+    expect(CollectionSchema.safeParse({ ...currentCollection, schemaVersion: 3 }).success).toBe(
       false,
     );
     expect(CollectionSchema.safeParse({ ...currentCollection, unexpected: true }).success).toBe(

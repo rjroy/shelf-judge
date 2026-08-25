@@ -60,6 +60,8 @@ describe("GameService BGG Integration", () => {
       expect(game.yearPublished).toBe(2019);
       expect(game.minPlayers).toBe(1);
       expect(game.maxPlayers).toBe(5);
+      expect(game.bggData!.bestPlayerCount).toBe(3);
+      expect(game.bestPlayers).toBe(3);
     });
 
     test("adds game with warning when BGG unavailable", async () => {
@@ -124,6 +126,9 @@ describe("GameService BGG Integration", () => {
       );
       expect(complexityAxis).toBeDefined();
       await gameService.rateGame(game.id, { [complexityAxis!.id]: 7 });
+      const beforeRefresh = await storageService.loadCollection();
+      beforeRefresh.games[0].bestPlayers = null;
+      await storageService.saveCollection(beforeRefresh);
 
       // Refresh: second fetch
       mockFetch.enqueue(200, thingXml);
@@ -132,6 +137,8 @@ describe("GameService BGG Integration", () => {
       // bggData should be updated (fetchedAt changed)
       expect(refreshed.bggData).not.toBeNull();
       expect(refreshed.bggData!.communityRating).toBe(8.00153);
+      expect(refreshed.bggData!.bestPlayerCount).toBe(3);
+      expect(refreshed.bestPlayers).toBe(3);
 
       // User override should be preserved
       expect(refreshed.ratings[complexityAxis!.id]).toBe(7);

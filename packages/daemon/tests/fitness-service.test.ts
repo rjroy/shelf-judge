@@ -24,6 +24,7 @@ function bgg(overrides: Partial<BggGameData> = {}): BggGameData {
     families: [],
     subdomains: [],
     suggestedPlayerCounts: [],
+    bestPlayerCount: null,
     fetchedAt: now,
     ...overrides,
   };
@@ -37,6 +38,7 @@ function game(ratings: Record<string, number> = {}, overrides: Partial<Game> = {
     yearPublished: null,
     minPlayers: null,
     maxPlayers: null,
+    bestPlayers: null,
     playingTime: null,
     imageUrl: null,
     bggData: null,

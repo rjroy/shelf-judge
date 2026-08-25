@@ -263,7 +263,7 @@ describe("AxesPage production workflows", () => {
 
     click(
       page,
-      "Player Count FitChecks a target player count against the publisher-declared player range.",
+      "Player Count FitScores a target player count using BGG suggested-player-count poll data, falling back to publisher bounds.",
     );
     page = renderPage();
     const selectedPlayerTemplate = findElement(
@@ -284,7 +284,7 @@ describe("AxesPage production workflows", () => {
     page = renderPage();
     click(
       page,
-      "Player Count FitChecks a target player count against the publisher-declared player range.",
+      "Player Count FitScores a target player count using BGG suggested-player-count poll data, falling back to publisher bounds.",
     );
     page = renderPage();
     changeInput(page, "create-axis-configuration-targetPlayerCount", "1");
@@ -429,7 +429,7 @@ describe("AxesPage production workflows", () => {
     page = renderPage();
     click(
       page,
-      "Player Count FitChecks a target player count against the publisher-declared player range.",
+      "Player Count FitScores a target player count using BGG suggested-player-count poll data, falling back to publisher bounds.",
     );
     page = renderPage();
     changeInput(page, "create-axis-configuration-targetPlayerCount", "100");
@@ -486,7 +486,7 @@ describe("AxesPage production workflows", () => {
     page = renderPage();
     click(
       page,
-      "Player Count FitChecks a target player count against the publisher-declared player range.",
+      "Player Count FitScores a target player count using BGG suggested-player-count poll data, falling back to publisher bounds.",
     );
     page = renderPage();
     submitCreate(page);
@@ -534,7 +534,7 @@ describe("AxesPage production workflows", () => {
     page = renderPage();
     click(
       page,
-      "Player Count FitChecks a target player count against the publisher-declared player range.",
+      "Player Count FitScores a target player count using BGG suggested-player-count poll data, falling back to publisher bounds.",
     );
     page = renderPage();
     submitCreate(page);

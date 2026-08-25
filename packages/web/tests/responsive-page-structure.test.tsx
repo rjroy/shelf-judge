@@ -13,6 +13,7 @@ void mock.module("@/lib/api", () => ({
         yearPublished: 2026,
         minPlayers: 1,
         maxPlayers: 4,
+        bestPlayers: null,
         playingTime: 90,
         numPlays: 0,
         boxDimensions: null,

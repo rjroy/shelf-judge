@@ -167,7 +167,7 @@ function projectWeight(game: Game): number | null {
   return game.bggData?.weight ?? null;
 }
 
-function projectPlayerCountRange(game: Game): number | null {
+function projectPlayerCountMean(game: Game): number | null {
   const minimum = game.minPlayers;
   const maximum = game.maxPlayers;
   if (
@@ -181,7 +181,12 @@ function projectPlayerCountRange(game: Game): number | null {
   ) {
     return null;
   }
-  return maximum - minimum;
+  return (maximum + minimum) / 2;
+}
+
+function projectBestPlayerCount(game: Game): number | null {
+  const best = game.bestPlayers;
+  return best != null && Number.isFinite(best) && best > 0 ? best : projectPlayerCountMean(game);
 }
 
 function projectPlayingTime(game: Game): number | null {
@@ -368,11 +373,12 @@ export const DERIVED_AXIS_REGISTRY = {
     id: "playerCountFit",
     includedInFreshCollection: false,
     label: "Player Count Fit",
-    description: "Checks a target player count against the publisher-declared player range.",
-    provenance: "Publisher-declared minimum and maximum player count",
+    description:
+      "Scores a target player count using BGG suggested-player-count poll data, falling back to publisher bounds.",
+    provenance: "BoardGameGeek suggested-player-count poll with publisher-declared bounds fallback",
     unit: "fit score",
     missingValuePolicy:
-      "Missing when publisher player bounds are absent, nonfinite, nonpositive, or reversed.",
+      "Falls back to publisher bounds when poll data is unavailable; missing only when neither source is valid.",
     configurationSchema: targetPlayerCountSchema,
     configurationValidation: {
       field: "targetPlayerCount",
@@ -391,6 +397,16 @@ export const DERIVED_AXIS_REGISTRY = {
     defaultNativeScale: { min: 1, max: 10 },
     nativeScale: () => ({ min: 1, max: 10 }),
     resolve: (game, configuration) => {
+      const target = configuration.targetPlayerCount;
+      const best = game.bestPlayers;
+      if (best != null && Number.isFinite(best) && best > 0) {
+        // Best might be multiple votes, so consider it a valid range.
+        const minBest = Math.floor(best);
+        const maxBest = Math.ceil(best);
+        const penalty = 2 * Math.min(Math.abs(target - minBest), Math.abs(target - maxBest));
+        const value = Math.min(10, Math.max(1, 10 - penalty));
+        return { sourceValue: value, scoringRawValue: value };
+      }
       const minimum = game.minPlayers;
       const maximum = game.maxPlayers;
       if (
@@ -404,7 +420,6 @@ export const DERIVED_AXIS_REGISTRY = {
       ) {
         return null;
       }
-      const target = configuration.targetPlayerCount;
       const penalty =
         target >= minimum && target <= maximum
           ? Math.max(target - minimum, maximum - target)
@@ -413,12 +428,13 @@ export const DERIVED_AXIS_REGISTRY = {
       return { sourceValue: value, scoringRawValue: value };
     },
     suggestionAnalysis: {
-      attribute: "player count range",
-      projectValue: projectPlayerCountRange,
+      attribute: "best player count or publisher range midpoint",
+      projectValue: projectBestPlayerCount,
     },
     templateDefaults: {
       name: "Player Count Fit",
-      description: "Checks a target player count against the publisher-declared player range.",
+      description:
+        "Scores a target player count using BGG suggested-player-count poll data, falling back to publisher bounds.",
       weight: 50,
       preferenceShape: "higher-is-better",
       configuration: {},

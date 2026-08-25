@@ -122,6 +122,7 @@ describe("prediction routes", () => {
           families: [],
           subdomains: [],
           suggestedPlayerCounts: [],
+          bestPlayerCount: null,
           fetchedAt: new Date().toISOString(),
         },
       });
@@ -238,6 +239,7 @@ describe("prediction routes", () => {
               families: [],
               subdomains: [],
               suggestedPlayerCounts: [],
+              bestPlayerCount: null,
               fetchedAt: new Date().toISOString(),
             },
           }),
@@ -285,6 +287,7 @@ describe("prediction routes", () => {
         families: [],
         subdomains: [],
         suggestedPlayerCounts: [],
+        bestPlayerCount: null,
         fetchedAt: new Date().toISOString(),
       },
     });

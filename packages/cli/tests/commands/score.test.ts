@@ -113,7 +113,8 @@ const scoreGetData = {
       preferenceShape: "higher-is-better",
       curveAffected: false,
       unit: "fit score",
-      provenance: "Publisher-declared minimum and maximum player count",
+      provenance:
+        "BoardGameGeek suggested-player-count poll with publisher-declared bounds fallback",
       configurationSummary: "Target: 4 players",
       overridden: false,
       predictionConfidence: null,
@@ -142,7 +143,9 @@ describe("score get (rated game)", () => {
     expect(output).toContain("Wife will play it");
     expect(output).toContain("Player Count Fit");
     expect(output).toContain("Target: 4 players");
-    expect(output).toContain("Publisher-declared minimum and maximum player count");
+    expect(output).toContain(
+      "BoardGameGeek suggested-player-count poll with publisher-declared bounds fallback",
+    );
     expect(output).toContain("3.20");
     expect(output).toContain("1.00");
   });

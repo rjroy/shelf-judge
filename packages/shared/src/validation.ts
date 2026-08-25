@@ -23,7 +23,7 @@ import type {
   ToleranceLevel,
 } from "./types";
 
-export const CURRENT_COLLECTION_SCHEMA_VERSION = 1 as const;
+export const CURRENT_COLLECTION_SCHEMA_VERSION = 2 as const;
 
 const VetoConfigSchema = z.object({
   direction: z.enum(["below", "above"]),
@@ -467,7 +467,7 @@ const SuggestedPlayerCountSchema = z
     notRecommended: z.number().int().min(0),
   })
   .strict();
-const BggGameDataSchema = z
+export const BggGameDataSchema = z
   .object({
     communityRating: z.number(),
     bayesAverage: z.number(),
@@ -479,6 +479,7 @@ const BggGameDataSchema = z
     families: z.array(BggTagSchema),
     subdomains: z.array(BggTagSchema),
     suggestedPlayerCounts: z.array(SuggestedPlayerCountSchema),
+    bestPlayerCount: z.number().nullable().optional().default(null),
     fetchedAt: z.string(),
   })
   .strict();
@@ -498,6 +499,7 @@ export const GameSchema = z
     yearPublished: z.number().int().nullable(),
     minPlayers: z.number().int().nullable(),
     maxPlayers: z.number().int().nullable(),
+    bestPlayers: z.number().nullable().optional().default(null),
     playingTime: z.number().int().nullable(),
     imageUrl: z.string().nullable(),
     bggData: BggGameDataSchema.nullable(),
@@ -532,6 +534,7 @@ const AddGameBaseFields = {
   yearPublished: z.number().int().nullable().optional().default(null),
   minPlayers: z.number().int().min(1).nullable().optional().default(null),
   maxPlayers: z.number().int().min(1).nullable().optional().default(null),
+  bestPlayers: z.number().int().min(1).nullable().optional().default(null),
   playingTime: z.number().int().min(0).nullable().optional().default(null),
   imageUrl: z.string().url().nullable().optional().default(null),
   numPlays: z.number().int().min(0).nullable().optional().default(null),

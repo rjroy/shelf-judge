@@ -32,6 +32,7 @@ function makeGame(overrides: Partial<Game> = {}): Game {
     yearPublished: null,
     minPlayers: null,
     maxPlayers: null,
+    bestPlayers: null,
     playingTime: null,
     imageUrl: null,
     bggData: null,
@@ -175,6 +176,7 @@ describe("derived axis registry contract", () => {
         families: [],
         subdomains: [],
         suggestedPlayerCounts: [],
+        bestPlayerCount: null,
         fetchedAt: "2026-01-01T00:00:00Z",
       },
     });
@@ -196,7 +198,10 @@ describe("derived axis registry contract", () => {
     ).toEqual({
       communityRating: { attribute: "community rating", value: 7.5 },
       weight: { attribute: "BGG weight", value: 3 },
-      playerCountFit: { attribute: "player count range", value: 3 },
+      playerCountFit: {
+        attribute: "best player count or publisher range midpoint",
+        value: 3.5,
+      },
       playingTime: { attribute: "play time", value: 240 },
     });
   });
@@ -227,6 +232,24 @@ describe("derived axis registry contract", () => {
         invalidCode: AXIS_VALIDATION_CODES.INVALID_MAXIMUM_SCORING_TIME,
       },
     });
+  });
+
+  test("projects valid poll-derived best-player counts before publisher midpoint fallback", () => {
+    const projection = getDerivedSuggestionProjections().find(
+      ({ derivedField }) => derivedField === "playerCountFit",
+    );
+    expect(projection).toBeDefined();
+    if (projection === undefined) return;
+
+    expect(projection.projectValue(makeGame({ bestPlayers: 4 }))).toBe(4);
+    expect(
+      projection.projectValue(makeGame({ bestPlayers: null, minPlayers: 2, maxPlayers: 5 })),
+    ).toBe(3.5);
+    expect(
+      projection.projectValue(
+        makeGame({ bestPlayers: Number.NaN, minPlayers: null, maxPlayers: 5 }),
+      ),
+    ).toBeNull();
   });
 
   test("pins Community Rating metadata and current storage defaults", () => {
@@ -303,11 +326,13 @@ describe("derived axis registry contract", () => {
     }).toEqual({
       id: "playerCountFit",
       label: "Player Count Fit",
-      description: "Checks a target player count against the publisher-declared player range.",
-      provenance: "Publisher-declared minimum and maximum player count",
+      description:
+        "Scores a target player count using BGG suggested-player-count poll data, falling back to publisher bounds.",
+      provenance:
+        "BoardGameGeek suggested-player-count poll with publisher-declared bounds fallback",
       unit: "fit score",
       missingValuePolicy:
-        "Missing when publisher player bounds are absent, nonfinite, nonpositive, or reversed.",
+        "Falls back to publisher bounds when poll data is unavailable; missing only when neither source is valid.",
       nativeScaleDiscovery: { type: "fixed", min: 1, max: 10 },
       defaultNativeScale: { min: 1, max: 10 },
     });
@@ -322,7 +347,8 @@ describe("derived axis registry contract", () => {
     ]);
     expect(definition.templateDefaults).toEqual({
       name: "Player Count Fit",
-      description: "Checks a target player count against the publisher-declared player range.",
+      description:
+        "Scores a target player count using BGG suggested-player-count poll data, falling back to publisher bounds.",
       weight: 50,
       preferenceShape: "higher-is-better",
       configuration: {},
@@ -444,11 +470,13 @@ describe("derived axis registry contract", () => {
         {
           id: "playerCountFit",
           label: "Player Count Fit",
-          description: "Checks a target player count against the publisher-declared player range.",
-          provenance: "Publisher-declared minimum and maximum player count",
+          description:
+            "Scores a target player count using BGG suggested-player-count poll data, falling back to publisher bounds.",
+          provenance:
+            "BoardGameGeek suggested-player-count poll with publisher-declared bounds fallback",
           unit: "fit score",
           missingValuePolicy:
-            "Missing when publisher player bounds are absent, nonfinite, nonpositive, or reversed.",
+            "Falls back to publisher bounds when poll data is unavailable; missing only when neither source is valid.",
           nativeScaleDiscovery: { type: "fixed", min: 1, max: 10 },
           nativeScale: { min: 1, max: 10 },
           configuration: [
@@ -463,7 +491,7 @@ describe("derived axis registry contract", () => {
           template: {
             name: "Player Count Fit",
             description:
-              "Checks a target player count against the publisher-declared player range.",
+              "Scores a target player count using BGG suggested-player-count poll data, falling back to publisher bounds.",
             weight: 50,
             preferenceShape: "higher-is-better",
             configuration: {},
@@ -648,6 +676,7 @@ describe("derived value resolution", () => {
         families: [],
         subdomains: [],
         suggestedPlayerCounts: [],
+        bestPlayerCount: null,
         fetchedAt: "2026-01-01T00:00:00Z",
       },
     });
@@ -676,6 +705,48 @@ describe("derived value resolution", () => {
       sourceValue: expected,
       scoringRawValue: expected,
     });
+  });
+
+  test.each([
+    [4, 10],
+    [3, 8],
+    [5, 8],
+  ])("grades target 4 against integer best-player count %s", (bestPlayers, expected) => {
+    expect(resolveDerivedAxisValue(playerAxis, makeGame({ bestPlayers }))).toEqual({
+      sourceValue: expected,
+      scoringRawValue: expected,
+    });
+  });
+
+  test("defensively treats a fractional best-player count as its adjacent integer range", () => {
+    expect(resolveDerivedAxisValue(playerAxis, makeGame({ bestPlayers: 3.5 }))).toEqual({
+      sourceValue: 10,
+      scoringRawValue: 10,
+    });
+    expect(resolveDerivedAxisValue(playerAxis, makeGame({ bestPlayers: 2.5 }))).toEqual({
+      sourceValue: 8,
+      scoringRawValue: 8,
+    });
+  });
+
+  test("falls back to publisher bounds when best-player count is unavailable or malformed", () => {
+    for (const bestPlayers of [null, 0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(
+        resolveDerivedAxisValue(
+          playerAxis,
+          makeGame({ bestPlayers, minPlayers: 3, maxPlayers: 5 }),
+        ),
+      ).toEqual({ sourceValue: 9, scoringRawValue: 9 });
+    }
+  });
+
+  test("returns missing when both best-player count and publisher bounds are malformed", () => {
+    expect(
+      resolveDerivedAxisValue(
+        playerAxis,
+        makeGame({ bestPlayers: Number.NaN, minPlayers: 5, maxPlayers: 4 }),
+      ),
+    ).toBeNull();
   });
 
   test("grades target 100 within imported bounds above 100", () => {
@@ -786,7 +857,7 @@ describe("current-axis helpers", () => {
 
   test("supports an additive versioned persisted collection contract", () => {
     const collection: Collection = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       id: "collection",
       name: "Collection",
       axes: [personal, tournament, derived, disabled],
@@ -794,7 +865,7 @@ describe("current-axis helpers", () => {
       createdAt: "2026-01-01T00:00:00Z",
       updatedAt: "2026-01-01T00:00:00Z",
     };
-    expect(collection.schemaVersion).toBe(1);
+    expect(collection.schemaVersion).toBe(2);
     expect(collection.axes).toEqual([personal, tournament, derived, disabled]);
   });
 });

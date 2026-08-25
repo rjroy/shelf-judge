@@ -89,6 +89,7 @@ function makeGame(
     yearPublished: 2020,
     minPlayers: 2,
     maxPlayers: 4,
+    bestPlayers: null,
     playingTime: 60,
     numPlays: null,
     ownership: "owned",
@@ -108,6 +109,7 @@ function makeGame(
           families: [],
           subdomains: [],
           suggestedPlayerCounts: [],
+          bestPlayerCount: null,
           fetchedAt: now,
         }
       : null,
@@ -118,7 +120,7 @@ function makeGame(
 
 function makeCollection(games: Game[], axes: Axis[]): Collection {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: "test-col",
     name: "Test Collection",
     axes,
@@ -297,7 +299,7 @@ describe("prediction-service", () => {
         ...(vector.personalAxes ?? []),
       ];
       expect(vector).toEqual(baselineVector);
-      expect(flattenedVector).toHaveLength(8);
+      expect(flattenedVector).toHaveLength(9);
       expect(flattenedVector.every(Number.isFinite)).toBe(true);
 
       expect(requireRow(playerCountAxis.id)).toMatchObject({
@@ -643,6 +645,7 @@ describe("prediction-service", () => {
       families: [],
       subdomains: [],
       suggestedPlayerCounts: [],
+      bestPlayerCount: null,
       fetchedAt: now,
     });
 
@@ -674,7 +677,9 @@ describe("prediction-service", () => {
 
     test("returns prediction for a game not in collection", async () => {
       const collection = buildRatedCollection(6);
-      const bggClient = createStubBggClient(makeBggResult("New Game"));
+      const bggData = makeBggData();
+      bggData.bestPlayerCount = 3;
+      const bggClient = createStubBggClient(makeBggResult("New Game", bggData));
 
       const service = createPredictionService({
         storageService: createStubStorage(collection),
@@ -687,6 +692,7 @@ describe("prediction-service", () => {
       expect(result.game.id).toBe("preview-99999");
       expect(result.game.name).toBe("New Game");
       expect(result.game.bggId).toBe(99999);
+      expect(result.game.bestPlayers).toBe(3);
       expect(result.score).toBeDefined();
       // Temporary game has no ratings, so all personal axes should be predicted
       const themeEntry = result.score.breakdown.find((e) => e.axisId === "theme");

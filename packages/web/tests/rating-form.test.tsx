@@ -381,7 +381,8 @@ describe("RatingForm rendered workflows", () => {
           sourceValue: 10,
           scoringRawValue: 10,
           unit: "fit score",
-          provenance: "Publisher-declared minimum and maximum player count",
+          provenance:
+            "BoardGameGeek suggested-player-count poll with publisher-declared bounds fallback",
           preferenceShape: "higher-is-better",
           curveAffected: false,
           configurationSummary: "Target: 4 players",
@@ -417,7 +418,9 @@ describe("RatingForm rendered workflows", () => {
     const renderedText = text(form);
 
     expect(renderedText).toContain("Target: 4 players");
-    expect(renderedText).toContain("Publisher-declared minimum and maximum player count");
+    expect(renderedText).toContain(
+      "BoardGameGeek suggested-player-count poll with publisher-declared bounds fallback",
+    );
     expect(renderedText).toContain("Scoring cap: 240 minutes");
     expect(renderedText).toContain("Publisher-listed playing time imported from BoardGameGeek");
   });

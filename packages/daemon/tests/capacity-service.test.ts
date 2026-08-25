@@ -34,6 +34,7 @@ function makeGame(
     yearPublished: null,
     minPlayers: opts.minPlayers ?? null,
     maxPlayers: opts.maxPlayers ?? null,
+    bestPlayers: null,
     playingTime: opts.playingTime ?? null,
     imageUrl: null,
     bggData: null,
@@ -74,7 +75,7 @@ function createMockStorage(units: ShelfUnit[], axes?: Axis[]): StorageService {
     saveShelfConfig: () => Promise.resolve(),
     loadCollection: () =>
       Promise.resolve({
-        schemaVersion: 1,
+        schemaVersion: 2,
         id: "mock",
         name: "Mock",
         games: [],

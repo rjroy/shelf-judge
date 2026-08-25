@@ -229,6 +229,7 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
         yearPublished: bggResult.metadata.yearPublished,
         minPlayers: bggResult.metadata.minPlayers,
         maxPlayers: bggResult.metadata.maxPlayers,
+        bestPlayers: bggResult.bggData.bestPlayerCount,
         playingTime: bggResult.metadata.playingTime,
         imageUrl: bggResult.metadata.imageUrl,
         numPlays: bggResult.collectionData?.numPlays ?? null,

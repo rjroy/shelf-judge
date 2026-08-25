@@ -30,6 +30,7 @@ describe("shared public surface (Phase 6 strike)", () => {
         yearPublished: null,
         minPlayers: null,
         maxPlayers: null,
+        bestPlayers: null,
         playingTime: null,
         imageUrl: null,
         numPlays: null,

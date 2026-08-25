@@ -20,6 +20,7 @@ export interface Vocabulary {
 export interface ContinuousRanges {
   minPlayers: { min: number; max: number };
   maxPlayers: { min: number; max: number };
+  bestPlayers: { min: number; max: number };
   playingTime: { min: number; max: number };
 }
 
@@ -36,6 +37,7 @@ export const FACTUAL_VECTOR_DIMENSIONS = [
   "communityRating",
   "minPlayers",
   "maxPlayers",
+  "bestPlayers",
   "playingTime",
 ] as const;
 
@@ -109,6 +111,8 @@ export function computeContinuousRanges(games: Game[]): ContinuousRanges {
     maxP = -Infinity;
   let minMP = Infinity,
     maxMP = -Infinity;
+  let minBP = Infinity,
+    maxBP = -Infinity;
   let minT = Infinity,
     maxT = -Infinity;
 
@@ -121,6 +125,10 @@ export function computeContinuousRanges(games: Game[]): ContinuousRanges {
       minMP = Math.min(minMP, g.maxPlayers);
       maxMP = Math.max(maxMP, g.maxPlayers);
     }
+    if (g.bestPlayers != null && Number.isFinite(g.bestPlayers)) {
+      minBP = Math.min(minBP, g.bestPlayers);
+      maxBP = Math.max(maxBP, g.bestPlayers);
+    }
     if (g.playingTime != null && Number.isFinite(g.playingTime)) {
       minT = Math.min(minT, g.playingTime);
       maxT = Math.max(maxT, g.playingTime);
@@ -130,6 +138,7 @@ export function computeContinuousRanges(games: Game[]): ContinuousRanges {
   return {
     minPlayers: { min: isFinite(minP) ? minP : 1, max: isFinite(maxP) ? maxP : 10 },
     maxPlayers: { min: isFinite(minMP) ? minMP : 1, max: isFinite(maxMP) ? maxMP : 10 },
+    bestPlayers: { min: isFinite(minBP) ? minBP : 1, max: isFinite(maxBP) ? maxBP : 10 },
     playingTime: { min: isFinite(minT) ? minT : 0, max: isFinite(maxT) ? maxT : 300 },
   };
 }
@@ -139,7 +148,7 @@ export function computeContinuousRanges(games: Game[]): ContinuousRanges {
  *
  * Binary portion: one bit per mechanic/category in the vocabulary.
  * Continuous portion: BGG weight (1-5), community rating (1-10),
- *   min players, max players, play time (normalized over observed ranges).
+ *   min players, max players, best players, play time (normalized over observed ranges).
  * Personal axes portion: axis ratings normalized 0-1 over 1-10.
  */
 export function encodeGame(
@@ -161,25 +170,28 @@ export function encodeGame(
 
   const binary = allTerms.map((term) => (gameTerms.has(term) ? 1 : 0));
 
-  // Continuous: weight (1-5), community rating (1-10), min players, max players, play time.
+  // Continuous: weight, community rating, min/max/best players, and play time.
   // Null values default to midpoint of their range.
+  const r = ranges ?? {
+    minPlayers: { min: 1, max: 10 },
+    maxPlayers: { min: 1, max: 10 },
+    bestPlayers: { min: 1, max: 10 },
+    playingTime: { min: 0, max: 300 },
+  };
+
   const weight = finiteOr(game.bggData?.weight, 2.5);
   const communityRating = finiteOr(game.bggData?.communityRating, 5.5);
   const minPlayers = finiteOr(game.minPlayers, 1);
   const maxPlayers = finiteOr(game.maxPlayers, 4);
+  const bestPlayers = finiteOr(game.bestPlayers, (r.bestPlayers.min + r.bestPlayers.max) / 2);
   const playingTime = finiteOr(game.playingTime, 60);
-
-  const r = ranges ?? {
-    minPlayers: { min: 1, max: 10 },
-    maxPlayers: { min: 1, max: 10 },
-    playingTime: { min: 0, max: 300 },
-  };
 
   const continuous = [
     normalize(weight, 1, 5),
     normalize(communityRating, 1, 10),
     normalize(minPlayers, r.minPlayers.min, r.minPlayers.max),
     normalize(maxPlayers, r.maxPlayers.min, r.maxPlayers.max),
+    normalize(bestPlayers, r.bestPlayers.min, r.bestPlayers.max),
     normalize(playingTime, r.playingTime.min, r.playingTime.max),
   ];
 

@@ -22,6 +22,7 @@ function game(overrides: Partial<Game> = {}): Game {
     yearPublished: null,
     minPlayers: null,
     maxPlayers: null,
+    bestPlayers: null,
     playingTime: null,
     imageUrl: null,
     bggData: null,
@@ -107,7 +108,8 @@ describe("derived fitness", () => {
           scoringRawValue: expected,
           effectiveRating: expected,
           unit: "fit score",
-          provenance: "Publisher-declared minimum and maximum player count",
+          provenance:
+            "BoardGameGeek suggested-player-count poll with publisher-declared bounds fallback",
           configurationSummary: `Target: ${targetPlayerCount} player${targetPlayerCount === 1 ? "" : "s"}`,
         });
       }
@@ -267,6 +269,7 @@ describe("derived fitness", () => {
           families: [],
           subdomains: [],
           suggestedPlayerCounts: [],
+          bestPlayerCount: null,
           fetchedAt: timestamp,
         },
       }),
@@ -336,6 +339,7 @@ describe("derived fitness", () => {
       families: [],
       subdomains: [],
       suggestedPlayerCounts: [],
+      bestPlayerCount: null,
       fetchedAt: timestamp,
     };
     const raw = {

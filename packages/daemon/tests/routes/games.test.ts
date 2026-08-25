@@ -53,6 +53,7 @@ const wingspanBggResult: BggGameResult = {
     families: [],
     subdomains: [],
     suggestedPlayerCounts: [],
+    bestPlayerCount: null,
     fetchedAt: new Date().toISOString(),
   },
 };
@@ -454,6 +455,7 @@ describe("Game Routes", () => {
         families: [],
         subdomains: [],
         suggestedPlayerCounts: [],
+        bestPlayerCount: null,
         fetchedAt: new Date().toISOString(),
       },
     });

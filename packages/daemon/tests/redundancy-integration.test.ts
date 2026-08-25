@@ -38,6 +38,7 @@ function makeBggData(
     families: [],
     subdomains: [],
     suggestedPlayerCounts: [],
+    bestPlayerCount: null,
     fetchedAt: now,
     ...overrides,
   };
@@ -56,6 +57,7 @@ function makeGame(
     yearPublished: 2020,
     minPlayers: 2,
     maxPlayers: 4,
+    bestPlayers: null,
     playingTime: 60,
     imageUrl: null,
     bggData,
@@ -122,7 +124,7 @@ const allGamesWithScores: GameWithScore[] = [
 ];
 
 const defaultCollection: Collection = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   id: "collection-1",
   name: "Test",
   axes: [

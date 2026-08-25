@@ -17,6 +17,7 @@ function makeGame(id: string, name: string): Game {
     yearPublished: 2020,
     minPlayers: 2,
     maxPlayers: 4,
+    bestPlayers: null,
     playingTime: 60,
     imageUrl: null,
     bggData: null,

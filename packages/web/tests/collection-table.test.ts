@@ -28,6 +28,7 @@ function makeGame(overrides: Partial<Game> = {}): Game {
     yearPublished: null,
     minPlayers: null,
     maxPlayers: null,
+    bestPlayers: null,
     playingTime: null,
     imageUrl: null,
     bggData: null,
@@ -122,6 +123,7 @@ function makeBggData(overrides: Partial<BggGameData> = {}): BggGameData {
     families: [],
     subdomains: [],
     suggestedPlayerCounts: [],
+    bestPlayerCount: null,
     fetchedAt: "2026-01-01T00:00:00Z",
     ...overrides,
   };
@@ -259,6 +261,7 @@ describe("sortGames", () => {
         categories: [],
         families: [],
         suggestedPlayerCounts: [],
+        bestPlayerCount: null,
         fetchedAt: "2026-01-01T00:00:00.000Z",
       },
     });
@@ -275,6 +278,7 @@ describe("sortGames", () => {
         categories: [],
         families: [],
         suggestedPlayerCounts: [],
+        bestPlayerCount: null,
         fetchedAt: "2026-01-01T00:00:00.000Z",
       },
     });
@@ -305,6 +309,7 @@ describe("sortGames", () => {
         recommended: number;
         notRecommended: number;
       }[],
+      bestPlayerCount: null,
       fetchedAt: "2026-01-01T00:00:00.000Z",
     });
     const g1 = makeGWS({ id: "1", name: "Light", bggData: makeBgg(1.5) });
@@ -686,6 +691,7 @@ describe("getScoreDisplay", () => {
         categories: [],
         families: [],
         suggestedPlayerCounts: [],
+        bestPlayerCount: null,
         fetchedAt: "2026-01-01T00:00:00.000Z",
       },
     },
@@ -796,6 +802,7 @@ describe("getScoreDisplay", () => {
         categories: [],
         families: [],
         suggestedPlayerCounts: [],
+        bestPlayerCount: null,
         fetchedAt: "2026-01-01T00:00:00.000Z",
       },
     });

@@ -64,6 +64,33 @@ function historicalCollection(
   };
 }
 
+function versionOneCollection(games: Record<string, unknown>[]): Record<string, unknown> {
+  const step = COLLECTION_MIGRATION_STEPS.find(({ fromVersion }) => fromVersion === 0);
+  if (step === undefined) throw new Error("Missing v0 collection migration");
+  const migrated = step.migrate(historicalCollection(), dependencies).data;
+  if (typeof migrated !== "object" || migrated === null) {
+    throw new Error("Invalid v1 migration fixture");
+  }
+  return { ...migrated, games };
+}
+
+function versionOneBggData(bestPlayerCount?: number | null): Record<string, unknown> {
+  return {
+    communityRating: 7.5,
+    bayesAverage: 7,
+    weight: 2.5,
+    numWeightVotes: 10,
+    description: null,
+    mechanics: [],
+    categories: [],
+    families: [],
+    subdomains: [],
+    suggestedPlayerCounts: [],
+    ...(bestPlayerCount === undefined ? {} : { bestPlayerCount }),
+    fetchedAt: NOW,
+  };
+}
+
 describe("migrateCollection", () => {
   test("preserves every score-relevant known-axis field, ID, and rating association", () => {
     const weight = legacyAxis({
@@ -214,6 +241,34 @@ describe("migrateCollection", () => {
     });
   });
 
+  test("migrates v1 best-player fields without changing axes or other game data", () => {
+    const axes = COLLECTION_MIGRATION_STEPS[0].migrate(historicalCollection(), dependencies).data;
+    if (typeof axes !== "object" || axes === null || !("axes" in axes)) {
+      throw new Error("Invalid v1 axes fixture");
+    }
+    const base = {
+      ...historicalGame({
+        ownership: "owned",
+        boxDimensions: null,
+        manualShelfId: null,
+      }),
+    };
+    const raw = versionOneCollection([
+      { ...base, bggData: versionOneBggData(3) },
+      { ...base, id: "game-2", bestPlayers: 4, bggData: versionOneBggData(3) },
+      { ...base, id: "game-3", bggData: versionOneBggData() },
+    ]);
+
+    const result = migrateCollection(raw, dependencies);
+
+    expect(result).toMatchObject({ migrated: true, sourceVersion: 1 });
+    expect(result.data.schemaVersion).toBe(2);
+    expect(result.data.axes).toEqual((axes as { axes: typeof result.data.axes }).axes);
+    expect(result.data.games.map(({ bestPlayers }) => bestPlayers)).toEqual([3, 4, null]);
+    expect(result.data.games.map((game) => game.bggData?.bestPlayerCount)).toEqual([3, 3, null]);
+    expect(JSON.stringify(result.data.games[0]?.ratings)).toBe(JSON.stringify(base.ratings));
+  });
+
   test("migrates the pinned historical game-shape fixture", async () => {
     const fixture: unknown = await Bun.file(
       new URL("../fixtures/collection-schema-v0-games.json", import.meta.url),
@@ -238,10 +293,13 @@ describe("migrateCollection", () => {
     ]);
   });
 
-  test("inserts Tournament once and is byte-stable on repeated migration", () => {
+  test("chains v0 through v2, inserts Tournament once, and is byte-stable at v2", () => {
     expect(
       COLLECTION_MIGRATION_STEPS.map(({ fromVersion, toVersion }) => ({ fromVersion, toVersion })),
-    ).toEqual([{ fromVersion: 0, toVersion: 1 }]);
+    ).toEqual([
+      { fromVersion: 0, toVersion: 1 },
+      { fromVersion: 1, toVersion: 2 },
+    ]);
     const first = migrateCollection(historicalCollection(), dependencies);
     expect(first.data.axes.filter((axis) => axis.source === "tournament")).toHaveLength(1);
 
@@ -254,8 +312,8 @@ describe("migrateCollection", () => {
     const current = migrateCollection(historicalCollection(), dependencies).data;
     expect(CollectionSchema.parse(migrateCollection(current, dependencies).data)).toEqual(current);
     expect(() => migrateCollection({ ...current, unexpected: true }, dependencies)).toThrow();
-    expect(() => migrateCollection({ ...current, schemaVersion: 2 }, dependencies)).toThrow(
-      "Unsupported collection schema version 2; current version is 1",
+    expect(() => migrateCollection({ ...current, schemaVersion: 3 }, dependencies)).toThrow(
+      "Unsupported collection schema version 3; current version is 2",
     );
     expect(() =>
       migrateCollection(

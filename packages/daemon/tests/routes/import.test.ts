@@ -81,6 +81,7 @@ describe("POST /api/import/bgg", () => {
         families: [],
         subdomains: [],
         suggestedPlayerCounts: [],
+        bestPlayerCount: 3,
         fetchedAt: new Date().toISOString(),
       },
     });
@@ -106,6 +107,7 @@ describe("POST /api/import/bgg", () => {
         families: [],
         subdomains: [],
         suggestedPlayerCounts: [],
+        bestPlayerCount: null,
         fetchedAt: new Date().toISOString(),
       },
     });
@@ -142,5 +144,10 @@ describe("POST /api/import/bgg", () => {
     expect(complete.imported).toBe(2);
     expect(complete.skipped).toBe(0);
     expect(complete.errors).toEqual([]);
+    const imported = await ctx.storageService.loadCollection();
+    expect(imported.games.find(({ bggId }) => bggId === 1)).toMatchObject({
+      bestPlayers: 3,
+      bggData: { bestPlayerCount: 3 },
+    });
   });
 });

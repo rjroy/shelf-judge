@@ -43,6 +43,7 @@ function game(id: string, rating: number): Collection["games"][number] {
     yearPublished: null,
     minPlayers: null,
     maxPlayers: null,
+    bestPlayers: null,
     playingTime: null,
     imageUrl: null,
     bggData: null,

@@ -21,6 +21,7 @@ function makeGame(bggId: number, name: string): Game {
     yearPublished: 2020,
     minPlayers: 2,
     maxPlayers: 4,
+    bestPlayers: null,
     playingTime: 60,
     imageUrl: `https://example.com/${bggId}.jpg`,
     numPlays: null,
@@ -35,6 +36,7 @@ function makeGame(bggId: number, name: string): Game {
       families: [],
       subdomains: [],
       suggestedPlayerCounts: [],
+      bestPlayerCount: null,
       fetchedAt: NOW,
     },
     ownership: "owned",
@@ -107,7 +109,7 @@ function createMockStorage(
 ): StorageService {
   let stored = structuredClone(wishlist);
   const coll: Collection = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: "coll-1",
     name: "Test",
     axes: [],

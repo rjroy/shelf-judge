@@ -1,11 +1,11 @@
 import {
   CURRENT_COLLECTION_SCHEMA_VERSION,
+  BggGameDataSchema,
   CollectionSchema,
   GameSchema,
   type Axis,
   type AxisBase,
   type Collection,
-  type Game,
   type DisabledLegacyAxis,
 } from "@shelf-judge/shared";
 import { z } from "zod";
@@ -73,11 +73,18 @@ const LegacyAxisSchema = z
 type LegacyAxisInput = z.output<typeof LegacyAxisSchema>;
 
 const HistoricalGameSchema = GameSchema.omit({
+  bestPlayers: true,
+  bggData: true,
   ownership: true,
   boxDimensions: true,
   manualShelfId: true,
 })
   .extend({
+    bestPlayers: z.number().nullable().optional(),
+    bggData: BggGameDataSchema.omit({ bestPlayerCount: true })
+      .extend({ bestPlayerCount: z.number().nullable().optional() })
+      .strict()
+      .nullable(),
     ownership: z.enum(["owned", "previously-owned"]).optional(),
     boxDimensions: z
       .object({
@@ -177,13 +184,13 @@ function migrateAxis(original: unknown): {
   return { axis: disableLegacyAxis(axis, original, reason), converted: false, disabled: true };
 }
 
-function backfillGame(game: z.output<typeof HistoricalGameSchema>): Game {
-  return GameSchema.parse({
+function backfillHistoricalGame(game: z.output<typeof HistoricalGameSchema>): unknown {
+  return {
     ...game,
     ownership: game.ownership ?? "owned",
     boxDimensions: game.boxDimensions ?? null,
     manualShelfId: game.manualShelfId ?? null,
-  });
+  };
 }
 
 function createTournamentAxis(dependencies: CollectionMigrationDependencies): Axis {
@@ -223,7 +230,7 @@ function migrateVersionZeroToOne(
       id: historical.id,
       name: historical.name,
       axes,
-      games: historical.games.map(backfillGame),
+      games: historical.games.map(backfillHistoricalGame),
       createdAt: historical.createdAt,
       updatedAt: dependencies.now(),
     },
@@ -232,11 +239,57 @@ function migrateVersionZeroToOne(
   };
 }
 
+const VersionOneGameSchema = GameSchema.omit({ bestPlayers: true, bggData: true })
+  .extend({
+    bestPlayers: z.number().nullable().optional(),
+    bggData: BggGameDataSchema.omit({ bestPlayerCount: true })
+      .extend({ bestPlayerCount: z.number().nullable().optional() })
+      .strict()
+      .nullable(),
+  })
+  .strict();
+
+const VersionOneCollectionSchema = CollectionSchema.omit({ schemaVersion: true, games: true })
+  .extend({
+    schemaVersion: z.literal(1),
+    games: z.array(VersionOneGameSchema),
+  })
+  .strict();
+
+function validBestPlayerCount(value: number | null | undefined): number | null {
+  return value != null && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function migrateVersionOneToTwo(raw: unknown): CollectionMigrationStepResult {
+  const historical = VersionOneCollectionSchema.parse(raw);
+  return {
+    data: {
+      ...historical,
+      schemaVersion: 2,
+      games: historical.games.map((game) => {
+        const bestPlayerCount = validBestPlayerCount(game.bggData?.bestPlayerCount);
+        return {
+          ...game,
+          bestPlayers: validBestPlayerCount(game.bestPlayers) ?? bestPlayerCount,
+          bggData: game.bggData === null ? null : { ...game.bggData, bestPlayerCount },
+        };
+      }),
+    },
+    convertedAxisCount: 0,
+    disabledAxisCount: 0,
+  };
+}
+
 export const COLLECTION_MIGRATION_STEPS: readonly CollectionMigrationStep[] = [
   {
     fromVersion: 0,
     toVersion: 1,
     migrate: migrateVersionZeroToOne,
+  },
+  {
+    fromVersion: 1,
+    toVersion: 2,
+    migrate: migrateVersionOneToTwo,
   },
 ];
 
