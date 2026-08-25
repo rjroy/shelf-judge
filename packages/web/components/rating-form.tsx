@@ -10,16 +10,19 @@ export function RatingForm({
   axes,
   currentRatings,
   predictionScore,
+  score,
 }: {
   gameId: string;
   axes: Axis[];
   currentRatings: Record<string, number>;
   predictionScore?: FitnessResult | null;
+  score?: FitnessResult | null;
 }) {
   const router = useRouter();
+  const editableAxes = axes.filter(isEditableRatingAxis);
   const [ratings, setRatings] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {};
-    for (const axis of axes) {
+    for (const axis of editableAxes) {
       if (currentRatings[axis.id] !== undefined) {
         initial[axis.id] = String(currentRatings[axis.id]);
       }
@@ -29,8 +32,11 @@ export function RatingForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const personalAxes = axes.filter((a) => a.enabled && a.source === "personal");
-  const derivedAxes = axes.filter((a) => a.enabled && a.source === "derived");
+  const personalAxes = editableAxes.filter((axis) => axis.source === "personal");
+  const derivedAxes = editableAxes.filter((axis) => axis.source === "derived");
+  const resolvedByAxis = new Map(
+    ((score ?? predictionScore)?.breakdown ?? []).map((entry) => [entry.axisId, entry]),
+  );
 
   const predictionHints = new Map<
     string,
@@ -57,25 +63,11 @@ export function RatingForm({
     setSaving(true);
     setError(null);
 
-    const numericRatings: Record<string, number | null> = {};
-    const invalidAxes: string[] = [];
-    for (const [axisId, value] of Object.entries(ratings)) {
-      if (value !== "") {
-        const num = parseInt(value, 10);
-        if (num >= 1 && num <= 10) {
-          numericRatings[axisId] = num;
-        } else {
-          const axis = axes.find((a) => a.id === axisId);
-          invalidAxes.push(axis?.name ?? axisId);
-        }
-      }
-    }
-
-    for (const axis of axes) {
-      if (currentRatings[axis.id] !== undefined && !(axis.id in numericRatings)) {
-        numericRatings[axis.id] = null;
-      }
-    }
+    const { ratings: numericRatings, invalidAxes } = buildRatingMutation(
+      editableAxes,
+      currentRatings,
+      ratings,
+    );
 
     if (invalidAxes.length > 0) {
       setError(`Ratings must be between 1 and 10: ${invalidAxes.join(", ")}`);
@@ -107,7 +99,7 @@ export function RatingForm({
 
   function handleCancel() {
     const initial: Record<string, string> = {};
-    for (const axis of axes) {
+    for (const axis of editableAxes) {
       if (currentRatings[axis.id] !== undefined) {
         initial[axis.id] = String(currentRatings[axis.id]);
       }
@@ -221,6 +213,8 @@ export function RatingForm({
 
             {derivedAxes.map((axis) => {
               const hasOverride = ratings[axis.id] !== undefined && ratings[axis.id] !== "";
+              const resolution = resolvedByAxis.get(axis.id);
+              const effectiveRating = resolution?.effectiveRating ?? null;
               return (
                 <div key={axis.id} className="rating-field">
                   <div className="rating-field-header">
@@ -231,12 +225,34 @@ export function RatingForm({
                     <div className="rating-field-weight">Weight: {axis.weight}</div>
                   </div>
                   {axis.description && <div className="rating-field-desc">{axis.description}</div>}
+                  <div className="derived-rating-facts">
+                    {resolution?.sourceValue === null || resolution === undefined ? (
+                      <span>Source metadata unavailable</span>
+                    ) : (
+                      <span>
+                        Published value: {resolution.sourceValue} {resolution.unit ?? ""}
+                      </span>
+                    )}
+                    {resolution &&
+                      resolution.scoringRawValue !== null &&
+                      resolution.sourceValue !== null &&
+                      resolution.scoringRawValue !== resolution.sourceValue && (
+                        <span>
+                          Scoring input: {resolution.scoringRawValue} {resolution.unit ?? ""}
+                        </span>
+                      )}
+                    {resolution?.provenance && <span>{resolution.provenance}</span>}
+                    {resolution?.configurationSummary && (
+                      <span>{resolution.configurationSummary}</span>
+                    )}
+                  </div>
                   {hasOverride ? (
                     <>
                       <div className="bgg-auto-value overridden">
-                        <span>Your override: {ratings[axis.id]}</span>
+                        <span>Stored override (1-10): {ratings[axis.id]}</span>
                         <span className="value">{ratings[axis.id]}</span>
-                        <span
+                        <button
+                          type="button"
                           className="override-link"
                           onClick={() => {
                             setRatings((prev) => {
@@ -246,8 +262,8 @@ export function RatingForm({
                             });
                           }}
                         >
-                          Revert to metadata &rsaquo;
-                        </span>
+                          Clear override &rsaquo;
+                        </button>
                       </div>
                       <div className="rating-input-row">
                         <input
@@ -270,24 +286,28 @@ export function RatingForm({
                     </>
                   ) : (
                     <div className="bgg-auto-value">
-                      <span>Auto-populated from game metadata</span>
-                      <span className="value">
-                        {currentRatings[axis.id] ?? "\u2014"}
-                        {currentRatings[axis.id] !== undefined &&
-                          getRatingLabel(currentRatings[axis.id]) && (
-                            <span
-                              style={{ fontSize: "0.85em", color: "#888", marginLeft: "0.4em" }}
-                            >
-                              {getRatingLabel(currentRatings[axis.id])}
-                            </span>
-                          )}
+                      <span>
+                        {effectiveRating === null
+                          ? "No effective rating from metadata"
+                          : "Effective rating (1-10)"}
                       </span>
-                      <span
+                      <span className="value">
+                        {effectiveRating ?? "\u2014"}
+                        {effectiveRating !== null && getRatingLabel(effectiveRating) && (
+                          <span style={{ fontSize: "0.85em", color: "#888", marginLeft: "0.4em" }}>
+                            {getRatingLabel(effectiveRating)}
+                          </span>
+                        )}
+                      </span>
+                      <button
+                        type="button"
                         className="override-link"
-                        onClick={() => handleChange(axis.id, String(currentRatings[axis.id] ?? 5))}
+                        onClick={() =>
+                          handleChange(axis.id, String(derivedOverrideDraft(effectiveRating)))
+                        }
                       >
                         Override &rsaquo;
-                      </span>
+                      </button>
                     </div>
                   )}
                 </div>
@@ -307,4 +327,36 @@ export function RatingForm({
       </div>
     </form>
   );
+}
+
+export function buildRatingMutation(
+  axes: Axis[],
+  currentRatings: Record<string, number>,
+  drafts: Record<string, string>,
+): { ratings: Record<string, number | null>; invalidAxes: string[] } {
+  const ratings: Record<string, number | null> = {};
+  const invalidAxes: string[] = [];
+  const editableAxes = axes.filter(isEditableRatingAxis);
+  const editableAxisById = new Map(editableAxes.map((axis) => [axis.id, axis]));
+  for (const [axisId, value] of Object.entries(drafts)) {
+    const axis = editableAxisById.get(axisId);
+    if (!axis) continue;
+    if (value === "") continue;
+    const rating = Number(value);
+    if (Number.isInteger(rating) && rating >= 1 && rating <= 10) ratings[axisId] = rating;
+    else invalidAxes.push(axis.name);
+  }
+  for (const axis of editableAxes) {
+    if (currentRatings[axis.id] !== undefined && !(axis.id in ratings)) ratings[axis.id] = null;
+  }
+  return { ratings, invalidAxes };
+}
+
+function isEditableRatingAxis(axis: Axis): boolean {
+  return axis.enabled && (axis.source === "personal" || axis.source === "derived");
+}
+
+function derivedOverrideDraft(effectiveRating: number | null): number {
+  if (effectiveRating === null || !Number.isFinite(effectiveRating)) return 5;
+  return Math.min(10, Math.max(1, Math.round(effectiveRating)));
 }

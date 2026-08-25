@@ -12,6 +12,7 @@ import {
   matchesFilters,
   getScoreDisplay,
   getSeparatorLabel,
+  buildSortFields,
   type FilterState,
 } from "@/lib/collection-utils";
 
@@ -447,6 +448,25 @@ describe("sortGames", () => {
     const tournamentValue = tournamentStats[byTournament[0].game.id]?.normalizedScore;
     expect(tournamentValue).toBe(2.0);
   });
+});
+
+test("disabled legacy axes are excluded from sort choices", () => {
+  const legacy: Axis = {
+    id: "legacy",
+    name: "Old field",
+    description: null,
+    weight: 50,
+    enabled: false,
+    source: "legacy",
+    reason: "unknown field",
+    legacyField: "old",
+    legacyPayload: {},
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+  };
+  const fields = buildSortFields([...AXES, legacy], false, false);
+  expect(fields.some((field) => field.id === "axis:fun")).toBe(true);
+  expect(fields.some((field) => field.id === "axis:legacy")).toBe(false);
 });
 
 // ---------------------------------------------------------------------------

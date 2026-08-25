@@ -486,6 +486,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
               gameId={game.id}
               axes={axes}
               currentRatings={game.ratings}
+              score={score}
               predictionScore={hasPredictions ? displayScore : null}
             />
             <OwnershipActions gameId={game.id} gameName={game.name} ownership={game.ownership} />

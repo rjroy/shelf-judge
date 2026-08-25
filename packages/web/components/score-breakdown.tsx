@@ -39,6 +39,9 @@ export function ScoreBreakdown({
   const excludedCount = score.breakdown.filter(
     (e) => e.source === "predicted" && e.predictionConfidence === "insufficient",
   ).length;
+  const vetoUnit = score.vetoedBy
+    ? score.breakdown.find((entry) => entry.axisId === score.vetoedBy?.axisId)?.unit
+    : null;
 
   return (
     <>
@@ -47,8 +50,9 @@ export function ScoreBreakdown({
         <div className="veto-banner">
           <div className="veto-banner-title">VETOED</div>
           <div className="veto-banner-detail">
-            <strong>{score.vetoedBy.axisName}</strong> scored {score.vetoedBy.rawValue.toFixed(1)}{" "}
-            (threshold: {score.vetoedBy.direction} {score.vetoedBy.threshold})
+            <strong>{score.vetoedBy.axisName}</strong> scored{" "}
+            {formatValue(score.vetoedBy.rawValue, vetoUnit)} (threshold: {score.vetoedBy.direction}{" "}
+            {formatValue(score.vetoedBy.threshold, vetoUnit)})
           </div>
           {score.hypotheticalScore !== null && (
             <div className="veto-banner-hypothetical">
@@ -62,8 +66,8 @@ export function ScoreBreakdown({
         <thead>
           <tr>
             <th>Axis</th>
-            <th className="right">Raw</th>
-            <th className="right">Effective</th>
+            <th className="right">Scoring Input</th>
+            <th className="right">Effective (1-10)</th>
             <th className="right">Weight</th>
             <th className="right">Contribution</th>
             <th className="right">Source</th>
@@ -173,10 +177,8 @@ function BreakdownRow({
       ? Math.round((entry.contribution / displayScore) * 100)
       : null;
 
-  const showRaw =
-    entry.scoringRawValue !== null &&
-    entry.effectiveRating !== null &&
-    Math.abs(entry.scoringRawValue - entry.effectiveRating) > 0.05;
+  const hasFactualDetails =
+    entry.derivedField != null || (entry.overridden && entry.sourceValue != null);
 
   return (
     <>
@@ -195,15 +197,25 @@ function BreakdownRow({
               onClick={() => setExpanded((v) => !v)}
             />
           )}
-          {entry.overridden && entry.sourceValue !== null && (
-            <div className="breakdown-override-detail">
-              Metadata: {entry.sourceValue.toFixed(1)} {entry.unit ?? ""}
+          {hasFactualDetails && (
+            <div className="breakdown-derived-details">
+              <span>Published: {formatValue(entry.sourceValue, entry.unit)}</span>
+              {entry.sourceValue !== entry.scoringRawValue && entry.scoringRawValue != null && (
+                <span>Capped scoring input: {formatValue(entry.scoringRawValue, entry.unit)}</span>
+              )}
+              {entry.overridden && (
+                <span className="breakdown-override-detail">Personal override applied</span>
+              )}
+              {entry.provenance && <span>Provenance: {entry.provenance}</span>}
+              {entry.configurationSummary && (
+                <span>Configuration: {entry.configurationSummary}</span>
+              )}
             </div>
           )}
         </td>
         <td className="right breakdown-raw">
-          {showRaw && entry.scoringRawValue !== null ? (
-            `${entry.scoringRawValue.toFixed(1)}${entry.unit ? ` ${entry.unit}` : ""}`
+          {entry.scoringRawValue != null ? (
+            formatValue(entry.scoringRawValue, entry.unit)
           ) : (
             <span className="breakdown-dash">&mdash;</span>
           )}
@@ -255,6 +267,11 @@ function BreakdownRow({
       )}
     </>
   );
+}
+
+function formatValue(value: number | null | undefined, unit: string | null | undefined): string {
+  if (value == null) return "Missing";
+  return `${Number.isInteger(value) ? value : value.toFixed(1)}${unit ? ` ${unit}` : ""}`;
 }
 
 function ConfidenceBadge({

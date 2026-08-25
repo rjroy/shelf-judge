@@ -1,10 +1,11 @@
 ---
 title: "Implementation notes: derived game-metadata axes"
 date: 2026-08-24
-status: complete
-tags: [implementation, notes, derived-axes]
+status: in_progress
+tags: [implementation, notes, derived-axes, web]
 source: .lore/work/plans/derived-game-metadata-axes.md
-modules: [shared, daemon]
+modules: [shared, daemon, web, cli]
+related: [.lore/work/specs/derived-bgg-axes.md]
 ---
 
 # Implementation notes: derived game-metadata axes
@@ -82,3 +83,44 @@ modules: [shared, daemon]
 - 2026-08-24: A final web wording follow-up found the stage-zero search preview still rendered `BGG-derived score` after the CLI had moved to generic terminology. The preview now renders `Available-data score`, with focused page coverage and a production-wide source audit preventing the obsolete score wording from returning.
 - 2026-08-24: The web wording follow-up passed its two focused tests with 119 assertions across 117 production TypeScript files, root typecheck and lint, the full 1,468-test suite with 1 skipped, the production web build, changed-file formatting, and `git diff --check`.
 - 2026-08-24: Final holistic validation for `shelf-judge-2bb.6` found no remaining issues. Root typecheck, lint, and production build passed; full tests completed with 1,467 passing and 1 skipped; test declarations increased to 1,433 from 1,381 at `HEAD`; all changed files passed Prettier and `git diff --check`; and root `format:check` fails only for the unchanged 42-file baseline. The approved override divergence remains: valid community/weight curves apply to personal overrides, while native-unit configurations incompatible with the personal 1-10 scale use the override directly; both paths bypass derived vetoes and retain available factual values. Discovery-driven client creation, configuration, and repair workflows remain in the residual scope of `.7` and `.8`. All runtime phases and holistic validation are complete.
+
+## Step 7 web progress
+
+- [x] Discovery-driven personal and derived template creation
+- [x] Generic derived configuration and native-unit curve editing
+- [x] Disabled legacy repair and deletion workflows
+- [x] Derived override, breakdown, and profile presentation
+- [x] Focused web tests, lint, formatting, and diff checks
+- [ ] Step 8 CLI workflows
+- [ ] Step 9 cross-package regression coverage
+- [ ] Step 10 final broad validation
+
+## Step 7 implementation log
+
+- 2026-08-24: Added a typed web adapter for discovery template drafts, configuration-bound native scales, derived create payloads, and structured validation errors.
+- 2026-08-24: Axis management now fetches `/api/daemon/axes/derived-fields`, renders personal creation plus every discovered derived template, keeps duplicate creation unrestricted, and has no production derived-field ID list.
+- 2026-08-24: Generic integer configuration controls use discovered requirements, defaults, and bounds. Derived updates and repairs submit configuration, curve, numeric tolerance, and veto atomically, with minute-aware controls and live configuration-bound scales.
+- 2026-08-24: Disabled legacy cards show reason, preserved identifier/payload, retained override count and warning, discovery-driven repair controls, and deletion.
+- 2026-08-24: Rating cards resolve factual and effective display values from score breakdowns while `game.ratings` remains the editable 1-10 override store. Clears use `null`; stored override and effective rating are labeled separately to preserve the approved curve-compatible override semantics.
+- 2026-08-24: Breakdown rows distinguish published facts, capped scoring inputs, effective ratings, overrides, units, provenance, and configuration. Essential details stay in the first table column on mobile.
+- 2026-08-24: Profile histograms explicitly identify effective 1-10 ratings. Utility declarations show native scale, unit, provenance, configuration, and numeric tolerance width. Disabled legacy axes no longer appear in collection sort choices.
+- 2026-08-24: Focused web validation passed 96 tests with 194 assertions. Changed-file ESLint, Prettier, and `git diff --check` passed. The web TypeScript project still reports pre-existing Bun-global configuration and stale fixture errors; no changed production web errors remained. Broad final validation was intentionally not run.
+- 2026-08-24: Step 7 validation exposed a legacy breakdown regression in `game-links.test.tsx`: omitted derived metadata passed null-only presence checks, causing `formatValue` to call `toFixed` on `undefined`. Corrected factual and scoring-input checks to treat both `null` and omission as absent while preserving zero-valued facts, and added focused legacy/zero-value regression coverage. The formerly failing test and all 15 score-breakdown tests pass; changed-file ESLint, Prettier, and diff checks pass.
+- 2026-08-24: Step 7 review corrections restrict rating drafts, validation, submission, and null-clearing to enabled personal and derived axes, so preserved disabled legacy ratings never re-enter mutation payloads. Derived Override now rounds fractional effective ratings to the nearest integer, with half values rounding upward and the result clamped to 1-10; existing stored overrides remain displayed unchanged.
+- 2026-08-24: Structured `idealValue`, `toleranceWidth`, and veto-threshold errors now render beside their controls in create, derived-update, and legacy-repair forms while the summary banner remains. Veto labels and hints use the discovered native unit, including minutes for Play Time, without field-ID branching.
+- 2026-08-24: Replaced rating and management source-inspection acceptance tests with rendered production-component and interaction coverage for disabled legacy exclusion, fractional override submission, supported null clearing, derived update and legacy repair controls/actions, structured errors, and discovery-provided units. Focused validation passed 28 tests with 86 assertions; changed-file ESLint, Prettier, production web build, and `git diff --check` passed. The standalone web TypeScript command remains blocked by its documented Bun-global and stale-fixture baseline; the production build TypeScript check passes.
+- 2026-08-24: Step 7 re-review corrections route create, newly enabled update, and every veto-bearing legacy repair through one explicit confirmation with the selected discovery field's native unit. Confirmed repairs proceed and cancelled repairs cannot invoke the repair request callback. Persisted ideal/veto summaries now include the discovery unit without derived-field branching.
+- 2026-08-24: Rating-form derived facts now render the breakdown-owned configuration summary alongside provenance, exposing Player Count Fit targets and Play Time scoring caps. Rendered tests pin both configurations/provenances, unit-bearing persisted summaries and confirmations, and confirmed/cancelled repair interactions.
+- 2026-08-24: Re-review validation passed 32 focused web tests with 97 assertions, changed-file ESLint and Prettier checks, the production web build including TypeScript, and `git diff --check`. A final source audit confirmed create, update, and repair all use the shared unit-aware veto confirmation and no bare confirmation wording remains.
+- 2026-08-24: The user explicitly authorized one additional full correction cycle for `shelf-judge-2bb.7` and required every final review finding to be resolved without closing the bead, committing, pushing, or modifying unrelated `.beads` changes.
+- 2026-08-24: Veto banners and profile curve declarations now qualify native source, threshold, and ideal values through generic unit-aware formatting while preserving unitless output. Derived Override and Clear override controls are native buttons with the existing visual treatment.
+- 2026-08-24: Axis management now exposes template selection with `aria-pressed` and gives create, edit, and repair controls context-stable IDs. Structured configuration, ideal, tolerance-width, and veto errors set `aria-invalid` and point to their rendered messages with `aria-describedby`.
+- 2026-08-24: Added stateful tests around the production `AxesPage` discovery and request workflows. Coverage creates Player Count Fit twice at both target boundaries, creates Play Time at its cap boundary, updates both fields, repairs and deletes legacy data, checks structured server errors, and asserts request bodies rather than source text.
+- 2026-08-24: Expanded rendered `RatingForm` interaction coverage for Player Count Fit and Play Time through override entry, mutation, persisted display, and null clearing. The Player Count Fit case submits successfully with missing factual metadata, and both semantic button actions are exercised through their rendered click handlers.
+- 2026-08-24: Added browser-free responsive smoke coverage that renders the production game-detail shell and verifies its responsive structure plus the existing game-detail and axes media-query contracts. The repository has no DOM viewport or browser runner, so pixel layout, overflow, focus traversal, and actual mobile/desktop viewport behavior remain an explicit environmental residual rather than a claimed browser verification.
+- 2026-08-24: Final correction validation passed 39 focused web tests with 143 assertions, root typecheck and lint, the full suite with 1,491 passing and 1 skipped, the production Next.js build including TypeScript, changed-file Prettier checks, and `git diff --check`. The bead remains open and no commit, push, Beads sync, or unrelated `.beads` edit was performed, as explicitly required.
+- 2026-08-24: Final review follow-up clears shared structured form errors at every create, edit, and repair start, cancel, selection, and submission boundary. A rendered interaction regression now rejects a create request, opens the derived editor with the same configuration field, and verifies that neither the summary nor field-level accessibility error state leaks into the edit workflow.
+- 2026-08-24: The final review follow-up passed all 5 rendered axis workflow tests with 21 assertions, changed-file ESLint and Prettier checks, the production Next.js build including TypeScript, and `git diff --check`.
+- 2026-08-24: Replaced the shared axis-management error fields and mutation banner with form errors keyed by `create`, `update:<axisId>`, and `repair:<axisId>`. Every create, personal/derived/Tournament update, and legacy repair form now receives only its own summary and structured field map, so concurrent forms cannot consume another request's response while server and network fallback summaries remain local and visible.
+- 2026-08-24: Each form scope now has a monotonic request generation. Submission, cancellation, template/repair-field selection, axis switching, and success invalidate the relevant generation; late responses check their captured generation before setting errors, closing a form, or reloading data. This prevents a cancelled request from repopulating the same scope after reopening, rather than relying on transition resets.
+- 2026-08-24: Added deferred-response regressions for late create-to-edit isolation, cancelled update reopening, and out-of-order update/repair failures with distinct structured fields and summaries. Focused axis validation passed 18 tests with 73 assertions; repository lint and shared/daemon/CLI typechecking passed; changed-file Prettier passed; and the production Next.js build passed its TypeScript gate.

@@ -50,7 +50,7 @@ export function buildSortFields(
     if ((f.id === "bggRating" || f.id === "bggWeight") && !hasBggData) return false;
     return true;
   });
-  for (const axis of axes) {
+  for (const axis of axes.filter((candidate) => candidate.enabled)) {
     fields.push({
       id: `axis:${axis.id}`,
       label: axis.name,
@@ -301,7 +301,7 @@ export function getScoreDisplay(
       if (val == null) return { text: "no penalty", className: "score-unrated" };
       return {
         text: val.toFixed(1),
-        className: "score-value"
+        className: "score-value",
       };
     }
     case "tournament": {

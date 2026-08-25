@@ -95,13 +95,19 @@ function makeResult(entries: FitnessBreakdownEntry[]): FitnessResult {
 describe("BreakdownRow — rating interpretation labels", () => {
   test("rated entry with rating 8 renders 'Recommended' in the row", () => {
     const entry = makeEntry({ effectiveRating: 8, contribution: 5.6 });
-    const html = renderToString(<ScoreBreakdown score={makeResult([entry])} />);
+    const html = renderToString(<ScoreBreakdown score={makeResult([entry])} />).replaceAll(
+      "<!-- -->",
+      "",
+    );
     expect(html).toContain("Recommended");
   });
 
   test("rated entry with rating null renders em-dash and no label", () => {
     const entry = makeEntry({ effectiveRating: null });
-    const html = renderToString(<ScoreBreakdown score={makeResult([entry])} />);
+    const html = renderToString(<ScoreBreakdown score={makeResult([entry])} />).replaceAll(
+      "<!-- -->",
+      "",
+    );
     // em-dash unicode entity renders as the character itself in renderToString
     expect(html).toContain("\u2014");
     // None of the label strings should appear
@@ -130,7 +136,10 @@ describe("BreakdownRow — rating interpretation labels", () => {
       effectiveRating: 6,
       contribution: 4.2,
     });
-    const html = renderToString(<ScoreBreakdown score={makeResult([entry])} />);
+    const html = renderToString(<ScoreBreakdown score={makeResult([entry])} />).replaceAll(
+      "<!-- -->",
+      "",
+    );
     expect(html).toContain("breakdown-override-detail");
     expect(html).toContain("5.8");
     expect(html).toContain("Good");
@@ -142,7 +151,10 @@ describe("BreakdownRow — rating interpretation labels", () => {
       effectiveRating: 7,
       contribution: 4.9,
     });
-    const html = renderToString(<ScoreBreakdown score={makeResult([entry])} />);
+    const html = renderToString(<ScoreBreakdown score={makeResult([entry])} />).replaceAll(
+      "<!-- -->",
+      "",
+    );
     expect(html).toContain("Very Good");
   });
 
@@ -158,5 +170,139 @@ describe("BreakdownRow — rating interpretation labels", () => {
     expect(html).toContain("breakdown-override-detail");
     expect(html).toContain("5.4");
     expect(html).toContain("Fine");
+  });
+});
+
+describe("BreakdownRow derived facts", () => {
+  test("qualifies derived veto values with the breakdown unit", () => {
+    const entry = makeEntry({
+      axisId: "duration",
+      axisName: "Duration",
+      source: "derived",
+      derivedField: "playingTime",
+      sourceValue: 200,
+      scoringRawValue: 180,
+      effectiveRating: 3,
+      unit: "minutes",
+    });
+    const result = makeResult([entry]);
+    result.vetoed = true;
+    result.vetoedBy = {
+      axisId: entry.axisId,
+      axisName: entry.axisName,
+      rawValue: 180,
+      direction: "above",
+      threshold: 150,
+    };
+    result.hypotheticalScore = 3;
+
+    const html = renderToString(<ScoreBreakdown score={result} />).replaceAll("<!-- -->", "");
+
+    expect(html).toContain("scored 180 minutes (threshold: above 150 minutes)");
+  });
+
+  test("preserves unitless veto values", () => {
+    const entry = makeEntry({ effectiveRating: 2 });
+    const result = makeResult([entry]);
+    result.vetoed = true;
+    result.vetoedBy = {
+      axisId: entry.axisId,
+      axisName: entry.axisName,
+      rawValue: 2,
+      direction: "below",
+      threshold: 3,
+    };
+    result.hypotheticalScore = 2;
+
+    const html = renderToString(<ScoreBreakdown score={result} />).replaceAll("<!-- -->", "");
+
+    expect(html).toContain("scored 2 (threshold: below 3)");
+  });
+
+  test("renders legacy entries with omitted derived metadata safely", () => {
+    const legacyEntry = {
+      axisId: "legacy-fun",
+      axisName: "Fun",
+      weight: 10,
+      contribution: 7,
+      source: "personal",
+      sourceValue: null,
+      effectiveRating: 7,
+      preferenceShape: "higher-is-better",
+      curveAffected: false,
+      predictionConfidence: null,
+      referenceGames: null,
+    } as FitnessBreakdownEntry;
+
+    const html = renderToString(<ScoreBreakdown score={makeResult([legacyEntry])} />);
+
+    expect(html).toContain("Fun");
+    expect(html).toContain("Very Good");
+    expect(html).not.toContain("breakdown-derived-details");
+  });
+
+  test("preserves zero-valued derived facts and scoring inputs", () => {
+    const entry = makeEntry({
+      source: "derived",
+      derivedField: "communityRating",
+      sourceValue: 0,
+      scoringRawValue: 0,
+      effectiveRating: 0,
+      unit: "points",
+    });
+    const html = renderToString(<ScoreBreakdown score={makeResult([entry])} />).replaceAll(
+      "<!-- -->",
+      "",
+    );
+
+    expect(html).toContain("Published: 0 points");
+    expect(html).toContain(">0 points</td>");
+  });
+
+  test("distinguishes published duration, capped scoring input, effective rating, and configuration", () => {
+    const entry = makeEntry({
+      axisName: "Duration preference",
+      source: "derived",
+      derivedField: "playingTime",
+      sourceValue: 300,
+      scoringRawValue: 240,
+      effectiveRating: 4.5,
+      unit: "minutes",
+      provenance: "Publisher-listed duration",
+      configurationSummary: "Scoring cap: 240 minutes",
+      contribution: 3.2,
+    });
+    const html = renderToString(<ScoreBreakdown score={makeResult([entry])} />).replaceAll(
+      "<!-- -->",
+      "",
+    );
+    expect(html).toContain("Published: 300 minutes");
+    expect(html).toContain("Capped scoring input: 240 minutes");
+    expect(html).toContain("Effective (1-10)");
+    expect(html).toContain("Provenance: Publisher-listed duration");
+    expect(html).toContain("Configuration: Scoring cap: 240 minutes");
+  });
+
+  test("shows missing factual metadata with an override without inventing a value", () => {
+    const entry = makeEntry({
+      source: "override",
+      derivedField: "playerCountFit",
+      sourceValue: null,
+      scoringRawValue: null,
+      effectiveRating: 8,
+      overridden: true,
+      unit: "fit score",
+      provenance: "Publisher-declared player range",
+      configurationSummary: "Target: 4 players",
+      contribution: 5.6,
+    });
+    const html = renderToString(<ScoreBreakdown score={makeResult([entry])} />).replaceAll(
+      "<!-- -->",
+      "",
+    );
+    expect(html).toContain("Published: Missing");
+    expect(html).toContain("Personal override applied");
+    expect(html).toContain("Target: 4 players");
+    expect(html).not.toContain("Published: 8");
   });
 });

@@ -68,3 +68,5 @@
 sync.remote: "git+https://github.com/rjroy/shelf-judge.git"
 export:
     auto: true
+dolt:
+    auto-push: true
