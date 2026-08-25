@@ -126,6 +126,35 @@ export function ShelfAssignmentForm({
   isPreviouslyOwned: boolean;
 }) {
   const router = useRouter();
+  return (
+    <ShelfAssignmentFormContent
+      gameId={gameId}
+      currentShelfId={currentShelfId}
+      options={options}
+      hasDimensions={hasDimensions}
+      isPreviouslyOwned={isPreviouslyOwned}
+      refresh={() => router.refresh()}
+    />
+  );
+}
+
+export function ShelfAssignmentFormContent({
+  gameId,
+  currentShelfId,
+  options,
+  hasDimensions,
+  isPreviouslyOwned,
+  refresh,
+  request = fetch,
+}: {
+  gameId: string;
+  currentShelfId: string | null;
+  options: ShelfAssignmentOption[];
+  hasDimensions: boolean;
+  isPreviouslyOwned: boolean;
+  refresh: () => void;
+  request?: typeof fetch;
+}) {
   const [selectedShelfId, setSelectedShelfId] = useState(currentShelfId ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -140,13 +169,13 @@ export function ShelfAssignmentForm({
     setSaving(true);
     setError(null);
     try {
-      await saveShelfAssignment(gameId, selectedShelfId, () => router.refresh());
+      await saveShelfAssignment(gameId, selectedShelfId, refresh, request);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Shelf assignment save failed");
     } finally {
       setSaving(false);
     }
-  }, [gameId, saveDisabled, router, selectedShelfId]);
+  }, [gameId, refresh, request, saveDisabled, selectedShelfId]);
 
   return (
     <ShelfAssignmentFields

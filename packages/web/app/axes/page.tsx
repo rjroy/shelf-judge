@@ -745,7 +745,7 @@ export function LegacyAxisCard({
   onDelete: () => void;
 }) {
   return (
-    <div className="axis-card legacy-axis-card">
+    <div className="axis-card legacy-axis-card" data-axis-id={axis.id}>
       <div className="legacy-axis-header">
         <div>
           <div className="axis-name">{axis.name}</div>
@@ -905,7 +905,7 @@ export function AxisCard({
   const nativeUnit = discoveryField?.unit ?? "rating";
 
   return (
-    <div className="axis-card">
+    <div className="axis-card" data-axis-id={axis.id}>
       <div className="axis-card-main">
         <div>
           {isEditing && !isTournament ? (

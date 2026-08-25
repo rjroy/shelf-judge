@@ -2,12 +2,6 @@ import { beforeAll, describe, expect, mock, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { AssignmentConflict, ShelfAssignment } from "@shelf-judge/shared";
 
-const refresh = mock(() => undefined);
-
-void mock.module("next/navigation", () => ({
-  useRouter: () => ({ refresh }),
-}));
-
 let ShelfAssignmentFields: typeof import("../components/shelf-assignment-form").ShelfAssignmentFields;
 let saveShelfAssignment: typeof import("../components/shelf-assignment-form").saveShelfAssignment;
 let ShelfAssignmentCard: typeof import("../app/capacity/page").ShelfAssignmentCard;

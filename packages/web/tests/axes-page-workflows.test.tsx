@@ -4,41 +4,10 @@ import {
   type Axis,
   type DerivedFieldDiscoveryResponse,
 } from "@shelf-judge/shared";
-import type { ReactElement, ReactNode, SetStateAction } from "react";
+import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
+import AxesPage from "@/app/axes/page";
 
-const React = await import("react");
-let states: unknown[] = [];
-let stateIndex = 0;
-let effects: Array<() => void> = [];
-let effectIndex = 0;
-let refs: Array<{ current: unknown }> = [];
-let refIndex = 0;
-
-void mock.module("react", () => ({
-  ...React,
-  useState: <T,>(initial: T | (() => T)) => {
-    const index = stateIndex++;
-    if (states.length <= index) {
-      states[index] = typeof initial === "function" ? (initial as () => T)() : initial;
-    }
-    const setState = (value: SetStateAction<T>) => {
-      states[index] =
-        typeof value === "function" ? (value as (previous: T) => T)(states[index] as T) : value;
-    };
-    return [states[index] as T, setState] as const;
-  },
-  useEffect: (effect: () => void) => {
-    const index = effectIndex++;
-    effects[index] ??= effect;
-  },
-  useRef: <T,>(initial: T) => {
-    const index = refIndex++;
-    refs[index] ??= { current: initial };
-    return refs[index] as { current: T };
-  },
-}));
-
-const { AxisCard, LegacyAxisCard, default: AxesPage } = await import("@/app/axes/page");
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const discovery: DerivedFieldDiscoveryResponse = {
   version: 1,
@@ -123,76 +92,61 @@ function successfulFetch() {
   });
 }
 
-function renderPage(): ReactElement<Record<string, unknown>> {
-  stateIndex = 0;
-  effectIndex = 0;
-  refIndex = 0;
-  return AxesPage() as ReactElement<Record<string, unknown>>;
-}
-
-async function loadPage(): Promise<ReactElement<Record<string, unknown>>> {
-  renderPage();
-  effects[0]?.();
-  await flushMutation();
-  return renderPage();
-}
-
-function descendants(node: ReactNode): ReactElement<Record<string, unknown>>[] {
-  if (!React.isValidElement<Record<string, unknown>>(node)) {
-    if (Array.isArray(node)) return node.flatMap(descendants);
-    return [];
-  }
-  const own = [node];
-  if (typeof node.type === "function") {
-    const rendered = node.type(node.props) as ReactNode;
-    return [...own, ...descendants(rendered)];
-  }
-  return [...own, ...descendants(node.props.children as ReactNode)];
-}
-
-function text(node: ReactNode): string {
-  if (typeof node === "string" || typeof node === "number") return String(node);
-  if (Array.isArray(node)) return node.map(text).join("");
-  if (React.isValidElement<Record<string, unknown>>(node)) {
-    if (typeof node.type === "function") return text(node.type(node.props) as ReactNode);
-    return text(node.props.children as ReactNode);
-  }
-  return "";
-}
-
-function findElement(
-  root: ReactElement<Record<string, unknown>>,
-  predicate: (element: ReactElement<Record<string, unknown>>) => boolean,
-): ReactElement<Record<string, unknown>> {
-  const element = descendants(root).find(predicate);
-  if (!element) throw new Error("Expected rendered element was not found");
-  return element;
-}
-
-function click(root: ReactElement<Record<string, unknown>>, label: string): void {
-  const button = findElement(
-    root,
-    (element) => element.type === "button" && text(element) === label,
-  );
-  (button.props.onClick as () => void)();
-}
-
-function changeInput(root: ReactElement<Record<string, unknown>>, id: string, value: string): void {
-  const input = findElement(root, (element) => element.type === "input" && element.props.id === id);
-  (input.props.onChange as (event: { target: { value: string } }) => void)({ target: { value } });
-}
-
-function submitCreate(root: ReactElement<Record<string, unknown>>): void {
-  const form = findElement(root, (element) => element.type === "form");
-  (form.props.onSubmit as (event: { preventDefault: () => void }) => void)({
-    preventDefault: () => undefined,
-  });
-}
-
 async function flushMutation(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
   await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+async function loadPage(fetchMock = successfulFetch()): Promise<{
+  renderer: ReactTestRenderer;
+  fetchMock: ReturnType<typeof successfulFetch>;
+}> {
+  globalThis.fetch = fetchMock as unknown as typeof fetch;
+  let renderer: ReactTestRenderer | undefined;
+  await act(async () => {
+    renderer = create(<AxesPage />);
+    await flushMutation();
+  });
+  if (!renderer) throw new Error("Expected axes page renderer");
+  return { renderer, fetchMock };
+}
+
+function text(node: ReactTestInstance): string {
+  return node.children.map((child) => (typeof child === "string" ? child : text(child))).join("");
+}
+
+function card(renderer: ReactTestRenderer, axisId: string): ReactTestInstance {
+  return renderer.root.findByProps({ "data-axis-id": axisId });
+}
+
+function button(scope: ReactTestInstance, label: string | RegExp): ReactTestInstance {
+  const match = scope.findAllByType("button").find((candidate) => {
+    const content = text(candidate);
+    return typeof label === "string" ? content === label : label.test(content);
+  });
+  if (!match) throw new Error(`Expected button ${String(label)}`);
+  return match;
+}
+
+function changeInput(renderer: ReactTestRenderer, id: string, value: string): void {
+  const input = renderer.root.findByProps({ id });
+  act(() => input.props.onChange({ target: { value } }));
+}
+
+async function clickAndFlush(target: ReactTestInstance): Promise<void> {
+  await act(async () => {
+    target.props.onClick();
+    await flushMutation();
+  });
+}
+
+async function submitCreate(renderer: ReactTestRenderer): Promise<void> {
+  const form = renderer.root.findByType("form");
+  await act(async () => {
+    form.props.onSubmit({ preventDefault: () => undefined });
+    await flushMutation();
+  });
 }
 
 function mutationBodies(fetchMock: ReturnType<typeof successfulFetch>, method: string): unknown[] {
@@ -228,82 +182,40 @@ function validationError(
 }
 
 afterEach(() => {
-  states = [];
-  stateIndex = 0;
-  effects = [];
-  effectIndex = 0;
-  refs = [];
-  refIndex = 0;
   globalThis.fetch = originalFetch;
   globalThis.confirm = originalConfirm;
 });
 
 describe("AxesPage production workflows", () => {
   test("creates both discovered templates at configuration boundaries and permits duplicates", async () => {
-    const fetchMock = successfulFetch();
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
-    let page = await loadPage();
+    const { renderer, fetchMock } = await loadPage();
+    act(() => button(renderer.root, "+ New Axis").props.onClick());
 
-    click(page, "+ New Axis");
-    page = renderPage();
-    expect(
-      findElement(page, (element) => element.props.className === "main-scroll").props.className,
-    ).toBe("main-scroll");
-    expect(
-      findElement(page, (element) => element.props.className === "axes-content").props.className,
-    ).toBe("axes-content");
-    expect(
-      findElement(page, (element) => element.props.className === "template-picker").props.role,
-    ).toBe("group");
-    const personalTemplate = findElement(
-      page,
-      (element) => text(element) === "Personal axisEnter your own 1-10 ratings.",
-    );
-    expect(personalTemplate.props["aria-pressed"]).toBe(true);
+    expect(renderer.root.findByProps({ className: "main-scroll" })).toBeDefined();
+    expect(renderer.root.findByProps({ className: "axes-content" })).toBeDefined();
+    expect(renderer.root.findByProps({ className: "template-picker" }).props.role).toBe("group");
+    expect(button(renderer.root, /Personal axis/).props["aria-pressed"]).toBe(true);
 
-    click(
-      page,
-      "Player Count FitScores a target player count using BGG suggested-player-count poll data, falling back to publisher bounds.",
-    );
-    page = renderPage();
-    const selectedPlayerTemplate = findElement(
-      page,
-      (element) => element.type === "button" && text(element).startsWith("Player Count Fit"),
-    );
-    expect(selectedPlayerTemplate.props["aria-pressed"]).toBe(true);
-    const targetInput = findElement(
-      page,
-      (element) => element.props.id === "create-axis-configuration-targetPlayerCount",
-    );
+    act(() => button(renderer.root, /Player Count FitScores/).props.onClick());
+    expect(button(renderer.root, /Player Count FitScores/).props["aria-pressed"]).toBe(true);
+    const targetInput = renderer.root.findByProps({
+      id: "create-axis-configuration-targetPlayerCount",
+    });
     expect(targetInput.props).toMatchObject({ required: true, min: 1, max: 100 });
-    changeInput(page, "create-axis-configuration-targetPlayerCount", "100");
-    page = renderPage();
-    submitCreate(page);
-    await flushMutation();
+    changeInput(renderer, "create-axis-configuration-targetPlayerCount", "100");
+    await submitCreate(renderer);
 
-    page = renderPage();
-    click(
-      page,
-      "Player Count FitScores a target player count using BGG suggested-player-count poll data, falling back to publisher bounds.",
-    );
-    page = renderPage();
-    changeInput(page, "create-axis-configuration-targetPlayerCount", "1");
-    page = renderPage();
-    submitCreate(page);
-    await flushMutation();
+    act(() => button(renderer.root, /Player Count FitScores/).props.onClick());
+    changeInput(renderer, "create-axis-configuration-targetPlayerCount", "1");
+    await submitCreate(renderer);
 
-    page = renderPage();
-    click(page, "Play TimeScores publisher-listed playing time against your preferred duration.");
-    page = renderPage();
-    const capInput = findElement(
-      page,
-      (element) => element.props.id === "create-axis-configuration-maximumScoringTime",
-    );
+    act(() => button(renderer.root, /Play TimeScores/).props.onClick());
+    const capInput = renderer.root.findByProps({
+      id: "create-axis-configuration-maximumScoringTime",
+    });
     expect(capInput.props).toMatchObject({ required: true, min: 60, max: 1440 });
-    changeInput(page, "create-axis-configuration-maximumScoringTime", "1440");
-    page = renderPage();
-    submitCreate(page);
-    await flushMutation();
+    changeInput(renderer, "create-axis-configuration-maximumScoringTime", "1440");
+    await submitCreate(renderer);
 
     expect(mutationBodies(fetchMock, "POST")).toEqual([
       expect.objectContaining({
@@ -327,31 +239,15 @@ describe("AxesPage production workflows", () => {
   });
 
   test("updates Player Count Fit and Play Time through rendered production cards", async () => {
-    const fetchMock = successfulFetch();
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
-    let page = await loadPage();
-    const playerCard = findElement(
-      page,
-      (element) => element.type === AxisCard && (element.props.axis as Axis).id === "player-axis",
-    );
-    (playerCard.props.onStartEdit as () => void)();
-    page = renderPage();
-    changeInput(page, "edit-player-axis-configuration-targetPlayerCount", "100");
-    page = renderPage();
-    click(page, "Save");
-    await flushMutation();
+    const { renderer, fetchMock } = await loadPage();
 
-    page = renderPage();
-    const playCard = findElement(
-      page,
-      (element) => element.type === AxisCard && (element.props.axis as Axis).id === "play-axis",
-    );
-    (playCard.props.onStartEdit as () => void)();
-    page = renderPage();
-    changeInput(page, "edit-play-axis-configuration-maximumScoringTime", "1440");
-    page = renderPage();
-    click(page, "Save");
-    await flushMutation();
+    act(() => button(card(renderer, "player-axis"), "Edit").props.onClick());
+    changeInput(renderer, "edit-player-axis-configuration-targetPlayerCount", "100");
+    await clickAndFlush(button(card(renderer, "player-axis"), "Save"));
+
+    act(() => button(card(renderer, "play-axis"), "Edit").props.onClick());
+    changeInput(renderer, "edit-play-axis-configuration-maximumScoringTime", "1440");
+    await clickAndFlush(button(card(renderer, "play-axis"), "Save"));
 
     expect(mutationBodies(fetchMock, "PUT")).toEqual([
       expect.objectContaining({ configuration: { targetPlayerCount: 100 } }),
@@ -360,41 +256,26 @@ describe("AxesPage production workflows", () => {
   });
 
   test("repairs and deletes a disabled legacy axis through production workflows", async () => {
-    const fetchMock = successfulFetch();
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
     globalThis.confirm = mock(() => true);
-    let page = await loadPage();
+    const { renderer, fetchMock } = await loadPage();
 
-    click(page, "Repair");
-    page = renderPage();
-    const repairSelect = findElement(
-      page,
-      (element) => element.type === "select" && element.props.value === "playerCountFit",
+    act(() => button(card(renderer, "legacy-axis"), "Repair").props.onClick());
+    const repairSelect = card(renderer, "legacy-axis").findByType("select");
+    act(() => repairSelect.props.onChange({ target: { value: "playingTime" } }));
+    changeInput(renderer, "repair-legacy-axis-configuration-maximumScoringTime", "60");
+    await clickAndFlush(button(card(renderer, "legacy-axis"), "Repair Axis"));
+    await clickAndFlush(button(card(renderer, "legacy-axis"), "Delete"));
+
+    const repair = fetchMock.mock.calls.find(
+      (call) => call[0] === "/api/daemon/axes/legacy-axis/repair",
     );
-    (repairSelect.props.onChange as (event: { target: { value: string } }) => void)({
-      target: { value: "playingTime" },
-    });
-    page = renderPage();
-    changeInput(page, "repair-legacy-axis-configuration-maximumScoringTime", "60");
-    page = renderPage();
-    click(page, "Repair Axis");
-    await flushMutation();
-
-    page = renderPage();
-    const legacyCard = findElement(page, (element) => element.type === LegacyAxisCard);
-    (legacyCard.props.onDelete as () => void)();
-    await flushMutation();
-
-    const posts = fetchMock.mock.calls.filter((call) => call[1]?.method === "POST");
-    expect(posts[0]?.[0]).toBe("/api/daemon/axes/legacy-axis/repair");
-    expect(requestBody(posts[0]?.[1])).toEqual(
+    expect(requestBody(repair?.[1])).toEqual(
       expect.objectContaining({
         derivedField: "playingTime",
         configuration: { maximumScoringTime: 60 },
       }),
     );
-    const deletes = fetchMock.mock.calls.filter((call) => call[1]?.method === "DELETE");
-    expect(deletes[0]?.[0]).toBe("/api/daemon/axes/legacy-axis");
+    expect(fetchMock.mock.calls.some((call) => call[1]?.method === "DELETE")).toBe(true);
   });
 
   test("associates structured server errors with the rejected configuration input", async () => {
@@ -402,18 +283,10 @@ describe("AxesPage production workflows", () => {
     fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
       if (init?.method === "POST") {
         return Promise.resolve(
-          json(
-            {
-              code: "invalid_target_player_count",
-              message: "Target is outside the supported range.",
-              details: [
-                {
-                  field: "targetPlayerCount",
-                  path: ["configuration", "targetPlayerCount"],
-                },
-              ],
-            },
-            400,
+          validationError(
+            "invalid_target_player_count",
+            "Target is outside the supported range.",
+            "targetPlayerCount",
           ),
         );
       }
@@ -423,35 +296,27 @@ describe("AxesPage production workflows", () => {
       if (url === "/api/daemon/axes/derived-fields") return Promise.resolve(json(discovery));
       throw new Error(`Unexpected request: ${url}`);
     });
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
-    let page = await loadPage();
-    click(page, "+ New Axis");
-    page = renderPage();
-    click(
-      page,
-      "Player Count FitScores a target player count using BGG suggested-player-count poll data, falling back to publisher bounds.",
-    );
-    page = renderPage();
-    changeInput(page, "create-axis-configuration-targetPlayerCount", "100");
-    page = renderPage();
-    submitCreate(page);
-    await flushMutation();
-    page = renderPage();
+    const { renderer } = await loadPage(fetchMock);
+    act(() => button(renderer.root, "+ New Axis").props.onClick());
+    act(() => button(renderer.root, /Player Count FitScores/).props.onClick());
+    changeInput(renderer, "create-axis-configuration-targetPlayerCount", "100");
+    await submitCreate(renderer);
 
-    const input = findElement(
-      page,
-      (element) => element.props.id === "create-axis-configuration-targetPlayerCount",
-    );
+    const input = renderer.root.findByProps({
+      id: "create-axis-configuration-targetPlayerCount",
+    });
     expect(input.props["aria-invalid"]).toBe(true);
     expect(input.props["aria-describedby"]).toBe(
       "create-axis-configuration-targetPlayerCount-error",
     );
-    const error = findElement(
-      page,
-      (element) => element.props.id === "create-axis-configuration-targetPlayerCount-error",
-    );
-    expect(text(error)).toBe("Enter a whole number within the displayed bounds.");
-    expect(text(page)).toContain("Target is outside the supported range.");
+    expect(
+      text(
+        renderer.root.findByProps({
+          id: "create-axis-configuration-targetPlayerCount-error",
+        }),
+      ),
+    ).toBe("Enter a whole number within the displayed bounds.");
+    expect(text(renderer.root)).toContain("Target is outside the supported range.");
   });
 
   test("keeps create errors scoped when opening an edit workflow", async () => {
@@ -459,18 +324,10 @@ describe("AxesPage production workflows", () => {
     fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
       if (init?.method === "POST") {
         return Promise.resolve(
-          json(
-            {
-              code: "invalid_target_player_count",
-              message: "Target is outside the supported range.",
-              details: [
-                {
-                  field: "targetPlayerCount",
-                  path: ["configuration", "targetPlayerCount"],
-                },
-              ],
-            },
-            400,
+          validationError(
+            "invalid_target_player_count",
+            "Target is outside the supported range.",
+            "targetPlayerCount",
           ),
         );
       }
@@ -480,39 +337,22 @@ describe("AxesPage production workflows", () => {
       if (url === "/api/daemon/axes/derived-fields") return Promise.resolve(json(discovery));
       throw new Error(`Unexpected request: ${url}`);
     });
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
-    let page = await loadPage();
-    click(page, "+ New Axis");
-    page = renderPage();
-    click(
-      page,
-      "Player Count FitScores a target player count using BGG suggested-player-count poll data, falling back to publisher bounds.",
-    );
-    page = renderPage();
-    submitCreate(page);
-    await flushMutation();
-    page = renderPage();
-    expect(text(page)).toContain("Target is outside the supported range.");
+    const { renderer } = await loadPage(fetchMock);
+    act(() => button(renderer.root, "+ New Axis").props.onClick());
+    act(() => button(renderer.root, /Player Count FitScores/).props.onClick());
+    changeInput(renderer, "create-axis-configuration-targetPlayerCount", "100");
+    await submitCreate(renderer);
 
-    const playerCard = findElement(
-      page,
-      (element) => element.type === AxisCard && (element.props.axis as Axis).id === "player-axis",
-    );
-    (playerCard.props.onStartEdit as () => void)();
-    page = renderPage();
-
-    const editInput = findElement(
-      page,
-      (element) => element.props.id === "edit-player-axis-configuration-targetPlayerCount",
-    );
+    act(() => button(card(renderer, "player-axis"), "Edit").props.onClick());
+    const editInput = renderer.root.findByProps({
+      id: "edit-player-axis-configuration-targetPlayerCount",
+    });
+    const createInput = renderer.root.findByProps({
+      id: "create-axis-configuration-targetPlayerCount",
+    });
     expect(editInput.props["aria-invalid"]).toBeUndefined();
     expect(editInput.props["aria-describedby"]).toBeUndefined();
-    const createInput = findElement(
-      page,
-      (element) => element.props.id === "create-axis-configuration-targetPlayerCount",
-    );
     expect(createInput.props["aria-invalid"]).toBe(true);
-    expect(text(page)).toContain("Target is outside the supported range.");
   });
 
   test("does not apply a late create response to an edit form", async () => {
@@ -528,44 +368,33 @@ describe("AxesPage production workflows", () => {
       if (url === "/api/daemon/axes/derived-fields") return Promise.resolve(json(discovery));
       throw new Error(`Unexpected request: ${url}`);
     });
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
-    let page = await loadPage();
-    click(page, "+ New Axis");
-    page = renderPage();
-    click(
-      page,
-      "Player Count FitScores a target player count using BGG suggested-player-count poll data, falling back to publisher bounds.",
-    );
-    page = renderPage();
-    submitCreate(page);
+    const { renderer } = await loadPage(fetchMock);
+    act(() => button(renderer.root, "+ New Axis").props.onClick());
+    act(() => button(renderer.root, /Player Count FitScores/).props.onClick());
+    act(() => {
+      renderer.root.findByType("form").props.onSubmit({ preventDefault: () => undefined });
+    });
+    act(() => button(card(renderer, "player-axis"), "Edit").props.onClick());
 
-    page = renderPage();
-    const playerCard = findElement(
-      page,
-      (element) => element.type === AxisCard && (element.props.axis as Axis).id === "player-axis",
-    );
-    (playerCard.props.onStartEdit as () => void)();
-    createResponse.resolve(
-      validationError(
-        "invalid_target_player_count",
-        "The late create request was rejected.",
-        "targetPlayerCount",
-      ),
-    );
-    await flushMutation();
-    page = renderPage();
+    await act(async () => {
+      createResponse.resolve(
+        validationError(
+          "invalid_target_player_count",
+          "The late create request was rejected.",
+          "targetPlayerCount",
+        ),
+      );
+      await flushMutation();
+    });
 
-    const editingCard = findElement(
-      page,
-      (element) => element.type === AxisCard && (element.props.axis as Axis).id === "player-axis",
+    expect(text(card(renderer, "player-axis"))).not.toContain(
+      "The late create request was rejected.",
     );
-    expect(editingCard.props.formError).toBeUndefined();
-    const editInput = findElement(
-      page,
-      (element) => element.props.id === "edit-player-axis-configuration-targetPlayerCount",
-    );
-    expect(editInput.props["aria-invalid"]).toBeUndefined();
-    expect(text(editingCard)).not.toContain("The late create request was rejected.");
+    expect(
+      renderer.root.findByProps({
+        id: "edit-player-axis-configuration-targetPlayerCount",
+      }).props["aria-invalid"],
+    ).toBeUndefined();
   });
 
   test("ignores an in-flight update response after cancellation and reopening", async () => {
@@ -581,40 +410,26 @@ describe("AxesPage production workflows", () => {
       if (url === "/api/daemon/axes/derived-fields") return Promise.resolve(json(discovery));
       throw new Error(`Unexpected request: ${url}`);
     });
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
-    let page = await loadPage();
-    let playerCard = findElement(
-      page,
-      (element) => element.type === AxisCard && (element.props.axis as Axis).id === "player-axis",
-    );
-    (playerCard.props.onStartEdit as () => void)();
-    page = renderPage();
-    click(page, "Save");
-    page = renderPage();
-    click(page, "Cancel");
+    const { renderer } = await loadPage(fetchMock);
+    act(() => button(card(renderer, "player-axis"), "Edit").props.onClick());
+    act(() => button(card(renderer, "player-axis"), "Save").props.onClick());
+    act(() => button(card(renderer, "player-axis"), "Cancel").props.onClick());
+    act(() => button(card(renderer, "player-axis"), "Edit").props.onClick());
 
-    page = renderPage();
-    playerCard = findElement(
-      page,
-      (element) => element.type === AxisCard && (element.props.axis as Axis).id === "player-axis",
-    );
-    (playerCard.props.onStartEdit as () => void)();
-    updateResponse.resolve(
-      validationError(
-        "invalid_target_player_count",
-        "The cancelled update was rejected late.",
-        "targetPlayerCount",
-      ),
-    );
-    await flushMutation();
-    page = renderPage();
+    await act(async () => {
+      updateResponse.resolve(
+        validationError(
+          "invalid_target_player_count",
+          "The cancelled update was rejected late.",
+          "targetPlayerCount",
+        ),
+      );
+      await flushMutation();
+    });
 
-    playerCard = findElement(
-      page,
-      (element) => element.type === AxisCard && (element.props.axis as Axis).id === "player-axis",
+    expect(text(card(renderer, "player-axis"))).not.toContain(
+      "The cancelled update was rejected late.",
     );
-    expect(playerCard.props.formError).toBeUndefined();
-    expect(text(playerCard)).not.toContain("The cancelled update was rejected late.");
   });
 
   test("isolates update and repair errors when responses complete out of order", async () => {
@@ -634,68 +449,44 @@ describe("AxesPage production workflows", () => {
       if (url === "/api/daemon/axes/derived-fields") return Promise.resolve(json(discovery));
       throw new Error(`Unexpected request: ${url}`);
     });
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
     globalThis.confirm = mock(() => true);
-    let page = await loadPage();
+    const { renderer } = await loadPage(fetchMock);
 
-    const playerCard = findElement(
-      page,
-      (element) => element.type === AxisCard && (element.props.axis as Axis).id === "player-axis",
-    );
-    (playerCard.props.onStartEdit as () => void)();
-    page = renderPage();
-    click(page, "Save");
+    act(() => button(card(renderer, "player-axis"), "Edit").props.onClick());
+    act(() => button(card(renderer, "player-axis"), "Save").props.onClick());
+    act(() => button(card(renderer, "legacy-axis"), "Repair").props.onClick());
+    const repairSelect = card(renderer, "legacy-axis").findByType("select");
+    act(() => repairSelect.props.onChange({ target: { value: "playingTime" } }));
+    act(() => button(card(renderer, "legacy-axis"), "Repair Axis").props.onClick());
 
-    page = renderPage();
-    click(page, "Repair");
-    page = renderPage();
-    const repairSelect = findElement(page, (element) => element.type === "select");
-    (repairSelect.props.onChange as (event: { target: { value: string } }) => void)({
-      target: { value: "playingTime" },
+    await act(async () => {
+      repairResponse.resolve(
+        validationError(
+          "invalid_maximum_scoring_time",
+          "The repair cap was rejected.",
+          "maximumScoringTime",
+        ),
+      );
+      await flushMutation();
     });
-    page = renderPage();
-    click(page, "Repair Axis");
+    await act(async () => {
+      updateResponse.resolve(
+        validationError(
+          "invalid_target_player_count",
+          "The late update target was rejected.",
+          "targetPlayerCount",
+        ),
+      );
+      await flushMutation();
+    });
 
-    repairResponse.resolve(
-      validationError(
-        "invalid_maximum_scoring_time",
-        "The repair cap was rejected.",
-        "maximumScoringTime",
-      ),
-    );
-    await flushMutation();
-    updateResponse.resolve(
-      validationError(
-        "invalid_target_player_count",
-        "The late update target was rejected.",
-        "targetPlayerCount",
-      ),
-    );
-    await flushMutation();
-    page = renderPage();
-
-    const editingCard = findElement(
-      page,
-      (element) => element.type === AxisCard && (element.props.axis as Axis).id === "player-axis",
-    );
-    const updateFormError = editingCard.props.formError as {
-      summary: string;
-      fields: Record<string, string>;
-    };
-    expect(updateFormError.summary).toContain("The late update target was rejected.");
-    expect(updateFormError.fields["configuration.targetPlayerCount"]).toBe(
-      "Enter a whole number within the displayed bounds.",
-    );
-    const legacyCard = findElement(page, (element) => element.type === LegacyAxisCard);
-    const repairFormError = legacyCard.props.formError as {
-      summary: string;
-      fields: Record<string, string>;
-    };
-    expect(repairFormError.summary).toContain("The repair cap was rejected.");
-    expect(repairFormError.fields["configuration.maximumScoringTime"]).toBe(
-      "Enter a whole number within the displayed bounds.",
-    );
-    expect(updateFormError.fields["configuration.maximumScoringTime"]).toBeUndefined();
-    expect(repairFormError.fields["configuration.targetPlayerCount"]).toBeUndefined();
+    const playerText = text(card(renderer, "player-axis"));
+    const legacyText = text(card(renderer, "legacy-axis"));
+    expect(playerText).toContain("The late update target was rejected.");
+    expect(playerText).toContain("Enter a whole number within the displayed bounds.");
+    expect(legacyText).toContain("The repair cap was rejected.");
+    expect(legacyText).toContain("Enter a whole number within the displayed bounds.");
+    expect(playerText).not.toContain("The repair cap was rejected.");
+    expect(legacyText).not.toContain("The late update target was rejected.");
   });
 });

@@ -5,20 +5,33 @@ import { useRouter } from "next/navigation";
 import type { Axis, FitnessResult } from "@shelf-judge/shared";
 import { getRatingLabel } from "@shelf-judge/shared";
 
-export function RatingForm({
-  gameId,
-  axes,
-  currentRatings,
-  predictionScore,
-  score,
-}: {
+export interface RatingFormProps {
   gameId: string;
   axes: Axis[];
   currentRatings: Record<string, number>;
   predictionScore?: FitnessResult | null;
   score?: FitnessResult | null;
-}) {
+}
+
+interface RatingFormContentProps extends RatingFormProps {
+  refresh: () => void;
+  request?: typeof fetch;
+}
+
+export function RatingForm(props: RatingFormProps) {
   const router = useRouter();
+  return <RatingFormContent {...props} refresh={() => router.refresh()} />;
+}
+
+export function RatingFormContent({
+  gameId,
+  axes,
+  currentRatings,
+  predictionScore,
+  score,
+  refresh,
+  request = fetch,
+}: RatingFormContentProps) {
   const editableAxes = axes.filter(isEditableRatingAxis);
   const [ratings, setRatings] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {};
@@ -76,7 +89,7 @@ export function RatingForm({
     }
 
     try {
-      const res = await fetch(`/api/daemon/games/${gameId}/ratings`, {
+      const res = await request(`/api/daemon/games/${gameId}/ratings`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ratings: numericRatings }),
@@ -89,7 +102,7 @@ export function RatingForm({
         throw new Error(data.error ?? `Failed: ${res.status}`);
       }
 
-      router.refresh();
+      refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save ratings");
     } finally {

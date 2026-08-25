@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import {
   getGame,
   listAxes,
@@ -123,9 +124,9 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
         <GameActions gameId={game.id} gameName={game.name} hasBggId={game.bggId !== null} />
       </div>
 
-      <div className="main-scroll">
+      <GameDetailMain>
         {/* Game hero section */}
-        <div className="game-hero">
+        <GameDetailHero>
           <div className="game-cover">
             {game.imageUrl ? <img src={game.imageUrl} alt={game.name} /> : <span>🎲</span>}
           </div>
@@ -287,7 +288,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
               </div>
             )}
           </div>
-        </div>
+        </GameDetailHero>
 
         {isPreviouslyOwned && (
           <div className="prev-owned-notice">
@@ -455,53 +456,74 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
           ))}
 
         {/* Two-panel layout */}
-        <div className="detail-panels">
-          <div className="panel-left">
-            <div className="panel-section-title">
-              Score Breakdown
-              {displayScore && !displayScore.vetoed && (
-                <span className="badge">
-                  How {hasPredictions ? "~" : ""}
-                  {displayScore.score.toFixed(1)} was calculated
-                </span>
-              )}
-            </div>
-            <ScoreBreakdown score={displayScore} isPreviouslyOwned={isPreviouslyOwned} />
-            <div className="calc-explanation">
-              <strong>How this is calculated:</strong> weighted average of all rated axes. Formula:{" "}
-              <code>sum(rating &times; weight) / sum(weight)</code>. Axes without ratings are
-              excluded from both the numerator and denominator.
-              {hasPredictions && (
-                <>
-                  {" "}
-                  Predicted axes use similarity-weighted ratings from your most similar rated games.
-                  Insufficient-confidence axes are excluded.
-                </>
-              )}
-            </div>
-          </div>
-          <div className="panel-right">
-            <div className="panel-section-title">Your Ratings</div>
-            <RatingForm
-              gameId={game.id}
-              axes={axes}
-              currentRatings={game.ratings}
-              score={score}
-              predictionScore={hasPredictions ? displayScore : null}
-            />
-            <OwnershipActions gameId={game.id} gameName={game.name} ownership={game.ownership} />
-            <BoxDimensionsForm gameId={game.id} currentDimensions={game.boxDimensions} />
-            <ShelfAssignmentForm
-              gameId={game.id}
-              currentShelfId={game.manualShelfId}
-              options={shelfOptions}
-              hasDimensions={game.boxDimensions !== null}
-              isPreviouslyOwned={isPreviouslyOwned}
-            />
-          </div>
-        </div>
-      </div>
+        <GameDetailPanels
+          left={
+            <>
+              <div className="panel-section-title">
+                Score Breakdown
+                {displayScore && !displayScore.vetoed && (
+                  <span className="badge">
+                    How {hasPredictions ? "~" : ""}
+                    {displayScore.score.toFixed(1)} was calculated
+                  </span>
+                )}
+              </div>
+              <ScoreBreakdown score={displayScore} isPreviouslyOwned={isPreviouslyOwned} />
+              <div className="calc-explanation">
+                <strong>How this is calculated:</strong> weighted average of all rated axes.
+                Formula: <code>sum(rating &times; weight) / sum(weight)</code>. Axes without ratings
+                are excluded from both the numerator and denominator.
+                {hasPredictions && (
+                  <>
+                    {" "}
+                    Predicted axes use similarity-weighted ratings from your most similar rated
+                    games. Insufficient-confidence axes are excluded.
+                  </>
+                )}
+              </div>
+            </>
+          }
+          right={
+            <>
+              <div className="panel-section-title">Your Ratings</div>
+              <RatingForm
+                gameId={game.id}
+                axes={axes}
+                currentRatings={game.ratings}
+                score={score}
+                predictionScore={hasPredictions ? displayScore : null}
+              />
+              <OwnershipActions gameId={game.id} gameName={game.name} ownership={game.ownership} />
+              <BoxDimensionsForm gameId={game.id} currentDimensions={game.boxDimensions} />
+              <ShelfAssignmentForm
+                gameId={game.id}
+                currentShelfId={game.manualShelfId}
+                options={shelfOptions}
+                hasDimensions={game.boxDimensions !== null}
+                isPreviouslyOwned={isPreviouslyOwned}
+              />
+            </>
+          }
+        />
+      </GameDetailMain>
     </>
+  );
+}
+
+export function GameDetailMain({ children }: { children: ReactNode }) {
+  return <div className="main-scroll">{children}</div>;
+}
+
+export function GameDetailHero({ children }: { children: ReactNode }) {
+  return <div className="game-hero">{children}</div>;
+}
+
+export function GameDetailPanels({ left, right }: { left: ReactNode; right: ReactNode }) {
+  return (
+    <div className="detail-panels">
+      <div className="panel-left">{left}</div>
+      <div className="panel-right">{right}</div>
+    </div>
   );
 }
 

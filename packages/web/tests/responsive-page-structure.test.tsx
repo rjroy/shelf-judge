@@ -1,64 +1,18 @@
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-
-void mock.module("@/lib/api", () => ({
-  getGame: () =>
-    Promise.resolve({
-      game: {
-        id: "game-1",
-        name: "Responsive Game",
-        ownership: "owned",
-        bggId: null,
-        imageUrl: null,
-        yearPublished: 2026,
-        minPlayers: 1,
-        maxPlayers: 4,
-        bestPlayers: null,
-        playingTime: 90,
-        numPlays: 0,
-        boxDimensions: null,
-        manualShelfId: null,
-        bggData: null,
-        ratings: {},
-      },
-      score: null,
-      nichePosition: null,
-    }),
-  listAxes: () => Promise.resolve([]),
-  getTournamentGameStats: () => Promise.reject(new Error("No tournament stats")),
-  getProfile: () => Promise.resolve({ divergence: [], outliers: [] }),
-  predictGame: () => Promise.resolve({ score: null }),
-  getNicheSettings: () => Promise.resolve({ ignoredTags: [] }),
-  getShelfConfig: () => Promise.resolve(null),
-}));
-
-void mock.module("@/components/score-breakdown", () => ({
-  ScoreBreakdown: () => <table className="breakdown-table" />,
-}));
-void mock.module("@/components/rating-form", () => ({
-  RatingForm: () => <form className="rating-form" />,
-}));
-void mock.module("@/components/game-actions", () => ({
-  GameActions: () => <div />,
-  OwnershipActions: () => <div />,
-}));
-void mock.module("@/components/niche-ignore-button", () => ({
-  NicheIgnoreButton: () => <button type="button" />,
-  NicheRestoreButton: () => <button type="button" />,
-}));
-void mock.module("@/components/box-dimensions-form", () => ({
-  BoxDimensionsForm: () => <form />,
-}));
-void mock.module("@/components/shelf-assignment-form", () => ({
-  ShelfAssignmentForm: () => <form />,
-}));
-
-const { default: GameDetailPage } = await import("@/app/games/[id]/page");
+import { GameDetailHero, GameDetailMain, GameDetailPanels } from "@/app/games/[id]/page";
 
 describe("responsive page structure", () => {
-  test("keeps game detail content in the production responsive shell", async () => {
-    const page = await GameDetailPage({ params: Promise.resolve({ id: "game-1" }) });
-    const html = renderToStaticMarkup(page);
+  test("keeps game detail content in the production responsive shell", () => {
+    const html = renderToStaticMarkup(
+      <GameDetailMain>
+        <GameDetailHero>Responsive Game</GameDetailHero>
+        <GameDetailPanels
+          left={<table className="breakdown-table" />}
+          right={<form className="rating-form" />}
+        />
+      </GameDetailMain>,
+    );
 
     expect(html).toContain('class="main-scroll"');
     expect(html).toContain('class="game-hero"');

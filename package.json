@@ -1,6 +1,7 @@
 {
   "name": "shelf-judge",
   "private": true,
+  "packageManager": "bun@1.4.0",
   "type": "module",
   "workspaces": [
     "packages/shared",
