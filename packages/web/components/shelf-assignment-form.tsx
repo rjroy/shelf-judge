@@ -1,12 +1,40 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useReducer } from "react";
 import { useRouter } from "next/navigation";
 
 export interface ShelfAssignmentOption {
   shelfId: string;
   label: string;
   dimensionless: boolean;
+}
+
+export interface ShelfAssignmentState {
+  selectedShelfId: string;
+  saving: boolean;
+  error: string | null;
+}
+
+export type ShelfAssignmentAction =
+  | { type: "select"; shelfId: string }
+  | { type: "save-started" }
+  | { type: "save-finished" }
+  | { type: "save-failed"; error: string };
+
+export function shelfAssignmentReducer(
+  state: ShelfAssignmentState,
+  action: ShelfAssignmentAction,
+): ShelfAssignmentState {
+  switch (action.type) {
+    case "select":
+      return { ...state, selectedShelfId: action.shelfId };
+    case "save-started":
+      return { ...state, saving: true, error: null };
+    case "save-finished":
+      return { ...state, saving: false };
+    case "save-failed":
+      return { ...state, saving: false, error: action.error };
+  }
 }
 
 export async function saveShelfAssignment(
@@ -25,6 +53,31 @@ export async function saveShelfAssignment(
     throw new Error(data.error ?? `Failed: ${response.status}`);
   }
   refresh();
+}
+
+export async function submitShelfAssignment({
+  gameId,
+  selectedShelfId,
+  refresh,
+  request,
+  dispatch,
+}: {
+  gameId: string;
+  selectedShelfId: string;
+  refresh: () => void;
+  request: typeof fetch;
+  dispatch: (action: ShelfAssignmentAction) => void;
+}): Promise<void> {
+  dispatch({ type: "save-started" });
+  try {
+    await saveShelfAssignment(gameId, selectedShelfId, refresh, request);
+    dispatch({ type: "save-finished" });
+  } catch (err) {
+    dispatch({
+      type: "save-failed",
+      error: err instanceof Error ? err.message : "Shelf assignment save failed",
+    });
+  }
 }
 
 export function ShelfAssignmentFields({
@@ -155,9 +208,12 @@ export function ShelfAssignmentFormContent({
   refresh: () => void;
   request?: typeof fetch;
 }) {
-  const [selectedShelfId, setSelectedShelfId] = useState(currentShelfId ?? "");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [state, dispatch] = useReducer(shelfAssignmentReducer, {
+    selectedShelfId: currentShelfId ?? "",
+    saving: false,
+    error: null,
+  });
+  const { selectedShelfId, saving, error } = state;
   const selectedOption = options.find((option) => option.shelfId === selectedShelfId);
   const selectionAllowed =
     selectedShelfId === "" ||
@@ -166,15 +222,7 @@ export function ShelfAssignmentFormContent({
 
   const handleSave = useCallback(async () => {
     if (saveDisabled) return;
-    setSaving(true);
-    setError(null);
-    try {
-      await saveShelfAssignment(gameId, selectedShelfId, refresh, request);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Shelf assignment save failed");
-    } finally {
-      setSaving(false);
-    }
+    await submitShelfAssignment({ gameId, selectedShelfId, refresh, request, dispatch });
   }, [gameId, refresh, request, saveDisabled, selectedShelfId]);
 
   return (
@@ -185,7 +233,7 @@ export function ShelfAssignmentFormContent({
       isPreviouslyOwned={isPreviouslyOwned}
       saving={saving}
       error={error}
-      onSelectionChange={setSelectedShelfId}
+      onSelectionChange={(shelfId) => dispatch({ type: "select", shelfId })}
       onSave={() => void handleSave()}
       descriptionId={`shelf-assignment-description-${gameId}`}
       errorId={`shelf-assignment-error-${gameId}`}

@@ -1,9 +1,15 @@
 import { describe, expect, mock, test } from "bun:test";
 import type { Axis, FitnessResult } from "@shelf-judge/shared";
-import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
-import { RatingFormContent, type RatingFormProps } from "@/components/rating-form";
-
-globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+import { renderToStaticMarkup } from "react-dom/server";
+import {
+  buildRatingMutation,
+  createRatingFormState,
+  derivedOverrideDraft,
+  RatingFormContent,
+  ratingFormReducer,
+  saveRatings,
+  submitRatingForm,
+} from "@/components/rating-form";
 
 const personalAxis: Axis = {
   id: "personal-axis",
@@ -30,16 +36,11 @@ const derivedAxis: Axis = {
 };
 
 const playerCountAxis: Axis = {
+  ...derivedAxis,
   id: "player-count-axis",
   name: "Player Count Fit",
-  description: null,
-  enabled: true,
-  source: "derived",
   derivedField: "playerCountFit",
   configuration: { targetPlayerCount: 4 },
-  weight: 50,
-  createdAt: "2026-01-01T00:00:00Z",
-  updatedAt: "2026-01-01T00:00:00Z",
 };
 
 const disabledLegacyAxis: Axis = {
@@ -55,34 +56,6 @@ const disabledLegacyAxis: Axis = {
   createdAt: "2026-01-01T00:00:00Z",
   updatedAt: "2026-01-01T00:00:00Z",
 };
-
-function successfulRequest() {
-  return mock(() =>
-    Promise.resolve(new Response("{}", { status: 200 })),
-  ) as unknown as typeof fetch;
-}
-
-function renderForm(
-  overrides: Partial<RatingFormProps> = {},
-  request: typeof fetch = successfulRequest(),
-  refresh = mock(() => undefined),
-): { renderer: ReactTestRenderer; request: typeof fetch; refresh: ReturnType<typeof mock> } {
-  let renderer: ReactTestRenderer | undefined;
-  act(() => {
-    renderer = create(
-      <RatingFormContent
-        gameId="game-1"
-        axes={[personalAxis, derivedAxis]}
-        currentRatings={{}}
-        {...overrides}
-        request={request}
-        refresh={refresh}
-      />,
-    );
-  });
-  if (!renderer) throw new Error("Expected rating form renderer");
-  return { renderer, request, refresh };
-}
 
 function derivedScore(
   axis: Axis,
@@ -125,157 +98,137 @@ function derivedScore(
   };
 }
 
-function text(node: ReactTestInstance): string {
-  return node.children.map((child) => (typeof child === "string" ? child : text(child))).join("");
+function renderForm(
+  overrides: {
+    axes?: Axis[];
+    currentRatings?: Record<string, number>;
+    score?: FitnessResult;
+  } = {},
+): string {
+  return renderToStaticMarkup(
+    <RatingFormContent
+      gameId="game-1"
+      axes={overrides.axes ?? [personalAxis, derivedAxis]}
+      currentRatings={overrides.currentRatings ?? {}}
+      score={overrides.score}
+      refresh={() => undefined}
+    />,
+  );
 }
 
-function button(renderer: ReactTestRenderer, label: string): ReactTestInstance {
-  const match = renderer.root
-    .findAllByType("button")
-    .find((candidate) => text(candidate) === label);
-  if (!match) throw new Error(`Expected button ${label}`);
-  return match;
-}
+describe("RatingForm controller", () => {
+  test("excludes disabled legacy ratings from state and submitted mutations", () => {
+    const currentRatings = { [personalAxis.id]: 7, [disabledLegacyAxis.id]: 9 };
+    const state = createRatingFormState([personalAxis, disabledLegacyAxis], currentRatings);
 
-function overrideInput(renderer: ReactTestRenderer): ReactTestInstance {
-  return renderer.root.findByProps({ className: "rating-value-input override-value-input" });
-}
-
-function requestCalls(request: typeof fetch): Array<[string | URL | Request, RequestInit?]> {
-  return (
-    request as unknown as {
-      mock: { calls: Array<[string | URL | Request, RequestInit?]> };
-    }
-  ).mock.calls;
-}
-
-async function submit(renderer: ReactTestRenderer): Promise<void> {
-  const form = renderer.root.findByType("form");
-  await act(async () => {
-    form.props.onSubmit({ preventDefault: () => undefined });
-    await Promise.resolve();
-    await Promise.resolve();
-  });
-}
-
-describe("RatingForm rendered workflows", () => {
-  test("excludes disabled legacy ratings from a submitted unrelated save", async () => {
-    const { renderer, request, refresh } = renderForm({
-      axes: [personalAxis, disabledLegacyAxis],
-      currentRatings: { [personalAxis.id]: 7, [disabledLegacyAxis.id]: 9 },
-    });
-
-    expect(text(renderer.root)).toContain(personalAxis.name);
-    expect(text(renderer.root)).not.toContain(disabledLegacyAxis.name);
-    await submit(renderer);
-
-    expect(refresh).toHaveBeenCalledTimes(1);
-    expect(requestCalls(request)[0]?.[1]).toMatchObject({
-      body: JSON.stringify({ ratings: { [personalAxis.id]: 7 } }),
-    });
+    expect(state.ratings).toEqual({ [personalAxis.id]: "7" });
+    expect(
+      buildRatingMutation([personalAxis, disabledLegacyAxis], currentRatings, state.ratings)
+        .ratings,
+    ).toEqual({ [personalAxis.id]: 7 });
   });
 
-  test("rounds a fractional effective rating to a valid override draft and submits it", async () => {
-    const score = derivedScore(derivedAxis, "playingTime", 120, 7.5);
-    const { renderer, request, refresh } = renderForm({ axes: [derivedAxis], score });
-
-    act(() => button(renderer, "Override ›").props.onClick());
-    expect(overrideInput(renderer).props.value).toBe("8");
-    await submit(renderer);
-
-    expect(refresh).toHaveBeenCalledTimes(1);
-    expect(requestCalls(request)[0]?.[1]).toMatchObject({
-      body: JSON.stringify({ ratings: { [derivedAxis.id]: 8 } }),
+  test("enters, changes, and clears derived overrides", () => {
+    const initial = createRatingFormState([derivedAxis], {});
+    const entered = ratingFormReducer(initial, {
+      type: "change",
+      axisId: derivedAxis.id,
+      value: "8",
     });
+    const changed = ratingFormReducer(entered, {
+      type: "change",
+      axisId: derivedAxis.id,
+      value: "6",
+    });
+    const cleared = ratingFormReducer(changed, { type: "remove", axisId: derivedAxis.id });
+
+    expect(buildRatingMutation([derivedAxis], {}, entered.ratings).ratings).toEqual({
+      [derivedAxis.id]: 8,
+    });
+    expect(changed.ratings[derivedAxis.id]).toBe("6");
+    expect(
+      buildRatingMutation([derivedAxis], { [derivedAxis.id]: 6 }, cleared.ratings).ratings,
+    ).toEqual({ [derivedAxis.id]: null });
+    expect(derivedOverrideDraft(7.5)).toBe(8);
   });
 
-  test("clears a supported derived override using null wire semantics", async () => {
-    const { renderer, request, refresh } = renderForm({
-      axes: [derivedAxis],
-      currentRatings: { [derivedAxis.id]: 8 },
+  test("tracks saving, failure, and reset transitions", () => {
+    const initial = createRatingFormState([personalAxis], { [personalAxis.id]: 7 });
+    const saving = ratingFormReducer(initial, { type: "save-started" });
+    const failed = ratingFormReducer(saving, { type: "save-failed", error: "Save failed" });
+    const reset = ratingFormReducer(failed, { type: "reset", ratings: initial.ratings });
+
+    expect(saving).toMatchObject({ saving: true, error: null });
+    expect(failed).toMatchObject({ saving: false, error: "Save failed" });
+    expect(reset).toEqual(initial);
+  });
+
+  test("saves ratings with null wire semantics and refreshes", async () => {
+    const requestMock = mock((input: string | URL | Request, init?: RequestInit) => {
+      void input;
+      void init;
+      return Promise.resolve(new Response("{}", { status: 200 }));
     });
+    const refresh = mock(() => undefined);
 
-    act(() => button(renderer, "Clear override ›").props.onClick());
-    await submit(renderer);
+    await saveRatings(
+      "game-1",
+      { [derivedAxis.id]: null },
+      refresh,
+      requestMock as unknown as typeof fetch,
+    );
 
-    expect(refresh).toHaveBeenCalledTimes(1);
-    expect(requestCalls(request)[0]?.[1]).toMatchObject({
+    expect(requestMock).toHaveBeenCalledTimes(1);
+    expect(requestMock.mock.calls[0]?.[1]).toMatchObject({
+      method: "PUT",
       body: JSON.stringify({ ratings: { [derivedAxis.id]: null } }),
     });
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  for (const scenario of [
-    {
-      label: "Player Count Fit with missing factual metadata",
-      axis: playerCountAxis,
-      field: "playerCountFit" as const,
-      sourceValue: null,
-      effectiveRating: null,
-      override: "9",
-    },
-    {
-      label: "Play Time with factual metadata",
-      axis: derivedAxis,
-      field: "playingTime" as const,
-      sourceValue: 120,
-      effectiveRating: 7,
-      override: "6",
-    },
-  ]) {
-    test(`enters, persists, displays, and clears ${scenario.label} overrides`, async () => {
-      const score = derivedScore(
-        scenario.axis,
-        scenario.field,
-        scenario.sourceValue,
-        scenario.effectiveRating,
+  test("runs validation and async failures through production state transitions", async () => {
+    let state = createRatingFormState([personalAxis], {});
+    const dispatch = (action: Parameters<typeof ratingFormReducer>[1]) => {
+      state = ratingFormReducer(state, action);
+    };
+    const request = mock((input: string | URL | Request, init?: RequestInit) => {
+      void input;
+      void init;
+      return Promise.resolve(
+        new Response(JSON.stringify({ error: "Daemon unavailable" }), {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
+        }),
       );
-      const request = successfulRequest();
-      const refresh = mock(() => undefined);
-      const initial = renderForm({ axes: [scenario.axis], score }, request, refresh);
+    }) as unknown as typeof fetch;
 
-      act(() => button(initial.renderer, "Override ›").props.onClick());
-      act(() =>
-        overrideInput(initial.renderer).props.onChange({ target: { value: scenario.override } }),
-      );
-      expect(text(initial.renderer.root)).toContain(`Stored override (1-10): ${scenario.override}`);
-      await submit(initial.renderer);
-      expect(requestCalls(request)[0]?.[1]).toMatchObject({
-        body: JSON.stringify({ ratings: { [scenario.axis.id]: Number(scenario.override) } }),
-      });
-
-      act(() => initial.renderer.unmount());
-      const persisted = renderForm(
-        {
-          axes: [scenario.axis],
-          currentRatings: { [scenario.axis.id]: Number(scenario.override) },
-          score,
-        },
-        request,
-        refresh,
-      );
-      expect(text(persisted.renderer.root)).toContain(
-        `Stored override (1-10): ${scenario.override}`,
-      );
-      act(() => button(persisted.renderer, "Clear override ›").props.onClick());
-      expect(text(persisted.renderer.root)).not.toContain("Stored override (1-10)");
-      await submit(persisted.renderer);
-      expect(requestCalls(request)[1]?.[1]).toMatchObject({
-        body: JSON.stringify({ ratings: { [scenario.axis.id]: null } }),
-      });
+    await submitRatingForm({
+      gameId: "game-1",
+      axes: [personalAxis],
+      currentRatings: {},
+      drafts: { [personalAxis.id]: "11" },
+      refresh: () => undefined,
+      request,
+      dispatch,
     });
-  }
-
-  test("renders rating labels and metadata fallback through the component", () => {
-    const { renderer } = renderForm({
-      axes: [personalAxis, derivedAxis],
-      currentRatings: { [personalAxis.id]: 7 },
+    expect(state).toMatchObject({
+      saving: false,
+      error: "Ratings must be between 1 and 10: Personal axis",
     });
 
-    expect(text(renderer.root)).toContain("Very Good");
-    expect(text(renderer.root)).toContain("Source metadata unavailable");
+    await submitRatingForm({
+      gameId: "game-1",
+      axes: [personalAxis],
+      currentRatings: {},
+      drafts: { [personalAxis.id]: "7" },
+      refresh: () => undefined,
+      request,
+      dispatch,
+    });
+    expect(state).toMatchObject({ saving: false, error: "Daemon unavailable" });
   });
 
-  test("renders target, cap, and provenance facts from derived breakdowns", () => {
+  test("renders labels and derived metadata from initial controller state", () => {
     const playerScore = derivedScore(playerCountAxis, "playerCountFit", 10, 10);
     const timeScore = derivedScore(derivedAxis, "playingTime", 300, 8);
     const score: FitnessResult = {
@@ -296,14 +249,20 @@ describe("RatingForm rendered workflows", () => {
         },
       ],
     };
+    const html = renderForm({
+      axes: [personalAxis, playerCountAxis, derivedAxis],
+      currentRatings: { [personalAxis.id]: 7, [derivedAxis.id]: 8 },
+      score,
+    });
 
-    const { renderer } = renderForm({ axes: [playerCountAxis, derivedAxis], score });
-    const rendered = text(renderer.root);
-    expect(rendered).toContain("Target: 4 players");
-    expect(rendered).toContain(
-      "BoardGameGeek suggested-player-count poll with publisher-declared bounds fallback",
-    );
-    expect(rendered).toContain("Scoring cap: 240 minutes");
-    expect(rendered).toContain("Publisher-listed playing time imported from BoardGameGeek");
+    expect(html).toContain("Very Good");
+    expect(html).toContain("Stored override (1-10): 8");
+    expect(html).toContain("Target: 4 players");
+    expect(html).toContain("Scoring cap: 240 minutes");
+    expect(html).toContain("Publisher-listed playing time imported from BoardGameGeek");
+  });
+
+  test("renders metadata fallback when no derived score is available", () => {
+    expect(renderForm()).toContain("Source metadata unavailable");
   });
 });

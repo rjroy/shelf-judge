@@ -36,21 +36,6 @@ export default tseslint.config(
     },
   },
   {
-    // react-test-renderer exposes host-node props as any. These tests validate
-    // those handlers at runtime without weakening production type checking.
-    files: [
-      "packages/web/tests/axes-page-workflows.test.tsx",
-      "packages/web/tests/rating-form.test.tsx",
-      "packages/web/tests/shelf-assignment-interaction.test.tsx",
-    ],
-    rules: {
-      "@typescript-eslint/no-base-to-string": "off",
-      "@typescript-eslint/no-floating-promises": "off",
-      "@typescript-eslint/no-unsafe-call": "off",
-      "@typescript-eslint/no-unsafe-return": "off",
-    },
-  },
-  {
     ignores: ["**/node_modules/", "**/dist/", "**/.next/"],
   },
 );
