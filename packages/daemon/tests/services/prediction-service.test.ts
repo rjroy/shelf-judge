@@ -303,9 +303,9 @@ describe("prediction-service", () => {
       expect(requireRow(playerCountAxis.id)).toMatchObject({
         source: "derived",
         derivedField: "playerCountFit",
-        sourceValue: 10,
-        scoringRawValue: 10,
-        effectiveRating: 10,
+        sourceValue: 9,
+        scoringRawValue: 9,
+        effectiveRating: 9,
         unit: "fit score",
         configurationSummary: "Target: 3 players",
         predictionConfidence: "actual",

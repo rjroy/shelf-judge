@@ -58,6 +58,37 @@ function makeScore(
   };
 }
 
+function makeAxisScore(
+  axisId: string,
+  effectiveRating: number | null,
+  sourceValue: number = effectiveRating ?? 1,
+): FitnessResult {
+  return {
+    ...makeScore(effectiveRating ?? 5),
+    breakdown: [
+      {
+        axisId,
+        axisName: "Test Axis",
+        weight: 50,
+        contribution: effectiveRating,
+        source: "derived",
+        derivedField: "playingTime",
+        sourceValue,
+        scoringRawValue: sourceValue,
+        effectiveRating,
+        preferenceShape: "higher-is-better",
+        curveAffected: sourceValue !== effectiveRating,
+        unit: null,
+        provenance: null,
+        configurationSummary: null,
+        overridden: false,
+        predictionConfidence: null,
+        referenceGames: null,
+      },
+    ],
+  };
+}
+
 function makeGWS(
   gameOverrides: Partial<Game> = {},
   score: FitnessResult | null = null,
@@ -294,7 +325,7 @@ describe("sortGames", () => {
     expect(withoutValue.map((g) => g.game.name)).toEqual(["Delta"]);
   });
 
-  test("sort by derived axis resolves values from game metadata", () => {
+  test("sort by derived axis uses effective breakdown ratings", () => {
     const derivedAxes: Axis[] = [
       {
         id: "w",
@@ -309,9 +340,18 @@ describe("sortGames", () => {
         updatedAt: "2026-01-01T00:00:00.000Z",
       },
     ];
-    const g1 = makeGWS({ id: "1", name: "Light", bggData: makeBggData({ weight: 1.5 }) });
-    const g2 = makeGWS({ id: "2", name: "Heavy", bggData: makeBggData({ weight: 4.0 }) });
-    const g3 = makeGWS({ id: "3", name: "Medium", bggData: makeBggData({ weight: 2.8 }) });
+    const g1 = makeGWS(
+      { id: "1", name: "Light", bggData: makeBggData({ weight: 1.5 }) },
+      makeAxisScore("w", 2, 1.5),
+    );
+    const g2 = makeGWS(
+      { id: "2", name: "Heavy", bggData: makeBggData({ weight: 4.0 }) },
+      makeAxisScore("w", 8, 4),
+    );
+    const g3 = makeGWS(
+      { id: "3", name: "Medium", bggData: makeBggData({ weight: 2.8 }) },
+      makeAxisScore("w", 5, 2.8),
+    );
     const g4 = makeGWS({ id: "4", name: "NoBgg" });
 
     const { withValue, withoutValue } = sortGames(
@@ -323,6 +363,45 @@ describe("sortGames", () => {
     );
     expect(withValue.map((g) => g.game.name)).toEqual(["Heavy", "Medium", "Light"]);
     expect(withoutValue.map((g) => g.game.name)).toEqual(["NoBgg"]);
+  });
+
+  test("sort by Play Time axis uses effective score instead of minutes", () => {
+    const playTimeAxis: Axis = {
+      id: "duration",
+      name: "Preferred Duration",
+      description: null,
+      weight: 50,
+      enabled: true,
+      source: "derived",
+      derivedField: "playingTime",
+      configuration: { maximumScoringTime: 240 },
+      preferenceShape: "lower-is-better",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+    const quick = makeGWS(
+      { id: "quick", name: "Quick", playingTime: 60 },
+      makeAxisScore("duration", 8, 60),
+    );
+    const long = makeGWS(
+      { id: "long", name: "Long", playingTime: 180 },
+      makeAxisScore("duration", 3, 180),
+    );
+    const missing = makeGWS(
+      { id: "missing", name: "Missing", playingTime: 90 },
+      makeAxisScore("duration", null, 90),
+    );
+
+    const { withValue, withoutValue } = sortGames(
+      [long, missing, quick],
+      "axis:duration",
+      "desc",
+      EMPTY_TOURNAMENT,
+      [playTimeAxis],
+    );
+
+    expect(withValue.map((entry) => entry.game.name)).toEqual(["Quick", "Long"]);
+    expect(withoutValue.map((entry) => entry.game.name)).toEqual(["Missing"]);
   });
 
   test("nulls sort to bottom regardless of direction", () => {
@@ -739,6 +818,47 @@ describe("getScoreDisplay", () => {
     const result = getScoreDisplay(ratedGame, "axis:fun", EMPTY_TOURNAMENT);
     expect(result.text).toBe("7");
     expect(result.className).toContain("axis-score");
+  });
+
+  test("derived axis: shows effective score instead of native value", () => {
+    const axis: Axis = {
+      id: "duration",
+      name: "Preferred Duration",
+      description: null,
+      weight: 50,
+      enabled: true,
+      source: "derived",
+      derivedField: "playingTime",
+      configuration: { maximumScoringTime: 240 },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+    const game = makeGWS({ playingTime: 120 }, makeAxisScore("duration", 8.5, 120));
+
+    const result = getScoreDisplay(game, "axis:duration", EMPTY_TOURNAMENT, [axis]);
+
+    expect(result.text).toBe("8.5");
+  });
+
+  test("derived axis: null effective score shows missing despite a native value", () => {
+    const game = makeGWS({ playingTime: 120 }, makeAxisScore("duration", null, 120));
+
+    const result = getScoreDisplay(game, "axis:duration", EMPTY_TOURNAMENT, [
+      {
+        id: "duration",
+        name: "Preferred Duration",
+        description: null,
+        weight: 50,
+        enabled: true,
+        source: "derived",
+        derivedField: "playingTime",
+        configuration: { maximumScoringTime: 240 },
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    ]);
+
+    expect(result.text).toBe("---");
   });
 
   test("axis: no rating shows ---", () => {

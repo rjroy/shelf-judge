@@ -662,28 +662,23 @@ describe("derived value resolution", () => {
     expect(resolveDerivedAxisValue(weightAxis, makeGame())).toBeNull();
   });
 
-  test("uses inclusive publisher player bounds", () => {
-    expect(resolveDerivedAxisValue(playerAxis, makeGame({ minPlayers: 4, maxPlayers: 8 }))).toEqual(
-      {
-        sourceValue: 10,
-        scoringRawValue: 10,
-      },
-    );
-    expect(resolveDerivedAxisValue(playerAxis, makeGame({ minPlayers: 1, maxPlayers: 4 }))).toEqual(
-      {
-        sourceValue: 10,
-        scoringRawValue: 10,
-      },
-    );
-    expect(resolveDerivedAxisValue(playerAxis, makeGame({ minPlayers: 5, maxPlayers: 8 }))).toEqual(
-      {
-        sourceValue: 1,
-        scoringRawValue: 1,
-      },
-    );
+  test.each([
+    [4, 4, 10],
+    [3, 4, 9],
+    [3, 5, 9],
+    [2, 4, 8],
+    [2, 2, 6],
+    [5, 5, 8],
+    [5, 6, 7],
+    [10, 20, 1],
+  ])("grades target 4 against publisher range %i-%i", (minPlayers, maxPlayers, expected) => {
+    expect(resolveDerivedAxisValue(playerAxis, makeGame({ minPlayers, maxPlayers }))).toEqual({
+      sourceValue: expected,
+      scoringRawValue: expected,
+    });
   });
 
-  test("accepts target 100 within imported bounds above 100", () => {
+  test("grades target 100 within imported bounds above 100", () => {
     const target100: DerivedAxis<"playerCountFit"> = {
       ...playerAxis,
       configuration: { targetPlayerCount: 100 },
@@ -691,8 +686,8 @@ describe("derived value resolution", () => {
     expect(
       resolveDerivedAxisValue(target100, makeGame({ minPlayers: 1, maxPlayers: 500 })),
     ).toEqual({
-      sourceValue: 10,
-      scoringRawValue: 10,
+      sourceValue: 1,
+      scoringRawValue: 1,
     });
   });
 

@@ -18,7 +18,7 @@ Let a collection owner add optional fitness axes whose factual values are derive
 
 - Derived values are factual game metadata or deterministic calculations from it. They are distinct from personal ratings and the tournament axis.
 - Player-count fit uses the publisher-declared inclusive `minPlayers` to `maxPlayers` range, not BGG's suggested-player-count poll.
-- A player-count-fit axis has one required integer target-player-count setting from 1 through 100. A game scores 10 when that target is in its declared range and 1 otherwise. A missing or invalid declared range produces no value.
+- A player-count-fit axis has one required integer target-player-count setting from 1 through 100. Its 1-10 score rewards narrow declared ranges close to that target. A missing or invalid declared range produces no value.
 - Play time uses the existing published BGG `playingtime` value. Each Play Time axis has an editable `maximumScoringTime` setting, defaulting to 240 minutes, which defines its 1-to-cap native scale. Valid values above the configured cap retain their factual source value but resolve as the cap for scoring. Zero and absent values produce no value.
 - The two new axes are optional templates, not collection defaults. Existing Community Rating and Complexity remain available as derived axes after migration.
 - A personal 1-10 override remains available for any derived axis and retains current override semantics, including bypassing the derived-axis veto.
@@ -37,7 +37,7 @@ Let a collection owner add optional fitness axes whose factual values are derive
 ### Player Count Fit
 
 7. **REQ-DERIVED-7:** A `playerCountFit` axis shall require an integer `targetPlayerCount` from 1 through 100, owned by that axis. Declared game bounds are valid when positive and `minPlayers` is not greater than `maxPlayers`; imported bounds have no arbitrary upper cap.
-8. **REQ-DERIVED-8:** `playerCountFit` shall resolve to 10 when `targetPlayerCount` is inclusively within a game's valid declared `minPlayers` to `maxPlayers` range, and to 1 when it is outside that range.
+8. **REQ-DERIVED-8:** Given target `T` and valid declared bounds `m..M`, `playerCountFit` shall start at 10 and apply a distance penalty. When `m <= T <= M`, the penalty is `max(T - m, M - T)`. Otherwise, the penalty is `abs(T - m) + abs(T - M)`. The resulting `10 - penalty` score shall be clamped inclusively to 1 through 10.
 9. **REQ-DERIVED-9:** `playerCountFit` shall resolve as missing when either player bound is absent, non-positive, or `minPlayers` exceeds `maxPlayers`. It shall not infer values from BGG player-count polls in this release.
 10. **REQ-DERIVED-10:** The player-count-fit template shall clearly show its target player count and publisher-range provenance wherever the axis or its score breakdown is presented.
 
@@ -74,7 +74,7 @@ Let a collection owner add optional fitness axes whose factual values are derive
 1. Run `bun run typecheck`, `bun run lint`, `bun run format:check`, and `bun run test` successfully.
 2. Verify shared validation rejects an unknown derived field, rejects missing or invalid player-count and play-time-cap configuration, accepts target counts 1 and 100 but rejects adjacent values, accepts play-time caps 60 and 1,440 but rejects adjacent values, and accepts all four registered fields with their valid configuration.
 3. Verify resolver and fitness tests cover community rating and weight before and after persisted-axis migration, proving their effective scores, curves, vetoes, weights, and overrides are unchanged.
-4. Verify player-count-fit scoring at the inclusive minimum, inclusive maximum, an in-range count, an out-of-range count, malformed ranges, and missing bounds. Confirm valid in-range games resolve to 10, valid out-of-range games resolve to 1, and invalid/missing ranges are excluded as missing.
+4. Verify player-count-fit scoring for an exact singleton, inclusive bounds, centered and off-center in-range targets, out-of-range targets, clamping, malformed ranges, and missing bounds. Confirm invalid or missing ranges are excluded as missing.
 5. Verify play-time resolution for a normal positive value, zero, missing data, the configured cap, and a value above the configured cap. Confirm above-cap values preserve their factual source duration, score at the configured cap, display both values, and leave uncapped duration as the feature-vector input. Confirm changing a Play Time axis's cap from the default 240 changes its scoring scale without migration and missing values do not affect the weighted denominator.
 6. Exercise discovery, web, API, and CLI creation/editing for both new templates. Confirm the player-count target is requested and displayed, play-time controls use minutes and allow cap editing, unsupported configuration receives a machine-readable actionable error, and neither template appears automatically in a fresh collection.
 7. Load fixtures containing known legacy BGG axes and unknown/malformed legacy BGG axes, ratings, profile cache, and wishlist prediction data. Confirm known axes migrate with unchanged scores; unknown/malformed axes remain disabled and repairable; collection migration is persisted and idempotent; and invalid caches are safely invalidated.

@@ -404,10 +404,12 @@ export const DERIVED_AXIS_REGISTRY = {
       ) {
         return null;
       }
-      const value =
-        configuration.targetPlayerCount >= minimum && configuration.targetPlayerCount <= maximum
-          ? 10
-          : 1;
+      const target = configuration.targetPlayerCount;
+      const penalty =
+        target >= minimum && target <= maximum
+          ? Math.max(target - minimum, maximum - target)
+          : Math.abs(target - minimum) + Math.abs(target - maximum);
+      const value = Math.min(10, Math.max(1, 10 - penalty));
       return { sourceValue: value, scoringRawValue: value };
     },
     suggestionAnalysis: {

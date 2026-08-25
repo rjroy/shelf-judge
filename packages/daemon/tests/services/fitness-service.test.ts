@@ -81,11 +81,14 @@ function entry(result: ReturnType<typeof service.calculateScore>, axisId: string
 
 describe("derived fitness", () => {
   test.each([
-    [2, 4, 2, 10],
-    [2, 4, 4, 10],
-    [2, 4, 3, 10],
-    [2, 4, 1, 1],
-    [2, 4, 5, 1],
+    [2, 4, 2, 8],
+    [2, 4, 4, 8],
+    [2, 4, 3, 9],
+    [2, 4, 1, 6],
+    [2, 4, 5, 6],
+    [4, 4, 4, 10],
+    [2, 2, 4, 6],
+    [10, 20, 4, 1],
     [null, 4, 3, null],
     [2, null, 3, null],
     [0, 4, 3, null],

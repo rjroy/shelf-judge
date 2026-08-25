@@ -161,12 +161,12 @@ describe("resolveAxisValues", () => {
 
   test("returns the in-range player-count fit value", () => {
     const game = makeGame({ minPlayers: 2, maxPlayers: 5 });
-    expect(resolveAxisValues(game, [playerCount(4)])).toEqual({ players: 10 });
+    expect(resolveAxisValues(game, [playerCount(4)])).toEqual({ players: 8 });
   });
 
   test("returns the out-of-range player-count fit value", () => {
     const game = makeGame({ minPlayers: 2, maxPlayers: 5 });
-    expect(resolveAxisValues(game, [playerCount(6)])).toEqual({ players: 1 });
+    expect(resolveAxisValues(game, [playerCount(6)])).toEqual({ players: 5 });
   });
 
   test("omits player-count fit when bounds are missing", () => {
