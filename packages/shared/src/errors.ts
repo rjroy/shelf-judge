@@ -27,6 +27,8 @@ export const AXIS_VALIDATION_CODES = {
   INVALID_MAXIMUM_SCORING_TIME: "invalid_maximum_scoring_time",
   INVALID_CURVE_FOR_NATIVE_SCALE: "invalid_curve_for_native_scale",
   INVALID_LEGACY_AXIS_REPAIR: "invalid_legacy_axis_repair",
+  TOURNAMENT_AXIS_MANAGED: "tournament_axis_managed",
+  DISABLED_LEGACY_AXIS: "disabled_legacy_axis",
 } as const;
 
 export type AxisValidationCode = (typeof AXIS_VALIDATION_CODES)[keyof typeof AXIS_VALIDATION_CODES];

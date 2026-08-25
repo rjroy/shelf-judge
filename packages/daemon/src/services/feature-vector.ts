@@ -2,8 +2,15 @@
 // Implements REQ-PROFILE-11 (composite distance), REQ-PRED-4 (shared module).
 // Follows the elo-engine.ts and curve-engine.ts pattern.
 
-import type { Axis, ComponentDistances, ComponentWeights, Game } from "@shelf-judge/shared";
-import { getNativeScale } from "@shelf-judge/shared";
+import type {
+  ComponentDistances,
+  ComponentWeights,
+  Axis,
+  Game,
+  PersonalAxis,
+  TournamentAxis,
+} from "@shelf-judge/shared";
+import { isVectorEligibleAxis } from "@shelf-judge/shared";
 
 export interface Vocabulary {
   mechanics: string[];
@@ -21,6 +28,16 @@ export interface FeatureVector {
   continuous: number[]; // BGG weight, community rating, min/max players, play time
   personalAxes: number[] | null; // axis ratings normalized 0-1, null when no ratings
 }
+
+export type VectorAxis = PersonalAxis | TournamentAxis;
+
+export const FACTUAL_VECTOR_DIMENSIONS = [
+  "weight",
+  "communityRating",
+  "minPlayers",
+  "maxPlayers",
+  "playingTime",
+] as const;
 
 export type { ComponentDistances, ComponentWeights };
 
@@ -55,8 +72,32 @@ export function buildVocabulary(games: Game[]): Vocabulary {
  * Returns 0 when min === max (no spread).
  */
 function normalize(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value) || !Number.isFinite(min) || !Number.isFinite(max)) return 0.5;
   if (min === max) return 0;
   return (value - min) / (max - min);
+}
+
+function finiteOr(value: number | null | undefined, fallback: number): number {
+  return value !== null && value !== undefined && Number.isFinite(value) ? value : fallback;
+}
+
+export function getOrderedVectorAxes(axes: readonly Axis[]): VectorAxis[] {
+  return axes.filter(isVectorEligibleAxis);
+}
+
+export function getVectorAxisValues(
+  game: Game,
+  vectorAxes: readonly VectorAxis[],
+  tournamentScore: number | null | undefined,
+): Record<string, number> {
+  const values: Record<string, number> = {};
+  for (const axis of vectorAxes) {
+    const value = axis.source === "tournament" ? tournamentScore : game.ratings[axis.id];
+    if (value !== null && value !== undefined && Number.isFinite(value)) {
+      values[axis.id] = value;
+    }
+  }
+  return values;
 }
 
 /**
@@ -72,15 +113,15 @@ export function computeContinuousRanges(games: Game[]): ContinuousRanges {
     maxT = -Infinity;
 
   for (const g of games) {
-    if (g.minPlayers != null) {
+    if (g.minPlayers != null && Number.isFinite(g.minPlayers)) {
       minP = Math.min(minP, g.minPlayers);
       maxP = Math.max(maxP, g.minPlayers);
     }
-    if (g.maxPlayers != null) {
+    if (g.maxPlayers != null && Number.isFinite(g.maxPlayers)) {
       minMP = Math.min(minMP, g.maxPlayers);
       maxMP = Math.max(maxMP, g.maxPlayers);
     }
-    if (g.playingTime != null) {
+    if (g.playingTime != null && Number.isFinite(g.playingTime)) {
       minT = Math.min(minT, g.playingTime);
       maxT = Math.max(maxT, g.playingTime);
     }
@@ -104,10 +145,13 @@ export function computeContinuousRanges(games: Game[]): ContinuousRanges {
 export function encodeGame(
   game: Game,
   vocabulary: Vocabulary,
-  axisRatings?: Record<string, number>,
+  vectorAxes: readonly VectorAxis[],
+  axisValues?: Readonly<Record<string, number | undefined>>,
   ranges?: ContinuousRanges,
-  axes?: Axis[],
 ): FeatureVector {
+  if (vectorAxes === undefined) {
+    throw new Error("encodeGame: ordered vector-axis schema is required");
+  }
   const allTerms = [...vocabulary.mechanics, ...vocabulary.categories];
   const gameTerms = new Set<string>();
   if (game.bggData) {
@@ -119,11 +163,11 @@ export function encodeGame(
 
   // Continuous: weight (1-5), community rating (1-10), min players, max players, play time.
   // Null values default to midpoint of their range.
-  const weight = game.bggData?.weight ?? 2.5;
-  const communityRating = game.bggData?.communityRating ?? 5.5;
-  const minPlayers = game.minPlayers ?? 1;
-  const maxPlayers = game.maxPlayers ?? 4;
-  const playingTime = game.playingTime ?? 60;
+  const weight = finiteOr(game.bggData?.weight, 2.5);
+  const communityRating = finiteOr(game.bggData?.communityRating, 5.5);
+  const minPlayers = finiteOr(game.minPlayers, 1);
+  const maxPlayers = finiteOr(game.maxPlayers, 4);
+  const playingTime = finiteOr(game.playingTime, 60);
 
   const r = ranges ?? {
     minPlayers: { min: 1, max: 10 },
@@ -144,31 +188,46 @@ export function encodeGame(
     continuous[i] = Math.max(0, Math.min(1, continuous[i]));
   }
 
-  // Personal axes: when `axes` is provided, iterate over the axis list so every
-  // game in the same profile produces a fixed-dimension vector (slot i = axes[i]).
-  // This matters for centroid/pairwise distance math: mismatched dimensions produce
-  // NaN distances which serialize to JSON `null`. When `axes` is absent, fall back
-  // to the legacy keyset-driven shape for call sites that don't know the axis list.
-  let personalAxes: number[] | null = null;
-  if (axes && axes.length > 0) {
-    personalAxes = axes.map((axis) => {
-      const rating = axisRatings?.[axis.id];
-      if (rating == null) return 0.5;
-      const scale = getNativeScale(axis.source, axis.bggField);
-      return normalize(rating, scale.min, scale.max);
-    });
-  } else if (axisRatings) {
-    const axisIds = Object.keys(axisRatings).sort();
-    if (axisIds.length > 0) {
-      personalAxes = axisIds.map((id) => {
-        const rating = axisRatings[id];
-        if (rating == null) return 0.5;
-        return normalize(rating, 1, 10);
-      });
-    }
-  }
+  // Tournament data lives outside Game.ratings. Callers supply it in axisValues;
+  // unavailable tournament and personal values share the explicit midpoint policy.
+  const personalAxes =
+    vectorAxes.length === 0
+      ? null
+      : vectorAxes.map((axis) => {
+          const value = axisValues?.[axis.id];
+          return value === undefined || !Number.isFinite(value) ? 0.5 : normalize(value, 1, 10);
+        });
 
-  return { binary, continuous, personalAxes };
+  const vector = { binary, continuous, personalAxes };
+  assertFeatureVector(vector, vocabulary, vectorAxes);
+  return vector;
+}
+
+function assertFeatureVector(
+  vector: FeatureVector,
+  vocabulary: Vocabulary,
+  vectorAxes: readonly VectorAxis[],
+): void {
+  const expectedBinary = vocabulary.mechanics.length + vocabulary.categories.length;
+  if (vector.binary.length !== expectedBinary) {
+    throw new Error(
+      `encodeGame: binary dimension mismatch (actual=${vector.binary.length}, expected=${expectedBinary})`,
+    );
+  }
+  if (vector.continuous.length !== FACTUAL_VECTOR_DIMENSIONS.length) {
+    throw new Error(
+      `encodeGame: factual dimension mismatch (actual=${vector.continuous.length}, expected=${FACTUAL_VECTOR_DIMENSIONS.length})`,
+    );
+  }
+  if ((vector.personalAxes?.length ?? 0) !== vectorAxes.length) {
+    throw new Error(
+      `encodeGame: axis dimension mismatch (actual=${vector.personalAxes?.length ?? 0}, expected=${vectorAxes.length})`,
+    );
+  }
+  const values = [...vector.binary, ...vector.continuous, ...(vector.personalAxes ?? [])];
+  if (!values.every(Number.isFinite)) {
+    throw new Error("encodeGame: feature vector contains a non-finite value");
+  }
 }
 
 /**
@@ -183,6 +242,7 @@ export function jaccardDistance(a: number[], b: number[]): number {
       `jaccardDistance: dimension mismatch (a.length=${a.length}, b.length=${b.length})`,
     );
   }
+  assertFiniteVectorElements("jaccardDistance", a, b);
   let minSum = 0;
   let maxSum = 0;
 
@@ -208,6 +268,7 @@ export function normalizedManhattanDistance(a: number[], b: number[]): number {
       `normalizedManhattanDistance: dimension mismatch (a.length=${a.length}, b.length=${b.length})`,
     );
   }
+  assertFiniteVectorElements("normalizedManhattanDistance", a, b);
   if (a.length === 0) return 0;
 
   let sum = 0;
@@ -307,6 +368,12 @@ export function computeCentroid(vectors: FeatureVector[]): FeatureVector {
  * Returns 0 when either vector has zero magnitude.
  */
 export function cosineSimilarity(a: number[], b: number[]): number {
+  if (a.length !== b.length) {
+    throw new Error(
+      `cosineSimilarity: dimension mismatch (a.length=${a.length}, b.length=${b.length})`,
+    );
+  }
+  assertFiniteVectorElements("cosineSimilarity", a, b);
   let dot = 0;
   let magA = 0;
   let magB = 0;
@@ -320,4 +387,20 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   const denominator = Math.sqrt(magA) * Math.sqrt(magB);
   if (denominator === 0) return 0;
   return dot / denominator;
+}
+
+function assertFiniteVectorElements(operation: string, a: number[], b: number[]): void {
+  for (const [vectorName, vector] of [
+    ["a", a],
+    ["b", b],
+  ] as const) {
+    for (let index = 0; index < vector.length; index++) {
+      const value = vector[index];
+      if (!Number.isFinite(value)) {
+        throw new Error(
+          `${operation}: non-finite vector element (vector=${vectorName}, index=${index}, value=${String(value)})`,
+        );
+      }
+    }
+  }
 }

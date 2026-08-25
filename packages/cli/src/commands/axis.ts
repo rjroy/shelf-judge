@@ -2,19 +2,9 @@
 import type { DaemonClient } from "../client.js";
 import type { OutputOptions } from "../output.js";
 import { formatTable, printOutput } from "../output.js";
+import type { Axis } from "@shelf-judge/shared";
 
-interface AxisData {
-  id: string;
-  name: string;
-  weight: number;
-  source: string;
-  description: string | null;
-  preferenceShape?: string;
-  idealValue?: number | null;
-  tolerance?: string;
-  leanDirection?: string | null;
-  veto?: { direction: "below" | "above"; threshold: number } | null;
-}
+type AxisData = Axis;
 
 function formatShapeColumn(axis: AxisData): string {
   const shape = axis.preferenceShape ?? "higher-is-better";
@@ -77,7 +67,13 @@ export async function axisList(
 
   return formatTable(
     ["ID", "Name", "Weight", "Source", "Shape"],
-    data.map((a) => [a.id.slice(0, 8), a.name, String(a.weight), a.source, formatShapeColumn(a)]),
+    data.map((a) => [
+      a.id.slice(0, 8),
+      a.name,
+      String(a.weight),
+      a.source === "derived" ? `${a.source}:${a.derivedField}` : a.source,
+      formatShapeColumn(a),
+    ]),
   );
 }
 

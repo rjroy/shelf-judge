@@ -1,60 +1,34 @@
 import { describe, expect, test } from "bun:test";
-import type { Axis, BggGameData, FitnessResult, Game } from "@shelf-judge/shared";
+import type {
+  Axis,
+  DerivedAxis,
+  DisabledLegacyAxis,
+  Game,
+  PersonalAxis,
+  TournamentAxis,
+} from "@shelf-judge/shared";
+import { createFitnessService } from "../../src/services/fitness-service.js";
 import {
   assessReadiness,
   computePredictedFitness,
   DEFAULT_PREDICTION_SETTINGS,
   findKNearestForAxis,
   predictAxisRating,
-} from "../../src/services/prediction-engine";
-import type {
-  ClusterMembership,
-  ReferenceGameCandidate,
-  SimilarityMatch,
-} from "../../src/services/prediction-engine";
-import type { Vocabulary } from "../../src/services/feature-vector";
+  type ClusterMembership,
+  type ReferenceGameCandidate,
+  type SimilarityMatch,
+} from "../../src/services/prediction-engine.js";
+import type { Vocabulary } from "../../src/services/feature-vector.js";
 
-// --- Helpers ---
+const timestamp = "2026-01-01T00:00:00.000Z";
+const settings = DEFAULT_PREDICTION_SETTINGS;
+const fitness = createFitnessService();
 
-function makeCandidate(
-  overrides: Partial<ReferenceGameCandidate> & { gameId: string },
-): ReferenceGameCandidate {
+function game(overrides: Partial<Game> = {}): Game {
   return {
-    gameName: overrides.gameId,
-    vector: overrides.vector ?? [1, 0, 0.5],
-    ratings: overrides.ratings ?? {},
-    tournamentStability: overrides.tournamentStability ?? 1.0,
-    ...overrides,
-  };
-}
-
-function makeMatch(gameId: string, similarity: number, rating: number): SimilarityMatch {
-  return { gameId, gameName: gameId, similarity, rating };
-}
-
-function makeAxis(
-  id: string,
-  name: string,
-  weight: number,
-  source: "personal" | "bgg" = "personal",
-): Axis {
-  return {
-    id,
-    name,
-    description: null,
-    weight,
-    source,
-    bggField: source === "bgg" ? "communityRating" : null,
-    createdAt: "2025-01-01T00:00:00Z",
-    updatedAt: "2025-01-01T00:00:00Z",
-  };
-}
-
-function makeGame(id: string, ratings: Record<string, number> = {}): Game {
-  return {
-    id,
+    id: "target",
     bggId: 1,
-    name: id,
+    name: "Target",
     yearPublished: 2020,
     minPlayers: 2,
     maxPlayers: 4,
@@ -65,1193 +39,755 @@ function makeGame(id: string, ratings: Record<string, number> = {}): Game {
     ownership: "owned",
     boxDimensions: null,
     manualShelfId: null,
-    ratings,
-    createdAt: "2025-01-01T00:00:00Z",
-    updatedAt: "2025-01-01T00:00:00Z",
+    ratings: {},
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    ...overrides,
   };
 }
 
-const defaultSettings = DEFAULT_PREDICTION_SETTINGS;
+function personal(id: string, weight = 50): PersonalAxis {
+  return {
+    id,
+    name: id,
+    description: null,
+    weight,
+    enabled: true,
+    source: "personal",
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
 
-// --- findKNearestForAxis ---
+function playingTime(
+  overrides: Partial<DerivedAxis<"playingTime">> = {},
+): DerivedAxis<"playingTime"> {
+  return {
+    id: "playing-time",
+    name: "Play Time",
+    description: null,
+    weight: 40,
+    enabled: true,
+    source: "derived",
+    derivedField: "playingTime",
+    configuration: { maximumScoringTime: 120 },
+    preferenceShape: "lower-is-better",
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    ...overrides,
+  };
+}
 
-describe("findKNearestForAxis", () => {
-  test("returns k most similar games with the target axis rating", () => {
-    // Target vector: [1, 0, 0.5]
-    const target = [1, 0, 0.5];
-    const candidates: ReferenceGameCandidate[] = [
-      makeCandidate({ gameId: "a", vector: [1, 0, 0.5], ratings: { fun: 8 } }), // identical = sim 1.0
-      makeCandidate({ gameId: "b", vector: [0.9, 0.1, 0.4], ratings: { fun: 7 } }), // very similar
-      makeCandidate({ gameId: "c", vector: [0.5, 0.5, 0.5], ratings: { fun: 6 } }), // moderate
-      makeCandidate({ gameId: "d", vector: [0, 1, 0.5], ratings: { fun: 5 } }), // low similarity
-      makeCandidate({ gameId: "e", vector: [1, 0, 0.5], ratings: { fun: 9 } }), // identical
-      makeCandidate({ gameId: "f", vector: [0.8, 0.2, 0.6], ratings: { fun: 7 } }), // similar
-    ];
+function disabled(weight = 100): DisabledLegacyAxis {
+  return {
+    id: "disabled",
+    name: "Disabled",
+    description: null,
+    weight,
+    enabled: false,
+    source: "legacy",
+    reason: "unknown",
+    legacyField: "future",
+    legacyPayload: {},
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
 
-    const result = findKNearestForAxis(target, candidates, "fun", 3, 0.2);
-    expect(result).toHaveLength(3);
-    // The top 3 should be the most similar (a and e are identical, then b or f)
-    expect(result[0].similarity).toBeGreaterThanOrEqual(result[1].similarity);
-    expect(result[1].similarity).toBeGreaterThanOrEqual(result[2].similarity);
-  });
+function references(axisId: string, rating = 7, count = 5): ReferenceGameCandidate[] {
+  return Array.from({ length: count }, (_, index) => ({
+    gameId: `reference-${index}`,
+    gameName: `Reference ${index}`,
+    vector: [1, 0.5],
+    ratings: { [axisId]: rating },
+    tournamentStability: 1,
+  }));
+}
 
-  test("excludes candidates without the target axis rating", () => {
-    const target = [1, 0, 0.5];
-    const candidates: ReferenceGameCandidate[] = [
-      makeCandidate({ gameId: "a", vector: [1, 0, 0.5], ratings: { fun: 8 } }),
-      makeCandidate({ gameId: "b", vector: [1, 0, 0.5], ratings: { theme: 7 } }), // no "fun" rating
-      makeCandidate({ gameId: "c", vector: [0.9, 0.1, 0.4], ratings: { fun: 6 } }),
-    ];
+function compute(
+  target: Game,
+  axes: Axis[],
+  refs: ReferenceGameCandidate[] = [],
+  stage: 0 | 1 | 2 | 3 = 2,
+) {
+  return computePredictedFitness(
+    target,
+    axes,
+    refs,
+    [1, 0.5],
+    settings,
+    stage,
+    (actualGame, actualAxes) => fitness.calculateScore(actualGame, actualAxes),
+  );
+}
 
-    const result = findKNearestForAxis(target, candidates, "fun", 5, 0.0);
-    expect(result).toHaveLength(2);
-    expect(result.map((r) => r.gameId)).toEqual(["a", "c"]);
-  });
-
-  test("excludes candidates below minimum similarity", () => {
-    const target = [1, 0, 0];
-    const candidates: ReferenceGameCandidate[] = [
-      makeCandidate({ gameId: "a", vector: [1, 0, 0], ratings: { fun: 8 } }), // sim = 1.0
-      makeCandidate({ gameId: "b", vector: [0, 1, 0], ratings: { fun: 5 } }), // sim = 0.0
-    ];
-
-    const result = findKNearestForAxis(target, candidates, "fun", 5, 0.5);
-    expect(result).toHaveLength(1);
-    expect(result[0].gameId).toBe("a");
-  });
-
-  test("tournament stability multiplies base similarity", () => {
-    const target = [1, 0, 0.5];
-    // Both have identical vectors to target
-    const candidates: ReferenceGameCandidate[] = [
-      makeCandidate({
-        gameId: "stable",
-        vector: [1, 0, 0.5],
-        ratings: { fun: 8 },
-        tournamentStability: 1.2,
-      }),
-      makeCandidate({
-        gameId: "normal",
-        vector: [1, 0, 0.5],
-        ratings: { fun: 7 },
-        tournamentStability: 1.0,
-      }),
-    ];
-
-    const result = findKNearestForAxis(target, candidates, "fun", 2, 0.0);
-    expect(result[0].gameId).toBe("stable");
-    expect(result[0].similarity).toBeCloseTo(1.2, 4);
-    expect(result[1].gameId).toBe("normal");
-    expect(result[1].similarity).toBeCloseTo(1.0, 4);
-  });
-
-  test("returns fewer than k when not enough qualify", () => {
-    const target = [1, 0, 0.5];
-    const candidates: ReferenceGameCandidate[] = [
-      makeCandidate({ gameId: "a", vector: [1, 0, 0.5], ratings: { fun: 8 } }),
-    ];
-
-    const result = findKNearestForAxis(target, candidates, "fun", 5, 0.0);
-    expect(result).toHaveLength(1);
-  });
-
-  test("returns empty array when no candidates have the axis", () => {
-    const target = [1, 0, 0.5];
-    const candidates: ReferenceGameCandidate[] = [
-      makeCandidate({ gameId: "a", vector: [1, 0, 0.5], ratings: { theme: 8 } }),
-    ];
-
-    const result = findKNearestForAxis(target, candidates, "fun", 5, 0.0);
-    expect(result).toHaveLength(0);
-  });
-});
-
-// --- predictAxisRating ---
-
-describe("predictAxisRating", () => {
-  test("returns null for empty matches (insufficient)", () => {
-    expect(predictAxisRating([])).toBeNull();
-  });
-
-  test("computes similarity-weighted average (hand-calculated)", () => {
-    // Games: A (sim=0.8, rating=8), B (sim=0.6, rating=6), C (sim=0.4, rating=4)
-    // Weighted avg = (8*0.8 + 6*0.6 + 4*0.4) / (0.8 + 0.6 + 0.4) = (6.4 + 3.6 + 1.6) / 1.8 = 11.6 / 1.8 = 6.444...
-    const matches = [makeMatch("a", 0.8, 8), makeMatch("b", 0.6, 6), makeMatch("c", 0.4, 4)];
-    const result = predictAxisRating(matches);
-    expect(result).not.toBeNull();
-    expect(result!.rating).toBeCloseTo(11.6 / 1.8, 4);
-  });
-
-  test("single match returns that rating with weak confidence", () => {
-    const result = predictAxisRating([makeMatch("a", 0.9, 7)]);
-    expect(result!.rating).toBeCloseTo(7, 4);
-    expect(result!.confidence).toBe("weak");
-  });
-
-  test("strong confidence: 5+ matches, variance < 1.5, avg similarity > 0.7", () => {
-    // 5 matches, all similar ratings (7-8), high similarity (0.8+)
-    const matches = [
-      makeMatch("a", 0.9, 7.5),
-      makeMatch("b", 0.85, 7.8),
-      makeMatch("c", 0.8, 7.2),
-      makeMatch("d", 0.75, 7.6),
-      makeMatch("e", 0.72, 7.4),
-    ];
-    const result = predictAxisRating(matches);
-    expect(result!.confidence).toBe("strong");
-  });
-
-  test("moderate confidence: 3+ matches, variance <= 3.0, avg similarity >= 0.4", () => {
-    const matches = [makeMatch("a", 0.5, 6), makeMatch("b", 0.45, 7), makeMatch("c", 0.4, 8)];
-    const result = predictAxisRating(matches);
-    expect(result!.confidence).toBe("moderate");
-  });
-
-  test("weak confidence: fewer than 3 matches", () => {
-    const matches = [makeMatch("a", 0.5, 6), makeMatch("b", 0.45, 7)];
-    const result = predictAxisRating(matches);
-    expect(result!.confidence).toBe("weak");
-  });
-
-  // Boundary tests per plan verification items
-  test("boundary: 4 matches does not qualify for strong (needs 5)", () => {
-    const matches = [
-      makeMatch("a", 0.9, 7),
-      makeMatch("b", 0.85, 7),
-      makeMatch("c", 0.8, 7),
-      makeMatch("d", 0.75, 7),
-    ];
-    const result = predictAxisRating(matches);
-    // 4 matches, low variance, high similarity: meets moderate but not strong (needs 5)
-    expect(result!.confidence).not.toBe("strong");
-    expect(result!.confidence).toBe("moderate");
-  });
-
-  test("boundary: 5 matches qualifies for strong when other criteria met", () => {
-    const matches = [
-      makeMatch("a", 0.9, 7),
-      makeMatch("b", 0.85, 7),
-      makeMatch("c", 0.8, 7),
-      makeMatch("d", 0.75, 7),
-      makeMatch("e", 0.72, 7),
-    ];
-    const result = predictAxisRating(matches);
-    expect(result!.confidence).toBe("strong");
-  });
-
-  test("boundary: variance at 1.49 qualifies for strong", () => {
-    // Need 5 matches with avg sim > 0.7 and variance just under 1.5
-    // Ratings: we need variance = sum((r_i - mean)^2) / n < 1.5
-    // With 5 ratings centered at 7: [5.78, 7, 7, 7, 8.22] gives variance ~= 1.49
-    // Actually simpler: [6, 7, 7, 7, 8] => mean ~= 7, var = (1+0+0+0+1)/5 = 0.4
-    // Let's use [5, 7, 7, 7, 9] => weighted mean depends on weights...
-    // For simplicity, use equal similarities so weighted mean = arithmetic mean
-    const matches = [
-      makeMatch("a", 0.75, 5.27),
-      makeMatch("b", 0.75, 7),
-      makeMatch("c", 0.75, 7),
-      makeMatch("d", 0.75, 7),
-      makeMatch("e", 0.75, 8.73),
-    ];
-    // Equal weights, so mean = (5.27+7+7+7+8.73)/5 = 35/5 = 7.0
-    // variance = ((7-5.27)^2 + 0 + 0 + 0 + (8.73-7)^2) / 5 = (2.9929 + 2.9929) / 5 = 5.9858/5 = 1.197
-    const result = predictAxisRating(matches);
-    expect(result!.variance).toBeLessThan(1.5);
-    expect(result!.confidence).toBe("strong");
-  });
-
-  test("boundary: variance at 1.5+ does not qualify for strong", () => {
-    // 5 matches with high similarity but high variance
-    const matches = [
-      makeMatch("a", 0.75, 5),
-      makeMatch("b", 0.75, 7),
-      makeMatch("c", 0.75, 7),
-      makeMatch("d", 0.75, 7),
-      makeMatch("e", 0.75, 9),
-    ];
-    // mean = 35/5 = 7, var = (4+0+0+0+4)/5 = 1.6
-    const result = predictAxisRating(matches);
-    expect(result!.variance).toBeGreaterThanOrEqual(1.5);
-    expect(result!.confidence).not.toBe("strong");
-  });
-
-  test("boundary: avg similarity at 0.69 does not qualify for strong", () => {
-    const matches = [
-      makeMatch("a", 0.69, 7),
-      makeMatch("b", 0.69, 7),
-      makeMatch("c", 0.69, 7),
-      makeMatch("d", 0.69, 7),
-      makeMatch("e", 0.69, 7),
-    ];
-    const result = predictAxisRating(matches);
-    expect(result!.avgSimilarity).toBeCloseTo(0.69, 4);
-    expect(result!.confidence).not.toBe("strong");
-  });
-
-  test("boundary: avg similarity at 0.71 qualifies for strong", () => {
-    const matches = [
-      makeMatch("a", 0.71, 7),
-      makeMatch("b", 0.71, 7),
-      makeMatch("c", 0.71, 7),
-      makeMatch("d", 0.71, 7),
-      makeMatch("e", 0.71, 7),
-    ];
-    const result = predictAxisRating(matches);
-    expect(result!.avgSimilarity).toBeCloseTo(0.71, 4);
-    expect(result!.confidence).toBe("strong");
-  });
-
-  test("lowest confidence wins when criteria conflict", () => {
-    // 5 matches, low variance, but avg similarity below 0.7 => not strong
-    // avg similarity >= 0.4, count >= 3, variance reasonable => moderate
-    const matches = [
-      makeMatch("a", 0.5, 7),
-      makeMatch("b", 0.5, 7),
-      makeMatch("c", 0.5, 7),
-      makeMatch("d", 0.5, 7),
-      makeMatch("e", 0.5, 7),
-    ];
-    const result = predictAxisRating(matches);
-    // 5 matches, zero variance, but avg sim = 0.5 (below 0.7 for strong)
-    // Meets moderate criteria (3+, variance <= 3, sim >= 0.4)
-    expect(result!.confidence).toBe("moderate");
-  });
-});
-
-// --- computePredictedFitness ---
-
-describe("computePredictedFitness", () => {
-  const funAxis = makeAxis("fun", "Fun", 50, "personal");
-  const themeAxis = makeAxis("theme", "Theme", 30, "personal");
-  const bggAxis = makeAxis("bgg-rating", "BGG Rating", 20, "bgg");
-
-  function mockCalculateScore(
-    _game: Game,
-    axes: Axis[],
-    bggData: BggGameData | null,
-  ): FitnessResult | null {
-    // Simulate: BGG axis gets 7.0 effective rating, personal axes only if game has ratings
-    const breakdown: import("@shelf-judge/shared").FitnessBreakdownEntry[] = [];
-    let weightedSum = 0;
-    let weightSum = 0;
-    let ratedCount = 0;
-
-    for (const axis of axes) {
-      if (axis.source === "bgg" && bggData) {
-        const rating = 7.0;
-        breakdown.push({
-          axisId: axis.id,
-          axisName: axis.name,
-          rating,
-          weight: axis.weight,
-          contribution: rating * axis.weight,
-          source: "bgg",
-          bggOriginal: 7.0,
-          rawValue: 7.0,
-          effectiveRating: rating,
-          preferenceShape: "higher-is-better",
-          curveAffected: false,
-          predictionConfidence: null,
-          referenceGames: null,
-        });
-        weightedSum += rating * axis.weight;
-        weightSum += axis.weight;
-        ratedCount++;
-      } else if (axis.source === "personal" && _game.ratings[axis.id] !== undefined) {
-        const rating = _game.ratings[axis.id];
-        breakdown.push({
-          axisId: axis.id,
-          axisName: axis.name,
-          rating,
-          weight: axis.weight,
-          contribution: rating * axis.weight,
-          source: "personal",
-          bggOriginal: null,
-          rawValue: rating,
-          effectiveRating: rating,
-          preferenceShape: "higher-is-better",
-          curveAffected: false,
-          predictionConfidence: null,
-          referenceGames: null,
-        });
-        weightedSum += rating * axis.weight;
-        weightSum += axis.weight;
-        ratedCount++;
-      } else {
-        breakdown.push({
-          axisId: axis.id,
-          axisName: axis.name,
-          rating: null,
-          weight: axis.weight,
-          contribution: null,
-          source: axis.source === "bgg" ? "bgg" : "personal",
-          bggOriginal: null,
-          rawValue: null,
-          effectiveRating: null,
-          preferenceShape: "higher-is-better",
-          curveAffected: false,
-          predictionConfidence: null,
-          referenceGames: null,
-        });
-      }
-    }
-
-    if (ratedCount === 0) return null;
-
-    return {
-      score: weightSum > 0 ? Math.round((weightedSum / weightSum) * 10) / 10 : 0,
-      ratedAxisCount: ratedCount,
-      totalAxisCount: axes.length,
-      breakdown,
-      vetoed: false,
-      vetoedBy: null,
-      hypotheticalScore: null,
-      predictionMeta: null,
-      redundancyAdjustment: null,
-    };
-  }
-
-  test("fully rated game returns actual result with no predictionMeta", () => {
-    const game = makeGame("g1", { fun: 8, theme: 6 });
-    const axes = [funAxis, themeAxis]; // no BGG axis
-    const result = computePredictedFitness(
-      game,
-      axes,
-      null,
-      [],
-      [1, 0, 0.5],
-      defaultSettings,
-      2,
-      mockCalculateScore,
-    );
-
-    expect(result.fitnessResult.predictionMeta).toBeNull();
-    expect(result.predictedAxisCount).toBe(0);
-    expect(result.actualAxisCount).toBe(2);
-  });
-
-  test("partially rated game gets predictions for unrated personal axes", () => {
-    const game = makeGame("target", { fun: 8 }); // rated fun, not theme
-    const axes = [funAxis, themeAxis];
-
-    // Reference games with both axes rated, vectors identical to target
-    const refs: ReferenceGameCandidate[] = [
-      makeCandidate({ gameId: "r1", vector: [1, 0, 0.5], ratings: { fun: 7, theme: 6 } }),
-      makeCandidate({ gameId: "r2", vector: [0.9, 0.1, 0.5], ratings: { fun: 8, theme: 7 } }),
-      makeCandidate({ gameId: "r3", vector: [0.8, 0.2, 0.4], ratings: { fun: 9, theme: 8 } }),
-    ];
-
-    const result = computePredictedFitness(
-      game,
-      axes,
-      null,
-      refs,
-      [1, 0, 0.5],
-      defaultSettings,
-      2,
-      mockCalculateScore,
-    );
-
-    expect(result.predictedAxisCount).toBe(1); // theme predicted
-    expect(result.actualAxisCount).toBe(1); // fun actual
-    expect(result.fitnessResult.predictionMeta).not.toBeNull();
-    expect(result.fitnessResult.predictionMeta!.predictedAxisCount).toBe(1);
-    expect(result.fitnessResult.predictionMeta!.actualAxisCount).toBe(1);
-
-    // Find predicted entry
-    const predictedEntry = result.fitnessResult.breakdown.find((e) => e.source === "predicted");
-    expect(predictedEntry).toBeDefined();
-    expect(predictedEntry!.axisId).toBe("theme");
-    expect(predictedEntry!.predictionConfidence).not.toBeNull();
-    expect(predictedEntry!.referenceGames).not.toBeNull();
-    expect(predictedEntry!.rating).not.toBeNull();
-  });
-
-  test("BGG-derived axes produce predictionConfidence 'actual'", () => {
-    const game = makeGame("target", {});
-    const bggData: BggGameData = {
-      communityRating: 7.5,
-      bayesAverage: 7.0,
-      weight: 3.0,
-      numWeightVotes: 100,
-      description: null,
-      mechanics: [],
-      categories: [],
-      families: [],
-      subdomains: [],
-      suggestedPlayerCounts: [],
-      fetchedAt: "2025-01-01T00:00:00Z",
-    };
-
-    const axes = [funAxis, bggAxis];
-    const refs: ReferenceGameCandidate[] = [
-      makeCandidate({ gameId: "r1", vector: [1, 0, 0.5], ratings: { fun: 7 } }),
-      makeCandidate({ gameId: "r2", vector: [0.9, 0.1, 0.5], ratings: { fun: 8 } }),
-      makeCandidate({ gameId: "r3", vector: [0.8, 0.2, 0.4], ratings: { fun: 6 } }),
-    ];
-
-    const result = computePredictedFitness(
-      game,
-      axes,
-      bggData,
-      refs,
-      [1, 0, 0.5],
-      defaultSettings,
-      2,
-      mockCalculateScore,
-    );
-
-    const bggEntry = result.fitnessResult.breakdown.find((e) => e.axisId === "bgg-rating");
-    expect(bggEntry).toBeDefined();
-    expect(bggEntry!.predictionConfidence).toBe("actual");
-  });
-
-  test("predicted fitness score matches hand-calculated weighted average", () => {
-    // Setup: one actual axis (fun=8, weight=50), one predicted axis (theme~=7, weight=30)
-    const game = makeGame("target", { fun: 8 });
-    const axes = [funAxis, themeAxis];
-
-    // All refs rate theme as 7.0, so predicted should be 7.0
-    const refs: ReferenceGameCandidate[] = [
-      makeCandidate({ gameId: "r1", vector: [1, 0, 0.5], ratings: { theme: 7 } }),
-      makeCandidate({ gameId: "r2", vector: [1, 0, 0.5], ratings: { theme: 7 } }),
-      makeCandidate({ gameId: "r3", vector: [1, 0, 0.5], ratings: { theme: 7 } }),
-    ];
-
-    const result = computePredictedFitness(
-      game,
-      axes,
-      null,
-      refs,
-      [1, 0, 0.5],
-      defaultSettings,
-      2,
-      mockCalculateScore,
-    );
-
-    // Expected: (8*50 + 7*30) / (50 + 30) = (400 + 210) / 80 = 610 / 80 = 7.625 => 7.6
-    expect(result.fitnessResult.score).toBeCloseTo(7.6, 1);
-  });
-
-  test("insufficient-confidence axes excluded from score", () => {
-    const game = makeGame("target", { fun: 8 });
-    const axes = [funAxis, themeAxis];
-
-    // No refs have "theme" rating, so theme gets insufficient
-    const refs: ReferenceGameCandidate[] = [
-      makeCandidate({ gameId: "r1", vector: [1, 0, 0.5], ratings: { fun: 9 } }),
-    ];
-
-    const result = computePredictedFitness(
-      game,
-      axes,
-      null,
-      refs,
-      [1, 0, 0.5],
-      defaultSettings,
-      2,
-      mockCalculateScore,
-    );
-
-    // Theme is insufficient, so score is based only on fun
-    // fun = 8, weight = 50, only fun counts
-    // score = (8*50) / 50 = 8.0
-    expect(result.fitnessResult.score).toBeCloseTo(8.0, 1);
-
-    // Insufficient entry exists in breakdown
-    const insufficientEntry = result.fitnessResult.breakdown.find(
-      (e) => e.axisId === "theme" && e.predictionConfidence === "insufficient",
-    );
-    expect(insufficientEntry).toBeDefined();
-    expect(insufficientEntry!.rating).toBeNull();
-    expect(insufficientEntry!.contribution).toBeNull();
-  });
-
-  test("vetoes fire on BGG-derived actual values", () => {
-    const vetoAxis = {
-      ...bggAxis,
-      veto: { direction: "below" as const, threshold: 6.0 },
-    };
-    const bggData: BggGameData = {
-      communityRating: 5.0, // below veto threshold
-      bayesAverage: 5.0,
-      weight: 3.0,
-      numWeightVotes: 100,
-      description: null,
-      mechanics: [],
-      categories: [],
-      families: [],
-      subdomains: [],
-      suggestedPlayerCounts: [],
-      fetchedAt: "2025-01-01T00:00:00Z",
-    };
-
-    const game = makeGame("target", {});
-
-    // Mock that returns a vetoed result
-    function vetoCalcScore(g: Game, ax: Axis[]): FitnessResult | null {
-      return {
-        score: 0,
-        ratedAxisCount: 1,
-        totalAxisCount: ax.length,
-        breakdown: [
-          {
-            axisId: vetoAxis.id,
-            axisName: vetoAxis.name,
-            rating: 5.0,
-            weight: vetoAxis.weight,
-            contribution: null,
-            source: "bgg",
-            bggOriginal: 5.0,
-            rawValue: 5.0,
-            effectiveRating: 5.0,
-            preferenceShape: "higher-is-better",
-            curveAffected: false,
-            predictionConfidence: null,
-            referenceGames: null,
-          },
-        ],
-        vetoed: true,
-        vetoedBy: {
-          axisId: vetoAxis.id,
-          axisName: vetoAxis.name,
-          threshold: 6.0,
-          direction: "below",
-          rawValue: 5.0,
+describe("prediction primitives", () => {
+  test("finds nearest rated candidates and applies stability to ordering", () => {
+    const matches = findKNearestForAxis(
+      [1, 0.5],
+      [
+        ...references("fun", 7, 1),
+        {
+          gameId: "stable",
+          gameName: "Stable",
+          vector: [1, 0.5],
+          ratings: { fun: 8 },
+          tournamentStability: 1.2,
         },
-        hypotheticalScore: 5.0,
-        predictionMeta: null,
-        redundancyAdjustment: null,
-      };
-    }
-
-    const result = computePredictedFitness(
-      game,
-      [funAxis, vetoAxis],
-      bggData,
-      [makeCandidate({ gameId: "r1", vector: [1, 0, 0.5], ratings: { fun: 8 } })],
-      [1, 0, 0.5],
-      defaultSettings,
-      2,
-      vetoCalcScore,
+        {
+          gameId: "other-axis",
+          gameName: "Other",
+          vector: [1, 0.5],
+          ratings: { theme: 10 },
+          tournamentStability: 2,
+        },
+      ],
+      "fun",
+      5,
+      0.2,
     );
-
-    expect(result.fitnessResult.vetoed).toBe(true);
-    expect(result.fitnessResult.score).toBe(0);
+    expect(matches.map(({ gameId }) => gameId)).toEqual(["stable", "reference-0"]);
   });
 
-  test("predicted personal values do NOT trigger vetoes (REQ-PRED-10)", () => {
-    // Fun axis has a veto at below 3, but the predicted value is 2
-    const vetoFunAxis: Axis = {
-      ...funAxis,
-      veto: { direction: "below", threshold: 3 },
-    };
-    const game = makeGame("target", {}); // no personal ratings
-
-    // Refs all give fun = 2 (would trigger veto if actual)
-    const refs: ReferenceGameCandidate[] = [
-      makeCandidate({ gameId: "r1", vector: [1, 0, 0.5], ratings: { fun: 2 } }),
-      makeCandidate({ gameId: "r2", vector: [1, 0, 0.5], ratings: { fun: 2 } }),
-      makeCandidate({ gameId: "r3", vector: [1, 0, 0.5], ratings: { fun: 2 } }),
-    ];
-
-    const result = computePredictedFitness(
-      game,
-      [vetoFunAxis],
-      null,
-      refs,
-      [1, 0, 0.5],
-      defaultSettings,
-      2,
-      () => null, // no actual score
-    );
-
-    // Predicted value is ~2 but veto should NOT fire
-    expect(result.fitnessResult.vetoed).toBe(false);
-    expect(result.fitnessResult.score).toBeGreaterThan(0);
+  test("assigns confidence from match count, similarity, and variance", () => {
+    expect(predictAxisRating([])).toBeNull();
+    expect(
+      predictAxisRating(
+        references("fun").map(({ gameId, gameName, ratings }) => ({
+          gameId,
+          gameName,
+          similarity: 1,
+          rating: ratings.fun,
+        })),
+      )?.confidence,
+    ).toBe("strong");
+    expect(
+      predictAxisRating([{ gameId: "one", gameName: "One", similarity: 0.5, rating: 6 }])
+        ?.confidence,
+    ).toBe("weak");
   });
+});
 
-  test("Stage 0 returns no personal-axis predictions", () => {
-    const game = makeGame("target", {});
-    const axes = [funAxis, themeAxis];
+describe("predicted fitness", () => {
+  test("uses deterministic derived values as actual inputs and never predicts them", () => {
+    const derived = playingTime();
+    const fun = personal("fun", 60);
+    const result = compute(game({ playingTime: 60 }), [derived, fun], references(fun.id));
+    const derivedRow = result.fitnessResult.breakdown.find(({ axisId }) => axisId === derived.id);
 
-    const refs: ReferenceGameCandidate[] = [
-      makeCandidate({ gameId: "r1", vector: [1, 0, 0.5], ratings: { fun: 8, theme: 7 } }),
-    ];
-
-    const result = computePredictedFitness(
-      game,
-      axes,
-      null,
-      refs,
-      [1, 0, 0.5],
-      defaultSettings,
-      0, // Stage 0
-      () => null,
-    );
-
-    // No predictions at stage 0
-    expect(result.predictedAxisCount).toBe(0);
-    const predictedEntries = result.fitnessResult.breakdown.filter((e) => e.source === "predicted");
-    expect(predictedEntries).toHaveLength(0);
-  });
-
-  test("PredictionMeta correctly reports counts and coverage", () => {
-    const game = makeGame("target", { fun: 8 });
-    const axes = [funAxis, themeAxis]; // fun=rated, theme=predicted
-
-    // Refs with high similarity so theme gets strong confidence
-    const refs: ReferenceGameCandidate[] = [
-      makeCandidate({ gameId: "r1", vector: [1, 0, 0.5], ratings: { theme: 7 } }),
-      makeCandidate({ gameId: "r2", vector: [1, 0, 0.5], ratings: { theme: 7 } }),
-      makeCandidate({ gameId: "r3", vector: [1, 0, 0.5], ratings: { theme: 7 } }),
-      makeCandidate({ gameId: "r4", vector: [1, 0, 0.5], ratings: { theme: 7 } }),
-      makeCandidate({ gameId: "r5", vector: [1, 0, 0.5], ratings: { theme: 7 } }),
-    ];
-
-    const result = computePredictedFitness(
-      game,
-      axes,
-      null,
-      refs,
-      [1, 0, 0.5],
-      defaultSettings,
-      2,
-      mockCalculateScore,
-    );
-
-    const meta = result.fitnessResult.predictionMeta!;
-    expect(meta.predictedAxisCount).toBe(1);
-    expect(meta.actualAxisCount).toBe(1);
-    expect(meta.referenceGameCount).toBe(5);
-    expect(meta.readinessStage).toBe(2);
-    // Coverage: fun (actual, weight 50) + theme (strong, weight 30) out of total 80
-    // coveragePercent = 80/80 = 1.0
-    expect(meta.coveragePercent).toBe(1);
-  });
-
-  test("moderate/weak predictions do not count toward coverage", () => {
-    const game = makeGame("target", {});
-    const axes = [funAxis, themeAxis]; // both unrated
-
-    // Only 2 refs per axis => weak confidence
-    const refs: ReferenceGameCandidate[] = [
-      makeCandidate({ gameId: "r1", vector: [1, 0, 0.5], ratings: { fun: 7, theme: 6 } }),
-      makeCandidate({ gameId: "r2", vector: [0.9, 0.1, 0.5], ratings: { fun: 8, theme: 7 } }),
-    ];
-
-    const result = computePredictedFitness(
-      game,
-      axes,
-      null,
-      refs,
-      [1, 0, 0.5],
-      defaultSettings,
-      1,
-      () => null,
-    );
-
-    const meta = result.fitnessResult.predictionMeta!;
-    // Both axes predicted with weak confidence (only 2 matches)
-    // Coverage: neither actual nor strong => 0
-    expect(meta.coveragePercent).toBe(0);
-  });
-
-  test("ratedAxisCount reflects actual axes only, not predicted (REQ-PRED-35)", () => {
-    const game = makeGame("target", {}); // no personal ratings
-    const axes = [funAxis, themeAxis];
-
-    // Refs so both axes get predicted
-    const refs: ReferenceGameCandidate[] = [
-      makeCandidate({ gameId: "r1", vector: [1, 0, 0.5], ratings: { fun: 7, theme: 6 } }),
-      makeCandidate({ gameId: "r2", vector: [1, 0, 0.5], ratings: { fun: 8, theme: 7 } }),
-      makeCandidate({ gameId: "r3", vector: [1, 0, 0.5], ratings: { fun: 9, theme: 8 } }),
-    ];
-
-    const result = computePredictedFitness(
-      game,
-      axes,
-      null,
-      refs,
-      [1, 0, 0.5],
-      defaultSettings,
-      2,
-      () => null,
-    );
-
-    // Both axes are predicted, zero are actual
-    expect(result.predictedAxisCount).toBe(2);
-    expect(result.actualAxisCount).toBe(0);
-    // ratedAxisCount must be 0 (actual only), not 2
-    expect(result.fitnessResult.ratedAxisCount).toBe(0);
-    // But score should still be non-zero because predictions contribute
-    expect(result.fitnessResult.score).toBeGreaterThan(0);
-  });
-
-  test("ratedAxisCount is actual-only even with mixed actual and predicted axes", () => {
-    const game = makeGame("target", { fun: 8 }); // fun rated, theme not
-    const axes = [funAxis, themeAxis];
-
-    const refs: ReferenceGameCandidate[] = [
-      makeCandidate({ gameId: "r1", vector: [1, 0, 0.5], ratings: { theme: 7 } }),
-      makeCandidate({ gameId: "r2", vector: [1, 0, 0.5], ratings: { theme: 7 } }),
-      makeCandidate({ gameId: "r3", vector: [1, 0, 0.5], ratings: { theme: 7 } }),
-    ];
-
-    const result = computePredictedFitness(
-      game,
-      axes,
-      null,
-      refs,
-      [1, 0, 0.5],
-      defaultSettings,
-      2,
-      mockCalculateScore,
-    );
-
+    expect(derivedRow).toMatchObject({
+      source: "derived",
+      sourceValue: 60,
+      scoringRawValue: 60,
+      effectiveRating: 5.5,
+      predictionConfidence: "actual",
+    });
     expect(result.actualAxisCount).toBe(1);
     expect(result.predictedAxisCount).toBe(1);
-    // ratedAxisCount = actual only = 1
-    expect(result.fitnessResult.ratedAxisCount).toBe(1);
+    expect(result.fitnessResult.predictionMeta).toMatchObject({
+      actualAxisCount: 1,
+      predictedAxisCount: 1,
+      confidence: "strong",
+      coveragePercent: 1,
+    });
   });
 
-  test("overall confidence is lowest non-actual confidence (mixed confidence)", () => {
-    const game = makeGame("target", {}); // no personal ratings
-    const axes = [funAxis, themeAxis];
+  test("fully actual early return marks personal and deterministic derived rows actual", () => {
+    const time = playingTime();
+    const fun = personal("fun", 60);
+    const result = compute(game({ playingTime: 60, ratings: { fun: 8 } }), [time, fun]);
 
-    // fun: 5 high-sim refs => strong confidence
-    // theme: only 2 refs => weak confidence
-    const refs: ReferenceGameCandidate[] = [
-      makeCandidate({ gameId: "r1", vector: [1, 0, 0.5], ratings: { fun: 7, theme: 6 } }),
-      makeCandidate({ gameId: "r2", vector: [1, 0, 0.5], ratings: { fun: 7, theme: 7 } }),
-      makeCandidate({ gameId: "r3", vector: [1, 0, 0.5], ratings: { fun: 7 } }),
-      makeCandidate({ gameId: "r4", vector: [1, 0, 0.5], ratings: { fun: 7 } }),
-      makeCandidate({ gameId: "r5", vector: [1, 0, 0.5], ratings: { fun: 7 } }),
-    ];
-
-    const result = computePredictedFitness(
-      game,
-      axes,
-      null,
-      refs,
-      [1, 0, 0.5],
-      defaultSettings,
-      2,
-      () => null,
-    );
-
-    const meta = result.fitnessResult.predictionMeta!;
-    // fun should be strong (5 refs, 0 variance, sim=1.0)
-    // theme should be weak (2 refs)
-    // overall = lowest = weak
-    expect(meta.confidence).toBe("weak");
-  });
-
-  test("all predictions insufficient produces null predictionMeta", () => {
-    const game = makeGame("target", {}); // no personal ratings
-    const axes = [funAxis, themeAxis];
-
-    // No refs have fun or theme ratings => insufficient for both
-    const refs: ReferenceGameCandidate[] = [
-      makeCandidate({ gameId: "r1", vector: [1, 0, 0.5], ratings: { other: 7 } }),
-    ];
-
-    const result = computePredictedFitness(
-      game,
-      axes,
-      null,
-      refs,
-      [1, 0, 0.5],
-      defaultSettings,
-      2,
-      () => null,
-    );
-
-    // Both axes insufficient => predictedAxisCount = 0 => predictionMeta = null
-    expect(result.predictedAxisCount).toBe(0);
+    expect(result).toMatchObject({ predictedAxisCount: 0, actualAxisCount: 2 });
     expect(result.fitnessResult.predictionMeta).toBeNull();
-    expect(result.fitnessResult.score).toBe(0);
+    expect(result.fitnessResult.breakdown).toHaveLength(2);
+    for (const row of result.fitnessResult.breakdown) {
+      expect(row.predictionConfidence).toBe("actual");
+      expect(row.referenceGames).toBeNull();
+    }
+    expect(result.fitnessResult.breakdown.find(({ axisId }) => axisId === time.id)).toMatchObject({
+      source: "derived",
+      derivedField: "playingTime",
+      sourceValue: 60,
+      scoringRawValue: 60,
+      effectiveRating: 5.5,
+      predictionConfidence: "actual",
+    });
   });
 
-  test("games without BGG data and no ratings returns score 0", () => {
-    const game = makeGame("target", {});
-    const axes = [bggAxis]; // Only a BGG axis, no BGG data
+  test("missing derived fallback rows carry the same metadata as actual scoring", () => {
+    const derived = playingTime();
+    const actual = fitness.calculateScore(game({ ratings: { fun: 8 } }), [
+      derived,
+      personal("fun"),
+    ]);
+    const predicted = compute(game({ playingTime: null }), [derived], [], 0).fitnessResult;
+    const actualRow = actual?.breakdown.find(({ axisId }) => axisId === derived.id);
+    const predictedRow = predicted.breakdown.find(({ axisId }) => axisId === derived.id);
 
-    const result = computePredictedFitness(
-      game,
-      axes,
-      null,
-      [],
-      [1, 0, 0.5],
-      defaultSettings,
-      2,
-      () => null,
+    expect(predictedRow).toMatchObject({
+      derivedField: actualRow?.derivedField,
+      sourceValue: null,
+      scoringRawValue: null,
+      effectiveRating: null,
+      unit: actualRow?.unit,
+      provenance: actualRow?.provenance,
+      configurationSummary: actualRow?.configurationSummary,
+      overridden: false,
+      predictionConfidence: null,
+    });
+  });
+
+  test("excludes disabled axes from rows, score, counts, coverage, confidence, and sorting", () => {
+    const fun = personal("fun", 50);
+    const legacy = disabled(100);
+    const result = compute(
+      game({ ratings: { [legacy.id]: 1 } }),
+      [legacy, fun],
+      references(fun.id),
     );
 
-    expect(result.fitnessResult.score).toBe(0);
-    expect(result.fitnessResult.ratedAxisCount).toBe(0);
+    expect(result.fitnessResult.score).toBe(7);
+    expect(result.fitnessResult.totalAxisCount).toBe(1);
+    expect(result.actualAxisCount).toBe(0);
+    expect(result.predictedAxisCount).toBe(1);
+    expect(result.fitnessResult.breakdown.map(({ axisId }) => axisId)).toEqual([fun.id]);
+    expect(result.fitnessResult.predictionMeta).toMatchObject({
+      confidence: "strong",
+      coveragePercent: 1,
+      actualAxisCount: 0,
+      predictedAxisCount: 1,
+    });
   });
-});
 
-// --- Tournament axis prediction (REQ-TAXIS-8 / REQ-TAXIS-17) ---
+  test("disabled axes cannot prevent the fully-actual early return", () => {
+    const fun = personal("fun");
+    const result = compute(game({ ratings: { fun: 8, disabled: 1 } }), [fun, disabled()]);
+    expect(result).toMatchObject({ predictedAxisCount: 0, actualAxisCount: 1 });
+    expect(result.fitnessResult).toMatchObject({
+      score: 8,
+      totalAxisCount: 1,
+      predictionMeta: null,
+    });
+    expect(result.fitnessResult.breakdown.map(({ axisId }) => axisId)).toEqual([fun.id]);
+  });
 
-describe("computePredictedFitness with tournament axis", () => {
-  function makeTournamentAxis(): Axis {
-    return {
+  test("stage zero and insufficient predictions preserve fallback semantics", () => {
+    const fun = personal("fun");
+    const stageZero = compute(game(), [fun], references(fun.id), 0);
+    expect(stageZero).toMatchObject({ predictedAxisCount: 0, actualAxisCount: 0 });
+    expect(stageZero.fitnessResult.breakdown[0]).toMatchObject({
+      source: "personal",
+      effectiveRating: null,
+      predictionConfidence: null,
+    });
+
+    const insufficient = compute(game(), [fun], [], 2);
+    expect(insufficient.fitnessResult.breakdown[0]).toMatchObject({
+      source: "predicted",
+      effectiveRating: null,
+      predictionConfidence: "insufficient",
+      referenceGames: [],
+    });
+    expect(insufficient.fitnessResult.predictionMeta).toBeNull();
+  });
+
+  test("rated counts remain actual-only and weak predictions do not add coverage", () => {
+    const actual = personal("actual", 70);
+    const predicted = personal("predicted", 30);
+    const result = compute(
+      game({ ratings: { [actual.id]: 8 } }),
+      [actual, predicted],
+      references(predicted.id, 6, 1),
+    );
+    expect(result.fitnessResult.ratedAxisCount).toBe(1);
+    expect(result.actualAxisCount).toBe(1);
+    expect(result.predictedAxisCount).toBe(1);
+    expect(result.fitnessResult.predictionMeta).toMatchObject({
+      confidence: "weak",
+      coveragePercent: 0.7,
+    });
+  });
+
+  test("preserves Tournament prediction semantics", () => {
+    const tournament: TournamentAxis = {
       id: "tournament",
       name: "Tournament",
       description: null,
       weight: 30,
+      enabled: true,
       source: "tournament",
-      bggField: null,
-      createdAt: "2026-01-01T00:00:00Z",
-      updatedAt: "2026-01-01T00:00:00Z",
+      createdAt: timestamp,
+      updatedAt: timestamp,
     };
-  }
-
-  // The fitness service excludes tournament axes for games with null
-  // normalizedScore the same way it excludes unrated personal axes. This
-  // mock mirrors that for the target game (no tournament data) — every axis
-  // is unrated so the actual result is null and computePredictedFitness
-  // routes the tournament axis through the predicted-axis branch.
-  const tournamentMockCalculateScore: (
-    game: Game,
-    axes: Axis[],
-    bggData: BggGameData | null,
-  ) => FitnessResult | null = () => null;
-
-  test("predicts tournament axis for a 6th game from a 5-game cohort (hand-calculated)", () => {
-    // Five reference games each with a tournament value (i.e. comparisons in
-    // a 5+ cohort). Their feature vectors are tuned so cosine similarity to
-    // the target is identical (1.0) for all five — so the predicted value
-    // is simply the arithmetic mean of their tournament ratings.
-    const tournamentAxis = makeTournamentAxis();
-    const target = [1, 0, 0.5];
-    const refs: ReferenceGameCandidate[] = [
-      makeCandidate({ gameId: "r1", vector: [1, 0, 0.5], ratings: { tournament: 6.0 } }),
-      makeCandidate({ gameId: "r2", vector: [1, 0, 0.5], ratings: { tournament: 7.0 } }),
-      makeCandidate({ gameId: "r3", vector: [1, 0, 0.5], ratings: { tournament: 8.0 } }),
-      makeCandidate({ gameId: "r4", vector: [1, 0, 0.5], ratings: { tournament: 9.0 } }),
-      makeCandidate({ gameId: "r5", vector: [1, 0, 0.5], ratings: { tournament: 10.0 } }),
-    ];
-
-    const game = makeGame("target");
-    const result = computePredictedFitness(
-      game,
-      [tournamentAxis],
-      null,
-      refs,
-      target,
-      defaultSettings,
-      2,
-      tournamentMockCalculateScore,
-    );
-
-    // All similarities are 1.0, so weighted mean == arithmetic mean = 8.0.
-    const predictedEntry = result.fitnessResult.breakdown.find((e) => e.axisId === "tournament");
-    expect(predictedEntry).toBeDefined();
-    expect(predictedEntry!.source).toBe("predicted");
-    expect(predictedEntry!.rating).toBeCloseTo(8.0, 5);
-    expect(predictedEntry!.predictionConfidence).not.toBe("insufficient");
-    expect(predictedEntry!.predictionConfidence).not.toBe("actual");
-    expect(predictedEntry!.referenceGames).not.toBeNull();
-    expect(predictedEntry!.referenceGames!.length).toBe(5);
-
-    expect(result.predictedAxisCount).toBe(1);
-    expect(result.actualAxisCount).toBe(0);
-  });
-
-  test("game with non-null tournament value contributes as a reference game (filter-fix regression)", () => {
-    // Without the prediction-service filter fix, ReferenceGameCandidate.ratings
-    // would not include the tournament axis even though the candidate had a
-    // tournament value. Here we simulate the post-fix shape — ratings includes
-    // the tournament axis — and confirm k-NN actually picks the candidate up.
-    const target = [1, 0, 0.5];
-    const refs: ReferenceGameCandidate[] = [
-      makeCandidate({
-        gameId: "with-tournament",
-        vector: [1, 0, 0.5],
-        ratings: { tournament: 7.5 },
-      }),
-    ];
-
-    const matches = findKNearestForAxis(target, refs, "tournament", 5, 0.0);
-    expect(matches).toHaveLength(1);
-    expect(matches[0].gameId).toBe("with-tournament");
-    expect(matches[0].rating).toBe(7.5);
-  });
-
-  test("Stage 0 returns no tournament-axis predictions", () => {
-    const tournamentAxis = makeTournamentAxis();
-    const refs: ReferenceGameCandidate[] = [
-      makeCandidate({ gameId: "r1", vector: [1, 0, 0.5], ratings: { tournament: 7.0 } }),
-    ];
-
-    const result = computePredictedFitness(
-      makeGame("target"),
-      [tournamentAxis],
-      null,
-      refs,
-      [1, 0, 0.5],
-      defaultSettings,
-      0,
-      tournamentMockCalculateScore,
-    );
-
-    const entry = result.fitnessResult.breakdown.find((e) => e.axisId === "tournament");
-    expect(entry).toBeDefined();
-    expect(entry!.source).toBe("tournament"); // unrated, not predicted
-    expect(entry!.rating).toBeNull();
-    expect(entry!.predictionConfidence).toBeNull();
-    expect(result.predictedAxisCount).toBe(0);
-  });
-
-  test("tournament axis with no reference candidates produces insufficient prediction", () => {
-    const tournamentAxis = makeTournamentAxis();
-
-    const result = computePredictedFitness(
-      makeGame("target"),
-      [tournamentAxis],
-      null,
-      [], // no reference games
-      [1, 0, 0.5],
-      defaultSettings,
-      2,
-      tournamentMockCalculateScore,
-    );
-
-    const entry = result.fitnessResult.breakdown.find((e) => e.axisId === "tournament");
-    expect(entry).toBeDefined();
-    expect(entry!.source).toBe("predicted");
-    expect(entry!.predictionConfidence).toBe("insufficient");
-    expect(entry!.rating).toBeNull();
+    const result = compute(game(), [tournament], references(tournament.id, 8));
+    expect(result.fitnessResult.breakdown[0]).toMatchObject({
+      source: "predicted",
+      effectiveRating: 8,
+      predictionConfidence: "strong",
+    });
+    expect(result).toMatchObject({ actualAxisCount: 0, predictedAxisCount: 1 });
   });
 });
 
-// --- assessReadiness ---
+describe("readiness", () => {
+  const vocabulary: Vocabulary = { mechanics: [], categories: [] };
 
-describe("assessReadiness", () => {
-  const axes = [
-    makeAxis("fun", "Fun", 50),
-    makeAxis("theme", "Theme", 30),
-    makeAxis("replay", "Replayability", 20),
-  ];
-
-  const emptyVocab: Vocabulary = { mechanics: [], categories: [] };
-
-  test("stage 0 when fewer than threshold[0] games rated", () => {
-    const gameRatings = new Map([
-      ["g1", { fun: 8 }],
-      ["g2", { fun: 7 }],
-    ]);
-
-    const result = assessReadiness(2, axes, gameRatings, emptyVocab, defaultSettings);
-    expect(result.stage).toBe(0);
-    expect(result.nextStageAt).toBe(5);
-    expect(result.ratedGameCount).toBe(2);
-  });
-
-  test("stage 1 when >= threshold[0] and < threshold[1]", () => {
-    const gameRatings = new Map(
-      Array.from({ length: 7 }, (_, i) => [`g${i}`, { fun: 7 }] as const),
+  test("disabled and derived axes do not appear in weak-axis counts or suggestions", () => {
+    const fun = personal("fun");
+    const result = assessReadiness(
+      5,
+      [disabled(), playingTime(), fun],
+      new Map([["game", { disabled: 8, "playing-time": 7 }]]),
+      vocabulary,
+      settings,
     );
-
-    const result = assessReadiness(7, axes, gameRatings, emptyVocab, defaultSettings);
-    expect(result.stage).toBe(1);
-    expect(result.nextStageAt).toBe(15);
+    expect(result.weakAxes).toEqual([{ axisId: "fun", axisName: "fun", ratedCount: 0 }]);
+    expect(result.suggestedActions.some((message) => message.includes("Disabled"))).toBe(false);
+    expect(result.suggestedActions.some((message) => message.includes("Play Time"))).toBe(false);
   });
 
-  test("stage 2 when >= threshold[1] and < threshold[2]", () => {
-    const gameRatings = new Map(
-      Array.from({ length: 20 }, (_, i) => [`g${i}`, { fun: 7 }] as const),
+  test.each([
+    [4, 0, 5],
+    [5, 1, 15],
+    [15, 2, 30],
+    [30, 3, 30],
+  ] as const)("maps %p rated games to readiness stage %p", (ratedCount, stage, nextStageAt) => {
+    const result = assessReadiness(ratedCount, [personal("fun")], new Map(), vocabulary, settings);
+    expect(result).toMatchObject({ stage, nextStageAt, ratedGameCount: ratedCount });
+  });
+});
+
+function match(gameId: string, similarity: number, rating: number): SimilarityMatch {
+  return { gameId, gameName: gameId, similarity, rating };
+}
+
+describe("restored prediction primitive boundaries", () => {
+  test("returns only the requested number of nearest games", () => {
+    const result = findKNearestForAxis([1, 0.5], references("fun", 7, 6), "fun", 3, 0);
+    expect(result).toHaveLength(3);
+  });
+
+  test("excludes candidates without the requested axis", () => {
+    const result = findKNearestForAxis(
+      [1, 0.5],
+      [...references("fun", 7, 1), { ...references("theme", 8, 1)[0], gameId: "theme-only" }],
+      "fun",
+      5,
+      0,
     );
-
-    const result = assessReadiness(20, axes, gameRatings, emptyVocab, defaultSettings);
-    expect(result.stage).toBe(2);
-    expect(result.nextStageAt).toBe(30);
+    expect(result.map(({ gameId }) => gameId)).toEqual(["reference-0"]);
   });
 
-  test("stage 3 when >= threshold[2]", () => {
-    const gameRatings = new Map(
-      Array.from({ length: 30 }, (_, i) => [`g${i}`, { fun: 7 }] as const),
+  test("excludes candidates below minimum similarity", () => {
+    const result = findKNearestForAxis(
+      [1, 0],
+      [
+        { ...references("fun", 8, 1)[0], vector: [1, 0] },
+        { ...references("fun", 5, 1)[0], gameId: "orthogonal", vector: [0, 1] },
+      ],
+      "fun",
+      5,
+      0.5,
     );
-
-    const result = assessReadiness(30, axes, gameRatings, emptyVocab, defaultSettings);
-    expect(result.stage).toBe(3);
-    expect(result.nextStageAt).toBe(30); // already at max
+    expect(result).toHaveLength(1);
   });
 
-  test("identifies weak axes (fewer rated games than defaultK)", () => {
-    // fun: 3 games rated, theme: 1 game rated, replay: 0 games rated
-    const gameRatings = new Map<string, Record<string, number>>([
+  test("returns fewer than k when fewer candidates qualify", () => {
+    expect(findKNearestForAxis([1, 0.5], references("fun", 7, 1), "fun", 5, 0)).toHaveLength(1);
+  });
+
+  test("returns no neighbors when no candidate rates the axis", () => {
+    expect(findKNearestForAxis([1, 0.5], references("theme", 7, 2), "fun", 5, 0)).toEqual([]);
+  });
+
+  test("computes the hand-calculated similarity-weighted average", () => {
+    const result = predictAxisRating([match("a", 0.8, 8), match("b", 0.6, 6), match("c", 0.4, 4)]);
+    expect(result?.rating).toBeCloseTo(11.6 / 1.8, 4);
+  });
+
+  test("one match has weak confidence", () => {
+    expect(predictAxisRating([match("a", 0.9, 7)])).toMatchObject({
+      rating: 7,
+      confidence: "weak",
+    });
+  });
+
+  test("four high-quality matches cannot be strong", () => {
+    expect(
+      predictAxisRating([
+        match("a", 0.9, 7),
+        match("b", 0.85, 7),
+        match("c", 0.8, 7),
+        match("d", 0.75, 7),
+      ])?.confidence,
+    ).toBe("moderate");
+  });
+
+  test("five high-quality matches can be strong", () => {
+    expect(
+      predictAxisRating([0.9, 0.85, 0.8, 0.75, 0.72].map((value, i) => match(String(i), value, 7)))
+        ?.confidence,
+    ).toBe("strong");
+  });
+
+  test("variance below 1.5 qualifies for strong", () => {
+    const ratings = [5.27, 7, 7, 7, 8.73];
+    const result = predictAxisRating(ratings.map((rating, i) => match(String(i), 0.75, rating)));
+    expect(result?.variance).toBeLessThan(1.5);
+    expect(result?.confidence).toBe("strong");
+  });
+
+  test("variance at or above 1.5 prevents strong", () => {
+    const ratings = [5, 7, 7, 7, 9];
+    const result = predictAxisRating(ratings.map((rating, i) => match(String(i), 0.75, rating)));
+    expect(result?.variance).toBeGreaterThanOrEqual(1.5);
+    expect(result?.confidence).not.toBe("strong");
+  });
+
+  test("average similarity 0.69 prevents strong", () => {
+    expect(
+      predictAxisRating(Array.from({ length: 5 }, (_, i) => match(String(i), 0.69, 7)))?.confidence,
+    ).not.toBe("strong");
+  });
+
+  test("average similarity 0.71 permits strong", () => {
+    expect(
+      predictAxisRating(Array.from({ length: 5 }, (_, i) => match(String(i), 0.71, 7)))?.confidence,
+    ).toBe("strong");
+  });
+
+  test("three moderate matches produce moderate confidence", () => {
+    expect(
+      predictAxisRating([match("a", 0.5, 6), match("b", 0.45, 7), match("c", 0.4, 8)])?.confidence,
+    ).toBe("moderate");
+  });
+
+  test("lowest met confidence criteria wins", () => {
+    expect(
+      predictAxisRating(Array.from({ length: 5 }, (_, i) => match(String(i), 0.5, 7)))?.confidence,
+    ).toBe("moderate");
+  });
+});
+
+describe("restored predicted-fitness cases", () => {
+  const fun = personal("fun", 50);
+  const theme = personal("theme", 30);
+
+  test("fully rated games return the actual result early", () => {
+    const result = compute(game({ ratings: { fun: 8, theme: 6 } }), [fun, theme]);
+    expect(result).toMatchObject({ predictedAxisCount: 0, actualAxisCount: 2 });
+    expect(result.fitnessResult.predictionMeta).toBeNull();
+    expect(
+      result.fitnessResult.breakdown.every((row) => row.predictionConfidence === "actual"),
+    ).toBe(true);
+  });
+
+  test("partially rated games predict only missing personal axes", () => {
+    const result = compute(game({ ratings: { fun: 8 } }), [fun, theme], references("theme", 7, 3));
+    expect(result).toMatchObject({ predictedAxisCount: 1, actualAxisCount: 1 });
+    expect(result.fitnessResult.breakdown.find(({ axisId }) => axisId === "theme")).toMatchObject({
+      source: "predicted",
+      effectiveRating: 7,
+    });
+  });
+
+  test("predicted fitness preserves the hand-calculated weighted average", () => {
+    const result = compute(game({ ratings: { fun: 8 } }), [fun, theme], references("theme", 7, 3));
+    expect(result.fitnessResult.score).toBe(7.6);
+  });
+
+  test("insufficient predictions are excluded from score", () => {
+    const result = compute(game({ ratings: { fun: 8 } }), [fun, theme]);
+    expect(result.fitnessResult.score).toBe(8);
+    expect(result.fitnessResult.breakdown.find(({ axisId }) => axisId === "theme")).toMatchObject({
+      effectiveRating: null,
+      contribution: null,
+      predictionConfidence: "insufficient",
+    });
+  });
+
+  test("predicted values never trigger personal vetoes", () => {
+    const veto = personal("fun", 50);
+    veto.veto = { direction: "below", threshold: 3 };
+    const result = compute(game(), [veto], references("fun", 2, 3));
+    expect(result.fitnessResult).toMatchObject({ score: 2, vetoed: false });
+  });
+
+  test("stage zero produces no predicted-source rows", () => {
+    const result = compute(game(), [fun, theme], references("fun", 8, 3), 0);
+    expect(result.predictedAxisCount).toBe(0);
+    expect(result.fitnessResult.breakdown.filter(({ source }) => source === "predicted")).toEqual(
+      [],
+    );
+  });
+
+  test("prediction metadata reports counts reference games and coverage", () => {
+    const result = compute(game({ ratings: { fun: 8 } }), [fun, theme], references("theme", 7, 5));
+    expect(result.fitnessResult.predictionMeta).toMatchObject({
+      predictedAxisCount: 1,
+      actualAxisCount: 1,
+      referenceGameCount: 5,
+      readinessStage: 2,
+      coveragePercent: 1,
+    });
+  });
+
+  test("weak predictions do not add coverage", () => {
+    const result = compute(
+      game(),
+      [fun, theme],
+      [
+        { ...references("fun", 7, 1)[0], ratings: { fun: 7, theme: 6 } },
+        { ...references("fun", 8, 1)[0], gameId: "second", ratings: { fun: 8, theme: 7 } },
+      ],
+    );
+    expect(result.fitnessResult.predictionMeta?.coveragePercent).toBe(0);
+  });
+
+  test("ratedAxisCount excludes predicted axes", () => {
+    const result = compute(
+      game(),
+      [fun, theme],
+      [
+        { ...references("fun", 7, 1)[0], ratings: { fun: 7, theme: 6 } },
+        { ...references("fun", 8, 1)[0], gameId: "second", ratings: { fun: 8, theme: 7 } },
+        { ...references("fun", 9, 1)[0], gameId: "third", ratings: { fun: 9, theme: 8 } },
+      ],
+    );
+    expect(result).toMatchObject({ predictedAxisCount: 2, actualAxisCount: 0 });
+    expect(result.fitnessResult.ratedAxisCount).toBe(0);
+  });
+
+  test("ratedAxisCount remains actual-only for mixed results", () => {
+    const result = compute(game({ ratings: { fun: 8 } }), [fun, theme], references("theme", 7, 3));
+    expect(result.fitnessResult.ratedAxisCount).toBe(1);
+  });
+
+  test("overall confidence is the lowest predicted confidence", () => {
+    const refs = references("fun", 7, 5).map((candidate, index) => {
+      const ratings: Record<string, number> = index < 2 ? { fun: 7, theme: 6 + index } : { fun: 7 };
+      return { ...candidate, ratings };
+    });
+    expect(compute(game(), [fun, theme], refs).fitnessResult.predictionMeta?.confidence).toBe(
+      "weak",
+    );
+  });
+
+  test("all insufficient predictions produce null metadata and zero score", () => {
+    const result = compute(game(), [fun, theme], references("other", 7, 1));
+    expect(result.predictedAxisCount).toBe(0);
+    expect(result.fitnessResult).toMatchObject({ score: 0, predictionMeta: null });
+  });
+
+  test("missing deterministic derived data is never predicted", () => {
+    const result = compute(
+      game({ playingTime: null }),
+      [playingTime()],
+      references("playing-time", 9),
+    );
+    expect(result.predictedAxisCount).toBe(0);
+    expect(result.fitnessResult.breakdown[0]).toMatchObject({
+      source: "derived",
+      effectiveRating: null,
+      predictionConfidence: null,
+    });
+  });
+
+  test("Tournament is not predicted at stage zero", () => {
+    const axis: TournamentAxis = {
+      id: "tournament-zero",
+      name: "Tournament",
+      description: null,
+      weight: 30,
+      enabled: true,
+      source: "tournament",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    const result = compute(game(), [axis], references(axis.id, 7), 0);
+    expect(result.fitnessResult.breakdown[0]).toMatchObject({
+      source: "tournament",
+      effectiveRating: null,
+      predictionConfidence: null,
+    });
+  });
+
+  test("Tournament without references gets an insufficient row", () => {
+    const axis: TournamentAxis = {
+      id: "tournament-insufficient",
+      name: "Tournament",
+      description: null,
+      weight: 30,
+      enabled: true,
+      source: "tournament",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    expect(compute(game(), [axis]).fitnessResult.breakdown[0]).toMatchObject({
+      source: "predicted",
+      predictionConfidence: "insufficient",
+      effectiveRating: null,
+    });
+  });
+});
+
+describe("restored readiness and suggestion cases", () => {
+  const axes = [personal("fun", 50), personal("theme", 30), personal("replay", 20)];
+  const vocabulary: Vocabulary = { mechanics: [], categories: [] };
+
+  test("stage zero is selected below the first threshold", () => {
+    expect(assessReadiness(2, axes, new Map(), vocabulary, settings)).toMatchObject({
+      stage: 0,
+      nextStageAt: 5,
+    });
+  });
+
+  test("stage one is selected between first and second thresholds", () => {
+    expect(assessReadiness(7, axes, new Map(), vocabulary, settings)).toMatchObject({
+      stage: 1,
+      nextStageAt: 15,
+    });
+  });
+
+  test("stage two is selected between second and third thresholds", () => {
+    expect(assessReadiness(20, axes, new Map(), vocabulary, settings)).toMatchObject({
+      stage: 2,
+      nextStageAt: 30,
+    });
+  });
+
+  test("stage three is selected at maturity", () => {
+    expect(assessReadiness(30, axes, new Map(), vocabulary, settings)).toMatchObject({
+      stage: 3,
+      nextStageAt: 30,
+    });
+  });
+
+  test("weak axes are sorted by rated count", () => {
+    const ratings = new Map<string, Record<string, number>>([
       ["g1", { fun: 8, theme: 7 }],
       ["g2", { fun: 7 }],
       ["g3", { fun: 6 }],
       ["g4", { fun: 5 }],
       ["g5", { fun: 4 }],
     ]);
-
-    const result = assessReadiness(5, axes, gameRatings, emptyVocab, defaultSettings);
-    // replay (0 rated) and theme (1 rated) are weak (< defaultK=5)
-    // fun (5 rated) is not weak
-    expect(result.weakAxes.map((a) => a.axisId)).toContain("replay");
-    expect(result.weakAxes.map((a) => a.axisId)).toContain("theme");
-    // Sorted by ratedCount ascending
-    expect(result.weakAxes[0].ratedCount).toBeLessThanOrEqual(result.weakAxes[1].ratedCount);
+    expect(
+      assessReadiness(5, axes, ratings, vocabulary, settings).weakAxes.map(({ axisId }) => axisId),
+    ).toEqual(["replay", "theme"]);
   });
 
-  test("generates suggestion to unlock predictions at stage 0", () => {
-    const result = assessReadiness(3, axes, new Map(), emptyVocab, defaultSettings);
-    expect(result.suggestedActions.some((a) => a.includes("2 more game"))).toBe(true);
+  test("stage zero suggests the exact remaining game count", () => {
+    expect(
+      assessReadiness(3, axes, new Map(), vocabulary, settings).suggestedActions.some((value) =>
+        value.includes("2 more game"),
+      ),
+    ).toBe(true);
   });
 
-  test("generates suggestions for weak axes", () => {
-    const gameRatings = new Map<string, Record<string, number>>([
+  test("weak axes generate rating suggestions", () => {
+    const result = assessReadiness(5, axes, new Map(), vocabulary, settings);
+    expect(result.suggestedActions.some((value) => value.includes("theme"))).toBe(true);
+    expect(result.suggestedActions.some((value) => value.includes("replay"))).toBe(true);
+  });
+
+  test("custom readiness thresholds are respected", () => {
+    const custom = { ...settings, stageThresholds: [3, 10, 20] as [number, number, number] };
+    expect(assessReadiness(3, axes, new Map(), vocabulary, custom)).toMatchObject({
+      stage: 1,
+      nextStageAt: 10,
+    });
+  });
+
+  test("threshold minus one remains stage zero", () => {
+    expect(assessReadiness(4, axes, new Map(), vocabulary, settings).stage).toBe(0);
+  });
+
+  test("the exact first threshold enters stage one", () => {
+    expect(assessReadiness(5, axes, new Map(), vocabulary, settings).stage).toBe(1);
+  });
+
+  test("underrepresented clusters are suggested by coverage", () => {
+    const membership: ClusterMembership = new Map([
+      ["Deck Building", new Set(["g1", "g6", "g7", "g8", "g9"])],
+      ["Worker Placement", new Set(["g2", "g3", "g4", "g10"])],
+      ["Area Control", new Set(["g11", "g12", "g13"])],
+    ]);
+    const ratings = new Map<string, Record<string, number>>([
       ["g1", { fun: 8 }],
       ["g2", { fun: 7 }],
       ["g3", { fun: 6 }],
       ["g4", { fun: 5 }],
       ["g5", { fun: 4 }],
     ]);
-
-    const result = assessReadiness(5, axes, gameRatings, emptyVocab, defaultSettings);
-    // Should suggest rating games on theme and replay
-    expect(result.suggestedActions.some((a) => a.includes("Theme"))).toBe(true);
-    expect(result.suggestedActions.some((a) => a.includes("Replayability"))).toBe(true);
-  });
-
-  test("custom thresholds are respected", () => {
-    const customSettings = {
-      ...defaultSettings,
-      stageThresholds: [3, 10, 20] as [number, number, number],
-    };
-    const gameRatings = new Map(
-      Array.from({ length: 3 }, (_, i) => [`g${i}`, { fun: 7 }] as const),
-    );
-
-    const result = assessReadiness(3, axes, gameRatings, emptyVocab, customSettings);
-    expect(result.stage).toBe(1);
-    expect(result.nextStageAt).toBe(10);
-  });
-
-  test("stage 0 at exactly threshold - 1", () => {
-    const result = assessReadiness(4, axes, new Map(), emptyVocab, defaultSettings);
-    expect(result.stage).toBe(0);
-  });
-
-  test("stage 1 at exactly threshold[0]", () => {
-    const gameRatings = new Map(
-      Array.from({ length: 5 }, (_, i) => [`g${i}`, { fun: 7 }] as const),
-    );
-    const result = assessReadiness(5, axes, gameRatings, emptyVocab, defaultSettings);
-    expect(result.stage).toBe(1);
-  });
-
-  test("suggests underrepresented mechanic/category clusters (REQ-PRED-20)", () => {
-    // 10 games in collection, 5 rated. "Deck Building" has 5 games, only 1 rated.
-    // "Worker Placement" has 4 games, 3 rated. "Area Control" has 3 games, 0 rated.
-    const gameRatings = new Map<string, Record<string, number>>([
-      ["g1", { fun: 8 }], // deck-building, rated
-      ["g2", { fun: 7 }], // worker placement, rated
-      ["g3", { fun: 6 }], // worker placement, rated
-      ["g4", { fun: 5 }], // worker placement, rated
-      ["g5", { fun: 4 }], // unrelated, rated
-    ]);
-
-    const clusterMembership: ClusterMembership = new Map([
-      ["Deck Building", new Set(["g1", "g6", "g7", "g8", "g9"])], // 5 total, 1 rated
-      ["Worker Placement", new Set(["g2", "g3", "g4", "g10"])], // 4 total, 3 rated
-      ["Area Control", new Set(["g11", "g12", "g13"])], // 3 total, 0 rated
-    ]);
-
-    const result = assessReadiness(
+    const actions = assessReadiness(
       5,
       axes,
-      gameRatings,
-      emptyVocab,
-      defaultSettings,
-      clusterMembership,
-    );
-
-    // Should suggest Area Control (0/3 = 0%) and Deck Building (1/5 = 20%)
-    // Worker Placement is 3/4 = 75%, above the 50% threshold
-    expect(result.suggestedActions.some((a) => a.includes("Area Control"))).toBe(true);
-    expect(result.suggestedActions.some((a) => a.includes("Deck Building"))).toBe(true);
-    expect(result.suggestedActions.some((a) => a.includes("Worker Placement"))).toBe(false);
+      ratings,
+      vocabulary,
+      settings,
+      membership,
+    ).suggestedActions;
+    expect(actions.some((value) => value.includes("Area Control"))).toBe(true);
+    expect(actions.some((value) => value.includes("Deck Building"))).toBe(true);
+    expect(actions.some((value) => value.includes("Worker Placement"))).toBe(false);
   });
 
-  test("cluster suggestions limited to 2 and skips clusters with fewer than 3 games", () => {
-    const gameRatings = new Map<string, Record<string, number>>([["g1", { fun: 8 }]]);
-
-    const clusterMembership: ClusterMembership = new Map([
-      ["Tiny Cluster", new Set(["g1", "g2"])], // only 2, should be skipped
-      ["Big A", new Set(["g3", "g4", "g5"])], // 3 total, 0 rated
-      ["Big B", new Set(["g6", "g7", "g8"])], // 3 total, 0 rated
-      ["Big C", new Set(["g9", "g10", "g11"])], // 3 total, 0 rated
+  test("cluster suggestions are capped and tiny clusters are skipped", () => {
+    const membership: ClusterMembership = new Map([
+      ["Tiny Cluster", new Set(["g1", "g2"])],
+      ["Big A", new Set(["g3", "g4", "g5"])],
+      ["Big B", new Set(["g6", "g7", "g8"])],
+      ["Big C", new Set(["g9", "g10", "g11"])],
     ]);
-
-    const result = assessReadiness(
+    const actions = assessReadiness(
       1,
       axes,
-      gameRatings,
-      emptyVocab,
-      defaultSettings,
-      clusterMembership,
+      new Map(),
+      vocabulary,
+      settings,
+      membership,
+    ).suggestedActions;
+    expect(actions.filter((value) => value.includes("cluster"))).toHaveLength(2);
+    expect(actions.some((value) => value.includes("Tiny Cluster"))).toBe(false);
+  });
+
+  test("empty cluster membership produces no cluster suggestions", () => {
+    expect(
+      assessReadiness(5, axes, new Map(), vocabulary, settings).suggestedActions.filter((value) =>
+        value.includes("cluster"),
+      ),
+    ).toEqual([]);
+  });
+
+  test("Tournament ratings participate in weak-axis counts", () => {
+    const tournamentAxis: TournamentAxis = {
+      id: "tournament-weak",
+      name: "Tournament",
+      description: null,
+      weight: 30,
+      enabled: true,
+      source: "tournament",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    const ratings = new Map<string, Record<string, number>>([
+      ["g1", { fun: 8, "tournament-weak": 7 }],
+      ["g2", { fun: 7, "tournament-weak": 6.5 }],
+      ["g3", { fun: 6 }],
+      ["g4", { fun: 5 }],
+      ["g5", { fun: 4 }],
+    ]);
+    const result = assessReadiness(
+      5,
+      [personal("fun"), tournamentAxis],
+      ratings,
+      vocabulary,
+      settings,
     );
-
-    // Tiny Cluster skipped (<3). Only 2 of the 3 big clusters suggested.
-    const clusterActions = result.suggestedActions.filter((a) => a.includes("cluster"));
-    expect(clusterActions.length).toBe(2);
-    expect(result.suggestedActions.some((a) => a.includes("Tiny Cluster"))).toBe(false);
-  });
-
-  test("no cluster suggestions when clusterMembership is empty (backward compatible)", () => {
-    const gameRatings = new Map<string, Record<string, number>>([
-      ["g1", { fun: 8 }],
-      ["g2", { fun: 7 }],
-      ["g3", { fun: 6 }],
-      ["g4", { fun: 5 }],
-      ["g5", { fun: 4 }],
-    ]);
-
-    const result = assessReadiness(5, axes, gameRatings, emptyVocab, defaultSettings);
-    // No cluster suggestions, only weak-axis suggestions
-    const clusterActions = result.suggestedActions.filter((a) => a.includes("cluster"));
-    expect(clusterActions.length).toBe(0);
-  });
-
-  test("tournament axis ratings count toward weakAxes thresholds (REQ-TAXIS-8)", () => {
-    // Mixed: a personal axis rated on 5 games, and a tournament axis rated on
-    // only 2 games. With defaultK=5 the tournament axis is weak; the personal
-    // axis is not.
-    const mixedAxes: Axis[] = [
-      makeAxis("fun", "Fun", 50, "personal"),
-      {
-        id: "tournament",
-        name: "Tournament",
-        description: null,
-        weight: 30,
-        source: "tournament",
-        bggField: null,
-        createdAt: "2026-01-01T00:00:00Z",
-        updatedAt: "2026-01-01T00:00:00Z",
-      },
-    ];
-
-    const gameRatings = new Map<string, Record<string, number>>([
-      ["g1", { fun: 8, tournament: 7.0 }],
-      ["g2", { fun: 7, tournament: 6.5 }],
-      ["g3", { fun: 6 }],
-      ["g4", { fun: 5 }],
-      ["g5", { fun: 4 }],
-    ]);
-
-    const result = assessReadiness(5, mixedAxes, gameRatings, emptyVocab, defaultSettings);
-    // tournament axis has 2 ratings → weak (< defaultK=5)
-    // fun has 5 ratings → not weak
-    expect(result.weakAxes.map((a) => a.axisId)).toContain("tournament");
-    expect(result.weakAxes.map((a) => a.axisId)).not.toContain("fun");
-    const tournamentWeak = result.weakAxes.find((a) => a.axisId === "tournament");
-    expect(tournamentWeak!.ratedCount).toBe(2);
+    expect(result.weakAxes).toContainEqual({
+      axisId: "tournament-weak",
+      axisName: "Tournament",
+      ratedCount: 2,
+    });
   });
 });

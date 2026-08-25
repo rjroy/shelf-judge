@@ -1,234 +1,471 @@
-import { describe, test, expect, beforeEach } from "bun:test";
-import { createAxisService } from "../../src/services/axis-service.js";
-import { createStorageService } from "../../src/services/storage-service.js";
-import { createMockFileOps } from "../helpers/mock-file-ops.js";
-import type { AxisService } from "../../src/services/axis-service.js";
-import type { StorageService } from "../../src/services/storage-service.js";
-import type { MockFileOps } from "../helpers/mock-file-ops.js";
+import { beforeEach, describe, expect, test } from "bun:test";
+import {
+  AXIS_VALIDATION_CODES,
+  CodedAxisValidationError,
+  CollectionSchema,
+  type AxisValidationCode,
+  type Collection,
+  type DisabledLegacyAxis,
+} from "@shelf-judge/shared";
+import { createAxisService, type AxisService } from "../../src/services/axis-service.js";
+import { createStorageService, type StorageService } from "../../src/services/storage-service.js";
+import type { Logger } from "../../src/services/logger.js";
+import { createMockFileOps, type MockFileOps } from "../helpers/mock-file-ops.js";
+
+const timestamp = "2026-08-24T12:00:00.000Z";
+
+function disabledAxis(): DisabledLegacyAxis {
+  return {
+    id: "legacy-axis",
+    name: "Legacy preference",
+    description: "Preserve me",
+    weight: 63,
+    enabled: false,
+    source: "legacy",
+    reason: "unknown_legacy_field",
+    legacyField: "futureMetric",
+    legacyPayload: { originalSource: "external", originalField: "futureMetric" },
+    preferenceShape: "sweet-spot",
+    idealValue: 8,
+    tolerance: "moderate",
+    leanDirection: "higher",
+    veto: { direction: "below", threshold: 3 },
+    createdAt: "2025-01-01T00:00:00.000Z",
+    updatedAt: "2025-02-01T00:00:00.000Z",
+  };
+}
+
+function game(id: string, rating: number): Collection["games"][number] {
+  return {
+    id,
+    bggId: null,
+    name: "Game",
+    yearPublished: null,
+    minPlayers: null,
+    maxPlayers: null,
+    playingTime: null,
+    imageUrl: null,
+    bggData: null,
+    numPlays: null,
+    ownership: "owned",
+    boxDimensions: null,
+    manualShelfId: null,
+    ratings: { "legacy-axis": rating, "other-axis": 4 },
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+function logSink(): Logger & { entries: string[] } {
+  const entries: string[] = [];
+  return {
+    entries,
+    log: (...values) => entries.push(`log ${values.map(String).join(" ")}`),
+    warn: (...values) => entries.push(`warn ${values.map(String).join(" ")}`),
+    error: (...values) => entries.push(`error ${values.map(String).join(" ")}`),
+  };
+}
 
 let fileOps: MockFileOps;
 let storageService: StorageService;
 let axisService: AxisService;
 
 beforeEach(() => {
+  let id = 0;
   fileOps = createMockFileOps();
   storageService = createStorageService({
     dataDir: "/data",
     configPath: "/config/config.json",
     fileOps,
   });
-  axisService = createAxisService({ storageService });
+  axisService = createAxisService({
+    storageService,
+    createId: () => `created-axis-${++id}`,
+    now: () => timestamp,
+  });
 });
 
-describe("AxisService", () => {
-  describe("createAxis", () => {
-    test("creates an axis with generated UUID", async () => {
+async function seedDisabledAxis(): Promise<void> {
+  const collection = await storageService.loadCollection();
+  await storageService.saveCollection({
+    ...collection,
+    axes: [...collection.axes, disabledAxis()],
+    games: [game("game-1", 9), game("game-2", 6)],
+  });
+}
+
+function expectCode(error: unknown, code: AxisValidationCode): void {
+  expect(error).toBeInstanceOf(CodedAxisValidationError);
+  if (!(error instanceof CodedAxisValidationError)) return;
+  expect(error.code).toBe(code);
+}
+
+describe("AxisService current axis operations", () => {
+  test("creates a personal axis and all four derived fields", async () => {
+    const personal = await axisService.createAxis({
+      name: "Fun",
+      weight: 40,
+      source: "personal",
+    });
+    expect(personal).toMatchObject({ source: "personal", enabled: true });
+
+    const inputs = [
+      { derivedField: "communityRating", configuration: {} },
+      { derivedField: "weight", configuration: {} },
+      { derivedField: "playerCountFit", configuration: { targetPlayerCount: 4 } },
+      { derivedField: "playingTime", configuration: { maximumScoringTime: 240 } },
+    ] as const;
+    for (const input of inputs) {
       const axis = await axisService.createAxis({
-        name: "Fun Factor",
-        weight: 30,
+        name: input.derivedField,
+        weight: 50,
+        source: "derived",
+        ...input,
+        ...(input.derivedField === "playingTime"
+          ? { preferenceShape: "sweet-spot" as const, idealValue: 90, toleranceWidth: 30 }
+          : {}),
       });
-
-      expect(axis.id).toBeTruthy();
-      expect(axis.name).toBe("Fun Factor");
-      expect(axis.weight).toBe(30);
-      expect(axis.source).toBe("personal");
-      expect(axis.bggField).toBeNull();
-      expect(axis.description).toBeNull();
-    });
-
-    test("stores axis in collection", async () => {
-      await axisService.createAxis({ name: "Fun", weight: 50 });
-      const axes = await axisService.listAxes();
-
-      // Default collection has 2 BGG axes + our new one
-      const fun = axes.find((a) => a.name === "Fun");
-      expect(fun).toBeTruthy();
-    });
-
-    test("rejects invalid weight (0 is allowed by schema, 101 is not)", async () => {
-      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
-      await expect(axisService.createAxis({ name: "Bad", weight: 101 })).rejects.toThrow();
-    });
-
-    test("rejects negative weight", async () => {
-      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
-      await expect(axisService.createAxis({ name: "Bad", weight: -1 })).rejects.toThrow();
-    });
-
-    test("rejects non-integer weight", async () => {
-      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
-      await expect(axisService.createAxis({ name: "Bad", weight: 5.5 })).rejects.toThrow();
-    });
+      expect(axis).toMatchObject({
+        source: "derived",
+        derivedField: input.derivedField,
+        configuration: input.configuration,
+      });
+    }
   });
 
-  describe("listAxes", () => {
-    test("returns default BGG-derived axes plus tournament axis on fresh collection", async () => {
-      const axes = await axisService.listAxes();
-
-      // 2 BGG axes + 1 auto-created tournament axis (REQ-TAXIS-4)
-      expect(axes.length).toBe(3);
-      expect(axes.find((a) => a.name === "Community Rating")).toBeTruthy();
-      expect(axes.find((a) => a.name === "Complexity")).toBeTruthy();
-      expect(axes.find((a) => a.source === "tournament")).toBeTruthy();
-    });
+  test("allows duplicate derived fields", async () => {
+    const input = {
+      name: "At four",
+      weight: 50,
+      source: "derived" as const,
+      derivedField: "playerCountFit" as const,
+      configuration: { targetPlayerCount: 4 },
+    };
+    const first = await axisService.createAxis(input);
+    const second = await axisService.createAxis(input);
+    expect(first).toMatchObject({ derivedField: "playerCountFit" });
+    expect(second).toMatchObject({ derivedField: "playerCountFit" });
+    expect(first.id).not.toBe(second.id);
   });
 
-  describe("updateAxis", () => {
-    test("updates name and preserves other fields", async () => {
-      const axis = await axisService.createAxis({
-        name: "Original",
-        weight: 50,
-        description: "Original desc",
-      });
-
-      const updated = await axisService.updateAxis(axis.id, {
-        name: "Renamed",
-      });
-
-      expect(updated.name).toBe("Renamed");
-      expect(updated.weight).toBe(50);
-      expect(updated.description).toBe("Original desc");
+  test("updates target and cap configuration through merged validation", async () => {
+    const players = await axisService.createAxis({
+      name: "Players",
+      weight: 50,
+      source: "derived",
+      derivedField: "playerCountFit",
+      configuration: { targetPlayerCount: 4 },
     });
-
-    test("updates weight", async () => {
-      const axis = await axisService.createAxis({
-        name: "Test",
-        weight: 50,
-      });
-
-      const updated = await axisService.updateAxis(axis.id, { weight: 75 });
-      expect(updated.weight).toBe(75);
+    const updatedPlayers = await axisService.updateAxis(players.id, {
+      configuration: { targetPlayerCount: 6 },
     });
+    expect(updatedPlayers).toMatchObject({ configuration: { targetPlayerCount: 6 } });
 
-    test("throws on non-existent axis", async () => {
-      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
-      await expect(axisService.updateAxis("nonexistent", { name: "Nope" })).rejects.toThrow(
-        "Axis not found",
-      );
+    const time = await axisService.createAxis({
+      name: "Time",
+      weight: 50,
+      source: "derived",
+      derivedField: "playingTime",
+      configuration: { maximumScoringTime: 240 },
+      preferenceShape: "sweet-spot",
+      idealValue: 90,
+      toleranceWidth: 30,
     });
-
-    test("updates weight on the auto-created tournament axis", async () => {
-      // The tournament axis is migrated in by ensureTournamentAxis at first load.
-      // It's a singleton with fixed defaults (REQ-TAXIS-5), but weight is user-tunable
-      // from the Axis Settings page — confirm the update path accepts it.
-      const axes = await axisService.listAxes();
-      const tournamentAxis = axes.find((a) => a.source === "tournament");
-      expect(tournamentAxis).toBeDefined();
-
-      const updated = await axisService.updateAxis(tournamentAxis!.id, { weight: 55 });
-      expect(updated.weight).toBe(55);
-      expect(updated.source).toBe("tournament");
-      expect(updated.name).toBe(tournamentAxis!.name);
+    const updatedTime = await axisService.updateAxis(time.id, {
+      configuration: { maximumScoringTime: 300 },
     });
+    expect(updatedTime).toMatchObject({ configuration: { maximumScoringTime: 300 } });
   });
 
-  describe("deleteAxis", () => {
-    test("removes axis from collection", async () => {
-      const axis = await axisService.createAxis({
-        name: "Doomed",
-        weight: 50,
+  test("rejects a merged cap that invalidates the curve with stable details", async () => {
+    const axis = await axisService.createAxis({
+      name: "Time",
+      weight: 50,
+      source: "derived",
+      derivedField: "playingTime",
+      configuration: { maximumScoringTime: 240 },
+      preferenceShape: "sweet-spot",
+      idealValue: 90,
+      toleranceWidth: 30,
+      veto: { direction: "above", threshold: 180 },
+    });
+    try {
+      await axisService.updateAxis(axis.id, { configuration: { maximumScoringTime: 120 } });
+      throw new Error("expected update rejection");
+    } catch (error) {
+      expectCode(error, AXIS_VALIDATION_CODES.INVALID_CURVE_FOR_NATIVE_SCALE);
+      if (error instanceof CodedAxisValidationError) {
+        expect(error.details.map(({ field }) => field)).toContain("veto");
+      }
+    }
+  });
+
+  test("rejects source and derived-field mutation", async () => {
+    const axis = await axisService.createAxis({
+      name: "Players",
+      weight: 50,
+      source: "derived",
+      derivedField: "playerCountFit",
+      configuration: { targetPlayerCount: 4 },
+    });
+    for (const input of [{ source: "personal" }, { derivedField: "playingTime" }]) {
+      try {
+        await axisService.updateAxis(axis.id, input);
+        throw new Error("expected update rejection");
+      } catch (error) {
+        expectCode(error, AXIS_VALIDATION_CODES.INVALID_AXIS_PAYLOAD);
+      }
+    }
+  });
+
+  test("general create rejects tournament and delete protects the managed axis", async () => {
+    try {
+      await axisService.createAxis({ name: "Tournament", weight: 30, source: "tournament" });
+      throw new Error("expected create rejection");
+    } catch (error) {
+      expectCode(error, AXIS_VALIDATION_CODES.INVALID_AXIS_PAYLOAD);
+    }
+    const tournament = (await axisService.listAxes()).find((axis) => axis.source === "tournament");
+    expect(tournament).toBeDefined();
+    if (tournament === undefined) return;
+    try {
+      await axisService.deleteAxis(tournament.id);
+      throw new Error("expected delete rejection");
+    } catch (error) {
+      expectCode(error, AXIS_VALIDATION_CODES.TOURNAMENT_AXIS_MANAGED);
+    }
+  });
+
+  test("lists and deletes disabled axes", async () => {
+    await seedDisabledAxis();
+    expect((await axisService.listAxes()).find((axis) => axis.id === "legacy-axis")).toMatchObject({
+      enabled: false,
+    });
+    expect(await axisService.deleteAxis("legacy-axis")).toEqual({ deletedRatingsCount: 2 });
+    expect(
+      (await storageService.loadCollection()).games[0]?.ratings["legacy-axis"],
+    ).toBeUndefined();
+  });
+
+  test("repairs a disabled axis while preserving identity, common values, timestamps, and ratings", async () => {
+    await seedDisabledAxis();
+    const repaired = await axisService.repairLegacyAxis("legacy-axis", {
+      derivedField: "communityRating",
+      configuration: {},
+    });
+    expect(repaired).toMatchObject({
+      id: "legacy-axis",
+      name: "Legacy preference",
+      description: "Preserve me",
+      weight: 63,
+      enabled: true,
+      source: "derived",
+      derivedField: "communityRating",
+      configuration: {},
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-02-01T00:00:00.000Z",
+    });
+    expect({
+      preferenceShape: repaired.preferenceShape,
+      idealValue: repaired.idealValue,
+      tolerance: repaired.tolerance,
+      toleranceWidth: repaired.toleranceWidth,
+      leanDirection: repaired.leanDirection,
+      veto: repaired.veto,
+    }).toEqual({
+      preferenceShape: "sweet-spot",
+      idealValue: 8,
+      tolerance: "moderate",
+      toleranceWidth: undefined,
+      leanDirection: "higher",
+      veto: { direction: "below", threshold: 3 },
+    });
+    const ratings = (await storageService.loadCollection()).games.map(({ ratings }) => ratings);
+    expect(ratings).toEqual([
+      { "legacy-axis": 9, "other-axis": 4 },
+      { "legacy-axis": 6, "other-axis": 4 },
+    ]);
+  });
+
+  test("repair validation failure leaves storage and ratings byte-identical", async () => {
+    await seedDisabledAxis();
+    const before = fileOps.files.get("/data/collection.json");
+    try {
+      await axisService.repairLegacyAxis("legacy-axis", {
+        derivedField: "weight",
+        configuration: {},
       });
+      throw new Error("expected repair rejection");
+    } catch (error) {
+      expectCode(error, AXIS_VALIDATION_CODES.INVALID_LEGACY_AXIS_REPAIR);
+    }
+    expect(fileOps.files.get("/data/collection.json")).toBe(before);
+  });
 
-      await axisService.deleteAxis(axis.id);
+  test("repair save failure leaves storage and ratings byte-identical", async () => {
+    await seedDisabledAxis();
+    const before = fileOps.files.get("/data/collection.json");
+    storageService.saveCollection = () => Promise.reject(new Error("disk full"));
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+    await expect(
+      axisService.repairLegacyAxis("legacy-axis", {
+        derivedField: "communityRating",
+        configuration: {},
+      }),
+    ).rejects.toThrow("disk full");
+    expect(fileOps.files.get("/data/collection.json")).toBe(before);
+    const raw: unknown = JSON.parse(before ?? "{}");
+    expect(CollectionSchema.parse(raw).games.map(({ ratings }) => ratings)).toEqual([
+      { "legacy-axis": 9, "other-axis": 4 },
+      { "legacy-axis": 6, "other-axis": 4 },
+    ]);
+  });
 
-      const axes = await axisService.listAxes();
-      expect(axes.find((a) => a.id === axis.id)).toBeUndefined();
+  test("ordinary update cannot mutate a disabled legacy axis", async () => {
+    await seedDisabledAxis();
+    try {
+      await axisService.updateAxis("legacy-axis", { name: "Not repaired" });
+      throw new Error("expected update rejection");
+    } catch (error) {
+      expectCode(error, AXIS_VALIDATION_CODES.INVALID_LEGACY_AXIS_REPAIR);
+    }
+  });
+
+  test("logs attempts, outcomes, validation codes, configuration keys, and persistence failures", async () => {
+    const sink = logSink();
+    let loggedId = 0;
+    const service = createAxisService({
+      storageService,
+      logger: sink,
+      createId: () => `logged-axis-${++loggedId}`,
+      now: () => timestamp,
     });
-
-    test("cascade deletes ratings on that axis from all games", async () => {
-      // Set up: create an axis, manually add games with ratings on it
-      const axis = await axisService.createAxis({
-        name: "Cascade Test",
-        weight: 50,
-      });
-
-      // Manually add games with ratings via storage
-      const collection = await storageService.loadCollection();
-      collection.games.push(
-        {
-          id: "g1",
-          bggId: null,
-          name: "Game 1",
-          yearPublished: null,
-          minPlayers: null,
-          maxPlayers: null,
-          playingTime: null,
-          imageUrl: null,
-          bggData: null,
-          numPlays: null,
-          ownership: "owned",
-          boxDimensions: null,
-          manualShelfId: null,
-          ratings: { [axis.id]: 8, "other-axis": 5 },
-          createdAt: "2026-01-01T00:00:00.000Z",
-          updatedAt: "2026-01-01T00:00:00.000Z",
-        },
-        {
-          id: "g2",
-          bggId: null,
-          name: "Game 2",
-          yearPublished: null,
-          minPlayers: null,
-          maxPlayers: null,
-          playingTime: null,
-          imageUrl: null,
-          bggData: null,
-          numPlays: null,
-          ownership: "owned",
-          boxDimensions: null,
-          manualShelfId: null,
-          ratings: { [axis.id]: 6 },
-          createdAt: "2026-01-01T00:00:00.000Z",
-          updatedAt: "2026-01-01T00:00:00.000Z",
-        },
-        {
-          id: "g3",
-          bggId: null,
-          name: "Game 3 (no rating on this axis)",
-          yearPublished: null,
-          minPlayers: null,
-          maxPlayers: null,
-          playingTime: null,
-          imageUrl: null,
-          bggData: null,
-          numPlays: null,
-          ownership: "owned",
-          boxDimensions: null,
-          manualShelfId: null,
-          ratings: { "other-axis": 7 },
-          createdAt: "2026-01-01T00:00:00.000Z",
-          updatedAt: "2026-01-01T00:00:00.000Z",
-        },
-      );
-      await storageService.saveCollection(collection);
-
-      const result = await axisService.deleteAxis(axis.id);
-
-      expect(result.deletedRatingsCount).toBe(2);
-
-      // Verify ratings are gone
-      const updated = await storageService.loadCollection();
-      const g1 = updated.games.find((g) => g.id === "g1")!;
-      expect(g1.ratings[axis.id]).toBeUndefined();
-      expect(g1.ratings["other-axis"]).toBe(5); // other ratings preserved
-
-      const g2 = updated.games.find((g) => g.id === "g2")!;
-      expect(g2.ratings[axis.id]).toBeUndefined();
+    const axis = await service.createAxis({
+      name: "Players",
+      weight: 50,
+      source: "derived",
+      derivedField: "playerCountFit",
+      configuration: { targetPlayerCount: 4 },
     });
-
-    test("returns zero count when no games have ratings on the axis", async () => {
-      const axis = await axisService.createAxis({
-        name: "Unused",
-        weight: 50,
-      });
-
-      const result = await axisService.deleteAxis(axis.id);
-      expect(result.deletedRatingsCount).toBe(0);
+    await service.updateAxis(axis.id, { configuration: { targetPlayerCount: 5 } });
+    await seedDisabledAxis();
+    await service.repairLegacyAxis("legacy-axis", {
+      derivedField: "communityRating",
+      configuration: {},
+      preferenceShape: "higher-is-better",
+      idealValue: null,
+      veto: null,
     });
-
-    test("throws on non-existent axis", async () => {
-      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
-      await expect(axisService.deleteAxis("nonexistent")).rejects.toThrow("Axis not found");
+    const doomed = await service.createAxis({
+      name: "Doomed",
+      weight: 50,
+      source: "personal",
     });
+    await service.deleteAxis(doomed.id);
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+    await expect(
+      service.updateAxis(axis.id, { configuration: { targetPlayerCount: 0 } }),
+    ).rejects.toThrow();
+    storageService.saveCollection = () => Promise.reject(new Error("save failed"));
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+    await expect(service.deleteAxis(axis.id)).rejects.toThrow("save failed");
+
+    const hasEntry = (...parts: string[]): boolean =>
+      sink.entries.some((entry) => parts.every((part) => entry.includes(part)));
+
+    expect(
+      hasEntry(
+        "axis create attempt",
+        "source=derived",
+        "derivedField=playerCountFit",
+        "configurationKeys=targetPlayerCount",
+      ),
+    ).toBe(true);
+    expect(
+      hasEntry(
+        "axis create completed",
+        `axisId=${axis.id}`,
+        "source=derived",
+        "derivedField=playerCountFit",
+      ),
+    ).toBe(true);
+    expect(hasEntry("axis update attempt", `axisId=${axis.id}`, "targetPlayerCount")).toBe(true);
+    expect(
+      hasEntry(
+        "axis update completed",
+        `axisId=${axis.id}`,
+        "source=derived",
+        "derivedField=playerCountFit",
+      ),
+    ).toBe(true);
+    expect(
+      hasEntry(
+        "axis repair attempt",
+        "axisId=legacy-axis",
+        "source=legacy",
+        "derivedField=communityRating",
+      ),
+    ).toBe(true);
+    expect(
+      hasEntry(
+        "axis repair completed",
+        "axisId=legacy-axis",
+        "source=derived",
+        "derivedField=communityRating",
+      ),
+    ).toBe(true);
+    expect(hasEntry("axis delete attempt", `axisId=${doomed.id}`)).toBe(true);
+    expect(
+      hasEntry(
+        "axis delete completed",
+        `axisId=${doomed.id}`,
+        "source=personal",
+        "derivedField=none",
+      ),
+    ).toBe(true);
+    expect(
+      hasEntry(
+        "axis update rejected",
+        `axisId=${axis.id}`,
+        "source=derived",
+        "derivedField=playerCountFit",
+        "code=invalid_target_player_count",
+        '"field":"targetPlayerCount"',
+      ),
+    ).toBe(true);
+    expect(
+      hasEntry(
+        "axis delete persistence failed",
+        `axisId=${axis.id}`,
+        "source=derived",
+        "derivedField=playerCountFit",
+        "save failed",
+      ),
+    ).toBe(true);
+  });
+
+  test("logs update, repair, and delete not-found outcomes", async () => {
+    const sink = logSink();
+    const service = createAxisService({ storageService, logger: sink });
+
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+    await expect(service.updateAxis("missing-update", { name: "Missing" })).rejects.toThrow(
+      "Axis not found",
+    );
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+    await expect(
+      service.repairLegacyAxis("missing-repair", {
+        derivedField: "communityRating",
+        configuration: {},
+      }),
+    ).rejects.toThrow("Axis not found");
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+    await expect(service.deleteAxis("missing-delete")).rejects.toThrow("Axis not found");
+
+    const hasEntry = (...parts: string[]): boolean =>
+      sink.entries.some((entry) => parts.every((part) => entry.includes(part)));
+    expect(hasEntry("axis update failed", "axisId=missing-update", "reason=not_found")).toBe(true);
+    expect(hasEntry("axis repair failed", "axisId=missing-repair", "reason=not_found")).toBe(true);
+    expect(hasEntry("axis delete failed", "axisId=missing-delete", "reason=not_found")).toBe(true);
   });
 });

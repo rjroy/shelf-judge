@@ -1,14 +1,20 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import type {
-  Axis,
-  AxisSource,
-  PreferenceShape,
-  ToleranceLevel,
-  LeanDirection,
+import type { Axis, NativeScale, PreferenceShape } from "@shelf-judge/shared";
+import {
+  applyPreferenceCurve,
+  getAxisNativeScale,
+  isPreferenceCurveApplicable,
+  summarizeDerivedAxisConfiguration,
 } from "@shelf-judge/shared";
-import { getNativeScale, applyPreferenceCurve } from "@shelf-judge/shared";
+import { getAxisWeightPercentage, getEnabledAxisWeightTotal } from "@/lib/axis-weight-utils";
+import {
+  DEFAULT_CURVE,
+  curveStateFromAxis,
+  curveStateToBody,
+  type CurveState,
+} from "@/lib/axis-curve-state";
 
 interface GameWithScore {
   game: {
@@ -16,60 +22,6 @@ interface GameWithScore {
     ratings: Record<string, number>;
   };
   score: unknown;
-}
-
-// Curve config state for create/edit forms
-interface CurveState {
-  shape: PreferenceShape;
-  idealValue: string;
-  tolerance: ToleranceLevel;
-  leanDirection: LeanDirection | null;
-  vetoEnabled: boolean;
-  vetoDirection: "below" | "above";
-  vetoThreshold: string;
-}
-
-const DEFAULT_CURVE: CurveState = {
-  shape: "higher-is-better",
-  idealValue: "",
-  tolerance: "moderate",
-  leanDirection: null,
-  vetoEnabled: false,
-  vetoDirection: "below",
-  vetoThreshold: "",
-};
-
-function curveStateFromAxis(axis: Axis): CurveState {
-  return {
-    shape: axis.preferenceShape ?? "higher-is-better",
-    idealValue: axis.idealValue != null ? String(axis.idealValue) : "",
-    tolerance: axis.tolerance ?? "moderate",
-    leanDirection: axis.leanDirection ?? null,
-    vetoEnabled: axis.veto != null,
-    vetoDirection: axis.veto?.direction ?? "below",
-    vetoThreshold: axis.veto != null ? String(axis.veto.threshold) : "",
-  };
-}
-
-function curveStateToBody(curve: CurveState): Record<string, unknown> {
-  const body: Record<string, unknown> = {
-    preferenceShape: curve.shape,
-  };
-  if (curve.shape === "sweet-spot") {
-    body.idealValue = curve.idealValue !== "" ? parseFloat(curve.idealValue) : null;
-    body.tolerance = curve.tolerance;
-    body.leanDirection = curve.leanDirection;
-  } else {
-    body.idealValue = null;
-    body.tolerance = undefined;
-    body.leanDirection = null;
-  }
-  if (curve.vetoEnabled && curve.vetoThreshold !== "") {
-    body.veto = { direction: curve.vetoDirection, threshold: parseFloat(curve.vetoThreshold) };
-  } else {
-    body.veto = null;
-  }
-  return body;
 }
 
 export default function AxesPage() {
@@ -139,7 +91,7 @@ export default function AxesPage() {
           name: newName.trim(),
           description: newDescription.trim() || undefined,
           weight: parseInt(newWeight, 10),
-          ...curveStateToBody(newCurve),
+          ...curveStateToBody(newCurve, "create"),
         }),
       });
       if (!res.ok) {
@@ -186,7 +138,7 @@ export default function AxesPage() {
         if (editName.trim() && editName.trim() !== axis?.name) body.name = editName.trim();
         if (editWeight) body.weight = parseInt(editWeight, 10);
         if (editDescription !== axis?.description) body.description = editDescription;
-        Object.assign(body, curveStateToBody(editCurve));
+        Object.assign(body, curveStateToBody(editCurve, "update"));
       }
 
       const res = await fetch(`/api/daemon/axes/${id}`, {
@@ -235,9 +187,10 @@ export default function AxesPage() {
   if (loading) return <p className="axes-content loading-text">Loading axes...</p>;
 
   const personalAxes = axes.filter((a) => a.source === "personal");
-  const bggAxes = axes.filter((a) => a.source === "bgg");
+  const derivedAxes = axes.filter((a) => a.source === "derived");
   const tournamentAxes = axes.filter((a) => a.source === "tournament");
-  const totalWeight = axes.reduce((sum, a) => sum + a.weight, 0);
+  const disabledAxes = axes.filter((a) => !a.enabled);
+  const totalWeight = getEnabledAxisWeightTotal(axes);
 
   return (
     <>
@@ -309,12 +262,7 @@ export default function AxesPage() {
                   />
                 </div>
 
-                <CurveConfig
-                  curve={newCurve}
-                  onChange={setNewCurve}
-                  source="personal"
-                  bggField={null}
-                />
+                <CurveConfig curve={newCurve} onChange={setNewCurve} scale={{ min: 1, max: 10 }} />
 
                 <div className="form-actions">
                   <button
@@ -367,18 +315,18 @@ export default function AxesPage() {
             />
           ))}
 
-          {/* BGG axes */}
-          {bggAxes.length > 0 && (
+          {/* Derived axes */}
+          {derivedAxes.length > 0 && (
             <>
               <div className="section-label section-label-mt">
-                BGG-derived axes &middot; {bggAxes.length}
+                Derived axes &middot; {derivedAxes.length}
               </div>
               <p className="bgg-axes-desc">
-                These axes are automatically populated from BoardGameGeek data. You can override any
-                individual game{"'"}s value.
+                These axes are automatically populated from game metadata. You can override any
+                individual game{"'"}s effective rating.
               </p>
 
-              {bggAxes.map((axis) => (
+              {derivedAxes.map((axis) => (
                 <AxisCard
                   key={axis.id}
                   axis={axis}
@@ -403,6 +351,39 @@ export default function AxesPage() {
                   onDelete={() => {
                     void handleDelete(axis);
                   }}
+                  onCurveChange={setEditCurve}
+                  onNameChange={setEditName}
+                  onWeightChange={setEditWeight}
+                  onDescChange={setEditDescription}
+                />
+              ))}
+            </>
+          )}
+
+          {disabledAxes.length > 0 && (
+            <>
+              <div className="section-label section-label-mt">
+                Disabled legacy axes &middot; {disabledAxes.length}
+              </div>
+              <p className="bgg-axes-desc">
+                These preserved axes are excluded from scoring. They can still be deleted; repair
+                workflows will be added separately.
+              </p>
+              {disabledAxes.map((axis) => (
+                <AxisCard
+                  key={axis.id}
+                  axis={axis}
+                  editingId={editingId}
+                  editName={editName}
+                  editWeight={editWeight}
+                  editDescription={editDescription}
+                  editCurve={editCurve}
+                  totalWeight={totalWeight}
+                  ratingsCount={ratingsCountForAxis(axis.id)}
+                  onStartEdit={() => undefined}
+                  onCancelEdit={() => setEditingId(null)}
+                  onSave={() => undefined}
+                  onDelete={() => void handleDelete(axis)}
                   onCurveChange={setEditCurve}
                   onNameChange={setEditName}
                   onWeightChange={setEditWeight}
@@ -504,10 +485,12 @@ function AxisCard({
   onDescChange,
 }: AxisCardProps) {
   const isEditing = editingId === axis.id;
-  const isBgg = axis.source === "bgg";
+  const isDerived = axis.source === "derived";
+  const isDisabled = !axis.enabled;
   const isTournament = axis.source === "tournament";
   const shapeLabel = formatShape(axis.preferenceShape);
   const hasVeto = axis.veto != null;
+  const weightPercentage = getAxisWeightPercentage(axis, totalWeight);
 
   return (
     <div className="axis-card">
@@ -550,8 +533,14 @@ function AxisCard({
             </>
           )}
         </div>
-        <span className={isBgg ? "bgg-source-tag" : "personal-source-tag"}>
-          {isBgg ? <>&#8599; BGG</> : isTournament ? "Tournament" : "Personal"}
+        <span className={isDerived ? "bgg-source-tag" : "personal-source-tag"}>
+          {isDisabled
+            ? "Disabled"
+            : isDerived
+              ? "Derived"
+              : isTournament
+                ? "Tournament"
+                : "Personal"}
         </span>
         <div className="weight-display">
           {isEditing ? (
@@ -567,7 +556,7 @@ function AxisCard({
             <>
               <div className="weight-number">{axis.weight}</div>
               <div className="weight-pct">
-                {totalWeight > 0 ? Math.round((axis.weight / totalWeight) * 100) : 0}% of total
+                {isDisabled ? "Excluded from total" : `${weightPercentage}% of total`}
               </div>
             </>
           )}
@@ -576,7 +565,7 @@ function AxisCard({
           <div
             className="weight-bar-fill"
             style={{
-              width: `${totalWeight > 0 ? (axis.weight / totalWeight) * 100 : 0}%`,
+              width: `${weightPercentage}%`,
             }}
           />
         </div>
@@ -592,9 +581,11 @@ function AxisCard({
             </>
           ) : (
             <>
-              <button className="btn btn-secondary btn-sm" onClick={onStartEdit}>
-                Edit
-              </button>
+              {!isDisabled && (
+                <button className="btn btn-secondary btn-sm" onClick={onStartEdit}>
+                  Edit
+                </button>
+              )}
               {!isTournament && (
                 <button className="btn btn-danger-outline btn-sm" onClick={onDelete}>
                   Delete
@@ -606,31 +597,31 @@ function AxisCard({
       </div>
 
       {/* Curve config shown in edit mode (not for tournament — identity passthrough) */}
-      {isEditing && !isTournament && (
-        <CurveConfig
-          curve={editCurve}
-          onChange={onCurveChange}
-          source={axis.source}
-          bggField={axis.bggField}
-        />
+      {isEditing && axis.enabled && !isTournament && (
+        <CurveConfig curve={editCurve} onChange={onCurveChange} scale={getAxisNativeScale(axis)} />
       )}
 
-      <div className={`axis-stats-strip${isBgg ? " bgg-strip" : ""}`}>
+      <div className={`axis-stats-strip${isDerived ? " bgg-strip" : ""}`}>
         <div className="axis-stat">
           {isTournament ? (
             <>Derived from head-to-head comparisons</>
           ) : (
             <>
-              {isBgg ? "Auto-populated on" : "Rated on"} <strong>{ratingsCount} games</strong>
+              {isDerived ? "Overridden on" : "Rated on"} <strong>{ratingsCount} games</strong>
             </>
           )}
         </div>
-        {isBgg && axis.bggField && (
+        {isDerived && (
           <div className="axis-stat">
-            BGG source: <strong>{axis.bggField}</strong>
+            Source: <strong>{axis.derivedField}</strong> ({summarizeDerivedAxisConfiguration(axis)})
           </div>
         )}
-        {!isBgg && !isTournament && (
+        {isDisabled && (
+          <div className="axis-stat">
+            Reason: <strong>{axis.reason}</strong>
+          </div>
+        )}
+        {!isDerived && !isTournament && !isDisabled && (
           <div className="axis-stat">
             Created{" "}
             <strong>
@@ -653,13 +644,10 @@ function AxisCard({
 interface CurveConfigProps {
   curve: CurveState;
   onChange: (curve: CurveState) => void;
-  source: AxisSource;
-  bggField: string | null;
+  scale: NativeScale;
 }
 
-function CurveConfig({ curve, onChange, source, bggField }: CurveConfigProps) {
-  const scale = getNativeScale(source, bggField);
-
+function CurveConfig({ curve, onChange, scale }: CurveConfigProps) {
   function update(partial: Partial<CurveState>) {
     onChange({ ...curve, ...partial });
   }
@@ -719,32 +707,45 @@ function CurveConfig({ curve, onChange, source, bggField }: CurveConfigProps) {
                 type="number"
                 min={scale.min}
                 max={scale.max}
-                step={source === "bgg" && bggField === "weight" ? 0.25 : 1}
+                step="any"
                 value={curve.idealValue}
                 onChange={(e) => update({ idealValue: e.target.value })}
               />
             </div>
             <div className="form-group">
-              <label className="form-label">Tolerance</label>
-              <div className="seg-control">
-                {(["flexible", "moderate", "strict"] as const).map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    className={`seg-btn${curve.tolerance === t ? " active" : ""}`}
-                    onClick={() => update({ tolerance: t })}
-                  >
-                    {t.charAt(0).toUpperCase() + t.slice(1)}
-                  </button>
-                ))}
-              </div>
-              <span className="form-hint">
-                {curve.tolerance === "flexible"
-                  ? "I'm not picky about this."
-                  : curve.tolerance === "strict"
-                    ? "I know exactly what I want."
-                    : "Moderate preference."}
-              </span>
+              <label className="form-label">Tolerance width (optional)</label>
+              <input
+                className="form-input"
+                type="number"
+                min={0}
+                step="any"
+                value={curve.toleranceWidth}
+                onChange={(e) => update({ toleranceWidth: e.target.value })}
+                placeholder="Use categorical tolerance"
+              />
+              {curve.toleranceWidth === "" && (
+                <>
+                  <div className="seg-control">
+                    {(["flexible", "moderate", "strict"] as const).map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        className={`seg-btn${curve.tolerance === t ? " active" : ""}`}
+                        onClick={() => update({ tolerance: t })}
+                      >
+                        {t.charAt(0).toUpperCase() + t.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                  <span className="form-hint">
+                    {curve.tolerance === "flexible"
+                      ? "I'm not picky about this."
+                      : curve.tolerance === "strict"
+                        ? "I know exactly what I want."
+                        : "Moderate preference."}
+                  </span>
+                </>
+              )}
             </div>
           </div>
           <div className="form-group form-group-mb">
@@ -812,7 +813,7 @@ function CurveConfig({ curve, onChange, source, bggField }: CurveConfigProps) {
               type="number"
               min={scale.min}
               max={scale.max}
-              step={source === "bgg" && bggField === "weight" ? 0.25 : 1}
+              step="any"
               value={curve.vetoThreshold}
               onChange={(e) => update({ vetoThreshold: e.target.value })}
               placeholder="Threshold"
@@ -847,16 +848,18 @@ function CurvePreview({ curve, scale }: CurvePreviewProps) {
   const steps = 60;
   const points: string[] = [];
   const idealVal = curve.idealValue !== "" ? parseFloat(curve.idealValue) : null;
-  const canRender = curve.shape !== "sweet-spot" || idealVal != null;
+  const toleranceWidth = curve.toleranceWidth !== "" ? parseFloat(curve.toleranceWidth) : null;
+  const curveConfig = {
+    idealValue: idealVal,
+    ...(toleranceWidth === null ? { tolerance: curve.tolerance } : { toleranceWidth }),
+    leanDirection: curve.leanDirection,
+  };
+  const canRender = isPreferenceCurveApplicable(scale, curve.shape, curveConfig);
 
   if (canRender) {
     for (let i = 0; i <= steps; i++) {
       const raw = scale.min + ((scale.max - scale.min) * i) / steps;
-      const eff = applyPreferenceCurve(raw, scale, curve.shape, {
-        idealValue: idealVal,
-        tolerance: curve.tolerance,
-        leanDirection: curve.leanDirection,
-      });
+      const eff = applyPreferenceCurve(raw, scale, curve.shape, curveConfig);
       const x = pad.left + (plotW * i) / steps;
       const y = pad.top + plotH - ((eff - 1) / 9) * plotH;
       points.push(`${x.toFixed(1)},${y.toFixed(1)}`);

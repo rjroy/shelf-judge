@@ -28,6 +28,13 @@ export function createMockFileOps(initialFiles?: Record<string, string>): MockFi
       return Promise.resolve();
     },
 
+    writeFileExclusive(filePath: string, content: string): Promise<boolean> {
+      calls.push({ method: "writeFileExclusive", args: [filePath] });
+      if (files.has(filePath)) return Promise.resolve(false);
+      files.set(filePath, content);
+      return Promise.resolve(true);
+    },
+
     rename(oldPath: string, newPath: string): Promise<void> {
       calls.push({ method: "rename", args: [oldPath, newPath] });
       const content = files.get(oldPath);

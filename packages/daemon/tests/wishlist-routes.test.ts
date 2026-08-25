@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import { Hono } from "hono";
-import type { WishlistEntry, Game, GameWithScore, AddGameResult } from "@shelf-judge/shared";
+import type { AddGameResult, GameWithScore, Game, WishlistEntry } from "@shelf-judge/shared";
 import { createWishlistRoutes } from "../src/routes/wishlist";
 import { createGameRoutes } from "../src/routes/games";
 import type { WishlistService } from "../src/services/wishlist-service";

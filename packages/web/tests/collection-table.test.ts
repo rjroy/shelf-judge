@@ -70,8 +70,8 @@ const AXES: Axis[] = [
     name: "Fun Factor",
     description: null,
     weight: 50,
+    enabled: true,
     source: "personal",
-    bggField: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
   },
@@ -293,15 +293,17 @@ describe("sortGames", () => {
     expect(withoutValue.map((g) => g.game.name)).toEqual(["Delta"]);
   });
 
-  test("sort by BGG-sourced axis resolves values from bggData", () => {
-    const bggAxes: Axis[] = [
+  test("sort by derived axis resolves values from game metadata", () => {
+    const derivedAxes: Axis[] = [
       {
         id: "w",
         name: "Weight",
         description: null,
         weight: 50,
-        source: "bgg",
-        bggField: "weight",
+        enabled: true,
+        source: "derived",
+        derivedField: "weight",
+        configuration: {},
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
       },
@@ -316,7 +318,7 @@ describe("sortGames", () => {
       "axis:w",
       "desc",
       EMPTY_TOURNAMENT,
-      bggAxes,
+      derivedAxes,
     );
     expect(withValue.map((g) => g.game.name)).toEqual(["Heavy", "Medium", "Light"]);
     expect(withoutValue.map((g) => g.game.name)).toEqual(["NoBgg"]);

@@ -106,6 +106,7 @@ const allGamesWithScores: GameWithScore[] = [
 // --- Mock factories ---
 
 const defaultCollection: Collection = {
+  schemaVersion: 1,
   id: "collection-1",
   name: "Test",
   axes: [],

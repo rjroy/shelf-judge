@@ -1,13 +1,55 @@
 // Pure curve math functions shared between daemon (scoring) and web (live preview).
 // No I/O, no service dependencies. Implements REQ-CURVE-2 through REQ-CURVE-12.
 
-import type {
-  AxisSource,
-  NativeScale,
-  PreferenceShape,
-  ToleranceLevel,
-  LeanDirection,
-} from "./types";
+import type { NativeScale, PreferenceShape, ToleranceLevel, LeanDirection } from "./types";
+
+export interface PreferenceCurveConfig {
+  idealValue?: number | null;
+  tolerance?: ToleranceLevel;
+  toleranceWidth?: number | null;
+  leanDirection?: LeanDirection | null;
+}
+
+export function getPreferenceCurveInvalidFields(
+  scale: NativeScale,
+  shape: PreferenceShape,
+  config: PreferenceCurveConfig,
+): string[] {
+  const invalid = new Set<string>();
+  const ideal = config.idealValue;
+  const width = config.toleranceWidth;
+
+  if (shape === "sweet-spot" && ideal == null) invalid.add("idealValue");
+  if (ideal != null && (!Number.isFinite(ideal) || ideal < scale.min || ideal > scale.max)) {
+    invalid.add("idealValue");
+  }
+  if (config.tolerance !== undefined && width != null) {
+    invalid.add("tolerance");
+    invalid.add("toleranceWidth");
+  }
+  if (width != null) {
+    if (shape !== "sweet-spot") invalid.add("toleranceWidth");
+    if (
+      ideal == null ||
+      !Number.isFinite(width) ||
+      width <= 0 ||
+      width >= ideal - scale.min ||
+      width >= scale.max - ideal
+    ) {
+      invalid.add("toleranceWidth");
+    }
+  }
+
+  return [...invalid];
+}
+
+export function isPreferenceCurveApplicable(
+  scale: NativeScale,
+  shape: PreferenceShape,
+  config: PreferenceCurveConfig,
+): boolean {
+  return getPreferenceCurveInvalidFields(scale, shape, config).length === 0;
+}
 
 function clamp(value: number): number {
   return Math.max(1, Math.min(10, value));
@@ -29,30 +71,6 @@ export const K_STRICT = Math.log(1 / 6) / Math.log(1 / 3);
 // the avoided side gets a steeper slope (higher k).
 export const LEAN_GENTLE_MULTIPLIER = 0.6;
 export const LEAN_STEEP_MULTIPLIER = 1.5;
-
-/**
- * Returns the native scale range for an axis based on its source and BGG field.
- * Personal axes are always 1-10. BGG axes depend on the field.
- */
-export function getNativeScale(source: AxisSource, bggField: string | null): NativeScale {
-  if (source === "personal") {
-    return { min: 1, max: 10 };
-  }
-
-  if (source === "tournament") {
-    // Tournament axes feed normalized ELO scores in the 1-10 space, same as personal.
-    return { min: 1, max: 10 };
-  }
-
-  switch (bggField) {
-    case "communityRating":
-      return { min: 1, max: 10 };
-    case "weight":
-      return { min: 1, max: 5 };
-    default:
-      throw new Error(`Unknown BGG field: ${bggField}`);
-  }
-}
 
 /**
  * Returns the base k exponent for a tolerance level.
@@ -100,12 +118,7 @@ export function applyPreferenceCurve(
   rawValue: number,
   scale: NativeScale,
   shape: PreferenceShape,
-  config: {
-    idealValue?: number | null;
-    tolerance?: ToleranceLevel;
-    toleranceWidth?: number | null;
-    leanDirection?: LeanDirection | null;
-  },
+  config: PreferenceCurveConfig,
 ): number {
   const range = scale.max - scale.min;
 

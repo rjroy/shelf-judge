@@ -1,5 +1,29 @@
 import { describe, test, expect } from "bun:test";
 import { formatTable, formatScore, formatBreakdown, printOutput } from "../src/output.js";
+import type { FitnessBreakdownEntry } from "@shelf-judge/shared";
+
+function entry(overrides: Partial<FitnessBreakdownEntry>): FitnessBreakdownEntry {
+  return {
+    axisId: "axis",
+    axisName: "Axis",
+    weight: 50,
+    contribution: null,
+    source: "personal",
+    derivedField: null,
+    sourceValue: null,
+    scoringRawValue: null,
+    effectiveRating: null,
+    preferenceShape: "higher-is-better",
+    curveAffected: false,
+    unit: null,
+    provenance: null,
+    configurationSummary: null,
+    overridden: overrides.source === "override",
+    predictionConfidence: null,
+    referenceGames: null,
+    ...overrides,
+  };
+}
 
 describe("formatTable", () => {
   test("formats headers and rows with alignment", () => {
@@ -44,154 +68,149 @@ describe("formatScore", () => {
 describe("formatBreakdown", () => {
   test("formats breakdown entries as a table", () => {
     const result = formatBreakdown([
-      {
+      entry({
         axisName: "Wife will play it",
-        rating: 8,
+        effectiveRating: 8,
         weight: 40,
         contribution: 3.2,
         source: "personal",
-        bggOriginal: null,
-      },
-      {
+        sourceValue: null,
+      }),
+      entry({
         axisName: "Complexity",
-        rating: 5.8,
+        effectiveRating: 5.8,
         weight: 20,
         contribution: 1.16,
-        source: "bgg",
-        bggOriginal: null,
-      },
+        source: "derived",
+        sourceValue: null,
+      }),
     ]);
     expect(result).toContain("Axis");
     expect(result).toContain("Wife will play it");
     expect(result).toContain("Complexity");
     expect(result).toContain("personal");
-    expect(result).toContain("bgg");
+    expect(result).toContain("derived");
   });
 
-  test("shows BGG original for override source", () => {
+  test("shows factual metadata for an override source", () => {
     const result = formatBreakdown([
-      {
+      entry({
         axisName: "Community Rating",
-        rating: 9,
+        effectiveRating: 9,
         weight: 10,
         contribution: 0.9,
         source: "override",
-        bggOriginal: 8.1,
-      },
+        sourceValue: 8.1,
+      }),
     ]);
-    expect(result).toContain("(BGG: 8.1)");
+    expect(result).toContain("(metadata: 8.1)");
     expect(result).toContain("override");
   });
 
   test("shows --- for unrated axes", () => {
     const result = formatBreakdown([
-      {
+      entry({
         axisName: "Unrated",
-        rating: null,
+        effectiveRating: null,
         weight: 30,
         contribution: null,
         source: "personal",
-        bggOriginal: null,
-      },
+        sourceValue: null,
+      }),
     ]);
     expect(result).toContain("---");
   });
 
-  test("shows Raw column when rawValue differs from effectiveRating", () => {
+  test("shows Raw column when scoringRawValue differs from effectiveRating", () => {
     const result = formatBreakdown([
-      {
+      entry({
         axisName: "Complexity",
-        rating: 5.275,
         weight: 20,
         contribution: 1.055,
-        source: "bgg",
-        bggOriginal: null,
-        rawValue: 2.9,
+        source: "derived",
+        sourceValue: null,
+        scoringRawValue: 2.9,
         effectiveRating: 5.275,
         preferenceShape: "higher-is-better",
         curveAffected: false,
-      },
-      {
+      }),
+      entry({
         axisName: "Fun",
-        rating: 8,
         weight: 40,
         contribution: 3.2,
         source: "personal",
-        bggOriginal: null,
-        rawValue: 8,
+        sourceValue: null,
+        scoringRawValue: 8,
         effectiveRating: 8,
         preferenceShape: "higher-is-better",
         curveAffected: false,
-      },
+      }),
     ]);
     expect(result).toContain("Raw");
     expect(result).toContain("2.9");
   });
 
-  test("hides Raw column when all rawValues equal effectiveRatings", () => {
+  test("hides Raw column when all scoring values equal effective ratings", () => {
     const result = formatBreakdown([
-      {
+      entry({
         axisName: "Fun",
-        rating: 8,
         weight: 40,
         contribution: 3.2,
         source: "personal",
-        bggOriginal: null,
-        rawValue: 8,
+        sourceValue: null,
+        scoringRawValue: 8,
         effectiveRating: 8,
         preferenceShape: "higher-is-better",
         curveAffected: false,
-      },
+      }),
     ]);
     expect(result).not.toContain("Raw");
   });
 
   test("marks curve-affected rows with *", () => {
     const result = formatBreakdown([
-      {
+      entry({
         axisName: "Complexity",
-        rating: 9.2,
         weight: 20,
         contribution: 1.84,
-        source: "bgg",
-        bggOriginal: null,
-        rawValue: 2.75,
+        source: "derived",
+        sourceValue: null,
+        scoringRawValue: 2.75,
         effectiveRating: 9.2,
         preferenceShape: "sweet-spot",
         curveAffected: true,
-      },
+      }),
     ]);
     expect(result).toContain("9.2 *");
   });
 
   test("does not mark non-curve-affected rows", () => {
     const result = formatBreakdown([
-      {
+      entry({
         axisName: "Fun",
-        rating: 8,
         weight: 40,
         contribution: 3.2,
         source: "personal",
-        bggOriginal: null,
-        rawValue: 8,
+        sourceValue: null,
+        scoringRawValue: 8,
         effectiveRating: 8,
         preferenceShape: "higher-is-better",
         curveAffected: false,
-      },
+      }),
     ]);
     expect(result).not.toContain("*");
   });
 
   test("backward compatible with entries missing curve fields", () => {
     const result = formatBreakdown([
-      {
+      entry({
         axisName: "Fun",
-        rating: 8,
+        effectiveRating: 8,
         weight: 40,
         contribution: 3.2,
         source: "personal",
-        bggOriginal: null,
-      },
+        sourceValue: null,
+      }),
     ]);
     expect(result).toContain("Fun");
     expect(result).not.toContain("Raw");
@@ -202,22 +221,22 @@ describe("formatBreakdown", () => {
   // accommodates the longer "tournament" string without clobbering neighbors.
   test("renders tournament source without column misalignment", () => {
     const result = formatBreakdown([
-      {
+      entry({
         axisName: "Tournament",
-        rating: 7.2,
+        effectiveRating: 7.2,
         weight: 30,
         contribution: 2.16,
         source: "tournament",
-        bggOriginal: null,
-      },
-      {
+        sourceValue: null,
+      }),
+      entry({
         axisName: "Wife will play it",
-        rating: 8,
+        effectiveRating: 8,
         weight: 40,
         contribution: 3.2,
         source: "personal",
-        bggOriginal: null,
-      },
+        sourceValue: null,
+      }),
     ]);
     expect(result).toContain("tournament");
     expect(result).toContain("personal");
@@ -235,14 +254,14 @@ describe("formatBreakdown", () => {
   // "not rated" treatment to any other unrated axis.
   test("renders null-valued tournament entry as '---' (parity with personal)", () => {
     const result = formatBreakdown([
-      {
+      entry({
         axisName: "Tournament",
-        rating: null,
+        effectiveRating: null,
         weight: 30,
         contribution: null,
         source: "tournament",
-        bggOriginal: null,
-      },
+        sourceValue: null,
+      }),
     ]);
     expect(result).toContain("Tournament");
     expect(result).toContain("---");

@@ -1,18 +1,22 @@
 import { describe, expect, test } from "bun:test";
 import {
+  createDerivedAxisFromPayload,
+  createFreshCollectionDerivedAxes,
   DERIVED_AXIS_REGISTRY,
-  getCurrentAxisNativeScale,
+  getAxisNativeScale,
   getDerivedAxisNativeScale,
   getDerivedFieldDiscovery,
+  getDerivedSuggestionProjections,
   isEnabledScoringAxis,
   isVectorEligibleAxis,
   resolveDerivedAxisValue,
   summarizeDerivedAxisConfiguration,
+  validateDerivedAxisPayload,
 } from "../src/derived-axis-registry";
 import { AXIS_VALIDATION_CODES } from "../src/errors";
 import type {
-  CurrentAxis,
-  CurrentCollection,
+  Axis,
+  Collection,
   DerivedAxis,
   DerivedFieldId,
   Game,
@@ -42,6 +46,46 @@ function makeGame(overrides: Partial<Game> = {}): Game {
   };
 }
 
+describe("registry-owned payload validation and creation", () => {
+  test("every registry entry automatically validates and creates through its definition", () => {
+    const base = {
+      id: "axis",
+      name: "Axis",
+      description: null,
+      weight: 50,
+      enabled: true as const,
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+
+    for (const definition of Object.values(DERIVED_AXIS_REGISTRY)) {
+      const configuration = Object.fromEntries(
+        definition.configurationDiscovery.map((property) => [
+          property.name,
+          property.default ?? property.minimum,
+        ]),
+      );
+      const result = validateDerivedAxisPayload({
+        derivedField: definition.id,
+        configuration,
+      });
+      expect(result.success).toBe(true);
+      if (!result.success) throw new Error(result.message);
+
+      const axis = createDerivedAxisFromPayload(base, result.data);
+      expect(axis.source).toBe("derived");
+      expect(axis.derivedField).toBe(definition.id);
+      expect(axis.configuration).toEqual(result.data.configuration);
+    }
+  });
+
+  test("payload validation and creation contain no independent field dispatch", async () => {
+    const source = await Bun.file("packages/shared/src/derived-axis-registry.ts").text();
+    expect(source).not.toContain('z.discriminatedUnion("derivedField"');
+    expect(source).not.toContain("switch (payload.derivedField)");
+  });
+});
+
 const commonAxis = {
   id: "axis",
   name: "Axis",
@@ -60,6 +104,101 @@ describe("derived axis registry contract", () => {
       "playerCountFit",
       "playingTime",
     ] satisfies DerivedFieldId[]);
+  });
+
+  test("declares fresh-collection inclusion and projects only marked templates", () => {
+    expect(
+      Object.fromEntries(
+        Object.values(DERIVED_AXIS_REGISTRY).map(({ id, includedInFreshCollection }) => [
+          id,
+          includedInFreshCollection,
+        ]),
+      ),
+    ).toEqual({
+      communityRating: true,
+      weight: true,
+      playerCountFit: false,
+      playingTime: false,
+    });
+
+    const ids = ["community-axis", "weight-axis"];
+    let idIndex = 0;
+    const axes = createFreshCollectionDerivedAxes(() => {
+      const id = ids[idIndex++];
+      if (id === undefined) throw new Error("Unexpected fresh derived axis");
+      return id;
+    }, "2026-01-01T00:00:00Z");
+
+    expect(axes).toEqual([
+      {
+        id: "community-axis",
+        name: "Community Rating",
+        description: "BGG community average rating",
+        weight: 50,
+        enabled: true,
+        preferenceShape: "higher-is-better",
+        source: "derived",
+        derivedField: "communityRating",
+        configuration: {},
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+      {
+        id: "weight-axis",
+        name: "Complexity",
+        description: "BGG weight normalized to 1-10 scale",
+        weight: 50,
+        enabled: true,
+        preferenceShape: "higher-is-better",
+        source: "derived",
+        derivedField: "weight",
+        configuration: {},
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    ]);
+  });
+
+  test("keeps suggestion projections exhaustive with registry fields", () => {
+    const game = makeGame({
+      minPlayers: 2,
+      maxPlayers: 5,
+      playingTime: 240,
+      bggData: {
+        communityRating: 7.5,
+        bayesAverage: 7,
+        weight: 3,
+        numWeightVotes: 1,
+        description: null,
+        mechanics: [],
+        categories: [],
+        families: [],
+        subdomains: [],
+        suggestedPlayerCounts: [],
+        fetchedAt: "2026-01-01T00:00:00Z",
+      },
+    });
+    const projections = getDerivedSuggestionProjections();
+
+    expect(projections.map(({ derivedField }) => derivedField)).toEqual(
+      Object.values(DERIVED_AXIS_REGISTRY).map(({ id }) => id),
+    );
+    expect(new Set(projections.map(({ derivedField }) => derivedField)).size).toBe(
+      projections.length,
+    );
+    expect(
+      Object.fromEntries(
+        projections.map(({ derivedField, attribute, projectValue }) => [
+          derivedField,
+          { attribute, value: projectValue(game) },
+        ]),
+      ),
+    ).toEqual({
+      communityRating: { attribute: "community rating", value: 7.5 },
+      weight: { attribute: "BGG weight", value: 3 },
+      playerCountFit: { attribute: "player count range", value: 3 },
+      playingTime: { attribute: "play time", value: 240 },
+    });
   });
 
   test("owns stable configuration validation metadata", () => {
@@ -369,6 +508,61 @@ describe("derived axis registry contract", () => {
     expect(JSON.parse(JSON.stringify(discovery))).toEqual(discovery);
   });
 
+  test("returns independently mutable nested discovery projections", () => {
+    const first = getDerivedFieldDiscovery();
+    const firstPlayingTime = first.fields.find(({ id }) => id === "playingTime");
+    expect(firstPlayingTime).toBeDefined();
+    if (firstPlayingTime === undefined) return;
+
+    firstPlayingTime.nativeScale.max = 999;
+    if (firstPlayingTime.nativeScaleDiscovery.type === "configuration-bound") {
+      firstPlayingTime.nativeScaleDiscovery.maxConfigurationProperty = "tampered";
+    }
+    const configurationProperty = firstPlayingTime.configuration[0];
+    expect(configurationProperty).toBeDefined();
+    if (configurationProperty === undefined) return;
+    configurationProperty.minimum = 999;
+    configurationProperty.default = 999;
+    firstPlayingTime.template.configuration.maximumScoringTime = 999;
+
+    const second = getDerivedFieldDiscovery();
+    const secondPlayingTime = second.fields.find(({ id }) => id === "playingTime");
+    expect(secondPlayingTime).toBeDefined();
+    if (secondPlayingTime === undefined) return;
+
+    expect(secondPlayingTime).toMatchObject({
+      nativeScale: { min: 1, max: 240 },
+      nativeScaleDiscovery: {
+        type: "configuration-bound",
+        min: 1,
+        maxConfigurationProperty: "maximumScoringTime",
+      },
+      configuration: [
+        {
+          name: "maximumScoringTime",
+          minimum: 60,
+          maximum: 1440,
+          default: 240,
+        },
+      ],
+      template: { configuration: { maximumScoringTime: 240 } },
+    });
+    expect(DERIVED_AXIS_REGISTRY.playingTime.defaultNativeScale).toEqual({ min: 1, max: 240 });
+    expect(DERIVED_AXIS_REGISTRY.playingTime.configurationDiscovery[0]).toMatchObject({
+      minimum: 60,
+      default: 240,
+    });
+    expect(DERIVED_AXIS_REGISTRY.playingTime.templateDefaults.configuration).toEqual({
+      maximumScoringTime: 240,
+    });
+    expect(secondPlayingTime.nativeScale).not.toBe(firstPlayingTime.nativeScale);
+    expect(secondPlayingTime.nativeScaleDiscovery).not.toBe(firstPlayingTime.nativeScaleDiscovery);
+    expect(secondPlayingTime.configuration[0]).not.toBe(firstPlayingTime.configuration[0]);
+    expect(secondPlayingTime.template.configuration).not.toBe(
+      firstPlayingTime.template.configuration,
+    );
+  });
+
   test("retains exact direct-entry configuration types and validates generic input", () => {
     const game = makeGame({ playingTime: 120 });
     expect(DERIVED_AXIS_REGISTRY.playingTime.resolve(game, { maximumScoringTime: 240 })).toEqual({
@@ -560,13 +754,13 @@ describe("current-axis helpers", () => {
     derivedField: "playerCountFit",
     configuration: { targetPlayerCount: 3 },
   };
-  const disabled: CurrentAxis = {
+  const disabled: Axis = {
     ...commonAxis,
     source: "legacy",
     enabled: false,
     reason: "Unsupported field",
     legacyField: "unknown",
-    legacyPayload: { bggField: "unknown" },
+    legacyPayload: { originalField: "unknown" },
   };
 
   test("filters scoring and vector axes independently", () => {
@@ -582,8 +776,8 @@ describe("current-axis helpers", () => {
   });
 
   test("looks up native scales and stable configuration summaries", () => {
-    expect(getCurrentAxisNativeScale(personal)).toEqual({ min: 1, max: 10 });
-    expect(getCurrentAxisNativeScale(derived)).toEqual({ min: 1, max: 10 });
+    expect(getAxisNativeScale(personal)).toEqual({ min: 1, max: 10 });
+    expect(getAxisNativeScale(derived)).toEqual({ min: 1, max: 10 });
     expect(summarizeDerivedAxisConfiguration(derived)).toBe("Target: 3 players");
     const time: DerivedAxis<"playingTime"> = {
       ...commonAxis,
@@ -591,12 +785,12 @@ describe("current-axis helpers", () => {
       derivedField: "playingTime",
       configuration: { maximumScoringTime: 360 },
     };
-    expect(getCurrentAxisNativeScale(time)).toEqual({ min: 1, max: 360 });
+    expect(getAxisNativeScale(time)).toEqual({ min: 1, max: 360 });
     expect(summarizeDerivedAxisConfiguration(time)).toBe("Scoring cap: 360 minutes");
   });
 
   test("supports an additive versioned persisted collection contract", () => {
-    const collection: CurrentCollection = {
+    const collection: Collection = {
       schemaVersion: 1,
       id: "collection",
       name: "Collection",

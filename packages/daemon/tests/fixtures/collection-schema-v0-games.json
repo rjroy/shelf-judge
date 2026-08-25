@@ -1,0 +1,57 @@
+{
+  "id": "collection-historical-games",
+  "name": "Historical game shapes",
+  "axes": [],
+  "games": [
+    {
+      "id": "game-before-ownership",
+      "bggId": 1,
+      "name": "Before Ownership",
+      "yearPublished": 2020,
+      "minPlayers": 1,
+      "maxPlayers": 4,
+      "playingTime": 45,
+      "imageUrl": null,
+      "bggData": null,
+      "numPlays": null,
+      "ratings": {},
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "game-before-box-dimensions",
+      "bggId": 2,
+      "name": "Before Box Dimensions",
+      "yearPublished": 2021,
+      "minPlayers": 2,
+      "maxPlayers": 5,
+      "playingTime": 60,
+      "imageUrl": null,
+      "bggData": null,
+      "numPlays": 3,
+      "ownership": "previously-owned",
+      "ratings": {},
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "game-before-manual-shelf",
+      "bggId": 3,
+      "name": "Before Manual Shelf",
+      "yearPublished": 2022,
+      "minPlayers": 2,
+      "maxPlayers": 2,
+      "playingTime": 30,
+      "imageUrl": null,
+      "bggData": null,
+      "numPlays": 1,
+      "ownership": "owned",
+      "boxDimensions": { "width": 10, "height": 8, "depth": 3 },
+      "ratings": {},
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    }
+  ],
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+}

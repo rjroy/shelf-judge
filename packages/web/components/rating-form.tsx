@@ -29,8 +29,8 @@ export function RatingForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const personalAxes = axes.filter((a) => a.source === "personal");
-  const bggAxes = axes.filter((a) => a.source === "bgg");
+  const personalAxes = axes.filter((a) => a.enabled && a.source === "personal");
+  const derivedAxes = axes.filter((a) => a.enabled && a.source === "derived");
 
   const predictionHints = new Map<
     string,
@@ -40,7 +40,7 @@ export function RatingForm({
     for (const entry of predictionScore.breakdown) {
       if (entry.source === "predicted") {
         predictionHints.set(entry.axisId, {
-          rating: entry.rating,
+          rating: entry.effectiveRating,
           confidence: entry.predictionConfidence,
           refCount: entry.referenceGames?.length ?? 0,
         });
@@ -214,19 +214,19 @@ export function RatingForm({
           );
         })}
 
-        {bggAxes.length > 0 && (
+        {derivedAxes.length > 0 && (
           <>
             <hr className="section-divider" />
-            <div className="panel-section-title bgg-section-title">BGG-Derived Axes</div>
+            <div className="panel-section-title bgg-section-title">Derived Axes</div>
 
-            {bggAxes.map((axis) => {
+            {derivedAxes.map((axis) => {
               const hasOverride = ratings[axis.id] !== undefined && ratings[axis.id] !== "";
               return (
                 <div key={axis.id} className="rating-field">
                   <div className="rating-field-header">
                     <div className="rating-field-name">
                       {axis.name}
-                      <span className="source-badge source-bgg bgg-badge-inline">BGG</span>
+                      <span className="source-badge source-bgg bgg-badge-inline">Derived</span>
                     </div>
                     <div className="rating-field-weight">Weight: {axis.weight}</div>
                   </div>
@@ -246,7 +246,7 @@ export function RatingForm({
                             });
                           }}
                         >
-                          Revert to BGG &rsaquo;
+                          Revert to metadata &rsaquo;
                         </span>
                       </div>
                       <div className="rating-input-row">
@@ -270,7 +270,7 @@ export function RatingForm({
                     </>
                   ) : (
                     <div className="bgg-auto-value">
-                      <span>Auto-populated from BGG</span>
+                      <span>Auto-populated from game metadata</span>
                       <span className="value">
                         {currentRatings[axis.id] ?? "\u2014"}
                         {currentRatings[axis.id] !== undefined &&

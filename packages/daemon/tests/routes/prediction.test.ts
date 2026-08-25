@@ -7,9 +7,9 @@ import {
 } from "../helpers/test-app.js";
 import type {
   Axis,
+  PredictedGameResponse,
   PredictionReadiness,
   PredictionSettings,
-  PredictedGameResponse,
   NicheImpact,
 } from "@shelf-judge/shared";
 import type { BggGameResult } from "../../src/services/bgg-client.js";
@@ -141,6 +141,7 @@ describe("prediction routes", () => {
       const axisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
         name: "Fun",
         weight: 50,
+        source: "personal",
       });
       expect(axisRes.status).toBe(201);
       const axis = (await axisRes.json()) as Axis;
@@ -185,6 +186,30 @@ describe("prediction routes", () => {
       expect(prediction.score.predictionMeta!.confidence).toBeDefined();
       expect(prediction.score.predictionMeta!.referenceGameCount).toBeGreaterThan(0);
       expect(prediction.predictionUnavailable).toBeNull();
+
+      const community = prediction.score.breakdown.find(
+        ({ derivedField }) => derivedField === "communityRating",
+      );
+      if (community === undefined) throw new Error("Missing community rating breakdown row");
+      expect(community).toEqual({
+        axisId: community.axisId,
+        axisName: "Community Rating",
+        weight: 50,
+        contribution: 2.5,
+        source: "derived",
+        derivedField: "communityRating",
+        sourceValue: 7.5,
+        scoringRawValue: 7.5,
+        effectiveRating: 7.5,
+        preferenceShape: "higher-is-better",
+        curveAffected: false,
+        unit: "rating",
+        provenance: "BoardGameGeek community average rating",
+        configurationSummary: "No configuration",
+        overridden: false,
+        predictionConfidence: "actual",
+        referenceGames: null,
+      });
     });
 
     test("returns predictionUnavailable at Stage 0", async () => {
@@ -277,6 +302,7 @@ describe("prediction routes", () => {
       const axisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
         name: "Fun",
         weight: 50,
+        source: "personal",
       });
       const axis = (await axisRes.json()) as Axis;
 
@@ -358,6 +384,7 @@ describe("prediction routes", () => {
       const axisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
         name: "Fun",
         weight: 50,
+        source: "personal",
       });
       const axis = (await axisRes.json()) as Axis;
 
@@ -408,6 +435,7 @@ describe("prediction routes", () => {
       const axisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
         name: "Fun",
         weight: 50,
+        source: "personal",
       });
       const axis = (await axisRes.json()) as Axis;
 

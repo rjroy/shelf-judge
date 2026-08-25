@@ -10,7 +10,15 @@ const axes = [
     source: "personal",
     description: null,
   },
-  { id: "ax-2-full-uuid", name: "Community Rating", weight: 10, source: "bgg", description: null },
+  {
+    id: "ax-2-full-uuid",
+    name: "Community Rating",
+    weight: 10,
+    source: "derived",
+    derivedField: "communityRating",
+    configuration: {},
+    description: null,
+  },
 ];
 
 describe("axis list", () => {
@@ -36,7 +44,7 @@ describe("axis list", () => {
     expect(output).toContain("ax-2-ful");
     expect(output).toContain("Community Rating");
     expect(output).toContain("10");
-    expect(output).toContain("bgg");
+    expect(output).toContain("derived:communityRating");
     // Default shape for axes without preferenceShape
     expect(output).toContain("linear\u2191");
   });
@@ -138,7 +146,9 @@ describe("axis list with curve config", () => {
       id: "ax-1-full-uuid",
       name: "Complexity",
       weight: 20,
-      source: "bgg",
+      source: "derived",
+      derivedField: "weight",
+      configuration: {},
       description: null,
       preferenceShape: "sweet-spot",
       idealValue: 2.75,
@@ -214,7 +224,9 @@ describe("axis create with curve flags", () => {
     id: "new-axis-id",
     name: "Complexity",
     weight: 20,
-    source: "bgg",
+    source: "derived",
+    derivedField: "weight",
+    configuration: {},
     description: null,
     preferenceShape: "sweet-spot",
     idealValue: 2.75,
@@ -255,7 +267,9 @@ describe("axis update with curve flags", () => {
     id: "ax-1-full-uuid",
     name: "Complexity",
     weight: 20,
-    source: "bgg",
+    source: "derived",
+    derivedField: "weight",
+    configuration: {},
     description: null,
     preferenceShape: "sweet-spot",
     idealValue: 2.75,

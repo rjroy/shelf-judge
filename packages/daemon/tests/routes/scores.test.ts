@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { createTestApp, jsonRequest, type TestAppContext } from "../helpers/test-app.js";
-import type { Axis, Game, FitnessBreakdownEntry } from "@shelf-judge/shared";
+import type { Axis, FitnessBreakdownEntry, Game } from "@shelf-judge/shared";
 
 interface GameAddResponse {
   game: Game;
@@ -35,6 +35,7 @@ describe("score routes", () => {
       const axisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
         name: "Fun",
         weight: 50,
+        source: "personal",
       });
       expect(axisRes.status).toBe(201);
       const axis = (await axisRes.json()) as Axis;
@@ -69,7 +70,7 @@ describe("score routes", () => {
 
       const personalEntry = score.breakdown.find((b) => b.axisId === axis.id);
       expect(personalEntry).toBeDefined();
-      expect(personalEntry!.rating).toBe(8);
+      expect(personalEntry!.effectiveRating).toBe(8);
     });
 
     test("returns null score for an unrated game", async () => {
@@ -98,6 +99,7 @@ describe("score routes", () => {
       const axisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
         name: "Fun",
         weight: 50,
+        source: "personal",
       });
       expect(axisRes.status).toBe(201);
       const axis = (await axisRes.json()) as Axis;
@@ -148,6 +150,7 @@ describe("score routes", () => {
       const axisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
         name: "Fun",
         weight: 50,
+        source: "personal",
       });
       expect(axisRes.status).toBe(201);
       const axis = (await axisRes.json()) as Axis;

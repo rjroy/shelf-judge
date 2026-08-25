@@ -1,6 +1,32 @@
-import { describe, test, expect, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
+import {
+  AXIS_VALIDATION_CODES,
+  getDerivedFieldDiscovery,
+  type Axis,
+  type DisabledLegacyAxis,
+} from "@shelf-judge/shared";
 import { createTestApp, jsonRequest, type TestAppContext } from "../helpers/test-app.js";
-import type { Axis, AxisSource, Game, VetoConfig } from "@shelf-judge/shared";
+
+interface CodedErrorBody {
+  error: string;
+  message: string;
+  code: string;
+  details: { field: string; path: (string | number)[] }[];
+}
+
+const disabled: DisabledLegacyAxis = {
+  id: "legacy-axis",
+  name: "Legacy",
+  description: null,
+  weight: 50,
+  enabled: false,
+  source: "legacy",
+  reason: "unknown_legacy_field",
+  legacyField: "futureMetric",
+  legacyPayload: { originalField: "futureMetric" },
+  createdAt: "2025-01-01T00:00:00.000Z",
+  updatedAt: "2025-01-02T00:00:00.000Z",
+};
 
 describe("axis routes", () => {
   let ctx: TestAppContext;
@@ -9,377 +35,329 @@ describe("axis routes", () => {
     ctx = createTestApp();
   });
 
-  describe("POST /api/axes", () => {
-    test("creates axis and returns 201", async () => {
-      const res = await jsonRequest(ctx.app, "POST", "/api/axes", {
-        name: "Fun Factor",
+  test("creates personal and duplicate derived axes", async () => {
+    const personal = await jsonRequest(ctx.app, "POST", "/api/axes", {
+      name: "Fun",
+      weight: 50,
+      source: "personal",
+    });
+    expect(personal.status).toBe(201);
+    expect((await personal.json()) as Axis).toMatchObject({ source: "personal" });
+
+    const payload = {
+      name: "At four",
+      weight: 40,
+      source: "derived",
+      derivedField: "playerCountFit",
+      configuration: { targetPlayerCount: 4 },
+    };
+    expect((await jsonRequest(ctx.app, "POST", "/api/axes", payload)).status).toBe(201);
+    expect((await jsonRequest(ctx.app, "POST", "/api/axes", payload)).status).toBe(201);
+  });
+
+  test.each([
+    {
+      derivedField: "communityRating",
+      configuration: {},
+      curve: {},
+    },
+    {
+      derivedField: "weight",
+      configuration: {},
+      curve: {},
+    },
+    {
+      derivedField: "playerCountFit",
+      configuration: { targetPlayerCount: 4 },
+      curve: {},
+    },
+    {
+      derivedField: "playingTime",
+      configuration: { maximumScoringTime: 240 },
+      curve: { preferenceShape: "sweet-spot", idealValue: 90, toleranceWidth: 30 },
+    },
+  ])(
+    "creates the $derivedField derived template",
+    async ({ derivedField, configuration, curve }) => {
+      const response = await jsonRequest(ctx.app, "POST", "/api/axes", {
+        name: derivedField,
         weight: 50,
+        source: "derived",
+        derivedField,
+        configuration,
+        ...curve,
       });
-
-      expect(res.status).toBe(201);
-      const body = (await res.json()) as Axis;
-      expect(body.name).toBe("Fun Factor");
-      expect(body.weight).toBe(50);
-      expect(body.id).toBeString();
-      expect(body.source).toBe("personal");
-    });
-
-    test("returns 400 for weight exceeding 100", async () => {
-      const res = await jsonRequest(ctx.app, "POST", "/api/axes", {
-        name: "Too Heavy",
-        weight: 101,
+      expect(response.status).toBe(201);
+      expect((await response.json()) as Axis).toMatchObject({
+        enabled: true,
+        source: "derived",
+        derivedField,
+        configuration,
       });
+    },
+  );
 
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { error: string };
-      expect(body.error).toContain("Validation failed");
+  test("discovery response equals the shared registry projection exactly", async () => {
+    const response = await jsonRequest(ctx.app, "GET", "/api/axes/derived-fields");
+    expect(response.status).toBe(200);
+    const body: unknown = await response.json();
+    expect(body).toEqual(getDerivedFieldDiscovery());
+    expect(new Set(getDerivedFieldDiscovery().fields.map(({ id }) => id)).size).toBe(
+      getDerivedFieldDiscovery().fields.length,
+    );
+  });
+
+  test("returns stable coded create errors without message inference", async () => {
+    const response = await jsonRequest(ctx.app, "POST", "/api/axes", {
+      name: "Bad target",
+      weight: 50,
+      source: "derived",
+      derivedField: "playerCountFit",
+      configuration: { targetPlayerCount: 0 },
     });
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as CodedErrorBody;
+    expect(body).toMatchObject({
+      error: "Validation failed",
+      code: AXIS_VALIDATION_CODES.INVALID_TARGET_PLAYER_COUNT,
+    });
+    expect(body.message).toBeString();
+    expect(body.details).toEqual([
+      { field: "targetPlayerCount", path: ["configuration", "targetPlayerCount"] },
+    ]);
+  });
 
-    test("returns 400 for empty name", async () => {
-      const res = await jsonRequest(ctx.app, "POST", "/api/axes", {
-        name: "",
+  test.each([
+    {
+      name: "unknown field",
+      payload: {
+        name: "Unknown",
         weight: 50,
-      });
-
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { error: string };
-      expect(body.error).toContain("Validation failed");
-    });
-
-    test("rejects a second tournament-source axis (REQ-TAXIS-3)", async () => {
-      // The default collection already contains an auto-created tournament axis
-      // (REQ-TAXIS-4). Attempting to create another must be rejected.
-      const res = await jsonRequest(ctx.app, "POST", "/api/axes", {
-        name: "Second Tournament",
-        weight: 20,
-        source: "tournament",
-      });
-
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { error: string };
-      expect(body.error).toBe("tournament_axis_already_exists");
-    });
-  });
-
-  describe("GET /api/axes", () => {
-    test("returns all axes including default BGG axes and the tournament axis", async () => {
-      const res = await jsonRequest(ctx.app, "GET", "/api/axes");
-
-      expect(res.status).toBe(200);
-      const axes = (await res.json()) as Axis[];
-      expect(Array.isArray(axes)).toBe(true);
-      // Default collection has 2 BGG axes + 1 tournament axis (auto-created per REQ-TAXIS-4)
-      expect(axes.length).toBe(3);
-      const sources = axes.map((a) => a.source);
-      expect(sources.filter((s: AxisSource) => s === "bgg")).toHaveLength(2);
-      expect(sources.filter((s: AxisSource) => s === "tournament")).toHaveLength(1);
-    });
-  });
-
-  describe("PUT /api/axes/:id", () => {
-    test("updates axis name and weight", async () => {
-      // Create an axis first
-      const createRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
-        name: "Original",
-        weight: 30,
-      });
-      const created = (await createRes.json()) as Axis;
-
-      const res = await jsonRequest(ctx.app, "PUT", `/api/axes/${created.id}`, {
-        name: "Updated",
-        weight: 70,
-      });
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as Axis;
-      expect(body.name).toBe("Updated");
-      expect(body.weight).toBe(70);
-    });
-
-    test("returns 404 for nonexistent axis", async () => {
-      const res = await jsonRequest(ctx.app, "PUT", "/api/axes/nonexistent-id", { name: "Ghost" });
-
-      expect(res.status).toBe(404);
-      const body = (await res.json()) as { error: string };
-      expect(body.error).toContain("not found");
-    });
-  });
-
-  describe("POST /api/axes - curve configuration", () => {
-    test("creates axis with full curve config", async () => {
-      const res = await jsonRequest(ctx.app, "POST", "/api/axes", {
-        name: "Complexity Preference",
-        weight: 40,
-        source: "bgg",
-        bggField: "weight",
-        preferenceShape: "sweet-spot",
-        idealValue: 3.0,
-        tolerance: "moderate",
-        leanDirection: "lower",
-      });
-
-      expect(res.status).toBe(201);
-      const axis = (await res.json()) as Axis;
-      expect(axis.preferenceShape).toBe("sweet-spot");
-      expect(axis.idealValue).toBe(3.0);
-      expect(axis.tolerance).toBe("moderate");
-      expect(axis.leanDirection).toBe("lower");
-    });
-
-    test("creates axis with veto config", async () => {
-      const res = await jsonRequest(ctx.app, "POST", "/api/axes", {
-        name: "Complexity Floor",
-        weight: 30,
-        source: "bgg",
-        bggField: "weight",
-        veto: { direction: "above", threshold: 4.0 },
-      });
-
-      expect(res.status).toBe(201);
-      const axis = (await res.json()) as Axis;
-      expect(axis.veto).toEqual({ direction: "above", threshold: 4.0 });
-    });
-
-    test("creates axis without curve fields (backward compatible)", async () => {
-      const res = await jsonRequest(ctx.app, "POST", "/api/axes", {
-        name: "Fun Factor",
+        source: "derived",
+        derivedField: "futureMetric",
+        configuration: {},
+      },
+      code: AXIS_VALIDATION_CODES.UNKNOWN_DERIVED_FIELD,
+      field: "derivedField",
+    },
+    {
+      name: "missing configuration",
+      payload: {
+        name: "Players",
         weight: 50,
-      });
+        source: "derived",
+        derivedField: "playerCountFit",
+        configuration: {},
+      },
+      code: AXIS_VALIDATION_CODES.MISSING_DERIVED_CONFIGURATION,
+      field: "targetPlayerCount",
+    },
+    {
+      name: "unsupported configuration",
+      payload: {
+        name: "Community",
+        weight: 50,
+        source: "derived",
+        derivedField: "communityRating",
+        configuration: { targetPlayerCount: 4 },
+      },
+      code: AXIS_VALIDATION_CODES.UNSUPPORTED_DERIVED_CONFIGURATION,
+      field: "configuration",
+    },
+    {
+      name: "invalid maximum scoring time",
+      payload: {
+        name: "Time",
+        weight: 50,
+        source: "derived",
+        derivedField: "playingTime",
+        configuration: { maximumScoringTime: 59 },
+      },
+      code: AXIS_VALIDATION_CODES.INVALID_MAXIMUM_SCORING_TIME,
+      field: "maximumScoringTime",
+    },
+  ])("routes $name with its stable code", async ({ payload, code, field }) => {
+    const response = await jsonRequest(ctx.app, "POST", "/api/axes", payload);
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as CodedErrorBody;
+    expect(body.error).toBe("Validation failed");
+    expect(body.code).toBe(code);
+    expect(body.details.map((detail) => detail.field)).toContain(field);
+  });
 
-      expect(res.status).toBe(201);
-      const axis = (await res.json()) as Axis;
-      expect(axis.preferenceShape).toBeUndefined();
-      expect(axis.idealValue).toBeUndefined();
-      expect(axis.veto).toBeUndefined();
+  test("returns stable invalid-payload errors for malformed JSON and tournament create", async () => {
+    const malformed = await ctx.app.request("http://localhost/api/axes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{",
+    });
+    expect(malformed.status).toBe(400);
+    expect((await malformed.json()) as CodedErrorBody).toMatchObject({
+      code: AXIS_VALIDATION_CODES.INVALID_AXIS_PAYLOAD,
     });
 
-    test("returns 400 when sweet-spot idealValue is outside native scale", async () => {
-      const res = await jsonRequest(ctx.app, "POST", "/api/axes", {
-        name: "Bad Ideal",
-        weight: 30,
-        source: "bgg",
-        bggField: "weight",
-        preferenceShape: "sweet-spot",
-        idealValue: 7.0, // BGG weight scale is 1-5
-      });
-
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { error: string };
-      expect(body.error).toContain("outside native scale");
+    const tournament = await jsonRequest(ctx.app, "POST", "/api/axes", {
+      name: "Tournament",
+      weight: 30,
+      source: "tournament",
     });
-
-    test("returns 400 when sweet-spot is missing idealValue", async () => {
-      const res = await jsonRequest(ctx.app, "POST", "/api/axes", {
-        name: "Missing Ideal",
-        weight: 30,
-        preferenceShape: "sweet-spot",
-      });
-
-      expect(res.status).toBe(400);
+    expect(tournament.status).toBe(400);
+    expect((await tournament.json()) as CodedErrorBody).toMatchObject({
+      code: AXIS_VALIDATION_CODES.INVALID_AXIS_PAYLOAD,
     });
   });
 
-  describe("PUT /api/axes/:id - curve configuration", () => {
-    test("updates axis to sweet-spot with idealValue", async () => {
-      const createRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
-        name: "Complexity",
-        weight: 40,
-        source: "bgg",
-        bggField: "weight",
-      });
-      const created = (await createRes.json()) as Axis;
+  test("routes merged update validation with stable code and details", async () => {
+    const createdResponse = await jsonRequest(ctx.app, "POST", "/api/axes", {
+      name: "Time",
+      weight: 50,
+      source: "derived",
+      derivedField: "playingTime",
+      configuration: { maximumScoringTime: 240 },
+      preferenceShape: "sweet-spot",
+      idealValue: 90,
+      toleranceWidth: 30,
+      veto: { direction: "above", threshold: 180 },
+    });
+    const created = (await createdResponse.json()) as Axis;
+    const response = await jsonRequest(ctx.app, "PUT", `/api/axes/${created.id}`, {
+      configuration: { maximumScoringTime: 120 },
+    });
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as CodedErrorBody;
+    expect(body.code).toBe(AXIS_VALIDATION_CODES.INVALID_CURVE_FOR_NATIVE_SCALE);
+    expect(body.details.map(({ field }) => field)).toContain("veto");
+  });
 
-      const res = await jsonRequest(ctx.app, "PUT", `/api/axes/${created.id}`, {
-        preferenceShape: "sweet-spot",
-        idealValue: 2.5,
-        tolerance: "strict",
-      });
+  test("returns 404 for update and repair of unknown axes", async () => {
+    expect(
+      (await jsonRequest(ctx.app, "PUT", "/api/axes/missing", { name: "Missing" })).status,
+    ).toBe(404);
+    expect(
+      (
+        await jsonRequest(ctx.app, "POST", "/api/axes/missing/repair", {
+          derivedField: "communityRating",
+          configuration: {},
+        })
+      ).status,
+    ).toBe(404);
+  });
 
-      expect(res.status).toBe(200);
-      const axis = (await res.json()) as Axis;
-      expect(axis.preferenceShape).toBe("sweet-spot");
-      expect(axis.idealValue).toBe(2.5);
-      expect(axis.tolerance).toBe("strict");
+  test("lists and repairs disabled legacy axes", async () => {
+    const collection = await ctx.storageService.loadCollection();
+    await ctx.storageService.saveCollection({
+      ...collection,
+      axes: [...collection.axes, disabled],
+    });
+    const list = (await (await jsonRequest(ctx.app, "GET", "/api/axes")).json()) as Axis[];
+    expect(list.find(({ id }) => id === disabled.id)).toMatchObject({ enabled: false });
+
+    const repair = await jsonRequest(ctx.app, "POST", `/api/axes/${disabled.id}/repair`, {
+      derivedField: "communityRating",
+      configuration: {},
+    });
+    expect(repair.status).toBe(200);
+    expect((await repair.json()) as Axis).toMatchObject({
+      id: disabled.id,
+      source: "derived",
+      derivedField: "communityRating",
     });
 
-    test("updates sweet-spot axis without providing idealValue (uses stored value)", async () => {
-      const createRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
-        name: "Complexity",
-        weight: 40,
-        source: "bgg",
-        bggField: "weight",
-        preferenceShape: "sweet-spot",
-        idealValue: 3.0,
-      });
-      const created = (await createRes.json()) as Axis;
-
-      // Update tolerance only, idealValue already stored
-      const res = await jsonRequest(ctx.app, "PUT", `/api/axes/${created.id}`, {
-        tolerance: "flexible",
-      });
-
-      expect(res.status).toBe(200);
-      const axis = (await res.json()) as Axis;
-      expect(axis.idealValue).toBe(3.0);
-      expect(axis.tolerance).toBe("flexible");
+    const repeatedRepair = await jsonRequest(ctx.app, "POST", `/api/axes/${disabled.id}/repair`, {
+      derivedField: "communityRating",
+      configuration: {},
     });
-
-    test("returns 400 when updating to sweet-spot without idealValue and none stored", async () => {
-      const createRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
-        name: "Plain Axis",
-        weight: 30,
-      });
-      const created = (await createRes.json()) as Axis;
-
-      const res = await jsonRequest(ctx.app, "PUT", `/api/axes/${created.id}`, {
-        preferenceShape: "sweet-spot",
-      });
-
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { error: string };
-      expect(body.error).toContain("idealValue is required");
-    });
-
-    test("clears stale config when changing away from sweet-spot", async () => {
-      // Create a sweet-spot axis
-      const createRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
-        name: "Complexity",
-        weight: 40,
-        source: "bgg",
-        bggField: "weight",
-        preferenceShape: "sweet-spot",
-        idealValue: 3.0,
-        tolerance: "strict",
-        leanDirection: "higher",
-      });
-      const created = (await createRes.json()) as Axis;
-
-      // Change to higher-is-better
-      const res = await jsonRequest(ctx.app, "PUT", `/api/axes/${created.id}`, {
-        preferenceShape: "higher-is-better",
-      });
-
-      expect(res.status).toBe(200);
-      const axis = (await res.json()) as Axis;
-      expect(axis.preferenceShape).toBe("higher-is-better");
-      expect(axis.idealValue).toBeUndefined();
-      expect(axis.tolerance).toBeUndefined();
-      expect(axis.leanDirection).toBeUndefined();
-    });
-
-    test("adds veto to existing axis", async () => {
-      const createRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
-        name: "Complexity",
-        weight: 40,
-        source: "bgg",
-        bggField: "weight",
-      });
-      const created = (await createRes.json()) as Axis;
-
-      const res = await jsonRequest(ctx.app, "PUT", `/api/axes/${created.id}`, {
-        veto: { direction: "below", threshold: 2.0 },
-      });
-
-      expect(res.status).toBe(200);
-      const axis = (await res.json()) as Axis;
-      expect(axis.veto).toEqual({ direction: "below", threshold: 2.0 });
-    });
-
-    test("removes veto from existing axis", async () => {
-      const createRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
-        name: "Complexity",
-        weight: 40,
-        source: "bgg",
-        bggField: "weight",
-        veto: { direction: "below", threshold: 2.0 },
-      });
-      const created = (await createRes.json()) as Axis;
-
-      const res = await jsonRequest(ctx.app, "PUT", `/api/axes/${created.id}`, {
-        veto: null,
-      });
-
-      expect(res.status).toBe(200);
-      const axis = (await res.json()) as Axis;
-      expect(axis.veto).toBeNull();
-    });
-
-    test("updates only name without affecting curve fields", async () => {
-      const createRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
-        name: "Complexity",
-        weight: 40,
-        source: "bgg",
-        bggField: "weight",
-        preferenceShape: "sweet-spot",
-        idealValue: 3.0,
-        tolerance: "moderate",
-        veto: { direction: "above", threshold: 4.5 },
-      });
-      const created = (await createRes.json()) as Axis;
-
-      const res = await jsonRequest(ctx.app, "PUT", `/api/axes/${created.id}`, {
-        name: "Renamed Complexity",
-      });
-
-      expect(res.status).toBe(200);
-      const axis = (await res.json()) as Axis;
-      expect(axis.name).toBe("Renamed Complexity");
-      expect(axis.preferenceShape).toBe("sweet-spot");
-      expect(axis.idealValue).toBe(3.0);
-      expect(axis.tolerance).toBe("moderate");
-      expect((axis.veto as VetoConfig).threshold).toBe(4.5);
-    });
-
-    test("returns 400 when idealValue is outside native scale on update", async () => {
-      const createRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
-        name: "Complexity",
-        weight: 40,
-        source: "bgg",
-        bggField: "weight",
-      });
-      const created = (await createRes.json()) as Axis;
-
-      const res = await jsonRequest(ctx.app, "PUT", `/api/axes/${created.id}`, {
-        preferenceShape: "sweet-spot",
-        idealValue: 8.0, // BGG weight is 1-5
-      });
-
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { error: string };
-      expect(body.error).toContain("outside native scale");
+    expect(repeatedRepair.status).toBe(400);
+    expect((await repeatedRepair.json()) as CodedErrorBody).toMatchObject({
+      code: AXIS_VALIDATION_CODES.INVALID_LEGACY_AXIS_REPAIR,
     });
   });
 
-  describe("DELETE /api/axes/:id", () => {
-    test("returns 200 with deletedRatingsCount", async () => {
-      // Create a personal axis
-      const axisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
-        name: "Replayability",
-        weight: 40,
-      });
-      expect(axisRes.status).toBe(201);
-      const axis = (await axisRes.json()) as Axis;
-
-      // Add a game
-      const gameRes = await jsonRequest(ctx.app, "POST", "/api/games", {
-        name: "Test Game",
-      });
-      expect(gameRes.status).toBe(201);
-      const gameBody = (await gameRes.json()) as { game: Game; bggImported: boolean };
-      const gameId = gameBody.game.id;
-
-      // Rate the game on that axis
-      const rateRes = await jsonRequest(ctx.app, "PUT", `/api/games/${gameId}/ratings`, {
-        ratings: { [axis.id]: 7 },
-      });
-      expect(rateRes.status).toBe(200);
-
-      // Delete the axis
-      const deleteRes = await jsonRequest(ctx.app, "DELETE", `/api/axes/${axis.id}`);
-
-      expect(deleteRes.status).toBe(200);
-      const body = (await deleteRes.json()) as { deletedRatingsCount: number };
-      expect(body.deletedRatingsCount).toBe(1);
+  test("deletes a disabled legacy axis and its ratings through DELETE", async () => {
+    const gameResponse = await jsonRequest(ctx.app, "POST", "/api/games", { name: "Game" });
+    const gameBody = (await gameResponse.json()) as { game: { id: string } };
+    const collection = await ctx.storageService.loadCollection();
+    const game = collection.games.find(({ id }) => id === gameBody.game.id);
+    expect(game).toBeDefined();
+    if (game === undefined) return;
+    game.ratings[disabled.id] = 8;
+    await ctx.storageService.saveCollection({
+      ...collection,
+      axes: [...collection.axes, disabled],
     });
+
+    const response = await jsonRequest(ctx.app, "DELETE", `/api/axes/${disabled.id}`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ deletedRatingsCount: 1 });
+    const persisted = await ctx.storageService.loadCollection();
+    expect(persisted.axes.some(({ id }) => id === disabled.id)).toBe(false);
+    expect(persisted.games[0]?.ratings[disabled.id]).toBeUndefined();
+  });
+
+  test("routes repair validation as invalid legacy repair", async () => {
+    const collection = await ctx.storageService.loadCollection();
+    await ctx.storageService.saveCollection({
+      ...collection,
+      axes: [...collection.axes, disabled],
+    });
+    const response = await jsonRequest(ctx.app, "POST", `/api/axes/${disabled.id}/repair`, {
+      derivedField: "playingTime",
+      configuration: { maximumScoringTime: 60 },
+      preferenceShape: "sweet-spot",
+      idealValue: 90,
+    });
+    expect(response.status).toBe(400);
+    expect((await response.json()) as CodedErrorBody).toMatchObject({
+      code: AXIS_VALIDATION_CODES.INVALID_LEGACY_AXIS_REPAIR,
+    });
+  });
+
+  test("returns 500 for persistence failures", async () => {
+    ctx.storageService.saveCollection = () => Promise.reject(new Error("disk failed"));
+    const response = await jsonRequest(ctx.app, "POST", "/api/axes", {
+      name: "Fun",
+      weight: 50,
+      source: "personal",
+    });
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: "disk failed" });
+  });
+
+  test("protects tournament deletion with a coded response", async () => {
+    const axes = (await (await jsonRequest(ctx.app, "GET", "/api/axes")).json()) as Axis[];
+    const tournament = axes.find((axis) => axis.source === "tournament");
+    expect(tournament).toBeDefined();
+    if (tournament === undefined) return;
+    const response = await jsonRequest(ctx.app, "DELETE", `/api/axes/${tournament.id}`);
+    expect(response.status).toBe(400);
+    expect((await response.json()) as CodedErrorBody).toMatchObject({
+      code: AXIS_VALIDATION_CODES.TOURNAMENT_AXIS_MANAGED,
+    });
+  });
+
+  test("rating mutation rejects a disabled axis with a stable code and preserves its rating", async () => {
+    const gameResponse = await jsonRequest(ctx.app, "POST", "/api/games", { name: "Game" });
+    const gameBody = (await gameResponse.json()) as { game: { id: string } };
+    const collection = await ctx.storageService.loadCollection();
+    const game = collection.games.find(({ id }) => id === gameBody.game.id);
+    expect(game).toBeDefined();
+    if (game === undefined) return;
+    game.ratings[disabled.id] = 8;
+    await ctx.storageService.saveCollection({
+      ...collection,
+      axes: [...collection.axes, disabled],
+    });
+
+    const response = await jsonRequest(ctx.app, "PUT", `/api/games/${gameBody.game.id}/ratings`, {
+      ratings: { [disabled.id]: 5 },
+    });
+    expect(response.status).toBe(400);
+    expect((await response.json()) as CodedErrorBody).toMatchObject({
+      code: AXIS_VALIDATION_CODES.DISABLED_LEGACY_AXIS,
+    });
+    const unchanged = (await ctx.storageService.loadCollection()).games.find(
+      ({ id }) => id === gameBody.game.id,
+    );
+    expect(unchanged?.ratings[disabled.id]).toBe(8);
   });
 });

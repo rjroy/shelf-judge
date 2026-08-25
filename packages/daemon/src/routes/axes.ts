@@ -1,10 +1,14 @@
 import { Hono } from "hono";
 import {
+  AXIS_VALIDATION_CODES,
+  CodedAxisValidationError,
   CreateAxisSchema,
   UpdateAxisSchema,
-  ValidationError,
+  LegacyAxisRepairSchema,
   NotFoundError,
   toErrorMessage,
+  type AxisValidationCode,
+  type AxisValidationDetail,
 } from "@shelf-judge/shared";
 import type { AxisService } from "../services/axis-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
@@ -13,86 +17,101 @@ export interface AxisRoutesDeps {
   axisService: AxisService;
 }
 
+interface AxisErrorBody {
+  error: string;
+  message: string;
+  code: AxisValidationCode;
+  details: readonly AxisValidationDetail[];
+}
+
+const invalidJsonBody: AxisErrorBody = {
+  error: "Validation failed",
+  message: "Invalid JSON body",
+  code: AXIS_VALIDATION_CODES.INVALID_AXIS_PAYLOAD,
+  details: [{ field: "body", path: [] }],
+};
+
+function codedErrorBody(error: CodedAxisValidationError): AxisErrorBody {
+  return {
+    error: "Validation failed",
+    message: error.message,
+    code: error.code,
+    details: error.details,
+  };
+}
+
 export function createAxisRoutes(deps: AxisRoutesDeps): RouteModule {
   const { axisService } = deps;
   const routes = new Hono();
 
-  // POST /axes
   routes.post("/axes", async (c) => {
     let body: unknown;
     try {
       body = await c.req.json();
     } catch {
-      return c.json({ error: "Invalid JSON body" }, 400);
+      return c.json(invalidJsonBody, 400);
     }
-
-    const parsed = CreateAxisSchema.safeParse(body);
-    if (!parsed.success) {
-      return c.json({ error: "Validation failed", details: parsed.error.issues }, 400);
-    }
-
     try {
-      const axis = await axisService.createAxis(parsed.data);
+      const axis = await axisService.createAxis(body);
       return c.json(axis, 201);
-    } catch (err) {
-      if (err instanceof ValidationError) {
-        return c.json({ error: err.message }, 400);
-      }
-      return c.json({ error: toErrorMessage(err) }, 500);
+    } catch (error) {
+      if (error instanceof CodedAxisValidationError) return c.json(codedErrorBody(error), 400);
+      return c.json({ error: toErrorMessage(error) }, 500);
     }
   });
 
-  // GET /axes
   routes.get("/axes", async (c) => {
     try {
-      const axes = await axisService.listAxes();
-      return c.json(axes);
-    } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 500);
+      return c.json(await axisService.listAxes());
+    } catch (error) {
+      return c.json({ error: toErrorMessage(error) }, 500);
     }
   });
 
-  // PUT /axes/:id
+  routes.get("/axes/derived-fields", (c) => c.json(axisService.getDerivedFields()));
+
   routes.put("/axes/:id", async (c) => {
     const id = c.req.param("id");
-
     let body: unknown;
     try {
       body = await c.req.json();
     } catch {
-      return c.json({ error: "Invalid JSON body" }, 400);
+      return c.json(invalidJsonBody, 400);
     }
-
-    const parsed = UpdateAxisSchema.safeParse(body);
-    if (!parsed.success) {
-      return c.json({ error: "Validation failed", details: parsed.error.issues }, 400);
-    }
-
     try {
-      const axis = await axisService.updateAxis(id, parsed.data);
-      return c.json(axis);
-    } catch (err) {
-      if (err instanceof NotFoundError) {
-        return c.json({ error: err.message }, 404);
-      }
-      if (err instanceof ValidationError) {
-        return c.json({ error: err.message }, 400);
-      }
-      return c.json({ error: toErrorMessage(err) }, 500);
+      return c.json(await axisService.updateAxis(id, body));
+    } catch (error) {
+      if (error instanceof NotFoundError) return c.json({ error: error.message }, 404);
+      if (error instanceof CodedAxisValidationError) return c.json(codedErrorBody(error), 400);
+      return c.json({ error: toErrorMessage(error) }, 500);
     }
   });
 
-  // DELETE /axes/:id
+  routes.post("/axes/:id/repair", async (c) => {
+    const id = c.req.param("id");
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json(invalidJsonBody, 400);
+    }
+    try {
+      return c.json(await axisService.repairLegacyAxis(id, body));
+    } catch (error) {
+      if (error instanceof NotFoundError) return c.json({ error: error.message }, 404);
+      if (error instanceof CodedAxisValidationError) return c.json(codedErrorBody(error), 400);
+      return c.json({ error: toErrorMessage(error) }, 500);
+    }
+  });
+
   routes.delete("/axes/:id", async (c) => {
     const id = c.req.param("id");
     try {
-      const result = await axisService.deleteAxis(id);
-      return c.json({ deletedRatingsCount: result.deletedRatingsCount });
-    } catch (err) {
-      if (err instanceof NotFoundError) {
-        return c.json({ error: err.message }, 404);
-      }
-      return c.json({ error: toErrorMessage(err) }, 500);
+      return c.json(await axisService.deleteAxis(id));
+    } catch (error) {
+      if (error instanceof NotFoundError) return c.json({ error: error.message }, 404);
+      if (error instanceof CodedAxisValidationError) return c.json(codedErrorBody(error), 400);
+      return c.json({ error: toErrorMessage(error) }, 500);
     }
   });
 
@@ -100,32 +119,52 @@ export function createAxisRoutes(deps: AxisRoutesDeps): RouteModule {
     {
       operationId: "shelf.axis.create",
       name: "create",
-      description: "Create a new rating axis with optional curve and veto configuration",
+      description: "Create a personal or registry-backed derived rating axis",
       invocation: { method: "POST", path: "/api/axes" },
+      requestSchema: CreateAxisSchema,
       hierarchy: { root: "shelf", feature: "axis" },
       idempotent: false,
     },
     {
       operationId: "shelf.axis.list",
       name: "list",
-      description: "List all axes with weights",
+      description: "List enabled and disabled axes with weights",
       invocation: { method: "GET", path: "/api/axes" },
+      hierarchy: { root: "shelf", feature: "axis" },
+      idempotent: true,
+    },
+    {
+      operationId: "shelf.axis.derived-fields",
+      name: "derived-fields",
+      description: "Discover versioned registry-backed derived axis fields and templates",
+      invocation: { method: "GET", path: "/api/axes/derived-fields" },
       hierarchy: { root: "shelf", feature: "axis" },
       idempotent: true,
     },
     {
       operationId: "shelf.axis.update",
       name: "update",
-      description: "Update axis name, description, weight, curve, or veto configuration",
+      description: "Update axis settings without changing its source or derived field",
       invocation: { method: "PUT", path: "/api/axes/:id" },
+      requestSchema: UpdateAxisSchema,
       hierarchy: { root: "shelf", feature: "axis" },
       parameters: [{ name: "id", in: "path", description: "Axis ID", required: true }],
       idempotent: true,
     },
     {
+      operationId: "shelf.axis.repair",
+      name: "repair",
+      description: "Repair a disabled legacy axis as a registered derived axis",
+      invocation: { method: "POST", path: "/api/axes/:id/repair" },
+      requestSchema: LegacyAxisRepairSchema,
+      hierarchy: { root: "shelf", feature: "axis" },
+      parameters: [{ name: "id", in: "path", description: "Axis ID", required: true }],
+      idempotent: false,
+    },
+    {
       operationId: "shelf.axis.delete",
       name: "delete",
-      description: "Delete an axis (removes all ratings on it)",
+      description: "Delete a non-tournament axis and its ratings",
       invocation: { method: "DELETE", path: "/api/axes/:id" },
       hierarchy: { root: "shelf", feature: "axis" },
       parameters: [{ name: "id", in: "path", description: "Axis ID", required: true }],

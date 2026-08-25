@@ -51,7 +51,7 @@ function PreviewPanel({ data }: { data: PredictedGameResponse }) {
         </div>
         {score && (
           <div className="preview-score-line">
-            BGG-derived score: <strong>{score.score.toFixed(1)}</strong>
+            Available-data score: <strong>{score.score.toFixed(1)}</strong>
           </div>
         )}
       </div>
@@ -93,12 +93,12 @@ function PreviewPanel({ data }: { data: PredictedGameResponse }) {
       {score.breakdown && score.breakdown.length > 0 && (
         <div className="preview-breakdown">
           {score.breakdown
-            .filter((e: FitnessBreakdownEntry) => e.rating !== null)
+            .filter((e: FitnessBreakdownEntry) => e.effectiveRating !== null)
             .map((e: FitnessBreakdownEntry) => (
               <div key={e.axisId} className="preview-breakdown-row">
                 <span className="preview-axis-name">{e.axisName}</span>
                 <span className="preview-axis-rating">
-                  {e.rating !== null ? e.rating.toFixed(1) : "-"}
+                  {e.effectiveRating !== null ? e.effectiveRating.toFixed(1) : "-"}
                 </span>
                 {e.predictionConfidence && (
                   <span

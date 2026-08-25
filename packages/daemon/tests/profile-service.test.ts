@@ -37,6 +37,7 @@ function makeGame(id: string, name: string): Game {
 function makeCollection(updatedAt?: string): Collection {
   const now = updatedAt ?? new Date().toISOString();
   return {
+    schemaVersion: 1,
     id: "test-col",
     name: "Test Collection",
     axes: [],

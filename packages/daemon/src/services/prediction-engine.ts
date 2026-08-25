@@ -4,7 +4,6 @@
 
 import type {
   Axis,
-  BggGameData,
   FitnessBreakdownEntry,
   FitnessResult,
   Game,
@@ -13,6 +12,11 @@ import type {
   PredictionReadiness,
   PredictionSettings,
   ReferenceGame,
+} from "@shelf-judge/shared";
+import {
+  DERIVED_AXIS_REGISTRY,
+  isEnabledScoringAxis,
+  summarizeDerivedAxisConfiguration,
 } from "@shelf-judge/shared";
 import { cosineSimilarity } from "./feature-vector";
 import type { Vocabulary } from "./feature-vector";
@@ -141,7 +145,7 @@ function roundToOneDecimal(value: number): number {
 /**
  * Core prediction entry point. Produces a FitnessResult with predicted values for unrated axes.
  *
- * 1. Calls calculateActualScore for BGG-derived axes with curves.
+ * 1. Calls calculateActualScore for deterministic derived axes with curves.
  * 2. For each personal axis without an actual rating, runs k-NN estimation.
  * 3. Assembles combined breakdown (actual + predicted entries).
  * 4. Computes overall score: sum(effectiveRating * weight) / sum(weights).
@@ -151,23 +155,26 @@ function roundToOneDecimal(value: number): number {
 export function computePredictedFitness(
   game: Game,
   axes: Axis[],
-  bggData: BggGameData | null,
   referenceGames: ReferenceGameCandidate[],
   targetVector: number[],
   settings: PredictionSettings,
   readinessStage: 0 | 1 | 2 | 3,
-  calculateActualScore: (
-    game: Game,
-    axes: Axis[],
-    bggData: BggGameData | null,
-  ) => FitnessResult | null,
+  calculateActualScore: (game: Game, axes: Axis[]) => FitnessResult | null,
 ): PredictedFitnessResult {
-  const actualResult = calculateActualScore(game, axes, bggData);
+  const scoringAxes = axes.filter(isEnabledScoringAxis);
+  const actualResult = calculateActualScore(game, scoringAxes);
 
   // If all axes are rated, no prediction needed
-  if (actualResult && actualResult.ratedAxisCount === axes.length) {
+  if (actualResult && actualResult.ratedAxisCount === scoringAxes.length) {
     return {
-      fitnessResult: actualResult,
+      fitnessResult: {
+        ...actualResult,
+        breakdown: actualResult.breakdown.map((entry) => ({
+          ...entry,
+          predictionConfidence: "actual",
+          referenceGames: null,
+        })),
+      },
       predictedAxisCount: 0,
       actualAxisCount: actualResult.ratedAxisCount,
     };
@@ -186,12 +193,12 @@ export function computePredictedFitness(
   let coveredWeight = 0;
   const totalReferenceGames = new Set<string>();
 
-  for (const axis of axes) {
+  for (const axis of scoringAxes) {
     totalWeight += axis.weight;
 
     // Check if actual result has this axis rated
     const actualEntry = actualResult?.breakdown.find((e) => e.axisId === axis.id);
-    const hasActualRating = actualEntry && actualEntry.rating !== null;
+    const hasActualRating = actualEntry !== undefined && actualEntry.effectiveRating !== null;
 
     if (hasActualRating) {
       // Use actual entry directly
@@ -202,7 +209,7 @@ export function computePredictedFitness(
       };
       breakdown.push(entry);
 
-      weightedSum += actualEntry.rating! * axis.weight;
+      weightedSum += actualEntry.effectiveRating! * axis.weight;
       weightSum += axis.weight;
       actualAxisCount++;
       coveredWeight += axis.weight; // actual always counts toward coverage
@@ -232,15 +239,19 @@ export function computePredictedFitness(
         breakdown.push({
           axisId: axis.id,
           axisName: axis.name,
-          rating: effectiveRating,
           weight: axis.weight,
           contribution: 0, // placeholder, overwritten by normalization below
           source: "predicted",
-          bggOriginal: null,
-          rawValue: effectiveRating,
+          derivedField: null,
+          sourceValue: effectiveRating,
+          scoringRawValue: effectiveRating,
           effectiveRating,
           preferenceShape: axis.preferenceShape ?? "higher-is-better",
           curveAffected: false,
+          unit: null,
+          provenance: null,
+          configurationSummary: null,
+          overridden: false,
           predictionConfidence: prediction.confidence,
           referenceGames: refGames,
         });
@@ -267,35 +278,44 @@ export function computePredictedFitness(
         breakdown.push({
           axisId: axis.id,
           axisName: axis.name,
-          rating: null,
           weight: axis.weight,
           contribution: null,
           source: "predicted",
-          bggOriginal: null,
-          rawValue: null,
+          derivedField: null,
+          sourceValue: null,
+          scoringRawValue: null,
           effectiveRating: null,
           preferenceShape: axis.preferenceShape ?? "higher-is-better",
           curveAffected: false,
+          unit: null,
+          provenance: null,
+          configurationSummary: null,
+          overridden: false,
           predictionConfidence: "insufficient",
           referenceGames: [],
         });
       }
     } else {
-      // Unrated axis with no prediction (stage 0 or BGG axis without data)
-      const fallbackSource: FitnessBreakdownEntry["source"] =
-        axis.source === "bgg" ? "bgg" : axis.source === "tournament" ? "tournament" : "personal";
+      // Unrated axis with no prediction (stage 0 or a missing deterministic value).
+      const definition =
+        axis.source === "derived" ? DERIVED_AXIS_REGISTRY[axis.derivedField] : null;
       breakdown.push({
         axisId: axis.id,
         axisName: axis.name,
-        rating: null,
         weight: axis.weight,
         contribution: null,
-        source: fallbackSource,
-        bggOriginal: null,
-        rawValue: null,
+        source: axis.source,
+        derivedField: axis.source === "derived" ? axis.derivedField : null,
+        sourceValue: null,
+        scoringRawValue: null,
         effectiveRating: null,
         preferenceShape: axis.preferenceShape ?? "higher-is-better",
         curveAffected: false,
+        unit: definition?.unit ?? null,
+        provenance: definition?.provenance ?? null,
+        configurationSummary:
+          axis.source === "derived" ? summarizeDerivedAxisConfiguration(axis) : null,
+        overridden: false,
         predictionConfidence: null,
         referenceGames: null,
       });
@@ -311,16 +331,16 @@ export function computePredictedFitness(
   // Normalize contributions to be relative to total weight sum
   for (const entry of breakdown) {
     if (entry.contribution !== null && weightSum > 0) {
-      entry.contribution = roundToOneDecimal((entry.rating! * entry.weight) / weightSum);
+      entry.contribution = roundToOneDecimal((entry.effectiveRating! * entry.weight) / weightSum);
     }
   }
 
-  // Sort breakdown: override, bgg, tournament, personal, predicted.
-  // Tournament between bgg and personal — both system-derived, but tournament
+  // Sort breakdown: override, derived, tournament, personal, predicted.
+  // Tournament between derived and personal, both system-derived, but tournament
   // is per-game user signal (matches fitness-service ordering).
   const sourceOrder: Record<string, number> = {
     override: 0,
-    bgg: 1,
+    derived: 1,
     tournament: 2,
     personal: 3,
     predicted: 4,
@@ -360,7 +380,7 @@ export function computePredictedFitness(
     ? {
         score: 0,
         ratedAxisCount: actualAxisCount,
-        totalAxisCount: axes.length,
+        totalAxisCount: scoringAxes.length,
         breakdown,
         vetoed: true,
         vetoedBy: vetoInfo,
@@ -371,7 +391,7 @@ export function computePredictedFitness(
     : {
         score: combinedCount > 0 ? score : 0,
         ratedAxisCount: actualAxisCount,
-        totalAxisCount: axes.length,
+        totalAxisCount: scoringAxes.length,
         breakdown,
         vetoed: false,
         vetoedBy: null,
@@ -450,9 +470,12 @@ export function assessReadiness(
 
   // Weak axes: personal + tournament axes with fewest rated games.
   // REQ-TAXIS-8: tournament axis is a prediction target, so it counts toward
-  // weakAxes thresholds the same way personal axes do. BGG-derived axes are
-  // excluded because their values are always available from BGG data.
-  const ratableAxes = axes.filter((a) => a.source === "personal" || a.source === "tournament");
+  // weakAxes thresholds the same way personal axes do. Derived axes are
+  // excluded because their values are deterministic rather than predicted.
+  const ratableAxes = axes.filter(
+    (axis) =>
+      isEnabledScoringAxis(axis) && (axis.source === "personal" || axis.source === "tournament"),
+  );
   const axisCounts: { axisId: string; axisName: string; ratedCount: number }[] = [];
 
   for (const axis of ratableAxes) {

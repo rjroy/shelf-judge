@@ -1,5 +1,7 @@
 // Table and JSON formatting for CLI output.
 
+import type { FitnessBreakdownEntry } from "@shelf-judge/shared";
+
 export interface OutputOptions {
   json: boolean;
 }
@@ -38,28 +40,14 @@ export function formatScore(score: number | null | undefined): string {
   return score.toFixed(1);
 }
 
-export interface BreakdownEntry {
-  axisName: string;
-  rating: number | null;
-  weight: number;
-  contribution: number | null;
-  source: string;
-  bggOriginal: number | null;
-  rawValue?: number | null;
-  effectiveRating?: number | null;
-  preferenceShape?: string;
-  curveAffected?: boolean;
-  predictionConfidence?: string | null;
-  referenceGames?: { gameId: string; gameName: string; similarity: number }[] | null;
-}
+export type BreakdownEntry = FitnessBreakdownEntry;
 
 export function formatBreakdown(breakdown: BreakdownEntry[]): string {
-  // Determine if any entry has a raw value that differs from effective
   const hasRawColumn = breakdown.some(
     (e) =>
-      e.rawValue != null &&
+      e.scoringRawValue != null &&
       e.effectiveRating != null &&
-      Math.abs(e.rawValue - e.effectiveRating) > 0.05,
+      Math.abs(e.scoringRawValue - e.effectiveRating) > 0.05,
   );
 
   const headers = hasRawColumn
@@ -68,12 +56,15 @@ export function formatBreakdown(breakdown: BreakdownEntry[]): string {
 
   const rows = breakdown.map((entry) => {
     const marker = entry.curveAffected ? " *" : "";
-    let ratingStr = entry.rating !== null ? String(entry.rating) + marker : "---";
-    if (entry.source === "override" && entry.bggOriginal !== null) {
-      ratingStr += ` (BGG: ${entry.bggOriginal})`;
+    let ratingStr = entry.effectiveRating !== null ? String(entry.effectiveRating) + marker : "---";
+    if (entry.overridden && entry.sourceValue !== null) {
+      ratingStr += ` (metadata: ${entry.sourceValue}${entry.unit ? ` ${entry.unit}` : ""})`;
     }
 
-    const rawStr = entry.rawValue != null ? String(entry.rawValue) : "---";
+    const rawStr =
+      entry.scoringRawValue != null
+        ? `${entry.scoringRawValue}${entry.unit ? ` ${entry.unit}` : ""}`
+        : "---";
 
     const row = [
       entry.axisName,

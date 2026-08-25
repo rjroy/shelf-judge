@@ -119,7 +119,9 @@ describe("GameService BGG Integration", () => {
 
       // Rate a BGG-derived axis (override)
       const collection = await storageService.loadCollection();
-      const complexityAxis = collection.axes.find((a) => a.bggField === "weight");
+      const complexityAxis = collection.axes.find(
+        (axis) => axis.source === "derived" && axis.derivedField === "weight",
+      );
       expect(complexityAxis).toBeDefined();
       await gameService.rateGame(game.id, { [complexityAxis!.id]: 7 });
 
@@ -214,7 +216,9 @@ describe("GameService BGG Integration", () => {
       });
 
       const collection = await storageService.loadCollection();
-      const complexityAxis = collection.axes.find((a) => a.bggField === "weight");
+      const complexityAxis = collection.axes.find(
+        (axis) => axis.source === "derived" && axis.derivedField === "weight",
+      );
 
       // Override the complexity axis
       await gameService.rateGame(game.id, { [complexityAxis!.id]: 7 });
@@ -227,8 +231,8 @@ describe("GameService BGG Integration", () => {
       );
       expect(complexityBreakdown).toBeDefined();
       expect(complexityBreakdown!.source).toBe("override");
-      expect(complexityBreakdown!.rating).toBe(7);
-      expect(complexityBreakdown!.bggOriginal).toBe(2.5); // raw BGG weight 2.4802, rounded
+      expect(complexityBreakdown!.effectiveRating).toBe(7);
+      expect(complexityBreakdown!.sourceValue).toBe(2.4802);
     });
   });
 });

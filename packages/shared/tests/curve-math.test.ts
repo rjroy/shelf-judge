@@ -1,27 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { applyPreferenceCurve, getNativeScale } from "../src/curve-math";
-
-describe("getNativeScale", () => {
-  test("personal source returns 1-10 scale", () => {
-    expect(getNativeScale("personal", null)).toEqual({ min: 1, max: 10 });
-  });
-
-  test("tournament source returns 1-10 scale", () => {
-    expect(getNativeScale("tournament", null)).toEqual({ min: 1, max: 10 });
-  });
-
-  test("bgg communityRating returns 1-10 scale", () => {
-    expect(getNativeScale("bgg", "communityRating")).toEqual({ min: 1, max: 10 });
-  });
-
-  test("bgg weight returns 1-5 scale", () => {
-    expect(getNativeScale("bgg", "weight")).toEqual({ min: 1, max: 5 });
-  });
-
-  test("bgg with unknown field throws", () => {
-    expect(() => getNativeScale("bgg", "nonsense")).toThrow();
-  });
-});
+import {
+  applyPreferenceCurve,
+  getPreferenceCurveInvalidFields,
+  isPreferenceCurveApplicable,
+} from "../src/curve-math";
 
 describe("applyPreferenceCurve numeric tolerance width", () => {
   const playTimeScale = { min: 1, max: 240 };
@@ -88,5 +70,29 @@ describe("applyPreferenceCurve numeric tolerance width", () => {
     const config = { idealValue: 90, toleranceWidth: 30 };
     expect(applyPreferenceCurve(120, scale, "sweet-spot", config)).toBeCloseTo(4.5, 10);
     expect(applyPreferenceCurve(180, scale, "sweet-spot", config)).toBeCloseTo(1, 10);
+  });
+});
+
+describe("personal-scale curve applicability", () => {
+  const personalScale = { min: 1, max: 10 };
+
+  test("accepts legacy higher, lower, and categorical sweet-spot curves", () => {
+    expect(isPreferenceCurveApplicable(personalScale, "higher-is-better", {})).toBe(true);
+    expect(isPreferenceCurveApplicable(personalScale, "lower-is-better", {})).toBe(true);
+    expect(
+      isPreferenceCurveApplicable(personalScale, "sweet-spot", {
+        idealValue: 8,
+        tolerance: "moderate",
+      }),
+    ).toBe(true);
+  });
+
+  test("rejects native-minute ideal and width without interpreting their units", () => {
+    const config = { idealValue: 90, toleranceWidth: 30 };
+    expect(isPreferenceCurveApplicable(personalScale, "sweet-spot", config)).toBe(false);
+    expect(getPreferenceCurveInvalidFields(personalScale, "sweet-spot", config)).toEqual([
+      "idealValue",
+      "toleranceWidth",
+    ]);
   });
 });

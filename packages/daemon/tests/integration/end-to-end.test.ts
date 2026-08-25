@@ -135,6 +135,7 @@ describe("Integration: End-to-end scenarios", () => {
       const createAxisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
         name: "Fun Factor",
         weight: 60,
+        source: "personal",
       });
       expect(createAxisRes.status).toBe(201);
       const funAxis = (await createAxisRes.json()) as Axis;
@@ -143,6 +144,7 @@ describe("Integration: End-to-end scenarios", () => {
       const createAxis2Res = await jsonRequest(ctx.app, "POST", "/api/axes", {
         name: "Replay Value",
         weight: 40,
+        source: "personal",
       });
       expect(createAxis2Res.status).toBe(201);
       const replayAxis = (await createAxis2Res.json()) as Axis;
@@ -199,6 +201,7 @@ describe("Integration: End-to-end scenarios", () => {
       const axisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
         name: "Depth",
         weight: 100,
+        source: "personal",
       });
       const axis = (await axisRes.json()) as Axis;
 
@@ -218,6 +221,7 @@ describe("Integration: End-to-end scenarios", () => {
       const axis2Res = await jsonRequest(ctx.app, "POST", "/api/axes", {
         name: "Accessibility",
         weight: 50,
+        source: "personal",
       });
       const axis2 = (await axis2Res.json()) as Axis;
 
@@ -305,12 +309,14 @@ describe("Integration: End-to-end scenarios", () => {
       const axis1Res = await jsonRequest(ctx.app, "POST", "/api/axes", {
         name: "Fun",
         weight: 60,
+        source: "personal",
       });
       const axis1 = (await axis1Res.json()) as Axis;
 
       const axis2Res = await jsonRequest(ctx.app, "POST", "/api/axes", {
         name: "Theme",
         weight: 40,
+        source: "personal",
       });
       const axis2 = (await axis2Res.json()) as Axis;
 
@@ -405,23 +411,23 @@ describe("Integration: End-to-end scenarios", () => {
       let scoreRes = await jsonRequest(ctx.app, "GET", `/api/games/${game.id}/score`);
       let scoreData = (await scoreRes.json()) as ScoreResponse;
       const communityEntry = scoreData.breakdown.find((b) => b.axisName === "Community Rating");
-      expect(communityEntry!.rating).toBe(7);
+      expect(communityEntry!.effectiveRating).toBe(7);
       expect(communityEntry!.source).toBe("override");
-      expect(communityEntry!.bggOriginal).toBe(8.1);
+      expect(communityEntry!.sourceValue).toBe(8.1);
 
       // Refresh BGG data for this game (now returns updated data)
       refreshed = true;
       const refreshRes = await jsonRequest(ctx.app, "POST", `/api/games/${game.id}/refresh`);
       expect(refreshRes.status).toBe(200);
 
-      // Score should still use the override, but bggOriginal should be updated
+      // Score should still use the override, but sourceValue should be updated
       scoreRes = await jsonRequest(ctx.app, "GET", `/api/games/${game.id}/score`);
       scoreData = (await scoreRes.json()) as ScoreResponse;
       const updatedEntry = scoreData.breakdown.find((b) => b.axisName === "Community Rating");
-      expect(updatedEntry!.rating).toBe(7); // Override preserved
+      expect(updatedEntry!.effectiveRating).toBe(7); // Override preserved
       expect(updatedEntry!.source).toBe("override");
-      // bggOriginal reflects the refreshed BGG data
-      expect(updatedEntry!.bggOriginal).toBe(8.5);
+      // sourceValue reflects the refreshed BGG data
+      expect(updatedEntry!.sourceValue).toBe(8.5);
 
       // Refresh all games
       const refreshAllRes = await jsonRequest(ctx.app, "POST", "/api/games/refresh");
@@ -451,6 +457,7 @@ describe("Integration: End-to-end scenarios", () => {
       const axisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
         name: "Personal Axis",
         weight: 50,
+        source: "personal",
       });
       expect(axisRes.status).toBe(201);
       const axis = (await axisRes.json()) as Axis;
@@ -516,6 +523,7 @@ describe("Integration: End-to-end scenarios", () => {
       const axisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
         name: "Test Axis",
         weight: 50,
+        source: "personal",
       });
       const axis = (await axisRes.json()) as Axis;
       // Shape: Axis

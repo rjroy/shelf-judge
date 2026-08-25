@@ -3,14 +3,13 @@
 
 import type { NativeScale, VetoConfig } from "@shelf-judge/shared";
 
-// Re-export all shared curve math so existing daemon imports don't break.
+// Re-export shared curve math used by daemon consumers.
 export {
   K_FLEXIBLE,
   K_MODERATE,
   K_STRICT,
   LEAN_GENTLE_MULTIPLIER,
   LEAN_STEEP_MULTIPLIER,
-  getNativeScale,
   calibrateTolerance,
   applyLean,
   applyPreferenceCurve,

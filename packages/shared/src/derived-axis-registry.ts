@@ -5,8 +5,8 @@ import {
   type AxisValidationDetail,
 } from "./errors";
 import type {
-  CurrentAxis,
-  CurrentAxisBase,
+  Axis,
+  AxisBase,
   DerivedAxis,
   DerivedAxisConfigurationByField,
   DerivedAxisTemplateDiscovery,
@@ -16,7 +16,7 @@ import type {
   DerivedFieldId,
   DerivedValueResolution,
   EmptyDerivedAxisConfiguration,
-  EnabledCurrentAxis,
+  EnabledAxis,
   Game,
   NativeScale,
   NativeScaleDiscovery,
@@ -35,8 +35,18 @@ export interface DerivedAxisTemplateDefaults<Configuration> {
   configuration: Partial<Configuration>;
 }
 
+export interface DerivedSuggestionAnalysis {
+  attribute: string;
+  projectValue: (game: Game) => number | null;
+}
+
+export interface DerivedSuggestionProjection extends DerivedSuggestionAnalysis {
+  derivedField: DerivedFieldId;
+}
+
 export interface DerivedFieldDefinition<Configuration> {
   id: DerivedFieldId;
+  includedInFreshCollection: boolean;
   label: string;
   description: string;
   provenance: string;
@@ -52,16 +62,43 @@ export interface DerivedFieldDefinition<Configuration> {
   defaultNativeScale: NativeScale;
   nativeScale: (configuration: Configuration) => NativeScale;
   resolve: (game: Game, configuration: Configuration) => DerivedValueResolution | null;
+  suggestionAnalysis: DerivedSuggestionAnalysis | null;
   templateDefaults: DerivedAxisTemplateDefaults<Configuration>;
   summarizeConfiguration: (configuration: Configuration) => string;
 }
 
+type DerivedAxisPayloadFor<Field extends DerivedFieldId> = {
+  derivedField: Field;
+  configuration: DerivedAxisConfigurationByField[Field];
+};
+
+export type DerivedAxisPayloadByField = {
+  [Field in DerivedFieldId]: DerivedAxisPayloadFor<Field>;
+};
+
+export type DerivedAxisPayload = DerivedAxisPayloadByField[DerivedFieldId];
+
 interface RuntimeDerivedFieldDefinition<
+  Field extends DerivedFieldId,
   Configuration,
 > extends DerivedFieldDefinition<Configuration> {
+  id: Field;
+  parseConfigurationPayload: (
+    configuration: unknown,
+  ) =>
+    | { success: true; data: DerivedAxisPayloadFor<Field> }
+    | { success: false; error: z.ZodError };
   nativeScaleFromUnknown: (configuration: unknown) => NativeScale;
   resolveFromUnknown: (game: Game, configuration: unknown) => DerivedValueResolution | null;
   summarizeConfigurationFromUnknown: (configuration: unknown) => string;
+  createAxisFromUnknown: (
+    base: AxisBase,
+    configuration: unknown,
+  ) => AxisBase & {
+    source: "derived";
+    derivedField: Field;
+    configuration: DerivedAxisConfigurationByField[Field];
+  };
 }
 
 interface DerivedFieldDefinitionInput<
@@ -71,14 +108,23 @@ interface DerivedFieldDefinitionInput<
   id: Field;
 }
 
-function defineDerivedField<Field extends DerivedFieldId, Configuration>(
-  definition: DerivedFieldDefinitionInput<Field, Configuration>,
-): RuntimeDerivedFieldDefinition<Configuration> & { id: Field } {
+function defineDerivedField<Field extends DerivedFieldId>(
+  definition: DerivedFieldDefinitionInput<Field, DerivedAxisConfigurationByField[Field]>,
+): RuntimeDerivedFieldDefinition<Field, DerivedAxisConfigurationByField[Field]> {
+  type Configuration = DerivedAxisConfigurationByField[Field];
   const parseConfiguration = (configuration: unknown): Configuration =>
     definition.configurationSchema.parse(configuration);
-
   return {
     ...definition,
+    parseConfigurationPayload: (configuration) => {
+      const parsed = definition.configurationSchema.safeParse(configuration);
+      return parsed.success
+        ? {
+            success: true,
+            data: { derivedField: definition.id, configuration: parsed.data },
+          }
+        : parsed;
+    },
     nativeScale: (configuration) => definition.nativeScale(parseConfiguration(configuration)),
     resolve: (game, configuration) => definition.resolve(game, parseConfiguration(configuration)),
     summarizeConfiguration: (configuration) =>
@@ -89,13 +135,20 @@ function defineDerivedField<Field extends DerivedFieldId, Configuration>(
       definition.resolve(game, parseConfiguration(configuration)),
     summarizeConfigurationFromUnknown: (configuration) =>
       definition.summarizeConfiguration(parseConfiguration(configuration)),
+    createAxisFromUnknown: (base, configuration) => ({
+      ...base,
+      source: "derived",
+      derivedField: definition.id,
+      configuration: parseConfiguration(configuration),
+    }),
   };
 }
 
 export type DerivedAxisRegistry = {
   [Field in DerivedFieldId]: RuntimeDerivedFieldDefinition<
+    Field,
     DerivedAxisConfigurationByField[Field]
-  > & { id: Field };
+  >;
 };
 
 const noConfigurationSchema: z.ZodType<EmptyDerivedAxisConfiguration> = z.object({}).strict();
@@ -106,40 +159,35 @@ const playingTimeConfigurationSchema = z
   .object({ maximumScoringTime: z.number().int().min(60).max(1440) })
   .strict();
 
-export const DerivedAxisPayloadSchema = z.discriminatedUnion("derivedField", [
-  z
-    .object({
-      derivedField: z.literal("communityRating"),
-      configuration: noConfigurationSchema,
-    })
-    .strict(),
-  z
-    .object({
-      derivedField: z.literal("weight"),
-      configuration: noConfigurationSchema,
-    })
-    .strict(),
-  z
-    .object({
-      derivedField: z.literal("playerCountFit"),
-      configuration: targetPlayerCountSchema,
-    })
-    .strict(),
-  z
-    .object({
-      derivedField: z.literal("playingTime"),
-      configuration: playingTimeConfigurationSchema,
-    })
-    .strict(),
-]);
+function projectCommunityRating(game: Game): number | null {
+  return game.bggData?.communityRating ?? null;
+}
 
-export const DerivedAxisConfigurationSchema = z.union([
-  noConfigurationSchema,
-  targetPlayerCountSchema,
-  playingTimeConfigurationSchema,
-]);
+function projectWeight(game: Game): number | null {
+  return game.bggData?.weight ?? null;
+}
 
-export type DerivedAxisPayload = z.output<typeof DerivedAxisPayloadSchema>;
+function projectPlayerCountRange(game: Game): number | null {
+  const minimum = game.minPlayers;
+  const maximum = game.maxPlayers;
+  if (
+    minimum == null ||
+    maximum == null ||
+    !Number.isFinite(minimum) ||
+    !Number.isFinite(maximum) ||
+    minimum <= 0 ||
+    maximum <= 0 ||
+    minimum > maximum
+  ) {
+    return null;
+  }
+  return maximum - minimum;
+}
+
+function projectPlayingTime(game: Game): number | null {
+  const value = game.playingTime;
+  return value == null || !Number.isFinite(value) || value <= 0 ? null : value;
+}
 
 export type DerivedAxisPayloadValidationResult =
   | { success: true; data: DerivedAxisPayload }
@@ -156,18 +204,6 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 function isDerivedFieldId(value: unknown): value is DerivedFieldId {
   return typeof value === "string" && Object.hasOwn(DERIVED_AXIS_REGISTRY, value);
-}
-
-interface LocatedZodIssue {
-  issue: z.ZodIssue;
-  path: (string | number)[];
-}
-
-function locateZodIssue(issue: z.ZodIssue): LocatedZodIssue[] {
-  if (issue.code === z.ZodIssueCode.unrecognized_keys) {
-    return issue.keys.map((key) => ({ issue, path: [...issue.path, key] }));
-  }
-  return [{ issue, path: issue.path }];
 }
 
 export function validateDerivedAxisPayload(value: unknown): DerivedAxisPayloadValidationResult {
@@ -191,21 +227,15 @@ export function validateDerivedAxisPayload(value: unknown): DerivedAxisPayloadVa
   const definition = DERIVED_AXIS_REGISTRY[value.derivedField];
   const validation = definition.configurationValidation;
   const configuration = value.configuration;
-  const parsed = DerivedAxisPayloadSchema.safeParse(value);
-  if (parsed.success) return parsed;
-
-  const payloadIssue = parsed.error.issues
-    .flatMap(locateZodIssue)
-    .find(({ path }) => path[0] !== "configuration");
-  if (payloadIssue !== undefined) {
+  const unsupportedPayloadKey = Object.keys(value).find(
+    (key) => key !== "derivedField" && key !== "configuration",
+  );
+  if (unsupportedPayloadKey !== undefined) {
     return {
       success: false,
       code: AXIS_VALIDATION_CODES.INVALID_AXIS_PAYLOAD,
-      detail: {
-        field: String(payloadIssue.path.at(-1) ?? "payload"),
-        path: payloadIssue.path,
-      },
-      message: payloadIssue.issue.message,
+      detail: { field: unsupportedPayloadKey, path: [unsupportedPayloadKey] },
+      message: `Unsupported derived axis payload property: ${unsupportedPayloadKey}`,
     };
   }
 
@@ -239,6 +269,9 @@ export function validateDerivedAxisPayload(value: unknown): DerivedAxisPayloadVa
     };
   }
 
+  const parsed = definition.parseConfigurationPayload(configuration);
+  if (parsed.success) return { success: true, data: parsed.data };
+
   const field = validation.field ?? "configuration";
   return {
     success: false,
@@ -248,22 +281,24 @@ export function validateDerivedAxisPayload(value: unknown): DerivedAxisPayloadVa
   };
 }
 
+export function createDerivedAxisFromPayload<Field extends DerivedFieldId>(
+  base: AxisBase,
+  payload: DerivedAxisPayloadByField[Field],
+): DerivedAxis<Field>;
 export function createDerivedAxisFromPayload(
-  base: CurrentAxisBase,
+  base: AxisBase,
   payload: DerivedAxisPayload,
 ): DerivedAxis {
-  switch (payload.derivedField) {
-    case "communityRating":
-    case "weight":
-    case "playerCountFit":
-    case "playingTime":
-      return { ...base, source: "derived", ...payload };
-  }
+  return DERIVED_AXIS_REGISTRY[payload.derivedField].createAxisFromUnknown(
+    base,
+    payload.configuration,
+  );
 }
 
 export const DERIVED_AXIS_REGISTRY = {
   communityRating: defineDerivedField({
     id: "communityRating",
+    includedInFreshCollection: true,
     label: "Community Rating",
     description: "BGG community average rating",
     provenance: "BoardGameGeek community average rating",
@@ -279,8 +314,12 @@ export const DERIVED_AXIS_REGISTRY = {
     defaultNativeScale: { min: 1, max: 10 },
     nativeScale: () => ({ min: 1, max: 10 }),
     resolve: (game) => {
-      const value = game.bggData?.communityRating;
+      const value = projectCommunityRating(game);
       return value == null ? null : { sourceValue: value, scoringRawValue: value };
+    },
+    suggestionAnalysis: {
+      attribute: "community rating",
+      projectValue: projectCommunityRating,
     },
     templateDefaults: {
       name: "Community Rating",
@@ -293,6 +332,7 @@ export const DERIVED_AXIS_REGISTRY = {
   }),
   weight: defineDerivedField({
     id: "weight",
+    includedInFreshCollection: true,
     label: "Complexity",
     description: "BGG weight normalized to 1-10 scale",
     provenance: "BoardGameGeek community weight rating",
@@ -308,8 +348,12 @@ export const DERIVED_AXIS_REGISTRY = {
     defaultNativeScale: { min: 1, max: 5 },
     nativeScale: () => ({ min: 1, max: 5 }),
     resolve: (game) => {
-      const value = game.bggData?.weight;
+      const value = projectWeight(game);
       return value == null ? null : { sourceValue: value, scoringRawValue: value };
+    },
+    suggestionAnalysis: {
+      attribute: "BGG weight",
+      projectValue: projectWeight,
     },
     templateDefaults: {
       name: "Complexity",
@@ -322,6 +366,7 @@ export const DERIVED_AXIS_REGISTRY = {
   }),
   playerCountFit: defineDerivedField({
     id: "playerCountFit",
+    includedInFreshCollection: false,
     label: "Player Count Fit",
     description: "Checks a target player count against the publisher-declared player range.",
     provenance: "Publisher-declared minimum and maximum player count",
@@ -365,6 +410,10 @@ export const DERIVED_AXIS_REGISTRY = {
           : 1;
       return { sourceValue: value, scoringRawValue: value };
     },
+    suggestionAnalysis: {
+      attribute: "player count range",
+      projectValue: projectPlayerCountRange,
+    },
     templateDefaults: {
       name: "Player Count Fit",
       description: "Checks a target player count against the publisher-declared player range.",
@@ -377,6 +426,7 @@ export const DERIVED_AXIS_REGISTRY = {
   }),
   playingTime: defineDerivedField({
     id: "playingTime",
+    includedInFreshCollection: false,
     label: "Play Time",
     description: "Scores publisher-listed playing time against your preferred duration.",
     provenance: "Publisher-listed playing time imported from BoardGameGeek",
@@ -405,9 +455,13 @@ export const DERIVED_AXIS_REGISTRY = {
     defaultNativeScale: { min: 1, max: 240 },
     nativeScale: ({ maximumScoringTime }) => ({ min: 1, max: maximumScoringTime }),
     resolve: (game, { maximumScoringTime }) => {
-      const value = game.playingTime;
-      if (value == null || !Number.isFinite(value) || value <= 0) return null;
+      const value = projectPlayingTime(game);
+      if (value === null) return null;
       return { sourceValue: value, scoringRawValue: Math.min(value, maximumScoringTime) };
+    },
+    suggestionAnalysis: {
+      attribute: "play time",
+      projectValue: projectPlayingTime,
     },
     templateDefaults: {
       name: "Play Time",
@@ -423,6 +477,43 @@ export const DERIVED_AXIS_REGISTRY = {
   }),
 } satisfies DerivedAxisRegistry;
 
+export const DerivedAxisPayloadSchema: z.ZodType<DerivedAxisPayload> = z.custom<DerivedAxisPayload>(
+  (value): value is DerivedAxisPayload => validateDerivedAxisPayload(value).success,
+  "Invalid derived axis payload",
+);
+
+export function createFreshCollectionDerivedAxes(
+  createId: () => string,
+  timestamp: string,
+): DerivedAxis[] {
+  return Object.values(DERIVED_AXIS_REGISTRY)
+    .filter((definition) => definition.includedInFreshCollection)
+    .map((definition) => {
+      const template = definition.templateDefaults;
+      const payload = DerivedAxisPayloadSchema.parse({
+        derivedField: definition.id,
+        configuration: template.configuration,
+      });
+      return createDerivedAxisFromPayload(
+        {
+          id: createId(),
+          name: template.name,
+          description: template.description,
+          weight: template.weight,
+          enabled: true,
+          preferenceShape: template.preferenceShape,
+          ...(template.idealValue === undefined ? {} : { idealValue: template.idealValue }),
+          ...(template.toleranceWidth === undefined
+            ? {}
+            : { toleranceWidth: template.toleranceWidth }),
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        },
+        payload,
+      );
+    });
+}
+
 export function resolveDerivedAxisValue<Field extends DerivedFieldId>(
   axis: DerivedAxis<Field>,
   game: Game,
@@ -431,7 +522,22 @@ export function resolveDerivedAxisValue<Field extends DerivedFieldId>(
   return definition.resolveFromUnknown(game, axis.configuration);
 }
 
-export function getCurrentAxisNativeScale(axis: EnabledCurrentAxis): NativeScale {
+export function getDerivedSuggestionProjections(): DerivedSuggestionProjection[] {
+  return Object.values(DERIVED_AXIS_REGISTRY).flatMap((definition) => {
+    const analysis = definition.suggestionAnalysis;
+    return analysis === null
+      ? []
+      : [
+          {
+            derivedField: definition.id,
+            attribute: analysis.attribute,
+            projectValue: analysis.projectValue,
+          },
+        ];
+  });
+}
+
+export function getAxisNativeScale(axis: EnabledAxis): NativeScale {
   if (axis.source !== "derived") return { min: 1, max: 10 };
   return getDerivedAxisNativeScale(axis);
 }
@@ -442,11 +548,11 @@ export function getDerivedAxisNativeScale<Field extends DerivedFieldId>(
   return DERIVED_AXIS_REGISTRY[axis.derivedField].nativeScaleFromUnknown(axis.configuration);
 }
 
-export function isEnabledScoringAxis(axis: CurrentAxis): axis is EnabledCurrentAxis {
+export function isEnabledScoringAxis(axis: Axis): axis is EnabledAxis {
   return axis.enabled;
 }
 
-export function isVectorEligibleAxis(axis: CurrentAxis): axis is PersonalAxis | TournamentAxis {
+export function isVectorEligibleAxis(axis: Axis): axis is PersonalAxis | TournamentAxis {
   return axis.enabled && (axis.source === "personal" || axis.source === "tournament");
 }
 
@@ -468,7 +574,32 @@ function serializeTemplate(
     preferenceShape: template.preferenceShape,
     ...(template.idealValue === undefined ? {} : { idealValue: template.idealValue }),
     ...(template.toleranceWidth === undefined ? {} : { toleranceWidth: template.toleranceWidth }),
-    configuration: template.configuration,
+    configuration: { ...template.configuration },
+  };
+}
+
+function serializeNativeScaleDiscovery(
+  discovery: NativeScaleDiscovery<string>,
+): NativeScaleDiscovery {
+  return discovery.type === "fixed"
+    ? { type: "fixed", min: discovery.min, max: discovery.max }
+    : {
+        type: "configuration-bound",
+        min: discovery.min,
+        maxConfigurationProperty: discovery.maxConfigurationProperty,
+      };
+}
+
+function serializeConfigurationProperty(
+  property: DerivedConfigurationPropertyDiscovery,
+): DerivedConfigurationPropertyDiscovery {
+  return {
+    name: property.name,
+    type: property.type,
+    required: property.required,
+    minimum: property.minimum,
+    maximum: property.maximum,
+    ...(property.default === undefined ? {} : { default: property.default }),
   };
 }
 
@@ -481,9 +612,12 @@ export function getDerivedFieldDiscovery(): DerivedFieldDiscoveryResponse {
       provenance: definition.provenance,
       unit: definition.unit,
       missingValuePolicy: definition.missingValuePolicy,
-      nativeScaleDiscovery: definition.nativeScaleDiscovery,
-      nativeScale: definition.defaultNativeScale,
-      configuration: [...definition.configurationDiscovery],
+      nativeScaleDiscovery: serializeNativeScaleDiscovery(definition.nativeScaleDiscovery),
+      nativeScale: {
+        min: definition.defaultNativeScale.min,
+        max: definition.defaultNativeScale.max,
+      },
+      configuration: definition.configurationDiscovery.map(serializeConfigurationProperty),
       template: serializeTemplate(definition.templateDefaults),
     }),
   );

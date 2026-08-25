@@ -2,13 +2,15 @@ import { describe, expect, test } from "bun:test";
 import {
   AXIS_VALIDATION_CODES,
   CodedAxisValidationError,
-  CurrentCreateAxisSchema,
-  CurrentUpdateAxisSchema,
+  CreateAxisSchema,
+  CollectionSchema,
+  CURRENT_COLLECTION_SCHEMA_VERSION,
+  UpdateAxisSchema,
   LegacyAxisRepairSchema,
   ValidationError,
-  mergeAndValidateCurrentAxisUpdate,
-  parseCurrentCreateAxisInput,
-  parseCurrentUpdateAxisInput,
+  mergeAndValidateAxisUpdate,
+  parseCreateAxisInput,
+  parseUpdateAxisInput,
   parseLegacyAxisRepairInput,
   repairAndValidateLegacyAxis,
   validateDerivedAxisPayload,
@@ -82,7 +84,7 @@ function legacyAxis(overrides: Partial<DisabledLegacyAxis> = {}): DisabledLegacy
     source: "legacy",
     reason: "unknown_field",
     legacyField: "oldTime",
-    legacyPayload: { source: "bgg", bggField: "oldTime" },
+    legacyPayload: { originalSource: "external", originalField: "oldTime" },
     preferenceShape: "sweet-spot",
     idealValue: 90,
     tolerance: "moderate",
@@ -111,11 +113,9 @@ function expectCodedError(
   }
 }
 
-describe("CurrentCreateAxisSchema", () => {
+describe("CreateAxisSchema", () => {
   test("accepts personal and all four registered derived fields", () => {
-    expect(CurrentCreateAxisSchema.safeParse({ ...commonCreate, source: "personal" }).success).toBe(
-      true,
-    );
+    expect(CreateAxisSchema.safeParse({ ...commonCreate, source: "personal" }).success).toBe(true);
     for (const payload of [
       { derivedField: "communityRating", configuration: {} },
       { derivedField: "weight", configuration: {} },
@@ -123,19 +123,18 @@ describe("CurrentCreateAxisSchema", () => {
       { derivedField: "playingTime", configuration: { maximumScoringTime: 240 } },
     ]) {
       expect(
-        CurrentCreateAxisSchema.safeParse({ ...commonCreate, source: "derived", ...payload })
-          .success,
+        CreateAxisSchema.safeParse({ ...commonCreate, source: "derived", ...payload }).success,
       ).toBe(true);
     }
   });
 
   test("rejects tournament creation and unknown derived IDs", () => {
-    expect(
-      CurrentCreateAxisSchema.safeParse({ ...commonCreate, source: "tournament" }).success,
-    ).toBe(false);
+    expect(CreateAxisSchema.safeParse({ ...commonCreate, source: "tournament" }).success).toBe(
+      false,
+    );
     expectCodedError(
       () =>
-        parseCurrentCreateAxisInput({
+        parseCreateAxisInput({
           ...commonCreate,
           source: "derived",
           derivedField: "futureField",
@@ -150,7 +149,7 @@ describe("CurrentCreateAxisSchema", () => {
     for (const derivedField of ["communityRating", "weight"] as const) {
       expectCodedError(
         () =>
-          parseCurrentCreateAxisInput({
+          parseCreateAxisInput({
             ...commonCreate,
             source: "derived",
             derivedField,
@@ -162,7 +161,7 @@ describe("CurrentCreateAxisSchema", () => {
     }
     expectCodedError(
       () =>
-        parseCurrentCreateAxisInput({
+        parseCreateAxisInput({
           ...commonCreate,
           source: "derived",
           derivedField: "playerCountFit",
@@ -172,7 +171,7 @@ describe("CurrentCreateAxisSchema", () => {
     );
     expectCodedError(
       () =>
-        parseCurrentCreateAxisInput({
+        parseCreateAxisInput({
           ...commonCreate,
           source: "derived",
           derivedField: "playingTime",
@@ -183,7 +182,7 @@ describe("CurrentCreateAxisSchema", () => {
     );
     expectCodedError(
       () =>
-        parseCurrentCreateAxisInput({
+        parseCreateAxisInput({
           ...commonCreate,
           source: "derived",
           derivedField: "playerCountFit",
@@ -197,7 +196,7 @@ describe("CurrentCreateAxisSchema", () => {
   test("enforces integer target count boundaries", () => {
     for (const targetPlayerCount of [1, 100]) {
       expect(
-        CurrentCreateAxisSchema.safeParse({
+        CreateAxisSchema.safeParse({
           ...commonCreate,
           source: "derived",
           derivedField: "playerCountFit",
@@ -208,7 +207,7 @@ describe("CurrentCreateAxisSchema", () => {
     for (const targetPlayerCount of [0, 101, 1.5]) {
       expectCodedError(
         () =>
-          parseCurrentCreateAxisInput({
+          parseCreateAxisInput({
             ...commonCreate,
             source: "derived",
             derivedField: "playerCountFit",
@@ -223,7 +222,7 @@ describe("CurrentCreateAxisSchema", () => {
   test("enforces integer playing-time cap boundaries", () => {
     for (const maximumScoringTime of [60, 1440]) {
       expect(
-        CurrentCreateAxisSchema.safeParse({
+        CreateAxisSchema.safeParse({
           ...commonCreate,
           source: "derived",
           derivedField: "playingTime",
@@ -234,7 +233,7 @@ describe("CurrentCreateAxisSchema", () => {
     for (const maximumScoringTime of [59, 1441, 60.5]) {
       expectCodedError(
         () =>
-          parseCurrentCreateAxisInput({
+          parseCreateAxisInput({
             ...commonCreate,
             source: "derived",
             derivedField: "playingTime",
@@ -249,7 +248,7 @@ describe("CurrentCreateAxisSchema", () => {
   test("returns stable curve code and field details independently of messages", () => {
     expectCodedError(
       () =>
-        parseCurrentCreateAxisInput({
+        parseCreateAxisInput({
           ...commonCreate,
           source: "derived",
           derivedField: "playingTime",
@@ -267,7 +266,7 @@ describe("CurrentCreateAxisSchema", () => {
   test("validates personal curves against the 1..10 native scale", () => {
     expectCodedError(
       () =>
-        parseCurrentCreateAxisInput({
+        parseCreateAxisInput({
           ...commonCreate,
           source: "personal",
           preferenceShape: "sweet-spot",
@@ -282,7 +281,7 @@ describe("CurrentCreateAxisSchema", () => {
   test("rejects numeric width but preserves categorical tolerance outside sweet-spot curves", () => {
     expectCodedError(
       () =>
-        parseCurrentCreateAxisInput({
+        parseCreateAxisInput({
           ...commonCreate,
           source: "personal",
           preferenceShape: "higher-is-better",
@@ -291,7 +290,7 @@ describe("CurrentCreateAxisSchema", () => {
       AXIS_VALIDATION_CODES.INVALID_CURVE_FOR_NATIVE_SCALE,
       "toleranceWidth",
     );
-    const categorical = parseCurrentCreateAxisInput({
+    const categorical = parseCreateAxisInput({
       ...commonCreate,
       source: "personal",
       preferenceShape: "lower-is-better",
@@ -328,7 +327,7 @@ describe("CurrentCreateAxisSchema", () => {
 
   test("requires strict veto objects only for replacement create payloads", () => {
     expect(
-      CurrentCreateAxisSchema.safeParse({
+      CreateAxisSchema.safeParse({
         ...commonCreate,
         source: "personal",
         veto: { direction: "above", threshold: 8, unsupported: true },
@@ -339,15 +338,15 @@ describe("CurrentCreateAxisSchema", () => {
 
 describe("current axis updates", () => {
   test("schema cannot mutate source or derivedField", () => {
-    expect(CurrentUpdateAxisSchema.safeParse({ source: "personal" }).success).toBe(false);
-    expect(CurrentUpdateAxisSchema.safeParse({ derivedField: "weight" }).success).toBe(false);
+    expect(UpdateAxisSchema.safeParse({ source: "personal" }).success).toBe(false);
+    expect(UpdateAxisSchema.safeParse({ derivedField: "weight" }).success).toBe(false);
   });
 
   test("defers malformed configuration to stored playing-time context", () => {
     for (const maximumScoringTime of [59, 1441, 60.5]) {
-      const update = parseCurrentUpdateAxisInput({ configuration: { maximumScoringTime } });
+      const update = parseUpdateAxisInput({ configuration: { maximumScoringTime } });
       expectCodedError(
-        () => mergeAndValidateCurrentAxisUpdate(playingTimeAxis(), update),
+        () => mergeAndValidateAxisUpdate(playingTimeAxis(), update),
         AXIS_VALIDATION_CODES.INVALID_MAXIMUM_SCORING_TIME,
         "maximumScoringTime",
       );
@@ -356,9 +355,9 @@ describe("current axis updates", () => {
 
   test("defers malformed configuration to stored player-count context", () => {
     for (const targetPlayerCount of [0, 101, 1.5]) {
-      const update = parseCurrentUpdateAxisInput({ configuration: { targetPlayerCount } });
+      const update = parseUpdateAxisInput({ configuration: { targetPlayerCount } });
       expectCodedError(
-        () => mergeAndValidateCurrentAxisUpdate(playerCountAxis(), update),
+        () => mergeAndValidateAxisUpdate(playerCountAxis(), update),
         AXIS_VALIDATION_CODES.INVALID_TARGET_PLAYER_COUNT,
         "targetPlayerCount",
       );
@@ -368,27 +367,24 @@ describe("current axis updates", () => {
   test("reports missing and unsupported merged configuration from registry metadata", () => {
     expectCodedError(
       () =>
-        mergeAndValidateCurrentAxisUpdate(
-          playerCountAxis(),
-          parseCurrentUpdateAxisInput({ configuration: {} }),
-        ),
+        mergeAndValidateAxisUpdate(playerCountAxis(), parseUpdateAxisInput({ configuration: {} })),
       AXIS_VALIDATION_CODES.MISSING_DERIVED_CONFIGURATION,
       "targetPlayerCount",
     );
     expectCodedError(
       () =>
-        mergeAndValidateCurrentAxisUpdate(
+        mergeAndValidateAxisUpdate(
           communityRatingAxis(),
-          parseCurrentUpdateAxisInput({ configuration: { unsupported: true } }),
+          parseUpdateAxisInput({ configuration: { unsupported: true } }),
         ),
       AXIS_VALIDATION_CODES.UNSUPPORTED_DERIVED_CONFIGURATION,
       "configuration",
     );
     expectCodedError(
       () =>
-        mergeAndValidateCurrentAxisUpdate(
+        mergeAndValidateAxisUpdate(
           playerCountAxis(),
-          parseCurrentUpdateAxisInput({ configuration: { maximumScoringTime: 240 } }),
+          parseUpdateAxisInput({ configuration: { maximumScoringTime: 240 } }),
         ),
       AXIS_VALIDATION_CODES.UNSUPPORTED_DERIVED_CONFIGURATION,
       "configuration",
@@ -398,16 +394,13 @@ describe("current axis updates", () => {
   test("rejects conflicting tolerance and endpoint-reaching widths", () => {
     const axis = playingTimeAxis({ tolerance: "moderate" });
     expectCodedError(
-      () => mergeAndValidateCurrentAxisUpdate(axis, parseCurrentUpdateAxisInput({})),
+      () => mergeAndValidateAxisUpdate(axis, parseUpdateAxisInput({})),
       AXIS_VALIDATION_CODES.INVALID_CURVE_FOR_NATIVE_SCALE,
       "toleranceWidth",
     );
     expectCodedError(
       () =>
-        mergeAndValidateCurrentAxisUpdate(
-          playingTimeAxis(),
-          parseCurrentUpdateAxisInput({ toleranceWidth: 89 }),
-        ),
+        mergeAndValidateAxisUpdate(playingTimeAxis(), parseUpdateAxisInput({ toleranceWidth: 89 })),
       AXIS_VALIDATION_CODES.INVALID_CURVE_FOR_NATIVE_SCALE,
       "toleranceWidth",
     );
@@ -416,29 +409,29 @@ describe("current axis updates", () => {
   test("validates tolerance forms against merged preference shape", () => {
     expectCodedError(
       () =>
-        mergeAndValidateCurrentAxisUpdate(
+        mergeAndValidateAxisUpdate(
           playingTimeAxis(),
-          parseCurrentUpdateAxisInput({ preferenceShape: "higher-is-better" }),
+          parseUpdateAxisInput({ preferenceShape: "higher-is-better" }),
         ),
       AXIS_VALIDATION_CODES.INVALID_CURVE_FOR_NATIVE_SCALE,
       "toleranceWidth",
     );
-    const retainedCategorical = mergeAndValidateCurrentAxisUpdate(
+    const retainedCategorical = mergeAndValidateAxisUpdate(
       communityRatingAxis(),
-      parseCurrentUpdateAxisInput({ tolerance: "moderate" }),
+      parseUpdateAxisInput({ tolerance: "moderate" }),
     );
     expect(retainedCategorical.tolerance).toBe("moderate");
 
-    const categorical = mergeAndValidateCurrentAxisUpdate(
+    const categorical = mergeAndValidateAxisUpdate(
       playingTimeAxis({ toleranceWidth: null, tolerance: "moderate" }),
-      parseCurrentUpdateAxisInput({ name: "Categorical tolerance remains valid" }),
+      parseUpdateAxisInput({ name: "Categorical tolerance remains valid" }),
     );
     expect(categorical.tolerance).toBe("moderate");
   });
 
   test("requires strict veto objects for replacement updates", () => {
     expect(
-      CurrentUpdateAxisSchema.safeParse({
+      UpdateAxisSchema.safeParse({
         veto: { direction: "above", threshold: 8, unsupported: true },
       }).success,
     ).toBe(false);
@@ -447,18 +440,15 @@ describe("current axis updates", () => {
   test("rejects ideal and veto outside the native scale", () => {
     expectCodedError(
       () =>
-        mergeAndValidateCurrentAxisUpdate(
-          playingTimeAxis(),
-          parseCurrentUpdateAxisInput({ idealValue: 241 }),
-        ),
+        mergeAndValidateAxisUpdate(playingTimeAxis(), parseUpdateAxisInput({ idealValue: 241 })),
       AXIS_VALIDATION_CODES.INVALID_CURVE_FOR_NATIVE_SCALE,
       "idealValue",
     );
     expectCodedError(
       () =>
-        mergeAndValidateCurrentAxisUpdate(
+        mergeAndValidateAxisUpdate(
           playingTimeAxis(),
-          parseCurrentUpdateAxisInput({ veto: { direction: "above", threshold: 241 } }),
+          parseUpdateAxisInput({ veto: { direction: "above", threshold: 241 } }),
         ),
       AXIS_VALIDATION_CODES.INVALID_CURVE_FOR_NATIVE_SCALE,
       "veto",
@@ -468,27 +458,27 @@ describe("current axis updates", () => {
   test("rejects cap changes invalidating ideal, width, or veto", () => {
     expectCodedError(
       () =>
-        mergeAndValidateCurrentAxisUpdate(
+        mergeAndValidateAxisUpdate(
           playingTimeAxis(),
-          parseCurrentUpdateAxisInput({ configuration: { maximumScoringTime: 80 } }),
+          parseUpdateAxisInput({ configuration: { maximumScoringTime: 80 } }),
         ),
       AXIS_VALIDATION_CODES.INVALID_CURVE_FOR_NATIVE_SCALE,
       "idealValue",
     );
     expectCodedError(
       () =>
-        mergeAndValidateCurrentAxisUpdate(
+        mergeAndValidateAxisUpdate(
           playingTimeAxis(),
-          parseCurrentUpdateAxisInput({ configuration: { maximumScoringTime: 120 } }),
+          parseUpdateAxisInput({ configuration: { maximumScoringTime: 120 } }),
         ),
       AXIS_VALIDATION_CODES.INVALID_CURVE_FOR_NATIVE_SCALE,
       "toleranceWidth",
     );
     expectCodedError(
       () =>
-        mergeAndValidateCurrentAxisUpdate(
+        mergeAndValidateAxisUpdate(
           playingTimeAxis({ veto: { direction: "above", threshold: 200 } }),
-          parseCurrentUpdateAxisInput({ configuration: { maximumScoringTime: 180 } }),
+          parseUpdateAxisInput({ configuration: { maximumScoringTime: 180 } }),
         ),
       AXIS_VALIDATION_CODES.INVALID_CURVE_FOR_NATIVE_SCALE,
       "veto",
@@ -496,9 +486,9 @@ describe("current axis updates", () => {
   });
 
   test("accepts a valid merged cap edit", () => {
-    const result = mergeAndValidateCurrentAxisUpdate(
+    const result = mergeAndValidateAxisUpdate(
       playingTimeAxis({ veto: { direction: "above", threshold: 150 } }),
-      parseCurrentUpdateAxisInput({ configuration: { maximumScoringTime: 180 } }),
+      parseUpdateAxisInput({ configuration: { maximumScoringTime: 180 } }),
     );
     expect(result.source).toBe("derived");
     if (result.source === "derived")
@@ -506,9 +496,9 @@ describe("current axis updates", () => {
   });
 
   test("ordinary updates preserve disabled legacy state", () => {
-    const result = mergeAndValidateCurrentAxisUpdate(
+    const result = mergeAndValidateAxisUpdate(
       legacyAxis(),
-      parseCurrentUpdateAxisInput({ name: "Still disabled" }),
+      parseUpdateAxisInput({ name: "Still disabled" }),
     );
     expect(result.source).toBe("legacy");
     expect(result.enabled).toBe(false);
@@ -595,5 +585,71 @@ describe("legacy contracts", () => {
     expect(error).toBeInstanceOf(Error);
     expect(error.name).toBe("ValidationError");
     expect(error.message).toBe("legacy message");
+  });
+});
+
+describe("current persisted collection validation", () => {
+  const currentCollection = {
+    schemaVersion: CURRENT_COLLECTION_SCHEMA_VERSION,
+    id: "collection-1",
+    name: "Current",
+    axes: [communityRatingAxis()],
+    games: [],
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+
+  test("accepts the strict current schema", () => {
+    expect(CollectionSchema.parse(currentCollection)).toEqual(currentCollection);
+  });
+
+  test("keeps persisted structural validation separate from mutation curve semantics", () => {
+    const historicalCurve: DerivedAxis<"communityRating"> = {
+      ...communityRatingAxis(),
+      preferenceShape: "sweet-spot",
+      idealValue: 12,
+      veto: { direction: "below", threshold: -2 },
+    };
+    expect(
+      CollectionSchema.safeParse({ ...currentCollection, axes: [historicalCurve] }).success,
+    ).toBe(true);
+    expectCodedError(
+      () =>
+        parseCreateAxisInput({
+          name: historicalCurve.name,
+          weight: historicalCurve.weight,
+          source: "derived",
+          derivedField: "communityRating",
+          configuration: {},
+          preferenceShape: historicalCurve.preferenceShape,
+          idealValue: historicalCurve.idealValue,
+          veto: historicalCurve.veto,
+        }),
+      AXIS_VALIDATION_CODES.INVALID_CURVE_FOR_NATIVE_SCALE,
+      "idealValue",
+    );
+  });
+
+  test("rejects future versions and extra persisted fields", () => {
+    expect(CollectionSchema.safeParse({ ...currentCollection, schemaVersion: 2 }).success).toBe(
+      false,
+    );
+    expect(CollectionSchema.safeParse({ ...currentCollection, unexpected: true }).success).toBe(
+      false,
+    );
+    expect(
+      CollectionSchema.safeParse({
+        ...currentCollection,
+        axes: [{ ...communityRatingAxis(), unsupportedPersistedField: true }],
+      }).success,
+    ).toBe(false);
+  });
+
+  test("requires disabled legacy snapshots", () => {
+    const withoutSnapshot: Record<string, unknown> = { ...legacyAxis() };
+    Reflect.deleteProperty(withoutSnapshot, "legacyPayload");
+    expect(
+      CollectionSchema.safeParse({ ...currentCollection, axes: [withoutSnapshot] }).success,
+    ).toBe(false);
   });
 });

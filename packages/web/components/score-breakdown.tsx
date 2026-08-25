@@ -26,7 +26,7 @@ export function ScoreBreakdown({
   }
 
   const totalWeight = score.breakdown
-    .filter((e) => e.rating !== null)
+    .filter((e) => e.effectiveRating !== null)
     .reduce((sum, e) => sum + e.weight, 0);
 
   const displayScore = score.vetoed ? (score.hypotheticalScore ?? 0) : score.score;
@@ -34,7 +34,7 @@ export function ScoreBreakdown({
 
   const predictedCount = score.breakdown.filter((e) => e.source === "predicted").length;
   const actualCount = score.breakdown.filter(
-    (e) => e.source !== "predicted" && e.rating !== null,
+    (e) => e.source !== "predicted" && e.effectiveRating !== null,
   ).length;
   const excludedCount = score.breakdown.filter(
     (e) => e.source === "predicted" && e.predictionConfidence === "insufficient",
@@ -156,7 +156,7 @@ function BreakdownRow({
   const rowClass = [
     entry.source === "override"
       ? "override-row"
-      : entry.source === "bgg"
+      : entry.source === "derived"
         ? "bgg-row"
         : isPredicted
           ? isInsufficient
@@ -174,9 +174,9 @@ function BreakdownRow({
       : null;
 
   const showRaw =
-    entry.rawValue !== null &&
+    entry.scoringRawValue !== null &&
     entry.effectiveRating !== null &&
-    Math.abs(entry.rawValue - entry.effectiveRating) > 0.05;
+    Math.abs(entry.scoringRawValue - entry.effectiveRating) > 0.05;
 
   return (
     <>
@@ -195,26 +195,25 @@ function BreakdownRow({
               onClick={() => setExpanded((v) => !v)}
             />
           )}
-          {entry.source === "override" && entry.bggOriginal !== null && (
+          {entry.overridden && entry.sourceValue !== null && (
             <div className="breakdown-override-detail">
-              BGG: {entry.bggOriginal.toFixed(1)}{" "}
-              ({getRatingLabel(entry.bggOriginal)})
+              Metadata: {entry.sourceValue.toFixed(1)} {entry.unit ?? ""}
             </div>
           )}
         </td>
         <td className="right breakdown-raw">
-          {showRaw && entry.rawValue !== null ? (
-            entry.rawValue.toFixed(1)
+          {showRaw && entry.scoringRawValue !== null ? (
+            `${entry.scoringRawValue.toFixed(1)}${entry.unit ? ` ${entry.unit}` : ""}`
           ) : (
             <span className="breakdown-dash">&mdash;</span>
           )}
         </td>
         <td className="right">
-          {entry.rating !== null ? (
+          {entry.effectiveRating !== null ? (
             <div>
-              <div>{entry.rating}</div>
+              <div>{entry.effectiveRating}</div>
               <div style={{ fontSize: "0.75em", color: "#888", lineHeight: 1.2 }}>
-                {getRatingLabel(entry.rating)}
+                {getRatingLabel(entry.effectiveRating)}
               </div>
             </div>
           ) : (
@@ -249,7 +248,7 @@ function BreakdownRow({
               axisName={entry.axisName}
               confidence={entry.predictionConfidence!}
               referenceGames={entry.referenceGames}
-              rating={entry.rating}
+              rating={entry.effectiveRating}
             />
           </td>
         </tr>
@@ -353,8 +352,8 @@ export function SourceBadge({ source }: { source: string }) {
   if (source === "override") {
     return <span className="source-badge source-override">Override</span>;
   }
-  if (source === "bgg") {
-    return <span className="source-badge source-bgg">BGG</span>;
+  if (source === "derived") {
+    return <span className="source-badge source-bgg">Derived</span>;
   }
   if (source === "predicted") {
     return <span className="source-badge source-predicted">Predicted</span>;

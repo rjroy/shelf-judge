@@ -5,6 +5,7 @@ import type {
   CollectionProfile,
   WishlistEntry,
 } from "@shelf-judge/shared";
+import { createFreshCollectionDerivedAxes } from "@shelf-judge/shared";
 import { createStorageService } from "../../src/services/storage-service.js";
 import { createMockFileOps } from "../helpers/mock-file-ops.js";
 
@@ -24,34 +25,113 @@ function makeService(initialFiles?: Record<string, string>) {
   return { service, fileOps };
 }
 
+function currentCollection(overrides: Partial<Collection> = {}): Collection {
+  return {
+    schemaVersion: 1,
+    id: "col-1",
+    name: "Test",
+    axes: [],
+    games: [],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
 describe("StorageService.loadCollection", () => {
-  test("returns default collection with 2 BGG axes plus tournament axis when file doesn't exist", async () => {
+  test("returns a current collection with two derived defaults plus Tournament", async () => {
     const { service } = makeService();
 
     const collection = await service.loadCollection();
 
     expect(collection.name).toBe("My Collection");
+    expect(collection.schemaVersion).toBe(1);
     expect(collection.axes).toHaveLength(3);
     expect(collection.games).toHaveLength(0);
 
     const communityRating = collection.axes.find((a) => a.name === "Community Rating");
     expect(communityRating).toBeDefined();
-    expect(communityRating!.source).toBe("bgg");
-    expect(communityRating!.bggField).toBe("communityRating");
+    expect(communityRating).toMatchObject({
+      source: "derived",
+      derivedField: "communityRating",
+      configuration: {},
+      enabled: true,
+    });
 
     const complexity = collection.axes.find((a) => a.name === "Complexity");
     expect(complexity).toBeDefined();
-    expect(complexity!.source).toBe("bgg");
-    expect(complexity!.bggField).toBe("weight");
+    expect(complexity).toMatchObject({
+      source: "derived",
+      derivedField: "weight",
+      configuration: {},
+      enabled: true,
+    });
 
     const tournament = collection.axes.find((a) => a.source === "tournament");
     expect(tournament).toBeDefined();
     expect(tournament!.name).toBe("Tournament");
-    expect(tournament!.bggField).toBeNull();
+    expect(tournament!.enabled).toBe(true);
+  });
+
+  test("projects fresh derived axes from registry defaults without optional templates", async () => {
+    const timestamp = "2026-08-24T00:00:00.000Z";
+    const ids = ["collection-id", "community-axis", "weight-axis", "tournament-axis"];
+    let idIndex = 0;
+    const nextId = () => {
+      const id = ids[idIndex++];
+      if (id === undefined) throw new Error("Unexpected fresh collection ID");
+      return id;
+    };
+    const fileOps = createMockFileOps();
+    const service = createStorageService({
+      dataDir: DATA_DIR,
+      configPath: CONFIG_PATH,
+      fileOps,
+      collectionMigrationDependencies: {
+        createId: nextId,
+        now: () => timestamp,
+      },
+    });
+
+    const collection = await service.loadCollection();
+    const expectedDerivedAxes = createFreshCollectionDerivedAxes(
+      (() => {
+        const expectedIds = ["community-axis", "weight-axis"];
+        let expectedIndex = 0;
+        return () => {
+          const id = expectedIds[expectedIndex++];
+          if (id === undefined) throw new Error("Unexpected expected derived axis");
+          return id;
+        };
+      })(),
+      timestamp,
+    );
+
+    expect(collection.axes).toEqual([
+      ...expectedDerivedAxes,
+      {
+        id: "tournament-axis",
+        name: "Tournament",
+        description:
+          "Derived from head-to-head tournament comparisons. Each game's score is its normalized ELO display value.",
+        weight: 30,
+        enabled: true,
+        source: "tournament",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      },
+    ]);
+    expect(
+      collection.axes.some(
+        (axis) =>
+          axis.source === "derived" &&
+          (axis.derivedField === "playerCountFit" || axis.derivedField === "playingTime"),
+      ),
+    ).toBe(false);
   });
 
   test("loads collection from valid JSON file", async () => {
-    const stored: Collection = {
+    const stored = {
       id: "col-1",
       name: "Test Collection",
       axes: [],
@@ -82,23 +162,16 @@ describe("StorageService.loadCollection", () => {
 describe("StorageService.saveCollection", () => {
   test("writes to temp file then renames (atomic write)", async () => {
     const { service, fileOps } = makeService();
-    const collection: Collection = {
-      id: "col-1",
-      name: "Test",
-      axes: [],
-      games: [],
-      createdAt: "2026-01-01T00:00:00.000Z",
-      updatedAt: "2026-01-01T00:00:00.000Z",
-    };
+    const collection = currentCollection();
 
     await service.saveCollection(collection);
 
-    // Verify the call sequence: mkdir, writeFile (to tmp), rename (tmp -> real)
+    // Verify the call sequence: exclusive temp claim, then rename onto the real path.
     const writeCalls = fileOps.calls.filter(
-      (c) => c.method === "writeFile" || c.method === "rename",
+      (c) => c.method === "writeFileExclusive" || c.method === "rename",
     );
     expect(writeCalls).toHaveLength(2);
-    expect(writeCalls[0].method).toBe("writeFile");
+    expect(writeCalls[0].method).toBe("writeFileExclusive");
     expect(writeCalls[0].args[0]).toContain(".tmp");
     expect(writeCalls[1].method).toBe("rename");
     expect(writeCalls[1].args[0]).toContain(".tmp");
@@ -107,7 +180,7 @@ describe("StorageService.saveCollection", () => {
 
   test("produces valid JSON that round-trips through load", async () => {
     const { service, fileOps } = makeService();
-    const original: Collection = {
+    const original = currentCollection({
       id: "col-round",
       name: "Round Trip",
       axes: [
@@ -116,47 +189,45 @@ describe("StorageService.saveCollection", () => {
           name: "Fun",
           description: null,
           weight: 50,
+          enabled: true,
           source: "personal",
-          bggField: null,
           createdAt: "2026-01-01T00:00:00.000Z",
           updatedAt: "2026-01-01T00:00:00.000Z",
         },
       ],
-      games: [],
-      createdAt: "2026-01-01T00:00:00.000Z",
-      updatedAt: "2026-01-01T00:00:00.000Z",
-    };
+    });
 
     await service.saveCollection(original);
 
     // The file should now be in the mock filesystem at the collection path
     expect(fileOps.files.has(COLLECTION_PATH)).toBe(true);
 
-    // Load it back. The tournament-axis migration (REQ-TAXIS-4) adds a second axis.
     const loaded = await service.loadCollection();
     expect(loaded.id).toBe("col-round");
     expect(loaded.name).toBe("Round Trip");
-    expect(loaded.axes).toHaveLength(2);
+    expect(loaded.axes).toHaveLength(1);
     expect(loaded.axes.find((a) => a.name === "Fun")).toBeDefined();
-    expect(loaded.axes.find((a) => a.source === "tournament")).toBeDefined();
   });
 
   test("sequential saves result in last-write-wins", async () => {
     const { service } = makeService();
-    const base: Collection = {
-      id: "col-1",
-      name: "First",
-      axes: [],
-      games: [],
-      createdAt: "2026-01-01T00:00:00.000Z",
-      updatedAt: "2026-01-01T00:00:00.000Z",
-    };
+    const base = currentCollection({ name: "First" });
 
     await service.saveCollection({ ...base, name: "First" });
     await service.saveCollection({ ...base, name: "Second" });
 
     const loaded = await service.loadCollection();
     expect(loaded.name).toBe("Second");
+  });
+
+  test("validates current collections before writing", async () => {
+    const { service, fileOps } = makeService();
+    const malformed = currentCollection({ name: "" });
+
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+    await expect(service.saveCollection(malformed)).rejects.toThrow();
+    expect(fileOps.files.has(COLLECTION_PATH)).toBe(false);
+    expect(fileOps.calls.some((call) => call.method === "writeFileExclusive")).toBe(false);
   });
 });
 
@@ -198,10 +269,10 @@ describe("StorageService.saveConfig", () => {
     });
 
     const writeCalls = fileOps.calls.filter(
-      (c) => c.method === "writeFile" || c.method === "rename",
+      (c) => c.method === "writeFileExclusive" || c.method === "rename",
     );
     expect(writeCalls).toHaveLength(2);
-    expect(writeCalls[0].method).toBe("writeFile");
+    expect(writeCalls[0].method).toBe("writeFileExclusive");
     expect(writeCalls[0].args[0]).toContain(".tmp");
     expect(writeCalls[1].method).toBe("rename");
   });
@@ -280,7 +351,7 @@ describe("StorageService.saveProfile", () => {
 // Tournament-axis migration (REQ-TAXIS-4, REQ-TAXIS-9)
 // ---------------------------------------------------------------------------
 
-function legacyCollectionWithoutTournamentAxis(): Collection {
+function legacyCollectionWithoutTournamentAxis() {
   return {
     id: "col-legacy",
     name: "Legacy",
@@ -345,10 +416,14 @@ describe("StorageService.loadCollection — tournament axis migration", () => {
     });
 
     await service.loadCollection();
-    const writeCallsAfterFirstLoad = fileOps.calls.filter((c) => c.method === "writeFile").length;
+    const writeCallsAfterFirstLoad = fileOps.calls.filter(
+      (c) => c.method === "writeFileExclusive",
+    ).length;
 
     await service.loadCollection();
-    const writeCallsAfterSecondLoad = fileOps.calls.filter((c) => c.method === "writeFile").length;
+    const writeCallsAfterSecondLoad = fileOps.calls.filter(
+      (c) => c.method === "writeFileExclusive",
+    ).length;
 
     // Second load must not re-write the collection file.
     expect(writeCallsAfterSecondLoad).toBe(writeCallsAfterFirstLoad);
@@ -411,22 +486,9 @@ describe("StorageService.loadCollection — tournament axis migration", () => {
   });
 
   test("does not touch wishlist when migration is a no-op", async () => {
-    // Collection already has a tournament axis, so no migration runs.
-    const collection: Collection = {
-      ...legacyCollectionWithoutTournamentAxis(),
-      axes: [
-        {
-          id: "axis-t",
-          name: "Tournament",
-          description: null,
-          weight: 30,
-          source: "tournament",
-          bggField: null,
-          createdAt: "2026-01-01T00:00:00.000Z",
-          updatedAt: "2026-01-01T00:00:00.000Z",
-        },
-      ],
-    };
+    const legacy = legacyCollectionWithoutTournamentAxis();
+    const first = makeService({ [COLLECTION_PATH]: JSON.stringify(legacy) });
+    const collection = await first.service.loadCollection();
     const wishlist: WishlistEntry[] = [makeWishlistEntry({ predictedScore: 7.5 })];
     const { service, fileOps } = makeService({
       [COLLECTION_PATH]: JSON.stringify(collection),
@@ -447,16 +509,16 @@ describe("StorageService.loadCollection — tournament axis migration", () => {
 // in-flight promise map. Without the lock, two parallel callers each see the
 // no-file branch, each call atomicWrite, and the writes race on the shared
 // `<file>.tmp` path. The mock filesystem masks the rename ordering, but write
-// counts are still observable: with the lock, exactly one writeFile + one
+// counts are still observable: with the lock, exactly one exclusive temp write + one
 // rename per file; without it, two of each.
 //
-// To make the race deterministic, we wrap the mock's writeFile in a yield so
+// To make the race deterministic, we wrap the mock's exclusive write in a yield so
 // both callers reliably enter their no-file branch before either side writes.
 // ---------------------------------------------------------------------------
 
 function withSlowWrite(fileOps: ReturnType<typeof createMockFileOps>) {
-  const original = fileOps.writeFile.bind(fileOps);
-  fileOps.writeFile = async (filePath: string, content: string): Promise<void> => {
+  const original = fileOps.writeFileExclusive.bind(fileOps);
+  fileOps.writeFileExclusive = async (filePath: string, content: string): Promise<boolean> => {
     // Yield to the microtask queue so the second caller's exists() check can
     // resolve before this writeFile commits. Without this hop, both callers
     // could otherwise serialize naturally even without the lock.
@@ -482,10 +544,10 @@ describe("StorageService — concurrent first-time load lock", () => {
     expect(a.sessions).toEqual([]);
     expect(a.gameStats).toEqual({});
 
-    // Exactly one atomic write to tournament.json (one writeFile to the tmp,
+    // Exactly one atomic write to tournament.json (one exclusive write to the tmp,
     // one rename onto the real path). Two of either means the lock is gone.
     const tournamentWrites = fileOps.calls.filter(
-      (c) => c.method === "writeFile" && c.args[0].includes("tournament.json"),
+      (c) => c.method === "writeFileExclusive" && c.args[0].includes("tournament.json"),
     );
     const tournamentRenames = fileOps.calls.filter(
       (c) => c.method === "rename" && c.args[1] === TOURNAMENT_PATH,
@@ -509,7 +571,7 @@ describe("StorageService — concurrent first-time load lock", () => {
     expect(a.axes.map((axis) => axis.name).sort()).toEqual(b.axes.map((axis) => axis.name).sort());
 
     const collectionWrites = fileOps.calls.filter(
-      (c) => c.method === "writeFile" && c.args[0].includes("collection.json"),
+      (c) => c.method === "writeFileExclusive" && c.args[0].includes("collection.json"),
     );
     const collectionRenames = fileOps.calls.filter(
       (c) => c.method === "rename" && c.args[1] === COLLECTION_PATH,

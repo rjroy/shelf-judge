@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { getPreferenceCurveInvalidFields } from "./curve-math";
 import {
   DerivedAxisPayloadSchema,
   DERIVED_AXIS_REGISTRY,
@@ -13,21 +14,23 @@ import {
   type AxisValidationDetail,
 } from "./errors";
 import type {
-  CurrentAxis,
-  CurrentAxisBase,
+  Axis,
+  AxisBase,
   DerivedAxis,
   DisabledLegacyAxis,
-  EnabledCurrentAxis,
+  EnabledAxis,
   NativeScale,
   ToleranceLevel,
 } from "./types";
+
+export const CURRENT_COLLECTION_SCHEMA_VERSION = 1 as const;
 
 const VetoConfigSchema = z.object({
   direction: z.enum(["below", "above"]),
   threshold: z.number(),
 });
 
-const CurrentVetoConfigSchema = VetoConfigSchema.strict();
+const StrictVetoConfigSchema = VetoConfigSchema.strict();
 
 const curveFields = {
   preferenceShape: z.enum(["higher-is-better", "lower-is-better", "sweet-spot"]).optional(),
@@ -40,7 +43,7 @@ const curveFields = {
 const currentCurveFields = {
   ...curveFields,
   toleranceWidth: z.number().nullable().optional(),
-  veto: CurrentVetoConfigSchema.nullable().optional(),
+  veto: StrictVetoConfigSchema.nullable().optional(),
 };
 
 const currentCommonFields = {
@@ -58,14 +61,14 @@ const currentCommonUpdateFields = {
   tolerance: z.enum(["flexible", "moderate", "strict"]).nullable().optional(),
 };
 
-const CurrentPersonalCreateAxisSchema = z
+const PersonalCreateAxisSchema = z
   .object({
     ...currentCommonFields,
-    source: z.literal("personal"),
+    source: z.literal("personal").optional().default("personal"),
   })
   .strict();
 
-const CurrentDerivedCreateAxisSchema = z
+const DerivedCreateAxisSchema = z
   .object({
     ...currentCommonFields,
     source: z.literal("derived"),
@@ -82,14 +85,14 @@ const CurrentDerivedCreateAxisSchema = z
     ...DerivedAxisPayloadSchema.parse(derivedPayloadFrom(value)),
   }));
 
-export const CurrentCreateAxisSchema = z
-  .union([CurrentPersonalCreateAxisSchema, CurrentDerivedCreateAxisSchema])
+export const CreateAxisSchema = z
+  .union([PersonalCreateAxisSchema, DerivedCreateAxisSchema])
   .superRefine((value, context) => {
     const scale = getCreateNativeScale(value);
     if (scale !== null) addCurveIssues(value, scale, context);
   });
 
-export const CurrentUpdateAxisSchema = z
+export const UpdateAxisSchema = z
   .object({
     ...currentCommonUpdateFields,
     configuration: z.unknown().optional(),
@@ -113,7 +116,7 @@ export const LegacyAxisRepairSchema = z
   }));
 
 type ValidationContext = z.RefinementCtx;
-type CurrentCurveInput = {
+type CurveInput = {
   preferenceShape?: "higher-is-better" | "lower-is-better" | "sweet-spot";
   idealValue?: number | null;
   tolerance?: "flexible" | "moderate" | "strict";
@@ -155,7 +158,7 @@ function addDerivedConfigurationIssues(
 }
 
 function getCreateNativeScale(
-  value: z.output<typeof CurrentPersonalCreateAxisSchema> | Record<string, unknown>,
+  value: z.output<typeof PersonalCreateAxisSchema> | Record<string, unknown>,
 ): NativeScale | null {
   if (value.source === "personal") return { min: 1, max: 10 };
   const result = validateDerivedAxisPayload(derivedPayloadFrom(value));
@@ -165,37 +168,19 @@ function getCreateNativeScale(
   );
 }
 
-function curveInvalidFields(curve: CurrentCurveInput, scale: NativeScale): string[] {
-  const invalid = new Set<string>();
-  const ideal = curve.idealValue;
-  const width = curve.toleranceWidth;
+function curveInvalidFields(curve: CurveInput, scale: NativeScale): string[] {
   const shape = curve.preferenceShape ?? "higher-is-better";
-  if (shape === "sweet-spot" && ideal == null) invalid.add("idealValue");
-  if (ideal != null && (ideal < scale.min || ideal > scale.max)) invalid.add("idealValue");
+  const invalid = new Set(getPreferenceCurveInvalidFields(scale, shape, curve));
   if (
     curve.veto != null &&
     (curve.veto.threshold < scale.min || curve.veto.threshold > scale.max)
   ) {
     invalid.add("veto");
   }
-  if (curve.tolerance !== undefined && width != null) {
-    invalid.add("tolerance");
-    invalid.add("toleranceWidth");
-  }
-  if (width != null) {
-    if (shape !== "sweet-spot") invalid.add("toleranceWidth");
-    if (ideal == null || width <= 0 || width >= ideal - scale.min || width >= scale.max - ideal) {
-      invalid.add("toleranceWidth");
-    }
-  }
   return [...invalid];
 }
 
-function addCurveIssues(
-  curve: CurrentCurveInput,
-  scale: NativeScale,
-  context: ValidationContext,
-): void {
+function addCurveIssues(curve: CurveInput, scale: NativeScale, context: ValidationContext): void {
   for (const field of curveInvalidFields(curve, scale)) {
     addCodedIssue(
       context,
@@ -247,7 +232,7 @@ function throwCodedSchemaError(error: z.ZodError): never {
   );
 }
 
-export function parseCurrentCreateAxisInput(input: unknown): CurrentCreateAxisOutput {
+export function parseCreateAxisInput(input: unknown): CreateAxisOutput {
   if (isObject(input) && input.source === "derived") {
     const payload = requireValidDerivedPayload(derivedPayloadFrom(input));
     const curve = z.object(currentCurveFields).passthrough().safeParse(input);
@@ -258,13 +243,13 @@ export function parseCurrentCreateAxisInput(input: unknown): CurrentCreateAxisOu
       throwIfInvalidCurve(curve.data, scale);
     }
   }
-  const result = CurrentCreateAxisSchema.safeParse(input);
+  const result = CreateAxisSchema.safeParse(input);
   if (!result.success) throwCodedSchemaError(result.error);
   return result.data;
 }
 
-export function parseCurrentUpdateAxisInput(input: unknown): CurrentUpdateAxisOutput {
-  const result = CurrentUpdateAxisSchema.safeParse(input);
+export function parseUpdateAxisInput(input: unknown): UpdateAxisOutput {
+  const result = UpdateAxisSchema.safeParse(input);
   if (!result.success) throwCodedSchemaError(result.error);
   return result.data;
 }
@@ -288,7 +273,7 @@ function throwDerivedPayloadFailure(
   throw new CodedAxisValidationError(result.message, result.code, [result.detail]);
 }
 
-function throwIfInvalidCurve(curve: CurrentCurveInput, scale: NativeScale): void {
+function throwIfInvalidCurve(curve: CurveInput, scale: NativeScale): void {
   const invalidFields = curveInvalidFields(curve, scale);
   if (invalidFields.length === 0) return;
   throw new CodedAxisValidationError(
@@ -298,17 +283,17 @@ function throwIfInvalidCurve(curve: CurrentCurveInput, scale: NativeScale): void
   );
 }
 
-type NormalizedCurrentUpdate = Omit<CurrentUpdateAxisOutput, "tolerance"> & {
+type NormalizedAxisUpdate = Omit<UpdateAxisOutput, "tolerance"> & {
   tolerance?: ToleranceLevel;
 };
 
-function normalizeCurrentUpdate(update: CurrentUpdateAxisOutput): NormalizedCurrentUpdate {
+function normalizeAxisUpdate(update: UpdateAxisOutput): NormalizedAxisUpdate {
   const { tolerance, ...rest } = update;
   if (tolerance === null) return { ...rest, tolerance: undefined };
   return tolerance === undefined ? rest : { ...rest, tolerance };
 }
 
-function validateEnabledCurrentAxis(axis: EnabledCurrentAxis): void {
+function validateEnabledAxis(axis: EnabledAxis): void {
   let scale: NativeScale = { min: 1, max: 10 };
   if (axis.source === "derived") {
     const payload = { derivedField: axis.derivedField, configuration: axis.configuration };
@@ -325,16 +310,13 @@ function validateEnabledCurrentAxis(axis: EnabledCurrentAxis): void {
   }
 }
 
-export function validateCurrentAxisForNativeScale(axis: CurrentAxis): CurrentAxis {
-  if (axis.enabled) validateEnabledCurrentAxis(axis);
+export function validateAxisForNativeScale(axis: Axis): Axis {
+  if (axis.enabled) validateEnabledAxis(axis);
   return axis;
 }
 
-export function mergeAndValidateCurrentAxisUpdate(
-  axis: CurrentAxis,
-  update: CurrentUpdateAxisOutput,
-): CurrentAxis {
-  const normalizedUpdate = normalizeCurrentUpdate(update);
+export function mergeAndValidateAxisUpdate(axis: Axis, update: UpdateAxisOutput): Axis {
+  const normalizedUpdate = normalizeAxisUpdate(update);
   if (!axis.enabled) {
     if (update.configuration !== undefined) {
       throw new CodedAxisValidationError(
@@ -360,11 +342,11 @@ export function mergeAndValidateCurrentAxisUpdate(
     });
     if (!result.success) throwDerivedPayloadFailure(result);
     const merged = createDerivedAxisFromPayload({ ...axis, ...normalizedUpdate }, result.data);
-    validateEnabledCurrentAxis(merged);
+    validateEnabledAxis(merged);
     return merged;
   }
   const merged = { ...axis, ...normalizedUpdate };
-  validateEnabledCurrentAxis(merged);
+  validateEnabledAxis(merged);
   return merged;
 }
 
@@ -380,7 +362,7 @@ export function repairAndValidateLegacyAxis(
       [result.detail],
     );
   }
-  const repairedBase: CurrentAxisBase = {
+  const repairedBase: AxisBase = {
     id: axis.id,
     name: repair.name ?? axis.name,
     description: repair.description === undefined ? axis.description : repair.description,
@@ -398,7 +380,7 @@ export function repairAndValidateLegacyAxis(
   };
   const repaired = createDerivedAxisFromPayload(repairedBase, result.data);
   try {
-    validateEnabledCurrentAxis(repaired);
+    validateEnabledAxis(repaired);
   } catch (error) {
     if (error instanceof CodedAxisValidationError) {
       throw new CodedAxisValidationError(
@@ -412,47 +394,134 @@ export function repairAndValidateLegacyAxis(
   return repaired;
 }
 
-export const CreateAxisSchema = z
-  .object({
-    name: z.string().min(1, "Axis name cannot be empty"),
-    description: z.string().nullable().optional().default(null),
-    weight: z.number().int("Weight must be an integer").min(0).max(100),
-    source: z.enum(["personal", "bgg", "tournament"]).optional().default("personal"),
-    bggField: z.string().nullable().optional().default(null),
-    ...curveFields,
-  })
-  .refine(
-    (data) =>
-      data.preferenceShape !== "sweet-spot" ||
-      (data.idealValue !== undefined && data.idealValue !== null),
-    { message: "idealValue is required when preferenceShape is sweet-spot", path: ["idealValue"] },
-  )
-  .refine(
-    (data) => {
-      // Three-arm shape: bggField presence is determined by source.
-      // - personal: no bggField
-      // - bgg: bggField required
-      // - tournament: no bggField
-      const hasBggField = data.bggField !== null && data.bggField !== undefined;
-      if (data.source === "bgg") return hasBggField;
-      return !hasBggField;
-    },
-    {
-      message: "bggField is required when source is 'bgg' and must be omitted otherwise",
-      path: ["bggField"],
-    },
-  );
+const AxisBaseSchemaFields = {
+  id: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().nullable(),
+  weight: z.number().int().min(0).max(100),
+  enabled: z.literal(true),
+  preferenceShape: z.enum(["higher-is-better", "lower-is-better", "sweet-spot"]).optional(),
+  idealValue: z.number().nullable().optional(),
+  tolerance: z.enum(["flexible", "moderate", "strict"]).optional(),
+  toleranceWidth: z.number().nullable().optional(),
+  leanDirection: z.enum(["lower", "higher"]).nullable().optional(),
+  veto: StrictVetoConfigSchema.nullable().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+};
 
-// UpdateAxisSchema omits the sweet-spot/idealValue refinement that CreateAxisSchema has.
-// On update, an axis may already have idealValue stored, so sending
-// { preferenceShape: "sweet-spot" } without idealValue is valid.
-// The service layer validates against stored axis state instead.
-export const UpdateAxisSchema = z.object({
-  name: z.string().min(1, "Axis name cannot be empty").optional(),
-  description: z.string().nullable().optional(),
-  weight: z.number().int("Weight must be an integer").min(0).max(100).optional(),
-  ...curveFields,
-});
+const PersonalAxisSchema = z
+  .object({ ...AxisBaseSchemaFields, source: z.literal("personal") })
+  .strict();
+const TournamentAxisSchema = z
+  .object({ ...AxisBaseSchemaFields, source: z.literal("tournament") })
+  .strict();
+const DerivedAxisSchema = z
+  .object({
+    ...AxisBaseSchemaFields,
+    source: z.literal("derived"),
+    derivedField: z.string(),
+    configuration: z.unknown(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const result = validateDerivedAxisPayload(derivedPayloadFrom(value));
+    if (!result.success) addDerivedConfigurationIssues(value, context);
+  })
+  .transform((value) => ({
+    ...value,
+    ...DerivedAxisPayloadSchema.parse(derivedPayloadFrom(value)),
+  }));
+const DisabledLegacyAxisSchema = z
+  .object({
+    ...AxisBaseSchemaFields,
+    enabled: z.literal(false),
+    source: z.literal("legacy"),
+    reason: z.string().min(1),
+    legacyField: z.string().nullable(),
+    legacyPayload: z.unknown(),
+  })
+  .strict()
+  .refine((value) => Object.hasOwn(value, "legacyPayload"), {
+    message: "legacyPayload is required",
+    path: ["legacyPayload"],
+  })
+  .transform((value) => ({ ...value, legacyPayload: value.legacyPayload }));
+
+// Persisted collections validate structure and source/configuration correlation only.
+// Curve/native-scale semantics belong to create, update, and repair mutation boundaries;
+// historical values must remain loadable so migration can preserve scoring behavior.
+export const AxisSchema = z.union([
+  PersonalAxisSchema,
+  TournamentAxisSchema,
+  DerivedAxisSchema,
+  DisabledLegacyAxisSchema,
+]);
+
+const BggTagSchema = z.object({ id: z.number().int(), name: z.string() }).strict();
+const SuggestedPlayerCountSchema = z
+  .object({
+    playerCount: z.string(),
+    best: z.number().int().min(0),
+    recommended: z.number().int().min(0),
+    notRecommended: z.number().int().min(0),
+  })
+  .strict();
+const BggGameDataSchema = z
+  .object({
+    communityRating: z.number(),
+    bayesAverage: z.number(),
+    weight: z.number().nullable(),
+    numWeightVotes: z.number().int().min(0),
+    description: z.string().nullable(),
+    mechanics: z.array(BggTagSchema),
+    categories: z.array(BggTagSchema),
+    families: z.array(BggTagSchema),
+    subdomains: z.array(BggTagSchema),
+    suggestedPlayerCounts: z.array(SuggestedPlayerCountSchema),
+    fetchedAt: z.string(),
+  })
+  .strict();
+const BoxDimensionsSchema = z
+  .object({
+    width: z.number().positive(),
+    height: z.number().positive(),
+    depth: z.number().positive(),
+  })
+  .strict();
+
+export const GameSchema = z
+  .object({
+    id: z.string().min(1),
+    bggId: z.number().int().nullable(),
+    name: z.string().min(1),
+    yearPublished: z.number().int().nullable(),
+    minPlayers: z.number().int().nullable(),
+    maxPlayers: z.number().int().nullable(),
+    playingTime: z.number().int().nullable(),
+    imageUrl: z.string().nullable(),
+    bggData: BggGameDataSchema.nullable(),
+    numPlays: z.number().int().min(0).nullable(),
+    ownership: z.enum(["owned", "previously-owned"]),
+    boxDimensions: BoxDimensionsSchema.nullable(),
+    manualShelfId: z.string().nullable(),
+    ratings: z.record(z.number().int().min(1).max(10)),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .strict();
+
+export const CollectionSchema = z
+  .object({
+    schemaVersion: z.literal(CURRENT_COLLECTION_SCHEMA_VERSION),
+    id: z.string().min(1),
+    name: z.string().min(1),
+    axes: z.array(AxisSchema),
+    games: z.array(GameSchema),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .strict();
 
 export const RateGameSchema = z.object({
   axisId: z.string().min(1),
@@ -586,11 +655,9 @@ export const ShelfConfigurationSchema = z.object({
 });
 
 export type CreateAxisInput = z.input<typeof CreateAxisSchema>;
+export type CreateAxisOutput = z.output<typeof CreateAxisSchema>;
 export type UpdateAxisInput = z.input<typeof UpdateAxisSchema>;
-export type CurrentCreateAxisInput = z.input<typeof CurrentCreateAxisSchema>;
-export type CurrentCreateAxisOutput = z.output<typeof CurrentCreateAxisSchema>;
-export type CurrentUpdateAxisInput = z.input<typeof CurrentUpdateAxisSchema>;
-export type CurrentUpdateAxisOutput = z.output<typeof CurrentUpdateAxisSchema>;
+export type UpdateAxisOutput = z.output<typeof UpdateAxisSchema>;
 export type LegacyAxisRepairInput = z.input<typeof LegacyAxisRepairSchema>;
 export type LegacyAxisRepairOutput = z.output<typeof LegacyAxisRepairSchema>;
 export type RateGameInput = z.input<typeof RateGameSchema>;

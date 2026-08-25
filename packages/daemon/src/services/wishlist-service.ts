@@ -30,13 +30,17 @@ function buildEntry(
 
   let predictedBreakdown: WishlistBreakdownEntry[] | null = null;
   if (!isUnavailable && result.score.breakdown) {
-    predictedBreakdown = result.score.breakdown
-      .filter((b) => b.rating !== null)
-      .map((b) => ({
-        axisName: b.axisName,
-        rating: b.rating!,
-        confidence: b.predictionConfidence ?? "weak",
-      }));
+    predictedBreakdown = result.score.breakdown.flatMap((breakdown) =>
+      breakdown.effectiveRating === null
+        ? []
+        : [
+            {
+              axisName: breakdown.axisName,
+              rating: breakdown.effectiveRating,
+              confidence: breakdown.predictionConfidence ?? "weak",
+            },
+          ],
+    );
   }
 
   return {

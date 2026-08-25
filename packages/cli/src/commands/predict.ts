@@ -115,7 +115,7 @@ export async function predictBggGame(
       `Predictions unavailable: need ${predictionUnavailable.gamesNeeded} more rated game(s) to reach Stage 1`,
     );
     if (score) {
-      lines.push(`BGG-derived score: ${formatScore(score.score)}`);
+      lines.push(`Available-data score: ${formatScore(score.score)}`);
     }
     return lines.join("\n");
   }

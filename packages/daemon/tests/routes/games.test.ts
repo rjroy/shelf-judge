@@ -130,6 +130,7 @@ describe("Game Routes", () => {
       const axisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
         name: "Fun",
         weight: 50,
+        source: "personal",
       });
       expect(axisRes.status).toBe(201);
       const axis = (await axisRes.json()) as Axis;
@@ -171,6 +172,7 @@ describe("Game Routes", () => {
       const axisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
         name: "Fun",
         weight: 50,
+        source: "personal",
       });
       const axis = (await axisRes.json()) as Axis;
 
@@ -201,6 +203,7 @@ describe("Game Routes", () => {
       const axisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
         name: "Fun",
         weight: 50,
+        source: "personal",
       });
       const axis = (await axisRes.json()) as Axis;
 
@@ -226,6 +229,7 @@ describe("Game Routes", () => {
       const axisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
         name: "Fun",
         weight: 50,
+        source: "personal",
       });
       const axis = (await axisRes.json()) as Axis;
 
@@ -249,6 +253,7 @@ describe("Game Routes", () => {
       const axisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
         name: "Fun",
         weight: 50,
+        source: "personal",
       });
       const axis = (await axisRes.json()) as Axis;
 
@@ -481,6 +486,7 @@ describe("Game Routes", () => {
       const axisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
         name: "Fun",
         weight: 50,
+        source: "personal",
       });
       const axis = (await axisRes.json()) as Axis;
 

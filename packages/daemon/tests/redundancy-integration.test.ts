@@ -115,9 +115,35 @@ const allGamesWithScores: GameWithScore[] = [
 ];
 
 const defaultCollection: Collection = {
+  schemaVersion: 1,
   id: "collection-1",
   name: "Test",
-  axes: [],
+  axes: [
+    {
+      id: "players",
+      name: "Player Count Fit",
+      description: null,
+      weight: 50,
+      enabled: true,
+      source: "derived",
+      derivedField: "playerCountFit",
+      configuration: { targetPlayerCount: 4 },
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: "time",
+      name: "Play Time",
+      description: null,
+      weight: 50,
+      enabled: true,
+      source: "derived",
+      derivedField: "playingTime",
+      configuration: { maximumScoringTime: 90 },
+      createdAt: now,
+      updatedAt: now,
+    },
+  ],
   games: [gameA, gameB, gameC],
   createdAt: now,
   updatedAt: now,
@@ -139,7 +165,12 @@ function createMockStorageService(
     saveCollection: () => Promise.resolve(),
     loadConfig: () => Promise.reject(new Error("not implemented")),
     saveConfig: () => Promise.resolve(),
-    loadTournament: () => Promise.reject(new Error("not implemented")),
+    loadTournament: () =>
+      Promise.resolve({
+        settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
+        sessions: [],
+        gameStats: {},
+      }),
     saveTournament: () => Promise.resolve(),
     loadProfile: () => Promise.resolve(null),
     saveProfile: () => Promise.resolve(),

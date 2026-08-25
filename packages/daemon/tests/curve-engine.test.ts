@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import {
-  getNativeScale,
   applyPreferenceCurve,
   calibrateTolerance,
   applyLean,
@@ -12,28 +11,64 @@ import {
   LEAN_GENTLE_MULTIPLIER,
   LEAN_STEEP_MULTIPLIER,
 } from "../src/services/curve-engine";
+import { getAxisNativeScale, type DerivedAxis, type PersonalAxis } from "@shelf-judge/shared";
 
 // --- Native Scales (REQ-CURVE-2, REQ-CURVE-3) ---
 
-describe("getNativeScale", () => {
+describe("getAxisNativeScale", () => {
+  const common = {
+    id: "axis",
+    name: "Axis",
+    description: null,
+    weight: 50,
+    enabled: true as const,
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+  };
+
   test("personal axis returns {1, 10}", () => {
-    expect(getNativeScale("personal", null)).toEqual({ min: 1, max: 10 });
+    const axis: PersonalAxis = { ...common, source: "personal" };
+    expect(getAxisNativeScale(axis)).toEqual({ min: 1, max: 10 });
   });
 
-  test("BGG communityRating returns {1, 10}", () => {
-    expect(getNativeScale("bgg", "communityRating")).toEqual({ min: 1, max: 10 });
+  test("community rating returns {1, 10}", () => {
+    const axis: DerivedAxis<"communityRating"> = {
+      ...common,
+      source: "derived",
+      derivedField: "communityRating",
+      configuration: {},
+    };
+    expect(getAxisNativeScale(axis)).toEqual({ min: 1, max: 10 });
   });
 
-  test("BGG weight returns {1, 5}", () => {
-    expect(getNativeScale("bgg", "weight")).toEqual({ min: 1, max: 5 });
+  test("complexity returns {1, 5}", () => {
+    const axis: DerivedAxis<"weight"> = {
+      ...common,
+      source: "derived",
+      derivedField: "weight",
+      configuration: {},
+    };
+    expect(getAxisNativeScale(axis)).toEqual({ min: 1, max: 5 });
   });
 
-  test("unknown BGG field throws", () => {
-    expect(() => getNativeScale("bgg", "unknownField")).toThrow("Unknown BGG field");
+  test("playing time uses its configured cap", () => {
+    const axis: DerivedAxis<"playingTime"> = {
+      ...common,
+      source: "derived",
+      derivedField: "playingTime",
+      configuration: { maximumScoringTime: 360 },
+    };
+    expect(getAxisNativeScale(axis)).toEqual({ min: 1, max: 360 });
   });
 
-  test("personal axis ignores bggField value", () => {
-    expect(getNativeScale("personal", "weight")).toEqual({ min: 1, max: 10 });
+  test("player count fit uses the 1-10 scoring scale", () => {
+    const axis: DerivedAxis<"playerCountFit"> = {
+      ...common,
+      source: "derived",
+      derivedField: "playerCountFit",
+      configuration: { targetPlayerCount: 4 },
+    };
+    expect(getAxisNativeScale(axis)).toEqual({ min: 1, max: 10 });
   });
 });
 

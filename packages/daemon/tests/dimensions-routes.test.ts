@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Hono } from "hono";
-import type { Game, GameWithScore, BoxDimensions } from "@shelf-judge/shared";
+import type { BoxDimensions, GameWithScore, Game } from "@shelf-judge/shared";
 import { createGameRoutes } from "../src/routes/games";
 import type { GameService } from "../src/services/game-service";
 

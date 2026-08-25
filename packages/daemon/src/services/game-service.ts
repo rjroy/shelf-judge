@@ -1,10 +1,13 @@
 import { v4 as uuidv4 } from "uuid";
 import {
   AddGameSchema,
+  AXIS_VALIDATION_CODES,
+  CodedAxisValidationError,
   toErrorMessage,
   type Game,
   type OwnershipStatus,
   type AddGameInput,
+  type Axis,
   type FitnessResult,
   type GameWithScore,
   type AddGameResult,
@@ -87,10 +90,10 @@ export function createGameService(deps: GameServiceDeps): GameService {
 
   function computeScore(
     game: Game,
-    axes: import("@shelf-judge/shared").Axis[],
+    axes: Axis[],
     tournamentData: TournamentData | null,
   ): FitnessResult | null {
-    return fitnessService.calculateScore(game, axes, game.bggData, tournamentData);
+    return fitnessService.calculateScore(game, axes, tournamentData);
   }
 
   function assertBggConfigured(): void {
@@ -206,6 +209,13 @@ export function createGameService(deps: GameServiceDeps): GameService {
         const axis = collection.axes.find((a) => a.id === axisId);
         if (!axis) {
           throw new Error(`Axis not found: ${axisId}`);
+        }
+        if (!axis.enabled) {
+          throw new CodedAxisValidationError(
+            `Axis is disabled and cannot be rated: ${axisId}`,
+            AXIS_VALIDATION_CODES.DISABLED_LEGACY_AXIS,
+            [{ field: "axisId", path: ["ratings", axisId] }],
+          );
         }
         if (rating !== null && (!Number.isInteger(rating) || rating < 1 || rating > 10)) {
           throw new Error(
