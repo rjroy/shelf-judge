@@ -16,20 +16,22 @@ import {
   summarizeDerivedAxisConfiguration,
 } from "@shelf-judge/shared";
 import { getAxisWeightPercentage, getEnabledAxisWeightTotal } from "@/lib/axis-weight-utils";
-import {
-  DEFAULT_CURVE,
-  curveStateFromAxis,
-  curveStateToBody,
-  type CurveState,
-} from "@/lib/axis-curve-state";
+import { DEFAULT_CURVE, curveStateFromAxis, type CurveState } from "@/lib/axis-curve-state";
 import {
   configurationDraftFromField,
-  configurationFromDraft,
   nativeScaleFromDiscovery,
   readAxisFormError,
   type AxisFormError,
   type ConfigurationDraft,
 } from "@/lib/derived-axis-web";
+import {
+  AxisFormRequestTracker,
+  createAxis,
+  deleteAxis,
+  repairAxis,
+  updateAxis,
+  type AxisFormScope,
+} from "@/lib/axis-page-controller";
 
 interface GameWithScore {
   game: {
@@ -38,8 +40,6 @@ interface GameWithScore {
   };
   score: unknown;
 }
-
-type FormScope = "create" | `update:${string}` | `repair:${string}`;
 
 export default function AxesPage() {
   const [axes, setAxes] = useState<Axis[]>([]);
@@ -59,8 +59,8 @@ export default function AxesPage() {
   const [newCurve, setNewCurve] = useState<CurveState>(DEFAULT_CURVE);
   const [newDerivedField, setNewDerivedField] = useState<DerivedFieldDiscovery | null>(null);
   const [newConfiguration, setNewConfiguration] = useState<ConfigurationDraft>({});
-  const [formErrors, setFormErrors] = useState<Partial<Record<FormScope, AxisFormError>>>({});
-  const formRequestVersions = useRef(new Map<FormScope, number>());
+  const [formErrors, setFormErrors] = useState<Partial<Record<AxisFormScope, AxisFormError>>>({});
+  const formRequests = useRef(new AxisFormRequestTracker());
   const [repairingId, setRepairingId] = useState<string | null>(null);
   const [repairField, setRepairField] = useState<DerivedFieldDiscovery | null>(null);
   const [repairConfiguration, setRepairConfiguration] = useState<ConfigurationDraft>({});
@@ -96,9 +96,8 @@ export default function AxesPage() {
     return games.filter((g) => g.game.ratings[axisId] !== undefined).length;
   }
 
-  function clearFormError(scope: FormScope): number {
-    const version = (formRequestVersions.current.get(scope) ?? 0) + 1;
-    formRequestVersions.current.set(scope, version);
+  function clearFormError(scope: AxisFormScope): number {
+    const version = formRequests.current.begin(scope);
     setFormErrors((current) => {
       if (current[scope] === undefined) return current;
       const next = { ...current };
@@ -108,8 +107,8 @@ export default function AxesPage() {
     return version;
   }
 
-  function setFormError(scope: FormScope, version: number, formError: AxisFormError) {
-    if (formRequestVersions.current.get(scope) !== version) return;
+  function setFormError(scope: AxisFormScope, version: number, formError: AxisFormError) {
+    if (!formRequests.current.isCurrent(scope, version)) return;
     setFormErrors((current) => ({ ...current, [scope]: formError }));
   }
 
@@ -123,24 +122,15 @@ export default function AxesPage() {
     const version = clearFormError(scope);
 
     try {
-      const res = await fetch("/api/daemon/axes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          source: newDerivedField ? "derived" : "personal",
-          name: newName.trim(),
-          description: newDescription.trim() || undefined,
-          weight: parseInt(newWeight, 10),
-          ...curveStateToBody(newCurve, "create"),
-          ...(newDerivedField
-            ? {
-                derivedField: newDerivedField.id,
-                configuration: configurationFromDraft(newDerivedField, newConfiguration),
-              }
-            : {}),
-        }),
+      const res = await createAxis({
+        name: newName,
+        description: newDescription,
+        weight: newWeight,
+        curve: newCurve,
+        derivedField: newDerivedField,
+        configuration: newConfiguration,
       });
-      if (formRequestVersions.current.get(scope) !== version) return;
+      if (!formRequests.current.isCurrent(scope, version)) return;
       if (!res.ok) {
         const formError = await readAxisFormError(res);
         setFormError(scope, version, formError);
@@ -174,32 +164,26 @@ export default function AxesPage() {
 
     const version = clearFormError(scope);
     try {
-      const body: Record<string, unknown> = {};
       const axis = axes.find((a) => a.id === id);
+      if (!axis) throw new Error("Axis is unavailable");
       // Tournament axis is auto-managed; only weight is user-editable. Sending
       // name/description/curve fields would let the user drift the singleton's
       // fixed defaults (REQ-TAXIS-5) and apply curves to an already-normalized
       // 1-10 ELO score (REQ-CURVE-3a says identity passthrough is the default).
-      if (axis?.source === "tournament") {
-        if (editWeight) body.weight = parseInt(editWeight, 10);
-      } else {
-        if (editName.trim() && editName.trim() !== axis?.name) body.name = editName.trim();
-        if (editWeight) body.weight = parseInt(editWeight, 10);
-        if (editDescription !== axis?.description) body.description = editDescription;
-        Object.assign(body, curveStateToBody(editCurve, "update"));
-        if (axis?.source === "derived") {
-          const field = discovery?.fields.find((candidate) => candidate.id === axis.derivedField);
-          if (!field) throw new Error("Derived field metadata is unavailable");
-          body.configuration = configurationFromDraft(field, editConfiguration);
-        }
-      }
-
-      const res = await fetch(`/api/daemon/axes/${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+      const field =
+        axis.source === "derived"
+          ? discovery?.fields.find((candidate) => candidate.id === axis.derivedField)
+          : undefined;
+      const res = await updateAxis(id, {
+        axis,
+        name: editName,
+        description: editDescription,
+        weight: editWeight,
+        curve: editCurve,
+        derivedField: field,
+        configuration: editConfiguration,
       });
-      if (formRequestVersions.current.get(scope) !== version) return;
+      if (!formRequests.current.isCurrent(scope, version)) return;
       if (!res.ok) {
         const formError = await readAxisFormError(res);
         setFormError(scope, version, formError);
@@ -221,16 +205,8 @@ export default function AxesPage() {
     const scope = `repair:${axis.id}` as const;
     const version = clearFormError(scope);
     try {
-      const res = await fetch(`/api/daemon/axes/${axis.id}/repair`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          derivedField: repairField.id,
-          configuration: configurationFromDraft(repairField, repairConfiguration),
-          ...curveStateToBody(repairCurve, "update"),
-        }),
-      });
-      if (formRequestVersions.current.get(scope) !== version) return;
+      const res = await repairAxis(axis.id, repairField, repairConfiguration, repairCurve);
+      if (!formRequests.current.isCurrent(scope, version)) return;
       if (!res.ok) {
         const formError = await readAxisFormError(res);
         setFormError(scope, version, formError);
@@ -281,9 +257,7 @@ export default function AxesPage() {
 
     setError(null);
     try {
-      const res = await fetch(`/api/daemon/axes/${axis.id}`, {
-        method: "DELETE",
-      });
+      const res = await deleteAxis(axis.id);
       if (!res.ok) {
         const data = (await res.json().catch(() => ({ error: "Unknown error" }))) as {
           error?: string;

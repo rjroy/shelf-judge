@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useReducer } from "react";
 import { useRouter } from "next/navigation";
 import type { Axis, FitnessResult } from "@shelf-judge/shared";
 import { getRatingLabel } from "@shelf-judge/shared";
@@ -18,6 +18,112 @@ interface RatingFormContentProps extends RatingFormProps {
   request?: typeof fetch;
 }
 
+export interface RatingFormState {
+  ratings: Record<string, string>;
+  saving: boolean;
+  error: string | null;
+}
+
+export type RatingFormAction =
+  | { type: "change"; axisId: string; value: string }
+  | { type: "remove"; axisId: string }
+  | { type: "reset"; ratings: Record<string, string> }
+  | { type: "save-started" }
+  | { type: "save-finished" }
+  | { type: "save-failed"; error: string };
+
+export function createRatingFormState(
+  axes: Axis[],
+  currentRatings: Record<string, number>,
+): RatingFormState {
+  const ratings: Record<string, string> = {};
+  for (const axis of axes.filter(isEditableRatingAxis)) {
+    if (currentRatings[axis.id] !== undefined) ratings[axis.id] = String(currentRatings[axis.id]);
+  }
+  return { ratings, saving: false, error: null };
+}
+
+export function ratingFormReducer(
+  state: RatingFormState,
+  action: RatingFormAction,
+): RatingFormState {
+  switch (action.type) {
+    case "change":
+      return { ...state, ratings: { ...state.ratings, [action.axisId]: action.value } };
+    case "remove": {
+      const ratings = { ...state.ratings };
+      delete ratings[action.axisId];
+      return { ...state, ratings };
+    }
+    case "reset":
+      return { ratings: action.ratings, saving: false, error: null };
+    case "save-started":
+      return { ...state, saving: true, error: null };
+    case "save-finished":
+      return { ...state, saving: false };
+    case "save-failed":
+      return { ...state, saving: false, error: action.error };
+  }
+}
+
+export async function saveRatings(
+  gameId: string,
+  ratings: Record<string, number | null>,
+  refresh: () => void,
+  request: typeof fetch = fetch,
+): Promise<void> {
+  const response = await request(`/api/daemon/games/${gameId}/ratings`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ratings }),
+  });
+  if (!response.ok) {
+    const data = (await response.json().catch(() => ({ error: "Unknown error" }))) as {
+      error?: string;
+    };
+    throw new Error(data.error ?? `Failed: ${response.status}`);
+  }
+  refresh();
+}
+
+export async function submitRatingForm({
+  gameId,
+  axes,
+  currentRatings,
+  drafts,
+  refresh,
+  request,
+  dispatch,
+}: {
+  gameId: string;
+  axes: Axis[];
+  currentRatings: Record<string, number>;
+  drafts: Record<string, string>;
+  refresh: () => void;
+  request: typeof fetch;
+  dispatch: (action: RatingFormAction) => void;
+}): Promise<void> {
+  dispatch({ type: "save-started" });
+  const { ratings, invalidAxes } = buildRatingMutation(axes, currentRatings, drafts);
+  if (invalidAxes.length > 0) {
+    dispatch({
+      type: "save-failed",
+      error: `Ratings must be between 1 and 10: ${invalidAxes.join(", ")}`,
+    });
+    return;
+  }
+
+  try {
+    await saveRatings(gameId, ratings, refresh, request);
+    dispatch({ type: "save-finished" });
+  } catch (err) {
+    dispatch({
+      type: "save-failed",
+      error: err instanceof Error ? err.message : "Failed to save ratings",
+    });
+  }
+}
+
 export function RatingForm(props: RatingFormProps) {
   const router = useRouter();
   return <RatingFormContent {...props} refresh={() => router.refresh()} />;
@@ -33,17 +139,10 @@ export function RatingFormContent({
   request = fetch,
 }: RatingFormContentProps) {
   const editableAxes = axes.filter(isEditableRatingAxis);
-  const [ratings, setRatings] = useState<Record<string, string>>(() => {
-    const initial: Record<string, string> = {};
-    for (const axis of editableAxes) {
-      if (currentRatings[axis.id] !== undefined) {
-        initial[axis.id] = String(currentRatings[axis.id]);
-      }
-    }
-    return initial;
-  });
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [state, dispatch] = useReducer(ratingFormReducer, undefined, () =>
+    createRatingFormState(editableAxes, currentRatings),
+  );
+  const { ratings, saving, error } = state;
 
   const personalAxes = editableAxes.filter((axis) => axis.source === "personal");
   const derivedAxes = editableAxes.filter((axis) => axis.source === "derived");
@@ -68,57 +167,27 @@ export function RatingFormContent({
   }
 
   function handleChange(axisId: string, value: string) {
-    setRatings((prev) => ({ ...prev, [axisId]: value }));
+    dispatch({ type: "change", axisId, value });
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setSaving(true);
-    setError(null);
-
-    const { ratings: numericRatings, invalidAxes } = buildRatingMutation(
-      editableAxes,
+    await submitRatingForm({
+      gameId,
+      axes: editableAxes,
       currentRatings,
-      ratings,
-    );
-
-    if (invalidAxes.length > 0) {
-      setError(`Ratings must be between 1 and 10: ${invalidAxes.join(", ")}`);
-      setSaving(false);
-      return;
-    }
-
-    try {
-      const res = await request(`/api/daemon/games/${gameId}/ratings`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ratings: numericRatings }),
-      });
-
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({ error: "Unknown error" }))) as {
-          error?: string;
-        };
-        throw new Error(data.error ?? `Failed: ${res.status}`);
-      }
-
-      refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save ratings");
-    } finally {
-      setSaving(false);
-    }
+      drafts: ratings,
+      refresh,
+      request,
+      dispatch,
+    });
   }
 
   function handleCancel() {
-    const initial: Record<string, string> = {};
-    for (const axis of editableAxes) {
-      if (currentRatings[axis.id] !== undefined) {
-        initial[axis.id] = String(currentRatings[axis.id]);
-      }
-    }
-    setRatings(initial);
-    setError(null);
+    dispatch({
+      type: "reset",
+      ratings: createRatingFormState(editableAxes, currentRatings).ratings,
+    });
   }
 
   const hasPredictionHints = predictionHints.size > 0;
@@ -268,11 +337,7 @@ export function RatingFormContent({
                           type="button"
                           className="override-link"
                           onClick={() => {
-                            setRatings((prev) => {
-                              const next = { ...prev };
-                              delete next[axis.id];
-                              return next;
-                            });
+                            dispatch({ type: "remove", axisId: axis.id });
                           }}
                         >
                           Clear override &rsaquo;
@@ -369,7 +434,7 @@ function isEditableRatingAxis(axis: Axis): boolean {
   return axis.enabled && (axis.source === "personal" || axis.source === "derived");
 }
 
-function derivedOverrideDraft(effectiveRating: number | null): number {
+export function derivedOverrideDraft(effectiveRating: number | null): number {
   if (effectiveRating === null || !Number.isFinite(effectiveRating)) return 5;
   return Math.min(10, Math.max(1, Math.round(effectiveRating)));
 }
