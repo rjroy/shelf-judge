@@ -247,7 +247,7 @@ describe("AxisService current axis operations", () => {
     ).toBeUndefined();
   });
 
-  test("repairs a disabled axis while preserving identity, common values, timestamps, and ratings", async () => {
+  test("repairs a disabled axis while preserving common values, createdAt, and ratings", async () => {
     await seedDisabledAxis();
     const repaired = await axisService.repairLegacyAxis("legacy-axis", {
       derivedField: "communityRating",
@@ -263,7 +263,7 @@ describe("AxisService current axis operations", () => {
       derivedField: "communityRating",
       configuration: {},
       createdAt: "2025-01-01T00:00:00.000Z",
-      updatedAt: "2025-02-01T00:00:00.000Z",
+      updatedAt: timestamp,
     });
     expect({
       preferenceShape: repaired.preferenceShape,
@@ -280,8 +280,9 @@ describe("AxisService current axis operations", () => {
       leanDirection: "higher",
       veto: { direction: "below", threshold: 3 },
     });
-    const ratings = (await storageService.loadCollection()).games.map(({ ratings }) => ratings);
-    expect(ratings).toEqual([
+    const persisted = await storageService.loadCollection();
+    expect(persisted.axes.find(({ id }) => id === "legacy-axis")?.updatedAt).toBe(timestamp);
+    expect(persisted.games.map(({ ratings }) => ratings)).toEqual([
       { "legacy-axis": 9, "other-axis": 4 },
       { "legacy-axis": 6, "other-axis": 4 },
     ]);

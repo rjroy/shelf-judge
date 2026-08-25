@@ -195,8 +195,11 @@ export function createAxisService(deps: AxisServiceDeps): AxisService {
             [{ field: "axisId", path: ["id"] }],
           );
         }
-        const repaired = repairAndValidateLegacyAxis(axis, parsed);
         const timestamp = now();
+        const repaired = {
+          ...repairAndValidateLegacyAxis(axis, parsed),
+          updatedAt: timestamp,
+        };
         await storageService.saveCollection({
           ...collection,
           axes: collection.axes.map((candidate) => (candidate.id === id ? repaired : candidate)),

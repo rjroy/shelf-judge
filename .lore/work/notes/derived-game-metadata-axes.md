@@ -2,7 +2,7 @@
 title: "Implementation notes: derived game-metadata axes"
 date: 2026-08-24
 status: in_progress
-tags: [implementation, notes, derived-axes, web]
+tags: [implementation, notes, derived-axes, regression]
 source: .lore/work/plans/derived-game-metadata-axes.md
 modules: [shared, daemon, web, cli]
 related: [.lore/work/specs/derived-bgg-axes.md]
@@ -11,6 +11,22 @@ related: [.lore/work/specs/derived-bgg-axes.md]
 # Implementation notes: derived game-metadata axes
 
 ## Progress
+
+### Plan phase checklist
+
+- [x] Step 1: shared axis union, registry, and curve contract previously completed
+- [x] Step 2: registry-derived validation and stable API errors previously completed
+- [x] Step 3: collection migration and cache invalidation previously completed
+- [x] Step 4: axis services and registry discovery previously completed
+- [x] Step 5: fitness resolution and breakdown integration previously completed
+- [x] Step 6: canonical feature-vector invariants previously completed
+- [x] Step 7: discovery-driven web workflows previously completed
+- [x] Step 8: discovery-driven CLI workflows previously completed
+- [x] Step 9: implementation complete
+- [x] Step 9: testing complete
+- [x] Step 9: code review complete
+- [x] Step 9: holistic acceptance validation complete
+- [ ] Step 10: final validation and artifact completion
 
 - [x] Phase 1: additive registry, current-axis contracts, helpers, and numeric curve width
 - [x] Phase 2: additive replacement validation schemas and stable validation errors
@@ -91,8 +107,9 @@ related: [.lore/work/specs/derived-bgg-axes.md]
 - [x] Disabled legacy repair and deletion workflows
 - [x] Derived override, breakdown, and profile presentation
 - [x] Focused web tests, lint, formatting, and diff checks
-- [ ] Step 8 CLI workflows
-- [ ] Step 9 cross-package regression coverage
+- [x] Step 8 CLI workflows
+- [x] Step 9 cross-package regression implementation
+- [ ] Step 9 testing and review
 - [ ] Step 10 final broad validation
 
 ## Step 7 implementation log
@@ -124,3 +141,147 @@ related: [.lore/work/specs/derived-bgg-axes.md]
 - 2026-08-24: Replaced the shared axis-management error fields and mutation banner with form errors keyed by `create`, `update:<axisId>`, and `repair:<axisId>`. Every create, personal/derived/Tournament update, and legacy repair form now receives only its own summary and structured field map, so concurrent forms cannot consume another request's response while server and network fallback summaries remain local and visible.
 - 2026-08-24: Each form scope now has a monotonic request generation. Submission, cancellation, template/repair-field selection, axis switching, and success invalidate the relevant generation; late responses check their captured generation before setting errors, closing a form, or reloading data. This prevents a cancelled request from repopulating the same scope after reopening, rather than relying on transition resets.
 - 2026-08-24: Added deferred-response regressions for late create-to-edit isolation, cancelled update reopening, and out-of-order update/repair failures with distinct structured fields and summaries. Focused axis validation passed 18 tests with 73 assertions; repository lint and shared/daemon/CLI typechecking passed; changed-file Prettier passed; and the production Next.js build passed its TypeScript gate.
+
+## Step 9 implementation log
+
+- 2026-08-24: Added `packages/daemon/tests/fixtures/persisted-derived-axis-migration.json` and a persisted HTTP integration flow covering known Community Rating/Complexity migration, unknown and malformed disabled axes, retained ratings and override behavior, profile deletion, wishlist prediction clearing, discovery, repair, and write-free idempotent reload.
+- 2026-08-24: Pinned the migrated score at 6.4: Community Rating uses the retained override of 7 at weight 60, while Complexity retains lower-is-better behavior and maps raw weight 3 to 5.5 at weight 40.
+- 2026-08-24: Extended the existing Wingspan parser fixture coverage for both metadata parser APIs. Player bounds and singular `playingTime` remain, while exact returned metadata keys exclude minimum and maximum duration fields present in the XML.
+- 2026-08-24: Added a production-source ownership audit for derived-field dispatch and template lists. It permits the shared registry, migration boundary, closed field-ID type declaration, and only the exact canonical factual-vector declaration.
+- 2026-08-24: Inspected remaining legacy-shape matches. Production legacy parsing remains confined to `collection-migration.ts`; other matches are explicit migration tests or disabled-legacy presentation fixtures, so no runtime fixtures were converted.
+- 2026-08-24: Per implementation-agent scope, tests, lint, typecheck, build, and code review were not run. Step 9 validation and independent review remain pending, and Step 10 remains unstarted.
+
+## Step 9 testing log
+
+- 2026-08-24: PASS, 21 tests across three files with 220 assertions:
+
+  ```text
+  bun test packages/daemon/tests/integration/end-to-end.test.ts packages/daemon/tests/services/bgg-xml-parser.test.ts packages/shared/tests/derived-field-source-audit.test.ts
+  ```
+
+- 2026-08-24: PASS, 404 tests across 20 existing tournament, prediction, profile, redundancy, wishlist, and capacity regression files with 1,132 assertions:
+
+  ```text
+  bun test packages/daemon/tests/tournament-service.test.ts packages/daemon/tests/tournament-migration.test.ts packages/daemon/tests/services/prediction-engine-tournament.test.ts packages/daemon/tests/routes/tournament.test.ts packages/cli/tests/commands/tournament.test.ts packages/daemon/tests/services/prediction-service.test.ts packages/daemon/tests/services/prediction-engine.test.ts packages/daemon/tests/routes/prediction.test.ts packages/daemon/tests/profile-stale-detection.test.ts packages/daemon/tests/profile-service.test.ts packages/daemon/tests/profile-engine.test.ts packages/daemon/tests/routes/profile.test.ts packages/daemon/tests/routes/profile-narrate.test.ts packages/cli/tests/commands/profile.test.ts packages/daemon/tests/redundancy-settings-routes.test.ts packages/daemon/tests/redundancy-integration.test.ts packages/daemon/tests/redundancy-engine.test.ts packages/daemon/tests/wishlist-service.test.ts packages/daemon/tests/wishlist-routes.test.ts packages/daemon/tests/capacity-service.test.ts
+  ```
+
+- 2026-08-24: PASS, root shared/daemon/CLI TypeScript check: `bun run typecheck`.
+- 2026-08-24: PASS, repository ESLint: `bun run lint`.
+- 2026-08-24: PASS, whitespace/error-marker check: `git diff --check`.
+- 2026-08-24: FAIL, changed-file formatting:
+
+  ```text
+  bunx prettier --check .beads/issues.jsonl .lore/work/notes/derived-game-metadata-axes.md packages/daemon/tests/integration/end-to-end.test.ts packages/daemon/tests/services/bgg-xml-parser.test.ts packages/daemon/tests/fixtures/persisted-derived-axis-migration.json packages/shared/tests/derived-field-source-audit.test.ts
+  ```
+
+  Prettier cannot infer a parser for `.beads/issues.jsonl`. Re-running the supported changed files without that JSONL file also fails only for `packages/daemon/tests/integration/end-to-end.test.ts` and `packages/shared/tests/derived-field-source-audit.test.ts`:
+
+  ```text
+  bunx prettier --check .lore/work/notes/derived-game-metadata-axes.md packages/daemon/tests/integration/end-to-end.test.ts packages/daemon/tests/services/bgg-xml-parser.test.ts packages/daemon/tests/fixtures/persisted-derived-axis-migration.json packages/shared/tests/derived-field-source-audit.test.ts
+  ```
+
+  Actionable formatting differences begin at `packages/daemon/tests/integration/end-to-end.test.ts:677` and `packages/daemon/tests/integration/end-to-end.test.ts:718`, where Prettier compacts two `jsonRequest` calls, and at `packages/shared/tests/derived-field-source-audit.test.ts:38` and `packages/shared/tests/derived-field-source-audit.test.ts:45`, where Prettier reflows the assertion and conditional. No implementation or test files were edited by the testing agent. Step 9 remains `in_progress`, with review pending.
+
+- 2026-08-24: Applied only the reported Prettier layout corrections in the persisted integration and production-source audit tests. Behavior was unchanged, and the correction awaited re-verification.
+
+- 2026-08-24: PASS on formatting rerun for all parser-supported changed Markdown, JSON, and TypeScript files. Passing tests, typecheck, and lint were not rerun:
+
+  ```text
+  bunx prettier --check .lore/work/notes/derived-game-metadata-axes.md packages/daemon/tests/integration/end-to-end.test.ts packages/daemon/tests/services/bgg-xml-parser.test.ts packages/daemon/tests/fixtures/persisted-derived-axis-migration.json packages/shared/tests/derived-field-source-audit.test.ts
+  ```
+
+  Output: `All matched files use Prettier code style!` This recheck verified the preceding formatting correction. Step 9 remains `in_progress`.
+
+## Step 9 review correction log
+
+- 2026-08-24: Addressed all five review findings: replaced the source grep with AST-based concrete-ID and callable-dispatch auditing plus narrow type/vector boundary assertions; strengthened repaired-axis durability and idempotence assertions; made the profile cache a valid stale `ProfileData`; made parser scope assertions property-specific; and corrected this log's chronology. Testing and re-review of these corrections remain pending.
+
+- 2026-08-24: FAIL, review-correction verification. Step 9 remains `in_progress`, with re-review pending. No implementation or test files were edited by the testing agent.
+
+  Focused command:
+
+  ```text
+  bun test packages/daemon/tests/integration/end-to-end.test.ts packages/daemon/tests/services/bgg-xml-parser.test.ts packages/shared/tests/derived-field-source-audit.test.ts
+  ```
+
+  Result: 21 passed and 1 failed across three files with 244 assertions. `packages/shared/tests/derived-field-source-audit.test.ts:199` expected no violations but received `packages/cli/src/index.ts:286 unquoted derived-field dispatch`. The flagged node is the ordinary shorthand `weight` return property at `packages/cli/src/index.ts:286`, so the audit's identifier classification must distinguish that non-derived-field property from actual derived-field dispatch.
+
+  Root typecheck command: `bun run typecheck`.
+
+  Result: FAIL with `TS2769` at `packages/shared/tests/derived-field-source-audit.test.ts:129` and `packages/shared/tests/derived-field-source-audit.test.ts:141`. Both assertions pass the readonly `derivedFieldIds` tuple to an expectation inferred as a mutable `(string | null)[]`; align the compared array types without weakening the audit.
+
+  Root lint command: `bun run lint`.
+
+  Result: PASS with no diagnostics.
+
+  Whitespace command: `git diff --check`.
+
+  Result: PASS with no diagnostics.
+
+  Changed-file formatting command, excluding `.beads/issues.jsonl`:
+
+  ```text
+  bunx prettier --check .lore/work/notes/derived-game-metadata-axes.md packages/daemon/tests/integration/end-to-end.test.ts packages/daemon/tests/services/bgg-xml-parser.test.ts packages/daemon/tests/fixtures/persisted-derived-axis-migration.json packages/shared/tests/derived-field-source-audit.test.ts
+  ```
+
+  Result: FAIL only for `packages/shared/tests/derived-field-source-audit.test.ts`. Prettier differences begin at lines 30, 71, 76, and 179, reflowing the `AuditDeclaration` union, two long conditionals, and the concrete-ID diagnostic push. Apply Prettier formatting to that file, then rerun these affected gates. Unaffected broad regression suites were not rerun.
+
+- 2026-08-24: Corrected the verification diagnostics without weakening ownership checks: ordinary domain `weight` properties now require derived/template/dispatch AST context before classification, readonly expected field IDs are compared as mutable copies, and the reported Prettier layout was applied manually. Verification of this correction was pending at this point.
+
+- 2026-08-24: PASS, rerun of only the three previously failed gates, superseding the preceding pending-verification statement. Step 9 remains `in_progress`, with re-review pending. No implementation or test files were edited by the testing agent.
+
+  ```text
+  bun test packages/shared/tests/derived-field-source-audit.test.ts
+  ```
+
+  Result: 2 passed, 0 failed, with 6 assertions across one file.
+
+  ```text
+  bun run typecheck
+  ```
+
+  Result: PASS for the root shared, daemon, and CLI TypeScript projects.
+
+  ```text
+  bunx prettier --check .lore/work/notes/derived-game-metadata-axes.md packages/daemon/tests/integration/end-to-end.test.ts packages/daemon/tests/services/bgg-xml-parser.test.ts packages/daemon/tests/fixtures/persisted-derived-axis-migration.json packages/shared/tests/derived-field-source-audit.test.ts
+  ```
+
+  Result: PASS, `All matched files use Prettier code style!` Previously passing daemon focused tests, lint, and `git diff --check` were not rerun. Implementation and testing corrections were therefore verified.
+
+- 2026-08-24: Addressed the final re-review findings. Callable resolver/handler factory entries are now classified as behavior dispatch; repaired axes receive the injected mutation timestamp while retaining `createdAt` and common settings; service and persisted-flow assertions pin the new timestamp semantics. This final production/audit correction awaits focused verification and re-review.
+
+- 2026-08-24: Final focused verification and holistic acceptance validation passed, and the final re-review reported no findings. Step 9 implementation, testing, and code review are complete. Residual risk remains that the persisted migration flow uses the in-memory mocked filesystem, so real filesystem permissions, durability, and platform-specific atomic rename behavior remain for Step 10 validation. This notes document remains `in_progress`; Step 10 is pending, and the plan/spec statuses are unchanged.
+
+- 2026-08-24: PASS, focused verification of the final corrections. Step 9 remains `in_progress`, with re-review pending. No implementation or test files were edited by the testing agent, and unaffected broad suites were not rerun.
+
+  ```text
+  bun test packages/shared/tests/derived-field-source-audit.test.ts packages/daemon/tests/services/axis-service.test.ts packages/daemon/tests/integration/end-to-end.test.ts
+  ```
+
+  Result: 23 passed, 0 failed, with 198 assertions across three files. The expected injected `disk full` failure-path log from `axis-service.test.ts:309` was emitted while its rollback test passed.
+
+  ```text
+  bun run typecheck
+  ```
+
+  Result: PASS for the root shared, daemon, and CLI TypeScript projects.
+
+  ```text
+  bun run lint
+  ```
+
+  Result: PASS with no diagnostics.
+
+  ```text
+  git diff --check
+  ```
+
+  Result: PASS with no diagnostics.
+
+  Changed-file formatting command, excluding `.beads/issues.jsonl`:
+
+  ```text
+  bunx prettier --check .lore/work/notes/derived-game-metadata-axes.md packages/daemon/src/services/axis-service.ts packages/daemon/tests/integration/end-to-end.test.ts packages/daemon/tests/services/axis-service.test.ts packages/daemon/tests/services/bgg-xml-parser.test.ts packages/daemon/tests/fixtures/persisted-derived-axis-migration.json packages/shared/tests/derived-field-source-audit.test.ts
+  ```
+
+  Result: PASS, `All matched files use Prettier code style!`

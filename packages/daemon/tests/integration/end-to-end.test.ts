@@ -12,6 +12,9 @@ import type { BggCollectionItem } from "../../src/services/bgg-xml-parser.js";
 import type {
   Game,
   Axis,
+  Collection,
+  DerivedFieldDiscoveryResponse,
+  ProfileData,
   FitnessResult,
   FitnessBreakdownEntry,
   AddGameResult,
@@ -52,6 +55,12 @@ interface RefreshAllResponse {
 
 interface ErrorResponse {
   error: string;
+}
+
+interface PersistedMigrationFixture {
+  collection: Record<string, unknown>;
+  profile: ProfileData;
+  wishlist: Record<string, unknown>[];
 }
 
 // Shared fixtures
@@ -597,6 +606,196 @@ describe("Integration: End-to-end scenarios", () => {
       // Verify deleted
       const getDeletedRes = await jsonRequest(ctx.app, "GET", `/api/games/${gameId}`);
       expect(getDeletedRes.status).toBe(404);
+    });
+  });
+
+  describe("Scenario 8: Persisted derived-axis migration", () => {
+    test("migrates, invalidates, scores, discovers, repairs, and reloads idempotently", async () => {
+      const fixture = (await Bun.file(
+        new URL("../fixtures/persisted-derived-axis-migration.json", import.meta.url),
+      ).json()) as PersistedMigrationFixture;
+      const ctx = createTestApp();
+      const collectionPath = "/test/data/collection.json";
+      const profilePath = "/test/data/profile.json";
+      const wishlistPath = "/test/data/wishlist.json";
+      ctx.fileOps.files.set(collectionPath, JSON.stringify(fixture.collection));
+      ctx.fileOps.files.set(profilePath, JSON.stringify(fixture.profile));
+      ctx.fileOps.files.set(wishlistPath, JSON.stringify(fixture.wishlist));
+
+      expect(await ctx.storageService.loadProfile()).toEqual(fixture.profile);
+      expect(fixture.profile.profile.narrationState).toBe("stale");
+
+      const migrated = await ctx.storageService.loadCollection();
+      const persisted = JSON.parse(ctx.fileOps.files.get(collectionPath) ?? "null") as Collection;
+      expect(persisted).toEqual(migrated);
+      expect(persisted.schemaVersion).toBe(1);
+      expect(persisted.axes).toHaveLength(5);
+      expect(persisted.axes.find(({ id }) => id === "community-axis")).toMatchObject({
+        id: "community-axis",
+        source: "derived",
+        derivedField: "communityRating",
+        weight: 60,
+      });
+      expect(persisted.axes.find(({ id }) => id === "complexity-axis")).toMatchObject({
+        id: "complexity-axis",
+        source: "derived",
+        derivedField: "weight",
+        weight: 40,
+        preferenceShape: "lower-is-better",
+      });
+      expect(persisted.axes.find(({ id }) => id === "unknown-axis")).toMatchObject({
+        id: "unknown-axis",
+        enabled: false,
+        source: "legacy",
+        reason: "unknown_legacy_field",
+        legacyField: "futureMetric",
+      });
+      expect(persisted.axes.find(({ id }) => id === "malformed-axis")).toMatchObject({
+        id: "malformed-axis",
+        enabled: false,
+        source: "legacy",
+        reason: "malformed_legacy_source_field",
+        legacyField: "weight",
+      });
+      expect(persisted.games[0].ratings).toEqual({
+        "community-axis": 7,
+        "unknown-axis": 4,
+        "malformed-axis": 6,
+      });
+      expect(ctx.fileOps.files.has(profilePath)).toBe(false);
+      expect(JSON.parse(ctx.fileOps.files.get(wishlistPath) ?? "null")).toEqual([
+        {
+          id: "wishlist-game",
+          bggId: 456,
+          name: "Wishlist Game",
+          yearPublished: 2024,
+          thumbnailUrl: null,
+          predictedScore: null,
+          predictionConfidence: null,
+          predictedBreakdown: null,
+          nicheImpact: null,
+          addedAt: "2025-01-02T00:00:00.000Z",
+        },
+      ]);
+
+      const scoreResponse = await jsonRequest(ctx.app, "GET", "/api/games/legacy-game/score");
+      expect(scoreResponse.status).toBe(200);
+      const score = (await scoreResponse.json()) as ScoreResponse;
+      expect(score).toMatchObject({
+        gameId: "legacy-game",
+        score: 6.4,
+        ratedAxisCount: 2,
+        totalAxisCount: 3,
+      });
+      expect(score.breakdown.find(({ axisId }) => axisId === "community-axis")).toMatchObject({
+        source: "override",
+        sourceValue: 8,
+        scoringRawValue: 8,
+        effectiveRating: 7,
+        overridden: true,
+      });
+      expect(score.breakdown.find(({ axisId }) => axisId === "complexity-axis")).toMatchObject({
+        source: "derived",
+        sourceValue: 3,
+        scoringRawValue: 3,
+        effectiveRating: 5.5,
+        overridden: false,
+      });
+      expect(score.breakdown.some(({ axisId }) => axisId === "unknown-axis")).toBe(false);
+      expect(score.breakdown.some(({ axisId }) => axisId === "malformed-axis")).toBe(false);
+
+      const discoveryResponse = await jsonRequest(ctx.app, "GET", "/api/axes/derived-fields");
+      expect(discoveryResponse.status).toBe(200);
+      const discovery = (await discoveryResponse.json()) as DerivedFieldDiscoveryResponse;
+      expect(discovery.version).toBe(1);
+      expect(discovery.fields.map(({ id }) => id)).toEqual([
+        "communityRating",
+        "weight",
+        "playerCountFit",
+        "playingTime",
+      ]);
+
+      const unknownRepair = await jsonRequest(ctx.app, "POST", "/api/axes/unknown-axis/repair", {
+        derivedField: "playerCountFit",
+        configuration: { targetPlayerCount: 3 },
+      });
+      expect(unknownRepair.status).toBe(200);
+      const repairedUnknown = (await unknownRepair.json()) as Axis;
+      expect(repairedUnknown).toMatchObject({
+        id: "unknown-axis",
+        enabled: true,
+        source: "derived",
+        derivedField: "playerCountFit",
+      });
+      const malformedRepair = await jsonRequest(
+        ctx.app,
+        "POST",
+        "/api/axes/malformed-axis/repair",
+        {
+          derivedField: "playingTime",
+          configuration: { maximumScoringTime: 240 },
+        },
+      );
+      expect(malformedRepair.status).toBe(200);
+      const repairedMalformed = (await malformedRepair.json()) as Axis;
+      expect(repairedMalformed).toMatchObject({
+        id: "malformed-axis",
+        enabled: true,
+        source: "derived",
+        derivedField: "playingTime",
+      });
+
+      const persistenceCountAfterRepair = ctx.fileOps.calls.filter(
+        ({ method, args }) => method === "rename" && args[1] === collectionPath,
+      ).length;
+      const repaired = await ctx.storageService.loadCollection();
+      expect(repaired.axes.find(({ id }) => id === "unknown-axis")).toEqual({
+        id: "unknown-axis",
+        name: "Future metric",
+        description: "Preserve unknown data",
+        weight: 20,
+        enabled: true,
+        source: "derived",
+        derivedField: "playerCountFit",
+        configuration: { targetPlayerCount: 3 },
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: repairedUnknown.updatedAt,
+      });
+      expect(repaired.axes.find(({ id }) => id === "malformed-axis")).toEqual({
+        id: "malformed-axis",
+        name: "Malformed metric",
+        description: "Preserve malformed source and field",
+        weight: 10,
+        enabled: true,
+        source: "derived",
+        derivedField: "playingTime",
+        configuration: { maximumScoringTime: 240 },
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: repairedMalformed.updatedAt,
+      });
+      expect(repairedUnknown.updatedAt).not.toBe("2025-01-01T00:00:00.000Z");
+      expect(repairedMalformed.updatedAt).not.toBe("2025-01-01T00:00:00.000Z");
+      expect(repaired.games[0].ratings).toEqual({
+        "community-axis": 7,
+        "unknown-axis": 4,
+        "malformed-axis": 6,
+      });
+      expect(
+        ctx.fileOps.calls.filter(
+          ({ method, args }) => method === "rename" && args[1] === collectionPath,
+        ),
+      ).toHaveLength(persistenceCountAfterRepair);
+
+      const persistedAfterRepair = ctx.fileOps.files.get(collectionPath);
+      expect(persistedAfterRepair).toBeDefined();
+      const idempotentReload = await ctx.storageService.loadCollection();
+      expect(idempotentReload).toEqual(repaired);
+      expect(ctx.fileOps.files.get(collectionPath)).toBe(persistedAfterRepair);
+      expect(
+        ctx.fileOps.calls.filter(
+          ({ method, args }) => method === "rename" && args[1] === collectionPath,
+        ),
+      ).toHaveLength(persistenceCountAfterRepair);
     });
   });
 });

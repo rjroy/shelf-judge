@@ -120,6 +120,14 @@ describe("BGG XML Parser", () => {
       expect(m.playingTime).toBe(70);
       expect(m.imageUrl).toContain("geekdo-images.com");
       expect(m.thumbnailUrl).toContain("geekdo-images.com");
+      expect(m).not.toHaveProperty("minPlayingTime");
+      expect(m).not.toHaveProperty("maxPlayingTime");
+      expect(m).not.toHaveProperty("minPlayTime");
+      expect(m).not.toHaveProperty("maxPlayTime");
+      expect(m).not.toHaveProperty("minPlaytime");
+      expect(m).not.toHaveProperty("maxPlaytime");
+      expect(m).not.toHaveProperty("minplaytime");
+      expect(m).not.toHaveProperty("maxplaytime");
     });
 
     test("extracts Gloomhaven metadata", async () => {
@@ -180,6 +188,23 @@ describe("BGG XML Parser", () => {
       const asia = items.find((i) => i.bggId === 366161);
       expect(asia).toBeDefined();
       expect(asia!.metadata.thumbnailUrl).toBeNull();
+    });
+
+    test("retains player bounds and singular playing time without duration ranges", async () => {
+      const xml = await readFixture("thing-wingspan-266192.xml");
+      const [item] = parseThingItems(xml);
+
+      expect(item.metadata.minPlayers).toBe(1);
+      expect(item.metadata.maxPlayers).toBe(5);
+      expect(item.metadata.playingTime).toBe(70);
+      expect(item.metadata).not.toHaveProperty("minPlayingTime");
+      expect(item.metadata).not.toHaveProperty("maxPlayingTime");
+      expect(item.metadata).not.toHaveProperty("minPlayTime");
+      expect(item.metadata).not.toHaveProperty("maxPlayTime");
+      expect(item.metadata).not.toHaveProperty("minPlaytime");
+      expect(item.metadata).not.toHaveProperty("maxPlaytime");
+      expect(item.metadata).not.toHaveProperty("minplaytime");
+      expect(item.metadata).not.toHaveProperty("maxplaytime");
     });
   });
 
