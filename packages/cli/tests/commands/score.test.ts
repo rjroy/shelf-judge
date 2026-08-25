@@ -101,12 +101,23 @@ const scoreGetData = {
       sourceValue: null,
     },
     {
-      axisName: "Community Rating",
-      effectiveRating: 8.1,
+      axisName: "Player Count Fit",
+      axisId: "player-count-axis",
+      derivedField: "playerCountFit",
+      effectiveRating: 10,
       weight: 10,
-      contribution: 0.81,
+      contribution: 1,
       source: "derived",
-      sourceValue: null,
+      sourceValue: 10,
+      scoringRawValue: 10,
+      preferenceShape: "higher-is-better",
+      curveAffected: false,
+      unit: "fit score",
+      provenance: "Publisher-declared minimum and maximum player count",
+      configurationSummary: "Target: 4 players",
+      overridden: false,
+      predictionConfidence: null,
+      referenceGames: null,
     },
   ],
 };
@@ -129,23 +140,28 @@ describe("score get (rated game)", () => {
   test("human-readable output shows breakdown table", async () => {
     const output = await scoreGet(client, ["abc-123"], { json: false });
     expect(output).toContain("Wife will play it");
-    expect(output).toContain("Community Rating");
+    expect(output).toContain("Player Count Fit");
+    expect(output).toContain("Target: 4 players");
+    expect(output).toContain("Publisher-declared minimum and maximum player count");
     expect(output).toContain("3.20");
-    expect(output).toContain("0.81");
+    expect(output).toContain("1.00");
   });
 
   test("--json outputs parseable JSON with score and breakdown", async () => {
     const output = await scoreGet(client, ["abc-123"], { json: true });
-    const parsed = JSON.parse(output) as {
-      gameName: string;
-      score: number;
-      breakdown: Array<{ axisName: string }>;
-    };
+    const parsed = JSON.parse(output) as typeof scoreGetData;
     expect(parsed.gameName).toBe("Wingspan");
     expect(parsed.score).toBe(7.9);
+    expect(parsed).toEqual(scoreGetData);
     expect(Array.isArray(parsed.breakdown)).toBe(true);
     expect(parsed.breakdown[0].axisName).toBe("Wife will play it");
-    expect(parsed.breakdown[1].axisName).toBe("Community Rating");
+    expect(parsed.breakdown[1]).toMatchObject({
+      axisName: "Player Count Fit",
+      derivedField: "playerCountFit",
+      sourceValue: 10,
+      scoringRawValue: 10,
+      configurationSummary: "Target: 4 players",
+    });
   });
 });
 

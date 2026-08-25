@@ -20,6 +20,20 @@ interface LocalCommandHelp {
 // One API operation can intentionally back multiple CLI commands. Keep those
 // CLI-only aliases here instead of advertising duplicate daemon operations.
 const LOCAL_OPERATION_COMMANDS: Record<string, LocalCommandHelp[]> = {
+  "shelf.axis.derived-fields": [
+    {
+      name: "templates",
+      usage: "shelf-judge axis templates [--json]",
+      description: "List registry-backed derived axis templates",
+    },
+  ],
+  "shelf.axis.repair": [
+    {
+      name: "repair",
+      usage: "shelf-judge axis repair <axis-id> --template <template-id> [configuration options]",
+      description: "Repair a disabled legacy axis while retaining its ratings and overrides",
+    },
+  ],
   "shelf.game.shelf-assignment": [
     {
       name: "assign-shelf",

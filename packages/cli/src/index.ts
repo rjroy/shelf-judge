@@ -16,7 +16,14 @@ import {
   gameAssignShelf,
   gameClearShelf,
 } from "./commands/game.js";
-import { axisList, axisCreate, axisUpdate, axisDelete } from "./commands/axis.js";
+import {
+  axisTemplates,
+  axisList,
+  axisCreate,
+  axisUpdate,
+  axisRepair,
+  axisDelete,
+} from "./commands/axis.js";
 import { scoreList, scoreGet } from "./commands/score.js";
 import { importBggCollection } from "./commands/import.js";
 import { configGet, configSet } from "./commands/config.js";
@@ -70,8 +77,10 @@ const COMMANDS: Record<string, number> = {
   "game assign-shelf": 2,
   "game clear-shelf": 2,
   "axis list": 2,
+  "axis templates": 2,
   "axis create": 2,
   "axis update": 2,
+  "axis repair": 2,
   "axis delete": 2,
   "score list": 2,
   "score get": 2,
@@ -126,6 +135,9 @@ interface ParsedArgs {
   shape?: string;
   ideal?: number;
   tolerance?: string;
+  toleranceWidth?: number;
+  noTolerance?: boolean;
+  noToleranceWidth?: boolean;
   lean?: string;
   vetoBelow?: number;
   vetoAbove?: number;
@@ -138,9 +150,12 @@ interface ParsedArgs {
   boxHeight?: number;
   boxDepth?: number;
   clearBox?: boolean;
+  template?: string;
+  targetPlayerCount?: number;
+  maximumScoringTime?: number;
 }
 
-function parseArgs(argv: string[]): ParsedArgs {
+export function parseArgs(argv: string[]): ParsedArgs {
   const raw = argv.slice(2); // skip bun and script path
 
   // Separate flags from non-flag tokens
@@ -155,6 +170,9 @@ function parseArgs(argv: string[]): ParsedArgs {
   let shape: string | undefined;
   let ideal: number | undefined;
   let tolerance: string | undefined;
+  let toleranceWidth: number | undefined;
+  let noTolerance = false;
+  let noToleranceWidth = false;
   let lean: string | undefined;
   let vetoBelow: number | undefined;
   let vetoAbove: number | undefined;
@@ -167,6 +185,9 @@ function parseArgs(argv: string[]): ParsedArgs {
   let boxHeight: number | undefined;
   let boxDepth: number | undefined;
   let clearBox = false;
+  let template: string | undefined;
+  let targetPlayerCount: number | undefined;
+  let maximumScoringTime: number | undefined;
 
   for (let i = 0; i < raw.length; i++) {
     const arg = raw[i];
@@ -187,6 +208,12 @@ function parseArgs(argv: string[]): ParsedArgs {
       ideal = Number(raw[++i]);
     } else if (arg === "--tolerance") {
       tolerance = raw[++i];
+    } else if (arg === "--tolerance-width") {
+      toleranceWidth = Number(raw[++i]);
+    } else if (arg === "--no-tolerance") {
+      noTolerance = true;
+    } else if (arg === "--no-tolerance-width") {
+      noToleranceWidth = true;
     } else if (arg === "--lean") {
       lean = raw[++i];
     } else if (arg === "--veto-below") {
@@ -211,6 +238,12 @@ function parseArgs(argv: string[]): ParsedArgs {
       boxDepth = Number(raw[++i]);
     } else if (arg === "--clear-box") {
       clearBox = true;
+    } else if (arg === "--template") {
+      template = raw[++i];
+    } else if (arg === "--target-player-count") {
+      targetPlayerCount = Number(raw[++i]);
+    } else if (arg === "--maximum-scoring-time") {
+      maximumScoringTime = Number(raw[++i]);
     } else if (arg === "--axis") {
       axisFlags.push(raw[++i]);
       axisFlags.push(raw[++i]);
@@ -257,6 +290,9 @@ function parseArgs(argv: string[]): ParsedArgs {
     shape,
     ideal,
     tolerance,
+    toleranceWidth,
+    noTolerance: noTolerance || undefined,
+    noToleranceWidth: noToleranceWidth || undefined,
     lean,
     vetoBelow,
     vetoAbove,
@@ -269,6 +305,9 @@ function parseArgs(argv: string[]): ParsedArgs {
     boxHeight,
     boxDepth,
     clearBox: clearBox || undefined,
+    template,
+    targetPlayerCount,
+    maximumScoringTime,
   };
 }
 
@@ -335,6 +374,9 @@ async function main(): Promise<void> {
     case "axis list":
       output = await axisList(client, args, opts);
       break;
+    case "axis templates":
+      output = await axisTemplates(client, args, opts);
+      break;
     case "axis create":
       output = await axisCreate(client, args, {
         ...opts,
@@ -343,10 +385,16 @@ async function main(): Promise<void> {
         shape: parsed.shape,
         ideal: parsed.ideal,
         tolerance: parsed.tolerance,
+        toleranceWidth: parsed.toleranceWidth,
+        noTolerance: parsed.noTolerance,
+        noToleranceWidth: parsed.noToleranceWidth,
         lean: parsed.lean,
         vetoBelow: parsed.vetoBelow,
         vetoAbove: parsed.vetoAbove,
         noVeto: parsed.noVeto,
+        template: parsed.template,
+        targetPlayerCount: parsed.targetPlayerCount,
+        maximumScoringTime: parsed.maximumScoringTime,
       });
       break;
     case "axis update":
@@ -358,6 +406,32 @@ async function main(): Promise<void> {
         shape: parsed.shape,
         ideal: parsed.ideal,
         tolerance: parsed.tolerance,
+        toleranceWidth: parsed.toleranceWidth,
+        noTolerance: parsed.noTolerance,
+        noToleranceWidth: parsed.noToleranceWidth,
+        lean: parsed.lean,
+        vetoBelow: parsed.vetoBelow,
+        vetoAbove: parsed.vetoAbove,
+        noVeto: parsed.noVeto,
+        targetPlayerCount: parsed.targetPlayerCount,
+        maximumScoringTime: parsed.maximumScoringTime,
+      });
+      break;
+    case "axis repair":
+      output = await axisRepair(client, args, {
+        ...opts,
+        template: parsed.template,
+        targetPlayerCount: parsed.targetPlayerCount,
+        maximumScoringTime: parsed.maximumScoringTime,
+        weight: parsed.weight,
+        name: parsed.name,
+        description: parsed.description,
+        shape: parsed.shape,
+        ideal: parsed.ideal,
+        tolerance: parsed.tolerance,
+        toleranceWidth: parsed.toleranceWidth,
+        noTolerance: parsed.noTolerance,
+        noToleranceWidth: parsed.noToleranceWidth,
         lean: parsed.lean,
         vetoBelow: parsed.vetoBelow,
         vetoAbove: parsed.vetoAbove,
@@ -498,7 +572,9 @@ async function main(): Promise<void> {
   console.log(output);
 }
 
-main().catch((err) => {
-  console.error(toErrorMessage(err));
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch((err) => {
+    console.error(toErrorMessage(err));
+    process.exit(1);
+  });
+}

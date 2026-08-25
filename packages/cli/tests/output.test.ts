@@ -103,7 +103,10 @@ describe("formatBreakdown", () => {
         sourceValue: 8.1,
       }),
     ]);
-    expect(result).toContain("(metadata: 8.1)");
+    expect(result).toContain("Source Value");
+    expect(result).toContain("8.1");
+    expect(result).toContain("Override");
+    expect(result).toContain("yes");
     expect(result).toContain("override");
   });
 
@@ -150,7 +153,7 @@ describe("formatBreakdown", () => {
     expect(result).toContain("2.9");
   });
 
-  test("hides Raw column when all scoring values equal effective ratings", () => {
+  test("keeps factual and effective columns distinct when values match", () => {
     const result = formatBreakdown([
       entry({
         axisName: "Fun",
@@ -164,7 +167,8 @@ describe("formatBreakdown", () => {
         curveAffected: false,
       }),
     ]);
-    expect(result).not.toContain("Raw");
+    expect(result).toContain("Scoring Input (Raw)");
+    expect(result).toContain("Effective Rating");
   });
 
   test("marks curve-affected rows with *", () => {
@@ -213,7 +217,28 @@ describe("formatBreakdown", () => {
       }),
     ]);
     expect(result).toContain("Fun");
-    expect(result).not.toContain("Raw");
+    expect(result).toContain("Scoring Input (Raw)");
+  });
+
+  test("shows published and capped duration with provenance", () => {
+    const result = formatBreakdown([
+      entry({
+        axisName: "Play Time",
+        derivedField: "playingTime",
+        source: "derived",
+        sourceValue: 300,
+        scoringRawValue: 240,
+        effectiveRating: 1,
+        unit: "minutes",
+        provenance: "BGG published playing time",
+        configurationSummary: "maximum scoring time: 240 minutes",
+      }),
+    ]);
+    expect(result).toContain("300 minutes");
+    expect(result).toContain("240 minutes");
+    expect(result).toContain("field=playingTime");
+    expect(result).toContain("BGG published playing time");
+    expect(result).toContain("maximum scoring time: 240 minutes");
   });
 
   // REQ-TAXIS-11: tournament source flows through unchanged. Verifies the

@@ -43,38 +43,41 @@ export function formatScore(score: number | null | undefined): string {
 export type BreakdownEntry = FitnessBreakdownEntry;
 
 export function formatBreakdown(breakdown: BreakdownEntry[]): string {
-  const hasRawColumn = breakdown.some(
-    (e) =>
-      e.scoringRawValue != null &&
-      e.effectiveRating != null &&
-      Math.abs(e.scoringRawValue - e.effectiveRating) > 0.05,
-  );
-
-  const headers = hasRawColumn
-    ? ["Axis", "Raw", "Rating", "Weight", "Contribution", "Source"]
-    : ["Axis", "Rating", "Weight", "Contribution", "Source"];
-
   const rows = breakdown.map((entry) => {
     const marker = entry.curveAffected ? " *" : "";
-    let ratingStr = entry.effectiveRating !== null ? String(entry.effectiveRating) + marker : "---";
-    if (entry.overridden && entry.sourceValue !== null) {
-      ratingStr += ` (metadata: ${entry.sourceValue}${entry.unit ? ` ${entry.unit}` : ""})`;
-    }
-
-    const rawStr =
-      entry.scoringRawValue != null
-        ? `${entry.scoringRawValue}${entry.unit ? ` ${entry.unit}` : ""}`
-        : "---";
-
-    const row = [
+    const value = (candidate: number | null): string =>
+      candidate === null ? "---" : `${candidate}${entry.unit ? ` ${entry.unit}` : ""}`;
+    const details = [
+      entry.derivedField ? `field=${entry.derivedField}` : null,
+      entry.configurationSummary,
+      entry.provenance,
+    ]
+      .filter((detail): detail is string => Boolean(detail))
+      .join("; ");
+    return [
       entry.axisName,
-      ...(hasRawColumn ? [rawStr] : []),
-      ratingStr,
+      value(entry.sourceValue),
+      value(entry.scoringRawValue),
+      entry.effectiveRating !== null ? `${entry.effectiveRating}${marker}` : "---",
+      entry.overridden ? "yes" : "no",
       String(entry.weight),
       entry.contribution !== null ? entry.contribution.toFixed(2) : "---",
       entry.source,
+      details || "---",
     ];
-    return row;
   });
-  return formatTable(headers, rows);
+  return formatTable(
+    [
+      "Axis",
+      "Source Value",
+      "Scoring Input (Raw)",
+      "Effective Rating",
+      "Override",
+      "Weight",
+      "Contribution",
+      "Source",
+      "Details",
+    ],
+    rows,
+  );
 }

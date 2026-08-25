@@ -42,16 +42,22 @@ const predictGameData = {
         ],
       },
       {
-        axisName: "Community Rating",
-        rating: 8.1,
+        axisId: "play-time-axis",
+        axisName: "Play Time",
+        derivedField: "playingTime",
+        rating: 1,
         weight: 10,
-        contribution: 0.81,
+        contribution: 0.1,
         source: "derived",
-        sourceValue: null,
-        rawValue: 8.1,
-        effectiveRating: 8.1,
-        preferenceShape: "higher-is-better",
-        curveAffected: false,
+        sourceValue: 300,
+        scoringRawValue: 240,
+        effectiveRating: 1,
+        preferenceShape: "sweet-spot",
+        curveAffected: true,
+        unit: "minutes",
+        provenance: "BGG published playing time",
+        configurationSummary: "maximum scoring time: 240 minutes",
+        overridden: false,
         predictionConfidence: "actual",
         referenceGames: null,
       },
@@ -115,6 +121,9 @@ describe("predict <game-id>", () => {
     expect(output).toContain("personal");
     expect(output).toContain("Replayability");
     expect(output).toContain("predicted");
+    expect(output).toContain("300 minutes");
+    expect(output).toContain("240 minutes");
+    expect(output).toContain("maximum scoring time: 240 minutes");
   });
 
   test("human-readable output shows reference games for predicted axes", async () => {
@@ -131,6 +140,13 @@ describe("predict <game-id>", () => {
     expect(parsed.game.name).toBe("Wingspan");
     expect(parsed.score.score).toBe(7.2);
     expect(parsed.score.predictionMeta.predictedAxisCount).toBe(2);
+    expect(parsed).toEqual(predictGameData);
+    expect(parsed.score.breakdown[2]).toMatchObject({
+      derivedField: "playingTime",
+      sourceValue: 300,
+      scoringRawValue: 240,
+      configurationSummary: "maximum scoring time: 240 minutes",
+    });
   });
 
   test("throws on missing game-id argument", async () => {
