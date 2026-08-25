@@ -100,6 +100,7 @@ function makeGame(id: string, name: string, overrides?: Partial<Game>): Game {
     yearPublished: null,
     minPlayers: null,
     maxPlayers: null,
+    bestPlayers: null,
     playingTime: null,
     imageUrl: null,
     bggData: null,
@@ -151,6 +152,7 @@ function makeBggData(mechanics: string[] = [], categories: string[] = []): BggGa
     families: [],
     subdomains: [],
     suggestedPlayerCounts: [],
+    bestPlayerCount: null,
     fetchedAt: new Date().toISOString(),
   };
 }

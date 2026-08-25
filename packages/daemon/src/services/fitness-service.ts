@@ -1,24 +1,21 @@
-import type {
-  Game,
-  Axis,
-  BggGameData,
-  FitnessResult,
-  FitnessBreakdownEntry,
-  FitnessBreakdownSource,
-  TournamentData,
-} from "@shelf-judge/shared";
-import { resolveBggRawValue } from "@shelf-judge/shared";
 import {
-  getNativeScale,
+  DERIVED_AXIS_REGISTRY,
   applyPreferenceCurve,
-  checkVeto,
-  computeHigherIsBetterEffective,
-} from "./curve-engine";
+  getAxisNativeScale,
+  isPreferenceCurveApplicable,
+  isEnabledScoringAxis,
+  resolveDerivedAxisValue,
+  summarizeDerivedAxisConfiguration,
+  type Axis,
+  type FitnessBreakdownEntry,
+  type FitnessBreakdownSource,
+  type FitnessResult,
+  type Game,
+  type TournamentData,
+} from "@shelf-judge/shared";
+import { checkVeto, computeHigherIsBetterEffective } from "./curve-engine";
 import { deriveDisplayStats } from "./tournament-service";
 
-// Empty tournament shape used when no tournament data is supplied. deriveDisplayStats
-// gracefully returns normalizedScore=null for any gameId here, matching the spec's
-// "no comparisons" semantic without requiring callers to fabricate a TournamentData.
 const EMPTY_TOURNAMENT: TournamentData = {
   settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
   sessions: [],
@@ -29,7 +26,6 @@ export interface FitnessService {
   calculateScore(
     game: Game,
     axes: Axis[],
-    bggData: BggGameData | null,
     tournamentData?: TournamentData | null,
   ): FitnessResult | null;
 }
@@ -38,178 +34,154 @@ function roundToOneDecimal(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
-// Threshold for curveAffected highlighting (REQ-CURVE-17).
-// When the effective rating differs from the higher-is-better baseline by more than
-// this amount, the axis is flagged as curve-affected.
 const CURVE_AFFECTED_THRESHOLD = 0.5;
 
 export function createFitnessService(): FitnessService {
   return {
-    calculateScore(
-      game: Game,
-      axes: Axis[],
-      bggData: BggGameData | null,
-      tournamentData?: TournamentData | null,
-    ): FitnessResult | null {
+    calculateScore(game, axes, tournamentData) {
+      const scoringAxes = axes.filter(isEnabledScoringAxis);
       const breakdown: FitnessBreakdownEntry[] = [];
       let weightedSum = 0;
       let weightSum = 0;
       let ratedCount = 0;
-      let vetoTriggered = false;
       let vetoInfo: FitnessResult["vetoedBy"] = null;
 
-      for (const axis of axes) {
-        const personalRating = game.ratings[axis.id];
-        const bggRawValue = resolveBggRawValue(axis, bggData);
-        const scale = getNativeScale(axis.source, axis.bggField);
+      for (const axis of scoringAxes) {
         const shape = axis.preferenceShape ?? "higher-is-better";
-
-        // Determine raw value, source, and the appropriate native scale for curve application.
-        // Personal overrides use the personal scale (1-10), not the BGG axis scale.
-        let rawValue: number | null = null;
-        let source: FitnessBreakdownSource =
-          axis.source === "bgg" ? "bgg" : axis.source === "tournament" ? "tournament" : "personal";
-        let bggOriginal: number | null = null;
-        let valueScale = scale;
+        const curveConfig = {
+          idealValue: axis.idealValue,
+          tolerance: axis.tolerance,
+          toleranceWidth: axis.toleranceWidth,
+          leanDirection: axis.leanDirection,
+        };
+        const personalRating = game.ratings[axis.id];
+        const resolution = axis.source === "derived" ? resolveDerivedAxisValue(axis, game) : null;
+        const nativeScale = getAxisNativeScale(axis);
+        let source: FitnessBreakdownSource = axis.source;
+        let scoringValue: number | null = null;
+        let valueScale = nativeScale;
+        let overridden = false;
+        let applyConfiguredCurve = true;
 
         if (axis.source === "tournament") {
-          // Tournament axis: contribute the normalized ELO display score.
-          // deriveDisplayStats returns normalizedScore=null when there are no comparisons
-          // for this game, or the cohort of compared games is < 5 (REQ-TAXIS-7); in either
-          // case the axis is excluded from numerator and denominator, the same way an
-          // unrated personal axis is. (REQ-TAXIS-6)
-          const stats = deriveDisplayStats(game.id, tournamentData ?? EMPTY_TOURNAMENT);
-          if (stats.normalizedScore !== null) {
-            rawValue = stats.normalizedScore;
-            source = "tournament";
-          }
+          scoringValue = deriveDisplayStats(
+            game.id,
+            tournamentData ?? EMPTY_TOURNAMENT,
+          ).normalizedScore;
         } else if (personalRating !== undefined) {
-          rawValue = personalRating;
-          // Personal ratings are always on the 1-10 scale, even when overriding a BGG axis
-          valueScale = getNativeScale("personal", null);
-          if (bggRawValue !== null) {
+          scoringValue = personalRating;
+          valueScale = { min: 1, max: 10 };
+          if (axis.source === "derived") {
             source = "override";
-            bggOriginal = roundToOneDecimal(bggRawValue);
-          } else {
-            source = "personal";
+            overridden = true;
+            applyConfiguredCurve = isPreferenceCurveApplicable(valueScale, shape, curveConfig);
           }
-        } else if (bggRawValue !== null) {
-          rawValue = bggRawValue;
-          source = "bgg";
+        } else if (resolution !== null) {
+          scoringValue = resolution.scoringRawValue;
         }
 
-        // Check veto on raw value (before curve application).
-        // Veto thresholds are in the axis's native scale (e.g., 1-5 for BGG weight).
-        // When a user overrides a BGG axis with a personal rating (1-10 scale),
-        // skip the veto: the user is asserting their judgment for this specific game.
-        const isOverride = source === "override";
-        if (rawValue !== null && !vetoTriggered && !isOverride) {
-          const vetoed = checkVeto(rawValue, axis.veto ?? null);
-          if (vetoed) {
-            vetoTriggered = true;
+        if (scoringValue !== null && vetoInfo === null && !overridden) {
+          if (checkVeto(scoringValue, axis.veto ?? null)) {
             vetoInfo = {
               axisId: axis.id,
               axisName: axis.name,
               threshold: axis.veto!.threshold,
               direction: axis.veto!.direction,
-              rawValue,
+              rawValue: scoringValue,
             };
           }
         }
 
-        // Apply preference curve to get effective rating (1-10)
-        let effectiveRating: number | null = null;
-        if (rawValue !== null) {
-          effectiveRating = applyPreferenceCurve(rawValue, valueScale, shape, {
-            idealValue: axis.idealValue,
-            tolerance: axis.tolerance,
-            leanDirection: axis.leanDirection,
-          });
-        }
-
-        // Compute higher-is-better baseline for curveAffected highlighting
-        let curveAffected = false;
-        if (rawValue !== null && effectiveRating !== null) {
-          const baseline = computeHigherIsBetterEffective(rawValue, valueScale);
-          curveAffected = Math.abs(effectiveRating - baseline) > CURVE_AFFECTED_THRESHOLD;
-        }
-
+        const effectiveRating =
+          scoringValue === null
+            ? null
+            : overridden && !applyConfiguredCurve
+              ? scoringValue
+              : applyPreferenceCurve(scoringValue, valueScale, shape, curveConfig);
         const displayedRating =
-          effectiveRating !== null ? roundToOneDecimal(effectiveRating) : null;
-        const displayedRawValue = rawValue !== null ? roundToOneDecimal(rawValue) : null;
-        const rawContribution = effectiveRating !== null ? effectiveRating * axis.weight : null;
+          effectiveRating === null ? null : roundToOneDecimal(effectiveRating);
+        const contribution = effectiveRating === null ? null : effectiveRating * axis.weight;
+        const definition =
+          axis.source === "derived" ? DERIVED_AXIS_REGISTRY[axis.derivedField] : null;
 
         breakdown.push({
           axisId: axis.id,
           axisName: axis.name,
-          rating: displayedRating,
           weight: axis.weight,
-          contribution: rawContribution !== null ? roundToOneDecimal(rawContribution) : null,
+          contribution: contribution === null ? null : roundToOneDecimal(contribution),
           source,
-          bggOriginal,
-          rawValue: displayedRawValue,
+          derivedField: axis.source === "derived" ? axis.derivedField : null,
+          sourceValue:
+            resolution !== null
+              ? resolution.sourceValue
+              : axis.source === "derived" || scoringValue === null
+                ? null
+                : scoringValue,
+          scoringRawValue:
+            resolution !== null
+              ? resolution.scoringRawValue
+              : axis.source === "derived" || scoringValue === null
+                ? null
+                : scoringValue,
           effectiveRating: displayedRating,
           preferenceShape: shape,
-          curveAffected,
+          curveAffected:
+            scoringValue !== null &&
+            effectiveRating !== null &&
+            (!overridden || applyConfiguredCurve)
+              ? Math.abs(
+                  effectiveRating - computeHigherIsBetterEffective(scoringValue, valueScale),
+                ) > CURVE_AFFECTED_THRESHOLD
+              : false,
+          unit: definition?.unit ?? null,
+          provenance: definition?.provenance ?? null,
+          configurationSummary:
+            axis.source === "derived" ? summarizeDerivedAxisConfiguration(axis) : null,
+          overridden,
+          overrideValue: overridden ? (personalRating ?? null) : null,
           predictionConfidence: null,
           referenceGames: null,
         });
 
-        if (rawContribution !== null) {
-          weightedSum += rawContribution;
+        if (contribution !== null) {
+          weightedSum += contribution;
           weightSum += axis.weight;
           ratedCount++;
         }
       }
 
-      // Recalculate contribution as weighted contribution to final score
       for (const entry of breakdown) {
-        if (entry.contribution !== null && weightSum > 0) {
-          entry.contribution = roundToOneDecimal((entry.rating! * entry.weight) / weightSum);
+        if (entry.contribution !== null && entry.effectiveRating !== null && weightSum > 0) {
+          entry.contribution = roundToOneDecimal(
+            (entry.effectiveRating * entry.weight) / weightSum,
+          );
         }
       }
 
-      breakdown.sort((a, b) => {
-        const sourceOrder: Record<FitnessBreakdownSource, number> = {
-          override: 0,
-          bgg: 1,
-          tournament: 2,
-          personal: 3,
-          predicted: 4,
-        };
-        if (sourceOrder[a.source] !== sourceOrder[b.source]) {
-          return sourceOrder[a.source] - sourceOrder[b.source];
-        }
-        return (b.contribution || 0) - (a.contribution || 0);
-      });
+      const sourceOrder: Record<FitnessBreakdownSource, number> = {
+        override: 0,
+        derived: 1,
+        tournament: 2,
+        personal: 3,
+        predicted: 4,
+      };
+      breakdown.sort((a, b) =>
+        sourceOrder[a.source] === sourceOrder[b.source]
+          ? (b.contribution ?? 0) - (a.contribution ?? 0)
+          : sourceOrder[a.source] - sourceOrder[b.source],
+      );
 
-      if (ratedCount === 0) return null;
-      if (weightSum === 0) return null;
+      if (ratedCount === 0 || weightSum === 0) return null;
 
       const hypotheticalScore = roundToOneDecimal(weightedSum / weightSum);
-
-      if (vetoTriggered) {
-        return {
-          score: 0,
-          ratedAxisCount: ratedCount,
-          totalAxisCount: axes.length,
-          breakdown,
-          vetoed: true,
-          vetoedBy: vetoInfo,
-          hypotheticalScore,
-          predictionMeta: null,
-          redundancyAdjustment: null,
-        };
-      }
-
       return {
-        score: hypotheticalScore,
+        score: vetoInfo === null ? hypotheticalScore : 0,
         ratedAxisCount: ratedCount,
-        totalAxisCount: axes.length,
+        totalAxisCount: scoringAxes.length,
         breakdown,
-        vetoed: false,
-        vetoedBy: null,
-        hypotheticalScore: null,
+        vetoed: vetoInfo !== null,
+        vetoedBy: vetoInfo,
+        hypotheticalScore: vetoInfo === null ? null : hypotheticalScore,
         predictionMeta: null,
         redundancyAdjustment: null,
       };

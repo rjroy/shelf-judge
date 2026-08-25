@@ -1,79 +1,127 @@
 import { v4 as uuidv4 } from "uuid";
 import {
-  CreateAxisSchema,
-  UpdateAxisSchema,
-  ValidationError,
+  AXIS_VALIDATION_CODES,
+  CodedAxisValidationError,
   NotFoundError,
+  createDerivedAxisFromPayload,
+  getDerivedFieldDiscovery,
+  mergeAndValidateAxisUpdate,
+  parseCreateAxisInput,
+  parseUpdateAxisInput,
+  parseLegacyAxisRepairInput,
+  repairAndValidateLegacyAxis,
   type Axis,
-  type CreateAxisInput,
-  type UpdateAxisInput,
+  type AxisBase,
+  type DerivedFieldDiscoveryResponse,
 } from "@shelf-judge/shared";
 import type { StorageService } from "./storage-service.js";
-import { getNativeScale } from "./curve-engine.js";
+import { createLogger, type Logger } from "./logger.js";
 
 export interface AxisService {
-  createAxis(input: CreateAxisInput): Promise<Axis>;
+  createAxis(input: unknown): Promise<Axis>;
   listAxes(): Promise<Axis[]>;
-  updateAxis(id: string, input: UpdateAxisInput): Promise<Axis>;
+  getDerivedFields(): DerivedFieldDiscoveryResponse;
+  updateAxis(id: string, input: unknown): Promise<Axis>;
+  repairLegacyAxis(id: string, input: unknown): Promise<Axis>;
   deleteAxis(id: string): Promise<{ deletedRatingsCount: number }>;
 }
 
 export interface AxisServiceDeps {
   storageService: StorageService;
+  logger?: Logger;
+  createId?: () => string;
+  now?: () => string;
+}
+
+function axisContext(axis: Axis): string {
+  const field = axis.source === "derived" ? axis.derivedField : "none";
+  return `axisId=${axis.id} source=${axis.source} derivedField=${field}`;
+}
+
+function isInputRecord(input: unknown): input is Record<string, unknown> {
+  return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+function inputRecord(input: unknown): Record<string, unknown> | null {
+  return isInputRecord(input) ? input : null;
+}
+
+function changedConfigurationKeys(input: unknown): string {
+  const record = inputRecord(input);
+  if (record === null || !("configuration" in record)) return "none";
+  const configuration = record.configuration;
+  if (typeof configuration !== "object" || configuration === null || Array.isArray(configuration)) {
+    return "invalid";
+  }
+  return Object.keys(configuration).sort().join(",") || "none";
+}
+
+function attemptedSource(input: unknown): string {
+  const source = inputRecord(input)?.source;
+  return typeof source === "string" ? source : "unknown";
+}
+
+function attemptedDerivedField(input: unknown): string {
+  const field = inputRecord(input)?.derivedField;
+  return typeof field === "string" ? field : "none";
+}
+
+function validationContext(error: CodedAxisValidationError): string {
+  return `code=${error.code} details=${JSON.stringify(error.details)}`;
 }
 
 export function createAxisService(deps: AxisServiceDeps): AxisService {
   const { storageService } = deps;
+  const logger = deps.logger ?? createLogger("axes");
+  const createId = deps.createId ?? uuidv4;
+  const now = deps.now ?? (() => new Date().toISOString());
 
   return {
-    async createAxis(input: CreateAxisInput): Promise<Axis> {
-      const parsed = CreateAxisSchema.parse(input);
-
-      // Cross-field validation: idealValue must be within native scale for sweet-spot
-      if (parsed.preferenceShape === "sweet-spot" && parsed.idealValue != null) {
-        const scale = getNativeScale(parsed.source, parsed.bggField);
-        if (parsed.idealValue < scale.min || parsed.idealValue > scale.max) {
-          throw new ValidationError(
-            `idealValue ${parsed.idealValue} is outside native scale range [${scale.min}, ${scale.max}]`,
+    async createAxis(input: unknown): Promise<Axis> {
+      logger.log(
+        `axis create attempt source=${attemptedSource(input)} derivedField=${attemptedDerivedField(input)} configurationKeys=${changedConfigurationKeys(input)}`,
+      );
+      try {
+        const parsed = parseCreateAxisInput(input);
+        const timestamp = now();
+        const base: AxisBase = {
+          id: createId(),
+          name: parsed.name,
+          description: parsed.description,
+          weight: parsed.weight,
+          enabled: true,
+          preferenceShape: parsed.preferenceShape,
+          idealValue: parsed.idealValue,
+          tolerance: parsed.tolerance,
+          toleranceWidth: parsed.toleranceWidth,
+          leanDirection: parsed.leanDirection,
+          veto: parsed.veto,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        };
+        const axis: Axis =
+          parsed.source === "derived"
+            ? createDerivedAxisFromPayload(base, parsed)
+            : { ...base, source: "personal" };
+        const collection = await storageService.loadCollection();
+        await storageService.saveCollection({
+          ...collection,
+          axes: [...collection.axes, axis],
+          updatedAt: timestamp,
+        });
+        logger.log(`axis create completed ${axisContext(axis)}`);
+        return axis;
+      } catch (error) {
+        if (error instanceof CodedAxisValidationError) {
+          logger.warn(`axis create rejected ${validationContext(error)}`);
+        } else {
+          logger.error(
+            `axis create persistence failed source=${attemptedSource(input)} derivedField=${attemptedDerivedField(input)}`,
+            error,
           );
         }
+        throw error;
       }
-
-      const collection = await storageService.loadCollection();
-
-      // Tournament axis is a singleton (REQ-TAXIS-3). The migration auto-creates one
-      // on load, so the only way this can be hit is a deliberate client attempt to
-      // add a second.
-      if (parsed.source === "tournament") {
-        const hasTournamentAxis = collection.axes.some((a) => a.source === "tournament");
-        if (hasTournamentAxis) {
-          throw new ValidationError("tournament_axis_already_exists");
-        }
-      }
-
-      const now = new Date().toISOString();
-
-      const axis: Axis = {
-        id: uuidv4(),
-        name: parsed.name,
-        description: parsed.description,
-        weight: parsed.weight,
-        source: parsed.source,
-        bggField: parsed.bggField,
-        preferenceShape: parsed.preferenceShape,
-        idealValue: parsed.idealValue,
-        tolerance: parsed.tolerance,
-        leanDirection: parsed.leanDirection,
-        veto: parsed.veto,
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      collection.axes.push(axis);
-      collection.updatedAt = now;
-      await storageService.saveCollection(collection);
-
-      return axis;
     },
 
     async listAxes(): Promise<Axis[]> {
@@ -81,86 +129,145 @@ export function createAxisService(deps: AxisServiceDeps): AxisService {
       return collection.axes;
     },
 
-    async updateAxis(id: string, input: UpdateAxisInput): Promise<Axis> {
-      const parsed = UpdateAxisSchema.parse(input);
-      const collection = await storageService.loadCollection();
-      const axis = collection.axes.find((a) => a.id === id);
+    getDerivedFields(): DerivedFieldDiscoveryResponse {
+      return getDerivedFieldDiscovery();
+    },
 
-      if (!axis) {
-        throw new NotFoundError(`Axis not found: ${id}`);
-      }
-
-      // Determine the effective preferenceShape after this update
-      const effectiveShape = parsed.preferenceShape ?? axis.preferenceShape;
-
-      if (effectiveShape === "sweet-spot") {
-        // idealValue must exist: either provided in this update or already stored
-        const effectiveIdealValue =
-          parsed.idealValue !== undefined ? parsed.idealValue : axis.idealValue;
-        if (effectiveIdealValue == null) {
-          throw new ValidationError("idealValue is required when preferenceShape is sweet-spot");
-        }
-
-        // Validate idealValue is within native scale
-        const scale = getNativeScale(axis.source, axis.bggField);
-        if (effectiveIdealValue < scale.min || effectiveIdealValue > scale.max) {
-          throw new ValidationError(
-            `idealValue ${effectiveIdealValue} is outside native scale range [${scale.min}, ${scale.max}]`,
+    async updateAxis(id: string, input: unknown): Promise<Axis> {
+      let targetContext = `axisId=${id} source=unknown derivedField=none`;
+      logger.log(
+        `axis update attempt axisId=${id} configurationKeys=${changedConfigurationKeys(input)}`,
+      );
+      try {
+        const parsed = parseUpdateAxisInput(input);
+        const collection = await storageService.loadCollection();
+        const axis = collection.axes.find((candidate) => candidate.id === id);
+        if (axis === undefined) throw new NotFoundError(`Axis not found: ${id}`);
+        targetContext = axisContext(axis);
+        logger.log(
+          `axis update target ${axisContext(axis)} configurationKeys=${changedConfigurationKeys(input)}`,
+        );
+        if (!axis.enabled) {
+          throw new CodedAxisValidationError(
+            "Disabled legacy axes require the explicit repair operation",
+            AXIS_VALIDATION_CODES.INVALID_LEGACY_AXIS_REPAIR,
+            [{ field: "axisId", path: ["id"] }],
           );
         }
-      }
-
-      const now = new Date().toISOString();
-
-      if (parsed.name !== undefined) axis.name = parsed.name;
-      if (parsed.description !== undefined) axis.description = parsed.description;
-      if (parsed.weight !== undefined) axis.weight = parsed.weight;
-
-      // Curve fields
-      if (parsed.preferenceShape !== undefined) {
-        axis.preferenceShape = parsed.preferenceShape;
-
-        // When changing away from sweet-spot, clear stale config
-        if (parsed.preferenceShape !== "sweet-spot") {
-          axis.idealValue = undefined;
-          axis.tolerance = undefined;
-          axis.leanDirection = undefined;
+        const updated = mergeAndValidateAxisUpdate(axis, parsed);
+        const timestamp = now();
+        const persisted = { ...updated, updatedAt: timestamp };
+        await storageService.saveCollection({
+          ...collection,
+          axes: collection.axes.map((candidate) => (candidate.id === id ? persisted : candidate)),
+          updatedAt: timestamp,
+        });
+        logger.log(`axis update completed ${axisContext(persisted)}`);
+        return persisted;
+      } catch (error) {
+        if (error instanceof CodedAxisValidationError) {
+          logger.warn(`axis update rejected ${targetContext} ${validationContext(error)}`);
+        } else if (error instanceof NotFoundError) {
+          logger.warn(`axis update failed axisId=${id} reason=not_found`);
+        } else {
+          logger.error(`axis update persistence failed ${targetContext}`, error);
         }
+        throw error;
       }
-      if (parsed.idealValue !== undefined) axis.idealValue = parsed.idealValue;
-      if (parsed.tolerance !== undefined) axis.tolerance = parsed.tolerance;
-      if (parsed.leanDirection !== undefined) axis.leanDirection = parsed.leanDirection;
-      if (parsed.veto !== undefined) axis.veto = parsed.veto;
+    },
 
-      axis.updatedAt = now;
-      collection.updatedAt = now;
-
-      await storageService.saveCollection(collection);
-      return axis;
+    async repairLegacyAxis(id: string, input: unknown): Promise<Axis> {
+      logger.log(
+        `axis repair attempt axisId=${id} source=legacy derivedField=${attemptedDerivedField(input)} configurationKeys=${changedConfigurationKeys(input)}`,
+      );
+      try {
+        const parsed = parseLegacyAxisRepairInput(input);
+        const collection = await storageService.loadCollection();
+        const axis = collection.axes.find((candidate) => candidate.id === id);
+        if (axis === undefined) throw new NotFoundError(`Axis not found: ${id}`);
+        logger.log(
+          `axis repair target ${axisContext(axis)} selectedDerivedField=${parsed.derivedField}`,
+        );
+        if (axis.enabled) {
+          throw new CodedAxisValidationError(
+            "Only disabled legacy axes can be repaired",
+            AXIS_VALIDATION_CODES.INVALID_LEGACY_AXIS_REPAIR,
+            [{ field: "axisId", path: ["id"] }],
+          );
+        }
+        const timestamp = now();
+        const repaired = {
+          ...repairAndValidateLegacyAxis(axis, parsed),
+          updatedAt: timestamp,
+        };
+        await storageService.saveCollection({
+          ...collection,
+          axes: collection.axes.map((candidate) => (candidate.id === id ? repaired : candidate)),
+          updatedAt: timestamp,
+        });
+        logger.log(`axis repair completed ${axisContext(repaired)}`);
+        return repaired;
+      } catch (error) {
+        if (error instanceof CodedAxisValidationError) {
+          logger.warn(`axis repair rejected axisId=${id} ${validationContext(error)}`);
+        } else if (error instanceof NotFoundError) {
+          logger.warn(`axis repair failed axisId=${id} reason=not_found`);
+        } else {
+          logger.error(
+            `axis repair persistence failed axisId=${id} source=legacy derivedField=${attemptedDerivedField(input)}`,
+            error,
+          );
+        }
+        throw error;
+      }
     },
 
     async deleteAxis(id: string): Promise<{ deletedRatingsCount: number }> {
-      const collection = await storageService.loadCollection();
-      const axisIndex = collection.axes.findIndex((a) => a.id === id);
-
-      if (axisIndex === -1) {
-        throw new NotFoundError(`Axis not found: ${id}`);
-      }
-
-      collection.axes.splice(axisIndex, 1);
-
-      let deletedRatingsCount = 0;
-      for (const game of collection.games) {
-        if (id in game.ratings) {
-          delete game.ratings[id];
-          deletedRatingsCount++;
+      let targetContext = `axisId=${id} source=unknown derivedField=none`;
+      logger.log(`axis delete attempt axisId=${id}`);
+      try {
+        const collection = await storageService.loadCollection();
+        const axis = collection.axes.find((candidate) => candidate.id === id);
+        if (axis === undefined) throw new NotFoundError(`Axis not found: ${id}`);
+        targetContext = axisContext(axis);
+        logger.log(`axis delete target ${axisContext(axis)}`);
+        if (axis.source === "tournament") {
+          throw new CodedAxisValidationError(
+            "Tournament axes are service-managed and cannot be deleted",
+            AXIS_VALIDATION_CODES.TOURNAMENT_AXIS_MANAGED,
+            [{ field: "source", path: ["source"] }],
+          );
         }
+
+        let deletedRatingsCount = 0;
+        const games = collection.games.map((game) => {
+          if (!(id in game.ratings)) return game;
+          deletedRatingsCount++;
+          const { [id]: removed, ...ratings } = game.ratings;
+          void removed;
+          return { ...game, ratings };
+        });
+        const timestamp = now();
+        await storageService.saveCollection({
+          ...collection,
+          axes: collection.axes.filter((candidate) => candidate.id !== id),
+          games,
+          updatedAt: timestamp,
+        });
+        logger.log(
+          `axis delete completed ${axisContext(axis)} deletedRatingsCount=${deletedRatingsCount}`,
+        );
+        return { deletedRatingsCount };
+      } catch (error) {
+        if (error instanceof CodedAxisValidationError) {
+          logger.warn(`axis delete rejected ${targetContext} ${validationContext(error)}`);
+        } else if (error instanceof NotFoundError) {
+          logger.warn(`axis delete failed axisId=${id} reason=not_found`);
+        } else {
+          logger.error(`axis delete persistence failed ${targetContext}`, error);
+        }
+        throw error;
       }
-
-      collection.updatedAt = new Date().toISOString();
-      await storageService.saveCollection(collection);
-
-      return { deletedRatingsCount };
     },
   };
 }

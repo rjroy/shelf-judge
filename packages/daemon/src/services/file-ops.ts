@@ -4,11 +4,17 @@ import * as path from "node:path";
 export interface FileOps {
   readFile(filePath: string): Promise<string>;
   writeFile(filePath: string, content: string): Promise<void>;
+  /** Write a new file without replacing an existing path. Returns false on collision. */
+  writeFileExclusive(filePath: string, content: string): Promise<boolean>;
   rename(oldPath: string, newPath: string): Promise<void>;
   exists(filePath: string): Promise<boolean>;
   mkdir(dirPath: string): Promise<void>;
   /** Delete a file. Resolves silently if the file does not exist (ENOENT is swallowed). */
   unlink(filePath: string): Promise<void>;
+}
+
+function hasErrorCode(error: unknown, code: string): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === code;
 }
 
 export function createFileOps(): FileOps {
@@ -19,6 +25,16 @@ export function createFileOps(): FileOps {
 
     async writeFile(filePath: string, content: string): Promise<void> {
       await fs.writeFile(filePath, content, "utf-8");
+    },
+
+    async writeFileExclusive(filePath: string, content: string): Promise<boolean> {
+      try {
+        await fs.writeFile(filePath, content, { encoding: "utf-8", flag: "wx" });
+        return true;
+      } catch (error) {
+        if (hasErrorCode(error, "EEXIST")) return false;
+        throw error;
+      }
     },
 
     async rename(oldPath: string, newPath: string): Promise<void> {
@@ -43,14 +59,52 @@ export function createFileOps(): FileOps {
         await fs.unlink(filePath);
       } catch (err) {
         // ENOENT is the only acceptable failure: deleting a missing file is a no-op.
-        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+        if (!hasErrorCode(err, "ENOENT")) throw err;
       }
     },
   };
 }
 
-export function getTempPath(filePath: string): string {
+export function getTempPath(filePath: string, token: string = crypto.randomUUID()): string {
   const dir = path.dirname(filePath);
   const base = path.basename(filePath);
-  return path.join(dir, `.${base}.tmp`);
+  return path.join(dir, `.${base}.${token}.tmp`);
+}
+
+export type TemporaryPathForAttempt = (filePath: string, attempt: number) => string;
+
+const defaultTemporaryPathForAttempt: TemporaryPathForAttempt = (filePath) => getTempPath(filePath);
+
+export async function atomicWrite(
+  filePath: string,
+  content: string,
+  fileOps: FileOps,
+  temporaryPathForAttempt: TemporaryPathForAttempt = defaultTemporaryPathForAttempt,
+): Promise<void> {
+  let attempt = 0;
+  let tmpPath: string;
+  for (;;) {
+    tmpPath = temporaryPathForAttempt(filePath, attempt);
+    try {
+      if (await fileOps.writeFileExclusive(tmpPath, content)) break;
+    } catch (error) {
+      try {
+        await fileOps.unlink(tmpPath);
+      } catch {
+        // Preserve the exclusive-write failure.
+      }
+      throw error;
+    }
+    attempt += 1;
+  }
+  try {
+    await fileOps.rename(tmpPath, filePath);
+  } catch (error) {
+    try {
+      await fileOps.unlink(tmpPath);
+    } catch {
+      // Preserve the write failure. A uniquely named temp file is safe for later cleanup.
+    }
+    throw error;
+  }
 }

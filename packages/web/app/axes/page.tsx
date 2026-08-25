@@ -3,12 +3,33 @@
 import { useState, useEffect, useRef } from "react";
 import type {
   Axis,
-  AxisSource,
+  DisabledLegacyAxis,
+  DerivedFieldDiscovery,
+  DerivedFieldDiscoveryResponse,
+  NativeScale,
   PreferenceShape,
-  ToleranceLevel,
-  LeanDirection,
 } from "@shelf-judge/shared";
-import { getNativeScale, applyPreferenceCurve } from "@shelf-judge/shared";
+import {
+  applyPreferenceCurve,
+  getAxisNativeScale,
+  isPreferenceCurveApplicable,
+  summarizeDerivedAxisConfiguration,
+} from "@shelf-judge/shared";
+import { getAxisWeightPercentage, getEnabledAxisWeightTotal } from "@/lib/axis-weight-utils";
+import {
+  DEFAULT_CURVE,
+  curveStateFromAxis,
+  curveStateToBody,
+  type CurveState,
+} from "@/lib/axis-curve-state";
+import {
+  configurationDraftFromField,
+  configurationFromDraft,
+  nativeScaleFromDiscovery,
+  readAxisFormError,
+  type AxisFormError,
+  type ConfigurationDraft,
+} from "@/lib/derived-axis-web";
 
 interface GameWithScore {
   game: {
@@ -18,63 +39,12 @@ interface GameWithScore {
   score: unknown;
 }
 
-// Curve config state for create/edit forms
-interface CurveState {
-  shape: PreferenceShape;
-  idealValue: string;
-  tolerance: ToleranceLevel;
-  leanDirection: LeanDirection | null;
-  vetoEnabled: boolean;
-  vetoDirection: "below" | "above";
-  vetoThreshold: string;
-}
-
-const DEFAULT_CURVE: CurveState = {
-  shape: "higher-is-better",
-  idealValue: "",
-  tolerance: "moderate",
-  leanDirection: null,
-  vetoEnabled: false,
-  vetoDirection: "below",
-  vetoThreshold: "",
-};
-
-function curveStateFromAxis(axis: Axis): CurveState {
-  return {
-    shape: axis.preferenceShape ?? "higher-is-better",
-    idealValue: axis.idealValue != null ? String(axis.idealValue) : "",
-    tolerance: axis.tolerance ?? "moderate",
-    leanDirection: axis.leanDirection ?? null,
-    vetoEnabled: axis.veto != null,
-    vetoDirection: axis.veto?.direction ?? "below",
-    vetoThreshold: axis.veto != null ? String(axis.veto.threshold) : "",
-  };
-}
-
-function curveStateToBody(curve: CurveState): Record<string, unknown> {
-  const body: Record<string, unknown> = {
-    preferenceShape: curve.shape,
-  };
-  if (curve.shape === "sweet-spot") {
-    body.idealValue = curve.idealValue !== "" ? parseFloat(curve.idealValue) : null;
-    body.tolerance = curve.tolerance;
-    body.leanDirection = curve.leanDirection;
-  } else {
-    body.idealValue = null;
-    body.tolerance = undefined;
-    body.leanDirection = null;
-  }
-  if (curve.vetoEnabled && curve.vetoThreshold !== "") {
-    body.veto = { direction: curve.vetoDirection, threshold: parseFloat(curve.vetoThreshold) };
-  } else {
-    body.veto = null;
-  }
-  return body;
-}
+type FormScope = "create" | `update:${string}` | `repair:${string}`;
 
 export default function AxesPage() {
   const [axes, setAxes] = useState<Axis[]>([]);
   const [games, setGames] = useState<GameWithScore[]>([]);
+  const [discovery, setDiscovery] = useState<DerivedFieldDiscoveryResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -82,10 +52,19 @@ export default function AxesPage() {
   const [editWeight, setEditWeight] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editCurve, setEditCurve] = useState<CurveState>(DEFAULT_CURVE);
+  const [editConfiguration, setEditConfiguration] = useState<ConfigurationDraft>({});
   const [newName, setNewName] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [newWeight, setNewWeight] = useState("50");
   const [newCurve, setNewCurve] = useState<CurveState>(DEFAULT_CURVE);
+  const [newDerivedField, setNewDerivedField] = useState<DerivedFieldDiscovery | null>(null);
+  const [newConfiguration, setNewConfiguration] = useState<ConfigurationDraft>({});
+  const [formErrors, setFormErrors] = useState<Partial<Record<FormScope, AxisFormError>>>({});
+  const formRequestVersions = useRef(new Map<FormScope, number>());
+  const [repairingId, setRepairingId] = useState<string | null>(null);
+  const [repairField, setRepairField] = useState<DerivedFieldDiscovery | null>(null);
+  const [repairConfiguration, setRepairConfiguration] = useState<ConfigurationDraft>({});
+  const [repairCurve, setRepairCurve] = useState<CurveState>(DEFAULT_CURVE);
   const [showCreate, setShowCreate] = useState(false);
 
   useEffect(() => {
@@ -95,14 +74,17 @@ export default function AxesPage() {
   async function loadData() {
     setLoading(true);
     try {
-      const [axesRes, gamesRes] = await Promise.all([
+      const [axesRes, gamesRes, discoveryRes] = await Promise.all([
         fetch("/api/daemon/axes"),
         fetch("/api/daemon/games"),
+        fetch("/api/daemon/axes/derived-fields"),
       ]);
       if (!axesRes.ok) throw new Error("Failed to load axes");
       if (!gamesRes.ok) throw new Error("Failed to load games");
+      if (!discoveryRes.ok) throw new Error("Failed to load derived axis templates");
       setAxes((await axesRes.json()) as Axis[]);
       setGames((await gamesRes.json()) as GameWithScore[]);
+      setDiscovery((await discoveryRes.json()) as DerivedFieldDiscoveryResponse);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load");
     } finally {
@@ -114,65 +96,83 @@ export default function AxesPage() {
     return games.filter((g) => g.game.ratings[axisId] !== undefined).length;
   }
 
+  function clearFormError(scope: FormScope): number {
+    const version = (formRequestVersions.current.get(scope) ?? 0) + 1;
+    formRequestVersions.current.set(scope, version);
+    setFormErrors((current) => {
+      if (current[scope] === undefined) return current;
+      const next = { ...current };
+      delete next[scope];
+      return next;
+    });
+    return version;
+  }
+
+  function setFormError(scope: FormScope, version: number, formError: AxisFormError) {
+    if (formRequestVersions.current.get(scope) !== version) return;
+    setFormErrors((current) => ({ ...current, [scope]: formError }));
+  }
+
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     if (!newName.trim()) return;
 
-    if (newCurve.vetoEnabled && newCurve.vetoThreshold !== "") {
-      const dir = newCurve.vetoDirection;
-      const threshold = newCurve.vetoThreshold;
-      if (
-        !confirm(
-          `This will set any game scoring ${dir} ${threshold} on this axis to fitness 0. Continue?`,
-        )
-      )
-        return;
-    }
+    if (!confirmVetoEnablement(newCurve, newDerivedField?.unit)) return;
 
-    setError(null);
+    const scope = "create";
+    const version = clearFormError(scope);
 
     try {
       const res = await fetch("/api/daemon/axes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          source: newDerivedField ? "derived" : "personal",
           name: newName.trim(),
           description: newDescription.trim() || undefined,
           weight: parseInt(newWeight, 10),
-          ...curveStateToBody(newCurve),
+          ...curveStateToBody(newCurve, "create"),
+          ...(newDerivedField
+            ? {
+                derivedField: newDerivedField.id,
+                configuration: configurationFromDraft(newDerivedField, newConfiguration),
+              }
+            : {}),
         }),
       });
+      if (formRequestVersions.current.get(scope) !== version) return;
       if (!res.ok) {
-        const data = (await res.json().catch(() => ({ error: "Unknown error" }))) as {
-          error?: string;
-        };
-        throw new Error(data.error ?? `Failed: ${res.status}`);
+        const formError = await readAxisFormError(res);
+        setFormError(scope, version, formError);
+        return;
       }
       setNewName("");
       setNewDescription("");
       setNewWeight("50");
       setNewCurve(DEFAULT_CURVE);
+      setNewDerivedField(null);
+      setNewConfiguration({});
+      clearFormError(scope);
       void loadData();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create axis");
+      setFormError(scope, version, {
+        summary: err instanceof Error ? err.message : "Failed to create axis",
+        fields: {},
+      });
     }
   }
 
   async function handleUpdate(id: string) {
+    const scope = `update:${id}` as const;
     const existingAxis = axes.find((a) => a.id === id);
     const hadVeto = existingAxis?.veto != null;
-    if (!hadVeto && editCurve.vetoEnabled && editCurve.vetoThreshold !== "") {
-      const dir = editCurve.vetoDirection;
-      const threshold = editCurve.vetoThreshold;
-      if (
-        !confirm(
-          `This will set any game scoring ${dir} ${threshold} on this axis to fitness 0. Continue?`,
-        )
-      )
-        return;
-    }
+    const existingField =
+      existingAxis?.source === "derived"
+        ? discovery?.fields.find((field) => field.id === existingAxis.derivedField)
+        : undefined;
+    if (!hadVeto && !confirmVetoEnablement(editCurve, existingField?.unit)) return;
 
-    setError(null);
+    const version = clearFormError(scope);
     try {
       const body: Record<string, unknown> = {};
       const axis = axes.find((a) => a.id === id);
@@ -186,7 +186,12 @@ export default function AxesPage() {
         if (editName.trim() && editName.trim() !== axis?.name) body.name = editName.trim();
         if (editWeight) body.weight = parseInt(editWeight, 10);
         if (editDescription !== axis?.description) body.description = editDescription;
-        Object.assign(body, curveStateToBody(editCurve));
+        Object.assign(body, curveStateToBody(editCurve, "update"));
+        if (axis?.source === "derived") {
+          const field = discovery?.fields.find((candidate) => candidate.id === axis.derivedField);
+          if (!field) throw new Error("Derived field metadata is unavailable");
+          body.configuration = configurationFromDraft(field, editConfiguration);
+        }
       }
 
       const res = await fetch(`/api/daemon/axes/${id}`, {
@@ -194,17 +199,76 @@ export default function AxesPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+      if (formRequestVersions.current.get(scope) !== version) return;
       if (!res.ok) {
-        const data = (await res.json().catch(() => ({ error: "Unknown error" }))) as {
-          error?: string;
-        };
-        throw new Error(data.error ?? `Failed: ${res.status}`);
+        const formError = await readAxisFormError(res);
+        setFormError(scope, version, formError);
+        return;
       }
       setEditingId(null);
+      clearFormError(scope);
       void loadData();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update axis");
+      setFormError(scope, version, {
+        summary: err instanceof Error ? err.message : "Failed to update axis",
+        fields: {},
+      });
     }
+  }
+
+  async function handleRepair(axis: Axis) {
+    if (axis.source !== "legacy" || repairField === null) return;
+    const scope = `repair:${axis.id}` as const;
+    const version = clearFormError(scope);
+    try {
+      const res = await fetch(`/api/daemon/axes/${axis.id}/repair`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          derivedField: repairField.id,
+          configuration: configurationFromDraft(repairField, repairConfiguration),
+          ...curveStateToBody(repairCurve, "update"),
+        }),
+      });
+      if (formRequestVersions.current.get(scope) !== version) return;
+      if (!res.ok) {
+        const formError = await readAxisFormError(res);
+        setFormError(scope, version, formError);
+        return;
+      }
+      setRepairingId(null);
+      clearFormError(scope);
+      void loadData();
+    } catch (err) {
+      setFormError(scope, version, {
+        summary: err instanceof Error ? err.message : "Failed to repair axis",
+        fields: {},
+      });
+    }
+  }
+
+  function selectTemplate(field: DerivedFieldDiscovery | null) {
+    setNewDerivedField(field);
+    clearFormError("create");
+    if (field === null) {
+      setNewName("");
+      setNewDescription("");
+      setNewWeight("50");
+      setNewCurve(DEFAULT_CURVE);
+      setNewConfiguration({});
+      return;
+    }
+    const template = field.template;
+    setNewName(template.name);
+    setNewDescription(template.description);
+    setNewWeight(String(template.weight));
+    setNewCurve({
+      ...DEFAULT_CURVE,
+      shape: template.preferenceShape,
+      idealValue: template.idealValue === undefined ? "" : String(template.idealValue),
+      toleranceWidth: template.toleranceWidth === undefined ? "" : String(template.toleranceWidth),
+    });
+    setNewConfiguration(configurationDraftFromField(field));
   }
 
   async function handleDelete(axis: Axis) {
@@ -235,15 +299,22 @@ export default function AxesPage() {
   if (loading) return <p className="axes-content loading-text">Loading axes...</p>;
 
   const personalAxes = axes.filter((a) => a.source === "personal");
-  const bggAxes = axes.filter((a) => a.source === "bgg");
+  const derivedAxes = axes.filter((a) => a.source === "derived");
   const tournamentAxes = axes.filter((a) => a.source === "tournament");
-  const totalWeight = axes.reduce((sum, a) => sum + a.weight, 0);
+  const disabledAxes = axes.filter((a) => !a.enabled);
+  const totalWeight = getEnabledAxisWeightTotal(axes);
 
   return (
     <>
       <div className="topbar">
         <div className="topbar-title">Rating Axes</div>
-        <button className="btn btn-primary" onClick={() => setShowCreate(!showCreate)}>
+        <button
+          className="btn btn-primary"
+          onClick={() => {
+            clearFormError("create");
+            setShowCreate(!showCreate);
+          }}
+        >
           + New Axis
         </button>
       </div>
@@ -267,11 +338,35 @@ export default function AxesPage() {
           {/* Create form (toggleable) */}
           {showCreate && (
             <div className="create-form">
+              {formErrors.create && <div className="error-banner">{formErrors.create.summary}</div>}
               <form
                 onSubmit={(e) => {
                   void handleCreate(e);
                 }}
               >
+                <div className="template-picker" role="group" aria-label="Axis templates">
+                  <button
+                    type="button"
+                    className={`template-option${newDerivedField === null ? " active" : ""}`}
+                    aria-pressed={newDerivedField === null}
+                    onClick={() => selectTemplate(null)}
+                  >
+                    <strong>Personal axis</strong>
+                    <span>Enter your own 1-10 ratings.</span>
+                  </button>
+                  {discovery?.fields.map((field) => (
+                    <button
+                      type="button"
+                      key={field.id}
+                      className={`template-option${newDerivedField?.id === field.id ? " active" : ""}`}
+                      aria-pressed={newDerivedField?.id === field.id}
+                      onClick={() => selectTemplate(field)}
+                    >
+                      <strong>{field.label}</strong>
+                      <span>{field.description}</span>
+                    </button>
+                  ))}
+                </div>
                 <div className="form-row">
                   <div className="form-group">
                     <label className="form-label">Name</label>
@@ -309,18 +404,37 @@ export default function AxesPage() {
                   />
                 </div>
 
+                {newDerivedField && (
+                  <ConfigurationFields
+                    idPrefix="create-axis"
+                    field={newDerivedField}
+                    draft={newConfiguration}
+                    errors={formErrors.create?.fields ?? {}}
+                    onChange={setNewConfiguration}
+                  />
+                )}
+
                 <CurveConfig
+                  idPrefix="create-axis"
                   curve={newCurve}
                   onChange={setNewCurve}
-                  source="personal"
-                  bggField={null}
+                  scale={
+                    newDerivedField
+                      ? nativeScaleFromDiscovery(newDerivedField, newConfiguration)
+                      : { min: 1, max: 10 }
+                  }
+                  unit={newDerivedField?.unit}
+                  errors={formErrors.create?.fields}
                 />
 
                 <div className="form-actions">
                   <button
                     type="button"
                     className="btn btn-secondary"
-                    onClick={() => setShowCreate(false)}
+                    onClick={() => {
+                      clearFormError("create");
+                      setShowCreate(false);
+                    }}
                   >
                     Cancel
                   </button>
@@ -347,13 +461,18 @@ export default function AxesPage() {
               totalWeight={totalWeight}
               ratingsCount={ratingsCountForAxis(axis.id)}
               onStartEdit={() => {
+                if (editingId !== null) clearFormError(`update:${editingId}`);
+                clearFormError(`update:${axis.id}`);
                 setEditingId(axis.id);
                 setEditName(axis.name);
                 setEditWeight(String(axis.weight));
                 setEditDescription(axis.description ?? "");
                 setEditCurve(curveStateFromAxis(axis));
               }}
-              onCancelEdit={() => setEditingId(null)}
+              onCancelEdit={() => {
+                clearFormError(`update:${axis.id}`);
+                setEditingId(null);
+              }}
               onSave={() => {
                 void handleUpdate(axis.id);
               }}
@@ -364,21 +483,22 @@ export default function AxesPage() {
               onNameChange={setEditName}
               onWeightChange={setEditWeight}
               onDescChange={setEditDescription}
+              formError={formErrors[`update:${axis.id}`]}
             />
           ))}
 
-          {/* BGG axes */}
-          {bggAxes.length > 0 && (
+          {/* Derived axes */}
+          {derivedAxes.length > 0 && (
             <>
               <div className="section-label section-label-mt">
-                BGG-derived axes &middot; {bggAxes.length}
+                Derived axes &middot; {derivedAxes.length}
               </div>
               <p className="bgg-axes-desc">
-                These axes are automatically populated from BoardGameGeek data. You can override any
-                individual game{"'"}s value.
+                These axes are automatically populated from game metadata. You can override any
+                individual game{"'"}s effective rating.
               </p>
 
-              {bggAxes.map((axis) => (
+              {derivedAxes.map((axis) => (
                 <AxisCard
                   key={axis.id}
                   axis={axis}
@@ -390,13 +510,24 @@ export default function AxesPage() {
                   totalWeight={totalWeight}
                   ratingsCount={ratingsCountForAxis(axis.id)}
                   onStartEdit={() => {
+                    if (editingId !== null) clearFormError(`update:${editingId}`);
+                    clearFormError(`update:${axis.id}`);
                     setEditingId(axis.id);
                     setEditName(axis.name);
                     setEditWeight(String(axis.weight));
                     setEditDescription(axis.description ?? "");
                     setEditCurve(curveStateFromAxis(axis));
+                    const field = discovery?.fields.find(
+                      (candidate) => candidate.id === axis.derivedField,
+                    );
+                    setEditConfiguration(
+                      field ? configurationDraftFromField(field, axis.configuration) : {},
+                    );
                   }}
-                  onCancelEdit={() => setEditingId(null)}
+                  onCancelEdit={() => {
+                    clearFormError(`update:${axis.id}`);
+                    setEditingId(null);
+                  }}
                   onSave={() => {
                     void handleUpdate(axis.id);
                   }}
@@ -407,8 +538,61 @@ export default function AxesPage() {
                   onNameChange={setEditName}
                   onWeightChange={setEditWeight}
                   onDescChange={setEditDescription}
+                  discoveryField={discovery?.fields.find((field) => field.id === axis.derivedField)}
+                  editConfiguration={editConfiguration}
+                  formError={formErrors[`update:${axis.id}`]}
+                  onConfigurationChange={setEditConfiguration}
                 />
               ))}
+            </>
+          )}
+
+          {disabledAxes.length > 0 && (
+            <>
+              <div className="section-label section-label-mt">
+                Disabled legacy axes &middot; {disabledAxes.length}
+              </div>
+              <p className="bgg-axes-desc">
+                These preserved axes are excluded from scoring. Choose a registered field to repair
+                one, or delete it permanently.
+              </p>
+              {disabledAxes.map((axis) =>
+                axis.source === "legacy" ? (
+                  <LegacyAxisCard
+                    key={axis.id}
+                    axis={axis}
+                    fields={discovery?.fields ?? []}
+                    ratingsCount={ratingsCountForAxis(axis.id)}
+                    repairing={repairingId === axis.id}
+                    repairField={repairField}
+                    configuration={repairConfiguration}
+                    curve={repairCurve}
+                    formError={formErrors[`repair:${axis.id}`]}
+                    onStartRepair={() => {
+                      if (repairingId !== null) clearFormError(`repair:${repairingId}`);
+                      clearFormError(`repair:${axis.id}`);
+                      const field = discovery?.fields[0] ?? null;
+                      setRepairingId(axis.id);
+                      setRepairField(field);
+                      setRepairConfiguration(field ? configurationDraftFromField(field) : {});
+                      setRepairCurve(curveStateFromAxis(axis));
+                    }}
+                    onSelectField={(field) => {
+                      clearFormError(`repair:${axis.id}`);
+                      setRepairField(field);
+                      setRepairConfiguration(configurationDraftFromField(field));
+                    }}
+                    onConfigurationChange={setRepairConfiguration}
+                    onCurveChange={setRepairCurve}
+                    onCancel={() => {
+                      clearFormError(`repair:${axis.id}`);
+                      setRepairingId(null);
+                    }}
+                    onRepair={() => void handleRepair(axis)}
+                    onDelete={() => void handleDelete(axis)}
+                  />
+                ) : null,
+              )}
             </>
           )}
 
@@ -435,13 +619,18 @@ export default function AxesPage() {
                   totalWeight={totalWeight}
                   ratingsCount={ratingsCountForAxis(axis.id)}
                   onStartEdit={() => {
+                    if (editingId !== null) clearFormError(`update:${editingId}`);
+                    clearFormError(`update:${axis.id}`);
                     setEditingId(axis.id);
                     setEditName(axis.name);
                     setEditWeight(String(axis.weight));
                     setEditDescription(axis.description ?? "");
                     setEditCurve(curveStateFromAxis(axis));
                   }}
-                  onCancelEdit={() => setEditingId(null)}
+                  onCancelEdit={() => {
+                    clearFormError(`update:${axis.id}`);
+                    setEditingId(null);
+                  }}
                   onSave={() => {
                     void handleUpdate(axis.id);
                   }}
@@ -452,6 +641,7 @@ export default function AxesPage() {
                   onNameChange={setEditName}
                   onWeightChange={setEditWeight}
                   onDescChange={setEditDescription}
+                  formError={formErrors[`update:${axis.id}`]}
                 />
               ))}
             </>
@@ -459,6 +649,200 @@ export default function AxesPage() {
         </div>
       </div>
     </>
+  );
+}
+
+function ConfigurationFields({
+  idPrefix,
+  field,
+  draft,
+  errors,
+  onChange,
+}: {
+  idPrefix: string;
+  field: DerivedFieldDiscovery;
+  draft: ConfigurationDraft;
+  errors: Record<string, string>;
+  onChange: (draft: ConfigurationDraft) => void;
+}) {
+  if (field.configuration.length === 0) return null;
+  return (
+    <div className="derived-configuration">
+      <div className="curve-config-title">Derived Configuration</div>
+      <div className="form-row">
+        {field.configuration.map((property) => {
+          const inputId = `${idPrefix}-configuration-${property.name}`;
+          const error = errors[`configuration.${property.name}`] ?? errors[property.name];
+          const errorId = `${inputId}-error`;
+          return (
+            <div className="form-group" key={property.name}>
+              <label className="form-label" htmlFor={inputId}>
+                {property.name
+                  .replace(/([A-Z])/g, " $1")
+                  .replace(/^./, (letter) => letter.toUpperCase())}
+                {` (${field.unit})`}
+              </label>
+              <input
+                id={inputId}
+                className="form-input"
+                type="number"
+                required={property.required}
+                min={property.minimum}
+                max={property.maximum}
+                step={1}
+                value={draft[property.name] ?? ""}
+                onChange={(event) => onChange({ ...draft, [property.name]: event.target.value })}
+                aria-invalid={error ? true : undefined}
+                aria-describedby={error ? errorId : undefined}
+              />
+              <span className="form-hint">
+                Whole number from {property.minimum} to {property.maximum}.
+              </span>
+              {error && (
+                <span id={errorId} className="field-error">
+                  {error}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export function LegacyAxisCard({
+  axis,
+  fields,
+  ratingsCount,
+  repairing,
+  repairField,
+  configuration,
+  curve,
+  formError,
+  onStartRepair,
+  onSelectField,
+  onConfigurationChange,
+  onCurveChange,
+  onCancel,
+  onRepair,
+  onDelete,
+}: {
+  axis: DisabledLegacyAxis;
+  fields: DerivedFieldDiscovery[];
+  ratingsCount: number;
+  repairing: boolean;
+  repairField: DerivedFieldDiscovery | null;
+  configuration: ConfigurationDraft;
+  curve: CurveState;
+  formError?: AxisFormError;
+  onStartRepair: () => void;
+  onSelectField: (field: DerivedFieldDiscovery) => void;
+  onConfigurationChange: (draft: ConfigurationDraft) => void;
+  onCurveChange: (curve: CurveState) => void;
+  onCancel: () => void;
+  onRepair: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="axis-card legacy-axis-card" data-axis-id={axis.id}>
+      <div className="legacy-axis-header">
+        <div>
+          <div className="axis-name">{axis.name}</div>
+          <div className="axis-desc">Reason: {axis.reason}</div>
+        </div>
+        <span className="bgg-source-tag">Disabled</span>
+      </div>
+      <dl className="legacy-axis-details">
+        <div>
+          <dt>Preserved identifier</dt>
+          <dd>{axis.legacyField ?? "Unavailable"}</dd>
+        </div>
+        <div>
+          <dt>Retained overrides</dt>
+          <dd>{ratingsCount}</dd>
+        </div>
+        <div>
+          <dt>Preserved payload</dt>
+          <dd>
+            <code>{JSON.stringify(axis.legacyPayload)}</code>
+          </dd>
+        </div>
+      </dl>
+      {ratingsCount > 0 && (
+        <div className="legacy-warning">
+          Repair keeps these overrides. They will override the selected derived field.
+        </div>
+      )}
+      {repairing ? (
+        <div className="legacy-repair-form">
+          {formError && <div className="error-banner">{formError.summary}</div>}
+          <div className="form-group">
+            <label className="form-label">Repair as</label>
+            <select
+              className="form-input"
+              value={repairField?.id ?? ""}
+              onChange={(event) => {
+                const selected = fields.find((field) => field.id === event.target.value);
+                if (selected) onSelectField(selected);
+              }}
+            >
+              {fields.map((field) => (
+                <option key={field.id} value={field.id}>
+                  {field.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          {repairField && (
+            <>
+              <ConfigurationFields
+                idPrefix={`repair-${axis.id}`}
+                field={repairField}
+                draft={configuration}
+                errors={formError?.fields ?? {}}
+                onChange={onConfigurationChange}
+              />
+              <CurveConfig
+                idPrefix={`repair-${axis.id}`}
+                curve={curve}
+                onChange={onCurveChange}
+                scale={nativeScaleFromDiscovery(repairField, configuration)}
+                unit={repairField.unit}
+                errors={formError?.fields}
+              />
+            </>
+          )}
+          <div className="form-actions">
+            <button type="button" className="btn btn-secondary" onClick={onCancel}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => {
+                if (confirmVetoEnablement(curve, repairField?.unit)) onRepair();
+              }}
+            >
+              Repair Axis
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="axis-actions legacy-axis-actions">
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={onStartRepair}
+            disabled={fields.length === 0}
+          >
+            Repair
+          </button>
+          <button className="btn btn-danger-outline btn-sm" onClick={onDelete}>
+            Delete
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -483,9 +867,13 @@ interface AxisCardProps {
   onNameChange: (v: string) => void;
   onWeightChange: (v: string) => void;
   onDescChange: (v: string) => void;
+  discoveryField?: DerivedFieldDiscovery;
+  editConfiguration?: ConfigurationDraft;
+  formError?: AxisFormError;
+  onConfigurationChange?: (draft: ConfigurationDraft) => void;
 }
 
-function AxisCard({
+export function AxisCard({
   axis,
   editingId,
   editName,
@@ -502,15 +890,22 @@ function AxisCard({
   onNameChange,
   onWeightChange,
   onDescChange,
+  discoveryField,
+  editConfiguration = {},
+  formError,
+  onConfigurationChange,
 }: AxisCardProps) {
   const isEditing = editingId === axis.id;
-  const isBgg = axis.source === "bgg";
+  const isDerived = axis.source === "derived";
+  const isDisabled = !axis.enabled;
   const isTournament = axis.source === "tournament";
   const shapeLabel = formatShape(axis.preferenceShape);
   const hasVeto = axis.veto != null;
+  const weightPercentage = getAxisWeightPercentage(axis, totalWeight);
+  const nativeUnit = discoveryField?.unit ?? "rating";
 
   return (
-    <div className="axis-card">
+    <div className="axis-card" data-axis-id={axis.id}>
       <div className="axis-card-main">
         <div>
           {isEditing && !isTournament ? (
@@ -538,11 +933,13 @@ function AxisCard({
                 <div className="axis-curve-summary">
                   <span className="curve-shape-tag">{shapeLabel}</span>
                   {axis.preferenceShape === "sweet-spot" && axis.idealValue != null && (
-                    <span className="curve-detail">ideal: {axis.idealValue}</span>
+                    <span className="curve-detail">
+                      ideal: {axis.idealValue} {nativeUnit}
+                    </span>
                   )}
                   {hasVeto && (
                     <span className="curve-veto-tag">
-                      Veto {axis.veto!.direction} {axis.veto!.threshold}
+                      Veto {axis.veto!.direction} {axis.veto!.threshold} {nativeUnit}
                     </span>
                   )}
                 </div>
@@ -550,8 +947,14 @@ function AxisCard({
             </>
           )}
         </div>
-        <span className={isBgg ? "bgg-source-tag" : "personal-source-tag"}>
-          {isBgg ? <>&#8599; BGG</> : isTournament ? "Tournament" : "Personal"}
+        <span className={isDerived ? "bgg-source-tag" : "personal-source-tag"}>
+          {isDisabled
+            ? "Disabled"
+            : isDerived
+              ? "Derived"
+              : isTournament
+                ? "Tournament"
+                : "Personal"}
         </span>
         <div className="weight-display">
           {isEditing ? (
@@ -567,7 +970,7 @@ function AxisCard({
             <>
               <div className="weight-number">{axis.weight}</div>
               <div className="weight-pct">
-                {totalWeight > 0 ? Math.round((axis.weight / totalWeight) * 100) : 0}% of total
+                {isDisabled ? "Excluded from total" : `${weightPercentage}% of total`}
               </div>
             </>
           )}
@@ -576,7 +979,7 @@ function AxisCard({
           <div
             className="weight-bar-fill"
             style={{
-              width: `${totalWeight > 0 ? (axis.weight / totalWeight) * 100 : 0}%`,
+              width: `${weightPercentage}%`,
             }}
           />
         </div>
@@ -592,9 +995,11 @@ function AxisCard({
             </>
           ) : (
             <>
-              <button className="btn btn-secondary btn-sm" onClick={onStartEdit}>
-                Edit
-              </button>
+              {!isDisabled && (
+                <button className="btn btn-secondary btn-sm" onClick={onStartEdit}>
+                  Edit
+                </button>
+              )}
               {!isTournament && (
                 <button className="btn btn-danger-outline btn-sm" onClick={onDelete}>
                   Delete
@@ -605,32 +1010,64 @@ function AxisCard({
         </div>
       </div>
 
+      {isEditing && formError && <div className="error-banner">{formError.summary}</div>}
+
       {/* Curve config shown in edit mode (not for tournament — identity passthrough) */}
-      {isEditing && !isTournament && (
-        <CurveConfig
-          curve={editCurve}
-          onChange={onCurveChange}
-          source={axis.source}
-          bggField={axis.bggField}
-        />
+      {isEditing && axis.enabled && !isTournament && (
+        <>
+          {isDerived && discoveryField && onConfigurationChange && (
+            <ConfigurationFields
+              idPrefix={`edit-${axis.id}`}
+              field={discoveryField}
+              draft={editConfiguration}
+              errors={formError?.fields ?? {}}
+              onChange={onConfigurationChange}
+            />
+          )}
+          <CurveConfig
+            idPrefix={`edit-${axis.id}`}
+            curve={editCurve}
+            onChange={onCurveChange}
+            scale={
+              isDerived && discoveryField
+                ? nativeScaleFromDiscovery(discoveryField, editConfiguration)
+                : getAxisNativeScale(axis)
+            }
+            unit={discoveryField?.unit}
+            errors={formError?.fields}
+          />
+        </>
       )}
 
-      <div className={`axis-stats-strip${isBgg ? " bgg-strip" : ""}`}>
+      <div className={`axis-stats-strip${isDerived ? " bgg-strip" : ""}`}>
         <div className="axis-stat">
           {isTournament ? (
             <>Derived from head-to-head comparisons</>
           ) : (
             <>
-              {isBgg ? "Auto-populated on" : "Rated on"} <strong>{ratingsCount} games</strong>
+              {isDerived ? "Overridden on" : "Rated on"} <strong>{ratingsCount} games</strong>
             </>
           )}
         </div>
-        {isBgg && axis.bggField && (
+        {isDerived && (
+          <>
+            <div className="axis-stat">
+              Configuration: <strong>{summarizeDerivedAxisConfiguration(axis)}</strong>
+            </div>
+            {discoveryField && (
+              <div className="axis-stat axis-stat-wide">
+                {discoveryField.provenance} &middot; {discoveryField.unit} &middot; native scale{" "}
+                {getAxisNativeScale(axis).min}-{getAxisNativeScale(axis).max}
+              </div>
+            )}
+          </>
+        )}
+        {isDisabled && (
           <div className="axis-stat">
-            BGG source: <strong>{axis.bggField}</strong>
+            Reason: <strong>{axis.reason}</strong>
           </div>
         )}
-        {!isBgg && !isTournament && (
+        {!isDerived && !isTournament && !isDisabled && (
           <div className="axis-stat">
             Created{" "}
             <strong>
@@ -651,15 +1088,22 @@ function AxisCard({
 // ---------------------------------------------------------------------------
 
 interface CurveConfigProps {
+  idPrefix: string;
   curve: CurveState;
   onChange: (curve: CurveState) => void;
-  source: AxisSource;
-  bggField: string | null;
+  scale: NativeScale;
+  unit?: string;
+  errors?: Record<string, string>;
 }
 
-function CurveConfig({ curve, onChange, source, bggField }: CurveConfigProps) {
-  const scale = getNativeScale(source, bggField);
-
+export function CurveConfig({
+  idPrefix,
+  curve,
+  onChange,
+  scale,
+  unit,
+  errors = {},
+}: CurveConfigProps) {
   function update(partial: Partial<CurveState>) {
     onChange({ ...curve, ...partial });
   }
@@ -711,40 +1155,73 @@ function CurveConfig({ curve, onChange, source, bggField }: CurveConfigProps) {
         <div className="sweet-spot-controls">
           <div className="form-row">
             <div className="form-group">
-              <label className="form-label">
-                Ideal value ({scale.min}&ndash;{scale.max})
+              <label className="form-label" htmlFor={`${idPrefix}-ideal-value`}>
+                Ideal value ({scale.min}&ndash;{scale.max} {unit ?? "rating"})
               </label>
               <input
+                id={`${idPrefix}-ideal-value`}
                 className="form-input"
                 type="number"
                 min={scale.min}
                 max={scale.max}
-                step={source === "bgg" && bggField === "weight" ? 0.25 : 1}
+                step="any"
                 value={curve.idealValue}
                 onChange={(e) => update({ idealValue: e.target.value })}
+                aria-invalid={errors.idealValue ? true : undefined}
+                aria-describedby={errors.idealValue ? `${idPrefix}-ideal-value-error` : undefined}
               />
+              {errors.idealValue && (
+                <span id={`${idPrefix}-ideal-value-error`} className="field-error">
+                  {errors.idealValue}
+                </span>
+              )}
             </div>
             <div className="form-group">
-              <label className="form-label">Tolerance</label>
-              <div className="seg-control">
-                {(["flexible", "moderate", "strict"] as const).map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    className={`seg-btn${curve.tolerance === t ? " active" : ""}`}
-                    onClick={() => update({ tolerance: t })}
-                  >
-                    {t.charAt(0).toUpperCase() + t.slice(1)}
-                  </button>
-                ))}
-              </div>
-              <span className="form-hint">
-                {curve.tolerance === "flexible"
-                  ? "I'm not picky about this."
-                  : curve.tolerance === "strict"
-                    ? "I know exactly what I want."
-                    : "Moderate preference."}
-              </span>
+              <label className="form-label" htmlFor={`${idPrefix}-tolerance-width`}>
+                Tolerance width ({unit ?? "native units"}, optional)
+              </label>
+              <input
+                id={`${idPrefix}-tolerance-width`}
+                className="form-input"
+                type="number"
+                min={0}
+                step="any"
+                value={curve.toleranceWidth}
+                onChange={(e) => update({ toleranceWidth: e.target.value })}
+                placeholder="Use categorical tolerance"
+                aria-invalid={errors.toleranceWidth ? true : undefined}
+                aria-describedby={
+                  errors.toleranceWidth ? `${idPrefix}-tolerance-width-error` : undefined
+                }
+              />
+              {errors.toleranceWidth && (
+                <span id={`${idPrefix}-tolerance-width-error`} className="field-error">
+                  {errors.toleranceWidth}
+                </span>
+              )}
+              {curve.toleranceWidth === "" && (
+                <>
+                  <div className="seg-control">
+                    {(["flexible", "moderate", "strict"] as const).map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        className={`seg-btn${curve.tolerance === t ? " active" : ""}`}
+                        onClick={() => update({ tolerance: t })}
+                      >
+                        {t.charAt(0).toUpperCase() + t.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                  <span className="form-hint">
+                    {curve.tolerance === "flexible"
+                      ? "I'm not picky about this."
+                      : curve.tolerance === "strict"
+                        ? "I know exactly what I want."
+                        : "Moderate preference."}
+                  </span>
+                </>
+              )}
             </div>
           </div>
           <div className="form-group form-group-mb">
@@ -777,7 +1254,7 @@ function CurveConfig({ curve, onChange, source, bggField }: CurveConfigProps) {
       )}
 
       {/* Curve preview */}
-      <CurvePreview curve={curve} scale={scale} />
+      <CurvePreview curve={curve} scale={scale} unit={unit} />
 
       {/* Veto threshold */}
       <div className="veto-config">
@@ -807,19 +1284,35 @@ function CurveConfig({ curve, onChange, source, bggField }: CurveConfigProps) {
                 Veto above
               </button>
             </div>
-            <input
-              className="form-input veto-threshold-input"
-              type="number"
-              min={scale.min}
-              max={scale.max}
-              step={source === "bgg" && bggField === "weight" ? 0.25 : 1}
-              value={curve.vetoThreshold}
-              onChange={(e) => update({ vetoThreshold: e.target.value })}
-              placeholder="Threshold"
-            />
+            <label className="form-label" htmlFor={`${idPrefix}-veto-threshold`}>
+              Veto threshold ({unit ?? "native units"})
+              <input
+                id={`${idPrefix}-veto-threshold`}
+                className="form-input veto-threshold-input"
+                type="number"
+                min={scale.min}
+                max={scale.max}
+                step="any"
+                value={curve.vetoThreshold}
+                onChange={(e) => update({ vetoThreshold: e.target.value })}
+                placeholder="Threshold"
+                aria-invalid={errors["veto.threshold"] || errors.veto ? true : undefined}
+                aria-describedby={
+                  errors["veto.threshold"] || errors.veto
+                    ? `${idPrefix}-veto-threshold-error`
+                    : undefined
+                }
+              />
+            </label>
             <span className="form-hint">
-              Games scoring {curve.vetoDirection} this value will get fitness 0.
+              Games scoring {curve.vetoDirection} this value
+              {unit ? ` (${unit})` : " in native units"} will get fitness 0.
             </span>
+            {(errors["veto.threshold"] ?? errors.veto) && (
+              <span id={`${idPrefix}-veto-threshold-error`} className="field-error">
+                {errors["veto.threshold"] ?? errors.veto}
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -834,9 +1327,10 @@ function CurveConfig({ curve, onChange, source, bggField }: CurveConfigProps) {
 interface CurvePreviewProps {
   curve: CurveState;
   scale: { min: number; max: number };
+  unit?: string;
 }
 
-function CurvePreview({ curve, scale }: CurvePreviewProps) {
+function CurvePreview({ curve, scale, unit }: CurvePreviewProps) {
   const canvasRef = useRef<SVGSVGElement>(null);
   const width = 280;
   const height = 140;
@@ -847,16 +1341,18 @@ function CurvePreview({ curve, scale }: CurvePreviewProps) {
   const steps = 60;
   const points: string[] = [];
   const idealVal = curve.idealValue !== "" ? parseFloat(curve.idealValue) : null;
-  const canRender = curve.shape !== "sweet-spot" || idealVal != null;
+  const toleranceWidth = curve.toleranceWidth !== "" ? parseFloat(curve.toleranceWidth) : null;
+  const curveConfig = {
+    idealValue: idealVal,
+    ...(toleranceWidth === null ? { tolerance: curve.tolerance } : { toleranceWidth }),
+    leanDirection: curve.leanDirection,
+  };
+  const canRender = isPreferenceCurveApplicable(scale, curve.shape, curveConfig);
 
   if (canRender) {
     for (let i = 0; i <= steps; i++) {
       const raw = scale.min + ((scale.max - scale.min) * i) / steps;
-      const eff = applyPreferenceCurve(raw, scale, curve.shape, {
-        idealValue: idealVal,
-        tolerance: curve.tolerance,
-        leanDirection: curve.leanDirection,
-      });
+      const eff = applyPreferenceCurve(raw, scale, curve.shape, curveConfig);
       const x = pad.left + (plotW * i) / steps;
       const y = pad.top + plotH - ((eff - 1) / 9) * plotH;
       points.push(`${x.toFixed(1)},${y.toFixed(1)}`);
@@ -975,7 +1471,7 @@ function CurvePreview({ curve, scale }: CurvePreviewProps) {
         )}
       </svg>
       <div className="curve-preview-labels">
-        <span>Native value</span>
+        <span>Native value{unit ? ` (${unit})` : ""}</span>
         <span>Effective (1-10)</span>
       </div>
     </div>
@@ -995,4 +1491,11 @@ function formatShape(shape?: PreferenceShape): string {
     default:
       return "Higher is better";
   }
+}
+
+export function confirmVetoEnablement(curve: CurveState, unit?: string): boolean {
+  if (!curve.vetoEnabled || curve.vetoThreshold === "") return true;
+  return confirm(
+    `This will set any game scoring ${curve.vetoDirection} ${curve.vetoThreshold} ${unit ?? "rating"} on this axis to fitness 0. Continue?`,
+  );
 }

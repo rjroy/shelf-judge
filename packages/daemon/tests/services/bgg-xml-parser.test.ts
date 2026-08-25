@@ -14,6 +14,22 @@ async function readFixture(filename: string): Promise<string> {
   return Bun.file(path.join(fixturesDir, filename)).text();
 }
 
+function thingXmlWithPlayerPoll(results: string | null): string {
+  const poll = results === null ? "" : `<poll name="suggested_numplayers">${results}</poll>`;
+  return `<items><item type="boardgame" id="1">
+    <name type="primary" value="Player Test"/>
+    ${poll}
+  </item></items>`;
+}
+
+function playerCountResult(playerCount: string, bestVotes: number): string {
+  return `<results numplayers="${playerCount}">
+    <result value="Best" numvotes="${bestVotes}"/>
+    <result value="Recommended" numvotes="0"/>
+    <result value="Not Recommended" numvotes="0"/>
+  </results>`;
+}
+
 describe("BGG XML Parser", () => {
   describe("parseThingResponse", () => {
     test("parses Wingspan thing response with all fields", async () => {
@@ -53,6 +69,7 @@ describe("BGG XML Parser", () => {
       expect(threePlayer!.best).toBe(1217);
       expect(threePlayer!.recommended).toBe(596);
       expect(threePlayer!.notRecommended).toBe(25);
+      expect(data.bestPlayerCount).toBe(3);
 
       // fetchedAt should be a valid ISO string
       expect(new Date(data.fetchedAt).getTime()).not.toBeNaN();
@@ -102,6 +119,36 @@ describe("BGG XML Parser", () => {
       expect(metadata).toHaveLength(1);
       expect(metadata[0].name).toBe("Wingspan");
     });
+
+    test("selects the numeric player count with the highest positive Best vote count", () => {
+      const xml = thingXmlWithPlayerPoll(
+        playerCountResult("2", 4) + playerCountResult("3", 12) + playerCountResult("4", 8),
+      );
+
+      expect(parseThingResponse(xml)[0]?.bestPlayerCount).toBe(3);
+    });
+
+    test("returns null when the suggested-player-count poll is absent", () => {
+      expect(parseThingResponse(thingXmlWithPlayerPoll(null))[0]?.bestPlayerCount).toBeNull();
+    });
+
+    test("returns null when every Best vote count is zero", () => {
+      const xml = thingXmlWithPlayerPoll(playerCountResult("2", 0) + playerCountResult("3", 0));
+
+      expect(parseThingResponse(xml)[0]?.bestPlayerCount).toBeNull();
+    });
+
+    test("keeps the first numeric bucket when Best vote counts tie", () => {
+      const xml = thingXmlWithPlayerPoll(playerCountResult("2", 10) + playerCountResult("3", 10));
+
+      expect(parseThingResponse(xml)[0]?.bestPlayerCount).toBe(2);
+    });
+
+    test("uses an aggregate bucket's numeric lower bound when it has the most Best votes", () => {
+      const xml = thingXmlWithPlayerPoll(playerCountResult("4", 10) + playerCountResult("5+", 100));
+
+      expect(parseThingResponse(xml)[0]?.bestPlayerCount).toBe(5);
+    });
   });
 
   describe("parseThingMetadata", () => {
@@ -120,6 +167,14 @@ describe("BGG XML Parser", () => {
       expect(m.playingTime).toBe(70);
       expect(m.imageUrl).toContain("geekdo-images.com");
       expect(m.thumbnailUrl).toContain("geekdo-images.com");
+      expect(m).not.toHaveProperty("minPlayingTime");
+      expect(m).not.toHaveProperty("maxPlayingTime");
+      expect(m).not.toHaveProperty("minPlayTime");
+      expect(m).not.toHaveProperty("maxPlayTime");
+      expect(m).not.toHaveProperty("minPlaytime");
+      expect(m).not.toHaveProperty("maxPlaytime");
+      expect(m).not.toHaveProperty("minplaytime");
+      expect(m).not.toHaveProperty("maxplaytime");
     });
 
     test("extracts Gloomhaven metadata", async () => {
@@ -161,6 +216,14 @@ describe("BGG XML Parser", () => {
   });
 
   describe("parseThingItems", () => {
+    test("selects aggregate player-count buckets through the production batch path", () => {
+      const xml = thingXmlWithPlayerPoll(
+        playerCountResult("4", 10) + playerCountResult("5+", 100) + playerCountResult("6", 100),
+      );
+
+      expect(parseThingItems(xml)[0]?.bggData.bestPlayerCount).toBe(5);
+    });
+
     test("extracts thumbnailUrl from batch thing response", async () => {
       const xml = await readFixture("thing-search-batch.xml");
       const items = parseThingItems(xml);
@@ -180,6 +243,23 @@ describe("BGG XML Parser", () => {
       const asia = items.find((i) => i.bggId === 366161);
       expect(asia).toBeDefined();
       expect(asia!.metadata.thumbnailUrl).toBeNull();
+    });
+
+    test("retains player bounds and singular playing time without duration ranges", async () => {
+      const xml = await readFixture("thing-wingspan-266192.xml");
+      const [item] = parseThingItems(xml);
+
+      expect(item.metadata.minPlayers).toBe(1);
+      expect(item.metadata.maxPlayers).toBe(5);
+      expect(item.metadata.playingTime).toBe(70);
+      expect(item.metadata).not.toHaveProperty("minPlayingTime");
+      expect(item.metadata).not.toHaveProperty("maxPlayingTime");
+      expect(item.metadata).not.toHaveProperty("minPlayTime");
+      expect(item.metadata).not.toHaveProperty("maxPlayTime");
+      expect(item.metadata).not.toHaveProperty("minPlaytime");
+      expect(item.metadata).not.toHaveProperty("maxPlaytime");
+      expect(item.metadata).not.toHaveProperty("minplaytime");
+      expect(item.metadata).not.toHaveProperty("maxplaytime");
     });
   });
 

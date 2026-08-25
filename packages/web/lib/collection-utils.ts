@@ -1,5 +1,4 @@
 import type { GameWithScore, Axis, TournamentGameStatsDisplay } from "@shelf-judge/shared";
-import { resolveAxisValues } from "@shelf-judge/shared";
 import { scoreRangeClass } from "@/lib/score-utils";
 import { relativeDate } from "@/lib/date-utils";
 
@@ -50,7 +49,7 @@ export function buildSortFields(
     if ((f.id === "bggRating" || f.id === "bggWeight") && !hasBggData) return false;
     return true;
   });
-  for (const axis of axes) {
+  for (const axis of axes.filter((candidate) => candidate.enabled)) {
     fields.push({
       id: `axis:${axis.id}`,
       label: axis.name,
@@ -185,6 +184,10 @@ export function matchesFilters(gws: GameWithScore, filters: FilterState): boolea
 
 type SortValue = number | string | null;
 
+function getAxisEffectiveRating(gws: GameWithScore, axisId: string): number | null {
+  return gws.score?.breakdown.find((entry) => entry.axisId === axisId)?.effectiveRating ?? null;
+}
+
 export function getSortValue(
   gws: GameWithScore,
   field: string,
@@ -221,8 +224,7 @@ export function getSortValue(
       if (field.startsWith("axis:")) {
         const axisId = field.slice(5);
         if (axes) {
-          const resolved = resolveAxisValues(game, axes);
-          return resolved[axisId] ?? null;
+          return getAxisEffectiveRating(gws, axisId);
         }
         return game.ratings[axisId] ?? null;
       }
@@ -301,7 +303,7 @@ export function getScoreDisplay(
       if (val == null) return { text: "no penalty", className: "score-unrated" };
       return {
         text: val.toFixed(1),
-        className: "score-value"
+        className: "score-value",
       };
     }
     case "tournament": {
@@ -355,8 +357,7 @@ export function getScoreDisplay(
       if (field.startsWith("axis:")) {
         const axisId = field.slice(5);
         if (axes) {
-          const resolved = resolveAxisValues(game, axes);
-          const value = resolved[axisId];
+          const value = getAxisEffectiveRating(gws, axisId);
           if (value == null) return { text: "---", className: "score-value" };
           return { text: String(value), className: "score-value axis-score" };
         }

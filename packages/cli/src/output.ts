@@ -1,5 +1,7 @@
 // Table and JSON formatting for CLI output.
 
+import type { FitnessBreakdownEntry } from "@shelf-judge/shared";
+
 export interface OutputOptions {
   json: boolean;
 }
@@ -38,52 +40,44 @@ export function formatScore(score: number | null | undefined): string {
   return score.toFixed(1);
 }
 
-export interface BreakdownEntry {
-  axisName: string;
-  rating: number | null;
-  weight: number;
-  contribution: number | null;
-  source: string;
-  bggOriginal: number | null;
-  rawValue?: number | null;
-  effectiveRating?: number | null;
-  preferenceShape?: string;
-  curveAffected?: boolean;
-  predictionConfidence?: string | null;
-  referenceGames?: { gameId: string; gameName: string; similarity: number }[] | null;
-}
+export type BreakdownEntry = FitnessBreakdownEntry;
 
 export function formatBreakdown(breakdown: BreakdownEntry[]): string {
-  // Determine if any entry has a raw value that differs from effective
-  const hasRawColumn = breakdown.some(
-    (e) =>
-      e.rawValue != null &&
-      e.effectiveRating != null &&
-      Math.abs(e.rawValue - e.effectiveRating) > 0.05,
-  );
-
-  const headers = hasRawColumn
-    ? ["Axis", "Raw", "Rating", "Weight", "Contribution", "Source"]
-    : ["Axis", "Rating", "Weight", "Contribution", "Source"];
-
   const rows = breakdown.map((entry) => {
     const marker = entry.curveAffected ? " *" : "";
-    let ratingStr = entry.rating !== null ? String(entry.rating) + marker : "---";
-    if (entry.source === "override" && entry.bggOriginal !== null) {
-      ratingStr += ` (BGG: ${entry.bggOriginal})`;
-    }
-
-    const rawStr = entry.rawValue != null ? String(entry.rawValue) : "---";
-
-    const row = [
+    const value = (candidate: number | null): string =>
+      candidate === null ? "---" : `${candidate}${entry.unit ? ` ${entry.unit}` : ""}`;
+    const details = [
+      entry.derivedField ? `field=${entry.derivedField}` : null,
+      entry.configurationSummary,
+      entry.provenance,
+    ]
+      .filter((detail): detail is string => Boolean(detail))
+      .join("; ");
+    return [
       entry.axisName,
-      ...(hasRawColumn ? [rawStr] : []),
-      ratingStr,
+      value(entry.sourceValue),
+      value(entry.scoringRawValue),
+      entry.effectiveRating !== null ? `${entry.effectiveRating}${marker}` : "---",
+      entry.overridden ? String(entry.overrideValue ?? "yes") : "no",
       String(entry.weight),
       entry.contribution !== null ? entry.contribution.toFixed(2) : "---",
       entry.source,
+      details || "---",
     ];
-    return row;
   });
-  return formatTable(headers, rows);
+  return formatTable(
+    [
+      "Axis",
+      "Source Value",
+      "Scoring Input (Raw)",
+      "Effective Rating",
+      "Override",
+      "Weight",
+      "Contribution",
+      "Source",
+      "Details",
+    ],
+    rows,
+  );
 }

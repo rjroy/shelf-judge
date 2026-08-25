@@ -32,6 +32,7 @@ function makeBggData(
     families: [],
     subdomains: [],
     suggestedPlayerCounts: [],
+    bestPlayerCount: null,
     fetchedAt: "2026-01-01T00:00:00Z",
     ...overrides,
   };
@@ -45,6 +46,7 @@ function makeGame(id: string, name: string, bggData: BggGameData | null): Game {
     yearPublished: 2020,
     minPlayers: 2,
     maxPlayers: 4,
+    bestPlayers: null,
     playingTime: 60,
     imageUrl: null,
     bggData,

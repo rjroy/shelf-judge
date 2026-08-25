@@ -21,6 +21,7 @@ function makeGame(id: string, name: string): Game {
     yearPublished: null,
     minPlayers: null,
     maxPlayers: null,
+    bestPlayers: null,
     playingTime: null,
     numPlays: null,
     ownership: "owned",
@@ -37,6 +38,7 @@ function makeGame(id: string, name: string): Game {
 function makeCollection(updatedAt?: string): Collection {
   const now = updatedAt ?? new Date().toISOString();
   return {
+    schemaVersion: 2,
     id: "test-col",
     name: "Test Collection",
     axes: [],

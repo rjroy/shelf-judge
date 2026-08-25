@@ -13,6 +13,16 @@ export default tseslint.config(
         tsconfigRootDir: import.meta.dirname,
       },
     },
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "CallExpression[callee.type='MemberExpression'][callee.property.name='module']",
+          message:
+            "mock.module() contaminates Bun's process-wide module cache. Use explicit dependencies or a suite-wide preload instead.",
+        },
+      ],
+    },
   },
   {
     // Web test files need bun-types for bun:test globals, but the main web tsconfig
@@ -23,6 +33,21 @@ export default tseslint.config(
         projectService: false,
         project: "./packages/web/tsconfig.test.json",
       },
+    },
+  },
+  {
+    // react-test-renderer exposes host-node props as any. These tests validate
+    // those handlers at runtime without weakening production type checking.
+    files: [
+      "packages/web/tests/axes-page-workflows.test.tsx",
+      "packages/web/tests/rating-form.test.tsx",
+      "packages/web/tests/shelf-assignment-interaction.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/no-base-to-string": "off",
+      "@typescript-eslint/no-floating-promises": "off",
+      "@typescript-eslint/no-unsafe-call": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
     },
   },
   {

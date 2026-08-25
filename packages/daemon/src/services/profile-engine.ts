@@ -3,7 +3,6 @@
 // Follows the elo-engine.ts and curve-engine.ts pattern: exported functions, heavy unit tests.
 
 import type {
-  Axis,
   AxisDistribution,
   AxisSuggestion,
   AxisWeightEntry,
@@ -11,22 +10,30 @@ import type {
   CollectionOutlier,
   CollectionProfile,
   DivergentGame,
+  Axis,
   FitnessResult,
+  EnabledAxis,
   Game,
   OutlierClassification,
   TournamentGameStatsDisplay,
   UtilityCurveDeclaration,
   WeightRangeCluster,
 } from "@shelf-judge/shared";
-import { resolveAxisValues } from "@shelf-judge/shared";
-
-import { getNativeScale } from "./curve-engine.js";
+import {
+  DERIVED_AXIS_REGISTRY,
+  getAxisNativeScale,
+  getDerivedSuggestionProjections,
+  isEnabledScoringAxis,
+  summarizeDerivedAxisConfiguration,
+} from "@shelf-judge/shared";
 import {
   buildVocabulary,
   compositeDistance,
   computeCentroid,
   computeContinuousRanges,
   encodeGame,
+  getOrderedVectorAxes,
+  getVectorAxisValues,
 } from "./feature-vector.js";
 
 export interface ProfileInput {
@@ -52,16 +59,22 @@ export function computeProfile(
 ): Omit<CollectionProfile, "computedAt" | "narration" | "narrationState"> {
   const { games, axes, fitnessResults, tournamentStats } = input;
 
-  const axisDistributions = computeAxisDistributions(games, axes);
-  const axisWeights = computeAxisWeights(axes);
+  const enabledAxes = axes.filter(isEnabledScoringAxis);
+  const axisDistributions = computeAxisDistributions(enabledAxes, fitnessResults);
+  const axisWeights = computeAxisWeights(enabledAxes);
   const bggClustering = computeBggClustering(games);
-  const utilityCurves = extractUtilityCurves(axes);
+  const utilityCurves = extractUtilityCurves(enabledAxes);
   const divergence =
     tournamentStats !== null ? computeDivergence(fitnessResults, tournamentStats, games) : null;
-  const outliers = detectOutliers(games, axes, fitnessResults);
-  const suggestions = generateSuggestions(games, axes, divergence);
+  const outliers = detectOutliers(games, axes, fitnessResults, tournamentStats);
+  const suggestions = generateSuggestions(games, enabledAxes, divergence);
 
-  const ratedGameCount = games.filter((g) => Object.keys(g.ratings).length > 0).length;
+  const userRatingAxisIds = new Set(
+    enabledAxes.flatMap((axis) => (axis.source === "tournament" ? [] : [axis.id])),
+  );
+  const ratedGameCount = games.filter((game) =>
+    Object.keys(game.ratings).some((axisId) => userRatingAxisIds.has(axisId)),
+  ).length;
 
   return {
     axisDistributions,
@@ -80,13 +93,17 @@ export function computeProfile(
  * Compute mean, median, standard deviation, and range for each axis's ratings.
  * Uses population standard deviation (not sample).
  */
-export function computeAxisDistributions(games: Game[], axes: Axis[]): AxisDistribution[] {
+export function computeAxisDistributions(
+  axes: EnabledAxis[],
+  fitnessResults: ReadonlyMap<string, FitnessResult>,
+): AxisDistribution[] {
   return axes.map((axis) => {
     const ratings: number[] = [];
-    for (const game of games) {
-      const resolved = resolveAxisValues(game, [axis]);
-      const r = resolved[axis.id];
-      if (r != null) ratings.push(r);
+    for (const result of fitnessResults.values()) {
+      const effectiveRating = result.breakdown.find(
+        (entry) => entry.axisId === axis.id,
+      )?.effectiveRating;
+      if (effectiveRating !== null && effectiveRating !== undefined) ratings.push(effectiveRating);
     }
 
     if (ratings.length === 0) {
@@ -141,7 +158,7 @@ export function computeAxisDistributions(games: Game[], axes: Axis[]): AxisDistr
 /**
  * Compute axis weight percentages, sorted descending by percentage.
  */
-export function computeAxisWeights(axes: Axis[]): AxisWeightEntry[] {
+export function computeAxisWeights(axes: EnabledAxis[]): AxisWeightEntry[] {
   const totalWeight = axes.reduce((acc, a) => acc + a.weight, 0);
   if (totalWeight === 0) return [];
 
@@ -208,29 +225,39 @@ export function computeBggClustering(games: Game[]): CollectionProfile["bggClust
 
 /**
  * Extract axes with non-default curve configuration.
- * An axis is "non-default" if any of preferenceShape, idealValue, tolerance,
- * leanDirection, or veto is explicitly set.
+ * An axis is "non-default" if any curve parameter is explicitly set.
  */
-export function extractUtilityCurves(axes: Axis[]): UtilityCurveDeclaration[] {
+export function extractUtilityCurves(axes: EnabledAxis[]): UtilityCurveDeclaration[] {
   return axes
     .filter(
       (axis) =>
         axis.preferenceShape !== undefined ||
         axis.idealValue !== undefined ||
         axis.tolerance !== undefined ||
+        axis.toleranceWidth !== undefined ||
         axis.leanDirection !== undefined ||
         axis.veto !== undefined,
     )
-    .map((axis) => ({
-      axisId: axis.id,
-      axisName: axis.name,
-      shape: axis.preferenceShape ?? "higher-is-better",
-      idealValue: axis.idealValue ?? null,
-      tolerance: axis.tolerance ?? null,
-      leanDirection: axis.leanDirection ?? null,
-      vetoThreshold: axis.veto ?? null,
-      nativeScale: getNativeScale(axis.source, axis.bggField),
-    }));
+    .map((axis) => {
+      const definition =
+        axis.source === "derived" ? DERIVED_AXIS_REGISTRY[axis.derivedField] : null;
+      return {
+        axisId: axis.id,
+        axisName: axis.name,
+        derivedField: axis.source === "derived" ? axis.derivedField : null,
+        shape: axis.preferenceShape ?? "higher-is-better",
+        idealValue: axis.idealValue ?? null,
+        tolerance: axis.tolerance ?? null,
+        toleranceWidth: axis.toleranceWidth ?? null,
+        leanDirection: axis.leanDirection ?? null,
+        vetoThreshold: axis.veto ?? null,
+        nativeScale: getAxisNativeScale(axis),
+        unit: definition?.unit ?? "rating",
+        provenance: definition?.provenance ?? null,
+        configurationSummary:
+          axis.source === "derived" ? summarizeDerivedAxisConfiguration(axis) : null,
+      };
+    });
 }
 
 /**
@@ -281,22 +308,22 @@ export function detectOutliers(
   games: Game[],
   axes: Axis[],
   fitnessResults: Map<string, FitnessResult>,
+  tournamentStats: ReadonlyMap<string, TournamentGameStatsDisplay> | null = null,
 ): CollectionOutlier[] {
   const gamesWithBgg = games.filter((g) => g.bggData !== null);
   if (gamesWithBgg.length < 3) return []; // need meaningful collection size
 
   const vocabulary = buildVocabulary(gamesWithBgg);
   const ranges = computeContinuousRanges(gamesWithBgg);
+  const vectorAxes = getOrderedVectorAxes(axes);
 
   const vectors = gamesWithBgg.map((game) => {
-    const resolved = resolveAxisValues(game, axes);
-    return encodeGame(
+    const axisValues = getVectorAxisValues(
       game,
-      vocabulary,
-      Object.keys(resolved).length > 0 ? resolved : undefined,
-      ranges,
-      axes,
+      vectorAxes,
+      tournamentStats?.get(game.id)?.normalizedScore,
     );
+    return encodeGame(game, vocabulary, vectorAxes, axisValues, ranges);
   });
   const centroid = computeCentroid(vectors);
 
@@ -380,7 +407,7 @@ export function detectOutliers(
  */
 export function generateSuggestions(
   games: Game[],
-  axes: Axis[],
+  axes: EnabledAxis[],
   divergentGames: DivergentGame[] | null,
 ): AxisSuggestion[] {
   const suggestions: AxisSuggestion[] = [];
@@ -420,39 +447,14 @@ export function generateSuggestions(
     }
   }
 
-  // 2. High-variance BGG attributes
-  const bggFields: {
-    name: string;
-    extractor: (g: Game) => number | null;
-    bggField: string;
-  }[] = [
-    {
-      name: "BGG weight",
-      extractor: (g) => g.bggData?.weight ?? null,
-      bggField: "weight",
-    },
-    {
-      name: "community rating",
-      extractor: (g) => g.bggData?.communityRating ?? null,
-      bggField: "communityRating",
-    },
-    {
-      name: "player count range",
-      extractor: (g) =>
-        g.minPlayers != null && g.maxPlayers != null ? g.maxPlayers - g.minPlayers : null,
-      bggField: "playerCountRange",
-    },
-    {
-      name: "play time",
-      extractor: (g) => g.playingTime ?? null,
-      bggField: "playingTime",
-    },
-  ];
-
-  for (const field of bggFields) {
+  // 2. High-variance derived attributes
+  const enabledDerivedCoverage = new Set(
+    axes.flatMap((axis) => (axis.source === "derived" ? [axis.derivedField] : [])),
+  );
+  for (const projection of getDerivedSuggestionProjections()) {
     const values: number[] = [];
     for (const game of games) {
-      const v = field.extractor(game);
+      const v = projection.projectValue(game);
       if (v !== null) values.push(v);
     }
     if (values.length < 2) continue;
@@ -465,12 +467,11 @@ export function generateSuggestions(
     const cv = stddev / mean;
 
     if (cv > 0.5) {
-      const axisMaps = axes.some((a) => a.source === "bgg" && a.bggField === field.bggField);
-      if (!axisMaps) {
+      if (!enabledDerivedCoverage.has(projection.derivedField)) {
         suggestions.push({
           source: "high-variance",
-          attribute: field.name,
-          reason: `Your collection has high variance in ${field.name} (CV=${cv.toFixed(2)}) but no axis tracks it`,
+          attribute: projection.attribute,
+          reason: `Your collection has high variance in ${projection.attribute} (CV=${cv.toFixed(2)}) but no axis tracks it`,
           evidence: { variance: cv },
         });
       }

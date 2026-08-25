@@ -5,15 +5,16 @@
 import type {
   AssignedGame,
   AssignmentConflict,
-  Axis,
   BoxDimensions,
   Game,
+  Axis,
   GameWithScore,
   OverflowEntry,
   Shelf,
   ShelfAssignment,
   ShelfCapacityResult,
   ShelfUnit,
+  TournamentData,
   UnfittableEntry,
 } from "@shelf-judge/shared";
 import type { GameService } from "./game-service.js";
@@ -31,8 +32,11 @@ import {
   compositeDistance,
   computeContinuousRanges,
   encodeGame,
+  getOrderedVectorAxes,
+  getVectorAxisValues,
   type FeatureVector,
 } from "./feature-vector.js";
+import { deriveDisplayStats } from "./tournament-service.js";
 
 // Sentinel height for shelves with unconstrained height (REQ-SHELF-22).
 // Large enough that any realistic box fits, small enough to stay out of infinity math.
@@ -156,13 +160,17 @@ export function createCapacityService(deps: CapacityServiceDeps): CapacityServic
       // Sort unfittable by fitness ascending (REQ-SHELF-20).
       unfittable.sort((a, b) => a.fitnessScore - b.fitnessScore);
 
-      const collection = await storageService.loadCollection();
+      const [collection, tournamentData] = await Promise.all([
+        storageService.loadCollection(),
+        storageService.loadTournament(),
+      ]);
 
       // Pre-encode feature vectors once per request; feed the compare closure.
       const vectorCache = buildVectorCache(
         ownedGames.map((g) => g.game),
         [...pinned, ...automaticFittable],
         collection.axes,
+        tournamentData,
       );
 
       // Pinned items are sorted by stable game ID and reserve their selected
@@ -440,15 +448,22 @@ function explainUnfittable(dims: BoxDimensions, shelves: ShelfContext[]): string
 function buildVectorCache(
   universe: Game[],
   participating: GameWithScore[],
-  axes: Axis[],
+  axes: readonly Axis[],
+  tournamentData: TournamentData,
 ): Map<string, FeatureVector> {
   const gamesWithBgg = universe.filter((g) => g.bggData);
   const vocabulary = buildVocabulary(gamesWithBgg);
   const ranges = computeContinuousRanges(gamesWithBgg);
+  const vectorAxes = getOrderedVectorAxes(axes);
 
   const cache = new Map<string, FeatureVector>();
   for (const gws of participating) {
-    cache.set(gws.game.id, encodeGame(gws.game, vocabulary, gws.game.ratings, ranges, axes));
+    const values = getVectorAxisValues(
+      gws.game,
+      vectorAxes,
+      deriveDisplayStats(gws.game.id, tournamentData).normalizedScore,
+    );
+    cache.set(gws.game.id, encodeGame(gws.game, vocabulary, vectorAxes, values, ranges));
   }
   return cache;
 }

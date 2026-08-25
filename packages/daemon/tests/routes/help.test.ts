@@ -5,6 +5,8 @@ interface HelpNode {
   name: string;
   description?: string;
   invocation?: { method: string; path: string };
+  idempotent?: boolean;
+  parameters?: { name: string; in: string; description: string; required: boolean }[];
   children?: Record<string, HelpNode>;
 }
 
@@ -64,6 +66,50 @@ describe("GET /api/help/:feature", () => {
     expect(body.name).toBe("shelf");
     expect(body.children).toBeDefined();
     expect(body.children!.game).toBeDefined();
+  });
+
+  test("registers derived-field discovery and disabled-axis repair", async () => {
+    const res = await jsonRequest(ctx.app, "GET", "/api/help/axis");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as HelpNode;
+    const axis = body.children?.axis;
+    const discovery = axis?.children?.["derived-fields"];
+    expect(discovery).toMatchObject({
+      name: "derived-fields",
+      description: "Discover versioned registry-backed derived axis fields and templates",
+      idempotent: true,
+    });
+    expect(discovery?.invocation).toEqual({
+      method: "GET",
+      path: "/api/axes/derived-fields",
+    });
+    const repair = axis?.children?.repair;
+    expect(repair).toMatchObject({
+      name: "repair",
+      description: "Repair a disabled legacy axis as a registered derived axis",
+      idempotent: false,
+      parameters: [{ name: "id", in: "path", description: "Axis ID", required: true }],
+    });
+    expect(repair?.invocation).toEqual({
+      method: "POST",
+      path: "/api/axes/:id/repair",
+    });
+
+    const discoveryOperation = ctx.operations.find(
+      ({ operationId }) => operationId === "shelf.axis.derived-fields",
+    );
+    const repairOperation = ctx.operations.find(
+      ({ operationId }) => operationId === "shelf.axis.repair",
+    );
+    expect(discoveryOperation?.requestSchema).toBeUndefined();
+    expect(repairOperation?.requestSchema).toBeDefined();
+    expect(repairOperation?.idempotent).toBe(false);
+    expect(
+      repairOperation?.requestSchema?.safeParse({
+        derivedField: "communityRating",
+        configuration: {},
+      }).success,
+    ).toBe(true);
   });
 
   test("returns 404 for nonexistent feature", async () => {

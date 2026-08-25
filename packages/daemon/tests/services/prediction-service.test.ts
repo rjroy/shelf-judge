@@ -2,6 +2,7 @@ import { describe, test, expect } from "bun:test";
 import type {
   Axis,
   Collection,
+  DerivedAxis,
   Game,
   PredictionSettings,
   TournamentGameStatsDisplay,
@@ -14,17 +15,62 @@ import type { StorageService } from "../../src/services/storage-service.js";
 import type { TournamentService } from "../../src/services/tournament-service.js";
 import type { BggClient, BggGameResult } from "../../src/services/bgg-client.js";
 import { DEFAULT_PREDICTION_SETTINGS } from "../../src/services/prediction-engine.js";
+import {
+  buildVocabulary,
+  computeContinuousRanges,
+  encodeGame,
+  getOrderedVectorAxes,
+  getVectorAxisValues,
+} from "../../src/services/feature-vector.js";
 
 const now = new Date().toISOString();
 
-function makeAxis(id: string, name: string, source: "personal" | "bgg", weight = 50): Axis {
-  return {
+function makeAxis(id: string, name: string, source: "personal" | "derived", weight = 50): Axis {
+  const common = {
     id,
     name,
     description: "",
     weight,
-    source,
-    bggField: source === "bgg" ? "communityRating" : null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  return source === "personal"
+    ? { ...common, enabled: true, source }
+    : {
+        ...common,
+        enabled: true,
+        source,
+        derivedField: "communityRating",
+        configuration: {},
+      };
+}
+
+function makePlayerCountAxis(): DerivedAxis<"playerCountFit"> {
+  return {
+    id: "player-count",
+    name: "Player Count Fit",
+    description: null,
+    weight: 50,
+    enabled: true,
+    source: "derived",
+    derivedField: "playerCountFit",
+    configuration: { targetPlayerCount: 3 },
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function makePlayingTimeAxis(): DerivedAxis<"playingTime"> {
+  return {
+    id: "playing-time",
+    name: "Play Time",
+    description: null,
+    weight: 50,
+    enabled: true,
+    source: "derived",
+    derivedField: "playingTime",
+    configuration: { maximumScoringTime: 120 },
+    preferenceShape: "lower-is-better",
     createdAt: now,
     updatedAt: now,
   };
@@ -43,6 +89,7 @@ function makeGame(
     yearPublished: 2020,
     minPlayers: 2,
     maxPlayers: 4,
+    bestPlayers: null,
     playingTime: 60,
     numPlays: null,
     ownership: "owned",
@@ -62,6 +109,7 @@ function makeGame(
           families: [],
           subdomains: [],
           suggestedPlayerCounts: [],
+          bestPlayerCount: null,
           fetchedAt: now,
         }
       : null,
@@ -72,6 +120,7 @@ function makeGame(
 
 function makeCollection(games: Game[], axes: Axis[]): Collection {
   return {
+    schemaVersion: 2,
     id: "test-col",
     name: "Test Collection",
     axes,
@@ -154,7 +203,7 @@ function createStubTournamentService(
 
 describe("prediction-service", () => {
   const themeAxis = makeAxis("theme", "Theme", "personal");
-  const complexityAxis = makeAxis("complexity", "Complexity", "bgg");
+  const complexityAxis = makeAxis("complexity", "Complexity", "derived");
 
   function buildRatedCollection(ratedCount: number) {
     const axes = [themeAxis, complexityAxis];
@@ -185,6 +234,124 @@ describe("prediction-service", () => {
       if (themeEntry?.predictionConfidence !== null) {
         expect(["strong", "moderate", "weak"]).toContain(themeEntry!.predictionConfidence);
       }
+    });
+
+    test("keeps prediction vectors stable with player-count and capped play-time axes", async () => {
+      const collection = buildRatedCollection(6);
+      const target = collection.games.find((candidate) => candidate.id === "target");
+      if (target === undefined) throw new Error("Missing prediction target fixture");
+      target.playingTime = 300;
+
+      const playerCountAxis = makePlayerCountAxis();
+      const playingTimeAxis = makePlayingTimeAxis();
+      const baselineCollection = makeCollection(collection.games, [themeAxis]);
+      const derivedCollection = makeCollection(collection.games, [
+        playerCountAxis,
+        playingTimeAxis,
+        themeAxis,
+      ]);
+      const baselineService = createPredictionService({
+        storageService: createStubStorage(baselineCollection),
+        fitnessService: createFitnessService(),
+        tournamentService: createStubTournamentService(),
+      });
+      const service = createPredictionService({
+        storageService: createStubStorage(derivedCollection),
+        fitnessService: createFitnessService(),
+        tournamentService: createStubTournamentService(),
+      });
+
+      const baseline = await baselineService.predictGame(target.id);
+      const result = await service.predictGame(target.id);
+      const repeated = await service.predictGame(target.id);
+      const requireRow = (axisId: string) => {
+        const entry = result.score.breakdown.find((candidate) => candidate.axisId === axisId);
+        if (entry === undefined) throw new Error(`Missing prediction breakdown row ${axisId}`);
+        return entry;
+      };
+      const baselineTheme = baseline.score.breakdown.find(
+        (candidate) => candidate.axisId === themeAxis.id,
+      );
+      if (baselineTheme === undefined) throw new Error("Missing baseline personal prediction");
+
+      const vectorAxes = getOrderedVectorAxes(derivedCollection.axes);
+      const baselineVectorAxes = getOrderedVectorAxes(baselineCollection.axes);
+      expect(vectorAxes.map(({ id }) => id)).toEqual([themeAxis.id]);
+      const vocabulary = buildVocabulary(collection.games);
+      const ranges = computeContinuousRanges(collection.games);
+      const vector = encodeGame(
+        target,
+        vocabulary,
+        vectorAxes,
+        getVectorAxisValues(target, vectorAxes, null),
+        ranges,
+      );
+      const baselineVector = encodeGame(
+        target,
+        vocabulary,
+        baselineVectorAxes,
+        getVectorAxisValues(target, baselineVectorAxes, null),
+        ranges,
+      );
+      const flattenedVector = [
+        ...vector.binary,
+        ...vector.continuous,
+        ...(vector.personalAxes ?? []),
+      ];
+      expect(vector).toEqual(baselineVector);
+      expect(flattenedVector).toHaveLength(9);
+      expect(flattenedVector.every(Number.isFinite)).toBe(true);
+
+      expect(requireRow(playerCountAxis.id)).toMatchObject({
+        source: "derived",
+        derivedField: "playerCountFit",
+        sourceValue: 9,
+        scoringRawValue: 9,
+        effectiveRating: 9,
+        unit: "fit score",
+        configurationSummary: "Target: 3 players",
+        predictionConfidence: "actual",
+      });
+      expect(requireRow(playingTimeAxis.id)).toMatchObject({
+        source: "derived",
+        derivedField: "playingTime",
+        sourceValue: 300,
+        scoringRawValue: 120,
+        effectiveRating: 1,
+        unit: "minutes",
+        configurationSummary: "Scoring cap: 120 minutes",
+        predictionConfidence: "actual",
+      });
+      expect(result.score.predictionMeta).toMatchObject({
+        actualAxisCount: 2,
+        predictedAxisCount: 1,
+      });
+
+      const theme = requireRow(themeAxis.id);
+      expect({
+        effectiveRating: theme.effectiveRating,
+        predictionConfidence: theme.predictionConfidence,
+        referenceGames: theme.referenceGames,
+      }).toEqual({
+        effectiveRating: baselineTheme.effectiveRating,
+        predictionConfidence: baselineTheme.predictionConfidence,
+        referenceGames: baselineTheme.referenceGames,
+      });
+      expect(repeated.score).toEqual(result.score);
+      expect(Number.isFinite(result.score.score)).toBe(true);
+      for (const entry of result.score.breakdown) {
+        for (const value of [
+          entry.contribution,
+          entry.sourceValue,
+          entry.scoringRawValue,
+          entry.effectiveRating,
+        ]) {
+          if (value !== null) expect(Number.isFinite(value)).toBe(true);
+        }
+      }
+      const serialized = JSON.stringify(result);
+      const parsed: unknown = JSON.parse(serialized);
+      expect(parsed).toEqual(result);
     });
 
     test("returns actual fitness with null predictionMeta when all axes rated", async () => {
@@ -265,8 +432,8 @@ describe("prediction-service", () => {
         name: "Tournament",
         description: null,
         weight: 30,
+        enabled: true,
         source: "tournament",
-        bggField: null,
         createdAt: now,
         updatedAt: now,
       };
@@ -310,12 +477,12 @@ describe("prediction-service", () => {
       // The decisive assertion: with the filter fix, the entry is "predicted"
       // with a real confidence level. Without the fix, no reference game has
       // a tournament rating and the entry's predictionConfidence collapses to
-      // "insufficient" with rating=null.
+      // "insufficient" with effectiveRating=null.
       expect(tournamentEntry!.source).toBe("predicted");
-      expect(tournamentEntry!.rating).not.toBeNull();
+      expect(tournamentEntry!.effectiveRating).not.toBeNull();
       const confidence = tournamentEntry!.predictionConfidence;
       expect(confidence).not.toBeNull();
-      expect(["strong", "moderate", "weak"]).toContain(confidence as string);
+      if (confidence !== null) expect(["strong", "moderate", "weak"]).toContain(confidence);
       expect(tournamentEntry!.referenceGames).not.toBeNull();
       expect(tournamentEntry!.referenceGames!.length).toBeGreaterThan(0);
     });
@@ -478,6 +645,7 @@ describe("prediction-service", () => {
       families: [],
       subdomains: [],
       suggestedPlayerCounts: [],
+      bestPlayerCount: null,
       fetchedAt: now,
     });
 
@@ -509,7 +677,9 @@ describe("prediction-service", () => {
 
     test("returns prediction for a game not in collection", async () => {
       const collection = buildRatedCollection(6);
-      const bggClient = createStubBggClient(makeBggResult("New Game"));
+      const bggData = makeBggData();
+      bggData.bestPlayerCount = 3;
+      const bggClient = createStubBggClient(makeBggResult("New Game", bggData));
 
       const service = createPredictionService({
         storageService: createStubStorage(collection),
@@ -522,6 +692,7 @@ describe("prediction-service", () => {
       expect(result.game.id).toBe("preview-99999");
       expect(result.game.name).toBe("New Game");
       expect(result.game.bggId).toBe(99999);
+      expect(result.game.bestPlayers).toBe(3);
       expect(result.score).toBeDefined();
       // Temporary game has no ratings, so all personal axes should be predicted
       const themeEntry = result.score.breakdown.find((e) => e.axisId === "theme");

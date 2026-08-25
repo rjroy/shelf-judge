@@ -30,6 +30,7 @@ describe("shared public surface (Phase 6 strike)", () => {
         yearPublished: null,
         minPlayers: null,
         maxPlayers: null,
+        bestPlayers: null,
         playingTime: null,
         imageUrl: null,
         numPlays: null,
@@ -56,5 +57,52 @@ describe("shared public surface (Phase 6 strike)", () => {
       redundancyPreview: null,
     };
     expect("tension" in response).toBe(false);
+  });
+});
+
+describe("shared public surface (derived-axis cutover)", () => {
+  test("exports canonical axis and collection schemas", () => {
+    expect("CreateAxisSchema" in shared).toBe(true);
+    expect("UpdateAxisSchema" in shared).toBe(true);
+    expect("AxisSchema" in shared).toBe(true);
+    expect("CollectionSchema" in shared).toBe(true);
+  });
+
+  test("does not export transitional current schema names", () => {
+    expect("CurrentCreateAxisSchema" in shared).toBe(false);
+    expect("CurrentUpdateAxisSchema" in shared).toBe(false);
+    expect("CurrentAxisSchema" in shared).toBe(false);
+    expect("CurrentCollectionSchema" in shared).toBe(false);
+  });
+
+  test("does not export BGG-specific axis resolution or scale helpers", () => {
+    expect("resolveBggRawValue" in shared).toBe(false);
+    expect("getNativeScale" in shared).toBe(false);
+  });
+
+  test("does not expose persisted legacy model types", () => {
+    // @ts-expect-error Persisted legacy input belongs to the daemon migration parser.
+    const legacyAxis: import("../src").LegacyAxis = {};
+    // @ts-expect-error Persisted legacy input belongs to the daemon migration parser.
+    const legacyCollection: import("../src").LegacyCollection = {};
+    // @ts-expect-error Persisted legacy input belongs to the daemon migration parser.
+    const legacySource: import("../src").LegacyAxisSource = "bgg";
+
+    expect(legacyAxis).toEqual({});
+    expect(legacyCollection).toEqual({});
+    expect(legacySource).toBe("bgg");
+  });
+
+  test("shared source and barrel contain no persisted legacy model declarations", async () => {
+    const [types, barrel] = await Promise.all([
+      Bun.file("packages/shared/src/types.ts").text(),
+      Bun.file("packages/shared/src/index.ts").text(),
+    ]);
+    for (const removedName of ["LegacyAxisSource", "LegacyAxis", "LegacyCollection"]) {
+      const exportedDeclaration = new RegExp(`export (?:type|interface) ${removedName}\\b`);
+      const barrelExport = new RegExp(`^\\s*${removedName},?$`, "m");
+      expect(types).not.toMatch(exportedDeclaration);
+      expect(barrel).not.toMatch(barrelExport);
+    }
   });
 });

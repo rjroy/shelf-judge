@@ -39,6 +39,7 @@ function makeBggData(
     families: [],
     subdomains: [],
     suggestedPlayerCounts: [],
+    bestPlayerCount: null,
     fetchedAt: now,
     ...overrides,
   };
@@ -60,6 +61,7 @@ function makeGame(
     yearPublished: 2020,
     minPlayers: 2,
     maxPlayers: 4,
+    bestPlayers: null,
     playingTime: 60,
     imageUrl: null,
     bggData:
@@ -98,6 +100,7 @@ const prevOwned = makeGame("prev", "Delta", "previously-owned");
 // Mutable collection for setOwnership tests
 function makeCollection(): Collection {
   return {
+    schemaVersion: 2,
     id: "coll-1",
     name: "Test",
     axes: [
@@ -106,8 +109,8 @@ function makeCollection(): Collection {
         name: "Fun",
         description: null,
         weight: 100,
+        enabled: true,
         source: "personal",
-        bggField: null,
         createdAt: now,
         updatedAt: now,
       },
@@ -142,7 +145,12 @@ function createMockStorageService(
     },
     loadConfig: () => Promise.reject(new Error("not implemented")),
     saveConfig: () => Promise.resolve(),
-    loadTournament: () => Promise.reject(new Error("not implemented")),
+    loadTournament: () =>
+      Promise.resolve({
+        settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
+        sessions: [],
+        gameStats: {},
+      }),
     saveTournament: () => Promise.resolve(),
     loadProfile: () => Promise.resolve(null),
     saveProfile: () => Promise.resolve(),
@@ -576,6 +584,11 @@ describe("legacy data migration", () => {
       writeFile: (p: string, content: string) => {
         files[p] = content;
         return Promise.resolve();
+      },
+      writeFileExclusive: (p: string, content: string) => {
+        if (p in files) return Promise.resolve(false);
+        files[p] = content;
+        return Promise.resolve(true);
       },
       rename: (oldP: string, newP: string) => {
         files[newP] = files[oldP];

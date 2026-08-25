@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { predictGame, predictReadiness } from "../../src/commands/predict.js";
+import { predictBggGame, predictGame, predictReadiness } from "../../src/commands/predict.js";
 import { scoreList } from "../../src/commands/score.js";
 import { createMockClient } from "../helpers/mock-client.js";
 
@@ -16,7 +16,7 @@ const predictGameData = {
         weight: 40,
         contribution: 3.2,
         source: "personal",
-        bggOriginal: null,
+        sourceValue: null,
         rawValue: 8,
         effectiveRating: 8,
         preferenceShape: "higher-is-better",
@@ -30,7 +30,7 @@ const predictGameData = {
         weight: 30,
         contribution: 2.1,
         source: "predicted",
-        bggOriginal: null,
+        sourceValue: null,
         rawValue: 7,
         effectiveRating: 7,
         preferenceShape: "higher-is-better",
@@ -42,16 +42,22 @@ const predictGameData = {
         ],
       },
       {
-        axisName: "Community Rating",
-        rating: 8.1,
+        axisId: "play-time-axis",
+        axisName: "Play Time",
+        derivedField: "playingTime",
+        rating: 1,
         weight: 10,
-        contribution: 0.81,
-        source: "bgg",
-        bggOriginal: null,
-        rawValue: 8.1,
-        effectiveRating: 8.1,
-        preferenceShape: "higher-is-better",
-        curveAffected: false,
+        contribution: 0.1,
+        source: "derived",
+        sourceValue: 300,
+        scoringRawValue: 240,
+        effectiveRating: 1,
+        preferenceShape: "sweet-spot",
+        curveAffected: true,
+        unit: "minutes",
+        provenance: "BGG published playing time",
+        configurationSummary: "maximum scoring time: 240 minutes",
+        overridden: false,
         predictionConfidence: "actual",
         referenceGames: null,
       },
@@ -61,7 +67,7 @@ const predictGameData = {
         weight: 20,
         contribution: null,
         source: "predicted",
-        bggOriginal: null,
+        sourceValue: null,
         rawValue: null,
         effectiveRating: null,
         preferenceShape: "higher-is-better",
@@ -115,6 +121,9 @@ describe("predict <game-id>", () => {
     expect(output).toContain("personal");
     expect(output).toContain("Replayability");
     expect(output).toContain("predicted");
+    expect(output).toContain("300 minutes");
+    expect(output).toContain("240 minutes");
+    expect(output).toContain("maximum scoring time: 240 minutes");
   });
 
   test("human-readable output shows reference games for predicted axes", async () => {
@@ -131,12 +140,54 @@ describe("predict <game-id>", () => {
     expect(parsed.game.name).toBe("Wingspan");
     expect(parsed.score.score).toBe(7.2);
     expect(parsed.score.predictionMeta.predictedAxisCount).toBe(2);
+    expect(parsed).toEqual(predictGameData);
+    expect(parsed.score.breakdown[2]).toMatchObject({
+      derivedField: "playingTime",
+      sourceValue: 300,
+      scoringRawValue: 240,
+      configurationSummary: "maximum scoring time: 240 minutes",
+    });
   });
 
   test("throws on missing game-id argument", async () => {
     const promise = predictGame(client, [], { json: false });
     // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test rejects pattern requires await
     await expect(promise).rejects.toThrow("Usage: shelf-judge predict <game-id>");
+  });
+});
+
+describe("predict bgg <bgg-id> at stage zero", () => {
+  test("labels deterministic metadata scoring without calling it BGG-derived", async () => {
+    const client = createMockClient({
+      routes: {
+        "GET /api/predictions/bgg/123": {
+          response: {
+            ok: true,
+            status: 200,
+            data: {
+              game: { id: "preview-123", name: "Preview Game" },
+              score: {
+                score: 7.4,
+                ratedAxisCount: 2,
+                totalAxisCount: 4,
+                breakdown: [],
+                vetoed: false,
+                vetoedBy: null,
+                hypotheticalScore: null,
+                predictionMeta: null,
+                redundancyAdjustment: null,
+              },
+              predictionUnavailable: { reason: "stage-0", ratedGameCount: 0, gamesNeeded: 5 },
+              redundancyPreview: null,
+            },
+          },
+        },
+      },
+    });
+
+    const output = await predictBggGame(client, ["123"], { json: false });
+    expect(output).toContain("Available-data score: 7.4");
+    expect(output).not.toContain("BGG-derived score");
   });
 });
 

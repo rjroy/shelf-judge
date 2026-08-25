@@ -12,7 +12,7 @@ export function AxisDistributions({
   return (
     <div className="section-card">
       <div className="section-header">
-        <span className="section-title-main">Axis Rating Distributions</span>
+        <span className="section-title-main">Effective Rating Distributions (1-10)</span>
         <span className="section-count">
           {distributions.length} {distributions.length === 1 ? "axis" : "axes"} &middot; {gameCount}{" "}
           games
@@ -67,6 +67,7 @@ export function AxisDistributions({
                   </span>
                 ))}
               </div>
+              <div className="axis-dist-scale-label">Effective preference rating, 1-10</div>
             </div>
           );
         })}

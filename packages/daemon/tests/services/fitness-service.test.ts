@@ -1,17 +1,28 @@
-import { describe, test, expect } from "bun:test";
+import { describe, expect, test } from "bun:test";
+import type {
+  DerivedAxis,
+  DisabledLegacyAxis,
+  Game,
+  PersonalAxis,
+  TournamentAxis,
+  TournamentData,
+} from "@shelf-judge/shared";
+import { AxisSchema } from "@shelf-judge/shared";
 import { createFitnessService } from "../../src/services/fitness-service.js";
-import type { Game, Axis, BggGameData, TournamentData } from "@shelf-judge/shared";
+import { migrateCollection } from "../../src/services/collection-migration.js";
 
-const fitnessService = createFitnessService();
+const service = createFitnessService();
+const timestamp = "2026-01-01T00:00:00.000Z";
 
-function makeGame(overrides: Partial<Game> = {}): Game {
+function game(overrides: Partial<Game> = {}): Game {
   return {
     id: "game-1",
     bggId: null,
-    name: "Test Game",
+    name: "Game",
     yearPublished: null,
     minPlayers: null,
     maxPlayers: null,
+    bestPlayers: null,
     playingTime: null,
     imageUrl: null,
     bggData: null,
@@ -20,547 +31,508 @@ function makeGame(overrides: Partial<Game> = {}): Game {
     boxDimensions: null,
     manualShelfId: null,
     ratings: {},
-    createdAt: "2026-01-01T00:00:00.000Z",
-    updatedAt: "2026-01-01T00:00:00.000Z",
+    createdAt: timestamp,
+    updatedAt: timestamp,
     ...overrides,
   };
 }
 
-function makeAxis(overrides: Partial<Axis> & { id: string; name: string; weight: number }): Axis {
+function personal(overrides: Partial<PersonalAxis> = {}): PersonalAxis {
   return {
+    id: "personal",
+    name: "Personal",
     description: null,
+    weight: 50,
+    enabled: true,
     source: "personal",
-    bggField: null,
-    createdAt: "2026-01-01T00:00:00.000Z",
-    updatedAt: "2026-01-01T00:00:00.000Z",
+    createdAt: timestamp,
+    updatedAt: timestamp,
     ...overrides,
   };
 }
 
-function makeBggData(overrides: Partial<BggGameData> = {}): BggGameData {
-  return {
-    communityRating: 7.0,
-    bayesAverage: 6.5,
-    weight: 3.0,
-    numWeightVotes: 100,
+function derived(
+  field: DerivedAxis["derivedField"],
+  configuration: DerivedAxis["configuration"],
+  overrides: Partial<DerivedAxis> = {},
+): DerivedAxis {
+  const axis = AxisSchema.parse({
+    id: field,
+    name: field,
     description: null,
-    mechanics: [],
-    categories: [],
-    families: [],
-    subdomains: [],
-    suggestedPlayerCounts: [],
-    fetchedAt: "2026-01-01T00:00:00.000Z",
+    weight: 50,
+    enabled: true,
+    source: "derived",
+    derivedField: field,
+    configuration,
+    createdAt: timestamp,
+    updatedAt: timestamp,
     ...overrides,
-  };
+  });
+  if (axis.source !== "derived") throw new Error("Expected a derived test axis");
+  return axis;
 }
 
-describe("FitnessService", () => {
-  describe("Wingspan example from design doc", () => {
-    test("produces score 7.9 with correct breakdown", () => {
-      const axes: Axis[] = [
-        makeAxis({ id: "wife", name: "Wife will play it", weight: 40 }),
-        makeAxis({ id: "visual", name: "Visual design", weight: 30 }),
-        makeAxis({
-          id: "complexity",
-          name: "Complexity",
-          weight: 20,
+function entry(result: ReturnType<typeof service.calculateScore>, axisId: string) {
+  const found = result?.breakdown.find((row) => row.axisId === axisId);
+  expect(found).toBeDefined();
+  if (found === undefined) throw new Error(`Missing breakdown row ${axisId}`);
+  return found;
+}
+
+describe("derived fitness", () => {
+  test.each([
+    [2, 4, 2, 8],
+    [2, 4, 4, 8],
+    [2, 4, 3, 9],
+    [2, 4, 1, 6],
+    [2, 4, 5, 6],
+    [4, 4, 4, 10],
+    [2, 2, 4, 6],
+    [10, 20, 4, 1],
+    [null, 4, 3, null],
+    [2, null, 3, null],
+    [0, 4, 3, null],
+    [4, 2, 3, null],
+  ] as const)(
+    "resolves player bounds min=%p max=%p target=%p",
+    (minPlayers, maxPlayers, targetPlayerCount, expected) => {
+      const axis = derived("playerCountFit", { targetPlayerCount });
+      const result = service.calculateScore(game({ minPlayers, maxPlayers }), [axis]);
+      if (expected === null) {
+        expect(result).toBeNull();
+      } else {
+        expect(result?.score).toBe(expected);
+        expect(entry(result, axis.id)).toMatchObject({
+          sourceValue: expected,
+          scoringRawValue: expected,
+          effectiveRating: expected,
+          unit: "fit score",
+          provenance:
+            "BoardGameGeek suggested-player-count poll with publisher-declared bounds fallback",
+          configurationSummary: `Target: ${targetPlayerCount} player${targetPlayerCount === 1 ? "" : "s"}`,
+        });
+      }
+    },
+  );
+
+  test.each([
+    [90, 240, 90, 90],
+    [0, 240, null, null],
+    [null, 240, null, null],
+    [240, 240, 240, 240],
+    [300, 240, 300, 240],
+  ] as const)(
+    "keeps play-time source and capped scoring values for %p minutes",
+    (playingTime, cap, sourceValue, scoringRawValue) => {
+      const axis = derived("playingTime", { maximumScoringTime: cap });
+      const result = service.calculateScore(game({ playingTime }), [axis]);
+      if (sourceValue === null) {
+        expect(result).toBeNull();
+      } else {
+        expect(entry(result, axis.id)).toMatchObject({ sourceValue, scoringRawValue });
+      }
+    },
+  );
+
+  test("applies lower-is-better at the minimum, interior, cap, and above-cap", () => {
+    const axis = derived(
+      "playingTime",
+      { maximumScoringTime: 120 },
+      { preferenceShape: "lower-is-better" },
+    );
+    expect(service.calculateScore(game({ playingTime: 1 }), [axis])?.score).toBe(10);
+    expect(service.calculateScore(game({ playingTime: 60 }), [axis])?.score).toBe(5.5);
+    expect(service.calculateScore(game({ playingTime: 120 }), [axis])?.score).toBe(1);
+    expect(service.calculateScore(game({ playingTime: 300 }), [axis])?.score).toBe(1);
+  });
+
+  test("applies numeric sweet-spot width and responds immediately to cap changes", () => {
+    const base = {
+      preferenceShape: "sweet-spot" as const,
+      idealValue: 90,
+      toleranceWidth: 30,
+    };
+    const cap240 = derived("playingTime", { maximumScoringTime: 240 }, base);
+    expect(service.calculateScore(game({ playingTime: 90 }), [cap240])?.score).toBe(10);
+    expect(service.calculateScore(game({ playingTime: 60 }), [cap240])?.score).toBe(4.5);
+    expect(service.calculateScore(game({ playingTime: 120 }), [cap240])?.score).toBe(4.5);
+    expect(service.calculateScore(game({ playingTime: 240 }), [cap240])?.score).toBe(1);
+
+    const lower240 = derived(
+      "playingTime",
+      { maximumScoringTime: 240 },
+      { preferenceShape: "lower-is-better" },
+    );
+    const lower120 = derived(
+      "playingTime",
+      { maximumScoringTime: 120 },
+      { preferenceShape: "lower-is-better" },
+    );
+    const stored = game({ playingTime: 180 });
+    expect(service.calculateScore(stored, [lower240])?.score).toBe(3.3);
+    expect(service.calculateScore(stored, [lower120])?.score).toBe(1);
+    expect(stored.playingTime).toBe(180);
+  });
+
+  test("shows missing derived rows without changing the denominator", () => {
+    const missing = derived("playingTime", { maximumScoringTime: 240 }, { weight: 100 });
+    const rated = personal({ weight: 25 });
+    const result = service.calculateScore(game({ ratings: { [rated.id]: 8 } }), [missing, rated]);
+
+    expect(result?.score).toBe(8);
+    expect(result?.ratedAxisCount).toBe(1);
+    expect(result?.totalAxisCount).toBe(2);
+    expect(entry(result, missing.id)).toMatchObject({
+      source: "derived",
+      sourceValue: null,
+      scoringRawValue: null,
+      effectiveRating: null,
+      contribution: null,
+      unit: "minutes",
+      provenance: "Publisher-listed playing time imported from BoardGameGeek",
+      configurationSummary: "Scoring cap: 240 minutes",
+      overridden: false,
+    });
+  });
+
+  test("invalid minute-native override is direct, retains facts, and bypasses veto", () => {
+    const axis = derived(
+      "playingTime",
+      { maximumScoringTime: 240 },
+      {
+        preferenceShape: "sweet-spot",
+        idealValue: 90,
+        toleranceWidth: 30,
+        veto: { direction: "above", threshold: 6 },
+      },
+    );
+    const result = service.calculateScore(game({ playingTime: 300, ratings: { [axis.id]: 7 } }), [
+      axis,
+    ]);
+
+    expect(result).toMatchObject({ score: 7, vetoed: false });
+    expect(entry(result, axis.id)).toMatchObject({
+      source: "override",
+      sourceValue: 300,
+      scoringRawValue: 240,
+      effectiveRating: 7,
+      overrideValue: 7,
+      contribution: 7,
+      overridden: true,
+      curveAffected: false,
+    });
+  });
+
+  test("invalid minute-native override is direct without inventing missing facts", () => {
+    const axis = derived(
+      "playingTime",
+      { maximumScoringTime: 240 },
+      { preferenceShape: "sweet-spot", idealValue: 90, toleranceWidth: 30 },
+    );
+    const result = service.calculateScore(game({ ratings: { [axis.id]: 9 } }), [axis]);
+    expect(result?.score).toBe(9);
+    expect(entry(result, axis.id)).toMatchObject({
+      source: "override",
+      sourceValue: null,
+      scoringRawValue: null,
+      effectiveRating: 9,
+      overrideValue: 9,
+      contribution: 9,
+      overridden: true,
+      curveAffected: false,
+    });
+  });
+
+  test("valid personal-scale sweet-spot override preserves legacy curve and bypasses veto", () => {
+    const axis = derived(
+      "communityRating",
+      {},
+      {
+        preferenceShape: "sweet-spot",
+        idealValue: 8,
+        tolerance: "moderate",
+        veto: { direction: "below", threshold: 10 },
+      },
+    );
+    const result = service.calculateScore(
+      game({
+        ratings: { [axis.id]: 9 },
+        bggData: {
+          communityRating: 7.5,
+          bayesAverage: 7,
+          weight: 3,
+          numWeightVotes: 1,
+          description: null,
+          mechanics: [],
+          categories: [],
+          families: [],
+          subdomains: [],
+          suggestedPlayerCounts: [],
+          bestPlayerCount: null,
+          fetchedAt: timestamp,
+        },
+      }),
+      [axis],
+    );
+
+    expect(result).toMatchObject({ score: 6, vetoed: false });
+    expect(entry(result, axis.id)).toMatchObject({
+      source: "override",
+      sourceValue: 7.5,
+      scoringRawValue: 7.5,
+      effectiveRating: 6,
+      overrideValue: 9,
+      contribution: 6,
+      overridden: true,
+      curveAffected: true,
+    });
+  });
+
+  test("valid lower and higher personal-scale overrides preserve configured behavior", () => {
+    const lower = derived(
+      "weight",
+      {},
+      {
+        preferenceShape: "lower-is-better",
+        veto: { direction: "above", threshold: 2 },
+      },
+    );
+    const higher = derived(
+      "communityRating",
+      {},
+      {
+        id: "higher",
+        preferenceShape: "higher-is-better",
+        veto: { direction: "below", threshold: 5 },
+      },
+    );
+    const result = service.calculateScore(game({ ratings: { [lower.id]: 3, [higher.id]: 4 } }), [
+      lower,
+      higher,
+    ]);
+
+    expect(result).toMatchObject({ score: 6, vetoed: false });
+    expect(entry(result, lower.id)).toMatchObject({
+      effectiveRating: 8,
+      contribution: 4,
+      overridden: true,
+      curveAffected: true,
+    });
+    expect(entry(result, higher.id)).toMatchObject({
+      effectiveRating: 4,
+      contribution: 2,
+      overridden: true,
+      curveAffected: false,
+    });
+  });
+
+  test("preserves legacy-before and current-after scores, curves, weights, vetoes, and overrides", () => {
+    const bggData = {
+      communityRating: 7.5,
+      bayesAverage: 7,
+      weight: 3,
+      numWeightVotes: 1,
+      description: null,
+      mechanics: [],
+      categories: [],
+      families: [],
+      subdomains: [],
+      suggestedPlayerCounts: [],
+      bestPlayerCount: null,
+      fetchedAt: timestamp,
+    };
+    const raw = {
+      id: "collection",
+      name: "Legacy",
+      axes: [
+        {
+          id: "community",
+          name: "Community",
+          description: null,
+          weight: 60,
+          source: "bgg",
+          bggField: "communityRating",
+          preferenceShape: "sweet-spot",
+          idealValue: 8,
+          tolerance: "moderate",
+          veto: { direction: "below", threshold: 4 },
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        },
+        {
+          id: "weight",
+          name: "Weight",
+          description: null,
+          weight: 40,
           source: "bgg",
           bggField: "weight",
-        }),
-        makeAxis({
-          id: "community",
-          name: "Community Rating",
-          weight: 10,
-          source: "bgg",
-          bggField: "communityRating",
-        }),
-      ];
-
-      const game = makeGame({
-        ratings: { wife: 8, visual: 9 },
-      });
-
-      const bggData = makeBggData({
-        communityRating: 8.1,
-        weight: 2.9,
-      });
-
-      const result = fitnessService.calculateScore(game, axes, bggData);
-
-      expect(result).not.toBeNull();
-      // Score shifted from 7.9 to 7.8 due to corrected BGG weight normalization:
-      // Old: weight 2.9 * 2 = 5.8, New: 1 + 9*(2.9-1)/(5-1) = 5.275 -> 5.3
-      expect(result!.score).toBe(7.8);
-      expect(result!.ratedAxisCount).toBe(4);
-      expect(result!.totalAxisCount).toBe(4);
-
-      // Verify breakdown
-      const wife = result!.breakdown.find((b) => b.axisId === "wife")!;
-      expect(wife.rating).toBe(8);
-      expect(wife.source).toBe("personal");
-      expect(wife.contribution).toBeCloseTo(3.2);
-
-      const visual = result!.breakdown.find((b) => b.axisId === "visual")!;
-      expect(visual.rating).toBe(9);
-      expect(visual.source).toBe("personal");
-      expect(visual.contribution).toBeCloseTo(2.7);
-
-      const complexity = result!.breakdown.find((b) => b.axisId === "complexity")!;
-      // Raw BGG weight 2.9 on 1-5 scale, higher-is-better: 1 + 9*(2.9-1)/4 = 5.275 -> 5.3
-      expect(complexity.rating).toBe(5.3);
-      expect(complexity.rawValue).toBe(2.9);
-      expect(complexity.source).toBe("bgg");
-      expect(complexity.contribution).toBeCloseTo(1.1);
-
-      const community = result!.breakdown.find((b) => b.axisId === "community")!;
-      expect(community.rating).toBe(8.1);
-      expect(community.source).toBe("bgg");
-      expect(community.contribution).toBeCloseTo(0.8);
-
-      // Verify the math: (320 + 270 + 105.5 + 81) / 100 = 7.765 -> 7.8
-      const totalContribution = result!.breakdown
-        .filter((b) => b.contribution !== null)
-        .reduce((sum, b) => sum + b.contribution!, 0);
-      const totalWeight = result!.breakdown
-        .filter((b) => b.rating !== null)
-        .reduce((sum, b) => sum + b.weight, 0);
-      expect(totalContribution).toBeCloseTo(7.8);
-      expect(totalWeight).toBeCloseTo(100);
-    });
-  });
-
-  describe("single axis", () => {
-    test("score equals the rating", () => {
-      const axes = [makeAxis({ id: "a1", name: "Fun", weight: 50 })];
-      const game = makeGame({ ratings: { a1: 7 } });
-
-      const result = fitnessService.calculateScore(game, axes, null);
-
-      expect(result).not.toBeNull();
-      expect(result!.score).toBe(7);
-    });
-  });
-
-  describe("multiple axes, equal weights", () => {
-    test("produces simple average", () => {
-      const axes = [
-        makeAxis({ id: "a1", name: "Fun", weight: 10 }),
-        makeAxis({ id: "a2", name: "Theme", weight: 10 }),
-      ];
-      const game = makeGame({ ratings: { a1: 6, a2: 8 } });
-
-      const result = fitnessService.calculateScore(game, axes, null);
-
-      expect(result).not.toBeNull();
-      expect(result!.score).toBe(7);
-    });
-  });
-
-  describe("missing ratings", () => {
-    test("excludes unrated axes from calculation", () => {
-      const axes = [
-        makeAxis({ id: "a1", name: "Fun", weight: 10 }),
-        makeAxis({ id: "a2", name: "Theme", weight: 10 }),
-        makeAxis({ id: "a3", name: "Art", weight: 10 }),
-      ];
-      // Only rate a1 and a3
-      const game = makeGame({ ratings: { a1: 6, a3: 8 } });
-
-      const result = fitnessService.calculateScore(game, axes, null);
-
-      expect(result).not.toBeNull();
-      expect(result!.score).toBe(7); // (6+8)/2 = 7
-      expect(result!.ratedAxisCount).toBe(2);
-      expect(result!.totalAxisCount).toBe(3);
-
-      const unrated = result!.breakdown.find((b) => b.axisId === "a2")!;
-      expect(unrated.rating).toBeNull();
-      expect(unrated.contribution).toBeNull();
-    });
-  });
-
-  describe("zero rated axes", () => {
-    test("returns null when no axes have ratings", () => {
-      const axes = [makeAxis({ id: "a1", name: "Fun", weight: 10 })];
-      const game = makeGame({ ratings: {} });
-
-      const result = fitnessService.calculateScore(game, axes, null);
-
-      expect(result).toBeNull();
-    });
-  });
-
-  describe("all-zero weights on rated axes", () => {
-    test("returns null to avoid division by zero", () => {
-      const axes = [
-        makeAxis({ id: "a1", name: "Fun", weight: 0 }),
-        makeAxis({ id: "a2", name: "Theme", weight: 0 }),
-      ];
-      const game = makeGame({ ratings: { a1: 5, a2: 8 } });
-
-      const result = fitnessService.calculateScore(game, axes, null);
-
-      expect(result).toBeNull();
-    });
-  });
-
-  describe("BGG-derived axis with no BGG data", () => {
-    test("excludes axis when bggData is null", () => {
-      const axes = [
-        makeAxis({ id: "a1", name: "Fun", weight: 10 }),
-        makeAxis({
-          id: "bgg1",
-          name: "Community Rating",
-          weight: 10,
-          source: "bgg",
-          bggField: "communityRating",
-        }),
-      ];
-      const game = makeGame({ ratings: { a1: 8 } });
-
-      const result = fitnessService.calculateScore(game, axes, null);
-
-      expect(result).not.toBeNull();
-      expect(result!.score).toBe(8);
-      expect(result!.ratedAxisCount).toBe(1);
-    });
-
-    test("excludes complexity axis when BGG weight is null", () => {
-      const axes = [
-        makeAxis({ id: "a1", name: "Fun", weight: 10 }),
-        makeAxis({ id: "bgg1", name: "Complexity", weight: 10, source: "bgg", bggField: "weight" }),
-      ];
-      const game = makeGame({ ratings: { a1: 8 } });
-      const bggData = makeBggData({ weight: null });
-
-      const result = fitnessService.calculateScore(game, axes, bggData);
-
-      expect(result).not.toBeNull();
-      expect(result!.score).toBe(8);
-      expect(result!.ratedAxisCount).toBe(1);
-    });
-  });
-
-  describe("override of BGG-derived axis", () => {
-    test("uses personal rating with override source and preserves bggOriginal", () => {
-      const axes = [
-        makeAxis({
-          id: "bgg1",
-          name: "Community Rating",
-          weight: 10,
-          source: "bgg",
-          bggField: "communityRating",
-        }),
-      ];
-      const game = makeGame({ ratings: { bgg1: 9 } });
-      const bggData = makeBggData({ communityRating: 7.5 });
-
-      const result = fitnessService.calculateScore(game, axes, bggData);
-
-      expect(result).not.toBeNull();
-      expect(result!.score).toBe(9);
-
-      const entry = result!.breakdown[0];
-      expect(entry.source).toBe("override");
-      expect(entry.bggOriginal).toBe(7.5);
-      expect(entry.rating).toBe(9);
-    });
-  });
-
-  describe("rounding to one decimal place", () => {
-    test("7.84 rounds to 7.8", () => {
-      // (8 * 84 + 7 * 16) / 100 = (672 + 112) / 100 = 7.84
-      const axes = [
-        makeAxis({ id: "a1", name: "A", weight: 84 }),
-        makeAxis({ id: "a2", name: "B", weight: 16 }),
-      ];
-      const game = makeGame({ ratings: { a1: 8, a2: 7 } });
-
-      const result = fitnessService.calculateScore(game, axes, null);
-
-      expect(result).not.toBeNull();
-      expect(result!.score).toBe(7.8);
-    });
-
-    test("7.85 rounds to 7.9", () => {
-      // (8 * 85 + 7 * 15) / 100 = (680 + 105) / 100 = 7.85
-      const axes = [
-        makeAxis({ id: "a1", name: "A", weight: 85 }),
-        makeAxis({ id: "a2", name: "B", weight: 15 }),
-      ];
-      const game = makeGame({ ratings: { a1: 8, a2: 7 } });
-
-      const result = fitnessService.calculateScore(game, axes, null);
-
-      expect(result).not.toBeNull();
-      expect(result!.score).toBe(7.9);
-    });
-
-    test("7.94 rounds to 7.9", () => {
-      // (8 * 94 + 7 * 6) / 100 = (752 + 42) / 100 = 7.94
-      const axes = [
-        makeAxis({ id: "a1", name: "A", weight: 94 }),
-        makeAxis({ id: "a2", name: "B", weight: 6 }),
-      ];
-      const game = makeGame({ ratings: { a1: 8, a2: 7 } });
-
-      const result = fitnessService.calculateScore(game, axes, null);
-
-      expect(result).not.toBeNull();
-      expect(result!.score).toBe(7.9);
-    });
-
-    test("7.95 rounds to 8.0", () => {
-      // (8 * 95 + 7 * 5) / 100 = (760 + 35) / 100 = 7.95
-      const axes = [
-        makeAxis({ id: "a1", name: "A", weight: 95 }),
-        makeAxis({ id: "a2", name: "B", weight: 5 }),
-      ];
-      const game = makeGame({ ratings: { a1: 8, a2: 7 } });
-
-      const result = fitnessService.calculateScore(game, axes, null);
-
-      expect(result).not.toBeNull();
-      expect(result!.score).toBe(8);
-    });
-  });
-
-  describe("breakdown consistency", () => {
-    test("contribution uses raw rating for accuracy, displays rounded", () => {
-      // communityRating 7.666 rounds to displayed rating 7.7
-      // contribution = roundToOneDecimal(7.666 * 30) = roundToOneDecimal(229.98) = 230
-      // Score uses raw 7.666, not rounded 7.7, to avoid compounding rounding error
-      const axes = [
-        makeAxis({ id: "a1", name: "A", weight: 30, source: "bgg", bggField: "communityRating" }),
-      ];
-      const game = makeGame({ ratings: {} });
-      const bggData = makeBggData({ communityRating: 7.666 });
-
-      const result = fitnessService.calculateScore(game, axes, bggData);
-
-      expect(result).not.toBeNull();
-      const entry = result!.breakdown[0];
-
-      // Displayed rating is rounded
-      expect(entry.rating).toBe(7.7);
-      // Contribution is rounded from raw: roundToOneDecimal(7.666 * 30 / 30) = 7.7
-      expect(entry.contribution).toBe(7.7);
-      // Score uses raw value: 7.666 * 30 / 30 = 7.666, rounded to 7.7
-      expect(result!.score).toBe(7.7);
-    });
-
-    test("score is derivable from breakdown contributions", () => {
-      // Use BGG ratings with multi-decimal precision across multiple axes
-      const axes = [
-        makeAxis({ id: "a1", name: "A", weight: 40 }),
-        makeAxis({ id: "a2", name: "B", weight: 30, source: "bgg", bggField: "communityRating" }),
-        makeAxis({ id: "a3", name: "C", weight: 30, source: "bgg", bggField: "weight" }),
-      ];
-      const game = makeGame({ ratings: { a1: 7 } });
-      const bggData = makeBggData({ communityRating: 8.347, weight: 3.14 });
-
-      const result = fitnessService.calculateScore(game, axes, bggData);
-
-      expect(result).not.toBeNull();
-      const totalContribution = result!.breakdown
-        .filter((b) => b.contribution !== null)
-        .reduce((sum, b) => sum + b.contribution!, 0);
-      const totalWeight = result!.breakdown
-        .filter((b) => b.rating !== null)
-        .reduce((sum, b) => sum + b.weight, 0);
-      expect(result!.score).toBeCloseTo(totalContribution);
-      expect(totalWeight).toBeCloseTo(100);
-    });
-  });
-
-  describe("source field accuracy", () => {
-    test("unrated BGG axis shows source as bgg, not personal", () => {
-      const axes = [
-        makeAxis({ id: "a1", name: "Fun", weight: 10 }),
-        makeAxis({
-          id: "bgg1",
-          name: "Community Rating",
-          weight: 10,
-          source: "bgg",
-          bggField: "communityRating",
-        }),
-      ];
-      const game = makeGame({ ratings: { a1: 8 } });
-
-      const result = fitnessService.calculateScore(game, axes, null);
-
-      expect(result).not.toBeNull();
-      const bggEntry = result!.breakdown.find((b) => b.axisId === "bgg1")!;
-      expect(bggEntry.rating).toBeNull();
-      expect(bggEntry.source).toBe("bgg");
-    });
-  });
-
-  describe("tournament axis", () => {
-    function makeTournament(
-      gameStats: Record<string, { eloRating: number; comparisonCount: number }>,
-      overrides?: Partial<TournamentData["settings"]>,
-    ): TournamentData {
-      return {
-        settings: {
-          kFactorThreshold: 15,
-          normalizationHalfWidth: 400,
-          provisionalThreshold: 6,
-          ...overrides,
+          preferenceShape: "lower-is-better",
+          createdAt: timestamp,
+          updatedAt: timestamp,
         },
-        sessions: [],
-        gameStats: Object.fromEntries(
-          Object.entries(gameStats).map(([id, s]) => [
-            id,
-            { ...s, wins: 0, losses: 0, recentComparisons: [] },
-          ]),
-        ),
-      };
-    }
+      ],
+      games: [
+        game({
+          id: "ordinary",
+          bggData,
+        }),
+        game({
+          id: "override",
+          ratings: { community: 9 },
+          bggData,
+        }),
+        game({
+          id: "veto",
+          bggData: { ...bggData, communityRating: 3.5 },
+        }),
+      ],
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    const migrated = migrateCollection(raw, {
+      createId: () => "tournament",
+      now: () => timestamp,
+    }).data;
+    const migratedLegacyAxes = migrated.axes.filter((axis) => axis.source === "derived");
 
-    function tournamentAxis(weight = 50): Axis {
-      return makeAxis({
-        id: "tournament",
-        name: "Tournament",
-        weight,
-        source: "tournament",
-        bggField: null,
-      });
-    }
-
-    test("contributes normalized score when cohort has 5+ ranked games", () => {
-      // Build a cohort of 5 games each with one comparison so shouldDisplayRanking returns true.
-      // The target game gets a high ELO so its normalized score is also high.
-      const tournament = makeTournament({
-        "game-1": { eloRating: 1900, comparisonCount: 8 }, // > provisional threshold
-        "game-2": { eloRating: 1500, comparisonCount: 6 },
-        "game-3": { eloRating: 1500, comparisonCount: 6 },
-        "game-4": { eloRating: 1500, comparisonCount: 6 },
-        "game-5": { eloRating: 1500, comparisonCount: 6 },
-      });
-      const axes = [tournamentAxis(50)];
-      const game = makeGame({ id: "game-1" });
-
-      const result = fitnessService.calculateScore(game, axes, null, tournament);
-
-      expect(result).not.toBeNull();
-      // ELO 1900 with halfWidth 400 -> 1 + 9*(1900 - 1100)/800 = 1 + 9 = 10
-      expect(result!.score).toBe(10);
-      const entry = result!.breakdown.find((b) => b.axisId === "tournament")!;
-      expect(entry.source).toBe("tournament");
-      expect(entry.rating).toBe(10);
-      expect(entry.contribution).toBeCloseTo(10);
-      expect(result!.ratedAxisCount).toBe(1);
+    expect(migratedLegacyAxes).toHaveLength(2);
+    expect(migratedLegacyAxes[0]).toMatchObject({
+      id: "community",
+      source: "derived",
+      derivedField: "communityRating",
+      configuration: {},
+      weight: 60,
+      preferenceShape: "sweet-spot",
+      idealValue: 8,
+      tolerance: "moderate",
+      veto: { direction: "below", threshold: 4 },
+    });
+    expect(migratedLegacyAxes[1]).toMatchObject({
+      id: "weight",
+      source: "derived",
+      derivedField: "weight",
+      configuration: {},
+      weight: 40,
+      preferenceShape: "lower-is-better",
     });
 
-    test("provisional games still contribute their normalized score", () => {
-      // game-1 has only 2 comparisons (< default provisionalThreshold of 6) but cohort
-      // is large enough to display. Per REQ-TOURN-10, provisional games still rank.
-      const tournament = makeTournament({
-        "game-1": { eloRating: 1700, comparisonCount: 2 },
-        "game-2": { eloRating: 1500, comparisonCount: 1 },
-        "game-3": { eloRating: 1500, comparisonCount: 1 },
-        "game-4": { eloRating: 1500, comparisonCount: 1 },
-        "game-5": { eloRating: 1500, comparisonCount: 1 },
-      });
-      const axes = [tournamentAxis(50)];
-      const game = makeGame({ id: "game-1" });
-
-      const result = fitnessService.calculateScore(game, axes, null, tournament);
-
-      expect(result).not.toBeNull();
-      // ELO 1700 -> 1 + 9*(1700 - 1100)/800 = 1 + 6.75 = 7.75 -> 7.8
-      expect(result!.score).toBe(7.8);
-      const entry = result!.breakdown.find((b) => b.axisId === "tournament")!;
-      expect(entry.source).toBe("tournament");
-      expect(entry.rating).toBe(7.8);
+    const ordinary = service.calculateScore(migrated.games[0], migratedLegacyAxes);
+    expect(ordinary).toMatchObject({ score: 7.9, vetoed: false, hypotheticalScore: null });
+    expect(entry(ordinary, "community")).toMatchObject({
+      sourceValue: 7.5,
+      scoringRawValue: 7.5,
+      effectiveRating: 9.4,
+      contribution: 5.6,
+      weight: 60,
+      overridden: false,
+    });
+    expect(entry(ordinary, "weight")).toMatchObject({
+      sourceValue: 3,
+      scoringRawValue: 3,
+      effectiveRating: 5.5,
+      contribution: 2.2,
+      weight: 40,
+      overridden: false,
     });
 
-    test("excludes axis when cohort has < 5 ranked games", () => {
-      // Only 4 games with comparisons -> shouldDisplayRanking is false -> normalizedScore null.
-      const tournament = makeTournament({
-        "game-1": { eloRating: 1900, comparisonCount: 8 },
-        "game-2": { eloRating: 1500, comparisonCount: 1 },
-        "game-3": { eloRating: 1500, comparisonCount: 1 },
-        "game-4": { eloRating: 1500, comparisonCount: 1 },
-      });
-      const axes = [makeAxis({ id: "fun", name: "Fun", weight: 50 }), tournamentAxis(50)];
-      const game = makeGame({ id: "game-1", ratings: { fun: 7 } });
+    const result = service.calculateScore(migrated.games[1], migratedLegacyAxes);
 
-      const result = fitnessService.calculateScore(game, axes, null, tournament);
-
-      expect(result).not.toBeNull();
-      // Tournament axis excluded; only fun=7 contributes
-      expect(result!.score).toBe(7);
-      expect(result!.ratedAxisCount).toBe(1);
-      const entry = result!.breakdown.find((b) => b.axisId === "tournament")!;
-      expect(entry.rating).toBeNull();
-      expect(entry.contribution).toBeNull();
-      expect(entry.source).toBe("tournament");
+    expect(result?.score).toBe(5.8);
+    expect(entry(result, "community")).toMatchObject({
+      effectiveRating: 6,
+      contribution: 3.6,
+      weight: 60,
+      sourceValue: 7.5,
+      scoringRawValue: 7.5,
+      overridden: true,
+      curveAffected: true,
     });
-
-    test("excludes axis when game has zero comparisons", () => {
-      // Cohort is large enough overall but the target game has no comparisons.
-      const tournament = makeTournament({
-        "other-1": { eloRating: 1500, comparisonCount: 6 },
-        "other-2": { eloRating: 1500, comparisonCount: 6 },
-        "other-3": { eloRating: 1500, comparisonCount: 6 },
-        "other-4": { eloRating: 1500, comparisonCount: 6 },
-        "other-5": { eloRating: 1500, comparisonCount: 6 },
-      });
-      const axes = [makeAxis({ id: "fun", name: "Fun", weight: 50 }), tournamentAxis(50)];
-      const game = makeGame({ id: "game-1", ratings: { fun: 7 } });
-
-      const result = fitnessService.calculateScore(game, axes, null, tournament);
-
-      expect(result).not.toBeNull();
-      expect(result!.score).toBe(7);
-      expect(result!.ratedAxisCount).toBe(1);
-      const entry = result!.breakdown.find((b) => b.axisId === "tournament")!;
-      expect(entry.rating).toBeNull();
+    expect(entry(result, "weight")).toMatchObject({
+      effectiveRating: 5.5,
+      weight: 40,
+      sourceValue: 3,
+      scoringRawValue: 3,
+      overridden: false,
     });
-
-    test("excludes axis when tournamentData is null", () => {
-      const axes = [makeAxis({ id: "fun", name: "Fun", weight: 50 }), tournamentAxis(50)];
-      const game = makeGame({ id: "game-1", ratings: { fun: 7 } });
-
-      const result = fitnessService.calculateScore(game, axes, null, null);
-
-      expect(result).not.toBeNull();
-      expect(result!.score).toBe(7);
-      const entry = result!.breakdown.find((b) => b.axisId === "tournament")!;
-      expect(entry.rating).toBeNull();
+    const vetoed = service.calculateScore(migrated.games[2], migratedLegacyAxes);
+    expect(vetoed).toMatchObject({
+      score: 0,
+      vetoed: true,
+      hypotheticalScore: 5,
+      vetoedBy: { axisId: "community", rawValue: 3.5, direction: "below", threshold: 4 },
     });
-
-    test("excludes axis when tournamentData argument is omitted", () => {
-      const axes = [makeAxis({ id: "fun", name: "Fun", weight: 50 }), tournamentAxis(50)];
-      const game = makeGame({ id: "game-1", ratings: { fun: 7 } });
-
-      const result = fitnessService.calculateScore(game, axes, null);
-
-      expect(result).not.toBeNull();
-      expect(result!.score).toBe(7);
-      const entry = result!.breakdown.find((b) => b.axisId === "tournament")!;
-      expect(entry.rating).toBeNull();
+    expect(entry(vetoed, "community")).toMatchObject({
+      sourceValue: 3.5,
+      scoringRawValue: 3.5,
+      effectiveRating: 4.7,
+      contribution: 2.8,
+      overridden: false,
     });
-
-    test("composes with other axes via weighted average", () => {
-      const tournament = makeTournament({
-        "game-1": { eloRating: 1900, comparisonCount: 8 }, // normalized -> 10
-        "game-2": { eloRating: 1500, comparisonCount: 6 },
-        "game-3": { eloRating: 1500, comparisonCount: 6 },
-        "game-4": { eloRating: 1500, comparisonCount: 6 },
-        "game-5": { eloRating: 1500, comparisonCount: 6 },
-      });
-      const axes = [makeAxis({ id: "fun", name: "Fun", weight: 60 }), tournamentAxis(40)];
-      const game = makeGame({ id: "game-1", ratings: { fun: 5 } });
-
-      const result = fitnessService.calculateScore(game, axes, null, tournament);
-
-      expect(result).not.toBeNull();
-      // (5*60 + 10*40) / 100 = 7.0
-      expect(result!.score).toBe(7);
-      expect(result!.ratedAxisCount).toBe(2);
+    expect(entry(vetoed, "weight")).toMatchObject({
+      sourceValue: 3,
+      scoringRawValue: 3,
+      effectiveRating: 5.5,
+      contribution: 2.2,
+      overridden: false,
     });
+  });
+
+  test("excludes disabled legacy axes from rows, counts, weights, and vetoes", () => {
+    const disabled: DisabledLegacyAxis = {
+      id: "legacy",
+      name: "Legacy",
+      description: null,
+      weight: 100,
+      enabled: false,
+      source: "legacy",
+      reason: "unknown",
+      legacyField: "future",
+      legacyPayload: {},
+      veto: { direction: "below", threshold: 10 },
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    const rated = personal();
+    const result = service.calculateScore(game({ ratings: { [disabled.id]: 1, [rated.id]: 8 } }), [
+      disabled,
+      rated,
+    ]);
+    expect(result).toMatchObject({ score: 8, ratedAxisCount: 1, totalAxisCount: 1, vetoed: false });
+    expect(result?.breakdown.map(({ axisId }) => axisId)).toEqual([rated.id]);
+  });
+});
+
+describe("tournament regression", () => {
+  test("keeps normalized tournament scoring and excludes missing rankings", () => {
+    const axis: TournamentAxis = {
+      id: "tournament",
+      name: "Tournament",
+      description: null,
+      weight: 40,
+      enabled: true,
+      source: "tournament",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    const stats = Object.fromEntries(
+      Array.from({ length: 5 }, (_, index) => [
+        `game-${index + 1}`,
+        {
+          eloRating: index === 0 ? 1900 : 1500,
+          comparisonCount: 6,
+          wins: 0,
+          losses: 0,
+          recentComparisons: [],
+        },
+      ]),
+    );
+    const tournament: TournamentData = {
+      settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
+      sessions: [],
+      gameStats: stats,
+    };
+    expect(service.calculateScore(game(), [axis], tournament)?.score).toBe(10);
+    expect(service.calculateScore(game({ id: "unranked" }), [axis], tournament)).toBeNull();
   });
 });

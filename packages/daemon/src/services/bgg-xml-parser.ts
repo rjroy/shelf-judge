@@ -130,6 +130,30 @@ function extractSuggestedPlayerCounts(poll: BggXmlPoll | undefined): SuggestedPl
   });
 }
 
+function extractBestPlayerCount(poll: BggXmlPoll | undefined): number | null {
+  const suggestedPlayerCounts = extractSuggestedPlayerCounts(poll);
+  if (suggestedPlayerCounts.length == 0) return null;
+  let best: number | null = null;
+  let votes: number | null = null;
+  let count: number | null = null;
+
+  for (const suggestion of suggestedPlayerCounts) {
+    const bucket = /^\s*(\d+)(?:\+)?\s*$/.exec(suggestion.playerCount);
+    const playerCount = bucket === null ? null : Number(bucket[1]);
+    if (suggestion.best > 0 && playerCount !== null && playerCount > 0) {
+      if (votes === null || votes < suggestion.best) {
+        best = playerCount;
+        votes = suggestion.best;
+        count = 1;
+      } else if (votes == suggestion.best && best == playerCount) {
+        count = count ? count + 1 : 1;
+      }
+    }
+  }
+
+  return best && count ? best / count : null;
+}
+
 function assertBggXml(parsed: { items?: unknown }, context: string): void {
   if (!parsed || !("items" in parsed)) {
     throw new Error(`Malformed BGG ${context} response: missing root <items> element`);
@@ -164,6 +188,7 @@ export function parseThingResponse(xml: string): BggGameData[] {
       families: extractLinks(links, "boardgamefamily"),
       subdomains: extractLinks(links, "boardgamesubdomain"),
       suggestedPlayerCounts: extractSuggestedPlayerCounts(playerCountPoll),
+      bestPlayerCount: extractBestPlayerCount(playerCountPoll),
       fetchedAt: new Date().toISOString(),
     };
   });
@@ -247,6 +272,7 @@ export function parseThingItems(xml: string): ThingItem[] {
         families: extractLinks(links, "boardgamefamily"),
         subdomains: extractLinks(links, "boardgamesubdomain"),
         suggestedPlayerCounts: extractSuggestedPlayerCounts(playerCountPoll),
+        bestPlayerCount: extractBestPlayerCount(playerCountPoll),
         fetchedAt: new Date().toISOString(),
       },
     };

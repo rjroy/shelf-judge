@@ -13,6 +13,11 @@ function createInMemoryFileOps(files: Record<string, string>): FileOps {
       files[filePath] = content;
       return Promise.resolve();
     },
+    writeFileExclusive(filePath: string, content: string): Promise<boolean> {
+      if (filePath in files) return Promise.resolve(false);
+      files[filePath] = content;
+      return Promise.resolve(true);
+    },
     rename(oldPath: string, newPath: string): Promise<void> {
       files[newPath] = files[oldPath]!;
       delete files[oldPath];

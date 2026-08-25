@@ -38,12 +38,18 @@ function makeBggData(
     families: [],
     subdomains: [],
     suggestedPlayerCounts: [],
+    bestPlayerCount: null,
     fetchedAt: now,
     ...overrides,
   };
 }
 
-function makeGame(id: string, name: string, bggData: BggGameData | null): Game {
+function makeGame(
+  id: string,
+  name: string,
+  bggData: BggGameData | null,
+  overrides: Partial<Game> = {},
+): Game {
   return {
     id,
     bggId: bggData ? 1 : null,
@@ -51,6 +57,7 @@ function makeGame(id: string, name: string, bggData: BggGameData | null): Game {
     yearPublished: 2020,
     minPlayers: 2,
     maxPlayers: 4,
+    bestPlayers: null,
     playingTime: 60,
     imageUrl: null,
     bggData,
@@ -61,6 +68,7 @@ function makeGame(id: string, name: string, bggData: BggGameData | null): Game {
     ratings: {},
     createdAt: now,
     updatedAt: now,
+    ...overrides,
   };
 }
 
@@ -98,6 +106,7 @@ const gameB = makeGame(
     mechanics: [mech("Deck Building"), mech("Hand Management")],
     categories: [cat("Card Game")],
   }),
+  { minPlayers: 1, maxPlayers: 2, playingTime: 180 },
 );
 const gameC = makeGame(
   "c",
@@ -115,9 +124,35 @@ const allGamesWithScores: GameWithScore[] = [
 ];
 
 const defaultCollection: Collection = {
+  schemaVersion: 2,
   id: "collection-1",
   name: "Test",
-  axes: [],
+  axes: [
+    {
+      id: "players",
+      name: "Player Count Fit",
+      description: null,
+      weight: 50,
+      enabled: true,
+      source: "derived",
+      derivedField: "playerCountFit",
+      configuration: { targetPlayerCount: 4 },
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: "time",
+      name: "Play Time",
+      description: null,
+      weight: 50,
+      enabled: true,
+      source: "derived",
+      derivedField: "playingTime",
+      configuration: { maximumScoringTime: 90 },
+      createdAt: now,
+      updatedAt: now,
+    },
+  ],
   games: [gameA, gameB, gameC],
   createdAt: now,
   updatedAt: now,
@@ -139,7 +174,12 @@ function createMockStorageService(
     saveCollection: () => Promise.resolve(),
     loadConfig: () => Promise.reject(new Error("not implemented")),
     saveConfig: () => Promise.resolve(),
-    loadTournament: () => Promise.reject(new Error("not implemented")),
+    loadTournament: () =>
+      Promise.resolve({
+        settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
+        sessions: [],
+        gameStats: {},
+      }),
     saveTournament: () => Promise.resolve(),
     loadProfile: () => Promise.resolve(null),
     saveProfile: () => Promise.resolve(),
@@ -202,8 +242,11 @@ const enabledIntegrated: RedundancySettings = {
   stage: "integrated",
 };
 
-function buildApp(redundancySettings: RedundancySettings) {
-  const storage = createMockStorageService(redundancySettings);
+function buildApp(
+  redundancySettings: RedundancySettings,
+  collection: Collection = defaultCollection,
+) {
+  const storage = createMockStorageService(redundancySettings, undefined, collection);
   const gameRoutes = createGameRoutes({
     gameService: createMockGameService() as GameService,
     predictionService: createMockPredictionService() as PredictionService,
@@ -325,6 +368,27 @@ describe("redundancy integration: GET /predictions/bgg/:bggId", () => {
 });
 
 describe("redundancy integration: penalty consistency across routes", () => {
+  test("derived axes do not change redundancy results or introduce non-finite values", async () => {
+    const withoutDerived = { ...defaultCollection, axes: [] };
+    const withDerivedResponse = await buildApp(enabledAnnotation).request("/api/games");
+    const withoutDerivedResponse = await buildApp(enabledAnnotation, withoutDerived).request(
+      "/api/games",
+    );
+    const withDerived = (await withDerivedResponse.json()) as GameWithScore[];
+    const baseline = (await withoutDerivedResponse.json()) as GameWithScore[];
+
+    expect(withDerived).toEqual(baseline);
+    for (const game of withDerived) {
+      const adjustment = game.score?.redundancyAdjustment;
+      if (!adjustment) continue;
+      expect(Number.isFinite(adjustment.penalty)).toBe(true);
+      expect(Number.isFinite(adjustment.adjustedScore)).toBe(true);
+      expect(
+        adjustment.nicheNeighbors.every((neighbor) => Number.isFinite(neighbor.similarity)),
+      ).toBe(true);
+    }
+  });
+
   test("GET /games/:id penalties match GET /games penalties", async () => {
     const app = buildApp(enabledAnnotation);
 

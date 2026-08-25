@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import type { Axis, BggGameData, Game } from "../src/types";
-import { resolveBggRawValue, resolveAxisValues } from "../src/axis-utils";
+import type { Axis, BggGameData, DerivedAxis, Game, PersonalAxis } from "../src/types";
+import { resolveAxisValues } from "../src/axis-utils";
 
 function makeBggData(overrides: Partial<BggGameData> = {}): BggGameData {
   return {
     communityRating: 7.5,
-    bayesAverage: 7.0,
-    weight: 3.0,
+    bayesAverage: 7,
+    weight: 3,
     numWeightVotes: 100,
     description: null,
     mechanics: [],
@@ -14,29 +14,83 @@ function makeBggData(overrides: Partial<BggGameData> = {}): BggGameData {
     families: [],
     subdomains: [],
     suggestedPlayerCounts: [],
+    bestPlayerCount: null,
     fetchedAt: "2026-01-01T00:00:00Z",
     ...overrides,
   };
 }
 
-function makeAxis(overrides: Partial<Axis> & { id: string; name: string }): Axis {
+const timestamps = {
+  createdAt: "2026-01-01T00:00:00Z",
+  updatedAt: "2026-01-01T00:00:00Z",
+};
+
+function personal(id: string): PersonalAxis {
   return {
+    id,
+    name: id,
     description: null,
     weight: 50,
+    enabled: true,
     source: "personal",
-    bggField: null,
-    createdAt: "2026-01-01T00:00:00Z",
-    updatedAt: "2026-01-01T00:00:00Z",
-    ...overrides,
+    ...timestamps,
   };
 }
 
-function makeGame(overrides: Partial<Game> & { id: string; name: string }): Game {
+function derived(
+  id: string,
+  derivedField: "communityRating" | "weight",
+): DerivedAxis<"communityRating"> | DerivedAxis<"weight"> {
   return {
+    id,
+    name: id,
+    description: null,
+    weight: 50,
+    enabled: true,
+    source: "derived",
+    derivedField,
+    configuration: {},
+    ...timestamps,
+  };
+}
+
+function playingTime(maximumScoringTime = 240): DerivedAxis<"playingTime"> {
+  return {
+    id: "time",
+    name: "Play Time",
+    description: null,
+    weight: 50,
+    enabled: true,
+    source: "derived",
+    derivedField: "playingTime",
+    configuration: { maximumScoringTime },
+    ...timestamps,
+  };
+}
+
+function playerCount(targetPlayerCount: number): DerivedAxis<"playerCountFit"> {
+  return {
+    id: "players",
+    name: "Player Count Fit",
+    description: null,
+    weight: 50,
+    enabled: true,
+    source: "derived",
+    derivedField: "playerCountFit",
+    configuration: { targetPlayerCount },
+    ...timestamps,
+  };
+}
+
+function makeGame(overrides: Partial<Game> = {}): Game {
+  return {
+    id: "g1",
     bggId: null,
+    name: "Game",
     yearPublished: null,
     minPlayers: null,
     maxPlayers: null,
+    bestPlayers: null,
     playingTime: null,
     imageUrl: null,
     bggData: null,
@@ -45,100 +99,118 @@ function makeGame(overrides: Partial<Game> & { id: string; name: string }): Game
     boxDimensions: null,
     manualShelfId: null,
     ratings: {},
-    createdAt: "2026-01-01T00:00:00Z",
-    updatedAt: "2026-01-01T00:00:00Z",
+    ...timestamps,
     ...overrides,
   };
 }
 
-describe("resolveBggRawValue", () => {
-  test("returns communityRating for bgg axis with bggField communityRating", () => {
-    const axis = makeAxis({ id: "cr", name: "Rating", source: "bgg", bggField: "communityRating" });
-    const bgg = makeBggData({ communityRating: 8.2 });
-    expect(resolveBggRawValue(axis, bgg)).toBe(8.2);
-  });
-
-  test("returns weight for bgg axis with bggField weight", () => {
-    const axis = makeAxis({ id: "w", name: "Weight", source: "bgg", bggField: "weight" });
-    const bgg = makeBggData({ weight: 3.5 });
-    expect(resolveBggRawValue(axis, bgg)).toBe(3.5);
-  });
-
-  test("returns null for personal axes", () => {
-    const axis = makeAxis({ id: "fun", name: "Fun", source: "personal" });
-    const bgg = makeBggData();
-    expect(resolveBggRawValue(axis, bgg)).toBeNull();
-  });
-
-  test("returns null when bggData is null", () => {
-    const axis = makeAxis({ id: "cr", name: "Rating", source: "bgg", bggField: "communityRating" });
-    expect(resolveBggRawValue(axis, null)).toBeNull();
-  });
-
-  test("returns null for weight when bgg weight is null", () => {
-    const axis = makeAxis({ id: "w", name: "Weight", source: "bgg", bggField: "weight" });
-    const bgg = makeBggData({ weight: null });
-    expect(resolveBggRawValue(axis, bgg)).toBeNull();
-  });
-});
-
 describe("resolveAxisValues", () => {
-  test("returns personal ratings unchanged for personal axes", () => {
-    const axes = [makeAxis({ id: "fun", name: "Fun" })];
-    const game = makeGame({ id: "g1", name: "Game", ratings: { fun: 8 } });
-    expect(resolveAxisValues(game, axes)).toEqual({ fun: 8 });
-  });
-
-  test("returns native-scale BGG values for BGG axes", () => {
-    const axes = [
-      makeAxis({ id: "w", name: "Weight", source: "bgg", bggField: "weight" }),
-      makeAxis({ id: "cr", name: "Rating", source: "bgg", bggField: "communityRating" }),
-    ];
-    const game = makeGame({
-      id: "g1",
-      name: "Game",
-      bggData: makeBggData({ weight: 3.25, communityRating: 7.8 }),
+  test("returns personal ratings unchanged", () => {
+    expect(resolveAxisValues(makeGame({ ratings: { fun: 8 } }), [personal("fun")])).toEqual({
+      fun: 8,
     });
-    const result = resolveAxisValues(game, axes);
-    expect(result.w).toBe(3.25);
-    expect(result.cr).toBe(7.8);
   });
 
-  test("prefers personal override when both personal rating and BGG data exist", () => {
-    const axes = [
-      makeAxis({ id: "cr", name: "Rating", source: "bgg", bggField: "communityRating" }),
-    ];
+  test("resolves registered factual values", () => {
+    const axes: Axis[] = [derived("w", "weight"), derived("cr", "communityRating")];
+    const game = makeGame({ bggData: makeBggData({ weight: 3.25, communityRating: 7.8 }) });
+    expect(resolveAxisValues(game, axes)).toEqual({ w: 3.25, cr: 7.8 });
+  });
+
+  test("prefers a personal override over a derived value", () => {
     const game = makeGame({
-      id: "g1",
-      name: "Game",
       ratings: { cr: 9 },
       bggData: makeBggData({ communityRating: 7.5 }),
     });
-    expect(resolveAxisValues(game, axes)).toEqual({ cr: 9 });
+    expect(resolveAxisValues(game, [derived("cr", "communityRating")])).toEqual({ cr: 9 });
   });
 
-  test("omits axes with no value (no rating, no bggData)", () => {
-    const axes = [
-      makeAxis({ id: "fun", name: "Fun" }),
-      makeAxis({ id: "cr", name: "Rating", source: "bgg", bggField: "communityRating" }),
-    ];
-    const game = makeGame({ id: "g1", name: "Game" });
-    expect(resolveAxisValues(game, axes)).toEqual({});
+  test("omits missing personal and derived values", () => {
+    expect(
+      resolveAxisValues(makeGame(), [personal("fun"), derived("cr", "communityRating")]),
+    ).toEqual({});
   });
 
-  test("mixed axes: personal rated, BGG resolved, and omitted", () => {
-    const axes = [
-      makeAxis({ id: "fun", name: "Fun" }),
-      makeAxis({ id: "w", name: "Weight", source: "bgg", bggField: "weight" }),
-      makeAxis({ id: "depth", name: "Depth" }),
-    ];
-    const game = makeGame({
-      id: "g1",
-      name: "Game",
-      ratings: { fun: 7 },
-      bggData: makeBggData({ weight: 2.5 }),
+  test("omits disabled legacy axes even when a stored rating remains", () => {
+    const axis: Axis = {
+      id: "legacy",
+      name: "Legacy",
+      description: null,
+      weight: 50,
+      enabled: false,
+      source: "legacy",
+      reason: "unknown_legacy_field",
+      legacyField: "futureMetric",
+      legacyPayload: {},
+      ...timestamps,
+    };
+    expect(resolveAxisValues(makeGame({ ratings: { legacy: 10 } }), [axis])).toEqual({});
+  });
+
+  test("returns published playing time rather than the capped scoring value", () => {
+    expect(resolveAxisValues(makeGame({ playingTime: 300 }), [playingTime(240)])).toEqual({
+      time: 300,
     });
-    const result = resolveAxisValues(game, axes);
-    expect(result).toEqual({ fun: 7, w: 2.5 });
+  });
+
+  test("returns playing time below the configured cap", () => {
+    expect(resolveAxisValues(makeGame({ playingTime: 90 }), [playingTime()])).toEqual({ time: 90 });
+  });
+
+  test("omits nonpositive playing time", () => {
+    expect(resolveAxisValues(makeGame({ playingTime: 0 }), [playingTime()])).toEqual({});
+  });
+
+  test("returns the in-range player-count fit value", () => {
+    const game = makeGame({ minPlayers: 2, maxPlayers: 5 });
+    expect(resolveAxisValues(game, [playerCount(4)])).toEqual({ players: 8 });
+  });
+
+  test("returns the out-of-range player-count fit value", () => {
+    const game = makeGame({ minPlayers: 2, maxPlayers: 5 });
+    expect(resolveAxisValues(game, [playerCount(6)])).toEqual({ players: 5 });
+  });
+
+  test("omits player-count fit when bounds are missing", () => {
+    expect(resolveAxisValues(makeGame(), [playerCount(4)])).toEqual({});
+  });
+
+  test("uses a stored override when derived metadata is missing", () => {
+    expect(resolveAxisValues(makeGame({ ratings: { time: 8 } }), [playingTime()])).toEqual({
+      time: 8,
+    });
+  });
+
+  test("resolves stored tournament values", () => {
+    const axis: Axis = {
+      id: "tournament",
+      name: "Tournament",
+      description: null,
+      weight: 30,
+      enabled: true,
+      source: "tournament",
+      ...timestamps,
+    };
+    expect(resolveAxisValues(makeGame({ ratings: { tournament: 7.5 } }), [axis])).toEqual({
+      tournament: 7.5,
+    });
+  });
+
+  test("resolves mixed personal, tournament, and derived values", () => {
+    const tournament: Axis = {
+      id: "tournament",
+      name: "Tournament",
+      description: null,
+      weight: 30,
+      enabled: true,
+      source: "tournament",
+      ...timestamps,
+    };
+    const game = makeGame({ playingTime: 60, ratings: { fun: 8, tournament: 7 } });
+    expect(resolveAxisValues(game, [personal("fun"), tournament, playingTime()])).toEqual({
+      fun: 8,
+      tournament: 7,
+      time: 60,
+    });
   });
 });

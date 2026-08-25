@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { toErrorMessage } from "@shelf-judge/shared";
-import type { Game, GameWithScore, RedundancyAdjustment } from "@shelf-judge/shared";
+import type { GameWithScore, Game, RedundancyAdjustment } from "@shelf-judge/shared";
 import type { PredictionService } from "../services/prediction-service.js";
 import type { StorageService } from "../services/storage-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
@@ -10,8 +10,11 @@ import {
   buildVocabulary,
   computeContinuousRanges,
   encodeGame,
+  getOrderedVectorAxes,
+  getVectorAxisValues,
 } from "../services/feature-vector.js";
 import type { FeatureVector } from "../services/feature-vector.js";
+import { deriveDisplayStats } from "../services/tournament-service.js";
 
 export interface PredictionRoutesDeps {
   predictionService: PredictionService;
@@ -56,9 +59,7 @@ export function createPredictionRoutes(deps: PredictionRoutesDeps): RouteModule 
     }
 
     try {
-      const updated = await predictionService.updateSettings(
-        body,
-      );
+      const updated = await predictionService.updateSettings(body);
       return c.json(updated);
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 500);
@@ -86,16 +87,25 @@ export function createPredictionRoutes(deps: PredictionRoutesDeps): RouteModule 
       if (storageService) {
         const redundancySettings = await storageService.loadRedundancySettings();
         if (redundancySettings.enabled) {
-          const collection = await storageService.loadCollection();
+          const [collection, tournamentData] = await Promise.all([
+            storageService.loadCollection(),
+            storageService.loadTournament(),
+          ]);
           const gamesWithBgg = collection.games.filter((g) => g.bggData);
           const vocabulary = buildVocabulary(gamesWithBgg);
           const ranges = computeContinuousRanges(gamesWithBgg);
+          const vectorAxes = getOrderedVectorAxes(collection.axes);
 
           const vectorCache = new Map<string, FeatureVector>();
           const getFeatureVector = (game: Game): FeatureVector => {
             const cached = vectorCache.get(game.id);
             if (cached) return cached;
-            const vec = encodeGame(game, vocabulary, game.ratings, ranges, collection.axes);
+            const values = getVectorAxisValues(
+              game,
+              vectorAxes,
+              deriveDisplayStats(game.id, tournamentData).normalizedScore,
+            );
+            const vec = encodeGame(game, vocabulary, vectorAxes, values, ranges);
             vectorCache.set(game.id, vec);
             return vec;
           };

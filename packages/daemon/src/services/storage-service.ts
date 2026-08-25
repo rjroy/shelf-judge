@@ -11,14 +11,30 @@ import type {
   WishlistEntry,
   ShelfConfiguration,
 } from "@shelf-judge/shared";
-import { TournamentDataSchema, ShelfConfigurationSchema } from "@shelf-judge/shared";
+import {
+  CURRENT_COLLECTION_SCHEMA_VERSION,
+  createFreshCollectionDerivedAxes,
+  CollectionSchema,
+  TournamentDataSchema,
+  ShelfConfigurationSchema,
+} from "@shelf-judge/shared";
 import type { FileOps } from "./file-ops.js";
-import { getTempPath } from "./file-ops.js";
+import { atomicWrite, type TemporaryPathForAttempt } from "./file-ops.js";
 import { migrateTournamentData } from "./tournament-migration.js";
-import { ensureTournamentAxis } from "./collection-migration.js";
+import {
+  migrateCollection,
+  type CollectionMigrationDependencies,
+  type CollectionMigrationResult,
+} from "./collection-migration.js";
+import {
+  COLLECTION_ARTIFACTS,
+  createCollectionArtifactContext,
+  type CollectionArtifactDescriptor,
+} from "./collection-artifacts.js";
 import { DEFAULT_PREDICTION_SETTINGS } from "./prediction-engine.js";
 import { DEFAULT_NICHE_SETTINGS } from "./niche-engine.js";
 import { DEFAULT_REDUNDANCY_SETTINGS } from "./redundancy-engine.js";
+import { createLogger, type Logger } from "./logger.js";
 
 export interface StorageService {
   loadCollection(): Promise<Collection>;
@@ -45,34 +61,30 @@ export interface StorageServiceDeps {
   dataDir: string;
   configPath: string;
   fileOps: FileOps;
+  logger?: Logger;
+  collectionArtifacts?: readonly CollectionArtifactDescriptor[];
+  collectionMigrationDependencies?: CollectionMigrationDependencies;
+  quarantinePathForAttempt?: (activePath: string, attempt: number) => string;
+  temporaryPathForAttempt?: TemporaryPathForAttempt;
 }
 
-function createDefaultCollection(): Collection {
-  const now = new Date().toISOString();
-  // Build the base collection with the existing personal/BGG defaults, then route through
-  // the same migration helper used on load so the tournament axis defaults stay in one
-  // place. This guarantees fresh and migrated collections agree on the axis shape.
-  const base: Collection = {
-    id: uuidv4(),
+function createDefaultCollection(dependencies?: CollectionMigrationDependencies): Collection {
+  const now = dependencies?.now() ?? new Date().toISOString();
+  const createId = dependencies === undefined ? uuidv4 : () => dependencies.createId();
+  return CollectionSchema.parse({
+    schemaVersion: CURRENT_COLLECTION_SCHEMA_VERSION,
+    id: createId(),
     name: "My Collection",
     axes: [
+      ...createFreshCollectionDerivedAxes(createId, now),
       {
-        id: uuidv4(),
-        name: "Community Rating",
-        description: "BGG community average rating",
-        weight: 50,
-        source: "bgg",
-        bggField: "communityRating",
-        createdAt: now,
-        updatedAt: now,
-      },
-      {
-        id: uuidv4(),
-        name: "Complexity",
-        description: "BGG weight normalized to 1-10 scale",
-        weight: 50,
-        source: "bgg",
-        bggField: "weight",
+        id: createId(),
+        name: "Tournament",
+        description:
+          "Derived from head-to-head tournament comparisons. Each game's score is its normalized ELO display value.",
+        weight: 30,
+        enabled: true,
+        source: "tournament",
         createdAt: now,
         updatedAt: now,
       },
@@ -80,8 +92,7 @@ function createDefaultCollection(): Collection {
     games: [],
     createdAt: now,
     updatedAt: now,
-  };
-  return ensureTournamentAxis(base).data;
+  });
 }
 
 function createDefaultTournament(): TournamentData {
@@ -100,18 +111,13 @@ function defaultConfig(dataDir: string): AppConfig {
   };
 }
 
-async function atomicWrite(filePath: string, content: string, fileOps: FileOps): Promise<void> {
-  const tmpPath = getTempPath(filePath);
-  await fileOps.writeFile(tmpPath, content);
-  await fileOps.rename(tmpPath, filePath);
-}
-
 export function createStorageService(deps: StorageServiceDeps): StorageService {
   const { dataDir, configPath, fileOps } = deps;
+  const logger = deps.logger ?? createLogger("storage");
+  const artifacts = deps.collectionArtifacts ?? COLLECTION_ARTIFACTS;
   const collectionPath = path.join(dataDir, "collection.json");
   const tournamentPath = path.join(dataDir, "tournament.json");
   const profilePath = path.join(dataDir, "profile.json");
-  const wishlistPath = path.join(dataDir, "wishlist.json");
 
   // Per-file in-flight load promise. Serializes concurrent first-time loads so
   // two callers don't both race to write `<file>.tmp` and one ends up renaming
@@ -128,28 +134,33 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     return promise;
   }
 
-  // Cache invalidation when the tournament axis is added on load (REQ-TAXIS-9).
-  // Stale profile data and wishlist predictions were computed against an axis set
-  // that did not include the new tournament axis; they would otherwise leak through
-  // to clients. We delete the profile cache (regenerable from collection + tournament)
-  // and clear only the prediction fields on wishlist entries (the user's URL/note
-  // metadata is theirs to keep).
-  async function invalidateCachesAfterAxisMigration(): Promise<void> {
-    await fileOps.unlink(profilePath);
+  async function writeAtomically(filePath: string, content: string): Promise<void> {
+    await atomicWrite(filePath, content, fileOps, deps.temporaryPathForAttempt);
+  }
 
-    const wishlistExists = await fileOps.exists(wishlistPath);
-    if (!wishlistExists) return;
+  function validateCollection(collection: unknown): Collection {
+    logger.log(`collection validation attempt path=${collectionPath}`);
+    try {
+      const validated = CollectionSchema.parse(collection);
+      logger.log(`collection validation completed path=${collectionPath}`);
+      return validated;
+    } catch (error) {
+      logger.error(`collection validation failed path=${collectionPath}`, error);
+      throw error;
+    }
+  }
 
-    const raw = await fileOps.readFile(wishlistPath);
-    const entries = JSON.parse(raw) as WishlistEntry[];
-    const cleared = entries.map((entry) => ({
-      ...entry,
-      predictedScore: null,
-      predictionConfidence: null,
-      predictedBreakdown: null,
-      nicheImpact: null,
-    }));
-    await atomicWrite(wishlistPath, JSON.stringify(cleared, null, 2), fileOps);
+  async function persistCollection(collection: Collection): Promise<void> {
+    const validated = validateCollection(collection);
+    await fileOps.mkdir(dataDir);
+    logger.log(`collection persistence attempt path=${collectionPath}`);
+    try {
+      await writeAtomically(collectionPath, JSON.stringify(validated, null, 2));
+      logger.log(`collection persistence completed path=${collectionPath}`);
+    } catch (error) {
+      logger.error(`collection persistence failed path=${collectionPath}`, error);
+      throw error;
+    }
   }
 
   return {
@@ -157,46 +168,86 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
       return withLoadLock(collectionPath, async () => {
         const exists = await fileOps.exists(collectionPath);
         if (!exists) {
-          const collection = createDefaultCollection();
-          await fileOps.mkdir(dataDir);
-          await atomicWrite(collectionPath, JSON.stringify(collection, null, 2), fileOps);
+          const collection = createDefaultCollection(deps.collectionMigrationDependencies);
+          await persistCollection(collection);
           return collection;
         }
 
-        const raw = await fileOps.readFile(collectionPath);
-        const collection = JSON.parse(raw) as Collection;
+        logger.log(`collection read attempt path=${collectionPath}`);
+        let rawText: string;
+        try {
+          rawText = await fileOps.readFile(collectionPath);
+          logger.log(`collection read completed path=${collectionPath} bytes=${rawText.length}`);
+        } catch (error) {
+          logger.error(`collection read failed path=${collectionPath}`, error);
+          throw error;
+        }
 
-        // Backfill legacy data for games missing newer fields
-        for (const game of collection.games) {
-          if (!game.ownership) {
-            game.ownership = "owned";
-          }
-          if (game.boxDimensions === undefined) {
-            game.boxDimensions = null;
-          }
-          if (game.manualShelfId === undefined) {
-            game.manualShelfId = null;
+        logger.log(`collection parse attempt path=${collectionPath}`);
+        let raw: unknown;
+        try {
+          raw = JSON.parse(rawText);
+          logger.log(`collection parse completed path=${collectionPath}`);
+        } catch (error) {
+          logger.error(`collection parse failed path=${collectionPath}`, error);
+          throw error;
+        }
+        const sourceVersion =
+          typeof raw === "object" && raw !== null && "schemaVersion" in raw
+            ? String(raw.schemaVersion)
+            : "0";
+        logger.log(
+          `collection migration start sourceVersion=${sourceVersion} targetVersion=${CURRENT_COLLECTION_SCHEMA_VERSION}`,
+        );
+        let migration: CollectionMigrationResult;
+        try {
+          migration = migrateCollection(raw, deps.collectionMigrationDependencies);
+        } catch (error) {
+          logger.error(
+            `collection migration failed sourceVersion=${sourceVersion} targetVersion=${CURRENT_COLLECTION_SCHEMA_VERSION}`,
+            error,
+          );
+          throw error;
+        }
+        logger.log(
+          `collection migration checked sourceVersion=${migration.sourceVersion} targetVersion=${CURRENT_COLLECTION_SCHEMA_VERSION} axes=${migration.data.axes.length} games=${migration.data.games.length} converted=${migration.convertedAxisCount} disabled=${migration.disabledAxisCount}`,
+        );
+        const validated = validateCollection(migration.data);
+        if (!migration.migrated) return validated;
+
+        const artifactContext = createCollectionArtifactContext(
+          dataDir,
+          fileOps,
+          logger,
+          deps.quarantinePathForAttempt,
+          deps.temporaryPathForAttempt,
+        );
+        for (const artifact of artifacts) {
+          const artifactPath = artifact.path(dataDir);
+          logger.log(
+            `artifact invalidation attempt identity=${artifact.identity} dependencyVersion=${artifact.dependencyVersion} path=${artifactPath}`,
+          );
+          try {
+            await artifact.invalidate(artifactContext);
+            logger.log(
+              `artifact invalidation completed identity=${artifact.identity} path=${artifactPath}`,
+            );
+          } catch (error) {
+            logger.error(
+              `artifact invalidation failed identity=${artifact.identity} path=${artifactPath}`,
+              error,
+            );
+            throw error;
           }
         }
 
-        // Tournament axis migration (REQ-TAXIS-4, REQ-TAXIS-9). Idempotent: a subsequent
-        // load is a no-op once the axis is present.
-        const { data: migrated, migrated: didMigrate } = ensureTournamentAxis(collection);
-        if (didMigrate) {
-          migrated.updatedAt = new Date().toISOString();
-          await fileOps.mkdir(dataDir);
-          await atomicWrite(collectionPath, JSON.stringify(migrated, null, 2), fileOps);
-          await invalidateCachesAfterAxisMigration();
-          return migrated;
-        }
-
-        return collection;
+        await persistCollection(validated);
+        return validated;
       });
     },
 
     async saveCollection(collection: Collection): Promise<void> {
-      await fileOps.mkdir(dataDir);
-      await atomicWrite(collectionPath, JSON.stringify(collection, null, 2), fileOps);
+      await persistCollection(collection);
     },
 
     async loadConfig(): Promise<AppConfig> {
@@ -205,7 +256,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
         const config = defaultConfig(dataDir);
         const configDir = path.dirname(configPath);
         await fileOps.mkdir(configDir);
-        await atomicWrite(configPath, JSON.stringify(config, null, 2), fileOps);
+        await writeAtomically(configPath, JSON.stringify(config, null, 2));
         return config;
       }
 
@@ -216,7 +267,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     async saveConfig(config: AppConfig): Promise<void> {
       const configDir = path.dirname(configPath);
       await fileOps.mkdir(configDir);
-      await atomicWrite(configPath, JSON.stringify(config, null, 2), fileOps);
+      await writeAtomically(configPath, JSON.stringify(config, null, 2));
     },
 
     loadTournament(): Promise<TournamentData> {
@@ -225,7 +276,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
         if (!exists) {
           const tournament = createDefaultTournament();
           await fileOps.mkdir(dataDir);
-          await atomicWrite(tournamentPath, JSON.stringify(tournament, null, 2), fileOps);
+          await writeAtomically(tournamentPath, JSON.stringify(tournament, null, 2));
           return tournament;
         }
 
@@ -235,7 +286,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
         const validated = TournamentDataSchema.parse(data);
 
         if (migrated) {
-          await atomicWrite(tournamentPath, JSON.stringify(validated, null, 2), fileOps);
+          await writeAtomically(tournamentPath, JSON.stringify(validated, null, 2));
         }
 
         return validated;
@@ -244,7 +295,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
 
     async saveTournament(data: TournamentData): Promise<void> {
       await fileOps.mkdir(dataDir);
-      await atomicWrite(tournamentPath, JSON.stringify(data, null, 2), fileOps);
+      await writeAtomically(tournamentPath, JSON.stringify(data, null, 2));
     },
 
     async loadProfile(): Promise<ProfileData | null> {
@@ -257,7 +308,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
 
     async saveProfile(data: ProfileData): Promise<void> {
       await fileOps.mkdir(dataDir);
-      await atomicWrite(profilePath, JSON.stringify(data, null, 2), fileOps);
+      await writeAtomically(profilePath, JSON.stringify(data, null, 2));
     },
 
     async loadPredictionSettings(): Promise<PredictionSettings> {
@@ -272,7 +323,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     async savePredictionSettings(settings: PredictionSettings): Promise<void> {
       const predictionSettingsPath = path.join(dataDir, "prediction-settings.json");
       await fileOps.mkdir(dataDir);
-      await atomicWrite(predictionSettingsPath, JSON.stringify(settings, null, 2), fileOps);
+      await writeAtomically(predictionSettingsPath, JSON.stringify(settings, null, 2));
     },
 
     async loadNicheSettings(): Promise<NicheSettings> {
@@ -287,7 +338,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     async saveNicheSettings(settings: NicheSettings): Promise<void> {
       const nicheSettingsPath = path.join(dataDir, "niche-settings.json");
       await fileOps.mkdir(dataDir);
-      await atomicWrite(nicheSettingsPath, JSON.stringify(settings, null, 2), fileOps);
+      await writeAtomically(nicheSettingsPath, JSON.stringify(settings, null, 2));
     },
 
     async loadRedundancySettings(): Promise<RedundancySettings> {
@@ -302,7 +353,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     async saveRedundancySettings(settings: RedundancySettings): Promise<void> {
       const redundancySettingsPath = path.join(dataDir, "redundancy-settings.json");
       await fileOps.mkdir(dataDir);
-      await atomicWrite(redundancySettingsPath, JSON.stringify(settings, null, 2), fileOps);
+      await writeAtomically(redundancySettingsPath, JSON.stringify(settings, null, 2));
     },
 
     async loadWishlist(): Promise<WishlistEntry[]> {
@@ -317,7 +368,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     async saveWishlist(entries: WishlistEntry[]): Promise<void> {
       const wishlistPath = path.join(dataDir, "wishlist.json");
       await fileOps.mkdir(dataDir);
-      await atomicWrite(wishlistPath, JSON.stringify(entries, null, 2), fileOps);
+      await writeAtomically(wishlistPath, JSON.stringify(entries, null, 2));
     },
 
     async loadShelfConfig(): Promise<ShelfConfiguration> {
@@ -342,7 +393,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     async saveShelfConfig(config: ShelfConfiguration): Promise<void> {
       const shelfConfigPath = path.join(dataDir, "shelf-config.json");
       await fileOps.mkdir(dataDir);
-      await atomicWrite(shelfConfigPath, JSON.stringify(config, null, 2), fileOps);
+      await writeAtomically(shelfConfigPath, JSON.stringify(config, null, 2));
     },
   };
 }

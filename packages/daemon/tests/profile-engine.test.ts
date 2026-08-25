@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import type {
-  Axis,
   BggGameData,
   FitnessResult,
+  Axis,
+  DerivedAxis,
+  EnabledAxis,
   Game,
+  PersonalAxis,
+  TournamentAxis,
   TournamentGameStatsDisplay,
 } from "@shelf-judge/shared";
 import {
@@ -25,6 +29,7 @@ function makeGame(overrides: Partial<Game> & { id: string; name: string }): Game
     yearPublished: null,
     minPlayers: null,
     maxPlayers: null,
+    bestPlayers: null,
     playingTime: null,
     imageUrl: null,
     bggData: null,
@@ -51,17 +56,18 @@ function makeBggData(overrides: Partial<BggGameData> = {}): BggGameData {
     families: [],
     subdomains: [],
     suggestedPlayerCounts: [],
+    bestPlayerCount: null,
     fetchedAt: "2026-01-01T00:00:00Z",
     ...overrides,
   };
 }
 
-function makeAxis(overrides: Partial<Axis> & { id: string; name: string }): Axis {
+function makeAxis(overrides: Partial<PersonalAxis> & { id: string; name: string }): PersonalAxis {
   return {
     description: null,
     weight: 50,
+    enabled: true,
     source: "personal",
-    bggField: null,
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:00Z",
     ...overrides,
@@ -80,6 +86,106 @@ function makeFitness(score: number, vetoed = false): FitnessResult {
     predictionMeta: null,
     redundancyAdjustment: null,
   };
+}
+
+function makeDerivedAxis(
+  id: string,
+  name: string,
+  derivedField: "communityRating" | "weight" | "playerCountFit" | "playingTime",
+): EnabledAxis {
+  const base = {
+    id,
+    name,
+    description: null,
+    weight: 50,
+    enabled: true as const,
+    source: "derived" as const,
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+  };
+  switch (derivedField) {
+    case "communityRating":
+      return { ...base, derivedField, configuration: {} };
+    case "weight":
+      return { ...base, derivedField, configuration: {} };
+    case "playerCountFit":
+      return { ...base, derivedField, configuration: { targetPlayerCount: 4 } };
+    case "playingTime":
+      return { ...base, derivedField, configuration: { maximumScoringTime: 240 } };
+  }
+}
+
+function makeTournamentAxis(id: string, name: string): TournamentAxis {
+  return {
+    id,
+    name,
+    description: null,
+    weight: 50,
+    enabled: true,
+    source: "tournament",
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+  };
+}
+
+function makePlayingTimeAxis(
+  id: string,
+  name: string,
+  maximumScoringTime = 240,
+): DerivedAxis<"playingTime"> {
+  return {
+    id,
+    name,
+    description: null,
+    weight: 50,
+    enabled: true,
+    source: "derived",
+    derivedField: "playingTime",
+    configuration: { maximumScoringTime },
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+  };
+}
+
+function makeDistributionResults(games: Game[], axes: EnabledAxis[]): Map<string, FitnessResult> {
+  return new Map(
+    games.map((game) => [
+      game.id,
+      {
+        ...makeFitness(5),
+        breakdown: axes.map((axis) => ({
+          axisId: axis.id,
+          axisName: axis.name,
+          weight: axis.weight,
+          contribution: null,
+          source: "personal" as const,
+          derivedField: axis.source === "derived" ? axis.derivedField : null,
+          sourceValue: null,
+          scoringRawValue: null,
+          effectiveRating: game.ratings[axis.id] ?? null,
+          preferenceShape: "higher-is-better" as const,
+          curveAffected: false,
+          unit: null,
+          provenance: null,
+          configurationSummary: null,
+          overridden: false,
+          overrideValue: null,
+          predictionConfidence: null,
+          referenceGames: null,
+        })),
+      },
+    ]),
+  );
+}
+
+function setEffectiveRating(
+  results: Map<string, FitnessResult>,
+  gameId: string,
+  rating: number,
+): void {
+  const entry = results.get(gameId)?.breakdown[0];
+  if (entry === undefined) throw new Error(`Missing distribution fixture for ${gameId}`);
+  entry.effectiveRating = rating;
 }
 
 function makeTournamentStats(
@@ -101,6 +207,37 @@ function makeTournamentStats(
 // --- Axis Distributions ---
 
 describe("computeAxisDistributions", () => {
+  test("uses effective ratings from fitness breakdowns, including derived overrides", () => {
+    const axis = makeDerivedAxis("time", "Play Time", "playingTime");
+    const result = makeFitness(8);
+    result.breakdown = [
+      {
+        axisId: axis.id,
+        axisName: axis.name,
+        weight: axis.weight,
+        contribution: 8,
+        source: "override",
+        derivedField: "playingTime",
+        sourceValue: 300,
+        scoringRawValue: 240,
+        effectiveRating: 8,
+        preferenceShape: "sweet-spot",
+        curveAffected: false,
+        unit: "minutes",
+        provenance: "Publisher-listed playing time imported from BoardGameGeek",
+        configurationSummary: "Scoring cap: 240 minutes",
+        overridden: true,
+        overrideValue: 8,
+        predictionConfidence: null,
+        referenceGames: null,
+      },
+    ];
+
+    const distributions = computeAxisDistributions([axis], new Map([["game", result]]));
+    expect(distributions[0].mean).toBe(8);
+    expect(distributions[0].range).toEqual({ min: 8, max: 8 });
+    expect(distributions[0].histogram[7]).toBe(1);
+  });
   test("hand-calculated mean/median/stddev/range for a 5-game, 3-axis dataset", () => {
     const axes = [
       makeAxis({ id: "a1", name: "Fun" }),
@@ -121,7 +258,7 @@ describe("computeAxisDistributions", () => {
       makeGame({ id: "g5", name: "G5", ratings: { a1: 10, a2: 3 } }),
     ];
 
-    const result = computeAxisDistributions(games, axes);
+    const result = computeAxisDistributions(axes, makeDistributionResults(games, axes));
 
     // Fun: [2,4,6,8,10] → mean=6, median=6, stddev=sqrt(8)
     const fun = result.find((d) => d.axisId === "a1")!;
@@ -161,7 +298,7 @@ describe("computeAxisDistributions", () => {
     const axes = [makeAxis({ id: "a1", name: "Fun" })];
     const games = [makeGame({ id: "g1", name: "G1" })];
 
-    const result = computeAxisDistributions(games, axes);
+    const result = computeAxisDistributions(axes, makeDistributionResults(games, axes));
     expect(result[0].mean).toBe(0);
     expect(result[0].median).toBe(0);
     expect(result[0].standardDeviation).toBe(0);
@@ -179,7 +316,7 @@ describe("computeAxisDistributions", () => {
       makeGame({ id: "g4", name: "G4", ratings: { a1: 9 } }),
     ];
 
-    const result = computeAxisDistributions(games, axes);
+    const result = computeAxisDistributions(axes, makeDistributionResults(games, axes));
     expect(result[0].median).toBe(6);
   });
 
@@ -187,7 +324,7 @@ describe("computeAxisDistributions", () => {
     const axes = [makeAxis({ id: "a1", name: "Fun" })];
     const games = [makeGame({ id: "g1", name: "G1", ratings: { a1: 7 } })];
 
-    const result = computeAxisDistributions(games, axes);
+    const result = computeAxisDistributions(axes, makeDistributionResults(games, axes));
     expect(result[0].mean).toBe(7);
     expect(result[0].median).toBe(7);
     expect(result[0].standardDeviation).toBe(0);
@@ -195,24 +332,26 @@ describe("computeAxisDistributions", () => {
   });
 
   test("includes BGG-sourced axis values in native scale from bggData", () => {
-    const axes = [makeAxis({ id: "w", name: "Weight", source: "bgg", bggField: "weight" })];
+    const axes = [makeDerivedAxis("w", "Weight", "weight")];
     const games = [
       makeGame({ id: "g1", name: "G1", bggData: makeBggData({ weight: 2.5 }) }),
       makeGame({ id: "g2", name: "G2", bggData: makeBggData({ weight: 3.5 }) }),
       makeGame({ id: "g3", name: "G3", bggData: makeBggData({ weight: 4.0 }) }),
     ];
 
-    const result = computeAxisDistributions(games, axes);
+    const fitnessResults = makeDistributionResults(games, axes);
+    setEffectiveRating(fitnessResults, "g1", 4);
+    setEffectiveRating(fitnessResults, "g2", 6);
+    setEffectiveRating(fitnessResults, "g3", 8);
+    const result = computeAxisDistributions(axes, fitnessResults);
     expect(result[0].ratedGameCount).toBe(3);
-    expect(result[0].mean).toBeCloseTo(10 / 3);
-    expect(result[0].median).toBe(3.5);
-    expect(result[0].range).toEqual({ min: 2.5, max: 4.0 });
+    expect(result[0].mean).toBe(6);
+    expect(result[0].median).toBe(6);
+    expect(result[0].range).toEqual({ min: 4, max: 8 });
   });
 
   test("prefers personal override for BGG axes when both exist", () => {
-    const axes = [
-      makeAxis({ id: "cr", name: "Rating", source: "bgg", bggField: "communityRating" }),
-    ];
+    const axes = [makeDerivedAxis("cr", "Rating", "communityRating")];
     const games = [
       makeGame({
         id: "g1",
@@ -222,7 +361,9 @@ describe("computeAxisDistributions", () => {
       }),
     ];
 
-    const result = computeAxisDistributions(games, axes);
+    const fitnessResults = makeDistributionResults(games, axes);
+    setEffectiveRating(fitnessResults, "g1", 9);
+    const result = computeAxisDistributions(axes, fitnessResults);
     expect(result[0].ratedGameCount).toBe(1);
     expect(result[0].mean).toBe(9);
   });
@@ -389,18 +530,40 @@ describe("computeBggClustering", () => {
 // --- Utility Curves ---
 
 describe("extractUtilityCurves", () => {
+  test("declares derived units, provenance, configuration, scale, and numeric width", () => {
+    const axis = {
+      ...makeDerivedAxis("time", "Play Time", "playingTime"),
+      preferenceShape: "sweet-spot" as const,
+      idealValue: 90,
+      toleranceWidth: 30,
+    };
+    expect(extractUtilityCurves([axis])).toEqual([
+      {
+        axisId: "time",
+        axisName: "Play Time",
+        derivedField: "playingTime",
+        shape: "sweet-spot",
+        idealValue: 90,
+        tolerance: null,
+        toleranceWidth: 30,
+        leanDirection: null,
+        vetoThreshold: null,
+        nativeScale: { min: 1, max: 240 },
+        unit: "minutes",
+        provenance: "Publisher-listed playing time imported from BoardGameGeek",
+        configurationSummary: "Scoring cap: 240 minutes",
+      },
+    ]);
+  });
   test("extracts axes with non-default curve config", () => {
     const axes = [
       makeAxis({ id: "a1", name: "Fun" }), // no curve config → excluded
-      makeAxis({
-        id: "a2",
-        name: "Weight",
-        source: "bgg",
-        bggField: "weight",
-        preferenceShape: "sweet-spot",
+      {
+        ...makeDerivedAxis("a2", "Weight", "weight"),
+        preferenceShape: "sweet-spot" as const,
         idealValue: 3.0,
-        tolerance: "moderate",
-      }),
+        tolerance: "moderate" as const,
+      },
       makeAxis({
         id: "a3",
         name: "Depth",
@@ -418,6 +581,15 @@ describe("extractUtilityCurves", () => {
     expect(result[1].axisId).toBe("a3");
     expect(result[1].vetoThreshold).toEqual({ direction: "below", threshold: 3 });
     expect(result[1].nativeScale).toEqual({ min: 1, max: 10 });
+  });
+
+  test("extracts an axis configured only with a numeric tolerance width", () => {
+    const axis = makeAxis({ id: "width-only", name: "Width Only", toleranceWidth: 2 });
+
+    const result = extractUtilityCurves([axis]);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.axisId).toBe("width-only");
+    expect(result[0]?.toleranceWidth).toBe(2);
   });
 
   test("returns empty for axes with no curve config", () => {
@@ -525,7 +697,11 @@ describe("detectOutliers", () => {
     });
   }
 
-  const axes = [makeAxis({ id: "a1", name: "Fun" })];
+  const axes: Axis[] = [
+    makeAxis({ id: "a1", name: "Fun" }),
+    makeDerivedAxis("players", "Player Count Fit", "playerCountFit"),
+    makePlayingTimeAxis("time", "Play Time", 90),
+  ];
 
   test("a deliberate outlier (heavy wargame in medium euros) is flagged", () => {
     const games = [
@@ -564,6 +740,38 @@ describe("detectOutliers", () => {
     const warOutlier = outliers.find((o) => o.gameId === "war1");
     expect(warOutlier).toBeDefined();
     expect(warOutlier!.gameName).toBe("Heavy Wargame");
+  });
+
+  test("derived axes do not change profile outlier vectors", () => {
+    const games = [
+      makeEuroGame("e1", "Euro 1"),
+      makeEuroGame("e2", "Euro 2"),
+      makeEuroGame("e3", "Euro 3"),
+      makeEuroGame("e4", "Euro 4"),
+      makeEuroGame("e5", "Euro 5"),
+      makeGame({
+        id: "war1",
+        name: "Heavy Wargame",
+        minPlayers: 2,
+        maxPlayers: 2,
+        playingTime: 240,
+        bggData: makeBggData({
+          weight: 4.5,
+          communityRating: 8,
+          mechanics: warMechanics,
+          categories: warCategories,
+          subdomains: [{ id: 101, name: "War Games" }],
+        }),
+        ratings: { a1: 6 },
+      }),
+    ];
+    const fitnessResults = new Map<string, FitnessResult>();
+
+    const withDerived = detectOutliers(games, axes, fitnessResults);
+    const baseline = detectOutliers(games, [axes[0]], fitnessResults);
+    expect(withDerived).toEqual(baseline);
+    expect(withDerived.some((outlier) => outlier.gameId === "war1")).toBe(true);
+    expect(withDerived.every((outlier) => Number.isFinite(outlier.distances.composite))).toBe(true);
   });
 
   test("game unusual on only one dimension is not flagged", () => {
@@ -753,12 +961,7 @@ describe("detectOutliers", () => {
     // wargame fixture must still be detected. (Prevents the bug class from
     // .lore/retros/incident/outlier-composite-null-crash.md, where a missing
     // axis silently became NaN and serialized to null.)
-    const tournamentAxis = makeAxis({
-      id: "tournament",
-      name: "Tournament",
-      source: "tournament",
-      bggField: null,
-    });
+    const tournamentAxis = makeTournamentAxis("tournament", "Tournament");
     const axesWithTournament = [...axes, tournamentAxis];
 
     const games = [
@@ -814,6 +1017,21 @@ describe("detectOutliers", () => {
 // --- Suggestions ---
 
 describe("generateSuggestions", () => {
+  test("counts duplicate enabled derived fields once for registry coverage", () => {
+    const games = [
+      makeGame({ id: "g1", name: "G1", playingTime: 30 }),
+      makeGame({ id: "g2", name: "G2", playingTime: 300 }),
+    ];
+    const first = makePlayingTimeAxis("time-a", "First");
+    const second = makePlayingTimeAxis("time-b", "Second", 120);
+    const suggestions = generateSuggestions(games, [first, second], null);
+    expect(
+      suggestions.some(
+        (suggestion) =>
+          suggestion.source === "high-variance" && suggestion.attribute === "play time",
+      ),
+    ).toBe(false);
+  });
   test("unexpressed concentration: mechanic in 80%+ games with no axis", () => {
     // 5 games, 4 have "Dice Rolling" (80%)
     const games = [
@@ -884,7 +1102,7 @@ describe("generateSuggestions", () => {
       makeGame({ id: "g5", name: "G5", playingTime: 240 }),
     ];
 
-    const axes: Axis[] = []; // no bgg axis for play time
+    const axes: EnabledAxis[] = [];
     const suggestions = generateSuggestions(games, axes, null);
 
     const variance = suggestions.filter((s) => s.source === "high-variance");
@@ -899,7 +1117,7 @@ describe("generateSuggestions", () => {
       makeGame({ id: "g2", name: "G2", playingTime: 240 }),
     ];
 
-    const axes = [makeAxis({ id: "a1", name: "Duration", source: "bgg", bggField: "playingTime" })];
+    const axes = [makeDerivedAxis("a1", "Duration", "playingTime")];
     const suggestions = generateSuggestions(games, axes, null);
     const variance = suggestions.filter(
       (s) => s.source === "high-variance" && s.attribute === "play time",
@@ -950,7 +1168,7 @@ describe("generateSuggestions", () => {
       },
     ];
 
-    const axes: Axis[] = [];
+    const axes: EnabledAxis[] = [];
     const suggestions = generateSuggestions(games, axes, divergent);
     const repair = suggestions.filter((s) => s.source === "divergence-repair");
     expect(repair.some((s) => s.attribute === "Area Control")).toBe(true);
@@ -976,7 +1194,7 @@ describe("generateSuggestions", () => {
       },
     ];
 
-    const axes: Axis[] = [];
+    const axes: EnabledAxis[] = [];
     const suggestions = generateSuggestions(games, axes, divergent);
     expect(suggestions.filter((s) => s.source === "divergence-repair").length).toBe(0);
   });
@@ -985,6 +1203,128 @@ describe("generateSuggestions", () => {
 // --- Full Profile (computeProfile) ---
 
 describe("computeProfile", () => {
+  test("does not count automatic derived or Tournament values as user ratings", () => {
+    const derived = makeDerivedAxis("community", "Community", "communityRating");
+    const tournament = makeTournamentAxis("tournament", "Tournament");
+    const game = makeGame({
+      id: "g1",
+      name: "G1",
+      bggData: makeBggData({ communityRating: 8 }),
+    });
+    const fitnessResults = makeDistributionResults([game], [derived, tournament]);
+    const breakdown = fitnessResults.get(game.id)?.breakdown;
+    if (breakdown === undefined) throw new Error("Missing profile fitness fixture");
+    breakdown[0].effectiveRating = 8;
+    breakdown[1].effectiveRating = 9;
+
+    const profile = computeProfile({
+      games: [game],
+      axes: [derived, tournament],
+      fitnessResults,
+      tournamentStats: new Map([[game.id, makeTournamentStats(9)]]),
+    });
+
+    expect(profile.ratedGameCount).toBe(0);
+  });
+
+  test("counts personal ratings and derived overrides once per game", () => {
+    const personal = makeAxis({ id: "fun", name: "Fun" });
+    const derived = makeDerivedAxis("community", "Community", "communityRating");
+    const games = [
+      makeGame({ id: "personal", name: "Personal", ratings: { [personal.id]: 7 } }),
+      makeGame({ id: "override", name: "Override", ratings: { [derived.id]: 9 } }),
+    ];
+
+    const profile = computeProfile({
+      games,
+      axes: [personal, derived],
+      fitnessResults: makeDistributionResults(games, [personal, derived]),
+      tournamentStats: null,
+    });
+
+    expect(profile.ratedGameCount).toBe(2);
+  });
+
+  test("does not count a rating stored for a disabled legacy axis", () => {
+    const disabled: Axis = {
+      id: "legacy",
+      name: "Legacy",
+      description: null,
+      weight: 50,
+      enabled: false,
+      source: "legacy",
+      reason: "unsupported",
+      legacyField: "future",
+      legacyPayload: {},
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+    const game = makeGame({ id: "g1", name: "G1", ratings: { [disabled.id]: 8 } });
+
+    const profile = computeProfile({
+      games: [game],
+      axes: [disabled],
+      fitnessResults: new Map(),
+      tournamentStats: null,
+    });
+
+    expect(profile.ratedGameCount).toBe(0);
+  });
+
+  test("does not overcount a game with ratings on multiple enabled axes", () => {
+    const fun = makeAxis({ id: "fun", name: "Fun" });
+    const art = makeAxis({ id: "art", name: "Art" });
+    const game = makeGame({ id: "g1", name: "G1", ratings: { fun: 7, art: 8 } });
+
+    const profile = computeProfile({
+      games: [game],
+      axes: [fun, art],
+      fitnessResults: makeDistributionResults([game], [fun, art]),
+      tournamentStats: null,
+    });
+
+    expect(profile.ratedGameCount).toBe(1);
+  });
+
+  test("excludes disabled axes from distributions, weights, curves, and coverage", () => {
+    const personal = makeAxis({ id: "fun", name: "Fun", weight: 100 });
+    const disabled: Axis = {
+      id: "legacy-time",
+      name: "Play Time",
+      description: null,
+      weight: 1000,
+      enabled: false,
+      source: "legacy",
+      reason: "disabled",
+      legacyField: "playingTime",
+      legacyPayload: {},
+      preferenceShape: "sweet-spot",
+      idealValue: 90,
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+    const games = [
+      makeGame({ id: "g1", name: "G1", ratings: { fun: 7 }, playingTime: 30 }),
+      makeGame({ id: "g2", name: "G2", ratings: { fun: 8 }, playingTime: 300 }),
+    ];
+    const profile = computeProfile({
+      games,
+      axes: [personal, disabled],
+      fitnessResults: makeDistributionResults(games, [personal]),
+      tournamentStats: null,
+    });
+    expect(profile.axisDistributions.map(({ axisId }) => axisId)).toEqual(["fun"]);
+    expect(profile.axisWeights).toEqual([
+      { axisId: "fun", axisName: "Fun", weight: 100, percentage: 100 },
+    ]);
+    expect(profile.utilityCurves).toEqual([]);
+    expect(
+      profile.suggestions.some(
+        (suggestion) =>
+          suggestion.source === "high-variance" && suggestion.attribute === "play time",
+      ),
+    ).toBe(true);
+  });
   test("assembles all sections correctly", () => {
     const axes = [makeAxis({ id: "a1", name: "Fun", weight: 50 })];
     const games = [
@@ -1009,10 +1349,7 @@ describe("computeProfile", () => {
       makeGame({ id: "g3", name: "G3" }), // no ratings, no BGG data
     ];
 
-    const fitnessResults = new Map<string, FitnessResult>([
-      ["g1", makeFitness(7.0)],
-      ["g2", makeFitness(8.0)],
-    ]);
+    const fitnessResults = makeDistributionResults(games.slice(0, 2), axes);
 
     const profile = computeProfile({
       games,

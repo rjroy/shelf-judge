@@ -4,7 +4,8 @@ date: 2026-04-11
 status: complete
 tags: [auth]
 modules: [daemon-narration, web-profile, cli-profile]
-related: [.lore/plans/features/llm-narrative.md, .lore/commissions/commission-Thorne-20260411-174549.md]
+related:
+  [.lore/plans/features/llm-narrative.md, .lore/commissions/commission-Thorne-20260411-174549.md]
 ---
 
 # Retro: Removing the ANTHROPIC_API_KEY gate from narration

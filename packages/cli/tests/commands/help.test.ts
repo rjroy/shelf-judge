@@ -32,6 +32,36 @@ const mockTree = {
   },
 };
 
+const mockAxisTree = {
+  name: "axis",
+  children: {
+    create: {
+      operationId: "shelf.axis.create",
+      name: "create",
+      description: "Create an axis",
+      invocation: { method: "POST", path: "/api/axes" },
+    },
+    update: {
+      operationId: "shelf.axis.update",
+      name: "update",
+      description: "Update an axis",
+      invocation: { method: "PUT", path: "/api/axes/:id" },
+    },
+    templates: {
+      operationId: "shelf.axis.derived-fields",
+      name: "derived-fields",
+      description: "List registered derived fields",
+      invocation: { method: "GET", path: "/api/axes/derived-fields" },
+    },
+    repair: {
+      operationId: "shelf.axis.repair",
+      name: "repair",
+      description: "Repair a disabled legacy axis",
+      invocation: { method: "PUT", path: "/api/axes/:id/repair" },
+    },
+  },
+};
+
 describe("help command", () => {
   test("displays operation tree", async () => {
     const client = createMockClient({
@@ -74,5 +104,21 @@ describe("help command", () => {
     expect(result).toContain("Usage: shelf-judge game clear-shelf <game-id>");
     expect(result).toContain("return it to automatic placement");
     expect(result).toContain("owned game with complete box dimensions");
+  });
+
+  test("help axis exposes templates, configuration flags, and repair", async () => {
+    const client = createMockClient({
+      routes: {
+        "GET /api/help/axis": { response: { ok: true, status: 200, data: mockAxisTree } },
+      },
+    });
+
+    const result = await helpCommand(client, ["axis"], { json: false });
+    expect(result).toContain("shelf-judge axis templates");
+    expect(result).toContain("shelf-judge axis create [name] [--template <template-id>]");
+    expect(result).toContain("shelf-judge axis update <axis-id>");
+    expect(result).toContain("shelf-judge axis repair <axis-id> --template <template-id>");
+    expect(result).toContain("--target-player-count <count>");
+    expect(result).toContain("--maximum-scoring-time <minutes>");
   });
 });

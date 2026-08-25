@@ -13,15 +13,15 @@ import type {
   BggSearchResult,
   ImportProgress,
   ImportComplete,
-  PreferenceShape,
-  ToleranceLevel,
-  LeanDirection,
-  VetoConfig,
   NichePosition,
   NicheEntry,
   NicheNeighbor,
   NicheImpact,
   NicheImpactEntry,
+  CreateAxisInput,
+  UpdateAxisInput,
+  LegacyAxisRepairInput,
+  DerivedFieldDiscoveryResponse,
 } from "@shelf-judge/shared";
 import { daemonRequest, daemonJson } from "./daemon";
 
@@ -62,7 +62,7 @@ export async function addGame(
 
 export async function rateGame(
   id: string,
-  ratings: Record<string, number>,
+  ratings: Record<string, number | null>,
 ): Promise<GameWithScore> {
   return daemonJson(`/api/games/${id}/ratings`, {
     method: "PUT",
@@ -111,39 +111,26 @@ export async function listAxes(): Promise<Axis[]> {
   return daemonJson("/api/axes");
 }
 
-export async function createAxis(body: {
-  name: string;
-  description?: string;
-  weight: number;
-  preferenceShape?: PreferenceShape;
-  idealValue?: number | null;
-  tolerance?: ToleranceLevel;
-  leanDirection?: LeanDirection | null;
-  veto?: VetoConfig | null;
-}): Promise<Axis> {
+export async function getDerivedFields(): Promise<DerivedFieldDiscoveryResponse> {
+  return daemonJson("/api/axes/derived-fields");
+}
+
+export async function createAxis(body: CreateAxisInput): Promise<Axis> {
   return daemonJson("/api/axes", {
     method: "POST",
     body,
   });
 }
 
-export async function updateAxis(
-  id: string,
-  body: {
-    name?: string;
-    description?: string;
-    weight?: number;
-    preferenceShape?: PreferenceShape;
-    idealValue?: number | null;
-    tolerance?: ToleranceLevel;
-    leanDirection?: LeanDirection | null;
-    veto?: VetoConfig | null;
-  },
-): Promise<Axis> {
+export async function updateAxis(id: string, body: UpdateAxisInput): Promise<Axis> {
   return daemonJson(`/api/axes/${id}`, {
     method: "PUT",
     body,
   });
+}
+
+export async function repairLegacyAxis(id: string, body: LegacyAxisRepairInput): Promise<Axis> {
+  return daemonJson(`/api/axes/${id}/repair`, { method: "POST", body });
 }
 
 export async function deleteAxis(id: string): Promise<{ deletedRatingsCount: number }> {

@@ -1,0 +1,127 @@
+{
+  "collection": {
+    "id": "legacy-collection",
+    "name": "Legacy derived axes",
+    "axes": [
+      {
+        "id": "community-axis",
+        "name": "Community Rating",
+        "description": "Community score",
+        "weight": 60,
+        "source": "bgg",
+        "bggField": "communityRating",
+        "createdAt": "2025-01-01T00:00:00.000Z",
+        "updatedAt": "2025-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "complexity-axis",
+        "name": "Complexity",
+        "description": "Prefer lighter games",
+        "weight": 40,
+        "source": "bgg",
+        "bggField": "weight",
+        "preferenceShape": "lower-is-better",
+        "createdAt": "2025-01-01T00:00:00.000Z",
+        "updatedAt": "2025-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "unknown-axis",
+        "name": "Future metric",
+        "description": "Preserve unknown data",
+        "weight": 20,
+        "source": "bgg",
+        "bggField": "futureMetric",
+        "customConfiguration": { "preserve": true },
+        "createdAt": "2025-01-01T00:00:00.000Z",
+        "updatedAt": "2025-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "malformed-axis",
+        "name": "Malformed metric",
+        "description": "Preserve malformed source and field",
+        "weight": 10,
+        "source": "personal",
+        "bggField": "weight",
+        "customConfiguration": { "preserve": "all" },
+        "createdAt": "2025-01-01T00:00:00.000Z",
+        "updatedAt": "2025-01-01T00:00:00.000Z"
+      }
+    ],
+    "games": [
+      {
+        "id": "legacy-game",
+        "bggId": 123,
+        "name": "Legacy Game",
+        "yearPublished": 2020,
+        "minPlayers": 2,
+        "maxPlayers": 4,
+        "playingTime": 75,
+        "imageUrl": null,
+        "bggData": {
+          "communityRating": 8,
+          "bayesAverage": 7.5,
+          "weight": 3,
+          "numWeightVotes": 100,
+          "description": null,
+          "mechanics": [],
+          "categories": [],
+          "families": [],
+          "subdomains": [],
+          "suggestedPlayerCounts": [],
+          "fetchedAt": "2025-01-01T00:00:00.000Z"
+        },
+        "numPlays": 4,
+        "ratings": {
+          "community-axis": 7,
+          "unknown-axis": 4,
+          "malformed-axis": 6
+        },
+        "createdAt": "2025-01-01T00:00:00.000Z",
+        "updatedAt": "2025-01-01T00:00:00.000Z"
+      }
+    ],
+    "createdAt": "2025-01-01T00:00:00.000Z",
+    "updatedAt": "2025-01-01T00:00:00.000Z"
+  },
+  "profile": {
+    "profile": {
+      "axisDistributions": [],
+      "axisWeights": [],
+      "bggClustering": {
+        "mechanics": [],
+        "categories": [],
+        "families": [],
+        "subdomains": [],
+        "weightRanges": []
+      },
+      "utilityCurves": [],
+      "divergence": null,
+      "outliers": [],
+      "suggestions": [],
+      "narration": null,
+      "narrationState": "stale",
+      "gameCount": 1,
+      "ratedGameCount": 1,
+      "computedAt": "2025-01-02T00:00:00.000Z"
+    },
+    "computedAt": "2025-01-02T00:00:00.000Z",
+    "narration": null,
+    "narrationComputedAt": null
+  },
+  "wishlist": [
+    {
+      "id": "wishlist-game",
+      "bggId": 456,
+      "name": "Wishlist Game",
+      "yearPublished": 2024,
+      "thumbnailUrl": null,
+      "predictedScore": 8.4,
+      "predictionConfidence": "strong",
+      "predictedBreakdown": [
+        { "axisName": "Community Rating", "rating": 8, "confidence": "actual" }
+      ],
+      "nicheImpact": { "stale": true },
+      "addedAt": "2025-01-02T00:00:00.000Z"
+    }
+  ]
+}

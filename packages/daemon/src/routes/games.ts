@@ -1,6 +1,6 @@
 import { Hono, type Context } from "hono";
-import { AddGameSchema, toErrorMessage } from "@shelf-judge/shared";
-import type { Game, GameWithScore, RedundancySettings } from "@shelf-judge/shared";
+import { AddGameSchema, CodedAxisValidationError, toErrorMessage } from "@shelf-judge/shared";
+import type { GameWithScore, Game, RedundancySettings } from "@shelf-judge/shared";
 import { z } from "zod";
 import type { GameService } from "../services/game-service.js";
 import type { BggClient } from "../services/bgg-client.js";
@@ -13,10 +13,13 @@ import {
   buildVocabulary,
   computeContinuousRanges,
   encodeGame,
+  getOrderedVectorAxes,
+  getVectorAxisValues,
 } from "../services/feature-vector.js";
 import type { FeatureVector } from "../services/feature-vector.js";
 
 import type { WishlistService } from "../services/wishlist-service.js";
+import { deriveDisplayStats } from "../services/tournament-service.js";
 
 export interface GameRoutesDeps {
   gameService: GameService;
@@ -83,17 +86,26 @@ async function applyRedundancy(
 
   const computeGames = universe ?? games;
 
-  const collection = await storageService.loadCollection();
+  const [collection, tournamentData] = await Promise.all([
+    storageService.loadCollection(),
+    storageService.loadTournament(),
+  ]);
   const gamesWithBgg = collection.games.filter((g) => g.bggData);
   const vocabulary = buildVocabulary(gamesWithBgg);
   const ranges = computeContinuousRanges(gamesWithBgg);
+  const vectorAxes = getOrderedVectorAxes(collection.axes);
 
   // Per-request feature vector cache (Open Question 1 from the plan)
   const vectorCache = new Map<string, FeatureVector>();
   const getFeatureVector = (game: Game): FeatureVector => {
     const cached = vectorCache.get(game.id);
     if (cached) return cached;
-    const vec = encodeGame(game, vocabulary, game.ratings, ranges, collection.axes);
+    const values = getVectorAxisValues(
+      game,
+      vectorAxes,
+      deriveDisplayStats(game.id, tournamentData).normalizedScore,
+    );
+    const vec = encodeGame(game, vocabulary, vectorAxes, values, ranges);
     vectorCache.set(game.id, vec);
     return vec;
   };
@@ -318,6 +330,17 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       const result = await gameService.rateGame(id, parsed.data.ratings);
       return c.json(result);
     } catch (err) {
+      if (err instanceof CodedAxisValidationError) {
+        return c.json(
+          {
+            error: "Validation failed",
+            message: err.message,
+            code: err.code,
+            details: err.details,
+          },
+          400,
+        );
+      }
       const message = toErrorMessage(err);
       if (message.includes("not found")) {
         return c.json({ error: message }, 404);

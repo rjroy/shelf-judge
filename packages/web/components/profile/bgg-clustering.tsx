@@ -83,7 +83,8 @@ export function BggClustering({
   const hasSubdomains = clustering.subdomains.length > 0;
   const hasWeightRanges = clustering.weightRanges.length > 0;
 
-  if (!hasMechanics && !hasCategories && !hasSubdomains && !hasFamilies && !hasWeightRanges) return null;
+  if (!hasMechanics && !hasCategories && !hasSubdomains && !hasFamilies && !hasWeightRanges)
+    return null;
 
   return (
     <div className="section-card">
@@ -129,9 +130,7 @@ export function BggClustering({
               />
             </div>
           )}
-          <div>
-            {hasWeightRanges && <WeightRangeHistogram ranges={clustering.weightRanges} />}
-          </div>
+          <div>{hasWeightRanges && <WeightRangeHistogram ranges={clustering.weightRanges} />}</div>
         </div>
       </div>
     </div>

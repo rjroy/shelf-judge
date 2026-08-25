@@ -26,10 +26,8 @@ async function main() {
 
   const appConfig = await storageService.loadConfig();
 
-  // Run collection migrations at startup, before any route handler can fire (REQ-TAXIS-9).
-  // loadCollection is the single entry point that applies ensureTournamentAxis and
-  // performs the cache invalidation that pairs with it. Calling it here means the very
-  // first request sees a migrated collection and clean caches.
+  // Run versioned collection migration and artifact invalidation before routes can fire.
+  // The first request therefore sees only a validated current collection and clean caches.
   await storageService.loadCollection();
 
   const fitnessService = createFitnessService();

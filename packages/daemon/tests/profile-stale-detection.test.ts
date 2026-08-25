@@ -61,7 +61,7 @@ describe("collection.updatedAt advances on mutations (profile stale detection)",
   });
 
   test("rating change advances collection.updatedAt", async () => {
-    const axis = await axisService.createAxis({ name: "Fun", weight: 50 });
+    const axis = await axisService.createAxis({ name: "Fun", weight: 50, source: "personal" });
     const { game } = await gameService.addGame({ name: "To Rate" });
     await setCollectionTimestampToPast();
     await gameService.rateGame(game.id, { [axis.id]: 7 });
@@ -71,13 +71,13 @@ describe("collection.updatedAt advances on mutations (profile stale detection)",
 
   test("axis create advances collection.updatedAt", async () => {
     await setCollectionTimestampToPast();
-    await axisService.createAxis({ name: "Strategy", weight: 50 });
+    await axisService.createAxis({ name: "Strategy", weight: 50, source: "personal" });
     const after = await getCollectionUpdatedAt();
     expect(after > KNOWN_PAST).toBe(true);
   });
 
   test("axis update advances collection.updatedAt", async () => {
-    const axis = await axisService.createAxis({ name: "Art", weight: 50 });
+    const axis = await axisService.createAxis({ name: "Art", weight: 50, source: "personal" });
     await setCollectionTimestampToPast();
     await axisService.updateAxis(axis.id, { weight: 75 });
     const after = await getCollectionUpdatedAt();
@@ -85,7 +85,11 @@ describe("collection.updatedAt advances on mutations (profile stale detection)",
   });
 
   test("axis delete advances collection.updatedAt", async () => {
-    const axis = await axisService.createAxis({ name: "Temporary", weight: 50 });
+    const axis = await axisService.createAxis({
+      name: "Temporary",
+      weight: 50,
+      source: "personal",
+    });
     await setCollectionTimestampToPast();
     await axisService.deleteAxis(axis.id);
     const after = await getCollectionUpdatedAt();

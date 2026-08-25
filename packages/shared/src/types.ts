@@ -43,6 +43,7 @@ export interface BggGameData {
   families: BggTag[];
   subdomains: BggTag[]; // BGG subdomains (Strategy Games, Family Games, etc.)
   suggestedPlayerCounts: SuggestedPlayerCount[];
+  bestPlayerCount: number | null;
   fetchedAt: string; // ISO 8601
 }
 
@@ -53,6 +54,7 @@ export interface Game {
   yearPublished: number | null;
   minPlayers: number | null;
   maxPlayers: number | null;
+  bestPlayers: number | null;
   playingTime: number | null; // Minutes
   imageUrl: string | null;
   bggData: BggGameData | null;
@@ -65,55 +67,175 @@ export interface Game {
   updatedAt: string; // ISO 8601
 }
 
-export type AxisSource = "personal" | "bgg" | "tournament";
+export type DerivedFieldId = "communityRating" | "weight" | "playerCountFit" | "playingTime";
 
-export interface Axis {
-  id: string; // UUID
+export type EmptyDerivedAxisConfiguration = Record<string, never>;
+
+export interface PlayerCountFitConfiguration {
+  targetPlayerCount: number;
+}
+
+export interface PlayingTimeConfiguration {
+  maximumScoringTime: number;
+}
+
+export interface DerivedAxisConfigurationByField {
+  communityRating: EmptyDerivedAxisConfiguration;
+  weight: EmptyDerivedAxisConfiguration;
+  playerCountFit: PlayerCountFitConfiguration;
+  playingTime: PlayingTimeConfiguration;
+}
+
+export interface AxisBase {
+  id: string;
   name: string;
   description: string | null;
-  weight: number; // 1-100
-  source: AxisSource;
-  bggField: string | null; // For source="bgg": which BGG field maps here
+  weight: number;
+  enabled: true;
   preferenceShape?: PreferenceShape;
   idealValue?: number | null;
   tolerance?: ToleranceLevel;
+  toleranceWidth?: number | null;
   leanDirection?: LeanDirection | null;
   veto?: VetoConfig | null;
-  createdAt: string; // ISO 8601
-  updatedAt: string; // ISO 8601
+  createdAt: string;
+  updatedAt: string;
 }
 
+export interface PersonalAxis extends AxisBase {
+  source: "personal";
+}
+
+export interface TournamentAxis extends AxisBase {
+  source: "tournament";
+}
+
+export type DerivedAxisByField = {
+  [Field in DerivedFieldId]: AxisBase & {
+    source: "derived";
+    derivedField: Field;
+    configuration: DerivedAxisConfigurationByField[Field];
+  };
+};
+
+export type DerivedAxis<Field extends DerivedFieldId = DerivedFieldId> = DerivedAxisByField[Field];
+
+export interface DisabledLegacyAxis extends Omit<AxisBase, "enabled"> {
+  source: "legacy";
+  enabled: false;
+  reason: string;
+  legacyField: string | null;
+  legacyPayload: unknown;
+}
+
+export type Axis = PersonalAxis | TournamentAxis | DerivedAxis | DisabledLegacyAxis;
+export type AxisSource = Axis["source"];
+export type EnabledAxis = PersonalAxis | TournamentAxis | DerivedAxis;
 export interface Collection {
-  id: string; // UUID
+  schemaVersion: 2;
+  id: string;
   name: string;
   axes: Axis[];
   games: Game[];
-  createdAt: string; // ISO 8601
-  updatedAt: string; // ISO 8601
+  createdAt: string;
+  updatedAt: string;
 }
 
 // Fitness score types from .lore/designs/mvp-fitness-model.md
 
-export type FitnessBreakdownSource = "personal" | "bgg" | "tournament" | "override" | "predicted";
+export type FitnessBreakdownSource =
+  | "personal"
+  | "tournament"
+  | "derived"
+  | "override"
+  | "predicted";
 
 export interface FitnessBreakdownEntry {
   axisId: string;
   axisName: string;
-  rating: number | null; // null if not rated
   weight: number;
-  contribution: number | null; // null if not rated
+  contribution: number | null;
   source: FitnessBreakdownSource;
-  bggOriginal: number | null; // Original BGG value when source is "override"
-  rawValue: number | null; // native-scale value
-  effectiveRating: number | null; // post-curve 1-10 value (same as rating)
-  preferenceShape: PreferenceShape; // which shape was applied
-  curveAffected: boolean; // true when curve changed the rating by > 0.5
-  predictionConfidence: PredictionConfidence | null; // null for non-predicted
-  referenceGames: ReferenceGame[] | null; // null for non-predicted
+  derivedField: DerivedFieldId | null;
+  sourceValue: number | null;
+  scoringRawValue: number | null;
+  effectiveRating: number | null;
+  preferenceShape: PreferenceShape;
+  curveAffected: boolean;
+  unit: string | null;
+  provenance: string | null;
+  configurationSummary: string | null;
+  overridden: boolean;
+  overrideValue: number | null;
+  predictionConfidence: PredictionConfidence | null;
+  referenceGames: ReferenceGame[] | null;
+}
+
+export interface DerivedValueResolution {
+  sourceValue: number;
+  scoringRawValue: number;
+}
+
+export interface DerivedConfigurationPropertyDiscovery {
+  name: string;
+  type: "integer";
+  required: boolean;
+  minimum: number;
+  maximum: number;
+  default?: number;
+}
+
+export interface FixedNativeScaleDiscovery {
+  type: "fixed";
+  min: number;
+  max: number;
+}
+
+export interface ConfigurationBoundNativeScaleDiscovery<
+  ConfigurationProperty extends string = string,
+> {
+  type: "configuration-bound";
+  min: number;
+  maxConfigurationProperty: ConfigurationProperty;
+}
+
+export type NativeScaleDiscovery<ConfigurationProperty extends string = string> =
+  | FixedNativeScaleDiscovery
+  | ConfigurationBoundNativeScaleDiscovery<ConfigurationProperty>;
+
+export interface DerivedAxisTemplateDiscovery {
+  name: string;
+  description: string;
+  weight: number;
+  preferenceShape: PreferenceShape;
+  idealValue?: number;
+  toleranceWidth?: number;
+  configuration: {
+    targetPlayerCount?: number;
+    maximumScoringTime?: number;
+  };
+}
+
+export interface DerivedFieldDiscovery {
+  id: DerivedFieldId;
+  label: string;
+  description: string;
+  provenance: string;
+  unit: string;
+  missingValuePolicy: string;
+  nativeScaleDiscovery: NativeScaleDiscovery;
+  nativeScale: NativeScale;
+  configuration: DerivedConfigurationPropertyDiscovery[];
+  template: DerivedAxisTemplateDiscovery;
+}
+
+export interface DerivedFieldDiscoveryResponse {
+  version: 1;
+  fields: DerivedFieldDiscovery[];
 }
 
 export interface FitnessResult {
-  score: number; // 1.0 - 10.0 (0 when vetoed)
+  score: number;
   ratedAxisCount: number;
   totalAxisCount: number;
   breakdown: FitnessBreakdownEntry[];
@@ -121,13 +243,13 @@ export interface FitnessResult {
   vetoedBy: {
     axisId: string;
     axisName: string;
-    threshold: number; // native-scale
+    threshold: number;
     direction: "below" | "above";
-    rawValue: number; // native-scale
+    rawValue: number;
   } | null;
-  hypotheticalScore: number | null; // score without veto, null when not vetoed
-  predictionMeta: PredictionMeta | null; // null for fully-actual results
-  redundancyAdjustment: RedundancyAdjustment | null; // null when redundancy disabled or no neighbors
+  hypotheticalScore: number | null;
+  predictionMeta: PredictionMeta | null;
+  redundancyAdjustment: RedundancyAdjustment | null;
 }
 
 // Tournament types
@@ -288,12 +410,17 @@ export interface WeightRangeCluster {
 export interface UtilityCurveDeclaration {
   axisId: string;
   axisName: string;
+  derivedField: DerivedFieldId | null;
   shape: PreferenceShape;
   idealValue: number | null;
   tolerance: ToleranceLevel | null;
+  toleranceWidth: number | null;
   leanDirection: LeanDirection | null;
   vetoThreshold: VetoConfig | null;
   nativeScale: NativeScale;
+  unit: string | null;
+  provenance: string | null;
+  configurationSummary: string | null;
 }
 
 export interface DivergentGame {

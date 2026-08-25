@@ -135,8 +135,7 @@ export function computeRedundancyAdjustments(
     const flatB = flattenWeighted(vecB, settings.componentWeights, includePA);
 
     const raw = cosineSimilarity(flatA, flatB);
-    // Zero-magnitude vectors produce NaN; treat as zero similarity
-    const sim = isNaN(raw) ? 0 : raw;
+    const sim = raw;
     similarities.set(key, sim);
     return sim;
   }

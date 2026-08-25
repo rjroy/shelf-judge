@@ -4,7 +4,7 @@ import {
   flattenWeighted,
   DEFAULT_REDUNDANCY_SETTINGS,
 } from "../src/services/redundancy-engine";
-import type { Game, GameWithScore, FitnessResult, RedundancySettings } from "@shelf-judge/shared";
+import type { FitnessResult, GameWithScore, Game, RedundancySettings } from "@shelf-judge/shared";
 import type { FeatureVector } from "../src/services/feature-vector";
 
 // --- Fixture helpers ---
@@ -17,6 +17,7 @@ function makeGame(id: string, name: string): Game {
     yearPublished: 2020,
     minPlayers: 2,
     maxPlayers: 4,
+    bestPlayers: null,
     playingTime: 60,
     imageUrl: null,
     bggData: null,

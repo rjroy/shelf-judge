@@ -1,58 +1,342 @@
-// Pure migration functions for the Collection.axes shape.
-// Ensures a singleton tournament-source axis exists. No I/O, no service dependencies.
-// Cache invalidation for downstream consumers (profile, wishlist predictions) is handled
-// by the caller in storage-service, since this module deals only with the Collection value.
+import {
+  CURRENT_COLLECTION_SCHEMA_VERSION,
+  BggGameDataSchema,
+  CollectionSchema,
+  GameSchema,
+  type Axis,
+  type AxisBase,
+  type Collection,
+  type DisabledLegacyAxis,
+} from "@shelf-judge/shared";
+import { z } from "zod";
 
-import type { Axis, Collection } from "@shelf-judge/shared";
-
-interface MigrationResult {
+export interface CollectionMigrationResult {
   data: Collection;
   migrated: boolean;
+  sourceVersion: number;
+  convertedAxisCount: number;
+  disabledAxisCount: number;
 }
 
-const TOURNAMENT_AXIS_NAME = "Tournament";
+export interface CollectionMigrationDependencies {
+  createId(): string;
+  now(): string;
+}
+
+export interface CollectionMigrationStepResult {
+  data: unknown;
+  convertedAxisCount: number;
+  disabledAxisCount: number;
+}
+
+export interface CollectionMigrationStep {
+  fromVersion: number;
+  toVersion: number;
+  migrate(
+    raw: unknown,
+    dependencies: CollectionMigrationDependencies,
+  ): CollectionMigrationStepResult;
+}
+
+const defaultDependencies: CollectionMigrationDependencies = {
+  createId: () => crypto.randomUUID(),
+  now: () => new Date().toISOString(),
+};
+
+const legacyCurveFields = {
+  preferenceShape: z.enum(["higher-is-better", "lower-is-better", "sweet-spot"]).optional(),
+  idealValue: z.number().nullable().optional(),
+  tolerance: z.enum(["flexible", "moderate", "strict"]).optional(),
+  toleranceWidth: z.number().nullable().optional(),
+  leanDirection: z.enum(["lower", "higher"]).nullable().optional(),
+  veto: z
+    .object({ direction: z.enum(["below", "above"]), threshold: z.number() })
+    .strict()
+    .nullable()
+    .optional(),
+};
+
+const LegacyAxisSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    description: z.string().nullable(),
+    weight: z.number().int().min(0).max(100),
+    source: z.unknown(),
+    bggField: z.unknown().optional(),
+    ...legacyCurveFields,
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .passthrough();
+
+type LegacyAxisInput = z.output<typeof LegacyAxisSchema>;
+
+const HistoricalGameSchema = GameSchema.omit({
+  bestPlayers: true,
+  bggData: true,
+  ownership: true,
+  boxDimensions: true,
+  manualShelfId: true,
+})
+  .extend({
+    bestPlayers: z.number().nullable().optional(),
+    bggData: BggGameDataSchema.omit({ bestPlayerCount: true })
+      .extend({ bestPlayerCount: z.number().nullable().optional() })
+      .strict()
+      .nullable(),
+    ownership: z.enum(["owned", "previously-owned"]).optional(),
+    boxDimensions: z
+      .object({
+        width: z.number().positive(),
+        height: z.number().positive(),
+        depth: z.number().positive(),
+      })
+      .strict()
+      .nullable()
+      .optional(),
+    manualShelfId: z.string().nullable().optional(),
+  })
+  .strict();
+
+const HistoricalCollectionSchema = z
+  .object({
+    schemaVersion: z.literal(0).optional(),
+    id: z.string().min(1),
+    name: z.string().min(1),
+    axes: z.array(LegacyAxisSchema),
+    games: z.array(HistoricalGameSchema),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .strict();
+
 const TOURNAMENT_AXIS_DESCRIPTION =
   "Derived from head-to-head tournament comparisons. Each game's score is its normalized ELO display value.";
-// Interim default weight per the plan: parity with BGG-axis tier. Tracked as an open
-// question for a system-axis-wide default-weight policy.
-const TOURNAMENT_AXIS_DEFAULT_WEIGHT = 30;
 
-/**
- * Ensure the collection contains exactly one axis with source === "tournament".
- *
- * If absent, append a fresh tournament axis with fixed defaults (REQ-TAXIS-5) and
- * report `migrated: true`. If already present, return the input unchanged (idempotent).
- *
- * Existing personal and BGG axes are never modified or removed (REQ-TAXIS-10).
- *
- * The caller is responsible for persisting the returned collection and for invalidating
- * any downstream caches (profile, wishlist predictions) when `migrated === true` —
- * those caches were computed against an axis set that did not include the new
- * tournament axis and would otherwise leak stale results.
- */
-export function ensureTournamentAxis(collection: Collection): MigrationResult {
-  const hasTournamentAxis = collection.axes.some((a) => a.source === "tournament");
-  if (hasTournamentAxis) {
-    return { data: collection, migrated: false };
+function currentBase(axis: LegacyAxisInput): AxisBase {
+  return {
+    id: axis.id,
+    name: axis.name,
+    description: axis.description,
+    weight: axis.weight,
+    enabled: true,
+    ...(axis.preferenceShape === undefined ? {} : { preferenceShape: axis.preferenceShape }),
+    ...(axis.idealValue === undefined ? {} : { idealValue: axis.idealValue }),
+    ...(axis.tolerance === undefined ? {} : { tolerance: axis.tolerance }),
+    ...(axis.toleranceWidth === undefined ? {} : { toleranceWidth: axis.toleranceWidth }),
+    ...(axis.leanDirection === undefined ? {} : { leanDirection: axis.leanDirection }),
+    ...(axis.veto === undefined ? {} : { veto: axis.veto }),
+    createdAt: axis.createdAt,
+    updatedAt: axis.updatedAt,
+  };
+}
+
+function disableLegacyAxis(
+  axis: LegacyAxisInput,
+  original: unknown,
+  reason: string,
+): DisabledLegacyAxis {
+  const base = currentBase(axis);
+  return {
+    ...base,
+    enabled: false,
+    source: "legacy",
+    reason,
+    legacyField: typeof axis.bggField === "string" ? axis.bggField : null,
+    legacyPayload: original,
+  };
+}
+
+function migrateAxis(original: unknown): {
+  axis: Axis;
+  converted: boolean;
+  disabled: boolean;
+} {
+  const axis = LegacyAxisSchema.parse(original);
+  const base = currentBase(axis);
+
+  if (axis.source === "personal" && (axis.bggField === null || axis.bggField === undefined)) {
+    return { axis: { ...base, source: "personal" }, converted: false, disabled: false };
+  }
+  if (axis.source === "tournament" && (axis.bggField === null || axis.bggField === undefined)) {
+    return { axis: { ...base, source: "tournament" }, converted: false, disabled: false };
+  }
+  if (axis.source === "bgg" && axis.bggField === "communityRating") {
+    return {
+      axis: { ...base, source: "derived", derivedField: "communityRating", configuration: {} },
+      converted: true,
+      disabled: false,
+    };
+  }
+  if (axis.source === "bgg" && axis.bggField === "weight") {
+    return {
+      axis: { ...base, source: "derived", derivedField: "weight", configuration: {} },
+      converted: true,
+      disabled: false,
+    };
   }
 
-  const now = new Date().toISOString();
-  const tournamentAxis: Axis = {
-    id: crypto.randomUUID(),
-    name: TOURNAMENT_AXIS_NAME,
+  const reason =
+    axis.source === "bgg" && typeof axis.bggField === "string"
+      ? "unknown_legacy_field"
+      : "malformed_legacy_source_field";
+  return { axis: disableLegacyAxis(axis, original, reason), converted: false, disabled: true };
+}
+
+function backfillHistoricalGame(game: z.output<typeof HistoricalGameSchema>): unknown {
+  return {
+    ...game,
+    ownership: game.ownership ?? "owned",
+    boxDimensions: game.boxDimensions ?? null,
+    manualShelfId: game.manualShelfId ?? null,
+  };
+}
+
+function createTournamentAxis(dependencies: CollectionMigrationDependencies): Axis {
+  const now = dependencies.now();
+  return {
+    id: dependencies.createId(),
+    name: "Tournament",
     description: TOURNAMENT_AXIS_DESCRIPTION,
-    weight: TOURNAMENT_AXIS_DEFAULT_WEIGHT,
+    weight: 30,
+    enabled: true,
     source: "tournament",
-    bggField: null,
     createdAt: now,
     updatedAt: now,
   };
+}
+
+function migrateVersionZeroToOne(
+  raw: unknown,
+  dependencies: CollectionMigrationDependencies,
+): CollectionMigrationStepResult {
+  const historical = HistoricalCollectionSchema.parse(raw);
+  let convertedAxisCount = 0;
+  let disabledAxisCount = 0;
+  const axes = historical.axes.map((axis) => {
+    const result = migrateAxis(axis);
+    if (result.converted) convertedAxisCount += 1;
+    if (result.disabled) disabledAxisCount += 1;
+    return result.axis;
+  });
+  if (!axes.some((axis) => axis.source === "tournament")) {
+    axes.push(createTournamentAxis(dependencies));
+  }
 
   return {
     data: {
-      ...collection,
-      axes: [...collection.axes, tournamentAxis],
+      schemaVersion: 1,
+      id: historical.id,
+      name: historical.name,
+      axes,
+      games: historical.games.map(backfillHistoricalGame),
+      createdAt: historical.createdAt,
+      updatedAt: dependencies.now(),
     },
-    migrated: true,
+    convertedAxisCount,
+    disabledAxisCount,
+  };
+}
+
+const VersionOneGameSchema = GameSchema.omit({ bestPlayers: true, bggData: true })
+  .extend({
+    bestPlayers: z.number().nullable().optional(),
+    bggData: BggGameDataSchema.omit({ bestPlayerCount: true })
+      .extend({ bestPlayerCount: z.number().nullable().optional() })
+      .strict()
+      .nullable(),
+  })
+  .strict();
+
+const VersionOneCollectionSchema = CollectionSchema.omit({ schemaVersion: true, games: true })
+  .extend({
+    schemaVersion: z.literal(1),
+    games: z.array(VersionOneGameSchema),
+  })
+  .strict();
+
+function validBestPlayerCount(value: number | null | undefined): number | null {
+  return value != null && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function migrateVersionOneToTwo(raw: unknown): CollectionMigrationStepResult {
+  const historical = VersionOneCollectionSchema.parse(raw);
+  return {
+    data: {
+      ...historical,
+      schemaVersion: 2,
+      games: historical.games.map((game) => {
+        const bestPlayerCount = validBestPlayerCount(game.bggData?.bestPlayerCount);
+        return {
+          ...game,
+          bestPlayers: validBestPlayerCount(game.bestPlayers) ?? bestPlayerCount,
+          bggData: game.bggData === null ? null : { ...game.bggData, bestPlayerCount },
+        };
+      }),
+    },
+    convertedAxisCount: 0,
+    disabledAxisCount: 0,
+  };
+}
+
+export const COLLECTION_MIGRATION_STEPS: readonly CollectionMigrationStep[] = [
+  {
+    fromVersion: 0,
+    toVersion: 1,
+    migrate: migrateVersionZeroToOne,
+  },
+  {
+    fromVersion: 1,
+    toVersion: 2,
+    migrate: migrateVersionOneToTwo,
+  },
+];
+
+function readSchemaVersion(raw: unknown): number {
+  if (typeof raw !== "object" || raw === null || !("schemaVersion" in raw)) return 0;
+  const version = raw.schemaVersion;
+  if (typeof version !== "number" || !Number.isInteger(version) || version < 0) {
+    throw new Error(`Invalid collection schema version: ${String(version)}`);
+  }
+  return version;
+}
+
+export function migrateCollection(
+  raw: unknown,
+  dependencies: CollectionMigrationDependencies = defaultDependencies,
+): CollectionMigrationResult {
+  const sourceVersion = readSchemaVersion(raw);
+  if (sourceVersion > CURRENT_COLLECTION_SCHEMA_VERSION) {
+    throw new Error(
+      `Unsupported collection schema version ${sourceVersion}; current version is ${CURRENT_COLLECTION_SCHEMA_VERSION}`,
+    );
+  }
+
+  let version = sourceVersion;
+  let working: unknown = raw;
+  let convertedAxisCount = 0;
+  let disabledAxisCount = 0;
+  while (version < CURRENT_COLLECTION_SCHEMA_VERSION) {
+    const step = COLLECTION_MIGRATION_STEPS.find(({ fromVersion }) => fromVersion === version);
+    if (step === undefined || step.toVersion <= version) {
+      throw new Error(
+        `No collection migration step from version ${version} to ${CURRENT_COLLECTION_SCHEMA_VERSION}`,
+      );
+    }
+    const result = step.migrate(working, dependencies);
+    working = result.data;
+    convertedAxisCount += result.convertedAxisCount;
+    disabledAxisCount += result.disabledAxisCount;
+    version = step.toVersion;
+  }
+
+  const data = CollectionSchema.parse(working);
+  return {
+    data,
+    migrated: sourceVersion !== CURRENT_COLLECTION_SCHEMA_VERSION,
+    sourceVersion,
+    convertedAxisCount,
+    disabledAxisCount,
   };
 }

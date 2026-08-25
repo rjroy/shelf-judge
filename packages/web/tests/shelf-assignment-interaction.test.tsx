@@ -1,91 +1,91 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
-import type { ReactElement } from "react";
+import { describe, expect, mock, test } from "bun:test";
+import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
+import { ShelfAssignmentFormContent } from "../components/shelf-assignment-form";
 
-const React = await import("react");
-const refresh = mock(() => undefined);
-let states: unknown[] = [];
-let stateIndex = 0;
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-void mock.module("react", () => ({
-  ...React,
-  useCallback: <T,>(callback: T) => callback,
-  useState: <T,>(initial: T) => {
-    const index = stateIndex++;
-    if (states.length <= index) states[index] = initial;
-    return [states[index] as T, (value: T) => (states[index] = value)] as const;
-  },
-}));
+const options = [
+  { shelfId: "shelf-a", label: "Room - A", dimensionless: false },
+  { shelfId: "shelf-b", label: "Room - B", dimensionless: false },
+];
 
-void mock.module("next/navigation", () => ({
-  useRouter: () => ({ refresh }),
-}));
-
-const { ShelfAssignmentForm } = await import("../components/shelf-assignment-form");
-type ShelfAssignmentFields =
-  typeof import("../components/shelf-assignment-form").ShelfAssignmentFields;
-
-function renderForm(
-  overrides: Partial<Parameters<typeof ShelfAssignmentForm>[0]> = {},
-): ReactElement<Parameters<ShelfAssignmentFields>[0]> {
-  stateIndex = 0;
-  return ShelfAssignmentForm({
-    gameId: "game-1",
-    currentShelfId: "shelf-a",
-    options: [
-      { shelfId: "shelf-a", label: "Room — A", dimensionless: false },
-      { shelfId: "shelf-b", label: "Room — B", dimensionless: false },
-    ],
-    hasDimensions: true,
-    isPreviouslyOwned: false,
-    ...overrides,
-  }) as ReactElement<Parameters<ShelfAssignmentFields>[0]>;
+function renderForm({
+  request,
+  refresh,
+  hasDimensions = true,
+  isPreviouslyOwned = false,
+}: {
+  request: typeof fetch;
+  refresh: () => void;
+  hasDimensions?: boolean;
+  isPreviouslyOwned?: boolean;
+}): ReactTestRenderer {
+  let renderer: ReactTestRenderer | undefined;
+  act(() => {
+    renderer = create(
+      <ShelfAssignmentFormContent
+        gameId="game-1"
+        currentShelfId="shelf-a"
+        options={options}
+        hasDimensions={hasDimensions}
+        isPreviouslyOwned={isPreviouslyOwned}
+        refresh={refresh}
+        request={request}
+      />,
+    );
+  });
+  if (!renderer) throw new Error("Expected shelf assignment renderer");
+  return renderer;
 }
 
-async function flushMutation(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
-  await new Promise((resolve) => setTimeout(resolve, 0));
+function select(renderer: ReactTestRenderer): ReactTestInstance {
+  return renderer.root.findByType("select");
 }
 
-afterEach(() => {
-  states = [];
-  stateIndex = 0;
-  refresh.mockClear();
-  mock.restore();
-});
+function saveButton(renderer: ReactTestRenderer): ReactTestInstance {
+  return renderer.root.findByType("button");
+}
+
+function requestCalls(request: typeof fetch): Array<[string | URL | Request, RequestInit?]> {
+  return (
+    request as unknown as {
+      mock: { calls: Array<[string | URL | Request, RequestInit?]> };
+    }
+  ).mock.calls;
+}
 
 describe("ShelfAssignmentForm stateful interaction", () => {
   test("wires selection through the request, saving state, and refresh", async () => {
     let resolveRequest!: (response: Response) => void;
-    const request = new Promise<Response>((resolve) => {
+    const requestPromise = new Promise<Response>((resolve) => {
       resolveRequest = resolve;
     });
-    const fetchMock = mock(() => request);
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    const request = mock(() => requestPromise) as unknown as typeof fetch;
+    const refresh = mock(() => undefined);
+    const renderer = renderForm({ request, refresh });
 
-    let form = renderForm();
-    form.props.onSelectionChange?.("shelf-b");
-    form = renderForm();
-    expect(form.props.selectedShelfId).toBe("shelf-b");
+    act(() => select(renderer).props.onChange({ target: { value: "shelf-b" } }));
+    expect(select(renderer).props.value).toBe("shelf-b");
+    act(() => saveButton(renderer).props.onClick());
 
-    form.props.onSave?.();
-    form = renderForm();
-    expect(form.props.saving).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+    expect(saveButton(renderer).props.disabled).toBe(true);
+    expect(saveButton(renderer).props.children).toBe("Saving...");
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(requestCalls(request)[0]?.[1]).toMatchObject({
       body: JSON.stringify({ shelfId: "shelf-b" }),
     });
 
-    resolveRequest(new Response("{}", { status: 200 }));
-    await flushMutation();
-    form = renderForm();
-    expect(form.props.saving).toBe(false);
-    expect(form.props.error).toBeNull();
+    await act(async () => {
+      resolveRequest(new Response("{}", { status: 200 }));
+      await requestPromise;
+    });
+    expect(saveButton(renderer).props.disabled).toBe(false);
+    expect(renderer.root.findAllByProps({ role: "alert" })).toHaveLength(0);
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
   test("surfaces a mutation error through component state without refreshing", async () => {
-    globalThis.fetch = mock(() =>
+    const request = mock(() =>
       Promise.resolve(
         new Response(JSON.stringify({ error: "Shelf unavailable" }), {
           status: 409,
@@ -93,52 +93,43 @@ describe("ShelfAssignmentForm stateful interaction", () => {
         }),
       ),
     ) as unknown as typeof fetch;
+    const refresh = mock(() => undefined);
+    const renderer = renderForm({ request, refresh });
 
-    let form = renderForm();
-    form.props.onSave?.();
-    await flushMutation();
-    form = renderForm();
+    await act(async () => {
+      saveButton(renderer).props.onClick();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
 
-    expect(form.props.saving).toBe(false);
-    expect(form.props.error).toBe("Shelf unavailable");
+    expect(renderer.root.findByProps({ role: "alert" }).children.join("")).toContain(
+      "Shelf unavailable",
+    );
+    expect(saveButton(renderer).props.disabled).toBe(false);
     expect(refresh).not.toHaveBeenCalled();
   });
 
-  test("allows a stale manual assignment to be cleared when manual choices are blocked", async () => {
-    const fetchMock = mock(() => Promise.resolve(new Response("{}", { status: 200 })));
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+  for (const restriction of [
+    { label: "missing dimensions", hasDimensions: false, isPreviouslyOwned: false },
+    { label: "previous ownership", hasDimensions: true, isPreviouslyOwned: true },
+  ]) {
+    test(`allows a stale manual assignment to be cleared despite ${restriction.label}`, async () => {
+      const request = mock(() =>
+        Promise.resolve(new Response("{}", { status: 200 })),
+      ) as unknown as typeof fetch;
+      const refresh = mock(() => undefined);
+      const renderer = renderForm({ request, refresh, ...restriction });
 
-    let form = renderForm({ hasDimensions: false });
-    expect(form.props.selectedShelfId).toBe("shelf-a");
-    form.props.onSelectionChange?.("");
-    form = renderForm({ hasDimensions: false });
-    expect(form.props.selectedShelfId).toBe("");
+      act(() => select(renderer).props.onChange({ target: { value: "" } }));
+      await act(async () => {
+        saveButton(renderer).props.onClick();
+        await Promise.resolve();
+      });
 
-    form.props.onSave?.();
-    await flushMutation();
-
-    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
-      body: JSON.stringify({ shelfId: null }),
+      expect(requestCalls(request)[0]?.[1]).toMatchObject({
+        body: JSON.stringify({ shelfId: null }),
+      });
+      expect(refresh).toHaveBeenCalledTimes(1);
     });
-    expect(refresh).toHaveBeenCalledTimes(1);
-  });
-
-  test("allows a previously-owned game's stale manual assignment to be cleared", async () => {
-    const fetchMock = mock(() => Promise.resolve(new Response("{}", { status: 200 })));
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
-
-    let form = renderForm({ isPreviouslyOwned: true });
-    expect(form.props.selectedShelfId).toBe("shelf-a");
-    form.props.onSelectionChange?.("");
-    form = renderForm({ isPreviouslyOwned: true });
-    expect(form.props.selectedShelfId).toBe("");
-
-    form.props.onSave?.();
-    await flushMutation();
-
-    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
-      body: JSON.stringify({ shelfId: null }),
-    });
-    expect(refresh).toHaveBeenCalledTimes(1);
-  });
+  }
 });

@@ -225,16 +225,16 @@ Implementation ends after code, tests, and behavioral validation. Spec approval 
 
 ## Requirement coverage
 
-| Requirements | Plan steps |
-| --- | --- |
-| REQ-SHELF-ASSIGN-1–2 | 1, 2 |
-| REQ-SHELF-ASSIGN-3–5 | 2 |
-| REQ-SHELF-ASSIGN-6 | 3 |
-| REQ-SHELF-ASSIGN-7–9 | 1, 2 |
-| REQ-SHELF-ASSIGN-10–17 | 4, 5 |
-| REQ-SHELF-ASSIGN-18–22 | 6 |
-| REQ-SHELF-ASSIGN-23–24 | 7 |
-| All behavioral validation | 8 |
+| Requirements              | Plan steps |
+| ------------------------- | ---------- |
+| REQ-SHELF-ASSIGN-1–2      | 1, 2       |
+| REQ-SHELF-ASSIGN-3–5      | 2          |
+| REQ-SHELF-ASSIGN-6        | 3          |
+| REQ-SHELF-ASSIGN-7–9      | 1, 2       |
+| REQ-SHELF-ASSIGN-10–17    | 4, 5       |
+| REQ-SHELF-ASSIGN-18–22    | 6          |
+| REQ-SHELF-ASSIGN-23–24    | 7          |
+| All behavioral validation | 8          |
 
 ## Risks and review notes
 

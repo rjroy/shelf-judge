@@ -26,7 +26,7 @@ export function ScoreBreakdown({
   }
 
   const totalWeight = score.breakdown
-    .filter((e) => e.rating !== null)
+    .filter((e) => e.effectiveRating !== null)
     .reduce((sum, e) => sum + e.weight, 0);
 
   const displayScore = score.vetoed ? (score.hypotheticalScore ?? 0) : score.score;
@@ -34,11 +34,14 @@ export function ScoreBreakdown({
 
   const predictedCount = score.breakdown.filter((e) => e.source === "predicted").length;
   const actualCount = score.breakdown.filter(
-    (e) => e.source !== "predicted" && e.rating !== null,
+    (e) => e.source !== "predicted" && e.effectiveRating !== null,
   ).length;
   const excludedCount = score.breakdown.filter(
     (e) => e.source === "predicted" && e.predictionConfidence === "insufficient",
   ).length;
+  const vetoUnit = score.vetoedBy
+    ? score.breakdown.find((entry) => entry.axisId === score.vetoedBy?.axisId)?.unit
+    : null;
 
   return (
     <>
@@ -47,8 +50,9 @@ export function ScoreBreakdown({
         <div className="veto-banner">
           <div className="veto-banner-title">VETOED</div>
           <div className="veto-banner-detail">
-            <strong>{score.vetoedBy.axisName}</strong> scored {score.vetoedBy.rawValue.toFixed(1)}{" "}
-            (threshold: {score.vetoedBy.direction} {score.vetoedBy.threshold})
+            <strong>{score.vetoedBy.axisName}</strong> scored{" "}
+            {formatValue(score.vetoedBy.rawValue, vetoUnit)} (threshold: {score.vetoedBy.direction}{" "}
+            {formatValue(score.vetoedBy.threshold, vetoUnit)})
           </div>
           {score.hypotheticalScore !== null && (
             <div className="veto-banner-hypothetical">
@@ -62,8 +66,8 @@ export function ScoreBreakdown({
         <thead>
           <tr>
             <th>Axis</th>
-            <th className="right">Raw</th>
-            <th className="right">Effective</th>
+            <th className="right">Scoring Input</th>
+            <th className="right">Effective (1-10)</th>
             <th className="right">Weight</th>
             <th className="right">Contribution</th>
             <th className="right">Source</th>
@@ -156,7 +160,7 @@ function BreakdownRow({
   const rowClass = [
     entry.source === "override"
       ? "override-row"
-      : entry.source === "bgg"
+      : entry.source === "derived"
         ? "bgg-row"
         : isPredicted
           ? isInsufficient
@@ -173,10 +177,8 @@ function BreakdownRow({
       ? Math.round((entry.contribution / displayScore) * 100)
       : null;
 
-  const showRaw =
-    entry.rawValue !== null &&
-    entry.effectiveRating !== null &&
-    Math.abs(entry.rawValue - entry.effectiveRating) > 0.05;
+  const hasFactualDetails =
+    entry.derivedField != null || (entry.overridden && entry.sourceValue != null);
 
   return (
     <>
@@ -195,26 +197,39 @@ function BreakdownRow({
               onClick={() => setExpanded((v) => !v)}
             />
           )}
-          {entry.source === "override" && entry.bggOriginal !== null && (
-            <div className="breakdown-override-detail">
-              BGG: {entry.bggOriginal.toFixed(1)}{" "}
-              ({getRatingLabel(entry.bggOriginal)})
+          {hasFactualDetails && (
+            <div className="breakdown-derived-details">
+              <span>Published: {formatValue(entry.sourceValue, entry.unit)}</span>
+              {entry.sourceValue !== entry.scoringRawValue && entry.scoringRawValue != null && (
+                <span>Capped scoring input: {formatValue(entry.scoringRawValue, entry.unit)}</span>
+              )}
+              {entry.overridden && (
+                <span className="breakdown-override-detail">
+                  {entry.overrideValue == null
+                    ? "Personal override applied"
+                    : `Personal override: ${entry.overrideValue}`}
+                </span>
+              )}
+              {entry.provenance && <span>Provenance: {entry.provenance}</span>}
+              {entry.configurationSummary && (
+                <span>Configuration: {entry.configurationSummary}</span>
+              )}
             </div>
           )}
         </td>
         <td className="right breakdown-raw">
-          {showRaw && entry.rawValue !== null ? (
-            entry.rawValue.toFixed(1)
+          {entry.scoringRawValue != null ? (
+            formatValue(entry.scoringRawValue, entry.unit)
           ) : (
             <span className="breakdown-dash">&mdash;</span>
           )}
         </td>
         <td className="right">
-          {entry.rating !== null ? (
+          {entry.effectiveRating !== null ? (
             <div>
-              <div>{entry.rating}</div>
+              <div>{entry.effectiveRating}</div>
               <div style={{ fontSize: "0.75em", color: "#888", lineHeight: 1.2 }}>
-                {getRatingLabel(entry.rating)}
+                {getRatingLabel(entry.effectiveRating)}
               </div>
             </div>
           ) : (
@@ -249,13 +264,18 @@ function BreakdownRow({
               axisName={entry.axisName}
               confidence={entry.predictionConfidence!}
               referenceGames={entry.referenceGames}
-              rating={entry.rating}
+              rating={entry.effectiveRating}
             />
           </td>
         </tr>
       )}
     </>
   );
+}
+
+function formatValue(value: number | null | undefined, unit: string | null | undefined): string {
+  if (value == null) return "Missing";
+  return `${Number.isInteger(value) ? value : value.toFixed(1)}${unit ? ` ${unit}` : ""}`;
 }
 
 function ConfidenceBadge({
@@ -353,8 +373,8 @@ export function SourceBadge({ source }: { source: string }) {
   if (source === "override") {
     return <span className="source-badge source-override">Override</span>;
   }
-  if (source === "bgg") {
-    return <span className="source-badge source-bgg">BGG</span>;
+  if (source === "derived") {
+    return <span className="source-badge source-bgg">Derived</span>;
   }
   if (source === "predicted") {
     return <span className="source-badge source-predicted">Predicted</span>;

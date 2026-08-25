@@ -10,9 +10,36 @@ import {
   TournamentSettingsUpdateSchema,
   TournamentDataSchema,
   TournamentSettingsSchema,
+  type CreateAxisInput,
+  type UpdateAxisInput,
 } from "../src/index";
 
+const createAliasFixture: CreateAxisInput = {
+  name: "Personal axis",
+  weight: 20,
+  source: "personal",
+};
+
+const updateAliasFixture: UpdateAxisInput = {
+  preferenceShape: "sweet-spot",
+  idealValue: 5,
+  tolerance: "moderate",
+};
+
 describe("CreateAxisSchema", () => {
+  test("keeps the exported canonical input alias assignable", () => {
+    expect(CreateAxisSchema.safeParse(createAliasFixture).success).toBe(true);
+  });
+
+  test("rejects unsupported nested veto properties", () => {
+    const result = CreateAxisSchema.safeParse({
+      name: "Legacy veto",
+      weight: 20,
+      veto: { direction: "above", threshold: 8, unsupported: true },
+    });
+    expect(result.success).toBe(false);
+  });
+
   test("accepts valid input", () => {
     const result = CreateAxisSchema.safeParse({
       name: "Visual design",
@@ -24,21 +51,20 @@ describe("CreateAxisSchema", () => {
       expect(result.data.weight).toBe(50);
       expect(result.data.description).toBeNull();
       expect(result.data.source).toBe("personal");
-      expect(result.data.bggField).toBeNull();
     }
   });
 
-  test("accepts BGG source with bggField", () => {
+  test("accepts a registered derived source and configuration", () => {
     const result = CreateAxisSchema.safeParse({
       name: "Community Rating",
       weight: 10,
-      source: "bgg",
-      bggField: "communityRating",
+      source: "derived",
+      derivedField: "communityRating",
+      configuration: {},
     });
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.source).toBe("bgg");
-      expect(result.data.bggField).toBe("communityRating");
+      expect(result.data.source).toBe("derived");
     }
   });
 
@@ -71,8 +97,9 @@ describe("CreateAxisSchema", () => {
     const result = CreateAxisSchema.safeParse({
       name: "Complexity",
       weight: 20,
-      source: "bgg",
-      bggField: "weight",
+      source: "derived",
+      derivedField: "weight",
+      configuration: {},
       preferenceShape: "sweet-spot",
       idealValue: 2.75,
       tolerance: "moderate",
@@ -184,61 +211,58 @@ describe("CreateAxisSchema", () => {
     }
   });
 
-  // Three-arm bggField refinement: source dictates whether bggField is allowed.
-
-  test("rejects personal source with bggField", () => {
+  test("rejects unsupported personal payload fields", () => {
     const result = CreateAxisSchema.safeParse({
       name: "Visual design",
       weight: 50,
       source: "personal",
-      bggField: "communityRating",
+      unsupported: true,
     });
     expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues.some((i) => i.path.includes("bggField"))).toBe(true);
-    }
   });
 
-  test("rejects bgg source without bggField", () => {
+  test("rejects derived source without configuration", () => {
     const result = CreateAxisSchema.safeParse({
       name: "Community Rating",
       weight: 10,
-      source: "bgg",
+      source: "derived",
+      derivedField: "communityRating",
     });
     expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues.some((i) => i.path.includes("bggField"))).toBe(true);
-    }
   });
 
-  test("accepts tournament source without bggField", () => {
+  test("rejects service-managed tournament creation", () => {
     const result = CreateAxisSchema.safeParse({
       name: "Tournament ELO",
       weight: 20,
       source: "tournament",
     });
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.source).toBe("tournament");
-      expect(result.data.bggField).toBeNull();
-    }
+    expect(result.success).toBe(false);
   });
 
-  test("rejects tournament source with bggField", () => {
+  test("rejects changing the source through create payload extras", () => {
     const result = CreateAxisSchema.safeParse({
       name: "Tournament ELO",
       weight: 20,
-      source: "tournament",
-      bggField: "communityRating",
+      source: "personal",
+      derivedField: "communityRating",
     });
     expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues.some((i) => i.path.includes("bggField"))).toBe(true);
-    }
   });
 });
 
 describe("UpdateAxisSchema", () => {
+  test("keeps the exported canonical update alias assignable", () => {
+    expect(UpdateAxisSchema.safeParse(updateAliasFixture).success).toBe(true);
+  });
+
+  test("rejects unsupported nested veto update properties", () => {
+    const result = UpdateAxisSchema.safeParse({
+      veto: { direction: "below", threshold: 2, unsupported: true },
+    });
+    expect(result.success).toBe(false);
+  });
+
   test("accepts partial update with name only", () => {
     const result = UpdateAxisSchema.safeParse({ name: "New name" });
     expect(result.success).toBe(true);

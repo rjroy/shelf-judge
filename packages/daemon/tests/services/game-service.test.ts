@@ -72,6 +72,7 @@ describe("GameService", () => {
       const axis = await axisService.createAxis({
         name: "Fun",
         weight: 50,
+        source: "personal",
       });
       const { game } = await gameService.addGame({ name: "Test Game" });
       await gameService.rateGame(game.id, { [axis.id]: 8 });
@@ -101,6 +102,7 @@ describe("GameService", () => {
       const axis = await axisService.createAxis({
         name: "Fun",
         weight: 50,
+        source: "personal",
       });
 
       const { game: g1 } = await gameService.addGame({ name: "Low Score" });
@@ -123,10 +125,43 @@ describe("GameService", () => {
   });
 
   describe("rateGame", () => {
+    test("rejects a disabled legacy axis without removing its stored rating", async () => {
+      const { game } = await gameService.addGame({ name: "Legacy-rated" });
+      const collection = await storageService.loadCollection();
+      collection.axes.push({
+        id: "legacy-axis",
+        name: "Legacy",
+        description: null,
+        weight: 50,
+        enabled: false,
+        source: "legacy",
+        reason: "unknown_legacy_field",
+        legacyField: "futureMetric",
+        legacyPayload: { originalField: "futureMetric" },
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      });
+      const storedGame = collection.games.find(({ id }) => id === game.id);
+      expect(storedGame).toBeDefined();
+      if (storedGame === undefined) return;
+      storedGame.ratings["legacy-axis"] = 8;
+      await storageService.saveCollection(collection);
+
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(gameService.rateGame(game.id, { "legacy-axis": 5 })).rejects.toThrow(
+        "Axis is disabled",
+      );
+      const unchanged = (await storageService.loadCollection()).games.find(
+        ({ id }) => id === game.id,
+      );
+      expect(unchanged?.ratings["legacy-axis"]).toBe(8);
+    });
+
     test("sets ratings and returns updated score", async () => {
       const axis = await axisService.createAxis({
         name: "Fun",
         weight: 50,
+        source: "personal",
       });
       const { game } = await gameService.addGame({ name: "Test" });
 
@@ -143,6 +178,7 @@ describe("GameService", () => {
       const axis = await axisService.createAxis({
         name: "Fun",
         weight: 50,
+        source: "personal",
       });
       const { game } = await gameService.addGame({ name: "Test" });
 
@@ -156,6 +192,7 @@ describe("GameService", () => {
       const axis = await axisService.createAxis({
         name: "Fun",
         weight: 50,
+        source: "personal",
       });
       const { game } = await gameService.addGame({ name: "Test" });
 
@@ -169,6 +206,7 @@ describe("GameService", () => {
       const axis = await axisService.createAxis({
         name: "Fun",
         weight: 50,
+        source: "personal",
       });
       const { game } = await gameService.addGame({ name: "Test" });
 
@@ -182,6 +220,7 @@ describe("GameService", () => {
       const axis = await axisService.createAxis({
         name: "Fun",
         weight: 50,
+        source: "personal",
       });
       const { game } = await gameService.addGame({ name: "Test" });
 
@@ -204,6 +243,7 @@ describe("GameService", () => {
       const axis = await axisService.createAxis({
         name: "Fun",
         weight: 50,
+        source: "personal",
       });
       const { game } = await gameService.addGame({ name: "Test" });
 
@@ -221,6 +261,7 @@ describe("GameService", () => {
       const axis = await axisService.createAxis({
         name: "Fun",
         weight: 50,
+        source: "personal",
       });
       const { game } = await gameService.addGame({ name: "Test" });
 
@@ -230,8 +271,16 @@ describe("GameService", () => {
     });
 
     test("can set some ratings and clear others in one call", async () => {
-      const axis1 = await axisService.createAxis({ name: "Fun", weight: 50 });
-      const axis2 = await axisService.createAxis({ name: "Depth", weight: 50 });
+      const axis1 = await axisService.createAxis({
+        name: "Fun",
+        weight: 50,
+        source: "personal",
+      });
+      const axis2 = await axisService.createAxis({
+        name: "Depth",
+        weight: 50,
+        source: "personal",
+      });
       const { game } = await gameService.addGame({ name: "Test" });
 
       // Set both
@@ -333,7 +382,10 @@ describe("GameService", () => {
       await expect(gameService.setManualShelf(game.id, "missing")).rejects.toThrow(
         "Shelf not found: missing",
       );
-      expect((await gameService.getGame(game.id)).game.manualShelfId).toBeNull();
+      const persisted = (await storageService.loadCollection()).games.find(
+        ({ id }) => id === game.id,
+      );
+      expect(persisted?.manualShelfId).toBeNull();
     });
 
     test("rejects unmeasured and previously-owned games", async () => {

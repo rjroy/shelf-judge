@@ -113,7 +113,8 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
         updated.similarityThreshold = patch.similarityThreshold as number;
       if ("maxPenalty" in patch) updated.maxPenalty = patch.maxPenalty as number;
       if ("minNeighbors" in patch) updated.minNeighbors = patch.minNeighbors as number;
-      if ("expectedNeighbors" in patch) updated.expectedNeighbors = patch.expectedNeighbors as number;
+      if ("expectedNeighbors" in patch)
+        updated.expectedNeighbors = patch.expectedNeighbors as number;
       if ("componentWeights" in patch) {
         const cw = patch.componentWeights as Record<string, unknown>;
         updated.componentWeights = {

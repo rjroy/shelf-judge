@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import type { Game } from "@shelf-judge/shared";
+import type { Axis, Game, PersonalAxis, TournamentAxis } from "@shelf-judge/shared";
 import {
+  FACTUAL_VECTOR_DIMENSIONS,
   buildVocabulary,
   computeContinuousRanges,
   encodeGame,
@@ -9,6 +10,8 @@ import {
   compositeDistance,
   computeCentroid,
   cosineSimilarity,
+  getOrderedVectorAxes,
+  getVectorAxisValues,
 } from "../src/services/feature-vector";
 import type { FeatureVector } from "../src/services/feature-vector";
 
@@ -20,6 +23,7 @@ function makeGame(overrides: Partial<Game> = {}): Game {
     yearPublished: 2020,
     minPlayers: 2,
     maxPlayers: 4,
+    bestPlayers: 3,
     playingTime: 60,
     imageUrl: null,
     bggData: {
@@ -36,6 +40,7 @@ function makeGame(overrides: Partial<Game> = {}): Game {
       families: [],
       subdomains: [],
       suggestedPlayerCounts: [],
+      bestPlayerCount: 3,
       fetchedAt: "2025-01-01T00:00:00.000Z",
     },
     numPlays: null,
@@ -97,25 +102,179 @@ describe("buildVocabulary", () => {
 });
 
 describe("encodeGame", () => {
+  test("requires an explicit ordered vector-axis schema at runtime", () => {
+    expect(() => {
+      Reflect.apply(encodeGame, undefined, [makeGame(), { mechanics: [], categories: [] }]);
+    }).toThrow(/ordered vector-axis schema is required/);
+  });
+
+  test("uses the canonical factual names and exact dimensions", () => {
+    expect(FACTUAL_VECTOR_DIMENSIONS).toEqual([
+      "weight",
+      "communityRating",
+      "minPlayers",
+      "maxPlayers",
+      "bestPlayers",
+      "playingTime",
+    ]);
+    const vector = encodeGame(makeGame(), { mechanics: ["Dice Rolling"], categories: [] }, []);
+    expect(vector.binary).toHaveLength(1);
+    expect(vector.continuous).toHaveLength(6);
+    expect(vector.personalAxes).toBeNull();
+  });
+
+  test("derives stable personal and tournament slots in collection order", () => {
+    const personal: PersonalAxis = {
+      id: "personal",
+      name: "Personal",
+      description: null,
+      weight: 50,
+      enabled: true,
+      source: "personal",
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+    const tournament: TournamentAxis = {
+      ...personal,
+      id: "tournament",
+      name: "Tournament",
+      source: "tournament",
+    };
+    const derived: Axis = {
+      ...personal,
+      id: "time",
+      name: "Play Time",
+      source: "derived",
+      derivedField: "playingTime",
+      configuration: { maximumScoringTime: 120 },
+    };
+    const disabled: Axis = {
+      id: "disabled",
+      name: "Disabled",
+      description: null,
+      weight: 50,
+      enabled: false,
+      source: "legacy",
+      reason: "unsupported",
+      legacyField: null,
+      legacyPayload: {},
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+
+    expect(
+      getOrderedVectorAxes([derived, tournament, disabled, personal]).map((axis) => axis.id),
+    ).toEqual(["tournament", "personal"]);
+    const vector = encodeGame(
+      makeGame(),
+      { mechanics: [], categories: [] },
+      [tournament, personal],
+      { tournament: 9, personal: 3 },
+    );
+    expect(vector.personalAxes).toEqual([8 / 9, 2 / 9]);
+    expect(getVectorAxisValues(makeGame(), [tournament, personal], 9)).toEqual({
+      tournament: 9,
+    });
+    expect(
+      encodeGame(
+        makeGame(),
+        { mechanics: [], categories: [] },
+        [tournament, personal],
+        getVectorAxisValues(makeGame(), [tournament, personal], null),
+      ).personalAxes,
+    ).toEqual([0.5, 0.5]);
+  });
+
+  test("derived duplicates and configuration changes cannot alter vector values", () => {
+    const base = {
+      id: "time-a",
+      name: "Play Time",
+      description: null,
+      weight: 50,
+      enabled: true as const,
+      source: "derived" as const,
+      derivedField: "playingTime" as const,
+      configuration: { maximumScoringTime: 60 },
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+    const game = makeGame({ playingTime: 300 });
+    const ranges = {
+      minPlayers: { min: 1, max: 5 },
+      maxPlayers: { min: 2, max: 6 },
+      bestPlayers: { min: 2, max: 4 },
+      playingTime: { min: 0, max: 600 },
+    };
+    const without = encodeGame(game, { mechanics: [], categories: [] }, [], undefined, ranges);
+    const axes: Axis[] = [
+      base,
+      { ...base, id: "time-b", configuration: { maximumScoringTime: 240 } },
+      {
+        ...base,
+        id: "players",
+        derivedField: "playerCountFit",
+        configuration: { targetPlayerCount: 4 },
+      },
+    ];
+    const withDerived = encodeGame(
+      game,
+      { mechanics: [], categories: [] },
+      getOrderedVectorAxes(axes),
+      game.ratings,
+      ranges,
+    );
+    expect(withDerived).toEqual(without);
+    expect(withDerived.continuous[5]).toBe(0.5);
+  });
+
+  test("sanitizes non-finite factual and axis inputs to a finite vector", () => {
+    const game = makeGame({
+      minPlayers: Number.NaN,
+      maxPlayers: Number.POSITIVE_INFINITY,
+      bestPlayers: Number.NaN,
+      playingTime: Number.NEGATIVE_INFINITY,
+    });
+    if (game.bggData !== null) {
+      game.bggData.weight = Number.NaN;
+      game.bggData.communityRating = Number.POSITIVE_INFINITY;
+    }
+    const axis: PersonalAxis = {
+      id: "personal",
+      name: "Personal",
+      description: null,
+      weight: 50,
+      enabled: true,
+      source: "personal",
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+    const vector = encodeGame(game, { mechanics: [], categories: [] }, [axis], {
+      personal: Number.NaN,
+    });
+    expect([...vector.continuous, ...(vector.personalAxes ?? [])].every(Number.isFinite)).toBe(
+      true,
+    );
+    expect(vector.personalAxes).toEqual([0.5]);
+  });
   test("produces correct binary flags for known mechanics", () => {
     const vocab = {
       mechanics: ["Dice Rolling", "Hand Management", "Worker Placement"],
       categories: ["Economic", "Strategy"],
     };
     const game = makeGame();
-    const vec = encodeGame(game, vocab);
+    const vec = encodeGame(game, vocab, []);
 
     // Dice Rolling=1, Hand Management=1, Worker Placement=0, Economic=0, Strategy=1
     expect(vec.binary).toEqual([1, 1, 0, 0, 1]);
   });
 
   test("normalizes continuous values to [0,1]", () => {
-    const game = makeGame({ minPlayers: 1, maxPlayers: 10, playingTime: 150 });
+    const game = makeGame({ minPlayers: 1, maxPlayers: 10, bestPlayers: 5.5, playingTime: 150 });
     game.bggData!.weight = 1; // min weight
     game.bggData!.communityRating = 10; // max rating
 
     const vocab = { mechanics: [], categories: [] };
-    const vec = encodeGame(game, vocab);
+    const vec = encodeGame(game, vocab, []);
 
     // weight: (1-1)/(5-1) = 0
     expect(vec.continuous[0]).toBe(0);
@@ -125,19 +284,21 @@ describe("encodeGame", () => {
     expect(vec.continuous[2]).toBe(0);
     // maxPlayers: (10-1)/(10-1) = 1
     expect(vec.continuous[3]).toBe(1);
-    // playingTime: 150/300 = 0.5
+    // bestPlayers: (5.5-1)/(10-1) = 0.5
     expect(vec.continuous[4]).toBe(0.5);
+    // playingTime: 150/300 = 0.5
+    expect(vec.continuous[5]).toBe(0.5);
   });
 
   test("handles null BGG data with defaults", () => {
     const game = makeGame({ bggData: null });
     const vocab = { mechanics: ["Dice Rolling"], categories: ["Strategy"] };
-    const vec = encodeGame(game, vocab);
+    const vec = encodeGame(game, vocab, []);
 
     // No BGG data: all binary flags 0
     expect(vec.binary).toEqual([0, 0]);
     // Continuous defaults: weight=2.5, rating=5.5, etc.
-    expect(vec.continuous.length).toBe(5);
+    expect(vec.continuous.length).toBe(6);
     expect(vec.continuous[0]).toBeCloseTo(0.375, 5); // (2.5-1)/4
     expect(vec.continuous[1]).toBe(0.5); // (5.5-1)/9
   });
@@ -145,9 +306,31 @@ describe("encodeGame", () => {
   test("encodes personal axis ratings when provided", () => {
     const game = makeGame();
     const axisRatings = { "axis-a": 8, "axis-b": 3 };
+    const axes = [
+      {
+        id: "axis-a",
+        name: "A",
+        description: null,
+        weight: 50,
+        enabled: true as const,
+        source: "personal" as const,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+      {
+        id: "axis-b",
+        name: "B",
+        description: null,
+        weight: 50,
+        enabled: true as const,
+        source: "personal" as const,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    ];
 
     const vocab = { mechanics: [], categories: [] };
-    const vec = encodeGame(game, vocab, axisRatings);
+    const vec = encodeGame(game, vocab, axes, axisRatings);
 
     expect(vec.personalAxes).not.toBeNull();
     expect(vec.personalAxes!.length).toBe(2);
@@ -157,9 +340,8 @@ describe("encodeGame", () => {
     expect(vec.personalAxes![1]).toBeCloseTo(2 / 9, 5);
   });
 
-  test("normalizes using axis-specific native scale", () => {
+  test("derived axes never allocate vector slots", () => {
     const game = makeGame();
-    // BGG weight axis value 3.0 on 1-5 scale
     const axisRatings = { w: 3.0 };
     const axes = [
       {
@@ -167,26 +349,38 @@ describe("encodeGame", () => {
         name: "Weight",
         description: null,
         weight: 50,
-        source: "bgg" as const,
-        bggField: "weight",
+        enabled: true as const,
+        source: "derived" as const,
+        derivedField: "weight" as const,
+        configuration: {},
         createdAt: "2026-01-01T00:00:00Z",
         updatedAt: "2026-01-01T00:00:00Z",
       },
     ];
 
     const vocab = { mechanics: [], categories: [] };
-    const vec = encodeGame(game, vocab, axisRatings, undefined, axes);
+    const vec = encodeGame(game, vocab, [], axisRatings);
 
-    expect(vec.personalAxes).not.toBeNull();
-    // weight 3.0: (3-1)/(5-1) = 0.5
-    expect(vec.personalAxes![0]).toBeCloseTo(0.5, 5);
+    expect(axes).toHaveLength(1);
+    expect(vec.personalAxes).toBeNull();
   });
 
   test("uses midpoint for unrated axes", () => {
     const game = makeGame();
     const vocab = { mechanics: [], categories: [] };
-    // Pass a record with one key whose value is undefined (unrated)
-    const vec = encodeGame(game, vocab, { "axis-a": undefined as unknown as number });
+    const axes = [
+      {
+        id: "axis-a",
+        name: "A",
+        description: null,
+        weight: 50,
+        enabled: true as const,
+        source: "personal" as const,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    ];
+    const vec = encodeGame(game, vocab, axes, { "axis-a": undefined });
 
     expect(vec.personalAxes![0]).toBe(0.5);
   });
@@ -194,7 +388,7 @@ describe("encodeGame", () => {
   test("personalAxes is null when no axis ratings provided", () => {
     const game = makeGame();
     const vocab = { mechanics: [], categories: [] };
-    const vec = encodeGame(game, vocab);
+    const vec = encodeGame(game, vocab, []);
     expect(vec.personalAxes).toBeNull();
   });
 
@@ -211,8 +405,8 @@ describe("encodeGame", () => {
         name: "A",
         description: null,
         weight: 50,
+        enabled: true as const,
         source: "personal" as const,
-        bggField: null,
         createdAt: "2026-01-01T00:00:00Z",
         updatedAt: "2026-01-01T00:00:00Z",
       },
@@ -221,8 +415,8 @@ describe("encodeGame", () => {
         name: "B",
         description: null,
         weight: 50,
+        enabled: true as const,
         source: "personal" as const,
-        bggField: null,
         createdAt: "2026-01-01T00:00:00Z",
         updatedAt: "2026-01-01T00:00:00Z",
       },
@@ -231,8 +425,8 @@ describe("encodeGame", () => {
         name: "C",
         description: null,
         weight: 50,
+        enabled: true as const,
         source: "personal" as const,
-        bggField: null,
         createdAt: "2026-01-01T00:00:00Z",
         updatedAt: "2026-01-01T00:00:00Z",
       },
@@ -240,8 +434,8 @@ describe("encodeGame", () => {
 
     // One game has only axis `a`, another has `b` and `c`. Both vectors must
     // have length 3 so centroid/pairwise math is well-defined.
-    const vecA = encodeGame(game, vocab, { a: 8 }, undefined, axes);
-    const vecBC = encodeGame(game, vocab, { b: 3, c: 9 }, undefined, axes);
+    const vecA = encodeGame(game, vocab, axes, { a: 8 });
+    const vecBC = encodeGame(game, vocab, axes, { b: 3, c: 9 });
 
     expect(vecA.personalAxes!.length).toBe(3);
     expect(vecBC.personalAxes!.length).toBe(3);
@@ -264,8 +458,8 @@ describe("encodeGame", () => {
       name: "Fun",
       description: null,
       weight: 50,
+      enabled: true as const,
       source: "personal" as const,
-      bggField: null,
       createdAt: "2026-01-01T00:00:00Z",
       updatedAt: "2026-01-01T00:00:00Z",
     };
@@ -274,17 +468,17 @@ describe("encodeGame", () => {
       name: "Tournament",
       description: null,
       weight: 30,
+      enabled: true as const,
       source: "tournament" as const,
-      bggField: null,
       createdAt: "2026-01-01T00:00:00Z",
       updatedAt: "2026-01-01T00:00:00Z",
     };
 
-    const withoutTournament = encodeGame(game, vocab, { fun: 8 }, undefined, [personalAxis]);
-    const withTournament = encodeGame(game, vocab, { fun: 8, tournament: 7.5 }, undefined, [
-      personalAxis,
-      tournamentAxis,
-    ]);
+    const withoutTournament = encodeGame(game, vocab, [personalAxis], { fun: 8 });
+    const withTournament = encodeGame(game, vocab, [personalAxis, tournamentAxis], {
+      fun: 8,
+      tournament: 7.5,
+    });
 
     expect(withoutTournament.personalAxes!.length).toBe(1);
     expect(withTournament.personalAxes!.length).toBe(2);
@@ -303,18 +497,18 @@ describe("encodeGame", () => {
       name: "Tournament",
       description: null,
       weight: 30,
+      enabled: true as const,
       source: "tournament" as const,
-      bggField: null,
       createdAt: "2026-01-01T00:00:00Z",
       updatedAt: "2026-01-01T00:00:00Z",
     };
 
     // Game with tournament value 10 (top of scale) should encode to 1.0
-    const top = encodeGame(game, vocab, { t: 10 }, undefined, [tournamentAxis]);
+    const top = encodeGame(game, vocab, [tournamentAxis], { t: 10 });
     expect(top.personalAxes![0]).toBeCloseTo(1, 5);
 
     // Game with no tournament rating falls back to 0.5
-    const empty = encodeGame(game, vocab, {}, undefined, [tournamentAxis]);
+    const empty = encodeGame(game, vocab, [tournamentAxis], {});
     expect(empty.personalAxes![0]).toBe(0.5);
   });
 
@@ -329,8 +523,8 @@ describe("encodeGame", () => {
         name: "Fun",
         description: null,
         weight: 50,
+        enabled: true as const,
         source: "personal" as const,
-        bggField: null,
         createdAt: "2026-01-01T00:00:00Z",
         updatedAt: "2026-01-01T00:00:00Z",
       },
@@ -339,15 +533,15 @@ describe("encodeGame", () => {
         name: "Tournament",
         description: null,
         weight: 30,
+        enabled: true as const,
         source: "tournament" as const,
-        bggField: null,
         createdAt: "2026-01-01T00:00:00Z",
         updatedAt: "2026-01-01T00:00:00Z",
       },
     ];
 
-    const a = encodeGame(game, vocab, { fun: 8, t: 7 }, undefined, axes);
-    const b = encodeGame(game, vocab, { fun: 6, t: 9 }, undefined, axes);
+    const a = encodeGame(game, vocab, axes, { fun: 8, t: 7 });
+    const b = encodeGame(game, vocab, axes, { fun: 6, t: 9 });
 
     const sim = cosineSimilarity(a.personalAxes!, b.personalAxes!);
     expect(Number.isNaN(sim)).toBe(false);
@@ -356,49 +550,91 @@ describe("encodeGame", () => {
   });
 
   test("uses observed ranges when provided", () => {
-    const game = makeGame({ minPlayers: 3, maxPlayers: 6, playingTime: 90 });
+    const game = makeGame({ minPlayers: 3, maxPlayers: 6, bestPlayers: 5, playingTime: 90 });
     const vocab = { mechanics: [], categories: [] };
     const ranges = {
       minPlayers: { min: 2, max: 4 },
       maxPlayers: { min: 4, max: 8 },
+      bestPlayers: { min: 3, max: 7 },
       playingTime: { min: 30, max: 120 },
     };
-    const vec = encodeGame(game, vocab, undefined, ranges);
+    const vec = encodeGame(game, vocab, [], undefined, ranges);
 
     // minPlayers: (3-2)/(4-2) = 0.5
     expect(vec.continuous[2]).toBeCloseTo(0.5, 10);
     // maxPlayers: (6-4)/(8-4) = 0.5
     expect(vec.continuous[3]).toBeCloseTo(0.5, 10);
+    // bestPlayers: (5-3)/(7-3) = 0.5
+    expect(vec.continuous[4]).toBeCloseTo(0.5, 10);
     // playingTime: (90-30)/(120-30) = 60/90 ≈ 0.667
-    expect(vec.continuous[4]).toBeCloseTo(60 / 90, 10);
+    expect(vec.continuous[5]).toBeCloseTo(60 / 90, 10);
+  });
+
+  test("encodes missing best-player counts at the active range midpoint", () => {
+    const ranges = {
+      minPlayers: { min: 1, max: 5 },
+      maxPlayers: { min: 2, max: 8 },
+      bestPlayers: { min: 6, max: 10 },
+      playingTime: { min: 30, max: 120 },
+    };
+
+    const vec = encodeGame(
+      makeGame({ bestPlayers: null }),
+      { mechanics: [], categories: [] },
+      [],
+      undefined,
+      ranges,
+    );
+
+    expect(vec.continuous[4]).toBe(0.5);
   });
 });
 
 describe("computeContinuousRanges", () => {
   test("computes observed min/max from collection", () => {
     const games = [
-      makeGame({ minPlayers: 2, maxPlayers: 4, playingTime: 30 }),
-      makeGame({ minPlayers: 3, maxPlayers: 8, playingTime: 120 }),
-      makeGame({ minPlayers: 1, maxPlayers: 6, playingTime: 60 }),
+      makeGame({ minPlayers: 2, maxPlayers: 4, bestPlayers: 3, playingTime: 30 }),
+      makeGame({ minPlayers: 3, maxPlayers: 8, bestPlayers: 6, playingTime: 120 }),
+      makeGame({ minPlayers: 1, maxPlayers: 6, bestPlayers: 4, playingTime: 60 }),
     ];
 
     const ranges = computeContinuousRanges(games);
     expect(ranges.minPlayers).toEqual({ min: 1, max: 3 });
     expect(ranges.maxPlayers).toEqual({ min: 4, max: 8 });
+    expect(ranges.bestPlayers).toEqual({ min: 3, max: 6 });
     expect(ranges.playingTime).toEqual({ min: 30, max: 120 });
   });
 
   test("falls back to defaults when no games have the field", () => {
-    const games = [makeGame({ minPlayers: null, maxPlayers: null, playingTime: null })];
+    const games = [
+      makeGame({ minPlayers: null, maxPlayers: null, bestPlayers: null, playingTime: null }),
+    ];
 
     const ranges = computeContinuousRanges(games);
     expect(ranges.minPlayers).toEqual({ min: 1, max: 10 });
     expect(ranges.maxPlayers).toEqual({ min: 1, max: 10 });
+    expect(ranges.bestPlayers).toEqual({ min: 1, max: 10 });
     expect(ranges.playingTime).toEqual({ min: 0, max: 300 });
   });
 });
 
 describe("jaccardDistance", () => {
+  test("rejects dimension mismatches", () => {
+    expect(() => jaccardDistance([1, 0], [1])).toThrow(
+      "jaccardDistance: dimension mismatch (a.length=2, b.length=1)",
+    );
+  });
+
+  test.each([
+    ["NaN", [Number.NaN], [0], "vector=a, index=0, value=NaN"],
+    ["positive infinity", [0], [Number.POSITIVE_INFINITY], "vector=b, index=0, value=Infinity"],
+    ["negative infinity", [Number.NEGATIVE_INFINITY], [0], "vector=a, index=0, value=-Infinity"],
+  ] as const)("rejects %s elements", (_name, a, b, detail) => {
+    expect(() => jaccardDistance([...a], [...b])).toThrow(
+      `jaccardDistance: non-finite vector element (${detail})`,
+    );
+  });
+
   test("identical sets return 0", () => {
     expect(jaccardDistance([1, 0, 1], [1, 0, 1])).toBe(0);
   });
@@ -441,6 +677,22 @@ describe("jaccardDistance", () => {
 });
 
 describe("normalizedManhattanDistance", () => {
+  test("rejects dimension mismatches", () => {
+    expect(() => normalizedManhattanDistance([1, 0], [1])).toThrow(
+      "normalizedManhattanDistance: dimension mismatch (a.length=2, b.length=1)",
+    );
+  });
+
+  test.each([
+    ["NaN", [Number.NaN], [0], "vector=a, index=0, value=NaN"],
+    ["positive infinity", [0], [Number.POSITIVE_INFINITY], "vector=b, index=0, value=Infinity"],
+    ["negative infinity", [Number.NEGATIVE_INFINITY], [0], "vector=a, index=0, value=-Infinity"],
+  ] as const)("rejects %s elements", (_name, a, b, detail) => {
+    expect(() => normalizedManhattanDistance([...a], [...b])).toThrow(
+      `normalizedManhattanDistance: non-finite vector element (${detail})`,
+    );
+  });
+
   test("identical values return 0", () => {
     expect(normalizedManhattanDistance([0.5, 0.5], [0.5, 0.5])).toBe(0);
   });
@@ -582,6 +834,20 @@ describe("computeCentroid", () => {
 });
 
 describe("cosineSimilarity", () => {
+  test("rejects dimension mismatches", () => {
+    expect(() => cosineSimilarity([1, 2], [1])).toThrow(/dimension mismatch/);
+  });
+
+  test.each([
+    ["NaN", [Number.NaN], [0], "vector=a, index=0, value=NaN"],
+    ["positive infinity", [0], [Number.POSITIVE_INFINITY], "vector=b, index=0, value=Infinity"],
+    ["negative infinity", [Number.NEGATIVE_INFINITY], [0], "vector=a, index=0, value=-Infinity"],
+  ] as const)("rejects %s elements", (_name, a, b, detail) => {
+    expect(() => cosineSimilarity([...a], [...b])).toThrow(
+      `cosineSimilarity: non-finite vector element (${detail})`,
+    );
+  });
+
   test("identical vectors return 1", () => {
     expect(cosineSimilarity([1, 2, 3], [1, 2, 3])).toBeCloseTo(1, 10);
   });

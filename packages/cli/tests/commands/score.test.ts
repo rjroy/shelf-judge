@@ -13,11 +13,11 @@ const scoreListData = {
       breakdown: [
         {
           axisName: "Wife will play it",
-          rating: 8,
+          effectiveRating: 8,
           weight: 40,
           contribution: 3.2,
           source: "personal",
-          bggOriginal: null,
+          sourceValue: null,
         },
       ],
     },
@@ -94,19 +94,31 @@ const scoreGetData = {
   breakdown: [
     {
       axisName: "Wife will play it",
-      rating: 8,
+      effectiveRating: 8,
       weight: 40,
       contribution: 3.2,
       source: "personal",
-      bggOriginal: null,
+      sourceValue: null,
     },
     {
-      axisName: "Community Rating",
-      rating: 8.1,
+      axisName: "Player Count Fit",
+      axisId: "player-count-axis",
+      derivedField: "playerCountFit",
+      effectiveRating: 10,
       weight: 10,
-      contribution: 0.81,
-      source: "bgg",
-      bggOriginal: null,
+      contribution: 1,
+      source: "derived",
+      sourceValue: 10,
+      scoringRawValue: 10,
+      preferenceShape: "higher-is-better",
+      curveAffected: false,
+      unit: "fit score",
+      provenance:
+        "BoardGameGeek suggested-player-count poll with publisher-declared bounds fallback",
+      configurationSummary: "Target: 4 players",
+      overridden: false,
+      predictionConfidence: null,
+      referenceGames: null,
     },
   ],
 };
@@ -129,23 +141,30 @@ describe("score get (rated game)", () => {
   test("human-readable output shows breakdown table", async () => {
     const output = await scoreGet(client, ["abc-123"], { json: false });
     expect(output).toContain("Wife will play it");
-    expect(output).toContain("Community Rating");
+    expect(output).toContain("Player Count Fit");
+    expect(output).toContain("Target: 4 players");
+    expect(output).toContain(
+      "BoardGameGeek suggested-player-count poll with publisher-declared bounds fallback",
+    );
     expect(output).toContain("3.20");
-    expect(output).toContain("0.81");
+    expect(output).toContain("1.00");
   });
 
   test("--json outputs parseable JSON with score and breakdown", async () => {
     const output = await scoreGet(client, ["abc-123"], { json: true });
-    const parsed = JSON.parse(output) as {
-      gameName: string;
-      score: number;
-      breakdown: Array<{ axisName: string }>;
-    };
+    const parsed = JSON.parse(output) as typeof scoreGetData;
     expect(parsed.gameName).toBe("Wingspan");
     expect(parsed.score).toBe(7.9);
+    expect(parsed).toEqual(scoreGetData);
     expect(Array.isArray(parsed.breakdown)).toBe(true);
     expect(parsed.breakdown[0].axisName).toBe("Wife will play it");
-    expect(parsed.breakdown[1].axisName).toBe("Community Rating");
+    expect(parsed.breakdown[1]).toMatchObject({
+      axisName: "Player Count Fit",
+      derivedField: "playerCountFit",
+      sourceValue: 10,
+      scoringRawValue: 10,
+      configurationSummary: "Target: 4 players",
+    });
   });
 });
 
@@ -167,24 +186,22 @@ const scoreGetVetoedData = {
   breakdown: [
     {
       axisName: "Complexity",
-      rating: 1.75,
       weight: 20,
       contribution: 0.35,
-      source: "bgg",
-      bggOriginal: null,
-      rawValue: 4.5,
+      source: "derived",
+      sourceValue: null,
+      scoringRawValue: 4.5,
       effectiveRating: 1.75,
       preferenceShape: "sweet-spot",
       curveAffected: true,
     },
     {
       axisName: "Fun Factor",
-      rating: 9,
       weight: 40,
       contribution: 3.6,
       source: "personal",
-      bggOriginal: null,
-      rawValue: 9,
+      sourceValue: null,
+      scoringRawValue: 9,
       effectiveRating: 9,
       preferenceShape: "higher-is-better",
       curveAffected: false,
@@ -260,7 +277,7 @@ describe("score list with vetoed game", () => {
           axisName: "Complexity",
           threshold: 4,
           direction: "above" as const,
-          rawValue: 4.5,
+          scoringRawValue: 4.5,
         },
         hypotheticalScore: 7.2,
       },

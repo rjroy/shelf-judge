@@ -13,9 +13,9 @@ function getShapeLabel(curve: UtilityCurveDeclaration): string {
   }
 }
 
-function formatNativeValue(value: number, scale: { min: number; max: number }): string {
-  if (Number.isInteger(value) && scale.max <= 100) return String(value);
-  return value.toFixed(1);
+function formatNativeValue(value: number, unit?: string | null): string {
+  const formatted = Number.isInteger(value) ? String(value) : value.toFixed(1);
+  return `${formatted}${unit ? ` ${unit}` : ""}`;
 }
 
 export function UtilityCurves({ curves }: { curves: UtilityCurveDeclaration[] }) {
@@ -25,6 +25,8 @@ export function UtilityCurves({ curves }: { curves: UtilityCurveDeclaration[] })
       c.shape !== "higher-is-better" ||
       c.idealValue !== null ||
       c.tolerance !== null ||
+      c.toleranceWidth !== null ||
+      c.derivedField !== null ||
       c.vetoThreshold !== null,
   );
 
@@ -46,16 +48,30 @@ export function UtilityCurves({ curves }: { curves: UtilityCurveDeclaration[] })
               <span className="curve-tag shape">{getShapeLabel(curve)}</span>
               {curve.idealValue !== null && (
                 <span className="curve-tag sweet-spot">
-                  Ideal: {formatNativeValue(curve.idealValue, curve.nativeScale)}
+                  Ideal: {formatNativeValue(curve.idealValue, curve.unit)}
                 </span>
               )}
               {curve.tolerance !== null && (
                 <span className="curve-tag tolerance">Tolerance: {curve.tolerance}</span>
               )}
+              {curve.toleranceWidth !== null && (
+                <span className="curve-tag tolerance">
+                  Tolerance: {formatNativeValue(curve.toleranceWidth)}{" "}
+                  {curve.unit ?? "native units"}
+                </span>
+              )}
+              <span className="curve-tag native-scale">
+                Native scale: {formatNativeValue(curve.nativeScale.min)}-
+                {formatNativeValue(curve.nativeScale.max)} {curve.unit ?? "rating"}
+              </span>
+              {curve.provenance && <span className="curve-detail-line">{curve.provenance}</span>}
+              {curve.configurationSummary && (
+                <span className="curve-detail-line">{curve.configurationSummary}</span>
+              )}
               {curve.vetoThreshold !== null && (
                 <span className="curve-tag veto">
                   Veto {curve.vetoThreshold.direction}{" "}
-                  {formatNativeValue(curve.vetoThreshold.threshold, curve.nativeScale)}
+                  {formatNativeValue(curve.vetoThreshold.threshold, curve.unit)}
                 </span>
               )}
             </div>

@@ -60,6 +60,8 @@ describe("GameService BGG Integration", () => {
       expect(game.yearPublished).toBe(2019);
       expect(game.minPlayers).toBe(1);
       expect(game.maxPlayers).toBe(5);
+      expect(game.bggData!.bestPlayerCount).toBe(3);
+      expect(game.bestPlayers).toBe(3);
     });
 
     test("adds game with warning when BGG unavailable", async () => {
@@ -119,9 +121,14 @@ describe("GameService BGG Integration", () => {
 
       // Rate a BGG-derived axis (override)
       const collection = await storageService.loadCollection();
-      const complexityAxis = collection.axes.find((a) => a.bggField === "weight");
+      const complexityAxis = collection.axes.find(
+        (axis) => axis.source === "derived" && axis.derivedField === "weight",
+      );
       expect(complexityAxis).toBeDefined();
       await gameService.rateGame(game.id, { [complexityAxis!.id]: 7 });
+      const beforeRefresh = await storageService.loadCollection();
+      beforeRefresh.games[0].bestPlayers = null;
+      await storageService.saveCollection(beforeRefresh);
 
       // Refresh: second fetch
       mockFetch.enqueue(200, thingXml);
@@ -130,6 +137,8 @@ describe("GameService BGG Integration", () => {
       // bggData should be updated (fetchedAt changed)
       expect(refreshed.bggData).not.toBeNull();
       expect(refreshed.bggData!.communityRating).toBe(8.00153);
+      expect(refreshed.bggData!.bestPlayerCount).toBe(3);
+      expect(refreshed.bestPlayers).toBe(3);
 
       // User override should be preserved
       expect(refreshed.ratings[complexityAxis!.id]).toBe(7);
@@ -214,7 +223,9 @@ describe("GameService BGG Integration", () => {
       });
 
       const collection = await storageService.loadCollection();
-      const complexityAxis = collection.axes.find((a) => a.bggField === "weight");
+      const complexityAxis = collection.axes.find(
+        (axis) => axis.source === "derived" && axis.derivedField === "weight",
+      );
 
       // Override the complexity axis
       await gameService.rateGame(game.id, { [complexityAxis!.id]: 7 });
@@ -227,8 +238,8 @@ describe("GameService BGG Integration", () => {
       );
       expect(complexityBreakdown).toBeDefined();
       expect(complexityBreakdown!.source).toBe("override");
-      expect(complexityBreakdown!.rating).toBe(7);
-      expect(complexityBreakdown!.bggOriginal).toBe(2.5); // raw BGG weight 2.4802, rounded
+      expect(complexityBreakdown!.effectiveRating).toBe(7);
+      expect(complexityBreakdown!.sourceValue).toBe(2.4802);
     });
   });
 });

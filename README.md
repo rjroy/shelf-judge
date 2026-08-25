@@ -106,16 +106,16 @@ Every command accepts `--json` for raw JSON output — useful for scripting and 
 
 The web UI is the primary interface. Navigate from the sidebar:
 
-| Page | What you do there |
-|---|---|
-| **Collection** | Browse all games sorted by fitness, filter and sort, see the redundancy and prediction overlays |
-| **Game detail** | View fitness breakdown, rate axes, refresh BGG data, edit box dimensions |
-| **Search / Add** | Find games on BGG or add manually |
-| **Wishlist** | Games you want; predicted fitness scores shown alongside |
-| **Axes** | Create, edit, and delete personal rating axes and adjust weights |
-| **Tournament** | Run head-to-head ELO sessions; configure the bracket filters |
-| **Redundancy** | Configure the overlap-penalty settings |
-| **Previously Owned** | Games you've culled; keep a record without cluttering the active shelf |
+| Page                 | What you do there                                                                               |
+| -------------------- | ----------------------------------------------------------------------------------------------- |
+| **Collection**       | Browse all games sorted by fitness, filter and sort, see the redundancy and prediction overlays |
+| **Game detail**      | View fitness breakdown, rate axes, refresh BGG data, edit box dimensions                        |
+| **Search / Add**     | Find games on BGG or add manually                                                               |
+| **Wishlist**         | Games you want; predicted fitness scores shown alongside                                        |
+| **Axes**             | Create, edit, and delete personal rating axes and adjust weights                                |
+| **Tournament**       | Run head-to-head ELO sessions; configure the bracket filters                                    |
+| **Redundancy**       | Configure the overlap-penalty settings                                                          |
+| **Previously Owned** | Games you've culled; keep a record without cluttering the active shelf                          |
 
 ## Fitness Score
 

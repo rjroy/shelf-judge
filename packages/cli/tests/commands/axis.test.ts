@@ -1,5 +1,13 @@
 import { describe, test, expect } from "bun:test";
-import { axisList, axisCreate, axisUpdate, axisDelete } from "../../src/commands/axis.js";
+import { getDerivedFieldDiscovery } from "@shelf-judge/shared";
+import {
+  axisTemplates,
+  axisList,
+  axisCreate,
+  axisUpdate,
+  axisRepair,
+  axisDelete,
+} from "../../src/commands/axis.js";
 import { createMockClient } from "../helpers/mock-client.js";
 
 const axes = [
@@ -10,14 +18,27 @@ const axes = [
     source: "personal",
     description: null,
   },
-  { id: "ax-2-full-uuid", name: "Community Rating", weight: 10, source: "bgg", description: null },
+  {
+    id: "ax-2-full-uuid",
+    name: "Community Rating",
+    weight: 10,
+    source: "derived",
+    derivedField: "communityRating",
+    configuration: {},
+    description: null,
+  },
 ];
+
+const discoveryRoute = {
+  response: { ok: true, status: 200, data: getDerivedFieldDiscovery() },
+};
 
 describe("axis list", () => {
   test("human-readable output has ID, Name, Weight, Source, Shape columns", async () => {
     const client = createMockClient({
       routes: {
         "GET /api/axes": { response: { ok: true, status: 200, data: axes } },
+        "GET /api/axes/derived-fields": discoveryRoute,
       },
     });
 
@@ -36,7 +57,7 @@ describe("axis list", () => {
     expect(output).toContain("ax-2-ful");
     expect(output).toContain("Community Rating");
     expect(output).toContain("10");
-    expect(output).toContain("bgg");
+    expect(output).toContain("derived:communityRating");
     // Default shape for axes without preferenceShape
     expect(output).toContain("linear\u2191");
   });
@@ -56,6 +77,33 @@ describe("axis list", () => {
     expect(parsed[0].id).toBe("ax-1-full-uuid");
     expect(parsed[0].name).toBe("Wife will play it");
     expect(parsed[1].id).toBe("ax-2-full-uuid");
+  });
+});
+
+describe("axis templates", () => {
+  test("lists every discovery-backed template with configuration and provenance", async () => {
+    const discovery = getDerivedFieldDiscovery();
+    const client = createMockClient({
+      routes: { "GET /api/axes/derived-fields": discoveryRoute },
+    });
+
+    const output = await axisTemplates(client, [], { json: false });
+
+    for (const field of discovery.fields) {
+      expect(output).toContain(field.id);
+      expect(output).toContain(field.template.name);
+      expect(output).toContain(field.provenance);
+    }
+    expect(output).toContain("targetPlayerCount");
+    expect(output).toContain("maximumScoringTime");
+  });
+
+  test("preserves the versioned discovery response as JSON", async () => {
+    const client = createMockClient({
+      routes: { "GET /api/axes/derived-fields": discoveryRoute },
+    });
+    const output = await axisTemplates(client, [], { json: true });
+    expect(JSON.parse(output)).toEqual(getDerivedFieldDiscovery());
   });
 });
 
@@ -96,6 +144,130 @@ describe("axis create", () => {
   });
 });
 
+describe("axis create from template", () => {
+  test("creates all discovery templates and permits duplicates", async () => {
+    const discovery = getDerivedFieldDiscovery();
+    const capturedBodies: unknown[] = [];
+    const client = createMockClient({
+      routes: {
+        "GET /api/axes/derived-fields": discoveryRoute,
+        "POST /api/axes": {
+          response: {
+            ok: true,
+            status: 201,
+            data: {
+              id: "new-derived-axis",
+              name: "Derived",
+              weight: 50,
+              source: "derived",
+              derivedField: "communityRating",
+              configuration: {},
+            },
+          },
+        },
+      },
+    });
+    const originalPost = client.post.bind(client);
+    client.post = <T>(path: string, body?: unknown) => {
+      capturedBodies.push(body);
+      return originalPost<T>(path, body);
+    };
+
+    for (const field of discovery.fields) {
+      const options = {
+        json: false,
+        template: field.id,
+        targetPlayerCount: field.configuration.some(({ name }) => name === "targetPlayerCount")
+          ? 4
+          : undefined,
+        maximumScoringTime: field.configuration.some(({ name }) => name === "maximumScoringTime")
+          ? 240
+          : undefined,
+      };
+      await axisCreate(client, [], options);
+      await axisCreate(client, [], options);
+    }
+
+    expect(capturedBodies).toHaveLength(discovery.fields.length * 2);
+    const playerCountBodies = capturedBodies.filter(
+      (body) => (body as { derivedField?: string }).derivedField === "playerCountFit",
+    );
+    expect(playerCountBodies).toHaveLength(2);
+    expect(playerCountBodies[0]).toMatchObject({
+      source: "derived",
+      derivedField: "playerCountFit",
+      configuration: { targetPlayerCount: 4 },
+    });
+    const playTime = capturedBodies.find(
+      (body) => (body as { derivedField?: string }).derivedField === "playingTime",
+    );
+    expect(playTime).toMatchObject({
+      configuration: { maximumScoringTime: 240 },
+      idealValue: 90,
+      toleranceWidth: 30,
+    });
+  });
+
+  test("requires configuration without a default and applies discovered defaults", async () => {
+    const capturedBodies: unknown[] = [];
+    const client = createMockClient({
+      routes: {
+        "GET /api/axes/derived-fields": discoveryRoute,
+        "POST /api/axes": {
+          response: {
+            ok: true,
+            status: 201,
+            data: {
+              id: "play-time",
+              name: "Play Time",
+              weight: 50,
+              source: "derived",
+              derivedField: "playingTime",
+              configuration: { maximumScoringTime: 240 },
+            },
+          },
+        },
+      },
+    });
+    const originalPost = client.post.bind(client);
+    client.post = <T>(path: string, body?: unknown) => {
+      capturedBodies.push(body);
+      return originalPost<T>(path, body);
+    };
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test rejects pattern requires await
+    await expect(
+      axisCreate(client, [], { json: false, template: "playerCountFit" }),
+    ).rejects.toThrow("--target-player-count is required");
+    await axisCreate(client, [], { json: false, template: "playingTime" });
+    expect(capturedBodies).toEqual([
+      expect.objectContaining({ configuration: { maximumScoringTime: 240 } }),
+    ]);
+  });
+
+  test("surfaces stable validation codes and fields", async () => {
+    const client = createMockClient({
+      routes: {
+        "POST /api/axes": {
+          response: {
+            ok: false,
+            status: 400,
+            data: {
+              error: "Validation failed",
+              message: "Target player count is invalid",
+              code: "invalid_target_player_count",
+              details: [{ field: "targetPlayerCount", path: ["configuration"] }],
+            },
+          },
+        },
+      },
+    });
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test rejects pattern requires await
+    await expect(axisCreate(client, ["Personal"], { json: false })).rejects.toThrow(
+      "Provide a whole target player count within the bounds shown by `axis templates`. [invalid_target_player_count] Fields: targetPlayerCount. Server: Target player count is invalid",
+    );
+  });
+});
+
 describe("axis update", () => {
   const updated = {
     id: "ax-1-full-uuid",
@@ -132,13 +304,202 @@ describe("axis update", () => {
   });
 });
 
+describe("axis update derived configuration", () => {
+  test("merges a target update with the current configuration", async () => {
+    let capturedBody: unknown;
+    const derivedAxis = {
+      ...axes[1],
+      id: "player-axis",
+      derivedField: "playerCountFit",
+      configuration: { targetPlayerCount: 2 },
+    };
+    const client = createMockClient({
+      routes: {
+        "GET /api/axes": { response: { ok: true, status: 200, data: [derivedAxis] } },
+        "GET /api/axes/derived-fields": discoveryRoute,
+        "PUT /api/axes/player-axis": {
+          response: { ok: true, status: 200, data: derivedAxis },
+        },
+      },
+    });
+    const originalPut = client.put.bind(client);
+    client.put = <T>(path: string, body?: unknown) => {
+      capturedBody = body;
+      return originalPut<T>(path, body);
+    };
+
+    await axisUpdate(client, ["player-axis"], { json: false, targetPlayerCount: 6 });
+
+    expect(capturedBody).toEqual({ configuration: { targetPlayerCount: 6 } });
+  });
+
+  test("updates scoring cap and native-unit tolerance together", async () => {
+    let capturedBody: unknown;
+    const derivedAxis = {
+      ...axes[1],
+      id: "time-axis",
+      derivedField: "playingTime",
+      configuration: { maximumScoringTime: 240 },
+    };
+    const client = createMockClient({
+      routes: {
+        "GET /api/axes": { response: { ok: true, status: 200, data: [derivedAxis] } },
+        "GET /api/axes/derived-fields": discoveryRoute,
+        "PUT /api/axes/time-axis": {
+          response: { ok: true, status: 200, data: derivedAxis },
+        },
+      },
+    });
+    const originalPut = client.put.bind(client);
+    client.put = <T>(path: string, body?: unknown) => {
+      capturedBody = body;
+      return originalPut<T>(path, body);
+    };
+
+    await axisUpdate(client, ["time-axis"], {
+      json: false,
+      maximumScoringTime: 300,
+      toleranceWidth: 45,
+    });
+
+    expect(capturedBody).toEqual({
+      toleranceWidth: 45,
+      configuration: { maximumScoringTime: 300 },
+    });
+  });
+
+  test("clears categorical tolerance when setting a native-unit width", async () => {
+    let capturedBody: unknown;
+    const client = createMockClient({
+      routes: {
+        "PUT /api/axes/time-axis": {
+          response: {
+            ok: true,
+            status: 200,
+            data: { ...axes[1], id: "time-axis", source: "derived" },
+          },
+        },
+      },
+    });
+    const originalPut = client.put.bind(client);
+    client.put = <T>(path: string, body?: unknown) => {
+      capturedBody = body;
+      return originalPut<T>(path, body);
+    };
+
+    await axisUpdate(client, ["time-axis"], {
+      json: false,
+      noTolerance: true,
+      toleranceWidth: 30,
+    });
+
+    expect(capturedBody).toEqual({ tolerance: null, toleranceWidth: 30 });
+  });
+
+  test("clears native-unit tolerance when setting a categorical tolerance", async () => {
+    let capturedBody: unknown;
+    const client = createMockClient({
+      routes: {
+        "PUT /api/axes/time-axis": {
+          response: {
+            ok: true,
+            status: 200,
+            data: { ...axes[1], id: "time-axis", source: "derived" },
+          },
+        },
+      },
+    });
+    const originalPut = client.put.bind(client);
+    client.put = <T>(path: string, body?: unknown) => {
+      capturedBody = body;
+      return originalPut<T>(path, body);
+    };
+
+    await axisUpdate(client, ["time-axis"], {
+      json: false,
+      tolerance: "moderate",
+      noToleranceWidth: true,
+    });
+
+    expect(capturedBody).toEqual({ tolerance: "moderate", toleranceWidth: null });
+  });
+});
+
+describe("axis repair", () => {
+  test("repairs a disabled axis using discovery-backed configuration", async () => {
+    let capturedBody: unknown;
+    const repaired = {
+      ...axes[1],
+      id: "legacy-axis",
+      derivedField: "playerCountFit",
+      configuration: { targetPlayerCount: 4 },
+    };
+    const client = createMockClient({
+      routes: {
+        "GET /api/axes/derived-fields": discoveryRoute,
+        "POST /api/axes/legacy-axis/repair": {
+          response: { ok: true, status: 200, data: repaired },
+        },
+      },
+    });
+    const originalPost = client.post.bind(client);
+    client.post = <T>(path: string, body?: unknown) => {
+      capturedBody = body;
+      return originalPost<T>(path, body);
+    };
+
+    const output = await axisRepair(client, ["legacy-axis"], {
+      json: false,
+      template: "playerCountFit",
+      targetPlayerCount: 4,
+    });
+
+    expect(capturedBody).toEqual({
+      derivedField: "playerCountFit",
+      configuration: { targetPlayerCount: 4 },
+    });
+    expect(output).toContain("Repaired axis");
+    expect(output).toContain("derived:playerCountFit");
+  });
+});
+
+describe("axis list disabled legacy guidance", () => {
+  test("shows repair and delete commands", async () => {
+    const disabled = {
+      id: "legacy-axis-id",
+      name: "Old Metadata",
+      description: null,
+      weight: 20,
+      enabled: false,
+      source: "legacy",
+      reason: "Unknown legacy field",
+      legacyField: "oldField",
+      legacyPayload: {},
+    };
+    const client = createMockClient({
+      routes: {
+        "GET /api/axes": { response: { ok: true, status: 200, data: [disabled] } },
+        "GET /api/axes/derived-fields": discoveryRoute,
+      },
+    });
+
+    const output = await axisList(client, [], { json: false });
+    expect(output).toContain("legacy (disabled)");
+    expect(output).toContain("Unknown legacy field");
+    expect(output).toContain("axis repair legacy-axis-id --template <id>");
+    expect(output).toContain("axis delete legacy-axis-id");
+  });
+});
+
 describe("axis list with curve config", () => {
   const axesWithCurves = [
     {
       id: "ax-1-full-uuid",
       name: "Complexity",
       weight: 20,
-      source: "bgg",
+      source: "derived",
+      derivedField: "weight",
+      configuration: {},
       description: null,
       preferenceShape: "sweet-spot",
       idealValue: 2.75,
@@ -168,6 +529,7 @@ describe("axis list with curve config", () => {
     const client = createMockClient({
       routes: {
         "GET /api/axes": { response: { ok: true, status: 200, data: axesWithCurves } },
+        "GET /api/axes/derived-fields": discoveryRoute,
       },
     });
 
@@ -179,6 +541,7 @@ describe("axis list with curve config", () => {
     const client = createMockClient({
       routes: {
         "GET /api/axes": { response: { ok: true, status: 200, data: axesWithCurves } },
+        "GET /api/axes/derived-fields": discoveryRoute,
       },
     });
 
@@ -190,6 +553,7 @@ describe("axis list with curve config", () => {
     const client = createMockClient({
       routes: {
         "GET /api/axes": { response: { ok: true, status: 200, data: axesWithCurves } },
+        "GET /api/axes/derived-fields": discoveryRoute,
       },
     });
 
@@ -201,6 +565,7 @@ describe("axis list with curve config", () => {
     const client = createMockClient({
       routes: {
         "GET /api/axes": { response: { ok: true, status: 200, data: axesWithCurves } },
+        "GET /api/axes/derived-fields": discoveryRoute,
       },
     });
 
@@ -214,7 +579,9 @@ describe("axis create with curve flags", () => {
     id: "new-axis-id",
     name: "Complexity",
     weight: 20,
-    source: "bgg",
+    source: "derived",
+    derivedField: "weight",
+    configuration: {},
     description: null,
     preferenceShape: "sweet-spot",
     idealValue: 2.75,
@@ -255,7 +622,9 @@ describe("axis update with curve flags", () => {
     id: "ax-1-full-uuid",
     name: "Complexity",
     weight: 20,
-    source: "bgg",
+    source: "derived",
+    derivedField: "weight",
+    configuration: {},
     description: null,
     preferenceShape: "sweet-spot",
     idealValue: 2.75,

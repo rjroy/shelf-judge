@@ -178,7 +178,14 @@ export default function ImportPage() {
                 <button type="submit" className="btn btn-primary" disabled={importing}>
                   Import
                 </button>
-                <button type="button" className="btn btn-secondary" onClick={() => { void handleSaveUsername(); }} disabled={importing}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    void handleSaveUsername();
+                  }}
+                  disabled={importing}
+                >
                   Save Username Only
                 </button>
               </form>
