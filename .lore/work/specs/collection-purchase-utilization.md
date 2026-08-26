@@ -131,7 +131,7 @@ The collection list can be sorted by:
 
 Sorting by value remaining helps the owner find purchases with the most money left to justify. Sorting by additional plays helps distinguish games that are close to the threshold from games that would require much more use.
 
-Value remaining is money, so Shelf Judge must not compare amounts in different currencies. If more than one currency has sortable results, the list groups games by currency and sorts within each group.
+Shelf Judge treats all entered amounts as the owner's one implicit personal currency. It does not store currency codes or distinguish dollars, pounds, or other units. Value remaining therefore sorts directly by its half-up rounded number of hundredths used for the two-decimal display.
 
 For additional plays, "Unreachable at current fitness" is larger than any finite estimate. It appears first when sorting high to low and after all finite estimates when sorting low to high. Results that cannot be calculated appear last in either direction.
 
@@ -145,7 +145,7 @@ The calculation uses the same current fitness score shown elsewhere for the game
 
 When the displayed fitness changes, the purchase-value result changes with it. The result answers, "Was this a good purchase according to what I value now?" It is not a historical snapshot of how the owner felt when they bought or played the game.
 
-A vetoed game has fitness `0`. Its adjusted hourly benchmark is therefore `$0`, so a paid vetoed game cannot currently meet the value threshold.
+A vetoed game has fitness `0`. Its adjusted hourly benchmark is therefore `$0`, even when the collection benchmark is missing or invalid, so a paid vetoed game cannot currently meet the value threshold.
 
 ### Modeled Player-Hours
 
@@ -183,53 +183,52 @@ Recorded plays are also lifetime totals. Shelf Judge does not try to decide whic
 
 ## Special Cases
 
-| Situation                                   | What the owner sees                                                                                                                                                                                                                                                                |
-| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| No purchase cost entered                    | Explain that purchase cost is needed. Continue showing any available use data.                                                                                                                                                                                                     |
-| No entertainment benchmark                  | For a positive-play, non-vetoed game, explain that the benchmark is needed for the value judgment. Continue showing available cost measures. A known zero-play or vetoed purchase still shows `0.00x` and its full cost remaining because those results do not need the benchmark. |
-| Play count unavailable                      | Explain that play count is unknown. Do not judge the purchase unless current fitness is `0`; a veto alone is enough to show the full cost remaining and an unreachable threshold.                                                                                                  |
-| Exactly zero recorded plays                 | Show `0.00x`, the full paid cost as value remaining, and "Value threshold not yet met," even when fitness or the benchmark is unavailable. Estimate additional plays only when duration, player count, positive fitness, and a same-currency benchmark are usable.                 |
-| Missing duration or player count            | Show cost per recorded play when possible. Explain why modeled value is unavailable unless current fitness is `0`; a veto alone is enough to show the full cost remaining and an unreachable threshold.                                                                            |
-| Gift                                        | Show "Gift; no owner cost." Do not calculate a value multiplier.                                                                                                                                                                                                                   |
-| Purchased for zero                          | Show "No owner cost." Do not calculate a value multiplier.                                                                                                                                                                                                                         |
-| Different benchmark and purchase currencies | Show both amounts, explain that matching currencies are required, and link to the benchmark setting. Do not compare or convert them. A known zero-play purchase may still show its full cost remaining, but additional plays remain unavailable.                                   |
-| Previously owned game                       | Show the result on game detail using its historical cost and plays, but make clear that fitness and the benchmark are current.                                                                                                                                                     |
-| Expansion stored as its own game            | Judge that record independently. Do not move cost or plays between the expansion and its base game.                                                                                                                                                                                |
-| Value threshold already met                 | Show `$0.00` remaining and `0` additional plays. Do not show a negative balance.                                                                                                                                                                                                   |
-| Vetoed game                                 | Show the full paid cost as value remaining. The additional-plays field says "Unreachable at current fitness," even when the benchmark or modeled-use inputs are missing or invalid. Do not show infinity.                                                                          |
+| Situation                        | What the owner sees                                                                                                                                                                                                                                                                |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No purchase cost entered         | Explain that purchase cost is needed. Continue showing any available use data.                                                                                                                                                                                                     |
+| No entertainment benchmark       | For a positive-play, non-vetoed game, explain that the benchmark is needed for the value judgment. Continue showing available cost measures. A known zero-play or vetoed purchase still shows `0.00x` and its full cost remaining because those results do not need the benchmark. |
+| Play count unavailable           | Explain that play count is unknown. Do not judge the purchase unless current fitness is `0`; a veto alone is enough to show the full cost remaining and an unreachable additional-play estimate.                                                                                   |
+| Exactly zero recorded plays      | Show `0.00x`, the full paid cost as value remaining, and "Value threshold not yet met," even when fitness or the benchmark is unavailable. Estimate additional plays only when duration, player count, positive fitness, and a benchmark are usable.                               |
+| Missing duration or player count | Show cost per recorded play when possible. Explain why modeled value is unavailable unless current fitness is `0`; a veto alone is enough to show the full cost remaining and an unreachable additional-play estimate.                                                             |
+| Gift                             | Show "Gift; no owner cost." Do not calculate a value multiplier.                                                                                                                                                                                                                   |
+| Purchased for zero               | Show "No owner cost." Do not calculate a value multiplier.                                                                                                                                                                                                                         |
+| Previously owned game            | Show the result on game detail using its historical cost and plays, but make clear that fitness and the benchmark are current.                                                                                                                                                     |
+| Expansion stored as its own game | Judge that record independently. Do not move cost or plays between the expansion and its base game.                                                                                                                                                                                |
+| Value threshold already met      | Show `$0.00` remaining and `0` additional plays. Do not show a negative balance.                                                                                                                                                                                                   |
+| Vetoed game                      | Show the full paid cost as value remaining. The additional-plays field says "Unreachable at current fitness," even when the benchmark or modeled-use inputs are missing or invalid. Do not show infinity.                                                                          |
 
 ## Requirements
 
 ### Result
 
 1. **REQ-UTIL-1:** A paid game with enough data must show whether its modeled value threshold is met or not yet met.
-2. **REQ-UTIL-2:** A positive-play result must show the value multiplier, value remaining, estimated additional plays, cost per modeled player-hour, fitness-adjusted hourly benchmark, and all inputs used. A zero-play result must show `0.00x`, the full paid cost as value remaining, and that hourly cost is unavailable. It shows the benchmark when available; otherwise it explains that the benchmark was not needed for those zero-play results.
+2. **REQ-UTIL-2:** A positive-play result must show the value multiplier, value remaining, estimated additional plays, cost per modeled player-hour, fitness-adjusted hourly benchmark, and all inputs used. A zero-play result must show `0.00x`, the full paid cost as value remaining, and that hourly cost is unavailable. It shows the benchmark when available; otherwise it explains that the benchmark was not needed for those zero-play results. A fitness-zero result shows a `$0.00` adjusted benchmark and explains that the collection benchmark was not needed.
 3. **REQ-UTIL-3:** The threshold is met when the exact cost per modeled player-hour is less than or equal to the exact fitness-adjusted benchmark. If rounded numbers would make the displayed status look wrong, the interface must show enough extra precision to explain the difference.
 4. **REQ-UTIL-4:** Cost per recorded play must remain available whenever purchase cost and a positive recorded play count are known, even if the modeled value result is unavailable.
 5. **REQ-UTIL-5:** The product must use the labels "Value threshold met," "Value threshold not yet met," "Value remaining," "Estimated additional plays to value threshold," "Cost per recorded play," "Cost per modeled player-hour," and "Fitness-adjusted hourly benchmark."
 6. **REQ-UTIL-6:** Value remaining must be the portion of purchase cost not yet justified by modeled use. It cannot be less than zero.
 7. **REQ-UTIL-7:** Estimated additional plays must divide value remaining by the modeled value of one more play and round up to the next whole play.
-8. **REQ-UTIL-8:** A purchase that has met its threshold must show `$0` remaining and `0` additional plays.
-9. **REQ-UTIL-9:** When current fitness is `0`, a paid game must show its full purchase cost as value remaining. Its additional-plays field must show "Unreachable at current fitness" rather than a number or infinity. This fitness rule takes precedence when the benchmark or modeled-use inputs are missing, invalid, or use another currency.
+8. **REQ-UTIL-8:** A purchase that has met its threshold must show `$0.00` remaining and `0` additional plays.
+9. **REQ-UTIL-9:** When current fitness is `0`, a paid game must show its full purchase cost as value remaining. Its additional-plays field must show "Unreachable at current fitness" rather than a number or infinity. This fitness rule takes precedence when the benchmark or modeled-use inputs are missing or invalid.
 
 ### Benchmark And Fitness
 
-10. **REQ-UTIL-10:** The collection must have one optional entertainment benchmark containing a positive amount and currency.
+10. **REQ-UTIL-10:** The collection must have one optional entertainment benchmark containing a positive amount in the owner's implicit personal currency.
 11. **REQ-UTIL-11:** The benchmark means the acceptable cost of one person-hour of entertainment for a fitness-6 game.
 12. **REQ-UTIL-12:** The fitness-adjusted benchmark must change in direct proportion to fitness. Fitness 6 uses the configured benchmark exactly.
 13. **REQ-UTIL-13:** The benchmark settings must explain the movie-ticket method and identify `$16 / 2 hours = $8 per person-hour` as an example.
 14. **REQ-UTIL-14:** The calculation must use the current fitness score shown for the game.
-15. **REQ-UTIL-15:** A vetoed fitness of `0` must produce an hourly benchmark of zero.
+15. **REQ-UTIL-15:** A vetoed fitness of `0` must produce an hourly benchmark of zero without requiring a valid collection benchmark.
 16. **REQ-UTIL-16:** Changing fitness or the entertainment benchmark must update the result without changing purchase or usage data.
 
 ### Purchase And Usage Data
 
 17. **REQ-UTIL-17:** Purchase cost is optional. The owner must be able to mark a game as unknown, a gift, or a purchase and correct that choice later.
 18. **REQ-UTIL-18:** Purchase cost means lifetime landed cost for that game record, including item price, tax, shipping, and later reacquisitions.
-19. **REQ-UTIL-19:** A known play count of zero must produce zero modeled player-hours, `0.00x` value, and the full paid cost remaining without requiring fitness, benchmark, duration, or player-count metadata. Estimating additional plays still requires valid positive fitness, a same-currency benchmark, duration, and player-count metadata.
+19. **REQ-UTIL-19:** A known play count of zero must produce zero modeled player-hours, `0.00x` value, and the full paid cost remaining without requiring fitness, benchmark, duration, or player-count metadata. Estimating additional plays still requires valid positive fitness, a benchmark, duration, and player-count metadata.
 20. **REQ-UTIL-20:** A positive play count requires a valid positive duration and modeled player count before modeled player-hours or modeled purchase value can be shown, except for the fitness-0 result defined by REQ-UTIL-9.
 21. **REQ-UTIL-21:** A gift must show "Gift; no owner cost." A zero-cost purchase must show "No owner cost." Neither receives value remaining, a value multiplier, or a met/not-met judgment.
-22. **REQ-UTIL-22:** The system must not compare a purchase with a benchmark in another currency. It must explain the mismatch and link to the benchmark setting.
+22. **REQ-UTIL-22:** Purchase cost and the entertainment benchmark must use the same implicit personal currency. The system must not store currency codes, convert amounts, or infer exchange rates.
 
 ### Honesty And Scope
 
@@ -248,8 +247,8 @@ Recorded plays are also lifetime totals. Shelf Judge does not try to decide whic
 32. **REQ-UTIL-32:** Web and CLI must let the owner mark a game as a gift, enter or correct a purchase, restore an unknown acquisition state, and set, correct, or clear the entertainment benchmark.
 33. **REQ-UTIL-33:** Clearing purchase cost or the entertainment benchmark must restore the unknown state rather than save zero.
 34. **REQ-UTIL-34:** Web and CLI must show the same result for the same game and inputs.
-35. **REQ-UTIL-35:** The collection list must support ascending and descending sorts by displayed value remaining and by estimated additional plays. Value remaining sorts by its currency-rounded display amount so equal displayed amounts use the tie-breaker instead of a hidden fraction. Different currencies must be grouped and compared only within the same currency; currency groups sort by currency code.
-36. **REQ-UTIL-36:** Calculated values must sort before unavailable values. For estimated plays, unreachable results sort above every finite result in descending order and below every finite result in ascending order; unavailable results remain last. Exact ties sort by game name and then stable game ID.
+35. **REQ-UTIL-35:** The web collection list must support ascending and descending sorts by displayed value remaining and by estimated additional plays. Value remaining sorts by the half-up rounded number of hundredths used for its two-decimal display, so an exact zero and a positive sub-cent value displayed as `<$0.01` share the zero sort key and use the tie-breaker instead of the hidden fraction.
+36. **REQ-UTIL-36:** Calculated values must sort before results without a sort value. A zero-play or fitness-zero value remaining is calculated even when other result components are unavailable. For estimated plays, unreachable results sort above every finite result in descending order and below every finite result in ascending order. Unavailable and not-applicable results have no sort value and remain together after calculated and unreachable results in either direction. Exact ties, including results without a sort value, always sort ascending by the game's NFC-normalized name using Unicode code-point order and then by stable game ID using code-point order, regardless of the selected primary direction.
 
 ## Deferred Collection Insight
 
@@ -296,7 +295,7 @@ estimated additional plays (K) = ceil(V / W)
 
 `R >= 1` is `met`. `R < 1` is `not-met`. For positive `N`, comparing `R` with `1` is equivalent to comparing `A` with `B`.
 
-Apply the fitness-0 rule first. For a positive-cost purchase with valid `F = 0`, set `R = 0`, `V = P`, and `K = unreachable-at-current-fitness` without requiring `H`, matching currency, `N`, `T`, or `C`. Supporting use measures still require their normal inputs.
+Apply the fitness-0 rule first. For a positive-cost purchase with valid `F = 0`, set `B = 0`, `R = 0`, `V = P`, and `K = unreachable-at-current-fitness` without requiring `H`, `N`, `T`, or `C`. Supporting use measures still require their normal inputs.
 
 Otherwise, when `N = 0`, set `Q = 0`, `R = 0`, and `V = P` without reading `T` or `C`. `A` remains unavailable because it would require division by zero. `K` still requires valid positive `T`, `C`, and `B`.
 
@@ -305,26 +304,26 @@ When `V = 0`, set `K = 0`. When `V > 0` and `B = 0`, classify `K` as `unreachabl
 ### Exact Values
 
 - Perform calculations with exact rational numbers.
-- Interpret money using its stored minor units and currency exponent.
+- Interpret amounts using their stored integer hundredths.
 - Interpret fitness from the base-10 value returned by the shared fitness contract, not its binary floating-point bits.
 - Compare exact values before rounding.
 - Round monetary displays half-up.
-- Round money to the currency's normal number of decimal places.
+- Round amount displays to two decimal places.
 - Display the value multiplier with two decimal places.
 - Display estimated additional plays as a whole number after exact ceiling.
 - If two-decimal display would hide why a result is met or not met, show additional digits for that result.
-- Show a positive value that rounds to zero at normal currency precision as less than one minor unit, such as `<$0.01`, rather than `$0.00`. A value that rounds up to one minor unit displays normally as `$0.01`.
+- Show a positive value that rounds to zero as `<$0.01`, rather than `$0.00`. A value that rounds up to one hundredth displays normally as `$0.01`.
 - Sort value remaining by its rounded minor-unit display amount. Sort estimated plays by its whole-number result and availability category.
 
 ### Money
 
-- Money input is a decimal amount string and an ISO 4217 currency code.
-- Store the integer minor-unit amount, currency, exponent used, currency-registry edition, manual source, and confirmation time.
-- Use a versioned, vendored currency registry. Do not fetch currency metadata at runtime.
-- A later registry update must not reinterpret stored money.
+- Amount input is a decimal string with at most two fractional digits.
+- Store the integer number of hundredths, manual source, and confirmation time. Do not store a currency code.
+- All purchase and benchmark amounts use the owner's one implicit personal currency. The first release uses `$` as its display symbol and does not add currency or symbol settings.
+- Reject input that cannot be represented exactly in hundredths or as a safe stored integer; never round input silently.
 - Benchmark amount must be positive. Purchase amount may be zero.
 - Existing collections migrate with purchase cost and benchmark absent.
-- Malformed old money data remains available for correction but does not prevent the collection from loading.
+- Malformed persisted amount data remains available for correction but does not prevent the collection from loading.
 
 ### Evidence
 
@@ -339,16 +338,15 @@ When `V = 0`, set `K = 0`. When `V > 0` and `B = 0`, classify `K` as `unreachabl
 - Future BGG and manual writes retain their source and observation time.
 - Existing values without reliable provenance use `legacy-unknown` and do not receive invented timestamps.
 
-### Unavailable Results
+### Result Reasons
 
-The shared result uses these stable reasons:
+The shared result uses these stable reasons for unavailable, not-applicable, and unreachable component outcomes:
 
 - `missing-acquisition`
 - `invalid-acquisition`
 - `no-owner-cost`
 - `missing-benchmark`
 - `invalid-benchmark`
-- `benchmark-currency-mismatch`
 - `missing-play-count`
 - `invalid-play-count`
 - `missing-modeled-duration`
@@ -359,7 +357,7 @@ The shared result uses these stable reasons:
 - `invalid-fitness`
 - `unreachable-at-current-fitness`
 
-Each result reports only reasons relevant to that result. For example, missing duration prevents modeled purchase value but does not prevent cost per recorded play.
+Each result component has an explicit `calculated`, `unavailable`, `not-applicable`, or `unreachable` outcome and reports only reasons relevant to that outcome. `no-owner-cost` is not applicable, and `unreachable-at-current-fitness` is unreachable rather than unavailable. For example, missing duration prevents modeled purchase value but does not prevent cost per recorded play.
 
 ## Out Of Scope
 
@@ -367,7 +365,7 @@ Each result reports only reasons relevant to that result. For example, missing d
 - Recording individual play sessions, attendance, or actual duration
 - Looking up movie-ticket prices
 - Nonlinear fitness adjustment
-- Currency conversion or inflation adjustment
+- Currency metadata, conversion, or inflation adjustment
 - Purchase dates, transaction history, sale proceeds, depreciation, or market value
 - Moving cost or plays between base games and expansions
 - Purchase recommendations or selling recommendations
@@ -382,14 +380,14 @@ Each result reports only reasons relevant to that result. For example, missing d
 4. Test fitness 1, 3, 6, 9, and 10 against an `$8` benchmark. Fitness 6 must produce exactly `$8`.
 5. Test a result exactly at, immediately below, and immediately above `1.00x`. Classification and value remaining must use exact results rather than displayed values. A positive sub-minor-unit remainder must not display as zero.
 6. Test estimated additional plays when no plays remain, when a fractional number of plays remains, and when one additional play overshoots the threshold. The result must be zero or round up to a whole play.
-7. Test zero plays with fitness, benchmark, duration, and player count present, missing, mismatched, and malformed. Each case must produce `0.00x` and the full paid cost remaining without division by zero; only the additional-play estimate requires all future-play inputs.
-8. Test gifts, zero-cost purchases, unknown cost, unknown benchmark, and currency mismatch.
-9. Test ordinary, predicted, vetoed, tournament-influenced, and redundancy-adjusted fitness. The value calculation must use the score shown for the game. A vetoed paid game must report the threshold as unreachable rather than infinite.
+7. Test zero plays with fitness, benchmark, duration, and player count present, missing, and malformed. Each case must produce `0.00x` and the full paid cost remaining without division by zero; only the additional-play estimate requires all future-play inputs.
+8. Test gifts, zero-cost purchases, unknown cost, and unknown benchmark.
+9. Test ordinary, predicted, vetoed, tournament-influenced, and redundancy-adjusted fitness. The value calculation must use the score shown for the game. A vetoed paid game must report the overall threshold as not met and only the additional-play estimate as `unreachable-at-current-fitness`, never as infinity.
 10. Test player-count selection for one poll winner, tied winners, `N+`, unusable polls, valid range fallback, invalid range, and no evidence.
-11. Test money with zero-, two-, and three-decimal currencies, invalid precision, safe-integer boundaries, and old stored exponents.
+11. Test amounts with zero, one, and two fractional digits, invalid precision, safe-integer boundaries, exact storage as hundredths, and malformed persisted amounts.
 12. Verify source and observation information survives daemon, web, and CLI responses.
-13. Verify ascending and descending sorts for remaining money, additional plays, displayed-money ties, unreachable games, and unavailable games. Remaining-money sorts must use rounded display amounts and group by currency without cross-currency comparison; additional-play sorts must use whole-number results and the specified availability order.
-14. Verify the release contains no automatic collection judgment, aggregation, brief candidate, automatic currency conversion, or purchase-value fitness axis.
+13. Verify ascending and descending web sorts for remaining money, additional plays, displayed-money ties, unreachable games, unavailable games, gifts, and zero-cost purchases. Remaining-money sorts must use the rounded-hundredths display key, including an exact-zero/sub-cent tie; additional-play sorts must use whole-number results and the specified availability order. Zero-play and fitness-zero remaining values count as calculated sort values even when other result components are unavailable. Unavailable and not-applicable results remain together at the end. Ties must keep ascending name and ID order in both primary directions; cover NFC-equivalent names, non-ASCII code-point ordering, and the stable-ID fallback.
+14. Verify the release contains no automatic collection judgment, aggregation, brief candidate, currency metadata or conversion, or purchase-value fitness axis.
 15. Ask a fresh reviewer to explain the feature, the fitness-6 benchmark, both examples, value remaining, and estimated additional plays without reading the Technical Contract. Treat inability to do so as a spec failure.
 
 ## Follow-Up Questions
