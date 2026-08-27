@@ -1,7 +1,7 @@
 ---
 title: "Implementation notes: collection purchase utilization"
 date: 2026-08-26
-status: in-progress
+status: in_progress
 tags: [implementation, purchase-utilization, exact-arithmetic]
 source: .lore/work/plans/collection-purchase-utilization.md
 modules: [shared, daemon, web, cli]
@@ -18,7 +18,7 @@ modules: [shared, daemon, web, cli]
 - [x] Step 5: Add daemon APIs and response assembly (`shelf-judge-mmr.12`; terminal acceptance `ACCEPTED`)
 - [x] Step 6: Build web detail and settings (`shelf-judge-mmr.11`; Beads `CLOSED`)
 - [x] Step 7: Add deterministic web sorts (`shelf-judge-mmr.10`; terminal acceptance `ACCEPTED`)
-- [ ] Step 8: Add CLI commands (`shelf-judge-mmr.8`)
+- [x] Step 8: Add CLI commands (`shelf-judge-mmr.8`; terminal acceptance `ACCEPTED`)
 - [ ] Step 9: Complete persisted-flow and parity coverage (`shelf-judge-mmr.9`)
 - [ ] Step 10: Run final validation (`shelf-judge-mmr.6`)
 
@@ -253,7 +253,7 @@ These statuses are reported for worktree completeness only. Neither file is a St
 
 - [x] Step 6: Build web detail and settings (`shelf-judge-mmr.11`; Beads `CLOSED`).
 - [x] Step 7: Add deterministic web sorts (`shelf-judge-mmr.10`; terminal acceptance `ACCEPTED`).
-- [ ] Step 8: Add CLI commands (`shelf-judge-mmr.8`), unlocked by accepted mutation and discovery contracts.
+- [x] Step 8: Add CLI commands (`shelf-judge-mmr.8`; terminal acceptance `ACCEPTED`).
 - [ ] Step 9: Complete persisted-flow and parity coverage (`shelf-judge-mmr.9`).
 - [ ] Step 10: Run final validation (`shelf-judge-mmr.6`).
 
@@ -319,3 +319,106 @@ Workflow files are outside the accepted product manifest:
 - Known baseline: `bunx tsc --noEmit -p packages/web/tsconfig.test.json` still fails only in unchanged fixtures `axes-page-curve.test.ts`, `game-links.test.tsx`, and `shelf-assignment.test.tsx`; no accepted Step 7 path appears in those diagnostics.
 - Residual runtime risk: validation used installed Bun `1.3.11` while the repository declares `1.4.0`; no Step 7 failure was attributed to that difference.
 - Overall implementation remains `in-progress`; Steps 8 through 10 and final plan/spec completion remain pending.
+
+## Step 8 Evidence Map
+
+| Obligation                                                                                           | Implementation surface                                                                                      | Executable validation                                                                                                                                                                                                |
+| ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Register acquisition, value, and benchmark commands while preserving exact positional amount strings | `packages/cli/src/index.ts`, `packages/cli/src/commands/game.ts`, `packages/cli/src/commands/collection.ts` | Parser and direct-command tests cover every state/action, missing/extra/unknown input, unchanged strings, URL encoding, methods, paths, bodies, and daemon errors                                                    |
+| Preserve complete daemon responses under JSON                                                        | Game acquisition/value and collection benchmark command handlers                                            | Deep-equality command tests retain exact fractions, reasons, evidence, sources, timestamps, assumptions, sort projections, and additive response fields                                                              |
+| Render acquisition and benchmark states distinctly                                                   | `packages/cli/src/commands/game.ts`, `packages/cli/src/commands/collection.ts`                              | Human-output tests cover unknown, gift, zero-cost and positive purchases, configured/invalid/unknown benchmarks, correction, and clear-to-unknown                                                                    |
+| Render daemon purchase-utilization results without client formulas                                   | `packages/cli/src/output.ts`, `packages/cli/src/commands/game.ts`                                           | Canonical `$60` and `$20` command fixtures plus special-state tests cover result-first output, every component label/display/reason, evidence/provenance/times, assumptions, and previous ownership                  |
+| Use canonical nullable `displayScore` in only the four required consumers                            | `packages/cli/src/commands/game.ts`, `packages/cli/src/commands/score.ts`, `packages/cli/src/output.ts`     | Game list/value and score list/get tests cover null and raw `7.95` with daemon `8.0`; score JSON tests preserve their existing endpoint shapes                                                                       |
+| Document amount, benchmark, correction, clear, and zero-cost semantics without CLI collection sorts  | `packages/cli/src/commands/help.ts`                                                                         | Help tests assert exact command syntax, implicit currency, amount grammar, lifetime landed cost, fitness-6 benchmark meaning, movie-ticket arithmetic, correction/clear distinction, and absence of collection sorts |
+
+## Step 8 Implementation Log
+
+### 2026-08-26
+
+- Implemented the Step 8 CLI production and test surface for `shelf-judge-mmr.8` directly in the shared workspace.
+- Amount arguments remain positional strings through dispatch. CLI validation is limited to state/action and argument shape; daemon/shared validation remains authoritative for amount syntax, precision, range, and benchmark positivity.
+- Human score rendering now consumes daemon `displayScore` for game list/value and score list/get. Human score commands enrich score-endpoint data through `/api/games` or `/api/games/:id`, while score JSON responses return before enrichment and retain their prior shapes.
+- `game value` renders daemon labels, displays, reasons, evidence and source identifiers, observation/confirmation times, assumptions, and the factual previously-owned explanation without client-side utilization arithmetic.
+- The implementation handoff left Step 8 awaiting independent validation; no tests or review were run by the implementation agent before that handoff.
+- Correction `S8-VAL-001` wraps each invalid argument vector as one typed Bun `test.each` callback argument, retaining every acquisition and benchmark missing/extra/unknown case.
+- Correction `S8-SCORE-001` enriches human `score list` output through the existing `/api/games?ownership=all` contract, so previously owned score records receive the daemon's canonical `displayScore` while `/api/scores` JSON remains unchanged.
+- Correction `S8-COV-001` adds factual human-output coverage for missing and invalid play-count evidence and invalid modeled-player-count evidence, including their daemon reason codes.
+- Post-correction verification passed the targeted index/help set at 19/19, the focused Step 8 set at 141/141, and the complete CLI suite at 242/242.
+- CLI TypeScript, changed-file ESLint, corrected-file Prettier, and `git diff --check` all passed.
+- Findings `S8-VAL-001`, `S8-SCORE-001`, `S8-COV-001`, `S8-FMT-001`, `S8-CLI-001`, `S8-HELP-001`, and `S8-CORR-FMT-001` are closed. The verification review found no new material issue.
+- Terminal acceptance completed with status `ACCEPTED` and no material findings. Step 8 is complete; the overall notes status remains `in_progress` because Steps 9 and 10 remain.
+
+### 2026-08-27
+
+- Terminal acceptance reconciled the Step 8 CLI surface and accepted it with no material findings.
+- Validation passed at every recorded level: targeted 19 pass; focused 141 pass; full CLI 242 pass; repository 1,804 pass, 1 skip, 0 fail; root typecheck pass; root lint pass; all 14 changed Step 8 product/test/notes paths Prettier-clean; and diff check pass.
+- Root `format:check` reported only three unchanged `.beads` state files. No Step 8 product, test, or notes path failed formatting.
+- Scope review confirmed no CLI collection sort scope was introduced.
+- Residual risks are the existing skipped daemon fetch-timeout test and validation under installed Bun `1.3.11` rather than the repository-declared `1.4.0`.
+
+## Step 8 Accepted Manifest
+
+Terminal acceptance status: `ACCEPTED`, with no material findings. `git status --short` and `git status --porcelain=v1` both reported this exact acceptance context:
+
+```text
+ M .beads/issues.jsonl
+ M .lore/work/notes/collection-purchase-utilization.md
+ M packages/cli/src/commands/game.ts
+ M packages/cli/src/commands/help.ts
+ M packages/cli/src/commands/score.ts
+ M packages/cli/src/index.ts
+ M packages/cli/src/output.ts
+ M packages/cli/tests/commands/game.test.ts
+ M packages/cli/tests/commands/help.test.ts
+ M packages/cli/tests/commands/predict.test.ts
+ M packages/cli/tests/commands/score.test.ts
+ M packages/cli/tests/index.test.ts
+ M packages/cli/tests/output.test.ts
+?? packages/cli/src/commands/collection.ts
+?? packages/cli/tests/commands/collection.test.ts
+```
+
+The accepted Step 8 product and test surface is exactly these 13 paths:
+
+| Path                                             | Porcelain | Index blob or marker                       | Working-tree SHA-256 or marker                                     |
+| ------------------------------------------------ | --------- | ------------------------------------------ | ------------------------------------------------------------------ |
+| `packages/cli/src/commands/game.ts`              | ` M`      | `7c10fb5452fc34a173f4f92ccedfe6910fc7b6c3` | `603aa0aba39e49dc76e4c5ab380708c532b09ec4ccf4ce2b94decf2264265f94` |
+| `packages/cli/src/commands/help.ts`              | ` M`      | `f9bbea0b25bea5aa4c6243947b2ae912d77b5414` | `99371e4de417ccbd910fcd413086daf250f16c0aaac9c9a2b210daa78d4aa74f` |
+| `packages/cli/src/commands/score.ts`             | ` M`      | `c33dfc9880857bd7c56c481a2099c5d25ea7f709` | `baea7edcb242fca046a67afa48cc7334859509cfd03eddb1ba54e0476f6c446d` |
+| `packages/cli/src/commands/collection.ts`        | `??`      | absent                                     | `e1170265bffc4170cd94786c1c924e8cf3d5f06eca1915b9c29769bc3a0832e0` |
+| `packages/cli/src/index.ts`                      | ` M`      | `3621be925816904762f50c54dd9fba00a386b8e8` | `6ea9077844a20931c2d6b0c313fa07b54e76739db7e1837a1d7f99a3de684110` |
+| `packages/cli/src/output.ts`                     | ` M`      | `b2770bb0ff8323a0287fedf9798a6f4b6eb67a49` | `0be62cc026f1b2a866be076a8068378ddc4ef5b8d13ab7b417fea752da1e4921` |
+| `packages/cli/tests/commands/game.test.ts`       | ` M`      | `ebd61861a843ffcf0901be7e736a9a90a698d619` | `a7e6514816103140e9b5c2c797ce75cb17bc17b6b50b3c400c7ee0e6b0daa373` |
+| `packages/cli/tests/commands/help.test.ts`       | ` M`      | `269786d1530b006140face8ce3eace0e898bb82b` | `fb23429d08e6c7384cecfd52652f706af7d4db6c11b39b920ff1020962a0e214` |
+| `packages/cli/tests/commands/predict.test.ts`    | ` M`      | `f047432f3879458387a55662cb959c9518e2eb4a` | `a6851d622a4236c8e2708120eb50b9d94ade0ca52265384be00a3f684287c441` |
+| `packages/cli/tests/commands/score.test.ts`      | ` M`      | `f80ce3172e2a7cb0cc1afb1d43e189de6cf3a032` | `7dcf6aa69bcd1a69120f7e39f9b5c8878588a18e539624aed4fe13eddc18ac96` |
+| `packages/cli/tests/commands/collection.test.ts` | `??`      | absent                                     | `b17b3e4f6fde24a2e975fa77eed41be37f9f94f65449e1414dceb2db84f8eb0d` |
+| `packages/cli/tests/index.test.ts`               | ` M`      | `02e8665afbae4bb31ceebce086f00ce93c34a953` | `6163c93267f11f87fb0beee47697dd5a50e6eed14da16ab02c9536da536f0b05` |
+| `packages/cli/tests/output.test.ts`              | ` M`      | `c44941b39bf32e3ba67503d3dda5dde2a0c4fdf6` | `dbbb37e62230a7167de04e23eb02d69ff613cdb0537d34ec697898a460486054` |
+
+No accepted Step 8 product or test path is deleted or unmerged.
+
+### Step 8 Workflow Context
+
+| Path                                                  | Porcelain | Index blob or marker                       | Working-tree identity                                             |
+| ----------------------------------------------------- | --------- | ------------------------------------------ | ----------------------------------------------------------------- |
+| `.lore/work/notes/collection-purchase-utilization.md` | ` M`      | `47012e5dee4ed7cbb1fd29b72b6b6ae1ae94b23a` | Not self-hashed: recording the hash in this file would change it. |
+| `.beads/issues.jsonl`                                 | ` M`      | `c237a000ded4688a8f8ae3ad854307ec5f1b40a1` | Excluded: unrelated pre-existing tracker workflow state.          |
+
+This notes path is included only as resumable workflow context, not as Step 8 product code. The modified `.beads/issues.jsonl` is unrelated pre-existing workflow state and is not claimed as a Step 8 product or documentation change.
+
+## Step 8 Validation Status
+
+- Terminal acceptance: `ACCEPTED`; no material findings.
+- Targeted validation: 19 pass.
+- Focused Step 8 validation: 141 pass.
+- Full CLI suite: 242 pass.
+- Full repository suite: 1,804 pass, 1 skip, 0 fail.
+- Root typecheck: passed.
+- Root lint: passed.
+- Prettier: all 14 changed Step 8 product/test/notes paths clean.
+- Root `format:check`: only three unchanged `.beads` state files reported.
+- Diff check: passed.
+- Scope check: no collection sort scope.
+- Residual risk: the existing skipped daemon fetch-timeout test remains.
+- Runtime residual: installed Bun was `1.3.11`; the repository declares `1.4.0`.

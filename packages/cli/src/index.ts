@@ -15,7 +15,10 @@ import {
   gameEdit,
   gameAssignShelf,
   gameClearShelf,
+  gameAcquisition,
+  gameValue,
 } from "./commands/game.js";
+import { collectionBenchmark } from "./commands/collection.js";
 import {
   axisTemplates,
   axisList,
@@ -76,6 +79,9 @@ const COMMANDS: Record<string, number> = {
   "game edit": 2,
   "game assign-shelf": 2,
   "game clear-shelf": 2,
+  "game acquisition": 2,
+  "game value": 2,
+  "collection benchmark": 2,
   "axis list": 2,
   "axis templates": 2,
   "axis create": 2,
@@ -122,6 +128,12 @@ const COMMANDS: Record<string, number> = {
   help: 1,
 };
 
+const EXACT_POSITIONAL_COMMANDS = new Set([
+  "game acquisition",
+  "game value",
+  "collection benchmark",
+]);
+
 interface ParsedArgs {
   commandPath: string;
   positional: string[];
@@ -157,6 +169,10 @@ interface ParsedArgs {
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const raw = argv.slice(2); // skip bun and script path
+  const commandTokens = raw.filter((arg) => arg !== "--json");
+  const exactPositionalCommand = EXACT_POSITIONAL_COMMANDS.has(
+    `${commandTokens[0]} ${commandTokens[1]}`,
+  );
 
   // Separate flags from non-flag tokens
   const tokens: string[] = [];
@@ -194,6 +210,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
     if (arg === "--json") {
       json = true;
+    } else if (exactPositionalCommand) {
+      tokens.push(arg);
     } else if (arg === "--bgg-id") {
       bggId = Number(raw[++i]);
     } else if (arg === "--name") {
@@ -370,6 +388,15 @@ async function main(): Promise<void> {
       break;
     case "game refresh-all-bgg":
       output = await gameRefreshAllBgg(client, args, opts);
+      break;
+    case "game acquisition":
+      output = await gameAcquisition(client, args, opts);
+      break;
+    case "game value":
+      output = await gameValue(client, args, opts);
+      break;
+    case "collection benchmark":
+      output = await collectionBenchmark(client, args, opts);
       break;
     case "axis list":
       output = await axisList(client, args, opts);

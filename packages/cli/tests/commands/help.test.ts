@@ -20,12 +20,44 @@ const mockTree = {
           description: "List all games with fitness scores",
           invocation: { method: "GET", path: "/api/games" },
         },
+        get: {
+          operationId: "shelf.game.get",
+          name: "get",
+          description: "Get one enriched game",
+          invocation: { method: "GET", path: "/api/games/:id" },
+        },
+        acquisition: {
+          operationId: "shelf.game.set-acquisition",
+          name: "set-acquisition",
+          description: "Set acquisition",
+          invocation: { method: "PUT", path: "/api/games/:id/acquisition" },
+        },
         "assign-shelf": {
           operationId: "shelf.game.shelf-assignment",
           name: "assign-shelf",
           description:
             "Set or clear a game's manual shelf assignment; assigning requires an owned game with complete box dimensions",
           invocation: { method: "PUT", path: "/api/games/:id/shelf-assignment" },
+        },
+      },
+    },
+    collection: {
+      name: "collection",
+      children: {
+        get: {
+          operationId: "shelf.collection.get-entertainment-benchmark",
+          name: "get-entertainment-benchmark",
+          invocation: { method: "GET", path: "/api/collection/entertainment-benchmark" },
+        },
+        set: {
+          operationId: "shelf.collection.set-entertainment-benchmark",
+          name: "set-entertainment-benchmark",
+          invocation: { method: "PUT", path: "/api/collection/entertainment-benchmark" },
+        },
+        clear: {
+          operationId: "shelf.collection.clear-entertainment-benchmark",
+          name: "clear-entertainment-benchmark",
+          invocation: { method: "DELETE", path: "/api/collection/entertainment-benchmark" },
         },
       },
     },
@@ -120,5 +152,34 @@ describe("help command", () => {
     expect(result).toContain("shelf-judge axis repair <axis-id> --template <template-id>");
     expect(result).toContain("--target-player-count <count>");
     expect(result).toContain("--maximum-scoring-time <minutes>");
+  });
+
+  test("documents purchase utilization commands and semantics without collection sorts", async () => {
+    const client = createMockClient({
+      routes: {
+        "GET /api/help": { response: { ok: true, status: 200, data: mockTree } },
+      },
+    });
+    const result = await helpCommand(client, [], { json: false });
+    expect(result).toContain(
+      "shelf-judge game acquisition <game-id> unknown|gift|purchase [amount] [--json]",
+    );
+    expect(result).toContain("shelf-judge game value <game-id> [--json]");
+    expect(result).toContain("shelf-judge collection benchmark get [--json]");
+    expect(result).toContain("shelf-judge collection benchmark set <amount> [--json]");
+    expect(result).toContain("shelf-judge collection benchmark clear [--json]");
+    expect(result).toContain("implicit personal currency");
+    expect(result).toContain(
+      "one or more whole-number digits, optionally followed by a decimal point and one or two digits",
+    );
+    expect(result).toContain("Signs, leading-dot forms, and trailing decimal points are invalid");
+    expect(result).toContain("lifetime landed cost");
+    expect(result).toContain("positive acceptable cost per person-hour at fitness 6");
+    expect(result).toContain("$16 / 2 hours = $8 per person-hour");
+    expect(result).toContain("zero-cost purchase");
+    expect(result).toContain("clear");
+    expect(result).not.toMatch(
+      /collection (sort|order)|value remaining sort|additional plays sort/i,
+    );
   });
 });

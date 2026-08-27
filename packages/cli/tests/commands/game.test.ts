@@ -8,7 +8,14 @@ import {
   parseRateArgs,
   gameAssignShelf,
   gameClearShelf,
+  gameAcquisition,
+  gameValue,
 } from "../../src/commands/game.js";
+import {
+  calculatePurchaseUtilization,
+  type Acquisition,
+  type PurchaseUtilizationInput,
+} from "@shelf-judge/shared";
 import { createMockClient } from "../helpers/mock-client.js";
 
 async function expectThrows(fn: () => Promise<unknown>, match: string): Promise<void> {
@@ -108,8 +115,16 @@ describe("game add (by name)", () => {
 
 describe("game list", () => {
   const listData = [
-    { game: { id: "abc-123", name: "Wingspan", yearPublished: 2019 }, score: { score: 7.9 } },
-    { game: { id: "def-456", name: "Unrated Game", yearPublished: null }, score: null },
+    {
+      game: { id: "abc-123", name: "Wingspan", yearPublished: 2019 },
+      score: { score: 7.95 },
+      displayScore: "8.0",
+    },
+    {
+      game: { id: "def-456", name: "Unrated Game", yearPublished: null },
+      score: null,
+      displayScore: null,
+    },
   ];
   const client = createMockClient({
     routes: {
@@ -127,7 +142,8 @@ describe("game list", () => {
     expect(output).toContain("Score");
     expect(output).toContain("Wingspan");
     expect(output).toContain("Unrated Game");
-    expect(output).toContain("7.9");
+    expect(output).toContain("8.0");
+    expect(output).not.toContain("7.95");
   });
 
   test("--json outputs parseable JSON array", async () => {
@@ -139,6 +155,424 @@ describe("game list", () => {
     expect(Array.isArray(parsed)).toBe(true);
     expect(parsed[0].game.name).toBe("Wingspan");
     expect(parsed[1].score).toBeNull();
+  });
+});
+
+describe("game acquisition", () => {
+  const cases: Array<[string, string | undefined, Acquisition, string]> = [
+    ["unknown", undefined, { state: "unknown" }, "acquisition is unknown"],
+    ["gift", undefined, { state: "gift" }, "gift with no owner cost"],
+    [
+      "purchase",
+      "0.00",
+      {
+        state: "purchase",
+        amount: { hundredths: 0, source: "manual", confirmedAt: "2026-08-26T12:00:00Z" },
+      },
+      "zero-cost purchase",
+    ],
+    [
+      "purchase",
+      "060.00",
+      {
+        state: "purchase",
+        amount: { hundredths: 6000, source: "manual", confirmedAt: "2026-08-26T12:00:00Z" },
+      },
+      "lifetime landed cost recorded as $60.00",
+    ],
+  ];
+  test.each(cases)("sends and renders %s", async (state, amount, acquisition, expected) => {
+    const response = { game: { id: "game/1", name: "Example", acquisition } };
+    const client = createMockClient({
+      routes: {
+        "PUT /api/games/game%2F1/acquisition": {
+          response: { ok: true, status: 200, data: response },
+        },
+      },
+    });
+    const originalPut = client.put.bind(client);
+    let sentBody: unknown;
+    client.put = <T>(path: string, body?: unknown) => {
+      sentBody = body;
+      return originalPut<T>(path, body);
+    };
+    const args = amount === undefined ? ["game/1", state] : ["game/1", state, amount];
+    const output = await gameAcquisition(client, args, { json: false });
+    expect(sentBody).toEqual(amount === undefined ? { state } : { state, amount });
+    expect(output).toContain(expected);
+    expect(JSON.parse(await gameAcquisition(client, args, { json: true }))).toEqual(response);
+  });
+
+  const invalidArgumentCases: Array<[string[]]> = [
+    [[]],
+    [["game-1"]],
+    [["game-1", "other"]],
+    [["game-1", "purchase"]],
+    [["game-1", "unknown", "1"]],
+    [["game-1", "gift", "1"]],
+    [["game-1", "purchase", "1", "extra"]],
+  ];
+  test.each(invalidArgumentCases)("rejects invalid local argument shape %#", async (args) => {
+    await expectThrows(() => gameAcquisition(createMockClient(), args, { json: false }), "Usage");
+  });
+
+  test.each(["1.234", "-1", "not-an-amount"])(
+    "passes daemon-invalid amount %s through unchanged and surfaces its error",
+    async (amount) => {
+      const client = createMockClient({
+        routes: {
+          "PUT /api/games/game-1/acquisition": {
+            response: { ok: false, status: 400, data: { error: `Invalid amount: ${amount}` } },
+          },
+        },
+      });
+      const originalPut = client.put.bind(client);
+      let body: unknown;
+      client.put = <T>(path: string, nextBody?: unknown) => {
+        body = nextBody;
+        return originalPut<T>(path, nextBody);
+      };
+      await expectThrows(
+        () => gameAcquisition(client, ["game-1", "purchase", amount], { json: false }),
+        `Invalid amount: ${amount}`,
+      );
+      expect(body).toEqual({ state: "purchase", amount });
+    },
+  );
+
+  test.each([
+    [404, "Game not found"],
+    [500, "Internal server error"],
+  ])("surfaces daemon error %s", async (status, message) => {
+    const client = createMockClient({
+      routes: {
+        "PUT /api/games/missing/acquisition": {
+          response: { ok: false, status, data: { error: message } },
+        },
+      },
+    });
+    await expectThrows(
+      () => gameAcquisition(client, ["missing", "gift"], { json: false }),
+      message,
+    );
+  });
+});
+
+const observedAt = "2026-08-26T12:00:00Z";
+function utilizationInput(
+  overrides: Partial<PurchaseUtilizationInput> = {},
+): PurchaseUtilizationInput {
+  return {
+    acquisition: {
+      state: "purchase",
+      amount: { hundredths: 6000, source: "manual", confirmedAt: observedAt },
+    },
+    entertainmentBenchmark: {
+      state: "configured",
+      amount: { hundredths: 800, source: "manual", confirmedAt: observedAt },
+    },
+    playCount: { status: "valid", value: 10, source: "bgg-collection", observedAt },
+    duration: { status: "valid", value: 90, source: "bgg-thing", observedAt },
+    playerRange: {
+      status: "valid",
+      value: { minPlayers: 4, maxPlayers: 4 },
+      source: "bgg-player-range",
+      observedAt,
+    },
+    suggestedPlayerPoll: {
+      status: "valid",
+      state: "usable",
+      buckets: [{ playerCount: "4", best: 10, recommended: 2, notRecommended: 1 }],
+      source: "bgg-suggested-player-poll",
+      observedAt,
+    },
+    fitness: "6.0",
+    ...overrides,
+  };
+}
+
+function valueResponse(input: PurchaseUtilizationInput, ownership = "owned") {
+  return {
+    game: { id: "game/1", name: "Canonical Example", ownership },
+    score: { score: 7.95 },
+    displayScore: "8.0",
+    purchaseUtilization: calculatePurchaseUtilization(input),
+    extraDaemonField: { exactFraction: "1/3" },
+  };
+}
+
+describe("game value", () => {
+  test("requests predicted enriched detail, renders the canonical $60 example, and retains full JSON", async () => {
+    const response = valueResponse(utilizationInput());
+    const client = createMockClient({
+      routes: {
+        "GET /api/games/game%2F1?includePredicted=true": {
+          response: { ok: true, status: 200, data: response },
+        },
+      },
+    });
+    const human = await gameValue(client, ["game/1"], { json: false });
+    expect(human).toContain("Value threshold met");
+    expect(human).toContain("Fitness: 8.0");
+    expect(human).toContain("60 player-hours");
+    expect(human).toContain("$1.00");
+    expect(human).toContain("8.00x");
+    expect(human).toContain("$0.00");
+    expect(human).toContain(`source=bgg-collection; observedAt=${observedAt}`);
+    expect(human).toContain(`confirmedAt=${observedAt}`);
+    expect(human).toContain(response.purchaseUtilization.assumptions.futurePlays);
+    expect(JSON.parse(await gameValue(client, ["game/1"], { json: true }))).toEqual(response);
+  });
+
+  test("renders the canonical $20 example without recalculating daemon displays", async () => {
+    const response = valueResponse(
+      utilizationInput({
+        acquisition: {
+          state: "purchase",
+          amount: { hundredths: 2000, source: "manual", confirmedAt: observedAt },
+        },
+        playCount: { status: "valid", value: 2, source: "bgg-collection", observedAt },
+        duration: { status: "valid", value: 30, source: "bgg-thing", observedAt },
+        playerRange: {
+          status: "valid",
+          value: { minPlayers: 2, maxPlayers: 2 },
+          source: "bgg-player-range",
+          observedAt,
+        },
+        suggestedPlayerPoll: {
+          status: "valid",
+          state: "usable",
+          buckets: [{ playerCount: "2", best: 3, recommended: 0, notRecommended: 0 }],
+          source: "bgg-suggested-player-poll",
+          observedAt,
+        },
+      }),
+    );
+    const client = createMockClient({
+      routes: {
+        "GET /api/games/game-1?includePredicted=true": {
+          response: { ok: true, status: 200, data: response },
+        },
+      },
+    });
+    const output = await gameValue(client, ["game-1"], { json: false });
+    expect(output).toContain("Value threshold not yet met");
+    expect(output).toContain("0.80x");
+    expect(output).toContain("$4.00");
+    expect(output).toMatch(/Estimated additional plays[^\n]*1/);
+  });
+
+  test.each([
+    ["unknown acquisition", { acquisition: { state: "unknown" } }, "missing-acquisition"],
+    [
+      "invalid acquisition",
+      {
+        acquisition: {
+          state: "invalid",
+          evidence: { presence: "present", value: { amount: "bad" } },
+        },
+      },
+      "invalid-acquisition",
+    ],
+    ["gift", { acquisition: { state: "gift" } }, "no-owner-cost"],
+    [
+      "zero-cost purchase",
+      {
+        acquisition: {
+          state: "purchase",
+          amount: { hundredths: 0, source: "manual", confirmedAt: observedAt },
+        },
+      },
+      "no-owner-cost",
+    ],
+    ["missing benchmark", { entertainmentBenchmark: null }, "missing-benchmark"],
+    [
+      "invalid benchmark",
+      {
+        entertainmentBenchmark: {
+          state: "invalid",
+          evidence: { presence: "present", value: "bad" },
+        },
+      },
+      "invalid-benchmark",
+    ],
+    [
+      "zero plays",
+      { playCount: { status: "valid", value: 0, source: "bgg-collection", observedAt } },
+      "Recorded plays are exactly zero",
+    ],
+    ["fitness zero", { fitness: "0.0" }, "Current fitness is 0"],
+    ["missing fitness", { fitness: null }, "missing-fitness"],
+    ["invalid fitness", { fitness: "invalid" }, "invalid-fitness"],
+    [
+      "missing duration",
+      { duration: { status: "missing", source: "legacy-unknown", observedAt: null } },
+      "missing-modeled-duration",
+    ],
+    [
+      "invalid duration",
+      {
+        duration: {
+          status: "invalid",
+          evidence: { presence: "present", value: -1 },
+          source: "legacy-unknown",
+          observedAt: null,
+        },
+      },
+      "invalid-modeled-duration",
+    ],
+    [
+      "missing player count",
+      {
+        playerRange: { status: "missing", source: "legacy-unknown", observedAt: null },
+        suggestedPlayerPoll: {
+          status: "valid",
+          state: "absent",
+          buckets: [],
+          source: "bgg-suggested-player-poll",
+          observedAt,
+        },
+      },
+      "missing-modeled-player-count",
+    ],
+  ])("explains %s", async (_name, overrides, expected) => {
+    const response = valueResponse(
+      utilizationInput(overrides as Partial<PurchaseUtilizationInput>),
+    );
+    const client = createMockClient({
+      routes: {
+        "GET /api/games/game-1?includePredicted=true": {
+          response: { ok: true, status: 200, data: response },
+        },
+      },
+    });
+    expect(await gameValue(client, ["game-1"], { json: false })).toContain(expected);
+  });
+
+  const evidenceCases: Array<[string, Partial<PurchaseUtilizationInput>, string[]]> = [
+    [
+      "missing play count",
+      {
+        playCount: { status: "missing", source: "bgg-collection", observedAt },
+      },
+      [
+        "Recorded play count is unavailable. [missing-play-count]",
+        `Recorded plays: missing; source=bgg-collection; observedAt=${observedAt}`,
+      ],
+    ],
+    [
+      "invalid play count",
+      {
+        playCount: {
+          status: "invalid",
+          evidence: { presence: "present", value: "not-a-count" },
+          source: "bgg-collection",
+          observedAt,
+        },
+      },
+      [
+        "Recorded play count is invalid. [invalid-play-count]",
+        `Recorded plays: invalid, evidence={"presence":"present","value":"not-a-count"}; source=bgg-collection; observedAt=${observedAt}`,
+      ],
+    ],
+    [
+      "invalid modeled player count",
+      {
+        playerRange: {
+          status: "invalid",
+          evidence: {
+            minPlayers: { presence: "present", value: 4 },
+            maxPlayers: { presence: "present", value: 2 },
+          },
+          source: "bgg-player-range",
+          observedAt,
+        },
+        suggestedPlayerPoll: {
+          status: "valid",
+          state: "absent",
+          buckets: [],
+          source: "bgg-suggested-player-poll",
+          observedAt,
+        },
+      },
+      [
+        "Modeled player-count evidence is invalid. [invalid-modeled-player-count]",
+        `Published player range: invalid, evidence={"minPlayers":{"presence":"present","value":4},"maxPlayers":{"presence":"present","value":2}}; source=bgg-player-range; observedAt=${observedAt}`,
+      ],
+    ],
+  ];
+  test.each(evidenceCases)(
+    "renders factual evidence and reasons for %s",
+    async (_name, overrides, expectedLines) => {
+      const response = valueResponse(utilizationInput(overrides));
+      const client = createMockClient({
+        routes: {
+          "GET /api/games/game-1?includePredicted=true": {
+            response: { ok: true, status: 200, data: response },
+          },
+        },
+      });
+
+      const output = await gameValue(client, ["game-1"], { json: false });
+      for (const expectedLine of expectedLines) {
+        expect(output).toContain(expectedLine);
+      }
+    },
+  );
+
+  test("renders fitness-zero additional plays as unreachable", async () => {
+    const response = valueResponse(utilizationInput({ fitness: "0.0" }));
+    const client = createMockClient({
+      routes: {
+        "GET /api/games/game-1?includePredicted=true": {
+          response: { ok: true, status: 200, data: response },
+        },
+      },
+    });
+    const output = await gameValue(client, ["game-1"], { json: false });
+    expect(output).toContain("Unreachable at current fitness");
+    expect(output).toContain("unreachable-at-current-fitness");
+  });
+
+  test("explains previous ownership factually", async () => {
+    const response = valueResponse(utilizationInput(), "previously-owned");
+    const client = createMockClient({
+      routes: {
+        "GET /api/games/game-1?includePredicted=true": {
+          response: { ok: true, status: 200, data: response },
+        },
+      },
+    });
+    const output = await gameValue(client, ["game-1"], { json: false });
+    expect(output).toContain("historical cost and plays");
+    expect(output).not.toMatch(/investment|resale|buy|sell/i);
+  });
+
+  test("rejects missing/extra IDs and surfaces daemon errors", async () => {
+    await expectThrows(() => gameValue(createMockClient(), [], { json: false }), "Usage");
+    await expectThrows(
+      () => gameValue(createMockClient(), ["one", "two"], { json: false }),
+      "Usage",
+    );
+    const client = createMockClient({
+      routes: {
+        "GET /api/games/missing?includePredicted=true": {
+          response: { ok: false, status: 404, data: { error: "Game not found" } },
+        },
+      },
+    });
+    await expectThrows(() => gameValue(client, ["missing"], { json: false }), "Game not found");
+    const failingClient = createMockClient({
+      routes: {
+        "GET /api/games/game-1?includePredicted=true": {
+          response: { ok: false, status: 500, data: { error: "Internal server error" } },
+        },
+      },
+    });
+    await expectThrows(
+      () => gameValue(failingClient, ["game-1"], { json: false }),
+      "Internal server error",
+    );
   });
 });
 
