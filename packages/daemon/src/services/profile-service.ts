@@ -100,8 +100,14 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
           allComparisons,
         );
         const tournamentStale = tournamentTimestamp !== null && tournamentTimestamp > computedAt;
+        const tournamentSettingsStale =
+          stored.tournamentSettings.kFactorThreshold !== tournamentData.settings.kFactorThreshold ||
+          stored.tournamentSettings.normalizationHalfWidth !==
+            tournamentData.settings.normalizationHalfWidth ||
+          stored.tournamentSettings.provisionalThreshold !==
+            tournamentData.settings.provisionalThreshold;
 
-        if (!collectionStale && !tournamentStale) {
+        if (!collectionStale && !tournamentStale && !tournamentSettingsStale) {
           return attachNarration(stored.profile, stored);
         }
       }
@@ -128,6 +134,7 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
         axes: collection.axes,
         fitnessResults,
         tournamentStats,
+        tournamentComparisonThreshold: tournamentData.settings.provisionalThreshold,
       };
 
       const now = new Date().toISOString();
@@ -143,6 +150,7 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
       const profileData: ProfileData = {
         contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
         algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
+        tournamentSettings: tournamentData.settings,
         profile,
         computedAt: now,
         narration: stored?.narration ?? null,

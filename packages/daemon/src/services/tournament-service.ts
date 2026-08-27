@@ -447,7 +447,11 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
       }
 
       // calculate the normalization half-width as the distance from 1500 to the furthest rating, or use the existing half-width if it's larger
-      const halfWidth = Math.max(maxElo - 1500, 1500 - minElo);
+      const halfWidth = Math.max(
+        data.settings.normalizationHalfWidth,
+        maxElo - 1500,
+        1500 - minElo,
+      );
       data.settings.normalizationHalfWidth = halfWidth;
 
       await storageService.saveTournament(data);

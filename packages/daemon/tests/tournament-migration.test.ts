@@ -20,6 +20,26 @@ function makeComparison(
 }
 
 describe("migrateTournamentData", () => {
+  test("repairs invalid settings in an already-migrated file", () => {
+    const raw = {
+      settings: {
+        kFactorThreshold: 2.5,
+        normalizationHalfWidth: 0,
+        provisionalThreshold: -1,
+      },
+      sessions: [],
+      gameStats: {},
+    };
+
+    const first = migrateTournamentData(raw);
+    const second = migrateTournamentData(first.data as unknown as Record<string, unknown>);
+
+    expect(first.migrated).toBe(true);
+    expect(first.data.settings).toEqual(baseSettings);
+    expect(second.migrated).toBe(false);
+    expect(second.data).toEqual(first.data);
+  });
+
   test("computes correct wins and losses for 3 games with 6 comparisons", () => {
     // g1 beats g2, g1 beats g3, g2 beats g3, g1 beats g2, g3 beats g1, g2 beats g3
     // g1: 3 wins (beat g2 twice, beat g3 once), 1 loss (lost to g3)

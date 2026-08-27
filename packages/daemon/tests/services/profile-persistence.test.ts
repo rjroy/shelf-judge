@@ -42,6 +42,11 @@ function currentProfileData(): ProfileData {
   return {
     contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
     algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
+    tournamentSettings: {
+      kFactorThreshold: 15,
+      normalizationHalfWidth: 400,
+      provisionalThreshold: 6,
+    },
     profile: emptyProfile(),
     computedAt: COMPUTED_AT,
     narration: null,

@@ -9,12 +9,13 @@ import type {
   AttributeCluster,
   CollectionOutlier,
   CollectionProfile,
-  DivergentGame,
+  TournamentDivergenceInsight,
   Axis,
   FitnessResult,
   EnabledAxis,
   Game,
   OutlierClassification,
+  ReportedInsightEvidenceGame,
   TournamentGameStatsDisplay,
   UtilityCurveDeclaration,
   WeightRangeCluster,
@@ -35,12 +36,14 @@ import {
   getOrderedVectorAxes,
   getVectorAxisValues,
 } from "./feature-vector.js";
+import { checkVeto } from "./curve-engine.js";
 
 export interface ProfileInput {
   games: Game[];
   axes: Axis[];
   fitnessResults: Map<string, FitnessResult>;
   tournamentStats: Map<string, TournamentGameStatsDisplay> | null;
+  tournamentComparisonThreshold?: number;
 }
 
 const WEIGHT_RANGES: { range: string; min: number; max: number }[] = [
@@ -65,7 +68,15 @@ export function computeProfile(
   const bggClustering = computeBggClustering(games);
   const utilityCurves = extractUtilityCurves(enabledAxes);
   const divergence =
-    tournamentStats !== null ? computeDivergence(fitnessResults, tournamentStats, games) : null;
+    tournamentStats !== null
+      ? computeDivergence(
+          fitnessResults,
+          tournamentStats,
+          games,
+          axes,
+          input.tournamentComparisonThreshold,
+        )
+      : null;
   const outliers = detectOutliers(games, axes, fitnessResults, tournamentStats);
   const suggestions = generateSuggestions(games, enabledAxes, divergence);
 
@@ -261,43 +272,249 @@ export function extractUtilityCurves(axes: EnabledAxis[]): UtilityCurveDeclarati
 }
 
 /**
- * Detect tournament/fitness divergence.
+ * Detect tournament divergence against fitness recomposed without Tournament axes.
  * Returns null when tournament data is null or empty.
  */
 export function computeDivergence(
-  fitnessResults: Map<string, FitnessResult>,
-  tournamentStats: Map<string, TournamentGameStatsDisplay>,
+  fitnessResults: ReadonlyMap<string, FitnessResult>,
+  tournamentStats: ReadonlyMap<string, TournamentGameStatsDisplay>,
   games: Game[],
-): DivergentGame[] | null {
+  axes: Axis[],
+  comparisonThreshold = 6,
+): TournamentDivergenceInsight[] | null {
   if (tournamentStats.size === 0) return null;
 
-  const divergent: DivergentGame[] = [];
+  const insights: TournamentDivergenceInsight[] = [];
   const gameMap = new Map(games.map((g) => [g.id, g]));
+  const tournamentAxisIds = new Set(
+    axes.flatMap((axis) => (axis.source === "tournament" ? [axis.id] : [])),
+  );
+  const includedGameCount = [...tournamentStats].filter(([gameId, stats]) => {
+    const result = fitnessResults.get(gameId);
+    return (
+      result !== undefined &&
+      independentFitnessScore(result, tournamentAxisIds, axes) !== null &&
+      stats.normalizedScore !== null &&
+      stats.comparisonCount >= comparisonThreshold &&
+      !stats.isProvisional
+    );
+  }).length;
+  const cohort = {
+    description: "Collection games with Tournament results and non-Tournament fitness evidence",
+    eligibleGameCount: tournamentStats.size,
+    includedGameCount,
+    excludedGameCount: Math.max(0, tournamentStats.size - includedGameCount),
+    coveragePercent:
+      tournamentStats.size === 0 ? 0 : (includedGameCount / tournamentStats.size) * 100,
+  };
+  const method = {
+    id: "tournament-preference-divergence",
+    version: 2,
+    description: "Compares Tournament preference with fitness excluding Tournament axes",
+  };
+  const limitations = ["Tournament preference reflects only the opponents compared so far"];
 
   for (const [gameId, stats] of tournamentStats) {
-    if (stats.normalizedScore === null) continue;
-
+    const gameName = gameMap.get(gameId)?.name ?? gameId;
     const fitness = fitnessResults.get(gameId);
-    if (!fitness || fitness.score === 0) continue; // skip vetoed/missing
-
-    const gap = Math.abs(stats.normalizedScore - fitness.score);
-    if (gap > 1.5) {
-      const game = gameMap.get(gameId);
-      const direction: DivergentGame["direction"] =
-        stats.normalizedScore > fitness.score ? "tournament-outlier" : "fitness-outlier";
-
-      divergent.push({
+    const independentScore =
+      fitness === undefined ? null : independentFitnessScore(fitness, tournamentAxisIds, axes);
+    const comparisonRequirement = {
+      criterion: "comparisons for subject game",
+      observed: stats.comparisonCount,
+      required: comparisonThreshold,
+      met: stats.comparisonCount >= comparisonThreshold && !stats.isProvisional,
+    };
+    const cohortRequirement = {
+      criterion: "normalized Tournament score available",
+      observed: stats.normalizedScore === null ? 0 : 1,
+      required: 1,
+      met: stats.normalizedScore !== null,
+    };
+    const comparatorRequirement = {
+      criterion: "independent non-Tournament axes",
+      observed: independentScore === null ? 0 : 1,
+      required: 1,
+      met: independentScore !== null,
+    };
+    const evidence: [ReportedInsightEvidenceGame] = [
+      {
         gameId,
-        gameName: game?.name ?? gameId,
-        fitnessScore: fitness.score,
-        normalizedTournamentScore: stats.normalizedScore,
-        gap,
-        direction,
+        gameName,
+        role: "subject" as const,
+        measurements: [
+          {
+            key: "tournament-score",
+            label: "Tournament score",
+            value: stats.normalizedScore,
+            unit: "rating",
+            source: "Tournament comparisons",
+          },
+          {
+            key: "comparison-count",
+            label: "Tournament comparisons",
+            value: stats.comparisonCount,
+            unit: "comparisons",
+            source: "Tournament comparisons",
+          },
+          {
+            key: "provisional",
+            label: "Provisional result",
+            value: stats.isProvisional,
+            unit: null,
+            source: "Tournament settings",
+          },
+          {
+            key: "independent-fitness-score",
+            label: "Independent fitness",
+            value: independentScore,
+            unit: "rating",
+            source: "Non-Tournament fitness axes",
+          },
+        ],
+      },
+    ];
+    const base = {
+      contractVersion: 1 as const,
+      id: `divergence:${gameId}`,
+      method,
+      cohort,
+      evidence,
+      limitations,
+    };
+
+    if (!comparisonRequirement.met) {
+      insights.push({
+        ...base,
+        status: "insufficient",
+        reason: "insufficient-sample",
+        sufficiency: [
+          { ...comparisonRequirement, met: false as const },
+          cohortRequirement,
+          comparatorRequirement,
+        ],
+        comparator: independentScore === null ? null : independentComparator(gameId),
+        explanation: `At least ${comparisonThreshold} comparisons are required before reporting divergence`,
+      });
+      continue;
+    }
+
+    if (stats.normalizedScore === null) {
+      insights.push({
+        ...base,
+        status: "insufficient",
+        reason: "insufficient-coverage",
+        sufficiency: [
+          { ...cohortRequirement, met: false as const },
+          { ...comparisonRequirement, met: true as const },
+          comparatorRequirement,
+        ],
+        comparator: independentScore === null ? null : independentComparator(gameId),
+        explanation: "The Tournament cohort is not yet sufficient to normalize scores",
+      });
+      continue;
+    }
+
+    if (independentScore === null) {
+      insights.push({
+        ...base,
+        status: "insufficient",
+        reason: "missing-comparator",
+        sufficiency: [
+          { ...comparatorRequirement, met: false as const },
+          { ...comparisonRequirement, met: true as const },
+          { ...cohortRequirement, met: true as const },
+        ],
+        comparator: null,
+        explanation: "No rated non-Tournament axis is available for an independent comparison",
+      });
+      continue;
+    }
+
+    const tournamentScore = stats.normalizedScore;
+    const gap = Math.abs(tournamentScore - independentScore);
+    if (gap > 1.5) {
+      const direction =
+        tournamentScore > independentScore ? "tournament-outlier" : "fitness-outlier";
+      insights.push({
+        ...base,
+        status: "reported",
+        sufficiency: [
+          { ...comparisonRequirement, met: true as const },
+          { ...cohortRequirement, met: true as const },
+          { ...comparatorRequirement, met: true as const },
+        ],
+        comparator: independentComparator(gameId),
+        observation: `Tournament score is ${gap.toFixed(1)} points ${tournamentScore > independentScore ? "above" : "below"} independent fitness`,
+        interpretation:
+          direction === "tournament-outlier"
+            ? "Tournament choices favor this game more than the configured non-Tournament axes predict"
+            : "Configured non-Tournament axes favor this game more than Tournament choices do",
+        details: {
+          gameId,
+          gameName,
+          independentFitnessScore: independentScore,
+          normalizedTournamentScore: tournamentScore,
+          gap,
+          direction,
+          comparisonCount: stats.comparisonCount,
+          provisional: stats.isProvisional,
+        },
+        notability: {
+          metric: "absolute score gap",
+          value: gap,
+          threshold: 1.5,
+          direction: "above",
+          explanation: "The gap exceeds the 1.5-point reporting threshold",
+        },
+        confidence: {
+          level: stats.comparisonCount >= comparisonThreshold * 2 ? "high" : "moderate",
+          basis: `${stats.comparisonCount} Tournament comparisons; provisional results are suppressed`,
+        },
       });
     }
   }
 
-  return divergent.sort((a, b) => b.gap - a.gap);
+  return insights.sort((a, b) => {
+    if (a.status !== "reported") return b.status === "reported" ? 1 : 0;
+    if (b.status !== "reported") return -1;
+    return b.details.gap - a.details.gap;
+  });
+}
+
+function independentComparator(gameId: string) {
+  return {
+    description: "Fitness recomposed from rated non-Tournament axes",
+    gameIds: [gameId],
+  };
+}
+
+function independentFitnessScore(
+  fitness: FitnessResult,
+  tournamentAxisIds: ReadonlySet<string>,
+  axes: Axis[],
+): number | null {
+  const entries = fitness.breakdown.filter(
+    (entry) =>
+      !tournamentAxisIds.has(entry.axisId) && entry.effectiveRating !== null && entry.weight > 0,
+  );
+  if (entries.length === 0) return null;
+
+  const axisById = new Map(axes.map((axis) => [axis.id, axis]));
+  const independentVeto = entries.some((entry) => {
+    const axis = axisById.get(entry.axisId);
+    if (axis === undefined || !isEnabledScoringAxis(axis) || entry.overridden) return false;
+    const scoringValue = entry.scoringRawValue;
+    return scoringValue !== null && checkVeto(scoringValue, axis.veto ?? null);
+  });
+  if (independentVeto) return 0;
+
+  const weight = entries.reduce((sum, entry) => sum + entry.weight, 0);
+  const weightedRating = entries.reduce(
+    (sum, entry) => sum + (entry.effectiveRating ?? 0) * entry.weight,
+    0,
+  );
+  return Math.round((weightedRating / weight) * 10) / 10;
 }
 
 /**
@@ -408,7 +625,7 @@ export function detectOutliers(
 export function generateSuggestions(
   games: Game[],
   axes: EnabledAxis[],
-  divergentGames: DivergentGame[] | null,
+  divergence: TournamentDivergenceInsight[] | null,
 ): AxisSuggestion[] {
   const suggestions: AxisSuggestion[] = [];
   const gamesWithBgg = games.filter((g) => g.bggData !== null);
@@ -479,6 +696,9 @@ export function generateSuggestions(
   }
 
   // 3. Divergence repair
+  const divergentGames = divergence?.flatMap((insight) =>
+    insight.status === "reported" ? [insight.details] : [],
+  );
   if (divergentGames && divergentGames.length >= 2) {
     const divergentIds = new Set(divergentGames.map((d) => d.gameId));
     const divergentGamesData = games.filter((g) => divergentIds.has(g.id));

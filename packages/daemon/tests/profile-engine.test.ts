@@ -10,6 +10,7 @@ import type {
   TournamentAxis,
   TournamentGameStatsDisplay,
 } from "@shelf-judge/shared";
+import { CollectionProfileSchema } from "@shelf-judge/shared";
 import {
   computeAxisDistributions,
   computeAxisWeights,
@@ -631,49 +632,82 @@ describe("extractUtilityCurves", () => {
 // --- Divergence ---
 
 describe("computeDivergence", () => {
-  test("games above 1.5-point threshold flagged in both directions", () => {
+  const personalAxis = makeAxis({ id: "personal", name: "Personal" });
+  const tournamentAxis = makeTournamentAxis("tournament", "Tournament");
+  const axes = [personalAxis, tournamentAxis];
+
+  function scoredGame(game: Game, independentScore: number, tournamentScore = 5): FitnessResult {
+    game.ratings = { personal: independentScore, tournament: tournamentScore };
+    const result = makeDistributionResults([game], axes).get(game.id);
+    if (result === undefined) throw new Error(`Missing fitness fixture for ${game.id}`);
+    return result;
+  }
+
+  test("reports both directions using only independent fitness evidence", () => {
     const games = [
       makeGame({ id: "g1", name: "Tournament Favorite" }),
       makeGame({ id: "g2", name: "Fitness Favorite" }),
     ];
     const fitnessResults = new Map<string, FitnessResult>([
-      ["g1", makeFitness(4.0)], // low fitness
-      ["g2", makeFitness(8.5)], // high fitness
+      ["g1", scoredGame(games[0], 4, 10)],
+      ["g2", scoredGame(games[1], 8.5, 1)],
     ]);
     const tournamentStats = new Map<string, TournamentGameStatsDisplay>([
       ["g1", makeTournamentStats(7.0)], // high ELO → gap=3.0
       ["g2", makeTournamentStats(5.0)], // low ELO → gap=3.5
     ]);
 
-    const result = computeDivergence(fitnessResults, tournamentStats, games)!;
+    const result = computeDivergence(fitnessResults, tournamentStats, games, axes)!;
     expect(result.length).toBe(2);
 
-    // Sorted by gap descending
-    expect(result[0].gameName).toBe("Fitness Favorite");
-    expect(result[0].gap).toBe(3.5);
-    expect(result[0].direction).toBe("fitness-outlier"); // high fitness, low ELO
-
-    expect(result[1].gameName).toBe("Tournament Favorite");
-    expect(result[1].gap).toBe(3.0);
-    expect(result[1].direction).toBe("tournament-outlier"); // high ELO, low fitness
+    expect(result[0].status).toBe("reported");
+    expect(result[1].status).toBe("reported");
+    if (result[0].status !== "reported" || result[1].status !== "reported") return;
+    expect(result[0].details).toMatchObject({
+      gameName: "Fitness Favorite",
+      independentFitnessScore: 8.5,
+      gap: 3.5,
+      direction: "fitness-outlier",
+    });
+    expect(result[1].details.direction).toBe("tournament-outlier");
+    expect(result[0].evidence[0].measurements.map(({ key }) => key)).toContain(
+      "independent-fitness-score",
+    );
   });
 
-  test("games with null normalized score excluded", () => {
+  test("provisional games expose insufficient sample evidence", () => {
     const games = [makeGame({ id: "g1", name: "G1" })];
-    const fitnessResults = new Map([["g1", makeFitness(5.0)]]);
-    const tournamentStats = new Map([["g1", makeTournamentStats(null, 0)]]);
+    const fitnessResults = new Map([["g1", scoredGame(games[0], 5)]]);
+    const weak = makeTournamentStats(8, 5);
+    weak.isProvisional = true;
+    const tournamentStats = new Map([["g1", weak]]);
 
-    const result = computeDivergence(fitnessResults, tournamentStats, games)!;
-    expect(result.length).toBe(0);
+    const result = computeDivergence(fitnessResults, tournamentStats, games, axes)!;
+    expect(result[0].status).toBe("insufficient");
+    if (result[0].status !== "insufficient") return;
+    expect(result[0].reason).toBe("insufficient-sample");
+    expect(result[0].cohort).toMatchObject({
+      includedGameCount: 0,
+      excludedGameCount: 1,
+      coveragePercent: 0,
+    });
+    expect(result[0].sufficiency[0]).toEqual({
+      criterion: "comparisons for subject game",
+      observed: 5,
+      required: 6,
+      met: false,
+    });
   });
 
-  test("games with zero fitness (vetoed) excluded", () => {
+  test("abstains when Tournament is the only scored axis", () => {
     const games = [makeGame({ id: "g1", name: "G1" })];
-    const fitnessResults = new Map([["g1", makeFitness(0, true)]]);
+    games[0].ratings = { tournament: 8 };
+    const fitnessResults = makeDistributionResults([games[0]], [tournamentAxis]);
     const tournamentStats = new Map([["g1", makeTournamentStats(8.0)]]);
 
-    const result = computeDivergence(fitnessResults, tournamentStats, games)!;
-    expect(result.length).toBe(0);
+    const result = computeDivergence(fitnessResults, tournamentStats, games, [tournamentAxis])!;
+    expect(result[0]).toMatchObject({ status: "insufficient", reason: "missing-comparator" });
+    expect(result[0].comparator).toBeNull();
   });
 
   test("returns null when tournament stats is empty", () => {
@@ -681,16 +715,76 @@ describe("computeDivergence", () => {
     const fitnessResults = new Map([["g1", makeFitness(5.0)]]);
     const tournamentStats = new Map<string, TournamentGameStatsDisplay>();
 
-    expect(computeDivergence(fitnessResults, tournamentStats, games)).toBeNull();
+    expect(computeDivergence(fitnessResults, tournamentStats, games, axes)).toBeNull();
   });
 
-  test("gap exactly 1.5 is not flagged (> not >=)", () => {
+  test("gap exactly 1.5 is not reported", () => {
     const games = [makeGame({ id: "g1", name: "G1" })];
-    const fitnessResults = new Map([["g1", makeFitness(5.0)]]);
+    const fitnessResults = new Map([["g1", scoredGame(games[0], 5)]]);
     const tournamentStats = new Map([["g1", makeTournamentStats(6.5)]]);
 
-    const result = computeDivergence(fitnessResults, tournamentStats, games)!;
+    const result = computeDivergence(fitnessResults, tournamentStats, games, axes)!;
     expect(result.length).toBe(0);
+  });
+
+  test("Tournament weight changes and Tournament vetoes do not alter the comparator", () => {
+    const game = makeGame({ id: "g1", name: "G1" });
+    const fitness = scoredGame(game, 4, 9);
+    fitness.vetoed = true;
+    fitness.vetoedBy = {
+      axisId: tournamentAxis.id,
+      axisName: tournamentAxis.name,
+      threshold: 5,
+      direction: "below",
+      rawValue: 1,
+    };
+    fitness.score = 0;
+    const tournamentEntry = fitness.breakdown.find(({ axisId }) => axisId === tournamentAxis.id);
+    if (tournamentEntry === undefined) throw new Error("Missing Tournament breakdown fixture");
+    tournamentEntry.weight = 100;
+
+    const result = computeDivergence(
+      new Map([[game.id, fitness]]),
+      new Map([[game.id, makeTournamentStats(8)]]),
+      [game],
+      [personalAxis, { ...tournamentAxis, weight: 100 }],
+    )!;
+    expect(result[0].status).toBe("reported");
+    if (result[0].status === "reported") {
+      expect(result[0].details.independentFitnessScore).toBe(4);
+    }
+  });
+
+  test("a non-Tournament veto remains when a Tournament veto was recorded first", () => {
+    const game = makeGame({ id: "g1", name: "G1" });
+    const fitness = scoredGame(game, 4);
+    fitness.vetoed = true;
+    fitness.vetoedBy = {
+      axisId: tournamentAxis.id,
+      axisName: tournamentAxis.name,
+      threshold: 5,
+      direction: "below",
+      rawValue: 1,
+    };
+    fitness.score = 0;
+    const personalEntry = fitness.breakdown.find(({ axisId }) => axisId === personalAxis.id);
+    if (personalEntry === undefined) throw new Error("Missing personal breakdown fixture");
+    personalEntry.scoringRawValue = 4;
+    const vetoedPersonalAxis = {
+      ...personalAxis,
+      veto: { direction: "below" as const, threshold: 5 },
+    };
+
+    const result = computeDivergence(
+      new Map([[game.id, fitness]]),
+      new Map([[game.id, makeTournamentStats(8)]]),
+      [game],
+      [vetoedPersonalAxis, tournamentAxis],
+    )!;
+    expect(result[0].status).toBe("reported");
+    if (result[0].status === "reported") {
+      expect(result[0].details.independentFitnessScore).toBe(0);
+    }
   });
 });
 
@@ -1160,6 +1254,7 @@ describe("generateSuggestions", () => {
       makeGame({
         id: "g1",
         name: "G1",
+        ratings: { preference: 4 },
         bggData: makeBggData({
           mechanics: [
             { id: 1, name: "Area Control" },
@@ -1170,6 +1265,7 @@ describe("generateSuggestions", () => {
       makeGame({
         id: "g2",
         name: "G2",
+        ratings: { preference: 3 },
         bggData: makeBggData({
           mechanics: [
             { id: 1, name: "Area Control" },
@@ -1179,26 +1275,17 @@ describe("generateSuggestions", () => {
       }),
     ];
 
-    const divergent = [
-      {
-        gameId: "g1",
-        gameName: "G1",
-        fitnessScore: 4.0,
-        normalizedTournamentScore: 8.0,
-        gap: 4.0,
-        direction: "tournament-outlier" as const,
-      },
-      {
-        gameId: "g2",
-        gameName: "G2",
-        fitnessScore: 3.0,
-        normalizedTournamentScore: 7.0,
-        gap: 4.0,
-        direction: "tournament-outlier" as const,
-      },
-    ];
-
-    const axes: EnabledAxis[] = [];
+    const preference = makeAxis({ id: "preference", name: "Preference" });
+    const axes: EnabledAxis[] = [preference];
+    const divergent = computeDivergence(
+      makeDistributionResults(games, axes),
+      new Map([
+        ["g1", makeTournamentStats(8)],
+        ["g2", makeTournamentStats(7)],
+      ]),
+      games,
+      axes,
+    );
     const suggestions = generateSuggestions(games, axes, divergent);
     const repair = suggestions.filter((s) => s.source === "divergence-repair");
     expect(repair.some((s) => s.attribute === "Area Control")).toBe(true);
@@ -1209,22 +1296,19 @@ describe("generateSuggestions", () => {
       makeGame({
         id: "g1",
         name: "G1",
+        ratings: { preference: 4 },
         bggData: makeBggData({ mechanics: [{ id: 1, name: "Area Control" }] }),
       }),
     ];
 
-    const divergent = [
-      {
-        gameId: "g1",
-        gameName: "G1",
-        fitnessScore: 4.0,
-        normalizedTournamentScore: 8.0,
-        gap: 4.0,
-        direction: "tournament-outlier" as const,
-      },
-    ];
-
-    const axes: EnabledAxis[] = [];
+    const preference = makeAxis({ id: "preference", name: "Preference" });
+    const axes: EnabledAxis[] = [preference];
+    const divergent = computeDivergence(
+      makeDistributionResults(games, axes),
+      new Map([["g1", makeTournamentStats(8)]]),
+      games,
+      axes,
+    );
     const suggestions = generateSuggestions(games, axes, divergent);
     expect(suggestions.filter((s) => s.source === "divergence-repair").length).toBe(0);
   });
@@ -1445,10 +1529,7 @@ describe("computeProfile", () => {
       makeGame({ id: "g2", name: "G2", ratings: { a1: 3 } }),
     ];
 
-    const fitnessResults = new Map<string, FitnessResult>([
-      ["g1", makeFitness(7.0)],
-      ["g2", makeFitness(3.0)],
-    ]);
+    const fitnessResults = makeDistributionResults(games, axes);
 
     const tournamentStats = new Map<string, TournamentGameStatsDisplay>([
       ["g1", makeTournamentStats(7.0)], // no divergence
@@ -1464,7 +1545,18 @@ describe("computeProfile", () => {
 
     expect(profile.divergence).not.toBeNull();
     expect(profile.divergence!.length).toBe(1);
-    expect(profile.divergence![0].gameId).toBe("g2");
-    expect(profile.divergence![0].direction).toBe("tournament-outlier");
+    expect(profile.divergence![0].status).toBe("reported");
+    if (profile.divergence![0].status === "reported") {
+      expect(profile.divergence![0].details.gameId).toBe("g2");
+      expect(profile.divergence![0].details.direction).toBe("tournament-outlier");
+    }
+    expect(
+      CollectionProfileSchema.safeParse({
+        ...profile,
+        narration: null,
+        narrationState: "empty",
+        computedAt: "2026-01-01T00:00:00.000Z",
+      }).success,
+    ).toBe(true);
   });
 });

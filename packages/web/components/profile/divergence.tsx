@@ -1,19 +1,22 @@
 import Link from "next/link";
-import type { DivergentGame } from "@shelf-judge/shared";
+import type { TournamentDivergenceInsight } from "@shelf-judge/shared";
 
-export function Divergence({ games }: { games: DivergentGame[] }) {
-  if (games.length === 0) return null;
+export function Divergence({ games }: { games: TournamentDivergenceInsight[] }) {
+  const reported = games.flatMap((insight) =>
+    insight.status === "reported" ? [insight.details] : [],
+  );
+  if (reported.length === 0) return null;
 
   return (
     <div className="section-card">
       <div className="section-header">
         <span className="section-title-main">Preference Divergence</span>
         <span className="section-count">
-          {games.length} {games.length === 1 ? "game" : "games"} &middot; gap &gt; 1.5 pts
+          {reported.length} {reported.length === 1 ? "game" : "games"} &middot; gap &gt; 1.5 pts
         </span>
       </div>
       <div className="section-body">
-        {games.map((game) => (
+        {reported.map((game) => (
           <div key={game.gameId} className="divergence-row">
             <div className="div-game-name">
               <Link href={`/games/${game.gameId}`} className="game-link">
@@ -22,8 +25,10 @@ export function Divergence({ games }: { games: DivergentGame[] }) {
             </div>
             <div className="div-scores">
               <div className="div-score">
-                <span className="div-score-val fitness">{game.fitnessScore.toFixed(1)}</span>
-                <span className="div-score-lbl">Fitness</span>
+                <span className="div-score-val fitness">
+                  {game.independentFitnessScore.toFixed(1)}
+                </span>
+                <span className="div-score-lbl">Independent fitness</span>
               </div>
               <span className="div-arrow">&rarr;</span>
               <div className="div-score">

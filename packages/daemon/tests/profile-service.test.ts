@@ -276,6 +276,7 @@ describe("ProfileService", () => {
       profile: {
         contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
         algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
+        tournamentSettings: defaultTournament().settings,
         profile: cachedProfile,
         computedAt: futureDate,
         narration: null,
@@ -294,6 +295,106 @@ describe("ProfileService", () => {
     // Should return cached (gameCount 99), not recompute (gameCount 1)
     expect(profile.gameCount).toBe(99);
     expect(storage.savedProfile).toBeNull();
+  });
+
+  test("recomputes when the Tournament comparison threshold changes", async () => {
+    const futureDate = new Date(Date.now() + 60_000).toISOString();
+    const pastDate = new Date(Date.now() - 60_000).toISOString();
+    const cachedProfile: CollectionProfile = {
+      axisDistributions: [],
+      axisWeights: [],
+      bggClustering: {
+        mechanics: [],
+        categories: [],
+        families: [],
+        subdomains: [],
+        weightRanges: [],
+      },
+      utilityCurves: [],
+      divergence: null,
+      outliers: [],
+      suggestions: [],
+      narration: null,
+      narrationState: "empty",
+      gameCount: 99,
+      ratedGameCount: 0,
+      computedAt: futureDate,
+    };
+    const tournament = defaultTournament();
+    tournament.settings.provisionalThreshold = 8;
+    const storage = createStubStorage({
+      collection: makeCollection(pastDate),
+      tournament,
+      profile: {
+        contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
+        algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
+        tournamentSettings: defaultTournament().settings,
+        profile: cachedProfile,
+        computedAt: futureDate,
+        narration: null,
+        narrationComputedAt: null,
+      },
+    });
+    const service = createProfileService({
+      storageService: storage,
+      gameService: createStubGameService([makeGame("g1", "Game 1")]),
+      tournamentService: createStubTournamentService(),
+    });
+
+    const profile = await service.getProfile();
+
+    expect(profile.gameCount).toBe(1);
+    expect(storage.savedProfile?.tournamentSettings.provisionalThreshold).toBe(8);
+  });
+
+  test("recomputes when Tournament normalization changes", async () => {
+    const futureDate = new Date(Date.now() + 60_000).toISOString();
+    const pastDate = new Date(Date.now() - 60_000).toISOString();
+    const cachedProfile: CollectionProfile = {
+      axisDistributions: [],
+      axisWeights: [],
+      bggClustering: {
+        mechanics: [],
+        categories: [],
+        families: [],
+        subdomains: [],
+        weightRanges: [],
+      },
+      utilityCurves: [],
+      divergence: null,
+      outliers: [],
+      suggestions: [],
+      narration: null,
+      narrationState: "empty",
+      gameCount: 99,
+      ratedGameCount: 0,
+      computedAt: futureDate,
+    };
+    const tournament = defaultTournament();
+    tournament.settings.normalizationHalfWidth = 300;
+    const storage = createStubStorage({
+      collection: makeCollection(pastDate),
+      tournament,
+      profile: {
+        contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
+        algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
+        tournamentSettings: defaultTournament().settings,
+        profile: cachedProfile,
+        computedAt: futureDate,
+        narration: null,
+        narrationComputedAt: null,
+      },
+    });
+    const service = createProfileService({
+      storageService: storage,
+      gameService: createStubGameService([makeGame("g1", "Game 1")]),
+      tournamentService: createStubTournamentService(),
+    });
+
+    const profile = await service.getProfile();
+
+    expect(profile.gameCount).toBe(1);
+    expect(storage.savedProfile?.tournamentSettings.normalizationHalfWidth).toBe(300);
   });
 
   test("recomputes when collection.updatedAt > computedAt", async () => {
@@ -327,6 +428,7 @@ describe("ProfileService", () => {
       profile: {
         contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
         algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
+        tournamentSettings: defaultTournament().settings,
         profile: cachedProfile,
         computedAt: middleDate,
         narration: null,
@@ -395,6 +497,7 @@ describe("ProfileService", () => {
       profile: {
         contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
         algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
+        tournamentSettings: defaultTournament().settings,
         profile: cachedProfile,
         computedAt: middleDate,
         narration: null,
@@ -472,6 +575,7 @@ describe("ProfileService", () => {
       profile: {
         contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
         algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
+        tournamentSettings: defaultTournament().settings,
         profile: cachedProfile,
         computedAt: middleDate,
         narration: null,

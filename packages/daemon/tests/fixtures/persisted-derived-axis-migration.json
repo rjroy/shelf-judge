@@ -84,8 +84,13 @@
     "updatedAt": "2025-01-01T00:00:00.000Z"
   },
   "profile": {
-    "contractVersion": 1,
-    "algorithmVersion": 1,
+    "contractVersion": 2,
+    "algorithmVersion": 2,
+    "tournamentSettings": {
+      "kFactorThreshold": 15,
+      "normalizationHalfWidth": 400,
+      "provisionalThreshold": 6
+    },
     "profile": {
       "axisDistributions": [],
       "axisWeights": [],

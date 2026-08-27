@@ -11,7 +11,7 @@ import {
 } from "@/lib/api";
 import type {
   TournamentGameStatsDisplay,
-  DivergentGame,
+  TournamentDivergenceDetails,
   CollectionOutlier,
   FitnessResult,
   NichePosition,
@@ -52,7 +52,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
   let data;
   let axes;
   let tournamentStats: TournamentGameStatsDisplay | null = null;
-  let profileDivergence: DivergentGame | null = null;
+  let profileDivergence: TournamentDivergenceDetails | null = null;
   let profileOutlier: CollectionOutlier | null = null;
   let ignoredTags: NicheTagFilter[] = [];
   let shelfOptions: Array<{ shelfId: string; label: string; dimensionless: boolean }> = [];
@@ -75,7 +75,10 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
     }
     try {
       const profile = await getProfile();
-      profileDivergence = profile.divergence?.find((d) => d.gameId === id) ?? null;
+      const divergence = profile.divergence?.find(
+        (insight) => insight.status === "reported" && insight.details.gameId === id,
+      );
+      profileDivergence = divergence?.status === "reported" ? divergence.details : null;
       profileOutlier = profile.outliers.find((o) => o.gameId === id) ?? null;
     } catch {
       // Profile may not exist yet
@@ -303,9 +306,9 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
               <div className="div-scores">
                 <div className="div-score">
                   <span className="div-score-val fitness">
-                    {profileDivergence.fitnessScore.toFixed(1)}
+                    {profileDivergence.independentFitnessScore.toFixed(1)}
                   </span>
-                  <span className="div-score-lbl">Fitness</span>
+                  <span className="div-score-lbl">Independent fitness</span>
                 </div>
                 <span className="div-arrow">&rarr;</span>
                 <div className="div-score">

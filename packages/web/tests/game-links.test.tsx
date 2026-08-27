@@ -1,7 +1,8 @@
 import { describe, test, expect } from "bun:test";
 import { renderToString } from "react-dom/server";
 import type {
-  DivergentGame,
+  TournamentDivergenceDetails,
+  TournamentDivergenceInsight,
   CollectionOutlier,
   ReferenceGame,
   PredictionConfidence,
@@ -14,15 +15,56 @@ import { Outliers } from "@/components/profile/outliers";
 // Fixtures
 // ---------------------------------------------------------------------------
 
-function makeDivergentGame(overrides: Partial<DivergentGame> = {}): DivergentGame {
-  return {
+function makeDivergentGame(
+  overrides: Partial<TournamentDivergenceDetails> = {},
+): TournamentDivergenceInsight {
+  const details: TournamentDivergenceDetails = {
     gameId: "game-123",
     gameName: "Test Game",
-    fitnessScore: 7.5,
+    independentFitnessScore: 7.5,
     normalizedTournamentScore: 5.2,
     gap: 2.3,
     direction: "fitness-outlier",
+    comparisonCount: 10,
+    provisional: false,
     ...overrides,
+  };
+  return {
+    contractVersion: 1,
+    id: `divergence:${details.gameId}`,
+    status: "reported",
+    method: { id: "tournament-preference-divergence", version: 2, description: "Test" },
+    cohort: {
+      description: "Test cohort",
+      eligibleGameCount: 1,
+      includedGameCount: 1,
+      excludedGameCount: 0,
+      coveragePercent: 100,
+    },
+    sufficiency: [{ criterion: "comparisons", observed: 10, required: 6, met: true }],
+    evidence: [
+      {
+        gameId: details.gameId,
+        gameName: details.gameName,
+        role: "subject",
+        measurements: [
+          { key: "gap", label: "Gap", value: details.gap, unit: "rating", source: "test" },
+        ],
+      },
+    ],
+    comparator: { description: "Independent fitness", gameIds: [details.gameId] },
+    limitations: [],
+    observation: "Scores diverge",
+    interpretation: null,
+    details,
+    notability: {
+      metric: "absolute score gap",
+      value: details.gap,
+      threshold: 1.5,
+      direction: "above",
+      explanation: "Above threshold",
+    },
+    confidence: { level: "moderate", basis: "Test fixture" },
   };
 }
 

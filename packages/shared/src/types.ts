@@ -808,14 +808,20 @@ export type AbstainedInsight = InsufficientInsight | SuppressedInsight | Retired
 
 export type TrustedInsight<TDetails> = ReportedInsight<TDetails> | AbstainedInsight;
 
-export interface DivergentGame {
+export interface TournamentDivergenceDetails {
   gameId: string;
   gameName: string;
-  fitnessScore: number;
+  independentFitnessScore: number;
   normalizedTournamentScore: number;
   gap: number; // absolute difference
   direction: "tournament-outlier" | "fitness-outlier";
+  comparisonCount: number;
+  provisional: boolean;
 }
+
+export type TournamentDivergenceInsight =
+  | ReportedInsight<TournamentDivergenceDetails>
+  | InsufficientInsight;
 
 export interface ComponentDistances {
   binary: number; // Jaccard distance [0,1]
@@ -864,7 +870,7 @@ export interface CollectionProfile {
     weightRanges: WeightRangeCluster[];
   };
   utilityCurves: UtilityCurveDeclaration[];
-  divergence: DivergentGame[] | null; // null when no tournament data
+  divergence: TournamentDivergenceInsight[] | null; // null when no tournament data
   outliers: CollectionOutlier[];
   suggestions: AxisSuggestion[];
   narration: ProfileNarration | null;
@@ -875,8 +881,9 @@ export interface CollectionProfile {
 }
 
 export interface ProfileData {
-  contractVersion: 1;
-  algorithmVersion: 1;
+  contractVersion: 2;
+  algorithmVersion: 2;
+  tournamentSettings: TournamentSettings;
   profile: CollectionProfile;
   computedAt: string; // ISO 8601
   narration: ProfileNarration | null;

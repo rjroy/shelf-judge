@@ -27,8 +27,8 @@ import type {
 } from "./types";
 
 export const CURRENT_COLLECTION_SCHEMA_VERSION = 3 as const;
-export const CURRENT_PROFILE_CONTRACT_VERSION = 1 as const;
-export const CURRENT_PROFILE_ALGORITHM_VERSION = 1 as const;
+export const CURRENT_PROFILE_CONTRACT_VERSION = 2 as const;
+export const CURRENT_PROFILE_ALGORITHM_VERSION = 2 as const;
 
 const AmountInputSchema = z.string().superRefine((value, context) => {
   try {
@@ -807,16 +807,158 @@ const UtilityCurveDeclarationSchema = z
     path: ["nativeScale", "max"],
   });
 
-const DivergentGameSchema = z
+const InsightMeasurementSchema = z
+  .object({
+    key: z.string().min(1),
+    label: z.string().min(1),
+    value: z.union([z.string(), FiniteNumberSchema, z.boolean(), z.null()]),
+    unit: z.string().nullable(),
+    source: z.string().min(1),
+  })
+  .strict();
+
+const InsightEvidenceGameSchema = z
   .object({
     gameId: z.string().min(1),
     gameName: z.string().min(1),
-    fitnessScore: FiniteNumberSchema,
+    role: z.enum(["subject", "supporting", "comparator"]),
+    measurements: z.array(InsightMeasurementSchema),
+  })
+  .strict();
+
+const InsightSufficiencySchema = z
+  .object({
+    criterion: z.string().min(1),
+    observed: FiniteNumberSchema,
+    required: FiniteNumberSchema,
+    met: z.boolean(),
+  })
+  .strict();
+
+const SatisfiedInsightSufficiencySchema = z
+  .object({
+    criterion: z.string().min(1),
+    observed: FiniteNumberSchema,
+    required: FiniteNumberSchema,
+    met: z.literal(true),
+  })
+  .strict();
+
+const UnmetInsightSufficiencySchema = z
+  .object({
+    criterion: z.string().min(1),
+    observed: FiniteNumberSchema,
+    required: FiniteNumberSchema,
+    met: z.literal(false),
+  })
+  .strict();
+
+const InsightBaseFields = {
+  contractVersion: z.literal(1),
+  id: z.string().min(1),
+  method: z
+    .object({
+      id: z.string().min(1),
+      version: z.number().int().positive(),
+      description: z.string().min(1),
+    })
+    .strict(),
+  cohort: z
+    .object({
+      description: z.string().min(1),
+      eligibleGameCount: NonNegativeIntegerSchema,
+      includedGameCount: NonNegativeIntegerSchema,
+      excludedGameCount: NonNegativeIntegerSchema,
+      coveragePercent: PercentageSchema,
+    })
+    .strict(),
+  sufficiency: z.array(InsightSufficiencySchema),
+  evidence: z.array(InsightEvidenceGameSchema),
+  comparator: z
+    .object({ description: z.string().min(1), gameIds: z.array(z.string().min(1)) })
+    .strict()
+    .nullable(),
+  limitations: z.array(z.string().min(1)),
+};
+
+const TournamentDivergenceDetailsSchema = z
+  .object({
+    gameId: z.string().min(1),
+    gameName: z.string().min(1),
+    independentFitnessScore: FiniteNumberSchema,
     normalizedTournamentScore: FiniteNumberSchema,
     gap: FiniteNumberSchema.min(0),
     direction: z.enum(["tournament-outlier", "fitness-outlier"]),
+    comparisonCount: NonNegativeIntegerSchema,
+    provisional: z.boolean(),
   })
   .strict();
+
+const ReportedTournamentDivergenceSchema = z
+  .object({
+    ...InsightBaseFields,
+    sufficiency: z.array(SatisfiedInsightSufficiencySchema).nonempty(),
+    evidence: z
+      .array(
+        InsightEvidenceGameSchema.extend({
+          measurements: z.array(InsightMeasurementSchema).nonempty(),
+        }),
+      )
+      .nonempty(),
+    status: z.literal("reported"),
+    observation: z.string().min(1),
+    interpretation: z.string().nullable(),
+    details: TournamentDivergenceDetailsSchema,
+    notability: z
+      .object({
+        metric: z.string().min(1),
+        value: FiniteNumberSchema,
+        threshold: FiniteNumberSchema.nullable(),
+        direction: z.enum(["above", "below", "two-sided"]),
+        explanation: z.string().min(1),
+      })
+      .strict(),
+    confidence: z
+      .object({ level: z.enum(["low", "moderate", "high"]), basis: z.string().min(1) })
+      .strict()
+      .nullable(),
+  })
+  .strict();
+
+const AbstainedTournamentDivergenceSchema = z.union([
+  z
+    .object({
+      ...InsightBaseFields,
+      status: z.literal("insufficient"),
+      reason: z.literal("insufficient-sample"),
+      sufficiency: z.tuple([UnmetInsightSufficiencySchema]).rest(InsightSufficiencySchema),
+      explanation: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      ...InsightBaseFields,
+      status: z.literal("insufficient"),
+      reason: z.literal("insufficient-coverage"),
+      sufficiency: z.tuple([UnmetInsightSufficiencySchema]).rest(InsightSufficiencySchema),
+      explanation: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      ...InsightBaseFields,
+      status: z.literal("insufficient"),
+      reason: z.literal("missing-comparator"),
+      comparator: z.null(),
+      explanation: z.string().min(1),
+    })
+    .strict(),
+]);
+
+const TournamentDivergenceInsightSchema = z.union([
+  ReportedTournamentDivergenceSchema,
+  AbstainedTournamentDivergenceSchema,
+]);
 
 const CollectionOutlierSchema = z
   .object({
@@ -873,7 +1015,7 @@ export const CollectionProfileSchema = z
       })
       .strict(),
     utilityCurves: z.array(UtilityCurveDeclarationSchema),
-    divergence: z.array(DivergentGameSchema).nullable(),
+    divergence: z.array(TournamentDivergenceInsightSchema).nullable(),
     outliers: z.array(CollectionOutlierSchema),
     suggestions: z.array(AxisSuggestionSchema),
     narration: ProfileNarrationSchema.nullable(),
@@ -892,6 +1034,13 @@ export const ProfileDataSchema = z
   .object({
     contractVersion: z.literal(CURRENT_PROFILE_CONTRACT_VERSION),
     algorithmVersion: z.literal(CURRENT_PROFILE_ALGORITHM_VERSION),
+    tournamentSettings: z
+      .object({
+        kFactorThreshold: z.number().int().min(1),
+        normalizationHalfWidth: z.number().positive(),
+        provisionalThreshold: z.number().int().min(0),
+      })
+      .strict(),
     profile: CollectionProfileSchema,
     computedAt: TimestampSchema,
     narration: ProfileNarrationSchema.nullable(),
@@ -974,18 +1123,18 @@ export const SubmitComparisonSchema = z
 
 export const TournamentSettingsUpdateSchema = z
   .object({
-    kFactorThreshold: z.number().optional(),
-    normalizationHalfWidth: z.number().optional(),
-    provisionalThreshold: z.number().optional(),
+    kFactorThreshold: z.number().int().min(1).optional(),
+    normalizationHalfWidth: z.number().positive().optional(),
+    provisionalThreshold: z.number().int().min(0).optional(),
   })
   .strict();
 
 // Storage format schemas (used by loadTournament for validation and migration)
 
 export const TournamentSettingsSchema = z.object({
-  kFactorThreshold: z.number(),
-  normalizationHalfWidth: z.number(),
-  provisionalThreshold: z.number(),
+  kFactorThreshold: z.number().int().min(1),
+  normalizationHalfWidth: z.number().positive(),
+  provisionalThreshold: z.number().int().min(0),
 });
 
 const CachedRecentComparisonSchema = z.object({

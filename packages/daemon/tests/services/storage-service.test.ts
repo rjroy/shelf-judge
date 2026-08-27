@@ -562,6 +562,11 @@ describe("StorageService.loadProfile", () => {
     const profileData: ProfileData = {
       contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
       algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
+      tournamentSettings: {
+        kFactorThreshold: 15,
+        normalizationHalfWidth: 400,
+        provisionalThreshold: 6,
+      },
       profile: makeEmptyProfile(),
       computedAt: "2026-01-01T00:00:00.000Z",
       narration: null,
@@ -584,6 +589,11 @@ describe("StorageService.saveProfile", () => {
     const profileData: ProfileData = {
       contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
       algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
+      tournamentSettings: {
+        kFactorThreshold: 15,
+        normalizationHalfWidth: 400,
+        provisionalThreshold: 6,
+      },
       profile: {
         ...makeEmptyProfile(),
         gameCount: 42,
@@ -690,6 +700,11 @@ describe("StorageService.loadCollection — tournament axis migration", () => {
     const profileData: ProfileData = {
       contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
       algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
+      tournamentSettings: {
+        kFactorThreshold: 15,
+        normalizationHalfWidth: 400,
+        provisionalThreshold: 6,
+      },
       profile: makeEmptyProfile(),
       computedAt: "2026-01-01T00:00:00.000Z",
       narration: null,
