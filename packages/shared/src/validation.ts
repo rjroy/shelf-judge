@@ -27,8 +27,8 @@ import type {
 } from "./types";
 
 export const CURRENT_COLLECTION_SCHEMA_VERSION = 3 as const;
-export const CURRENT_PROFILE_CONTRACT_VERSION = 3 as const;
-export const CURRENT_PROFILE_ALGORITHM_VERSION = 3 as const;
+export const CURRENT_PROFILE_CONTRACT_VERSION = 4 as const;
+export const CURRENT_PROFILE_ALGORITHM_VERSION = 4 as const;
 
 const AmountInputSchema = z.string().superRefine((value, context) => {
   try {
@@ -960,22 +960,184 @@ const TournamentDivergenceInsightSchema = z.union([
   AbstainedTournamentDivergenceSchema,
 ]);
 
-const CollectionOutlierSchema = z
+const CollectionOutlierDriverSchema = z
   .object({
-    gameId: z.string().min(1),
-    gameName: z.string().min(1),
-    distances: z
-      .object({
-        binary: FiniteNumberSchema.min(0).max(1),
-        continuous: FiniteNumberSchema.min(0).max(1),
-        personalAxes: FiniteNumberSchema.min(0).max(1).nullable(),
-        composite: FiniteNumberSchema.min(0).max(1),
-      })
-      .strict(),
-    classifications: z.array(z.enum(["lone-wolf", "category-orphan", "high-fitness-outlier"])),
-    fitnessScore: FiniteNumberSchema.nullable(),
+    dimension: z.enum(["mechanics", "categories", "complexity", "player-count", "playing-time"]),
+    label: z.string().min(1),
+    distance: FiniteNumberSchema.min(0).max(1),
+    subjectValue: z.union([z.string(), FiniteNumberSchema]),
+    comparatorValues: z.array(
+      z
+        .object({ gameId: z.string().min(1), value: z.union([z.string(), FiniteNumberSchema]) })
+        .strict(),
+    ),
+    explanation: z.string().min(1),
   })
   .strict();
+
+const ReportedCollectionOutlierSchema = z
+  .object({
+    ...InsightBaseFields,
+    status: z.literal("reported"),
+    sufficiency: z.array(SatisfiedInsightSufficiencySchema).nonempty(),
+    evidence: z
+      .array(
+        InsightEvidenceGameSchema.extend({
+          measurements: z.array(InsightMeasurementSchema).nonempty(),
+        }),
+      )
+      .nonempty(),
+    observation: z.string().min(1),
+    interpretation: z.string().nullable(),
+    details: z
+      .object({
+        gameId: z.string().min(1),
+        gameName: z.string().min(1),
+        neighborhoodDistance: FiniteNumberSchema.min(0).max(1),
+        nearestComparisons: z.tuple([
+          z
+            .object({
+              gameId: z.string().min(1),
+              gameName: z.string().min(1),
+              distance: FiniteNumberSchema.min(0).max(1),
+            })
+            .strict(),
+          z
+            .object({
+              gameId: z.string().min(1),
+              gameName: z.string().min(1),
+              distance: FiniteNumberSchema.min(0).max(1),
+            })
+            .strict(),
+        ]),
+        drivers: z.array(CollectionOutlierDriverSchema).nonempty(),
+        fitnessScore: FiniteNumberSchema.nullable(),
+      })
+      .strict(),
+    notability: z
+      .object({
+        metric: z.string().min(1),
+        value: FiniteNumberSchema,
+        threshold: FiniteNumberSchema.nullable(),
+        direction: z.enum(["above", "below", "two-sided"]),
+        explanation: z.string().min(1),
+      })
+      .strict(),
+    confidence: z
+      .object({ level: z.enum(["low", "moderate", "high"]), basis: z.string().min(1) })
+      .strict()
+      .nullable(),
+  })
+  .strict()
+  .superRefine((outlier, context) => {
+    const comparatorGameIds = outlier.comparator?.gameIds ?? [];
+    const detailComparatorGameIds = outlier.details.nearestComparisons.map(({ gameId }) => gameId);
+    const comparatorEvidence = outlier.evidence.filter(({ role }) => role === "comparator");
+    const evidenceComparatorGameIds = comparatorEvidence.map(({ gameId }) => gameId);
+    const comparatorIds = new Set(comparatorGameIds);
+    const detailComparatorIds = new Set(detailComparatorGameIds);
+    const evidenceComparatorIds = new Set(evidenceComparatorGameIds);
+    const subjectEvidence = outlier.evidence.filter(({ role }) => role === "subject");
+    const sameIds = (left: Set<string>, right: Set<string>) =>
+      left.size === right.size && [...left].every((gameId) => right.has(gameId));
+    const addContractIssue = (path: (string | number)[], message: string) =>
+      context.addIssue({ code: z.ZodIssueCode.custom, path, message });
+
+    if (outlier.id !== `outlier:${outlier.details.gameId}`) {
+      addContractIssue(["id"], "Outlier ID must identify the subject game");
+    }
+    if (
+      subjectEvidence.length !== 1 ||
+      subjectEvidence[0]?.gameId !== outlier.details.gameId ||
+      subjectEvidence[0]?.gameName !== outlier.details.gameName
+    ) {
+      addContractIssue(
+        ["evidence"],
+        "Outlier evidence must contain exactly one matching subject game",
+      );
+    }
+    if (comparatorGameIds.length !== 2 || comparatorIds.size !== 2) {
+      addContractIssue(
+        ["comparator", "gameIds"],
+        "Outliers must declare two distinct comparison games",
+      );
+    }
+    if (detailComparatorIds.size !== 2) {
+      addContractIssue(
+        ["details", "nearestComparisons"],
+        "Nearest comparisons must identify two distinct games",
+      );
+    }
+    if (comparatorEvidence.length !== 2 || evidenceComparatorIds.size !== 2) {
+      addContractIssue(["evidence"], "Outlier evidence must contain two distinct comparators");
+    }
+    if (!sameIds(comparatorIds, detailComparatorIds)) {
+      addContractIssue(
+        ["comparator", "gameIds"],
+        "Comparator IDs must match the nearest comparison details",
+      );
+    }
+    if (!sameIds(comparatorIds, evidenceComparatorIds)) {
+      addContractIssue(
+        ["evidence"],
+        "Comparator evidence must match the declared comparison games",
+      );
+    }
+    if (outlier.notability.value !== outlier.details.neighborhoodDistance) {
+      addContractIssue(
+        ["notability", "value"],
+        "Outlier notability must report the neighborhood distance",
+      );
+    }
+    for (const [driverIndex, driver] of outlier.details.drivers.entries()) {
+      const driverComparatorIds = new Set(driver.comparatorValues.map(({ gameId }) => gameId));
+      if (
+        driver.comparatorValues.length !== 2 ||
+        driverComparatorIds.size !== 2 ||
+        !sameIds(comparatorIds, driverComparatorIds)
+      ) {
+        addContractIssue(
+          ["details", "drivers", driverIndex, "comparatorValues"],
+          "Each driver must expose values for every comparison game",
+        );
+      }
+    }
+  });
+
+const AbstainedCollectionOutlierSchema = z.union([
+  z
+    .object({
+      ...InsightBaseFields,
+      status: z.literal("insufficient"),
+      reason: z.literal("insufficient-sample"),
+      sufficiency: z.tuple([UnmetInsightSufficiencySchema]).rest(InsightSufficiencySchema),
+      explanation: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      ...InsightBaseFields,
+      status: z.literal("insufficient"),
+      reason: z.literal("insufficient-coverage"),
+      sufficiency: z.tuple([UnmetInsightSufficiencySchema]).rest(InsightSufficiencySchema),
+      explanation: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      ...InsightBaseFields,
+      status: z.literal("insufficient"),
+      reason: z.literal("missing-comparator"),
+      comparator: z.null(),
+      explanation: z.string().min(1),
+    })
+    .strict(),
+]);
+
+const CollectionOutlierSchema = z.union([
+  ReportedCollectionOutlierSchema,
+  AbstainedCollectionOutlierSchema,
+]);
 
 const AxisSuggestionSchema = z
   .object({

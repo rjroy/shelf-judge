@@ -3,7 +3,6 @@ import type {
   BggGameData,
   FitnessResult,
   Axis,
-  DerivedAxis,
   EnabledAxis,
   Game,
   PersonalAxis,
@@ -135,25 +134,6 @@ function makeTournamentAxis(id: string, name: string): TournamentAxis {
     weight: 50,
     enabled: true,
     source: "tournament",
-    createdAt: "2026-01-01T00:00:00Z",
-    updatedAt: "2026-01-01T00:00:00Z",
-  };
-}
-
-function makePlayingTimeAxis(
-  id: string,
-  name: string,
-  maximumScoringTime = 240,
-): DerivedAxis<"playingTime"> {
-  return {
-    id,
-    name,
-    description: null,
-    weight: 50,
-    enabled: true,
-    source: "derived",
-    derivedField: "playingTime",
-    configuration: { maximumScoringTime },
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:00Z",
   };
@@ -821,13 +801,7 @@ describe("detectOutliers", () => {
     });
   }
 
-  const axes: Axis[] = [
-    makeAxis({ id: "a1", name: "Fun" }),
-    makeDerivedAxis("players", "Player Count Fit", "playerCountFit"),
-    makePlayingTimeAxis("time", "Play Time", 90),
-  ];
-
-  test("a deliberate outlier (heavy wargame in medium euros) is flagged", () => {
+  function deliberateOutlierFixture() {
     const games = [
       makeEuroGame("e1", "Euro 1"),
       makeEuroGame("e2", "Euro 2"),
@@ -860,42 +834,64 @@ describe("detectOutliers", () => {
       ["war1", makeFitness(6.0)],
     ]);
 
-    const outliers = detectOutliers(games, axes, fitnessResults);
-    const warOutlier = outliers.find((o) => o.gameId === "war1");
+    return { games, fitnessResults };
+  }
+
+  test("a deliberate outlier exposes nearest comparisons and concrete factual drivers", () => {
+    const { games, fitnessResults } = deliberateOutlierFixture();
+    const outliers = detectOutliers(games, fitnessResults);
+    const warOutlier = outliers.find(
+      (outlier) => outlier.status === "reported" && outlier.details.gameId === "war1",
+    );
     expect(warOutlier).toBeDefined();
-    expect(warOutlier!.gameName).toBe("Heavy Wargame");
+    if (warOutlier?.status !== "reported") return;
+    expect(warOutlier.details.gameName).toBe("Heavy Wargame");
+    expect(warOutlier.details.nearestComparisons).toHaveLength(2);
+    expect(warOutlier.comparator?.gameIds).toEqual(
+      warOutlier.details.nearestComparisons.map(({ gameId }) => gameId),
+    );
+    expect(warOutlier.details.drivers.map(({ dimension }) => dimension)).toContain("mechanics");
+    expect(warOutlier.details.drivers.map(({ dimension }) => dimension)).toContain("categories");
+    expect(warOutlier.evidence.every(({ measurements }) => measurements.length > 0)).toBe(true);
+    const profilePayload = {
+      axisDistributions: [],
+      axisWeights: [],
+      bggClustering: {
+        mechanics: [],
+        categories: [],
+        families: [],
+        subdomains: [],
+        weightRanges: [],
+      },
+      utilityCurves: [],
+      divergence: null,
+      outliers,
+      suggestions: [],
+      narration: null,
+      narrationState: "empty",
+      gameCount: games.length,
+      ratedGameCount: 0,
+      computedAt: "2026-01-01T00:00:00Z",
+    };
+    expect(CollectionProfileSchema.safeParse(profilePayload).success).toBe(true);
+
+    const malformedProfile = structuredClone(profilePayload);
+    const malformedOutlier = malformedProfile.outliers.find(
+      (outlier) => outlier.status === "reported",
+    );
+    if (malformedOutlier?.status !== "reported") return;
+    malformedOutlier.details.nearestComparisons[1] = malformedOutlier.details.nearestComparisons[0];
+    expect(CollectionProfileSchema.safeParse(malformedProfile).success).toBe(false);
   });
 
-  test("derived axes do not change profile outlier vectors", () => {
-    const games = [
-      makeEuroGame("e1", "Euro 1"),
-      makeEuroGame("e2", "Euro 2"),
-      makeEuroGame("e3", "Euro 3"),
-      makeEuroGame("e4", "Euro 4"),
-      makeEuroGame("e5", "Euro 5"),
-      makeGame({
-        id: "war1",
-        name: "Heavy Wargame",
-        minPlayers: 2,
-        maxPlayers: 2,
-        playingTime: 240,
-        bggData: makeBggData({
-          weight: 4.5,
-          communityRating: 8,
-          mechanics: warMechanics,
-          categories: warCategories,
-          subdomains: [{ id: 101, name: "War Games" }],
-        }),
-        ratings: { a1: 6 },
-      }),
-    ];
-    const fitnessResults = new Map<string, FitnessResult>();
-
-    const withDerived = detectOutliers(games, axes, fitnessResults);
-    const baseline = detectOutliers(games, [axes[0]], fitnessResults);
-    expect(withDerived).toEqual(baseline);
-    expect(withDerived.some((outlier) => outlier.gameId === "war1")).toBe(true);
-    expect(withDerived.every((outlier) => Number.isFinite(outlier.distances.composite))).toBe(true);
+  test("personal ratings do not affect compositional detection", () => {
+    const { games } = deliberateOutlierFixture();
+    const baseline = detectOutliers(games, new Map());
+    const withRatings = detectOutliers(
+      games.map((game) => ({ ...game, ratings: { a1: game.id === "war1" ? 1 : 10 } })),
+      new Map(),
+    );
+    expect(withRatings).toEqual(baseline);
   });
 
   test("game unusual on only one dimension is not flagged", () => {
@@ -923,218 +919,110 @@ describe("detectOutliers", () => {
     ];
 
     const fitnessResults = new Map<string, FitnessResult>();
-    const outliers = detectOutliers(games, axes, fitnessResults);
-    const oddOne = outliers.find((o) => o.gameId === "e5");
+    const outliers = detectOutliers(games, fitnessResults);
+    const oddOne = outliers.find(
+      (outlier) => outlier.status === "reported" && outlier.details.gameId === "e5",
+    );
     expect(oddOne).toBeUndefined();
   });
 
-  test("category orphan classification: game in unique category", () => {
+  test("fitness is exposed only as a separate interpretation", () => {
+    const { games } = deliberateOutlierFixture();
+    const outlier = detectOutliers(games, new Map([["war1", makeFitness(8.5)]])).find(
+      (result) => result.status === "reported" && result.details.gameId === "war1",
+    );
+    expect(outlier?.status).toBe("reported");
+    if (outlier?.status !== "reported") return;
+    expect(outlier.details.fitnessScore).toBe(8.5);
+    expect(outlier.interpretation).toContain("Separately");
+    expect(
+      outlier.evidence
+        .flatMap(({ measurements }) => measurements)
+        .some(({ key }) => key === "fitness"),
+    ).toBe(false);
+  });
+
+  test("small collections expose an explicit sample abstention", () => {
+    const result = detectOutliers(
+      [makeEuroGame("e1", "Euro 1"), makeEuroGame("e2", "Euro 2")],
+      new Map(),
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      status: "insufficient",
+      reason: "insufficient-sample",
+      cohort: { eligibleGameCount: 2, includedGameCount: 2 },
+    });
+  });
+
+  test("low factual metadata coverage exposes an explicit coverage abstention", () => {
     const games = [
-      makeEuroGame("e1", "Euro 1"),
-      makeEuroGame("e2", "Euro 2"),
-      makeEuroGame("e3", "Euro 3"),
-      makeEuroGame("e4", "Euro 4"),
-      makeEuroGame("e5", "Euro 5"),
+      ...Array.from({ length: 6 }, (_, index) => makeEuroGame(`e${index}`, `Euro ${index}`)),
+      ...Array.from({ length: 5 }, (_, index) =>
+        makeGame({ id: `m${index}`, name: `Missing ${index}` }),
+      ),
+    ];
+    expect(detectOutliers(games, new Map())[0]).toMatchObject({
+      status: "insufficient",
+      reason: "insufficient-coverage",
+      cohort: { eligibleGameCount: 11, includedGameCount: 6, excludedGameCount: 5 },
+    });
+  });
+
+  test("previously owned games do not participate in detection or comparisons", () => {
+    const { games } = deliberateOutlierFixture();
+    const historical = makeEuroGame("historical", "Historical Twin");
+    historical.ownership = "previously-owned";
+    const result = detectOutliers([...games, historical], new Map());
+    const reported = result.find((outlier) => outlier.status === "reported");
+    expect(reported?.cohort.eligibleGameCount).toBe(6);
+    expect(reported?.comparator?.gameIds).not.toContain("historical");
+  });
+
+  test("multimodal collections preserve well-supported local clusters", () => {
+    const euros = Array.from({ length: 3 }, (_, index) =>
+      makeEuroGame(`e${index}`, `Euro ${index}`),
+    );
+    const wars = Array.from({ length: 3 }, (_, index) =>
       makeGame({
-        id: "war1",
-        name: "Lone Wargame",
+        id: `w${index}`,
+        name: `War ${index}`,
         minPlayers: 2,
         maxPlayers: 2,
         playingTime: 240,
-        bggData: makeBggData({
-          weight: 4.5,
-          communityRating: 8.0,
-          mechanics: warMechanics,
-          categories: warCategories, // "Wargame" only appears once
-          subdomains: [{ id: 101, name: "War Games" }],
-        }),
-        ratings: { a1: 6 },
+        bggData: makeBggData({ weight: 4.5, mechanics: warMechanics, categories: warCategories }),
       }),
-    ];
-
-    const fitnessResults = new Map<string, FitnessResult>();
-    const outliers = detectOutliers(games, axes, fitnessResults);
-    const warOutlier = outliers.find((o) => o.gameId === "war1");
-    expect(warOutlier).toBeDefined();
-    expect(warOutlier!.classifications).toContain("category-orphan");
+    );
+    expect(detectOutliers([...euros, ...wars], new Map())).toEqual([]);
   });
 
-  test("lone wolf classification: game sharing zero mechanics with others", () => {
-    const games = [
-      makeEuroGame("e1", "Euro 1"),
-      makeEuroGame("e2", "Euro 2"),
-      makeEuroGame("e3", "Euro 3"),
-      makeEuroGame("e4", "Euro 4"),
-      makeEuroGame("e5", "Euro 5"),
+  test("a two-game minority mode is not mistaken for two isolated outliers", () => {
+    const euros = Array.from({ length: 4 }, (_, index) =>
+      makeEuroGame(`e${index}`, `Euro ${index}`),
+    );
+    const wars = Array.from({ length: 2 }, (_, index) =>
       makeGame({
-        id: "odd1",
-        name: "Truly Unique",
+        id: `w${index}`,
+        name: `War ${index}`,
         minPlayers: 1,
         maxPlayers: 1,
-        playingTime: 300,
-        bggData: makeBggData({
-          weight: 4.8,
-          communityRating: 9.0,
-          mechanics: [{ id: 99, name: "Totally Unique Mechanic" }],
-          categories: [{ id: 99, name: "Totally Unique Category" }],
-          subdomains: [],
-        }),
-        ratings: { a1: 2 },
+        playingTime: 390,
+        bggData: makeBggData({ weight: 5, mechanics: warMechanics, categories: warCategories }),
       }),
-    ];
-
-    const fitnessResults = new Map<string, FitnessResult>();
-    const outliers = detectOutliers(games, axes, fitnessResults);
-    const oddOutlier = outliers.find((o) => o.gameId === "odd1");
-    expect(oddOutlier).toBeDefined();
-    expect(oddOutlier!.classifications).toContain("lone-wolf");
+    );
+    expect(detectOutliers([...euros, ...wars], new Map())).toEqual([]);
   });
 
-  test("high-fitness outlier classification: game with fitness score and outlier distance", () => {
-    const games = [
-      makeEuroGame("e1", "Euro 1"),
-      makeEuroGame("e2", "Euro 2"),
-      makeEuroGame("e3", "Euro 3"),
-      makeEuroGame("e4", "Euro 4"),
-      makeEuroGame("e5", "Euro 5"),
-      makeGame({
-        id: "war1",
-        name: "Fit Wargame",
-        minPlayers: 2,
-        maxPlayers: 2,
-        playingTime: 240,
-        bggData: makeBggData({
-          weight: 4.5,
-          communityRating: 8.0,
-          mechanics: warMechanics,
-          categories: warCategories,
-          subdomains: [],
-        }),
-        ratings: { a1: 9 },
-      }),
-    ];
-
-    const fitnessResults = new Map<string, FitnessResult>([["war1", makeFitness(8.5)]]);
-
-    const outliers = detectOutliers(games, axes, fitnessResults);
-    const warOutlier = outliers.find((o) => o.gameId === "war1");
-    expect(warOutlier).toBeDefined();
-    expect(warOutlier!.classifications).toContain("high-fitness-outlier");
-    expect(warOutlier!.fitnessScore).toBe(8.5);
-  });
-
-  test("low-fitness outlier does NOT get high-fitness-outlier classification", () => {
-    const games = [
-      makeEuroGame("e1", "Euro 1"),
-      makeEuroGame("e2", "Euro 2"),
-      makeEuroGame("e3", "Euro 3"),
-      makeEuroGame("e4", "Euro 4"),
-      makeEuroGame("e5", "Euro 5"),
-      makeGame({
-        id: "war1",
-        name: "Poor Fit Wargame",
-        minPlayers: 2,
-        maxPlayers: 2,
-        playingTime: 240,
-        bggData: makeBggData({
-          weight: 4.5,
-          communityRating: 8.0,
-          mechanics: warMechanics,
-          categories: warCategories,
-          subdomains: [],
-        }),
-        ratings: { a1: 2 },
-      }),
-    ];
-
-    // Low fitness: axes say "don't keep it"
-    const fitnessResults = new Map<string, FitnessResult>([["war1", makeFitness(2.5)]]);
-
-    const outliers = detectOutliers(games, axes, fitnessResults);
-    const warOutlier = outliers.find((o) => o.gameId === "war1");
-    if (warOutlier) {
-      expect(warOutlier.classifications).not.toContain("high-fitness-outlier");
-    }
-  });
-
-  test("games without BGG data excluded from outlier detection", () => {
-    const games = [
-      makeEuroGame("e1", "Euro 1"),
-      makeEuroGame("e2", "Euro 2"),
-      makeEuroGame("e3", "Euro 3"),
-      makeEuroGame("e4", "Euro 4"),
-      makeGame({ id: "noBgg", name: "No BGG Data" }), // no bggData
-    ];
-
-    const fitnessResults = new Map<string, FitnessResult>();
-    const outliers = detectOutliers(games, axes, fitnessResults);
-    expect(outliers.every((o) => o.gameId !== "noBgg")).toBe(true);
-  });
-
-  test("fewer than 3 games with BGG data returns empty", () => {
-    const games = [makeEuroGame("e1", "Euro 1"), makeEuroGame("e2", "Euro 2")];
-    const fitnessResults = new Map<string, FitnessResult>();
-    expect(detectOutliers(games, axes, fitnessResults)).toEqual([]);
-  });
-
-  test("tournament axis presence does not destabilize outlier detection (REQ-TAXIS-8)", () => {
-    // Regression guard for the dimension change in feature-vector.ts when the
-    // tournament axis is added. profile-engine has no tournament data, so the
-    // tournament slot for every game is the 0.5 fallback. The added column
-    // must therefore not change which games are flagged as outliers — the
-    // wargame fixture must still be detected. (Prevents the bug class from
-    // .lore/retros/incident/outlier-composite-null-crash.md, where a missing
-    // axis silently became NaN and serialized to null.)
-    const tournamentAxis = makeTournamentAxis("tournament", "Tournament");
-    const axesWithTournament = [...axes, tournamentAxis];
-
-    const games = [
-      makeEuroGame("e1", "Euro 1"),
-      makeEuroGame("e2", "Euro 2"),
-      makeEuroGame("e3", "Euro 3"),
-      makeEuroGame("e4", "Euro 4"),
-      makeEuroGame("e5", "Euro 5"),
-      makeGame({
-        id: "war1",
-        name: "Heavy Wargame",
-        minPlayers: 2,
-        maxPlayers: 2,
-        playingTime: 240,
-        bggData: makeBggData({
-          weight: 4.5,
-          communityRating: 8.0,
-          mechanics: warMechanics,
-          categories: warCategories,
-          subdomains: [{ id: 101, name: "War Games" }],
-        }),
-        ratings: { a1: 6 },
-      }),
-    ];
-
-    const fitnessResults = new Map<string, FitnessResult>([
-      ["e1", makeFitness(7.0)],
-      ["e2", makeFitness(7.2)],
-      ["e3", makeFitness(6.8)],
-      ["e4", makeFitness(7.1)],
-      ["e5", makeFitness(7.3)],
-      ["war1", makeFitness(6.0)],
-    ]);
-
-    const outliersBefore = detectOutliers(games, axes, fitnessResults);
-    const outliersAfter = detectOutliers(games, axesWithTournament, fitnessResults);
-
-    // Same games flagged as outliers in both cases.
-    const idsBefore = outliersBefore.map((o) => o.gameId).sort();
-    const idsAfter = outliersAfter.map((o) => o.gameId).sort();
-    expect(idsAfter).toEqual(idsBefore);
-    // No NaN/null leaks: every flagged outlier still has a finite composite
-    // distance. NaN serializes through JSON.stringify as null, which is the
-    // exact failure mode the regression test guards against.
-    for (const o of outliersAfter) {
-      expect(Number.isFinite(o.distances.composite)).toBe(true);
-      expect(o.distances.personalAxes).not.toBeNull();
-      expect(Number.isFinite(o.distances.personalAxes!)).toBe(true);
-    }
+  test("missing factual values remain missing rather than creating outlier evidence", () => {
+    const games = Array.from({ length: 6 }, (_, index) =>
+      makeEuroGame(`e${index}`, `Euro ${index}`),
+    );
+    games[5] = { ...games[5], playingTime: null, bggData: { ...games[5].bggData!, weight: null } };
+    expect(detectOutliers(games, new Map())[0]).toMatchObject({
+      status: "insufficient",
+      reason: "insufficient-sample",
+      cohort: { eligibleGameCount: 6, includedGameCount: 5, excludedGameCount: 1 },
+    });
   });
 });
 

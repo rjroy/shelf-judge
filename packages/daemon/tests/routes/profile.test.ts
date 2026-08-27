@@ -54,13 +54,23 @@ describe("profile routes", () => {
       expect(profile.gameCount).toBe(0);
     });
 
-    test("includes per-component distances for outliers when present", async () => {
+    test("exposes outlier abstention evidence for an empty collection", async () => {
       const res = await jsonRequest(ctx.app, "GET", "/api/profile");
       expect(res.status).toBe(200);
 
       const profile = (await res.json()) as CollectionProfile;
-      // With no games, no outliers expected
-      expect(profile.outliers).toEqual([]);
+      expect(profile.outliers).toHaveLength(1);
+      expect(profile.outliers[0]).toMatchObject({
+        status: "insufficient",
+        reason: "insufficient-sample",
+        cohort: { eligibleGameCount: 0, includedGameCount: 0, coveragePercent: 0 },
+      });
+      expect(profile.outliers[0]?.sufficiency[0]).toEqual({
+        criterion: "usable-owned-games",
+        observed: 0,
+        required: 6,
+        met: false,
+      });
     });
 
     test("divergence is null when no tournament data", async () => {

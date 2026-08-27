@@ -14,7 +14,8 @@ import type {
   FitnessResult,
   EnabledAxis,
   Game,
-  OutlierClassification,
+  CollectionOutlierDimension,
+  CollectionOutlierDriver,
   ReportedInsightEvidenceGame,
   TournamentGameStatsDisplay,
   UtilityCurveDeclaration,
@@ -26,15 +27,6 @@ import {
   isEnabledScoringAxis,
   summarizeDerivedAxisConfiguration,
 } from "@shelf-judge/shared";
-import {
-  buildVocabulary,
-  compositeDistance,
-  computeCentroid,
-  computeContinuousRanges,
-  encodeGame,
-  getOrderedVectorAxes,
-  getVectorAxisValues,
-} from "./feature-vector.js";
 import { checkVeto } from "./curve-engine.js";
 
 export interface ProfileInput {
@@ -76,7 +68,7 @@ export function computeProfile(
           input.tournamentComparisonThreshold,
         )
       : null;
-  const outliers = detectOutliers(games, axes, fitnessResults, tournamentStats);
+  const outliers = detectOutliers(games, fitnessResults);
   const suggestions = generateSuggestions(
     games,
     enabledAxes,
@@ -523,99 +515,331 @@ function independentFitnessScore(
   return Math.round((weightedRating / weight) * 10) / 10;
 }
 
-/**
- * Detect collection outliers via composite feature vector distance.
- * Games without BGG data are excluded.
- */
+const OUTLIER_MIN_SAMPLE = 6;
+const OUTLIER_MIN_COVERAGE_PERCENT = 60;
+const OUTLIER_NEIGHBOR_COUNT = 2;
+const OUTLIER_DISTANCE_THRESHOLD = 0.5;
+const OUTLIER_DRIVER_THRESHOLD = 0.35;
+
+type OutlierFeatures = {
+  game: Game;
+  mechanics: Set<string>;
+  categories: Set<string>;
+  weight: number;
+  minPlayers: number;
+  maxPlayers: number;
+  playingTime: number;
+};
+
+type OutlierDistance = {
+  composite: number;
+  dimensions: Record<CollectionOutlierDimension, number>;
+};
+
+const OUTLIER_METHOD = {
+  id: "outlier:factual-neighborhood",
+  version: 1,
+  description:
+    "Compares each owned game with its two nearest owned neighbors using observed BGG composition and collection metadata only",
+} as const;
+
+function outlierFeatures(game: Game): OutlierFeatures | null {
+  if (game.bggData === null) return null;
+  const mechanics = game.bggData.mechanics.map(({ name }) => name).sort();
+  const categories = game.bggData.categories.map(({ name }) => name).sort();
+  if (
+    mechanics.length === 0 ||
+    categories.length === 0 ||
+    game.bggData.weight === null ||
+    game.minPlayers === null ||
+    game.maxPlayers === null ||
+    game.playingTime === null
+  ) {
+    return null;
+  }
+  const features: OutlierFeatures = {
+    game,
+    mechanics: new Set(mechanics),
+    categories: new Set(categories),
+    weight: game.bggData.weight,
+    minPlayers: game.minPlayers,
+    maxPlayers: game.maxPlayers,
+    playingTime: game.playingTime,
+  };
+  return features;
+}
+
+function jaccardDistance(left: Set<string>, right: Set<string>): number {
+  const intersection = [...left].filter((value) => right.has(value)).length;
+  const union = new Set([...left, ...right]).size;
+  return union === 0 ? 0 : 1 - intersection / union;
+}
+
+function factualDistance(left: OutlierFeatures, right: OutlierFeatures): OutlierDistance {
+  const dimensions: Record<CollectionOutlierDimension, number> = {
+    mechanics: jaccardDistance(left.mechanics, right.mechanics),
+    categories: jaccardDistance(left.categories, right.categories),
+    complexity: Math.min(Math.abs(left.weight - right.weight) / 4, 1),
+    "player-count":
+      (Math.min(Math.abs(left.minPlayers - right.minPlayers) / 7, 1) +
+        Math.min(Math.abs(left.maxPlayers - right.maxPlayers) / 7, 1)) /
+      2,
+    "playing-time": Math.min(Math.abs(left.playingTime - right.playingTime) / 300, 1),
+  };
+  const observed = Object.values(dimensions);
+  return {
+    composite: observed.reduce((sum, distance) => sum + distance, 0) / observed.length,
+    dimensions,
+  };
+}
+
+function featureValue(features: OutlierFeatures, dimension: CollectionOutlierDimension) {
+  switch (dimension) {
+    case "mechanics":
+      return [...features.mechanics].join(", ");
+    case "categories":
+      return [...features.categories].join(", ");
+    case "complexity":
+      return features.weight;
+    case "player-count":
+      return `${features.minPlayers}-${features.maxPlayers} players`;
+    case "playing-time":
+      return features.playingTime;
+  }
+}
+
+const OUTLIER_DIMENSION_LABELS: Record<CollectionOutlierDimension, string> = {
+  mechanics: "Mechanics",
+  categories: "Categories",
+  complexity: "Complexity weight",
+  "player-count": "Player range",
+  "playing-time": "Playing time",
+};
+
+function outlierEvidence(
+  features: OutlierFeatures,
+  role: ReportedInsightEvidenceGame["role"],
+  distance: number,
+): ReportedInsightEvidenceGame {
+  return {
+    gameId: features.game.id,
+    gameName: features.game.name,
+    role,
+    measurements: [
+      {
+        key: role === "subject" ? "neighborhood-distance" : "subject-distance",
+        label: role === "subject" ? "Neighborhood distance" : "Distance from subject",
+        value: Math.round(distance * 1000) / 1000,
+        unit: null,
+        source: OUTLIER_METHOD.id,
+      },
+      {
+        key: "mechanics",
+        label: "Mechanics",
+        value: featureValue(features, "mechanics"),
+        unit: null,
+        source: "BGG metadata",
+      },
+      {
+        key: "categories",
+        label: "Categories",
+        value: featureValue(features, "categories"),
+        unit: null,
+        source: "BGG metadata",
+      },
+      {
+        key: "complexity-weight",
+        label: "Complexity weight",
+        value: features.weight,
+        unit: "BGG weight",
+        source: "BGG metadata",
+      },
+      {
+        key: "player-range",
+        label: "Player range",
+        value: featureValue(features, "player-count"),
+        unit: null,
+        source: "collection metadata",
+      },
+      {
+        key: "playing-time",
+        label: "Playing time",
+        value: features.playingTime,
+        unit: "minutes",
+        source: "collection metadata",
+      },
+    ],
+  };
+}
+
+/** Detect compositional outliers among currently owned games with sufficient factual coverage. */
 export function detectOutliers(
   games: Game[],
-  axes: Axis[],
   fitnessResults: Map<string, FitnessResult>,
-  tournamentStats: ReadonlyMap<string, TournamentGameStatsDisplay> | null = null,
 ): CollectionOutlier[] {
-  const gamesWithBgg = games.filter((g) => g.bggData !== null);
-  if (gamesWithBgg.length < 3) return []; // need meaningful collection size
-
-  const vocabulary = buildVocabulary(gamesWithBgg);
-  const ranges = computeContinuousRanges(gamesWithBgg);
-  const vectorAxes = getOrderedVectorAxes(axes);
-
-  const vectors = gamesWithBgg.map((game) => {
-    const axisValues = getVectorAxisValues(
-      game,
-      vectorAxes,
-      tournamentStats?.get(game.id)?.normalizedScore,
-    );
-    return encodeGame(game, vocabulary, vectorAxes, axisValues, ranges);
+  const eligibleGames = games.filter(({ ownership }) => ownership === "owned");
+  const included = eligibleGames.flatMap((game) => {
+    const features = outlierFeatures(game);
+    return features === null ? [] : [features];
   });
-  const centroid = computeCentroid(vectors);
+  const coveragePercent =
+    eligibleGames.length === 0 ? 0 : (included.length / eligibleGames.length) * 100;
+  const cohort = {
+    description:
+      "Currently owned games with complete mechanics, categories, weight, player range, and playing-time metadata",
+    eligibleGameCount: eligibleGames.length,
+    includedGameCount: included.length,
+    excludedGameCount: eligibleGames.length - included.length,
+    coveragePercent,
+  };
+  const sampleRequirement = {
+    criterion: "usable-owned-games",
+    observed: included.length,
+    required: OUTLIER_MIN_SAMPLE,
+    met: included.length >= OUTLIER_MIN_SAMPLE,
+  };
+  const coverageRequirement = {
+    criterion: "factual-metadata-coverage-percent",
+    observed: coveragePercent,
+    required: OUTLIER_MIN_COVERAGE_PERCENT,
+    met: coveragePercent >= OUTLIER_MIN_COVERAGE_PERCENT,
+  };
+  const abstentionBase = {
+    contractVersion: 1 as const,
+    id: "outlier:collection",
+    method: OUTLIER_METHOD,
+    cohort,
+    evidence: [],
+    comparator: null,
+    limitations: [
+      "Only currently owned games participate in detection",
+      "Missing dimensions are excluded rather than estimated",
+    ],
+  };
 
-  // Compute distances from centroid
-  const distances = vectors.map((v) => compositeDistance(v, centroid));
-
-  // Mean and stddev of composite distances
-  const composites = distances.map((d) => d.composite);
-  const mean = composites.reduce((acc, v) => acc + v, 0) / composites.length;
-  const varianceSum = composites.reduce((acc, v) => acc + (v - mean) * (v - mean), 0);
-  const stddev = Math.sqrt(varianceSum / composites.length);
-
-  const threshold = mean + 2 * stddev;
+  if (!sampleRequirement.met) {
+    return [
+      {
+        ...abstentionBase,
+        status: "insufficient",
+        reason: "insufficient-sample",
+        sufficiency: [{ ...sampleRequirement, met: false }, coverageRequirement],
+        explanation: `At least ${OUTLIER_MIN_SAMPLE} owned games with usable factual metadata are required`,
+      },
+    ];
+  }
+  if (!coverageRequirement.met) {
+    return [
+      {
+        ...abstentionBase,
+        status: "insufficient",
+        reason: "insufficient-coverage",
+        sufficiency: [{ ...coverageRequirement, met: false }, sampleRequirement],
+        explanation: `At least ${OUTLIER_MIN_COVERAGE_PERCENT}% of owned games need usable factual metadata`,
+      },
+    ];
+  }
 
   const outliers: CollectionOutlier[] = [];
+  for (const subject of included) {
+    const neighbors = included
+      .filter((candidate) => candidate.game.id !== subject.game.id)
+      .map((candidate) => ({ features: candidate, distance: factualDistance(subject, candidate) }))
+      .sort(
+        (left, right) =>
+          left.distance.composite - right.distance.composite ||
+          left.features.game.id.localeCompare(right.features.game.id),
+      )
+      .slice(0, OUTLIER_NEIGHBOR_COUNT);
+    if (neighbors.length < OUTLIER_NEIGHBOR_COUNT) continue;
 
-  for (let i = 0; i < gamesWithBgg.length; i++) {
-    if (distances[i].composite <= threshold) continue;
+    const neighborhoodDistance =
+      neighbors.reduce((sum, neighbor) => sum + neighbor.distance.composite, 0) /
+      OUTLIER_NEIGHBOR_COUNT;
+    const dimensions = Object.keys(OUTLIER_DIMENSION_LABELS) as CollectionOutlierDimension[];
+    const drivers = dimensions
+      .flatMap((dimension): CollectionOutlierDriver[] => {
+        const values = neighbors.map(({ features, distance }) => ({
+          features,
+          distance: distance.dimensions[dimension],
+        }));
+        if (values.some(({ distance }) => distance < OUTLIER_DRIVER_THRESHOLD)) return [];
+        const distance = values.reduce((sum, value) => sum + value.distance, 0) / values.length;
+        const label = OUTLIER_DIMENSION_LABELS[dimension];
+        return [
+          {
+            dimension,
+            label,
+            distance,
+            subjectValue: featureValue(subject, dimension),
+            comparatorValues: values.map(({ features }) => ({
+              gameId: features.game.id,
+              value: featureValue(features, dimension),
+            })),
+            explanation: `${label} differs materially from both nearest comparison games`,
+          },
+        ];
+      })
+      .sort((left, right) => right.distance - left.distance);
+    if (neighborhoodDistance <= OUTLIER_DISTANCE_THRESHOLD || drivers.length < 2) continue;
 
-    const game = gamesWithBgg[i];
-    const classifications: OutlierClassification[] = [];
-
-    // Lone wolf: nearest neighbor composite distance > 0.5
-    let nearestDist = Infinity;
-    for (let j = 0; j < gamesWithBgg.length; j++) {
-      if (i === j) continue;
-      const d = compositeDistance(vectors[i], vectors[j]);
-      if (d.composite < nearestDist) nearestDist = d.composite;
-    }
-    if (nearestDist > 0.5) {
-      classifications.push("lone-wolf");
-    }
-
-    // Category orphan: game is in a BGG category or subdomain appearing only once
-    const categoryCounts = new Map<string, number>();
-    const subdomainCounts = new Map<string, number>();
-    const familyCounts = new Map<string, number>();
-    for (const g of gamesWithBgg) {
-      if (g.bggData) {
-        for (const c of g.bggData.categories)
-          categoryCounts.set(c.name, (categoryCounts.get(c.name) ?? 0) + 1);
-        for (const s of g.bggData.subdomains ?? [])
-          subdomainCounts.set(s.name, (subdomainCounts.get(s.name) ?? 0) + 1);
-        for (const f of g.bggData.families ?? [])
-          familyCounts.set(f.name, (familyCounts.get(f.name) ?? 0) + 1);
-      }
-    }
-    const isOrphan =
-      (game.bggData?.categories.some((c) => (categoryCounts.get(c.name) ?? 0) === 1) ?? false) ||
-      ((game.bggData?.subdomains ?? []).some((s) => (subdomainCounts.get(s.name) ?? 0) === 1) ??
-        false) ||
-      ((game.bggData?.families ?? []).some((f) => (familyCounts.get(f.name) ?? 0) === 1) ?? false);
-    if (isOrphan) {
-      classifications.push("category-orphan");
-    }
-
-    // High-fitness outlier: fitness score above scale midpoint (axes say "keep it")
-    // but BGG attributes say the game doesn't fit the collection identity
-    const fitness = fitnessResults.get(game.id);
-    if (fitness && fitness.score >= 5.0 && !fitness.vetoed) {
-      classifications.push("high-fitness-outlier");
-    }
-
+    const fitness = fitnessResults.get(subject.game.id);
+    const nearestComparisons = neighbors.map(({ features, distance }) => ({
+      gameId: features.game.id,
+      gameName: features.game.name,
+      distance: distance.composite,
+    })) as [
+      { gameId: string; gameName: string; distance: number },
+      { gameId: string; gameName: string; distance: number },
+    ];
     outliers.push({
-      gameId: game.id,
-      gameName: game.name,
-      distances: distances[i],
-      classifications,
-      fitnessScore: fitness?.score ?? null,
+      contractVersion: 1,
+      id: `outlier:${subject.game.id}`,
+      method: OUTLIER_METHOD,
+      cohort,
+      status: "reported",
+      sufficiency: [
+        { ...sampleRequirement, met: true },
+        { ...coverageRequirement, met: true },
+      ],
+      evidence: [
+        outlierEvidence(subject, "subject", neighborhoodDistance),
+        ...neighbors.map(({ features, distance }) =>
+          outlierEvidence(features, "comparator", distance.composite),
+        ),
+      ],
+      comparator: {
+        description: "Two nearest owned games with jointly observed factual metadata",
+        gameIds: nearestComparisons.map(({ gameId }) => gameId),
+      },
+      limitations: [
+        "Distance thresholds are deterministic heuristics, not population significance tests",
+        "Games missing any required factual dimension are excluded rather than estimated",
+      ],
+      observation: `${subject.game.name} is compositionally distant from its two nearest owned comparison games`,
+      interpretation:
+        fitness === undefined
+          ? null
+          : `Separately, its current preference fitness score is ${fitness.score.toFixed(1)}${fitness.vetoed ? " and is vetoed" : ""}`,
+      details: {
+        gameId: subject.game.id,
+        gameName: subject.game.name,
+        neighborhoodDistance,
+        nearestComparisons,
+        drivers: drivers as [CollectionOutlierDriver, ...CollectionOutlierDriver[]],
+        fitnessScore: fitness?.score ?? null,
+      },
+      notability: {
+        metric: "mean-two-nearest-factual-distance",
+        value: neighborhoodDistance,
+        threshold: OUTLIER_DISTANCE_THRESHOLD,
+        direction: "above",
+        explanation: `The mean distance exceeds ${OUTLIER_DISTANCE_THRESHOLD} and at least two dimensions are material drivers`,
+      },
+      confidence: {
+        level: included.length >= 12 ? "high" : "moderate",
+        basis: `${included.length} owned games passed factual metadata coverage gates`,
+      },
     });
   }
 

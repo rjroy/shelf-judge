@@ -4,6 +4,7 @@ import type {
   TournamentDivergenceDetails,
   TournamentDivergenceInsight,
   CollectionOutlier,
+  CollectionOutlierDetails,
   ReferenceGame,
   PredictionConfidence,
   FitnessBreakdownEntry,
@@ -68,14 +69,64 @@ function makeDivergentGame(
   };
 }
 
-function makeOutlier(overrides: Partial<CollectionOutlier> = {}): CollectionOutlier {
-  return {
+function makeOutlier(overrides: Partial<CollectionOutlierDetails> = {}): CollectionOutlier {
+  const details: CollectionOutlierDetails = {
     gameId: "outlier-456",
     gameName: "Outlier Game",
-    distances: { binary: 0.8, continuous: 0.6, personalAxes: 0.5, composite: 0.7 },
-    classifications: ["lone-wolf"],
-    fitnessScore: 6.0,
+    neighborhoodDistance: 0.7,
+    nearestComparisons: [
+      { gameId: "c1", gameName: "Comparator 1", distance: 0.65 },
+      { gameId: "c2", gameName: "Comparator 2", distance: 0.75 },
+    ],
+    drivers: [
+      {
+        dimension: "mechanics",
+        label: "Mechanics",
+        distance: 0.8,
+        subjectValue: "Hex-and-Counter",
+        comparatorValues: [{ gameId: "c1", value: "Worker Placement" }],
+        explanation: "Mechanics differ",
+      },
+    ],
+    fitnessScore: 6,
     ...overrides,
+  };
+  return {
+    contractVersion: 1,
+    id: `outlier:${details.gameId}`,
+    status: "reported",
+    method: { id: "outlier:factual-neighborhood", version: 1, description: "Test" },
+    cohort: {
+      description: "Owned games",
+      eligibleGameCount: 10,
+      includedGameCount: 10,
+      excludedGameCount: 0,
+      coveragePercent: 100,
+    },
+    sufficiency: [{ criterion: "sample", observed: 10, required: 6, met: true }],
+    evidence: [
+      {
+        gameId: details.gameId,
+        gameName: details.gameName,
+        role: "subject",
+        measurements: [
+          { key: "distance", label: "Distance", value: 0.7, unit: null, source: "test" },
+        ],
+      },
+    ],
+    comparator: { description: "Nearest games", gameIds: ["c1", "c2"] },
+    limitations: [],
+    observation: "Compositionally distant",
+    interpretation: null,
+    details,
+    notability: {
+      metric: "distance",
+      value: 0.7,
+      threshold: 0.5,
+      direction: "above",
+      explanation: "Above threshold",
+    },
+    confidence: { level: "moderate", basis: "Test" },
   };
 }
 

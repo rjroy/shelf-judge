@@ -53,7 +53,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
   let axes;
   let tournamentStats: TournamentGameStatsDisplay | null = null;
   let profileDivergence: TournamentDivergenceDetails | null = null;
-  let profileOutlier: CollectionOutlier | null = null;
+  let profileOutlier: Extract<CollectionOutlier, { status: "reported" }> | null = null;
   let ignoredTags: NicheTagFilter[] = [];
   let shelfOptions: Array<{ shelfId: string; label: string; dimensionless: boolean }> = [];
   try {
@@ -79,7 +79,10 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
         (insight) => insight.status === "reported" && insight.details.gameId === id,
       );
       profileDivergence = divergence?.status === "reported" ? divergence.details : null;
-      profileOutlier = profile.outliers.find((o) => o.gameId === id) ?? null;
+      const outlier = profile.outliers.find(
+        (candidate) => candidate.status === "reported" && candidate.details.gameId === id,
+      );
+      profileOutlier = outlier?.status === "reported" ? outlier : null;
     } catch {
       // Profile may not exist yet
     }
@@ -332,46 +335,16 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
             <div className="outlier-row">
               <div className="outlier-info">
                 <div className="outlier-reason">
-                  Composite distance <span>{profileOutlier.distances.composite.toFixed(2)}</span>{" "}
-                  from collection centroid
+                  Neighborhood distance{" "}
+                  <span>{profileOutlier.details.neighborhoodDistance.toFixed(2)}</span>
                 </div>
                 <div className="outlier-distance">
-                  {profileOutlier.distances.binary !== null && (
-                    <span
-                      className={`dist-component${profileOutlier.distances.binary >= 0.7 ? " high" : ""}`}
-                    >
-                      Mechanics: {profileOutlier.distances.binary.toFixed(2)}
+                  {profileOutlier.details.drivers.map((driver) => (
+                    <span key={driver.dimension} className="dist-component high">
+                      {driver.label}: {driver.distance.toFixed(2)}
                     </span>
-                  )}
-                  {profileOutlier.distances.continuous !== null && (
-                    <span
-                      className={`dist-component${profileOutlier.distances.continuous >= 0.7 ? " high" : ""}`}
-                    >
-                      BGG attrs: {profileOutlier.distances.continuous.toFixed(2)}
-                    </span>
-                  )}
-                  {profileOutlier.distances.personalAxes !== null && (
-                    <span
-                      className={`dist-component${profileOutlier.distances.personalAxes >= 0.7 ? " high" : ""}`}
-                    >
-                      Axis ratings: {profileOutlier.distances.personalAxes.toFixed(2)}
-                    </span>
-                  )}
+                  ))}
                 </div>
-              </div>
-              <div className="outlier-type-tags">
-                {profileOutlier.classifications.map((cls) => (
-                  <span
-                    key={cls}
-                    className={`outlier-type-tag ${cls === "lone-wolf" ? "lone-wolf" : cls === "category-orphan" ? "category-orphan" : "high-fitness"}`}
-                  >
-                    {cls === "lone-wolf"
-                      ? "Lone Wolf"
-                      : cls === "category-orphan"
-                        ? "Category Orphan"
-                        : "High-Fitness"}
-                  </span>
-                ))}
               </div>
             </div>
           </div>

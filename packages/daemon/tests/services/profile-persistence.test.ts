@@ -169,6 +169,29 @@ describe("persisted profile contract", () => {
     });
   });
 
+  test("deletes a current-version artifact containing a legacy centroid outlier", async () => {
+    await withStorage(async ({ profilePath, createStorage }) => {
+      const legacyOutlier = {
+        gameId: "legacy-game",
+        gameName: "Legacy Game",
+        distances: { binary: 0.8, continuous: 0.6, personalAxes: 0.5, composite: 0.7 },
+        classifications: ["lone-wolf"],
+        fitnessScore: 6,
+      };
+      await fs.writeFile(
+        profilePath,
+        JSON.stringify({
+          ...currentProfileData(),
+          profile: { ...emptyProfile(), outliers: [legacyOutlier] },
+        }),
+        "utf8",
+      );
+
+      expect(await createStorage().loadProfile()).toBeNull();
+      expect(await exists(profilePath)).toBe(false);
+    });
+  });
+
   test("deletes an artifact containing a non-finite number", async () => {
     await withStorage(async ({ profilePath, createStorage }) => {
       const raw = JSON.stringify(currentProfileData()).replace(

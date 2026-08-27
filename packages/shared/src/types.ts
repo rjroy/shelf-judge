@@ -824,21 +824,44 @@ export type TournamentDivergenceInsight =
   | InsufficientInsight;
 
 export interface ComponentDistances {
-  binary: number; // Jaccard distance [0,1]
-  continuous: number; // normalized Manhattan [0,1]
-  personalAxes: number | null; // normalized Manhattan [0,1], null when no shared axes
-  composite: number; // weighted combination [0,1]
+  binary: number;
+  continuous: number;
+  personalAxes: number | null;
+  composite: number;
 }
 
-export type OutlierClassification = "lone-wolf" | "category-orphan" | "high-fitness-outlier";
+export type CollectionOutlierDimension =
+  | "mechanics"
+  | "categories"
+  | "complexity"
+  | "player-count"
+  | "playing-time";
 
-export interface CollectionOutlier {
+export interface CollectionOutlierComparison {
   gameId: string;
   gameName: string;
-  distances: ComponentDistances;
-  classifications: OutlierClassification[];
+  distance: number; // factual compositional distance [0,1]
+}
+
+export interface CollectionOutlierDriver {
+  dimension: CollectionOutlierDimension;
+  label: string;
+  distance: number; // contribution distance [0,1]
+  subjectValue: string | number;
+  comparatorValues: { gameId: string; value: string | number }[];
+  explanation: string;
+}
+
+export interface CollectionOutlierDetails {
+  gameId: string;
+  gameName: string;
+  neighborhoodDistance: number;
+  nearestComparisons: [CollectionOutlierComparison, CollectionOutlierComparison];
+  drivers: [CollectionOutlierDriver, ...CollectionOutlierDriver[]];
   fitnessScore: number | null;
 }
+
+export type CollectionOutlier = ReportedInsight<CollectionOutlierDetails> | InsufficientInsight;
 
 export interface AxisSuggestionDetails {
   source: "divergence-repair";
@@ -894,8 +917,8 @@ export interface CollectionProfile {
 }
 
 export interface ProfileData {
-  contractVersion: 3;
-  algorithmVersion: 3;
+  contractVersion: 4;
+  algorithmVersion: 4;
   tournamentSettings: TournamentSettings;
   profile: CollectionProfile;
   computedAt: string; // ISO 8601
