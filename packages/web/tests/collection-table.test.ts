@@ -1,12 +1,13 @@
 import { describe, test, expect } from "bun:test";
 import type {
   Game,
-  GameWithScore,
+  GameWithPurchaseUtilization,
   FitnessResult,
   Axis,
   BggGameData,
   TournamentGameStatsDisplay,
 } from "@shelf-judge/shared";
+import { calculatePurchaseUtilization } from "@shelf-judge/shared";
 import {
   sortGames,
   matchesFilters,
@@ -107,8 +108,22 @@ function makeAxisScore(
 function makeGWS(
   gameOverrides: Partial<Game> = {},
   score: FitnessResult | null = null,
-): GameWithScore {
-  return { game: makeGame(gameOverrides), score };
+): GameWithPurchaseUtilization {
+  const game = makeGame(gameOverrides);
+  return {
+    game,
+    score,
+    displayScore: score === null ? null : score.score.toFixed(1),
+    purchaseUtilization: calculatePurchaseUtilization({
+      acquisition: game.acquisition,
+      entertainmentBenchmark: null,
+      playCount: game.playCountEvidence,
+      duration: game.durationEvidence,
+      playerRange: game.playerRangeEvidence,
+      suggestedPlayerPoll: game.suggestedPlayerPoll,
+      fitness: score === null ? null : score.score.toFixed(1),
+    }),
+  };
 }
 
 const AXES: Axis[] = [

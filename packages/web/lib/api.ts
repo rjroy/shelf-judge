@@ -32,7 +32,7 @@ import { daemonRequest, daemonJson } from "./daemon";
 export async function listGames(opts?: {
   includeNiches?: boolean;
   ownership?: "owned" | "previously-owned" | "all";
-}): Promise<GameWithScore[]> {
+}): Promise<GameWithPurchaseUtilization[]> {
   const params = new URLSearchParams();
   if (opts?.includeNiches) params.set("includeNiches", "true");
   if (opts?.ownership) params.set("ownership", opts.ownership);
@@ -279,7 +279,7 @@ export async function getReadiness(): Promise<PredictionReadiness> {
   return daemonJson("/api/predictions/readiness");
 }
 
-export async function listGamesWithPredictions(): Promise<GameWithScore[]> {
+export async function listGamesWithPredictions(): Promise<GameWithPurchaseUtilization[]> {
   return daemonJson("/api/games?includePredicted=true&&ownership=all");
 }
 

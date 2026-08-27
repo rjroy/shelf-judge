@@ -1,7 +1,7 @@
 ---
 title: "Implementation notes: collection purchase utilization"
 date: 2026-08-26
-status: complete
+status: in-progress
 tags: [implementation, purchase-utilization, exact-arithmetic]
 source: .lore/work/plans/collection-purchase-utilization.md
 modules: [shared, daemon, web, cli]
@@ -16,8 +16,8 @@ modules: [shared, daemon, web, cli]
 - [x] Step 3: Introduce schema version 3 (`shelf-judge-mmr.5`)
 - [x] Step 4: Implement purchase utilization engine (`shelf-judge-mmr.14`)
 - [x] Step 5: Add daemon APIs and response assembly (`shelf-judge-mmr.12`; terminal acceptance `ACCEPTED`)
-- [ ] Step 6: Build web detail and settings (`shelf-judge-mmr.11`)
-- [ ] Step 7: Add deterministic web sorts (`shelf-judge-mmr.10`)
+- [x] Step 6: Build web detail and settings (`shelf-judge-mmr.11`; Beads `CLOSED`)
+- [x] Step 7: Add deterministic web sorts (`shelf-judge-mmr.10`; terminal acceptance `ACCEPTED`)
 - [ ] Step 8: Add CLI commands (`shelf-judge-mmr.8`)
 - [ ] Step 9: Complete persisted-flow and parity coverage (`shelf-judge-mmr.9`)
 - [ ] Step 10: Run final validation (`shelf-judge-mmr.6`)
@@ -78,6 +78,12 @@ modules: [shared, daemon, web, cli]
 - Correction round 4 inventories every affected runtime error. Game detail publishes coded 400/404/500 responses; acquisition publishes both coded 400 variants plus coded 404/500 responses; benchmark GET, PUT, and DELETE publish their internal failures in addition to PUT validation. Targeted generic failures now return the stable redacted body `{ error: "Internal server error", code: "internal_error" }`, and game misses add `game_not_found` without changing their existing error text.
 - Semantic help tests execute the published JSON Schema subset against valid and invalid acquisition/benchmark examples, including strict-property, conditional-amount, positivity, and maximum-safe-hundredths boundaries. Route parity tests force every documented validation, not-found, and internal branch and verify status/code and response-field parity with operation metadata.
 - Terminal review accepted Step 5 after correction round 4. Status: `ACCEPTED`. Step 5 unlocks the pending web detail/settings, deterministic sort, and CLI child work; Steps 6 through 10 remain pending.
+- Beads confirms Step 6 (`shelf-judge-mmr.11`) is closed after its web detail/settings implementation, tests, responsive smoke validation, and fresh review. The stale unchecked Step 6 progress entry is corrected above.
+- Step 7 implementation adds only the two approved web collection sort fields. Dedicated comparators consume daemon `purchaseUtilization.sort` projections, use the shared exact unsigned-decimal comparator, and apply ascending NFC-normalized Unicode code-point name and stable-ID ties independently of primary direction.
+- Collection list API, prediction, niche merge, table, row, and sorting utility types now retain `GameWithPurchaseUtilization`. Selected utilization cells render daemon component display labels, and collection fitness cells render nullable daemon `displayScore` rather than formatting raw final fitness.
+- Step 7 local validation passed: 77 focused collection/sorting tests and the complete 185-test web suite; web production TypeScript, changed-file ESLint and Prettier, and the Next production build also pass. The repository's test-only web TypeScript config still reports unrelated pre-existing fixture errors in `axes-page-curve.test.ts`, `game-links.test.tsx`, and `shelf-assignment.test.tsx`; it reports no Step 7 file error.
+- Independent testing and terminal review reconciled the Step 7 behavior and accepted the five-path product manifest below with no material findings. Terminal acceptance: `ACCEPTED`.
+- Step 7 has no unresolved acceptance finding. Residual risks are limited to the known test-only TypeScript fixture baseline and the installed Bun version mismatch recorded below; neither produced a Step 7 diagnostic or observed failure.
 
 ## Step 1 Accepted Manifest
 
@@ -181,27 +187,27 @@ packages/daemon/tests/helpers/test-app.ts
 
 Current accepted product identities:
 
-| Path                                                                   | Porcelain | Index blob or marker                       | Working-tree SHA-256 or marker                                      |
-| ---------------------------------------------------------------------- | --------- | ------------------------------------------ | ------------------------------------------------------------------ |
-| `packages/shared/src/types.ts`                                         | ` M`      | `4873bc5753b1b7481a96a2050818982f4b9cc4ac` | `b7e92153a7194db4c5828f867c0101fb1f073af5ea358e382ac6a53fe7c69fd9` |
-| `packages/shared/src/validation.ts`                                    | ` M`      | `19173e1caa125b15f853d207e27743c13dc15469` | `908d737d21abc5dd6feda9057e13defd5b03bd5f37b684399ae5675064e04c1a` |
-| `packages/shared/src/index.ts`                                         | ` M`      | `abb75b39d7506fd2c171403dda2f038a76f2c4d5` | `a89a57d43283c51ee2282bbda342b89469e0854e42758c983c921a579b0d2322` |
-| `packages/daemon/src/services/purchase-utilization-service.ts`         | `??`      | absent                                     | `e85fb0ec15ea783f73c469180a05823142ae8c7d602cd7337380c61b1e859b53` |
-| `packages/daemon/src/routes/collection.ts`                             | `??`      | absent                                     | `1a5410b85e7e920b45705e518c0ed98084d22db1990f5d1517cea0a4ca6dbe32` |
-| `packages/daemon/src/routes/games.ts`                                  | ` M`      | `aa7e95145828c1ed1ac10f7bccc11ba4a99da6d3` | `a991995fbb567c056efc6330cb743fbc9444097d917c9ab2159bea9afeab4969` |
-| `packages/daemon/src/app.ts`                                           | ` M`      | `93375e882717b55cfd1478e1d0c1bb4408d2f48e` | `5f15e1a40ecbac353c56456954ba8f11bf1a76b4e25d401ec501c4d256931f3e` |
-| `packages/daemon/src/operations.ts`                                    | ` M`      | `274a4de77111d4d439c7143945577bf221177b4b` | `32bfe4af4d1e2aa4ef25064977167d7b57c88ebbd3cde6c3093b2d1de17d7e93` |
-| `packages/daemon/tests/services/purchase-utilization-service.test.ts`  | `??`      | absent                                     | `f12d02f18b0db69cd6c5614a14c33c48d367186e9e59b3e97a516600980a8cc1` |
-| `packages/daemon/tests/routes/collection.test.ts`                      | `??`      | absent                                     | `727321b5bea5f06d1700ad5083c044480b3842d54744028242684a23a27e04b9` |
-| `packages/daemon/tests/routes/games.test.ts`                           | ` M`      | `56debe1b4b4537af5e2101e1f74490175237638a` | `0a55c7d0a8e4f2b86affd102e5d76dbeeba9fd6da9bb2db8c2aa074ced46975d` |
-| `packages/daemon/tests/routes/prediction.test.ts`                      | ` M`      | `1a63e7f5d958b33f8793faeb2575dbb9c8445962` | `654c491729e3d1e36b3e32ab57694b63add2d2aa771b1160330d98da060d3137` |
-| `packages/daemon/tests/routes/help.test.ts`                            | ` M`      | `b9527476e0d47c2c6d513202b03c913302ff56b2` | `4e926e1ec98bd96ac58c2cd6ea0ea979facfb4c879a1c3beccfdac29e1be5a90` |
-| `packages/daemon/tests/redundancy-integration.test.ts`                 | ` M`      | `a0e77c1aff8d8475f65e86db7fe4f92ba38702ee` | `eff52bf2110b65de83864f1bd26e67f99c805565df15f195d8382b2bd61d0ba5` |
-| `packages/daemon/tests/dimensions-routes.test.ts`                      | ` M`      | `904e5bf2b67592293dd28040b97810c81989d604` | `041dc0d381f0817ab57220518ea0441c52f35e130a1accc8a7dc780d85bc996d` |
+| Path                                                                  | Porcelain | Index blob or marker                       | Working-tree SHA-256 or marker                                     |
+| --------------------------------------------------------------------- | --------- | ------------------------------------------ | ------------------------------------------------------------------ |
+| `packages/shared/src/types.ts`                                        | ` M`      | `4873bc5753b1b7481a96a2050818982f4b9cc4ac` | `b7e92153a7194db4c5828f867c0101fb1f073af5ea358e382ac6a53fe7c69fd9` |
+| `packages/shared/src/validation.ts`                                   | ` M`      | `19173e1caa125b15f853d207e27743c13dc15469` | `908d737d21abc5dd6feda9057e13defd5b03bd5f37b684399ae5675064e04c1a` |
+| `packages/shared/src/index.ts`                                        | ` M`      | `abb75b39d7506fd2c171403dda2f038a76f2c4d5` | `a89a57d43283c51ee2282bbda342b89469e0854e42758c983c921a579b0d2322` |
+| `packages/daemon/src/services/purchase-utilization-service.ts`        | `??`      | absent                                     | `e85fb0ec15ea783f73c469180a05823142ae8c7d602cd7337380c61b1e859b53` |
+| `packages/daemon/src/routes/collection.ts`                            | `??`      | absent                                     | `1a5410b85e7e920b45705e518c0ed98084d22db1990f5d1517cea0a4ca6dbe32` |
+| `packages/daemon/src/routes/games.ts`                                 | ` M`      | `aa7e95145828c1ed1ac10f7bccc11ba4a99da6d3` | `a991995fbb567c056efc6330cb743fbc9444097d917c9ab2159bea9afeab4969` |
+| `packages/daemon/src/app.ts`                                          | ` M`      | `93375e882717b55cfd1478e1d0c1bb4408d2f48e` | `5f15e1a40ecbac353c56456954ba8f11bf1a76b4e25d401ec501c4d256931f3e` |
+| `packages/daemon/src/operations.ts`                                   | ` M`      | `274a4de77111d4d439c7143945577bf221177b4b` | `32bfe4af4d1e2aa4ef25064977167d7b57c88ebbd3cde6c3093b2d1de17d7e93` |
+| `packages/daemon/tests/services/purchase-utilization-service.test.ts` | `??`      | absent                                     | `f12d02f18b0db69cd6c5614a14c33c48d367186e9e59b3e97a516600980a8cc1` |
+| `packages/daemon/tests/routes/collection.test.ts`                     | `??`      | absent                                     | `727321b5bea5f06d1700ad5083c044480b3842d54744028242684a23a27e04b9` |
+| `packages/daemon/tests/routes/games.test.ts`                          | ` M`      | `56debe1b4b4537af5e2101e1f74490175237638a` | `0a55c7d0a8e4f2b86affd102e5d76dbeeba9fd6da9bb2db8c2aa074ced46975d` |
+| `packages/daemon/tests/routes/prediction.test.ts`                     | ` M`      | `1a63e7f5d958b33f8793faeb2575dbb9c8445962` | `654c491729e3d1e36b3e32ab57694b63add2d2aa771b1160330d98da060d3137` |
+| `packages/daemon/tests/routes/help.test.ts`                           | ` M`      | `b9527476e0d47c2c6d513202b03c913302ff56b2` | `4e926e1ec98bd96ac58c2cd6ea0ea979facfb4c879a1c3beccfdac29e1be5a90` |
+| `packages/daemon/tests/redundancy-integration.test.ts`                | ` M`      | `a0e77c1aff8d8475f65e86db7fe4f92ba38702ee` | `eff52bf2110b65de83864f1bd26e67f99c805565df15f195d8382b2bd61d0ba5` |
+| `packages/daemon/tests/dimensions-routes.test.ts`                     | ` M`      | `904e5bf2b67592293dd28040b97810c81989d604` | `041dc0d381f0817ab57220518ea0441c52f35e130a1accc8a7dc780d85bc996d` |
 | `packages/daemon/tests/niche-settings-integration.test.ts`            | ` M`      | `30a5181bc66aec8a274daeefda59163c39f4a7f8` | `1c84637bd0c51b71052d7bc4526b612d6b46bcd75120c68910de156bad91ceec` |
-| `packages/daemon/tests/ownership-routes.test.ts`                       | ` M`      | `b8ff3d7ba8d32a824682c22e93da3233eff7cf14` | `0cfc34861e97a1078c3fda69e7efce9d264ab240d85e430a501453d9eebc84f7` |
-| `packages/daemon/tests/wishlist-routes.test.ts`                        | ` M`      | `e63e751a789f7a29bc5f5916f9a519cd388311a6` | `20dc0788f7b389c0ddfe8abce9a0fbc9c8dd89046d5c7c32af15395cbd36fc46` |
-| `packages/daemon/tests/helpers/test-app.ts`                            | ` M`      | `5918506a0ad96b51287ac4a846be20ff3a9bd0b9` | `883a8cfcec0f1b78b3addacc3b361b80de71441a37563ff3f24b1dd5cef38940` |
+| `packages/daemon/tests/ownership-routes.test.ts`                      | ` M`      | `b8ff3d7ba8d32a824682c22e93da3233eff7cf14` | `0cfc34861e97a1078c3fda69e7efce9d264ab240d85e430a501453d9eebc84f7` |
+| `packages/daemon/tests/wishlist-routes.test.ts`                       | ` M`      | `e63e751a789f7a29bc5f5916f9a519cd388311a6` | `20dc0788f7b389c0ddfe8abce9a0fbc9c8dd89046d5c7c32af15395cbd36fc46` |
+| `packages/daemon/tests/helpers/test-app.ts`                           | ` M`      | `5918506a0ad96b51287ac4a846be20ff3a9bd0b9` | `883a8cfcec0f1b78b3addacc3b361b80de71441a37563ff3f24b1dd5cef38940` |
 
 `packages/daemon/src/index.ts` did not require edits. No accepted product path is deleted or unmerged.
 
@@ -222,10 +228,10 @@ These statuses are reported for worktree completeness only. Neither file is a St
 | ------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `STEP5-LOG-001`     | Resolved          | Benchmark logs carry collection identity, semantic transitions, changed fields, persistence attempt/outcome, and safe rejection codes.             |
 | `SJ-MMR12-001`      | Resolved          | A rejection-safe service-local queue serializes complete mutation load/clone/save cycles and prevents lost updates.                                |
-| `SJ-MMR12-002`      | Resolved          | Detail `includePredicted` strictly accepts omitted, `true`, or `false` with a stable coded error for other values.                                  |
+| `SJ-MMR12-002`      | Resolved          | Detail `includePredicted` strictly accepts omitted, `true`, or `false` with a stable coded error for other values.                                 |
 | `SJ-MMR12-003`      | Resolved          | HTTP and service persistence seams expose safe attempt, success, rejection, and failure logging without amount leakage.                            |
-| `SJ-MMR12-004`      | Resolved          | Operation metadata exposes accepted query values and stable error declarations without breaking existing operation consumers.                     |
-| `SJ-MMR12-ACC-001`  | Resolved          | Direct service mutations apply shared strict schemas before queueing, load, clock, or save effects and return stable validation codes.              |
+| `SJ-MMR12-004`      | Resolved          | Operation metadata exposes accepted query values and stable error declarations without breaking existing operation consumers.                      |
+| `SJ-MMR12-ACC-001`  | Resolved          | Direct service mutations apply shared strict schemas before queueing, load, clock, or save effects and return stable validation codes.             |
 | `SJ-MMR12-API-002`  | Resolved          | Game routes require enrichment composition; every game list/detail response uses `GameWithPurchaseUtilization`, with no plain-response fallback.   |
 | `SJ-MMR12-DISC-003` | Resolved          | Round 4 fixed strict JSON Schema composition, exact safe amount bounds, complete runtime error metadata, and executable schema/error parity tests. |
 
@@ -245,8 +251,71 @@ These statuses are reported for worktree completeness only. Neither file is a St
 
 ## Remaining Plan
 
-- [ ] Step 6: Build web detail and settings (`shelf-judge-mmr.11`), unlocked by accepted Step 5 APIs.
-- [ ] Step 7: Add deterministic web sorts (`shelf-judge-mmr.10`), unlocked by accepted enriched response fields.
+- [x] Step 6: Build web detail and settings (`shelf-judge-mmr.11`; Beads `CLOSED`).
+- [x] Step 7: Add deterministic web sorts (`shelf-judge-mmr.10`; terminal acceptance `ACCEPTED`).
 - [ ] Step 8: Add CLI commands (`shelf-judge-mmr.8`), unlocked by accepted mutation and discovery contracts.
 - [ ] Step 9: Complete persisted-flow and parity coverage (`shelf-judge-mmr.9`).
 - [ ] Step 10: Run final validation (`shelf-judge-mmr.6`).
+
+## Step 7 Evidence Map
+
+| Obligation                                                                                                | Implementation surface                                                       | Local executable evidence                                                                                                          |
+| --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Add only the two approved built-in web sorts while preserving defaults and stored state                   | `packages/web/lib/collection-utils.ts`                                       | Sort-field/default/localStorage tests in `purchase-utilization-sorting.test.ts`; existing collection tests remain green            |
+| Sort rounded value-remaining hundredths, including zero-play, fitness-zero, exact-zero, and sub-cent ties | Dedicated `sortByValueRemaining()` comparator                                | Ascending/descending calculated-state tests and zero-key rounded-tie tests                                                         |
+| Order finite, unreachable, unavailable, and not-applicable additional-play projections exactly            | Dedicated `sortByEstimatedAdditionalPlays()` comparator                      | Both-direction category tests covering finite, unreachable, unavailable, gift, and zero-cost fixtures                              |
+| Compare canonical finite integer strings without numeric coercion                                         | Shared `compareUnsignedDecimals()` used by both dedicated comparators        | Boundary fixtures at and above `Number.MAX_SAFE_INTEGER`                                                                           |
+| Apply ascending NFC Unicode code-point name and stable-ID ties in every direction/category                | `compareCodePoints()` and `compareUtilizationTie()`                          | NFC equivalence, BMP versus supplementary scalar order, equal-name ID, rounded, finite, and unavailable direction-invariance tests |
+| Render only daemon labels and canonical fitness displays                                                  | `getScoreDisplay()` and `collection-table.tsx`                               | Label/displayScore tests plus web production typecheck/build                                                                       |
+| Preserve enriched response fields through collection variants and merges                                  | `packages/web/lib/api.ts` and `packages/web/components/collection-table.tsx` | Web production TypeScript and Next build; niche merge spreads the enriched source record                                           |
+| Exclude automatic ranking, aggregation, judgment, notability, recommendation, and brief integration       | New collection utility/table surface only                                    | Production diff and focused symbol audit; no such integration added                                                                |
+
+## Step 7 Accepted Product Manifest
+
+Terminal acceptance status: `ACCEPTED`, with no material findings. The accepted product surface is exactly:
+
+```text
+packages/web/lib/api.ts
+packages/web/lib/collection-utils.ts
+packages/web/components/collection-table.tsx
+packages/web/tests/collection-table.test.ts
+packages/web/tests/purchase-utilization-sorting.test.ts
+```
+
+Current accepted product identities:
+
+| Path                                                      | Porcelain | Index blob or marker                       | Working-tree SHA-256 or marker                                     |
+| --------------------------------------------------------- | --------- | ------------------------------------------ | ------------------------------------------------------------------ |
+| `packages/web/lib/api.ts`                                 | ` M`      | `29fed8dde5aea18a869eda3b7400443997927c6e` | `48aef1a714fd3e5988bbd5f54d36f4a67da5a7ed81d8aa35b6de69fe0e4fea6e` |
+| `packages/web/lib/collection-utils.ts`                    | ` M`      | `774a123314f80b792ee0f263a89e4843ceceaa07` | `e1ca3a9d415794350cc23631ee2b36f9efd5eaed89b055204deacac7df2352da` |
+| `packages/web/components/collection-table.tsx`            | ` M`      | `5d05fd32e48bcfe68bf6459b3dda1d0c46f4c01f` | `4a843ed51d0b6f3361b42ea5703fe5e869788415383fc772685e943710560eb4` |
+| `packages/web/tests/collection-table.test.ts`             | ` M`      | `a4b98d0bb1aa5cce452d8e3ad322742571a2e452` | `2ce8612ee23878f013d843bbad2654f14a26583ab4d8c14ce1ba7e24d0accdbd` |
+| `packages/web/tests/purchase-utilization-sorting.test.ts` | `??`      | absent                                     | `faa900447acc6a78fb374afe6dfc8171f756bcf650d36abe22649ee7dc46fcc0` |
+
+No accepted product path is deleted or unmerged.
+
+### Step 7 Workflow Status
+
+Workflow files are outside the accepted product manifest:
+
+```text
+ M .beads/issues.jsonl
+ M .lore/work/notes/collection-purchase-utilization.md
+```
+
+`.beads/issues.jsonl` was already modified outside the Step 7 product surface and was not mutated during this documentation update. This notes file is not self-hashed.
+
+## Step 7 Validation Status
+
+- `bun test packages/web/tests/collection-table.test.ts packages/web/tests/purchase-utilization-sorting.test.ts`: 77 pass, 0 fail.
+- `bun test packages/web/tests`: 185 pass, 0 fail.
+- `bunx tsc --noEmit -p packages/web/tsconfig.json`: passed.
+- `bunx eslint packages/web/lib/api.ts packages/web/lib/collection-utils.ts packages/web/components/collection-table.tsx packages/web/tests/collection-table.test.ts packages/web/tests/purchase-utilization-sorting.test.ts`: passed.
+- `bunx prettier --check packages/web/lib/api.ts packages/web/lib/collection-utils.ts packages/web/components/collection-table.tsx packages/web/tests/collection-table.test.ts packages/web/tests/purchase-utilization-sorting.test.ts`: passed.
+- `bun run --cwd packages/web build`: passed with all routes built.
+- `bunx tsc --noEmit -p packages/web/tsconfig.test.json`: failed on the existing unrelated fixture diagnostics listed in the Step 7 log; no changed Step 7 file appears in the output.
+- Installed Bun remains `1.3.11` while the repository declares `1.4.0`; no observed Step 7 failure was version-related.
+- Terminal acceptance: `ACCEPTED`, no material findings.
+- Known baseline: `bunx tsc --noEmit -p packages/web/tsconfig.test.json` still fails only in unchanged fixtures `axes-page-curve.test.ts`, `game-links.test.tsx`, and `shelf-assignment.test.tsx`; no accepted Step 7 path appears in those diagnostics.
+- Residual runtime risk: validation used installed Bun `1.3.11` while the repository declares `1.4.0`; no Step 7 failure was attributed to that difference.
+- Overall implementation remains `in-progress`; Steps 8 through 10 and final plan/spec completion remain pending.
