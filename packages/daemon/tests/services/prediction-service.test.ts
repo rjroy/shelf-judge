@@ -8,6 +8,7 @@ import type {
   TournamentGameStatsDisplay,
   TournamentSettings,
 } from "@shelf-judge/shared";
+import { SuggestedPlayerPollSchema } from "@shelf-judge/shared";
 import { createPredictionService } from "../../src/services/prediction-service.js";
 import { createFitnessService } from "../../src/services/fitness-service.js";
 import type { BggGameData } from "@shelf-judge/shared";
@@ -92,6 +93,18 @@ function makeGame(
     bestPlayers: null,
     playingTime: 60,
     numPlays: null,
+    acquisition: { state: "unknown" },
+    playCountEvidence: { status: "missing", source: "manual", observedAt: null },
+    durationEvidence: { status: "missing", source: "manual", observedAt: null },
+    playerRangeEvidence: { status: "missing", source: "manual", observedAt: null },
+    suggestedPlayerPoll: {
+      status: "valid",
+      state: "absent",
+      buckets: [],
+      source: "manual",
+      observedAt: null,
+    },
+    bestPlayersInvalidEvidence: null,
     ownership: "owned",
     boxDimensions: null,
     manualShelfId: null,
@@ -108,7 +121,6 @@ function makeGame(
           categories: [{ id: 1, name: "Strategy" }],
           families: [],
           subdomains: [],
-          suggestedPlayerCounts: [],
           bestPlayerCount: null,
           fetchedAt: now,
         }
@@ -120,11 +132,12 @@ function makeGame(
 
 function makeCollection(games: Game[], axes: Axis[]): Collection {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     id: "test-col",
     name: "Test Collection",
     axes,
     games,
+    entertainmentBenchmark: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -644,7 +657,6 @@ describe("prediction-service", () => {
       categories: categories.map((name, i) => ({ id: i + 1, name })),
       families: [],
       subdomains: [],
-      suggestedPlayerCounts: [],
       bestPlayerCount: null,
       fetchedAt: now,
     });
@@ -679,7 +691,43 @@ describe("prediction-service", () => {
       const collection = buildRatedCollection(6);
       const bggData = makeBggData();
       bggData.bestPlayerCount = 3;
-      const bggClient = createStubBggClient(makeBggResult("New Game", bggData));
+      const bggObservations = {
+        metadataObservation: {
+          sourceRequest: "bgg-thing" as const,
+          observedAt: now,
+          state: "complete" as const,
+          fieldsReturned: ["name", "bggData"],
+        },
+        playerRangeObservation: {
+          sourceRequest: "bgg-thing" as const,
+          observedAt: now,
+          state: "complete" as const,
+          fieldsReturned: ["minPlayers", "maxPlayers"],
+        },
+        suggestedPlayerPoll: {
+          buckets: [],
+          state: "empty" as const,
+          observation: {
+            sourceRequest: "bgg-thing" as const,
+            observedAt: now,
+            state: "complete" as const,
+            fieldsReturned: ["suggestedPlayerCounts"],
+          },
+        },
+        collectionData: {
+          numPlays: 12,
+          observation: {
+            sourceRequest: "bgg-collection" as const,
+            observedAt: now,
+            state: "complete" as const,
+            fieldsReturned: ["numPlays"],
+          },
+        },
+      };
+      const bggClient = createStubBggClient({
+        ...makeBggResult("New Game", bggData),
+        ...bggObservations,
+      });
 
       const service = createPredictionService({
         storageService: createStubStorage(collection),
@@ -694,9 +742,114 @@ describe("prediction-service", () => {
       expect(result.game.bggId).toBe(99999);
       expect(result.game.bestPlayers).toBe(3);
       expect(result.score).toBeDefined();
+      expect(result.bggObservations).toEqual(bggObservations);
       // Temporary game has no ratings, so all personal axes should be predicted
       const themeEntry = result.score.breakdown.find((e) => e.axisId === "theme");
       expect(themeEntry).toBeDefined();
+    });
+
+    test("preserves malformed suggested-player poll buckets as invalid JSON evidence", async () => {
+      const collection = buildRatedCollection(6);
+      const observedAt = "2026-08-25T12:00:00.000Z";
+      const previewCreatedAt = "2026-08-26T12:00:00.000Z";
+      const malformedBuckets = [
+        {
+          playerCount: "2",
+          best: -1,
+          recommended: 1.5,
+          notRecommended: Number.MAX_SAFE_INTEGER + 1,
+        },
+      ];
+      const bggClient = createStubBggClient({
+        ...makeBggResult("Malformed Poll Game"),
+        suggestedPlayerPoll: {
+          buckets: malformedBuckets,
+          state: "usable",
+          observation: {
+            sourceRequest: "bgg-thing",
+            observedAt,
+            state: "complete",
+            fieldsReturned: ["suggestedPlayerCounts"],
+          },
+        },
+      });
+      const stubStorage = createStubStorage(collection);
+      let savedCollection = false;
+      stubStorage.saveCollection = () => {
+        savedCollection = true;
+        return Promise.resolve();
+      };
+      const service = createPredictionService({
+        storageService: stubStorage,
+        fitnessService: createFitnessService(),
+        tournamentService: createStubTournamentService(),
+        bggClient,
+        now: () => previewCreatedAt,
+      });
+
+      const result = await service.predictBggGame(99999);
+
+      expect(result.game.suggestedPlayerPoll).toEqual({
+        status: "invalid",
+        state: "unusable",
+        buckets: [],
+        evidence: { presence: "present", value: malformedBuckets },
+        source: "bgg-suggested-player-poll",
+        observedAt,
+      });
+      expect(result.game.createdAt).toBe(previewCreatedAt);
+      expect(result.score).toBeDefined();
+      expect(JSON.parse(JSON.stringify(result.game.suggestedPlayerPoll))).toEqual(
+        result.game.suggestedPlayerPoll,
+      );
+      expect(savedCollection).toBe(false);
+    });
+
+    test("normalizes sparse suggested-player poll buckets to schema-safe evidence", async () => {
+      const collection = buildRatedCollection(6);
+      const observedAt = "2026-08-25T12:00:00.000Z";
+      const bucket = {
+        playerCount: "2",
+        best: 1,
+        recommended: 2,
+        notRecommended: 3,
+      };
+      const sparseBuckets = new Array<typeof bucket>(2);
+      sparseBuckets[1] = bucket;
+      const bggClient = createStubBggClient({
+        ...makeBggResult("Sparse Poll Game"),
+        suggestedPlayerPoll: {
+          buckets: sparseBuckets,
+          state: "usable",
+          observation: {
+            sourceRequest: "bgg-thing",
+            observedAt,
+            state: "complete",
+            fieldsReturned: ["suggestedPlayerCounts"],
+          },
+        },
+      });
+      const service = createPredictionService({
+        storageService: createStubStorage(collection),
+        fitnessService: createFitnessService(),
+        tournamentService: createStubTournamentService(),
+        bggClient,
+      });
+
+      const poll = (await service.predictBggGame(99999)).game.suggestedPlayerPoll;
+
+      expect(SuggestedPlayerPollSchema.safeParse(poll).success).toBe(true);
+      expect(poll).toEqual({
+        source: "bgg-suggested-player-poll",
+        observedAt,
+        status: "invalid",
+        state: "unusable",
+        buckets: [],
+        evidence: { presence: "present", value: ["undefined", bucket] },
+      });
+      expect(JSON.stringify(poll)).toBe(
+        '{"source":"bgg-suggested-player-poll","observedAt":"2026-08-25T12:00:00.000Z","status":"invalid","state":"unusable","buckets":[],"evidence":{"presence":"present","value":["undefined",{"playerCount":"2","best":1,"recommended":2,"notRecommended":3}]}}',
+      );
     });
 
     test("delegates to predictGame when bggId exists in collection", async () => {

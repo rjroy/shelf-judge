@@ -14,6 +14,10 @@ import {
 } from "../../src/services/prediction-service.js";
 import type { BggClient } from "../../src/services/bgg-client.js";
 import type { NarrationService } from "../../src/services/narration-service.js";
+import {
+  createPurchaseUtilizationService,
+  type PurchaseUtilizationService,
+} from "../../src/services/purchase-utilization-service.js";
 import { createApp, type AppResult } from "../../src/app.js";
 
 export interface TestAppContext {
@@ -33,6 +37,26 @@ export interface TestAppContext {
 export interface TestAppOptions {
   bggClient?: BggClient;
   narrationService?: NarrationService;
+}
+
+export function createTestPurchaseUtilizationService(
+  storageService?: StorageService,
+): PurchaseUtilizationService {
+  const fallbackStorage = {
+    loadCollection: () =>
+      Promise.resolve({
+        schemaVersion: 3 as const,
+        id: "test-collection",
+        name: "Test Collection",
+        axes: [],
+        games: [],
+        entertainmentBenchmark: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      }),
+    saveCollection: () => Promise.resolve(),
+  } as unknown as StorageService;
+  return createPurchaseUtilizationService({ storageService: storageService ?? fallbackStorage });
 }
 
 export function createTestApp(options?: TestAppOptions): TestAppContext {

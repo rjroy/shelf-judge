@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type {
-  GameWithScore,
+  GameWithPurchaseUtilization,
   Axis,
   TournamentGameStatsDisplay,
   NicheTagFilter,
@@ -34,9 +34,9 @@ import {
 } from "@/lib/collection-utils";
 
 interface CollectionTableProps {
-  games: GameWithScore[];
-  predictedGames: GameWithScore[] | null;
-  nicheGames: GameWithScore[] | null;
+  games: GameWithPurchaseUtilization[];
+  predictedGames: GameWithPurchaseUtilization[] | null;
+  nicheGames: GameWithPurchaseUtilization[] | null;
   axes: Axis[];
   tournamentStats: Record<string, TournamentGameStatsDisplay>;
   hasTournamentData: boolean;
@@ -119,7 +119,9 @@ export function CollectionTable({
   const activeGames = useMemo(() => {
     if (!nichesOn || !nicheGames) return baseGames;
     const nicheMap = new Map(
-      nicheGames.filter((g) => g.nichePosition).map((g) => [g.game.id, g.nichePosition!]),
+      nicheGames.flatMap((game) =>
+        game.nichePosition ? [[game.game.id, game.nichePosition] as const] : [],
+      ),
     );
     return baseGames.map((g) => {
       const np = nicheMap.get(g.game.id);
@@ -265,7 +267,10 @@ export function CollectionTable({
   // Build niche groups for "Group by Niche" view (REQ-NICHE-24, REQ-NICHE-25)
   const nicheGroups = useMemo(() => {
     if (!nicheViewMode || !nichesOn) return [];
-    const groupMap = new Map<string, { type: string; name: string; games: GameWithScore[] }>();
+    const groupMap = new Map<
+      string,
+      { type: string; name: string; games: GameWithPurchaseUtilization[] }
+    >();
 
     for (const gws of filtered) {
       const niches = gws.nichePosition?.niches;
@@ -785,7 +790,7 @@ export function CollectionTable({
 // ---------------------------------------------------------------------------
 
 interface GameRowProps {
-  gws: GameWithScore;
+  gws: GameWithPurchaseUtilization;
   rank: number | null;
   sortField: string;
   tournamentStats: Record<string, TournamentGameStatsDisplay>;
@@ -817,6 +822,8 @@ function GameRow({
     score !== null && score.predictionMeta !== null && score.ratedAxisCount === 0;
   const hasPrediction = score?.predictionMeta !== null && score?.predictionMeta !== undefined;
   const isUnrated = score === null && rank === null;
+  const isUtilizationSort =
+    sortField === "valueRemaining" || sortField === "estimatedAdditionalPlays";
 
   const ratedAxisIds = Object.keys(game.ratings);
   const ratedAxisNames = ratedAxisIds
@@ -895,7 +902,7 @@ function GameRow({
       {showConfidence && (
         <div className="axes-used">
           {hasPrediction ? (
-            <ConfidencePill level={score.predictionMeta!.confidence} />
+            <ConfidencePill level={score.predictionMeta?.confidence ?? "insufficient"} />
           ) : score ? (
             <ConfidencePill level="actual" />
           ) : (
@@ -906,17 +913,19 @@ function GameRow({
       <div className="last-rated">{relativeDate(game.updatedAt)}</div>
       <div className="score-cell">
         <div className="score-cell-inner">
-          {score?.vetoed ? (
+          {isUtilizationSort ? (
+            <span className={display.className}>{display.text}</span>
+          ) : score?.vetoed ? (
             <div className="score-vetoed-cell">
               <span className="vetoed-badge">VETOED</span>
-              {score.hypotheticalScore !== null && (
-                <span className="vetoed-hypothetical">{score.hypotheticalScore.toFixed(1)}</span>
+              {gws.displayScore !== null && (
+                <span className="vetoed-hypothetical">{gws.displayScore}</span>
               )}
             </div>
           ) : isPredictedOnly ? (
             <span className="score-predicted-inline">
               <span className="score-predicted-tilde-inline">~</span>
-              {score.score.toFixed(1)}
+              {gws.displayScore ?? display.text}
             </span>
           ) : display.className === "score-unrated" ? (
             <span className="score-unrated">{display.text}</span>
@@ -966,7 +975,7 @@ function AxisSortAltScores({
   gws,
   tournamentStats,
 }: {
-  gws: GameWithScore;
+  gws: GameWithPurchaseUtilization;
   tournamentStats: Record<string, TournamentGameStatsDisplay>;
 }) {
   const { game, score } = gws;
@@ -977,12 +986,12 @@ function AxisSortAltScores({
         score.vetoed ? (
           <span className="axis-sort-fitness">
             <span className="vetoed-badge-small">V</span>
-            {score.hypotheticalScore !== null ? score.hypotheticalScore.toFixed(1) : "--"}
+            {gws.displayScore ?? "--"}
           </span>
         ) : (
           <span className="axis-sort-fitness">
             <span className={`score-dot ${scoreRangeClass(score.score)}`} />
-            {score.score.toFixed(1)}
+            {gws.displayScore ?? "--"}
           </span>
         )
       ) : (

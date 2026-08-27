@@ -19,6 +19,7 @@ import { DEFAULT_REDUNDANCY_SETTINGS } from "../src/services/redundancy-engine";
 import { createWishlistRoutes } from "../src/routes/wishlist";
 import type { WishlistService } from "../src/services/wishlist-service";
 import { computeProfile } from "../src/services/profile-engine";
+import { createTestPurchaseUtilizationService } from "./helpers/test-app";
 
 const now = "2026-01-01T00:00:00Z";
 
@@ -38,7 +39,6 @@ function makeBggData(
     categories: [],
     families: [],
     subdomains: [],
-    suggestedPlayerCounts: [],
     bestPlayerCount: null,
     fetchedAt: now,
     ...overrides,
@@ -68,6 +68,23 @@ function makeGame(
       bggData ??
       makeBggData({ mechanics: [mech("Deck Building")], categories: [cat("Card Game")] }),
     numPlays: 5,
+    acquisition: { state: "unknown" },
+    playCountEvidence: { status: "valid", value: 5, source: "manual", observedAt: now },
+    durationEvidence: { status: "valid", value: 60, source: "manual", observedAt: now },
+    playerRangeEvidence: {
+      status: "valid",
+      value: { minPlayers: 2, maxPlayers: 4 },
+      source: "manual",
+      observedAt: now,
+    },
+    suggestedPlayerPoll: {
+      status: "valid",
+      state: "absent",
+      buckets: [],
+      source: "manual",
+      observedAt: null,
+    },
+    bestPlayersInvalidEvidence: null,
     ownership,
     boxDimensions: null,
     manualShelfId: null,
@@ -100,7 +117,7 @@ const prevOwned = makeGame("prev", "Delta", "previously-owned");
 // Mutable collection for setOwnership tests
 function makeCollection(): Collection {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     id: "coll-1",
     name: "Test",
     axes: [
@@ -121,6 +138,7 @@ function makeCollection(): Collection {
       structuredClone(ownedC),
       structuredClone(prevOwned),
     ],
+    entertainmentBenchmark: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -229,6 +247,7 @@ function buildApp(collection?: Collection) {
     gameService,
     predictionService,
     storageService: storage,
+    purchaseUtilizationService: createTestPurchaseUtilizationService(storage),
   });
   app.route("/api", routes);
   return app;
@@ -389,6 +408,7 @@ describe("GET /games/:id regardless of ownership", () => {
       gameService,
       predictionService,
       storageService: storage,
+      purchaseUtilizationService: createTestPurchaseUtilizationService(storage),
     });
     app.route("/api", routes);
 
@@ -422,6 +442,7 @@ describe("niche/redundancy exclusion for previously-owned games", () => {
       gameService,
       predictionService,
       storageService: storage,
+      purchaseUtilizationService: createTestPurchaseUtilizationService(storage),
     });
     app.route("/api", routes);
 
@@ -463,6 +484,7 @@ describe("niche/redundancy exclusion for previously-owned games", () => {
       gameService,
       predictionService,
       storageService: storage,
+      purchaseUtilizationService: createTestPurchaseUtilizationService(storage),
     });
     app.route("/api", routes);
 

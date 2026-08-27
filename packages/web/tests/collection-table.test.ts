@@ -1,12 +1,13 @@
 import { describe, test, expect } from "bun:test";
 import type {
   Game,
-  GameWithScore,
+  GameWithPurchaseUtilization,
   FitnessResult,
   Axis,
   BggGameData,
   TournamentGameStatsDisplay,
 } from "@shelf-judge/shared";
+import { calculatePurchaseUtilization } from "@shelf-judge/shared";
 import {
   sortGames,
   matchesFilters,
@@ -33,8 +34,21 @@ function makeGame(overrides: Partial<Game> = {}): Game {
     imageUrl: null,
     bggData: null,
     numPlays: null,
+    acquisition: { state: "unknown" },
+    playCountEvidence: { status: "missing", source: "manual", observedAt: null },
+    durationEvidence: { status: "missing", source: "manual", observedAt: null },
+    playerRangeEvidence: { status: "missing", source: "manual", observedAt: null },
+    suggestedPlayerPoll: {
+      status: "valid",
+      state: "absent",
+      buckets: [],
+      source: "manual",
+      observedAt: null,
+    },
+    bestPlayersInvalidEvidence: null,
     ownership: "owned",
     boxDimensions: null,
+    manualShelfId: null,
     ratings: {},
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -94,8 +108,22 @@ function makeAxisScore(
 function makeGWS(
   gameOverrides: Partial<Game> = {},
   score: FitnessResult | null = null,
-): GameWithScore {
-  return { game: makeGame(gameOverrides), score };
+): GameWithPurchaseUtilization {
+  const game = makeGame(gameOverrides);
+  return {
+    game,
+    score,
+    displayScore: score === null ? null : score.score.toFixed(1),
+    purchaseUtilization: calculatePurchaseUtilization({
+      acquisition: game.acquisition,
+      entertainmentBenchmark: null,
+      playCount: game.playCountEvidence,
+      duration: game.durationEvidence,
+      playerRange: game.playerRangeEvidence,
+      suggestedPlayerPoll: game.suggestedPlayerPoll,
+      fitness: score === null ? null : score.score.toFixed(1),
+    }),
+  };
 }
 
 const AXES: Axis[] = [
@@ -122,7 +150,6 @@ function makeBggData(overrides: Partial<BggGameData> = {}): BggGameData {
     categories: [],
     families: [],
     subdomains: [],
-    suggestedPlayerCounts: [],
     bestPlayerCount: null,
     fetchedAt: "2026-01-01T00:00:00Z",
     ...overrides,
@@ -260,7 +287,7 @@ describe("sortGames", () => {
         mechanics: [],
         categories: [],
         families: [],
-        suggestedPlayerCounts: [],
+        subdomains: [],
         bestPlayerCount: null,
         fetchedAt: "2026-01-01T00:00:00.000Z",
       },
@@ -277,7 +304,7 @@ describe("sortGames", () => {
         mechanics: [],
         categories: [],
         families: [],
-        suggestedPlayerCounts: [],
+        subdomains: [],
         bestPlayerCount: null,
         fetchedAt: "2026-01-01T00:00:00.000Z",
       },
@@ -303,12 +330,7 @@ describe("sortGames", () => {
       mechanics: [] as { id: number; name: string }[],
       categories: [] as { id: number; name: string }[],
       families: [] as { id: number; name: string }[],
-      suggestedPlayerCounts: [] as {
-        playerCount: string;
-        best: number;
-        recommended: number;
-        notRecommended: number;
-      }[],
+      subdomains: [] as { id: number; name: string }[],
       bestPlayerCount: null,
       fetchedAt: "2026-01-01T00:00:00.000Z",
     });
@@ -690,7 +712,7 @@ describe("getScoreDisplay", () => {
         mechanics: [],
         categories: [],
         families: [],
-        suggestedPlayerCounts: [],
+        subdomains: [],
         bestPlayerCount: null,
         fetchedAt: "2026-01-01T00:00:00.000Z",
       },
@@ -801,7 +823,7 @@ describe("getScoreDisplay", () => {
         mechanics: [],
         categories: [],
         families: [],
-        suggestedPlayerCounts: [],
+        subdomains: [],
         bestPlayerCount: null,
         fetchedAt: "2026-01-01T00:00:00.000Z",
       },

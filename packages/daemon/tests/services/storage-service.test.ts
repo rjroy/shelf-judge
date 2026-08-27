@@ -4,6 +4,8 @@ import type {
   ProfileData,
   CollectionProfile,
   WishlistEntry,
+  Game,
+  JsonValue,
 } from "@shelf-judge/shared";
 import { createFreshCollectionDerivedAxes } from "@shelf-judge/shared";
 import { createStorageService } from "../../src/services/storage-service.js";
@@ -27,11 +29,47 @@ function makeService(initialFiles?: Record<string, string>) {
 
 function currentCollection(overrides: Partial<Collection> = {}): Collection {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     id: "col-1",
     name: "Test",
     axes: [],
     games: [],
+    entertainmentBenchmark: null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function currentGame(overrides: Partial<Game> = {}): Game {
+  return {
+    id: "game-1",
+    bggId: null,
+    name: "Game",
+    yearPublished: null,
+    minPlayers: null,
+    maxPlayers: null,
+    bestPlayers: null,
+    playingTime: null,
+    imageUrl: null,
+    bggData: null,
+    numPlays: null,
+    acquisition: { state: "unknown" },
+    playCountEvidence: { status: "missing", source: "manual", observedAt: null },
+    durationEvidence: { status: "missing", source: "manual", observedAt: null },
+    playerRangeEvidence: { status: "missing", source: "manual", observedAt: null },
+    suggestedPlayerPoll: {
+      status: "valid",
+      state: "absent",
+      buckets: [],
+      source: "manual",
+      observedAt: null,
+    },
+    bestPlayersInvalidEvidence: null,
+    ownership: "owned",
+    boxDimensions: null,
+    manualShelfId: null,
+    ratings: {},
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
@@ -45,7 +83,7 @@ describe("StorageService.loadCollection", () => {
     const collection = await service.loadCollection();
 
     expect(collection.name).toBe("My Collection");
-    expect(collection.schemaVersion).toBe(2);
+    expect(collection.schemaVersion).toBe(3);
     expect(collection.axes).toHaveLength(3);
     expect(collection.games).toHaveLength(0);
 
@@ -156,6 +194,212 @@ describe("StorageService.loadCollection", () => {
 
     // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
     await expect(service.loadCollection()).rejects.toThrow();
+  });
+
+  test("normalizes malformed v3 acquisition and benchmark only at the load boundary", async () => {
+    const cases: Array<{ label: string; acquisition: JsonValue; expected: JsonValue }> = [
+      { label: "explicit null", acquisition: null, expected: null },
+      {
+        label: "wrong discriminator",
+        acquisition: { state: "other" },
+        expected: { state: "other" },
+      },
+      {
+        label: "malformed nested amount",
+        acquisition: { state: "purchase", amount: { hundredths: "12345" } },
+        expected: { state: "purchase", amount: { hundredths: "12345" } },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const rawGame = { ...currentGame(), acquisition: testCase.acquisition };
+      const rawCollection = {
+        ...currentCollection(),
+        games: [rawGame],
+        entertainmentBenchmark: { state: "configured", amount: { hundredths: "12345" } },
+      };
+      const entries: string[] = [];
+      const fileOps = createMockFileOps({ [COLLECTION_PATH]: JSON.stringify(rawCollection) });
+      const service = createStorageService({
+        dataDir: DATA_DIR,
+        configPath: CONFIG_PATH,
+        fileOps,
+        logger: {
+          log: (...values) => entries.push(values.map(String).join(" ")),
+          warn: (...values) => entries.push(values.map(String).join(" ")),
+          error: (...values) => entries.push(values.map(String).join(" ")),
+        },
+      });
+
+      const loaded = await service.loadCollection();
+      expect(loaded.games[0]?.acquisition).toEqual({
+        state: "invalid",
+        evidence: { presence: "present", value: testCase.expected },
+      });
+      expect(loaded.entertainmentBenchmark).toEqual({
+        state: "invalid",
+        evidence: {
+          presence: "present",
+          value: { state: "configured", amount: { hundredths: "12345" } },
+        },
+      });
+      expect(entries.some((entry) => entry.includes("field=acquisition"))).toBe(true);
+      expect(entries.some((entry) => entry.includes("field=entertainmentBenchmark"))).toBe(true);
+      expect(entries.join(" ")).not.toContain('hundredths":"12345');
+    }
+  });
+
+  test("distinguishes absent fields and does not rewrap normalized invalid values", async () => {
+    const rawGame: Partial<Game> = currentGame();
+    delete rawGame.acquisition;
+    const rawCollection: Partial<Collection> = currentCollection({ games: [] });
+    delete rawCollection.entertainmentBenchmark;
+    expect(rawGame).not.toHaveProperty("acquisition");
+    expect(rawCollection).not.toHaveProperty("entertainmentBenchmark");
+    const normalizedInvalid = {
+      state: "invalid" as const,
+      evidence: { presence: "missing" as const },
+    };
+    const { service } = makeService({
+      [COLLECTION_PATH]: JSON.stringify({
+        ...rawCollection,
+        games: [
+          rawGame,
+          { ...currentGame({ id: "already-invalid" }), acquisition: normalizedInvalid },
+        ],
+      }),
+    });
+
+    const loaded = await service.loadCollection();
+    expect(loaded.games[0]?.acquisition).toEqual(normalizedInvalid);
+    expect(loaded.games[1]?.acquisition).toEqual(normalizedInvalid);
+    expect(loaded.entertainmentBenchmark).toEqual(normalizedInvalid);
+    expect(await service.loadCollection()).toEqual(loaded);
+  });
+
+  test("round-trips valid v3 amounts, observations, invalid data, and later correction", async () => {
+    const invalidAcquisition = {
+      state: "invalid" as const,
+      evidence: {
+        presence: "present" as const,
+        value: { state: "purchase", amount: { hundredths: "bad" } },
+      },
+    };
+    const game = currentGame({
+      acquisition: invalidAcquisition,
+      numPlays: 7,
+      playingTime: 90,
+      minPlayers: 1,
+      maxPlayers: 5,
+      playCountEvidence: {
+        status: "valid",
+        value: 7,
+        source: "bgg-collection",
+        observedAt: "2026-08-26T10:05:00Z",
+      },
+      durationEvidence: {
+        status: "valid",
+        value: 90,
+        source: "bgg-thing",
+        observedAt: "2026-08-26T10:00:00Z",
+      },
+      playerRangeEvidence: {
+        status: "valid",
+        value: { minPlayers: 1, maxPlayers: 5 },
+        source: "bgg-player-range",
+        observedAt: "2026-08-26T10:00:00Z",
+      },
+      suggestedPlayerPoll: {
+        status: "valid",
+        state: "usable",
+        buckets: [{ playerCount: "3", best: 8, recommended: 2, notRecommended: 1 }],
+        source: "bgg-suggested-player-poll",
+        observedAt: "2026-08-26T10:00:00Z",
+      },
+    });
+    const benchmark = {
+      state: "configured" as const,
+      amount: { hundredths: 800, source: "manual" as const, confirmedAt: "2026-08-26T11:00:00Z" },
+    };
+    const gift = currentGame({ id: "gift", acquisition: { state: "gift" } });
+    const zeroPurchase = currentGame({
+      id: "zero-purchase",
+      acquisition: {
+        state: "purchase",
+        amount: { hundredths: 0, source: "manual", confirmedAt: "2026-08-26T11:30:00Z" },
+      },
+    });
+    const positivePurchase = currentGame({
+      id: "positive-purchase",
+      acquisition: {
+        state: "purchase",
+        amount: { hundredths: 1250, source: "manual", confirmedAt: "2026-08-26T11:45:00Z" },
+      },
+    });
+    const { service } = makeService();
+    await service.saveCollection(
+      currentCollection({
+        games: [game, gift, zeroPurchase, positivePurchase],
+        entertainmentBenchmark: benchmark,
+      }),
+    );
+
+    const loaded = await service.loadCollection();
+    expect(loaded.games[0]).toEqual(game);
+    expect(loaded.games.slice(1).map(({ acquisition }) => acquisition)).toEqual([
+      gift.acquisition,
+      zeroPurchase.acquisition,
+      positivePurchase.acquisition,
+    ]);
+    expect(loaded.entertainmentBenchmark).toEqual(benchmark);
+
+    if (loaded.games[0] === undefined) throw new Error("Expected persisted game");
+    loaded.games[0].name = "Unrelated rename";
+    await service.saveCollection(loaded);
+    expect((await service.loadCollection()).games[0]?.acquisition).toEqual(invalidAcquisition);
+
+    loaded.games[0].acquisition = {
+      state: "purchase",
+      amount: { hundredths: 0, source: "manual", confirmedAt: "2026-08-26T12:00:00Z" },
+    };
+    await service.saveCollection(loaded);
+    expect((await service.loadCollection()).games[0]?.acquisition).toEqual(
+      loaded.games[0].acquisition,
+    );
+  });
+
+  test("round-trips min-only and max-only manual range evidence", async () => {
+    const minOnly = currentGame({
+      id: "min-only",
+      playerRangeEvidence: {
+        status: "invalid",
+        evidence: {
+          minPlayers: { presence: "present", value: 2 },
+          maxPlayers: { presence: "missing" },
+        },
+        source: "manual",
+        observedAt: "2026-08-26T12:00:00Z",
+      },
+    });
+    const maxOnly = currentGame({
+      id: "max-only",
+      playerRangeEvidence: {
+        status: "invalid",
+        evidence: {
+          minPlayers: { presence: "missing" },
+          maxPlayers: { presence: "present", value: 5 },
+        },
+        source: "manual",
+        observedAt: "2026-08-26T12:05:00Z",
+      },
+    });
+    const { service } = makeService();
+
+    await service.saveCollection(currentCollection({ games: [minOnly, maxOnly] }));
+
+    expect(
+      (await service.loadCollection()).games.map(({ playerRangeEvidence }) => playerRangeEvidence),
+    ).toEqual([minOnly.playerRangeEvidence, maxOnly.playerRangeEvidence]);
   });
 });
 

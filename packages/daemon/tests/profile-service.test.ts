@@ -24,6 +24,18 @@ function makeGame(id: string, name: string): Game {
     bestPlayers: null,
     playingTime: null,
     numPlays: null,
+    acquisition: { state: "unknown" },
+    playCountEvidence: { status: "missing", source: "manual", observedAt: null },
+    durationEvidence: { status: "missing", source: "manual", observedAt: null },
+    playerRangeEvidence: { status: "missing", source: "manual", observedAt: null },
+    suggestedPlayerPoll: {
+      status: "valid",
+      state: "absent",
+      buckets: [],
+      source: "manual",
+      observedAt: null,
+    },
+    bestPlayersInvalidEvidence: null,
     ownership: "owned",
     boxDimensions: null,
     manualShelfId: null,
@@ -38,11 +50,12 @@ function makeGame(id: string, name: string): Game {
 function makeCollection(updatedAt?: string): Collection {
   const now = updatedAt ?? new Date().toISOString();
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     id: "test-col",
     name: "Test Collection",
     axes: [],
     games: [],
+    entertainmentBenchmark: null,
     createdAt: now,
     updatedAt: now,
   };

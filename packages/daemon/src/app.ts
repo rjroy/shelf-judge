@@ -17,6 +17,7 @@ import { createNicheRoutes } from "./routes/niche.js";
 import { createRedundancyRoutes } from "./routes/redundancy.js";
 import { createWishlistRoutes } from "./routes/wishlist.js";
 import { createShelfRoutes } from "./routes/shelf.js";
+import { createCollectionRoutes } from "./routes/collection.js";
 import { createWishlistService } from "./services/wishlist-service.js";
 import { createShelfService } from "./services/shelf-service.js";
 import { createCapacityService } from "./services/capacity-service.js";
@@ -24,6 +25,7 @@ import type { TournamentService } from "./services/tournament-service.js";
 import type { ProfileService } from "./services/profile-service.js";
 import type { PredictionService } from "./services/prediction-service.js";
 import type { OperationDefinition } from "./operations.js";
+import { createPurchaseUtilizationService } from "./services/purchase-utilization-service.js";
 
 export interface AppDeps {
   storageService: StorageService;
@@ -59,6 +61,7 @@ export function createApp(deps: AppDeps): AppResult {
     predictionService,
     gameService,
   });
+  const purchaseUtilizationService = createPurchaseUtilizationService({ storageService });
 
   // Build routes
   const gameRouteModule = createGameRoutes({
@@ -67,7 +70,9 @@ export function createApp(deps: AppDeps): AppResult {
     predictionService,
     storageService,
     wishlistService,
+    purchaseUtilizationService,
   });
+  const collectionRouteModule = createCollectionRoutes({ purchaseUtilizationService });
   const axisRouteModule = createAxisRoutes({ axisService });
   const scoreRouteModule = createScoreRoutes({ gameService });
   const importRouteModule = createImportRoutes({ gameService, bggClient });
@@ -94,6 +99,7 @@ export function createApp(deps: AppDeps): AppResult {
     ...redundancyRouteModule.operations,
     ...wishlistRouteModule.operations,
     ...shelfRouteModule.operations,
+    ...collectionRouteModule.operations,
   ];
 
   const helpRouteModule = createHelpRoutes({ operations: allOperations });
@@ -121,6 +127,7 @@ export function createApp(deps: AppDeps): AppResult {
   app.route("/api", redundancyRouteModule.routes);
   app.route("/api", wishlistRouteModule.routes);
   app.route("/api", shelfRouteModule.routes);
+  app.route("/api", collectionRouteModule.routes);
   app.route("/api", helpRouteModule.routes);
   app.route("/api", configRouteModule.routes);
   app.route("/api", shutdownRouteModule.routes);

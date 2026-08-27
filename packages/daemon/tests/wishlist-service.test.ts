@@ -25,6 +25,18 @@ function makeGame(bggId: number, name: string): Game {
     playingTime: 60,
     imageUrl: `https://example.com/${bggId}.jpg`,
     numPlays: null,
+    acquisition: { state: "unknown" },
+    playCountEvidence: { status: "missing", source: "manual", observedAt: null },
+    durationEvidence: { status: "missing", source: "manual", observedAt: null },
+    playerRangeEvidence: { status: "missing", source: "manual", observedAt: null },
+    suggestedPlayerPoll: {
+      status: "valid",
+      state: "absent",
+      buckets: [],
+      source: "manual",
+      observedAt: null,
+    },
+    bestPlayersInvalidEvidence: null,
     bggData: {
       communityRating: 7.5,
       bayesAverage: 7.2,
@@ -35,7 +47,6 @@ function makeGame(bggId: number, name: string): Game {
       categories: [],
       families: [],
       subdomains: [],
-      suggestedPlayerCounts: [],
       bestPlayerCount: null,
       fetchedAt: NOW,
     },
@@ -109,11 +120,12 @@ function createMockStorage(
 ): StorageService {
   let stored = structuredClone(wishlist);
   const coll: Collection = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     id: "coll-1",
     name: "Test",
     axes: [],
     games: [],
+    entertainmentBenchmark: null,
     createdAt: NOW,
     updatedAt: NOW,
     ...collection,

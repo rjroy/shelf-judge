@@ -51,3 +51,75 @@ describe("CLI derived-axis argument parsing", () => {
     });
   });
 });
+
+describe("purchase utilization argument parsing", () => {
+  const cases: Array<[string[], string, string[]]> = [
+    [["game", "acquisition", "game/1", "unknown"], "game acquisition", ["game/1", "unknown"]],
+    [["game", "acquisition", "game/1", "gift"], "game acquisition", ["game/1", "gift"]],
+    [
+      ["game", "acquisition", "game/1", "purchase", "0008.50", "--json"],
+      "game acquisition",
+      ["game/1", "purchase", "0008.50"],
+    ],
+    [["--json", "game", "value", "game/1"], "game value", ["game/1"]],
+    [["collection", "benchmark", "get"], "collection benchmark", ["get"]],
+    [
+      ["collection", "benchmark", "set", "0008.50", "--json"],
+      "collection benchmark",
+      ["set", "0008.50"],
+    ],
+    [["collection", "benchmark", "clear"], "collection benchmark", ["clear"]],
+  ];
+  test.each(cases)(
+    "keeps positional command values unchanged",
+    (tokens, commandPath, positional) => {
+      const parsed = parseArgs(["bun", "shelf-judge", ...tokens]);
+      expect(parsed.commandPath).toBe(commandPath);
+      expect(parsed.positional).toEqual(positional);
+      expect(parsed.json).toBe(tokens.includes("--json"));
+    },
+  );
+
+  test.each([
+    [
+      ["game", "acquisition", "game/1", "purchase", "--name"],
+      "game acquisition",
+      ["game/1", "purchase", "--name"],
+    ],
+    [["collection", "benchmark", "set", "--weight"], "collection benchmark", ["set", "--weight"]],
+  ] as Array<[string[], string, string[]]>)(
+    "preserves recognized flag-shaped amount strings",
+    (tokens, commandPath, positional) => {
+      expect(parseArgs(["bun", "shelf-judge", ...tokens])).toMatchObject({
+        commandPath,
+        positional,
+      });
+    },
+  );
+
+  test.each([
+    [
+      ["game", "acquisition", "game/1", "gift", "--weight", "5"],
+      "game acquisition",
+      ["game/1", "gift", "--weight", "5"],
+    ],
+    [
+      ["game", "value", "game/1", "--name", "ignored"],
+      "game value",
+      ["game/1", "--name", "ignored"],
+    ],
+    [
+      ["collection", "benchmark", "get", "--description", "ignored", "--json"],
+      "collection benchmark",
+      ["get", "--description", "ignored"],
+    ],
+  ] as Array<[string[], string, string[]]>)(
+    "preserves unrelated recognized options as actionable extra arguments",
+    (tokens, commandPath, positional) => {
+      const parsed = parseArgs(["bun", "shelf-judge", ...tokens]);
+      expect(parsed.commandPath).toBe(commandPath);
+      expect(parsed.positional).toEqual(positional);
+      expect(parsed.json).toBe(tokens.includes("--json"));
+    },
+  );
+});

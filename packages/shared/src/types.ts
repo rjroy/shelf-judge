@@ -30,6 +30,100 @@ export interface SuggestedPlayerCount {
   notRecommended: number;
 }
 
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
+
+export type InvalidEvidence = { presence: "missing" } | { presence: "present"; value: JsonValue };
+
+export type FieldObservationSource =
+  | "manual"
+  | "bgg-collection"
+  | "bgg-thing"
+  | "bgg-suggested-player-poll"
+  | "bgg-player-range"
+  | "current-fitness"
+  | "legacy-unknown";
+
+export interface EvidenceObservation {
+  source: FieldObservationSource;
+  observedAt: string | null;
+}
+
+export type FieldEvidence<Value extends JsonValue> =
+  | (EvidenceObservation & { status: "valid"; value: Value })
+  | (EvidenceObservation & { status: "missing" })
+  | (EvidenceObservation & { status: "invalid"; evidence: InvalidEvidence });
+
+export interface PlayerRangeValue {
+  minPlayers: number;
+  maxPlayers: number;
+}
+
+export interface InvalidPlayerRangeEvidence {
+  minPlayers: InvalidEvidence;
+  maxPlayers: InvalidEvidence;
+}
+
+export type PlayerRangeEvidence =
+  | (EvidenceObservation & { status: "valid"; value: PlayerRangeValue })
+  | (EvidenceObservation & { status: "missing" })
+  | (EvidenceObservation & {
+      status: "invalid";
+      evidence: InvalidPlayerRangeEvidence;
+    });
+
+export type SuggestedPlayerPollState =
+  | "absent"
+  | "empty"
+  | "unusable"
+  | "usable"
+  | "legacy-unknown";
+
+export type SuggestedPlayerPoll =
+  | (EvidenceObservation & {
+      status: "valid";
+      state: "absent" | "empty" | "legacy-unknown";
+      buckets: [];
+    })
+  | (EvidenceObservation & {
+      status: "valid";
+      state: "unusable" | "usable";
+      buckets: [SuggestedPlayerCount, ...SuggestedPlayerCount[]];
+    })
+  | (EvidenceObservation & {
+      status: "invalid";
+      state: "unusable";
+      buckets: [];
+      evidence: InvalidEvidence;
+    });
+
+export interface PersistedAmount {
+  hundredths: number;
+  source: "manual";
+  confirmedAt: string;
+}
+
+export type Acquisition =
+  | { state: "unknown" }
+  | { state: "gift" }
+  | { state: "purchase"; amount: PersistedAmount }
+  | { state: "invalid"; evidence: InvalidEvidence };
+
+export type EntertainmentBenchmark =
+  | { state: "configured"; amount: PersistedAmount }
+  | { state: "invalid"; evidence: InvalidEvidence }
+  | null;
+
+export type BggResponseFieldState = "absent" | "partial" | "complete";
+export type BggSourceRequest = "bgg-search" | "bgg-thing" | "bgg-collection";
+
+export interface BggRequestObservation {
+  sourceRequest: BggSourceRequest;
+  observedAt: string;
+  state: BggResponseFieldState;
+  fieldsReturned: string[];
+}
+
 export type OwnershipStatus = "owned" | "previously-owned";
 
 export interface BggGameData {
@@ -42,7 +136,6 @@ export interface BggGameData {
   categories: BggTag[];
   families: BggTag[];
   subdomains: BggTag[]; // BGG subdomains (Strategy Games, Family Games, etc.)
-  suggestedPlayerCounts: SuggestedPlayerCount[];
   bestPlayerCount: number | null;
   fetchedAt: string; // ISO 8601
 }
@@ -59,6 +152,12 @@ export interface Game {
   imageUrl: string | null;
   bggData: BggGameData | null;
   numPlays: number | null;
+  acquisition: Acquisition;
+  playCountEvidence: FieldEvidence<number>;
+  durationEvidence: FieldEvidence<number>;
+  playerRangeEvidence: PlayerRangeEvidence;
+  suggestedPlayerPoll: SuggestedPlayerPoll;
+  bestPlayersInvalidEvidence: InvalidEvidence | null;
   ownership: OwnershipStatus;
   boxDimensions: BoxDimensions | null;
   manualShelfId: string | null;
@@ -132,11 +231,12 @@ export type Axis = PersonalAxis | TournamentAxis | DerivedAxis | DisabledLegacyA
 export type AxisSource = Axis["source"];
 export type EnabledAxis = PersonalAxis | TournamentAxis | DerivedAxis;
 export interface Collection {
-  schemaVersion: 2;
+  schemaVersion: 3;
   id: string;
   name: string;
   axes: Axis[];
   games: Game[];
+  entertainmentBenchmark: EntertainmentBenchmark;
   createdAt: string;
   updatedAt: string;
 }
@@ -338,6 +438,149 @@ export interface GameWithScore {
   nichePosition?: NichePosition | null;
 }
 
+export interface GameWithPurchaseUtilization extends GameWithScore {
+  displayScore: string | null;
+  purchaseUtilization: PurchaseUtilizationResult;
+}
+
+export type PurchaseUtilizationReason =
+  | "missing-acquisition"
+  | "invalid-acquisition"
+  | "no-owner-cost"
+  | "missing-benchmark"
+  | "invalid-benchmark"
+  | "missing-play-count"
+  | "invalid-play-count"
+  | "missing-modeled-duration"
+  | "invalid-modeled-duration"
+  | "missing-modeled-player-count"
+  | "invalid-modeled-player-count"
+  | "missing-fitness"
+  | "invalid-fitness"
+  | "unreachable-at-current-fitness";
+
+export type UtilizationOutcome = "calculated" | "unavailable" | "not-applicable" | "unreachable";
+
+export interface UtilizationComponentBase {
+  label: string;
+  outcome: UtilizationOutcome;
+  reasons: PurchaseUtilizationReason[];
+}
+
+export interface CalculatedUtilizationComponent<Value> extends UtilizationComponentBase {
+  outcome: "calculated";
+  value: Value;
+  display: string;
+  reasons: [];
+}
+
+export interface UnavailableUtilizationComponent extends UtilizationComponentBase {
+  outcome: "unavailable";
+  display: "Unavailable";
+}
+
+export interface NotApplicableUtilizationComponent extends UtilizationComponentBase {
+  outcome: "not-applicable";
+  display: string;
+}
+
+export interface UnreachableUtilizationComponent extends UtilizationComponentBase {
+  outcome: "unreachable";
+  display: "Unreachable at current fitness";
+  reasons: ["unreachable-at-current-fitness"];
+}
+
+export type UtilizationComponent<Value> =
+  | CalculatedUtilizationComponent<Value>
+  | UnavailableUtilizationComponent
+  | NotApplicableUtilizationComponent
+  | UnreachableUtilizationComponent;
+
+export interface ExactUtilizationValue {
+  exact: { numerator: string; denominator: string };
+}
+
+export interface MultiplierUtilizationValue extends ExactUtilizationValue {
+  status: "met" | "not-met";
+}
+
+export interface ModeledPlayerCountValue extends ExactUtilizationValue {
+  source: FieldObservationSource;
+  observedAt: string | null;
+  resolution: "poll-winner" | "poll-tie-average" | "player-range-midpoint";
+  winningBestVotes: number | null;
+  winningPlayerCounts: string[];
+}
+
+export type PurchaseUtilizationFitnessInput =
+  | (EvidenceObservation & { status: "valid"; value: string })
+  | (EvidenceObservation & { status: "missing" })
+  | (EvidenceObservation & { status: "invalid"; value: string });
+
+export interface PurchaseUtilizationInput {
+  acquisition: Acquisition;
+  entertainmentBenchmark: EntertainmentBenchmark;
+  playCount: FieldEvidence<number>;
+  duration: FieldEvidence<number>;
+  playerRange: PlayerRangeEvidence;
+  suggestedPlayerPoll: SuggestedPlayerPoll;
+  fitness: string | null;
+}
+
+export interface PurchaseUtilizationEvidence {
+  acquisition: Acquisition;
+  entertainmentBenchmark: EntertainmentBenchmark;
+  playCount: FieldEvidence<number>;
+  duration: FieldEvidence<number>;
+  playerRange: PlayerRangeEvidence;
+  suggestedPlayerPoll: SuggestedPlayerPoll;
+  fitness: PurchaseUtilizationFitnessInput;
+}
+
+export interface PurchaseUtilizationSortProjection {
+  valueRemainingHundredths: string | null;
+  estimatedAdditionalPlays:
+    | { category: "finite"; wholePlays: string }
+    | { category: "unreachable"; wholePlays: null }
+    | { category: "unavailable" | "not-applicable"; wholePlays: null };
+}
+
+export interface PurchaseUtilizationResult {
+  outcome: "met" | "not-met" | "unavailable" | "not-applicable";
+  outcomeLabel:
+    | "Value threshold met"
+    | "Value threshold not yet met"
+    | "Purchase value unavailable"
+    | "Purchase value not applicable";
+  reasons: PurchaseUtilizationReason[];
+  components: {
+    costPerRecordedPlay: UtilizationComponent<ExactUtilizationValue>;
+    modeledPlayerCount: UtilizationComponent<ModeledPlayerCountValue>;
+    modeledPlayerHours: UtilizationComponent<ExactUtilizationValue>;
+    costPerModeledPlayerHour: UtilizationComponent<ExactUtilizationValue>;
+    fitnessAdjustedHourlyBenchmark: UtilizationComponent<ExactUtilizationValue>;
+    valueMultiplier: UtilizationComponent<MultiplierUtilizationValue>;
+    valueRemaining: UtilizationComponent<ExactUtilizationValue>;
+    estimatedAdditionalPlays: UtilizationComponent<{ wholePlays: string }>;
+  };
+  evidence: PurchaseUtilizationEvidence;
+  assumptions: {
+    modeledSessions: "Models each recorded play at the shown duration and player count; actual sessions may differ.";
+    futurePlays: "Estimated additional plays assumes future plays use the shown duration, player count, fitness, and entertainment benchmark.";
+    fitnessAdjustment: "The fitness-adjusted hourly benchmark changes in direct proportion to current fitness; fitness 6 uses the collection benchmark.";
+  };
+  sort: PurchaseUtilizationSortProjection;
+}
+
+export type AcquisitionMutationRequest =
+  | { state: "unknown" }
+  | { state: "gift" }
+  | { state: "purchase"; amount: string };
+
+export interface EntertainmentBenchmarkMutationRequest {
+  amount: string;
+}
+
 export interface AddGameResult {
   game: Game;
   bggImported: boolean;
@@ -349,6 +592,8 @@ export interface BggSearchResult {
   name: string;
   yearPublished: number | null;
   thumbnailUrl: string | null;
+  searchObservation?: BggRequestObservation;
+  thingObservation?: BggRequestObservation;
 }
 
 // SSE event types for BGG collection import (wire format between daemon and clients)

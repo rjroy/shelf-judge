@@ -16,6 +16,11 @@ const typesFile = "packages/shared/src/types.ts";
 const factualVectorFile = "packages/daemon/src/services/feature-vector.ts";
 const derivedFieldIds = ["communityRating", "weight", "playerCountFit", "playingTime"] as const;
 const derivedFieldIdSet = new Set<string>(derivedFieldIds);
+const currentSchemaWriteOwners = new Map<string, ReadonlySet<string>>([
+  ["packages/daemon/src/services/bgg-xml-parser.ts", new Set(["playingTime"])],
+  ["packages/daemon/src/services/game-service.ts", new Set(["playingTime"])],
+  ["packages/daemon/src/services/prediction-service.ts", new Set(["playingTime"])],
+]);
 
 function parseSource(filePath: string, source: string): ts.SourceFile {
   return ts.createSourceFile(
@@ -59,6 +64,21 @@ function isApprovedFactualVectorLiteral(filePath: string, node: ts.Node): boolea
     filePath === factualVectorFile &&
     declarationName(enclosingDeclaration(node)) === "FACTUAL_VECTOR_DIMENSIONS"
   );
+}
+
+function isApprovedCurrentSchemaWrite(filePath: string, node: ts.Node): boolean {
+  const fields = currentSchemaWriteOwners.get(filePath);
+  if (
+    fields === undefined ||
+    (!ts.isIdentifier(node) &&
+      !ts.isStringLiteral(node) &&
+      !ts.isNoSubstitutionTemplateLiteral(node)) ||
+    !fields.has(node.text)
+  ) {
+    return false;
+  }
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return true;
+  return ts.isIdentifier(node) && ts.isPropertyAssignment(node.parent) && node.parent.name === node;
 }
 
 function containsBehavior(initializer: ts.Expression): boolean {
@@ -211,7 +231,8 @@ describe("derived-field production ownership", () => {
           (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) &&
           derivedFieldIdSet.has(node.text) &&
           !isApprovedClosedTypeUse(filePath, node) &&
-          !isApprovedFactualVectorLiteral(filePath, node)
+          !isApprovedFactualVectorLiteral(filePath, node) &&
+          !isApprovedCurrentSchemaWrite(filePath, node)
         ) {
           violations.push(
             `${filePath}:${sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1} concrete derived ID literal`,
@@ -222,6 +243,7 @@ describe("derived-field production ownership", () => {
           ts.isIdentifier(node) &&
           derivedFieldIdSet.has(node.text) &&
           !isApprovedClosedTypeUse(filePath, node) &&
+          !isApprovedCurrentSchemaWrite(filePath, node) &&
           (isUnquotedClientFieldId(filePath, node) || isBehaviorDispatchProperty(node))
         ) {
           violations.push(

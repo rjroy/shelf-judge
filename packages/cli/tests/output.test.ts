@@ -1,5 +1,11 @@
 import { describe, test, expect } from "bun:test";
-import { formatTable, formatScore, formatBreakdown, printOutput } from "../src/output.js";
+import {
+  formatTable,
+  formatScore,
+  formatDisplayScore,
+  formatBreakdown,
+  printOutput,
+} from "../src/output.js";
 import type { FitnessBreakdownEntry } from "@shelf-judge/shared";
 
 function entry(overrides: Partial<FitnessBreakdownEntry>): FitnessBreakdownEntry {
@@ -63,6 +69,14 @@ describe("formatScore", () => {
   test("returns --- for null", () => {
     expect(formatScore(null)).toBe("---");
     expect(formatScore(undefined)).toBe("---");
+  });
+});
+
+describe("formatDisplayScore", () => {
+  test("uses the daemon canonical string without numeric formatting", () => {
+    expect(formatDisplayScore("8.0")).toBe("8.0");
+    expect(formatDisplayScore("1.3")).toBe("1.3");
+    expect(formatDisplayScore(null)).toBe("---");
   });
 });
 

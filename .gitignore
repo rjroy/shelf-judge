@@ -21,6 +21,8 @@ Thumbs.db
 # next.js
 packages/web/next-env.d.ts
 
+# development temporary
+tmp/
 .lore/.design-input
 
 # Beads / Dolt files (added by bd init)

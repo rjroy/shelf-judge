@@ -595,6 +595,7 @@ describe("current persisted collection validation", () => {
     name: "Current",
     axes: [communityRatingAxis()],
     games: [],
+    entertainmentBenchmark: null,
     createdAt: timestamp,
     updatedAt: timestamp,
   };
@@ -603,7 +604,7 @@ describe("current persisted collection validation", () => {
     expect(CollectionSchema.parse(currentCollection)).toEqual(currentCollection);
   });
 
-  test("backfills additive best-player fields in existing schemaVersion 1 collections", () => {
+  test("rejects historical game shapes outside migration", () => {
     const oldGame = {
       id: "game-1",
       bggId: 1,
@@ -623,7 +624,6 @@ describe("current persisted collection validation", () => {
         categories: [],
         families: [],
         subdomains: [],
-        suggestedPlayerCounts: [],
         fetchedAt: timestamp,
       },
       numPlays: null,
@@ -635,10 +635,9 @@ describe("current persisted collection validation", () => {
       updatedAt: timestamp,
     };
 
-    const parsed = CollectionSchema.parse({ ...currentCollection, games: [oldGame] });
-
-    expect(parsed.games[0]?.bestPlayers).toBeNull();
-    expect(parsed.games[0]?.bggData?.bestPlayerCount).toBeNull();
+    expect(CollectionSchema.safeParse({ ...currentCollection, games: [oldGame] }).success).toBe(
+      false,
+    );
   });
 
   test("preserves explicit null best-player fields in persisted output", () => {
@@ -665,11 +664,22 @@ describe("current persisted collection validation", () => {
             categories: [],
             families: [],
             subdomains: [],
-            suggestedPlayerCounts: [],
             bestPlayerCount: null,
             fetchedAt: timestamp,
           },
           numPlays: null,
+          acquisition: { state: "unknown" },
+          playCountEvidence: { status: "missing", source: "manual", observedAt: null },
+          durationEvidence: { status: "missing", source: "manual", observedAt: null },
+          playerRangeEvidence: { status: "missing", source: "manual", observedAt: null },
+          suggestedPlayerPoll: {
+            status: "valid",
+            state: "absent",
+            buckets: [],
+            source: "manual",
+            observedAt: null,
+          },
+          bestPlayersInvalidEvidence: null,
           ownership: "owned",
           boxDimensions: null,
           manualShelfId: null,
@@ -682,6 +692,56 @@ describe("current persisted collection validation", () => {
 
     expect(oldCollection.games[0]?.bestPlayers).toBeNull();
     expect(oldCollection.games[0]?.bggData?.bestPlayerCount).toBeNull();
+  });
+
+  test("rejects malformed amount and evidence payloads at the strict runtime boundary", () => {
+    expect(
+      CollectionSchema.safeParse({
+        ...currentCollection,
+        entertainmentBenchmark: {
+          state: "configured",
+          amount: { hundredths: -1, source: "manual", confirmedAt: timestamp },
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      CollectionSchema.safeParse({
+        ...currentCollection,
+        games: [
+          {
+            id: "invalid",
+            bggId: null,
+            name: "Invalid",
+            yearPublished: null,
+            minPlayers: null,
+            maxPlayers: null,
+            bestPlayers: null,
+            playingTime: null,
+            imageUrl: null,
+            bggData: null,
+            numPlays: null,
+            acquisition: { state: "purchase", amount: { hundredths: "10" } },
+            playCountEvidence: { status: "invalid", evidence: { presence: "present" } },
+            durationEvidence: { status: "missing", source: "manual", observedAt: null },
+            playerRangeEvidence: { status: "missing", source: "manual", observedAt: null },
+            suggestedPlayerPoll: {
+              status: "valid",
+              state: "absent",
+              buckets: [],
+              source: "manual",
+              observedAt: null,
+            },
+            bestPlayersInvalidEvidence: null,
+            ownership: "owned",
+            boxDimensions: null,
+            manualShelfId: null,
+            ratings: {},
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          },
+        ],
+      }).success,
+    ).toBe(false);
   });
 
   test("keeps persisted structural validation separate from mutation curve semantics", () => {
@@ -712,7 +772,7 @@ describe("current persisted collection validation", () => {
   });
 
   test("rejects future versions and extra persisted fields", () => {
-    expect(CollectionSchema.safeParse({ ...currentCollection, schemaVersion: 3 }).success).toBe(
+    expect(CollectionSchema.safeParse({ ...currentCollection, schemaVersion: 4 }).success).toBe(
       false,
     );
     expect(CollectionSchema.safeParse({ ...currentCollection, unexpected: true }).success).toBe(

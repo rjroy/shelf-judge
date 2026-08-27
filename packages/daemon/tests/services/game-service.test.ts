@@ -64,6 +64,38 @@ describe("GameService", () => {
 
       expect(g1.id).not.toBe(g2.id);
     });
+
+    test("preserves min-only and max-only manual ranges as invalid evidence", async () => {
+      const minOnly = (await gameService.addGame({ name: "Min only", minPlayers: 2 })).game;
+      const maxOnly = (await gameService.addGame({ name: "Max only", maxPlayers: 5 })).game;
+
+      expect(minOnly).toMatchObject({
+        minPlayers: null,
+        maxPlayers: null,
+        playerRangeEvidence: {
+          status: "invalid",
+          evidence: {
+            minPlayers: { presence: "present", value: 2 },
+            maxPlayers: { presence: "missing" },
+          },
+          source: "manual",
+          observedAt: minOnly.createdAt,
+        },
+      });
+      expect(maxOnly).toMatchObject({
+        minPlayers: null,
+        maxPlayers: null,
+        playerRangeEvidence: {
+          status: "invalid",
+          evidence: {
+            minPlayers: { presence: "missing" },
+            maxPlayers: { presence: "present", value: 5 },
+          },
+          source: "manual",
+          observedAt: maxOnly.createdAt,
+        },
+      });
+    });
   });
 
   describe("getGame", () => {

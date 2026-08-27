@@ -109,7 +109,7 @@ describe("storage collection migration ordering and recovery", () => {
       const migrated = await service.loadCollection();
       const persistedAfterMigration = await fs.readFile(collectionPath, "utf8");
       expect(JSON.parse(persistedAfterMigration)).toEqual(migrated);
-      expect(migrated.schemaVersion).toBe(2);
+      expect(migrated.schemaVersion).toBe(3);
       expect(
         await fs.stat(profilePath).then(
           () => true,
@@ -162,13 +162,13 @@ describe("storage collection migration ordering and recovery", () => {
       dataDir: DATA_DIR,
       configPath: "/test/config.json",
       fileOps: createMockFileOps({
-        [COLLECTION_PATH]: JSON.stringify({ ...historicalCollection, schemaVersion: 3 }),
+        [COLLECTION_PATH]: JSON.stringify({ ...historicalCollection, schemaVersion: 4 }),
       }),
       logger: migrationLog,
     });
     // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
     await expect(migrationService.loadCollection()).rejects.toThrow(
-      "Unsupported collection schema version 3",
+      "Unsupported collection schema version 4",
     );
     expect(
       migrationLog.entries.some((entry) => entry.includes("collection migration failed")),
@@ -182,11 +182,12 @@ describe("storage collection migration ordering and recovery", () => {
       logger: validationLog,
     });
     const invalidCurrent: Collection = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       id: "collection-1",
       name: "",
       axes: [],
       games: [],
+      entertainmentBenchmark: null,
       createdAt: NOW,
       updatedAt: NOW,
     };
@@ -292,7 +293,7 @@ describe("storage collection migration ordering and recovery", () => {
 
     const migrated = await service.loadCollection();
 
-    expect(migrated.schemaVersion).toBe(2);
+    expect(migrated.schemaVersion).toBe(3);
     expect(invalidated).toEqual(["v1-derived-artifact"]);
     expect(JSON.parse(fileOps.files.get(COLLECTION_PATH) ?? "null")).toEqual(migrated);
   });

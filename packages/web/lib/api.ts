@@ -22,13 +22,17 @@ import type {
   UpdateAxisInput,
   LegacyAxisRepairInput,
   DerivedFieldDiscoveryResponse,
+  AcquisitionMutationRequest,
+  EntertainmentBenchmark,
+  EntertainmentBenchmarkMutationRequest,
+  GameWithPurchaseUtilization,
 } from "@shelf-judge/shared";
 import { daemonRequest, daemonJson } from "./daemon";
 
 export async function listGames(opts?: {
   includeNiches?: boolean;
   ownership?: "owned" | "previously-owned" | "all";
-}): Promise<GameWithScore[]> {
+}): Promise<GameWithPurchaseUtilization[]> {
   const params = new URLSearchParams();
   if (opts?.includeNiches) params.set("includeNiches", "true");
   if (opts?.ownership) params.set("ownership", opts.ownership);
@@ -36,8 +40,33 @@ export async function listGames(opts?: {
   return daemonJson(`/api/games${qs ? `?${qs}` : ""}`);
 }
 
-export async function getGame(id: string): Promise<GameWithScore> {
-  return daemonJson(`/api/games/${id}`);
+export async function getGame(id: string): Promise<GameWithPurchaseUtilization> {
+  return daemonJson(`/api/games/${id}?includePredicted=true`);
+}
+
+export async function setGameAcquisition(
+  id: string,
+  body: AcquisitionMutationRequest,
+): Promise<{ game: Game }> {
+  return daemonJson(`/api/games/${id}/acquisition`, { method: "PUT", body });
+}
+
+export async function getEntertainmentBenchmark(): Promise<{
+  entertainmentBenchmark: EntertainmentBenchmark;
+}> {
+  return daemonJson("/api/collection/entertainment-benchmark");
+}
+
+export async function setEntertainmentBenchmark(
+  body: EntertainmentBenchmarkMutationRequest,
+): Promise<{ entertainmentBenchmark: EntertainmentBenchmark }> {
+  return daemonJson("/api/collection/entertainment-benchmark", { method: "PUT", body });
+}
+
+export async function clearEntertainmentBenchmark(): Promise<{
+  entertainmentBenchmark: EntertainmentBenchmark;
+}> {
+  return daemonJson("/api/collection/entertainment-benchmark", { method: "DELETE" });
 }
 
 export async function addGame(
@@ -250,7 +279,7 @@ export async function getReadiness(): Promise<PredictionReadiness> {
   return daemonJson("/api/predictions/readiness");
 }
 
-export async function listGamesWithPredictions(): Promise<GameWithScore[]> {
+export async function listGamesWithPredictions(): Promise<GameWithPurchaseUtilization[]> {
   return daemonJson("/api/games?includePredicted=true&&ownership=all");
 }
 
@@ -435,4 +464,8 @@ export type {
   AssignedGame,
   UnfittableEntry,
   OverflowEntry,
+  AcquisitionMutationRequest,
+  EntertainmentBenchmark,
+  EntertainmentBenchmarkMutationRequest,
+  GameWithPurchaseUtilization,
 };

@@ -6,7 +6,6 @@ import {
   listAxes,
   getTournamentGameStats,
   getProfile,
-  predictGame,
   getNicheSettings,
   getShelfConfig,
 } from "@/lib/api";
@@ -27,6 +26,8 @@ import { GameActions, OwnershipActions } from "@/components/game-actions";
 import { NicheIgnoreButton, NicheRestoreButton } from "@/components/niche-ignore-button";
 import { BoxDimensionsForm } from "@/components/box-dimensions-form";
 import { ShelfAssignmentForm } from "@/components/shelf-assignment-form";
+import { AcquisitionForm } from "@/components/acquisition-form";
+import { PurchaseUtilizationPanel } from "@/components/purchase-utilization-panel";
 
 export async function generateMetadata({
   params,
@@ -53,7 +54,6 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
   let tournamentStats: TournamentGameStatsDisplay | null = null;
   let profileDivergence: DivergentGame | null = null;
   let profileOutlier: CollectionOutlier | null = null;
-  let prediction: { score: FitnessResult } | null = null;
   let ignoredTags: NicheTagFilter[] = [];
   let shelfOptions: Array<{ shelfId: string; label: string; dimensionless: boolean }> = [];
   try {
@@ -80,17 +80,6 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
     } catch {
       // Profile may not exist yet
     }
-    // Fetch prediction data for unrated or partially-rated games
-    try {
-      const predicted = await predictGame(id);
-      if (predicted.score?.predictionMeta) {
-        prediction = {
-          score: predicted.score,
-        };
-      }
-    } catch {
-      // Prediction may not be available (fully rated, no BGG data, etc.)
-    }
     try {
       const nicheSettings = await getNicheSettings();
       ignoredTags = nicheSettings.ignoredTags;
@@ -105,12 +94,9 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
     );
   }
 
-  const { game, score, nichePosition } = data;
+  const { game, score, displayScore, purchaseUtilization, nichePosition } = data;
   const isPreviouslyOwned = game.ownership === "previously-owned";
-  // Use predicted score when the game has no actual score but has predictions
-  const displayScore = prediction?.score ?? score ?? null;
-  const hasPredictions =
-    displayScore?.predictionMeta !== null && displayScore?.predictionMeta !== undefined;
+  const hasPredictions = score?.predictionMeta !== null && score?.predictionMeta !== undefined;
 
   return (
     <>
@@ -222,20 +208,20 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
             )}
           </div>
           <div className="game-hero-score-section">
-            {displayScore ? (
-              displayScore.vetoed ? (
+            {score ? (
+              score.vetoed ? (
                 <>
                   <div className="game-hero-score-value">
                     <div className="score-hero-label">Fitness Score</div>
                     <div className="score-hero-number score-hero-vetoed">VETOED</div>
-                    {displayScore.hypotheticalScore !== null && (
+                    {score.hypotheticalScore !== null && (
                       <div className="score-hero-out-of">
-                        hypothetical: {displayScore.hypotheticalScore.toFixed(1)}
+                        hypothetical: {score.hypotheticalScore.toFixed(1)}
                       </div>
                     )}
                   </div>
                   <div className="game-hero-score-value">
-                    <div className="score-hero-rated">{displayScore.ratedAxisCount} axes rated</div>
+                    <div className="score-hero-rated">{score.ratedAxisCount} axes rated</div>
                   </div>
                 </>
               ) : hasPredictions ? (
@@ -244,17 +230,15 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
                     <div className="score-hero-label">Fitness Score</div>
                     <div className="score-hero-number score-predicted">
                       <span className="score-predicted-tilde">~</span>
-                      {displayScore.score.toFixed(1)}
+                      {displayScore}
                     </div>
                     <div className="score-hero-predict-summary">
-                      {displayScore.predictionMeta!.actualAxisCount} actual &middot;{" "}
-                      {displayScore.predictionMeta!.predictedAxisCount} predicted
+                      {score.predictionMeta!.actualAxisCount} actual &middot;{" "}
+                      {score.predictionMeta!.predictedAxisCount} predicted
                     </div>
                     <div className="score-hero-predict-summary" style={{ marginTop: 2 }}>
-                      <span
-                        className={`conf-badge conf-${displayScore.predictionMeta!.confidence}`}
-                      >
-                        {displayScore.predictionMeta!.confidence}
+                      <span className={`conf-badge conf-${score.predictionMeta!.confidence}`}>
+                        {score.predictionMeta!.confidence}
                       </span>
                     </div>
                   </div>
@@ -263,8 +247,8 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
                 <>
                   <div className="game-hero-score-value">
                     <div className="score-hero-label">Fitness Score</div>
-                    <div className="score-hero-number">{displayScore.score.toFixed(1)}</div>
-                    <div className="score-hero-rated">{displayScore.ratedAxisCount} axes rated</div>
+                    <div className="score-hero-number">{displayScore}</div>
+                    <div className="score-hero-rated">{score.ratedAxisCount} axes rated</div>
                   </div>
                 </>
               )
@@ -301,6 +285,11 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
             </div>
           </div>
         )}
+
+        <PurchaseUtilizationPanel
+          result={purchaseUtilization}
+          isPreviouslyOwned={isPreviouslyOwned}
+        />
 
         {profileDivergence && (
           <div className="profile-divergence-detail">
@@ -435,13 +424,13 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
         )}
 
         {/* Redundancy panel (REQ-REDUN-31, REQ-REDUN-32, REQ-REDUN-33) */}
-        {!isPreviouslyOwned && displayScore?.redundancyAdjustment && (
-          <RedundancyPanel score={displayScore} adjustment={displayScore.redundancyAdjustment} />
+        {!isPreviouslyOwned && score?.redundancyAdjustment && (
+          <RedundancyPanel score={score} adjustment={score.redundancyAdjustment} />
         )}
 
         {/* Niche Position panel (REQ-NICHE-18, REQ-NICHE-19) */}
         {!isPreviouslyOwned &&
-          (displayScore?.vetoed ? (
+          (score?.vetoed ? (
             <div className="niche-panel">
               <div className="panel-section-title">Niche Position</div>
               <div className="niche-vetoed-note">
@@ -461,14 +450,18 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
             <>
               <div className="panel-section-title">
                 Score Breakdown
-                {displayScore && !displayScore.vetoed && (
+                {score && !score.vetoed && (
                   <span className="badge">
                     How {hasPredictions ? "~" : ""}
-                    {displayScore.score.toFixed(1)} was calculated
+                    {displayScore} was calculated
                   </span>
                 )}
               </div>
-              <ScoreBreakdown score={displayScore} isPreviouslyOwned={isPreviouslyOwned} />
+              <ScoreBreakdown
+                score={score}
+                displayScore={displayScore}
+                isPreviouslyOwned={isPreviouslyOwned}
+              />
               <div className="calc-explanation">
                 <strong>How this is calculated:</strong> weighted average of all rated axes.
                 Formula: <code>sum(rating &times; weight) / sum(weight)</code>. Axes without ratings
@@ -491,9 +484,10 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
                 axes={axes}
                 currentRatings={game.ratings}
                 score={score}
-                predictionScore={hasPredictions ? displayScore : null}
+                predictionScore={hasPredictions ? score : null}
               />
               <OwnershipActions gameId={game.id} gameName={game.name} ownership={game.ownership} />
+              <AcquisitionForm gameId={game.id} acquisition={game.acquisition} />
               <BoxDimensionsForm gameId={game.id} currentDimensions={game.boxDimensions} />
               <ShelfAssignmentForm
                 gameId={game.id}

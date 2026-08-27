@@ -11,6 +11,7 @@ import type {
   PredictionReadiness,
   PredictionSettings,
   NicheImpact,
+  GameWithPurchaseUtilization,
 } from "@shelf-judge/shared";
 import type { BggGameResult } from "../../src/services/bgg-client.js";
 
@@ -121,7 +122,6 @@ describe("prediction routes", () => {
           categories: [{ id: 1, name: "Card Game" }],
           families: [],
           subdomains: [],
-          suggestedPlayerCounts: [],
           bestPlayerCount: null,
           fetchedAt: new Date().toISOString(),
         },
@@ -188,6 +188,25 @@ describe("prediction routes", () => {
       expect(prediction.score.predictionMeta!.referenceGameCount).toBeGreaterThan(0);
       expect(prediction.predictionUnavailable).toBeNull();
 
+      const predictedList = (await (
+        await jsonRequest(ctx.app, "GET", "/api/games?includePredicted=true&includeNiches=true")
+      ).json()) as GameWithPurchaseUtilization[];
+      const predictedDetail = (await (
+        await jsonRequest(ctx.app, "GET", `/api/games/${targetGame.id}?includePredicted=true`)
+      ).json()) as GameWithPurchaseUtilization;
+      const actualDetail = (await (
+        await jsonRequest(ctx.app, "GET", `/api/games/${targetGame.id}?includePredicted=false`)
+      ).json()) as GameWithPurchaseUtilization;
+      expect(predictedList).toContainEqual(predictedDetail);
+      expect(predictedDetail.score?.score).toBe(prediction.score.score);
+      expect(predictedDetail.displayScore).toBe(
+        predictedDetail.purchaseUtilization.evidence.fitness.status === "valid"
+          ? predictedDetail.purchaseUtilization.evidence.fitness.value
+          : null,
+      );
+      expect(actualDetail.score?.predictionMeta).toBeNull();
+      expect(predictedDetail.score?.predictionMeta).not.toBeNull();
+
       const community = prediction.score.breakdown.find(
         ({ derivedField }) => derivedField === "communityRating",
       );
@@ -238,7 +257,6 @@ describe("prediction routes", () => {
               categories: [{ id: 1, name: "Card Game" }],
               families: [],
               subdomains: [],
-              suggestedPlayerCounts: [],
               bestPlayerCount: null,
               fetchedAt: new Date().toISOString(),
             },
@@ -286,7 +304,6 @@ describe("prediction routes", () => {
         categories: [{ id: 1, name: "Strategy" }],
         families: [],
         subdomains: [],
-        suggestedPlayerCounts: [],
         bestPlayerCount: null,
         fetchedAt: new Date().toISOString(),
       },

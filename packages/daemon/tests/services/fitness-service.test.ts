@@ -27,6 +27,18 @@ function game(overrides: Partial<Game> = {}): Game {
     imageUrl: null,
     bggData: null,
     numPlays: null,
+    acquisition: { state: "unknown" },
+    playCountEvidence: { status: "missing", source: "manual", observedAt: null },
+    durationEvidence: { status: "missing", source: "manual", observedAt: null },
+    playerRangeEvidence: { status: "missing", source: "manual", observedAt: null },
+    suggestedPlayerPoll: {
+      status: "valid",
+      state: "absent",
+      buckets: [],
+      source: "manual",
+      observedAt: null,
+    },
+    bestPlayersInvalidEvidence: null,
     ownership: "owned",
     boxDimensions: null,
     manualShelfId: null,
@@ -268,7 +280,6 @@ describe("derived fitness", () => {
           categories: [],
           families: [],
           subdomains: [],
-          suggestedPlayerCounts: [],
           bestPlayerCount: null,
           fetchedAt: timestamp,
         },
@@ -338,10 +349,26 @@ describe("derived fitness", () => {
       categories: [],
       families: [],
       subdomains: [],
-      suggestedPlayerCounts: [],
       bestPlayerCount: null,
       fetchedAt: timestamp,
     };
+    const legacyGame = (overrides: Record<string, unknown> = {}) => ({
+      id: "game-1",
+      bggId: null,
+      name: "Game",
+      yearPublished: null,
+      minPlayers: null,
+      maxPlayers: null,
+      bestPlayers: null,
+      playingTime: null,
+      imageUrl: null,
+      bggData: null,
+      numPlays: null,
+      ratings: {},
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      ...overrides,
+    });
     const raw = {
       id: "collection",
       name: "Legacy",
@@ -373,16 +400,16 @@ describe("derived fitness", () => {
         },
       ],
       games: [
-        game({
+        legacyGame({
           id: "ordinary",
           bggData,
         }),
-        game({
+        legacyGame({
           id: "override",
           ratings: { community: 9 },
           bggData,
         }),
-        game({
+        legacyGame({
           id: "veto",
           bggData: { ...bggData, communityRating: 3.5 },
         }),

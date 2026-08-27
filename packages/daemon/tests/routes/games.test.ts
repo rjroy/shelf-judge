@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeEach } from "bun:test";
+import { Hono } from "hono";
 import {
   createTestApp,
   createMockBggClient,
@@ -6,18 +7,23 @@ import {
   type TestAppContext,
 } from "../helpers/test-app.js";
 import type { BggGameResult } from "../../src/services/bgg-client.js";
+import { createGameRoutes } from "../../src/routes/games.js";
+import { createPurchaseUtilizationService } from "../../src/services/purchase-utilization-service.js";
+import type { Logger } from "../../src/services/logger.js";
+import type { OperationDefinition } from "../../src/operations.js";
 import type {
   Axis,
   Game,
   FitnessResult,
   AddGameResult,
   GameWithScore,
+  GameWithPurchaseUtilization,
   BggSearchResult,
 } from "@shelf-judge/shared";
 
 type GameAddResponse = AddGameResult;
-type GameDetailResponse = GameWithScore;
-type GameListEntry = GameWithScore;
+type GameDetailResponse = GameWithPurchaseUtilization;
+type GameListEntry = GameWithPurchaseUtilization;
 
 interface GameRateResponse {
   game: Game;
@@ -27,6 +33,20 @@ interface GameRateResponse {
 interface RefreshResponse {
   refreshed: number;
   errors: string[];
+}
+
+async function expectPublishedError(
+  operation: OperationDefinition,
+  response: Response,
+): Promise<Record<string, unknown>> {
+  const body = (await response.json()) as Record<string, unknown>;
+  const definition = operation.errors?.find(
+    ({ status, code }) => status === response.status && code === body.code,
+  );
+  expect(definition).toBeDefined();
+  expect(Object.keys(body).sort()).toEqual(Object.keys(definition?.response ?? {}).sort());
+  expect(body.code).toBe(definition?.code);
+  return body;
 }
 
 let ctx: TestAppContext;
@@ -52,7 +72,6 @@ const wingspanBggResult: BggGameResult = {
     categories: [{ id: 1089, name: "Animals" }],
     families: [],
     subdomains: [],
-    suggestedPlayerCounts: [],
     bestPlayerCount: null,
     fetchedAt: new Date().toISOString(),
   },
@@ -195,6 +214,350 @@ describe("Game Routes", () => {
       expect(body.score).toBeDefined();
       expect(body.score!.breakdown).toBeArray();
       expect(body.score!.score).toBeGreaterThan(0);
+      expect(body.displayScore).toBe("7.0");
+      expect(body.purchaseUtilization.evidence.fitness).toMatchObject({
+        status: "valid",
+        value: "7.0",
+      });
+    });
+
+    test("defaults to actual fitness and matches list/detail response assembly", async () => {
+      const axisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
+        name: "Fun",
+        weight: 50,
+        source: "personal",
+      });
+      const axis = (await axisRes.json()) as Axis;
+      const gameRes = await jsonRequest(ctx.app, "POST", "/api/games", { name: "Parity" });
+      const game = ((await gameRes.json()) as GameAddResponse).game;
+      await jsonRequest(ctx.app, "PUT", `/api/games/${game.id}/ratings`, {
+        ratings: { [axis.id]: 8 },
+      });
+
+      const list = (await (
+        await jsonRequest(ctx.app, "GET", "/api/games?includeNiches=true")
+      ).json()) as GameWithPurchaseUtilization[];
+      const detail = (await (
+        await jsonRequest(ctx.app, "GET", `/api/games/${game.id}`)
+      ).json()) as GameWithPurchaseUtilization;
+      expect(list).toContainEqual(detail);
+    });
+
+    test("previously owned detail is enriched but remains outside niche and redundancy universes", async () => {
+      const { game } = await ctx.gameService.addGame({ name: "Former Game" });
+      await ctx.gameService.setOwnership(game.id, "previously-owned");
+      const detail = (await (
+        await jsonRequest(ctx.app, "GET", `/api/games/${game.id}?includePredicted=true`)
+      ).json()) as GameWithPurchaseUtilization;
+      expect(detail.game.ownership).toBe("previously-owned");
+      expect(detail.nichePosition).toBeNull();
+      expect(detail.score?.redundancyAdjustment ?? null).toBeNull();
+      expect(detail.purchaseUtilization).toBeDefined();
+    });
+
+    test("rejects malformed includePredicted detail values with a stable contract", async () => {
+      const { game } = await ctx.gameService.addGame({ name: "Query Contract" });
+      for (const value of ["yes", "TRUE", "1", ""]) {
+        const response = await jsonRequest(
+          ctx.app,
+          "GET",
+          `/api/games/${game.id}?includePredicted=${value}`,
+        );
+        expect(response.status).toBe(400);
+        expect(await response.json()).toEqual({
+          error: "Validation failed",
+          code: "invalid_include_predicted",
+          message: 'includePredicted must be "true" or "false"',
+        });
+      }
+
+      const operation = ctx.operations.find(({ operationId }) => operationId === "shelf.game.get");
+      expect(operation?.parameters?.find(({ name }) => name === "includePredicted")).toMatchObject({
+        required: false,
+        acceptedValues: ["true", "false"],
+      });
+      expect(operation?.errors).toContainEqual({
+        status: 400,
+        code: "invalid_include_predicted",
+        description: "includePredicted was not true or false",
+        response: {
+          error: "Validation failed",
+          code: "invalid_include_predicted",
+          message: 'includePredicted must be "true" or "false"',
+        },
+      });
+    });
+
+    test("runtime validation, not-found, and internal errors match discovery metadata", async () => {
+      const operation = ctx.operations.find(({ operationId }) => operationId === "shelf.game.get");
+      if (!operation) throw new Error("Missing game detail operation");
+
+      const invalid = await jsonRequest(ctx.app, "GET", "/api/games/missing?includePredicted=yes");
+      expect(await expectPublishedError(operation, invalid)).toEqual({
+        error: "Validation failed",
+        code: "invalid_include_predicted",
+        message: 'includePredicted must be "true" or "false"',
+      });
+
+      const missing = await jsonRequest(ctx.app, "GET", "/api/games/missing");
+      expect(await expectPublishedError(operation, missing)).toEqual({
+        error: "Game not found: missing",
+        code: "game_not_found",
+      });
+
+      const routeModule = createGameRoutes({
+        gameService: {
+          ...ctx.gameService,
+          listGames: () => Promise.reject(new Error("private assembly failure")),
+        },
+        storageService: ctx.storageService,
+        purchaseUtilizationService: createPurchaseUtilizationService({
+          storageService: ctx.storageService,
+        }),
+      });
+      const app = new Hono();
+      app.route("/api", routeModule.routes);
+      const failed = await app.request("/api/games/anything");
+      expect(await expectPublishedError(operation, failed)).toEqual({
+        error: "Internal server error",
+        code: "internal_error",
+      });
+    });
+  });
+
+  describe("PUT /api/games/:id/acquisition", () => {
+    test("sets all states, permits zero purchase, and corrects invalid persisted data", async () => {
+      const added = await ctx.gameService.addGame({ name: "Acquisition" });
+      const id = added.game.id;
+      for (const [payload, expected] of [
+        [{ state: "gift" }, { state: "gift" }],
+        [
+          { state: "purchase", amount: "0" },
+          { state: "purchase", amount: { hundredths: 0, source: "manual" } },
+        ],
+        [
+          { state: "purchase", amount: "12.34" },
+          { state: "purchase", amount: { hundredths: 1234, source: "manual" } },
+        ],
+        [{ state: "unknown" }, { state: "unknown" }],
+      ] as const) {
+        const response = await jsonRequest(ctx.app, "PUT", `/api/games/${id}/acquisition`, payload);
+        expect(response.status).toBe(200);
+        expect(((await response.json()) as { game: Game }).game.acquisition).toMatchObject(
+          expected,
+        );
+      }
+
+      const stored = await ctx.storageService.loadCollection();
+      stored.games[0].acquisition = {
+        state: "invalid",
+        evidence: { presence: "present", value: "malformed" },
+      };
+      await ctx.storageService.saveCollection(stored);
+      const corrected = await jsonRequest(ctx.app, "PUT", `/api/games/${id}/acquisition`, {
+        state: "purchase",
+        amount: "5.00",
+      });
+      expect(corrected.status).toBe(200);
+      expect(((await corrected.json()) as { game: Game }).game.acquisition).toMatchObject({
+        state: "purchase",
+        amount: { hundredths: 500, source: "manual" },
+      });
+    });
+
+    test("strictly rejects invalid payloads and preserves acquisition", async () => {
+      const { game } = await ctx.gameService.addGame({ name: "Strict" });
+      const payloads = [
+        { state: "unknown", amount: "1" },
+        { state: "gift", amount: "1" },
+        { state: "purchase" },
+        { state: "purchase", amount: "1.234" },
+        { state: "purchase", amount: "90071992547409.92" },
+        { state: "other" },
+        { state: "unknown", extra: true },
+      ];
+      for (const payload of payloads) {
+        const response = await jsonRequest(
+          ctx.app,
+          "PUT",
+          `/api/games/${game.id}/acquisition`,
+          payload,
+        );
+        expect(response.status).toBe(400);
+        expect(await response.json()).toMatchObject({
+          error: "Validation failed",
+          code: "invalid_acquisition_request",
+        });
+      }
+      expect((await ctx.storageService.loadCollection()).games[0].acquisition).toEqual({
+        state: "unknown",
+      });
+
+      const malformed = await ctx.app.request(
+        new Request(`http://localhost/api/games/${game.id}/acquisition`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: "{",
+        }),
+      );
+      expect(malformed.status).toBe(400);
+      expect(await malformed.json()).toEqual({ error: "Invalid JSON body", code: "invalid_json" });
+    });
+
+    test("returns stable not-found behavior and operation discovery", async () => {
+      const missing = await jsonRequest(ctx.app, "PUT", "/api/games/missing/acquisition", {
+        state: "gift",
+      });
+      expect(missing.status).toBe(404);
+      expect(await missing.json()).toEqual({
+        error: "Game not found: missing",
+        code: "game_not_found",
+      });
+
+      const operation = ctx.operations.find(
+        ({ operationId }) => operationId === "shelf.game.set-acquisition",
+      );
+      expect(operation).toMatchObject({
+        invocation: { method: "PUT", path: "/api/games/:id/acquisition" },
+        idempotent: true,
+      });
+      expect(operation?.parameters?.map(({ in: location }) => location)).toEqual(["path", "body"]);
+      expect(operation?.requestSchema?.safeParse({ state: "purchase", amount: "0" }).success).toBe(
+        true,
+      );
+    });
+
+    test("runtime validation, not-found, and internal errors match discovery metadata", async () => {
+      const operation = ctx.operations.find(
+        ({ operationId }) => operationId === "shelf.game.set-acquisition",
+      );
+      if (!operation) throw new Error("Missing acquisition operation");
+      const { game } = await ctx.gameService.addGame({ name: "Acquisition Error Parity" });
+
+      const malformed = await ctx.app.request(`/api/games/${game.id}/acquisition`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: "{",
+      });
+      expect(await expectPublishedError(operation, malformed)).toEqual({
+        error: "Invalid JSON body",
+        code: "invalid_json",
+      });
+
+      const invalid = await jsonRequest(ctx.app, "PUT", `/api/games/${game.id}/acquisition`, {
+        state: "gift",
+        amount: "1.00",
+      });
+      const invalidBody = await expectPublishedError(operation, invalid);
+      expect(invalidBody).toMatchObject({
+        error: "Validation failed",
+        code: "invalid_acquisition_request",
+      });
+
+      const missing = await jsonRequest(ctx.app, "PUT", "/api/games/missing/acquisition", {
+        state: "gift",
+      });
+      expect(await expectPublishedError(operation, missing)).toEqual({
+        error: "Game not found: missing",
+        code: "game_not_found",
+      });
+
+      ctx.storageService.saveCollection = () => Promise.reject(new Error("private disk failure"));
+      const failed = await jsonRequest(ctx.app, "PUT", `/api/games/${game.id}/acquisition`, {
+        state: "gift",
+      });
+      expect(await expectPublishedError(operation, failed)).toEqual({
+        error: "Internal server error",
+        code: "internal_error",
+      });
+    });
+
+    test("logs safe HTTP, service persistence, and failed persistence outcomes", async () => {
+      const logs: unknown[][] = [];
+      const logger: Logger = {
+        log: (...args) => logs.push(args),
+        warn: (...args) => logs.push(args),
+        error: (...args) => logs.push(args),
+      };
+      const { game } = await ctx.gameService.addGame({ name: "Logged Acquisition" });
+      const service = createPurchaseUtilizationService({
+        storageService: ctx.storageService,
+        logger,
+      });
+      const routeModule = createGameRoutes({
+        gameService: ctx.gameService,
+        storageService: ctx.storageService,
+        purchaseUtilizationService: service,
+        logger,
+      });
+      const app = new Hono();
+      app.route("/api", routeModule.routes);
+
+      const rejected = await app.request(`/api/games/${game.id}/acquisition`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ state: "gift", amount: "private-invalid" }),
+      });
+      expect(rejected.status).toBe(400);
+      const accepted = await app.request(`/api/games/${game.id}/acquisition`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ state: "purchase", amount: "432.10" }),
+      });
+      expect(accepted.status).toBe(200);
+
+      ctx.storageService.saveCollection = () => Promise.reject(new Error("disk failed"));
+      const failed = await app.request(`/api/games/${game.id}/acquisition`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ state: "gift" }),
+      });
+      expect(failed.status).toBe(500);
+      expect(logs).toContainEqual([
+        "acquisition HTTP mutation rejected",
+        {
+          gameId: game.id,
+          requestedState: "gift",
+          changedFields: ["acquisition"],
+          outcome: "rejected",
+          validationCode: "invalid_acquisition_request",
+        },
+      ]);
+      expect(
+        logs.some(
+          ([message, fields]) =>
+            message === "acquisition persistence completed" &&
+            typeof fields === "object" &&
+            fields !== null &&
+            "collectionId" in fields &&
+            "previousState" in fields &&
+            "nextState" in fields,
+        ),
+      ).toBe(true);
+      expect(
+        logs.some(
+          ([message, fields]) =>
+            message === "acquisition persistence failed" &&
+            typeof fields === "object" &&
+            fields !== null &&
+            "outcome" in fields &&
+            fields.outcome === "failed",
+        ),
+      ).toBe(true);
+      expect(logs).toContainEqual([
+        "acquisition HTTP mutation failed",
+        {
+          gameId: game.id,
+          requestedState: "gift",
+          changedFields: ["acquisition"],
+          outcome: "failed",
+          validationCode: "persistence_failed",
+        },
+      ]);
+      const serialized = JSON.stringify(logs);
+      expect(serialized).not.toContain("private-invalid");
+      expect(serialized).not.toContain("432.10");
+      expect(serialized).not.toContain("43210");
     });
   });
 
@@ -223,6 +586,8 @@ describe("Game Routes", () => {
       expect(body.game.ratings[axis.id]).toBe(8);
       expect(body.score).toBeDefined();
       expect(body.score!.score).toBeGreaterThan(0);
+      expect(body).not.toHaveProperty("displayScore");
+      expect(body).not.toHaveProperty("purchaseUtilization");
     });
 
     test("invalid rating returns 400", async () => {
@@ -454,7 +819,6 @@ describe("Game Routes", () => {
         categories,
         families: [],
         subdomains: [],
-        suggestedPlayerCounts: [],
         bestPlayerCount: null,
         fetchedAt: new Date().toISOString(),
       },

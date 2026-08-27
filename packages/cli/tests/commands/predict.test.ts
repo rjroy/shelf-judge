@@ -263,6 +263,7 @@ const predictedScoresData = [
       predictionMeta: null,
       redundancyAdjustment: null,
     },
+    displayScore: "8.5",
   },
   {
     game: { id: "def-456", name: "Everdell" },
@@ -284,10 +285,12 @@ const predictedScoresData = [
       },
       redundancyAdjustment: null,
     },
+    displayScore: "7.2",
   },
   {
     game: { id: "ghi-789", name: "No BGG Game" },
     score: null,
+    displayScore: null,
   },
 ];
 

@@ -1,8 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { Hono } from "hono";
-import type { BoxDimensions, GameWithScore, Game } from "@shelf-judge/shared";
+import type {
+  BoxDimensions,
+  GameWithPurchaseUtilization,
+  GameWithScore,
+  Game,
+} from "@shelf-judge/shared";
 import { createGameRoutes } from "../src/routes/games";
 import type { GameService } from "../src/services/game-service";
+import { createTestPurchaseUtilizationService } from "./helpers/test-app";
 
 const now = "2026-01-01T00:00:00Z";
 
@@ -19,6 +25,18 @@ function makeGame(id: string, name: string, boxDimensions: BoxDimensions | null 
     imageUrl: null,
     bggData: null,
     numPlays: null,
+    acquisition: { state: "unknown" },
+    playCountEvidence: { status: "missing", source: "manual", observedAt: null },
+    durationEvidence: { status: "missing", source: "manual", observedAt: null },
+    playerRangeEvidence: { status: "missing", source: "manual", observedAt: null },
+    suggestedPlayerPoll: {
+      status: "valid",
+      state: "absent",
+      buckets: [],
+      source: "manual",
+      observedAt: null,
+    },
+    bestPlayersInvalidEvidence: null,
     ownership: "owned",
     boxDimensions,
     manualShelfId: null,
@@ -40,7 +58,7 @@ function createTestApp() {
       return Promise.resolve({ game: storedGame, score: null });
     },
     listGames() {
-      return Promise.resolve([]);
+      return Promise.resolve([{ game: storedGame, score: null }]);
     },
     rateGame() {
       throw new Error("not implemented");
@@ -75,7 +93,10 @@ function createTestApp() {
     },
   };
 
-  const routeModule = createGameRoutes({ gameService });
+  const routeModule = createGameRoutes({
+    gameService,
+    purchaseUtilizationService: createTestPurchaseUtilizationService(),
+  });
   const app = new Hono();
   app.route("/api", routeModule.routes);
   return { app, getStoredGame: () => storedGame };
@@ -176,19 +197,21 @@ describe("PUT /api/games/:id/dimensions", () => {
     });
     const res = await app.request("/api/games/game-1");
     expect(res.status).toBe(200);
-    const data = (await res.json()) as GameWithScore;
+    const data = (await res.json()) as GameWithPurchaseUtilization;
     expect(data.game.boxDimensions).toEqual({
       width: 11.4,
       height: 11.4,
       depth: 2.75,
     });
+    expect(data.purchaseUtilization).toBeDefined();
   });
 
   test("game without boxDimensions defaults to null", async () => {
     const { app } = createTestApp();
     const res = await app.request("/api/games/game-1");
     expect(res.status).toBe(200);
-    const data = (await res.json()) as GameWithScore;
+    const data = (await res.json()) as GameWithPurchaseUtilization;
     expect(data.game.boxDimensions).toBeNull();
+    expect(data.purchaseUtilization).toBeDefined();
   });
 });

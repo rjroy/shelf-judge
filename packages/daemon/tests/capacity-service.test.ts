@@ -39,6 +39,18 @@ function makeGame(
     imageUrl: null,
     bggData: null,
     numPlays: null,
+    acquisition: { state: "unknown" },
+    playCountEvidence: { status: "missing", source: "manual", observedAt: null },
+    durationEvidence: { status: "missing", source: "manual", observedAt: null },
+    playerRangeEvidence: { status: "missing", source: "manual", observedAt: null },
+    suggestedPlayerPoll: {
+      status: "valid",
+      state: "absent",
+      buckets: [],
+      source: "manual",
+      observedAt: null,
+    },
+    bestPlayersInvalidEvidence: null,
     ownership: opts.ownership ?? "owned",
     boxDimensions: opts.boxDimensions ?? null,
     manualShelfId: opts.manualShelfId ?? null,
@@ -75,10 +87,11 @@ function createMockStorage(units: ShelfUnit[], axes?: Axis[]): StorageService {
     saveShelfConfig: () => Promise.resolve(),
     loadCollection: () =>
       Promise.resolve({
-        schemaVersion: 2,
+        schemaVersion: 3,
         id: "mock",
         name: "Mock",
         games: [],
+        entertainmentBenchmark: null,
         axes: axes ?? [
           {
             id: "players",

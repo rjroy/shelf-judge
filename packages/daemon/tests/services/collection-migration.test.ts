@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { CURRENT_COLLECTION_SCHEMA_VERSION, CollectionSchema } from "@shelf-judge/shared";
+import {
+  AxisSchema,
+  CURRENT_COLLECTION_SCHEMA_VERSION,
+  CollectionSchema,
+} from "@shelf-judge/shared";
 import {
   COLLECTION_MIGRATION_STEPS,
   migrateCollection,
@@ -11,6 +15,10 @@ const dependencies = {
   createId: () => "tournament-axis",
   now: () => MIGRATED_AT,
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 function legacyAxis(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -68,9 +76,7 @@ function versionOneCollection(games: Record<string, unknown>[]): Record<string, 
   const step = COLLECTION_MIGRATION_STEPS.find(({ fromVersion }) => fromVersion === 0);
   if (step === undefined) throw new Error("Missing v0 collection migration");
   const migrated = step.migrate(historicalCollection(), dependencies).data;
-  if (typeof migrated !== "object" || migrated === null) {
-    throw new Error("Invalid v1 migration fixture");
-  }
+  if (!isRecord(migrated)) throw new Error("Invalid v1 migration fixture");
   return { ...migrated, games };
 }
 
@@ -89,6 +95,31 @@ function versionOneBggData(bestPlayerCount?: number | null): Record<string, unkn
     ...(bestPlayerCount === undefined ? {} : { bestPlayerCount }),
     fetchedAt: NOW,
   };
+}
+
+function versionTwoGame(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    ...historicalGame({
+      bestPlayers: 3,
+      ownership: "owned",
+      boxDimensions: null,
+      manualShelfId: null,
+      bggData: {
+        ...versionOneBggData(3),
+        suggestedPlayerCounts: [{ playerCount: "3", best: 8, recommended: 2, notRecommended: 1 }],
+      },
+      numPlays: 4,
+    }),
+    ...overrides,
+  };
+}
+
+function versionTwoCollection(games: Record<string, unknown>[]): Record<string, unknown> {
+  const step = COLLECTION_MIGRATION_STEPS.find(({ fromVersion }) => fromVersion === 1);
+  if (step === undefined) throw new Error("Missing v1 collection migration");
+  const migrated = step.migrate(versionOneCollection(games), dependencies).data;
+  if (!isRecord(migrated)) throw new Error("Invalid v2 migration fixture");
+  return migrated;
 }
 
 describe("migrateCollection", () => {
@@ -243,9 +274,10 @@ describe("migrateCollection", () => {
 
   test("migrates v1 best-player fields without changing axes or other game data", () => {
     const axes = COLLECTION_MIGRATION_STEPS[0].migrate(historicalCollection(), dependencies).data;
-    if (typeof axes !== "object" || axes === null || !("axes" in axes)) {
+    if (!isRecord(axes)) {
       throw new Error("Invalid v1 axes fixture");
     }
+    const expectedAxes = AxisSchema.array().parse(axes.axes);
     const base = {
       ...historicalGame({
         ownership: "owned",
@@ -262,11 +294,274 @@ describe("migrateCollection", () => {
     const result = migrateCollection(raw, dependencies);
 
     expect(result).toMatchObject({ migrated: true, sourceVersion: 1 });
-    expect(result.data.schemaVersion).toBe(2);
-    expect(result.data.axes).toEqual((axes as { axes: typeof result.data.axes }).axes);
+    expect(result.data.schemaVersion).toBe(3);
+    expect(result.data.axes).toEqual(expectedAxes);
     expect(result.data.games.map(({ bestPlayers }) => bestPlayers)).toEqual([3, 4, null]);
+    expect(result.data.games[0]?.bestPlayersInvalidEvidence).toBeNull();
     expect(result.data.games.map((game) => game.bggData?.bestPlayerCount)).toEqual([3, 3, null]);
     expect(JSON.stringify(result.data.games[0]?.ratings)).toBe(JSON.stringify(base.ratings));
+  });
+
+  test("keeps the frozen v1 BGG fallback for explicit null and malformed bestPlayers", () => {
+    const base = historicalGame({
+      ownership: "owned",
+      boxDimensions: null,
+      manualShelfId: null,
+      bggData: versionOneBggData(3),
+    });
+    const v1ToV2 = COLLECTION_MIGRATION_STEPS.find(({ fromVersion }) => fromVersion === 1);
+    if (v1ToV2 === undefined) throw new Error("Missing v1 collection migration");
+
+    for (const fixture of [
+      { id: "explicit-null", bestPlayers: null },
+      { id: "malformed", bestPlayers: "not-a-count" },
+    ]) {
+      const v1 = versionOneCollection([{ ...base, ...fixture }]);
+      const v2 = v1ToV2.migrate(v1, dependencies).data;
+      if (!isRecord(v2) || !Array.isArray(v2.games)) {
+        throw new Error("Invalid v2 migration result");
+      }
+      expect(v2.games.map((game) => (isRecord(game) ? game.bestPlayers : undefined))).toEqual([3]);
+
+      const migrated = migrateCollection(v1, dependencies).data.games[0];
+      expect(migrated?.bestPlayers).toBe(3);
+      expect(migrated?.bestPlayersInvalidEvidence).toBeNull();
+    }
+  });
+
+  test("preserves malformed bestPlayers supplied to v2 without using it as poll input", () => {
+    const malformed = "not-a-count";
+    const v2 = {
+      ...versionOneCollection([]),
+      schemaVersion: 2,
+      games: [
+        versionTwoGame({
+          bestPlayers: malformed,
+          bggData: {
+            ...versionOneBggData(3),
+            suggestedPlayerCounts: [
+              { playerCount: "3", best: 8, recommended: 2, notRecommended: 1 },
+            ],
+          },
+        }),
+      ],
+    };
+
+    const game = migrateCollection(v2, dependencies).data.games[0];
+
+    expect(game?.bestPlayers).toBeNull();
+    expect(game?.bestPlayersInvalidEvidence).toEqual({ presence: "present", value: malformed });
+    expect(game?.bggData?.bestPlayerCount).toBe(3);
+    expect(game?.suggestedPlayerPoll).toMatchObject({
+      status: "valid",
+      state: "usable",
+      buckets: [{ playerCount: "3", best: 8, recommended: 2, notRecommended: 1 }],
+    });
+  });
+
+  test("moves legacy poll buckets exactly once with deterministic states", () => {
+    const empty = versionTwoGame({
+      id: "empty",
+      bggData: { ...versionOneBggData(null), suggestedPlayerCounts: [] },
+    });
+    const usable = versionTwoGame({ id: "usable" });
+    const unusable = versionTwoGame({
+      id: "unusable",
+      bggData: {
+        ...versionOneBggData(null),
+        suggestedPlayerCounts: [{ playerCount: "4+", best: 10, recommended: 0, notRecommended: 0 }],
+      },
+    });
+
+    const result = migrateCollection(versionTwoCollection([empty, usable, unusable]), dependencies);
+
+    expect(result.data.games.map((game) => game.suggestedPlayerPoll.state)).toEqual([
+      "legacy-unknown",
+      "usable",
+      "unusable",
+    ]);
+    for (const game of result.data.games) {
+      expect(game.suggestedPlayerPoll.source).toBe("legacy-unknown");
+      expect(game.suggestedPlayerPoll.observedAt).toBeNull();
+      expect(game.bggData).not.toHaveProperty("suggestedPlayerCounts");
+    }
+    expect(result.data.games[1]?.suggestedPlayerPoll).toMatchObject({
+      buckets: [{ playerCount: "3", best: 8, recommended: 2, notRecommended: 1 }],
+    });
+  });
+
+  test("normalizes malformed legacy compatibility fields and preserves exact JSON evidence", () => {
+    const unsafe = Number.MAX_SAFE_INTEGER + 1;
+    const malformedPoll = [{ playerCount: 3, best: -1 }];
+    const raw = versionTwoGame({
+      numPlays: -1,
+      playingTime: 0,
+      minPlayers: unsafe,
+      maxPlayers: 2,
+      bestPlayers: unsafe,
+      bggData: { ...versionOneBggData(unsafe), suggestedPlayerCounts: malformedPoll },
+    });
+
+    const game = migrateCollection({ ...versionTwoCollection([]), games: [raw] }, dependencies).data
+      .games[0];
+
+    expect(game).toMatchObject({
+      minPlayers: null,
+      maxPlayers: null,
+      bestPlayers: null,
+      playingTime: null,
+      numPlays: null,
+      playCountEvidence: {
+        status: "invalid",
+        evidence: { presence: "present", value: -1 },
+      },
+      durationEvidence: {
+        status: "invalid",
+        evidence: { presence: "present", value: 0 },
+      },
+      playerRangeEvidence: {
+        status: "invalid",
+        evidence: {
+          minPlayers: { presence: "present", value: unsafe },
+          maxPlayers: { presence: "present", value: 2 },
+        },
+      },
+      suggestedPlayerPoll: {
+        status: "invalid",
+        buckets: [],
+        evidence: { presence: "present", value: malformedPoll },
+      },
+      bestPlayersInvalidEvidence: { presence: "present", value: unsafe },
+    });
+  });
+
+  test("normalizes every numeric legacy boundary deterministically", () => {
+    const unsafe = Number.MAX_SAFE_INTEGER + 1;
+    const cases = [
+      { id: "zero-range", minPlayers: 0, maxPlayers: 4 },
+      { id: "negative-range", minPlayers: -1, maxPlayers: 4 },
+      { id: "unsafe-range", minPlayers: 1, maxPlayers: unsafe },
+      { id: "reversed-range", minPlayers: 5, maxPlayers: 2 },
+      { id: "negative-duration", playingTime: -10 },
+      { id: "unsafe-duration", playingTime: unsafe },
+      { id: "fractional-duration", playingTime: 1.5 },
+      { id: "unsafe-plays", numPlays: unsafe },
+      { id: "fractional-plays", numPlays: 1.5 },
+    ].map(({ id, ...fields }) => versionTwoGame({ id, ...fields }));
+
+    const games = migrateCollection(versionTwoCollection(cases), dependencies).data.games;
+
+    for (const game of games.slice(0, 4)) {
+      expect(game.minPlayers).toBeNull();
+      expect(game.maxPlayers).toBeNull();
+      expect(game.playerRangeEvidence.status).toBe("invalid");
+    }
+    for (const game of games.slice(4, 7)) {
+      expect(game.playingTime).toBeNull();
+      expect(game.durationEvidence.status).toBe("invalid");
+    }
+    for (const game of games.slice(7)) {
+      expect(game.numPlays).toBeNull();
+      expect(game.playCountEvidence.status).toBe("invalid");
+    }
+  });
+
+  test("rejects unsafe vote buckets without losing their original JSON", () => {
+    const buckets = [
+      {
+        playerCount: "3",
+        best: Number.MAX_SAFE_INTEGER + 1,
+        recommended: 0,
+        notRecommended: 0,
+      },
+    ];
+    const raw = versionTwoGame({
+      bggData: { ...versionOneBggData(null), suggestedPlayerCounts: buckets },
+    });
+
+    const poll = migrateCollection(versionTwoCollection([raw]), dependencies).data.games[0]
+      ?.suggestedPlayerPoll;
+
+    expect(poll).toEqual({
+      status: "invalid",
+      state: "unusable",
+      buckets: [],
+      evidence: { presence: "present", value: buckets },
+      source: "legacy-unknown",
+      observedAt: null,
+    });
+  });
+
+  test("keeps unsafe player labels as factual unusable buckets with null compatibility", () => {
+    const unsafe = Number.MAX_SAFE_INTEGER + 1;
+    const buckets = [{ playerCount: String(unsafe), best: 8, recommended: 2, notRecommended: 1 }];
+    const raw = versionTwoGame({
+      bestPlayers: unsafe,
+      bggData: { ...versionOneBggData(unsafe), suggestedPlayerCounts: buckets },
+    });
+
+    const game = migrateCollection(versionTwoCollection([raw]), dependencies).data.games[0];
+
+    expect(game?.bestPlayers).toBeNull();
+    expect(game?.bggData?.bestPlayerCount).toBeNull();
+    expect(game?.suggestedPlayerPoll).toMatchObject({
+      status: "valid",
+      state: "unusable",
+      buckets,
+    });
+    expect(
+      CollectionSchema.safeParse(migrateCollection(versionTwoCollection([raw]), dependencies).data)
+        .success,
+    ).toBe(true);
+  });
+
+  test("nulls non-positive, fractional, and unsafe legacy best-player projections", () => {
+    for (const bestPlayerCount of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      const raw = versionTwoGame({
+        bestPlayers: bestPlayerCount,
+        bggData: versionOneBggData(bestPlayerCount),
+      });
+
+      const game = migrateCollection(versionTwoCollection([raw]), dependencies).data.games[0];
+
+      expect(game?.bestPlayers).toBeNull();
+      expect(game?.bggData?.bestPlayerCount).toBeNull();
+    }
+  });
+
+  test("distinguishes missing legacy properties from explicit null", () => {
+    const raw = versionTwoGame();
+    delete raw.numPlays;
+    delete raw.playingTime;
+    delete raw.minPlayers;
+    delete raw.bestPlayers;
+
+    const game = migrateCollection(versionTwoCollection([raw]), dependencies).data.games[0];
+
+    expect(game.playCountEvidence).toMatchObject({
+      status: "invalid",
+      evidence: { presence: "missing" },
+    });
+    expect(game.durationEvidence).toMatchObject({
+      status: "invalid",
+      evidence: { presence: "missing" },
+    });
+    expect(game.playerRangeEvidence).toMatchObject({
+      status: "invalid",
+      evidence: { minPlayers: { presence: "missing" } },
+    });
+    expect(game.bestPlayersInvalidEvidence).toBeNull();
+  });
+
+  test("produces equivalent v3 data from direct and chained historical versions", () => {
+    const v0 = historicalCollection();
+    const v1Step = COLLECTION_MIGRATION_STEPS[0]?.migrate(v0, dependencies).data;
+    const v2Step = COLLECTION_MIGRATION_STEPS[1]?.migrate(v1Step, dependencies).data;
+    if (v1Step === undefined || v2Step === undefined) throw new Error("Missing migration fixture");
+
+    const fromZero = migrateCollection(v0, dependencies).data;
+    expect(migrateCollection(v1Step, dependencies).data).toEqual(fromZero);
+    expect(migrateCollection(v2Step, dependencies).data).toEqual(fromZero);
   });
 
   test("migrates the pinned historical game-shape fixture", async () => {
@@ -293,12 +588,13 @@ describe("migrateCollection", () => {
     ]);
   });
 
-  test("chains v0 through v2, inserts Tournament once, and is byte-stable at v2", () => {
+  test("chains v0 through v3, inserts Tournament once, and is byte-stable at v3", () => {
     expect(
       COLLECTION_MIGRATION_STEPS.map(({ fromVersion, toVersion }) => ({ fromVersion, toVersion })),
     ).toEqual([
       { fromVersion: 0, toVersion: 1 },
       { fromVersion: 1, toVersion: 2 },
+      { fromVersion: 2, toVersion: 3 },
     ]);
     const first = migrateCollection(historicalCollection(), dependencies);
     expect(first.data.axes.filter((axis) => axis.source === "tournament")).toHaveLength(1);
@@ -312,8 +608,8 @@ describe("migrateCollection", () => {
     const current = migrateCollection(historicalCollection(), dependencies).data;
     expect(CollectionSchema.parse(migrateCollection(current, dependencies).data)).toEqual(current);
     expect(() => migrateCollection({ ...current, unexpected: true }, dependencies)).toThrow();
-    expect(() => migrateCollection({ ...current, schemaVersion: 3 }, dependencies)).toThrow(
-      "Unsupported collection schema version 3; current version is 2",
+    expect(() => migrateCollection({ ...current, schemaVersion: 4 }, dependencies)).toThrow(
+      "Unsupported collection schema version 4; current version is 3",
     );
     expect(() =>
       migrateCollection(

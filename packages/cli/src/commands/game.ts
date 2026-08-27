@@ -1,8 +1,19 @@
 // Game commands: search, add, list, rate, remove, set-status
 import type { DaemonClient } from "../client.js";
-import type { OwnershipStatus } from "@shelf-judge/shared";
+import type {
+  AcquisitionMutationRequest,
+  GameWithPurchaseUtilization,
+  OwnershipStatus,
+} from "@shelf-judge/shared";
+import { formatStoredAmount } from "@shelf-judge/shared";
 import type { OutputOptions } from "../output.js";
-import { formatTable, formatScore, printOutput } from "../output.js";
+import {
+  formatDisplayScore,
+  formatPurchaseUtilization,
+  formatTable,
+  formatScore,
+  printOutput,
+} from "../output.js";
 
 export async function gameSearch(
   client: DaemonClient,
@@ -66,6 +77,7 @@ export async function gameAdd(
 interface GameListItem {
   game: { id: string; name: string; yearPublished: number | null; ownership?: OwnershipStatus };
   score: { score: number } | null;
+  displayScore: string | null;
 }
 
 interface TournamentStatsEntry {
@@ -113,7 +125,7 @@ export async function gameList(
         g.game.id.slice(0, 8),
         displayName,
         g.game.yearPublished ? String(g.game.yearPublished) : "---",
-        formatScore(g.score?.score ?? null),
+        formatDisplayScore(g.displayScore),
       ];
       if (hasRanks) {
         row.push(rankMap.get(g.game.id) ?? "---");
@@ -121,6 +133,76 @@ export async function gameList(
       return row;
     }),
   );
+}
+
+export async function gameAcquisition(
+  client: DaemonClient,
+  args: string[],
+  opts: OutputOptions,
+): Promise<string> {
+  const [gameId, state, amount, ...extra] = args;
+  const validState = state === "unknown" || state === "gift" || state === "purchase";
+  const validShape =
+    gameId !== undefined &&
+    validState &&
+    extra.length === 0 &&
+    ((state === "purchase" && amount !== undefined) ||
+      ((state === "unknown" || state === "gift") && amount === undefined));
+  if (!validShape) {
+    throw new Error("Usage: shelf-judge game acquisition <game-id> unknown|gift|purchase [amount]");
+  }
+
+  let body: AcquisitionMutationRequest;
+  if (state === "purchase" && amount !== undefined) {
+    body = { state, amount };
+  } else if (state === "unknown" || state === "gift") {
+    body = { state };
+  } else {
+    throw new Error("Usage: shelf-judge game acquisition <game-id> unknown|gift|purchase [amount]");
+  }
+  const { ok, data } = await client.put<{ game: GameWithPurchaseUtilization["game"] }>(
+    `/api/games/${encodeURIComponent(gameId)}/acquisition`,
+    body,
+  );
+  if (!ok) {
+    const error = data as unknown as { error?: string };
+    throw new Error(error.error ?? "Updating acquisition failed");
+  }
+  if (opts.json) return printOutput(data, opts);
+
+  const acquisition = data.game.acquisition;
+  if (acquisition.state === "unknown") {
+    return `${data.game.name}: acquisition is unknown.`;
+  }
+  if (acquisition.state === "gift") {
+    return `${data.game.name}: recorded as a gift with no owner cost.`;
+  }
+  if (acquisition.state === "purchase") {
+    const cost = formatStoredAmount(acquisition.amount.hundredths);
+    return acquisition.amount.hundredths === 0
+      ? `${data.game.name}: recorded as a zero-cost purchase (${cost}), distinct from unknown or gift.`
+      : `${data.game.name}: lifetime landed cost recorded as ${cost}.`;
+  }
+  return `${data.game.name}: saved acquisition data is invalid and can be corrected.`;
+}
+
+export async function gameValue(
+  client: DaemonClient,
+  args: string[],
+  opts: OutputOptions,
+): Promise<string> {
+  const [gameId, ...extra] = args;
+  if (!gameId || extra.length > 0) {
+    throw new Error("Usage: shelf-judge game value <game-id>");
+  }
+  const { ok, data } = await client.get<GameWithPurchaseUtilization>(
+    `/api/games/${encodeURIComponent(gameId)}?includePredicted=true`,
+  );
+  if (!ok) {
+    const error = data as unknown as { error?: string };
+    throw new Error(error.error ?? "Getting purchase utilization failed");
+  }
+  return opts.json ? printOutput(data, opts) : formatPurchaseUtilization(data);
 }
 
 interface RateParsed {
@@ -345,8 +427,14 @@ export async function gameEdit(
   let body: Record<string, unknown>;
   if (opts.clearBox) {
     body = { clear: true };
+  } else if (
+    opts.boxWidth !== undefined &&
+    opts.boxHeight !== undefined &&
+    opts.boxDepth !== undefined
+  ) {
+    body = { width: opts.boxWidth, height: opts.boxHeight, depth: opts.boxDepth };
   } else {
-    body = { width: opts.boxWidth!, height: opts.boxHeight!, depth: opts.boxDepth! };
+    throw new Error("All three box dimensions are required together");
   }
 
   const { ok, data } = await client.put<{

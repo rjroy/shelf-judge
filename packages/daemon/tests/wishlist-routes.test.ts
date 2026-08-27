@@ -6,6 +6,7 @@ import { createGameRoutes } from "../src/routes/games";
 import type { WishlistService } from "../src/services/wishlist-service";
 import type { GameService } from "../src/services/game-service";
 import type { BggClient } from "../src/services/bgg-client";
+import { createTestPurchaseUtilizationService } from "./helpers/test-app";
 
 const mockBggClient: BggClient = {
   searchGames: () => Promise.reject(new Error("not implemented")),
@@ -259,6 +260,18 @@ function makeGame(bggId: number | null, name: string): Game {
     playingTime: 60,
     imageUrl: null,
     numPlays: null,
+    acquisition: { state: "unknown" },
+    playCountEvidence: { status: "missing", source: "manual", observedAt: null },
+    durationEvidence: { status: "missing", source: "manual", observedAt: null },
+    playerRangeEvidence: { status: "missing", source: "manual", observedAt: null },
+    suggestedPlayerPoll: {
+      status: "valid",
+      state: "absent",
+      buckets: [],
+      source: "manual",
+      observedAt: null,
+    },
+    bestPlayersInvalidEvidence: null,
     bggData: null,
     ownership: "owned",
     boxDimensions: null,
@@ -304,6 +317,7 @@ describe("POST /games auto-removal (REQ-WISH-10)", () => {
       gameService: mockGameSvc,
       wishlistService: wishSvc,
       bggClient: mockBggClient,
+      purchaseUtilizationService: createTestPurchaseUtilizationService(),
     });
 
     const gameApp = new Hono();
@@ -333,6 +347,7 @@ describe("POST /games auto-removal (REQ-WISH-10)", () => {
       gameService: mockGameSvc,
       wishlistService: wishSvc,
       bggClient: mockBggClient,
+      purchaseUtilizationService: createTestPurchaseUtilizationService(),
     });
 
     const gameApp = new Hono();
@@ -363,6 +378,7 @@ describe("wishlist/collection isolation", () => {
       gameService: mockGameSvc,
       wishlistService: wishSvc,
       bggClient: mockBggClient,
+      purchaseUtilizationService: createTestPurchaseUtilizationService(),
     });
 
     const gameApp = new Hono();
@@ -396,6 +412,7 @@ describe("wishlist/collection isolation", () => {
       gameService: mockGameSvc,
       wishlistService: wishSvc,
       bggClient: mockBggClient,
+      purchaseUtilizationService: createTestPurchaseUtilizationService(),
     });
 
     const gameApp = new Hono();

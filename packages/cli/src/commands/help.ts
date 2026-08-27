@@ -63,6 +63,42 @@ const LOCAL_OPERATION_COMMANDS: Record<string, LocalCommandHelp[]> = {
       description: "Clear a game's manual shelf assignment and return it to automatic placement",
     },
   ],
+  "shelf.game.set-acquisition": [
+    {
+      name: "acquisition",
+      usage: "shelf-judge game acquisition <game-id> unknown|gift|purchase [amount] [--json]",
+      description:
+        "Set or correct unknown, gift, or purchase acquisition; purchase amount is lifetime landed cost",
+    },
+  ],
+  "shelf.game.get": [
+    {
+      name: "value",
+      usage: "shelf-judge game value <game-id> [--json]",
+      description: "Show daemon-calculated purchase utilization using predicted detail fitness",
+    },
+  ],
+  "shelf.collection.get-entertainment-benchmark": [
+    {
+      name: "benchmark get",
+      usage: "shelf-judge collection benchmark get [--json]",
+      description: "Show the collection entertainment benchmark or its unknown/invalid state",
+    },
+  ],
+  "shelf.collection.set-entertainment-benchmark": [
+    {
+      name: "benchmark set",
+      usage: "shelf-judge collection benchmark set <amount> [--json]",
+      description: "Set or correct the positive acceptable cost per person-hour at fitness 6",
+    },
+  ],
+  "shelf.collection.clear-entertainment-benchmark": [
+    {
+      name: "benchmark clear",
+      usage: "shelf-judge collection benchmark clear [--json]",
+      description: "Clear the benchmark to unknown; clearing is distinct from setting an amount",
+    },
+  ],
 };
 
 export async function helpCommand(
@@ -86,6 +122,17 @@ export async function helpCommand(
   lines.push("shelf-judge - Board game fitness scoring");
   lines.push("");
   formatNode(data, lines, 0);
+  lines.push("");
+  lines.push("Purchase utilization amounts use one implicit personal currency.");
+  lines.push(
+    "Amounts use unsigned decimal strings: one or more whole-number digits, optionally followed by a decimal point and one or two digits. Signs, leading-dot forms, and trailing decimal points are invalid. Purchase zero is a known zero-cost purchase, distinct from gift or unknown.",
+  );
+  lines.push(
+    "Purchase amount means cumulative lifetime landed cost, including the game and costs required to acquire it; set corrects the saved amount, while unknown or clear removes it from calculation.",
+  );
+  lines.push(
+    "The entertainment benchmark is a positive acceptable cost per person-hour at fitness 6. Example: $16 / 2 hours = $8 per person-hour.",
+  );
   return lines.join("\n");
 }
 

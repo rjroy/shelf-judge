@@ -8026,6 +8026,241 @@ body {
   color: var(--border-strong);
 }
 
+/* Purchase utilization */
+.purchase-utilization-panel {
+  margin: 24px var(--content-padding) 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg-surface);
+  overflow: hidden;
+}
+.utilization-outcome {
+  padding: 22px 24px;
+  border-left: 5px solid var(--text-muted);
+  background: var(--bg-subtle);
+}
+.outcome-met .utilization-outcome {
+  border-left-color: var(--success);
+}
+.outcome-not-met .utilization-outcome {
+  border-left-color: var(--score-mid);
+}
+.utilization-kicker {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.utilization-outcome h2 {
+  margin: 0;
+  font-size: var(--text-xl);
+}
+.utilization-outcome p,
+.utilization-assumptions p,
+.benchmark-card p {
+  margin: 7px 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+.utilization-outcome a,
+.utilization-reasons a {
+  color: var(--action);
+}
+.utilization-primary-values,
+.utilization-supporting-values {
+  display: grid;
+  margin: 0;
+}
+.utilization-primary-values {
+  grid-template-columns: repeat(3, 1fr);
+  border-bottom: 1px solid var(--border);
+}
+.utilization-supporting-values {
+  grid-template-columns: repeat(5, 1fr);
+}
+.utilization-special-explanation {
+  margin: 0;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+.utilization-row {
+  min-width: 0;
+  padding: 16px 18px;
+  border-right: 1px solid var(--border);
+}
+.utilization-row:last-child {
+  border-right: 0;
+}
+.utilization-row dt {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+}
+.utilization-row dd {
+  margin: 6px 0 0;
+  color: var(--text-primary);
+  font-size: var(--text-base);
+}
+.utilization-reasons {
+  display: block;
+  margin-top: 5px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+}
+.utilization-evidence,
+.utilization-assumptions {
+  margin: 0 20px;
+  padding: 14px 4px;
+  border-top: 1px solid var(--border);
+}
+.utilization-evidence summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.utilization-evidence ul {
+  margin: 12px 0 0;
+  padding-left: 18px;
+}
+.utilization-evidence li {
+  margin: 5px 0;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+.utilization-evidence li span {
+  color: var(--text-muted);
+}
+.utilization-assumptions {
+  padding-bottom: 18px;
+}
+
+.acquisition-form {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+.acquisition-options,
+.benchmark-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.acquisition-option {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.amount-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 14px 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.amount-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.amount-input-wrap input {
+  width: 130px;
+  padding: 7px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font: inherit;
+}
+.form-help,
+.form-warning,
+.form-error,
+.form-success {
+  margin: 8px 0;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+.form-help {
+  color: var(--text-muted);
+}
+.form-warning {
+  color: var(--score-mid);
+}
+.form-error {
+  color: var(--danger);
+}
+.form-success {
+  color: var(--success);
+}
+.settings-content {
+  width: min(720px, calc(100% - 48px));
+  margin: 32px auto;
+}
+.benchmark-card {
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-surface);
+  scroll-margin-top: 24px;
+}
+.benchmark-example {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 18px 0;
+  padding: 14px 16px;
+  border-left: 3px solid var(--action);
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.benchmark-actions {
+  margin-top: 16px;
+}
+
+@media (max-width: 900px) {
+  .utilization-supporting-values {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .utilization-supporting-values .utilization-row {
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+@media (max-width: 600px) {
+  .purchase-utilization-panel {
+    margin: 16px 12px 0;
+  }
+  .utilization-primary-values,
+  .utilization-supporting-values {
+    grid-template-columns: 1fr;
+  }
+  .utilization-row {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .settings-content {
+    width: auto;
+    margin: 16px 12px;
+  }
+  .benchmark-card {
+    padding: 18px;
+  }
+}
+
 /* Prevent iOS Safari from zooming on focused form fields (triggers at < 16px) */
 @supports (-webkit-touch-callout: none) {
   input,

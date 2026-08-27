@@ -1,4 +1,9 @@
-import type { GameWithScore, Axis, TournamentGameStatsDisplay } from "@shelf-judge/shared";
+import {
+  compareUnsignedDecimals,
+  type Axis,
+  type GameWithPurchaseUtilization,
+  type TournamentGameStatsDisplay,
+} from "@shelf-judge/shared";
 import { scoreRangeClass } from "@/lib/score-utils";
 import { relativeDate } from "@/lib/date-utils";
 
@@ -17,6 +22,13 @@ export interface SortFieldDef {
 
 const BUILT_IN_SORT_FIELDS: SortFieldDef[] = [
   { id: "fitness", label: "Fitness Score", group: "score", defaultDirection: "desc" },
+  { id: "valueRemaining", label: "Value Remaining", group: "score", defaultDirection: "desc" },
+  {
+    id: "estimatedAdditionalPlays",
+    label: "Estimated Additional Plays to Value Threshold",
+    group: "score",
+    defaultDirection: "desc",
+  },
   { id: "tournament", label: "Tournament ELO", group: "score", defaultDirection: "desc" },
   { id: "redundancy", label: "Redundancy Penalty", group: "score", defaultDirection: "desc" },
   { id: "name", label: "Name", group: "identity", defaultDirection: "asc" },
@@ -150,7 +162,7 @@ export function saveFilters(filters: FilterState): void {
 // Filter predicate (REQ-CFS-18)
 // ---------------------------------------------------------------------------
 
-export function matchesFilters(gws: GameWithScore, filters: FilterState): boolean {
+export function matchesFilters(gws: GameWithPurchaseUtilization, filters: FilterState): boolean {
   const { game, score } = gws;
   const numPlays = game?.numPlays ?? 0;
 
@@ -184,12 +196,12 @@ export function matchesFilters(gws: GameWithScore, filters: FilterState): boolea
 
 type SortValue = number | string | null;
 
-function getAxisEffectiveRating(gws: GameWithScore, axisId: string): number | null {
+function getAxisEffectiveRating(gws: GameWithPurchaseUtilization, axisId: string): number | null {
   return gws.score?.breakdown.find((entry) => entry.axisId === axisId)?.effectiveRating ?? null;
 }
 
 export function getSortValue(
-  gws: GameWithScore,
+  gws: GameWithPurchaseUtilization,
   field: string,
   tournamentStats: Record<string, TournamentGameStatsDisplay>,
   axes?: Axis[],
@@ -233,14 +245,24 @@ export function getSortValue(
 }
 
 export function sortGames(
-  games: GameWithScore[],
+  games: GameWithPurchaseUtilization[],
   field: string,
   direction: "asc" | "desc",
   tournamentStats: Record<string, TournamentGameStatsDisplay>,
   axes?: Axis[],
-): { withValue: GameWithScore[]; withoutValue: GameWithScore[] } {
-  const withValue: GameWithScore[] = [];
-  const withoutValue: GameWithScore[] = [];
+): {
+  withValue: GameWithPurchaseUtilization[];
+  withoutValue: GameWithPurchaseUtilization[];
+} {
+  if (field === "valueRemaining") {
+    return sortByValueRemaining(games, direction);
+  }
+  if (field === "estimatedAdditionalPlays") {
+    return sortByEstimatedAdditionalPlays(games, direction);
+  }
+
+  const withValue: GameWithPurchaseUtilization[] = [];
+  const withoutValue: GameWithPurchaseUtilization[] = [];
 
   for (const g of games) {
     const v = getSortValue(g, field, tournamentStats, axes);
@@ -253,8 +275,9 @@ export function sortGames(
 
   const dir = direction === "asc" ? 1 : -1;
   withValue.sort((a, b) => {
-    const av = getSortValue(a, field, tournamentStats, axes)!;
-    const bv = getSortValue(b, field, tournamentStats, axes)!;
+    const av = getSortValue(a, field, tournamentStats, axes);
+    const bv = getSortValue(b, field, tournamentStats, axes);
+    if (av === null || bv === null) return 0;
     if (typeof av === "string" && typeof bv === "string") {
       return dir * av.localeCompare(bv);
     }
@@ -263,6 +286,94 @@ export function sortGames(
 
   withoutValue.sort((a, b) => a.game.name.localeCompare(b.game.name));
 
+  return { withValue, withoutValue };
+}
+
+function compareCodePoints(left: string, right: string): number {
+  const leftIterator = left[Symbol.iterator]();
+  const rightIterator = right[Symbol.iterator]();
+
+  while (true) {
+    const leftNext = leftIterator.next();
+    const rightNext = rightIterator.next();
+    if (leftNext.done || rightNext.done) {
+      if (leftNext.done && rightNext.done) return 0;
+      return leftNext.done ? -1 : 1;
+    }
+
+    const leftPoint = leftNext.value.codePointAt(0) ?? 0;
+    const rightPoint = rightNext.value.codePointAt(0) ?? 0;
+    if (leftPoint !== rightPoint) return leftPoint < rightPoint ? -1 : 1;
+  }
+}
+
+function compareUtilizationTie(
+  left: GameWithPurchaseUtilization,
+  right: GameWithPurchaseUtilization,
+): number {
+  const nameOrder = compareCodePoints(
+    left.game.name.normalize("NFC"),
+    right.game.name.normalize("NFC"),
+  );
+  return nameOrder !== 0 ? nameOrder : compareCodePoints(left.game.id, right.game.id);
+}
+
+function sortByValueRemaining(
+  games: GameWithPurchaseUtilization[],
+  direction: "asc" | "desc",
+): {
+  withValue: GameWithPurchaseUtilization[];
+  withoutValue: GameWithPurchaseUtilization[];
+} {
+  const withValue = games.filter(
+    (game) => game.purchaseUtilization.sort.valueRemainingHundredths !== null,
+  );
+  const withoutValue = games.filter(
+    (game) => game.purchaseUtilization.sort.valueRemainingHundredths === null,
+  );
+  const primaryDirection = direction === "asc" ? 1 : -1;
+
+  withValue.sort((left, right) => {
+    const leftKey = left.purchaseUtilization.sort.valueRemainingHundredths;
+    const rightKey = right.purchaseUtilization.sort.valueRemainingHundredths;
+    if (leftKey === null || rightKey === null) return compareUtilizationTie(left, right);
+    const primary = compareUnsignedDecimals(leftKey, rightKey);
+    return primary === 0 ? compareUtilizationTie(left, right) : primaryDirection * primary;
+  });
+  withoutValue.sort(compareUtilizationTie);
+  return { withValue, withoutValue };
+}
+
+function sortByEstimatedAdditionalPlays(
+  games: GameWithPurchaseUtilization[],
+  direction: "asc" | "desc",
+): {
+  withValue: GameWithPurchaseUtilization[];
+  withoutValue: GameWithPurchaseUtilization[];
+} {
+  const withValue = games.filter((game) => {
+    const category = game.purchaseUtilization.sort.estimatedAdditionalPlays.category;
+    return category === "finite" || category === "unreachable";
+  });
+  const withoutValue = games.filter((game) => {
+    const category = game.purchaseUtilization.sort.estimatedAdditionalPlays.category;
+    return category === "unavailable" || category === "not-applicable";
+  });
+
+  withValue.sort((left, right) => {
+    const leftSort = left.purchaseUtilization.sort.estimatedAdditionalPlays;
+    const rightSort = right.purchaseUtilization.sort.estimatedAdditionalPlays;
+    if (leftSort.category !== rightSort.category) {
+      if (direction === "asc") return leftSort.category === "finite" ? -1 : 1;
+      return leftSort.category === "unreachable" ? -1 : 1;
+    }
+    if (leftSort.category === "finite" && rightSort.category === "finite") {
+      const primary = compareUnsignedDecimals(leftSort.wholePlays, rightSort.wholePlays);
+      if (primary !== 0) return direction === "asc" ? primary : -primary;
+    }
+    return compareUtilizationTie(left, right);
+  });
+  withoutValue.sort(compareUtilizationTie);
   return { withValue, withoutValue };
 }
 
@@ -278,7 +389,7 @@ export interface ScoreDisplay {
 }
 
 export function getScoreDisplay(
-  gws: GameWithScore,
+  gws: GameWithPurchaseUtilization,
   field: string,
   tournamentStats: Record<string, TournamentGameStatsDisplay>,
   axes?: Axis[],
@@ -288,14 +399,26 @@ export function getScoreDisplay(
   switch (field) {
     case "fitness":
     case "name": {
-      if (!score || !score.score) return { text: "not rated", className: "score-unrated" };
+      if (!score || gws.displayScore === null) {
+        return { text: "not rated", className: "score-unrated" };
+      }
       return {
-        text: score.score.toFixed(1),
+        text: gws.displayScore,
         className: "score-value",
         dotClass: scoreRangeClass(score.score),
         isFitnessValue: true,
       };
     }
+    case "valueRemaining":
+      return {
+        text: gws.purchaseUtilization.components.valueRemaining.display,
+        className: "score-value",
+      };
+    case "estimatedAdditionalPlays":
+      return {
+        text: gws.purchaseUtilization.components.estimatedAdditionalPlays.display,
+        className: "score-value",
+      };
     case "redundancy": {
       if (!score) return { text: "not rated", className: "score-unrated" };
       const adj = score.redundancyAdjustment;
@@ -384,6 +507,10 @@ export function getSeparatorLabel(field: string, count: number, axes: Axis[]): s
       return `Not yet rated - ${n}`;
     case "tournament":
       return `Not yet ranked - ${n}`;
+    case "valueRemaining":
+      return `No value remaining calculation - ${n}`;
+    case "estimatedAdditionalPlays":
+      return `No additional plays estimate - ${n}`;
     case "playerCount":
       return `No player count data - ${n}`;
     case "numPlays":
@@ -424,6 +551,10 @@ export function getScoreSubtitle(field: string, axes: Axis[]): string {
       return "Penalty";
     case "tournament":
       return "Tournament ELO";
+    case "valueRemaining":
+      return "Value Remaining";
+    case "estimatedAdditionalPlays":
+      return "Additional Plays";
     case "yearPublished":
       return "Year";
     case "createdAt":

@@ -1,10 +1,16 @@
 // Score commands: list, get
 import type { DaemonClient } from "../client.js";
 import type { OutputOptions, BreakdownEntry } from "../output.js";
-import { formatTable, formatScore, formatBreakdown, printOutput } from "../output.js";
+import {
+  formatTable,
+  formatScore,
+  formatDisplayScore,
+  formatBreakdown,
+  printOutput,
+} from "../output.js";
 import type {
   TournamentGameStatsDisplay,
-  GameWithScore,
+  GameWithPurchaseUtilization,
   NichePosition,
   RedundancyAdjustment,
 } from "@shelf-judge/shared";
@@ -65,6 +71,15 @@ export async function scoreList(
 
   if (opts.json) return printOutput(data, opts);
 
+  const gamesResponse = await client.get<GameWithPurchaseUtilization[]>("/api/games?ownership=all");
+  if (!gamesResponse.ok) {
+    const err = gamesResponse.data as unknown as { error?: string };
+    throw new Error(err.error ?? "Getting canonical fitness displays failed");
+  }
+  const displayScores = new Map(
+    gamesResponse.data.map((entry) => [entry.game.id, entry.displayScore] as const),
+  );
+
   const lines: string[] = [];
 
   if (data.scored.length > 0) {
@@ -74,7 +89,9 @@ export async function scoreList(
         data.scored.map((g, i) => [
           String(i + 1),
           g.gameName,
-          g.vetoed ? `VETOED (${formatScore(g.hypotheticalScore)})` : formatScore(g.score),
+          g.vetoed
+            ? `VETOED (${formatDisplayScore(displayScores.get(g.gameId) ?? null)})`
+            : formatDisplayScore(displayScores.get(g.gameId) ?? null),
           `${g.ratedAxisCount}/${g.totalAxisCount}`,
         ]),
       ),
@@ -134,6 +151,14 @@ export async function scoreGet(
     return `${data.gameName}: not yet rated`;
   }
 
+  const detailRes = await client.get<GameWithPurchaseUtilization>(
+    `/api/games/${encodeURIComponent(id)}`,
+  );
+  if (!detailRes.ok) {
+    const err = detailRes.data as unknown as { error?: string };
+    throw new Error(err.error ?? "Getting canonical fitness display failed");
+  }
+
   // Fetch tournament stats for this game (best-effort)
   const tournamentRes = await client.get<TournamentGameStatsDisplay>(
     `/api/tournament/games/${encodeURIComponent(id)}/stats`,
@@ -143,14 +168,14 @@ export async function scoreGet(
   lines.push(`${data.gameName}`);
 
   if (data.vetoed && data.vetoedBy) {
-    lines.push(`Fitness: VETOED (hypothetical: ${formatScore(data.hypotheticalScore)})`);
+    lines.push(`Fitness: VETOED (${formatDisplayScore(detailRes.data.displayScore)})`);
     const dir = data.vetoedBy.direction === "below" ? "below" : "above";
     lines.push(
       `Veto: "${data.vetoedBy.axisName}" scored ${data.vetoedBy.rawValue} (threshold: ${dir} ${data.vetoedBy.threshold})`,
     );
   } else {
     lines.push(
-      `Fitness: ${formatScore(data.score)} (${data.ratedAxisCount}/${data.totalAxisCount} axes rated)`,
+      `Fitness: ${formatDisplayScore(detailRes.data.displayScore)} (${data.ratedAxisCount}/${data.totalAxisCount} axes rated)`,
     );
   }
 
@@ -167,19 +192,15 @@ export async function scoreGet(
     lines.push(formatBreakdown(data.breakdown));
   }
 
-  // Fetch game detail for niche position and redundancy data (best-effort)
-  const detailRes = await client.get<GameWithScore>(`/api/games/${encodeURIComponent(id)}`);
-  if (detailRes.ok) {
-    const adj = detailRes.data.score?.redundancyAdjustment;
-    if (adj) {
-      lines.push("");
-      lines.push(formatRedundancyDetail(adj, detailRes.data.score!.score));
-    }
+  const adj = detailRes.data.score?.redundancyAdjustment;
+  if (adj && detailRes.data.score) {
+    lines.push("");
+    lines.push(formatRedundancyDetail(adj, detailRes.data.score.score));
+  }
 
-    if (detailRes.data.nichePosition) {
-      lines.push("");
-      lines.push(formatNichePosition(detailRes.data.nichePosition, data.vetoed ?? false));
-    }
+  if (detailRes.data.nichePosition) {
+    lines.push("");
+    lines.push(formatNichePosition(detailRes.data.nichePosition, data.vetoed ?? false));
   }
 
   return lines.join("\n");
@@ -194,7 +215,7 @@ async function scoreListWithPredictions(
   if (opts.showNiches) params.push("includeNiches=true");
   const qs = params.length > 0 ? `?${params.join("&")}` : "";
 
-  const { ok, data } = await client.get<GameWithScore[]>(`/api/games${qs}`);
+  const { ok, data } = await client.get<GameWithPurchaseUtilization[]>(`/api/games${qs}`);
 
   if (!ok) {
     const err = data as unknown as { error: string };
@@ -217,13 +238,18 @@ async function scoreListWithPredictions(
       formatTable(
         headers,
         scored.map((e, i) => {
-          const s = e.score!;
+          const s = e.score;
+          if (s === null) {
+            return [String(i + 1), e.game.name, "---", "0/0", ""];
+          }
           const isPredicted = s.predictionMeta !== null && s.predictionMeta !== undefined;
           const marker = isPredicted ? "[P]" : "";
           const row = [
             String(i + 1),
             e.game.name,
-            s.vetoed ? `VETOED (${formatScore(s.hypotheticalScore)})` : formatScore(s.score),
+            s.vetoed
+              ? `VETOED (${formatDisplayScore(e.displayScore)})`
+              : formatDisplayScore(e.displayScore),
             `${s.ratedAxisCount}/${s.totalAxisCount}`,
             marker,
           ];
@@ -267,8 +293,8 @@ function formatNicheSummary(nichePosition: NichePosition | null, vetoed: boolean
 
 function formatRedundancySummary(adj: RedundancyAdjustment | null): string {
   if (!adj) return "---";
-  if (adj.penalty === 0) return formatScore(adj.adjustedScore);
-  return `${formatScore(adj.adjustedScore)} (-${adj.penalty.toFixed(1)})`;
+  if (adj.penalty === 0) return "none";
+  return `-${adj.penalty.toFixed(1)}`;
 }
 
 function formatRedundancyDetail(adj: RedundancyAdjustment, currentScore: number): string {
@@ -278,14 +304,10 @@ function formatRedundancyDetail(adj: RedundancyAdjustment, currentScore: number)
   if (adj.penalty === 0) {
     lines.push(`  Best among ${adj.nicheSize} similar games (rank #${adj.nicheRank})`);
   } else if (isIntegrated) {
-    lines.push(
-      `  Fitness: ${formatScore(adj.adjustedScore)} (was ${formatScore(adj.originalScore)}, -${adj.penalty.toFixed(1)} redundancy)`,
-    );
+    lines.push(`  Current fitness includes a -${adj.penalty.toFixed(1)} redundancy adjustment.`);
     lines.push(`  Niche rank: #${adj.nicheRank} of ${adj.nicheSize} similar games`);
   } else {
-    lines.push(
-      `  Would be ${formatScore(adj.adjustedScore)} with redundancy applied (-${adj.penalty.toFixed(1)} penalty)`,
-    );
+    lines.push(`  Potential redundancy adjustment: -${adj.penalty.toFixed(1)}.`);
     lines.push(`  Niche rank: #${adj.nicheRank} of ${adj.nicheSize} similar games`);
   }
 

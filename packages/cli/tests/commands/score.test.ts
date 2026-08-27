@@ -7,7 +7,7 @@ const scoreListData = {
     {
       gameId: "abc-123",
       gameName: "Wingspan",
-      score: 7.9,
+      score: 7.95,
       ratedAxisCount: 4,
       totalAxisCount: 4,
       breakdown: [
@@ -29,6 +29,14 @@ const scoreListData = {
       totalAxisCount: 4,
       breakdown: [],
     },
+    {
+      gameId: "past-101",
+      gameName: "Previously Owned Game",
+      score: 7.95,
+      ratedAxisCount: 4,
+      totalAxisCount: 4,
+      breakdown: [],
+    },
   ],
   unscored: [
     {
@@ -46,6 +54,21 @@ describe("score list", () => {
       "GET /api/scores": {
         response: { ok: true, status: 200, data: scoreListData },
       },
+      "GET /api/games?ownership=all": {
+        response: {
+          ok: true,
+          status: 200,
+          data: [
+            { game: { id: "abc-123" }, displayScore: "8.0" },
+            { game: { id: "def-456" }, displayScore: "6.5" },
+            {
+              game: { id: "past-101", ownership: "previously-owned" },
+              displayScore: "8.0",
+            },
+            { game: { id: "ghi-789" }, displayScore: null },
+          ],
+        },
+      },
     },
   });
 
@@ -56,11 +79,13 @@ describe("score list", () => {
     expect(output).toContain("Score");
     expect(output).toContain("Rated Axes");
     expect(output).toContain("Wingspan");
-    expect(output).toContain("7.9");
+    expect(output).toContain("8.0");
+    expect(output).not.toContain("7.9");
     expect(output).toContain("4/4");
     expect(output).toContain("Gloomhaven");
     expect(output).toContain("6.5");
     expect(output).toContain("2/4");
+    expect(output).toMatch(/Previously Owned Game\s+8\.0\s+4\/4/);
   });
 
   test("human-readable output shows Unscored section", async () => {
@@ -78,7 +103,7 @@ describe("score list", () => {
     expect(Array.isArray(parsed.scored)).toBe(true);
     expect(Array.isArray(parsed.unscored)).toBe(true);
     expect(parsed.scored[0].gameName).toBe("Wingspan");
-    expect(parsed.scored[0].score).toBe(7.9);
+    expect(parsed.scored[0].score).toBe(7.95);
     expect(parsed.scored[1].gameName).toBe("Gloomhaven");
     expect(parsed.unscored[0].gameName).toBe("Unrated Game");
     expect(parsed.unscored[0].score).toBeNull();
@@ -88,7 +113,7 @@ describe("score list", () => {
 const scoreGetData = {
   gameId: "abc-123",
   gameName: "Wingspan",
-  score: 7.9,
+  score: 7.95,
   ratedAxisCount: 4,
   totalAxisCount: 4,
   breakdown: [
@@ -129,13 +154,21 @@ describe("score get (rated game)", () => {
       "GET /api/games/abc-123/score": {
         response: { ok: true, status: 200, data: scoreGetData },
       },
+      "GET /api/games/abc-123": {
+        response: {
+          ok: true,
+          status: 200,
+          data: { game: { id: "abc-123" }, score: null, displayScore: "8.0" },
+        },
+      },
     },
   });
 
   test("human-readable output shows game name and fitness score", async () => {
     const output = await scoreGet(client, ["abc-123"], { json: false });
     expect(output).toContain("Wingspan");
-    expect(output).toContain("7.9");
+    expect(output).toContain("8.0");
+    expect(output).not.toContain("7.9");
   });
 
   test("human-readable output shows breakdown table", async () => {
@@ -154,7 +187,7 @@ describe("score get (rated game)", () => {
     const output = await scoreGet(client, ["abc-123"], { json: true });
     const parsed = JSON.parse(output) as typeof scoreGetData;
     expect(parsed.gameName).toBe("Wingspan");
-    expect(parsed.score).toBe(7.9);
+    expect(parsed.score).toBe(7.95);
     expect(parsed).toEqual(scoreGetData);
     expect(Array.isArray(parsed.breakdown)).toBe(true);
     expect(parsed.breakdown[0].axisName).toBe("Wife will play it");
@@ -215,14 +248,21 @@ describe("score get (vetoed game)", () => {
       "GET /api/games/veto-123/score": {
         response: { ok: true, status: 200, data: scoreGetVetoedData },
       },
+      "GET /api/games/veto-123": {
+        response: {
+          ok: true,
+          status: 200,
+          data: { game: { id: "veto-123" }, score: null, displayScore: "0.0" },
+        },
+      },
     },
   });
 
-  test("human-readable output shows VETOED with hypothetical score", async () => {
+  test("human-readable output shows VETOED with canonical daemon score", async () => {
     const output = await scoreGet(client, ["veto-123"], { json: false });
     expect(output).toContain("Too Complex Game");
     expect(output).toContain("VETOED");
-    expect(output).toContain("hypothetical: 7.2");
+    expect(output).toContain("VETOED (0.0)");
   });
 
   test("human-readable output shows veto trigger details", async () => {
@@ -291,13 +331,23 @@ describe("score list with vetoed game", () => {
         "GET /api/scores": {
           response: { ok: true, status: 200, data: vetoedListData },
         },
+        "GET /api/games?ownership=all": {
+          response: {
+            ok: true,
+            status: 200,
+            data: [
+              { game: { id: "abc-123" }, displayScore: "8.0" },
+              { game: { id: "veto-123" }, displayScore: "0.0" },
+            ],
+          },
+        },
       },
     });
 
     const output = await scoreList(client, [], { json: false });
-    expect(output).toContain("VETOED (7.2)");
+    expect(output).toContain("VETOED (0.0)");
     expect(output).toContain("Wingspan");
-    expect(output).toContain("7.9");
+    expect(output).toContain("8.0");
   });
 });
 
@@ -362,6 +412,13 @@ describe("score get (REQ-TAXIS-14: divergence flag removed)", () => {
     routes: {
       "GET /api/games/div-1/score": {
         response: { ok: true, status: 200, data: divergingScore },
+      },
+      "GET /api/games/div-1": {
+        response: {
+          ok: true,
+          status: 200,
+          data: { game: { id: "div-1" }, score: null, displayScore: "8.5" },
+        },
       },
       "GET /api/tournament/games/div-1/stats": {
         response: { ok: true, status: 200, data: divergingTournamentStats },
