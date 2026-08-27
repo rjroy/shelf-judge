@@ -27,8 +27,8 @@ import type {
 } from "./types";
 
 export const CURRENT_COLLECTION_SCHEMA_VERSION = 3 as const;
-export const CURRENT_PROFILE_CONTRACT_VERSION = 4 as const;
-export const CURRENT_PROFILE_ALGORITHM_VERSION = 4 as const;
+export const CURRENT_PROFILE_CONTRACT_VERSION = 5 as const;
+export const CURRENT_PROFILE_ALGORITHM_VERSION = 5 as const;
 
 const AmountInputSchema = z.string().superRefine((value, context) => {
   try {
@@ -853,6 +853,100 @@ const UnmetInsightSufficiencySchema = z
   })
   .strict();
 
+// Persisted percentages may be rounded to one decimal place by producers.
+const INSIGHT_COVERAGE_TOLERANCE_PERCENTAGE_POINTS = 0.05;
+// Expected coverage uses division and multiplication; comparison adds two subtractions.
+const INSIGHT_FLOATING_POINT_ULPS = 4;
+// Suggestion means and their effect are independently rounded to tenths by the producer.
+const SUGGESTION_EFFECT_ROUNDING_TOLERANCE = 0.1;
+
+function insightValuesMatch(left: number, right: number): boolean {
+  return (
+    Math.abs(left - right) <=
+    INSIGHT_FLOATING_POINT_ULPS * Number.EPSILON * Math.max(1, Math.abs(left), Math.abs(right))
+  );
+}
+
+function exceedsInclusiveFloatingPointTolerance(
+  actual: number,
+  expected: number,
+  tolerance: number,
+): boolean {
+  const difference = Math.abs(actual - expected);
+  const operandScale = Math.max(
+    1,
+    Math.abs(actual),
+    Math.abs(expected),
+    Math.abs(difference),
+    Math.abs(tolerance),
+  );
+  const representationError = INSIGHT_FLOATING_POINT_ULPS * Number.EPSILON * operandScale;
+  return difference - tolerance > representationError;
+}
+
+const InsightCohortSchema = z
+  .object({
+    description: z.string().min(1),
+    eligibleGameCount: NonNegativeIntegerSchema,
+    includedGameCount: NonNegativeIntegerSchema,
+    excludedGameCount: NonNegativeIntegerSchema,
+    coveragePercent: PercentageSchema,
+  })
+  .strict()
+  .superRefine((cohort, context) => {
+    if (cohort.includedGameCount + cohort.excludedGameCount !== cohort.eligibleGameCount) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["excludedGameCount"],
+        message: "Included and excluded game counts must equal eligible game count",
+      });
+    }
+    const expectedCoverage =
+      cohort.eligibleGameCount === 0
+        ? 0
+        : (cohort.includedGameCount / cohort.eligibleGameCount) * 100;
+    if (
+      (cohort.eligibleGameCount === 0 && cohort.coveragePercent !== 0) ||
+      (cohort.eligibleGameCount > 0 &&
+        exceedsInclusiveFloatingPointTolerance(
+          cohort.coveragePercent,
+          expectedCoverage,
+          INSIGHT_COVERAGE_TOLERANCE_PERCENTAGE_POINTS,
+        ))
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["coveragePercent"],
+        message: `Coverage percent must match included/eligible within ${INSIGHT_COVERAGE_TOLERANCE_PERCENTAGE_POINTS} percentage points`,
+      });
+    }
+  });
+
+const CurrentAxisSuggestionMethodSchema = z
+  .object({
+    id: z.literal("directional-divergence-attribute-effect"),
+    version: z.literal(1),
+    description: z.string().min(1),
+  })
+  .strict();
+
+const RetiredAxisSuggestionMethodSchema = z.union([
+  z
+    .object({
+      id: z.literal("unexpressed-concentration"),
+      version: z.literal(1),
+      description: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.literal("high-variance"),
+      version: z.literal(1),
+      description: z.string().min(1),
+    })
+    .strict(),
+]);
+
 const InsightBaseFields = {
   contractVersion: z.literal(1),
   id: z.string().min(1),
@@ -863,15 +957,7 @@ const InsightBaseFields = {
       description: z.string().min(1),
     })
     .strict(),
-  cohort: z
-    .object({
-      description: z.string().min(1),
-      eligibleGameCount: NonNegativeIntegerSchema,
-      includedGameCount: NonNegativeIntegerSchema,
-      excludedGameCount: NonNegativeIntegerSchema,
-      coveragePercent: PercentageSchema,
-    })
-    .strict(),
+  cohort: InsightCohortSchema,
   sufficiency: z.array(InsightSufficiencySchema),
   evidence: z.array(InsightEvidenceGameSchema),
   comparator: z
@@ -913,8 +999,8 @@ const ReportedTournamentDivergenceSchema = z
       .object({
         metric: z.string().min(1),
         value: FiniteNumberSchema,
-        threshold: FiniteNumberSchema.nullable(),
-        direction: z.enum(["above", "below", "two-sided"]),
+        threshold: FiniteNumberSchema,
+        direction: z.literal("above"),
         explanation: z.string().min(1),
       })
       .strict(),
@@ -923,7 +1009,94 @@ const ReportedTournamentDivergenceSchema = z
       .strict()
       .nullable(),
   })
-  .strict();
+  .strict()
+  .superRefine((divergence, context) => {
+    const subjectEvidence = divergence.evidence.filter(({ role }) => role === "subject");
+    const comparisonRequirements = divergence.sufficiency.filter(
+      ({ criterion }) => criterion === "comparisons for subject game",
+    );
+    const comparisonRequirement = comparisonRequirements[0];
+    const comparatorGameIds = divergence.comparator?.gameIds ?? [];
+    const expectedGap = Math.abs(
+      divergence.details.normalizedTournamentScore - divergence.details.independentFitnessScore,
+    );
+    const scoreDifference =
+      divergence.details.normalizedTournamentScore - divergence.details.independentFitnessScore;
+    const expectedDirection =
+      scoreDifference > 0 ? "tournament-outlier" : scoreDifference < 0 ? "fitness-outlier" : null;
+    const addContractIssue = (path: (string | number)[], message: string) =>
+      context.addIssue({ code: z.ZodIssueCode.custom, path, message });
+
+    if (divergence.id !== `divergence:${divergence.details.gameId}`) {
+      addContractIssue(["id"], "Divergence ID must identify the subject game");
+    }
+    if (
+      subjectEvidence.length !== 1 ||
+      subjectEvidence[0]?.gameId !== divergence.details.gameId ||
+      subjectEvidence[0]?.gameName !== divergence.details.gameName
+    ) {
+      addContractIssue(
+        ["evidence"],
+        "Divergence evidence must contain exactly one matching subject game",
+      );
+    }
+    if (comparatorGameIds.length !== 1 || comparatorGameIds[0] !== divergence.details.gameId) {
+      addContractIssue(
+        ["comparator", "gameIds"],
+        "Divergence comparator must identify the subject game's independent fitness",
+      );
+    }
+    if (!insightValuesMatch(divergence.details.gap, expectedGap)) {
+      addContractIssue(
+        ["details", "gap"],
+        "Divergence gap must equal the absolute score difference",
+      );
+    }
+    if (divergence.details.gap <= 0 || expectedDirection === null) {
+      addContractIssue(
+        ["details", "gap"],
+        "Reported divergence requires strictly different scores and a positive gap",
+      );
+    }
+    if (expectedDirection === null || divergence.details.direction !== expectedDirection) {
+      addContractIssue(
+        ["details", "direction"],
+        "Divergence direction must match the score ordering",
+      );
+    }
+    if (
+      comparisonRequirements.length !== 1 ||
+      comparisonRequirement === undefined ||
+      comparisonRequirement.observed !== divergence.details.comparisonCount ||
+      divergence.details.comparisonCount < comparisonRequirement.required
+    ) {
+      addContractIssue(
+        ["details", "comparisonCount"],
+        "Divergence comparison count must match its satisfied sufficiency requirement",
+      );
+    }
+    if (divergence.details.provisional) {
+      addContractIssue(
+        ["details", "provisional"],
+        "Reported divergence cannot use provisional Tournament results",
+      );
+    }
+    if (!insightValuesMatch(divergence.notability.value, divergence.details.gap)) {
+      addContractIssue(
+        ["notability", "value"],
+        "Divergence notability must report the absolute score gap",
+      );
+    }
+    if (
+      divergence.details.gap <= divergence.notability.threshold ||
+      divergence.notability.value <= divergence.notability.threshold
+    ) {
+      addContractIssue(
+        ["notability"],
+        "Reported divergence must be strictly above its declared notability threshold",
+      );
+    }
+  });
 
 const AbstainedTournamentDivergenceSchema = z.union([
   z
@@ -1018,8 +1191,8 @@ const ReportedCollectionOutlierSchema = z
       .object({
         metric: z.string().min(1),
         value: FiniteNumberSchema,
-        threshold: FiniteNumberSchema.nullable(),
-        direction: z.enum(["above", "below", "two-sided"]),
+        threshold: FiniteNumberSchema,
+        direction: z.literal("above"),
         explanation: z.string().min(1),
       })
       .strict(),
@@ -1083,10 +1256,19 @@ const ReportedCollectionOutlierSchema = z
         "Comparator evidence must match the declared comparison games",
       );
     }
-    if (outlier.notability.value !== outlier.details.neighborhoodDistance) {
+    if (!insightValuesMatch(outlier.notability.value, outlier.details.neighborhoodDistance)) {
       addContractIssue(
         ["notability", "value"],
         "Outlier notability must report the neighborhood distance",
+      );
+    }
+    if (
+      outlier.details.neighborhoodDistance <= outlier.notability.threshold ||
+      outlier.notability.value <= outlier.notability.threshold
+    ) {
+      addContractIssue(
+        ["notability"],
+        "Reported outlier must be strictly above its declared notability threshold",
       );
     }
     for (const [driverIndex, driver] of outlier.details.drivers.entries()) {
@@ -1139,9 +1321,10 @@ const CollectionOutlierSchema = z.union([
   AbstainedCollectionOutlierSchema,
 ]);
 
-const AxisSuggestionSchema = z
+const ReportedAxisSuggestionSchema = z
   .object({
     ...InsightBaseFields,
+    method: CurrentAxisSuggestionMethodSchema,
     comparator: z
       .object({ description: z.string().min(1), gameIds: z.array(z.string().min(1)).nonempty() })
       .strict(),
@@ -1155,7 +1338,12 @@ const AxisSuggestionSchema = z
       )
       .nonempty(),
     observation: z.string().min(1),
-    interpretation: z.string().nullable(),
+    interpretation: z
+      .string()
+      .min(1)
+      .refine((value) => value.trim().endsWith("?"), {
+        message: "Reported axis suggestions must be framed as questions",
+      }),
     details: z
       .object({
         source: z.literal("divergence-repair"),
@@ -1173,8 +1361,8 @@ const AxisSuggestionSchema = z
       .object({
         metric: z.string().min(1),
         value: FiniteNumberSchema,
-        threshold: FiniteNumberSchema.nullable(),
-        direction: z.enum(["above", "below", "two-sided"]),
+        threshold: FiniteNumberSchema,
+        direction: z.literal("above"),
         explanation: z.string().min(1),
       })
       .strict(),
@@ -1221,13 +1409,101 @@ const AxisSuggestionSchema = z
         "Positive and comparator evidence must contain disjoint game IDs",
       );
     }
-    if (suggestion.notability.value !== suggestion.details.effect) {
+    const expectedEffect =
+      suggestion.details.direction === "tournament-outlier"
+        ? suggestion.details.supportingMeanGap - suggestion.details.comparatorMeanGap
+        : suggestion.details.comparatorMeanGap - suggestion.details.supportingMeanGap;
+    const directionMatchesSignedMean =
+      suggestion.details.direction === "tournament-outlier"
+        ? suggestion.details.supportingMeanGap > 0
+        : suggestion.details.supportingMeanGap < 0;
+    if (!directionMatchesSignedMean) {
+      addContractIssue(
+        ["details", "direction"],
+        "Suggestion direction must match the sign of the supporting mean gap",
+      );
+    }
+    if (
+      exceedsInclusiveFloatingPointTolerance(
+        suggestion.details.effect,
+        expectedEffect,
+        SUGGESTION_EFFECT_ROUNDING_TOLERANCE,
+      )
+    ) {
+      addContractIssue(
+        ["details", "effect"],
+        "Suggestion effect must match the direction-specific difference between rounded means",
+      );
+    }
+    if (!insightValuesMatch(suggestion.notability.value, suggestion.details.effect)) {
       addContractIssue(
         ["notability", "value"],
         "Suggestion notability must report the measured effect",
       );
     }
+    if (
+      suggestion.details.effect <= suggestion.notability.threshold ||
+      suggestion.notability.value <= suggestion.notability.threshold
+    ) {
+      addContractIssue(
+        ["notability"],
+        "Reported suggestion must be strictly above its declared notability threshold",
+      );
+    }
   });
+
+const AbstainedAxisSuggestionSchema = z.union([
+  z
+    .object({
+      ...InsightBaseFields,
+      method: CurrentAxisSuggestionMethodSchema,
+      status: z.literal("insufficient"),
+      reason: z.literal("insufficient-sample"),
+      sufficiency: z.tuple([UnmetInsightSufficiencySchema]).rest(InsightSufficiencySchema),
+      explanation: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      ...InsightBaseFields,
+      method: CurrentAxisSuggestionMethodSchema,
+      status: z.literal("insufficient"),
+      reason: z.literal("insufficient-coverage"),
+      sufficiency: z.tuple([UnmetInsightSufficiencySchema]).rest(InsightSufficiencySchema),
+      explanation: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      ...InsightBaseFields,
+      method: CurrentAxisSuggestionMethodSchema,
+      status: z.literal("insufficient"),
+      reason: z.literal("missing-comparator"),
+      comparator: z.null(),
+      explanation: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      ...InsightBaseFields,
+      method: CurrentAxisSuggestionMethodSchema,
+      status: z.literal("suppressed"),
+      reason: z.literal("unsupported-method"),
+      explanation: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      ...InsightBaseFields,
+      method: RetiredAxisSuggestionMethodSchema,
+      status: z.literal("retired"),
+      reason: z.literal("superseded"),
+      explanation: z.string().min(1),
+    })
+    .strict(),
+]);
+
+const AxisSuggestionSchema = z.union([ReportedAxisSuggestionSchema, AbstainedAxisSuggestionSchema]);
 
 export const CollectionProfileSchema = z
   .object({
@@ -1265,6 +1541,30 @@ export const CollectionProfileSchema = z
   .refine(({ gameCount, ratedGameCount }) => ratedGameCount <= gameCount, {
     message: "Rated game count cannot exceed profile game count",
     path: ["ratedGameCount"],
+  })
+  .superRefine((profile, context) => {
+    const families = [
+      ["divergence", profile.divergence ?? []],
+      ["outliers", profile.outliers],
+      ["suggestions", profile.suggestions],
+    ] as const;
+    for (const [familyName, insights] of families) {
+      for (const [insightIndex, insight] of insights.entries()) {
+        for (const countField of [
+          "eligibleGameCount",
+          "includedGameCount",
+          "excludedGameCount",
+        ] as const) {
+          if (insight.cohort[countField] > profile.gameCount) {
+            context.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: [familyName, insightIndex, "cohort", countField],
+              message: "Insight cohort count cannot exceed profile game count",
+            });
+          }
+        }
+      }
+    }
   });
 
 export const ProfileDataSchema = z

@@ -20,8 +20,14 @@ export async function profileNarrateCommand(
 ): Promise<string> {
   const res = await client.generateNarration();
   if (!res.ok) {
-    const errorData = res.data as { error?: string };
-    throw new Error(errorData.error ?? `Narration failed: ${res.status}`);
+    const message =
+      typeof res.data === "object" &&
+      res.data !== null &&
+      "error" in res.data &&
+      typeof res.data.error === "string"
+        ? res.data.error
+        : `Narration failed: ${res.status}`;
+    throw new Error(message);
   }
   return printOutput(res.data, { ...opts, json: true });
 }

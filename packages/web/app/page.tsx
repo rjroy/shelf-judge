@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import type { CollectionProfile } from "@shelf-judge/shared";
 import { getProfile } from "@/lib/api";
 import { NarrationSection } from "@/components/profile/narration-section";
 import { AxisDistributions } from "@/components/profile/axis-distributions";
@@ -13,19 +14,51 @@ import { Suggestions } from "@/components/profile/suggestions";
 export const metadata: Metadata = { title: "Shelf Judge" };
 export const dynamic = "force-dynamic";
 
-export default async function ProfileOverviewPage() {
-  let profile;
+export type ProfileOverviewState =
+  | { status: "loaded"; profile: CollectionProfile }
+  | { status: "unavailable" };
+
+export async function loadProfileOverview(
+  loadProfile: () => Promise<CollectionProfile> = getProfile,
+): Promise<ProfileOverviewState> {
   try {
-    profile = await getProfile();
+    return { status: "loaded", profile: await loadProfile() };
   } catch {
+    return { status: "unavailable" };
+  }
+}
+
+export default async function ProfileOverviewPage() {
+  return <ProfileOverviewContent state={await loadProfileOverview()} />;
+}
+
+export function ProfileOverviewContent({ state }: { state: ProfileOverviewState }) {
+  if (state.status === "unavailable") {
     return (
       <>
         <div className="topbar">
-          <div className="topbar-title">Collection Profile</div>
+          <h1 className="topbar-title">Collection Profile</h1>
         </div>
         <div className="main-scroll">
-          <div className="empty-state">
-            <h3>No profile available</h3>
+          <div className="empty-state" data-profile-state="unavailable">
+            <h2>Profile analysis unavailable</h2>
+            <p>The collection profile could not be loaded or validated. Try again later.</p>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  const { profile } = state;
+  if (profile.gameCount === 0) {
+    return (
+      <>
+        <div className="topbar">
+          <h1 className="topbar-title">Collection Profile</h1>
+        </div>
+        <div className="main-scroll">
+          <div className="empty-state" data-profile-state="empty">
+            <h2>No profile available</h2>
             <p>
               Add games to your collection and rate them to generate a profile of your preferences.
             </p>
@@ -55,7 +88,7 @@ export default async function ProfileOverviewPage() {
   return (
     <>
       <div className="topbar">
-        <div className="topbar-title">Collection Profile</div>
+        <h1 className="topbar-title">Collection Profile</h1>
         <div className="topbar-meta">
           <span>Computed {computedDate}</span>
           <span>
@@ -76,10 +109,18 @@ export default async function ProfileOverviewPage() {
         <AxisWeights weights={profile.axisWeights} />
         <BggClustering clustering={profile.bggClustering} gameCount={profile.gameCount} />
         <UtilityCurves curves={profile.utilityCurves} />
-        {profile.divergence !== null && <Divergence games={profile.divergence} />}
-        {profile.outliers.length > 0 && <Outliers outliers={profile.outliers} />}
-        {profile.suggestions.length > 0 && <Suggestions suggestions={profile.suggestions} />}
+        <ProfileInsightOverview profile={profile} />
       </div>
     </>
+  );
+}
+
+export function ProfileInsightOverview({ profile }: { profile: CollectionProfile }) {
+  return (
+    <div data-profile-insight-surface="overview">
+      <Divergence games={profile.divergence} />
+      <Outliers outliers={profile.outliers} />
+      <Suggestions suggestions={profile.suggestions} />
+    </div>
   );
 }

@@ -175,9 +175,10 @@ describe("Divergence game links", () => {
     expect(html).toContain('class="game-link"');
   });
 
-  test("empty games array renders nothing", () => {
+  test("empty games array renders an evaluated-empty state", () => {
     const html = renderToString(<Divergence games={[]} />);
-    expect(html).toBe("");
+    expect(html).toContain("Evaluated, nothing notable");
+    expect(html).not.toContain("Analysis unavailable");
   });
 });
 
@@ -203,9 +204,9 @@ describe("Outliers game links", () => {
     expect(html).toContain('class="game-link"');
   });
 
-  test("empty outliers array renders nothing", () => {
+  test("empty outliers array renders an evaluated-empty state", () => {
     const html = renderToString(<Outliers outliers={[]} />);
-    expect(html).toBe("");
+    expect(html).toContain("Evaluated, nothing notable");
   });
 });
 

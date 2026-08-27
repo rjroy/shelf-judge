@@ -10,9 +10,8 @@ import {
   getShelfConfig,
 } from "@/lib/api";
 import type {
+  CollectionProfile,
   TournamentGameStatsDisplay,
-  TournamentDivergenceDetails,
-  CollectionOutlier,
   FitnessResult,
   NichePosition,
   NicheEntry,
@@ -28,6 +27,9 @@ import { BoxDimensionsForm } from "@/components/box-dimensions-form";
 import { ShelfAssignmentForm } from "@/components/shelf-assignment-form";
 import { AcquisitionForm } from "@/components/acquisition-form";
 import { PurchaseUtilizationPanel } from "@/components/purchase-utilization-panel";
+import { Divergence } from "@/components/profile/divergence";
+import { Outliers } from "@/components/profile/outliers";
+import { Suggestions } from "@/components/profile/suggestions";
 
 export async function generateMetadata({
   params,
@@ -45,6 +47,27 @@ export async function generateMetadata({
 
 export const dynamic = "force-dynamic";
 
+export type GameProfileInsights = {
+  divergence: CollectionProfile["divergence"];
+  outliers: CollectionProfile["outliers"] | null;
+  suggestions: CollectionProfile["suggestions"] | null;
+};
+
+export async function loadGameProfileInsights(
+  loadProfile: () => Promise<CollectionProfile> = getProfile,
+): Promise<GameProfileInsights> {
+  try {
+    const profile = await loadProfile();
+    return {
+      divergence: profile.divergence,
+      outliers: profile.outliers,
+      suggestions: profile.suggestions,
+    };
+  } catch {
+    return { divergence: null, outliers: null, suggestions: null };
+  }
+}
+
 export default async function GameDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
@@ -52,8 +75,11 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
   let data;
   let axes;
   let tournamentStats: TournamentGameStatsDisplay | null = null;
-  let profileDivergence: TournamentDivergenceDetails | null = null;
-  let profileOutlier: Extract<CollectionOutlier, { status: "reported" }> | null = null;
+  let profileInsights: GameProfileInsights = {
+    divergence: null,
+    outliers: null,
+    suggestions: null,
+  };
   let ignoredTags: NicheTagFilter[] = [];
   let shelfOptions: Array<{ shelfId: string; label: string; dimensionless: boolean }> = [];
   try {
@@ -73,19 +99,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
     } catch {
       // Tournament stats may not exist yet
     }
-    try {
-      const profile = await getProfile();
-      const divergence = profile.divergence?.find(
-        (insight) => insight.status === "reported" && insight.details.gameId === id,
-      );
-      profileDivergence = divergence?.status === "reported" ? divergence.details : null;
-      const outlier = profile.outliers.find(
-        (candidate) => candidate.status === "reported" && candidate.details.gameId === id,
-      );
-      profileOutlier = outlier?.status === "reported" ? outlier : null;
-    } catch {
-      // Profile may not exist yet
-    }
+    profileInsights = await loadGameProfileInsights();
     try {
       const nicheSettings = await getNicheSettings();
       ignoredTags = nicheSettings.ignoredTags;
@@ -124,7 +138,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
           </div>
           <div className="game-hero-info">
             <div className="game-hero-title-row">
-              <div className="game-hero-title">{game.name}</div>
+              <h1 className="game-hero-title">{game.name}</h1>
               {isPreviouslyOwned && (
                 <span className="status-badge prev-owned">Previously Owned</span>
               )}
@@ -297,58 +311,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
           isPreviouslyOwned={isPreviouslyOwned}
         />
 
-        {profileDivergence && (
-          <div className="profile-divergence-detail">
-            <div className="profile-detail-title">Profile Divergence</div>
-            <div className="divergence-row">
-              <div className="div-game-name">
-                {profileDivergence.direction === "tournament-outlier"
-                  ? "Tournament rates higher than fitness"
-                  : "Fitness rates higher than tournament"}
-              </div>
-              <div className="div-scores">
-                <div className="div-score">
-                  <span className="div-score-val fitness">
-                    {profileDivergence.independentFitnessScore.toFixed(1)}
-                  </span>
-                  <span className="div-score-lbl">Independent fitness</span>
-                </div>
-                <span className="div-arrow">&rarr;</span>
-                <div className="div-score">
-                  <span className="div-score-val tournament">
-                    {profileDivergence.normalizedTournamentScore.toFixed(1)}
-                  </span>
-                  <span className="div-score-lbl">Tournament</span>
-                </div>
-                <span className={`div-gap ${profileDivergence.direction}`}>
-                  {profileDivergence.direction === "tournament-outlier" ? "+" : "\u2212"}
-                  {profileDivergence.gap.toFixed(1)}
-                </span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {profileOutlier && (
-          <div className="profile-outlier-detail">
-            <div className="profile-detail-title">Collection Outlier</div>
-            <div className="outlier-row">
-              <div className="outlier-info">
-                <div className="outlier-reason">
-                  Neighborhood distance{" "}
-                  <span>{profileOutlier.details.neighborhoodDistance.toFixed(2)}</span>
-                </div>
-                <div className="outlier-distance">
-                  {profileOutlier.details.drivers.map((driver) => (
-                    <span key={driver.dimension} className="dist-component high">
-                      {driver.label}: {driver.distance.toFixed(2)}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        <GameProfileInsightSurface profileInsights={profileInsights} gameId={id} />
 
         {tournamentStats && tournamentStats.comparisonCount > 0 && (
           <div className="tournament-breakdown-panel">
@@ -482,6 +445,22 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
 
 export function GameDetailMain({ children }: { children: ReactNode }) {
   return <div className="main-scroll">{children}</div>;
+}
+
+export function GameProfileInsightSurface({
+  profileInsights,
+  gameId,
+}: {
+  profileInsights: GameProfileInsights;
+  gameId: string;
+}) {
+  return (
+    <div className="game-profile-insights" data-profile-insight-surface="game-detail">
+      <Divergence games={profileInsights.divergence} gameId={gameId} />
+      <Outliers outliers={profileInsights.outliers} gameId={gameId} />
+      <Suggestions suggestions={profileInsights.suggestions} gameId={gameId} />
+    </div>
+  );
 }
 
 export function GameDetailHero({ children }: { children: ReactNode }) {

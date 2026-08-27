@@ -1070,6 +1070,29 @@ describe("generateSuggestions", () => {
     };
   }
 
+  function suggestionsPassSchema(fixture: ReturnType<typeof suggestionFixture>): boolean {
+    return CollectionProfileSchema.safeParse({
+      axisDistributions: [],
+      axisWeights: [],
+      bggClustering: {
+        mechanics: [],
+        categories: [],
+        families: [],
+        subdomains: [],
+        weightRanges: [],
+      },
+      utilityCurves: [],
+      divergence: null,
+      outliers: [],
+      suggestions: fixture.suggestions,
+      narration: null,
+      narrationState: "empty",
+      gameCount: fixture.games.length,
+      ratedGameCount: fixture.games.length,
+      computedAt: "2026-01-01T00:00:00Z",
+    }).success;
+  }
+
   test("retires concentration and variance as recommendation sources", () => {
     const games = Array.from({ length: 5 }, (_, index) =>
       makeGame({
@@ -1080,7 +1103,49 @@ describe("generateSuggestions", () => {
       }),
     );
 
-    expect(generateSuggestions(games, axes, new Map(), null, null)).toEqual([]);
+    const suggestions = generateSuggestions(games, axes, new Map(), null, null);
+    expect(suggestions.map(({ status }) => status)).toEqual(["retired", "retired", "insufficient"]);
+    expect(
+      suggestions
+        .filter((suggestion) => suggestion.status === "retired")
+        .map(({ method }) => method.id),
+    ).toEqual(["unexpressed-concentration", "high-variance"]);
+    expect(
+      CollectionProfileSchema.safeParse({
+        axisDistributions: [],
+        axisWeights: [],
+        bggClustering: {
+          mechanics: [],
+          categories: [],
+          families: [],
+          subdomains: [],
+          weightRanges: [],
+        },
+        utilityCurves: [],
+        divergence: null,
+        outliers: [],
+        suggestions,
+        narration: null,
+        narrationState: "empty",
+        gameCount: games.length,
+        ratedGameCount: 0,
+        computedAt: "2026-01-01T00:00:00Z",
+      }).success,
+    ).toBe(true);
+  });
+
+  test("exposes missing Tournament prerequisites as explicit insufficiency", () => {
+    const games = Array.from({ length: 6 }, (_, index) =>
+      makeGame({ id: `g${index}`, name: `G${index}`, bggData: makeBggData() }),
+    );
+
+    const suggestions = generateSuggestions(games, axes, new Map(), null, null);
+    expect(suggestions).toHaveLength(1);
+    expect(suggestions[0]).toMatchObject({
+      status: "insufficient",
+      reason: "insufficient-coverage",
+      id: "axis-suggestion:directional-divergence-attribute-effect",
+    });
   });
 
   test("suppresses null effects even when an attribute appears in divergent games", () => {
@@ -1101,7 +1166,11 @@ describe("generateSuggestions", () => {
       Array.from({ length: 6 }, () => ({ attribute: true, independent: 4, tournament: 8 })),
     );
 
-    expect(fixture.suggestions).toEqual([]);
+    expect(fixture.suggestions.map(({ status }) => status)).toEqual(["retired", "insufficient"]);
+    expect(fixture.suggestions[1]).toMatchObject({
+      reason: "missing-comparator",
+      sufficiency: [{ observed: 0, required: 3, met: false }],
+    });
   });
 
   test("suppresses attributes confounded by near-identical collection membership", () => {
@@ -1114,7 +1183,10 @@ describe("generateSuggestions", () => {
       { attribute: false, independent: 6, tournament: 6 },
     ]);
 
-    expect(fixture.suggestions).toEqual([]);
+    expect(fixture.suggestions.map(({ status }) => status)).toEqual(["suppressed", "suppressed"]);
+    expect(
+      fixture.suggestions.map((suggestion) => "reason" in suggestion && suggestion.reason),
+    ).toEqual(["unsupported-method", "unsupported-method"]);
   });
 
   test("does not combine opposite divergence directions into support", () => {
@@ -1129,7 +1201,12 @@ describe("generateSuggestions", () => {
       { attribute: false, independent: 6, tournament: 6 },
     ]);
 
-    expect(fixture.suggestions).toEqual([]);
+    expect(fixture.suggestions).toHaveLength(1);
+    expect(fixture.suggestions[0]).toMatchObject({
+      status: "insufficient",
+      reason: "insufficient-sample",
+      sufficiency: [{ observed: 1, required: 3, met: false }],
+    });
   });
 
   test("suppresses weak positive and comparator samples", () => {
@@ -1140,7 +1217,59 @@ describe("generateSuggestions", () => {
       { attribute: false, independent: 6, tournament: 6 },
     ]);
 
+    expect(fixture.suggestions).toHaveLength(1);
+    expect(fixture.suggestions[0]).toMatchObject({
+      status: "insufficient",
+      reason: "insufficient-sample",
+      sufficiency: [{ observed: 4, required: 6, met: false }],
+    });
+  });
+
+  test("does not report an effect exactly at the declared threshold", () => {
+    const fixture = suggestionFixture([
+      { attribute: true, independent: 4, tournament: 8 },
+      { attribute: true, independent: 4, tournament: 8 },
+      { attribute: true, independent: 4, tournament: 8 },
+      { attribute: false, independent: 4, tournament: 6.5 },
+      { attribute: false, independent: 4, tournament: 6.5 },
+      { attribute: false, independent: 4, tournament: 6.5 },
+    ]);
+
     expect(fixture.suggestions).toEqual([]);
+    expect(suggestionsPassSchema(fixture)).toBe(true);
+  });
+
+  test("does not report a raw effect just above threshold that publishes at threshold", () => {
+    const fixture = suggestionFixture([
+      { attribute: true, independent: 4, tournament: 8 },
+      { attribute: true, independent: 4, tournament: 8 },
+      { attribute: true, independent: 4, tournament: 8 },
+      { attribute: false, independent: 4, tournament: 6.49 },
+      { attribute: false, independent: 4, tournament: 6.49 },
+      { attribute: false, independent: 4, tournament: 6.49 },
+    ]);
+
+    expect(fixture.suggestions).toEqual([]);
+    expect(suggestionsPassSchema(fixture)).toBe(true);
+  });
+
+  test("reports a clearly above-threshold effect using its published rounded value", () => {
+    const fixture = suggestionFixture([
+      { attribute: true, independent: 4, tournament: 8 },
+      { attribute: true, independent: 4, tournament: 8 },
+      { attribute: true, independent: 4, tournament: 8 },
+      { attribute: false, independent: 4, tournament: 6.4 },
+      { attribute: false, independent: 4, tournament: 6.4 },
+      { attribute: false, independent: 4, tournament: 6.4 },
+    ]);
+
+    expect(fixture.suggestions).toHaveLength(1);
+    expect(fixture.suggestions[0]).toMatchObject({
+      status: "reported",
+      details: { effect: 1.6 },
+      notability: { value: 1.6, threshold: 1.5, direction: "above" },
+    });
+    expect(suggestionsPassSchema(fixture)).toBe(true);
   });
 
   test("retains a direction-specific effect with inspectable positive and comparator evidence", () => {
@@ -1155,6 +1284,8 @@ describe("generateSuggestions", () => {
 
     expect(fixture.suggestions).toHaveLength(1);
     const suggestion = fixture.suggestions[0];
+    expect(suggestion.status).toBe("reported");
+    if (suggestion.status !== "reported") return;
     expect(suggestion.details).toMatchObject({
       source: "divergence-repair",
       attribute: "Area Control",
@@ -1175,6 +1306,7 @@ describe("generateSuggestions", () => {
       "g6",
     ]);
     expect(suggestion.sufficiency.every(({ met }) => met)).toBe(true);
+    expect(suggestion.interpretation.endsWith("?")).toBe(true);
     const profile = {
       axisDistributions: [],
       axisWeights: [],
@@ -1200,6 +1332,24 @@ describe("generateSuggestions", () => {
       CollectionProfileSchema.safeParse({
         ...profile,
         suggestions: [{ ...suggestion, comparator: null }],
+      }).success,
+    ).toBe(false);
+    expect(
+      CollectionProfileSchema.safeParse({
+        ...profile,
+        suggestions: [{ ...suggestion, interpretation: "Create an Area Control axis" }],
+      }).success,
+    ).toBe(false);
+    expect(
+      CollectionProfileSchema.safeParse({
+        ...profile,
+        suggestions: [
+          {
+            ...suggestion,
+            details: { ...suggestion.details, effect: Number.POSITIVE_INFINITY },
+            notability: { ...suggestion.notability, value: Number.POSITIVE_INFINITY },
+          },
+        ],
       }).success,
     ).toBe(false);
     expect(
@@ -1253,7 +1403,10 @@ describe("generateSuggestions", () => {
     ]);
 
     expect(fixture.suggestions).toHaveLength(1);
-    expect(fixture.suggestions[0].details).toMatchObject({
+    const suggestion = fixture.suggestions[0];
+    expect(suggestion.status).toBe("reported");
+    if (suggestion.status !== "reported") return;
+    expect(suggestion.details).toMatchObject({
       attribute: "Area Control",
       direction: "fitness-outlier",
       effect: 4,
@@ -1379,7 +1532,7 @@ describe("computeProfile", () => {
       { axisId: "fun", axisName: "Fun", weight: 100, percentage: 100 },
     ]);
     expect(profile.utilityCurves).toEqual([]);
-    expect(profile.suggestions).toEqual([]);
+    expect(profile.suggestions.map(({ status }) => status)).toEqual(["retired", "insufficient"]);
   });
   test("assembles all sections correctly", () => {
     const axes = [makeAxis({ id: "a1", name: "Fun", weight: 50 })];

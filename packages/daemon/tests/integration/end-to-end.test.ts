@@ -14,11 +14,14 @@ import type {
   Axis,
   Collection,
   DerivedFieldDiscoveryResponse,
-  ProfileData,
   FitnessResult,
   FitnessBreakdownEntry,
   AddGameResult,
   GameWithScore,
+} from "@shelf-judge/shared";
+import {
+  CURRENT_PROFILE_ALGORITHM_VERSION,
+  CURRENT_PROFILE_CONTRACT_VERSION,
 } from "@shelf-judge/shared";
 
 // Response shapes returned by the daemon API
@@ -59,7 +62,7 @@ interface ErrorResponse {
 
 interface PersistedMigrationFixture {
   collection: Record<string, unknown>;
-  profile: ProfileData;
+  profile: Record<string, unknown> & { contractVersion: number; algorithmVersion: number };
   wishlist: Record<string, unknown>[];
 }
 
@@ -622,8 +625,9 @@ describe("Integration: End-to-end scenarios", () => {
       ctx.fileOps.files.set(profilePath, JSON.stringify(fixture.profile));
       ctx.fileOps.files.set(wishlistPath, JSON.stringify(fixture.wishlist));
 
-      expect(await ctx.storageService.loadProfile()).toEqual(fixture.profile);
-      expect(fixture.profile.profile.narrationState).toBe("stale");
+      expect(fixture.profile).toMatchObject({ contractVersion: 4, algorithmVersion: 4 });
+      expect(await ctx.storageService.loadProfile()).toBeNull();
+      expect(ctx.fileOps.files.has(profilePath)).toBe(false);
 
       const migrated = await ctx.storageService.loadCollection();
       const persisted = JSON.parse(ctx.fileOps.files.get(collectionPath) ?? "null") as Collection;
@@ -796,6 +800,21 @@ describe("Integration: End-to-end scenarios", () => {
           ({ method, args }) => method === "rename" && args[1] === collectionPath,
         ),
       ).toHaveLength(persistenceCountAfterRepair);
+
+      const profileResponse = await jsonRequest(ctx.app, "GET", "/api/profile");
+      expect(profileResponse.status).toBe(200);
+      const currentProfile = await ctx.storageService.loadProfile();
+      expect(currentProfile).not.toBeNull();
+      expect(currentProfile).toMatchObject({
+        contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
+        algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
+      });
+      const persistedCurrentProfile = ctx.fileOps.files.get(profilePath);
+      expect(persistedCurrentProfile).toBeDefined();
+
+      const idempotentProfileReload = await ctx.storageService.loadProfile();
+      expect(idempotentProfileReload).toEqual(currentProfile);
+      expect(ctx.fileOps.files.get(profilePath)).toBe(persistedCurrentProfile);
     });
   });
 });

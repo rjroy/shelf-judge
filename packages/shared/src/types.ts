@@ -808,6 +808,11 @@ export type AbstainedInsight = InsufficientInsight | SuppressedInsight | Retired
 
 export type TrustedInsight<TDetails> = ReportedInsight<TDetails> | AbstainedInsight;
 
+type AboveThresholdInsightNotability = Omit<InsightNotability, "threshold" | "direction"> & {
+  threshold: number;
+  direction: "above";
+};
+
 export interface TournamentDivergenceDetails {
   gameId: string;
   gameName: string;
@@ -819,9 +824,14 @@ export interface TournamentDivergenceDetails {
   provisional: boolean;
 }
 
-export type TournamentDivergenceInsight =
-  | ReportedInsight<TournamentDivergenceDetails>
-  | InsufficientInsight;
+export interface ReportedTournamentDivergence extends Omit<
+  ReportedInsight<TournamentDivergenceDetails>,
+  "notability"
+> {
+  notability: AboveThresholdInsightNotability;
+}
+
+export type TournamentDivergenceInsight = ReportedTournamentDivergence | InsufficientInsight;
 
 export interface ComponentDistances {
   binary: number;
@@ -861,7 +871,14 @@ export interface CollectionOutlierDetails {
   fitnessScore: number | null;
 }
 
-export type CollectionOutlier = ReportedInsight<CollectionOutlierDetails> | InsufficientInsight;
+export interface ReportedCollectionOutlier extends Omit<
+  ReportedInsight<CollectionOutlierDetails>,
+  "notability"
+> {
+  notability: AboveThresholdInsightNotability;
+}
+
+export type CollectionOutlier = ReportedCollectionOutlier | InsufficientInsight;
 
 export interface AxisSuggestionDetails {
   source: "divergence-repair";
@@ -875,13 +892,46 @@ export interface AxisSuggestionDetails {
   effect: number;
 }
 
-export type AxisSuggestion = Omit<
+export interface CurrentAxisSuggestionMethod extends InsightMethod {
+  id: "directional-divergence-attribute-effect";
+  version: 1;
+}
+
+export type RetiredAxisSuggestionMethod =
+  | (InsightMethod & { id: "unexpressed-concentration"; version: 1 })
+  | (InsightMethod & { id: "high-variance"; version: 1 });
+
+type WithAxisSuggestionMethod<TInsight, TMethod extends InsightMethod> = TInsight extends {
+  method: InsightMethod;
+}
+  ? Omit<TInsight, "method"> & { method: TMethod }
+  : never;
+
+export type ReportedAxisSuggestion = Omit<
   ReportedInsight<AxisSuggestionDetails>,
-  "comparator" | "confidence"
+  "comparator" | "confidence" | "interpretation" | "method" | "notability"
 > & {
+  method: CurrentAxisSuggestionMethod;
   comparator: InsightComparator;
   confidence: null;
+  interpretation: string;
+  notability: AboveThresholdInsightNotability;
 };
+
+export type CurrentAxisSuggestionAbstention = WithAxisSuggestionMethod<
+  InsufficientInsight | SuppressedInsight,
+  CurrentAxisSuggestionMethod
+>;
+
+export type RetiredAxisSuggestion = WithAxisSuggestionMethod<
+  RetiredInsight,
+  RetiredAxisSuggestionMethod
+>;
+
+export type AxisSuggestion =
+  | ReportedAxisSuggestion
+  | CurrentAxisSuggestionAbstention
+  | RetiredAxisSuggestion;
 
 // LLM narration types (collection-profiling spec, LLM Narration section)
 
@@ -917,8 +967,8 @@ export interface CollectionProfile {
 }
 
 export interface ProfileData {
-  contractVersion: 4;
-  algorithmVersion: 4;
+  contractVersion: 5;
+  algorithmVersion: 5;
   tournamentSettings: TournamentSettings;
   profile: CollectionProfile;
   computedAt: string; // ISO 8601

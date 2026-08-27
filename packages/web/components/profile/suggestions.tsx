@@ -2,54 +2,47 @@
 
 import { useState } from "react";
 import type { AxisSuggestion } from "@shelf-judge/shared";
-
-const sourceLabels: Record<AxisSuggestion["details"]["source"], string> = {
-  "divergence-repair": "Divergence repair opportunity",
-};
-
-const sourceDotClasses: Record<AxisSuggestion["details"]["source"], string> = {
-  "divergence-repair": "repair",
-};
+import { insightReferencesGame, TrustedInsightSection } from "./trusted-insights";
 
 export function Suggestions({
   suggestions: initialSuggestions,
+  gameId,
 }: {
-  suggestions: AxisSuggestion[];
+  suggestions: AxisSuggestion[] | null;
+  gameId?: string;
 }) {
-  const [dismissed, setDismissed] = useState<Set<number>>(new Set());
-
-  const visible = initialSuggestions.filter((_, i) => !dismissed.has(i));
-
-  if (visible.length === 0) return null;
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const relevant =
+    initialSuggestions?.filter(
+      (insight) =>
+        !gameId ||
+        insightReferencesGame(insight, gameId) ||
+        (insight.status !== "reported" && insight.evidence.length === 0),
+    ) ?? initialSuggestions;
+  const visible = relevant?.filter((insight) => !dismissed.has(insight.id)) ?? relevant;
+  if (relevant !== null && relevant.length > 0 && visible?.length === 0) return null;
 
   return (
-    <div className="section-card">
-      <div className="section-header">
-        <span className="section-title-main">Axis Suggestions</span>
-        <span className="section-count">{visible.length}</span>
-      </div>
-      <div className="section-body">
-        {initialSuggestions.map((suggestion, i) => {
-          if (dismissed.has(i)) return null;
-          return (
-            <div key={i} className="suggest-card">
-              <div className={`suggest-type-dot ${sourceDotClasses[suggestion.details.source]}`} />
-              <div className="suggest-text">
-                <div>{suggestion.interpretation}</div>
-                <div className="suggest-meta">
-                  Source: {sourceLabels[suggestion.details.source]}
-                </div>
-              </div>
-              <button
-                className="btn-dismiss"
-                onClick={() => setDismissed((prev) => new Set(prev).add(i))}
-              >
-                Dismiss
-              </button>
-            </div>
-          );
-        })}
-      </div>
-    </div>
+    <TrustedInsightSection
+      title={gameId ? "Questions from Profile Evidence" : "Questions from Your Collection"}
+      insights={visible}
+      compact={gameId !== undefined}
+      questionFramed
+      emptyMessage={
+        gameId
+          ? "No evidence-backed axis questions reference this game."
+          : "The suggestion method completed without finding a notable question."
+      }
+      renderAction={(insight) =>
+        insight.status === "reported" && gameId === undefined ? (
+          <button
+            className="btn-dismiss"
+            onClick={() => setDismissed((previous) => new Set(previous).add(insight.id))}
+          >
+            Dismiss
+          </button>
+        ) : null
+      }
+    />
   );
 }

@@ -2,6 +2,11 @@ import { describe, test, expect } from "bun:test";
 import { profileCommand, profileNarrateCommand } from "../../src/commands/profile.js";
 import { createMockClient } from "../helpers/mock-client.js";
 import type { CollectionProfile } from "@shelf-judge/shared";
+import { CollectionProfileSchema } from "@shelf-judge/shared";
+import {
+  emptyInsightProfileFixture,
+  trustedInsightProfileFixture,
+} from "../../../shared/tests/fixtures/trusted-profile.js";
 
 const sampleProfile: CollectionProfile = {
   axisDistributions: [
@@ -79,6 +84,47 @@ describe("profile", () => {
     expect(parsed.divergence).toBeNull();
     expect(parsed.outliers).toHaveLength(0);
     expect(parsed.suggestions).toHaveLength(0);
+  });
+
+  test("preserves every nested trusted insight state exactly", async () => {
+    const trustedClient = createMockClient({
+      routes: {
+        "GET /api/profile": {
+          response: { ok: true, status: 200, data: trustedInsightProfileFixture },
+        },
+      },
+    });
+
+    const output = await profileCommand(trustedClient, [], { json: false });
+    const parsed: CollectionProfile = CollectionProfileSchema.parse(JSON.parse(output));
+
+    expect(parsed).toEqual(trustedInsightProfileFixture);
+    expect(parsed.divergence?.map(({ status }) => status)).toEqual(["reported", "insufficient"]);
+    expect(parsed.outliers.map(({ status }) => status)).toEqual(["reported", "insufficient"]);
+    expect(parsed.suggestions.map(({ status }) => status)).toEqual([
+      "reported",
+      "insufficient",
+      "suppressed",
+      "retired",
+    ]);
+  });
+
+  test("preserves an explicitly empty insight family", async () => {
+    const emptyClient = createMockClient({
+      routes: {
+        "GET /api/profile": {
+          response: { ok: true, status: 200, data: emptyInsightProfileFixture },
+        },
+      },
+    });
+
+    const output = await profileCommand(emptyClient, [], { json: true });
+    const parsed: CollectionProfile = CollectionProfileSchema.parse(JSON.parse(output));
+    expect(parsed).toEqual(emptyInsightProfileFixture);
+    expect(parsed.divergence).toEqual([]);
+    expect(parsed.outliers).toEqual([]);
+    expect(parsed.suggestions).toEqual([]);
+    expect(parsed.gameCount).toBe(6);
   });
 });
 

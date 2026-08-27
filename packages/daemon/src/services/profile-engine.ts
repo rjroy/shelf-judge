@@ -5,6 +5,7 @@
 import type {
   AxisDistribution,
   AxisSuggestion,
+  ReportedAxisSuggestion,
   AxisWeightEntry,
   AttributeCluster,
   CollectionOutlier,
@@ -24,6 +25,7 @@ import type {
 import {
   DERIVED_AXIS_REGISTRY,
   getAxisNativeScale,
+  getDerivedSuggestionProjections,
   isEnabledScoringAxis,
   summarizeDerivedAxisConfiguration,
 } from "@shelf-judge/shared";
@@ -863,6 +865,196 @@ const SUGGESTION_MIN_GROUP_SIZE = 3;
 const SUGGESTION_MIN_EFFECT = 1.5;
 const SUGGESTION_MIN_DIRECTIONAL_CONSISTENCY = 0.8;
 const SUGGESTION_MAX_ATTRIBUTE_OVERLAP = 0.75;
+const LEGACY_CONCENTRATION_THRESHOLD = 80;
+const LEGACY_VARIANCE_THRESHOLD = 0.5;
+
+const SUGGESTION_METHOD = {
+  id: "directional-divergence-attribute-effect",
+  version: 1,
+  description:
+    "Compares signed Tournament-versus-independent-fitness gaps for games with and without an attribute",
+} as const;
+
+function suggestionCohort(gamesWithBgg: Game[], includedGameCount: number) {
+  return {
+    description:
+      "BGG-backed collection games with sufficient Tournament and independent fitness data",
+    eligibleGameCount: gamesWithBgg.length,
+    includedGameCount,
+    excludedGameCount: gamesWithBgg.length - includedGameCount,
+    coveragePercent:
+      gamesWithBgg.length === 0 ? 0 : (includedGameCount / gamesWithBgg.length) * 100,
+  };
+}
+
+function insufficientSuggestion(
+  gamesWithBgg: Game[],
+  includedGameCount: number,
+  reason: "insufficient-sample" | "insufficient-coverage" | "missing-comparator",
+  requirement: { criterion: string; observed: number; required: number },
+  explanation: string,
+  id = "axis-suggestion:directional-divergence-attribute-effect",
+): AxisSuggestion {
+  return {
+    contractVersion: 1,
+    id,
+    status: "insufficient",
+    reason,
+    method: SUGGESTION_METHOD,
+    cohort: suggestionCohort(gamesWithBgg, includedGameCount),
+    sufficiency: [{ ...requirement, met: false }],
+    evidence: [],
+    comparator: null,
+    limitations: [
+      "Tournament preference reflects only the opponents compared so far",
+      "BGG attributes are observational labels, not causal preference measures",
+    ],
+    explanation,
+  };
+}
+
+function suppressedSuggestion(
+  gamesWithBgg: Game[],
+  includedGameCount: number,
+  id: string,
+  explanation: string,
+): AxisSuggestion {
+  return {
+    contractVersion: 1,
+    id,
+    status: "suppressed",
+    reason: "unsupported-method",
+    method: SUGGESTION_METHOD,
+    cohort: suggestionCohort(gamesWithBgg, includedGameCount),
+    sufficiency: [],
+    evidence: [],
+    comparator: null,
+    limitations: ["Overlapping attributes prevent an independent effect interpretation"],
+    explanation,
+  };
+}
+
+function retiredLegacySuggestions(games: Game[], axes: EnabledAxis[]): AxisSuggestion[] {
+  const gamesWithBgg = games.filter((game) => game.bggData !== null);
+  const axisCovers = (term: string): boolean => {
+    const lower = term.toLowerCase();
+    return axes.some(
+      (axis) =>
+        axis.name.toLowerCase().includes(lower) ||
+        (axis.description?.toLowerCase().includes(lower) ?? false),
+    );
+  };
+  const retired: AxisSuggestion[] = [];
+  const attributeCounts = new Map<string, number>();
+  for (const game of gamesWithBgg) {
+    for (const attribute of new Set(suggestionAttributes(game).map(({ name }) => name))) {
+      attributeCounts.set(attribute, (attributeCounts.get(attribute) ?? 0) + 1);
+    }
+  }
+  const concentrated = [...attributeCounts]
+    .map(([attribute, count]) => ({
+      attribute,
+      percentage: gamesWithBgg.length === 0 ? 0 : (count / gamesWithBgg.length) * 100,
+    }))
+    .filter(
+      ({ attribute, percentage }) =>
+        percentage >= LEGACY_CONCENTRATION_THRESHOLD && !axisCovers(attribute),
+    )
+    .sort(
+      (left, right) =>
+        right.percentage - left.percentage || left.attribute.localeCompare(right.attribute),
+    )[0];
+  if (concentrated !== undefined) {
+    retired.push({
+      contractVersion: 1,
+      id: "axis-suggestion:retired:unexpressed-concentration",
+      status: "retired",
+      reason: "superseded",
+      method: {
+        id: "unexpressed-concentration",
+        version: 1,
+        description: "Recommended axes from common BGG attributes without preference evidence",
+      },
+      cohort: {
+        description: "Collection games with BGG mechanics or categories",
+        eligibleGameCount: games.length,
+        includedGameCount: gamesWithBgg.length,
+        excludedGameCount: games.length - gamesWithBgg.length,
+        coveragePercent: games.length === 0 ? 0 : (gamesWithBgg.length / games.length) * 100,
+      },
+      sufficiency: [
+        {
+          criterion: "collection attribute concentration percent",
+          observed: concentrated.percentage,
+          required: LEGACY_CONCENTRATION_THRESHOLD,
+          met: true,
+        },
+      ],
+      evidence: [],
+      comparator: null,
+      limitations: ["Collection concentration does not establish preference for an attribute"],
+      explanation:
+        "The concentration recommendation method is retired because ownership frequency alone does not support a preference axis",
+    });
+  }
+
+  const enabledDerivedCoverage = new Set(
+    axes.flatMap((axis) => (axis.source === "derived" ? [axis.derivedField] : [])),
+  );
+  const variable = getDerivedSuggestionProjections()
+    .flatMap((projection) => {
+      if (enabledDerivedCoverage.has(projection.derivedField)) return [];
+      const values = games
+        .map((game) => projection.projectValue(game))
+        .filter((value): value is number => value !== null && Number.isFinite(value));
+      if (values.length < 2) return [];
+      const average = mean(values);
+      if (average === 0) return [];
+      const variance = mean(values.map((value) => (value - average) ** 2));
+      const coefficient = Math.sqrt(variance) / Math.abs(average);
+      return coefficient > LEGACY_VARIANCE_THRESHOLD
+        ? [{ attribute: projection.attribute, coefficient, includedGameCount: values.length }]
+        : [];
+    })
+    .sort(
+      (left, right) =>
+        right.coefficient - left.coefficient || left.attribute.localeCompare(right.attribute),
+    )[0];
+  if (variable !== undefined) {
+    retired.push({
+      contractVersion: 1,
+      id: "axis-suggestion:retired:high-variance",
+      status: "retired",
+      reason: "superseded",
+      method: {
+        id: "high-variance",
+        version: 1,
+        description: "Recommended axes from varied factual metadata without preference evidence",
+      },
+      cohort: {
+        description: "Collection games with values for the most variable uncovered BGG field",
+        eligibleGameCount: games.length,
+        includedGameCount: variable.includedGameCount,
+        excludedGameCount: games.length - variable.includedGameCount,
+        coveragePercent: games.length === 0 ? 0 : (variable.includedGameCount / games.length) * 100,
+      },
+      sufficiency: [
+        {
+          criterion: "coefficient of variation",
+          observed: variable.coefficient,
+          required: LEGACY_VARIANCE_THRESHOLD,
+          met: true,
+        },
+      ],
+      evidence: [],
+      comparator: null,
+      limitations: ["Factual variance does not establish that the dimension affects preference"],
+      explanation:
+        "The variance recommendation method is retired because spread alone does not support a preference axis",
+    });
+  }
+  return retired;
+}
 
 /** Generate axis suggestions only when a BGG attribute predicts an independent preference gap. */
 export function generateSuggestions(
@@ -874,7 +1066,31 @@ export function generateSuggestions(
   comparisonThreshold = 6,
 ): AxisSuggestion[] {
   const gamesWithBgg = games.filter((g) => g.bggData !== null);
-  if (tournamentStats === null || divergence === null || gamesWithBgg.length === 0) return [];
+  const retired = retiredLegacySuggestions(games, axes);
+  if (gamesWithBgg.length === 0) {
+    return [
+      ...retired,
+      insufficientSuggestion(
+        gamesWithBgg,
+        0,
+        "insufficient-coverage",
+        { criterion: "games with BGG attributes", observed: 0, required: 1 },
+        "At least one game with BGG attributes is required to evaluate axis suggestions",
+      ),
+    ];
+  }
+  if (tournamentStats === null || divergence === null) {
+    return [
+      ...retired,
+      insufficientSuggestion(
+        gamesWithBgg,
+        0,
+        "insufficient-coverage",
+        { criterion: "Tournament preference results available", observed: 0, required: 1 },
+        "Tournament preference results are required to evaluate evidence-backed axis suggestions",
+      ),
+    ];
+  }
 
   const axisCovers = (term: string): boolean => {
     const lower = term.toLowerCase();
@@ -914,6 +1130,23 @@ export function generateSuggestions(
     ];
   });
 
+  if (outcomes.length < SUGGESTION_MIN_GROUP_SIZE * 2) {
+    return [
+      ...retired,
+      insufficientSuggestion(
+        gamesWithBgg,
+        outcomes.length,
+        "insufficient-sample",
+        {
+          criterion: "evaluated games for positive and comparator groups",
+          observed: outcomes.length,
+          required: SUGGESTION_MIN_GROUP_SIZE * 2,
+        },
+        `At least ${SUGGESTION_MIN_GROUP_SIZE * 2} evaluated games are required before testing axis suggestions`,
+      ),
+    ];
+  }
+
   const candidateSupport = new Map<
     string,
     { attribute: SuggestionAttribute; gameIds: Set<string> }
@@ -930,12 +1163,27 @@ export function generateSuggestions(
     }
   }
 
-  const suggestions: AxisSuggestion[] = [];
+  const suggestions: ReportedAxisSuggestion[] = [];
+  const abstained: AxisSuggestion[] = [];
   for (const [key, candidate] of candidateSupport) {
-    if (
-      candidate.gameIds.size < SUGGESTION_MIN_GROUP_SIZE ||
-      axisCovers(candidate.attribute.name)
-    ) {
+    if (axisCovers(candidate.attribute.name)) {
+      continue;
+    }
+    if (candidate.gameIds.size < SUGGESTION_MIN_GROUP_SIZE) {
+      abstained.push(
+        insufficientSuggestion(
+          gamesWithBgg,
+          outcomes.length,
+          "insufficient-sample",
+          {
+            criterion: `same-direction divergent games with ${candidate.attribute.name}`,
+            observed: candidate.gameIds.size,
+            required: SUGGESTION_MIN_GROUP_SIZE,
+          },
+          `At least ${SUGGESTION_MIN_GROUP_SIZE} same-direction divergent games are required to evaluate ${candidate.attribute.name}`,
+          `axis-suggestion:${key}`,
+        ),
+      );
       continue;
     }
     const direction = key.startsWith("tournament-outlier:")
@@ -950,7 +1198,17 @@ export function generateSuggestions(
         membershipOverlap(membership, suggestionMembership(outcomes, other.attribute)) >=
           SUGGESTION_MAX_ATTRIBUTE_OVERLAP,
     );
-    if (confoundedCandidate) continue;
+    if (confoundedCandidate) {
+      abstained.push(
+        suppressedSuggestion(
+          gamesWithBgg,
+          outcomes.length,
+          `axis-suggestion:${key}`,
+          `${candidate.attribute.name} is suppressed because another candidate has nearly identical collection membership`,
+        ),
+      );
+      continue;
+    }
     const supporting = outcomes.filter(({ game }) =>
       hasSuggestionAttribute(game, candidate.attribute),
     );
@@ -961,11 +1219,39 @@ export function generateSuggestions(
       supporting.length < SUGGESTION_MIN_GROUP_SIZE ||
       comparators.length < SUGGESTION_MIN_GROUP_SIZE
     ) {
+      const comparatorMissing = comparators.length === 0;
+      abstained.push(
+        insufficientSuggestion(
+          gamesWithBgg,
+          outcomes.length,
+          comparatorMissing ? "missing-comparator" : "insufficient-sample",
+          {
+            criterion: comparatorMissing
+              ? `evaluated games without ${candidate.attribute.name}`
+              : "evaluated games in both attribute groups",
+            observed: comparatorMissing ? 0 : Math.min(supporting.length, comparators.length),
+            required: SUGGESTION_MIN_GROUP_SIZE,
+          },
+          comparatorMissing
+            ? `No evaluated comparison games without ${candidate.attribute.name} are available`
+            : `At least ${SUGGESTION_MIN_GROUP_SIZE} evaluated games are required in both ${candidate.attribute.name} groups`,
+          `axis-suggestion:${key}`,
+        ),
+      );
       continue;
     }
 
     const supportingMeanGap = mean(supporting.map(({ signedGap }) => signedGap));
     const comparatorMeanGap = mean(comparators.map(({ signedGap }) => signedGap));
+    const directionalMean =
+      direction === "tournament-outlier" ? supportingMeanGap : -supportingMeanGap;
+    const effect =
+      direction === "tournament-outlier"
+        ? supportingMeanGap - comparatorMeanGap
+        : comparatorMeanGap - supportingMeanGap;
+    const roundedSupportingMean = roundToTenth(supportingMeanGap);
+    const roundedComparatorMean = roundToTenth(comparatorMeanGap);
+    const roundedEffect = roundToTenth(effect);
     const directionallyConsistentCount = supporting.filter(({ signedGap }) =>
       direction === "tournament-outlier" ? signedGap > 0 : signedGap < 0,
     ).length;
@@ -975,24 +1261,15 @@ export function generateSuggestions(
         ? signedGap < -SUGGESTION_MIN_EFFECT
         : signedGap > SUGGESTION_MIN_EFFECT,
     );
-    const directionalMean =
-      direction === "tournament-outlier" ? supportingMeanGap : -supportingMeanGap;
-    const effect =
-      direction === "tournament-outlier"
-        ? supportingMeanGap - comparatorMeanGap
-        : comparatorMeanGap - supportingMeanGap;
     if (
       hasOppositeDivergence ||
       directionalConsistency < SUGGESTION_MIN_DIRECTIONAL_CONSISTENCY ||
       directionalMean < SUGGESTION_MIN_EFFECT ||
-      effect < SUGGESTION_MIN_EFFECT
+      roundedEffect <= SUGGESTION_MIN_EFFECT
     ) {
       continue;
     }
 
-    const roundedSupportingMean = roundToTenth(supportingMeanGap);
-    const roundedComparatorMean = roundToTenth(comparatorMeanGap);
-    const roundedEffect = roundToTenth(effect);
     const evidenceGames: ReportedInsightEvidenceGame[] = [...supporting, ...comparators].map(
       (outcome) => ({
         gameId: outcome.game.id,
@@ -1018,9 +1295,9 @@ export function generateSuggestions(
     );
     const firstEvidence = evidenceGames[0];
     if (firstEvidence === undefined) continue;
-    const evidence: AxisSuggestion["evidence"] = [firstEvidence, ...evidenceGames.slice(1)];
+    const evidence: ReportedAxisSuggestion["evidence"] = [firstEvidence, ...evidenceGames.slice(1)];
     const directionLabel = direction === "tournament-outlier" ? "higher" : "lower";
-    const sufficiency: AxisSuggestion["sufficiency"] = [
+    const sufficiency: ReportedAxisSuggestion["sufficiency"] = [
       {
         criterion: `same-direction divergent games with ${candidate.attribute.name}`,
         observed: candidate.gameIds.size,
@@ -1063,20 +1340,8 @@ export function generateSuggestions(
       contractVersion: 1,
       id: `axis-suggestion:${direction}:${candidate.attribute.type}:${candidate.attribute.name}`,
       status: "reported",
-      method: {
-        id: "directional-divergence-attribute-effect",
-        version: 1,
-        description:
-          "Compares signed Tournament-versus-independent-fitness gaps for games with and without an attribute",
-      },
-      cohort: {
-        description:
-          "BGG-backed collection games with sufficient Tournament and independent fitness data",
-        eligibleGameCount: gamesWithBgg.length,
-        includedGameCount: outcomes.length,
-        excludedGameCount: gamesWithBgg.length - outcomes.length,
-        coveragePercent: (outcomes.length / gamesWithBgg.length) * 100,
-      },
+      method: SUGGESTION_METHOD,
+      cohort: suggestionCohort(gamesWithBgg, outcomes.length),
       sufficiency,
       evidence,
       comparator: {
@@ -1111,7 +1376,14 @@ export function generateSuggestions(
     });
   }
 
-  return suggestions.sort((a, b) => b.details.effect - a.details.effect);
+  return [
+    ...retired,
+    ...abstained.sort((left, right) => left.id.localeCompare(right.id)),
+    ...suggestions.sort(
+      (left, right) =>
+        right.details.effect - left.details.effect || left.id.localeCompare(right.id),
+    ),
+  ];
 }
 
 function suggestionAttributes(game: Game): SuggestionAttribute[] {

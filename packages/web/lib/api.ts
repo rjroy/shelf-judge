@@ -176,14 +176,27 @@ export async function importBggCollection(username: string): Promise<Response> {
 
 // Profile API functions
 
+import { CollectionProfileSchema } from "@shelf-judge/shared";
 import type { CollectionProfile } from "@shelf-judge/shared";
 
-export async function getProfile(): Promise<CollectionProfile> {
-  return daemonJson("/api/profile");
+function parseCollectionProfileResponse(response: unknown): CollectionProfile {
+  const parsed = CollectionProfileSchema.safeParse(response);
+  if (!parsed.success) {
+    throw new Error(`Invalid profile response: ${parsed.error.message}`);
+  }
+  return parsed.data;
 }
 
-export async function generateNarration(): Promise<CollectionProfile> {
-  return daemonJson("/api/profile/narrate", { method: "POST" });
+export async function getProfile(
+  load: () => Promise<unknown> = () => daemonJson("/api/profile"),
+): Promise<CollectionProfile> {
+  return parseCollectionProfileResponse(await load());
+}
+
+export async function generateNarration(
+  load: () => Promise<unknown> = () => daemonJson("/api/profile/narrate", { method: "POST" }),
+): Promise<CollectionProfile> {
+  return parseCollectionProfileResponse(await load());
 }
 
 // Tournament API functions
