@@ -27,8 +27,8 @@ import type {
 } from "./types";
 
 export const CURRENT_COLLECTION_SCHEMA_VERSION = 3 as const;
-export const CURRENT_PROFILE_CONTRACT_VERSION = 2 as const;
-export const CURRENT_PROFILE_ALGORITHM_VERSION = 2 as const;
+export const CURRENT_PROFILE_CONTRACT_VERSION = 3 as const;
+export const CURRENT_PROFILE_ALGORITHM_VERSION = 3 as const;
 
 const AmountInputSchema = z.string().superRefine((value, context) => {
   try {
@@ -979,18 +979,93 @@ const CollectionOutlierSchema = z
 
 const AxisSuggestionSchema = z
   .object({
-    source: z.enum(["unexpressed-concentration", "high-variance", "divergence-repair"]),
-    attribute: z.string().min(1),
-    reason: z.string().min(1),
+    ...InsightBaseFields,
+    comparator: z
+      .object({ description: z.string().min(1), gameIds: z.array(z.string().min(1)).nonempty() })
+      .strict(),
+    status: z.literal("reported"),
+    sufficiency: z.array(SatisfiedInsightSufficiencySchema).nonempty(),
     evidence: z
+      .array(
+        InsightEvidenceGameSchema.extend({
+          measurements: z.array(InsightMeasurementSchema).nonempty(),
+        }),
+      )
+      .nonempty(),
+    observation: z.string().min(1),
+    interpretation: z.string().nullable(),
+    details: z
       .object({
-        gameCount: NonNegativeIntegerSchema.optional(),
-        percentage: PercentageSchema.optional(),
-        variance: FiniteNumberSchema.min(0).optional(),
+        source: z.literal("divergence-repair"),
+        attribute: z.string().min(1),
+        attributeType: z.enum(["mechanic", "category"]),
+        direction: z.enum(["tournament-outlier", "fitness-outlier"]),
+        supportingGameCount: NonNegativeIntegerSchema.min(3),
+        comparatorGameCount: NonNegativeIntegerSchema.min(3),
+        supportingMeanGap: FiniteNumberSchema,
+        comparatorMeanGap: FiniteNumberSchema,
+        effect: FiniteNumberSchema.min(1.5),
       })
       .strict(),
+    notability: z
+      .object({
+        metric: z.string().min(1),
+        value: FiniteNumberSchema,
+        threshold: FiniteNumberSchema.nullable(),
+        direction: z.enum(["above", "below", "two-sided"]),
+        explanation: z.string().min(1),
+      })
+      .strict(),
+    confidence: z.null(),
   })
-  .strict();
+  .strict()
+  .superRefine((suggestion, context) => {
+    const supportingIds = new Set(
+      suggestion.evidence
+        .filter(({ role }) => role === "subject" || role === "supporting")
+        .map(({ gameId }) => gameId),
+    );
+    const comparatorIds = new Set(
+      suggestion.evidence.filter(({ role }) => role === "comparator").map(({ gameId }) => gameId),
+    );
+    const declaredComparatorIds = new Set(suggestion.comparator.gameIds);
+    const addContractIssue = (path: (string | number)[], message: string) =>
+      context.addIssue({ code: z.ZodIssueCode.custom, path, message });
+
+    if (supportingIds.size !== suggestion.details.supportingGameCount) {
+      addContractIssue(
+        ["details", "supportingGameCount"],
+        "Supporting game count must match distinct positive evidence games",
+      );
+    }
+    if (comparatorIds.size !== suggestion.details.comparatorGameCount) {
+      addContractIssue(
+        ["details", "comparatorGameCount"],
+        "Comparator game count must match distinct comparator evidence games",
+      );
+    }
+    if (
+      comparatorIds.size !== declaredComparatorIds.size ||
+      [...comparatorIds].some((gameId) => !declaredComparatorIds.has(gameId))
+    ) {
+      addContractIssue(
+        ["comparator", "gameIds"],
+        "Comparator game IDs must match comparator evidence games",
+      );
+    }
+    if ([...supportingIds].some((gameId) => comparatorIds.has(gameId))) {
+      addContractIssue(
+        ["evidence"],
+        "Positive and comparator evidence must contain disjoint game IDs",
+      );
+    }
+    if (suggestion.notability.value !== suggestion.details.effect) {
+      addContractIssue(
+        ["notability", "value"],
+        "Suggestion notability must report the measured effect",
+      );
+    }
+  });
 
 export const CollectionProfileSchema = z
   .object({

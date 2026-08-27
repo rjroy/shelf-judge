@@ -840,12 +840,25 @@ export interface CollectionOutlier {
   fitnessScore: number | null;
 }
 
-export interface AxisSuggestion {
-  source: "unexpressed-concentration" | "high-variance" | "divergence-repair";
-  attribute: string; // mechanic name, category name, or BGG field
-  reason: string; // human-readable explanation
-  evidence: { gameCount?: number; percentage?: number; variance?: number };
+export interface AxisSuggestionDetails {
+  source: "divergence-repair";
+  attribute: string;
+  attributeType: "mechanic" | "category";
+  direction: "tournament-outlier" | "fitness-outlier";
+  supportingGameCount: number;
+  comparatorGameCount: number;
+  supportingMeanGap: number;
+  comparatorMeanGap: number;
+  effect: number;
 }
+
+export type AxisSuggestion = Omit<
+  ReportedInsight<AxisSuggestionDetails>,
+  "comparator" | "confidence"
+> & {
+  comparator: InsightComparator;
+  confidence: null;
+};
 
 // LLM narration types (collection-profiling spec, LLM Narration section)
 
@@ -881,8 +894,8 @@ export interface CollectionProfile {
 }
 
 export interface ProfileData {
-  contractVersion: 2;
-  algorithmVersion: 2;
+  contractVersion: 3;
+  algorithmVersion: 3;
   tournamentSettings: TournamentSettings;
   profile: CollectionProfile;
   computedAt: string; // ISO 8601

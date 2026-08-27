@@ -3,15 +3,11 @@
 import { useState } from "react";
 import type { AxisSuggestion } from "@shelf-judge/shared";
 
-const sourceLabels: Record<AxisSuggestion["source"], string> = {
-  "unexpressed-concentration": "Unexpressed collection concentration",
-  "high-variance": "High-variance BGG attribute",
+const sourceLabels: Record<AxisSuggestion["details"]["source"], string> = {
   "divergence-repair": "Divergence repair opportunity",
 };
 
-const sourceDotClasses: Record<AxisSuggestion["source"], string> = {
-  "unexpressed-concentration": "concentration",
-  "high-variance": "variance",
+const sourceDotClasses: Record<AxisSuggestion["details"]["source"], string> = {
   "divergence-repair": "repair",
 };
 
@@ -37,10 +33,12 @@ export function Suggestions({
           if (dismissed.has(i)) return null;
           return (
             <div key={i} className="suggest-card">
-              <div className={`suggest-type-dot ${sourceDotClasses[suggestion.source]}`} />
+              <div className={`suggest-type-dot ${sourceDotClasses[suggestion.details.source]}`} />
               <div className="suggest-text">
-                <div>{suggestion.reason}</div>
-                <div className="suggest-meta">Source: {sourceLabels[suggestion.source]}</div>
+                <div>{suggestion.interpretation}</div>
+                <div className="suggest-meta">
+                  Source: {sourceLabels[suggestion.details.source]}
+                </div>
               </div>
               <button
                 className="btn-dismiss"

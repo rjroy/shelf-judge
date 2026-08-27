@@ -120,6 +120,7 @@ export type {
   ComponentDistances,
   OutlierClassification,
   CollectionOutlier,
+  AxisSuggestionDetails,
   AxisSuggestion,
   ProfileNarration,
   NarrationCacheState,

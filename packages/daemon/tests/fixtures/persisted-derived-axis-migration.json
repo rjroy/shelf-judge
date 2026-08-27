@@ -84,8 +84,8 @@
     "updatedAt": "2025-01-01T00:00:00.000Z"
   },
   "profile": {
-    "contractVersion": 2,
-    "algorithmVersion": 2,
+    "contractVersion": 3,
+    "algorithmVersion": 3,
     "tournamentSettings": {
       "kFactorThreshold": 15,
       "normalizationHalfWidth": 400,

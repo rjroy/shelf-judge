@@ -23,7 +23,6 @@ import type {
 import {
   DERIVED_AXIS_REGISTRY,
   getAxisNativeScale,
-  getDerivedSuggestionProjections,
   isEnabledScoringAxis,
   summarizeDerivedAxisConfiguration,
 } from "@shelf-judge/shared";
@@ -78,7 +77,14 @@ export function computeProfile(
         )
       : null;
   const outliers = detectOutliers(games, axes, fitnessResults, tournamentStats);
-  const suggestions = generateSuggestions(games, enabledAxes, divergence);
+  const suggestions = generateSuggestions(
+    games,
+    enabledAxes,
+    fitnessResults,
+    tournamentStats,
+    divergence,
+    input.tournamentComparisonThreshold,
+  );
 
   const userRatingAxisIds = new Set(
     enabledAxes.flatMap((axis) => (axis.source === "tournament" ? [] : [axis.id])),
@@ -616,22 +622,36 @@ export function detectOutliers(
   return outliers;
 }
 
-/**
- * Generate axis suggestions from three sources:
- * 1. Unexpressed concentration (80%+ mechanic/category without matching axis)
- * 2. High-variance BGG attributes (CV > 0.5 without matching axis)
- * 3. Tournament divergence repair (shared attributes across divergent games)
- */
+type SuggestionAttribute = {
+  type: "mechanic" | "category";
+  name: string;
+};
+
+type PreferenceOutcome = {
+  game: Game;
+  independentScore: number;
+  tournamentScore: number;
+  comparisonCount: number;
+  signedGap: number;
+};
+
+const SUGGESTION_MIN_GROUP_SIZE = 3;
+const SUGGESTION_MIN_EFFECT = 1.5;
+const SUGGESTION_MIN_DIRECTIONAL_CONSISTENCY = 0.8;
+const SUGGESTION_MAX_ATTRIBUTE_OVERLAP = 0.75;
+
+/** Generate axis suggestions only when a BGG attribute predicts an independent preference gap. */
 export function generateSuggestions(
   games: Game[],
   axes: EnabledAxis[],
+  fitnessResults: ReadonlyMap<string, FitnessResult>,
+  tournamentStats: ReadonlyMap<string, TournamentGameStatsDisplay> | null,
   divergence: TournamentDivergenceInsight[] | null,
+  comparisonThreshold = 6,
 ): AxisSuggestion[] {
-  const suggestions: AxisSuggestion[] = [];
   const gamesWithBgg = games.filter((g) => g.bggData !== null);
-  const totalWithBgg = gamesWithBgg.length;
+  if (tournamentStats === null || divergence === null || gamesWithBgg.length === 0) return [];
 
-  // Helper: check if any axis name or description references a term (case-insensitive substring)
   const axisCovers = (term: string): boolean => {
     const lower = term.toLowerCase();
     return axes.some(
@@ -641,89 +661,276 @@ export function generateSuggestions(
     );
   };
 
-  // 1. Unexpressed concentration (requires BGG data)
-  if (totalWithBgg > 0) {
-    const attrCounts = new Map<string, number>();
-    for (const game of gamesWithBgg) {
-      for (const m of game.bggData!.mechanics)
-        attrCounts.set(m.name, (attrCounts.get(m.name) ?? 0) + 1);
-      for (const c of game.bggData!.categories)
-        attrCounts.set(c.name, (attrCounts.get(c.name) ?? 0) + 1);
-    }
-
-    for (const [name, count] of attrCounts) {
-      const pct = (count / totalWithBgg) * 100;
-      if (pct >= 80 && !axisCovers(name)) {
-        suggestions.push({
-          source: "unexpressed-concentration",
-          attribute: name,
-          reason: `${name} appears in ${pct.toFixed(0)}% of your collection but no axis captures it`,
-          evidence: { gameCount: count, percentage: pct },
-        });
-      }
-    }
-  }
-
-  // 2. High-variance derived attributes
-  const enabledDerivedCoverage = new Set(
-    axes.flatMap((axis) => (axis.source === "derived" ? [axis.derivedField] : [])),
+  const gameById = new Map(gamesWithBgg.map((game) => [game.id, game]));
+  const tournamentAxisIds = new Set(
+    axes.flatMap((axis) => (axis.source === "tournament" ? [axis.id] : [])),
   );
-  for (const projection of getDerivedSuggestionProjections()) {
-    const values: number[] = [];
-    for (const game of games) {
-      const v = projection.projectValue(game);
-      if (v !== null) values.push(v);
+  const outcomes = gamesWithBgg.flatMap((game): PreferenceOutcome[] => {
+    const fitness = fitnessResults.get(game.id);
+    const stats = tournamentStats.get(game.id);
+    if (
+      fitness === undefined ||
+      stats === undefined ||
+      stats.normalizedScore === null ||
+      stats.isProvisional ||
+      stats.comparisonCount < comparisonThreshold
+    ) {
+      return [];
     }
-    if (values.length < 2) continue;
+    const independentScore = independentFitnessScore(fitness, tournamentAxisIds, axes);
+    if (independentScore === null) return [];
+    return [
+      {
+        game,
+        independentScore,
+        tournamentScore: stats.normalizedScore,
+        comparisonCount: stats.comparisonCount,
+        signedGap: stats.normalizedScore - independentScore,
+      },
+    ];
+  });
 
-    const mean = values.reduce((a, b) => a + b, 0) / values.length;
-    if (mean === 0) continue;
-
-    const variance = values.reduce((acc, v) => acc + (v - mean) * (v - mean), 0) / values.length;
-    const stddev = Math.sqrt(variance);
-    const cv = stddev / mean;
-
-    if (cv > 0.5) {
-      if (!enabledDerivedCoverage.has(projection.derivedField)) {
-        suggestions.push({
-          source: "high-variance",
-          attribute: projection.attribute,
-          reason: `Your collection has high variance in ${projection.attribute} (CV=${cv.toFixed(2)}) but no axis tracks it`,
-          evidence: { variance: cv },
-        });
-      }
+  const candidateSupport = new Map<
+    string,
+    { attribute: SuggestionAttribute; gameIds: Set<string> }
+  >();
+  for (const insight of divergence) {
+    if (insight.status !== "reported") continue;
+    const game = gameById.get(insight.details.gameId);
+    if (game === undefined) continue;
+    for (const attribute of suggestionAttributes(game)) {
+      const key = `${insight.details.direction}:${attribute.type}:${attribute.name}`;
+      const candidate = candidateSupport.get(key) ?? { attribute, gameIds: new Set<string>() };
+      candidate.gameIds.add(game.id);
+      candidateSupport.set(key, candidate);
     }
   }
 
-  // 3. Divergence repair
-  const divergentGames = divergence?.flatMap((insight) =>
-    insight.status === "reported" ? [insight.details] : [],
+  const suggestions: AxisSuggestion[] = [];
+  for (const [key, candidate] of candidateSupport) {
+    if (
+      candidate.gameIds.size < SUGGESTION_MIN_GROUP_SIZE ||
+      axisCovers(candidate.attribute.name)
+    ) {
+      continue;
+    }
+    const direction = key.startsWith("tournament-outlier:")
+      ? "tournament-outlier"
+      : "fitness-outlier";
+    const membership = suggestionMembership(outcomes, candidate.attribute);
+    const confoundedCandidate = [...candidateSupport.entries()].some(
+      ([otherKey, other]) =>
+        otherKey !== key &&
+        otherKey.startsWith(`${direction}:`) &&
+        other.gameIds.size >= SUGGESTION_MIN_GROUP_SIZE &&
+        membershipOverlap(membership, suggestionMembership(outcomes, other.attribute)) >=
+          SUGGESTION_MAX_ATTRIBUTE_OVERLAP,
+    );
+    if (confoundedCandidate) continue;
+    const supporting = outcomes.filter(({ game }) =>
+      hasSuggestionAttribute(game, candidate.attribute),
+    );
+    const comparators = outcomes.filter(
+      ({ game }) => !hasSuggestionAttribute(game, candidate.attribute),
+    );
+    if (
+      supporting.length < SUGGESTION_MIN_GROUP_SIZE ||
+      comparators.length < SUGGESTION_MIN_GROUP_SIZE
+    ) {
+      continue;
+    }
+
+    const supportingMeanGap = mean(supporting.map(({ signedGap }) => signedGap));
+    const comparatorMeanGap = mean(comparators.map(({ signedGap }) => signedGap));
+    const directionallyConsistentCount = supporting.filter(({ signedGap }) =>
+      direction === "tournament-outlier" ? signedGap > 0 : signedGap < 0,
+    ).length;
+    const directionalConsistency = directionallyConsistentCount / supporting.length;
+    const hasOppositeDivergence = supporting.some(({ signedGap }) =>
+      direction === "tournament-outlier"
+        ? signedGap < -SUGGESTION_MIN_EFFECT
+        : signedGap > SUGGESTION_MIN_EFFECT,
+    );
+    const directionalMean =
+      direction === "tournament-outlier" ? supportingMeanGap : -supportingMeanGap;
+    const effect =
+      direction === "tournament-outlier"
+        ? supportingMeanGap - comparatorMeanGap
+        : comparatorMeanGap - supportingMeanGap;
+    if (
+      hasOppositeDivergence ||
+      directionalConsistency < SUGGESTION_MIN_DIRECTIONAL_CONSISTENCY ||
+      directionalMean < SUGGESTION_MIN_EFFECT ||
+      effect < SUGGESTION_MIN_EFFECT
+    ) {
+      continue;
+    }
+
+    const roundedSupportingMean = roundToTenth(supportingMeanGap);
+    const roundedComparatorMean = roundToTenth(comparatorMeanGap);
+    const roundedEffect = roundToTenth(effect);
+    const evidenceGames: ReportedInsightEvidenceGame[] = [...supporting, ...comparators].map(
+      (outcome) => ({
+        gameId: outcome.game.id,
+        gameName: outcome.game.name,
+        role: hasSuggestionAttribute(outcome.game, candidate.attribute) ? "subject" : "comparator",
+        measurements: [
+          {
+            key: "signed-preference-gap",
+            label: "Tournament minus independent fitness",
+            value: roundToTenth(outcome.signedGap),
+            unit: "rating",
+            source: "Tournament comparisons and non-Tournament fitness axes",
+          },
+          {
+            key: "comparison-count",
+            label: "Tournament comparisons",
+            value: outcome.comparisonCount,
+            unit: "comparisons",
+            source: "Tournament comparisons",
+          },
+        ],
+      }),
+    );
+    const firstEvidence = evidenceGames[0];
+    if (firstEvidence === undefined) continue;
+    const evidence: AxisSuggestion["evidence"] = [firstEvidence, ...evidenceGames.slice(1)];
+    const directionLabel = direction === "tournament-outlier" ? "higher" : "lower";
+    const sufficiency: AxisSuggestion["sufficiency"] = [
+      {
+        criterion: `same-direction divergent games with ${candidate.attribute.name}`,
+        observed: candidate.gameIds.size,
+        required: SUGGESTION_MIN_GROUP_SIZE,
+        met: true as const,
+      },
+      {
+        criterion: "attribute-positive evaluated games",
+        observed: supporting.length,
+        required: SUGGESTION_MIN_GROUP_SIZE,
+        met: true as const,
+      },
+      {
+        criterion: "attribute-negative comparator games",
+        observed: comparators.length,
+        required: SUGGESTION_MIN_GROUP_SIZE,
+        met: true as const,
+      },
+      {
+        criterion: "attribute-positive directional consistency",
+        observed: roundToTenth(directionalConsistency * 100),
+        required: SUGGESTION_MIN_DIRECTIONAL_CONSISTENCY * 100,
+        met: true as const,
+      },
+      {
+        criterion: "directional mean gap",
+        observed: roundToTenth(directionalMean),
+        required: SUGGESTION_MIN_EFFECT,
+        met: true as const,
+      },
+      {
+        criterion: "difference from attribute-negative games",
+        observed: roundedEffect,
+        required: SUGGESTION_MIN_EFFECT,
+        met: true as const,
+      },
+    ];
+
+    suggestions.push({
+      contractVersion: 1,
+      id: `axis-suggestion:${direction}:${candidate.attribute.type}:${candidate.attribute.name}`,
+      status: "reported",
+      method: {
+        id: "directional-divergence-attribute-effect",
+        version: 1,
+        description:
+          "Compares signed Tournament-versus-independent-fitness gaps for games with and without an attribute",
+      },
+      cohort: {
+        description:
+          "BGG-backed collection games with sufficient Tournament and independent fitness data",
+        eligibleGameCount: gamesWithBgg.length,
+        includedGameCount: outcomes.length,
+        excludedGameCount: gamesWithBgg.length - outcomes.length,
+        coveragePercent: (outcomes.length / gamesWithBgg.length) * 100,
+      },
+      sufficiency,
+      evidence,
+      comparator: {
+        description: `Evaluated games without ${candidate.attribute.name}`,
+        gameIds: comparators.map(({ game }) => game.id),
+      },
+      limitations: [
+        "This observational association does not prove that the attribute causes preference",
+        "Tournament preference reflects only the opponents compared so far",
+      ],
+      observation: `${candidate.attribute.name} games average a ${roundedSupportingMean.toFixed(1)} signed preference gap versus ${roundedComparatorMean.toFixed(1)} without it`,
+      interpretation: `Could ${candidate.attribute.name} explain why Tournament preference is ${directionLabel} than the configured axes predict?`,
+      details: {
+        source: "divergence-repair",
+        attribute: candidate.attribute.name,
+        attributeType: candidate.attribute.type,
+        direction,
+        supportingGameCount: supporting.length,
+        comparatorGameCount: comparators.length,
+        supportingMeanGap: roundedSupportingMean,
+        comparatorMeanGap: roundedComparatorMean,
+        effect: roundedEffect,
+      },
+      notability: {
+        metric: "directional signed-gap effect",
+        value: roundedEffect,
+        threshold: SUGGESTION_MIN_EFFECT,
+        direction: "above",
+        explanation: `The directional gap differs from attribute-negative games by at least ${SUGGESTION_MIN_EFFECT.toFixed(1)} points`,
+      },
+      confidence: null,
+    });
+  }
+
+  return suggestions.sort((a, b) => b.details.effect - a.details.effect);
+}
+
+function suggestionAttributes(game: Game): SuggestionAttribute[] {
+  if (game.bggData === null) return [];
+  const attributes = [
+    ...game.bggData.mechanics.map(({ name }) => ({ type: "mechanic" as const, name })),
+    ...game.bggData.categories.map(({ name }) => ({ type: "category" as const, name })),
+  ];
+  return [
+    ...new Map(
+      attributes.map((attribute) => [`${attribute.type}:${attribute.name}`, attribute]),
+    ).values(),
+  ];
+}
+
+function hasSuggestionAttribute(game: Game, attribute: SuggestionAttribute): boolean {
+  return suggestionAttributes(game).some(
+    (candidate) => candidate.type === attribute.type && candidate.name === attribute.name,
   );
-  if (divergentGames && divergentGames.length >= 2) {
-    const divergentIds = new Set(divergentGames.map((d) => d.gameId));
-    const divergentGamesData = games.filter((g) => divergentIds.has(g.id));
+}
 
-    // Find mechanics/categories shared by 2+ divergent games
-    const sharedAttrs = new Map<string, number>();
-    for (const game of divergentGamesData) {
-      if (!game.bggData) continue;
-      for (const m of game.bggData.mechanics)
-        sharedAttrs.set(m.name, (sharedAttrs.get(m.name) ?? 0) + 1);
-      for (const c of game.bggData.categories)
-        sharedAttrs.set(c.name, (sharedAttrs.get(c.name) ?? 0) + 1);
-    }
+function suggestionMembership(
+  outcomes: PreferenceOutcome[],
+  attribute: SuggestionAttribute,
+): Set<string> {
+  return new Set(
+    outcomes
+      .filter(({ game }) => hasSuggestionAttribute(game, attribute))
+      .map(({ game }) => game.id),
+  );
+}
 
-    for (const [name, count] of sharedAttrs) {
-      if (count >= 2 && !axisCovers(name)) {
-        suggestions.push({
-          source: "divergence-repair",
-          attribute: name,
-          reason: `${name} is shared by ${count} games where tournament and fitness scores diverge`,
-          evidence: { gameCount: count },
-        });
-      }
-    }
-  }
+function membershipOverlap(first: ReadonlySet<string>, second: ReadonlySet<string>): number {
+  const union = new Set([...first, ...second]);
+  if (union.size === 0) return 0;
+  const intersectionCount = [...first].filter((gameId) => second.has(gameId)).length;
+  return intersectionCount / union.size;
+}
 
-  return suggestions;
+function mean(values: number[]): number {
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function roundToTenth(value: number): number {
+  return Math.round(value * 10) / 10;
 }

@@ -1141,176 +1141,235 @@ describe("detectOutliers", () => {
 // --- Suggestions ---
 
 describe("generateSuggestions", () => {
-  test("counts duplicate enabled derived fields once for registry coverage", () => {
-    const games = [
-      makeGame({ id: "g1", name: "G1", playingTime: 30 }),
-      makeGame({ id: "g2", name: "G2", playingTime: 300 }),
-    ];
-    const first = makePlayingTimeAxis("time-a", "First");
-    const second = makePlayingTimeAxis("time-b", "Second", 120);
-    const suggestions = generateSuggestions(games, [first, second], null);
+  const preference = makeAxis({ id: "preference", name: "Preference" });
+  const axes: EnabledAxis[] = [preference];
+
+  function suggestionFixture(
+    rows: {
+      attribute: boolean;
+      confounder?: boolean;
+      independent: number;
+      tournament: number;
+      comparisons?: number;
+    }[],
+  ) {
+    const games = rows.map((row, index) =>
+      makeGame({
+        id: `g${index + 1}`,
+        name: `G${index + 1}`,
+        ratings: { preference: row.independent },
+        bggData: makeBggData({
+          mechanics: [
+            ...(row.attribute ? [{ id: 1, name: "Area Control" }] : []),
+            ...(row.confounder ? [{ id: 2, name: "Deck Building" }] : []),
+          ],
+        }),
+      }),
+    );
+    const fitnessResults = makeDistributionResults(games, axes);
+    const tournamentStats = new Map(
+      rows.map((row, index) => [
+        `g${index + 1}`,
+        makeTournamentStats(row.tournament, row.comparisons ?? 10),
+      ]),
+    );
+    const divergence = computeDivergence(fitnessResults, tournamentStats, games, axes);
+    return {
+      games,
+      fitnessResults,
+      tournamentStats,
+      suggestions: generateSuggestions(games, axes, fitnessResults, tournamentStats, divergence),
+    };
+  }
+
+  test("retires concentration and variance as recommendation sources", () => {
+    const games = Array.from({ length: 5 }, (_, index) =>
+      makeGame({
+        id: `g${index}`,
+        name: `G${index}`,
+        playingTime: index === 4 ? 300 : 30,
+        bggData: makeBggData({ mechanics: [{ id: 1, name: "Dice Rolling" }] }),
+      }),
+    );
+
+    expect(generateSuggestions(games, axes, new Map(), null, null)).toEqual([]);
+  });
+
+  test("suppresses null effects even when an attribute appears in divergent games", () => {
+    const fixture = suggestionFixture([
+      { attribute: true, independent: 4, tournament: 8 },
+      { attribute: true, independent: 4, tournament: 8 },
+      { attribute: true, independent: 4, tournament: 8 },
+      { attribute: false, independent: 4, tournament: 8 },
+      { attribute: false, independent: 4, tournament: 8 },
+      { attribute: false, independent: 4, tournament: 8 },
+    ]);
+
+    expect(fixture.suggestions).toEqual([]);
+  });
+
+  test("suppresses ubiquitous attributes without an attribute-negative comparator", () => {
+    const fixture = suggestionFixture(
+      Array.from({ length: 6 }, () => ({ attribute: true, independent: 4, tournament: 8 })),
+    );
+
+    expect(fixture.suggestions).toEqual([]);
+  });
+
+  test("suppresses attributes confounded by near-identical collection membership", () => {
+    const fixture = suggestionFixture([
+      { attribute: true, confounder: true, independent: 4, tournament: 8 },
+      { attribute: true, confounder: true, independent: 4, tournament: 8 },
+      { attribute: true, confounder: true, independent: 4, tournament: 8 },
+      { attribute: false, confounder: true, independent: 6, tournament: 6 },
+      { attribute: false, independent: 6, tournament: 6 },
+      { attribute: false, independent: 6, tournament: 6 },
+    ]);
+
+    expect(fixture.suggestions).toEqual([]);
+  });
+
+  test("does not combine opposite divergence directions into support", () => {
+    const fixture = suggestionFixture([
+      { attribute: true, independent: 4, tournament: 8 },
+      { attribute: true, independent: 4, tournament: 8 },
+      { attribute: true, independent: 4, tournament: 8 },
+      { attribute: true, independent: 4, tournament: 8 },
+      { attribute: true, independent: 8, tournament: 4 },
+      { attribute: false, independent: 6, tournament: 6 },
+      { attribute: false, independent: 6, tournament: 6 },
+      { attribute: false, independent: 6, tournament: 6 },
+    ]);
+
+    expect(fixture.suggestions).toEqual([]);
+  });
+
+  test("suppresses weak positive and comparator samples", () => {
+    const fixture = suggestionFixture([
+      { attribute: true, independent: 4, tournament: 8 },
+      { attribute: true, independent: 4, tournament: 8 },
+      { attribute: false, independent: 6, tournament: 6 },
+      { attribute: false, independent: 6, tournament: 6 },
+    ]);
+
+    expect(fixture.suggestions).toEqual([]);
+  });
+
+  test("retains a direction-specific effect with inspectable positive and comparator evidence", () => {
+    const fixture = suggestionFixture([
+      { attribute: true, independent: 4, tournament: 8 },
+      { attribute: true, independent: 4, tournament: 8 },
+      { attribute: true, independent: 4, tournament: 8 },
+      { attribute: false, independent: 6, tournament: 6 },
+      { attribute: false, independent: 6, tournament: 6 },
+      { attribute: false, independent: 6, tournament: 6 },
+    ]);
+
+    expect(fixture.suggestions).toHaveLength(1);
+    const suggestion = fixture.suggestions[0];
+    expect(suggestion.details).toMatchObject({
+      source: "divergence-repair",
+      attribute: "Area Control",
+      direction: "tournament-outlier",
+      supportingGameCount: 3,
+      comparatorGameCount: 3,
+      supportingMeanGap: 4,
+      comparatorMeanGap: 0,
+      effect: 4,
+    });
+    expect(suggestion.comparator?.gameIds).toEqual(["g4", "g5", "g6"]);
+    expect(suggestion.evidence.map(({ gameId }) => gameId)).toEqual([
+      "g1",
+      "g2",
+      "g3",
+      "g4",
+      "g5",
+      "g6",
+    ]);
+    expect(suggestion.sufficiency.every(({ met }) => met)).toBe(true);
+    const profile = {
+      axisDistributions: [],
+      axisWeights: [],
+      bggClustering: {
+        mechanics: [],
+        categories: [],
+        families: [],
+        subdomains: [],
+        weightRanges: [],
+      },
+      utilityCurves: [],
+      divergence: null,
+      outliers: [],
+      suggestions: fixture.suggestions,
+      narration: null,
+      narrationState: "empty",
+      gameCount: 6,
+      ratedGameCount: 6,
+      computedAt: "2026-01-01T00:00:00Z",
+    };
+    expect(CollectionProfileSchema.safeParse(profile).success).toBe(true);
     expect(
-      suggestions.some(
-        (suggestion) =>
-          suggestion.source === "high-variance" && suggestion.attribute === "play time",
-      ),
+      CollectionProfileSchema.safeParse({
+        ...profile,
+        suggestions: [{ ...suggestion, comparator: null }],
+      }).success,
+    ).toBe(false);
+    expect(
+      CollectionProfileSchema.safeParse({
+        ...profile,
+        suggestions: [
+          {
+            ...suggestion,
+            details: { ...suggestion.details, comparatorGameCount: 2, effect: 1 },
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      CollectionProfileSchema.safeParse({
+        ...profile,
+        suggestions: [
+          {
+            ...suggestion,
+            confidence: { level: "high", basis: "Group size alone" },
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      CollectionProfileSchema.safeParse({
+        ...profile,
+        suggestions: [
+          {
+            ...suggestion,
+            evidence: [...suggestion.evidence, { ...suggestion.evidence[0], role: "comparator" }],
+            comparator: {
+              ...suggestion.comparator,
+              gameIds: [...suggestion.comparator.gameIds, "g1"],
+            },
+            details: { ...suggestion.details, comparatorGameCount: 4 },
+          },
+        ],
+      }).success,
     ).toBe(false);
   });
-  test("unexpressed concentration: mechanic in 80%+ games with no axis", () => {
-    // 5 games, 4 have "Dice Rolling" (80%)
-    const games = [
-      makeGame({
-        id: "g1",
-        name: "G1",
-        bggData: makeBggData({ mechanics: [{ id: 1, name: "Dice Rolling" }] }),
-      }),
-      makeGame({
-        id: "g2",
-        name: "G2",
-        bggData: makeBggData({ mechanics: [{ id: 1, name: "Dice Rolling" }] }),
-      }),
-      makeGame({
-        id: "g3",
-        name: "G3",
-        bggData: makeBggData({ mechanics: [{ id: 1, name: "Dice Rolling" }] }),
-      }),
-      makeGame({
-        id: "g4",
-        name: "G4",
-        bggData: makeBggData({ mechanics: [{ id: 1, name: "Dice Rolling" }] }),
-      }),
-      makeGame({
-        id: "g5",
-        name: "G5",
-        bggData: makeBggData({ mechanics: [{ id: 2, name: "Hand Management" }] }),
-      }),
-    ];
 
-    const axes = [makeAxis({ id: "a1", name: "Fun" })]; // no axis referencing "Dice Rolling"
-    const suggestions = generateSuggestions(games, axes, null);
+  test("retains the fitness-outlier direction independently", () => {
+    const fixture = suggestionFixture([
+      { attribute: true, independent: 8, tournament: 4 },
+      { attribute: true, independent: 8, tournament: 4 },
+      { attribute: true, independent: 8, tournament: 4 },
+      { attribute: false, independent: 6, tournament: 6 },
+      { attribute: false, independent: 6, tournament: 6 },
+      { attribute: false, independent: 6, tournament: 6 },
+    ]);
 
-    const concentration = suggestions.filter((s) => s.source === "unexpressed-concentration");
-    expect(concentration.length).toBe(1);
-    expect(concentration[0].attribute).toBe("Dice Rolling");
-    expect(concentration[0].evidence.percentage).toBe(80);
-  });
-
-  test("no suggestion when axis name references the mechanic", () => {
-    const games = [
-      makeGame({
-        id: "g1",
-        name: "G1",
-        bggData: makeBggData({ mechanics: [{ id: 1, name: "Dice Rolling" }] }),
-      }),
-      makeGame({
-        id: "g2",
-        name: "G2",
-        bggData: makeBggData({ mechanics: [{ id: 1, name: "Dice Rolling" }] }),
-      }),
-    ];
-
-    // Axis name contains "dice rolling" (case-insensitive)
-    const axes = [makeAxis({ id: "a1", name: "Dice Rolling Appeal" })];
-    const suggestions = generateSuggestions(games, axes, null);
-    const concentration = suggestions.filter((s) => s.source === "unexpressed-concentration");
-    expect(concentration.length).toBe(0);
-  });
-
-  test("high-variance BGG attribute with no axis triggers suggestion", () => {
-    // Play times: 30, 30, 30, 30, 240 → mean=72, stddev ≈ 84, CV ≈ 1.17
-    const games = [
-      makeGame({ id: "g1", name: "G1", playingTime: 30 }),
-      makeGame({ id: "g2", name: "G2", playingTime: 30 }),
-      makeGame({ id: "g3", name: "G3", playingTime: 30 }),
-      makeGame({ id: "g4", name: "G4", playingTime: 30 }),
-      makeGame({ id: "g5", name: "G5", playingTime: 240 }),
-    ];
-
-    const axes: EnabledAxis[] = [];
-    const suggestions = generateSuggestions(games, axes, null);
-
-    const variance = suggestions.filter((s) => s.source === "high-variance");
-    const playTimeSuggestion = variance.find((s) => s.attribute === "play time");
-    expect(playTimeSuggestion).toBeDefined();
-    expect(playTimeSuggestion!.evidence.variance).toBeGreaterThan(0.5);
-  });
-
-  test("no high-variance suggestion when bgg axis already maps the field", () => {
-    const games = [
-      makeGame({ id: "g1", name: "G1", playingTime: 30 }),
-      makeGame({ id: "g2", name: "G2", playingTime: 240 }),
-    ];
-
-    const axes = [makeDerivedAxis("a1", "Duration", "playingTime")];
-    const suggestions = generateSuggestions(games, axes, null);
-    const variance = suggestions.filter(
-      (s) => s.source === "high-variance" && s.attribute === "play time",
-    );
-    expect(variance.length).toBe(0);
-  });
-
-  test("divergence repair: shared attributes across divergent games", () => {
-    const games = [
-      makeGame({
-        id: "g1",
-        name: "G1",
-        ratings: { preference: 4 },
-        bggData: makeBggData({
-          mechanics: [
-            { id: 1, name: "Area Control" },
-            { id: 2, name: "Hand Management" },
-          ],
-        }),
-      }),
-      makeGame({
-        id: "g2",
-        name: "G2",
-        ratings: { preference: 3 },
-        bggData: makeBggData({
-          mechanics: [
-            { id: 1, name: "Area Control" },
-            { id: 3, name: "Dice Rolling" },
-          ],
-        }),
-      }),
-    ];
-
-    const preference = makeAxis({ id: "preference", name: "Preference" });
-    const axes: EnabledAxis[] = [preference];
-    const divergent = computeDivergence(
-      makeDistributionResults(games, axes),
-      new Map([
-        ["g1", makeTournamentStats(8)],
-        ["g2", makeTournamentStats(7)],
-      ]),
-      games,
-      axes,
-    );
-    const suggestions = generateSuggestions(games, axes, divergent);
-    const repair = suggestions.filter((s) => s.source === "divergence-repair");
-    expect(repair.some((s) => s.attribute === "Area Control")).toBe(true);
-  });
-
-  test("no divergence repair when fewer than 2 divergent games", () => {
-    const games = [
-      makeGame({
-        id: "g1",
-        name: "G1",
-        ratings: { preference: 4 },
-        bggData: makeBggData({ mechanics: [{ id: 1, name: "Area Control" }] }),
-      }),
-    ];
-
-    const preference = makeAxis({ id: "preference", name: "Preference" });
-    const axes: EnabledAxis[] = [preference];
-    const divergent = computeDivergence(
-      makeDistributionResults(games, axes),
-      new Map([["g1", makeTournamentStats(8)]]),
-      games,
-      axes,
-    );
-    const suggestions = generateSuggestions(games, axes, divergent);
-    expect(suggestions.filter((s) => s.source === "divergence-repair").length).toBe(0);
+    expect(fixture.suggestions).toHaveLength(1);
+    expect(fixture.suggestions[0].details).toMatchObject({
+      attribute: "Area Control",
+      direction: "fitness-outlier",
+      effect: 4,
+    });
   });
 });
 
@@ -1432,12 +1491,7 @@ describe("computeProfile", () => {
       { axisId: "fun", axisName: "Fun", weight: 100, percentage: 100 },
     ]);
     expect(profile.utilityCurves).toEqual([]);
-    expect(
-      profile.suggestions.some(
-        (suggestion) =>
-          suggestion.source === "high-variance" && suggestion.attribute === "play time",
-      ),
-    ).toBe(true);
+    expect(profile.suggestions).toEqual([]);
   });
   test("assembles all sections correctly", () => {
     const axes = [makeAxis({ id: "a1", name: "Fun", weight: 50 })];

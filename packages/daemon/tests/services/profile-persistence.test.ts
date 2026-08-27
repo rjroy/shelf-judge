@@ -147,6 +147,28 @@ describe("persisted profile contract", () => {
     });
   });
 
+  test("deletes a current-version artifact containing a legacy unsupported suggestion", async () => {
+    await withStorage(async ({ profilePath, createStorage }) => {
+      const legacySuggestion = {
+        source: "unexpressed-concentration",
+        attribute: "Dice Rolling",
+        reason: "Dice Rolling appears in 80% of the collection",
+        evidence: { gameCount: 4, percentage: 80 },
+      };
+      await fs.writeFile(
+        profilePath,
+        JSON.stringify({
+          ...currentProfileData(),
+          profile: { ...emptyProfile(), suggestions: [legacySuggestion] },
+        }),
+        "utf8",
+      );
+
+      expect(await createStorage().loadProfile()).toBeNull();
+      expect(await exists(profilePath)).toBe(false);
+    });
+  });
+
   test("deletes an artifact containing a non-finite number", async () => {
     await withStorage(async ({ profilePath, createStorage }) => {
       const raw = JSON.stringify(currentProfileData()).replace(
