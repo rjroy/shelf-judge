@@ -7,7 +7,11 @@ import type {
   Game,
   JsonValue,
 } from "@shelf-judge/shared";
-import { createFreshCollectionDerivedAxes } from "@shelf-judge/shared";
+import {
+  createFreshCollectionDerivedAxes,
+  CURRENT_PROFILE_ALGORITHM_VERSION,
+  CURRENT_PROFILE_CONTRACT_VERSION,
+} from "@shelf-judge/shared";
 import { createStorageService } from "../../src/services/storage-service.js";
 import { createMockFileOps } from "../helpers/mock-file-ops.js";
 
@@ -556,6 +560,8 @@ describe("StorageService.loadProfile", () => {
 
   test("loads profile from valid JSON file", async () => {
     const profileData: ProfileData = {
+      contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
+      algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
       profile: makeEmptyProfile(),
       computedAt: "2026-01-01T00:00:00.000Z",
       narration: null,
@@ -576,7 +582,13 @@ describe("StorageService.saveProfile", () => {
   test("writes and loads correctly (round-trip)", async () => {
     const { service } = makeService();
     const profileData: ProfileData = {
-      profile: { ...makeEmptyProfile(), gameCount: 42 },
+      contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
+      algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
+      profile: {
+        ...makeEmptyProfile(),
+        gameCount: 42,
+        computedAt: "2026-03-15T12:00:00.000Z",
+      },
       computedAt: "2026-03-15T12:00:00.000Z",
       narration: null,
       narrationComputedAt: null,
@@ -676,6 +688,8 @@ describe("StorageService.loadCollection — tournament axis migration", () => {
   test("deletes profile.json when migration runs", async () => {
     const stored = legacyCollectionWithoutTournamentAxis();
     const profileData: ProfileData = {
+      contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
+      algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
       profile: makeEmptyProfile(),
       computedAt: "2026-01-01T00:00:00.000Z",
       narration: null,

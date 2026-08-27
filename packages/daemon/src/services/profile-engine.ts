@@ -183,8 +183,8 @@ export function computeBggClustering(games: Game[]): CollectionProfile["bggClust
   const countAttributes = (extractor: (g: Game) => { name: string }[]): AttributeCluster[] => {
     const counts = new Map<string, number>();
     for (const game of gamesWithBgg) {
-      for (const attr of extractor(game)) {
-        counts.set(attr.name, (counts.get(attr.name) ?? 0) + 1);
+      for (const name of new Set(extractor(game).map(({ name }) => name))) {
+        counts.set(name, (counts.get(name) ?? 0) + 1);
       }
     }
     return [...counts.entries()]

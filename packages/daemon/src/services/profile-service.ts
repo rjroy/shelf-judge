@@ -6,6 +6,10 @@ import type {
   ProfileNarration,
   TournamentGameStatsDisplay,
 } from "@shelf-judge/shared";
+import {
+  CURRENT_PROFILE_ALGORITHM_VERSION,
+  CURRENT_PROFILE_CONTRACT_VERSION,
+} from "@shelf-judge/shared";
 import type { StorageService } from "./storage-service.js";
 import type { GameService } from "./game-service.js";
 import type { TournamentService } from "./tournament-service.js";
@@ -78,9 +82,10 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
 
   return {
     async getProfile(): Promise<CollectionProfile> {
-      const [stored, collection, tournamentData] = await Promise.all([
+      // Collection loading may migrate it and invalidate every dependent profile artifact.
+      const collection = await storageService.loadCollection();
+      const [stored, tournamentData] = await Promise.all([
         storageService.loadProfile(),
-        storageService.loadCollection(),
         storageService.loadTournament(),
       ]);
 
@@ -136,6 +141,8 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
       };
 
       const profileData: ProfileData = {
+        contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
+        algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
         profile,
         computedAt: now,
         narration: stored?.narration ?? null,
@@ -162,6 +169,12 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
       logger.log("narration service returned successfully");
       const now = new Date().toISOString();
 
+      const currentProfile = await this.getProfile();
+      if (currentProfile.computedAt !== profile.computedAt) {
+        logger.warn("profile changed during narration generation; discarding narration");
+        throw new Error("Profile changed during narration generation");
+      }
+
       // Load stored data so we can write narration back
       const stored = await storageService.loadProfile();
       if (!stored) {
@@ -171,7 +184,7 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
 
       stored.narration = narration;
       stored.narrationComputedAt = now;
-      await storageService.saveProfile(stored);
+      await storageService.saveProfile(stored, profile.computedAt);
       logger.log("narration saved to profile store");
 
       return { ...profile, narration, narrationState: "fresh" };

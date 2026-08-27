@@ -528,6 +528,25 @@ describe("computeBggClustering", () => {
     expect(medLight.percentage).toBe(100); // 1/1, not 1/2
   });
 
+  test("counts a repeated tag only once per game", () => {
+    const games = [
+      makeGame({
+        id: "g1",
+        name: "G1",
+        bggData: makeBggData({
+          mechanics: [
+            { id: 1, name: "Deck Building" },
+            { id: 2, name: "Deck Building" },
+          ],
+        }),
+      }),
+    ];
+
+    expect(computeBggClustering(games).mechanics).toEqual([
+      { name: "Deck Building", count: 1, percentage: 100 },
+    ]);
+  });
+
   test("empty collection returns empty clusters", () => {
     const result = computeBggClustering([]);
     expect(result.mechanics).toEqual([]);

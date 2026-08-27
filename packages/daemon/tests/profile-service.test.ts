@@ -7,6 +7,10 @@ import type {
   CollectionProfile,
   TournamentGameStatsDisplay,
 } from "@shelf-judge/shared";
+import {
+  CURRENT_PROFILE_ALGORITHM_VERSION,
+  CURRENT_PROFILE_CONTRACT_VERSION,
+} from "@shelf-judge/shared";
 import { createProfileService } from "../src/services/profile-service.js";
 import type { StorageService } from "../src/services/storage-service.js";
 import type { GameService } from "../src/services/game-service.js";
@@ -199,6 +203,31 @@ function createStubTournamentService(
 }
 
 describe("ProfileService", () => {
+  test("loads the collection before its dependent profile artifact", async () => {
+    const storage = createStubStorage();
+    const loadCollection = storage.loadCollection.bind(storage);
+    const loadProfile = storage.loadProfile.bind(storage);
+    let collectionLoaded = false;
+    storage.loadCollection = async () => {
+      const collection = await loadCollection();
+      collectionLoaded = true;
+      return collection;
+    };
+    storage.loadProfile = () => {
+      if (!collectionLoaded) return Promise.reject(new Error("profile loaded before collection"));
+      return loadProfile();
+    };
+    const service = createProfileService({
+      storageService: storage,
+      gameService: createStubGameService([]),
+      tournamentService: createStubTournamentService(),
+    });
+
+    await service.getProfile();
+
+    expect(collectionLoaded).toBe(true);
+  });
+
   test("computes fresh profile when no stored profile exists", async () => {
     const games = [makeGame("g1", "Game 1"), makeGame("g2", "Game 2")];
     const storage = createStubStorage();
@@ -245,6 +274,8 @@ describe("ProfileService", () => {
     const storage = createStubStorage({
       collection: makeCollection(pastDate),
       profile: {
+        contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
+        algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
         profile: cachedProfile,
         computedAt: futureDate,
         narration: null,
@@ -294,6 +325,8 @@ describe("ProfileService", () => {
     const storage = createStubStorage({
       collection: makeCollection(recentDate),
       profile: {
+        contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
+        algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
         profile: cachedProfile,
         computedAt: middleDate,
         narration: null,
@@ -360,6 +393,8 @@ describe("ProfileService", () => {
         ],
       },
       profile: {
+        contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
+        algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
         profile: cachedProfile,
         computedAt: middleDate,
         narration: null,
@@ -435,6 +470,8 @@ describe("ProfileService", () => {
         ],
       },
       profile: {
+        contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
+        algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
         profile: cachedProfile,
         computedAt: middleDate,
         narration: null,

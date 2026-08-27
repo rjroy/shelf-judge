@@ -16,6 +16,7 @@ import type {
 import {
   AcquisitionSchema,
   CURRENT_COLLECTION_SCHEMA_VERSION,
+  ProfileDataSchema,
   createFreshCollectionDerivedAxes,
   CollectionSchema,
   EntertainmentBenchmarkSchema,
@@ -48,7 +49,7 @@ export interface StorageService {
   loadTournament(): Promise<TournamentData>;
   saveTournament(data: TournamentData): Promise<void>;
   loadProfile(): Promise<ProfileData | null>;
-  saveProfile(data: ProfileData): Promise<void>;
+  saveProfile(data: ProfileData, expectedComputedAt?: string): Promise<void>;
   loadPredictionSettings(): Promise<PredictionSettings>;
   savePredictionSettings(settings: PredictionSettings): Promise<void>;
   loadNicheSettings(): Promise<NicheSettings>;
@@ -205,6 +206,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
   // a missing tmp. Once the file exists on disk, the read path is idempotent
   // and the lock has no observable effect.
   const inFlightLoads = new Map<string, Promise<unknown>>();
+  let profileOperations: Promise<void> = Promise.resolve();
   function withLoadLock<T>(filePath: string, fn: () => Promise<T>): Promise<T> {
     const existing = inFlightLoads.get(filePath);
     if (existing) return existing as Promise<T>;
@@ -213,6 +215,15 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     });
     inFlightLoads.set(filePath, promise);
     return promise;
+  }
+
+  function withProfileLock<T>(fn: () => Promise<T>): Promise<T> {
+    const operation = profileOperations.then(fn, fn);
+    profileOperations = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return operation;
   }
 
   async function writeAtomically(filePath: string, content: string): Promise<void> {
@@ -382,17 +393,50 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
       await writeAtomically(tournamentPath, JSON.stringify(data, null, 2));
     },
 
-    async loadProfile(): Promise<ProfileData | null> {
-      const exists = await fileOps.exists(profilePath);
-      if (!exists) return null;
+    loadProfile(): Promise<ProfileData | null> {
+      return withProfileLock(async () => {
+        const exists = await fileOps.exists(profilePath);
+        if (!exists) return null;
 
-      const raw = await fileOps.readFile(profilePath);
-      return JSON.parse(raw) as ProfileData;
+        logger.log(`profile cache read attempt path=${profilePath}`);
+        const raw = await fileOps.readFile(profilePath);
+        logger.log(`profile cache read completed path=${profilePath} bytes=${raw.length}`);
+        try {
+          const profile = ProfileDataSchema.parse(JSON.parse(raw));
+          logger.log(
+            `profile cache validation completed path=${profilePath} contractVersion=${profile.contractVersion} algorithmVersion=${profile.algorithmVersion}`,
+          );
+          return profile;
+        } catch (error) {
+          logger.warn(`profile cache invalid; discarding path=${profilePath}`, error);
+          await fileOps.unlink(profilePath);
+          logger.log(`profile cache discarded path=${profilePath}`);
+          return null;
+        }
+      });
     },
 
-    async saveProfile(data: ProfileData): Promise<void> {
-      await fileOps.mkdir(dataDir);
-      await writeAtomically(profilePath, JSON.stringify(data, null, 2));
+    saveProfile(data: ProfileData, expectedComputedAt?: string): Promise<void> {
+      return withProfileLock(async () => {
+        const validated = ProfileDataSchema.parse(data);
+        if (expectedComputedAt !== undefined) {
+          if (!(await fileOps.exists(profilePath))) {
+            throw new Error("Profile changed during narration generation");
+          }
+          const current = ProfileDataSchema.safeParse(
+            JSON.parse(await fileOps.readFile(profilePath)),
+          );
+          if (!current.success || current.data.computedAt !== expectedComputedAt) {
+            throw new Error("Profile changed during narration generation");
+          }
+        }
+        await fileOps.mkdir(dataDir);
+        logger.log(
+          `profile cache persistence attempt path=${profilePath} contractVersion=${validated.contractVersion} algorithmVersion=${validated.algorithmVersion}`,
+        );
+        await writeAtomically(profilePath, JSON.stringify(validated, null, 2));
+        logger.log(`profile cache persistence completed path=${profilePath}`);
+      });
     },
 
     async loadPredictionSettings(): Promise<PredictionSettings> {

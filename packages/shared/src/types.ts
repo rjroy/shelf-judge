@@ -875,6 +875,8 @@ export interface CollectionProfile {
 }
 
 export interface ProfileData {
+  contractVersion: 1;
+  algorithmVersion: 1;
   profile: CollectionProfile;
   computedAt: string; // ISO 8601
   narration: ProfileNarration | null;

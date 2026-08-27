@@ -73,6 +73,31 @@ describe("profile narrate routes", () => {
       expect(profile.narrationState).toBe("fresh");
     });
 
+    test("does not persist narration when profile inputs change during generation", async () => {
+      const ctx = createTestApp({
+        narrationService: createMockNarrationService({
+          generateNarration: async () => {
+            await Bun.sleep(2);
+            const collection = await ctx.storageService.loadCollection();
+            await ctx.storageService.saveCollection({
+              ...collection,
+              updatedAt: new Date().toISOString(),
+            });
+            return sampleNarration;
+          },
+        }),
+      });
+      await jsonRequest(ctx.app, "POST", "/api/games", { name: "Test Game" });
+
+      const response = await jsonRequest(ctx.app, "POST", "/api/profile/narrate");
+      const current = await jsonRequest(ctx.app, "GET", "/api/profile");
+      const profile = (await current.json()) as CollectionProfile;
+
+      expect(response.status).toBe(502);
+      expect(profile.narration).toBeNull();
+      expect(profile.narrationState).toBe("empty");
+    });
+
     test("GET /api/profile never auto-generates narration (REQ-PROFILE-27)", async () => {
       let narrationCalled = false;
       const ctx = createTestApp({

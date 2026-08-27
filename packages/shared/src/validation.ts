@@ -18,6 +18,7 @@ import type {
   Axis,
   AxisBase,
   DerivedAxis,
+  DerivedFieldId,
   DisabledLegacyAxis,
   EnabledAxis,
   NativeScale,
@@ -26,6 +27,8 @@ import type {
 } from "./types";
 
 export const CURRENT_COLLECTION_SCHEMA_VERSION = 3 as const;
+export const CURRENT_PROFILE_CONTRACT_VERSION = 1 as const;
+export const CURRENT_PROFILE_ALGORITHM_VERSION = 1 as const;
 
 const AmountInputSchema = z.string().superRefine((value, context) => {
   try {
@@ -720,6 +723,197 @@ export const CollectionSchema = z
     updatedAt: z.string(),
   })
   .strict();
+
+const FiniteNumberSchema = z.number().finite();
+const NonNegativeIntegerSchema = z.number().int().safe().min(0);
+const PercentageSchema = FiniteNumberSchema.min(0).max(100);
+const TimestampSchema = z.string().datetime({ offset: true });
+
+const ProfileNarrationSchema = z
+  .object({
+    summary: z.string(),
+    surprises: z.array(z.string()),
+    tensions: z.array(z.string()),
+    blindSpots: z.array(z.string()),
+    curveInsights: z.array(z.string()),
+  })
+  .strict();
+
+const AxisDistributionSchema = z
+  .object({
+    axisId: z.string().min(1),
+    axisName: z.string().min(1),
+    mean: FiniteNumberSchema,
+    median: FiniteNumberSchema,
+    standardDeviation: FiniteNumberSchema.min(0),
+    range: z.object({ min: FiniteNumberSchema, max: FiniteNumberSchema }).strict(),
+    ratedGameCount: NonNegativeIntegerSchema,
+    histogram: z.array(NonNegativeIntegerSchema).length(10),
+  })
+  .strict()
+  .refine(({ range }) => range.min <= range.max, {
+    message: "Profile axis range minimum cannot exceed maximum",
+    path: ["range", "max"],
+  });
+
+const AttributeClusterSchema = z
+  .object({
+    name: z.string().min(1),
+    count: NonNegativeIntegerSchema,
+    percentage: PercentageSchema,
+  })
+  .strict();
+
+const WeightRangeClusterSchema = z
+  .object({
+    range: z.string().min(1),
+    min: FiniteNumberSchema,
+    max: FiniteNumberSchema,
+    count: NonNegativeIntegerSchema,
+    percentage: PercentageSchema,
+  })
+  .strict()
+  .refine(({ min, max }) => min <= max, {
+    message: "Profile weight range minimum cannot exceed maximum",
+    path: ["max"],
+  });
+
+const UtilityCurveDeclarationSchema = z
+  .object({
+    axisId: z.string().min(1),
+    axisName: z.string().min(1),
+    derivedField: z
+      .custom<DerivedFieldId>(
+        (value) => typeof value === "string" && Object.hasOwn(DERIVED_AXIS_REGISTRY, value),
+      )
+      .nullable(),
+    shape: z.enum(["higher-is-better", "lower-is-better", "sweet-spot"]),
+    idealValue: FiniteNumberSchema.nullable(),
+    tolerance: z.enum(["flexible", "moderate", "strict"]).nullable(),
+    toleranceWidth: FiniteNumberSchema.nullable(),
+    leanDirection: z.enum(["lower", "higher"]).nullable(),
+    vetoThreshold: z
+      .object({ direction: z.enum(["below", "above"]), threshold: FiniteNumberSchema })
+      .strict()
+      .nullable(),
+    nativeScale: z.object({ min: FiniteNumberSchema, max: FiniteNumberSchema }).strict(),
+    unit: z.string().nullable(),
+    provenance: z.string().nullable(),
+    configurationSummary: z.string().nullable(),
+  })
+  .strict()
+  .refine(({ nativeScale }) => nativeScale.min < nativeScale.max, {
+    message: "Profile native scale minimum must be below maximum",
+    path: ["nativeScale", "max"],
+  });
+
+const DivergentGameSchema = z
+  .object({
+    gameId: z.string().min(1),
+    gameName: z.string().min(1),
+    fitnessScore: FiniteNumberSchema,
+    normalizedTournamentScore: FiniteNumberSchema,
+    gap: FiniteNumberSchema.min(0),
+    direction: z.enum(["tournament-outlier", "fitness-outlier"]),
+  })
+  .strict();
+
+const CollectionOutlierSchema = z
+  .object({
+    gameId: z.string().min(1),
+    gameName: z.string().min(1),
+    distances: z
+      .object({
+        binary: FiniteNumberSchema.min(0).max(1),
+        continuous: FiniteNumberSchema.min(0).max(1),
+        personalAxes: FiniteNumberSchema.min(0).max(1).nullable(),
+        composite: FiniteNumberSchema.min(0).max(1),
+      })
+      .strict(),
+    classifications: z.array(z.enum(["lone-wolf", "category-orphan", "high-fitness-outlier"])),
+    fitnessScore: FiniteNumberSchema.nullable(),
+  })
+  .strict();
+
+const AxisSuggestionSchema = z
+  .object({
+    source: z.enum(["unexpressed-concentration", "high-variance", "divergence-repair"]),
+    attribute: z.string().min(1),
+    reason: z.string().min(1),
+    evidence: z
+      .object({
+        gameCount: NonNegativeIntegerSchema.optional(),
+        percentage: PercentageSchema.optional(),
+        variance: FiniteNumberSchema.min(0).optional(),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const CollectionProfileSchema = z
+  .object({
+    axisDistributions: z.array(AxisDistributionSchema),
+    axisWeights: z.array(
+      z
+        .object({
+          axisId: z.string().min(1),
+          axisName: z.string().min(1),
+          weight: FiniteNumberSchema.min(0),
+          percentage: PercentageSchema,
+        })
+        .strict(),
+    ),
+    bggClustering: z
+      .object({
+        mechanics: z.array(AttributeClusterSchema),
+        categories: z.array(AttributeClusterSchema),
+        families: z.array(AttributeClusterSchema),
+        subdomains: z.array(AttributeClusterSchema),
+        weightRanges: z.array(WeightRangeClusterSchema),
+      })
+      .strict(),
+    utilityCurves: z.array(UtilityCurveDeclarationSchema),
+    divergence: z.array(DivergentGameSchema).nullable(),
+    outliers: z.array(CollectionOutlierSchema),
+    suggestions: z.array(AxisSuggestionSchema),
+    narration: ProfileNarrationSchema.nullable(),
+    narrationState: z.enum(["fresh", "stale", "empty"]),
+    gameCount: NonNegativeIntegerSchema,
+    ratedGameCount: NonNegativeIntegerSchema,
+    computedAt: TimestampSchema,
+  })
+  .strict()
+  .refine(({ gameCount, ratedGameCount }) => ratedGameCount <= gameCount, {
+    message: "Rated game count cannot exceed profile game count",
+    path: ["ratedGameCount"],
+  });
+
+export const ProfileDataSchema = z
+  .object({
+    contractVersion: z.literal(CURRENT_PROFILE_CONTRACT_VERSION),
+    algorithmVersion: z.literal(CURRENT_PROFILE_ALGORITHM_VERSION),
+    profile: CollectionProfileSchema,
+    computedAt: TimestampSchema,
+    narration: ProfileNarrationSchema.nullable(),
+    narrationComputedAt: TimestampSchema.nullable(),
+  })
+  .strict()
+  .superRefine((data, context) => {
+    if (data.profile.computedAt !== data.computedAt) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["profile", "computedAt"],
+        message: "Profile timestamps must match",
+      });
+    }
+    if ((data.narration === null) !== (data.narrationComputedAt === null)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["narrationComputedAt"],
+        message: "Narration and its timestamp must both be present or absent",
+      });
+    }
+  });
 
 export const RateGameSchema = z.object({
   axisId: z.string().min(1),
