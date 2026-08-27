@@ -9,6 +9,120 @@ async function readFixture(filename: string): Promise<string> {
   return Bun.file(path.join(fixturesDir, filename)).text();
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNumberArray(value: unknown): value is number[] {
+  return Array.isArray(value) && value.every((item: unknown) => typeof item === "number");
+}
+
+function findLogContext(logs: unknown[][], message: string): Record<string, unknown> {
+  const context: unknown = logs.find(([loggedMessage]) => loggedMessage === message)?.[1];
+  if (!isRecord(context)) throw new Error(`Expected structured log context for ${message}`);
+  return context;
+}
+
+function expectNumericLogIds(
+  context: Record<string, unknown>,
+  field: string,
+  expected: number[],
+): void {
+  const value: unknown = context[field];
+  if (!isNumberArray(value)) {
+    throw new Error(`Expected ${field} to contain numeric BGG IDs`);
+  }
+  expect(value).toEqual(expected);
+}
+
+const incompleteResponseCases: Array<[string, number[]]> = [
+  ["subset", [1]],
+  ["mismatched IDs", [3, 4]],
+];
+
+function searchXml(ids: readonly number[]): string {
+  return `<items>${ids
+    .map(
+      (id) =>
+        `<item type="boardgame" id="${id}"><name type="primary" value="Game ${id}"/><yearpublished value="2020"/></item>`,
+    )
+    .join("")}</items>`;
+}
+
+function completeThingItem(id: number): string {
+  return `<item type="boardgame" id="${id}">
+    <name type="primary" value="Game ${id}"/>
+    <yearpublished value="2020"/>
+    <minplayers value="1"/>
+    <maxplayers value="4"/>
+    <playingtime value="60"/>
+    <image>image-${id}</image>
+    <thumbnail>thumbnail-${id}</thumbnail>
+    <statistics><ratings><average value="7"/></ratings></statistics>
+  </item>`;
+}
+
+function partialThingItem(id: number): string {
+  return `<item type="boardgame" id="${id}">
+    <name type="primary" value="Game ${id}"/>
+  </item>`;
+}
+
+function thingXml(items: readonly string[]): string {
+  return `<items>${items.join("")}</items>`;
+}
+
+function completeThingXml(ids: readonly number[]): string {
+  return thingXml(ids.map(completeThingItem));
+}
+
+function collectionItem(id: number, includeNumPlays = true): string {
+  const numPlays = includeNumPlays ? `<numplays>${id}</numplays>` : "";
+  return `<item objectid="${id}"><name>Game ${id}</name>${numPlays}</item>`;
+}
+
+function collectionXml(ids: readonly number[], partialIds: readonly number[] = []): string {
+  return `<items>${ids.map((id) => collectionItem(id, !partialIds.includes(id))).join("")}</items>`;
+}
+
+const thingOutcomeCases: Array<[string, string, number[], "complete" | "partial"]> = [
+  ["exactly one complete item per requested ID", completeThingXml([1, 2]), [1, 2], "complete"],
+  ["duplicate returned IDs", completeThingXml([1, 1]), [1, 1], "partial"],
+  ["exact ID coverage with a duplicate", completeThingXml([1, 2, 2]), [1, 2, 2], "partial"],
+  [
+    "exact ID coverage with one partial observation",
+    thingXml([completeThingItem(1), partialThingItem(2)]),
+    [1, 2],
+    "partial",
+  ],
+];
+
+const collectionOutcomeCases: Array<[string, string, number[], "complete" | "partial"]> = [
+  ["exactly one complete item per requested ID", collectionXml([1, 2]), [1, 2], "complete"],
+  ["duplicate returned IDs", collectionXml([1, 1]), [1, 1], "partial"],
+  ["exact ID coverage with a duplicate", collectionXml([1, 2, 2]), [1, 2, 2], "partial"],
+  ["exact ID coverage with one partial observation", collectionXml([1, 2], [2]), [1, 2], "partial"],
+];
+
+function createLoggingClient(
+  mockFetch: MockFetch,
+  logs: unknown[][],
+  username: string | null,
+): BggClient {
+  return createBggClient({
+    config: { bggAuthToken: "test-token", username },
+    fetchFn: mockFetch.fn,
+    delayMs: 0,
+    delayFn: () => Promise.resolve(),
+    now: () => "2026-08-26T12:00:00.000Z",
+    logger: {
+      log: (...args: unknown[]) => logs.push(args),
+      warn: (...args: unknown[]) => logs.push(args),
+      error: (...args: unknown[]) => logs.push(args),
+    },
+  });
+}
+
 describe("BggClient", () => {
   let client: BggClient;
   let mockFetch: MockFetch;
@@ -74,6 +188,9 @@ describe("BggClient", () => {
       // Wingspan should have a thumbnail from the batch response
       const wingspan = results.find((r) => r.bggId === 266192);
       expect(wingspan?.thumbnailUrl).toContain("geekdo-images.com");
+      expect(wingspan?.thingObservation?.state).toBe("partial");
+      expect(wingspan?.thingObservation?.fieldsReturned).toContain("thumbnailUrl");
+      expect(wingspan?.thingObservation?.fieldsReturned).not.toContain("bggData");
 
       // Result not in the thing batch should have null thumbnail
       const noThumb = results.find((r) => r.bggId === 290448);
@@ -82,13 +199,26 @@ describe("BggClient", () => {
 
     test("returns results with null thumbnails when thing batch fails", async () => {
       const searchXml = await readFixture("search-wingspan.xml");
+      const logs: unknown[][] = [];
+      const degradedClient = createBggClient({
+        config: { bggAuthToken: "test-token", username: "testuser" },
+        fetchFn: mockFetch.fn,
+        delayMs: 0,
+        delayFn: () => Promise.resolve(),
+        now: () => "2026-08-26T12:00:00.000Z",
+        logger: {
+          log: (...args: unknown[]) => logs.push(args),
+          warn: (...args: unknown[]) => logs.push(args),
+          error: (...args: unknown[]) => logs.push(args),
+        },
+      });
       // Thing batch gets server errors until retry exhaustion
       mockFetch.enqueue(200, searchXml);
       mockFetch.enqueue(502, "Bad Gateway");
       mockFetch.enqueue(502, "Bad Gateway");
       mockFetch.enqueue(502, "Bad Gateway");
 
-      const results = await client.searchGames("Wingspan");
+      const results = await degradedClient.searchGames("Wingspan");
 
       // Search still returns results
       expect(results).toHaveLength(14);
@@ -96,7 +226,54 @@ describe("BggClient", () => {
       for (const result of results) {
         expect(result.thumbnailUrl).toBeNull();
       }
+      const context = findLogContext(logs, "thing enrichment outcome");
+      const bggIds = context.bggIds;
+      if (!Array.isArray(bggIds) || !bggIds.every((bggId: unknown) => typeof bggId === "number")) {
+        throw new Error("Expected enrichment outcome BGG IDs to be numeric");
+      }
+      expect(bggIds).toContain(266192);
+      expect(context.returnedBggIds).toEqual([]);
+      expect(context.fieldsReturned).toEqual([]);
+      expect(context.sourceRequest).toBe("bgg-thing");
+      expect(context.observedAt).toBeNull();
+      expect(context.state).toBe("failure");
     });
+
+    test.each(incompleteResponseCases)(
+      "logs partial enrichment for %s response coverage",
+      async (_label, returnedIds) => {
+        const logs: unknown[][] = [];
+        const loggingClient = createLoggingClient(mockFetch, logs, null);
+        mockFetch.enqueue(200, searchXml([1, 2]));
+        mockFetch.enqueue(200, completeThingXml(returnedIds));
+
+        const results = await loggingClient.searchGames("coverage");
+
+        expect(results.map((result) => result.bggId)).toEqual([1, 2]);
+        const context: unknown = findLogContext(logs, "thing enrichment outcome");
+        if (!isRecord(context)) throw new Error("Expected thing enrichment log context");
+        expectNumericLogIds(context, "bggIds", [1, 2]);
+        expectNumericLogIds(context, "returnedBggIds", returnedIds);
+        expect(context.state).toBe("partial");
+      },
+    );
+
+    test.each(thingOutcomeCases)(
+      "classifies enrichment for %s",
+      async (_label, responseXml, returnedIds, expectedState) => {
+        const logs: unknown[][] = [];
+        const loggingClient = createLoggingClient(mockFetch, logs, null);
+        mockFetch.enqueue(200, searchXml([1, 2]));
+        mockFetch.enqueue(200, responseXml);
+
+        await loggingClient.searchGames("coverage");
+
+        const context = findLogContext(logs, "thing enrichment outcome");
+        expectNumericLogIds(context, "bggIds", [1, 2]);
+        expectNumericLogIds(context, "returnedBggIds", returnedIds);
+        expect(context.state).toBe(expectedState);
+      },
+    );
   });
 
   describe("getGame", () => {
@@ -117,6 +294,84 @@ describe("BggClient", () => {
       expect(result.bggData.communityRating).toBe(8.00153);
       expect(result.bggData.weight).toBe(2.4802);
       expect(result.collectionData?.numPlays).toBe(12);
+    });
+
+    test("keeps thing and collection field observations source-correct", async () => {
+      const thingXml = await readFixture("thing-wingspan-266192.xml");
+      const collectionXml = await readFixture("collection-testuser-wingspan-266192.xml");
+      const observations = ["2026-08-26T10:00:00.000Z", "2026-08-26T10:01:00.000Z"];
+      let observationIndex = 0;
+      const logs: unknown[][] = [];
+      const observedClient = createBggClient({
+        config: { bggAuthToken: "test-token", username: "testuser" },
+        fetchFn: mockFetch.fn,
+        delayMs: 0,
+        delayFn: () => Promise.resolve(),
+        now: () => observations[observationIndex++] ?? "unexpected",
+        logger: {
+          log: (...args: unknown[]) => logs.push(args),
+          warn: (...args: unknown[]) => logs.push(args),
+          error: (...args: unknown[]) => logs.push(args),
+        },
+      });
+      mockFetch.enqueue(200, thingXml);
+      mockFetch.enqueue(200, collectionXml);
+
+      const result = await observedClient.getGame(266192);
+
+      expect(result.bggData.fetchedAt).toBe(observations[0]);
+      expect(result.metadataObservation?.observedAt).toBe(observations[0]);
+      expect(result.playerRangeObservation?.observedAt).toBe(observations[0]);
+      expect(result.suggestedPlayerPoll?.observation?.observedAt).toBe(observations[0]);
+      expect(result.collectionData?.observation?.observedAt).toBe(observations[1]);
+      expect(result.collectionData?.observation?.sourceRequest).toBe("bgg-collection");
+      const serializedLogs = JSON.stringify(logs);
+      expect(serializedLogs).toContain("metadata fetch attempt");
+      expect(serializedLogs).toContain("collection fetch outcome");
+      expect(serializedLogs).toContain("numPlays");
+      expect(serializedLogs).toContain(observations[1]);
+    });
+
+    test("records an absent collection response without fabricating a play count", async () => {
+      const thingXml = await readFixture("thing-wingspan-266192.xml");
+      mockFetch.enqueue(200, thingXml);
+      mockFetch.enqueue(200, "<items></items>");
+
+      const result = await client.getGame(266192);
+
+      expect(result.collectionData?.numPlays).toBeNull();
+      expect(result.collectionData?.observation?.state).toBe("absent");
+      expect(result.collectionData?.observation?.fieldsReturned).toEqual([]);
+    });
+
+    test("logs a terminal metadata failure without inventing an observation time", async () => {
+      const logs: unknown[][] = [];
+      const failedClient = createBggClient({
+        config: { bggAuthToken: "test-token", username: null },
+        fetchFn: mockFetch.fn,
+        delayMs: 0,
+        delayFn: () => Promise.resolve(),
+        logger: {
+          log: (...args: unknown[]) => logs.push(args),
+          warn: (...args: unknown[]) => logs.push(args),
+          error: (...args: unknown[]) => logs.push(args),
+        },
+      });
+      mockFetch.enqueue(500, "Internal Server Error");
+
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(failedClient.getGame(266192)).rejects.toThrow("HTTP 500");
+
+      expect(logs.find(([message]) => message === "metadata fetch outcome")?.[1]).toEqual(
+        expect.objectContaining({
+          bggIds: [266192],
+          returnedBggIds: [],
+          fieldsReturned: [],
+          sourceRequest: "bgg-thing",
+          observedAt: null,
+          state: "failure",
+        }),
+      );
     });
   });
 
@@ -143,6 +398,76 @@ describe("BggClient", () => {
       const firstIds = new URL(firstUrl).searchParams.get("id")!.split(",");
       expect(firstIds).toHaveLength(20);
     });
+
+    test.each(incompleteResponseCases)(
+      "logs partial metadata outcome for %s response coverage",
+      async (_label, returnedIds) => {
+        const logs: unknown[][] = [];
+        const loggingClient = createLoggingClient(mockFetch, logs, null);
+        mockFetch.enqueue(200, completeThingXml(returnedIds));
+
+        const results = await loggingClient.getGames([1, 2]);
+
+        expect([...results.keys()]).toEqual([...returnedIds]);
+        const context: unknown = findLogContext(logs, "metadata fetch outcome");
+        if (!isRecord(context)) throw new Error("Expected metadata fetch log context");
+        expectNumericLogIds(context, "bggIds", [1, 2]);
+        expectNumericLogIds(context, "returnedBggIds", returnedIds);
+        expect(context.state).toBe("partial");
+      },
+    );
+
+    test.each(thingOutcomeCases)(
+      "classifies metadata for %s",
+      async (_label, responseXml, returnedIds, expectedState) => {
+        const logs: unknown[][] = [];
+        const loggingClient = createLoggingClient(mockFetch, logs, null);
+        mockFetch.enqueue(200, responseXml);
+
+        await loggingClient.getGames([1, 2]);
+
+        const context = findLogContext(logs, "metadata fetch outcome");
+        expectNumericLogIds(context, "bggIds", [1, 2]);
+        expectNumericLogIds(context, "returnedBggIds", returnedIds);
+        expect(context.state).toBe(expectedState);
+      },
+    );
+
+    test.each(incompleteResponseCases)(
+      "logs partial collection outcome for %s response coverage",
+      async (_label, returnedIds) => {
+        const logs: unknown[][] = [];
+        const loggingClient = createLoggingClient(mockFetch, logs, "testuser");
+        mockFetch.enqueue(200, completeThingXml([1, 2]));
+        mockFetch.enqueue(200, collectionXml(returnedIds));
+
+        const results = await loggingClient.getGames([1, 2]);
+
+        expect(results.get(1)?.collectionData?.numPlays).toBe(returnedIds.includes(1) ? 1 : null);
+        const context: unknown = findLogContext(logs, "collection fetch outcome");
+        if (!isRecord(context)) throw new Error("Expected collection fetch log context");
+        expectNumericLogIds(context, "bggIds", [1, 2]);
+        expectNumericLogIds(context, "returnedBggIds", returnedIds);
+        expect(context.state).toBe("partial");
+      },
+    );
+
+    test.each(collectionOutcomeCases)(
+      "classifies collection for %s",
+      async (_label, responseXml, returnedIds, expectedState) => {
+        const logs: unknown[][] = [];
+        const loggingClient = createLoggingClient(mockFetch, logs, "testuser");
+        mockFetch.enqueue(200, completeThingXml([1, 2]));
+        mockFetch.enqueue(200, responseXml);
+
+        await loggingClient.getGames([1, 2]);
+
+        const context = findLogContext(logs, "collection fetch outcome");
+        expectNumericLogIds(context, "bggIds", [1, 2]);
+        expectNumericLogIds(context, "returnedBggIds", returnedIds);
+        expect(context.state).toBe(expectedState);
+      },
+    );
   });
 
   describe("getUserCollection", () => {
@@ -173,6 +498,18 @@ describe("BggClient", () => {
     });
 
     test("throws after max 202 retries", async () => {
+      const logs: unknown[][] = [];
+      const failedClient = createBggClient({
+        config: { bggAuthToken: "test-token", username: "testuser" },
+        fetchFn: mockFetch.fn,
+        delayMs: 0,
+        delayFn: () => Promise.resolve(),
+        logger: {
+          log: (...args: unknown[]) => logs.push(args),
+          warn: (...args: unknown[]) => logs.push(args),
+          error: (...args: unknown[]) => logs.push(args),
+        },
+      });
       // 4 attempts total (initial + 3 retries), all 202
       mockFetch.enqueue(202, "");
       mockFetch.enqueue(202, "");
@@ -180,8 +517,18 @@ describe("BggClient", () => {
       mockFetch.enqueue(202, "");
 
       // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
-      await expect(client.getUserCollection()).rejects.toThrow(
+      await expect(failedClient.getUserCollection()).rejects.toThrow(
         "still queued after maximum retries",
+      );
+      expect(logs.find(([message]) => message === "collection fetch outcome")?.[1]).toEqual(
+        expect.objectContaining({
+          bggIds: [],
+          returnedBggIds: [],
+          fieldsReturned: [],
+          sourceRequest: "bgg-collection",
+          observedAt: null,
+          state: "failure",
+        }),
       );
     });
   });
@@ -274,12 +621,34 @@ describe("BggClient", () => {
     });
 
     test("gives up after max 502 retries", async () => {
+      const logs: unknown[][] = [];
+      const failedClient = createBggClient({
+        config: { bggAuthToken: "test-token", username: null },
+        fetchFn: mockFetch.fn,
+        delayMs: 0,
+        delayFn: () => Promise.resolve(),
+        logger: {
+          log: (...args: unknown[]) => logs.push(args),
+          warn: (...args: unknown[]) => logs.push(args),
+          error: (...args: unknown[]) => logs.push(args),
+        },
+      });
       mockFetch.enqueue(502, "Bad Gateway");
       mockFetch.enqueue(502, "Bad Gateway");
       mockFetch.enqueue(502, "Bad Gateway"); // 3rd attempt, exceeds MAX_5XX_RETRIES=2
 
       // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
-      await expect(client.searchGames("Wingspan")).rejects.toThrow("HTTP 502");
+      await expect(failedClient.searchGames("Wingspan")).rejects.toThrow("HTTP 502");
+      expect(logs.find(([message]) => message === "search fetch outcome")?.[1]).toEqual(
+        expect.objectContaining({
+          query: "Wingspan",
+          bggIds: [],
+          fieldsReturned: [],
+          sourceRequest: "bgg-search",
+          observedAt: null,
+          state: "failure",
+        }),
+      );
     });
   });
 

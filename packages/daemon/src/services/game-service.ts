@@ -14,12 +14,16 @@ import {
   type BggSearchResult,
   type BoxDimensions,
   type TournamentData,
+  type BggRequestObservation,
+  type FieldEvidence,
+  type PlayerRangeEvidence,
 } from "@shelf-judge/shared";
 import type { StorageService } from "./storage-service.js";
 import type { FitnessService } from "./fitness-service.js";
 import type { BggClient, BggGameResult } from "./bgg-client.js";
 import type { BggCollectionItem } from "./bgg-xml-parser.js";
-import { createLogger } from "./logger.js";
+import { createLogger, type Logger } from "./logger.js";
+import { canonicalSuggestedPlayerPoll } from "./suggested-player-poll.js";
 
 const STALE_THRESHOLD_DAYS = 7;
 const STALE_THRESHOLD_MS = STALE_THRESHOLD_DAYS * 24 * 60 * 60 * 1000;
@@ -65,18 +69,138 @@ export interface GameServiceDeps {
   fitnessService: FitnessService;
   bggClient?: BggClient;
   onGameDeleted?: (gameId: string) => Promise<void>;
+  now?: () => string;
+  logger?: Logger;
 }
 
-function applyBggResult(game: Game, result: BggGameResult): void {
+function observedField(
+  observation: BggRequestObservation | undefined,
+  field: string,
+): observation is BggRequestObservation {
+  return observation?.fieldsReturned.includes(field) === true;
+}
+
+function fieldEvidence(
+  value: number | null,
+  observation: BggRequestObservation,
+  source: "bgg-thing" | "bgg-collection",
+  valid: (candidate: number) => boolean,
+): FieldEvidence<number> {
+  if (value === null) {
+    return {
+      status: "invalid",
+      evidence: { presence: "present", value: null },
+      source,
+      observedAt: observation.observedAt,
+    };
+  }
+  if (!valid(value)) {
+    return {
+      status: "invalid",
+      evidence: { presence: "present", value },
+      source,
+      observedAt: observation.observedAt,
+    };
+  }
+  return { status: "valid", value, source, observedAt: observation.observedAt };
+}
+
+function playerRangeEvidence(result: BggGameResult): PlayerRangeEvidence | null {
+  const observation = result.playerRangeObservation;
+  if (observation === undefined || observation.fieldsReturned.length === 0) return null;
+  const minPresent = observation.fieldsReturned.includes("minPlayers");
+  const maxPresent = observation.fieldsReturned.includes("maxPlayers");
+  const min = result.metadata.minPlayers;
+  const max = result.metadata.maxPlayers;
+  if (
+    minPresent &&
+    maxPresent &&
+    min !== null &&
+    max !== null &&
+    Number.isSafeInteger(min) &&
+    Number.isSafeInteger(max) &&
+    min > 0 &&
+    min <= max
+  ) {
+    return {
+      status: "valid",
+      value: { minPlayers: min, maxPlayers: max },
+      source: "bgg-player-range",
+      observedAt: observation.observedAt,
+    };
+  }
+  return {
+    status: "invalid",
+    evidence: {
+      minPlayers: minPresent ? { presence: "present", value: min } : { presence: "missing" },
+      maxPlayers: maxPresent ? { presence: "present", value: max } : { presence: "missing" },
+    },
+    source: "bgg-player-range",
+    observedAt: observation.observedAt,
+  };
+}
+
+function applyBggResult(
+  game: Game,
+  result: BggGameResult,
+  logger: Logger,
+  retainPollOnRefreshOmission: boolean,
+): void {
   game.name = result.metadata.name;
   game.yearPublished = result.metadata.yearPublished;
-  game.minPlayers = result.metadata.minPlayers;
-  game.maxPlayers = result.metadata.maxPlayers;
-  game.bestPlayers = result.bggData.bestPlayerCount;
-  game.playingTime = result.metadata.playingTime;
+  const rangeEvidence = playerRangeEvidence(result);
+  if (rangeEvidence !== null) {
+    game.playerRangeEvidence = rangeEvidence;
+    if (rangeEvidence.status === "valid") {
+      game.minPlayers = rangeEvidence.value.minPlayers;
+      game.maxPlayers = rangeEvidence.value.maxPlayers;
+    } else {
+      game.minPlayers = null;
+      game.maxPlayers = null;
+    }
+  }
+  const bestPlayerCount = strictSafeBestPlayerCount(result.bggData.bestPlayerCount);
+  game.bestPlayers = bestPlayerCount;
+  if (observedField(result.metadataObservation, "playingTime")) {
+    game.durationEvidence = fieldEvidence(
+      result.metadata.playingTime,
+      result.metadataObservation,
+      "bgg-thing",
+      (value) => Number.isSafeInteger(value) && value > 0,
+    );
+    game.playingTime =
+      game.durationEvidence.status === "valid" ? game.durationEvidence.value : null;
+  }
   game.imageUrl = result.metadata.imageUrl;
-  game.bggData = result.bggData;
-  game.numPlays = result.collectionData?.numPlays ?? game.numPlays ?? null;
+  game.bggData = { ...result.bggData, bestPlayerCount };
+  if (observedField(result.collectionData?.observation, "numPlays")) {
+    game.playCountEvidence = fieldEvidence(
+      result.collectionData?.numPlays ?? null,
+      result.collectionData.observation,
+      "bgg-collection",
+      (value) => Number.isSafeInteger(value) && value >= 0,
+    );
+    game.numPlays = game.playCountEvidence.status === "valid" ? game.playCountEvidence.value : null;
+  }
+  const poll = canonicalSuggestedPlayerPoll(result.suggestedPlayerPoll);
+  if (poll !== null && !(retainPollOnRefreshOmission && poll.state === "absent")) {
+    game.suggestedPlayerPoll = poll;
+  }
+  logger.log("applied BGG result", {
+    gameId: game.id,
+    bggId: game.bggId,
+    thingFieldsReturned: result.metadataObservation?.fieldsReturned ?? [],
+    thingObservedAt: result.metadataObservation?.observedAt ?? null,
+    playerRangeState: result.playerRangeObservation?.state ?? "absent",
+    pollState: result.suggestedPlayerPoll?.state ?? "absent",
+    collectionFieldsReturned: result.collectionData?.observation?.fieldsReturned ?? [],
+    collectionObservedAt: result.collectionData?.observation?.observedAt ?? null,
+    collectionState: result.collectionData?.observation?.state ?? "absent",
+  });
+}
+
+function strictSafeBestPlayerCount(value: number | null): number | null {
+  return value !== null && Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
 function isBggDataStale(game: Game): boolean | undefined {
@@ -87,7 +211,8 @@ function isBggDataStale(game: Game): boolean | undefined {
 
 export function createGameService(deps: GameServiceDeps): GameService {
   const { storageService, fitnessService, bggClient } = deps;
-  const logger = createLogger("import");
+  const now = deps.now ?? (() => new Date().toISOString());
+  const logger = deps.logger ?? createLogger("import");
 
   function computeScore(
     game: Game,
@@ -105,6 +230,12 @@ export function createGameService(deps: GameServiceDeps): GameService {
     }
   }
 
+  function configuredBggClient(): BggClient {
+    assertBggConfigured();
+    if (!bggClient) throw new Error("BGG integration is not configured");
+    return bggClient;
+  }
+
   return {
     async addGame(input: AddGameInput): Promise<AddGameResult> {
       const parsed = AddGameSchema.parse(input);
@@ -118,25 +249,87 @@ export function createGameService(deps: GameServiceDeps): GameService {
         }
       }
 
-      const now = new Date().toISOString();
+      const createdAt = now();
+      const initialDuration = parsed.playingTime ?? null;
+      const initialRange =
+        parsed.minPlayers !== null &&
+        parsed.maxPlayers !== null &&
+        parsed.minPlayers <= parsed.maxPlayers
+          ? { minPlayers: parsed.minPlayers, maxPlayers: parsed.maxPlayers }
+          : null;
+      const partialRange =
+        initialRange === null && (parsed.minPlayers !== null || parsed.maxPlayers !== null);
       const game: Game = {
         id: uuidv4(),
         bggId: parsed.bggId ?? null,
         name: parsed.name ?? "",
         yearPublished: parsed.yearPublished ?? null,
-        minPlayers: parsed.minPlayers ?? null,
-        maxPlayers: parsed.maxPlayers ?? null,
+        minPlayers: initialRange?.minPlayers ?? null,
+        maxPlayers: initialRange?.maxPlayers ?? null,
         bestPlayers: parsed.bestPlayers ?? null,
-        playingTime: parsed.playingTime ?? null,
+        playingTime: initialDuration !== null && initialDuration > 0 ? initialDuration : null,
         imageUrl: parsed.imageUrl ?? null,
         numPlays: parsed.numPlays ?? null,
         bggData: null,
+        acquisition: { state: "unknown" },
+        playCountEvidence:
+          parsed.numPlays === null
+            ? { status: "missing", source: "manual", observedAt: null }
+            : { status: "valid", value: parsed.numPlays, source: "manual", observedAt: createdAt },
+        durationEvidence:
+          initialDuration === null
+            ? { status: "missing", source: "manual", observedAt: null }
+            : initialDuration > 0
+              ? {
+                  status: "valid",
+                  value: initialDuration,
+                  source: "manual",
+                  observedAt: createdAt,
+                }
+              : {
+                  status: "invalid",
+                  evidence: { presence: "present", value: initialDuration },
+                  source: "manual",
+                  observedAt: createdAt,
+                },
+        playerRangeEvidence: initialRange
+          ? {
+              status: "valid",
+              value: initialRange,
+              source: "manual",
+              observedAt: createdAt,
+            }
+          : partialRange
+            ? {
+                status: "invalid",
+                evidence: {
+                  minPlayers:
+                    parsed.minPlayers === null
+                      ? { presence: "missing" }
+                      : { presence: "present", value: parsed.minPlayers },
+                  maxPlayers:
+                    parsed.maxPlayers === null
+                      ? { presence: "missing" }
+                      : { presence: "present", value: parsed.maxPlayers },
+                },
+                source: "manual",
+                observedAt: createdAt,
+              }
+            : { status: "missing", source: "manual", observedAt: null },
+        suggestedPlayerPoll: {
+          status: "valid",
+          state: "absent",
+          buckets: [],
+          source: "manual",
+          observedAt: null,
+        },
+        bestPlayersInvalidEvidence: null,
         ownership: "owned",
         boxDimensions: null,
         manualShelfId: null,
         ratings: {},
-        createdAt: now,
-        updatedAt: now,
+        createdAt,
+        updatedAt: createdAt,
       };
 
       // Fetch BGG data if bggId is provided and client is available
@@ -145,7 +338,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
       if (game.bggId !== null && bggClient?.isConfigured()) {
         try {
           const result = await bggClient.getGame(game.bggId);
-          applyBggResult(game, result);
+          applyBggResult(game, result, logger, false);
           bggImported = true;
         } catch (err) {
           warning = `Game added but BGG data could not be fetched: ${toErrorMessage(err)}`;
@@ -153,7 +346,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
       }
 
       collection.games.push(game);
-      collection.updatedAt = now;
+      collection.updatedAt = createdAt;
       await storageService.saveCollection(collection);
 
       return { game, bggImported, warning };
@@ -338,8 +531,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
     },
 
     async searchGames(query: string): Promise<BggSearchResult[]> {
-      assertBggConfigured();
-      return bggClient!.searchGames(query);
+      return configuredBggClient().searchGames(query);
     },
 
     async refreshBggData(gameId: string): Promise<Game> {
@@ -357,9 +549,9 @@ export function createGameService(deps: GameServiceDeps): GameService {
         );
       }
 
-      const result = await bggClient!.getGame(game.bggId);
-      applyBggResult(game, result);
-      game.updatedAt = new Date().toISOString();
+      const result = await configuredBggClient().getGame(game.bggId);
+      applyBggResult(game, result, logger, true);
+      game.updatedAt = now();
       collection.updatedAt = game.updatedAt;
       await storageService.saveCollection(collection);
 
@@ -369,16 +561,18 @@ export function createGameService(deps: GameServiceDeps): GameService {
     async refreshAllBggData(): Promise<RefreshSummary> {
       assertBggConfigured();
       const collection = await storageService.loadCollection();
-      const bggGames = collection.games.filter((g) => g.bggId !== null);
+      const bggGames = collection.games.filter(
+        (game): game is Game & { bggId: number } => game.bggId !== null,
+      );
 
       let refreshed = 0;
       const errors: string[] = [];
 
       // Batch fetch all BGG IDs
-      const bggIds = bggGames.map((g) => g.bggId!);
+      const bggIds = bggGames.map((game) => game.bggId);
       let bggResults: Map<number, BggGameResult>;
       try {
-        bggResults = await bggClient!.getGames(bggIds);
+        bggResults = await configuredBggClient().getGames(bggIds);
       } catch (err) {
         return {
           refreshed: 0,
@@ -387,10 +581,10 @@ export function createGameService(deps: GameServiceDeps): GameService {
       }
 
       for (const game of bggGames) {
-        const result = bggResults.get(game.bggId!);
+        const result = bggResults.get(game.bggId);
         if (result) {
-          applyBggResult(game, result);
-          game.updatedAt = new Date().toISOString();
+          applyBggResult(game, result, logger, true);
+          game.updatedAt = now();
           refreshed++;
         } else {
           errors.push(`No BGG data returned for "${game.name}" (BGG ID ${game.bggId})`);
@@ -398,7 +592,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
       }
 
       if (refreshed > 0) {
-        collection.updatedAt = new Date().toISOString();
+        collection.updatedAt = now();
         await storageService.saveCollection(collection);
       }
 
@@ -420,7 +614,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
 
       let collectionItems: BggCollectionItem[];
       try {
-        collectionItems = await bggClient!.getUserCollection();
+        collectionItems = await configuredBggClient().getUserCollection();
       } catch (err) {
         logger.error(`failed to fetch collection: ${toErrorMessage(err)}`);
         throw new Error(`Failed to fetch BGG collection: ${toErrorMessage(err)}`);
@@ -428,7 +622,9 @@ export function createGameService(deps: GameServiceDeps): GameService {
 
       const collection = await storageService.loadCollection();
       const existingBggIds = new Set(
-        collection.games.filter((g) => g.bggId !== null).map((g) => g.bggId!),
+        collection.games
+          .filter((game): game is Game & { bggId: number } => game.bggId !== null)
+          .map((game) => game.bggId),
       );
 
       let imported = 0;
@@ -456,7 +652,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
       if (newItems.length > 0) {
         const newBggIds = newItems.map((item) => item.bggId);
         try {
-          await bggClient!.getGames(newBggIds, async (batch) => {
+          await configuredBggClient().getGames(newBggIds, async (batch) => {
             for (const [bggId, result] of batch.results) {
               const item = itemsByBggId.get(bggId);
               const gameName = item?.name ?? result.metadata.name;
@@ -469,28 +665,107 @@ export function createGameService(deps: GameServiceDeps): GameService {
                 gameName,
               });
 
-              const now = new Date().toISOString();
+              const initialCollectionData = item
+                ? {
+                    numPlays: item.numplays,
+                    observation: item.playCountObservation,
+                  }
+                : undefined;
+              const secondaryCollectionComplete =
+                result.collectionData !== undefined &&
+                result.collectionData.numPlays !== null &&
+                result.collectionData.observation?.sourceRequest === "bgg-collection" &&
+                result.collectionData.observation.observedAt.length > 0 &&
+                result.collectionData.observation.state === "complete" &&
+                result.collectionData.observation.fieldsReturned.includes("numPlays");
+              const collectionData = secondaryCollectionComplete
+                ? result.collectionData
+                : (initialCollectionData ?? result.collectionData);
+              const createdAt = now();
+              const rangeEvidence = playerRangeEvidence(result);
+              const poll = canonicalSuggestedPlayerPoll(result.suggestedPlayerPoll);
+              const durationObserved = observedField(result.metadataObservation, "playingTime");
+              const playObserved = observedField(collectionData?.observation, "numPlays");
+              const playCountEvidence =
+                playObserved && collectionData?.observation
+                  ? fieldEvidence(
+                      collectionData.numPlays,
+                      collectionData.observation,
+                      "bgg-collection",
+                      (value) => Number.isSafeInteger(value) && value >= 0,
+                    )
+                  : {
+                      status: "missing" as const,
+                      source: "bgg-collection" as const,
+                      observedAt: null,
+                    };
+              const bestPlayerCount = strictSafeBestPlayerCount(result.bggData.bestPlayerCount);
               const game: Game = {
                 id: uuidv4(),
                 bggId,
                 name: result.metadata.name,
                 yearPublished: result.metadata.yearPublished,
-                minPlayers: result.metadata.minPlayers,
-                maxPlayers: result.metadata.maxPlayers,
-                bestPlayers: result.bggData.bestPlayerCount,
-                playingTime: result.metadata.playingTime,
+                minPlayers:
+                  rangeEvidence?.status === "valid" ? rangeEvidence.value.minPlayers : null,
+                maxPlayers:
+                  rangeEvidence?.status === "valid" ? rangeEvidence.value.maxPlayers : null,
+                bestPlayers: bestPlayerCount,
+                playingTime:
+                  durationObserved &&
+                  result.metadata.playingTime !== null &&
+                  Number.isSafeInteger(result.metadata.playingTime) &&
+                  result.metadata.playingTime > 0
+                    ? result.metadata.playingTime
+                    : null,
                 imageUrl: result.metadata.imageUrl,
-                numPlays: result.collectionData?.numPlays ?? null,
-                bggData: result.bggData,
+                numPlays: playCountEvidence.status === "valid" ? playCountEvidence.value : null,
+                bggData: { ...result.bggData, bestPlayerCount },
+                acquisition: { state: "unknown" },
+                playCountEvidence,
+                durationEvidence:
+                  durationObserved && result.metadataObservation
+                    ? fieldEvidence(
+                        result.metadata.playingTime,
+                        result.metadataObservation,
+                        "bgg-thing",
+                        (value) => Number.isSafeInteger(value) && value > 0,
+                      )
+                    : { status: "missing", source: "bgg-thing", observedAt: null },
+                playerRangeEvidence: rangeEvidence ?? {
+                  status: "missing",
+                  source: "bgg-player-range",
+                  observedAt: null,
+                },
+                suggestedPlayerPoll: poll ?? {
+                  status: "valid",
+                  state: "absent",
+                  buckets: [],
+                  source: "bgg-suggested-player-poll",
+                  observedAt: null,
+                },
+                bestPlayersInvalidEvidence: null,
                 ownership: "owned",
                 boxDimensions: null,
                 manualShelfId: null,
                 ratings: {},
-                createdAt: now,
-                updatedAt: now,
+                createdAt,
+                updatedAt: createdAt,
               };
 
               collection.games.push(game);
+              logger.log("imported BGG result", {
+                gameId: game.id,
+                bggId,
+                thingFieldsReturned: result.metadataObservation?.fieldsReturned ?? [],
+                thingObservedAt: result.metadataObservation?.observedAt ?? null,
+                playerRangeState: result.playerRangeObservation?.state ?? "absent",
+                pollState: result.suggestedPlayerPoll?.state ?? "absent",
+                collectionFieldsReturned: collectionData?.observation?.fieldsReturned ?? [],
+                collectionObservedAt: collectionData?.observation?.observedAt ?? null,
+                collectionState: collectionData?.observation?.state ?? "absent",
+                collectionSource:
+                  collectionData === result.collectionData ? "secondary-batch" : "initial-import",
+              });
               imported++;
             }
 
@@ -510,7 +785,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
       }
 
       if (imported > 0) {
-        collection.updatedAt = new Date().toISOString();
+        collection.updatedAt = now();
         await storageService.saveCollection(collection);
       }
       logger.log(`complete: ${imported} imported, ${skipped} skipped, ${errors.length} errors`);

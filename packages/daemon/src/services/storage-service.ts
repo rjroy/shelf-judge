@@ -10,11 +10,15 @@ import type {
   RedundancySettings,
   WishlistEntry,
   ShelfConfiguration,
+  InvalidEvidence,
+  JsonValue,
 } from "@shelf-judge/shared";
 import {
+  AcquisitionSchema,
   CURRENT_COLLECTION_SCHEMA_VERSION,
   createFreshCollectionDerivedAxes,
   CollectionSchema,
+  EntertainmentBenchmarkSchema,
   TournamentDataSchema,
   ShelfConfigurationSchema,
 } from "@shelf-judge/shared";
@@ -90,9 +94,86 @@ function createDefaultCollection(dependencies?: CollectionMigrationDependencies)
       },
     ],
     games: [],
+    entertainmentBenchmark: null,
     createdAt: now,
     updatedAt: now,
   });
+}
+
+export interface StoredCollectionDecodeResult {
+  data: unknown;
+  normalized: boolean;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isUnknownArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
+}
+
+function isJsonValue(value: unknown): value is JsonValue {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(isJsonValue);
+  return isRecord(value) && Object.values(value).every(isJsonValue);
+}
+
+function storedInvalidEvidence(value: unknown, present: boolean): InvalidEvidence {
+  if (!present) return { presence: "missing" };
+  if (!isJsonValue(value)) throw new Error("Malformed stored value is not JSON-safe");
+  return { presence: "present", value };
+}
+
+export function decodeStoredCollection(raw: unknown, logger: Logger): StoredCollectionDecodeResult {
+  if (!isRecord(raw) || raw.schemaVersion !== 3) return { data: raw, normalized: false };
+
+  let normalized = false;
+  const collectionId = typeof raw.id === "string" ? raw.id : "unknown";
+  const next: Record<string, unknown> = { ...raw };
+  const benchmarkPresent = Object.hasOwn(raw, "entertainmentBenchmark");
+  const benchmark = raw.entertainmentBenchmark;
+  if (!EntertainmentBenchmarkSchema.safeParse(benchmark).success) {
+    logger.log(
+      `collection storage normalization attempt collectionId=${collectionId} field=entertainmentBenchmark`,
+    );
+    next.entertainmentBenchmark = {
+      state: "invalid",
+      evidence: storedInvalidEvidence(benchmark, benchmarkPresent),
+    };
+    normalized = true;
+    logger.log(
+      `collection storage normalization completed collectionId=${collectionId} field=entertainmentBenchmark`,
+    );
+  }
+
+  if (isUnknownArray(raw.games)) {
+    next.games = raw.games.map((entry): unknown => {
+      if (!isRecord(entry)) return entry;
+      const acquisitionPresent = Object.hasOwn(entry, "acquisition");
+      const acquisition = entry.acquisition;
+      if (AcquisitionSchema.safeParse(acquisition).success) return entry;
+      const gameId = typeof entry.id === "string" ? entry.id : "unknown";
+      logger.log(
+        `collection storage normalization attempt collectionId=${collectionId} gameId=${gameId} field=acquisition`,
+      );
+      normalized = true;
+      const decoded = {
+        ...entry,
+        acquisition: {
+          state: "invalid",
+          evidence: storedInvalidEvidence(acquisition, acquisitionPresent),
+        },
+      };
+      logger.log(
+        `collection storage normalization completed collectionId=${collectionId} gameId=${gameId} field=acquisition`,
+      );
+      return decoded;
+    });
+  }
+
+  return { data: next, normalized };
 }
 
 function createDefaultTournament(): TournamentData {
@@ -200,8 +281,9 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
           `collection migration start sourceVersion=${sourceVersion} targetVersion=${CURRENT_COLLECTION_SCHEMA_VERSION}`,
         );
         let migration: CollectionMigrationResult;
+        const decoded = decodeStoredCollection(raw, logger);
         try {
-          migration = migrateCollection(raw, deps.collectionMigrationDependencies);
+          migration = migrateCollection(decoded.data, deps.collectionMigrationDependencies);
         } catch (error) {
           logger.error(
             `collection migration failed sourceVersion=${sourceVersion} targetVersion=${CURRENT_COLLECTION_SCHEMA_VERSION}`,
@@ -213,31 +295,33 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
           `collection migration checked sourceVersion=${migration.sourceVersion} targetVersion=${CURRENT_COLLECTION_SCHEMA_VERSION} axes=${migration.data.axes.length} games=${migration.data.games.length} converted=${migration.convertedAxisCount} disabled=${migration.disabledAxisCount}`,
         );
         const validated = validateCollection(migration.data);
-        if (!migration.migrated) return validated;
+        if (!migration.migrated && !decoded.normalized) return validated;
 
-        const artifactContext = createCollectionArtifactContext(
-          dataDir,
-          fileOps,
-          logger,
-          deps.quarantinePathForAttempt,
-          deps.temporaryPathForAttempt,
-        );
-        for (const artifact of artifacts) {
-          const artifactPath = artifact.path(dataDir);
-          logger.log(
-            `artifact invalidation attempt identity=${artifact.identity} dependencyVersion=${artifact.dependencyVersion} path=${artifactPath}`,
+        if (migration.migrated) {
+          const artifactContext = createCollectionArtifactContext(
+            dataDir,
+            fileOps,
+            logger,
+            deps.quarantinePathForAttempt,
+            deps.temporaryPathForAttempt,
           );
-          try {
-            await artifact.invalidate(artifactContext);
+          for (const artifact of artifacts) {
+            const artifactPath = artifact.path(dataDir);
             logger.log(
-              `artifact invalidation completed identity=${artifact.identity} path=${artifactPath}`,
+              `artifact invalidation attempt identity=${artifact.identity} dependencyVersion=${artifact.dependencyVersion} path=${artifactPath}`,
             );
-          } catch (error) {
-            logger.error(
-              `artifact invalidation failed identity=${artifact.identity} path=${artifactPath}`,
-              error,
-            );
-            throw error;
+            try {
+              await artifact.invalidate(artifactContext);
+              logger.log(
+                `artifact invalidation completed identity=${artifact.identity} path=${artifactPath}`,
+              );
+            } catch (error) {
+              logger.error(
+                `artifact invalidation failed identity=${artifact.identity} path=${artifactPath}`,
+                error,
+              );
+              throw error;
+            }
           }
         }
 

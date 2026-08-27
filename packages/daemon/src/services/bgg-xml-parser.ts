@@ -6,6 +6,8 @@ import type {
   BggSearchResult,
 } from "@shelf-judge/shared";
 
+type BggRequestObservation = NonNullable<BggSearchResult["searchObservation"]>;
+
 type BggXmlNameEntry = BggXmlAttribute & Record<string, string>;
 type BggXmlLinkEntry = BggXmlAttribute & Record<string, string>;
 
@@ -28,6 +30,15 @@ export interface BggCollectionItem {
   name: string;
   yearPublished: number | null;
   numplays: number | null;
+  playCountObservation?: BggRequestObservation;
+}
+
+export type SuggestedPlayerPollState = "absent" | "empty" | "unusable" | "usable";
+
+export interface ParsedSuggestedPlayerPoll {
+  buckets: SuggestedPlayerCount[];
+  state: SuggestedPlayerPollState;
+  observation?: BggRequestObservation;
 }
 
 // Interfaces for the parsed XML structure from fast-xml-parser.
@@ -115,12 +126,22 @@ function extractLinks(links: BggXmlLinkEntry[], type: string): BggTag[] {
     }));
 }
 
-function extractSuggestedPlayerCounts(poll: BggXmlPoll | undefined): SuggestedPlayerCount[] {
-  if (!poll) return [];
+function extractSuggestedPlayerPoll(poll: BggXmlPoll | undefined): ParsedSuggestedPlayerPoll {
+  if (!poll) return { buckets: [], state: "absent" };
   const allResults = ensureArray(poll.results);
-  return allResults.map((r) => {
+  if (allResults.length === 0) return { buckets: [], state: "empty" };
+
+  let hasUsableBucket = false;
+  const buckets = allResults.map((r) => {
     const playerCount = r["@_numplayers"] ?? "?";
     const votes = ensureArray(r.result);
+    const hasRecognizedVote = votes.some(
+      (vote) =>
+        vote["@_value"] === "Best" ||
+        vote["@_value"] === "Recommended" ||
+        vote["@_value"] === "Not Recommended",
+    );
+    if (r["@_numplayers"] !== undefined && hasRecognizedVote) hasUsableBucket = true;
     const best = Number(votes.find((v) => v["@_value"] === "Best")?.["@_numvotes"]) || 0;
     const recommended =
       Number(votes.find((v) => v["@_value"] === "Recommended")?.["@_numvotes"]) || 0;
@@ -128,10 +149,11 @@ function extractSuggestedPlayerCounts(poll: BggXmlPoll | undefined): SuggestedPl
       Number(votes.find((v) => v["@_value"] === "Not Recommended")?.["@_numvotes"]) || 0;
     return { playerCount, best, recommended, notRecommended };
   });
+
+  return { buckets, state: hasUsableBucket ? "usable" : "unusable" };
 }
 
-function extractBestPlayerCount(poll: BggXmlPoll | undefined): number | null {
-  const suggestedPlayerCounts = extractSuggestedPlayerCounts(poll);
+function extractBestPlayerCount(suggestedPlayerCounts: SuggestedPlayerCount[]): number | null {
   if (suggestedPlayerCounts.length == 0) return null;
   let best: number | null = null;
   let votes: number | null = null;
@@ -140,7 +162,12 @@ function extractBestPlayerCount(poll: BggXmlPoll | undefined): number | null {
   for (const suggestion of suggestedPlayerCounts) {
     const bucket = /^\s*(\d+)(?:\+)?\s*$/.exec(suggestion.playerCount);
     const playerCount = bucket === null ? null : Number(bucket[1]);
-    if (suggestion.best > 0 && playerCount !== null && playerCount > 0) {
+    if (
+      suggestion.best > 0 &&
+      playerCount !== null &&
+      Number.isSafeInteger(playerCount) &&
+      playerCount > 0
+    ) {
       if (votes === null || votes < suggestion.best) {
         best = playerCount;
         votes = suggestion.best;
@@ -154,30 +181,79 @@ function extractBestPlayerCount(poll: BggXmlPoll | undefined): number | null {
   return best && count ? best / count : null;
 }
 
+function observation(
+  sourceRequest: BggRequestObservation["sourceRequest"],
+  observedAt: string,
+  state: BggRequestObservation["state"],
+  fieldsReturned: string[],
+): BggRequestObservation {
+  return { sourceRequest, observedAt, state, fieldsReturned };
+}
+
 function assertBggXml(parsed: { items?: unknown }, context: string): void {
   if (!parsed || !("items" in parsed)) {
     throw new Error(`Malformed BGG ${context} response: missing root <items> element`);
   }
 }
 
-export function parseThingResponse(xml: string): BggGameData[] {
-  const parsed = parser.parse(xml) as BggXmlDocument;
-  assertBggXml(parsed, "thing");
-  const items = ensureArray(parsed?.items?.item);
+function parseThingItem(item: BggXmlItem, observedAt: string): ThingItem {
+  const names = ensureArray(item.name);
+  const links = ensureArray(item.link);
+  const ratings = item.statistics?.ratings;
+  const avgWeight = parseNumber(ratings?.averageweight?.["@_value"]);
+  const weight = avgWeight === 0 ? null : avgWeight;
+  const polls = ensureArray(item.poll);
+  const playerCountPoll = polls.find((poll) => poll["@_name"] === "suggested_numplayers");
+  const suggestedPlayerPoll = extractSuggestedPlayerPoll(playerCountPoll);
+  suggestedPlayerPoll.observation = observation(
+    "bgg-thing",
+    observedAt,
+    suggestedPlayerPoll.state === "absent" ? "absent" : "complete",
+    suggestedPlayerPoll.state === "absent" ? [] : ["suggestedPlayerCounts"],
+  );
 
-  return items.map((item) => {
-    const links = ensureArray(item.link);
-    const ratings = item.statistics?.ratings;
+  const minPlayers = parseNumber(item.minplayers?.["@_value"]);
+  const maxPlayers = parseNumber(item.maxplayers?.["@_value"]);
+  const rangeFields = [
+    ...(item.minplayers === undefined ? [] : ["minPlayers"]),
+    ...(item.maxplayers === undefined ? [] : ["maxPlayers"]),
+  ];
+  const rangeState =
+    rangeFields.length === 0 ? "absent" : rangeFields.length === 2 ? "complete" : "partial";
+  const hasName = names.some((name) => name["@_value"] !== undefined);
+  const metadataFields = [
+    ...(hasName ? ["name"] : []),
+    ...(item.yearpublished?.["@_value"] === undefined ? [] : ["yearPublished"]),
+    ...rangeFields,
+    ...(item.playingtime?.["@_value"] === undefined ? [] : ["playingTime"]),
+    ...(item.image === undefined ? [] : ["imageUrl"]),
+    ...(item.thumbnail === undefined ? [] : ["thumbnailUrl"]),
+    ...(ratings === undefined ? [] : ["bggData"]),
+  ];
+  const expectedMetadataFieldCount = 8;
+  const metadataState =
+    metadataFields.length === 0
+      ? "absent"
+      : metadataFields.length === expectedMetadataFieldCount
+        ? "complete"
+        : "partial";
 
-    const avgWeight = parseNumber(ratings?.averageweight?.["@_value"]);
-
-    // BGG quirk: averageweight of 0 treated as null (known bug)
-    const weight = avgWeight === 0 ? null : avgWeight;
-
-    const polls = ensureArray(item.poll);
-    const playerCountPoll = polls.find((p) => p["@_name"] === "suggested_numplayers");
-
-    return {
+  return {
+    bggId: Number(item["@_id"]),
+    metadata: {
+      bggId: Number(item["@_id"]),
+      name: extractPrimaryName(names),
+      yearPublished: parseNumber(item.yearpublished?.["@_value"]),
+      minPlayers,
+      maxPlayers,
+      playingTime: parseNumber(item.playingtime?.["@_value"]),
+      imageUrl: item.image ?? null,
+      thumbnailUrl: item.thumbnail ?? null,
+    },
+    metadataObservation: observation("bgg-thing", observedAt, metadataState, metadataFields),
+    playerRangeObservation: observation("bgg-thing", observedAt, rangeState, rangeFields),
+    suggestedPlayerPoll,
+    bggData: {
       communityRating: parseNumber(ratings?.average?.["@_value"]) ?? 0,
       bayesAverage: parseNumber(ratings?.bayesaverage?.["@_value"]) ?? 0,
       weight,
@@ -187,11 +263,24 @@ export function parseThingResponse(xml: string): BggGameData[] {
       categories: extractLinks(links, "boardgamecategory"),
       families: extractLinks(links, "boardgamefamily"),
       subdomains: extractLinks(links, "boardgamesubdomain"),
-      suggestedPlayerCounts: extractSuggestedPlayerCounts(playerCountPoll),
-      bestPlayerCount: extractBestPlayerCount(playerCountPoll),
-      fetchedAt: new Date().toISOString(),
-    };
-  });
+      bestPlayerCount: extractBestPlayerCount(suggestedPlayerPoll.buckets),
+      fetchedAt: observedAt,
+    },
+  };
+}
+
+function parseThingDocument(xml: string, observedAt: string): ThingItem[] {
+  const parsed = parser.parse(xml) as BggXmlDocument;
+  assertBggXml(parsed, "thing");
+  const items = ensureArray(parsed?.items?.item);
+  return items.map((item) => parseThingItem(item, observedAt));
+}
+
+export function parseThingResponse(
+  xml: string,
+  observedAt = new Date().toISOString(),
+): BggGameData[] {
+  return parseThingDocument(xml, observedAt).map((item) => item.bggData);
 }
 
 export interface ThingMetadata {
@@ -207,6 +296,7 @@ export interface ThingMetadata {
 
 export interface CollectiomItemMetadata {
   numPlays: number | null;
+  observation?: BggRequestObservation;
 }
 
 export function parseThingMetadata(xml: string): ThingMetadata[] {
@@ -233,69 +323,46 @@ export interface ThingItem {
   bggId: number;
   metadata: ThingMetadata;
   bggData: BggGameData;
+  metadataObservation: BggRequestObservation;
+  playerRangeObservation: BggRequestObservation;
+  suggestedPlayerPoll: ParsedSuggestedPlayerPoll;
 }
 
-export function parseThingItems(xml: string): ThingItem[] {
-  const parsed = parser.parse(xml) as BggXmlDocument;
-  assertBggXml(parsed, "thing");
-  const items = ensureArray(parsed?.items?.item);
-
-  return items.map((item) => {
-    const names = ensureArray(item.name);
-    const links = ensureArray(item.link);
-    const ratings = item.statistics?.ratings;
-    const avgWeight = parseNumber(ratings?.averageweight?.["@_value"]);
-    const weight = avgWeight === 0 ? null : avgWeight;
-    const polls = ensureArray(item.poll);
-    const playerCountPoll = polls.find((p) => p["@_name"] === "suggested_numplayers");
-
-    return {
-      bggId: Number(item["@_id"]),
-      metadata: {
-        bggId: Number(item["@_id"]),
-        name: extractPrimaryName(names),
-        yearPublished: parseNumber(item.yearpublished?.["@_value"]),
-        minPlayers: parseNumber(item.minplayers?.["@_value"]),
-        maxPlayers: parseNumber(item.maxplayers?.["@_value"]),
-        playingTime: parseNumber(item.playingtime?.["@_value"]),
-        imageUrl: item.image ?? null,
-        thumbnailUrl: item.thumbnail ?? null,
-      },
-      bggData: {
-        communityRating: parseNumber(ratings?.average?.["@_value"]) ?? 0,
-        bayesAverage: parseNumber(ratings?.bayesaverage?.["@_value"]) ?? 0,
-        weight,
-        numWeightVotes: parseNumber(ratings?.numweights?.["@_value"]) ?? 0,
-        description: item.description ?? null,
-        mechanics: extractLinks(links, "boardgamemechanic"),
-        categories: extractLinks(links, "boardgamecategory"),
-        families: extractLinks(links, "boardgamefamily"),
-        subdomains: extractLinks(links, "boardgamesubdomain"),
-        suggestedPlayerCounts: extractSuggestedPlayerCounts(playerCountPoll),
-        bestPlayerCount: extractBestPlayerCount(playerCountPoll),
-        fetchedAt: new Date().toISOString(),
-      },
-    };
-  });
+export function parseThingItems(xml: string, observedAt = new Date().toISOString()): ThingItem[] {
+  return parseThingDocument(xml, observedAt);
 }
 
-export function parseSearchResponse(xml: string): BggSearchResult[] {
+export function parseSearchResponse(
+  xml: string,
+  observedAt = new Date().toISOString(),
+): BggSearchResult[] {
   const parsed = parser.parse(xml) as BggXmlDocument;
   assertBggXml(parsed, "search");
   const items = ensureArray(parsed?.items?.item);
 
   return items.map((item) => {
     const names = ensureArray(item.name);
+    const fieldsReturned = [
+      ...(item["@_id"] === undefined ? [] : ["bggId"]),
+      ...(names.some((name) => name["@_value"] !== undefined) ? ["name"] : []),
+      ...(item.yearpublished?.["@_value"] === undefined ? [] : ["yearPublished"]),
+    ];
+    const state =
+      fieldsReturned.length === 0 ? "absent" : fieldsReturned.length === 3 ? "complete" : "partial";
     return {
       bggId: Number(item["@_id"]),
       name: extractPrimaryName(names),
       yearPublished: parseNumber(item.yearpublished?.["@_value"]),
       thumbnailUrl: null,
+      searchObservation: observation("bgg-search", observedAt, state, fieldsReturned),
     };
   });
 }
 
-export function parseCollectionResponse(xml: string): BggCollectionItem[] {
+export function parseCollectionResponse(
+  xml: string,
+  observedAt = new Date().toISOString(),
+): BggCollectionItem[] {
   const parsed = parser.parse(xml) as BggXmlCollectionDocument;
   assertBggXml(parsed, "collection");
   const items = ensureArray(parsed?.items?.item);
@@ -316,12 +383,20 @@ export function parseCollectionResponse(xml: string): BggCollectionItem[] {
     }
     const year = item.yearpublished;
     const numplays = item.numplays;
+    const parsedNumPlays = parseNumber(numplays);
+    const hasNumPlays = numplays !== undefined;
 
     return {
       bggId: Number(item["@_objectid"]),
       name: nameStr,
       yearPublished: parseNumber(year),
-      numplays: parseNumber(numplays),
+      numplays: parsedNumPlays,
+      playCountObservation: observation(
+        "bgg-collection",
+        observedAt,
+        hasNumPlays ? "complete" : "absent",
+        hasNumPlays ? ["numPlays"] : [],
+      ),
     };
   });
 }

@@ -10,9 +10,130 @@ import {
   TournamentSettingsUpdateSchema,
   TournamentDataSchema,
   TournamentSettingsSchema,
+  AcquisitionSchema,
+  EntertainmentBenchmarkSchema,
+  PlayCountEvidenceSchema,
+  PlayerRangeEvidenceSchema,
+  SuggestedPlayerPollSchema,
   type CreateAxisInput,
   type UpdateAxisInput,
 } from "../src/index";
+
+describe("schema v3 persisted contracts", () => {
+  const amount = { hundredths: 0, source: "manual", confirmedAt: "2026-08-26T00:00:00Z" };
+
+  test("accepts unknown, gift, zero purchase, positive purchase, and positive benchmark", () => {
+    expect(AcquisitionSchema.safeParse({ state: "unknown" }).success).toBe(true);
+    expect(AcquisitionSchema.safeParse({ state: "gift" }).success).toBe(true);
+    expect(AcquisitionSchema.safeParse({ state: "purchase", amount }).success).toBe(true);
+    expect(
+      AcquisitionSchema.safeParse({
+        state: "purchase",
+        amount: { ...amount, hundredths: 1250 },
+      }).success,
+    ).toBe(true);
+    expect(
+      EntertainmentBenchmarkSchema.safeParse({
+        state: "configured",
+        amount: { ...amount, hundredths: 800 },
+      }).success,
+    ).toBe(true);
+    expect(EntertainmentBenchmarkSchema.safeParse({ state: "configured", amount }).success).toBe(
+      false,
+    );
+  });
+
+  test("keeps invalid evidence JSON-safe and distinguishes missing from present null", () => {
+    expect(
+      AcquisitionSchema.parse({ state: "invalid", evidence: { presence: "missing" } }),
+    ).toEqual({ state: "invalid", evidence: { presence: "missing" } });
+    expect(
+      AcquisitionSchema.parse({
+        state: "invalid",
+        evidence: { presence: "present", value: null },
+      }),
+    ).toEqual({ state: "invalid", evidence: { presence: "present", value: null } });
+    expect(
+      AcquisitionSchema.safeParse({
+        state: "invalid",
+        evidence: { presence: "present", value: undefined },
+      }).success,
+    ).toBe(false);
+  });
+
+  test("strictly validates field, range, and canonical poll evidence", () => {
+    expect(
+      PlayCountEvidenceSchema.safeParse({
+        status: "valid",
+        value: 0,
+        source: "bgg-collection",
+        observedAt: "2026-08-26T00:00:00Z",
+      }).success,
+    ).toBe(true);
+    expect(
+      PlayCountEvidenceSchema.safeParse({
+        status: "invalid",
+        value: -1,
+        source: "legacy-unknown",
+        observedAt: null,
+      }).success,
+    ).toBe(false);
+    expect(
+      PlayerRangeEvidenceSchema.safeParse({
+        status: "valid",
+        value: { minPlayers: 4, maxPlayers: 2 },
+        source: "bgg-player-range",
+        observedAt: null,
+      }).success,
+    ).toBe(false);
+    expect(
+      SuggestedPlayerPollSchema.safeParse({
+        status: "valid",
+        state: "usable",
+        buckets: [{ playerCount: "3", best: 1, recommended: 0, notRecommended: 0 }],
+        source: "bgg-suggested-player-poll",
+        observedAt: "2026-08-26T00:00:00Z",
+      }).success,
+    ).toBe(true);
+    for (const contradictory of [
+      {
+        state: "absent",
+        buckets: [{ playerCount: "3", best: 1, recommended: 0, notRecommended: 0 }],
+      },
+      {
+        state: "empty",
+        buckets: [{ playerCount: "3", best: 1, recommended: 0, notRecommended: 0 }],
+      },
+      {
+        state: "legacy-unknown",
+        buckets: [{ playerCount: "3", best: 1, recommended: 0, notRecommended: 0 }],
+      },
+      { state: "usable", buckets: [] },
+      { state: "unusable", buckets: [] },
+      {
+        state: "usable",
+        buckets: [{ playerCount: "4+", best: 1, recommended: 0, notRecommended: 0 }],
+      },
+      {
+        state: "usable",
+        buckets: [{ playerCount: "9007199254740992", best: 1, recommended: 0, notRecommended: 0 }],
+      },
+      {
+        state: "unusable",
+        buckets: [{ playerCount: "3", best: 1, recommended: 0, notRecommended: 0 }],
+      },
+    ]) {
+      expect(
+        SuggestedPlayerPollSchema.safeParse({
+          status: "valid",
+          source: "bgg-suggested-player-poll",
+          observedAt: null,
+          ...contradictory,
+        }).success,
+      ).toBe(false);
+    }
+  });
+});
 
 const createAliasFixture: CreateAxisInput = {
   name: "Personal axis",

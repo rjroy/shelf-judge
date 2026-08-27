@@ -62,9 +62,10 @@ describe("BGG XML Parser", () => {
       expect(subNames).toContain("Strategy Games");
       expect(subNames).toContain("Family Games");
 
-      // Suggested player counts
-      expect(data.suggestedPlayerCounts.length).toBeGreaterThanOrEqual(5);
-      const threePlayer = data.suggestedPlayerCounts.find((s) => s.playerCount === "3");
+      // Suggested player counts are carried only by the persistence sidecar.
+      const poll = parseThingItems(xml)[0]?.suggestedPlayerPoll;
+      expect(poll?.buckets.length).toBeGreaterThanOrEqual(5);
+      const threePlayer = poll?.buckets.find((s) => s.playerCount === "3");
       expect(threePlayer).toBeDefined();
       expect(threePlayer!.best).toBe(1217);
       expect(threePlayer!.recommended).toBe(596);
@@ -216,6 +217,177 @@ describe("BGG XML Parser", () => {
   });
 
   describe("parseThingItems", () => {
+    test("distinguishes absent, empty, unusable, and usable suggested-player polls", () => {
+      const cases = [
+        { xml: thingXmlWithPlayerPoll(null), state: "absent" },
+        { xml: thingXmlWithPlayerPoll(""), state: "empty" },
+        {
+          xml: thingXmlWithPlayerPoll(
+            '<results><result value="Unexpected" numvotes="4"/></results>',
+          ),
+          state: "unusable",
+        },
+        { xml: thingXmlWithPlayerPoll(playerCountResult("5+", 7)), state: "usable" },
+      ] as const;
+
+      for (const { xml, state } of cases) {
+        expect(parseThingItems(xml, "2026-08-26T10:00:00.000Z")[0]?.suggestedPlayerPoll.state).toBe(
+          state,
+        );
+      }
+    });
+
+    test("retains factual buckets once while preserving best-player compatibility", () => {
+      const xml = thingXmlWithPlayerPoll(
+        `<results numplayers="Crowd">
+          <result value="Best" numvotes="7"/>
+          <result value="Recommended" numvotes="5"/>
+          <result value="Not Recommended" numvotes="3"/>
+        </results>${playerCountResult("5+", 11)}`,
+      );
+      const observedAt = "2026-08-26T10:00:00.000Z";
+      const item = parseThingItems(xml, observedAt)[0];
+      const compatibility = parseThingResponse(xml, observedAt)[0];
+
+      expect(item?.suggestedPlayerPoll.buckets).toEqual([
+        { playerCount: "Crowd", best: 7, recommended: 5, notRecommended: 3 },
+        { playerCount: "5+", best: 11, recommended: 0, notRecommended: 0 },
+      ]);
+      expect(compatibility?.bestPlayerCount).toBe(5);
+      expect(compatibility).not.toHaveProperty("suggestedPlayerCounts");
+      expect(compatibility).not.toHaveProperty("suggestedPlayerPoll");
+      expect(item?.suggestedPlayerPoll.observation?.observedAt).toBe(observedAt);
+    });
+
+    test("rejects unsafe compatibility labels without discarding the factual bucket", () => {
+      const unsafe = "9007199254740992";
+      const item = parseThingItems(thingXmlWithPlayerPoll(playerCountResult(unsafe, 7)))[0];
+
+      expect(item?.bggData.bestPlayerCount).toBeNull();
+      expect(item?.suggestedPlayerPoll.buckets).toEqual([
+        { playerCount: unsafe, best: 7, recommended: 0, notRecommended: 0 },
+      ]);
+    });
+
+    test("rejects non-positive and noninteger compatibility labels", () => {
+      for (const playerCount of ["0", "-1", "1.5"]) {
+        const item = parseThingItems(thingXmlWithPlayerPoll(playerCountResult(playerCount, 7)))[0];
+
+        expect(item?.bggData.bestPlayerCount).toBeNull();
+      }
+    });
+
+    test("uses one thing observation for metadata, range, poll, and fetchedAt", () => {
+      const observedAt = "2026-08-26T11:00:00.000Z";
+      const item = parseThingItems(
+        thingXmlWithPlayerPoll(playerCountResult("2", 4)),
+        observedAt,
+      )[0];
+
+      expect(item?.metadataObservation.observedAt).toBe(observedAt);
+      expect(item?.playerRangeObservation.observedAt).toBe(observedAt);
+      expect(item?.suggestedPlayerPoll.observation?.observedAt).toBe(observedAt);
+      expect(item?.bggData.fetchedAt).toBe(observedAt);
+    });
+
+    test("derives partial thing evidence from fields actually present", () => {
+      const observedAt = "2026-08-26T11:30:00.000Z";
+      const xml = `<items><item type="boardgame" id="1">
+        <minplayers value="2"/>
+      </item></items>`;
+
+      const item = parseThingItems(xml, observedAt)[0];
+
+      expect(item?.metadataObservation).toEqual({
+        sourceRequest: "bgg-thing",
+        observedAt,
+        state: "partial",
+        fieldsReturned: ["minPlayers"],
+      });
+      expect(item?.metadata.name).toBe("Unknown");
+      expect(item?.playerRangeObservation).toEqual({
+        sourceRequest: "bgg-thing",
+        observedAt,
+        state: "partial",
+        fieldsReturned: ["minPlayers"],
+      });
+      expect(item?.suggestedPlayerPoll.state).toBe("absent");
+      expect(item?.bggData.communityRating).toBe(0);
+      expect(item?.bggData.numWeightVotes).toBe(0);
+    });
+
+    test("reports malformed-present player bounds without changing compatibility values", () => {
+      const observedAt = "2026-08-26T11:40:00.000Z";
+      const xml = `<items><item type="boardgame" id="1">
+        <minplayers value="many"/>
+        <maxplayers value="several"/>
+      </item></items>`;
+
+      const item = parseThingItems(xml, observedAt)[0];
+
+      expect(item?.metadata.minPlayers).toBeNull();
+      expect(item?.metadata.maxPlayers).toBeNull();
+      expect(item?.playerRangeObservation).toEqual({
+        sourceRequest: "bgg-thing",
+        observedAt,
+        state: "complete",
+        fieldsReturned: ["minPlayers", "maxPlayers"],
+      });
+      expect(item?.metadataObservation.fieldsReturned).toEqual(["minPlayers", "maxPlayers"]);
+      expect(item?.metadataObservation.state).toBe("partial");
+    });
+
+    test("reports empty-present player bounds without changing compatibility values", () => {
+      const observedAt = "2026-08-26T11:41:00.000Z";
+      const xml = `<items><item type="boardgame" id="1">
+        <minplayers/>
+        <maxplayers/>
+      </item></items>`;
+
+      const item = parseThingItems(xml, observedAt)[0];
+
+      expect(item?.metadata.minPlayers).toBeNull();
+      expect(item?.metadata.maxPlayers).toBeNull();
+      expect(item?.playerRangeObservation).toEqual({
+        sourceRequest: "bgg-thing",
+        observedAt,
+        state: "complete",
+        fieldsReturned: ["minPlayers", "maxPlayers"],
+      });
+      expect(item?.metadataObservation.fieldsReturned).toEqual(["minPlayers", "maxPlayers"]);
+      expect(item?.metadataObservation.state).toBe("partial");
+    });
+
+    test("reports fully absent player bounds separately from present empty bounds", () => {
+      const observedAt = "2026-08-26T11:42:00.000Z";
+      const xml = `<items><item type="boardgame" id="1"></item></items>`;
+
+      const item = parseThingItems(xml, observedAt)[0];
+
+      expect(item?.metadata.minPlayers).toBeNull();
+      expect(item?.metadata.maxPlayers).toBeNull();
+      expect(item?.playerRangeObservation).toEqual({
+        sourceRequest: "bgg-thing",
+        observedAt,
+        state: "absent",
+        fieldsReturned: [],
+      });
+      expect(item?.metadataObservation.fieldsReturned).toEqual([]);
+      expect(item?.metadataObservation.state).toBe("absent");
+    });
+
+    test("does not report compatibility BGG defaults as no-statistics evidence", async () => {
+      const xml = await readFixture("thing-search-batch.xml");
+      const items = parseThingItems(xml, "2026-08-26T11:45:00.000Z");
+
+      for (const item of items) {
+        expect(item.metadataObservation.state).toBe("partial");
+        expect(item.metadataObservation.fieldsReturned).not.toContain("bggData");
+        expect(item.bggData.communityRating).toBe(0);
+        expect(item.bggData.bayesAverage).toBe(0);
+      }
+    });
+
     test("selects aggregate player-count buckets through the production batch path", () => {
       const xml = thingXmlWithPlayerPoll(
         playerCountResult("4", 10) + playerCountResult("5+", 100) + playerCountResult("6", 100),
@@ -264,6 +436,45 @@ describe("BGG XML Parser", () => {
   });
 
   describe("parseCollectionResponse", () => {
+    test("attaches the producing collection observation to play counts", () => {
+      const observedAt = "2026-08-26T12:00:00.000Z";
+      const xml = `<items><item objectid="1"><name>Test</name><numplays>4</numplays></item></items>`;
+
+      const item = parseCollectionResponse(xml, observedAt)[0];
+
+      expect(item?.playCountObservation).toEqual({
+        sourceRequest: "bgg-collection",
+        observedAt,
+        state: "complete",
+        fieldsReturned: ["numPlays"],
+      });
+    });
+
+    test("distinguishes malformed-present and absent collection play counts", () => {
+      const observedAt = "2026-08-26T12:05:00.000Z";
+      const xml = `<items>
+        <item objectid="1"><name>Malformed</name><numplays>many</numplays></item>
+        <item objectid="2"><name>Absent</name></item>
+      </items>`;
+
+      const [malformed, absent] = parseCollectionResponse(xml, observedAt);
+
+      expect(malformed.numplays).toBeNull();
+      expect(malformed.playCountObservation).toEqual({
+        sourceRequest: "bgg-collection",
+        observedAt,
+        state: "complete",
+        fieldsReturned: ["numPlays"],
+      });
+      expect(absent.numplays).toBeNull();
+      expect(absent.playCountObservation).toEqual({
+        sourceRequest: "bgg-collection",
+        observedAt,
+        state: "absent",
+        fieldsReturned: [],
+      });
+    });
+
     test("parses collection with game list", async () => {
       const xml = await readFixture("collection-bloodmage.xml");
       const results = parseCollectionResponse(xml);

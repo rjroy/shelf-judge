@@ -37,6 +37,18 @@ function makeGame(overrides: Partial<Game> = {}): Game {
     imageUrl: null,
     bggData: null,
     numPlays: null,
+    acquisition: { state: "unknown" },
+    playCountEvidence: { status: "missing", source: "manual", observedAt: null },
+    durationEvidence: { status: "missing", source: "manual", observedAt: null },
+    playerRangeEvidence: { status: "missing", source: "manual", observedAt: null },
+    suggestedPlayerPoll: {
+      status: "valid",
+      state: "absent",
+      buckets: [],
+      source: "manual",
+      observedAt: null,
+    },
+    bestPlayersInvalidEvidence: null,
     ownership: "owned",
     boxDimensions: null,
     manualShelfId: null,
@@ -175,7 +187,6 @@ describe("derived axis registry contract", () => {
         categories: [],
         families: [],
         subdomains: [],
-        suggestedPlayerCounts: [],
         bestPlayerCount: null,
         fetchedAt: "2026-01-01T00:00:00Z",
       },
@@ -675,7 +686,6 @@ describe("derived value resolution", () => {
         categories: [],
         families: [],
         subdomains: [],
-        suggestedPlayerCounts: [],
         bestPlayerCount: null,
         fetchedAt: "2026-01-01T00:00:00Z",
       },
@@ -857,15 +867,16 @@ describe("current-axis helpers", () => {
 
   test("supports an additive versioned persisted collection contract", () => {
     const collection: Collection = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       id: "collection",
       name: "Collection",
       axes: [personal, tournament, derived, disabled],
       games: [makeGame()],
+      entertainmentBenchmark: null,
       createdAt: "2026-01-01T00:00:00Z",
       updatedAt: "2026-01-01T00:00:00Z",
     };
-    expect(collection.schemaVersion).toBe(2);
+    expect(collection.schemaVersion).toBe(3);
     expect(collection.axes).toEqual([personal, tournament, derived, disabled]);
   });
 });

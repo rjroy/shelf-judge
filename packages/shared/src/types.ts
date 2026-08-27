@@ -30,6 +30,100 @@ export interface SuggestedPlayerCount {
   notRecommended: number;
 }
 
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
+
+export type InvalidEvidence = { presence: "missing" } | { presence: "present"; value: JsonValue };
+
+export type FieldObservationSource =
+  | "manual"
+  | "bgg-collection"
+  | "bgg-thing"
+  | "bgg-suggested-player-poll"
+  | "bgg-player-range"
+  | "current-fitness"
+  | "legacy-unknown";
+
+export interface EvidenceObservation {
+  source: FieldObservationSource;
+  observedAt: string | null;
+}
+
+export type FieldEvidence<Value extends JsonValue> =
+  | (EvidenceObservation & { status: "valid"; value: Value })
+  | (EvidenceObservation & { status: "missing" })
+  | (EvidenceObservation & { status: "invalid"; evidence: InvalidEvidence });
+
+export interface PlayerRangeValue {
+  minPlayers: number;
+  maxPlayers: number;
+}
+
+export interface InvalidPlayerRangeEvidence {
+  minPlayers: InvalidEvidence;
+  maxPlayers: InvalidEvidence;
+}
+
+export type PlayerRangeEvidence =
+  | (EvidenceObservation & { status: "valid"; value: PlayerRangeValue })
+  | (EvidenceObservation & { status: "missing" })
+  | (EvidenceObservation & {
+      status: "invalid";
+      evidence: InvalidPlayerRangeEvidence;
+    });
+
+export type SuggestedPlayerPollState =
+  | "absent"
+  | "empty"
+  | "unusable"
+  | "usable"
+  | "legacy-unknown";
+
+export type SuggestedPlayerPoll =
+  | (EvidenceObservation & {
+      status: "valid";
+      state: "absent" | "empty" | "legacy-unknown";
+      buckets: [];
+    })
+  | (EvidenceObservation & {
+      status: "valid";
+      state: "unusable" | "usable";
+      buckets: [SuggestedPlayerCount, ...SuggestedPlayerCount[]];
+    })
+  | (EvidenceObservation & {
+      status: "invalid";
+      state: "unusable";
+      buckets: [];
+      evidence: InvalidEvidence;
+    });
+
+export interface PersistedAmount {
+  hundredths: number;
+  source: "manual";
+  confirmedAt: string;
+}
+
+export type Acquisition =
+  | { state: "unknown" }
+  | { state: "gift" }
+  | { state: "purchase"; amount: PersistedAmount }
+  | { state: "invalid"; evidence: InvalidEvidence };
+
+export type EntertainmentBenchmark =
+  | { state: "configured"; amount: PersistedAmount }
+  | { state: "invalid"; evidence: InvalidEvidence }
+  | null;
+
+export type BggResponseFieldState = "absent" | "partial" | "complete";
+export type BggSourceRequest = "bgg-search" | "bgg-thing" | "bgg-collection";
+
+export interface BggRequestObservation {
+  sourceRequest: BggSourceRequest;
+  observedAt: string;
+  state: BggResponseFieldState;
+  fieldsReturned: string[];
+}
+
 export type OwnershipStatus = "owned" | "previously-owned";
 
 export interface BggGameData {
@@ -42,7 +136,6 @@ export interface BggGameData {
   categories: BggTag[];
   families: BggTag[];
   subdomains: BggTag[]; // BGG subdomains (Strategy Games, Family Games, etc.)
-  suggestedPlayerCounts: SuggestedPlayerCount[];
   bestPlayerCount: number | null;
   fetchedAt: string; // ISO 8601
 }
@@ -59,6 +152,12 @@ export interface Game {
   imageUrl: string | null;
   bggData: BggGameData | null;
   numPlays: number | null;
+  acquisition: Acquisition;
+  playCountEvidence: FieldEvidence<number>;
+  durationEvidence: FieldEvidence<number>;
+  playerRangeEvidence: PlayerRangeEvidence;
+  suggestedPlayerPoll: SuggestedPlayerPoll;
+  bestPlayersInvalidEvidence: InvalidEvidence | null;
   ownership: OwnershipStatus;
   boxDimensions: BoxDimensions | null;
   manualShelfId: string | null;
@@ -132,11 +231,12 @@ export type Axis = PersonalAxis | TournamentAxis | DerivedAxis | DisabledLegacyA
 export type AxisSource = Axis["source"];
 export type EnabledAxis = PersonalAxis | TournamentAxis | DerivedAxis;
 export interface Collection {
-  schemaVersion: 2;
+  schemaVersion: 3;
   id: string;
   name: string;
   axes: Axis[];
   games: Game[];
+  entertainmentBenchmark: EntertainmentBenchmark;
   createdAt: string;
   updatedAt: string;
 }
@@ -349,6 +449,8 @@ export interface BggSearchResult {
   name: string;
   yearPublished: number | null;
   thumbnailUrl: string | null;
+  searchObservation?: BggRequestObservation;
+  thingObservation?: BggRequestObservation;
 }
 
 // SSE event types for BGG collection import (wire format between daemon and clients)

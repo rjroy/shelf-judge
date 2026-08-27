@@ -1,6 +1,23 @@
 export type {
   BggTag,
   SuggestedPlayerCount,
+  JsonPrimitive,
+  JsonValue,
+  InvalidEvidence,
+  FieldObservationSource,
+  EvidenceObservation,
+  FieldEvidence,
+  PlayerRangeValue,
+  InvalidPlayerRangeEvidence,
+  PlayerRangeEvidence,
+  SuggestedPlayerPollState,
+  SuggestedPlayerPoll,
+  PersistedAmount,
+  Acquisition,
+  EntertainmentBenchmark,
+  BggResponseFieldState,
+  BggSourceRequest,
+  BggRequestObservation,
   OwnershipStatus,
   BggGameData,
   Game,
@@ -114,6 +131,15 @@ export {
   CURRENT_COLLECTION_SCHEMA_VERSION,
   AxisSchema,
   BggGameDataSchema,
+  InvalidEvidenceSchema,
+  PersistedAmountSchema,
+  AcquisitionSchema,
+  EntertainmentBenchmarkSchema,
+  PlayCountEvidenceSchema,
+  DurationEvidenceSchema,
+  PlayerRangeEvidenceSchema,
+  SuggestedPlayerPollSchema,
+  isUsableSuggestedPlayerPoll,
   GameSchema,
   CollectionSchema,
   RateGameSchema,
@@ -126,6 +152,16 @@ export {
   TournamentDataSchema,
   ShelfConfigurationSchema,
 } from "./validation";
+
+export {
+  ExactRational,
+  projectFitnessScore,
+  isCanonicalUnsignedDecimal,
+  compareUnsignedDecimals,
+} from "./exact-rational";
+export type { ExactRationalJson, ExactComparison } from "./exact-rational";
+
+export { parseAmountInput, formatStoredAmount, formatExactAmount, amountSortKey } from "./amount";
 
 export {
   toErrorMessage,

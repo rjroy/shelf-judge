@@ -12,7 +12,7 @@ import type { StorageService } from "./storage-service";
 import type { FitnessService } from "./fitness-service";
 import type { TournamentService } from "./tournament-service";
 import { deriveDisplayStats } from "./tournament-service";
-import type { BggClient } from "./bgg-client";
+import type { BggClient, BggGameResult } from "./bgg-client";
 import {
   buildVocabulary,
   computeContinuousRanges,
@@ -23,11 +23,16 @@ import {
 import type { FeatureVector } from "./feature-vector";
 import { computePredictedFitness, assessReadiness } from "./prediction-engine";
 import type { ReferenceGameCandidate, ClusterMembership } from "./prediction-engine";
+import { canonicalSuggestedPlayerPoll } from "./suggested-player-poll.js";
 
 export interface PredictedGameResult {
   game: Game;
   score: FitnessResult;
   predictionUnavailable: PredictionUnavailable | null;
+  bggObservations?: Pick<
+    BggGameResult,
+    "metadataObservation" | "playerRangeObservation" | "suggestedPlayerPoll" | "collectionData"
+  >;
 }
 
 export interface PredictionService {
@@ -44,6 +49,7 @@ export interface PredictionServiceDeps {
   fitnessService: FitnessService;
   tournamentService: TournamentService;
   bggClient?: BggClient;
+  now?: () => string;
 }
 
 function flattenVector(fv: FeatureVector): number[] {
@@ -52,6 +58,7 @@ function flattenVector(fv: FeatureVector): number[] {
 
 export function createPredictionService(deps: PredictionServiceDeps): PredictionService {
   const { storageService, fitnessService, bggClient } = deps;
+  const now = deps.now ?? (() => new Date().toISOString());
 
   async function loadPredictionContext() {
     // Load collection, prediction settings, and tournament data in parallel.
@@ -221,25 +228,120 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
       const bggResult = await bggClient.getGame(bggId);
 
       // Build a temporary Game object (not persisted)
-      const now = new Date().toISOString();
+      const observedAt = now();
+      const rangeObservation = bggResult.playerRangeObservation;
+      const rangePresent =
+        rangeObservation?.fieldsReturned.includes("minPlayers") === true &&
+        rangeObservation.fieldsReturned.includes("maxPlayers");
+      const validRange =
+        rangePresent &&
+        bggResult.metadata.minPlayers !== null &&
+        bggResult.metadata.maxPlayers !== null &&
+        Number.isSafeInteger(bggResult.metadata.minPlayers) &&
+        Number.isSafeInteger(bggResult.metadata.maxPlayers) &&
+        bggResult.metadata.minPlayers > 0 &&
+        bggResult.metadata.minPlayers <= bggResult.metadata.maxPlayers
+          ? {
+              minPlayers: bggResult.metadata.minPlayers,
+              maxPlayers: bggResult.metadata.maxPlayers,
+            }
+          : null;
+      const durationPresent =
+        bggResult.metadataObservation?.fieldsReturned.includes("playingTime") === true;
+      const validDuration =
+        durationPresent &&
+        bggResult.metadata.playingTime !== null &&
+        Number.isSafeInteger(bggResult.metadata.playingTime) &&
+        bggResult.metadata.playingTime > 0
+          ? bggResult.metadata.playingTime
+          : null;
+      const playObservation = bggResult.collectionData?.observation;
+      const playPresent = playObservation?.fieldsReturned.includes("numPlays") === true;
+      const plays = bggResult.collectionData?.numPlays ?? null;
+      const validPlays =
+        playPresent && plays !== null && Number.isSafeInteger(plays) && plays >= 0 ? plays : null;
       const tempGame: Game = {
         id: `preview-${bggId}`,
         bggId,
         name: bggResult.metadata.name,
         yearPublished: bggResult.metadata.yearPublished,
-        minPlayers: bggResult.metadata.minPlayers,
-        maxPlayers: bggResult.metadata.maxPlayers,
+        minPlayers: validRange?.minPlayers ?? null,
+        maxPlayers: validRange?.maxPlayers ?? null,
         bestPlayers: bggResult.bggData.bestPlayerCount,
-        playingTime: bggResult.metadata.playingTime,
+        playingTime: validDuration,
         imageUrl: bggResult.metadata.imageUrl,
-        numPlays: bggResult.collectionData?.numPlays ?? null,
+        numPlays: validPlays,
         bggData: bggResult.bggData,
+        acquisition: { state: "unknown" },
+        playCountEvidence:
+          validPlays !== null
+            ? {
+                status: "valid",
+                value: validPlays,
+                source: "bgg-collection",
+                observedAt: playObservation?.observedAt ?? null,
+              }
+            : playPresent
+              ? {
+                  status: "invalid",
+                  evidence: { presence: "present", value: plays },
+                  source: "bgg-collection",
+                  observedAt: playObservation?.observedAt ?? null,
+                }
+              : { status: "missing", source: "bgg-collection", observedAt: null },
+        durationEvidence:
+          validDuration !== null
+            ? {
+                status: "valid",
+                value: validDuration,
+                source: "bgg-thing",
+                observedAt: bggResult.metadataObservation?.observedAt ?? null,
+              }
+            : durationPresent
+              ? {
+                  status: "invalid",
+                  evidence: { presence: "present", value: bggResult.metadata.playingTime },
+                  source: "bgg-thing",
+                  observedAt: bggResult.metadataObservation?.observedAt ?? null,
+                }
+              : { status: "missing", source: "bgg-thing", observedAt: null },
+        playerRangeEvidence:
+          validRange !== null
+            ? {
+                status: "valid",
+                value: validRange,
+                source: "bgg-player-range",
+                observedAt: rangeObservation?.observedAt ?? null,
+              }
+            : rangeObservation !== undefined && rangeObservation.fieldsReturned.length > 0
+              ? {
+                  status: "invalid",
+                  evidence: {
+                    minPlayers: rangeObservation.fieldsReturned.includes("minPlayers")
+                      ? { presence: "present", value: bggResult.metadata.minPlayers }
+                      : { presence: "missing" },
+                    maxPlayers: rangeObservation.fieldsReturned.includes("maxPlayers")
+                      ? { presence: "present", value: bggResult.metadata.maxPlayers }
+                      : { presence: "missing" },
+                  },
+                  source: "bgg-player-range",
+                  observedAt: rangeObservation.observedAt,
+                }
+              : { status: "missing", source: "bgg-player-range", observedAt: null },
+        suggestedPlayerPoll: canonicalSuggestedPlayerPoll(bggResult.suggestedPlayerPoll) ?? {
+          status: "valid",
+          state: "absent",
+          buckets: [],
+          source: "bgg-suggested-player-poll",
+          observedAt: null,
+        },
+        bestPlayersInvalidEvidence: null,
         ownership: "owned",
         boxDimensions: null,
         manualShelfId: null,
         ratings: {},
-        createdAt: now,
-        updatedAt: now,
+        createdAt: observedAt,
+        updatedAt: observedAt,
       };
 
       // Encode the temporary game using the collection's vocabulary and ranges
@@ -268,7 +370,24 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
         };
       }
 
-      return { game: tempGame, score: fitnessResult, predictionUnavailable };
+      return {
+        game: tempGame,
+        score: fitnessResult,
+        predictionUnavailable,
+        ...(bggResult.metadataObservation ||
+        bggResult.playerRangeObservation ||
+        bggResult.suggestedPlayerPoll ||
+        bggResult.collectionData
+          ? {
+              bggObservations: {
+                metadataObservation: bggResult.metadataObservation,
+                playerRangeObservation: bggResult.playerRangeObservation,
+                suggestedPlayerPoll: bggResult.suggestedPlayerPoll,
+                collectionData: bggResult.collectionData,
+              },
+            }
+          : {}),
+      };
     },
 
     async getReadiness(): Promise<PredictionReadiness> {

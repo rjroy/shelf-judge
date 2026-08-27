@@ -1,12 +1,13 @@
 import {
   CURRENT_COLLECTION_SCHEMA_VERSION,
-  BggGameDataSchema,
   CollectionSchema,
-  GameSchema,
+  isUsableSuggestedPlayerPoll,
   type Axis,
   type AxisBase,
   type Collection,
   type DisabledLegacyAxis,
+  type InvalidEvidence,
+  type JsonValue,
 } from "@shelf-judge/shared";
 import { z } from "zod";
 
@@ -72,30 +73,51 @@ const LegacyAxisSchema = z
 
 type LegacyAxisInput = z.output<typeof LegacyAxisSchema>;
 
-const HistoricalGameSchema = GameSchema.omit({
-  bestPlayers: true,
-  bggData: true,
-  ownership: true,
-  boxDimensions: true,
-  manualShelfId: true,
-})
-  .extend({
-    bestPlayers: z.number().nullable().optional(),
-    bggData: BggGameDataSchema.omit({ bestPlayerCount: true })
-      .extend({ bestPlayerCount: z.number().nullable().optional() })
-      .strict()
-      .nullable(),
+const HistoricalBggTagSchema = z.object({ id: z.number().int(), name: z.string() }).strict();
+const HistoricalBggDataSchema = z
+  .object({
+    communityRating: z.number(),
+    bayesAverage: z.number(),
+    weight: z.number().nullable(),
+    numWeightVotes: z.number().int().min(0),
+    description: z.string().nullable(),
+    mechanics: z.array(HistoricalBggTagSchema),
+    categories: z.array(HistoricalBggTagSchema),
+    families: z.array(HistoricalBggTagSchema),
+    subdomains: z.array(HistoricalBggTagSchema),
+    suggestedPlayerCounts: z.unknown().optional(),
+    bestPlayerCount: z.unknown().optional(),
+    fetchedAt: z.string(),
+  })
+  .strict();
+
+const HistoricalBoxDimensionsSchema = z
+  .object({
+    width: z.number().positive(),
+    height: z.number().positive(),
+    depth: z.number().positive(),
+  })
+  .strict();
+
+const HistoricalGameSchema = z
+  .object({
+    id: z.string().min(1),
+    bggId: z.number().int().nullable(),
+    name: z.string().min(1),
+    yearPublished: z.number().int().nullable(),
+    minPlayers: z.unknown().optional(),
+    maxPlayers: z.unknown().optional(),
+    bestPlayers: z.unknown().optional(),
+    playingTime: z.unknown().optional(),
+    imageUrl: z.string().nullable(),
+    bggData: HistoricalBggDataSchema.nullable(),
+    numPlays: z.unknown().optional(),
     ownership: z.enum(["owned", "previously-owned"]).optional(),
-    boxDimensions: z
-      .object({
-        width: z.number().positive(),
-        height: z.number().positive(),
-        depth: z.number().positive(),
-      })
-      .strict()
-      .nullable()
-      .optional(),
+    boxDimensions: HistoricalBoxDimensionsSchema.nullable().optional(),
     manualShelfId: z.string().nullable().optional(),
+    ratings: z.record(z.number().int().min(1).max(10)),
+    createdAt: z.string(),
+    updatedAt: z.string(),
   })
   .strict();
 
@@ -239,25 +261,35 @@ function migrateVersionZeroToOne(
   };
 }
 
-const VersionOneGameSchema = GameSchema.omit({ bestPlayers: true, bggData: true })
-  .extend({
-    bestPlayers: z.number().nullable().optional(),
-    bggData: BggGameDataSchema.omit({ bestPlayerCount: true })
-      .extend({ bestPlayerCount: z.number().nullable().optional() })
-      .strict()
-      .nullable(),
-  })
-  .strict();
+const VersionOneGameSchema = HistoricalGameSchema.extend({
+  ownership: z.enum(["owned", "previously-owned"]),
+  boxDimensions: HistoricalBoxDimensionsSchema.nullable(),
+  manualShelfId: z.string().nullable(),
+}).strict();
 
-const VersionOneCollectionSchema = CollectionSchema.omit({ schemaVersion: true, games: true })
-  .extend({
+const historicalCurrentCollectionFields = {
+  id: z.string().min(1),
+  name: z.string().min(1),
+  axes: z.array(z.unknown()),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+};
+
+const VersionOneCollectionSchema = z
+  .object({
     schemaVersion: z.literal(1),
+    ...historicalCurrentCollectionFields,
     games: z.array(VersionOneGameSchema),
   })
   .strict();
 
-function validBestPlayerCount(value: number | null | undefined): number | null {
-  return value != null && Number.isFinite(value) && value > 0 ? value : null;
+function validBestPlayerCount(value: unknown): number | null {
+  return typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value > 0 &&
+    value <= Number.MAX_SAFE_INTEGER
+    ? value
+    : null;
 }
 
 function migrateVersionOneToTwo(raw: unknown): CollectionMigrationStepResult {
@@ -280,6 +312,315 @@ function migrateVersionOneToTwo(raw: unknown): CollectionMigrationStepResult {
   };
 }
 
+const VersionTwoCollectionSchema = z
+  .object({
+    schemaVersion: z.literal(2),
+    ...historicalCurrentCollectionFields,
+    games: z.array(VersionOneGameSchema),
+  })
+  .strict();
+
+function isJsonValue(value: unknown): value is JsonValue {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(isJsonValue);
+  if (typeof value !== "object") return false;
+  return Object.values(value).every(isJsonValue);
+}
+
+function invalidEvidence(value: unknown, present: boolean): InvalidEvidence {
+  if (!present) return { presence: "missing" };
+  if (!isJsonValue(value)) throw new Error("Malformed persisted evidence is not JSON-safe");
+  return { presence: "present", value };
+}
+
+function hasOwn(value: object, property: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, property);
+}
+
+function migratePlayCount(game: z.output<typeof VersionOneGameSchema>) {
+  const present = hasOwn(game, "numPlays");
+  const value = game.numPlays;
+  if (!present) {
+    return {
+      compatibility: null,
+      evidence: {
+        status: "invalid" as const,
+        evidence: invalidEvidence(undefined, false),
+        source: "legacy-unknown" as const,
+        observedAt: null,
+      },
+    };
+  }
+  if (value === null) {
+    return {
+      compatibility: null,
+      evidence: { status: "missing" as const, source: "legacy-unknown" as const, observedAt: null },
+    };
+  }
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
+    return {
+      compatibility: value,
+      evidence: {
+        status: "valid" as const,
+        value,
+        source: "legacy-unknown" as const,
+        observedAt: null,
+      },
+    };
+  }
+  return {
+    compatibility: null,
+    evidence: {
+      status: "invalid" as const,
+      evidence: invalidEvidence(value, true),
+      source: "legacy-unknown" as const,
+      observedAt: null,
+    },
+  };
+}
+
+function migrateDuration(game: z.output<typeof VersionOneGameSchema>) {
+  const present = hasOwn(game, "playingTime");
+  const value = game.playingTime;
+  if (!present) {
+    return {
+      compatibility: null,
+      evidence: {
+        status: "invalid" as const,
+        evidence: invalidEvidence(undefined, false),
+        source: "legacy-unknown" as const,
+        observedAt: null,
+      },
+    };
+  }
+  if (value === null) {
+    return {
+      compatibility: null,
+      evidence: { status: "missing" as const, source: "legacy-unknown" as const, observedAt: null },
+    };
+  }
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) {
+    return {
+      compatibility: value,
+      evidence: {
+        status: "valid" as const,
+        value,
+        source: "legacy-unknown" as const,
+        observedAt: null,
+      },
+    };
+  }
+  return {
+    compatibility: null,
+    evidence: {
+      status: "invalid" as const,
+      evidence: invalidEvidence(value, true),
+      source: "legacy-unknown" as const,
+      observedAt: null,
+    },
+  };
+}
+
+function migratePlayerRange(game: z.output<typeof VersionOneGameSchema>) {
+  const minPresent = hasOwn(game, "minPlayers");
+  const maxPresent = hasOwn(game, "maxPlayers");
+  const min = game.minPlayers;
+  const max = game.maxPlayers;
+  if (minPresent && maxPresent && min === null && max === null) {
+    return {
+      minPlayers: null,
+      maxPlayers: null,
+      evidence: { status: "missing" as const, source: "legacy-unknown" as const, observedAt: null },
+    };
+  }
+  if (
+    minPresent &&
+    maxPresent &&
+    typeof min === "number" &&
+    Number.isSafeInteger(min) &&
+    min > 0 &&
+    typeof max === "number" &&
+    Number.isSafeInteger(max) &&
+    max > 0 &&
+    min <= max
+  ) {
+    return {
+      minPlayers: min,
+      maxPlayers: max,
+      evidence: {
+        status: "valid" as const,
+        value: { minPlayers: min, maxPlayers: max },
+        source: "legacy-unknown" as const,
+        observedAt: null,
+      },
+    };
+  }
+  return {
+    minPlayers: null,
+    maxPlayers: null,
+    evidence: {
+      status: "invalid" as const,
+      evidence: {
+        minPlayers: invalidEvidence(min, minPresent),
+        maxPlayers: invalidEvidence(max, maxPresent),
+      },
+      source: "legacy-unknown" as const,
+      observedAt: null,
+    },
+  };
+}
+
+function isSuggestedPlayerBucket(value: unknown): value is {
+  playerCount: string;
+  best: number;
+  recommended: number;
+  notRecommended: number;
+} {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  if (
+    !("playerCount" in value) ||
+    !("best" in value) ||
+    !("recommended" in value) ||
+    !("notRecommended" in value)
+  ) {
+    return false;
+  }
+  return (
+    typeof value.playerCount === "string" &&
+    typeof value.best === "number" &&
+    Number.isSafeInteger(value.best) &&
+    value.best >= 0 &&
+    typeof value.recommended === "number" &&
+    Number.isSafeInteger(value.recommended) &&
+    value.recommended >= 0 &&
+    typeof value.notRecommended === "number" &&
+    Number.isSafeInteger(value.notRecommended) &&
+    value.notRecommended >= 0 &&
+    Object.keys(value).every((key) =>
+      ["playerCount", "best", "recommended", "notRecommended"].includes(key),
+    )
+  );
+}
+
+function emptySuggestedPlayerBuckets(): [] {
+  return [];
+}
+
+function migrateSuggestedPlayerPoll(game: z.output<typeof VersionOneGameSchema>) {
+  if (game.bggData === null) {
+    return {
+      bggData: null,
+      poll: {
+        status: "valid" as const,
+        state: "absent" as const,
+        buckets: [],
+        source: "legacy-unknown" as const,
+        observedAt: null,
+      },
+    };
+  }
+  const { suggestedPlayerCounts, ...bggData } = game.bggData;
+  const present = hasOwn(game.bggData, "suggestedPlayerCounts");
+  if (!present || !Array.isArray(suggestedPlayerCounts)) {
+    return {
+      bggData: { ...bggData, bestPlayerCount: validBestPlayerCount(bggData.bestPlayerCount) },
+      poll: {
+        status: "invalid" as const,
+        state: "unusable" as const,
+        buckets: emptySuggestedPlayerBuckets(),
+        evidence: invalidEvidence(suggestedPlayerCounts, present),
+        source: "legacy-unknown" as const,
+        observedAt: null,
+      },
+    };
+  }
+  if (!suggestedPlayerCounts.every(isSuggestedPlayerBucket)) {
+    return {
+      bggData: { ...bggData, bestPlayerCount: validBestPlayerCount(bggData.bestPlayerCount) },
+      poll: {
+        status: "invalid" as const,
+        state: "unusable" as const,
+        buckets: emptySuggestedPlayerBuckets(),
+        evidence: invalidEvidence(suggestedPlayerCounts, true),
+        source: "legacy-unknown" as const,
+        observedAt: null,
+      },
+    };
+  }
+  const [firstBucket, ...remainingBuckets] = suggestedPlayerCounts;
+  if (firstBucket === undefined) {
+    return {
+      bggData: { ...bggData, bestPlayerCount: validBestPlayerCount(bggData.bestPlayerCount) },
+      poll: {
+        status: "valid" as const,
+        state: "legacy-unknown" as const,
+        buckets: emptySuggestedPlayerBuckets(),
+        source: "legacy-unknown" as const,
+        observedAt: null,
+      },
+    };
+  }
+  const buckets: [typeof firstBucket, ...typeof remainingBuckets] = [
+    firstBucket,
+    ...remainingBuckets,
+  ];
+  const usable = isUsableSuggestedPlayerPoll(buckets);
+  return {
+    bggData: { ...bggData, bestPlayerCount: validBestPlayerCount(bggData.bestPlayerCount) },
+    poll: {
+      status: "valid" as const,
+      state: usable ? ("usable" as const) : ("unusable" as const),
+      buckets,
+      source: "legacy-unknown" as const,
+      observedAt: null,
+    },
+  };
+}
+
+function migrateVersionTwoToThree(raw: unknown): CollectionMigrationStepResult {
+  const historical = VersionTwoCollectionSchema.parse(raw);
+  return {
+    data: {
+      ...historical,
+      schemaVersion: 3,
+      entertainmentBenchmark: null,
+      games: historical.games.map((game) => {
+        const playCount = migratePlayCount(game);
+        const duration = migrateDuration(game);
+        const range = migratePlayerRange(game);
+        const poll = migrateSuggestedPlayerPoll(game);
+        const bestPlayersValid = validBestPlayerCount(game.bestPlayers);
+        const bestPlayersPresent = hasOwn(game, "bestPlayers");
+        const bestPlayersCompatibility = bestPlayersPresent
+          ? bestPlayersValid
+          : validBestPlayerCount(game.bggData?.bestPlayerCount);
+        const bestPlayersInvalidEvidence =
+          bestPlayersValid !== null || (bestPlayersPresent && game.bestPlayers === null)
+            ? null
+            : invalidEvidence(game.bestPlayers, bestPlayersPresent);
+        return {
+          ...game,
+          minPlayers: range.minPlayers,
+          maxPlayers: range.maxPlayers,
+          bestPlayers: bestPlayersCompatibility,
+          playingTime: duration.compatibility,
+          bggData: poll.bggData,
+          numPlays: playCount.compatibility,
+          acquisition: { state: "unknown" as const },
+          playCountEvidence: playCount.evidence,
+          durationEvidence: duration.evidence,
+          playerRangeEvidence: range.evidence,
+          suggestedPlayerPoll: poll.poll,
+          bestPlayersInvalidEvidence,
+        };
+      }),
+    },
+    convertedAxisCount: 0,
+    disabledAxisCount: 0,
+  };
+}
+
 export const COLLECTION_MIGRATION_STEPS: readonly CollectionMigrationStep[] = [
   {
     fromVersion: 0,
@@ -290,6 +631,11 @@ export const COLLECTION_MIGRATION_STEPS: readonly CollectionMigrationStep[] = [
     fromVersion: 1,
     toVersion: 2,
     migrate: migrateVersionOneToTwo,
+  },
+  {
+    fromVersion: 2,
+    toVersion: 3,
+    migrate: migrateVersionTwoToThree,
   },
 ];
 

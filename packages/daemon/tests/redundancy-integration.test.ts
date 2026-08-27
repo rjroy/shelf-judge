@@ -37,7 +37,6 @@ function makeBggData(
     categories: [],
     families: [],
     subdomains: [],
-    suggestedPlayerCounts: [],
     bestPlayerCount: null,
     fetchedAt: now,
     ...overrides,
@@ -62,6 +61,18 @@ function makeGame(
     imageUrl: null,
     bggData,
     numPlays: null,
+    acquisition: { state: "unknown" },
+    playCountEvidence: { status: "missing", source: "manual", observedAt: null },
+    durationEvidence: { status: "missing", source: "manual", observedAt: null },
+    playerRangeEvidence: { status: "missing", source: "manual", observedAt: null },
+    suggestedPlayerPoll: {
+      status: "valid",
+      state: "absent",
+      buckets: [],
+      source: "manual",
+      observedAt: null,
+    },
+    bestPlayersInvalidEvidence: null,
     ownership: "owned",
     boxDimensions: null,
     manualShelfId: null,
@@ -124,7 +135,7 @@ const allGamesWithScores: GameWithScore[] = [
 ];
 
 const defaultCollection: Collection = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   id: "collection-1",
   name: "Test",
   axes: [
@@ -154,6 +165,7 @@ const defaultCollection: Collection = {
     },
   ],
   games: [gameA, gameB, gameC],
+  entertainmentBenchmark: null,
   createdAt: now,
   updatedAt: now,
 };
