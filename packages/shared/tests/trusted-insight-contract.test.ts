@@ -142,6 +142,58 @@ function reportedAxisSuggestion(): ReportedAxisSuggestion {
 }
 
 describe("TrustedInsight contract", () => {
+  test("validates narration references and canonical trusted claim text", () => {
+    const profile = structuredClone(trustedInsightProfileFixture);
+    profile.narration = {
+      summary: [
+        {
+          observation: "Game 3 is compositionally distant from its two nearest comparison games",
+          interpretation: "Separately, its current preference fitness score is 8.0",
+          evidenceReferences: [{ insightId: "outlier:game-3", gameIds: ["game-3"] }],
+        },
+      ],
+      surprises: [],
+      tensions: [],
+      abstention: null,
+    };
+    profile.narrationState = "fresh";
+
+    expect(CollectionProfileSchema.safeParse(profile).success).toBe(true);
+
+    const unsupportedText = structuredClone(profile);
+    const unsupportedClaim = unsupportedText.narration?.summary[0];
+    if (unsupportedClaim === undefined) throw new Error("Missing narration fixture");
+    unsupportedClaim.observation = "This unrelated conclusion borrows a valid reference";
+    expect(CollectionProfileSchema.safeParse(unsupportedText).success).toBe(false);
+
+    const suppressedReference = structuredClone(profile);
+    const suppressedClaim = suppressedReference.narration?.summary[0];
+    if (suppressedClaim === undefined) throw new Error("Missing narration fixture");
+    suppressedClaim.evidenceReferences[0].insightId = "axis-suggestion:suppressed:confounded";
+    expect(CollectionProfileSchema.safeParse(suppressedReference).success).toBe(false);
+
+    const emptyGames = structuredClone(profile);
+    const emptyGameClaim = emptyGames.narration?.summary[0];
+    if (emptyGameClaim === undefined) throw new Error("Missing narration fixture");
+    emptyGameClaim.evidenceReferences[0].gameIds = [];
+    expect(CollectionProfileSchema.safeParse(emptyGames).success).toBe(false);
+
+    const unsupportedAbstention = structuredClone(profile);
+    unsupportedAbstention.narration = {
+      summary: [],
+      surprises: [],
+      tensions: [],
+      abstention: "The evidence is inconvenient, so no claim is available.",
+    };
+    expect(CollectionProfileSchema.safeParse(unsupportedAbstention).success).toBe(false);
+
+    const duplicateReference = structuredClone(profile);
+    const duplicateClaim = duplicateReference.narration?.summary[0];
+    if (duplicateClaim === undefined) throw new Error("Missing narration fixture");
+    duplicateClaim.evidenceReferences.push(structuredClone(duplicateClaim.evidenceReferences[0]));
+    expect(CollectionProfileSchema.safeParse(duplicateReference).success).toBe(false);
+  });
+
   test("reported insights separate observation, interpretation, and typed details", () => {
     const insight: ReportedInsight<DivergenceDetails> = {
       id: "divergence:game-1",

@@ -3,11 +3,10 @@ import { deriveNarrationState } from "../src/services/profile-service.js";
 import type { ProfileNarration } from "@shelf-judge/shared";
 
 const sampleNarration: ProfileNarration = {
-  summary: "Test summary",
-  surprises: ["surprise 1"],
-  tensions: ["tension 1"],
-  blindSpots: ["blind spot 1"],
-  curveInsights: ["curve insight 1"],
+  summary: [],
+  surprises: [],
+  tensions: [],
+  abstention: "No reported trusted insights are available to narrate.",
 };
 
 describe("deriveNarrationState", () => {

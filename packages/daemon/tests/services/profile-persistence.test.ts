@@ -426,6 +426,40 @@ describe("persisted profile contract", () => {
     });
   });
 
+  test("deletes persisted narration that does not match its profile evidence", async () => {
+    await withStorage(async ({ profilePath, createStorage }) => {
+      const data = currentProfileDataWithSuggestions();
+      await fs.writeFile(
+        profilePath,
+        JSON.stringify({
+          ...data,
+          narration: {
+            summary: [
+              {
+                observation: "Unsupported claim",
+                interpretation: null,
+                evidenceReferences: [
+                  {
+                    insightId: "axis-suggestion:suppressed:confounded",
+                    gameIds: ["g1"],
+                  },
+                ],
+              },
+            ],
+            surprises: [],
+            tensions: [],
+            abstention: null,
+          },
+          narrationComputedAt: COMPUTED_AT,
+        }),
+        "utf8",
+      );
+
+      expect(await createStorage().loadProfile()).toBeNull();
+      expect(await exists(profilePath)).toBe(false);
+    });
+  });
+
   test("recomputes an old contract without carrying its narration forward", async () => {
     await withStorage(async ({ profilePath, createStorage }) => {
       const oldNarration = {
@@ -439,7 +473,7 @@ describe("persisted profile contract", () => {
         profilePath,
         JSON.stringify({
           ...currentProfileData(),
-          contractVersion: 4,
+          contractVersion: 5,
           narration: oldNarration,
           narrationComputedAt: COMPUTED_AT,
         }),
@@ -479,11 +513,10 @@ describe("persisted profile contract", () => {
       };
       await storage.saveProfile(replacement);
       narrated.narration = {
-        summary: "Narration for the replaced profile",
+        summary: [],
         surprises: [],
         tensions: [],
-        blindSpots: [],
-        curveInsights: [],
+        abstention: "No reported trusted insights are available to narrate.",
       };
       narrated.narrationComputedAt = "2026-08-27T13:01:00.000Z";
 

@@ -27,8 +27,10 @@ import type {
 } from "./types";
 
 export const CURRENT_COLLECTION_SCHEMA_VERSION = 3 as const;
-export const CURRENT_PROFILE_CONTRACT_VERSION = 5 as const;
+export const CURRENT_PROFILE_CONTRACT_VERSION = 6 as const;
 export const CURRENT_PROFILE_ALGORITHM_VERSION = 5 as const;
+export const PROFILE_NARRATION_ABSTENTION =
+  "No reported trusted insights are available to narrate." as const;
 
 const AmountInputSchema = z.string().superRefine((value, context) => {
   try {
@@ -729,15 +731,52 @@ const NonNegativeIntegerSchema = z.number().int().safe().min(0);
 const PercentageSchema = FiniteNumberSchema.min(0).max(100);
 const TimestampSchema = z.string().datetime({ offset: true });
 
-const ProfileNarrationSchema = z
+const NarrationEvidenceReferenceSchema = z
   .object({
-    summary: z.string(),
-    surprises: z.array(z.string()),
-    tensions: z.array(z.string()),
-    blindSpots: z.array(z.string()),
-    curveInsights: z.array(z.string()),
+    insightId: z.string().min(1),
+    gameIds: z
+      .array(z.string().min(1))
+      .min(1)
+      .refine((ids) => new Set(ids).size === ids.length, {
+        message: "Narration evidence game IDs must be unique",
+      }),
   })
   .strict();
+
+const NarratedClaimSchema = z
+  .object({
+    observation: z.string().min(1),
+    interpretation: z.string().min(1).nullable(),
+    evidenceReferences: z
+      .tuple([NarrationEvidenceReferenceSchema])
+      .rest(NarrationEvidenceReferenceSchema)
+      .refine(
+        (references) =>
+          new Set(references.map(({ insightId }) => insightId)).size === references.length,
+        { message: "Narration insight references must be unique within a claim" },
+      ),
+  })
+  .strict();
+
+const ProfileNarrationSchema = z
+  .object({
+    summary: z.array(NarratedClaimSchema),
+    surprises: z.array(NarratedClaimSchema),
+    tensions: z.array(NarratedClaimSchema),
+    abstention: z.string().min(1).nullable(),
+  })
+  .strict()
+  .superRefine((narration, context) => {
+    const claimCount =
+      narration.summary.length + narration.surprises.length + narration.tensions.length;
+    if ((claimCount === 0) !== (narration.abstention !== null)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["abstention"],
+        message: "Narration must contain grounded claims or an abstention, but not both",
+      });
+    }
+  });
 
 const AxisDistributionSchema = z
   .object({
@@ -1548,8 +1587,34 @@ export const CollectionProfileSchema = z
       ["outliers", profile.outliers],
       ["suggestions", profile.suggestions],
     ] as const;
+    const seenInsightIds = new Set<string>();
+    const reported = new Map<
+      string,
+      {
+        familyName: string;
+        observation: string;
+        interpretation: string | null;
+        evidenceGameIds: Set<string>;
+      }
+    >();
     for (const [familyName, insights] of families) {
       for (const [insightIndex, insight] of insights.entries()) {
+        if (seenInsightIds.has(insight.id)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [familyName, insightIndex, "id"],
+            message: "Insight IDs must be unique across the profile",
+          });
+        }
+        seenInsightIds.add(insight.id);
+        if (insight.status === "reported") {
+          reported.set(insight.id, {
+            familyName,
+            observation: insight.observation,
+            interpretation: insight.interpretation,
+            evidenceGameIds: new Set(insight.evidence.map(({ gameId }) => gameId)),
+          });
+        }
         for (const countField of [
           "eligibleGameCount",
           "includedGameCount",
@@ -1562,6 +1627,82 @@ export const CollectionProfileSchema = z
               message: "Insight cohort count cannot exceed profile game count",
             });
           }
+        }
+      }
+    }
+
+    if (profile.narration === null) return;
+    if (profile.narration.abstention !== null) {
+      if (reported.size > 0 || profile.narration.abstention !== PROFILE_NARRATION_ABSTENTION) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["narration", "abstention"],
+          message:
+            "Narration may use the canonical abstention only when no reported insight exists",
+        });
+      }
+      return;
+    }
+    const narrationSections = [
+      ["summary", profile.narration.summary],
+      ["surprises", profile.narration.surprises],
+      ["tensions", profile.narration.tensions],
+    ] as const;
+    for (const [sectionName, claims] of narrationSections) {
+      for (const [claimIndex, claim] of claims.entries()) {
+        const sources = claim.evidenceReferences.map((reference, referenceIndex) => {
+          const source = reported.get(reference.insightId);
+          if (source === undefined) {
+            context.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: [
+                "narration",
+                sectionName,
+                claimIndex,
+                "evidenceReferences",
+                referenceIndex,
+                "insightId",
+              ],
+              message: "Narration must reference a reported insight in this profile",
+            });
+            return null;
+          }
+          if (reference.gameIds.some((gameId) => !source.evidenceGameIds.has(gameId))) {
+            context.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: [
+                "narration",
+                sectionName,
+                claimIndex,
+                "evidenceReferences",
+                referenceIndex,
+                "gameIds",
+              ],
+              message: "Narration game references must occur in the referenced insight evidence",
+            });
+          }
+          if (sectionName === "tensions" && source.familyName !== "divergence") {
+            context.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ["narration", sectionName, claimIndex, "evidenceReferences", referenceIndex],
+              message: "Narrated tensions require reported divergence evidence",
+            });
+          }
+          return source;
+        });
+        if (sources.some((source) => source === null)) continue;
+        const grounded = sources.filter((source) => source !== null);
+        const observation = grounded.map((source) => source.observation).join(" ");
+        const interpretations = grounded
+          .map((source) => source.interpretation)
+          .filter((interpretation): interpretation is string => interpretation !== null);
+        const interpretation = interpretations.length > 0 ? interpretations.join(" ") : null;
+        if (claim.observation !== observation || claim.interpretation !== interpretation) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["narration", sectionName, claimIndex],
+            message: "Narration claim text must match its referenced trusted insights",
+          });
         }
       }
     }
@@ -1598,6 +1739,20 @@ export const ProfileDataSchema = z
         path: ["narrationComputedAt"],
         message: "Narration and its timestamp must both be present or absent",
       });
+    }
+    if (data.narration !== null) {
+      const groundedProfile = CollectionProfileSchema.safeParse({
+        ...data.profile,
+        narration: data.narration,
+        narrationState: "fresh",
+      });
+      if (!groundedProfile.success) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["narration"],
+          message: "Persisted narration must match the persisted profile evidence",
+        });
+      }
     }
   });
 

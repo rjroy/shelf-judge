@@ -935,12 +935,22 @@ export type AxisSuggestion =
 
 // LLM narration types (collection-profiling spec, LLM Narration section)
 
+export interface NarrationEvidenceReference {
+  insightId: string;
+  gameIds: string[];
+}
+
+export interface NarratedClaim {
+  observation: string;
+  interpretation: string | null;
+  evidenceReferences: [NarrationEvidenceReference, ...NarrationEvidenceReference[]];
+}
+
 export interface ProfileNarration {
-  summary: string; // 2-4 paragraph overview of collection identity
-  surprises: string[]; // Unexpected patterns
-  tensions: string[]; // Disagreements between stated and revealed preferences
-  blindSpots: string[]; // Absent or underrepresented attribute categories
-  curveInsights: string[]; // Utility curve observations
+  summary: NarratedClaim[];
+  surprises: NarratedClaim[];
+  tensions: NarratedClaim[];
+  abstention: string | null;
 }
 
 export type NarrationCacheState = "fresh" | "stale" | "empty";
@@ -967,7 +977,7 @@ export interface CollectionProfile {
 }
 
 export interface ProfileData {
-  contractVersion: 5;
+  contractVersion: 6;
   algorithmVersion: 5;
   tournamentSettings: TournamentSettings;
   profile: CollectionProfile;

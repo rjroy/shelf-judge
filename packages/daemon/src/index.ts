@@ -45,7 +45,7 @@ async function main() {
     onGameDeleted: (gameId) => tournamentService.onGameDeleted(gameId),
   });
 
-  const narrationService = createNarrationService({ gameService });
+  const narrationService = createNarrationService();
 
   const profileService = createProfileService({
     storageService,

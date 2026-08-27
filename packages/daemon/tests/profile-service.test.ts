@@ -15,6 +15,7 @@ import { createProfileService } from "../src/services/profile-service.js";
 import type { StorageService } from "../src/services/storage-service.js";
 import type { GameService } from "../src/services/game-service.js";
 import type { TournamentService } from "../src/services/tournament-service.js";
+import { trustedInsightProfileFixture } from "../../shared/tests/fixtures/trusted-profile.js";
 
 function makeGame(id: string, name: string): Game {
   const now = new Date().toISOString();
@@ -203,6 +204,50 @@ function createStubTournamentService(
 }
 
 describe("ProfileService", () => {
+  test("drops persisted narration when recomputation replaces its trusted evidence", async () => {
+    const oldComputedAt = "2026-01-01T00:00:00.000Z";
+    const cachedProfile: CollectionProfile = {
+      ...structuredClone(trustedInsightProfileFixture),
+      computedAt: oldComputedAt,
+      narration: {
+        summary: [
+          {
+            observation: "Game 3 is compositionally distant from its two nearest comparison games",
+            interpretation: "Separately, its current preference fitness score is 8.0",
+            evidenceReferences: [{ insightId: "outlier:game-3", gameIds: ["game-3"] }],
+          },
+        ],
+        surprises: [],
+        tensions: [],
+        abstention: null,
+      },
+      narrationState: "fresh",
+    };
+    const storage = createStubStorage({
+      collection: makeCollection("2026-01-02T00:00:00.000Z"),
+      profile: {
+        contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
+        algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
+        tournamentSettings: defaultTournament().settings,
+        profile: cachedProfile,
+        computedAt: oldComputedAt,
+        narration: cachedProfile.narration,
+        narrationComputedAt: oldComputedAt,
+      },
+    });
+    const service = createProfileService({
+      storageService: storage,
+      gameService: createStubGameService([]),
+      tournamentService: createStubTournamentService(),
+    });
+
+    const profile = await service.getProfile();
+
+    expect(profile.narration).toBeNull();
+    expect(profile.narrationState).toBe("empty");
+    expect(storage.savedProfile?.narration).toBeNull();
+  });
+
   test("loads the collection before its dependent profile artifact", async () => {
     const storage = createStubStorage();
     const loadCollection = storage.loadCollection.bind(storage);

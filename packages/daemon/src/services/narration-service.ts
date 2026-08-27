@@ -1,5 +1,10 @@
-import type { CollectionProfile, GameWithScore, ProfileNarration } from "@shelf-judge/shared";
-import type { GameService } from "./game-service.js";
+import type {
+  CollectionProfile,
+  NarratedClaim,
+  ProfileNarration,
+  ReportedInsight,
+} from "@shelf-judge/shared";
+import { PROFILE_NARRATION_ABSTENTION } from "@shelf-judge/shared";
 import { createLogger } from "./logger.js";
 import {
   createAgentSession,
@@ -27,10 +32,6 @@ export interface NarrationService {
   generateNarration(profile: CollectionProfile): Promise<ProfileNarration>;
 }
 
-export interface NarrationServiceDeps {
-  gameService: GameService;
-}
-
 function parseModelSpec(spec: string): { provider: string; modelId: string } {
   const sep = spec.indexOf(":");
   if (sep < 1 || sep === spec.length - 1) {
@@ -41,101 +42,197 @@ function parseModelSpec(spec: string): { provider: string; modelId: string } {
   return { provider: spec.slice(0, sep), modelId: spec.slice(sep + 1) };
 }
 
-function buildSystemPrompt(profile: CollectionProfile): string {
-  const axisInfo = profile.axisDistributions
-    .map(
-      (d) =>
-        `- ${d.axisName} (mean: ${d.mean.toFixed(1)}, σ: ${d.standardDeviation.toFixed(2)}, ${d.ratedGameCount} rated)`,
-    )
-    .join("\n");
+type AnyReportedInsight = ReportedInsight<unknown>;
 
-  const weightInfo = profile.axisWeights
-    .map((w) => `- ${w.axisName}: weight ${w.weight} (${w.percentage.toFixed(1)}%)`)
-    .join("\n");
-
-  let curveInfo = "No utility curves configured.";
-  if (profile.utilityCurves.length > 0) {
-    curveInfo = profile.utilityCurves
-      .map((c) => {
-        let desc = `- ${c.axisName}: shape=${c.shape}`;
-        if (c.idealValue !== null) desc += `, ideal=${c.idealValue}`;
-        if (c.tolerance !== null) desc += `, tolerance=${c.tolerance}`;
-        if (c.leanDirection !== null) desc += `, lean=${c.leanDirection}`;
-        if (c.vetoThreshold !== null)
-          desc += `, veto ${c.vetoThreshold.direction} ${c.vetoThreshold.threshold}`;
-        return desc;
-      })
-      .join("\n");
-  }
-
-  return `You are interpreting a board game collection profile for a single user. Your role:
-
-1. You narrate what the data shows. You do NOT determine scores, recommend purchases, or prescribe actions.
-2. Every claim must trace to specific data in the profile or collection. Do not fabricate patterns.
-3. Use the provided tools to drill into specific games when naming examples. Never invent game names.
-
-The user's rating axes and weights:
-${axisInfo}
-
-Axis weights (how the user values each dimension):
-${weightInfo}
-
-Utility curve configurations:
-${curveInfo}
-
-${profile.utilityCurves.length > 0 ? "Compare the utility curve configurations above against the actual rating distributions. Name specific games that fall outside configured sweet spots or veto thresholds. Relate the curve shapes to what you observe in the collection data." : ""}
-
-Collection summary: ${profile.gameCount} games, ${profile.ratedGameCount} rated.
-
-When you are ready, call \`submit_narration\` exactly once as your final action with the structured output. Do not produce any other final text.`;
+interface NarrationEvidenceInput {
+  collection: { gameCount: number; ratedGameCount: number };
+  insights: Array<{ family: "divergence" | "outlier" | "suggestion"; insight: AnyReportedInsight }>;
 }
 
-export function createNarrationService(deps: NarrationServiceDeps): NarrationService {
-  const { gameService } = deps;
+interface NarrationSelection {
+  summary: Array<Pick<NarratedClaim, "evidenceReferences">>;
+  surprises: Array<Pick<NarratedClaim, "evidenceReferences">>;
+  tensions: Array<Pick<NarratedClaim, "evidenceReferences">>;
+}
 
+export function buildNarrationEvidence(profile: CollectionProfile): NarrationEvidenceInput {
+  const insights: NarrationEvidenceInput["insights"] = [];
+  for (const insight of profile.divergence ?? []) {
+    if (insight.status === "reported") insights.push({ family: "divergence", insight });
+  }
+  for (const insight of profile.outliers) {
+    if (insight.status === "reported") insights.push({ family: "outlier", insight });
+  }
+  for (const insight of profile.suggestions) {
+    if (insight.status === "reported") insights.push({ family: "suggestion", insight });
+  }
+  return {
+    collection: { gameCount: profile.gameCount, ratedGameCount: profile.ratedGameCount },
+    insights,
+  };
+}
+
+function allClaims(narration: ProfileNarration): NarratedClaim[] {
+  return [...narration.summary, ...narration.surprises, ...narration.tensions];
+}
+
+function canonicalClaim(
+  references: NarratedClaim["evidenceReferences"],
+  reported: Map<string, { family: string; insight: AnyReportedInsight }>,
+): NarratedClaim {
+  const sources = references.map(({ insightId }) => reported.get(insightId)?.insight);
+  if (sources.some((source) => source === undefined)) {
+    const missing = references.find(({ insightId }) => !reported.has(insightId));
+    throw new Error(`Narration references unavailable insight: ${missing?.insightId ?? "unknown"}`);
+  }
+  const grounded = sources.filter((source): source is AnyReportedInsight => source !== undefined);
+  const interpretations = grounded
+    .map(({ interpretation }) => interpretation)
+    .filter((interpretation): interpretation is string => interpretation !== null);
+  return {
+    observation: grounded.map(({ observation }) => observation).join(" "),
+    interpretation: interpretations.length > 0 ? interpretations.join(" ") : null,
+    evidenceReferences: references,
+  };
+}
+
+function groundNarrationSelection(
+  selection: NarrationSelection,
+  profile: CollectionProfile,
+): ProfileNarration {
+  const evidence = buildNarrationEvidence(profile);
+  const reported = new Map(
+    evidence.insights.map(({ family, insight }) => [insight.id, { family, insight }]),
+  );
+  const hydrate = ({ evidenceReferences }: Pick<NarratedClaim, "evidenceReferences">) =>
+    canonicalClaim(evidenceReferences, reported);
+  return validateNarrationEvidence(
+    {
+      summary: selection.summary.map(hydrate),
+      surprises: selection.surprises.map(hydrate),
+      tensions: selection.tensions.map(hydrate),
+      abstention: null,
+    },
+    profile,
+  );
+}
+
+export function validateNarrationEvidence(
+  narration: ProfileNarration,
+  profile: CollectionProfile,
+): ProfileNarration {
+  const evidence = buildNarrationEvidence(profile);
+  const reported = new Map(
+    evidence.insights.map(({ family, insight }) => [insight.id, { family, insight }]),
+  );
+  const claims = allClaims(narration);
+
+  if (claims.length === 0) {
+    if (narration.abstention === null) throw new Error("Narration contains no grounded claims");
+    if (reported.size > 0)
+      throw new Error("Narration abstained despite available trusted evidence");
+    return narration;
+  }
+  if (narration.abstention !== null) {
+    throw new Error("Narration cannot combine claims with an abstention");
+  }
+
+  for (const claim of claims) {
+    if (
+      new Set(claim.evidenceReferences.map(({ insightId }) => insightId)).size !==
+      claim.evidenceReferences.length
+    ) {
+      throw new Error("Narration claim repeats an insight reference");
+    }
+    for (const reference of claim.evidenceReferences) {
+      const source = reported.get(reference.insightId);
+      if (!source) {
+        throw new Error(`Narration references unavailable insight: ${reference.insightId}`);
+      }
+      const evidenceGameIds = new Set(source.insight.evidence.map(({ gameId }) => gameId));
+      if (reference.gameIds.some((gameId) => !evidenceGameIds.has(gameId))) {
+        throw new Error(`Narration references a game outside insight ${reference.insightId}`);
+      }
+    }
+    const canonical = canonicalClaim(claim.evidenceReferences, reported);
+    if (
+      claim.observation !== canonical.observation ||
+      claim.interpretation !== canonical.interpretation
+    ) {
+      throw new Error("Narration claim text does not match its trusted evidence");
+    }
+  }
+
+  for (const tension of narration.tensions) {
+    if (
+      tension.evidenceReferences.some(
+        ({ insightId }) => reported.get(insightId)?.family !== "divergence",
+      )
+    ) {
+      throw new Error("Narrated tensions require reported divergence evidence");
+    }
+  }
+  return narration;
+}
+
+function buildSystemPrompt(): string {
+  return `You narrate trusted board game collection insights for one user.
+
+Rules:
+1. Use only the supplied reported insights. Suppressed, retired, and insufficient claims are deliberately absent.
+2. Select insight references only. The server copies each insight's canonical observation and interpretation into separate fields.
+3. Every claim must reference one or more supplied insight IDs and at least one game from each insight's evidence.
+4. A tension is allowed only when it references reported divergence evidence. Do not infer tensions from outliers or suggestions.
+5. Do not recommend purchases, prescribe actions, invent games, or claim causation.
+
+Call \`submit_narration\` exactly once as your final action. Do not produce any other final text.`;
+}
+
+export function createNarrationService(): NarrationService {
   async function generateNarration(profile: CollectionProfile): Promise<ProfileNarration> {
+    const evidence = buildNarrationEvidence(profile);
     logger.log(
-      `starting narration: ${profile.gameCount} games, ${profile.ratedGameCount} rated${DEBUG ? " (DEBUG)" : ""}`,
+      `starting narration: ${profile.gameCount} games, ${profile.ratedGameCount} rated, ${evidence.insights.length} reported insights${DEBUG ? " (DEBUG)" : ""}`,
     );
+    if (evidence.insights.length === 0) {
+      logger.log("narration abstained: no reported trusted insights");
+      return {
+        summary: [],
+        surprises: [],
+        tensions: [],
+        abstention: PROFILE_NARRATION_ABSTENTION,
+      };
+    }
 
-    const NarrationSchema = Type.Object(
+    const EvidenceReferenceSchema = Type.Object(
       {
-        summary: Type.String({ description: "2-4 paragraph overview of collection identity" }),
-        surprises: Type.Array(Type.String(), {
-          description: "Unexpected patterns in the collection",
-        }),
-        tensions: Type.Array(Type.String(), {
-          description: "Disagreements between stated and revealed preferences",
-        }),
-        blindSpots: Type.Array(Type.String(), {
-          description: "Absent or underrepresented attribute categories",
-        }),
-        curveInsights: Type.Array(Type.String(), {
-          description:
-            "Utility curve observations relating configured preferences to actual distributions",
+        insightId: Type.String({ description: "ID of a supplied reported insight" }),
+        gameIds: Type.Array(Type.String(), {
+          minItems: 1,
+          description: "Only game IDs present in that insight's evidence",
         }),
       },
       { additionalProperties: false },
     );
-
-    const CollectionFilterSchema = Type.Object({
-      mechanic: Type.Optional(Type.String({ description: "Filter by mechanic name" })),
-      category: Type.Optional(Type.String({ description: "Filter by category name" })),
-    });
-
-    const ProfileSectionSchema = Type.Object({
-      section: Type.Union(
-        [
-          Type.Literal("divergence"),
-          Type.Literal("outliers"),
-          Type.Literal("suggestions"),
-          Type.Literal("clustering"),
-          Type.Literal("distributions"),
-          Type.Literal("curves"),
-        ],
-        { description: "Which section to retrieve" },
-      ),
-    });
+    const ClaimSchema = Type.Object(
+      {
+        evidenceReferences: Type.Array(EvidenceReferenceSchema, {
+          minItems: 1,
+          description: "Reported insights to narrate; the server supplies their canonical text",
+        }),
+      },
+      { additionalProperties: false },
+    );
+    const NarrationSchema = Type.Object(
+      {
+        summary: Type.Array(ClaimSchema, { description: "Core collection identity claims" }),
+        surprises: Type.Array(ClaimSchema, { description: "Evidence-backed unexpected findings" }),
+        tensions: Type.Array(ClaimSchema, {
+          description: "Only disagreements supported by reported divergence insights",
+        }),
+      },
+      { additionalProperties: false },
+    );
 
     // Wrap in an object so TS doesn't narrow it to `null` based on the initializer;
     // the actual assignment happens inside a tool callback (closure) which TS
@@ -161,92 +258,11 @@ export function createNarrationService(deps: NarrationServiceDeps): NarrationSer
             details: undefined,
           };
         }
-        captured.value = params;
+        captured.value = groundNarrationSelection(params as NarrationSelection, profile);
         return {
           content: [{ type: "text" as const, text: "Narration accepted." }],
           details: undefined,
           terminate: true,
-        };
-      },
-    });
-
-    const getCollectionGames = defineTool({
-      name: "get_collection_games",
-      label: "Get collection games",
-      description:
-        "Returns the list of games in the collection with their BGG data, ratings, and fitness scores. Use to drill into specific games when tracing patterns.",
-      parameters: CollectionFilterSchema,
-      async execute(_id, params) {
-        const games = await gameService.listGames();
-        let filtered: GameWithScore[] = games;
-        if (params.mechanic) {
-          const m = params.mechanic.toLowerCase();
-          filtered = filtered.filter((g) =>
-            g.game.bggData?.mechanics.some((mech) => mech.name.toLowerCase().includes(m)),
-          );
-        }
-        if (params.category) {
-          const c = params.category.toLowerCase();
-          filtered = filtered.filter((g) =>
-            g.game.bggData?.categories.some((cat) => cat.name.toLowerCase().includes(c)),
-          );
-        }
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(
-                filtered.map((g) => ({
-                  name: g.game.name,
-                  id: g.game.id,
-                  bggId: g.game.bggId,
-                  ratings: g.game.ratings,
-                  fitnessScore: g.score?.score ?? null,
-                  vetoed: g.score?.vetoed ?? false,
-                  mechanics: g.game.bggData?.mechanics.map((m) => m.name) ?? [],
-                  categories: g.game.bggData?.categories.map((c) => c.name) ?? [],
-                  weight: g.game.bggData?.weight ?? null,
-                  communityRating: g.game.bggData?.communityRating ?? null,
-                })),
-              ),
-            },
-          ],
-          details: undefined,
-        };
-      },
-    });
-
-    const getProfileDetail = defineTool({
-      name: "get_profile_detail",
-      label: "Get profile detail",
-      description: "Returns a specific section of the algorithmic profile in full detail.",
-      parameters: ProfileSectionSchema,
-      // eslint-disable-next-line @typescript-eslint/require-await -- defineTool requires async
-      async execute(_id, params) {
-        let data: unknown;
-        switch (params.section) {
-          case "divergence":
-            data = profile.divergence;
-            break;
-          case "outliers":
-            data = profile.outliers;
-            break;
-          case "suggestions":
-            data = profile.suggestions;
-            break;
-          case "clustering":
-            data = profile.bggClustering;
-            break;
-          case "distributions":
-            data = profile.axisDistributions;
-            break;
-          case "curves":
-            data = profile.utilityCurves;
-            break;
-        }
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(data) }],
-          details: undefined,
         };
       },
     });
@@ -268,7 +284,7 @@ export function createNarrationService(deps: NarrationServiceDeps): NarrationSer
       sessionManager,
       resourceLoader,
       noTools: "builtin",
-      customTools: [submitNarration, getCollectionGames, getProfileDetail],
+      customTools: [submitNarration],
     });
     if (modelFallbackMessage) logger.warn(`pi modelFallbackMessage: ${modelFallbackMessage}`);
 
@@ -345,17 +361,12 @@ export function createNarrationService(deps: NarrationServiceDeps): NarrationSer
     });
 
     try {
-      // Strip narration fields from the profile to avoid self-referential data
-      const profileData = { ...profile } as Record<string, unknown>;
-      delete profileData.narration;
-      delete profileData.narrationState;
-
-      const systemPrompt = buildSystemPrompt(profile);
+      const systemPrompt = buildSystemPrompt();
       const userPrompt = `${systemPrompt}
 
-Here is the full collection profile to interpret:
+Here is the complete and exclusive trusted evidence to interpret:
 
-${JSON.stringify(profileData, null, 2)}`;
+${JSON.stringify(evidence, null, 2)}`;
 
       logger.log(`sending prompt (${userPrompt.length} chars)`);
       try {
@@ -394,18 +405,16 @@ ${JSON.stringify(profileData, null, 2)}`;
     }
 
     if (
-      typeof result.summary !== "string" ||
+      !Array.isArray(result.summary) ||
       !Array.isArray(result.surprises) ||
-      !Array.isArray(result.tensions) ||
-      !Array.isArray(result.blindSpots) ||
-      !Array.isArray(result.curveInsights)
+      !Array.isArray(result.tensions)
     ) {
       logger.error("narration output missing required fields:", Object.keys(result));
       throw new Error("Narration output missing required fields");
     }
 
     logger.log("narration generation complete");
-    return result;
+    return validateNarrationEvidence(result, profile);
   }
 
   return { generateNarration };

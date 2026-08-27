@@ -43,11 +43,10 @@ const sampleProfile: CollectionProfile = {
 const sampleProfileWithNarration: CollectionProfile = {
   ...sampleProfile,
   narration: {
-    summary: "Your collection leans heavily into deck builders.",
-    surprises: ["You rate complexity higher than expected."],
-    tensions: ["Fun vs. depth tension visible."],
-    blindSpots: ["No area control games."],
-    curveInsights: ["Diminishing returns on player count above 4."],
+    summary: [],
+    surprises: [],
+    tensions: [],
+    abstention: "No reported trusted insights are available to narrate.",
   },
   narrationState: "fresh",
 };
@@ -140,7 +139,7 @@ describe("profile narrate", () => {
     const output = await profileNarrateCommand(narrationClient, [], { json: false });
     const parsed = JSON.parse(output) as CollectionProfile;
     expect(parsed.narration).not.toBeNull();
-    expect(parsed.narration!.summary).toBe("Your collection leans heavily into deck builders.");
+    expect(parsed.narration!.abstention).toContain("No reported trusted insights");
     expect(parsed.narrationState).toBe("fresh");
   });
 

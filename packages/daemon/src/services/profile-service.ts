@@ -153,8 +153,8 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
         tournamentSettings: tournamentData.settings,
         profile,
         computedAt: now,
-        narration: stored?.narration ?? null,
-        narrationComputedAt: stored?.narrationComputedAt ?? null,
+        narration: null,
+        narrationComputedAt: null,
       };
 
       await storageService.saveProfile(profileData);

@@ -4,11 +4,10 @@ import type { CollectionProfile, ProfileNarration } from "@shelf-judge/shared";
 import type { NarrationService } from "../../src/services/narration-service.js";
 
 const sampleNarration: ProfileNarration = {
-  summary: "A well-curated collection emphasizing strategy.",
-  surprises: ["High weight concentration in medium games"],
-  tensions: ["Fun vs complexity trade-off"],
-  blindSpots: ["No party games"],
-  curveInsights: [],
+  summary: [],
+  surprises: [],
+  tensions: [],
+  abstention: "No reported trusted insights are available to narrate.",
 };
 
 function createMockNarrationService(overrides?: Partial<NarrationService>): NarrationService {
@@ -33,7 +32,7 @@ describe("profile narrate routes", () => {
 
       const profile = (await res.json()) as CollectionProfile;
       expect(profile.narration).not.toBeNull();
-      expect(profile.narration!.summary).toBe(sampleNarration.summary);
+      expect(profile.narration).toEqual(sampleNarration);
       expect(profile.narrationState).toBe("fresh");
     });
 

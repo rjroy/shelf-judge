@@ -57,6 +57,7 @@ function InsightCard({
 
   return (
     <article
+      id={`insight-${insight.id}`}
       className={`trusted-insight-card status-${insight.status}`}
       data-insight-status={insight.status}
       aria-labelledby={headingId}
