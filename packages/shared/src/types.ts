@@ -668,6 +668,146 @@ export interface UtilityCurveDeclaration {
   configurationSummary: string | null;
 }
 
+export type InsightStatus = "reported" | "insufficient" | "suppressed" | "retired";
+
+export interface InsightMethod {
+  id: string;
+  version: number;
+  description: string;
+}
+
+export interface InsightEvidenceMeasurement {
+  key: string;
+  label: string;
+  value: string | number | boolean | null;
+  unit: string | null;
+  source: string;
+}
+
+export interface InsightEvidenceGame {
+  gameId: string;
+  gameName: string;
+  role: "subject" | "supporting" | "comparator";
+  measurements: InsightEvidenceMeasurement[];
+}
+
+export interface InsightCohort {
+  description: string;
+  eligibleGameCount: number;
+  includedGameCount: number;
+  excludedGameCount: number;
+  coveragePercent: number; // percentage in [0,100]
+}
+
+export interface InsightSufficiencyRequirement {
+  criterion: string;
+  observed: number;
+  required: number;
+  met: boolean;
+}
+
+export interface InsightComparator {
+  description: string;
+  gameIds: string[];
+}
+
+export interface InsightNotability {
+  metric: string;
+  value: number;
+  threshold: number | null;
+  direction: "above" | "below" | "two-sided";
+  explanation: string;
+}
+
+export interface InsightConfidence {
+  level: "low" | "moderate" | "high";
+  basis: string;
+}
+
+interface TrustedInsightBase {
+  contractVersion: 1;
+  id: string;
+  method: InsightMethod;
+  cohort: InsightCohort;
+  sufficiency: InsightSufficiencyRequirement[];
+  evidence: InsightEvidenceGame[];
+  comparator: InsightComparator | null;
+  limitations: string[];
+}
+
+type NonEmptyArray<T> = [T, ...T[]];
+
+export interface ReportedInsightEvidenceGame extends Omit<InsightEvidenceGame, "measurements"> {
+  measurements: NonEmptyArray<InsightEvidenceMeasurement>;
+}
+
+export interface SatisfiedInsightRequirement extends InsightSufficiencyRequirement {
+  met: true;
+}
+
+export interface UnmetInsightRequirement extends InsightSufficiencyRequirement {
+  met: false;
+}
+
+export interface ReportedInsight<TDetails> extends TrustedInsightBase {
+  status: "reported";
+  sufficiency: NonEmptyArray<SatisfiedInsightRequirement>;
+  evidence: NonEmptyArray<ReportedInsightEvidenceGame>;
+  observation: string;
+  interpretation: string | null;
+  details: TDetails;
+  notability: InsightNotability;
+  confidence: InsightConfidence | null;
+}
+
+export type InsightAbstentionReason =
+  | "insufficient-sample"
+  | "insufficient-coverage"
+  | "missing-comparator"
+  | "unsupported-method"
+  | "superseded";
+
+interface AbstainedInsightBase extends TrustedInsightBase {
+  explanation: string;
+}
+
+export interface InsufficientSampleInsight extends AbstainedInsightBase {
+  status: "insufficient";
+  reason: "insufficient-sample";
+  sufficiency: [UnmetInsightRequirement, ...InsightSufficiencyRequirement[]];
+}
+
+export interface InsufficientCoverageInsight extends AbstainedInsightBase {
+  status: "insufficient";
+  reason: "insufficient-coverage";
+  sufficiency: [UnmetInsightRequirement, ...InsightSufficiencyRequirement[]];
+}
+
+export interface MissingComparatorInsight extends AbstainedInsightBase {
+  status: "insufficient";
+  reason: "missing-comparator";
+  comparator: null;
+}
+
+export interface SuppressedInsight extends AbstainedInsightBase {
+  status: "suppressed";
+  reason: "unsupported-method";
+}
+
+export interface RetiredInsight extends AbstainedInsightBase {
+  status: "retired";
+  reason: "superseded";
+}
+
+export type InsufficientInsight =
+  | InsufficientSampleInsight
+  | InsufficientCoverageInsight
+  | MissingComparatorInsight;
+
+export type AbstainedInsight = InsufficientInsight | SuppressedInsight | RetiredInsight;
+
+export type TrustedInsight<TDetails> = ReportedInsight<TDetails> | AbstainedInsight;
+
 export interface DivergentGame {
   gameId: string;
   gameName: string;
