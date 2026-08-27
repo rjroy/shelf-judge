@@ -19,6 +19,7 @@ import { DEFAULT_REDUNDANCY_SETTINGS } from "../src/services/redundancy-engine";
 import { createWishlistRoutes } from "../src/routes/wishlist";
 import type { WishlistService } from "../src/services/wishlist-service";
 import { computeProfile } from "../src/services/profile-engine";
+import { createTestPurchaseUtilizationService } from "./helpers/test-app";
 
 const now = "2026-01-01T00:00:00Z";
 
@@ -246,6 +247,7 @@ function buildApp(collection?: Collection) {
     gameService,
     predictionService,
     storageService: storage,
+    purchaseUtilizationService: createTestPurchaseUtilizationService(storage),
   });
   app.route("/api", routes);
   return app;
@@ -406,6 +408,7 @@ describe("GET /games/:id regardless of ownership", () => {
       gameService,
       predictionService,
       storageService: storage,
+      purchaseUtilizationService: createTestPurchaseUtilizationService(storage),
     });
     app.route("/api", routes);
 
@@ -439,6 +442,7 @@ describe("niche/redundancy exclusion for previously-owned games", () => {
       gameService,
       predictionService,
       storageService: storage,
+      purchaseUtilizationService: createTestPurchaseUtilizationService(storage),
     });
     app.route("/api", routes);
 
@@ -480,6 +484,7 @@ describe("niche/redundancy exclusion for previously-owned games", () => {
       gameService,
       predictionService,
       storageService: storage,
+      purchaseUtilizationService: createTestPurchaseUtilizationService(storage),
     });
     app.route("/api", routes);
 

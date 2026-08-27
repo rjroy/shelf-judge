@@ -5,6 +5,7 @@ import { createPredictionRoutes } from "../src/routes/prediction";
 import type {
   Game,
   GameWithScore,
+  GameWithPurchaseUtilization,
   FitnessResult,
   BggGameData,
   RedundancySettings,
@@ -16,6 +17,7 @@ import type { GameService } from "../src/services/game-service";
 import type { PredictionService } from "../src/services/prediction-service";
 import type { StorageService } from "../src/services/storage-service";
 import { DEFAULT_REDUNDANCY_SETTINGS } from "../src/services/redundancy-engine";
+import { createTestPurchaseUtilizationService } from "./helpers/test-app";
 
 // --- Fixture helpers ---
 
@@ -263,6 +265,7 @@ function buildApp(
     gameService: createMockGameService() as GameService,
     predictionService: createMockPredictionService() as PredictionService,
     storageService: storage as StorageService,
+    purchaseUtilizationService: createTestPurchaseUtilizationService(storage as StorageService),
   });
   const predictionRoutes = createPredictionRoutes({
     predictionService: createMockPredictionService() as PredictionService,
@@ -380,6 +383,26 @@ describe("redundancy integration: GET /predictions/bgg/:bggId", () => {
 });
 
 describe("redundancy integration: penalty consistency across routes", () => {
+  test("integrated list and detail use the same adjusted score for utilization", async () => {
+    const app = buildApp(enabledIntegrated);
+    const listResponse = await app.request("/api/games");
+    const detailResponse = await app.request("/api/games/c");
+    expect(listResponse.status).toBe(200);
+    expect(detailResponse.status).toBe(200);
+    const list = (await listResponse.json()) as GameWithPurchaseUtilization[];
+    const detail = (await detailResponse.json()) as GameWithPurchaseUtilization;
+    const listEntry = list.find((entry) => entry.game.id === "c");
+    expect(listEntry).toBeDefined();
+    expect(listEntry?.score?.score).toBe(detail.score?.score);
+    expect(listEntry?.displayScore).toBe(detail.displayScore);
+    expect(listEntry?.purchaseUtilization).toEqual(detail.purchaseUtilization);
+    expect(detail.score?.score).toBe(detail.score?.redundancyAdjustment?.adjustedScore);
+    expect(detail.purchaseUtilization.evidence.fitness).toMatchObject({
+      status: "valid",
+      value: detail.displayScore,
+    });
+  });
+
   test("derived axes do not change redundancy results or introduce non-finite values", async () => {
     const withoutDerived = { ...defaultCollection, axes: [] };
     const withDerivedResponse = await buildApp(enabledAnnotation).request("/api/games");

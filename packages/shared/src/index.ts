@@ -60,6 +60,7 @@ export type {
   RecentComparison,
   TournamentGameStatsDisplay,
   GameWithScore,
+  GameWithPurchaseUtilization,
   PurchaseUtilizationReason,
   UtilizationOutcome,
   UtilizationComponentBase,
@@ -76,6 +77,8 @@ export type {
   PurchaseUtilizationEvidence,
   PurchaseUtilizationSortProjection,
   PurchaseUtilizationResult,
+  AcquisitionMutationRequest,
+  EntertainmentBenchmarkMutationRequest,
   AddGameResult,
   BggSearchResult,
   ImportProgress,
@@ -167,6 +170,8 @@ export {
   TournamentSettingsSchema,
   TournamentDataSchema,
   ShelfConfigurationSchema,
+  AcquisitionMutationRequestSchema,
+  EntertainmentBenchmarkMutationRequestSchema,
 } from "./validation";
 
 export {

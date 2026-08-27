@@ -1,12 +1,22 @@
 import { Hono, type Context } from "hono";
-import { AddGameSchema, CodedAxisValidationError, toErrorMessage } from "@shelf-judge/shared";
+import {
+  AcquisitionMutationRequestSchema,
+  AddGameSchema,
+  CodedAxisValidationError,
+  NotFoundError,
+  toErrorMessage,
+} from "@shelf-judge/shared";
 import type { GameWithScore, Game, RedundancySettings } from "@shelf-judge/shared";
 import { z } from "zod";
 import type { GameService } from "../services/game-service.js";
 import type { BggClient } from "../services/bgg-client.js";
 import type { PredictionService } from "../services/prediction-service.js";
 import type { StorageService } from "../services/storage-service.js";
-import type { RouteModule, OperationDefinition } from "../operations.js";
+import {
+  UNSAFE_STORED_AMOUNT_SCHEMA,
+  type RouteModule,
+  type OperationDefinition,
+} from "../operations.js";
 import { computeNichePositions } from "../services/niche-engine.js";
 import { computeRedundancyAdjustments } from "../services/redundancy-engine.js";
 import {
@@ -20,6 +30,15 @@ import type { FeatureVector } from "../services/feature-vector.js";
 
 import type { WishlistService } from "../services/wishlist-service.js";
 import { deriveDisplayStats } from "../services/tournament-service.js";
+import type { PurchaseUtilizationService } from "../services/purchase-utilization-service.js";
+import { PurchaseUtilizationValidationError } from "../services/purchase-utilization-service.js";
+import { createLogger, type Logger } from "../services/logger.js";
+
+const INTERNAL_ERROR_RESPONSE = { error: "Internal server error", code: "internal_error" } as const;
+
+function gameNotFoundResponse(gameId: string) {
+  return { error: `Game not found: ${gameId}`, code: "game_not_found" } as const;
+}
 
 export interface GameRoutesDeps {
   gameService: GameService;
@@ -27,6 +46,8 @@ export interface GameRoutesDeps {
   predictionService?: PredictionService;
   storageService?: StorageService;
   wishlistService?: WishlistService;
+  purchaseUtilizationService: PurchaseUtilizationService;
+  logger?: Logger;
 }
 
 const RatingsBodySchema = z.object({
@@ -132,8 +153,65 @@ function filterByOwnership(games: GameWithScore[], ownership: string): GameWithS
 }
 
 export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
-  const { gameService, bggClient, predictionService, storageService, wishlistService } = deps;
+  const {
+    gameService,
+    bggClient,
+    predictionService,
+    storageService,
+    wishlistService,
+    purchaseUtilizationService,
+  } = deps;
+  const logger = deps.logger ?? createLogger("purchase-utilization-routes");
   const routes = new Hono();
+
+  async function assembleFinalGames(
+    includePredicted: boolean,
+    includeNiches: boolean,
+  ): Promise<GameWithScore[]> {
+    let predictedGames: GameWithScore[] | undefined;
+    const getPredictedGames = async (): Promise<GameWithScore[]> => {
+      if (!predictionService) return gameService.listGames();
+      predictedGames ??= await predictionService.listGamesWithPredictions();
+      return predictedGames;
+    };
+
+    const allGames =
+      includePredicted && predictionService
+        ? await getPredictedGames()
+        : await gameService.listGames();
+    const ownedGames = allGames.filter((entry) => entry.game.ownership !== "previously-owned");
+
+    if (includeNiches && predictionService) {
+      const nicheSettings = storageService ? await storageService.loadNicheSettings() : undefined;
+      const nicheUniverse = includePredicted
+        ? ownedGames
+        : (await getPredictedGames()).filter(
+            (entry) => entry.game.ownership !== "previously-owned",
+          );
+      const nicheMap = computeNichePositions(nicheUniverse, nicheSettings);
+      for (const entry of allGames) {
+        entry.nichePosition = nicheMap.get(entry.game.id) ?? null;
+      }
+    }
+
+    if (storageService) {
+      const redundancySettings = await storageService.loadRedundancySettings();
+      const universe =
+        !includePredicted && predictionService
+          ? (await getPredictedGames()).filter(
+              (entry) => entry.game.ownership !== "previously-owned",
+            )
+          : undefined;
+      await applyRedundancy(ownedGames, redundancySettings, storageService, universe);
+    }
+
+    return allGames;
+  }
+
+  async function enrichFinalGames(games: GameWithScore[], responseKind: "list" | "detail") {
+    const benchmark = await purchaseUtilizationService.getEntertainmentBenchmark();
+    return purchaseUtilizationService.enrichGames(games, benchmark, responseKind);
+  }
 
   // GET /games/search?q={query}
   routes.get("/games/search", async (c) => {
@@ -201,64 +279,9 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       const includePredicted = c.req.query("includePredicted") === "true";
       const includeNiches = c.req.query("includeNiches") === "true";
       const ownershipFilter = c.req.query("ownership") ?? "owned";
-
-      if (includePredicted && predictionService) {
-        const allGames = await predictionService.listGamesWithPredictions();
-
-        // Owned-only set for niche/redundancy computation (REQ-PREV-19)
-        const ownedGames = allGames.filter((g) => g.game.ownership !== "previously-owned");
-
-        if (includeNiches) {
-          const nicheSettings = storageService
-            ? await storageService.loadNicheSettings()
-            : undefined;
-          const nicheMap = computeNichePositions(ownedGames, nicheSettings);
-          for (const gws of allGames) {
-            gws.nichePosition = nicheMap.get(gws.game.id) ?? null;
-          }
-        }
-        // Redundancy: after niches (which use pre-redundancy scores per REQ-REDUN-26)
-        if (storageService) {
-          const redundancySettings = await storageService.loadRedundancySettings();
-          await applyRedundancy(ownedGames, redundancySettings, storageService);
-        }
-
-        const response = filterByOwnership(allGames, ownershipFilter);
-        return c.json(response);
-      }
-
-      const allGames = await gameService.listGames();
-
-      // Owned-only set for niche/redundancy computation (REQ-PREV-19)
-      const ownedGames = allGames.filter((g) => g.game.ownership !== "previously-owned");
-
-      if (includeNiches && predictionService) {
-        // Niche ranking needs predicted scores (REQ-NICHE-4), but the client
-        // didn't ask for predicted games in the response. Compute niches from
-        // the owned set with predictions, then attach positions to the response set.
-        const nicheSettings = storageService ? await storageService.loadNicheSettings() : undefined;
-        const ownedWithPredictions = (await predictionService.listGamesWithPredictions()).filter(
-          (g) => g.game.ownership !== "previously-owned",
-        );
-        const nicheMap = computeNichePositions(ownedWithPredictions, nicheSettings);
-        for (const gws of allGames) {
-          gws.nichePosition = nicheMap.get(gws.game.id) ?? null;
-        }
-      }
-
-      // Redundancy: after niches, computed against owned prediction-enriched universe
-      if (storageService) {
-        const redundancySettings = await storageService.loadRedundancySettings();
-        const universe = predictionService
-          ? (await predictionService.listGamesWithPredictions()).filter(
-              (g) => g.game.ownership !== "previously-owned",
-            )
-          : undefined;
-        await applyRedundancy(ownedGames, redundancySettings, storageService, universe);
-      }
-
-      const response = filterByOwnership(allGames, ownershipFilter);
-      return c.json(response);
+      const assembled = await assembleFinalGames(includePredicted, includeNiches);
+      const response = filterByOwnership(assembled, ownershipFilter);
+      return c.json(await enrichFinalGames(response, "list"));
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 500);
     }
@@ -267,46 +290,112 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
   // GET /games/:id
   routes.get("/games/:id", async (c) => {
     const id = c.req.param("id");
+    const includePredictedQuery = c.req.query("includePredicted");
+    if (
+      includePredictedQuery !== undefined &&
+      includePredictedQuery !== "true" &&
+      includePredictedQuery !== "false"
+    ) {
+      return c.json(
+        {
+          error: "Validation failed",
+          code: "invalid_include_predicted",
+          message: 'includePredicted must be "true" or "false"',
+        },
+        400,
+      );
+    }
     try {
-      const result = await gameService.getGame(id);
-
-      // Compute niche position from owned-only set with predicted scores (REQ-PREV-19)
-      if (predictionService) {
-        const nicheSettings = storageService ? await storageService.loadNicheSettings() : undefined;
-        const allGames = await predictionService.listGamesWithPredictions();
-        const ownedGames = allGames.filter((g) => g.game.ownership !== "previously-owned");
-        const nicheMap = computeNichePositions(ownedGames, nicheSettings);
-        result.nichePosition = nicheMap.get(id) ?? null;
-      } else {
-        result.nichePosition = null;
-      }
-
-      // Redundancy: use owned prediction-enriched set (REQ-PREV-19)
-      if (storageService) {
-        const redundancySettings = await storageService.loadRedundancySettings();
-        if (redundancySettings.enabled) {
-          const allGames = predictionService
-            ? await predictionService.listGamesWithPredictions()
-            : await gameService.listGames();
-          const ownedGames = allGames.filter((g) => g.game.ownership !== "previously-owned");
-          await applyRedundancy(ownedGames, redundancySettings, storageService);
-          const thisGame = ownedGames.find((g) => g.game.id === id);
-          if (result.score && thisGame?.score) {
-            result.score.redundancyAdjustment = thisGame.score.redundancyAdjustment;
-            if (redundancySettings.stage === "integrated" && thisGame.score.redundancyAdjustment) {
-              result.score.score = thisGame.score.redundancyAdjustment.adjustedScore;
-            }
-          }
-        }
-      }
-
-      return c.json(result);
+      const includePredicted = includePredictedQuery === "true";
+      const assembled = await assembleFinalGames(includePredicted, true);
+      const result = assembled.find((entry) => entry.game.id === id);
+      if (!result) throw new NotFoundError(`Game not found: ${id}`);
+      const [enriched] = await enrichFinalGames([result], "detail");
+      return c.json(enriched);
     } catch (err) {
+      if (err instanceof NotFoundError) {
+        return c.json(gameNotFoundResponse(id), 404);
+      }
       const message = toErrorMessage(err);
       if (message.includes("not found")) {
-        return c.json({ error: message }, 404);
+        return c.json(gameNotFoundResponse(id), 404);
       }
-      return c.json({ error: message }, 500);
+      return c.json(INTERNAL_ERROR_RESPONSE, 500);
+    }
+  });
+
+  routes.put("/games/:id/acquisition", async (c) => {
+    const id = c.req.param("id");
+    const changedFields = ["acquisition"];
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      logger.log("acquisition HTTP mutation attempt", {
+        gameId: id,
+        requestedState: "unavailable",
+        changedFields,
+      });
+      logger.warn("acquisition HTTP mutation rejected", {
+        gameId: id,
+        requestedState: "unavailable",
+        changedFields,
+        outcome: "rejected",
+        validationCode: "invalid_json",
+      });
+      return c.json({ error: "Invalid JSON body", code: "invalid_json" }, 400);
+    }
+    const requestedState =
+      typeof body === "object" &&
+      body !== null &&
+      "state" in body &&
+      (body.state === "unknown" || body.state === "gift" || body.state === "purchase")
+        ? body.state
+        : "invalid";
+    logger.log("acquisition HTTP mutation attempt", { gameId: id, requestedState, changedFields });
+    const parsed = AcquisitionMutationRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      logger.warn("acquisition HTTP mutation rejected", {
+        gameId: id,
+        requestedState,
+        changedFields,
+        outcome: "rejected",
+        validationCode: "invalid_acquisition_request",
+      });
+      return c.json(
+        {
+          error: "Validation failed",
+          code: "invalid_acquisition_request",
+          details: parsed.error.issues,
+        },
+        400,
+      );
+    }
+    try {
+      const game = await purchaseUtilizationService.setAcquisition(id, parsed.data);
+      return c.json({ game });
+    } catch (error) {
+      if (error instanceof PurchaseUtilizationValidationError) {
+        return c.json({ error: error.message, code: error.code, details: error.details }, 400);
+      }
+      if (error instanceof NotFoundError) {
+        logger.warn("acquisition HTTP mutation rejected", {
+          gameId: id,
+          requestedState,
+          changedFields,
+          outcome: "rejected",
+          validationCode: "game_not_found",
+        });
+        return c.json(gameNotFoundResponse(id), 404);
+      }
+      logger.error("acquisition HTTP mutation failed", {
+        gameId: id,
+        requestedState,
+        changedFields,
+        outcome: "failed",
+        validationCode: "persistence_failed",
+      });
+      return c.json(INTERNAL_ERROR_RESPONSE, 500);
     }
   });
 
@@ -522,6 +611,26 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       description: "List all games with fitness scores",
       invocation: { method: "GET", path: "/api/games" },
       hierarchy: { root: "shelf", feature: "game" },
+      parameters: [
+        {
+          name: "includePredicted",
+          in: "query",
+          description: "Use predicted scores",
+          required: false,
+        },
+        {
+          name: "includeNiches",
+          in: "query",
+          description: "Include niche annotations",
+          required: false,
+        },
+        {
+          name: "ownership",
+          in: "query",
+          description: "owned, previously-owned, or all",
+          required: false,
+        },
+      ],
       idempotent: true,
     },
     {
@@ -530,7 +639,124 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       description: "Get a game with current fitness score",
       invocation: { method: "GET", path: "/api/games/:id" },
       hierarchy: { root: "shelf", feature: "game" },
-      parameters: [{ name: "id", in: "path", description: "Game ID", required: true }],
+      parameters: [
+        { name: "id", in: "path", description: "Game ID", required: true },
+        {
+          name: "includePredicted",
+          in: "query",
+          description: "Use predicted score",
+          required: false,
+          acceptedValues: ["true", "false"],
+        },
+      ],
+      errors: [
+        {
+          status: 400,
+          code: "invalid_include_predicted",
+          description: "includePredicted was not true or false",
+          response: {
+            error: "Validation failed",
+            code: "invalid_include_predicted",
+            message: 'includePredicted must be "true" or "false"',
+          },
+        },
+        {
+          status: 404,
+          code: "game_not_found",
+          description: "No game exists with the requested ID",
+          response: { error: "Game not found: :id", code: "game_not_found" },
+        },
+        {
+          status: 500,
+          code: "internal_error",
+          description: "Game response assembly failed",
+          response: INTERNAL_ERROR_RESPONSE,
+        },
+      ],
+      idempotent: true,
+    },
+    {
+      operationId: "shelf.game.set-acquisition",
+      name: "set-acquisition",
+      description: "Set or correct a game's lifetime acquisition state and landed cost",
+      invocation: { method: "PUT", path: "/api/games/:id/acquisition" },
+      requestSchema: AcquisitionMutationRequestSchema,
+      request: {
+        body: {
+          oneOf: [
+            {
+              type: "object",
+              additionalProperties: false,
+              required: ["state"],
+              properties: { state: { const: "unknown" } },
+              description: "Unknown acquisition; amount is forbidden",
+            },
+            {
+              type: "object",
+              additionalProperties: false,
+              required: ["state"],
+              properties: { state: { const: "gift" } },
+              description: "Gift acquisition; amount is forbidden",
+            },
+            {
+              type: "object",
+              additionalProperties: false,
+              required: ["state", "amount"],
+              properties: {
+                state: { const: "purchase" },
+                amount: {
+                  type: "string",
+                  pattern: "^\\d+(?:\\.\\d{1,2})?$",
+                  not: UNSAFE_STORED_AMOUNT_SCHEMA,
+                  description:
+                    "Required non-negative exact decimal amount, at most two fractional digits and safe when stored as hundredths",
+                },
+              },
+              description: "Purchase acquisition; amount is required",
+            },
+          ],
+        },
+      },
+      hierarchy: { root: "shelf", feature: "game" },
+      parameters: [
+        { name: "id", in: "path", description: "Game ID", required: true },
+        {
+          name: "body",
+          in: "body",
+          description: "Strict acquisition state payload",
+          required: true,
+        },
+      ],
+      errors: [
+        {
+          status: 400,
+          code: "invalid_json",
+          description: "Request body is not valid JSON",
+          response: { error: "Invalid JSON body", code: "invalid_json" },
+        },
+        {
+          status: 400,
+          code: "invalid_acquisition_request",
+          description: "Request body does not match the strict acquisition contract",
+          response: {
+            error: "Validation failed",
+            code: "invalid_acquisition_request",
+            details: [],
+          },
+        },
+        {
+          status: 404,
+          code: "game_not_found",
+          description: "No game exists with the requested ID",
+          response: { error: "Game not found: :id", code: "game_not_found" },
+        },
+        {
+          status: 500,
+          code: "internal_error",
+          description: "Acquisition persistence failed",
+          response: INTERNAL_ERROR_RESPONSE,
+        },
+      ],
       idempotent: true,
     },
     {

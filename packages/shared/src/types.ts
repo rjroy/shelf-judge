@@ -438,6 +438,11 @@ export interface GameWithScore {
   nichePosition?: NichePosition | null;
 }
 
+export interface GameWithPurchaseUtilization extends GameWithScore {
+  displayScore: string | null;
+  purchaseUtilization: PurchaseUtilizationResult;
+}
+
 export type PurchaseUtilizationReason =
   | "missing-acquisition"
   | "invalid-acquisition"
@@ -565,6 +570,15 @@ export interface PurchaseUtilizationResult {
     fitnessAdjustment: "The fitness-adjusted hourly benchmark changes in direct proportion to current fitness; fitness 6 uses the collection benchmark.";
   };
   sort: PurchaseUtilizationSortProjection;
+}
+
+export type AcquisitionMutationRequest =
+  | { state: "unknown" }
+  | { state: "gift" }
+  | { state: "purchase"; amount: string };
+
+export interface EntertainmentBenchmarkMutationRequest {
+  amount: string;
 }
 
 export interface AddGameResult {

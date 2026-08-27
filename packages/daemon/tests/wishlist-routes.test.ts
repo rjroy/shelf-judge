@@ -6,6 +6,7 @@ import { createGameRoutes } from "../src/routes/games";
 import type { WishlistService } from "../src/services/wishlist-service";
 import type { GameService } from "../src/services/game-service";
 import type { BggClient } from "../src/services/bgg-client";
+import { createTestPurchaseUtilizationService } from "./helpers/test-app";
 
 const mockBggClient: BggClient = {
   searchGames: () => Promise.reject(new Error("not implemented")),
@@ -316,6 +317,7 @@ describe("POST /games auto-removal (REQ-WISH-10)", () => {
       gameService: mockGameSvc,
       wishlistService: wishSvc,
       bggClient: mockBggClient,
+      purchaseUtilizationService: createTestPurchaseUtilizationService(),
     });
 
     const gameApp = new Hono();
@@ -345,6 +347,7 @@ describe("POST /games auto-removal (REQ-WISH-10)", () => {
       gameService: mockGameSvc,
       wishlistService: wishSvc,
       bggClient: mockBggClient,
+      purchaseUtilizationService: createTestPurchaseUtilizationService(),
     });
 
     const gameApp = new Hono();
@@ -375,6 +378,7 @@ describe("wishlist/collection isolation", () => {
       gameService: mockGameSvc,
       wishlistService: wishSvc,
       bggClient: mockBggClient,
+      purchaseUtilizationService: createTestPurchaseUtilizationService(),
     });
 
     const gameApp = new Hono();
@@ -408,6 +412,7 @@ describe("wishlist/collection isolation", () => {
       gameService: mockGameSvc,
       wishlistService: wishSvc,
       bggClient: mockBggClient,
+      purchaseUtilizationService: createTestPurchaseUtilizationService(),
     });
 
     const gameApp = new Hono();

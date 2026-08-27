@@ -14,6 +14,7 @@ import { DEFAULT_REDUNDANCY_SETTINGS } from "../src/services/redundancy-engine";
 import type { GameService } from "../src/services/game-service";
 import type { PredictionService } from "../src/services/prediction-service";
 import type { StorageService } from "../src/services/storage-service";
+import { createTestPurchaseUtilizationService } from "./helpers/test-app";
 
 // --- Fixture helpers (shared with niche-engine.test.ts pattern) ---
 
@@ -177,6 +178,7 @@ describe("niche settings integration: GET /games/:id passthrough", () => {
       gameService: createMockGameService() as GameService,
       predictionService: createMockPredictionService() as PredictionService,
       storageService: createMockStorageService({ ignoredTags: [] }) as StorageService,
+      purchaseUtilizationService: createTestPurchaseUtilizationService(),
     });
     appNoFilter.route("/api", routesNoFilter);
 
@@ -196,6 +198,7 @@ describe("niche settings integration: GET /games/:id passthrough", () => {
       storageService: createMockStorageService({
         ignoredTags: [{ type: "mechanic", name: "Deck Building" }],
       }) as StorageService,
+      purchaseUtilizationService: createTestPurchaseUtilizationService(),
     });
     appWithFilter.route("/api", routesWithFilter);
 
@@ -217,6 +220,7 @@ describe("niche settings integration: GET /games?includeNiches=true passthrough"
       gameService: createMockGameService() as GameService,
       predictionService: createMockPredictionService() as PredictionService,
       storageService: createMockStorageService({ ignoredTags: [] }) as StorageService,
+      purchaseUtilizationService: createTestPurchaseUtilizationService(),
     });
     appNoFilter.route("/api", routesNoFilter);
 
@@ -236,6 +240,7 @@ describe("niche settings integration: GET /games?includeNiches=true passthrough"
       storageService: createMockStorageService({
         ignoredTags: [{ type: "mechanic", name: "Deck Building" }],
       }) as StorageService,
+      purchaseUtilizationService: createTestPurchaseUtilizationService(),
     });
     appWithFilter.route("/api", routesWithFilter);
 
@@ -255,6 +260,7 @@ describe("niche settings integration: GET /games?includeNiches=true passthrough"
       gameService: createMockGameService() as GameService,
       predictionService: createMockPredictionService() as PredictionService,
       storageService: createMockStorageService({ ignoredTags: [] }) as StorageService,
+      purchaseUtilizationService: createTestPurchaseUtilizationService(),
     });
     appNoFilter.route("/api", routesNoFilter);
 
@@ -275,6 +281,7 @@ describe("niche settings integration: GET /games?includeNiches=true passthrough"
       storageService: createMockStorageService({
         ignoredTags: [{ type: "mechanic", name: "Deck Building" }],
       }) as StorageService,
+      purchaseUtilizationService: createTestPurchaseUtilizationService(),
     });
     appWithFilter.route("/api", routesWithFilter);
 

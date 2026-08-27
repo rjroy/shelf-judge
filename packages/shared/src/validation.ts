@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { parseAmountInput } from "./amount";
 import { getPreferenceCurveInvalidFields } from "./curve-math";
 import {
   DerivedAxisPayloadSchema,
@@ -25,6 +26,42 @@ import type {
 } from "./types";
 
 export const CURRENT_COLLECTION_SCHEMA_VERSION = 3 as const;
+
+const AmountInputSchema = z.string().superRefine((value, context) => {
+  try {
+    parseAmountInput(value);
+  } catch (error) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: error instanceof Error ? error.message : "Invalid amount",
+    });
+  }
+});
+
+export const AcquisitionMutationRequestSchema = z.discriminatedUnion("state", [
+  z.object({ state: z.literal("unknown") }).strict(),
+  z.object({ state: z.literal("gift") }).strict(),
+  z.object({ state: z.literal("purchase"), amount: AmountInputSchema }).strict(),
+]);
+
+export const EntertainmentBenchmarkMutationRequestSchema = z
+  .object({ amount: AmountInputSchema })
+  .strict()
+  .superRefine((value, context) => {
+    let hundredths: number;
+    try {
+      hundredths = parseAmountInput(value.amount);
+    } catch {
+      return;
+    }
+    if (hundredths === 0) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["amount"],
+        message: "Entertainment benchmark must be positive",
+      });
+    }
+  });
 
 const VetoConfigSchema = z.object({
   direction: z.enum(["below", "above"]),
