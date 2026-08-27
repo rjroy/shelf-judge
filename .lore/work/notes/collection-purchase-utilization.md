@@ -19,7 +19,7 @@ modules: [shared, daemon, web, cli]
 - [x] Step 6: Build web detail and settings (`shelf-judge-mmr.11`; Beads `CLOSED`)
 - [x] Step 7: Add deterministic web sorts (`shelf-judge-mmr.10`; terminal acceptance `ACCEPTED`)
 - [x] Step 8: Add CLI commands (`shelf-judge-mmr.8`; terminal acceptance `ACCEPTED`)
-- [ ] Step 9: Complete persisted-flow and parity coverage (`shelf-judge-mmr.9`)
+- [x] Step 9: Complete persisted-flow and parity coverage (`shelf-judge-mmr.9`; validation and review passed)
 - [ ] Step 10: Run final validation (`shelf-judge-mmr.6`)
 
 ## Step 1 Evidence Map
@@ -254,7 +254,7 @@ These statuses are reported for worktree completeness only. Neither file is a St
 - [x] Step 6: Build web detail and settings (`shelf-judge-mmr.11`; Beads `CLOSED`).
 - [x] Step 7: Add deterministic web sorts (`shelf-judge-mmr.10`; terminal acceptance `ACCEPTED`).
 - [x] Step 8: Add CLI commands (`shelf-judge-mmr.8`; terminal acceptance `ACCEPTED`).
-- [ ] Step 9: Complete persisted-flow and parity coverage (`shelf-judge-mmr.9`).
+- [x] Step 9: Complete persisted-flow and parity coverage (`shelf-judge-mmr.9`; validation and review passed).
 - [ ] Step 10: Run final validation (`shelf-judge-mmr.6`).
 
 ## Step 7 Evidence Map
@@ -422,3 +422,41 @@ This notes path is included only as resumable workflow context, not as Step 8 pr
 - Scope check: no collection sort scope.
 - Residual risk: the existing skipped daemon fetch-timeout test remains.
 - Runtime residual: installed Bun was `1.3.11`; the repository declares `1.4.0`.
+
+## Step 9 Evidence Map
+
+| Obligation                                                                                                                                                     | Executable evidence                                                                                                            |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Schema-2 migration, HTTP mutations, independent BGG provenance, recalculation, reload, malformed normalization/correction, and idempotency                     | `packages/daemon/tests/integration/purchase-utilization-persisted-flow.test.ts` and its literal schema-2 fixture               |
+| Canonical, zero-play, vetoed, unavailable, gift, and zero-cost response categories, labels, displays, exact rationals, reasons, sort projections, and evidence | `test-fixtures/purchase-utilization-responses.ts` plus daemon HTTP, web, and CLI parity suites                                 |
+| Ordinary, predicted, tournament-influenced, vetoed, annotation/integrated redundancy, and previously-owned fitness behavior                                    | Persisted-flow, game/prediction route, purchase service, redundancy integration, and ownership tests                           |
+| Web-only utilization sorting without daemon or CLI reordering                                                                                                  | Persisted-flow conflicting-order assertion, CLI parity conflicting-order assertion, and `purchase-utilization-sorting.test.ts` |
+| Existing fitness, prediction, redundancy, profile, collection, BGG, and previous-owner behavior                                                                | Complete repository suite and the focused 234-test Step 9 regression set                                                       |
+| REQ-UTIL-1 through REQ-UTIL-9                                                                                                                                  | Shared engine tests, daemon HTTP parity, and persisted ordinary/vetoed flows                                                   |
+| REQ-UTIL-10 through REQ-UTIL-18                                                                                                                                | Migration/storage, daemon service/routes, web forms, CLI commands, and persisted correction flow                               |
+| REQ-UTIL-19 through REQ-UTIL-25                                                                                                                                | Shared zero-play/evidence matrices and web/CLI canonical parity rendering                                                      |
+| REQ-UTIL-26 through REQ-UTIL-30                                                                                                                                | Record-local expansion tests, production scope audit, and daemon/CLI ordering regressions                                      |
+| REQ-UTIL-31 through REQ-UTIL-34                                                                                                                                | Result-first web tests, mutation suites, and shared daemon/web/CLI parity fixtures                                             |
+| REQ-UTIL-35 through REQ-UTIL-36                                                                                                                                | Exact web sorting suite covering rounded keys, categories, Unicode ties, and stable IDs                                        |
+
+## Step 9 Log
+
+### 2026-08-27
+
+- Added a literal schema-version-2 persisted fixture and one end-to-end flow through migration, purchase and benchmark HTTP mutations, BGG refresh with independent observation times, ordinary and vetoed calculations, benchmark-only recalculation, daemon restart, malformed current-data normalization, exact raw-envelope preservation, correction, normalized no-ops, and final reload.
+- Added shared canonical cases for both approved examples plus zero-play, vetoed, unavailable, gift, and zero-cost states. Daemon tests assemble all seven through `GET /api/games`; web and CLI consume the same result contracts. Independent expectations lock labels, displays, exact rationals, categories, reasons, evidence, and JSON preservation.
+- Added conflicting-order regressions proving utilization sorting remains web-only. Existing web comparator coverage remains authoritative for both directions, rounded-money ties, unreachable/unavailable categories, unsafe whole-play values, NFC normalization, Unicode code-point order, and stable IDs.
+- Production scope audit found no purchase-value input in fitness, prediction-engine, profile, feature-vector, aggregate, or brief code; no base-expansion join; no currency metadata/conversion; and no resale or investment language. The only prediction-service acquisition reference initializes a temporary factual game record to `unknown`.
+- Fresh review identified six gaps in the first test revision: synthetic-only daemon parity, unlocked exact/provenance values, incomplete malformed-data durability, missing recalculation comparison, weak sort-leak conflicts, and a stale fitness evidence-map entry. The corrected revision addresses all six.
+- Focused Step 9 regression set passed 234 tests before review corrections. Repository typecheck, lint, and 1,828 tests with one baseline skip passed before the correction round; final post-correction validation is recorded below.
+
+## Step 9 Validation Status
+
+- Final repository typecheck: passed.
+- Final repository lint: passed.
+- Final repository suite: 1,829 passed, 1 baseline skip, 0 failed.
+- Final web production build and production TypeScript: passed.
+- Final canonical/persisted/web/CLI parity set: 25 passed after review corrections.
+- Changed-file Prettier, ESLint, and `git diff --check`: passed.
+- Web test-only TypeScript retains only the documented unchanged fixture diagnostics in `axes-page-curve.test.ts`, `game-links.test.tsx`, and `shelf-assignment.test.tsx`; no Step 9 file appears.
+- Runtime residual: installed Bun remains `1.3.11` while the repository declares `1.4.0`; no failure was attributed to the version difference.

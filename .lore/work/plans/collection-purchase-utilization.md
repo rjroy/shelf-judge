@@ -392,23 +392,23 @@ Do not split the Step 3 schema migration from all required current-runtime fixtu
 
 ## AI Validation evidence map
 
-| Spec validation                         | Planned automated evidence                                                                            |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| 1. Repository gates                     | Step 10 root commands plus Step 6 web TypeScript/build commands                                       |
-| 2. `$60` canonical example              | `packages/shared/tests/purchase-utilization.test.ts`; daemon/web/CLI parity tests                     |
-| 3. `$20` canonical example              | `packages/shared/tests/purchase-utilization.test.ts`; daemon/web/CLI parity tests                     |
-| 4. Fitness scaling                      | `packages/shared/tests/purchase-utilization.test.ts`                                                  |
-| 5. Exact threshold and sub-cent display | `packages/shared/tests/exact-rational.test.ts`, `amount.test.ts`, and `purchase-utilization.test.ts`  |
-| 6. Additional-play ceiling              | `packages/shared/tests/purchase-utilization.test.ts`                                                  |
-| 7. Zero-play matrix                     | `packages/shared/tests/purchase-utilization.test.ts`                                                  |
-| 8. Acquisition and benchmark states     | `packages/shared/tests/purchase-utilization.test.ts`; daemon service/route tests                      |
-| 9. Fitness variants                     | `packages/daemon/tests/integration/purchase-utilization-response-parity.test.ts`                      |
-| 10. Player-count evidence               | Existing parser bucket tests plus `packages/shared/tests/purchase-utilization.test.ts` resolver tests |
-| 11. Amount parsing/storage              | `packages/shared/tests/amount.test.ts`; migration/storage tests                                       |
-| 12. Provenance round-trip               | `packages/daemon/tests/integration/purchase-utilization-persisted-flow.test.ts`; web/CLI parity tests |
-| 13. Web sorting                         | `packages/web/tests/purchase-utilization-sorting.test.ts`                                             |
-| 14. Deferred-scope exclusion            | Step 9 production-code audit and regression suites                                                    |
-| 15. Fresh explanation review            | Step 10 fresh user-facing reviewer                                                                    |
+| Spec validation                         | Planned automated evidence                                                                                                    |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| 1. Repository gates                     | Step 10 root commands plus Step 6 web TypeScript/build commands                                                               |
+| 2. `$60` canonical example              | `packages/shared/tests/purchase-utilization.test.ts`; daemon/web/CLI parity tests                                             |
+| 3. `$20` canonical example              | `packages/shared/tests/purchase-utilization.test.ts`; daemon/web/CLI parity tests                                             |
+| 4. Fitness scaling                      | `packages/shared/tests/purchase-utilization.test.ts`                                                                          |
+| 5. Exact threshold and sub-cent display | `packages/shared/tests/exact-rational.test.ts`, `amount.test.ts`, and `purchase-utilization.test.ts`                          |
+| 6. Additional-play ceiling              | `packages/shared/tests/purchase-utilization.test.ts`                                                                          |
+| 7. Zero-play matrix                     | `packages/shared/tests/purchase-utilization.test.ts`                                                                          |
+| 8. Acquisition and benchmark states     | `packages/shared/tests/purchase-utilization.test.ts`; daemon service/route tests                                              |
+| 9. Fitness variants                     | Ordinary/vetoed persisted-flow tests; prediction route tests; purchase service tournament tests; redundancy integration tests |
+| 10. Player-count evidence               | Existing parser bucket tests plus `packages/shared/tests/purchase-utilization.test.ts` resolver tests                         |
+| 11. Amount parsing/storage              | `packages/shared/tests/amount.test.ts`; migration/storage tests                                                               |
+| 12. Provenance round-trip               | `packages/daemon/tests/integration/purchase-utilization-persisted-flow.test.ts`; web/CLI parity tests                         |
+| 13. Web sorting                         | `packages/web/tests/purchase-utilization-sorting.test.ts`                                                                     |
+| 14. Deferred-scope exclusion            | Step 9 production-code audit and regression suites                                                                            |
+| 15. Fresh explanation review            | Step 10 fresh user-facing reviewer                                                                                            |
 
 ## Risks and review notes
 
