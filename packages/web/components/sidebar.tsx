@@ -79,6 +79,15 @@ const navGroups = [
     label: "Settings",
     items: [
       {
+        href: "/settings",
+        name: "General",
+        icon: (
+          <svg className="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M7 1h2l.4 2a5 5 0 011.3.8l1.9-.7 1 1.8-1.5 1.3a5 5 0 010 1.6l1.5 1.3-1 1.8-1.9-.7a5 5 0 01-1.3.8L9 13H7l-.4-2a5 5 0 01-1.3-.8l-1.9.7-1-1.8 1.5-1.3a5 5 0 010-1.6L2.4 4.9l1-1.8 1.9.7A5 5 0 016.6 3L7 1zm1 5a2 2 0 100 4 2 2 0 000-4z" />
+          </svg>
+        ),
+      },
+      {
         href: "/axes",
         name: "Axes",
         icon: (

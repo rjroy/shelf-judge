@@ -12,9 +12,11 @@ import { getRatingLabel } from "@shelf-judge/shared";
 
 export function ScoreBreakdown({
   score,
+  displayScore,
   isPreviouslyOwned = false,
 }: {
   score: FitnessResult | null;
+  displayScore?: string | null;
   isPreviouslyOwned?: boolean;
 }) {
   if (!score) {
@@ -29,7 +31,8 @@ export function ScoreBreakdown({
     .filter((e) => e.effectiveRating !== null)
     .reduce((sum, e) => sum + e.weight, 0);
 
-  const displayScore = score.vetoed ? (score.hypotheticalScore ?? 0) : score.score;
+  const calculationScore = score.vetoed ? (score.hypotheticalScore ?? 0) : score.score;
+  const canonicalScore = displayScore ?? score.score.toFixed(1);
   const hasPredictions = score.predictionMeta !== null;
 
   const predictedCount = score.breakdown.filter((e) => e.source === "predicted").length;
@@ -79,7 +82,7 @@ export function ScoreBreakdown({
               key={entry.axisId}
               entry={entry}
               totalWeight={totalWeight}
-              displayScore={displayScore}
+              displayScore={calculationScore}
             />
           ))}
           {isPreviouslyOwned && (
@@ -116,10 +119,10 @@ export function ScoreBreakdown({
             </td>
             <td colSpan={2} className="right">
               {score.vetoed ? (
-                <span className="score-hypothetical">{displayScore.toFixed(1)}</span>
+                <span className="score-hypothetical">{calculationScore.toFixed(1)}</span>
               ) : hasPredictions ? (
                 <span className="score-predicted">
-                  ~{score.score.toFixed(1)}
+                  ~{canonicalScore}
                   <span
                     style={{
                       fontSize: "11px",
@@ -133,7 +136,7 @@ export function ScoreBreakdown({
                   </span>
                 </span>
               ) : (
-                score.score.toFixed(1)
+                canonicalScore
               )}
             </td>
           </tr>

@@ -1,6 +1,8 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
+    "target": "es2022",
+    "incremental": false,
     "types": ["bun-types"]
   },
   "include": ["tests"]
