@@ -98,12 +98,6 @@ function InsightCard({
               <strong>Why it is notable</strong>
               <span>{insight.notability.explanation}</span>
             </div>
-            {insight.confidence && (
-              <div>
-                <strong>Confidence: {insight.confidence.level}</strong>
-                <span>{insight.confidence.basis}</span>
-              </div>
-            )}
           </div>
         </>
       ) : (

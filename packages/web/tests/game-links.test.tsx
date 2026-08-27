@@ -65,7 +65,7 @@ function makeDivergentGame(
       direction: "above",
       explanation: "Above threshold",
     },
-    confidence: { level: "moderate", basis: "Test fixture" },
+    confidence: null,
   };
 }
 
@@ -84,8 +84,22 @@ function makeOutlier(overrides: Partial<CollectionOutlierDetails> = {}): Collect
         label: "Mechanics",
         distance: 0.8,
         subjectValue: "Hex-and-Counter",
-        comparatorValues: [{ gameId: "c1", value: "Worker Placement" }],
+        comparatorValues: [
+          { gameId: "c1", value: "Worker Placement" },
+          { gameId: "c2", value: "Deck Building" },
+        ],
         explanation: "Mechanics differ",
+      },
+      {
+        dimension: "categories",
+        label: "Categories",
+        distance: 0.7,
+        subjectValue: "Wargame",
+        comparatorValues: [
+          { gameId: "c1", value: "Economic" },
+          { gameId: "c2", value: "Fantasy" },
+        ],
+        explanation: "Categories differ",
       },
     ],
     fitnessScore: 6,
@@ -126,7 +140,7 @@ function makeOutlier(overrides: Partial<CollectionOutlierDetails> = {}): Collect
       direction: "above",
       explanation: "Above threshold",
     },
-    confidence: { level: "moderate", basis: "Test" },
+    confidence: null,
   };
 }
 

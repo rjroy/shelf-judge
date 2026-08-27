@@ -826,8 +826,9 @@ export interface TournamentDivergenceDetails {
 
 export interface ReportedTournamentDivergence extends Omit<
   ReportedInsight<TournamentDivergenceDetails>,
-  "notability"
+  "confidence" | "notability"
 > {
+  confidence: null;
   notability: AboveThresholdInsightNotability;
 }
 
@@ -867,14 +868,15 @@ export interface CollectionOutlierDetails {
   gameName: string;
   neighborhoodDistance: number;
   nearestComparisons: [CollectionOutlierComparison, CollectionOutlierComparison];
-  drivers: [CollectionOutlierDriver, ...CollectionOutlierDriver[]];
+  drivers: [CollectionOutlierDriver, CollectionOutlierDriver, ...CollectionOutlierDriver[]];
   fitnessScore: number | null;
 }
 
 export interface ReportedCollectionOutlier extends Omit<
   ReportedInsight<CollectionOutlierDetails>,
-  "notability"
+  "confidence" | "notability"
 > {
+  confidence: null;
   notability: AboveThresholdInsightNotability;
 }
 
@@ -978,7 +980,7 @@ export interface CollectionProfile {
 
 export interface ProfileData {
   contractVersion: 6;
-  algorithmVersion: 5;
+  algorithmVersion: 7;
   tournamentSettings: TournamentSettings;
   profile: CollectionProfile;
   computedAt: string; // ISO 8601

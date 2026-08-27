@@ -28,9 +28,11 @@ import type {
 
 export const CURRENT_COLLECTION_SCHEMA_VERSION = 3 as const;
 export const CURRENT_PROFILE_CONTRACT_VERSION = 6 as const;
-export const CURRENT_PROFILE_ALGORITHM_VERSION = 5 as const;
+export const CURRENT_PROFILE_ALGORITHM_VERSION = 7 as const;
 export const PROFILE_NARRATION_ABSTENTION =
   "No reported trusted insights are available to narrate." as const;
+
+const AXIS_SUGGESTION_MIN_COMPARISON_COUNT = 6;
 
 const AmountInputSchema = z.string().superRefine((value, context) => {
   try {
@@ -896,8 +898,7 @@ const UnmetInsightSufficiencySchema = z
 const INSIGHT_COVERAGE_TOLERANCE_PERCENTAGE_POINTS = 0.05;
 // Expected coverage uses division and multiplication; comparison adds two subtractions.
 const INSIGHT_FLOATING_POINT_ULPS = 4;
-// Suggestion means and their effect are independently rounded to tenths by the producer.
-const SUGGESTION_EFFECT_ROUNDING_TOLERANCE = 0.1;
+const OUTLIER_DRIVER_THRESHOLD = 0.35;
 
 function insightValuesMatch(left: number, right: number): boolean {
   return (
@@ -1043,14 +1044,12 @@ const ReportedTournamentDivergenceSchema = z
         explanation: z.string().min(1),
       })
       .strict(),
-    confidence: z
-      .object({ level: z.enum(["low", "moderate", "high"]), basis: z.string().min(1) })
-      .strict()
-      .nullable(),
+    confidence: z.null(),
   })
   .strict()
   .superRefine((divergence, context) => {
     const subjectEvidence = divergence.evidence.filter(({ role }) => role === "subject");
+    const subjectMeasurements = subjectEvidence[0]?.measurements ?? [];
     const comparisonRequirements = divergence.sufficiency.filter(
       ({ criterion }) => criterion === "comparisons for subject game",
     );
@@ -1065,6 +1064,26 @@ const ReportedTournamentDivergenceSchema = z
       scoreDifference > 0 ? "tournament-outlier" : scoreDifference < 0 ? "fitness-outlier" : null;
     const addContractIssue = (path: (string | number)[], message: string) =>
       context.addIssue({ code: z.ZodIssueCode.custom, path, message });
+    const requireSubjectMeasurement = (
+      key: string,
+      source: string,
+      expectedValue: number | boolean,
+    ) => {
+      const measurements = subjectMeasurements.filter(
+        (measurement) => measurement.key === key && measurement.source === source,
+      );
+      const value = measurements[0]?.value;
+      const matches =
+        typeof expectedValue === "number"
+          ? typeof value === "number" && insightValuesMatch(value, expectedValue)
+          : value === expectedValue;
+      if (measurements.length !== 1 || !matches) {
+        addContractIssue(
+          ["evidence"],
+          `Divergence ${key} must match one subject measurement from ${source}`,
+        );
+      }
+    };
 
     if (divergence.id !== `divergence:${divergence.details.gameId}`) {
       addContractIssue(["id"], "Divergence ID must identify the subject game");
@@ -1079,6 +1098,22 @@ const ReportedTournamentDivergenceSchema = z
         "Divergence evidence must contain exactly one matching subject game",
       );
     }
+    requireSubjectMeasurement(
+      "tournament-score",
+      "Tournament comparisons",
+      divergence.details.normalizedTournamentScore,
+    );
+    requireSubjectMeasurement(
+      "independent-fitness-score",
+      "Non-Tournament fitness axes",
+      divergence.details.independentFitnessScore,
+    );
+    requireSubjectMeasurement(
+      "comparison-count",
+      "Tournament comparisons",
+      divergence.details.comparisonCount,
+    );
+    requireSubjectMeasurement("provisional", "Tournament settings", divergence.details.provisional);
     if (comparatorGameIds.length !== 1 || comparatorGameIds[0] !== divergence.details.gameId) {
       addContractIssue(
         ["comparator", "gameIds"],
@@ -1222,7 +1257,9 @@ const ReportedCollectionOutlierSchema = z
             })
             .strict(),
         ]),
-        drivers: z.array(CollectionOutlierDriverSchema).nonempty(),
+        drivers: z
+          .tuple([CollectionOutlierDriverSchema, CollectionOutlierDriverSchema])
+          .rest(CollectionOutlierDriverSchema),
         fitnessScore: FiniteNumberSchema.nullable(),
       })
       .strict(),
@@ -1235,10 +1272,7 @@ const ReportedCollectionOutlierSchema = z
         explanation: z.string().min(1),
       })
       .strict(),
-    confidence: z
-      .object({ level: z.enum(["low", "moderate", "high"]), basis: z.string().min(1) })
-      .strict()
-      .nullable(),
+    confidence: z.null(),
   })
   .strict()
   .superRefine((outlier, context) => {
@@ -1250,10 +1284,30 @@ const ReportedCollectionOutlierSchema = z
     const detailComparatorIds = new Set(detailComparatorGameIds);
     const evidenceComparatorIds = new Set(evidenceComparatorGameIds);
     const subjectEvidence = outlier.evidence.filter(({ role }) => role === "subject");
+    const fitnessMeasurements =
+      subjectEvidence[0]?.measurements.filter(({ key }) => key === "fitness-score") ?? [];
     const sameIds = (left: Set<string>, right: Set<string>) =>
       left.size === right.size && [...left].every((gameId) => right.has(gameId));
     const addContractIssue = (path: (string | number)[], message: string) =>
       context.addIssue({ code: z.ZodIssueCode.custom, path, message });
+    const measurement = (
+      evidence: (typeof outlier.evidence)[number] | undefined,
+      key: string,
+      source: string,
+    ) => {
+      const matches =
+        evidence?.measurements.filter(
+          (candidate) => candidate.key === key && candidate.source === source,
+        ) ?? [];
+      return matches.length === 1 ? matches[0] : undefined;
+    };
+    const factualMeasurementContract = {
+      mechanics: { key: "mechanics", source: "BGG metadata" },
+      categories: { key: "categories", source: "BGG metadata" },
+      complexity: { key: "complexity-weight", source: "BGG metadata" },
+      "player-count": { key: "player-range", source: "collection metadata" },
+      "playing-time": { key: "playing-time", source: "collection metadata" },
+    } as const;
 
     if (outlier.id !== `outlier:${outlier.details.gameId}`) {
       addContractIssue(["id"], "Outlier ID must identify the subject game");
@@ -1266,6 +1320,29 @@ const ReportedCollectionOutlierSchema = z
       addContractIssue(
         ["evidence"],
         "Outlier evidence must contain exactly one matching subject game",
+      );
+    }
+    if (
+      outlier.details.fitnessScore !== null &&
+      (fitnessMeasurements.length !== 1 ||
+        fitnessMeasurements[0]?.source !== "Fitness engine" ||
+        typeof fitnessMeasurements[0]?.value !== "number" ||
+        !insightValuesMatch(fitnessMeasurements[0].value, outlier.details.fitnessScore))
+    ) {
+      addContractIssue(
+        ["details", "fitnessScore"],
+        "Outlier fitness context must match one subject measurement from the Fitness engine",
+      );
+    }
+    if (
+      outlier.interpretation !== null &&
+      (outlier.details.fitnessScore === null ||
+        outlier.interpretation !==
+          `Separately, its current preference fitness score is ${outlier.details.fitnessScore.toFixed(1)}`)
+    ) {
+      addContractIssue(
+        ["interpretation"],
+        "Outlier interpretation must state only the measured preference fitness context",
       );
     }
     if (comparatorGameIds.length !== 2 || comparatorIds.size !== 2) {
@@ -1295,6 +1372,77 @@ const ReportedCollectionOutlierSchema = z
         "Comparator evidence must match the declared comparison games",
       );
     }
+    const subjectDistance = measurement(
+      subjectEvidence[0],
+      "neighborhood-distance",
+      "outlier:factual-neighborhood",
+    );
+    if (
+      typeof subjectDistance?.value !== "number" ||
+      !insightValuesMatch(subjectDistance.value, outlier.details.neighborhoodDistance)
+    ) {
+      addContractIssue(
+        ["details", "neighborhoodDistance"],
+        "Outlier neighborhood distance must match its sourced subject measurement",
+      );
+    }
+    const detailComparisonsById = new Map(
+      outlier.details.nearestComparisons.map((comparison) => [comparison.gameId, comparison]),
+    );
+    const outlierDimensions = Object.keys(factualMeasurementContract) as Array<
+      keyof typeof factualMeasurementContract
+    >;
+    const comparatorDistances: number[] = [];
+    for (const [evidenceIndex, evidence] of comparatorEvidence.entries()) {
+      const detail = detailComparisonsById.get(evidence.gameId);
+      const distance = measurement(evidence, "subject-distance", "outlier:factual-neighborhood");
+      if (
+        detail === undefined ||
+        detail.gameName !== evidence.gameName ||
+        typeof distance?.value !== "number" ||
+        !insightValuesMatch(distance.value, detail.distance)
+      ) {
+        addContractIssue(
+          ["evidence", evidenceIndex],
+          "Outlier comparator identity and distance must match nearest comparison details",
+        );
+      } else {
+        comparatorDistances.push(distance.value);
+      }
+      const dimensionDistances = outlierDimensions.flatMap((dimension) => {
+        const value = measurement(
+          evidence,
+          `${dimension}-distance`,
+          "outlier:factual-neighborhood",
+        )?.value;
+        return typeof value === "number" ? [value] : [];
+      });
+      if (
+        typeof distance?.value !== "number" ||
+        dimensionDistances.length !== outlierDimensions.length ||
+        !insightValuesMatch(
+          dimensionDistances.reduce((sum, value) => sum + value, 0) / outlierDimensions.length,
+          distance.value,
+        )
+      ) {
+        addContractIssue(
+          ["evidence", evidenceIndex, "measurements"],
+          "Outlier comparator distance must equal the mean sourced dimension distance",
+        );
+      }
+    }
+    if (
+      comparatorDistances.length !== 2 ||
+      !insightValuesMatch(
+        comparatorDistances.reduce((sum, value) => sum + value, 0) / 2,
+        outlier.details.neighborhoodDistance,
+      )
+    ) {
+      addContractIssue(
+        ["details", "neighborhoodDistance"],
+        "Outlier neighborhood distance must equal the mean comparator distance",
+      );
+    }
     if (!insightValuesMatch(outlier.notability.value, outlier.details.neighborhoodDistance)) {
       addContractIssue(
         ["notability", "value"],
@@ -1310,6 +1458,13 @@ const ReportedCollectionOutlierSchema = z
         "Reported outlier must be strictly above its declared notability threshold",
       );
     }
+    const driverDimensions = new Set(outlier.details.drivers.map(({ dimension }) => dimension));
+    if (driverDimensions.size !== outlier.details.drivers.length) {
+      addContractIssue(
+        ["details", "drivers"],
+        "Outlier drivers must identify distinct factual dimensions",
+      );
+    }
     for (const [driverIndex, driver] of outlier.details.drivers.entries()) {
       const driverComparatorIds = new Set(driver.comparatorValues.map(({ gameId }) => gameId));
       if (
@@ -1320,6 +1475,51 @@ const ReportedCollectionOutlierSchema = z
         addContractIssue(
           ["details", "drivers", driverIndex, "comparatorValues"],
           "Each driver must expose values for every comparison game",
+        );
+      }
+      const contract = factualMeasurementContract[driver.dimension];
+      const subjectValue = measurement(subjectEvidence[0], contract.key, contract.source)?.value;
+      if (subjectValue !== driver.subjectValue) {
+        addContractIssue(
+          ["details", "drivers", driverIndex, "subjectValue"],
+          "Outlier driver subject value must match sourced factual evidence",
+        );
+      }
+      const comparatorDistanceValues: number[] = [];
+      for (const comparatorValue of driver.comparatorValues) {
+        const evidence = comparatorEvidence.find(({ gameId }) => gameId === comparatorValue.gameId);
+        const factualValue = measurement(evidence, contract.key, contract.source)?.value;
+        if (factualValue !== comparatorValue.value) {
+          addContractIssue(
+            ["details", "drivers", driverIndex, "comparatorValues"],
+            "Outlier driver comparator values must match sourced factual evidence",
+          );
+        }
+        const distanceValue = measurement(
+          evidence,
+          `${driver.dimension}-distance`,
+          "outlier:factual-neighborhood",
+        )?.value;
+        if (typeof distanceValue === "number") {
+          comparatorDistanceValues.push(distanceValue);
+          if (distanceValue < OUTLIER_DRIVER_THRESHOLD) {
+            addContractIssue(
+              ["details", "drivers", driverIndex, "distance"],
+              `Every comparator distance for a declared driver must be at least ${OUTLIER_DRIVER_THRESHOLD}`,
+            );
+          }
+        }
+      }
+      if (
+        comparatorDistanceValues.length !== 2 ||
+        !insightValuesMatch(
+          comparatorDistanceValues.reduce((sum, value) => sum + value, 0) / 2,
+          driver.distance,
+        )
+      ) {
+        addContractIssue(
+          ["details", "drivers", driverIndex, "distance"],
+          "Outlier driver distance must equal the mean sourced comparator dimension distance",
         );
       }
     }
@@ -1409,31 +1609,80 @@ const ReportedAxisSuggestionSchema = z
   })
   .strict()
   .superRefine((suggestion, context) => {
-    const supportingIds = new Set(
-      suggestion.evidence
-        .filter(({ role }) => role === "subject" || role === "supporting")
-        .map(({ gameId }) => gameId),
+    const supportingEvidence = suggestion.evidence.filter(
+      ({ role }) => role === "subject" || role === "supporting",
     );
-    const comparatorIds = new Set(
-      suggestion.evidence.filter(({ role }) => role === "comparator").map(({ gameId }) => gameId),
-    );
+    const comparatorEvidence = suggestion.evidence.filter(({ role }) => role === "comparator");
+    const supportingIds = new Set(supportingEvidence.map(({ gameId }) => gameId));
+    const comparatorIds = new Set(comparatorEvidence.map(({ gameId }) => gameId));
     const declaredComparatorIds = new Set(suggestion.comparator.gameIds);
     const addContractIssue = (path: (string | number)[], message: string) =>
       context.addIssue({ code: z.ZodIssueCode.custom, path, message });
 
-    if (supportingIds.size !== suggestion.details.supportingGameCount) {
+    const signedGapTenths = (
+      evidence: typeof supportingEvidence,
+      role: "supporting" | "comparator",
+    ): number[] => {
+      const values: number[] = [];
+      for (const [evidenceIndex, game] of evidence.entries()) {
+        const gapMeasurements = game.measurements.filter(
+          ({ key }) => key === "signed-preference-gap",
+        );
+        const countMeasurements = game.measurements.filter(({ key }) => key === "comparison-count");
+        const gap = gapMeasurements[0];
+        const count = countMeasurements[0];
+        if (
+          gapMeasurements.length !== 1 ||
+          gap?.source !== "Tournament comparisons and non-Tournament fitness axes" ||
+          typeof gap.value !== "number" ||
+          !Number.isSafeInteger(gap.value * 10)
+        ) {
+          addContractIssue(
+            ["evidence", evidenceIndex, "measurements"],
+            `Each ${role} game must have one canonical signed-preference-gap measurement`,
+          );
+        } else {
+          values.push(gap.value * 10);
+        }
+        if (
+          countMeasurements.length !== 1 ||
+          count?.source !== "Tournament comparisons" ||
+          typeof count.value !== "number" ||
+          !Number.isSafeInteger(count.value) ||
+          count.value < AXIS_SUGGESTION_MIN_COMPARISON_COUNT
+        ) {
+          addContractIssue(
+            ["evidence", evidenceIndex, "measurements"],
+            `Each ${role} game must have one canonical comparison-count measurement`,
+          );
+        }
+      }
+      return values;
+    };
+
+    const supportingGapTenths = signedGapTenths(supportingEvidence, "supporting");
+    const comparatorGapTenths = signedGapTenths(comparatorEvidence, "comparator");
+
+    if (
+      supportingEvidence.length !== supportingIds.size ||
+      supportingIds.size !== suggestion.details.supportingGameCount
+    ) {
       addContractIssue(
         ["details", "supportingGameCount"],
         "Supporting game count must match distinct positive evidence games",
       );
     }
-    if (comparatorIds.size !== suggestion.details.comparatorGameCount) {
+    if (
+      comparatorEvidence.length !== comparatorIds.size ||
+      comparatorIds.size !== suggestion.details.comparatorGameCount
+    ) {
       addContractIssue(
         ["details", "comparatorGameCount"],
         "Comparator game count must match distinct comparator evidence games",
       );
     }
     if (
+      suggestion.comparator.gameIds.length !== declaredComparatorIds.size ||
       comparatorIds.size !== declaredComparatorIds.size ||
       [...comparatorIds].some((gameId) => !declaredComparatorIds.has(gameId))
     ) {
@@ -1448,14 +1697,48 @@ const ReportedAxisSuggestionSchema = z
         "Positive and comparator evidence must contain disjoint game IDs",
       );
     }
-    const expectedEffect =
+    const supportingGapSum = supportingGapTenths.reduce((sum, value) => sum + value, 0);
+    const comparatorGapSum = comparatorGapTenths.reduce((sum, value) => sum + value, 0);
+    const roundedMean = (sum: number, count: number) => Math.round(sum / count) / 10;
+    const expectedSupportingMean = roundedMean(supportingGapSum, supportingGapTenths.length);
+    const expectedComparatorMean = roundedMean(comparatorGapSum, comparatorGapTenths.length);
+    if (
+      supportingGapTenths.length !== supportingEvidence.length ||
+      suggestion.details.supportingMeanGap !== expectedSupportingMean
+    ) {
+      addContractIssue(
+        ["details", "supportingMeanGap"],
+        "Supporting mean gap must equal the rounded mean of canonical supporting evidence",
+      );
+    }
+    if (
+      comparatorGapTenths.length !== comparatorEvidence.length ||
+      suggestion.details.comparatorMeanGap !== expectedComparatorMean
+    ) {
+      addContractIssue(
+        ["details", "comparatorMeanGap"],
+        "Comparator mean gap must equal the rounded mean of canonical comparator evidence",
+      );
+    }
+    const expectedObservation = `${suggestion.details.attribute} games average a ${suggestion.details.supportingMeanGap.toFixed(1)} signed preference gap versus ${suggestion.details.comparatorMeanGap.toFixed(1)} without it`;
+    if (suggestion.observation !== expectedObservation) {
+      addContractIssue(
+        ["observation"],
+        "Suggestion observation must display the evidence-derived rounded group means",
+      );
+    }
+    const effectNumerator =
       suggestion.details.direction === "tournament-outlier"
-        ? suggestion.details.supportingMeanGap - suggestion.details.comparatorMeanGap
-        : suggestion.details.comparatorMeanGap - suggestion.details.supportingMeanGap;
+        ? supportingGapSum * comparatorGapTenths.length -
+          comparatorGapSum * supportingGapTenths.length
+        : comparatorGapSum * supportingGapTenths.length -
+          supportingGapSum * comparatorGapTenths.length;
+    const effectDenominator = supportingGapTenths.length * comparatorGapTenths.length;
+    const expectedEffect = Math.round(effectNumerator / effectDenominator) / 10;
     const directionMatchesSignedMean =
       suggestion.details.direction === "tournament-outlier"
-        ? suggestion.details.supportingMeanGap > 0
-        : suggestion.details.supportingMeanGap < 0;
+        ? supportingGapSum > 0
+        : supportingGapSum < 0;
     if (!directionMatchesSignedMean) {
       addContractIssue(
         ["details", "direction"],
@@ -1463,18 +1746,15 @@ const ReportedAxisSuggestionSchema = z
       );
     }
     if (
-      exceedsInclusiveFloatingPointTolerance(
-        suggestion.details.effect,
-        expectedEffect,
-        SUGGESTION_EFFECT_ROUNDING_TOLERANCE,
-      )
+      !Number.isSafeInteger(suggestion.details.effect * 10) ||
+      suggestion.details.effect !== expectedEffect
     ) {
       addContractIssue(
         ["details", "effect"],
-        "Suggestion effect must match the direction-specific difference between rounded means",
+        "Suggestion effect must be the one-decimal directional difference derived from canonical evidence",
       );
     }
-    if (!insightValuesMatch(suggestion.notability.value, suggestion.details.effect)) {
+    if (suggestion.notability.value !== suggestion.details.effect) {
       addContractIssue(
         ["notability", "value"],
         "Suggestion notability must report the measured effect",

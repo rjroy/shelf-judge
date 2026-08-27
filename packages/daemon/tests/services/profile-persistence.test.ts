@@ -1,20 +1,28 @@
 import { describe, expect, test } from "bun:test";
+import { Hono } from "hono";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import type {
   AxisSuggestion,
+  BggGameData,
   CollectionProfile,
+  Game,
   ProfileData,
+  ProfileNarration,
   ReportedInsightEvidenceGame,
 } from "@shelf-judge/shared";
 import {
+  CollectionProfileSchema,
   CURRENT_PROFILE_ALGORITHM_VERSION,
   CURRENT_PROFILE_CONTRACT_VERSION,
 } from "@shelf-judge/shared";
+import { trustedInsightProfileFixture } from "../../../shared/tests/fixtures/trusted-profile.js";
+import { createProfileRoutes } from "../../src/routes/profile.js";
 import { createFileOps } from "../../src/services/file-ops.js";
 import type { GameService } from "../../src/services/game-service.js";
 import { createProfileService } from "../../src/services/profile-service.js";
+import { computeProfile } from "../../src/services/profile-engine.js";
 import { createStorageService } from "../../src/services/storage-service.js";
 import type { TournamentService } from "../../src/services/tournament-service.js";
 
@@ -86,6 +94,13 @@ function persistedSuggestionStates(): AxisSuggestion[] {
         unit: "rating",
         source: "Tournament comparisons and non-Tournament fitness axes",
       },
+      {
+        key: "comparison-count",
+        label: "Tournament comparisons",
+        value: 10,
+        unit: "comparisons",
+        source: "Tournament comparisons",
+      },
     ],
   }));
   const firstEvidence = evidence[0];
@@ -105,7 +120,7 @@ function persistedSuggestionStates(): AxisSuggestion[] {
       evidence: [firstEvidence, ...evidence.slice(1)],
       comparator: { description: "Games without Area Control", gameIds: ["g4", "g5", "g6"] },
       limitations,
-      observation: "Area Control games have a larger signed preference gap",
+      observation: "Area Control games average a 4.0 signed preference gap versus 0.0 without it",
       interpretation: "Could Area Control explain the observed preference gap?",
       details: {
         source: "divergence-repair",
@@ -183,6 +198,125 @@ function currentProfileDataWithSuggestions(): ProfileData {
   return data;
 }
 
+function trustedProfileData(state: "reported" | "abstained"): ProfileData {
+  const profile = structuredClone(trustedInsightProfileFixture);
+  profile.computedAt = COMPUTED_AT;
+  profile.divergence =
+    profile.divergence?.filter((insight) =>
+      state === "reported" ? insight.status === "reported" : insight.status !== "reported",
+    ) ?? null;
+  profile.outliers = profile.outliers.filter((insight) =>
+    state === "reported" ? insight.status === "reported" : insight.status !== "reported",
+  );
+  profile.suggestions = profile.suggestions.filter((insight) =>
+    state === "reported" ? insight.status === "reported" : insight.status !== "reported",
+  );
+  const narration: ProfileNarration =
+    state === "reported"
+      ? {
+          summary: [
+            {
+              observation:
+                "Game 3 is compositionally distant from its two nearest comparison games",
+              interpretation: "Separately, its current preference fitness score is 8.0",
+              evidenceReferences: [{ insightId: "outlier:game-3", gameIds: ["game-3"] }],
+            },
+          ],
+          surprises: [],
+          tensions: [
+            {
+              observation: "Tournament score is 4.0 points above independent fitness",
+              interpretation:
+                "Tournament choices favor this game more than the configured non-Tournament axes predict",
+              evidenceReferences: [{ insightId: "divergence:game-1", gameIds: ["game-1"] }],
+            },
+          ],
+          abstention: null,
+        }
+      : {
+          summary: [],
+          surprises: [],
+          tensions: [],
+          abstention: "No reported trusted insights are available to narrate.",
+        };
+  return {
+    contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
+    algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
+    tournamentSettings: currentProfileData().tournamentSettings,
+    profile: { ...profile, narration: null, narrationState: "empty" },
+    computedAt: COMPUTED_AT,
+    narration,
+    narrationComputedAt: COMPUTED_AT,
+  };
+}
+
+function bggData(overrides: Partial<BggGameData>): BggGameData {
+  return {
+    communityRating: 7.5,
+    bayesAverage: 7,
+    weight: 3,
+    numWeightVotes: 100,
+    description: null,
+    mechanics: [],
+    categories: [],
+    families: [],
+    subdomains: [],
+    bestPlayerCount: null,
+    fetchedAt: "2026-08-27T10:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function profileGame(index: number, outlier = false): Game {
+  return {
+    id: outlier ? "war" : `euro-${index}`,
+    name: outlier ? "Long Wargame" : `Economic Game ${index}`,
+    bggId: null,
+    yearPublished: 2020,
+    minPlayers: 2,
+    maxPlayers: outlier ? 2 : 4,
+    bestPlayers: null,
+    playingTime: outlier ? 300 : 90,
+    imageUrl: null,
+    bggData: bggData({
+      weight: outlier ? 4.8 : 3,
+      mechanics: [
+        outlier ? { id: 2, name: "Hex-and-Counter" } : { id: 1, name: "Worker Placement" },
+      ],
+      categories: [outlier ? { id: 11, name: "Wargame" } : { id: 10, name: "Economic" }],
+    }),
+    numPlays: null,
+    acquisition: { state: "unknown" },
+    playCountEvidence: { status: "missing", source: "manual", observedAt: null },
+    durationEvidence: {
+      status: "valid",
+      value: outlier ? 300 : 90,
+      source: "manual",
+      observedAt: "2026-08-27T10:00:00.000Z",
+    },
+    playerRangeEvidence: {
+      status: "valid",
+      value: { minPlayers: 2, maxPlayers: outlier ? 2 : 4 },
+      source: "manual",
+      observedAt: "2026-08-27T10:00:00.000Z",
+    },
+    suggestedPlayerPoll: {
+      status: "valid",
+      state: "absent",
+      buckets: [],
+      source: "manual",
+      observedAt: null,
+    },
+    bestPlayersInvalidEvidence: null,
+    ownership: "owned",
+    boxDimensions: null,
+    manualShelfId: null,
+    ratings: {},
+    createdAt: "2026-08-27T10:00:00.000Z",
+    updatedAt: "2026-08-27T10:00:00.000Z",
+  };
+}
+
 function silentLogger() {
   return { log() {}, warn() {}, error() {} };
 }
@@ -255,11 +389,13 @@ async function exists(filePath: string): Promise<boolean> {
 }
 
 describe("persisted profile contract", () => {
-  test("reloads a valid current artifact through a new storage instance", async () => {
+  test("reloads a valid current-v7 artifact through a new storage instance", async () => {
     await withStorage(async ({ createStorage }) => {
       await createStorage().saveProfile(currentProfileData());
 
-      expect(await createStorage().loadProfile()).toEqual(currentProfileData());
+      const reloaded = await createStorage().loadProfile();
+      expect(reloaded?.algorithmVersion).toBe(7);
+      expect(reloaded).toEqual(currentProfileData());
     });
   });
 
@@ -272,6 +408,106 @@ describe("persisted profile contract", () => {
       expect((await createStorage().loadProfile())?.profile.suggestions).toEqual(
         persistedSuggestionStates(),
       );
+    });
+  });
+
+  test("reloads complete reported and abstained trusted profiles with grounded narration", async () => {
+    for (const state of ["reported", "abstained"] as const) {
+      await withStorage(async ({ createStorage }) => {
+        const data = trustedProfileData(state);
+
+        await createStorage().saveProfile(data);
+
+        const reloaded = await createStorage().loadProfile();
+        expect(reloaded).toEqual(data);
+        expect(
+          [
+            ...(reloaded?.profile.divergence ?? []),
+            ...(reloaded?.profile.outliers ?? []),
+            ...(reloaded?.profile.suggestions ?? []),
+          ].every((insight) => insight.status !== "reported" || insight.confidence === null),
+        ).toBe(true);
+      });
+    }
+  });
+
+  test("serves deterministic computed evidence after persistence and a fresh service reload", async () => {
+    await withStorage(async ({ createStorage }) => {
+      const storage = createStorage();
+      const collection = await storage.loadCollection();
+      const games = [
+        profileGame(1),
+        profileGame(2),
+        profileGame(3),
+        profileGame(4),
+        profileGame(5),
+        profileGame(6, true),
+      ];
+      await storage.saveCollection({
+        ...collection,
+        games,
+        updatedAt: "2026-08-27T10:00:00.000Z",
+      });
+      const tournament = await storage.loadTournament();
+      const computed = computeProfile({
+        games,
+        axes: collection.axes,
+        fitnessResults: new Map(),
+        tournamentStats: null,
+      });
+      const reportedOutlier = computed.outliers.find((insight) => insight.status === "reported");
+      if (reportedOutlier?.status !== "reported") throw new Error("Expected computed outlier");
+      const narration: ProfileNarration = {
+        summary: [
+          {
+            observation: reportedOutlier.observation,
+            interpretation: reportedOutlier.interpretation,
+            evidenceReferences: [
+              { insightId: reportedOutlier.id, gameIds: [reportedOutlier.details.gameId] },
+            ],
+          },
+        ],
+        surprises: [],
+        tensions: [],
+        abstention: null,
+      };
+      await storage.saveProfile({
+        contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
+        algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
+        tournamentSettings: tournament.settings,
+        profile: {
+          ...computed,
+          narration: null,
+          narrationState: "empty",
+          computedAt: COMPUTED_AT,
+        },
+        computedAt: COMPUTED_AT,
+        narration,
+        narrationComputedAt: COMPUTED_AT,
+      });
+
+      const freshStorage = createStorage();
+      const freshService = createProfileService({
+        storageService: freshStorage,
+        gameService: emptyGameService(),
+        tournamentService: emptyTournamentService(),
+      });
+      const app = new Hono();
+      app.route("/api", createProfileRoutes({ profileService: freshService }).routes);
+
+      const response = await app.request("http://localhost/api/profile");
+      const profile = CollectionProfileSchema.parse(await response.json());
+
+      expect(response.status).toBe(200);
+      expect(profile.outliers).toContainEqual(reportedOutlier);
+      expect(
+        profile.outliers
+          .filter((insight) => insight.status === "reported")
+          .every((insight) => insight.evidence.every((game) => game.measurements.length > 0)),
+      ).toBe(true);
+      expect(profile.suggestions.some((insight) => insight.status !== "reported")).toBe(true);
+      expect(profile.narration).toEqual(narration);
+      expect(profile.narrationState).toBe("fresh");
     });
   });
 
@@ -341,16 +577,73 @@ describe("persisted profile contract", () => {
     });
   });
 
-  test("deletes an artifact from an old algorithm version", async () => {
+  test("deletes current-v7 artifacts that violate reported insight evidence rules", async () => {
+    const valid = JSON.stringify(trustedProfileData("reported"));
+    const malformedArtifacts = [
+      valid.replace('"supportingMeanGap":4', '"supportingMeanGap":3'),
+      valid.replace('"dimension":"categories"', '"dimension":"mechanics"'),
+      valid.replaceAll(
+        '"confidence":null',
+        '"confidence":{"level":"moderate","basis":"Count-only confidence"}',
+      ),
+    ];
+
+    for (const malformedArtifact of malformedArtifacts) {
+      await withStorage(async ({ profilePath, createStorage }) => {
+        await fs.writeFile(profilePath, malformedArtifact, "utf8");
+
+        expect(await createStorage().loadProfile()).toBeNull();
+        expect(await exists(profilePath)).toBe(false);
+      });
+    }
+  });
+
+  test("discards and recomputes an algorithm-v5 artifact under current producer semantics", async () => {
+    await withStorage(async ({ profilePath, createStorage }) => {
+      const algorithmV5 = JSON.stringify({
+        ...trustedProfileData("reported"),
+        algorithmVersion: 5,
+      }).replaceAll(
+        '"confidence":null',
+        '"confidence":{"level":"moderate","basis":"Count-derived confidence from algorithm v5"}',
+      );
+      await fs.writeFile(profilePath, algorithmV5, "utf8");
+
+      const service = createProfileService({
+        storageService: createStorage(),
+        gameService: emptyGameService(),
+        tournamentService: emptyTournamentService(),
+      });
+      const recomputed = await service.getProfile();
+      const persisted = await createStorage().loadProfile();
+
+      expect(recomputed.gameCount).toBe(0);
+      expect(persisted?.algorithmVersion).toBe(CURRENT_PROFILE_ALGORITHM_VERSION);
+      expect(persisted?.profile).toEqual(recomputed);
+      expect(await exists(profilePath)).toBe(true);
+    });
+  });
+
+  test("discards and recomputes an algorithm-v6 artifact as v7", async () => {
     await withStorage(async ({ profilePath, createStorage }) => {
       await fs.writeFile(
         profilePath,
-        JSON.stringify({ ...currentProfileData(), algorithmVersion: 4 }),
+        JSON.stringify({ ...trustedProfileData("reported"), algorithmVersion: 6 }),
         "utf8",
       );
 
-      expect(await createStorage().loadProfile()).toBeNull();
-      expect(await exists(profilePath)).toBe(false);
+      const service = createProfileService({
+        storageService: createStorage(),
+        gameService: emptyGameService(),
+        tournamentService: emptyTournamentService(),
+      });
+      const recomputed = await service.getProfile();
+      const persisted = await createStorage().loadProfile();
+
+      expect(recomputed.gameCount).toBe(0);
+      expect(persisted?.algorithmVersion).toBe(7);
+      expect(persisted?.profile).toEqual(recomputed);
+      expect(await exists(profilePath)).toBe(true);
     });
   });
 

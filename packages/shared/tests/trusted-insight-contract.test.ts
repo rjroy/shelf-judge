@@ -91,6 +91,13 @@ function reportedAxisSuggestion(): ReportedAxisSuggestion {
         unit: "rating",
         source: "Tournament comparisons and non-Tournament fitness axes",
       },
+      {
+        key: "comparison-count",
+        label: "Tournament comparisons",
+        value: 10,
+        unit: "comparisons",
+        source: "Tournament comparisons",
+      },
     ],
   }));
   const firstEvidence = evidence[0];
@@ -117,7 +124,7 @@ function reportedAxisSuggestion(): ReportedAxisSuggestion {
       gameIds: ["game-4", "game-5", "game-6"],
     },
     limitations: ["This observational association does not establish causation"],
-    observation: "Area Control games have a larger signed preference gap",
+    observation: "Area Control games average a 4.0 signed preference gap versus 0.0 without it",
     interpretation: "Could Area Control explain the observed preference gap?",
     details: {
       source: "divergence-repair",
@@ -420,23 +427,69 @@ describe("TrustedInsight contract", () => {
       }).success;
 
     expect(parse(reported)).toBe(true);
+    const withGaps = (supporting: number[], comparator: number[]) => {
+      const suggestion = structuredClone(reported);
+      let supportingIndex = 0;
+      let comparatorIndex = 0;
+      for (const game of suggestion.evidence) {
+        const gap = game.measurements.find(({ key }) => key === "signed-preference-gap");
+        if (gap === undefined) throw new Error("Missing signed gap evidence");
+        gap.value =
+          game.role === "comparator"
+            ? comparator[comparatorIndex++]
+            : supporting[supportingIndex++];
+      }
+      return suggestion;
+    };
+    const independentlyRounded = withGaps([1.7, 1.7, 1.8], [0.1, 0.2, 0.2]);
     expect(
       parse({
-        ...reported,
+        ...independentlyRounded,
+        observation: "Area Control games average a 1.7 signed preference gap versus 0.2 without it",
         details: {
-          ...reported.details,
+          ...independentlyRounded.details,
           supportingMeanGap: 1.7,
           comparatorMeanGap: 0.2,
           effect: 1.6,
         },
-        notability: { ...reported.notability, value: 1.6 },
+        notability: { ...independentlyRounded.notability, value: 1.6 },
       }),
     ).toBe(true);
     expect(
       parse({
-        ...reported,
+        ...independentlyRounded,
+        details: { ...independentlyRounded.details, effect: 1.59 },
+        notability: { ...independentlyRounded.notability, value: 1.59 },
+      }),
+    ).toBe(false);
+    const thresholdCrossing = withGaps([1.7, 1.7, 1.7], [0.2, 0.2, 0.2]);
+    expect(
+      parse({
+        ...thresholdCrossing,
+        observation: "Area Control games average a 1.7 signed preference gap versus 0.2 without it",
         details: {
-          ...reported.details,
+          ...thresholdCrossing.details,
+          supportingMeanGap: 1.7,
+          comparatorMeanGap: 0.2,
+          effect: 1.6,
+        },
+        notability: { ...thresholdCrossing.notability, value: 1.6 },
+      }),
+    ).toBe(false);
+    const oppositeDirection = structuredClone(reported);
+    for (const game of oppositeDirection.evidence) {
+      if (game.role === "comparator") continue;
+      const gap = game.measurements.find(({ key }) => key === "signed-preference-gap");
+      if (gap === undefined) throw new Error("Missing signed gap evidence");
+      gap.value = -4;
+    }
+    expect(
+      parse({
+        ...oppositeDirection,
+        observation:
+          "Area Control games average a -4.0 signed preference gap versus 0.0 without it",
+        details: {
+          ...oppositeDirection.details,
           direction: "fitness-outlier",
           supportingMeanGap: -4,
           comparatorMeanGap: 0,
@@ -505,6 +558,96 @@ describe("TrustedInsight contract", () => {
       },
     ];
     for (const { label, suggestion } of invalid) {
+      expect(parse(suggestion), label).toBe(false);
+    }
+  });
+
+  test("reported suggestion evidence canonically determines group arithmetic", () => {
+    const parse = (suggestion: unknown) =>
+      CollectionProfileSchema.safeParse({
+        ...trustedInsightProfileFixture,
+        suggestions: [suggestion],
+      }).success;
+    const measurement = (
+      suggestion: ReportedAxisSuggestion,
+      key: "signed-preference-gap" | "comparison-count",
+    ) => {
+      const value = suggestion.evidence[0].measurements.find((candidate) => candidate.key === key);
+      if (value === undefined) throw new Error(`Missing ${key} fixture measurement`);
+      return value;
+    };
+    const cases: Array<{ label: string; mutate: (value: ReportedAxisSuggestion) => void }> = [
+      {
+        label: "fabricated signed gap",
+        mutate: (value) => (measurement(value, "signed-preference-gap").value = 3),
+      },
+      {
+        label: "arbitrary-precision signed gap",
+        mutate: (value) => (measurement(value, "signed-preference-gap").value = 4.01),
+      },
+      {
+        label: "missing signed gap",
+        mutate: (value) => {
+          const measurements = value.evidence[0].measurements;
+          measurements.splice(
+            measurements.findIndex(({ key }) => key === "signed-preference-gap"),
+            1,
+          );
+        },
+      },
+      {
+        label: "wrong signed gap source",
+        mutate: (value) => (measurement(value, "signed-preference-gap").source = "Fabricated"),
+      },
+      {
+        label: "duplicate signed gap",
+        mutate: (value) =>
+          value.evidence[0].measurements.push(
+            structuredClone(measurement(value, "signed-preference-gap")),
+          ),
+      },
+      {
+        label: "missing comparison count",
+        mutate: (value) => {
+          const measurements = value.evidence[0].measurements;
+          measurements.splice(
+            measurements.findIndex(({ key }) => key === "comparison-count"),
+            1,
+          );
+        },
+      },
+      {
+        label: "wrong comparison count source",
+        mutate: (value) => (measurement(value, "comparison-count").source = "Fabricated"),
+      },
+      {
+        label: "duplicate comparison count",
+        mutate: (value) =>
+          value.evidence[0].measurements.push(
+            structuredClone(measurement(value, "comparison-count")),
+          ),
+      },
+      {
+        label: "non-integer comparison count",
+        mutate: (value) => (measurement(value, "comparison-count").value = 1.5),
+      },
+      {
+        label: "duplicate supporting game record",
+        mutate: (value) => value.evidence.push(structuredClone(value.evidence[0])),
+      },
+      {
+        label: "fabricated supporting count",
+        mutate: (value) => (value.details.supportingGameCount = 4),
+      },
+      {
+        label: "fabricated comparator count",
+        mutate: (value) => (value.details.comparatorGameCount = 4),
+      },
+    ];
+
+    for (const { label, mutate } of cases) {
+      const suggestion = reportedAxisSuggestion();
+      mutate(suggestion);
       expect(parse(suggestion), label).toBe(false);
     }
   });
@@ -692,6 +835,27 @@ describe("TrustedInsight contract", () => {
       }).success,
     ).toBe(false);
   });
+
+  test("reported suggestion comparison counts meet the Tournament eligibility minimum", () => {
+    const parse = (suggestion: ReportedAxisSuggestion) =>
+      CollectionProfileSchema.safeParse({
+        ...trustedInsightProfileFixture,
+        suggestions: [suggestion],
+      }).success;
+    const withComparisonCount = (value: number) => {
+      const suggestion = reportedAxisSuggestion();
+      for (const game of suggestion.evidence) {
+        const count = game.measurements.find(({ key }) => key === "comparison-count");
+        if (count === undefined) throw new Error("Missing comparison count evidence");
+        count.value = value;
+      }
+      return suggestion;
+    };
+
+    expect(parse(withComparisonCount(0))).toBe(false);
+    expect(parse(withComparisonCount(5))).toBe(false);
+    expect(parse(withComparisonCount(6))).toBe(true);
+  });
 });
 
 describe("reported Tournament divergence invariants", () => {
@@ -709,11 +873,12 @@ describe("reported Tournament divergence invariants", () => {
       Extract<TournamentDivergenceInsight, { status: "reported" }>
     >().toEqualTypeOf<ReportedTournamentDivergence>();
     expectTypeOf<ReportedTournamentDivergence["notability"]["threshold"]>().toEqualTypeOf<number>();
+    expectTypeOf<ReportedTournamentDivergence["confidence"]>().toEqualTypeOf<null>();
     expectTypeOf<
       ReportedTournamentDivergence["notability"]["direction"]
     >().toEqualTypeOf<"above">();
-    expectTypeOf<Omit<ReportedTournamentDivergence, "notability">>().toEqualTypeOf<
-      Omit<ReportedInsight<TournamentDivergenceDetails>, "notability">
+    expectTypeOf<Omit<ReportedTournamentDivergence, "confidence" | "notability">>().toEqualTypeOf<
+      Omit<ReportedInsight<TournamentDivergenceDetails>, "confidence" | "notability">
     >();
   });
 
@@ -736,6 +901,14 @@ describe("reported Tournament divergence invariants", () => {
     value.divergence.details.direction = "tournament-outlier";
     value.divergence.notability.value = 0.2;
     value.divergence.notability.threshold = 0.1;
+    const measurements = value.divergence.evidence[0].measurements;
+    const tournamentScore = measurements.find(({ key }) => key === "tournament-score");
+    const independentScore = measurements.find(({ key }) => key === "independent-fitness-score");
+    if (tournamentScore === undefined || independentScore === undefined) {
+      throw new Error("Missing divergence score evidence");
+    }
+    tournamentScore.value = 0.3;
+    independentScore.value = 0.1;
 
     expect(CollectionProfileSchema.safeParse(value.profile).success).toBe(true);
   });
@@ -845,6 +1018,38 @@ describe("reported Tournament divergence invariants", () => {
     mutate(value);
     expect(CollectionProfileSchema.safeParse(value.profile).success).toBe(false);
   });
+
+  test.each([
+    ["Tournament score", "tournament-score", 7],
+    ["independent fitness score", "independent-fitness-score", 5],
+    ["comparison count", "comparison-count", 9],
+    ["provisional state", "provisional", true],
+  ])("rejects mismatched %s subject evidence", (_label, key, value) => {
+    const { profile, divergence } = fixture();
+    const measurement = divergence.evidence[0].measurements.find(
+      (candidate) => candidate.key === key,
+    );
+    if (measurement === undefined) throw new Error(`Missing ${key} evidence`);
+    measurement.value = value;
+    expect(CollectionProfileSchema.safeParse(profile).success).toBe(false);
+  });
+
+  test("rejects missing and incorrectly sourced divergence measurements", () => {
+    const missing = fixture();
+    missing.divergence.evidence[0].measurements =
+      missing.divergence.evidence[0].measurements.filter(
+        ({ key }) => key !== "comparison-count",
+      ) as (typeof missing.divergence.evidence)[0]["measurements"];
+    expect(CollectionProfileSchema.safeParse(missing.profile).success).toBe(false);
+
+    const wrongSource = fixture();
+    const provisional = wrongSource.divergence.evidence[0].measurements.find(
+      ({ key }) => key === "provisional",
+    );
+    if (provisional === undefined) throw new Error("Missing provisional evidence");
+    provisional.source = "Tournament comparisons";
+    expect(CollectionProfileSchema.safeParse(wrongSource.profile).success).toBe(false);
+  });
 });
 
 describe("reported collection outlier notability", () => {
@@ -861,16 +1066,86 @@ describe("reported collection outlier notability", () => {
       Extract<CollectionOutlier, { status: "reported" }>
     >().toEqualTypeOf<ReportedCollectionOutlier>();
     expectTypeOf<ReportedCollectionOutlier["notability"]["threshold"]>().toEqualTypeOf<number>();
+    expectTypeOf<ReportedCollectionOutlier["confidence"]>().toEqualTypeOf<null>();
     expectTypeOf<ReportedCollectionOutlier["notability"]["direction"]>().toEqualTypeOf<"above">();
   });
 
   test("accepts fixture and floating-point-compatible reported outliers", () => {
     expect(CollectionProfileSchema.safeParse(fixture().profile).success).toBe(true);
     const floating = fixture();
-    floating.outlier.details.neighborhoodDistance = 0.1 + 0.2;
-    floating.outlier.notability.value = 0.3;
-    floating.outlier.notability.threshold = 0.2;
+    floating.outlier.details.neighborhoodDistance = 0.1 + 0.7;
+    floating.outlier.notability.value = 0.8;
+    floating.outlier.notability.threshold = 0.7;
+    const subjectDistance = floating.outlier.evidence
+      .find(({ role }) => role === "subject")
+      ?.measurements.find(({ key }) => key === "neighborhood-distance");
+    if (subjectDistance === undefined) throw new Error("Missing subject distance evidence");
+    subjectDistance.value = 0.8;
     expect(CollectionProfileSchema.safeParse(floating.profile).success).toBe(true);
+  });
+
+  test("requires two distinct drivers that are material against both comparators", () => {
+    const single = fixture();
+    single.outlier.details.drivers.splice(1, 1);
+    expect(CollectionProfileSchema.safeParse(single.profile).success).toBe(false);
+
+    const duplicate = fixture();
+    duplicate.outlier.details.drivers[1] = structuredClone(duplicate.outlier.details.drivers[0]);
+    expect(CollectionProfileSchema.safeParse(duplicate.profile).success).toBe(false);
+
+    const belowThreshold = fixture();
+    const firstComparator = belowThreshold.outlier.evidence.find(
+      ({ gameId }) => gameId === "game-4",
+    );
+    if (firstComparator === undefined) throw new Error("Missing first outlier comparator");
+    const categoryDistance = firstComparator.measurements.find(
+      ({ key }) => key === "categories-distance",
+    );
+    const subjectDistance = firstComparator.measurements.find(
+      ({ key }) => key === "subject-distance",
+    );
+    const neighborhoodDistance = belowThreshold.outlier.evidence
+      .find(({ role }) => role === "subject")
+      ?.measurements.find(({ key }) => key === "neighborhood-distance");
+    if (
+      categoryDistance === undefined ||
+      subjectDistance === undefined ||
+      neighborhoodDistance === undefined
+    ) {
+      throw new Error("Missing outlier distance evidence");
+    }
+    categoryDistance.value = 0.3;
+    subjectDistance.value = 0.65;
+    neighborhoodDistance.value = 0.75;
+    belowThreshold.outlier.details.nearestComparisons[0].distance = 0.65;
+    belowThreshold.outlier.details.neighborhoodDistance = 0.75;
+    belowThreshold.outlier.details.drivers[1].distance = 0.6;
+    belowThreshold.outlier.notability.value = 0.75;
+    expect(CollectionProfileSchema.safeParse(belowThreshold.profile).success).toBe(false);
+  });
+
+  test("rejects fitness context without a matching sourced subject measurement", () => {
+    const missing = fixture();
+    const subject = missing.outlier.evidence.find(({ role }) => role === "subject");
+    if (subject === undefined) throw new Error("Missing outlier subject evidence");
+    subject.measurements = subject.measurements.filter(({ key }) => key !== "fitness-score") as [
+      (typeof subject.measurements)[number],
+      ...(typeof subject.measurements)[number][],
+    ];
+    expect(CollectionProfileSchema.safeParse(missing.profile).success).toBe(false);
+
+    const mismatched = fixture();
+    const measurement = mismatched.outlier.evidence
+      .find(({ role }) => role === "subject")
+      ?.measurements.find(({ key }) => key === "fitness-score");
+    if (measurement === undefined) throw new Error("Missing outlier fitness evidence");
+    measurement.value = 7;
+    expect(CollectionProfileSchema.safeParse(mismatched.profile).success).toBe(false);
+
+    const unsupported = fixture();
+    unsupported.outlier.interpretation =
+      "Separately, its current preference fitness score is 8.0 and is vetoed";
+    expect(CollectionProfileSchema.safeParse(unsupported.profile).success).toBe(false);
   });
 
   test.each([
@@ -888,6 +1163,73 @@ describe("reported collection outlier notability", () => {
       ({ outlier }: ReturnType<typeof fixture>) => (outlier.notability.value = 0.7),
     ],
   ])("rejects %s", (_label, mutate) => {
+    const value = fixture();
+    mutate(value);
+    expect(CollectionProfileSchema.safeParse(value.profile).success).toBe(false);
+  });
+
+  test.each([
+    [
+      "subject neighborhood distance evidence",
+      ({ outlier }: ReturnType<typeof fixture>) => {
+        const measurement = outlier.evidence
+          .find(({ role }) => role === "subject")
+          ?.measurements.find(({ key }) => key === "neighborhood-distance");
+        if (measurement === undefined) throw new Error("Missing neighborhood evidence");
+        measurement.value = 0.7;
+      },
+    ],
+    [
+      "nearest comparator distance evidence",
+      ({ outlier }: ReturnType<typeof fixture>) => {
+        const measurement = outlier.evidence
+          .find(({ role }) => role === "comparator")
+          ?.measurements.find(({ key }) => key === "subject-distance");
+        if (measurement === undefined) throw new Error("Missing comparator distance evidence");
+        measurement.value = 0.7;
+      },
+    ],
+    [
+      "driver subject value evidence",
+      ({ outlier }: ReturnType<typeof fixture>) => {
+        const measurement = outlier.evidence
+          .find(({ role }) => role === "subject")
+          ?.measurements.find(({ key }) => key === "mechanics");
+        if (measurement === undefined) throw new Error("Missing subject mechanics evidence");
+        measurement.value = "Deck Building";
+      },
+    ],
+    [
+      "driver comparator value evidence",
+      ({ outlier }: ReturnType<typeof fixture>) => {
+        const measurement = outlier.evidence
+          .find(({ role }) => role === "comparator")
+          ?.measurements.find(({ key }) => key === "mechanics");
+        if (measurement === undefined) throw new Error("Missing comparator mechanics evidence");
+        measurement.value = "Area Control";
+      },
+    ],
+    [
+      "driver distance evidence",
+      ({ outlier }: ReturnType<typeof fixture>) => {
+        const measurement = outlier.evidence
+          .find(({ role }) => role === "comparator")
+          ?.measurements.find(({ key }) => key === "mechanics-distance");
+        if (measurement === undefined) throw new Error("Missing driver distance evidence");
+        measurement.value = 0.8;
+      },
+    ],
+    [
+      "required dimension distance evidence",
+      ({ outlier }: ReturnType<typeof fixture>) => {
+        const evidence = outlier.evidence.find(({ role }) => role === "comparator");
+        if (evidence === undefined) throw new Error("Missing comparator evidence");
+        evidence.measurements = evidence.measurements.filter(
+          ({ key }) => key !== "categories-distance",
+        ) as typeof evidence.measurements;
+      },
+    ],
+  ])("rejects mismatched or missing %s", (_label, mutate) => {
     const value = fixture();
     mutate(value);
     expect(CollectionProfileSchema.safeParse(value.profile).success).toBe(false);

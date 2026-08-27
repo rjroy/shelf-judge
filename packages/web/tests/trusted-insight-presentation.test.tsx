@@ -19,10 +19,9 @@ describe("trusted insight presentation", () => {
     expect(html).toContain("Insufficient evidence");
     expect(html).toContain("Tournament score is 4.0 points above independent fitness");
     expect(html).toContain("Why it is notable");
-    expect(html).toContain("Confidence: moderate");
     expect(html).toContain("Tournament score");
     expect(html).toContain("Independent fitness");
-    expect(html).toContain("Ten Tournament comparisons meet the reporting threshold");
+    expect(html).not.toContain("Confidence:");
     expect(html).toContain("At least six comparisons are required before reporting divergence");
     expect(html).toContain("Tournament preference reflects only the opponents compared so far");
     expect(html).toContain('href="/games/game-1"');
@@ -35,8 +34,12 @@ describe("trusted insight presentation", () => {
     );
 
     expect(html).toContain("Game 3 is compositionally distant");
-    expect(html).toContain("The mean distance exceeds 0.5 with a material factual driver");
-    expect(html).toContain("Six owned games passed factual metadata coverage gates");
+    expect(html).toContain(
+      "The mean distance exceeds 0.5 with at least two material factual drivers",
+    );
+    expect(html).toContain("Preference fitness");
+    expect(html).toContain("Fitness engine");
+    expect(html).not.toContain("Confidence:");
     expect(html).toContain("At least 60% of owned games need usable factual metadata");
     expect(html).toContain("Games missing any required factual dimension");
     expect(html).toContain('href="/games/game-4"');
@@ -55,6 +58,7 @@ describe("trusted insight presentation", () => {
     expect(html).toContain("Retired method");
     expect(html).toContain("Area Control is confounded by another candidate attribute");
     expect(html).toContain("The concentration recommendation method is retired");
+    expect(html).not.toContain("Confidence:");
     expect(html).not.toContain("Create an axis");
   });
 

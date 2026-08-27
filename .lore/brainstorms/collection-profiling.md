@@ -4,6 +4,7 @@ date: 2026-04-09
 status: resolved
 tags: [brainstorm, profiling, collection, llm, agent-sdk]
 related:
+  - .lore/specs/collection/collection-profiling.md
   - .lore/issues/collection/deferred-collection-profiling.md
   - .lore/issues/features/deferred-llm-integration.md
   - .lore/issues/fitness/deferred-prediction-engine.md
@@ -15,6 +16,8 @@ related:
 ---
 
 # Brainstorm: Collection Identity and Taste Profiling
+
+> **Historical and superseded.** This brainstorm records the April 2026 exploration and is preserved as product history. The authoritative implemented behavior is [Collection Identity and Trusted Insight Profiling](../specs/collection/collection-profiling.md). The current implementation does not use full-fitness divergence, collection centroids or two-standard-deviation thresholds, `lone-wolf`/`category-orphan`/`high-fitness` classifications, concentration or high variance as recommendation evidence, or free-form narration claims. Do not use the signal methods below as current requirements.
 
 ## Header
 

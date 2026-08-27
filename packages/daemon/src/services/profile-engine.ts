@@ -467,10 +467,7 @@ export function computeDivergence(
           direction: "above",
           explanation: "The gap exceeds the 1.5-point reporting threshold",
         },
-        confidence: {
-          level: stats.comparisonCount >= comparisonThreshold * 2 ? "high" : "moderate",
-          basis: `${stats.comparisonCount} Tournament comparisons; provisional results are suppressed`,
-        },
+        confidence: null,
       });
     }
   }
@@ -622,6 +619,8 @@ function outlierEvidence(
   features: OutlierFeatures,
   role: ReportedInsightEvidenceGame["role"],
   distance: number,
+  dimensionDistances: OutlierDistance["dimensions"] | undefined,
+  fitness: FitnessResult | undefined,
 ): ReportedInsightEvidenceGame {
   return {
     gameId: features.game.id,
@@ -631,7 +630,7 @@ function outlierEvidence(
       {
         key: role === "subject" ? "neighborhood-distance" : "subject-distance",
         label: role === "subject" ? "Neighborhood distance" : "Distance from subject",
-        value: Math.round(distance * 1000) / 1000,
+        value: distance,
         unit: null,
         source: OUTLIER_METHOD.id,
       },
@@ -670,6 +669,28 @@ function outlierEvidence(
         unit: "minutes",
         source: "collection metadata",
       },
+      ...(dimensionDistances === undefined
+        ? []
+        : (Object.entries(dimensionDistances) as [CollectionOutlierDimension, number][]).map(
+            ([dimension, value]) => ({
+              key: `${dimension}-distance`,
+              label: `${OUTLIER_DIMENSION_LABELS[dimension]} distance from subject`,
+              value,
+              unit: null,
+              source: OUTLIER_METHOD.id,
+            }),
+          )),
+      ...(role === "subject" && fitness !== undefined
+        ? [
+            {
+              key: "fitness-score",
+              label: "Preference fitness",
+              value: fitness.score,
+              unit: "rating",
+              source: "Fitness engine",
+            },
+          ]
+        : []),
     ],
   };
 }
@@ -805,9 +826,15 @@ export function detectOutliers(
         { ...coverageRequirement, met: true },
       ],
       evidence: [
-        outlierEvidence(subject, "subject", neighborhoodDistance),
+        outlierEvidence(subject, "subject", neighborhoodDistance, undefined, fitness),
         ...neighbors.map(({ features, distance }) =>
-          outlierEvidence(features, "comparator", distance.composite),
+          outlierEvidence(
+            features,
+            "comparator",
+            distance.composite,
+            distance.dimensions,
+            undefined,
+          ),
         ),
       ],
       comparator: {
@@ -822,13 +849,17 @@ export function detectOutliers(
       interpretation:
         fitness === undefined
           ? null
-          : `Separately, its current preference fitness score is ${fitness.score.toFixed(1)}${fitness.vetoed ? " and is vetoed" : ""}`,
+          : `Separately, its current preference fitness score is ${fitness.score.toFixed(1)}`,
       details: {
         gameId: subject.game.id,
         gameName: subject.game.name,
         neighborhoodDistance,
         nearestComparisons,
-        drivers: drivers as [CollectionOutlierDriver, ...CollectionOutlierDriver[]],
+        drivers: drivers as [
+          CollectionOutlierDriver,
+          CollectionOutlierDriver,
+          ...CollectionOutlierDriver[],
+        ],
         fitnessScore: fitness?.score ?? null,
       },
       notability: {
@@ -838,10 +869,7 @@ export function detectOutliers(
         direction: "above",
         explanation: `The mean distance exceeds ${OUTLIER_DISTANCE_THRESHOLD} and at least two dimensions are material drivers`,
       },
-      confidence: {
-        level: included.length >= 12 ? "high" : "moderate",
-        basis: `${included.length} owned games passed factual metadata coverage gates`,
-      },
+      confidence: null,
     });
   }
 
@@ -1065,6 +1093,7 @@ export function generateSuggestions(
   divergence: TournamentDivergenceInsight[] | null,
   comparisonThreshold = 6,
 ): AxisSuggestion[] {
+  const effectiveComparisonThreshold = Math.max(comparisonThreshold, SUGGESTION_MIN_GROUP_SIZE * 2);
   const gamesWithBgg = games.filter((g) => g.bggData !== null);
   const retired = retiredLegacySuggestions(games, axes);
   if (gamesWithBgg.length === 0) {
@@ -1113,7 +1142,7 @@ export function generateSuggestions(
       stats === undefined ||
       stats.normalizedScore === null ||
       stats.isProvisional ||
-      stats.comparisonCount < comparisonThreshold
+      stats.comparisonCount < effectiveComparisonThreshold
     ) {
       return [];
     }
@@ -1125,7 +1154,7 @@ export function generateSuggestions(
         independentScore,
         tournamentScore: stats.normalizedScore,
         comparisonCount: stats.comparisonCount,
-        signedGap: stats.normalizedScore - independentScore,
+        signedGap: roundToTenth(stats.normalizedScore - independentScore),
       },
     ];
   });
@@ -1241,17 +1270,25 @@ export function generateSuggestions(
       continue;
     }
 
-    const supportingMeanGap = mean(supporting.map(({ signedGap }) => signedGap));
-    const comparatorMeanGap = mean(comparators.map(({ signedGap }) => signedGap));
+    const supportingGapSumTenths = supporting.reduce(
+      (sum, { signedGap }) => sum + signedGap * 10,
+      0,
+    );
+    const comparatorGapSumTenths = comparators.reduce(
+      (sum, { signedGap }) => sum + signedGap * 10,
+      0,
+    );
+    const supportingMeanGap = supportingGapSumTenths / supporting.length / 10;
     const directionalMean =
       direction === "tournament-outlier" ? supportingMeanGap : -supportingMeanGap;
-    const effect =
+    const effectNumerator =
       direction === "tournament-outlier"
-        ? supportingMeanGap - comparatorMeanGap
-        : comparatorMeanGap - supportingMeanGap;
-    const roundedSupportingMean = roundToTenth(supportingMeanGap);
-    const roundedComparatorMean = roundToTenth(comparatorMeanGap);
-    const roundedEffect = roundToTenth(effect);
+        ? supportingGapSumTenths * comparators.length - comparatorGapSumTenths * supporting.length
+        : comparatorGapSumTenths * supporting.length - supportingGapSumTenths * comparators.length;
+    const roundedSupportingMean = Math.round(supportingGapSumTenths / supporting.length) / 10;
+    const roundedComparatorMean = Math.round(comparatorGapSumTenths / comparators.length) / 10;
+    const roundedEffect =
+      Math.round(effectNumerator / (supporting.length * comparators.length)) / 10;
     const directionallyConsistentCount = supporting.filter(({ signedGap }) =>
       direction === "tournament-outlier" ? signedGap > 0 : signedGap < 0,
     ).length;
@@ -1279,7 +1316,7 @@ export function generateSuggestions(
           {
             key: "signed-preference-gap",
             label: "Tournament minus independent fitness",
-            value: roundToTenth(outcome.signedGap),
+            value: outcome.signedGap,
             unit: "rating",
             source: "Tournament comparisons and non-Tournament fitness axes",
           },

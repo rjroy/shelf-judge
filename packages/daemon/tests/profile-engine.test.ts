@@ -20,6 +20,7 @@ import {
   extractUtilityCurves,
   generateSuggestions,
 } from "../src/services/profile-engine.js";
+import type { ProfileInput } from "../src/services/profile-engine.js";
 
 // --- Test helpers ---
 
@@ -653,6 +654,28 @@ describe("computeDivergence", () => {
     expect(result[0].evidence[0].measurements.map(({ key }) => key)).toContain(
       "independent-fitness-score",
     );
+    expect(
+      result.every((insight) => insight.status !== "reported" || insight.confidence === null),
+    ).toBe(true);
+  });
+
+  test("abstains when the normalized Tournament score is unavailable", () => {
+    const game = makeGame({ id: "g1", name: "Unranked Tournament Game" });
+    const result = computeDivergence(
+      new Map([[game.id, scoredGame(game, 5)]]),
+      new Map([[game.id, makeTournamentStats(null, 10)]]),
+      [game],
+      axes,
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result?.[0]).toMatchObject({ status: "insufficient", reason: "insufficient-coverage" });
+    expect(result?.[0]?.sufficiency[0]).toEqual({
+      criterion: "normalized Tournament score available",
+      observed: 0,
+      required: 1,
+      met: false,
+    });
   });
 
   test("provisional games expose insufficient sample evidence", () => {
@@ -853,6 +876,19 @@ describe("detectOutliers", () => {
     expect(warOutlier.details.drivers.map(({ dimension }) => dimension)).toContain("mechanics");
     expect(warOutlier.details.drivers.map(({ dimension }) => dimension)).toContain("categories");
     expect(warOutlier.evidence.every(({ measurements }) => measurements.length > 0)).toBe(true);
+    expect(
+      warOutlier.evidence
+        .filter(({ role }) => role === "comparator")
+        .every(({ measurements }) =>
+          ["mechanics", "categories", "complexity", "player-count", "playing-time"].every(
+            (dimension) =>
+              measurements.some(
+                ({ key, source }) =>
+                  key === `${dimension}-distance` && source === "outlier:factual-neighborhood",
+              ),
+          ),
+        ),
+    ).toBe(true);
     const profilePayload = {
       axisDistributions: [],
       axisWeights: [],
@@ -926,7 +962,7 @@ describe("detectOutliers", () => {
     expect(oddOne).toBeUndefined();
   });
 
-  test("fitness is exposed only as a separate interpretation", () => {
+  test("fitness context is grounded in a sourced subject measurement", () => {
     const { games } = deliberateOutlierFixture();
     const outlier = detectOutliers(games, new Map([["war1", makeFitness(8.5)]])).find(
       (result) => result.status === "reported" && result.details.gameId === "war1",
@@ -935,11 +971,18 @@ describe("detectOutliers", () => {
     if (outlier?.status !== "reported") return;
     expect(outlier.details.fitnessScore).toBe(8.5);
     expect(outlier.interpretation).toContain("Separately");
+    expect(outlier.confidence).toBeNull();
     expect(
       outlier.evidence
-        .flatMap(({ measurements }) => measurements)
-        .some(({ key }) => key === "fitness"),
-    ).toBe(false);
+        .find(({ role }) => role === "subject")
+        ?.measurements.find(({ key }) => key === "fitness-score"),
+    ).toEqual({
+      key: "fitness-score",
+      label: "Preference fitness",
+      value: 8.5,
+      unit: "rating",
+      source: "Fitness engine",
+    });
   });
 
   test("small collections expose an explicit sample abstention", () => {
@@ -1040,6 +1083,7 @@ describe("generateSuggestions", () => {
       tournament: number;
       comparisons?: number;
     }[],
+    comparisonThreshold = 6,
   ) {
     const games = rows.map((row, index) =>
       makeGame({
@@ -1061,12 +1105,25 @@ describe("generateSuggestions", () => {
         makeTournamentStats(row.tournament, row.comparisons ?? 10),
       ]),
     );
-    const divergence = computeDivergence(fitnessResults, tournamentStats, games, axes);
+    const divergence = computeDivergence(
+      fitnessResults,
+      tournamentStats,
+      games,
+      axes,
+      comparisonThreshold,
+    );
     return {
       games,
       fitnessResults,
       tournamentStats,
-      suggestions: generateSuggestions(games, axes, fitnessResults, tournamentStats, divergence),
+      suggestions: generateSuggestions(
+        games,
+        axes,
+        fitnessResults,
+        tournamentStats,
+        divergence,
+        comparisonThreshold,
+      ),
     };
   }
 
@@ -1225,6 +1282,29 @@ describe("generateSuggestions", () => {
     });
   });
 
+  test("enforces the method evidence floor while honoring higher comparison thresholds", () => {
+    const rows = (comparisons: number) => [
+      { attribute: true, independent: 4, tournament: 8, comparisons },
+      { attribute: true, independent: 4, tournament: 8, comparisons },
+      { attribute: true, independent: 4, tournament: 8, comparisons },
+      { attribute: false, independent: 6, tournament: 6, comparisons },
+      { attribute: false, independent: 6, tournament: 6, comparisons },
+      { attribute: false, independent: 6, tournament: 6, comparisons },
+    ];
+
+    const belowFloor = suggestionFixture(rows(5), 5);
+    expect(belowFloor.suggestions).toMatchObject([{ status: "insufficient" }]);
+    expect(suggestionsPassSchema(belowFloor)).toBe(true);
+
+    const atFloor = suggestionFixture(rows(6), 5);
+    expect(atFloor.suggestions).toMatchObject([{ status: "reported" }]);
+    expect(suggestionsPassSchema(atFloor)).toBe(true);
+
+    const belowConfiguredThreshold = suggestionFixture(rows(6), 7);
+    expect(belowConfiguredThreshold.suggestions).toMatchObject([{ status: "insufficient" }]);
+    expect(suggestionsPassSchema(belowConfiguredThreshold)).toBe(true);
+  });
+
   test("does not report an effect exactly at the declared threshold", () => {
     const fixture = suggestionFixture([
       { attribute: true, independent: 4, tournament: 8 },
@@ -1269,6 +1349,34 @@ describe("generateSuggestions", () => {
       details: { effect: 1.6 },
       notability: { value: 1.6, threshold: 1.5, direction: "above" },
     });
+    expect(suggestionsPassSchema(fixture)).toBe(true);
+  });
+
+  test("derives published means and effect from the published per-game gaps", () => {
+    const fixture = suggestionFixture([
+      { attribute: true, independent: 4, tournament: 8.401 },
+      { attribute: true, independent: 4, tournament: 8.401 },
+      { attribute: true, independent: 4, tournament: 8.548 },
+      { attribute: false, independent: 6, tournament: 6 },
+      { attribute: false, independent: 6, tournament: 6 },
+      { attribute: false, independent: 6, tournament: 6 },
+    ]);
+
+    expect(fixture.suggestions).toHaveLength(1);
+    const suggestion = fixture.suggestions[0];
+    expect(suggestion).toMatchObject({
+      status: "reported",
+      details: { supportingMeanGap: 4.4, comparatorMeanGap: 0, effect: 4.4 },
+      notability: { value: 4.4 },
+    });
+    expect(
+      suggestion.evidence
+        .filter(({ role }) => role !== "comparator")
+        .map(
+          ({ measurements }) =>
+            measurements.find(({ key }) => key === "signed-preference-gap")?.value,
+        ),
+    ).toEqual([4.4, 4.4, 4.5]);
     expect(suggestionsPassSchema(fixture)).toBe(true);
   });
 
@@ -1417,6 +1525,116 @@ describe("generateSuggestions", () => {
 // --- Full Profile (computeProfile) ---
 
 describe("computeProfile", () => {
+  const preferenceAxis = makeAxis({ id: "preference", name: "Economic Preference" });
+
+  function realisticProfileGame(
+    index: number,
+    mechanic: "Area Control" | "Worker Placement",
+    rating: number,
+  ): Game {
+    return makeGame({
+      id: `profile-${index}`,
+      name: `Profile Game ${index}`,
+      minPlayers: 2,
+      maxPlayers: 4,
+      playingTime: 90,
+      ratings: { [preferenceAxis.id]: rating },
+      bggData: makeBggData({
+        weight: 3,
+        mechanics: [{ id: mechanic === "Area Control" ? 1 : 2, name: mechanic }],
+        categories: [{ id: 10, name: "Economic" }],
+      }),
+    });
+  }
+
+  function schemaProfile(profile: ReturnType<typeof computeProfile>) {
+    return {
+      ...profile,
+      narration: null,
+      narrationState: "empty" as const,
+      computedAt: "2026-08-27T12:00:00.000Z",
+    };
+  }
+
+  test("produces a deterministic realistic retained profile from sufficient evidence", () => {
+    const games = [
+      realisticProfileGame(1, "Area Control", 4),
+      realisticProfileGame(2, "Area Control", 4),
+      realisticProfileGame(3, "Area Control", 4),
+      realisticProfileGame(4, "Worker Placement", 6),
+      realisticProfileGame(5, "Worker Placement", 6),
+      realisticProfileGame(6, "Worker Placement", 6),
+    ];
+    const input: ProfileInput = {
+      games,
+      axes: [preferenceAxis],
+      fitnessResults: makeDistributionResults(games, [preferenceAxis]),
+      tournamentStats: new Map(
+        games.map((game, index) => [game.id, makeTournamentStats(index < 3 ? 8 : 6, 10)]),
+      ),
+    };
+
+    const first = computeProfile(input);
+    const second = computeProfile(input);
+
+    expect(second).toEqual(first);
+    expect(first.divergence?.map(({ status }) => status)).toEqual([
+      "reported",
+      "reported",
+      "reported",
+    ]);
+    expect(
+      first.divergence?.every(
+        (insight) => insight.status !== "reported" || insight.confidence === null,
+      ),
+    ).toBe(true);
+    expect(first.outliers).toEqual([]);
+    expect(first.suggestions).toHaveLength(1);
+    expect(first.suggestions[0]).toMatchObject({
+      status: "reported",
+      details: { attribute: "Area Control", effect: 4 },
+      confidence: null,
+    });
+    expect(CollectionProfileSchema.safeParse(schemaProfile(first)).success).toBe(true);
+  });
+
+  test("produces a deterministic realistic abstained profile from inadequate evidence", () => {
+    const games = [
+      realisticProfileGame(1, "Area Control", 4),
+      realisticProfileGame(2, "Worker Placement", 6),
+    ];
+    const input: ProfileInput = {
+      games,
+      axes: [preferenceAxis],
+      fitnessResults: makeDistributionResults(games, [preferenceAxis]),
+      tournamentStats: new Map(games.map((game) => [game.id, makeTournamentStats(null, 10)])),
+    };
+
+    const first = computeProfile(input);
+    const second = computeProfile(input);
+
+    expect(second).toEqual(first);
+    expect(
+      first.divergence?.map((insight) =>
+        insight.status === "reported" ? insight.status : [insight.status, insight.reason],
+      ),
+    ).toEqual([
+      ["insufficient", "insufficient-coverage"],
+      ["insufficient", "insufficient-coverage"],
+    ]);
+    expect(first.outliers).toHaveLength(1);
+    expect(first.outliers[0]).toMatchObject({
+      status: "insufficient",
+      reason: "insufficient-sample",
+    });
+    expect(first.suggestions).toHaveLength(1);
+    expect(first.suggestions[0]).toMatchObject({
+      status: "insufficient",
+      reason: "insufficient-sample",
+    });
+    expect(CollectionProfileSchema.safeParse(schemaProfile(first)).success).toBe(true);
+  });
+
   test("does not count automatic derived or Tournament values as user ratings", () => {
     const derived = makeDerivedAxis("community", "Community", "communityRating");
     const tournament = makeTournamentAxis("tournament", "Tournament");
