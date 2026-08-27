@@ -62,6 +62,8 @@ describe("PurchaseUtilizationPanel", () => {
     expect(html).toContain("$4.00");
     expect(html).toContain("Estimated additional plays to value threshold");
     expect(html).toContain("Cost per modeled player-hour");
+    expect(html).toContain("not cash value");
+    expect(html).toContain("rounds up to a whole play");
   });
 
   test("renders zero-play explanations, evidence sources, times, and disclaimers", () => {

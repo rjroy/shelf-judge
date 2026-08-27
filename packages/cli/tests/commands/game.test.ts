@@ -294,8 +294,8 @@ function utilizationInput(
 function valueResponse(input: PurchaseUtilizationInput, ownership = "owned") {
   return {
     game: { id: "game/1", name: "Canonical Example", ownership },
-    score: { score: 7.95 },
-    displayScore: "8.0",
+    score: input.fitness === null ? null : { score: Number(input.fitness) },
+    displayScore: input.fitness,
     purchaseUtilization: calculatePurchaseUtilization(input),
     extraDaemonField: { exactFraction: "1/3" },
   };
@@ -313,11 +313,15 @@ describe("game value", () => {
     });
     const human = await gameValue(client, ["game/1"], { json: false });
     expect(human).toContain("Value threshold met");
-    expect(human).toContain("Fitness: 8.0");
+    expect(human).toContain("Fitness: 6.0");
     expect(human).toContain("60 player-hours");
     expect(human).toContain("$1.00");
     expect(human).toContain("8.00x");
     expect(human).toContain("$0.00");
+    expect(human).toContain(
+      "Value remaining is the purchase cost not yet justified by modeled entertainment use; it is not cash value.",
+    );
+    expect(human).toContain("The estimate rounds up to a whole play.");
     expect(human).toContain(`source=bgg-collection; observedAt=${observedAt}`);
     expect(human).toContain(`confirmedAt=${observedAt}`);
     expect(human).toContain(response.purchaseUtilization.assumptions.futurePlays);

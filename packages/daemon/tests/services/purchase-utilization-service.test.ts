@@ -760,7 +760,7 @@ describe("PurchaseUtilizationService response enrichment", () => {
     expect([base, expansion]).toEqual(snapshots);
   });
 
-  test("logs only aggregate response outcomes without persisted amount values", () => {
+  test("logs response completion without aggregating judgments or amount values", () => {
     const ctx = harness();
     const paid = game({
       acquisition: {
@@ -786,12 +786,13 @@ describe("PurchaseUtilizationService response enrichment", () => {
         {
           responseKind: "list",
           gameCount: 2,
-          outcomes: { "not-met": 1, "not-applicable": 1 },
         },
       ],
     ]);
     const serialized = JSON.stringify(ctx.logs);
     expect(serialized).not.toContain("987654");
     expect(serialized).not.toContain("123456");
+    expect(serialized).not.toContain("not-met");
+    expect(serialized).not.toContain("not-applicable");
   });
 });

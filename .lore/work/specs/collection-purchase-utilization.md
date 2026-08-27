@@ -1,7 +1,7 @@
 ---
 title: Did this purchase earn its cost?
 date: 2026-08-25
-status: approved
+status: implemented
 tags: [collection, insights, acquisition-cost, play-count, value]
 modules: [shared, daemon, web, cli]
 related:

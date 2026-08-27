@@ -194,6 +194,10 @@ export function formatPurchaseUtilization(game: GameWithPurchaseUtilization): st
   ]) {
     lines.push(...componentLines(component));
   }
+  lines.push(
+    "  Value remaining is the purchase cost not yet justified by modeled entertainment use; it is not cash value.",
+    "  Estimated additional plays assumes the shown inputs remain unchanged. The estimate rounds up to a whole play.",
+  );
 
   const isPaidPurchase =
     result.evidence.acquisition.state === "purchase" &&

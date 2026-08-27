@@ -1,7 +1,7 @@
 ---
 title: "Implementation plan: collection purchase utilization"
 date: 2026-08-25
-status: approved
+status: executed
 tags: [plan, collection, purchase-utilization, exact-arithmetic, provenance]
 modules: [shared, daemon, web, cli]
 related:

@@ -184,6 +184,11 @@ export function PurchaseUtilizationPanel({
         <ComponentRow component={components.valueRemaining} />
         <ComponentRow component={components.estimatedAdditionalPlays} />
       </dl>
+      <p className="utilization-special-explanation">
+        Value remaining is the purchase cost not yet justified by modeled entertainment use; it is
+        not cash value. Estimated additional plays assumes the shown inputs remain unchanged and
+        rounds up to a whole play.
+      </p>
       {isPaidPurchase && isFitnessZero && (
         <p className="utilization-special-explanation">
           Current fitness is 0. The $0.00 adjusted benchmark, 0.00x multiplier, and full value

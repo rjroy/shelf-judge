@@ -331,15 +331,9 @@ export function createPurchaseUtilizationService(
           }),
         };
       });
-      const outcomes = enriched.reduce<Record<string, number>>((counts, entry) => {
-        const outcome = entry.purchaseUtilization.outcome;
-        counts[outcome] = (counts[outcome] ?? 0) + 1;
-        return counts;
-      }, {});
       logger.log("purchase utilization response enrichment completed", {
         responseKind,
         gameCount: enriched.length,
-        outcomes,
       });
       return enriched;
     },
