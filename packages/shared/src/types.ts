@@ -438,6 +438,135 @@ export interface GameWithScore {
   nichePosition?: NichePosition | null;
 }
 
+export type PurchaseUtilizationReason =
+  | "missing-acquisition"
+  | "invalid-acquisition"
+  | "no-owner-cost"
+  | "missing-benchmark"
+  | "invalid-benchmark"
+  | "missing-play-count"
+  | "invalid-play-count"
+  | "missing-modeled-duration"
+  | "invalid-modeled-duration"
+  | "missing-modeled-player-count"
+  | "invalid-modeled-player-count"
+  | "missing-fitness"
+  | "invalid-fitness"
+  | "unreachable-at-current-fitness";
+
+export type UtilizationOutcome = "calculated" | "unavailable" | "not-applicable" | "unreachable";
+
+export interface UtilizationComponentBase {
+  label: string;
+  outcome: UtilizationOutcome;
+  reasons: PurchaseUtilizationReason[];
+}
+
+export interface CalculatedUtilizationComponent<Value> extends UtilizationComponentBase {
+  outcome: "calculated";
+  value: Value;
+  display: string;
+  reasons: [];
+}
+
+export interface UnavailableUtilizationComponent extends UtilizationComponentBase {
+  outcome: "unavailable";
+  display: "Unavailable";
+}
+
+export interface NotApplicableUtilizationComponent extends UtilizationComponentBase {
+  outcome: "not-applicable";
+  display: string;
+}
+
+export interface UnreachableUtilizationComponent extends UtilizationComponentBase {
+  outcome: "unreachable";
+  display: "Unreachable at current fitness";
+  reasons: ["unreachable-at-current-fitness"];
+}
+
+export type UtilizationComponent<Value> =
+  | CalculatedUtilizationComponent<Value>
+  | UnavailableUtilizationComponent
+  | NotApplicableUtilizationComponent
+  | UnreachableUtilizationComponent;
+
+export interface ExactUtilizationValue {
+  exact: { numerator: string; denominator: string };
+}
+
+export interface MultiplierUtilizationValue extends ExactUtilizationValue {
+  status: "met" | "not-met";
+}
+
+export interface ModeledPlayerCountValue extends ExactUtilizationValue {
+  source: FieldObservationSource;
+  observedAt: string | null;
+  resolution: "poll-winner" | "poll-tie-average" | "player-range-midpoint";
+  winningBestVotes: number | null;
+  winningPlayerCounts: string[];
+}
+
+export type PurchaseUtilizationFitnessInput =
+  | (EvidenceObservation & { status: "valid"; value: string })
+  | (EvidenceObservation & { status: "missing" })
+  | (EvidenceObservation & { status: "invalid"; value: string });
+
+export interface PurchaseUtilizationInput {
+  acquisition: Acquisition;
+  entertainmentBenchmark: EntertainmentBenchmark;
+  playCount: FieldEvidence<number>;
+  duration: FieldEvidence<number>;
+  playerRange: PlayerRangeEvidence;
+  suggestedPlayerPoll: SuggestedPlayerPoll;
+  fitness: string | null;
+}
+
+export interface PurchaseUtilizationEvidence {
+  acquisition: Acquisition;
+  entertainmentBenchmark: EntertainmentBenchmark;
+  playCount: FieldEvidence<number>;
+  duration: FieldEvidence<number>;
+  playerRange: PlayerRangeEvidence;
+  suggestedPlayerPoll: SuggestedPlayerPoll;
+  fitness: PurchaseUtilizationFitnessInput;
+}
+
+export interface PurchaseUtilizationSortProjection {
+  valueRemainingHundredths: string | null;
+  estimatedAdditionalPlays:
+    | { category: "finite"; wholePlays: string }
+    | { category: "unreachable"; wholePlays: null }
+    | { category: "unavailable" | "not-applicable"; wholePlays: null };
+}
+
+export interface PurchaseUtilizationResult {
+  outcome: "met" | "not-met" | "unavailable" | "not-applicable";
+  outcomeLabel:
+    | "Value threshold met"
+    | "Value threshold not yet met"
+    | "Purchase value unavailable"
+    | "Purchase value not applicable";
+  reasons: PurchaseUtilizationReason[];
+  components: {
+    costPerRecordedPlay: UtilizationComponent<ExactUtilizationValue>;
+    modeledPlayerCount: UtilizationComponent<ModeledPlayerCountValue>;
+    modeledPlayerHours: UtilizationComponent<ExactUtilizationValue>;
+    costPerModeledPlayerHour: UtilizationComponent<ExactUtilizationValue>;
+    fitnessAdjustedHourlyBenchmark: UtilizationComponent<ExactUtilizationValue>;
+    valueMultiplier: UtilizationComponent<MultiplierUtilizationValue>;
+    valueRemaining: UtilizationComponent<ExactUtilizationValue>;
+    estimatedAdditionalPlays: UtilizationComponent<{ wholePlays: string }>;
+  };
+  evidence: PurchaseUtilizationEvidence;
+  assumptions: {
+    modeledSessions: "Models each recorded play at the shown duration and player count; actual sessions may differ.";
+    futurePlays: "Estimated additional plays assumes future plays use the shown duration, player count, fitness, and entertainment benchmark.";
+    fitnessAdjustment: "The fitness-adjusted hourly benchmark changes in direct proportion to current fitness; fitness 6 uses the collection benchmark.";
+  };
+  sort: PurchaseUtilizationSortProjection;
+}
+
 export interface AddGameResult {
   game: Game;
   bggImported: boolean;

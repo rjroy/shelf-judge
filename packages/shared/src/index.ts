@@ -60,6 +60,22 @@ export type {
   RecentComparison,
   TournamentGameStatsDisplay,
   GameWithScore,
+  PurchaseUtilizationReason,
+  UtilizationOutcome,
+  UtilizationComponentBase,
+  CalculatedUtilizationComponent,
+  UnavailableUtilizationComponent,
+  NotApplicableUtilizationComponent,
+  UnreachableUtilizationComponent,
+  UtilizationComponent,
+  ExactUtilizationValue,
+  MultiplierUtilizationValue,
+  ModeledPlayerCountValue,
+  PurchaseUtilizationFitnessInput,
+  PurchaseUtilizationInput,
+  PurchaseUtilizationEvidence,
+  PurchaseUtilizationSortProjection,
+  PurchaseUtilizationResult,
   AddGameResult,
   BggSearchResult,
   ImportProgress,
@@ -162,6 +178,8 @@ export {
 export type { ExactRationalJson, ExactComparison } from "./exact-rational";
 
 export { parseAmountInput, formatStoredAmount, formatExactAmount, amountSortKey } from "./amount";
+
+export { calculatePurchaseUtilization, resolveModeledPlayerCount } from "./purchase-utilization";
 
 export {
   toErrorMessage,
