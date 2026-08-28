@@ -326,6 +326,47 @@ describe("GameService BGG Integration", () => {
   });
 
   describe("refreshBggData", () => {
+    test("rejects an older response after a newer concurrent refresh is accepted", async () => {
+      const seedService = createGameService({
+        storageService,
+        fitnessService: createFitnessService(),
+      });
+      const { game } = await seedService.addGame({ name: "Wingspan", bggId: 266192 });
+      const parsed = parseThingItems(await readFixture("thing-wingspan-266192.xml"), observedAt)[0];
+      if (parsed === undefined) throw new Error("Expected Wingspan thing fixture");
+      const older = structuredClone(parsed);
+      older.metadata.name = "Older response";
+      const newer = structuredClone(parsed);
+      newer.metadata.name = "Newer response";
+      let resolveOlder: (result: BggGameResult) => void = () => {};
+      let resolveNewer: (result: BggGameResult) => void = () => {};
+      const olderResult = new Promise<BggGameResult>((resolve) => {
+        resolveOlder = resolve;
+      });
+      const newerResult = new Promise<BggGameResult>((resolve) => {
+        resolveNewer = resolve;
+      });
+      let request = 0;
+      const concurrentClient: BggClient = {
+        ...clientForResults([]),
+        getGame: () => (request++ === 0 ? olderResult : newerResult),
+      };
+      const service = createGameService({
+        storageService,
+        fitnessService: createFitnessService(),
+        bggClient: concurrentClient,
+      });
+
+      const first = service.refreshBggData(game.id);
+      const second = service.refreshBggData(game.id);
+      resolveNewer(newer);
+      expect((await second).name).toBe("Newer response");
+      resolveOlder(older);
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(first).rejects.toThrow("Newer BGG data was accepted");
+      expect((await storageService.loadCollection()).games[0]?.name).toBe("Newer response");
+    });
+
     test("updates bggData and preserves user overrides", async () => {
       const thingXml = await readFixture("thing-wingspan-266192.xml");
       // First fetch for addGame

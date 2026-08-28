@@ -41,9 +41,15 @@ import { DEFAULT_NICHE_SETTINGS } from "./niche-engine.js";
 import { DEFAULT_REDUNDANCY_SETTINGS } from "./redundancy-engine.js";
 import { createLogger, type Logger } from "./logger.js";
 
-export interface StorageService {
+export interface CollectionReader {
   loadCollection(): Promise<Collection>;
+}
+
+export interface CollectionPersistence {
   saveCollection(collection: Collection): Promise<void>;
+}
+
+export interface StorageService extends CollectionReader, CollectionPersistence {
   loadConfig(): Promise<AppConfig>;
   saveConfig(config: AppConfig): Promise<void>;
   loadTournament(): Promise<TournamentData>;

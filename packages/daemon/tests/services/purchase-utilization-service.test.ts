@@ -479,6 +479,41 @@ describe("PurchaseUtilizationService mutations", () => {
     ]);
   });
 
+  test("benchmark clear failure logs failure without a false completion", async () => {
+    const original = collection({
+      entertainmentBenchmark: {
+        state: "configured",
+        amount: { hundredths: 500, source: "manual", confirmedAt: initialTime },
+      },
+    });
+    const ctx = harness({ initial: original, failSave: true });
+
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+    await expect(ctx.service.clearEntertainmentBenchmark()).rejects.toThrow("disk unavailable");
+
+    expect(ctx.stored()).toEqual(original);
+    expect(ctx.logs).toContainEqual([
+      "benchmark persistence failed",
+      {
+        collectionId: "collection-1",
+        previousState: "configured",
+        nextState: "unknown",
+        changedFields: ["entertainmentBenchmark", "updatedAt"],
+        outcome: "failed",
+      },
+    ]);
+    expect(
+      ctx.logs.some(
+        ([message, fields]) =>
+          message === "benchmark mutation completed" &&
+          typeof fields === "object" &&
+          fields !== null &&
+          "changed" in fields &&
+          fields.changed === true,
+      ),
+    ).toBe(false);
+  });
+
   test("benchmark logs include safe transitions, outcomes, and service validation codes", async () => {
     const ctx = harness();
     await ctx.service.setEntertainmentBenchmark({ amount: "8.00" });

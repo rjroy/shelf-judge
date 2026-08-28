@@ -19,11 +19,16 @@ import {
   type PurchaseUtilizationService,
 } from "../../src/services/purchase-utilization-service.js";
 import { createApp, type AppResult } from "../../src/app.js";
+import {
+  createCollectionMutationService,
+  type CollectionMutationService,
+} from "../../src/services/collection-mutation-service.js";
 
 export interface TestAppContext {
   app: AppResult["app"];
   operations: AppResult["operations"];
   storageService: StorageService;
+  collectionMutationService: CollectionMutationService;
   fitnessService: FitnessService;
   axisService: AxisService;
   gameService: GameService;
@@ -56,7 +61,14 @@ export function createTestPurchaseUtilizationService(
       }),
     saveCollection: () => Promise.resolve(),
   } as unknown as StorageService;
-  return createPurchaseUtilizationService({ storageService: storageService ?? fallbackStorage });
+  const selectedStorage = storageService ?? fallbackStorage;
+  const collectionMutationService = createCollectionMutationService({
+    storageService: selectedStorage,
+  });
+  return createPurchaseUtilizationService({
+    storageService: selectedStorage,
+    collectionMutationService,
+  });
 }
 
 export function createTestApp(options?: TestAppOptions): TestAppContext {
@@ -69,14 +81,16 @@ export function createTestApp(options?: TestAppOptions): TestAppContext {
     configPath,
     fileOps,
   });
+  const collectionMutationService = createCollectionMutationService({ storageService });
   const fitnessService = createFitnessService();
   const bggClient = options?.bggClient;
   const narrationService = options?.narrationService;
 
-  const axisService = createAxisService({ storageService });
+  const axisService = createAxisService({ storageService, collectionMutationService });
   const tournamentService = createTournamentService({ storageService });
   const gameService = createGameService({
     storageService,
+    collectionMutationService,
     fitnessService,
     bggClient,
     onGameDeleted: (gameId) => tournamentService.onGameDeleted(gameId),
@@ -98,6 +112,7 @@ export function createTestApp(options?: TestAppOptions): TestAppContext {
 
   const { app, operations } = createApp({
     storageService,
+    collectionMutationService,
     axisService,
     gameService,
     tournamentService,
@@ -110,6 +125,7 @@ export function createTestApp(options?: TestAppOptions): TestAppContext {
     app,
     operations,
     storageService,
+    collectionMutationService,
     fitnessService,
     axisService,
     gameService,

@@ -11,6 +11,7 @@ import { createPredictionService } from "./services/prediction-service.js";
 import { createNarrationService } from "./services/narration-service.js";
 import { createApp } from "./app.js";
 import { createLogger } from "./services/logger.js";
+import { createCollectionMutationService } from "./services/collection-mutation-service.js";
 
 const logger = createLogger("daemon");
 
@@ -29,6 +30,7 @@ async function main() {
   // Run versioned collection migration and artifact invalidation before routes can fire.
   // The first request therefore sees only a validated current collection and clean caches.
   await storageService.loadCollection();
+  const collectionMutationService = createCollectionMutationService({ storageService });
 
   const fitnessService = createFitnessService();
 
@@ -36,10 +38,11 @@ async function main() {
     config: { bggAuthToken: appConfig.bggAuthToken, username: appConfig.username },
   });
 
-  const axisService = createAxisService({ storageService });
+  const axisService = createAxisService({ storageService, collectionMutationService });
   const tournamentService = createTournamentService({ storageService });
   const gameService = createGameService({
     storageService,
+    collectionMutationService,
     fitnessService,
     bggClient,
     onGameDeleted: (gameId) => tournamentService.onGameDeleted(gameId),
@@ -68,6 +71,7 @@ async function main() {
 
   const { app } = createApp({
     storageService,
+    collectionMutationService,
     axisService,
     gameService,
     tournamentService,

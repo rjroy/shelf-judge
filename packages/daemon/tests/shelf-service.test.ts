@@ -8,6 +8,8 @@ import {
   ShelfNotFoundError,
 } from "../src/services/shelf-service";
 import type { ShelfService } from "../src/services/shelf-service";
+import { createGameService } from "../src/services/game-service";
+import { createFitnessService } from "../src/services/fitness-service";
 
 const NOW = "2026-04-13T12:00:00.000Z";
 
@@ -118,6 +120,53 @@ describe("shelf service", () => {
       expect(config.units).toEqual([]);
       expect(config.createdAt).toBe(NOW);
     });
+  });
+
+  test("serializes shelf removal with manual assignment validation", async () => {
+    storage.config.units = [
+      {
+        id: "unit-1",
+        name: "Unit",
+        shelves: [
+          {
+            id: "shelf-1",
+            name: "Shelf",
+            dimensionless: false,
+            width: 20,
+            height: 20,
+            depth: 20,
+          },
+        ],
+      },
+    ];
+    storage.collection.games = [assignedGame("game-1", "shelf-1")];
+    let signalSaveStarted = () => {};
+    let releaseSave = () => {};
+    const saveStarted = new Promise<void>((resolve) => {
+      signalSaveStarted = resolve;
+    });
+    const saveRelease = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    storage.saveCollection = async (next) => {
+      signalSaveStarted();
+      await saveRelease;
+      storage.collection = structuredClone(next);
+    };
+    const gameService = createGameService({
+      storageService: storage,
+      fitnessService: createFitnessService(),
+    });
+
+    const removal = service.removeUnit("unit-1");
+    await saveStarted;
+    const assignment = gameService.setManualShelf("game-1", "shelf-1");
+    releaseSave();
+    await removal;
+    await expect(assignment).rejects.toThrow("Shelf not found: shelf-1");
+
+    expect(storage.config.units).toEqual([]);
+    expect(storage.collection.games[0]?.manualShelfId).toBeNull();
   });
 
   describe("addUnit", () => {

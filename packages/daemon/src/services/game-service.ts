@@ -18,7 +18,11 @@ import {
   type FieldEvidence,
   type PlayerRangeEvidence,
 } from "@shelf-judge/shared";
-import type { StorageService } from "./storage-service.js";
+import type { CollectionPersistence, StorageService } from "./storage-service.js";
+import {
+  collectionMutationServiceFor,
+  type CollectionMutationService,
+} from "./collection-mutation-service.js";
 import type { FitnessService } from "./fitness-service.js";
 import type { BggClient, BggGameResult } from "./bgg-client.js";
 import type { BggCollectionItem } from "./bgg-xml-parser.js";
@@ -64,14 +68,21 @@ export interface GameService {
   ): Promise<ImportSummary>;
 }
 
-export interface GameServiceDeps {
-  storageService: StorageService;
+type GameStorage = Pick<StorageService, "loadCollection" | "loadTournament" | "loadShelfConfig">;
+
+export type GameServiceDeps = {
   fitnessService: FitnessService;
   bggClient?: BggClient;
   onGameDeleted?: (gameId: string) => Promise<void>;
   now?: () => string;
   logger?: Logger;
-}
+} & (
+  | { storageService: GameStorage; collectionMutationService: CollectionMutationService }
+  | {
+      storageService: GameStorage & CollectionPersistence;
+      collectionMutationService?: undefined;
+    }
+);
 
 function observedField(
   observation: BggRequestObservation | undefined,
@@ -209,8 +220,29 @@ function isBggDataStale(game: Game): boolean | undefined {
   return Date.now() - fetchedAt > STALE_THRESHOLD_MS;
 }
 
+function bggStateIdentity(game: Game): string {
+  return JSON.stringify({
+    bggId: game.bggId,
+    name: game.name,
+    yearPublished: game.yearPublished,
+    minPlayers: game.minPlayers,
+    maxPlayers: game.maxPlayers,
+    bestPlayers: game.bestPlayers,
+    playingTime: game.playingTime,
+    imageUrl: game.imageUrl,
+    numPlays: game.numPlays,
+    bggData: game.bggData,
+    playCountEvidence: game.playCountEvidence,
+    durationEvidence: game.durationEvidence,
+    playerRangeEvidence: game.playerRangeEvidence,
+    suggestedPlayerPoll: game.suggestedPlayerPoll,
+  });
+}
+
 export function createGameService(deps: GameServiceDeps): GameService {
   const { storageService, fitnessService, bggClient } = deps;
+  const collectionMutationService =
+    deps.collectionMutationService ?? collectionMutationServiceFor(storageService);
   const now = deps.now ?? (() => new Date().toISOString());
   const logger = deps.logger ?? createLogger("import");
 
@@ -239,16 +271,6 @@ export function createGameService(deps: GameServiceDeps): GameService {
   return {
     async addGame(input: AddGameInput): Promise<AddGameResult> {
       const parsed = AddGameSchema.parse(input);
-      const collection = await storageService.loadCollection();
-
-      // Duplicate detection: reject if bggId already exists
-      if (parsed.bggId !== null && parsed.bggId !== undefined) {
-        const existing = collection.games.find((g) => g.bggId === parsed.bggId);
-        if (existing) {
-          throw new Error(`A game with BGG ID ${parsed.bggId} already exists: "${existing.name}"`);
-        }
-      }
-
       const createdAt = now();
       const initialDuration = parsed.playingTime ?? null;
       const initialRange =
@@ -345,11 +367,25 @@ export function createGameService(deps: GameServiceDeps): GameService {
         }
       }
 
-      collection.games.push(game);
-      collection.updatedAt = createdAt;
-      await storageService.saveCollection(collection);
+      const { value: acceptedGame } = await collectionMutationService.mutate(
+        { operation: "game.add", trigger: "owner", gameIds: [game.id] },
+        (collection) => {
+          if (game.bggId !== null) {
+            const existing = collection.games.find((candidate) => candidate.bggId === game.bggId);
+            if (existing) {
+              throw new Error(
+                `A game with BGG ID ${game.bggId} already exists: "${existing.name}"`,
+              );
+            }
+          }
+          const accepted = structuredClone(game);
+          collection.games.push(accepted);
+          collection.updatedAt = createdAt;
+          return { changed: true, value: accepted };
+        },
+      );
 
-      return { game, bggImported, warning };
+      return { game: acceptedGame, bggImported, warning };
     },
 
     async getGame(id: string): Promise<GameWithScore> {
@@ -392,142 +428,118 @@ export function createGameService(deps: GameServiceDeps): GameService {
     },
 
     async rateGame(id: string, ratings: Record<string, number | null>): Promise<GameWithScore> {
-      const collection = await storageService.loadCollection();
-      const game = collection.games.find((g) => g.id === id);
-
-      if (!game) {
-        throw new Error(`Game not found: ${id}`);
-      }
-
-      // Validate each rating
-      for (const [axisId, rating] of Object.entries(ratings)) {
-        const axis = collection.axes.find((a) => a.id === axisId);
-        if (!axis) {
-          throw new Error(`Axis not found: ${axisId}`);
-        }
-        if (!axis.enabled) {
-          throw new CodedAxisValidationError(
-            `Axis is disabled and cannot be rated: ${axisId}`,
-            AXIS_VALIDATION_CODES.DISABLED_LEGACY_AXIS,
-            [{ field: "axisId", path: ["ratings", axisId] }],
-          );
-        }
-        if (rating !== null && (!Number.isInteger(rating) || rating < 1 || rating > 10)) {
-          throw new Error(
-            `Rating must be an integer between 1 and 10, got ${rating} for axis "${axis.name}"`,
-          );
-        }
-      }
-
-      // Apply ratings (null = clear)
-      for (const [axisId, rating] of Object.entries(ratings)) {
-        if (rating === null) {
-          delete game.ratings[axisId];
-        } else {
-          game.ratings[axisId] = rating;
-        }
-      }
-
-      game.updatedAt = new Date().toISOString();
-      collection.updatedAt = game.updatedAt;
-      await storageService.saveCollection(collection);
-
+      const { value: game, collection } = await collectionMutationService.mutate(
+        { operation: "game.rate", trigger: "owner", gameIds: [id] },
+        (collection) => {
+          const game = collection.games.find((candidate) => candidate.id === id);
+          if (!game) throw new Error(`Game not found: ${id}`);
+          for (const [axisId, rating] of Object.entries(ratings)) {
+            const axis = collection.axes.find((candidate) => candidate.id === axisId);
+            if (!axis) throw new Error(`Axis not found: ${axisId}`);
+            if (!axis.enabled) {
+              throw new CodedAxisValidationError(
+                `Axis is disabled and cannot be rated: ${axisId}`,
+                AXIS_VALIDATION_CODES.DISABLED_LEGACY_AXIS,
+                [{ field: "axisId", path: ["ratings", axisId] }],
+              );
+            }
+            if (rating !== null && (!Number.isInteger(rating) || rating < 1 || rating > 10)) {
+              throw new Error(
+                `Rating must be an integer between 1 and 10, got ${rating} for axis "${axis.name}"`,
+              );
+            }
+          }
+          for (const [axisId, rating] of Object.entries(ratings)) {
+            if (rating === null) delete game.ratings[axisId];
+            else game.ratings[axisId] = rating;
+          }
+          game.updatedAt = now();
+          collection.updatedAt = game.updatedAt;
+          return { changed: true, value: game };
+        },
+      );
       const tournamentData = await storageService.loadTournament();
       const score = computeScore(game, collection.axes, tournamentData);
       return { game, score, bggDataStale: isBggDataStale(game) };
     },
 
     async removeGame(id: string): Promise<void> {
-      const collection = await storageService.loadCollection();
-      const index = collection.games.findIndex((g) => g.id === id);
-
-      if (index === -1) {
-        throw new Error(`Game not found: ${id}`);
-      }
-
-      collection.games.splice(index, 1);
-      collection.updatedAt = new Date().toISOString();
-      await storageService.saveCollection(collection);
+      await collectionMutationService.mutate(
+        { operation: "game.remove", trigger: "owner", gameIds: [id] },
+        (collection) => {
+          const index = collection.games.findIndex((game) => game.id === id);
+          if (index === -1) throw new Error(`Game not found: ${id}`);
+          collection.games.splice(index, 1);
+          collection.updatedAt = now();
+          return { changed: true, value: undefined };
+        },
+      );
       await deps.onGameDeleted?.(id);
     },
 
     async setOwnership(id: string, ownership: OwnershipStatus): Promise<Game> {
-      const collection = await storageService.loadCollection();
-      const game = collection.games.find((g) => g.id === id);
-
-      if (!game) {
-        throw new Error(`Game not found: ${id}`);
-      }
-
-      const clearsManualShelf = ownership === "previously-owned" && game.manualShelfId !== null;
-      if (game.ownership === ownership && !clearsManualShelf) {
-        return game;
-      }
-
-      game.ownership = ownership;
-      if (ownership === "previously-owned") {
-        game.manualShelfId = null;
-      }
-      game.updatedAt = new Date().toISOString();
-      collection.updatedAt = game.updatedAt;
-      await storageService.saveCollection(collection);
-
-      return game;
+      const { value } = await collectionMutationService.mutate(
+        { operation: "game.ownership.set", trigger: "owner", gameIds: [id] },
+        (collection) => {
+          const game = collection.games.find((candidate) => candidate.id === id);
+          if (!game) throw new Error(`Game not found: ${id}`);
+          const clearsManualShelf = ownership === "previously-owned" && game.manualShelfId !== null;
+          if (game.ownership === ownership && !clearsManualShelf) {
+            return { changed: false, value: game };
+          }
+          game.ownership = ownership;
+          if (ownership === "previously-owned") game.manualShelfId = null;
+          game.updatedAt = now();
+          collection.updatedAt = game.updatedAt;
+          return { changed: true, value: game };
+        },
+      );
+      return value;
     },
 
     async setBoxDimensions(id: string, dimensions: BoxDimensions | null): Promise<Game> {
-      const collection = await storageService.loadCollection();
-      const game = collection.games.find((g) => g.id === id);
-
-      if (!game) {
-        throw new Error(`Game not found: ${id}`);
-      }
-
-      game.boxDimensions = dimensions;
-      game.updatedAt = new Date().toISOString();
-      collection.updatedAt = game.updatedAt;
-      await storageService.saveCollection(collection);
-
-      return game;
+      const { value } = await collectionMutationService.mutate(
+        { operation: "game.dimensions.set", trigger: "owner", gameIds: [id] },
+        (collection) => {
+          const game = collection.games.find((candidate) => candidate.id === id);
+          if (!game) throw new Error(`Game not found: ${id}`);
+          game.boxDimensions = dimensions;
+          game.updatedAt = now();
+          collection.updatedAt = game.updatedAt;
+          return { changed: true, value: game };
+        },
+      );
+      return value;
     },
 
     async setManualShelf(id: string, shelfId: string | null): Promise<Game> {
-      const collection = await storageService.loadCollection();
-      const game = collection.games.find((g) => g.id === id);
-
-      if (!game) {
-        throw new Error(`Game not found: ${id}`);
-      }
-
-      if (shelfId !== null) {
-        if (game.ownership === "previously-owned") {
-          throw new Error("Manual shelf assignment requires an owned game");
-        }
-
-        const shelfConfig = await storageService.loadShelfConfig();
-        const targetShelf = shelfConfig.units
-          .flatMap((unit) => unit.shelves)
-          .find((shelf) => shelf.id === shelfId);
-        if (!targetShelf) {
-          throw new Error(`Shelf not found: ${shelfId}`);
-        }
-
-        // Dimensionless shelves are assignment-only buckets: capacity is never
-        // computed for them, so box dimensions are not required to pin a game there.
-        if (!targetShelf.dimensionless && game.boxDimensions === null) {
-          throw new Error("Box dimensions are required before assigning a shelf");
-        }
-      }
-
-      if (game.manualShelfId === shelfId) {
-        return game;
-      }
-
-      game.manualShelfId = shelfId;
-      game.updatedAt = new Date().toISOString();
-      collection.updatedAt = game.updatedAt;
-      await storageService.saveCollection(collection);
-      return game;
+      const { value } = await collectionMutationService.mutate(
+        { operation: "game.shelf.set", trigger: "owner", gameIds: [id] },
+        async (collection) => {
+          const game = collection.games.find((candidate) => candidate.id === id);
+          if (!game) throw new Error(`Game not found: ${id}`);
+          if (shelfId !== null) {
+            if (game.ownership === "previously-owned") {
+              throw new Error("Manual shelf assignment requires an owned game");
+            }
+            const shelfConfig = await storageService.loadShelfConfig();
+            const targetShelf = shelfConfig.units
+              .flatMap((unit) => unit.shelves)
+              .find((shelf) => shelf.id === shelfId);
+            if (!targetShelf) throw new Error(`Shelf not found: ${shelfId}`);
+            // Dimensionless shelves are assignment-only buckets.
+            if (!targetShelf.dimensionless && game.boxDimensions === null) {
+              throw new Error("Box dimensions are required before assigning a shelf");
+            }
+          }
+          if (game.manualShelfId === shelfId) return { changed: false, value: game };
+          game.manualShelfId = shelfId;
+          game.updatedAt = now();
+          collection.updatedAt = game.updatedAt;
+          return { changed: true, value: game };
+        },
+      );
+      return value;
     },
 
     async searchGames(query: string): Promise<BggSearchResult[]> {
@@ -550,12 +562,26 @@ export function createGameService(deps: GameServiceDeps): GameService {
       }
 
       const result = await configuredBggClient().getGame(game.bggId);
-      applyBggResult(game, result, logger, true);
-      game.updatedAt = now();
-      collection.updatedAt = game.updatedAt;
-      await storageService.saveCollection(collection);
-
-      return game;
+      const expectedBggId = game.bggId;
+      const expectedBggState = bggStateIdentity(game);
+      const { value } = await collectionMutationService.mutate(
+        { operation: "game.bgg.refresh", trigger: "owner", gameIds: [gameId] },
+        (latest) => {
+          const acceptedGame = latest.games.find((candidate) => candidate.id === gameId);
+          if (!acceptedGame) throw new Error(`Game not found: ${gameId}`);
+          if (acceptedGame.bggId !== expectedBggId) {
+            throw new Error(`Game BGG identity changed during refresh: ${gameId}`);
+          }
+          if (bggStateIdentity(acceptedGame) !== expectedBggState) {
+            throw new Error(`Newer BGG data was accepted during refresh: ${gameId}`);
+          }
+          applyBggResult(acceptedGame, result, logger, true);
+          acceptedGame.updatedAt = now();
+          latest.updatedAt = acceptedGame.updatedAt;
+          return { changed: true, value: acceptedGame };
+        },
+      );
+      return value;
     },
 
     async refreshAllBggData(): Promise<RefreshSummary> {
@@ -563,6 +589,12 @@ export function createGameService(deps: GameServiceDeps): GameService {
       const collection = await storageService.loadCollection();
       const bggGames = collection.games.filter(
         (game): game is Game & { bggId: number } => game.bggId !== null,
+      );
+      const requestedGames = new Map(
+        bggGames.map((game) => [
+          game.id,
+          { bggId: game.bggId, state: bggStateIdentity(game), name: game.name },
+        ]),
       );
 
       let refreshed = 0;
@@ -581,19 +613,43 @@ export function createGameService(deps: GameServiceDeps): GameService {
       }
 
       for (const game of bggGames) {
-        const result = bggResults.get(game.bggId);
-        if (result) {
-          applyBggResult(game, result, logger, true);
-          game.updatedAt = now();
-          refreshed++;
-        } else {
+        if (!bggResults.has(game.bggId)) {
           errors.push(`No BGG data returned for "${game.name}" (BGG ID ${game.bggId})`);
         }
       }
 
-      if (refreshed > 0) {
-        collection.updatedAt = now();
-        await storageService.saveCollection(collection);
+      if (bggResults.size > 0) {
+        const outcome = await collectionMutationService.mutate(
+          {
+            operation: "game.bgg.refresh-all",
+            trigger: "owner",
+            gameIds: bggGames.map((game) => game.id),
+          },
+          (latest) => {
+            const changedAt = now();
+            let accepted = 0;
+            for (const [gameId, requested] of requestedGames) {
+              const game = latest.games.find((candidate) => candidate.id === gameId);
+              if (!game) {
+                errors.push(`Game removed during BGG refresh: "${requested.name}"`);
+                continue;
+              }
+              if (game.bggId !== requested.bggId || bggStateIdentity(game) !== requested.state) {
+                errors.push(`Newer BGG data was accepted during refresh for "${game.name}"`);
+                continue;
+              }
+              const result = bggResults.get(requested.bggId);
+              if (!result) continue;
+              applyBggResult(game, result, logger, true);
+              game.updatedAt = changedAt;
+              accepted++;
+            }
+            if (accepted === 0) return { changed: false, value: 0 };
+            latest.updatedAt = changedAt;
+            return { changed: true, value: accepted };
+          },
+        );
+        refreshed = outcome.value;
       }
 
       return { refreshed, errors };
@@ -630,6 +686,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
       let imported = 0;
       let skipped = 0;
       const errors: string[] = [];
+      const candidates: Game[] = [];
       const total = collectionItems.length;
 
       const newItems = collectionItems.filter((item) => !existingBggIds.has(item.bggId));
@@ -752,7 +809,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
                 updatedAt: createdAt,
               };
 
-              collection.games.push(game);
+              candidates.push(game);
               logger.log("imported BGG result", {
                 gameId: game.id,
                 bggId,
@@ -785,8 +842,33 @@ export function createGameService(deps: GameServiceDeps): GameService {
       }
 
       if (imported > 0) {
-        collection.updatedAt = now();
-        await storageService.saveCollection(collection);
+        const fetched = imported;
+        const outcome = await collectionMutationService.mutate(
+          {
+            operation: "game.import",
+            trigger: "bgg-collection",
+            gameIds: candidates.map((game) => game.id),
+          },
+          (latest) => {
+            const existingIds = new Set(
+              latest.games
+                .filter((game): game is Game & { bggId: number } => game.bggId !== null)
+                .map((game) => game.bggId),
+            );
+            const accepted: Array<Game & { bggId: number }> = [];
+            for (const game of candidates) {
+              if (game.bggId === null || existingIds.has(game.bggId)) continue;
+              existingIds.add(game.bggId);
+              accepted.push(game as Game & { bggId: number });
+            }
+            if (accepted.length === 0) return { changed: false, value: 0 };
+            latest.games.push(...accepted.map((game) => structuredClone(game)));
+            latest.updatedAt = now();
+            return { changed: true, value: accepted.length };
+          },
+        );
+        imported = outcome.value;
+        skipped += fetched - imported;
       }
       logger.log(`complete: ${imported} imported, ${skipped} skipped, ${errors.length} errors`);
 

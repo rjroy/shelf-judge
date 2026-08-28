@@ -11,7 +11,11 @@ import {
   type GameWithPurchaseUtilization,
   type GameWithScore,
 } from "@shelf-judge/shared";
-import type { StorageService } from "./storage-service.js";
+import type { CollectionPersistence, StorageService } from "./storage-service.js";
+import {
+  collectionMutationServiceFor,
+  type CollectionMutationService,
+} from "./collection-mutation-service.js";
 import { createLogger, type Logger } from "./logger.js";
 
 export interface PurchaseUtilizationService {
@@ -40,11 +44,19 @@ export class PurchaseUtilizationValidationError extends Error {
   }
 }
 
-export interface PurchaseUtilizationServiceDeps {
-  storageService: StorageService;
+export type PurchaseUtilizationServiceDeps = {
   now?: () => string;
   logger?: Logger;
-}
+} & (
+  | {
+      storageService: Pick<StorageService, "loadCollection">;
+      collectionMutationService: CollectionMutationService;
+    }
+  | {
+      storageService: Pick<StorageService, "loadCollection"> & CollectionPersistence;
+      collectionMutationService?: undefined;
+    }
+);
 
 function acquisitionMatches(
   game: Game,
@@ -71,19 +83,10 @@ export function createPurchaseUtilizationService(
   deps: PurchaseUtilizationServiceDeps,
 ): PurchaseUtilizationService {
   const { storageService } = deps;
+  const collectionMutationService =
+    deps.collectionMutationService ?? collectionMutationServiceFor(storageService);
   const now = deps.now ?? (() => new Date().toISOString());
   const logger = deps.logger ?? createLogger("purchase-utilization");
-  let mutationQueue: Promise<void> = Promise.resolve();
-
-  function serializeMutation<Result>(mutation: () => Promise<Result>): Promise<Result> {
-    const result = mutationQueue.then(mutation, mutation);
-    mutationQueue = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    return result;
-  }
-
   return {
     async getEntertainmentBenchmark() {
       return (await storageService.loadCollection()).entertainmentBenchmark;
@@ -105,111 +108,133 @@ export function createPurchaseUtilizationService(
           parsed.error.issues,
         );
       }
-      return serializeMutation(async () => {
-        const current = await storageService.loadCollection();
-        const transition = {
-          collectionId: current.id,
-          previousState: benchmarkState(current.entertainmentBenchmark),
-          nextState: "configured" as const,
-        };
-        logger.log("benchmark mutation attempt", transition);
+      let persistenceContext:
+        | {
+            collectionId: string;
+            previousState: "unknown" | "configured" | "invalid";
+            nextState: "configured";
+            changedFields: string[];
+          }
+        | undefined;
+      try {
+        const result = await collectionMutationService.mutate(
+          { operation: "purchase.benchmark.set", trigger: "owner" },
+          (current) => {
+            const transition = {
+              collectionId: current.id,
+              previousState: benchmarkState(current.entertainmentBenchmark),
+              nextState: "configured" as const,
+            };
+            logger.log("benchmark mutation attempt", transition);
 
-        const hundredths = parseAmountInput(parsed.data.amount);
-        if (
-          current.entertainmentBenchmark?.state === "configured" &&
-          current.entertainmentBenchmark.amount.hundredths === hundredths
-        ) {
-          logger.log("benchmark mutation completed", {
-            ...transition,
-            changed: false,
-            changedFields: [],
-            outcome: "unchanged",
+            const hundredths = parseAmountInput(parsed.data.amount);
+            if (
+              current.entertainmentBenchmark?.state === "configured" &&
+              current.entertainmentBenchmark.amount.hundredths === hundredths
+            ) {
+              logger.log("benchmark mutation completed", {
+                ...transition,
+                changed: false,
+                changedFields: [],
+                outcome: "unchanged",
+              });
+              return { changed: false, value: current.entertainmentBenchmark };
+            }
+
+            const changedAt = now();
+            const changedFields = ["entertainmentBenchmark", "updatedAt"];
+            persistenceContext = { ...transition, changedFields };
+            logger.log("benchmark persistence attempt", persistenceContext);
+            current.entertainmentBenchmark = {
+              state: "configured",
+              amount: { hundredths, source: "manual", confirmedAt: changedAt },
+            };
+            current.updatedAt = changedAt;
+            return { changed: true, value: current.entertainmentBenchmark };
+          },
+        );
+        if (result.changed && persistenceContext) {
+          logger.log("benchmark persistence completed", {
+            ...persistenceContext,
+            outcome: "persisted",
           });
-          return current.entertainmentBenchmark;
+          logger.log("benchmark mutation completed", {
+            ...persistenceContext,
+            changed: true,
+            outcome: "changed",
+          });
         }
-
-        const next = structuredClone(current);
-        const changedAt = now();
-        const changedFields = ["entertainmentBenchmark", "updatedAt"];
-        next.entertainmentBenchmark = {
-          state: "configured",
-          amount: { hundredths, source: "manual", confirmedAt: changedAt },
-        };
-        next.updatedAt = changedAt;
-        logger.log("benchmark persistence attempt", { ...transition, changedFields });
-        try {
-          await storageService.saveCollection(next);
-        } catch (error) {
+        return result.value;
+      } catch (error) {
+        if (persistenceContext) {
           logger.error("benchmark persistence failed", {
-            ...transition,
-            changedFields,
+            ...persistenceContext,
             outcome: "failed",
           });
-          throw error;
         }
-        logger.log("benchmark persistence completed", {
-          ...transition,
-          changedFields,
-          outcome: "persisted",
-        });
-        logger.log("benchmark mutation completed", {
-          ...transition,
-          changed: true,
-          changedFields,
-          outcome: "changed",
-        });
-        return next.entertainmentBenchmark;
-      });
+        throw error;
+      }
     },
 
     async clearEntertainmentBenchmark() {
-      return serializeMutation(async () => {
-        const current = await storageService.loadCollection();
-        const transition = {
-          collectionId: current.id,
-          previousState: benchmarkState(current.entertainmentBenchmark),
-          nextState: "unknown" as const,
-        };
-        logger.log("benchmark mutation attempt", transition);
-        if (current.entertainmentBenchmark === null) {
-          logger.log("benchmark mutation completed", {
-            ...transition,
-            changed: false,
-            changedFields: [],
-            outcome: "unchanged",
-          });
-          return null;
-        }
+      let persistenceContext:
+        | {
+            collectionId: string;
+            previousState: "unknown" | "configured" | "invalid";
+            nextState: "unknown";
+            changedFields: string[];
+          }
+        | undefined;
+      try {
+        const result = await collectionMutationService.mutate(
+          { operation: "purchase.benchmark.clear", trigger: "owner" },
+          (current) => {
+            const transition = {
+              collectionId: current.id,
+              previousState: benchmarkState(current.entertainmentBenchmark),
+              nextState: "unknown" as const,
+            };
+            logger.log("benchmark mutation attempt", transition);
+            if (current.entertainmentBenchmark === null) {
+              logger.log("benchmark mutation completed", {
+                ...transition,
+                changed: false,
+                changedFields: [],
+                outcome: "unchanged",
+              });
+              return { changed: false, value: null };
+            }
 
-        const next = structuredClone(current);
-        const changedAt = now();
-        const changedFields = ["entertainmentBenchmark", "updatedAt"];
-        next.entertainmentBenchmark = null;
-        next.updatedAt = changedAt;
-        logger.log("benchmark persistence attempt", { ...transition, changedFields });
-        try {
-          await storageService.saveCollection(next);
-        } catch (error) {
+            const changedAt = now();
+            const changedFields = ["entertainmentBenchmark", "updatedAt"];
+            persistenceContext = { ...transition, changedFields };
+            logger.log("benchmark persistence attempt", persistenceContext);
+            current.entertainmentBenchmark = null;
+            current.updatedAt = changedAt;
+            return { changed: true, value: null };
+          },
+        );
+        if (result.changed && persistenceContext) {
+          logger.log("benchmark persistence completed", {
+            ...persistenceContext,
+            outcome: "persisted",
+          });
+          logger.log("benchmark mutation completed", {
+            ...persistenceContext,
+            changed: true,
+            outcome: "changed",
+          });
+        }
+        return result.value;
+      } catch (error) {
+        if (persistenceContext) {
           logger.error("benchmark persistence failed", {
-            ...transition,
-            changedFields,
+            ...persistenceContext,
             outcome: "failed",
           });
-          throw error;
         }
-        logger.log("benchmark persistence completed", {
-          ...transition,
-          changedFields,
-          outcome: "persisted",
-        });
-        logger.log("benchmark mutation completed", {
-          ...transition,
-          changed: true,
-          changedFields,
-          outcome: "changed",
-        });
-        return null;
-      });
+        throw error;
+      }
     },
 
     async setAcquisition(gameId, input) {
@@ -229,88 +254,100 @@ export function createPurchaseUtilizationService(
           parsed.error.issues,
         );
       }
-      return serializeMutation(async () => {
-        const current = await storageService.loadCollection();
-        const currentGame = current.games.find((game) => game.id === gameId);
-        if (!currentGame) {
-          logger.warn("acquisition mutation rejected", {
-            collectionId: current.id,
-            gameId,
-            previousState: "unavailable",
-            nextState: parsed.data.state,
-            changedFields: ["acquisition"],
-            outcome: "rejected",
-            validationCode: "game_not_found",
-          });
-          throw new NotFoundError(`Game not found: ${gameId}`);
-        }
-        const transition = {
-          collectionId: current.id,
-          gameId,
-          previousState: currentGame.acquisition.state,
-          nextState: parsed.data.state,
-        };
-        logger.log("acquisition mutation attempt", {
-          ...transition,
-          changedFields: ["acquisition"],
-        });
+      let persistenceContext:
+        | {
+            collectionId: string;
+            gameId: string;
+            previousState: string;
+            nextState: string;
+            changedFields: string[];
+          }
+        | undefined;
+      try {
+        const result = await collectionMutationService.mutate(
+          { operation: "purchase.acquisition.set", trigger: "owner", gameIds: [gameId] },
+          (current) => {
+            const currentGame = current.games.find((game) => game.id === gameId);
+            if (!currentGame) {
+              logger.warn("acquisition mutation rejected", {
+                collectionId: current.id,
+                gameId,
+                previousState: "unavailable",
+                nextState: parsed.data.state,
+                changedFields: ["acquisition"],
+                outcome: "rejected",
+                validationCode: "game_not_found",
+              });
+              throw new NotFoundError(`Game not found: ${gameId}`);
+            }
+            const transition = {
+              collectionId: current.id,
+              gameId,
+              previousState: currentGame.acquisition.state,
+              nextState: parsed.data.state,
+            };
+            logger.log("acquisition mutation attempt", {
+              ...transition,
+              changedFields: ["acquisition"],
+            });
 
-        const purchaseHundredths =
-          parsed.data.state === "purchase" ? parseAmountInput(parsed.data.amount) : null;
-        if (acquisitionMatches(currentGame, parsed.data, purchaseHundredths)) {
+            const purchaseHundredths =
+              parsed.data.state === "purchase" ? parseAmountInput(parsed.data.amount) : null;
+            if (acquisitionMatches(currentGame, parsed.data, purchaseHundredths)) {
+              logger.log("acquisition mutation completed", {
+                ...transition,
+                changed: false,
+                changedFields: [],
+                outcome: "unchanged",
+              });
+              return { changed: false, value: currentGame };
+            }
+
+            const game = current.games.find((candidate) => candidate.id === gameId);
+            if (!game) throw new NotFoundError(`Game not found: ${gameId}`);
+            const changedAt = now();
+            if (parsed.data.state === "purchase") {
+              if (purchaseHundredths === null) throw new Error("Purchase amount is required");
+              game.acquisition = {
+                state: "purchase",
+                amount: {
+                  hundredths: purchaseHundredths,
+                  source: "manual",
+                  confirmedAt: changedAt,
+                },
+              };
+            } else {
+              game.acquisition = { state: parsed.data.state };
+            }
+            game.updatedAt = changedAt;
+            current.updatedAt = changedAt;
+            const changedFields = ["acquisition", "game.updatedAt", "collection.updatedAt"];
+            persistenceContext = { ...transition, changedFields };
+            logger.log("acquisition persistence attempt", persistenceContext);
+            return { changed: true, value: game };
+          },
+        );
+        if (result.changed && persistenceContext) {
+          logger.log("acquisition persistence completed", {
+            ...persistenceContext,
+            outcome: "persisted",
+          });
           logger.log("acquisition mutation completed", {
-            ...transition,
-            changed: false,
-            changedFields: [],
-            outcome: "unchanged",
+            ...persistenceContext,
+            changed: true,
+            outcome: "changed",
           });
-          return currentGame;
         }
-
-        const next = structuredClone(current);
-        const game = next.games.find((candidate) => candidate.id === gameId);
-        if (!game) throw new NotFoundError(`Game not found: ${gameId}`);
-        const changedAt = now();
-        if (parsed.data.state === "purchase") {
-          if (purchaseHundredths === null) throw new Error("Purchase amount is required");
-          game.acquisition = {
-            state: "purchase",
-            amount: {
-              hundredths: purchaseHundredths,
-              source: "manual",
-              confirmedAt: changedAt,
-            },
-          };
-        } else {
-          game.acquisition = { state: parsed.data.state };
-        }
-        game.updatedAt = changedAt;
-        next.updatedAt = changedAt;
-        const changedFields = ["acquisition", "game.updatedAt", "collection.updatedAt"];
-        logger.log("acquisition persistence attempt", { ...transition, changedFields });
-        try {
-          await storageService.saveCollection(next);
-        } catch (error) {
+        return result.value;
+      } catch (error) {
+        if (persistenceContext) {
           logger.error("acquisition persistence failed", {
-            ...transition,
-            changedFields,
+            ...persistenceContext,
             outcome: "failed",
           });
-          throw error;
         }
-        logger.log("acquisition persistence completed", {
-          ...transition,
-          changedFields,
-          outcome: "persisted",
-        });
-        logger.log("acquisition mutation completed", {
-          ...transition,
-          changed: true,
-          changedFields,
-          outcome: "changed",
-        });
-        return game;
-      });
+        throw error;
+      }
     },
 
     enrichGames(games, entertainmentBenchmark, responseKind) {
