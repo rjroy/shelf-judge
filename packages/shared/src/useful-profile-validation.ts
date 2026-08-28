@@ -318,7 +318,7 @@ const StaleVersionConflictSchema = z
     }
   });
 
-const IntentionMutationErrorSchema = z.union([
+export const IntentionMutationErrorSchema = z.union([
   z
     .object({
       code: z.literal("validation"),

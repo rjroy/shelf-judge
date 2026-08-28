@@ -38,6 +38,7 @@ import {
   IntentionCommandSchema,
   AcceptedIntentionMutationSchema,
   IntentionMutationResultSchema,
+  IntentionMutationErrorSchema,
   IntentionCommandReceiptSchema,
   FutureUsefulProfileSourceRecordsSchema,
   ProfileEntityClassResultSchema,
@@ -59,6 +60,7 @@ export {
   IntentionCommandSchema,
   AcceptedIntentionMutationSchema,
   IntentionMutationResultSchema,
+  IntentionMutationErrorSchema,
   IntentionCommandReceiptSchema,
   ProfileEntityClassResultSchema,
   PlayIntentionAttentionItemSchema,
@@ -2667,6 +2669,15 @@ export const ManualPlayCorrectionResultSchema = z
       }
     }
   });
+
+export const ManualPlayCorrectionResponseSchema = z.union([
+  ManualPlayCorrectionResultSchema,
+  IntentionMutationErrorSchema.refine(
+    (error) => error.code === "validation" || error.code === "persistence-failure",
+    { message: "Unsupported manual play-correction error" },
+  ),
+  z.object({ code: z.literal("game_not_found"), error: z.string().min(1) }).strict(),
+]);
 
 export const OwnershipMutationResultSchema = z
   .object({

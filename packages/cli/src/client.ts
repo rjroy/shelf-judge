@@ -1,7 +1,7 @@
 // Unix socket HTTP client for communicating with the shelf-judge daemon.
 
-import type { CollectionProfile } from "@shelf-judge/shared";
-import { CollectionProfileSchema, resolveSocketPath } from "@shelf-judge/shared";
+import type { FutureUsefulProfileResult } from "@shelf-judge/shared";
+import { FutureUsefulProfileSchema, resolveSocketPath } from "@shelf-judge/shared";
 
 export interface DaemonClientOptions {
   socketPath?: string;
@@ -21,15 +21,10 @@ export interface DaemonClient {
   patch<T = unknown>(path: string, body?: unknown): Promise<DaemonResponse<T>>;
   del<T = unknown>(path: string, body?: unknown): Promise<DaemonResponse<T>>;
   postSSE(path: string, body: unknown, onEvent: (event: SSEEvent) => void): Promise<void>;
-  getProfile(): Promise<CollectionProfile>;
-  generateNarration(): Promise<ProfileNarrationResponse>;
+  getProfile(): Promise<FutureUsefulProfileResult>;
   isReachable(): Promise<boolean>;
   socketPath: string;
 }
-
-export type ProfileNarrationResponse =
-  | { ok: true; status: number; data: CollectionProfile }
-  | { ok: false; status: number; data: unknown };
 
 export interface SSEEvent {
   event: string;
@@ -139,20 +134,12 @@ export function createDaemonClient(options: DaemonClientOptions = {}): DaemonCli
     }
   }
 
-  async function getProfile(): Promise<CollectionProfile> {
+  async function getProfile(): Promise<FutureUsefulProfileResult> {
     const res = await request<unknown>("GET", "/api/profile");
     if (!res.ok) throw new Error(`Failed to get profile: ${res.status}`);
-    const parsed = CollectionProfileSchema.safeParse(res.data);
+    const parsed = FutureUsefulProfileSchema.safeParse(res.data);
     if (!parsed.success) throw new Error(`Invalid profile response: ${parsed.error.message}`);
     return parsed.data;
-  }
-
-  async function generateNarration(): Promise<ProfileNarrationResponse> {
-    const res = await request<unknown>("POST", "/api/profile/narrate");
-    if (!res.ok) return { ok: false, status: res.status, data: res.data };
-    const parsed = CollectionProfileSchema.safeParse(res.data);
-    if (!parsed.success) throw new Error(`Invalid profile response: ${parsed.error.message}`);
-    return { ...res, ok: true, data: parsed.data };
   }
 
   return {
@@ -163,7 +150,6 @@ export function createDaemonClient(options: DaemonClientOptions = {}): DaemonCli
     del: <T>(path: string, body?: unknown) => request<T>("DELETE", path, body),
     postSSE,
     getProfile,
-    generateNarration,
     isReachable,
     socketPath,
   };

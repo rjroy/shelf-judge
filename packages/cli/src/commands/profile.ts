@@ -5,29 +5,11 @@ import { printOutput } from "../output.js";
 
 export async function profileCommand(
   client: DaemonClient,
-  _args: string[],
+  args: string[],
   opts: OutputOptions,
 ): Promise<string> {
+  if (args.length > 0) throw new Error("Usage: shelf-judge profile");
   const profile = await client.getProfile();
   // Profile is complex nested data; always render as JSON regardless of opts.json.
   return printOutput(profile, { ...opts, json: true });
-}
-
-export async function profileNarrateCommand(
-  client: DaemonClient,
-  _args: string[],
-  opts: OutputOptions,
-): Promise<string> {
-  const res = await client.generateNarration();
-  if (!res.ok) {
-    const message =
-      typeof res.data === "object" &&
-      res.data !== null &&
-      "error" in res.data &&
-      typeof res.data.error === "string"
-        ? res.data.error
-        : `Narration failed: ${res.status}`;
-    throw new Error(message);
-  }
-  return printOutput(res.data, { ...opts, json: true });
 }

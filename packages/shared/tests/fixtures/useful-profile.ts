@@ -1,5 +1,6 @@
 import type {
   FutureUsefulCollectionProfile,
+  FutureUsefulProfileResult,
   PlayIntention,
   ProfileEntityClassResult,
 } from "@shelf-judge/shared";
@@ -94,7 +95,7 @@ export const mechanicClassFixture: ProfileEntityClassResult = {
   },
 };
 
-const emptyClass = (entityClass: "designer" | "artist"): ProfileEntityClassResult => ({
+const emptyClass = (entityClass: "mechanic" | "designer" | "artist"): ProfileEntityClassResult => ({
   entityClass,
   result: "evaluated-empty",
   metadataReadiness: readiness,
@@ -158,3 +159,138 @@ export const usefulProfileFixture: FutureUsefulCollectionProfile = {
   },
   computedAt: "2026-08-27T12:00:00.000Z",
 };
+
+export const supportedUsefulProfileFixture: FutureUsefulCollectionProfile = {
+  ...structuredClone(usefulProfileFixture),
+  attention: { state: "nothing-to-decide", items: [] },
+};
+
+export const limitedUsefulProfileFixture: FutureUsefulCollectionProfile = (() => {
+  const profile = structuredClone(supportedUsefulProfileFixture);
+  const mechanic = profile.identity.classes.mechanic;
+  mechanic.result = "limited";
+  mechanic.entities = [mechanic.entities[1]];
+  mechanic.associatedGameCount = 1;
+  mechanic.overviewEntityIds = [];
+  mechanic.orderings = { rating: [102], support: [102], name: [102] };
+  return profile;
+})();
+
+export const mixedReadinessUsefulProfileFixture: FutureUsefulCollectionProfile = (() => {
+  const profile = structuredClone(supportedUsefulProfileFixture);
+  const designer = profile.identity.classes.designer;
+  designer.metadataReadiness = {
+    state: "partial",
+    ownedGameCount: 4,
+    completeGameCount: 3,
+    refreshNeededGameCount: 1,
+    unrefreshableGameCount: 0,
+  };
+  designer.exclusions = [
+    {
+      gameId: "game-4",
+      gameName: "Heat",
+      reason: "refresh-needed-metadata",
+      hasEntityAssociation: false,
+      correctionDestination: { operationId: "shelf.game.bgg.refresh" },
+    },
+  ];
+  return profile;
+})();
+
+export const activeUsefulProfileFixture: FutureUsefulCollectionProfile =
+  structuredClone(usefulProfileFixture);
+
+export const warningUsefulProfileFixture: FutureUsefulCollectionProfile = (() => {
+  const profile = structuredClone(activeUsefulProfileFixture);
+  profile.attention.items[0].currentPlayEvidence = {
+    status: "stale",
+    playCount: 0,
+    source: "bgg-collection",
+    observedAt: "2026-08-27T10:00:00.000Z",
+    warning: "A newer BGG check did not provide a valid play count.",
+  };
+  return profile;
+})();
+
+export const nothingToDecideUsefulProfileFixture: FutureUsefulCollectionProfile = {
+  status: "available",
+  identity: {
+    collectionState: "populated",
+    classes: {
+      mechanic: emptyClass("mechanic"),
+      designer: emptyClass("designer"),
+      artist: emptyClass("artist"),
+    },
+    axisDistributions: [],
+  },
+  attention: { state: "nothing-to-decide", items: [] },
+  computedAt: "2026-08-27T12:00:00.000Z",
+};
+
+const emptyCollectionClass = (
+  entityClass: "mechanic" | "designer" | "artist",
+): ProfileEntityClassResult => ({
+  entityClass,
+  result: "not-evaluated",
+  metadataReadiness: {
+    state: "complete",
+    ownedGameCount: 0,
+    completeGameCount: 0,
+    refreshNeededGameCount: 0,
+    unrefreshableGameCount: 0,
+  },
+  associatedGameCount: 0,
+  comparator: { gameCount: 0, meanCurrentFitness: null, games: [] },
+  exclusions: [],
+  refreshWarnings: [],
+  entities: [],
+  overviewEntityIds: [],
+  orderings: { rating: [], support: [], name: [] },
+});
+
+export const emptyUsefulProfileFixture: FutureUsefulCollectionProfile = {
+  status: "available",
+  identity: {
+    collectionState: "empty",
+    classes: {
+      mechanic: emptyCollectionClass("mechanic"),
+      designer: emptyCollectionClass("designer"),
+      artist: emptyCollectionClass("artist"),
+    },
+    axisDistributions: [],
+  },
+  attention: { state: "empty-collection", items: [] },
+  computedAt: "2026-08-27T12:00:00.000Z",
+};
+
+export const unavailableUsefulProfileFixture: FutureUsefulProfileResult = {
+  status: "unavailable",
+  error: { kind: "transport", message: "Daemon unavailable" },
+  retryDestination: { operationId: "shelf.profile.get" },
+};
+
+export const canonicalUsefulProfileFixtures: ReadonlyArray<
+  readonly [
+    (
+      | "supported"
+      | "limited"
+      | "mixed-readiness"
+      | "active"
+      | "warning"
+      | "nothing-to-decide"
+      | "empty"
+      | "unavailable"
+    ),
+    FutureUsefulProfileResult,
+  ]
+> = [
+  ["supported", supportedUsefulProfileFixture],
+  ["limited", limitedUsefulProfileFixture],
+  ["mixed-readiness", mixedReadinessUsefulProfileFixture],
+  ["active", activeUsefulProfileFixture],
+  ["warning", warningUsefulProfileFixture],
+  ["nothing-to-decide", nothingToDecideUsefulProfileFixture],
+  ["empty", emptyUsefulProfileFixture],
+  ["unavailable", unavailableUsefulProfileFixture],
+];

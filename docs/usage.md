@@ -219,6 +219,17 @@ Tournament scores appear on game detail pages and are visible alongside fitness 
 
 The Profile page answers two questions: what the collection reveals about your preferences, and what explicit play intentions still need a decision. The daemon operation is `shelf.profile.get` (`GET /api/profile`). It returns the complete profile used by the overview and its entity and axis drilldowns.
 
+The CLI returns that same complete validated result with `shelf-judge profile`. Explicit intentions and manual play evidence use these commands:
+
+```text
+shelf-judge game intention set <game-id> <first-play|replay> [--command-id <uuid>]
+shelf-judge game intention complete <game-id> <intention-id> --expected-version <n> [--command-id <uuid>]
+shelf-judge game intention retire <game-id> <intention-id> --expected-version <n> [--command-id <uuid>]
+shelf-judge game plays set <game-id> <count>
+```
+
+When an intention command omits `--command-id`, the CLI prints the generated ID to standard error before sending the request. Reuse that ID with the same command after a lost response. A stale expected version is not retried automatically; refresh and review the current intention first. Owner-confirmed completion resolves the intention without changing recorded play count.
+
 The identity section uses the following data:
 
 - **Axis rating distributions** use effective ratings from each enabled axis's fitness breakdown. They show a histogram, mean, median, population standard deviation, and range. An axis with no usable values remains visible with a zero count.

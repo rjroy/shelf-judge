@@ -123,3 +123,59 @@ describe("purchase utilization argument parsing", () => {
     },
   );
 });
+
+describe("intention and play command parsing", () => {
+  test.each([
+    [
+      ["game", "intention", "set", "game-1", "replay", "--command-id", "command-1"],
+      "game intention set",
+      ["game-1", "replay", "--command-id", "command-1"],
+    ],
+    [
+      ["game", "intention", "complete", "game-1", "intention-1", "--expected-version", "2"],
+      "game intention complete",
+      ["game-1", "intention-1", "--expected-version", "2"],
+    ],
+    [
+      ["game", "intention", "retire", "game-1", "intention-1", "--expected-version", "1"],
+      "game intention retire",
+      ["game-1", "intention-1", "--expected-version", "1"],
+    ],
+    [["game", "plays", "set", "game-1", "4", "--json"], "game plays set", ["game-1", "4"]],
+  ] as Array<[string[], string, string[]]>)(
+    "matches the three-token command without consuming local flags",
+    (tokens, commandPath, args) => {
+      expect(parseArgs(["bun", "shelf-judge", ...tokens])).toMatchObject({
+        commandPath,
+        positional: args,
+        json: tokens.includes("--json"),
+      });
+    },
+  );
+
+  test("does not dispatch removed profile narration", () => {
+    expect(parseArgs(["bun", "shelf-judge", "profile", "narrate"])).toMatchObject({
+      commandPath: "profile",
+      positional: ["narrate"],
+    });
+  });
+
+  test("preserves unrelated recognized flags so command validation rejects them", () => {
+    expect(
+      parseArgs([
+        "bun",
+        "shelf-judge",
+        "game",
+        "intention",
+        "set",
+        "game-1",
+        "first-play",
+        "--name",
+        "ignored",
+      ]),
+    ).toMatchObject({
+      commandPath: "game intention set",
+      positional: ["game-1", "first-play", "--name", "ignored"],
+    });
+  });
+});

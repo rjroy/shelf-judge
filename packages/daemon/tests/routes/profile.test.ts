@@ -1,8 +1,26 @@
 import { describe, expect, test } from "bun:test";
-import { FutureUsefulProfileSchema } from "@shelf-judge/shared";
+import { FutureUsefulProfileSchema, type FutureUsefulProfileResult } from "@shelf-judge/shared";
+import { canonicalUsefulProfileFixtures } from "../../../shared/tests/fixtures/useful-profile.js";
+import { createProfileRoutes } from "../../src/routes/profile.js";
 import { createTestApp, jsonRequest } from "../helpers/test-app.js";
 
 describe("profile routes", () => {
+  test.each(canonicalUsefulProfileFixtures)(
+    "passes through and contract-validates the canonical %s fixture",
+    async (_label, fixture) => {
+      const { routes } = createProfileRoutes({
+        profileService: { getProfile: () => Promise.resolve(structuredClone(fixture)) },
+      });
+      const response = await routes.request("/profile");
+      const parsed: FutureUsefulProfileResult = FutureUsefulProfileSchema.parse(
+        await response.json(),
+      );
+
+      expect(response.status).toBe(200);
+      expect(parsed).toEqual(fixture);
+    },
+  );
+
   test("GET /api/profile passes through the complete useful profile", async () => {
     const ctx = createTestApp();
     const response = await jsonRequest(ctx.app, "GET", "/api/profile");

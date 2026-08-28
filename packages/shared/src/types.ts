@@ -1081,6 +1081,11 @@ export type ManualPlayCorrectionResult =
       };
     };
 
+export type ManualPlayCorrectionResponse =
+  | ManualPlayCorrectionResult
+  | Extract<IntentionMutationError, { code: "validation" | "persistence-failure" }>
+  | { code: "game_not_found"; error: string };
+
 export interface OwnershipMutationResult {
   game: Game;
   linkedIntentionTransition: PlayIntention | null;

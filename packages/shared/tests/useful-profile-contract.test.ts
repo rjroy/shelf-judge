@@ -20,6 +20,7 @@ import {
 } from "../src/index";
 import {
   activeIntentionFixture,
+  canonicalUsefulProfileFixtures,
   mechanicClassFixture,
   usefulProfileFixture,
 } from "./fixtures/useful-profile";
@@ -724,6 +725,16 @@ describe("future useful-profile source contracts", () => {
 });
 
 describe("future useful-profile identity contract", () => {
+  test.each(canonicalUsefulProfileFixtures)(
+    "validates the canonical %s daemon result",
+    (_label, profile) => {
+      const parsed: FutureUsefulProfileResult = FutureUsefulProfileSchema.parse(
+        structuredClone(profile),
+      );
+      expect(parsed).toEqual(profile);
+    },
+  );
+
   test("reproduces supported, limited, comparator, veto, and ordering evidence", () => {
     for (const entityClass of ["mechanic", "designer", "artist"] as const) {
       expect(

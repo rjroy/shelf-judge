@@ -5,7 +5,13 @@ import type {
   GameWithPurchaseUtilization,
   OwnershipStatus,
 } from "@shelf-judge/shared";
-import { formatStoredAmount } from "@shelf-judge/shared";
+import {
+  formatStoredAmount,
+  IntentionCommandSchema,
+  IntentionMutationErrorSchema,
+  IntentionMutationResultSchema,
+  ManualPlayCorrectionResponseSchema,
+} from "@shelf-judge/shared";
 import type { OutputOptions } from "../output.js";
 import {
   formatDisplayScore,
@@ -14,6 +20,163 @@ import {
   formatScore,
   printOutput,
 } from "../output.js";
+import { StructuredCliError } from "../errors.js";
+
+interface IntentionCommandDependencies {
+  createCommandId?: () => string;
+  writeStderr?: (message: string) => void;
+}
+
+function parseFlags(
+  args: string[],
+  positionalCount: number,
+  allowedFlags: readonly string[],
+  usage: string,
+): { positional: string[]; flags: Map<string, string> } {
+  const positional = args.slice(0, positionalCount);
+  const rest = args.slice(positionalCount);
+  if (positional.length !== positionalCount || positional.some((value) => value.startsWith("--"))) {
+    throw new Error(usage);
+  }
+
+  const flags = new Map<string, string>();
+  for (let index = 0; index < rest.length; index += 2) {
+    const flag = rest[index];
+    const value = rest[index + 1];
+    if (
+      flag === undefined ||
+      value === undefined ||
+      !allowedFlags.includes(flag) ||
+      value.startsWith("--") ||
+      flags.has(flag)
+    ) {
+      throw new Error(usage);
+    }
+    flags.set(flag, value);
+  }
+  return { positional, flags };
+}
+
+function commandIdFor(
+  supplied: string | undefined,
+  dependencies: IntentionCommandDependencies,
+): string {
+  if (supplied !== undefined) return supplied;
+  const commandId = (dependencies.createCommandId ?? (() => crypto.randomUUID()))();
+  (dependencies.writeStderr ?? console.error)(`Command ID: ${commandId}`);
+  return commandId;
+}
+
+function renderIntentionResult(data: unknown, opts: OutputOptions): string {
+  const parsed = IntentionMutationResultSchema.safeParse(data);
+  if (!parsed.success) throw new Error(`Invalid intention response: ${parsed.error.message}`);
+  if (!parsed.data.ok) {
+    const guidance =
+      parsed.data.error.code === "stale-version"
+        ? "Refresh the current intention and review it before issuing a new command. Do not retry this stale version."
+        : undefined;
+    throw new StructuredCliError(
+      guidance === undefined ? parsed.data : { ...parsed.data, guidance },
+    );
+  }
+  return printOutput(parsed.data, { ...opts, json: true });
+}
+
+export async function gameIntentionSet(
+  client: DaemonClient,
+  args: string[],
+  opts: OutputOptions,
+  dependencies: IntentionCommandDependencies = {},
+): Promise<string> {
+  const usage =
+    "Usage: shelf-judge game intention set <game-id> <first-play|replay> [--command-id <uuid>]";
+  const { positional, flags } = parseFlags(args, 2, ["--command-id"], usage);
+  const [gameId, kind] = positional;
+  const suppliedCommandId = flags.get("--command-id");
+  const preliminary = IntentionCommandSchema.safeParse({
+    type: "create",
+    commandId: suppliedCommandId ?? "00000000-0000-4000-8000-000000000001",
+    gameId,
+    kind,
+    expectedActiveIntention: "absent",
+  });
+  if (!preliminary.success || preliminary.data.type !== "create") throw new Error(usage);
+  const command = {
+    ...preliminary.data,
+    commandId: commandIdFor(suppliedCommandId, dependencies),
+  };
+
+  const response = await client.post(`/api/games/${encodeURIComponent(gameId)}/intention`, {
+    commandId: command.commandId,
+    kind: command.kind,
+    expectedActiveIntention: command.expectedActiveIntention,
+  });
+  return renderIntentionResult(response.data, opts);
+}
+
+export async function gameIntentionResolve(
+  client: DaemonClient,
+  type: "complete" | "retire",
+  args: string[],
+  opts: OutputOptions,
+  dependencies: IntentionCommandDependencies = {},
+): Promise<string> {
+  const usage = `Usage: shelf-judge game intention ${type} <game-id> <intention-id> --expected-version <n> [--command-id <uuid>]`;
+  const { positional, flags } = parseFlags(args, 2, ["--expected-version", "--command-id"], usage);
+  const expectedVersionText = flags.get("--expected-version");
+  if (expectedVersionText === undefined || !/^[1-9]\d*$/.test(expectedVersionText)) {
+    throw new Error(usage);
+  }
+  const [gameId, intentionId] = positional;
+  const suppliedCommandId = flags.get("--command-id");
+  const preliminary = IntentionCommandSchema.safeParse({
+    type,
+    commandId: suppliedCommandId ?? "00000000-0000-4000-8000-000000000001",
+    gameId,
+    intentionId,
+    expectedVersion: Number(expectedVersionText),
+  });
+  if (!preliminary.success || preliminary.data.type === "create") throw new Error(usage);
+  const command = {
+    ...preliminary.data,
+    commandId: commandIdFor(suppliedCommandId, dependencies),
+  };
+
+  const response = await client.post(
+    `/api/games/${encodeURIComponent(gameId)}/intention/${encodeURIComponent(intentionId)}/${type}`,
+    { commandId: command.commandId, expectedVersion: command.expectedVersion },
+  );
+  return renderIntentionResult(response.data, opts);
+}
+
+export async function gamePlaysSet(
+  client: DaemonClient,
+  args: string[],
+  opts: OutputOptions,
+): Promise<string> {
+  const usage = "Usage: shelf-judge game plays set <game-id> <count>";
+  const [gameId, countText, ...extra] = args;
+  if (
+    gameId === undefined ||
+    countText === undefined ||
+    extra.length > 0 ||
+    !/^\d+$/.test(countText)
+  ) {
+    throw new Error(usage);
+  }
+  const playCount = Number(countText);
+  if (!Number.isSafeInteger(playCount)) throw new Error(usage);
+
+  const response = await client.put(`/api/games/${encodeURIComponent(gameId)}/plays`, {
+    playCount,
+  });
+  const parsed = ManualPlayCorrectionResponseSchema.safeParse(response.data);
+  if (!parsed.success) {
+    throw new Error(`Invalid play-correction response: ${parsed.error.message}`);
+  }
+  if (!("ok" in parsed.data) || !parsed.data.ok) throw new StructuredCliError(parsed.data);
+  return printOutput(parsed.data, { ...opts, json: true });
+}
 
 export async function gameSearch(
   client: DaemonClient,
@@ -302,7 +465,9 @@ export async function gameRemove(
   const { ok, status, data } = await client.del(`/api/games/${encodeURIComponent(id)}`);
 
   if (!ok) {
-    const err = data as { error: string };
+    const structured = IntentionMutationErrorSchema.safeParse(data);
+    if (structured.success) throw new StructuredCliError(structured.data);
+    const err = data as { error?: string };
     throw new Error(err.error ?? "Remove failed");
   }
 

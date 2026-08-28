@@ -1,156 +1,32 @@
-import { describe, test, expect } from "bun:test";
-import { profileCommand, profileNarrateCommand } from "../../src/commands/profile.js";
-import { createMockClient } from "../helpers/mock-client.js";
-import type { CollectionProfile } from "@shelf-judge/shared";
-import { CollectionProfileSchema } from "@shelf-judge/shared";
+import { describe, expect, test } from "bun:test";
+import type { FutureUsefulProfileResult } from "@shelf-judge/shared";
 import {
-  emptyInsightProfileFixture,
-  trustedInsightProfileFixture,
-} from "../../../shared/tests/fixtures/trusted-profile.js";
+  canonicalUsefulProfileFixtures,
+  usefulProfileFixture,
+} from "../../../shared/tests/fixtures/useful-profile.js";
+import { profileCommand } from "../../src/commands/profile.js";
+import { createMockClient } from "../helpers/mock-client.js";
 
-const sampleProfile: CollectionProfile = {
-  axisDistributions: [
-    {
-      axisId: "fun",
-      axisName: "Fun",
-      mean: 7.5,
-      median: 8,
-      standardDeviation: 1.2,
-      range: { min: 3, max: 10 },
-      ratedGameCount: 10,
-      histogram: [0, 0, 1, 0, 0, 1, 2, 3, 2, 1],
+function clientFor(profile: FutureUsefulProfileResult) {
+  return createMockClient({
+    routes: {
+      "GET /api/profile": { response: { ok: true, status: 200, data: profile } },
     },
-  ],
-  axisWeights: [{ axisId: "fun", axisName: "Fun", weight: 50, percentage: 100 }],
-  bggClustering: {
-    mechanics: [{ name: "Deck Building", count: 5, percentage: 50 }],
-    categories: [],
-    families: [],
-    subdomains: [],
-    weightRanges: [{ range: "Medium", min: 2.5, max: 3.0, count: 4, percentage: 40 }],
-  },
-  utilityCurves: [],
-  divergence: null,
-  outliers: [],
-  suggestions: [],
-  gameCount: 10,
-  ratedGameCount: 8,
-  computedAt: "2026-04-10T12:00:00.000Z",
-  narration: null,
-  narrationState: "empty",
-};
-
-const sampleProfileWithNarration: CollectionProfile = {
-  ...sampleProfile,
-  narration: {
-    summary: [],
-    surprises: [],
-    tensions: [],
-    abstention: "No reported trusted insights are available to narrate.",
-  },
-  narrationState: "fresh",
-};
-
-const client = createMockClient({
-  routes: {
-    "GET /api/profile": {
-      response: { ok: true, status: 200, data: sampleProfile },
-    },
-  },
-});
+  });
+}
 
 describe("profile", () => {
-  test("outputs valid JSON containing profile data", async () => {
-    const output = await profileCommand(client, [], { json: false });
-    const parsed = JSON.parse(output) as CollectionProfile;
-    expect(parsed.gameCount).toBe(10);
-    expect(parsed.ratedGameCount).toBe(8);
-    expect(parsed.axisDistributions).toHaveLength(1);
-    expect(parsed.axisDistributions[0].axisName).toBe("Fun");
-    expect(parsed.computedAt).toBe("2026-04-10T12:00:00.000Z");
-  });
+  test.each(canonicalUsefulProfileFixtures)(
+    "JSON deep-equals the complete canonical %s result",
+    async (_label, profile) => {
+      const output = await profileCommand(clientFor(profile), [], { json: false });
+      expect(JSON.parse(output)).toEqual(profile);
+    },
+  );
 
-  test("outputs valid JSON when --json flag is passed", async () => {
-    const output = await profileCommand(client, [], { json: true });
-    const parsed = JSON.parse(output) as CollectionProfile;
-    expect(parsed.gameCount).toBe(10);
-  });
-
-  test("includes all profile sections", async () => {
-    const output = await profileCommand(client, [], { json: false });
-    const parsed = JSON.parse(output) as CollectionProfile;
-    expect(parsed.bggClustering.mechanics).toHaveLength(1);
-    expect(parsed.divergence).toBeNull();
-    expect(parsed.outliers).toHaveLength(0);
-    expect(parsed.suggestions).toHaveLength(0);
-  });
-
-  test("preserves every nested trusted insight state exactly", async () => {
-    const trustedClient = createMockClient({
-      routes: {
-        "GET /api/profile": {
-          response: { ok: true, status: 200, data: trustedInsightProfileFixture },
-        },
-      },
-    });
-
-    const output = await profileCommand(trustedClient, [], { json: false });
-    const parsed: CollectionProfile = CollectionProfileSchema.parse(JSON.parse(output));
-
-    expect(parsed).toEqual(trustedInsightProfileFixture);
-    expect(parsed.divergence?.map(({ status }) => status)).toEqual(["reported", "insufficient"]);
-    expect(parsed.outliers.map(({ status }) => status)).toEqual(["reported", "insufficient"]);
-    expect(parsed.suggestions.map(({ status }) => status)).toEqual([
-      "reported",
-      "insufficient",
-      "suppressed",
-      "retired",
-    ]);
-  });
-
-  test("preserves an explicitly empty insight family", async () => {
-    const emptyClient = createMockClient({
-      routes: {
-        "GET /api/profile": {
-          response: { ok: true, status: 200, data: emptyInsightProfileFixture },
-        },
-      },
-    });
-
-    const output = await profileCommand(emptyClient, [], { json: true });
-    const parsed: CollectionProfile = CollectionProfileSchema.parse(JSON.parse(output));
-    expect(parsed).toEqual(emptyInsightProfileFixture);
-    expect(parsed.divergence).toEqual([]);
-    expect(parsed.outliers).toEqual([]);
-    expect(parsed.suggestions).toEqual([]);
-    expect(parsed.gameCount).toBe(6);
-  });
-});
-
-describe("profile narrate", () => {
-  test("returns profile with narration on success", async () => {
-    const narrationClient = createMockClient({
-      routes: {
-        "POST /api/profile/narrate": {
-          response: { ok: true, status: 200, data: sampleProfileWithNarration },
-        },
-      },
-    });
-    const output = await profileNarrateCommand(narrationClient, [], { json: false });
-    const parsed = JSON.parse(output) as CollectionProfile;
-    expect(parsed.narration).not.toBeNull();
-    expect(parsed.narration!.abstention).toContain("No reported trusted insights");
-    expect(parsed.narrationState).toBe("fresh");
-  });
-
-  test("throws on daemon error", () => {
-    const errorClient = createMockClient({
-      routes: {
-        "POST /api/profile/narrate": {
-          response: { ok: false, status: 502, data: { error: "SDK crashed" } },
-        },
-      },
-    });
-    expect(profileNarrateCommand(errorClient, [], { json: false })).rejects.toThrow("SDK crashed");
+  test("rejects extra arguments", () => {
+    expect(
+      profileCommand(clientFor(usefulProfileFixture), ["extra"], { json: true }),
+    ).rejects.toThrow("Usage: shelf-judge profile");
   });
 });
