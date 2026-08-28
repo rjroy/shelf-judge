@@ -7,7 +7,7 @@ import type {
   PredictionUnavailable,
   TournamentGameStatsDisplay,
 } from "@shelf-judge/shared";
-import { createInitialEntityMetadata, isEnabledScoringAxis } from "@shelf-judge/shared";
+import { isEnabledScoringAxis } from "@shelf-judge/shared";
 import type { StorageService } from "./storage-service";
 import type { FitnessService } from "./fitness-service";
 import type { TournamentService } from "./tournament-service";
@@ -31,7 +31,11 @@ export interface PredictedGameResult {
   predictionUnavailable: PredictionUnavailable | null;
   bggObservations?: Pick<
     BggGameResult,
-    "metadataObservation" | "playerRangeObservation" | "suggestedPlayerPoll" | "collectionData"
+    | "metadataObservation"
+    | "playerRangeObservation"
+    | "suggestedPlayerPoll"
+    | "collectionData"
+    | "entityMetadata"
   >;
 }
 
@@ -336,7 +340,7 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
           observedAt: null,
         },
         bestPlayersInvalidEvidence: null,
-        entityMetadata: createInitialEntityMetadata(bggId),
+        entityMetadata: structuredClone(bggResult.entityMetadata),
         latestPlayCountCheck: null,
         ownership: "owned",
         boxDimensions: null,
@@ -386,6 +390,7 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
                 playerRangeObservation: bggResult.playerRangeObservation,
                 suggestedPlayerPoll: bggResult.suggestedPlayerPoll,
                 collectionData: bggResult.collectionData,
+                entityMetadata: bggResult.entityMetadata,
               },
             }
           : {}),

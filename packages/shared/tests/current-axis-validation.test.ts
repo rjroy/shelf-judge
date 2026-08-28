@@ -690,6 +690,8 @@ describe("current persisted collection validation", () => {
               observedAt: null,
               refreshFailure: null,
               correctionDestination: null,
+              explanation:
+                "This game has no BGG ID, so Shelf Judge cannot refresh entity metadata.",
             },
             designer: {
               state: "unrefreshable",
@@ -697,6 +699,8 @@ describe("current persisted collection validation", () => {
               observedAt: null,
               refreshFailure: null,
               correctionDestination: null,
+              explanation:
+                "This game has no BGG ID, so Shelf Judge cannot refresh entity metadata.",
             },
             artist: {
               state: "unrefreshable",
@@ -704,6 +708,8 @@ describe("current persisted collection validation", () => {
               observedAt: null,
               refreshFailure: null,
               correctionDestination: null,
+              explanation:
+                "This game has no BGG ID, so Shelf Judge cannot refresh entity metadata.",
             },
           },
           latestPlayCountCheck: null,

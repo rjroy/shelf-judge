@@ -26,6 +26,12 @@ import type {
   EntertainmentBenchmark,
   EntertainmentBenchmarkMutationRequest,
   GameWithPurchaseUtilization,
+  PlayEvidenceMutationResult,
+  OwnershipMutationResult,
+} from "@shelf-judge/shared";
+import {
+  OwnershipMutationResultSchema,
+  PlayEvidenceMutationResultSchema,
 } from "@shelf-judge/shared";
 import { daemonRequest, daemonJson } from "./daemon";
 
@@ -107,11 +113,13 @@ export async function removeGame(id: string): Promise<void> {
 export async function setGameOwnership(
   id: string,
   ownership: "owned" | "previously-owned",
-): Promise<{ game: Game }> {
-  return daemonJson(`/api/games/${id}/ownership`, {
-    method: "PATCH",
-    body: { ownership },
-  });
+  load: () => Promise<unknown> = () =>
+    daemonJson(`/api/games/${id}/ownership`, {
+      method: "PATCH",
+      body: { ownership },
+    }),
+): Promise<OwnershipMutationResult> {
+  return OwnershipMutationResultSchema.parse(await load());
 }
 
 export async function setGameDimensions(
@@ -124,8 +132,11 @@ export async function setGameDimensions(
   });
 }
 
-export async function refreshBggData(id: string): Promise<{ game: Game }> {
-  return daemonJson(`/api/games/${id}/refresh`, { method: "POST" });
+export async function refreshBggData(
+  id: string,
+  load: () => Promise<unknown> = () => daemonJson(`/api/games/${id}/refresh`, { method: "POST" }),
+): Promise<PlayEvidenceMutationResult> {
+  return PlayEvidenceMutationResultSchema.parse(await load());
 }
 
 export async function refreshAllBggData(): Promise<{ refreshed: number; errors: string[] }> {

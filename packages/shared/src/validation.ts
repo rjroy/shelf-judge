@@ -843,15 +843,22 @@ export const CollectionSchema = CollectionSchemaV3.omit({ schemaVersion: true, g
       }
       if (
         game.latestPlayCountCheck?.status === "valid" &&
-        (game.playCountEvidence.status !== "valid" ||
-          game.playCountEvidence.source !== "bgg-collection" ||
-          game.playCountEvidence.value !== game.latestPlayCountCheck.value ||
-          game.playCountEvidence.observedAt !== game.latestPlayCountCheck.observedAt)
+        !(
+          (game.playCountEvidence.status === "valid" &&
+            game.playCountEvidence.source === "bgg-collection" &&
+            game.playCountEvidence.value === game.latestPlayCountCheck.value &&
+            game.playCountEvidence.observedAt === game.latestPlayCountCheck.observedAt) ||
+          (game.playCountEvidence.status === "valid" &&
+            game.playCountEvidence.observedAt !== null &&
+            Date.parse(game.playCountEvidence.observedAt) >
+              Date.parse(game.latestPlayCountCheck.observedAt))
+        )
       ) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["games", index, "latestPlayCountCheck"],
-          message: "A valid latest BGG check must be the current play-count evidence",
+          message:
+            "A valid latest BGG check must be current evidence unless superseded by newer valid evidence",
         });
       }
       if (
@@ -2445,6 +2452,222 @@ export const RateGameSchema = z.object({
   axisId: z.string().min(1),
   rating: z.number().int("Rating must be an integer").min(1).max(10),
 });
+
+export const PlayEvidenceMutationResultSchema = z
+  .object({
+    game: GameSchema,
+    linkedIntentionTransition: PlayIntentionSchema.nullable(),
+  })
+  .strict()
+  .superRefine((result, context) => {
+    const transition = result.linkedIntentionTransition;
+    const evidence = result.game.playCountEvidence;
+    const latestCheck = result.game.latestPlayCountCheck;
+    const evidenceObservedAt = evidence.observedAt;
+    const evidenceObservedTime =
+      evidenceObservedAt === null ? null : Date.parse(evidenceObservedAt);
+    const latestCheckTime = latestCheck === null ? null : Date.parse(latestCheck.observedAt);
+    const mutationTime = Date.parse(result.game.updatedAt);
+    const matchesValidLatestCheck =
+      evidence.status === "valid" &&
+      evidence.source === "bgg-collection" &&
+      latestCheck?.status === "valid" &&
+      evidence.value === latestCheck.value &&
+      evidence.observedAt === latestCheck.observedAt;
+    const supersedesLatestCheck =
+      evidence.status === "valid" &&
+      evidenceObservedTime !== null &&
+      latestCheckTime !== null &&
+      evidenceObservedTime > latestCheckTime;
+
+    if (!Number.isFinite(mutationTime)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["game", "updatedAt"],
+        message: "The game mutation timestamp must be a valid date",
+      });
+    }
+    if (evidenceObservedAt !== null && !Number.isFinite(evidenceObservedTime)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["game", "playCountEvidence", "observedAt"],
+        message: "The play-count evidence timestamp must be a valid date",
+      });
+    }
+    if (latestCheck !== null && !Number.isFinite(latestCheckTime)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["game", "latestPlayCountCheck", "observedAt"],
+        message: "The latest BGG play-count check timestamp must be a valid date",
+      });
+    }
+    if (latestCheck?.status === "valid" && !matchesValidLatestCheck && !supersedesLatestCheck) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["game", "latestPlayCountCheck"],
+        message:
+          "A valid latest BGG check must be current evidence unless superseded by newer valid evidence",
+      });
+    }
+    if (
+      latestCheck !== null &&
+      latestCheck.status !== "valid" &&
+      evidence.status !== "valid" &&
+      (evidence.status !== latestCheck.status ||
+        evidence.source !== "bgg-collection" ||
+        evidence.observedAt !== latestCheck.observedAt ||
+        (latestCheck.status === "invalid" &&
+          evidence.status === "invalid" &&
+          JSON.stringify(evidence.evidence) !== JSON.stringify(latestCheck.evidence)))
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["game", "latestPlayCountCheck"],
+        message: "A non-valid latest BGG check must match current non-valid evidence",
+      });
+    }
+    if (evidenceObservedTime !== null && evidenceObservedTime > mutationTime) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["game", "playCountEvidence", "observedAt"],
+        message: "Play-count evidence cannot be observed after the game mutation",
+      });
+    }
+    if (latestCheckTime !== null && latestCheckTime > mutationTime) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["game", "latestPlayCountCheck", "observedAt"],
+        message: "The latest BGG play-count check cannot be observed after the game mutation",
+      });
+    }
+    if (transition !== null && transition.gameId !== result.game.id) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["linkedIntentionTransition", "gameId"],
+        message: "Linked intention transition must belong to the returned game",
+      });
+    }
+    if (transition === null) return;
+    const authoritativeFreshEvidence =
+      evidence.status === "valid" &&
+      evidenceObservedTime !== null &&
+      (latestCheck === null ||
+        matchesValidLatestCheck ||
+        (latestCheckTime !== null && evidenceObservedTime >= latestCheckTime));
+    if (
+      transition.resolution?.outcome !== "completed" ||
+      transition.resolution.source !== "observed-play-increase" ||
+      transition.version !== 2
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["linkedIntentionTransition"],
+        message: "Linked play-evidence transition must be an observed version-two completion",
+      });
+    }
+    if (
+      evidence.status !== "valid" ||
+      evidence.observedAt === null ||
+      !authoritativeFreshEvidence ||
+      evidence.value <= transition.baseline.playCount ||
+      Date.parse(evidence.observedAt) <= Date.parse(transition.baseline.observedAt)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["game", "playCountEvidence"],
+        message:
+          "Linked completion requires valid non-stale evidence above and newer than its baseline",
+      });
+    }
+    if (transition.resolution?.resolvedAt !== result.game.updatedAt) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["linkedIntentionTransition", "resolution", "resolvedAt"],
+        message: "Linked completion and returned game must describe the same mutation",
+      });
+    }
+    if (
+      evidenceObservedTime !== null &&
+      transition.resolution !== null &&
+      evidenceObservedTime > Date.parse(transition.resolution.resolvedAt)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["game", "playCountEvidence", "observedAt"],
+        message: "Completion evidence cannot be observed after the linked completion",
+      });
+    }
+  });
+
+export const ManualPlayCorrectionResultSchema = z
+  .discriminatedUnion("ok", [
+    z
+      .object({
+        ok: z.literal(true),
+        game: GameSchema,
+        linkedIntentionTransition: PlayIntentionSchema.nullable(),
+      })
+      .strict(),
+    z
+      .object({
+        ok: z.literal(false),
+        error: z
+          .object({
+            code: z.literal("non-monotonic-observation"),
+            gameId: z.string().min(1),
+            attemptedObservedAt: TimestampSchema,
+            latestAcceptedAt: TimestampSchema,
+          })
+          .strict(),
+      })
+      .strict(),
+  ])
+  .superRefine((result, context) => {
+    if (result.ok) {
+      const parsed = PlayEvidenceMutationResultSchema.safeParse({
+        game: result.game,
+        linkedIntentionTransition: result.linkedIntentionTransition,
+      });
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) context.addIssue(issue);
+      }
+    } else {
+      if (
+        Date.parse(result.error.attemptedObservedAt) > Date.parse(result.error.latestAcceptedAt)
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["error", "attemptedObservedAt"],
+          message: "A rejected observation must not be newer than the latest accepted timestamp",
+        });
+      }
+    }
+  });
+
+export const OwnershipMutationResultSchema = z
+  .object({
+    game: GameSchema,
+    linkedIntentionTransition: PlayIntentionSchema.nullable(),
+  })
+  .strict()
+  .superRefine((result, context) => {
+    const transition = result.linkedIntentionTransition;
+    if (transition === null) return;
+    if (
+      transition.gameId !== result.game.id ||
+      result.game.ownership !== "previously-owned" ||
+      transition.version !== 2 ||
+      transition.resolution?.outcome !== "retired" ||
+      transition.resolution.source !== "owner-retired" ||
+      transition.resolution.resolvedAt !== result.game.updatedAt
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["linkedIntentionTransition"],
+        message: "Linked ownership transition must be the retirement caused by this relinquishment",
+      });
+    }
+  });
 
 const AddGameBaseFields = {
   yearPublished: z.number().int().nullable().optional().default(null),

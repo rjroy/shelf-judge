@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach } from "bun:test";
-import { createGameService } from "../../src/services/game-service.js";
+import { createGameService, GameHistoryConflictError } from "../../src/services/game-service.js";
 import { createFitnessService } from "../../src/services/fitness-service.js";
 import { createStorageService } from "../../src/services/storage-service.js";
 import { createAxisService } from "../../src/services/axis-service.js";
@@ -9,6 +9,8 @@ import type { StorageService } from "../../src/services/storage-service.js";
 import type { AxisService } from "../../src/services/axis-service.js";
 import type { MockFileOps } from "../helpers/mock-file-ops.js";
 import type { Game } from "@shelf-judge/shared";
+import { collectionMutationServiceFor } from "../../src/services/collection-mutation-service.js";
+import { createIntentionService } from "../../src/services/intention-service.js";
 
 let fileOps: MockFileOps;
 let storageService: StorageService;
@@ -352,6 +354,102 @@ describe("GameService", () => {
       // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
       await expect(gameService.removeGame("nonexistent")).rejects.toThrow("Game not found");
     });
+
+    test.each(["active", "resolved"] as const)(
+      "coordinated service rejects deletion with %s history and preserves the whole collection",
+      async (state) => {
+        const { game } = await gameService.addGame({ name: "Historical", numPlays: 0 });
+        const intentions = createIntentionService({
+          collectionMutationService: collectionMutationServiceFor(storageService),
+          createId: () => "history-intention",
+        });
+        const created = await intentions.execute({
+          type: "create",
+          commandId: "40000000-0000-4000-8000-000000000001",
+          gameId: game.id,
+          kind: "first-play",
+          expectedActiveIntention: "absent",
+        });
+        if (!created.ok) throw new Error(created.error.code);
+        if (state === "resolved") {
+          await intentions.execute({
+            type: "complete",
+            commandId: "40000000-0000-4000-8000-000000000002",
+            gameId: game.id,
+            intentionId: created.intention.intentionId,
+            expectedVersion: 1,
+          });
+        }
+        const before = await storageService.loadCollection();
+
+        try {
+          await gameService.removeGame(game.id);
+          throw new Error("Expected history conflict");
+        } catch (error) {
+          expect(error).toBeInstanceOf(GameHistoryConflictError);
+        }
+        expect(await storageService.loadCollection()).toEqual(before);
+      },
+    );
+  });
+
+  describe("setOwnership", () => {
+    test("logs one automatic transition attempt and durable outcome without unrelated game data", async () => {
+      const entries: unknown[][] = [];
+      const logger = {
+        log: (...args: unknown[]) => entries.push(args),
+        warn: (...args: unknown[]) => entries.push(args),
+        error: (...args: unknown[]) => entries.push(args),
+      };
+      const coordinated = createGameService({
+        storageService,
+        fitnessService: createFitnessService(),
+        logger,
+      });
+      await coordinated.addGame({ name: "SECRET UNRELATED GAME" });
+      const { game } = await coordinated.addGame({ name: "Ownership target", numPlays: 1 });
+      const intentions = createIntentionService({
+        collectionMutationService: collectionMutationServiceFor(storageService),
+        createId: () => "ownership-intention",
+      });
+      await intentions.execute({
+        type: "create",
+        commandId: "40000000-0000-4000-8000-000000000010",
+        gameId: game.id,
+        kind: "replay",
+        expectedActiveIntention: "absent",
+      });
+      entries.length = 0;
+
+      const result = await coordinated.setOwnership(game.id, "previously-owned");
+      expect(result.linkedIntentionTransition?.resolution?.outcome).toBe("retired");
+      expect(entries).toEqual([
+        [
+          "automatic intention transition attempt",
+          {
+            trigger: "ownership-change",
+            gameId: game.id,
+            intentionId: "ownership-intention",
+            priorState: "active",
+            priorVersion: 1,
+          },
+        ],
+        [
+          "automatic intention transition outcome",
+          {
+            trigger: "ownership-change",
+            gameId: game.id,
+            intentionId: "ownership-intention",
+            priorState: "active",
+            priorVersion: 1,
+            result: "retired",
+            version: 2,
+            persisted: true,
+          },
+        ],
+      ]);
+      expect(JSON.stringify(entries)).not.toContain("SECRET UNRELATED GAME");
+    });
   });
 
   describe("setManualShelf", () => {
@@ -457,7 +555,7 @@ describe("GameService", () => {
       await gameService.setManualShelf(game.id, "shelf-1");
 
       const updated = await gameService.setOwnership(game.id, "previously-owned");
-      expect(updated.manualShelfId).toBeNull();
+      expect(updated.game.manualShelfId).toBeNull();
       const collection = await storageService.loadCollection();
       expect(
         collection.games.find((candidate) => candidate.id === game.id)?.manualShelfId,

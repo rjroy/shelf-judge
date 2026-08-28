@@ -18,6 +18,7 @@ export type CollectionMutationDecision<Value> =
       changed: true;
       value: Value;
       onPersistenceFailure?: (error: unknown) => Promise<void> | void;
+      onPersistenceSuccess?: () => Promise<void> | void;
     }
   | { changed: false; value: Value };
 
@@ -200,6 +201,20 @@ export function createCollectionMutationService(
         throw error;
       }
       logger.log("collection mutation persistence completed", { ...fields, after });
+      if (decision.onPersistenceSuccess) {
+        logger.log("collection mutation post-commit attempt", { ...fields, after });
+        try {
+          await decision.onPersistenceSuccess();
+          logger.log("collection mutation post-commit completed", { ...fields, after });
+        } catch (error) {
+          logger.error("collection mutation post-commit failed", {
+            ...fields,
+            after,
+            outcome: "post-commit-failed",
+          });
+          throw error;
+        }
+      }
       logger.log("collection mutation completed", {
         ...fields,
         after,

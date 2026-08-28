@@ -20,6 +20,7 @@ import type {
   GameWithPurchaseUtilization,
   BggSearchResult,
 } from "@shelf-judge/shared";
+import { createCompleteEntityMetadata } from "@shelf-judge/shared";
 
 type GameAddResponse = AddGameResult;
 type GameDetailResponse = GameWithPurchaseUtilization;
@@ -52,6 +53,10 @@ async function expectPublishedError(
 let ctx: TestAppContext;
 
 const wingspanBggResult: BggGameResult = {
+  entityMetadata: createCompleteEntityMetadata(
+    { mechanic: [{ id: 2004, name: "Set Collection" }], designer: [], artist: [] },
+    "2026-08-28T00:00:00.000Z",
+  ),
   metadata: {
     bggId: 266192,
     name: "Wingspan",
@@ -96,6 +101,14 @@ describe("Game Routes", () => {
       expect(body.game.bggId).toBeNull();
       expect(body.game.ratings).toEqual({});
       expect(body.bggImported).toBe(false);
+      expect(body.game.entityMetadata.mechanic).toEqual({
+        state: "unrefreshable",
+        entities: [],
+        observedAt: null,
+        refreshFailure: null,
+        correctionDestination: null,
+        explanation: "This game has no BGG ID, so Shelf Judge cannot refresh entity metadata.",
+      });
     });
 
     test("game with bggId when BGG is configured returns 201", async () => {
@@ -799,6 +812,10 @@ describe("Game Routes", () => {
       mechanics: { id: number; name: string }[],
       categories: { id: number; name: string }[] = [],
     ): BggGameResult => ({
+      entityMetadata: createCompleteEntityMetadata(
+        { mechanic: mechanics, designer: [], artist: [] },
+        "2026-08-28T00:00:00.000Z",
+      ),
       metadata: {
         bggId,
         name,

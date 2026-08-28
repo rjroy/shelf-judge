@@ -27,6 +27,10 @@ import {
   createDisplayedFitnessService,
   type DisplayedFitnessService,
 } from "../../src/services/displayed-fitness-service.js";
+import {
+  createIntentionService,
+  type IntentionService,
+} from "../../src/services/intention-service.js";
 
 export interface TestAppContext {
   app: AppResult["app"];
@@ -40,6 +44,7 @@ export interface TestAppContext {
   profileService: ProfileService;
   predictionService: PredictionService;
   displayedFitnessService: DisplayedFitnessService;
+  intentionService: IntentionService;
   bggClient: BggClient | undefined;
   fileOps: ReturnType<typeof createMockFileOps>;
 }
@@ -47,6 +52,9 @@ export interface TestAppContext {
 export interface TestAppOptions {
   bggClient?: BggClient;
   narrationService?: NarrationService;
+  fileOps?: ReturnType<typeof createMockFileOps>;
+  now?: () => string;
+  intentionService?: IntentionService;
 }
 
 export function createTestPurchaseUtilizationService(
@@ -80,7 +88,7 @@ export function createTestPurchaseUtilizationService(
 }
 
 export function createTestApp(options?: TestAppOptions): TestAppContext {
-  const fileOps = createMockFileOps();
+  const fileOps = options?.fileOps ?? createMockFileOps();
   const dataDir = "/test/data";
   const configPath = "/test/config.json";
 
@@ -101,6 +109,7 @@ export function createTestApp(options?: TestAppOptions): TestAppContext {
     collectionMutationService,
     fitnessService,
     bggClient,
+    now: options?.now,
     onGameDeleted: (gameId) => tournamentService.onGameDeleted(gameId),
   });
 
@@ -115,6 +124,12 @@ export function createTestApp(options?: TestAppOptions): TestAppContext {
     predictionService,
     storageService,
   });
+  const intentionService =
+    options?.intentionService ??
+    createIntentionService({
+      collectionMutationService,
+      now: options?.now,
+    });
   const profileService = createProfileService({
     storageService,
     displayedFitnessService,
@@ -131,6 +146,7 @@ export function createTestApp(options?: TestAppOptions): TestAppContext {
     profileService,
     predictionService,
     displayedFitnessService,
+    intentionService,
     bggClient,
   });
 
@@ -146,6 +162,7 @@ export function createTestApp(options?: TestAppOptions): TestAppContext {
     profileService,
     predictionService,
     displayedFitnessService,
+    intentionService,
     bggClient,
     fileOps,
   };
@@ -157,7 +174,7 @@ export function createMockBggClient(overrides?: Partial<BggClient>): BggClient {
     searchGames: () => Promise.resolve([]),
     getGame: () => Promise.reject(new Error("Not implemented in mock")),
     getGames: async (_ids, onBatch) => {
-      await onBatch?.({ batchIds: _ids, results: new Map() });
+      await onBatch?.({ batchIds: _ids, results: new Map(), failures: new Map() });
       return new Map();
     },
     getUserCollection: () => Promise.resolve([]),

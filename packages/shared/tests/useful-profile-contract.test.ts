@@ -6,6 +6,9 @@ import {
   FutureUsefulProfileSchema,
   IntentionCommandReceiptSchema,
   IntentionMutationResultSchema,
+  ManualPlayCorrectionResultSchema,
+  OwnershipMutationResultSchema,
+  PlayEvidenceMutationResultSchema,
   PlayIntentionSchema,
   ProfileEntityClassResultSchema,
   ResolvedPlayIntentionHistorySchema,
@@ -96,6 +99,256 @@ function futureSourceCollection(
 }
 
 describe("future useful-profile source contracts", () => {
+  test("validates linked play-evidence transitions against the returned game", () => {
+    const completedAt = "2026-08-27T12:00:00.000Z";
+    const game = futureSourceGame("game-4", "owned", {
+      numPlays: 1,
+      updatedAt: completedAt,
+      playCountEvidence: {
+        status: "valid",
+        value: 1,
+        source: "manual",
+        observedAt: completedAt,
+      },
+    });
+    const transition = {
+      ...activeIntentionFixture,
+      version: 2,
+      resolution: {
+        outcome: "completed" as const,
+        source: "observed-play-increase" as const,
+        resolvedAt: completedAt,
+      },
+    };
+    expect(
+      PlayEvidenceMutationResultSchema.safeParse({
+        game,
+        linkedIntentionTransition: transition,
+      }).success,
+    ).toBe(true);
+    expect(
+      PlayEvidenceMutationResultSchema.safeParse({
+        game: futureSourceGame("other-game"),
+        linkedIntentionTransition: transition,
+      }).success,
+    ).toBe(false);
+
+    const rejected = [
+      activeIntentionFixture,
+      { ...transition, version: 1 },
+      {
+        ...transition,
+        resolution: { ...transition.resolution, source: "owner-confirmed" as const },
+      },
+      {
+        ...transition,
+        resolution: {
+          outcome: "retired" as const,
+          source: "owner-retired" as const,
+          resolvedAt: completedAt,
+        },
+      },
+    ];
+    for (const linkedIntentionTransition of rejected) {
+      expect(
+        PlayEvidenceMutationResultSchema.safeParse({ game, linkedIntentionTransition }).success,
+      ).toBe(false);
+    }
+    for (const invalidGame of [
+      { ...game, playCountEvidence: { ...game.playCountEvidence, value: 0 } },
+      {
+        ...game,
+        playCountEvidence: {
+          ...game.playCountEvidence,
+          observedAt: transition.baseline.observedAt,
+        },
+      },
+      { ...game, updatedAt: "not-a-date" },
+    ]) {
+      expect(
+        PlayEvidenceMutationResultSchema.safeParse({
+          game: invalidGame,
+          linkedIntentionTransition: transition,
+        }).success,
+      ).toBe(false);
+    }
+
+    const newerValidCheck = {
+      ...game,
+      updatedAt: "2026-08-27T12:01:00.000Z",
+      latestPlayCountCheck: {
+        status: "valid" as const,
+        value: 2,
+        observedAt: "2026-08-27T12:01:00.000Z",
+      },
+    };
+    expect(
+      PlayEvidenceMutationResultSchema.safeParse({
+        game: newerValidCheck,
+        linkedIntentionTransition: {
+          ...transition,
+          resolution: { ...transition.resolution, resolvedAt: newerValidCheck.updatedAt },
+        },
+      }).success,
+    ).toBe(false);
+
+    const futureEvidence = {
+      ...game,
+      playCountEvidence: {
+        ...game.playCountEvidence,
+        observedAt: "2026-08-27T12:01:00.000Z",
+      },
+    };
+    expect(
+      PlayEvidenceMutationResultSchema.safeParse({
+        game: futureEvidence,
+        linkedIntentionTransition: transition,
+      }).success,
+    ).toBe(false);
+  });
+
+  test("accepts authoritative equal-time and retained-check play evidence", () => {
+    const completedAt = "2026-08-27T12:00:00.000Z";
+    const transition = {
+      ...activeIntentionFixture,
+      version: 2,
+      resolution: {
+        outcome: "completed" as const,
+        source: "observed-play-increase" as const,
+        resolvedAt: completedAt,
+      },
+    };
+    const bggEvidence = futureSourceGame("game-4", "owned", {
+      numPlays: 1,
+      updatedAt: completedAt,
+      playCountEvidence: {
+        status: "valid",
+        value: 1,
+        source: "bgg-collection",
+        observedAt: completedAt,
+      },
+      latestPlayCountCheck: { status: "valid", value: 1, observedAt: completedAt },
+    });
+    expect(
+      PlayEvidenceMutationResultSchema.safeParse({
+        game: bggEvidence,
+        linkedIntentionTransition: transition,
+      }).success,
+    ).toBe(true);
+
+    const retainedOlderCheck = futureSourceGame("game-4", "owned", {
+      numPlays: 5,
+      updatedAt: completedAt,
+      playCountEvidence: {
+        status: "valid",
+        value: 5,
+        source: "manual",
+        observedAt: completedAt,
+      },
+      latestPlayCountCheck: {
+        status: "valid",
+        value: 4,
+        observedAt: "2026-08-27T11:59:59.999Z",
+      },
+    });
+    expect(
+      PlayEvidenceMutationResultSchema.safeParse({
+        game: retainedOlderCheck,
+        linkedIntentionTransition: transition,
+      }).success,
+    ).toBe(true);
+
+    const equalConflictingCheck = {
+      ...retainedOlderCheck,
+      latestPlayCountCheck: {
+        status: "valid" as const,
+        value: 4,
+        observedAt: completedAt,
+      },
+    };
+    expect(
+      PlayEvidenceMutationResultSchema.safeParse({
+        game: equalConflictingCheck,
+        linkedIntentionTransition: transition,
+      }).success,
+    ).toBe(false);
+
+    const equalUnavailableCheck = {
+      ...retainedOlderCheck,
+      latestPlayCountCheck: { status: "missing" as const, observedAt: completedAt },
+    };
+    expect(
+      PlayEvidenceMutationResultSchema.safeParse({
+        game: equalUnavailableCheck,
+        linkedIntentionTransition: transition,
+      }).success,
+    ).toBe(true);
+  });
+
+  test("validates discriminated manual play correction outcomes", () => {
+    const game = futureSourceGame("game-4", "owned");
+    expect(
+      ManualPlayCorrectionResultSchema.safeParse({
+        ok: true,
+        game,
+        linkedIntentionTransition: null,
+      }).success,
+    ).toBe(true);
+    expect(
+      ManualPlayCorrectionResultSchema.safeParse({
+        ok: false,
+        error: {
+          code: "non-monotonic-observation",
+          gameId: "game-4",
+          attemptedObservedAt: "2026-08-27T10:00:00.000Z",
+          latestAcceptedAt: "2026-08-27T10:00:00.000Z",
+        },
+      }).success,
+    ).toBe(true);
+    expect(
+      ManualPlayCorrectionResultSchema.safeParse({
+        ok: false,
+        error: {
+          code: "non-monotonic-observation",
+          gameId: "game-4",
+          attemptedObservedAt: "2026-08-27T10:00:00.001Z",
+          latestAcceptedAt: "2026-08-27T10:00:00.000Z",
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  test("validates linked ownership retirement and null re-ownership responses", () => {
+    const resolvedAt = "2026-08-27T12:00:00.000Z";
+    const retired = {
+      ...activeIntentionFixture,
+      version: 2,
+      resolution: {
+        outcome: "retired" as const,
+        source: "owner-retired" as const,
+        resolvedAt,
+      },
+    };
+    expect(
+      OwnershipMutationResultSchema.safeParse({
+        game: futureSourceGame("game-4", "previously-owned", { updatedAt: resolvedAt }),
+        linkedIntentionTransition: retired,
+      }).success,
+    ).toBe(true);
+    expect(
+      OwnershipMutationResultSchema.safeParse({
+        game: futureSourceGame("game-4", "owned"),
+        linkedIntentionTransition: null,
+      }).success,
+    ).toBe(true);
+    expect(
+      OwnershipMutationResultSchema.safeParse({
+        game: futureSourceGame("game-4", "owned", { updatedAt: resolvedAt }),
+        linkedIntentionTransition: retired,
+      }).success,
+    ).toBe(false);
+  });
+
   test("keeps active collection and profile aliases separate from future contracts", () => {
     expectTypeOf<FutureUsefulProfileResult>().not.toEqualTypeOf<
       typeof usefulProfileFixture.identity
@@ -124,6 +377,7 @@ describe("future useful-profile source contracts", () => {
       observedAt: null,
       refreshFailure: null,
       correctionDestination: null,
+      explanation: "This game has no BGG ID, so Shelf Judge cannot refresh entity metadata.",
     };
 
     expect(EntityClassMetadataSchema.safeParse(complete).success).toBe(true);
@@ -151,6 +405,47 @@ describe("future useful-profile source contracts", () => {
       EntityClassMetadataSchema.safeParse({
         ...refreshNeeded,
         entities: [{ id: 1, name: "Fabricated" }],
+      }).success,
+    ).toBe(false);
+  });
+
+  test("retains factual latest BGG checks when newer manual evidence is current", () => {
+    const latestPlayCountCheck = {
+      status: "valid" as const,
+      value: 4,
+      observedAt: "2026-08-27T10:00:00.000Z",
+    };
+    expect(
+      FutureUsefulProfileCollectionSourceSchema.safeParse({
+        ...futureSourceCollection([]),
+        games: [
+          futureSourceGame("game-4", "owned", {
+            latestPlayCountCheck,
+            numPlays: 3,
+            playCountEvidence: {
+              status: "valid",
+              value: 3,
+              source: "manual",
+              observedAt: "2026-08-27T11:00:00.000Z",
+            },
+          }),
+        ],
+      }).success,
+    ).toBe(true);
+    expect(
+      FutureUsefulProfileCollectionSourceSchema.safeParse({
+        ...futureSourceCollection([]),
+        games: [
+          futureSourceGame("game-4", "owned", {
+            latestPlayCountCheck,
+            playCountEvidence: {
+              status: "valid",
+              value: 3,
+              source: "manual",
+              observedAt: latestPlayCountCheck.observedAt,
+            },
+          }),
+        ],
       }).success,
     ).toBe(false);
   });
@@ -242,6 +537,7 @@ describe("future useful-profile source contracts", () => {
           observedAt: null,
           refreshFailure: null,
           correctionDestination: null,
+          explanation: "This game has no BGG ID, so Shelf Judge cannot refresh entity metadata.",
         },
         designer: {
           state: "unrefreshable",
@@ -249,6 +545,7 @@ describe("future useful-profile source contracts", () => {
           observedAt: null,
           refreshFailure: null,
           correctionDestination: null,
+          explanation: "This game has no BGG ID, so Shelf Judge cannot refresh entity metadata.",
         },
         artist: {
           state: "unrefreshable",
@@ -256,6 +553,7 @@ describe("future useful-profile source contracts", () => {
           observedAt: null,
           refreshFailure: null,
           correctionDestination: null,
+          explanation: "This game has no BGG ID, so Shelf Judge cannot refresh entity metadata.",
         },
       },
     });
@@ -399,7 +697,7 @@ describe("future useful-profile source contracts", () => {
           code: "stale-version",
           gameId: "game-4",
           intentionId: "intention-1",
-          expectedVersion: 2,
+          expectedVersion: 1,
           current: activeIntentionFixture,
         },
       }).success,

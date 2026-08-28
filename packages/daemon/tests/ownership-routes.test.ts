@@ -46,8 +46,8 @@ function makeBggData(
   };
 }
 
-const mech = (name: string) => ({ id: Math.random(), name });
-const cat = (name: string) => ({ id: Math.random(), name });
+const mech = (name: string) => ({ id: 1, name });
+const cat = (name: string) => ({ id: 2, name });
 
 function makeGame(
   id: string,
@@ -212,11 +212,16 @@ function createMockGameService(collection?: Collection): GameService {
     setOwnership: (id: string, ownership: "owned" | "previously-owned") => {
       const game = coll.games.find((g) => g.id === id);
       if (!game) return Promise.reject(new Error(`Game not found: ${id}`));
-      if (game.ownership === ownership) return Promise.resolve(structuredClone(game));
+      if (game.ownership === ownership) {
+        return Promise.resolve({
+          game: structuredClone(game),
+          linkedIntentionTransition: null,
+        });
+      }
       game.ownership = ownership;
       game.updatedAt = new Date().toISOString();
       coll.updatedAt = game.updatedAt;
-      return Promise.resolve(structuredClone(game));
+      return Promise.resolve({ game: structuredClone(game), linkedIntentionTransition: null });
     },
     setBoxDimensions: () => Promise.reject(new Error("not implemented")),
     setManualShelf: () => Promise.reject(new Error("not implemented")),
@@ -243,10 +248,10 @@ function createMockPredictionService(collection?: Collection): PredictionService
   };
 }
 
-function buildApp(collection?: Collection) {
+function buildApp(collection?: Collection, gameServiceOverride?: GameService) {
   const coll = collection ?? makeCollection();
   const storage = createMockStorageService(coll);
-  const gameService = createMockGameService(coll);
+  const gameService = gameServiceOverride ?? createMockGameService(coll);
   const predictionService = createMockPredictionService(coll);
   const app = new Hono();
   const { routes } = createGameRoutes({
@@ -334,6 +339,33 @@ describe("PATCH /games/:id/ownership", () => {
     expect(data.game.bggData).not.toBeNull();
     expect(data.game.numPlays).toBe(5);
     expect(data.game.name).toBe("Alpha");
+  });
+
+  test("rejects an incoherent ownership mutation service response", async () => {
+    const service = createMockGameService();
+    service.setOwnership = () =>
+      Promise.resolve({
+        game: makeGame("a", "Alpha", "owned"),
+        linkedIntentionTransition: {
+          intentionId: "intention-1",
+          gameId: "a",
+          kind: "first-play",
+          baseline: { playCount: 0, evidenceSource: "manual", observedAt: now },
+          createdAt: now,
+          version: 2,
+          resolution: {
+            outcome: "completed",
+            source: "owner-confirmed",
+            resolvedAt: now,
+          },
+        },
+      });
+    const response = await buildApp(undefined, service).request("/api/games/a/ownership", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ownership: "previously-owned" }),
+    });
+    expect(response.status).toBe(500);
   });
 });
 

@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import type { Collection, GameWithPurchaseUtilization } from "@shelf-judge/shared";
+import {
+  createCompleteEntityMetadata,
+  type Collection,
+  type GameWithPurchaseUtilization,
+} from "@shelf-judge/shared";
 import type { BggGameResult } from "../../src/services/bgg-client.js";
 import {
   createMockBggClient,
@@ -32,6 +36,10 @@ function boot(collectionText: string, result?: BggGameResult): TestAppContext {
 
 function refreshedBggResult(): BggGameResult {
   return {
+    entityMetadata: createCompleteEntityMetadata(
+      { mechanic: [], designer: [], artist: [] },
+      thingObservedAt,
+    ),
     metadata: {
       bggId: 101,
       name: "Ordinary Purchase",

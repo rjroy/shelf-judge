@@ -217,6 +217,71 @@ describe("BGG XML Parser", () => {
   });
 
   describe("parseThingItems", () => {
+    test("parses complete entity classes with deterministic validation and deduplication", async () => {
+      const observedAt = "2026-08-28T10:00:00.000Z";
+      const items = parseThingItems(await readFixture("thing-entity-links.xml"), observedAt);
+
+      expect(items[0]?.entityMetadata).toEqual({
+        mechanic: {
+          state: "complete",
+          entities: [],
+          observedAt,
+          refreshFailure: null,
+          correctionDestination: null,
+        },
+        designer: {
+          state: "complete",
+          entities: [],
+          observedAt,
+          refreshFailure: null,
+          correctionDestination: null,
+        },
+        artist: {
+          state: "complete",
+          entities: [],
+          observedAt,
+          refreshFailure: null,
+          correctionDestination: null,
+        },
+      });
+      expect(items[1]?.entityMetadata).toMatchObject({
+        mechanic: { entities: [{ id: 101, name: "Drafting" }] },
+        designer: { entities: [{ id: 201, name: "Designer One" }] },
+        artist: { entities: [{ id: 301, name: "Artist One" }] },
+      });
+      expect(items[2]?.entityMetadata).toMatchObject({
+        mechanic: {
+          entities: [
+            { id: 101, name: "Alpha Drafting" },
+            { id: 102, name: "Worker Placement" },
+          ],
+        },
+        designer: {
+          entities: [
+            { id: 202, name: "Designer Two" },
+            { id: 203, name: "Designer Three" },
+          ],
+        },
+        artist: {
+          entities: [
+            { id: 302, name: "Artist Two" },
+            { id: 303, name: "Artist Three" },
+          ],
+        },
+      });
+      expect(items[2]?.bggData.mechanics).toEqual(items[2]?.entityMetadata.mechanic.entities);
+      expect(items[3]?.entityMetadata).toMatchObject({
+        mechanic: { entities: [] },
+        designer: { entities: [] },
+        artist: { entities: [{ id: 304, name: "Artist Four" }] },
+      });
+      for (const item of items) {
+        expect(
+          new Set(Object.values(item.entityMetadata).map((metadata) => metadata.observedAt)),
+        ).toEqual(new Set([observedAt]));
+      }
+    });
+
     test("distinguishes absent, empty, unusable, and usable suggested-player polls", () => {
       const cases = [
         { xml: thingXmlWithPlayerPoll(null), state: "absent" },

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<items>
+  <item type="boardgame" id="1">
+    <name type="primary" value="No Links"/>
+  </item>
+  <item type="boardgame" id="2">
+    <name type="primary" value="One Link Per Class"/>
+    <link type="boardgamemechanic" id="101" value="Drafting"/>
+    <link type="boardgamedesigner" id="201" value="Designer One"/>
+    <link type="boardgameartist" id="301" value="Artist One"/>
+  </item>
+  <item type="boardgame" id="3">
+    <name type="primary" value="Many And Duplicate Links"/>
+    <link type="boardgamemechanic" id="102" value="Worker Placement"/>
+    <link type="boardgamemechanic" id="101" value="Zeta Drafting"/>
+    <link type="boardgamemechanic" id="101" value="Alpha Drafting"/>
+    <link type="boardgamemechanic" id="0" value="Invalid ID"/>
+    <link type="boardgamemechanic" id="1.5" value="Fractional ID"/>
+    <link type="boardgamemechanic" id="9007199254740992" value="Unsafe ID"/>
+    <link type="boardgamemechanic" id="103" value="   "/>
+    <link type="boardgamedesigner" id="202" value="Designer Two"/>
+    <link type="boardgamedesigner" id="203" value="Designer Three"/>
+    <link type="boardgameartist" id="302" value="Artist Two"/>
+    <link type="boardgameartist" id="303" value="Artist Three"/>
+  </item>
+  <item type="boardgame" id="4">
+    <name type="primary" value="Partial Links"/>
+    <link type="boardgamemechanic" value="Missing ID"/>
+    <link type="boardgamedesigner" id="204"/>
+    <link type="boardgameartist" id="304" value="Artist Four"/>
+  </item>
+</items>

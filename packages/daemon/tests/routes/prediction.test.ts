@@ -14,6 +14,7 @@ import type {
   GameWithPurchaseUtilization,
 } from "@shelf-judge/shared";
 import type { BggGameResult } from "../../src/services/bgg-client.js";
+import { createCompleteEntityMetadata } from "@shelf-judge/shared";
 
 describe("prediction routes", () => {
   let ctx: TestAppContext;
@@ -102,6 +103,10 @@ describe("prediction routes", () => {
     test("returns successful prediction with predictionMeta and breakdown", async () => {
       // Set up a mock BGG client that returns distinct game data
       const makeBggResult = (bggId: number, name: string, weight: number): BggGameResult => ({
+        entityMetadata: createCompleteEntityMetadata(
+          { mechanic: [{ id: 1, name: "Deck Building" }], designer: [], artist: [] },
+          "2026-08-28T00:00:00.000Z",
+        ),
         metadata: {
           bggId,
           name,
@@ -237,6 +242,10 @@ describe("prediction routes", () => {
       const bggClient = createMockBggClient({
         getGame: (bggId: number) =>
           Promise.resolve({
+            entityMetadata: createCompleteEntityMetadata(
+              { mechanic: [{ id: 1, name: "Deck Building" }], designer: [], artist: [] },
+              "2026-08-28T00:00:00.000Z",
+            ),
             metadata: {
               bggId,
               name: `Game-${bggId}`,
@@ -284,6 +293,10 @@ describe("prediction routes", () => {
 
   describe("GET /api/predictions/bgg/:bggId", () => {
     const makeBggResult = (bggId: number, name: string): BggGameResult => ({
+      entityMetadata: createCompleteEntityMetadata(
+        { mechanic: [{ id: 1, name: "Dice Rolling" }], designer: [], artist: [] },
+        "2026-08-28T00:00:00.000Z",
+      ),
       metadata: {
         bggId,
         name,

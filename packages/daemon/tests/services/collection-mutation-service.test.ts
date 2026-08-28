@@ -192,6 +192,97 @@ describe("CollectionMutationService", () => {
     expect(ctx.saveCount()).toBe(2);
   });
 
+  test("runs post-commit work after persistence and before the next mutation", async () => {
+    const ctx = controlledStorage();
+    const service = createCollectionMutationService({ storageService: ctx.storage });
+    const events: string[] = [];
+    const first = service.mutate(
+      { operation: "game.bgg.refresh", trigger: "owner", gameIds: ["game-1"] },
+      (candidate) => {
+        candidate.name = "accepted";
+        return {
+          changed: true,
+          value: undefined,
+          onPersistenceSuccess() {
+            expect(ctx.stored().name).toBe("accepted");
+            events.push("post-commit");
+          },
+        };
+      },
+    );
+    await ctx.firstSaveStarted;
+    const second = service.mutate(
+      { operation: "game.bgg.refresh-failed", trigger: "owner", gameIds: ["game-1"] },
+      (candidate) => {
+        events.push("second-mutation");
+        expect(candidate.name).toBe("accepted");
+        return { changed: false, value: undefined };
+      },
+    );
+
+    ctx.releaseFirstSave();
+    await Promise.all([first, second]);
+
+    expect(events).toEqual(["post-commit", "second-mutation"]);
+  });
+
+  test("compensates persistence failure without running post-commit work", async () => {
+    const ctx = controlledStorage({ failFirstSave: true });
+    const service = createCollectionMutationService({ storageService: ctx.storage });
+    const events: string[] = [];
+    const mutation = service.mutate(
+      { operation: "game.bgg.refresh", trigger: "owner", gameIds: ["game-1"] },
+      (candidate) => {
+        candidate.name = "failed";
+        return {
+          changed: true,
+          value: undefined,
+          onPersistenceFailure() {
+            events.push("compensated");
+          },
+          onPersistenceSuccess() {
+            events.push("post-commit");
+          },
+        };
+      },
+    );
+    await ctx.firstSaveStarted;
+    ctx.releaseFirstSave();
+
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+    await expect(mutation).rejects.toThrow("disk unavailable");
+    expect(events).toEqual(["compensated"]);
+    expect(ctx.stored()).toEqual(collection());
+  });
+
+  test("propagates post-commit failure after durable persistence and releases the queue", async () => {
+    const ctx = controlledStorage();
+    const service = createCollectionMutationService({ storageService: ctx.storage });
+    const first = service.mutate(
+      { operation: "game.bgg.refresh", trigger: "owner", gameIds: ["game-1"] },
+      (candidate) => {
+        candidate.name = "durably accepted";
+        return {
+          changed: true,
+          value: undefined,
+          onPersistenceSuccess() {
+            throw new Error("generation update failed");
+          },
+        };
+      },
+    );
+    await ctx.firstSaveStarted;
+    ctx.releaseFirstSave();
+
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+    await expect(first).rejects.toThrow("generation update failed");
+    expect(ctx.stored().name).toBe("durably accepted");
+    await service.mutate({ operation: "game.rate", trigger: "owner" }, (candidate) => {
+      expect(candidate.name).toBe("durably accepted");
+      return { changed: false, value: undefined };
+    });
+  });
+
   test("logs seam identity and affected IDs without collection contents", async () => {
     const ctx = controlledStorage();
     const entries: unknown[][] = [];

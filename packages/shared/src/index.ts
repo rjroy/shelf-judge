@@ -149,6 +149,9 @@ export type {
   PlayIntentionBaseline,
   PlayIntentionResolution,
   PlayIntention,
+  PlayEvidenceMutationResult,
+  ManualPlayCorrectionResult,
+  OwnershipMutationResult,
   FutureUsefulProfileGameSource,
   FutureUsefulProfileCollectionSource,
   CreateIntentionCommand,
@@ -236,6 +239,9 @@ export {
   SuggestedPlayerPollSchema,
   isUsableSuggestedPlayerPoll,
   GameSchema,
+  PlayEvidenceMutationResultSchema,
+  ManualPlayCorrectionResultSchema,
+  OwnershipMutationResultSchema,
   CollectionGameV3Schema,
   CollectionSchema,
   CollectionSchemaV3,
@@ -284,6 +290,7 @@ export type { ExactRationalJson, ExactComparison } from "./exact-rational";
 export { parseAmountInput, formatStoredAmount, formatExactAmount, amountSortKey } from "./amount";
 
 export { createInitialEntityMetadata } from "./useful-profile-source";
+export { createCompleteEntityMetadata } from "./useful-profile-source";
 
 export { calculatePurchaseUtilization, resolveModeledPlayerCount } from "./purchase-utilization";
 

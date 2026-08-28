@@ -80,6 +80,9 @@ export const EntityClassMetadataSchema = z
         observedAt: z.null(),
         refreshFailure: z.null(),
         correctionDestination: z.null(),
+        explanation: z.literal(
+          "This game has no BGG ID, so Shelf Judge cannot refresh entity metadata.",
+        ),
       })
       .strict(),
   ])
@@ -294,13 +297,13 @@ const StaleVersionConflictSchema = z
     if (
       error.current.gameId !== error.gameId ||
       error.current.intentionId !== error.intentionId ||
-      error.current.version <= error.expectedVersion
+      (error.current.version === error.expectedVersion && error.current.resolution === null)
     ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["current"],
         message:
-          "Stale conflict current state must match the requested identities and have a newer version",
+          "Stale conflict current state must match the requested identities and differ in version or resolved state",
       });
     }
   });
@@ -326,6 +329,7 @@ const IntentionMutationErrorSchema = z.union([
         "not-owned",
         "missing-play-evidence",
         "invalid-play-evidence",
+        "missing-observation-time",
         "stale-play-evidence",
         "kind-mismatch",
       ]),

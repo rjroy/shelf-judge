@@ -28,6 +28,7 @@ import type { OperationDefinition } from "./operations.js";
 import { createPurchaseUtilizationService } from "./services/purchase-utilization-service.js";
 import type { CollectionMutationService } from "./services/collection-mutation-service.js";
 import type { DisplayedFitnessService } from "./services/displayed-fitness-service.js";
+import type { IntentionService } from "./services/intention-service.js";
 
 export interface AppDeps {
   storageService: StorageService;
@@ -38,6 +39,7 @@ export interface AppDeps {
   profileService: ProfileService;
   predictionService: PredictionService;
   displayedFitnessService: DisplayedFitnessService;
+  intentionService: IntentionService;
   bggClient?: BggClient;
   onShutdown?: () => void;
 }
@@ -57,6 +59,7 @@ export function createApp(deps: AppDeps): AppResult {
     profileService,
     predictionService,
     displayedFitnessService,
+    intentionService,
     bggClient,
     onShutdown,
   } = deps;
@@ -81,6 +84,7 @@ export function createApp(deps: AppDeps): AppResult {
     wishlistService,
     purchaseUtilizationService,
     displayedFitnessService,
+    intentionService,
   });
   const collectionRouteModule = createCollectionRoutes({ purchaseUtilizationService });
   const axisRouteModule = createAxisRoutes({ axisService });

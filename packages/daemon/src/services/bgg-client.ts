@@ -3,6 +3,7 @@ import {
   type BggGameData,
   type AppConfig,
   type BggSearchResult,
+  type EntityMetadataByClass,
 } from "@shelf-judge/shared";
 import {
   parseThingItems,
@@ -37,11 +38,14 @@ export interface BggGameResult {
   metadataObservation?: BggRequestObservation;
   playerRangeObservation?: BggRequestObservation;
   suggestedPlayerPoll?: ParsedSuggestedPlayerPoll;
+  entityMetadata: EntityMetadataByClass;
 }
 
 export interface BatchProgressEvent {
   batchIds: number[];
   results: Map<number, BggGameResult>;
+  failures: Map<number, string>;
+  error?: string;
 }
 
 export interface BggClient {
@@ -90,6 +94,65 @@ function classifyRequestedItemOutcome<T>(
     : "partial";
 }
 
+interface RequestedItems<T> {
+  items: T[];
+  failures: Map<number, string>;
+  state: BggRequestObservation["state"] | "failure";
+}
+
+function validateRequestedItems<T>(
+  requestedIds: readonly number[],
+  returnedItems: readonly T[],
+  getId: (item: T) => number,
+  getState: (item: T) => BggRequestObservation["state"] | undefined,
+  responseName: string,
+  missingIsValid = false,
+): RequestedItems<T> {
+  const requestedIdSet = new Set(requestedIds);
+  const itemsById = new Map<number, T[]>();
+  for (const item of returnedItems) {
+    const id = getId(item);
+    const matches = itemsById.get(id);
+    if (matches) matches.push(item);
+    else itemsById.set(id, [item]);
+  }
+
+  const failures = new Map<number, string>();
+  const items: T[] = [];
+  const returnedIds = returnedItems.map(getId);
+  const returnedIdText = returnedIds.length === 0 ? "none" : returnedIds.join(", ");
+  for (const id of requestedIdSet) {
+    const matches = itemsById.get(id) ?? [];
+    if (matches.length === 1) {
+      items.push(matches[0]);
+    } else if (matches.length === 0 && !missingIsValid) {
+      failures.set(
+        id,
+        `${responseName} did not include requested BGG ID ${id}; returned BGG IDs: ${returnedIdText}`,
+      );
+    } else if (matches.length > 1) {
+      failures.set(
+        id,
+        `${responseName} was ambiguous for requested BGG ID ${id}; returned ${matches.length} matching items`,
+      );
+    }
+  }
+
+  const hasUnrequestedItems = returnedItems.some((item) => !requestedIdSet.has(getId(item)));
+  const state =
+    returnedItems.length === 0
+      ? "absent"
+      : items.length === 0
+        ? "failure"
+        : failures.size === 0 &&
+            items.length === requestedIdSet.size &&
+            !hasUnrequestedItems &&
+            items.every((item) => getState(item) === "complete")
+          ? "complete"
+          : "partial";
+  return { items, failures, state };
+}
+
 export function createBggClient(deps: BggClientDeps): BggClient {
   const { config, delayMs = DEFAULT_DELAY_MS } = deps;
   const fetchFn = deps.fetchFn ?? fetch;
@@ -99,6 +162,7 @@ export function createBggClient(deps: BggClientDeps): BggClient {
 
   let lastRequestTime = 0;
   let currentDelayMs = delayMs;
+  let requestQueue: Promise<void> = Promise.resolve();
 
   function assertConfigured(): void {
     if (!config.bggAuthToken) {
@@ -117,10 +181,6 @@ export function createBggClient(deps: BggClientDeps): BggClient {
   let rateLimitRetries = 0;
 
   async function throttledFetch(url: string, retryCount = 0): Promise<Response> {
-    // Rate limiting: timestamp-based throttle. Assumes single-threaded access.
-    // Concurrent calls would read the same lastRequestTime and both proceed,
-    // bypassing the delay. All current callers are sequential (await in loops).
-    // Post-MVP: replace with a mutex-guarded queue if parallel callers are added.
     const now = Date.now();
     const elapsed = now - lastRequestTime;
     if (elapsed < currentDelayMs && lastRequestTime > 0) {
@@ -188,9 +248,21 @@ export function createBggClient(deps: BggClientDeps): BggClient {
     return response;
   }
 
+  function queuedFetch(url: string): Promise<Response> {
+    const result = requestQueue.then(
+      () => throttledFetch(url),
+      () => throttledFetch(url),
+    );
+    requestQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
   async function fetchWithRetry202(url: string): Promise<{ xml: string; observedAt: string }> {
     for (let attempt = 0; attempt <= MAX_202_RETRIES; attempt++) {
-      const response = await throttledFetch(url);
+      const response = await queuedFetch(url);
 
       if (response.status === 200) {
         const xml = await response.text();
@@ -235,7 +307,7 @@ export function createBggClient(deps: BggClientDeps): BggClient {
       let searchObservedAt: string | null = null;
       let results: BggSearchResult[];
       try {
-        const response = await throttledFetch(url);
+        const response = await queuedFetch(url);
         const xml = await response.text();
         searchObservedAt = now();
         results = parseSearchResponse(xml, searchObservedAt);
@@ -280,7 +352,7 @@ export function createBggClient(deps: BggClientDeps): BggClient {
         let thingObservedAt: string | null = null;
         try {
           const thingUrl = `${BGG_BASE_URL}/thing?id=${enrichIds.join(",")}&type=boardgame`;
-          const thingResponse = await throttledFetch(thingUrl);
+          const thingResponse = await queuedFetch(thingUrl);
           const thingXml = await thingResponse.text();
           thingObservedAt = now();
           const thingItems = parseThingItems(thingXml, thingObservedAt);
@@ -335,7 +407,7 @@ export function createBggClient(deps: BggClientDeps): BggClient {
       let thingObservedAt: string | null = null;
       let items: ThingItem[];
       try {
-        const response = await throttledFetch(url);
+        const response = await queuedFetch(url);
         const xml = await response.text();
         thingObservedAt = now();
         items = parseThingItems(xml, thingObservedAt);
@@ -367,11 +439,34 @@ export function createBggClient(deps: BggClientDeps): BggClient {
         throw new Error(`No game found with BGG ID ${bggId}`);
       }
 
-      const item = items[0];
+      const matchingItems = items.filter((candidate) => candidate.bggId === bggId);
+      if (matchingItems.length !== 1) {
+        const returnedBggIds = items.map((candidate) => candidate.bggId);
+        const error =
+          matchingItems.length === 0
+            ? `BGG thing response did not include requested BGG ID ${bggId}; returned BGG IDs: ${returnedBggIds.join(", ")}`
+            : `BGG thing response was ambiguous for requested BGG ID ${bggId}; returned ${matchingItems.length} matching items`;
+        logger.error("metadata fetch outcome", {
+          bggIds: [bggId],
+          returnedBggIds,
+          fieldsReturned: [
+            ...new Set(items.flatMap((candidate) => candidate.metadataObservation.fieldsReturned)),
+          ],
+          sourceRequest: "bgg-thing",
+          observedAt: thingObservedAt,
+          state: "failure",
+          error,
+        });
+        throw new Error(error);
+      }
+
+      const item = matchingItems[0];
       logger.log("metadata fetch outcome", {
         bggIds: [bggId],
-        returnedBggIds: [item.bggId],
-        fieldsReturned: item.metadataObservation.fieldsReturned,
+        returnedBggIds: items.map((candidate) => candidate.bggId),
+        fieldsReturned: [
+          ...new Set(items.flatMap((candidate) => candidate.metadataObservation.fieldsReturned)),
+        ],
         sourceRequest: "bgg-thing",
         observedAt: thingObservedAt,
         state: classifyRequestedItemOutcome(
@@ -388,11 +483,12 @@ export function createBggClient(deps: BggClientDeps): BggClient {
         metadataObservation: item.metadataObservation,
         playerRangeObservation: item.playerRangeObservation,
         suggestedPlayerPoll: item.suggestedPlayerPoll,
+        entityMetadata: item.entityMetadata,
       };
 
       if (config.username) {
         logger.log(
-          `getGame: fetched data for "${items[0].metadata.name}", checking collection for "${config.username}"`,
+          `getGame: fetched data for "${item.metadata.name}", checking collection for "${config.username}"`,
         );
         const collectionUrl = `${BGG_BASE_URL}/collection?username=${encodeURIComponent(config.username)}&id=${bggId}&stats=1`;
         logger.log("collection fetch attempt", {
@@ -420,12 +516,41 @@ export function createBggClient(deps: BggClientDeps): BggClient {
             error: toErrorMessage(err),
             username: config.username,
           });
-          throw err;
+          return result;
         }
         if (collectionObservedAt === null) {
           throw new Error("BGG collection response did not include an observation time");
         }
-        const collectionItem = collectionItems.find((candidate) => candidate.bggId === bggId);
+        const validatedCollection = validateRequestedItems(
+          [bggId],
+          collectionItems,
+          (candidate) => candidate.bggId,
+          (candidate) => candidate.playCountObservation?.state,
+          "BGG collection response",
+          true,
+        );
+        const collectionFailure = validatedCollection.failures.get(bggId);
+        if (collectionFailure !== undefined) {
+          logger.warn("collection fetch outcome", {
+            bggIds: [bggId],
+            returnedBggIds: collectionItems.map((candidate) => candidate.bggId),
+            fieldsReturned: [
+              ...new Set(
+                collectionItems.flatMap(
+                  (candidate) => candidate.playCountObservation?.fieldsReturned ?? [],
+                ),
+              ),
+            ],
+            sourceRequest: "bgg-collection",
+            observedAt: collectionObservedAt,
+            state: "failure",
+            error: collectionFailure,
+            failures: Object.fromEntries(validatedCollection.failures),
+            username: config.username,
+          });
+          return result;
+        }
+        const collectionItem = validatedCollection.items[0];
         if (collectionItem) {
           result.collectionData = {
             numPlays: collectionItem.numplays,
@@ -445,15 +570,17 @@ export function createBggClient(deps: BggClientDeps): BggClient {
         logger.log("collection fetch outcome", {
           bggIds: [bggId],
           returnedBggIds: collectionItems.map((candidate) => candidate.bggId),
-          fieldsReturned: result.collectionData.observation?.fieldsReturned ?? [],
+          fieldsReturned: [
+            ...new Set(
+              collectionItems.flatMap(
+                (candidate) => candidate.playCountObservation?.fieldsReturned ?? [],
+              ),
+            ),
+          ],
           sourceRequest: "bgg-collection",
           observedAt: collectionObservedAt,
-          state: classifyRequestedItemOutcome(
-            [bggId],
-            collectionItems,
-            (candidate) => candidate.bggId,
-            (candidate) => candidate.playCountObservation?.state,
-          ),
+          state: validatedCollection.state,
+          failures: {},
           username: config.username,
         });
       }
@@ -485,11 +612,12 @@ export function createBggClient(deps: BggClientDeps): BggClient {
         let thingObservedAt: string | null = null;
         let items: ThingItem[];
         try {
-          const response = await throttledFetch(url);
+          const response = await queuedFetch(url);
           const xml = await response.text();
           thingObservedAt = now();
           items = parseThingItems(xml, thingObservedAt);
         } catch (err) {
+          const error = toErrorMessage(err);
           logger.error("metadata fetch outcome", {
             bggIds: batchIds,
             returnedBggIds: [],
@@ -497,19 +625,27 @@ export function createBggClient(deps: BggClientDeps): BggClient {
             sourceRequest: "bgg-thing",
             observedAt: thingObservedAt,
             state: "failure",
-            error: toErrorMessage(err),
+            error,
           });
-          await onBatch?.({ batchIds, results: batchResults });
+          await onBatch?.({ batchIds, results: batchResults, failures: new Map(), error });
           continue;
         }
 
-        for (const item of items) {
+        const validatedThings = validateRequestedItems(
+          batchIds,
+          items,
+          (item) => item.bggId,
+          (item) => item.metadataObservation.state,
+          "BGG thing response",
+        );
+        for (const item of validatedThings.items) {
           const entry: BggGameResult = {
             metadata: item.metadata,
             bggData: item.bggData,
             metadataObservation: item.metadataObservation,
             playerRangeObservation: item.playerRangeObservation,
             suggestedPlayerPoll: item.suggestedPlayerPoll,
+            entityMetadata: item.entityMetadata,
           };
           results.set(item.bggId, entry);
           batchResults.set(item.bggId, entry);
@@ -522,12 +658,8 @@ export function createBggClient(deps: BggClientDeps): BggClient {
           ],
           sourceRequest: "bgg-thing",
           observedAt: thingObservedAt,
-          state: classifyRequestedItemOutcome(
-            batchIds,
-            items,
-            (item) => item.bggId,
-            (item) => item.metadataObservation.state,
-          ),
+          state: validatedThings.state,
+          failures: Object.fromEntries(validatedThings.failures),
         });
         if (config.username) {
           const collectionUrl = `${BGG_BASE_URL}/collection?username=${encodeURIComponent(config.username)}&id=${idList}&stats=1`;
@@ -544,10 +676,18 @@ export function createBggClient(deps: BggClientDeps): BggClient {
               collectionResponse.xml,
               collectionResponse.observedAt,
             );
+            const validatedCollection = validateRequestedItems(
+              batchIds,
+              collectionItems,
+              (item) => item.bggId,
+              (item) => item.playCountObservation?.state,
+              "BGG collection response",
+              true,
+            );
 
-            for (const item of items) {
+            for (const item of validatedThings.items) {
               const gameResult = results.get(item.bggId);
-              if (gameResult) {
+              if (gameResult && !validatedCollection.failures.has(item.bggId)) {
                 gameResult.collectionData = {
                   numPlays: null,
                   observation: {
@@ -560,7 +700,7 @@ export function createBggClient(deps: BggClientDeps): BggClient {
               }
             }
 
-            for (const colItem of collectionItems) {
+            for (const colItem of validatedCollection.items) {
               const gameResult = results.get(colItem.bggId);
               if (gameResult) {
                 gameResult.collectionData = {
@@ -582,12 +722,8 @@ export function createBggClient(deps: BggClientDeps): BggClient {
               ],
               sourceRequest: "bgg-collection",
               observedAt: collectionResponse.observedAt,
-              state: classifyRequestedItemOutcome(
-                batchIds,
-                collectionItems,
-                (item) => item.bggId,
-                (item) => item.playCountObservation?.state,
-              ),
+              state: validatedCollection.state,
+              failures: Object.fromEntries(validatedCollection.failures),
               username: config.username,
             });
           } catch (err) {
@@ -604,7 +740,11 @@ export function createBggClient(deps: BggClientDeps): BggClient {
           }
         }
 
-        await onBatch?.({ batchIds, results: batchResults });
+        await onBatch?.({
+          batchIds,
+          results: batchResults,
+          failures: validatedThings.failures,
+        });
       }
 
       logger.log(`getGames: complete, ${results.size}/${bggIds.length} results`);

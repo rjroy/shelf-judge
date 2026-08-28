@@ -20,6 +20,7 @@ import type {
   GameWithScore,
 } from "@shelf-judge/shared";
 import {
+  createCompleteEntityMetadata,
   CURRENT_PROFILE_ALGORITHM_VERSION,
   CURRENT_PROFILE_CONTRACT_VERSION,
 } from "@shelf-judge/shared";
@@ -68,6 +69,10 @@ interface PersistedMigrationFixture {
 
 // Shared fixtures
 const wingspanBgg: BggGameResult = {
+  entityMetadata: createCompleteEntityMetadata(
+    { mechanic: [{ id: 2004, name: "Set Collection" }], designer: [], artist: [] },
+    "2026-08-28T00:00:00.000Z",
+  ),
   metadata: {
     bggId: 266192,
     name: "Wingspan",
@@ -94,6 +99,10 @@ const wingspanBgg: BggGameResult = {
 };
 
 const gloomhavenBgg: BggGameResult = {
+  entityMetadata: createCompleteEntityMetadata(
+    { mechanic: [{ id: 2023, name: "Cooperative Play" }], designer: [], artist: [] },
+    "2026-08-28T00:00:00.000Z",
+  ),
   metadata: {
     bggId: 174430,
     name: "Gloomhaven",
@@ -269,7 +278,7 @@ describe("Integration: End-to-end scenarios", () => {
           const filtered = new Map(
             ids.filter((id) => bggResults.has(id)).map((id) => [id, bggResults.get(id)!]),
           );
-          await onBatch?.({ batchIds: ids, results: filtered });
+          await onBatch?.({ batchIds: ids, results: filtered, failures: new Map() });
           return filtered;
         },
         getGame: (id) => {

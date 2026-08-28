@@ -13,6 +13,7 @@ import { createApp } from "./app.js";
 import { createLogger } from "./services/logger.js";
 import { createCollectionMutationService } from "./services/collection-mutation-service.js";
 import { createDisplayedFitnessService } from "./services/displayed-fitness-service.js";
+import { createIntentionService } from "./services/intention-service.js";
 
 const logger = createLogger("daemon");
 
@@ -48,6 +49,7 @@ async function main() {
     bggClient,
     onGameDeleted: (gameId) => tournamentService.onGameDeleted(gameId),
   });
+  const intentionService = createIntentionService({ collectionMutationService });
 
   const predictionService = createPredictionService({
     storageService,
@@ -83,6 +85,7 @@ async function main() {
     profileService,
     predictionService,
     displayedFitnessService,
+    intentionService,
     bggClient,
     onShutdown() {
       logger.log("Shutting down via API...");

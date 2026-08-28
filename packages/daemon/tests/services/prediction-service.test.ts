@@ -8,7 +8,11 @@ import type {
   TournamentGameStatsDisplay,
   TournamentSettings,
 } from "@shelf-judge/shared";
-import { createInitialEntityMetadata, SuggestedPlayerPollSchema } from "@shelf-judge/shared";
+import {
+  createCompleteEntityMetadata,
+  createInitialEntityMetadata,
+  SuggestedPlayerPollSchema,
+} from "@shelf-judge/shared";
 import { createPredictionService } from "../../src/services/prediction-service.js";
 import { createFitnessService } from "../../src/services/fitness-service.js";
 import type { BggGameData } from "@shelf-judge/shared";
@@ -668,6 +672,14 @@ describe("prediction-service", () => {
     });
 
     const makeBggResult = (name: string, bggData?: BggGameData): BggGameResult => ({
+      entityMetadata: createCompleteEntityMetadata(
+        {
+          mechanic: bggData?.mechanics ?? makeBggData().mechanics,
+          designer: [],
+          artist: [],
+        },
+        now,
+      ),
       metadata: {
         bggId: 99999,
         name,
@@ -729,6 +741,10 @@ describe("prediction-service", () => {
             fieldsReturned: ["numPlays"],
           },
         },
+        entityMetadata: createCompleteEntityMetadata(
+          { mechanic: bggData.mechanics, designer: [], artist: [] },
+          now,
+        ),
       };
       const bggClient = createStubBggClient({
         ...makeBggResult("New Game", bggData),
@@ -747,6 +763,7 @@ describe("prediction-service", () => {
       expect(result.game.name).toBe("New Game");
       expect(result.game.bggId).toBe(99999);
       expect(result.game.bestPlayers).toBe(3);
+      expect(result.game.entityMetadata).toEqual(bggObservations.entityMetadata);
       expect(result.score).toBeDefined();
       expect(result.bggObservations).toEqual(bggObservations);
       // Temporary game has no ratings, so all personal axes should be predicted

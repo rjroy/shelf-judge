@@ -1,7 +1,10 @@
 import { XMLParser } from "fast-xml-parser";
+import { createCompleteEntityMetadata } from "@shelf-judge/shared";
 import type {
   BggGameData,
   BggTag,
+  BggEntityLink,
+  EntityMetadataByClass,
   SuggestedPlayerCount,
   BggSearchResult,
 } from "@shelf-judge/shared";
@@ -126,6 +129,49 @@ function extractLinks(links: BggXmlLinkEntry[], type: string): BggTag[] {
     }));
 }
 
+function compareCodePoints(left: string, right: string): number {
+  const leftPoints = Array.from(left, (value) => value.codePointAt(0) ?? 0);
+  const rightPoints = Array.from(right, (value) => value.codePointAt(0) ?? 0);
+  for (let index = 0; index < Math.min(leftPoints.length, rightPoints.length); index += 1) {
+    const difference = (leftPoints[index] ?? 0) - (rightPoints[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return leftPoints.length - rightPoints.length;
+}
+
+function compareEntityNames(left: string, right: string): number {
+  return (
+    compareCodePoints(left.normalize("NFC"), right.normalize("NFC")) ||
+    compareCodePoints(left, right)
+  );
+}
+
+function extractEntityLinks(links: BggXmlLinkEntry[], type: string): BggEntityLink[] {
+  const byId = new Map<number, string>();
+  for (const link of links) {
+    if (link["@_type"] !== type) continue;
+    const id = Number(link["@_id"]);
+    const name = cleanupString(link["@_value"]).trim();
+    if (!Number.isSafeInteger(id) || id <= 0 || name.length === 0) continue;
+    const currentName = byId.get(id);
+    if (currentName === undefined || compareEntityNames(name, currentName) < 0) byId.set(id, name);
+  }
+  return [...byId]
+    .sort(([leftId], [rightId]) => leftId - rightId)
+    .map(([id, name]) => ({ id, name }));
+}
+
+function entityMetadata(links: BggXmlLinkEntry[], observedAt: string): EntityMetadataByClass {
+  return createCompleteEntityMetadata(
+    {
+      mechanic: extractEntityLinks(links, "boardgamemechanic"),
+      designer: extractEntityLinks(links, "boardgamedesigner"),
+      artist: extractEntityLinks(links, "boardgameartist"),
+    },
+    observedAt,
+  );
+}
+
 function extractSuggestedPlayerPoll(poll: BggXmlPoll | undefined): ParsedSuggestedPlayerPoll {
   if (!poll) return { buckets: [], state: "absent" };
   const allResults = ensureArray(poll.results);
@@ -205,6 +251,7 @@ function parseThingItem(item: BggXmlItem, observedAt: string): ThingItem {
   const polls = ensureArray(item.poll);
   const playerCountPoll = polls.find((poll) => poll["@_name"] === "suggested_numplayers");
   const suggestedPlayerPoll = extractSuggestedPlayerPoll(playerCountPoll);
+  const parsedEntityMetadata = entityMetadata(links, observedAt);
   suggestedPlayerPoll.observation = observation(
     "bgg-thing",
     observedAt,
@@ -259,13 +306,14 @@ function parseThingItem(item: BggXmlItem, observedAt: string): ThingItem {
       weight,
       numWeightVotes: parseNumber(ratings?.numweights?.["@_value"]) ?? 0,
       description: item.description ?? null,
-      mechanics: extractLinks(links, "boardgamemechanic"),
+      mechanics: parsedEntityMetadata.mechanic.entities,
       categories: extractLinks(links, "boardgamecategory"),
       families: extractLinks(links, "boardgamefamily"),
       subdomains: extractLinks(links, "boardgamesubdomain"),
       bestPlayerCount: extractBestPlayerCount(suggestedPlayerPoll.buckets),
       fetchedAt: observedAt,
     },
+    entityMetadata: parsedEntityMetadata,
   };
 }
 
@@ -326,6 +374,7 @@ export interface ThingItem {
   metadataObservation: BggRequestObservation;
   playerRangeObservation: BggRequestObservation;
   suggestedPlayerPoll: ParsedSuggestedPlayerPoll;
+  entityMetadata: EntityMetadataByClass;
 }
 
 export function parseThingItems(xml: string, observedAt = new Date().toISOString()): ThingItem[] {

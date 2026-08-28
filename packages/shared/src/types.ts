@@ -1029,6 +1029,7 @@ export type EntityClassMetadata =
       observedAt: null;
       refreshFailure: null;
       correctionDestination: null;
+      explanation: "This game has no BGG ID, so Shelf Judge cannot refresh entity metadata.";
     };
 
 export type EntityMetadataByClass = Record<ProfileEntityClass, EntityClassMetadata>;
@@ -1067,6 +1068,32 @@ export interface PlayIntention {
   createdAt: string;
   version: number;
   resolution: PlayIntentionResolution | null;
+}
+
+export interface PlayEvidenceMutationResult {
+  game: Game;
+  linkedIntentionTransition: PlayIntention | null;
+}
+
+export type ManualPlayCorrectionResult =
+  | {
+      ok: true;
+      game: Game;
+      linkedIntentionTransition: PlayIntention | null;
+    }
+  | {
+      ok: false;
+      error: {
+        code: "non-monotonic-observation";
+        gameId: string;
+        attemptedObservedAt: string;
+        latestAcceptedAt: string;
+      };
+    };
+
+export interface OwnershipMutationResult {
+  game: Game;
+  linkedIntentionTransition: PlayIntention | null;
 }
 
 export type FutureUsefulProfileGameSource = Game;
@@ -1115,6 +1142,7 @@ export type IntentionMutationError =
         | "not-owned"
         | "missing-play-evidence"
         | "invalid-play-evidence"
+        | "missing-observation-time"
         | "stale-play-evidence"
         | "kind-mismatch";
     }
