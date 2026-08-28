@@ -1,0 +1,817 @@
+import { describe, expect, expectTypeOf, test } from "bun:test";
+import {
+  EntityClassMetadataSchema,
+  FutureUsefulProfileCollectionSourceSchema,
+  FutureUsefulProfileSnapshotSchema,
+  FutureUsefulProfileSchema,
+  IntentionCommandReceiptSchema,
+  IntentionMutationResultSchema,
+  PlayIntentionSchema,
+  ProfileEntityClassResultSchema,
+  ResolvedPlayIntentionHistorySchema,
+  ResolvedPlayIntentionHistoryItemSchema,
+  type FutureUsefulProfileResult,
+  type FutureUsefulProfileGameSource,
+  type IntentionMutationError,
+  type IntentionMutationResult,
+} from "../src/index";
+import {
+  activeIntentionFixture,
+  mechanicClassFixture,
+  usefulProfileFixture,
+} from "./fixtures/useful-profile";
+
+const commandId = "123e4567-e89b-42d3-a456-426614174000";
+
+function futureSourceGame(
+  id: string,
+  ownership: "owned" | "previously-owned" = "owned",
+  overrides: Partial<FutureUsefulProfileGameSource> = {},
+): FutureUsefulProfileGameSource {
+  const complete = {
+    state: "complete" as const,
+    entities: [],
+    observedAt: "2026-08-27T12:00:00.000Z",
+    refreshFailure: null,
+    correctionDestination: null,
+  };
+  return {
+    id,
+    bggId: 1,
+    name: "Game",
+    yearPublished: null,
+    minPlayers: null,
+    maxPlayers: null,
+    bestPlayers: null,
+    playingTime: null,
+    imageUrl: null,
+    bggData: null,
+    numPlays: 0,
+    acquisition: { state: "unknown" },
+    playCountEvidence: {
+      status: "valid",
+      value: 0,
+      source: "manual",
+      observedAt: "2026-08-27T10:00:00.000Z",
+    },
+    durationEvidence: { status: "missing", source: "manual", observedAt: null },
+    playerRangeEvidence: { status: "missing", source: "manual", observedAt: null },
+    suggestedPlayerPoll: {
+      status: "valid",
+      state: "absent",
+      buckets: [],
+      source: "manual",
+      observedAt: null,
+    },
+    bestPlayersInvalidEvidence: null,
+    ownership,
+    boxDimensions: null,
+    manualShelfId: null,
+    ratings: {},
+    createdAt: "2026-08-27T09:00:00.000Z",
+    updatedAt: "2026-08-27T12:00:00.000Z",
+    entityMetadata: { mechanic: complete, designer: complete, artist: complete },
+    latestPlayCountCheck: null,
+    ...overrides,
+  };
+}
+
+function futureSourceCollection(
+  intentions = [activeIntentionFixture],
+  commandReceipts: unknown[] = [],
+) {
+  return {
+    schemaVersion: 4,
+    id: "collection",
+    name: "Collection",
+    axes: [],
+    entertainmentBenchmark: null,
+    createdAt: "2026-08-27T09:00:00.000Z",
+    updatedAt: "2026-08-27T12:00:00.000Z",
+    revision: 1,
+    games: [futureSourceGame("game-4")],
+    intentions,
+    commandReceipts,
+  };
+}
+
+describe("future useful-profile source contracts", () => {
+  test("keeps active collection and profile aliases separate from future contracts", () => {
+    expectTypeOf<FutureUsefulProfileResult>().not.toEqualTypeOf<
+      typeof usefulProfileFixture.identity
+    >();
+    expect(FutureUsefulProfileSchema.safeParse(usefulProfileFixture).success).toBe(true);
+  });
+
+  test("distinguishes complete-empty, refresh-needed, and unrefreshable entity metadata", () => {
+    const complete = {
+      state: "complete",
+      entities: [],
+      observedAt: "2026-08-27T12:00:00.000Z",
+      refreshFailure: null,
+      correctionDestination: null,
+    };
+    const refreshNeeded = {
+      state: "refresh-needed",
+      entities: [],
+      observedAt: null,
+      refreshFailure: null,
+      correctionDestination: { operationId: "shelf.game.bgg.refresh" },
+    };
+    const unrefreshable = {
+      state: "unrefreshable",
+      entities: [],
+      observedAt: null,
+      refreshFailure: null,
+      correctionDestination: null,
+    };
+
+    expect(EntityClassMetadataSchema.safeParse(complete).success).toBe(true);
+    expect(EntityClassMetadataSchema.safeParse(refreshNeeded).success).toBe(true);
+    expect(EntityClassMetadataSchema.safeParse(unrefreshable).success).toBe(true);
+    expect(
+      EntityClassMetadataSchema.safeParse({
+        ...complete,
+        entities: [
+          { id: 1, name: "Deck Building" },
+          { id: 1, name: "Renamed Deck Building" },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      EntityClassMetadataSchema.safeParse({
+        ...complete,
+        refreshFailure: {
+          attemptedAt: "2026-08-27T11:59:00.000Z",
+          message: "Failure before success is contradictory",
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      EntityClassMetadataSchema.safeParse({
+        ...refreshNeeded,
+        entities: [{ id: 1, name: "Fabricated" }],
+      }).success,
+    ).toBe(false);
+  });
+
+  test("validates intention kinds, lifecycle, and one active intention per game", () => {
+    expect(PlayIntentionSchema.safeParse(activeIntentionFixture).success).toBe(true);
+    expect(
+      PlayIntentionSchema.safeParse({
+        ...activeIntentionFixture,
+        kind: "replay",
+      }).success,
+    ).toBe(false);
+    expect(
+      PlayIntentionSchema.safeParse({
+        ...activeIntentionFixture,
+        resolution: {
+          outcome: "retired",
+          source: "owner-confirmed",
+          resolvedAt: "2026-08-27T12:00:00.000Z",
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      PlayIntentionSchema.safeParse({
+        ...activeIntentionFixture,
+        baseline: {
+          ...activeIntentionFixture.baseline,
+          observedAt: "2026-08-27T10:02:00.000Z",
+        },
+      }).success,
+    ).toBe(false);
+
+    const source = futureSourceCollection();
+    expect(FutureUsefulProfileCollectionSourceSchema.safeParse(source).success).toBe(true);
+    expect(
+      FutureUsefulProfileCollectionSourceSchema.safeParse({
+        ...source,
+        intentions: [
+          activeIntentionFixture,
+          { ...activeIntentionFixture, intentionId: "intention-2" },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      FutureUsefulProfileCollectionSourceSchema.safeParse({
+        ...source,
+        games: [
+          futureSourceGame("game-4", "owned", {
+            playCountEvidence: {
+              status: "missing",
+              source: "manual",
+              observedAt: null,
+            },
+            latestPlayCountCheck: {
+              status: "missing",
+              observedAt: "2026-08-27T12:00:00.000Z",
+            },
+          }),
+        ],
+        intentions: [],
+      }).success,
+    ).toBe(false);
+    const mismatchedObservation = futureSourceGame("game-4");
+    const artistMetadata = mismatchedObservation.entityMetadata.artist;
+    if (artistMetadata.state !== "complete") throw new Error("Expected complete artist metadata");
+    mismatchedObservation.entityMetadata.artist = {
+      ...artistMetadata,
+      observedAt: "2026-08-27T12:01:00.000Z",
+    };
+    expect(
+      FutureUsefulProfileCollectionSourceSchema.safeParse({
+        ...source,
+        games: [mismatchedObservation],
+      }).success,
+    ).toBe(false);
+    expect(
+      FutureUsefulProfileCollectionSourceSchema.safeParse({
+        ...source,
+        games: [futureSourceGame("game-4", "previously-owned")],
+      }).success,
+    ).toBe(false);
+
+    const noBgg = futureSourceGame("game-4", "owned", {
+      bggId: null,
+      entityMetadata: {
+        mechanic: {
+          state: "unrefreshable",
+          entities: [],
+          observedAt: null,
+          refreshFailure: null,
+          correctionDestination: null,
+        },
+        designer: {
+          state: "unrefreshable",
+          entities: [],
+          observedAt: null,
+          refreshFailure: null,
+          correctionDestination: null,
+        },
+        artist: {
+          state: "unrefreshable",
+          entities: [],
+          observedAt: null,
+          refreshFailure: null,
+          correctionDestination: null,
+        },
+      },
+    });
+    expect(
+      FutureUsefulProfileCollectionSourceSchema.safeParse({
+        ...source,
+        games: [noBgg],
+      }).success,
+    ).toBe(true);
+    expect(
+      FutureUsefulProfileCollectionSourceSchema.safeParse({
+        ...source,
+        games: [{ ...futureSourceGame("game-4"), bggId: null }],
+      }).success,
+    ).toBe(false);
+  });
+
+  test("validates accepted command receipts against canonical requests and results", () => {
+    const completed = {
+      ...activeIntentionFixture,
+      version: 2,
+      resolution: {
+        outcome: "completed" as const,
+        source: "owner-confirmed" as const,
+        resolvedAt: "2026-08-27T12:00:00.000Z",
+      },
+    };
+    const receipt = {
+      commandId,
+      request: {
+        type: "complete" as const,
+        commandId,
+        gameId: "game-4",
+        intentionId: "intention-1",
+        expectedVersion: 1,
+      },
+      result: {
+        ok: true as const,
+        commandId,
+        intention: completed,
+        linkedOwnershipTransition: null,
+      },
+    };
+
+    expect(IntentionCommandReceiptSchema.safeParse(receipt).success).toBe(true);
+    expect(
+      FutureUsefulProfileCollectionSourceSchema.safeParse(
+        futureSourceCollection([completed], [receipt]),
+      ).success,
+    ).toBe(true);
+    expect(
+      FutureUsefulProfileCollectionSourceSchema.safeParse(
+        futureSourceCollection(
+          [
+            {
+              ...completed,
+              baseline: { ...completed.baseline, evidenceSource: "manual" },
+            },
+          ],
+          [receipt],
+        ),
+      ).success,
+    ).toBe(false);
+    expect(
+      IntentionCommandReceiptSchema.safeParse({
+        ...receipt,
+        request: { ...receipt.request, intentionId: "different" },
+      }).success,
+    ).toBe(false);
+
+    expect(
+      IntentionCommandReceiptSchema.safeParse({
+        ...receipt,
+        result: {
+          ...receipt.result,
+          intention: {
+            ...completed,
+            resolution: {
+              outcome: "completed",
+              source: "observed-play-increase",
+              resolvedAt: "2026-08-27T12:00:00.000Z",
+            },
+          },
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      IntentionCommandReceiptSchema.safeParse({
+        ...receipt,
+        result: {
+          ...receipt.result,
+          intention: { ...completed, version: 3 },
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  test("accepts every structured mutation error family and rejects malformed variants", () => {
+    const errors: IntentionMutationError[] = [
+      { code: "validation", issues: [{ field: "kind", message: "Invalid kind" }] },
+      { code: "game-not-found", gameId: "missing" },
+      { code: "intention-not-found", gameId: "game-1", intentionId: "missing" },
+      { code: "ineligible-game", gameId: "game-1", reason: "not-owned" },
+      { code: "active-intention-conflict", gameId: "game-4", current: activeIntentionFixture },
+      {
+        code: "stale-version",
+        gameId: "game-4",
+        intentionId: "intention-1",
+        expectedVersion: 1,
+        current: {
+          ...activeIntentionFixture,
+          version: 2,
+          resolution: {
+            outcome: "retired",
+            source: "owner-retired",
+            resolvedAt: "2026-08-27T12:00:00.000Z",
+          },
+        },
+      },
+      { code: "command-reuse", commandId },
+      { code: "history-conflict", gameId: "game-4", intentionIds: ["intention-1"] },
+      { code: "persistence-failure", operation: "save", message: "Disk unavailable" },
+    ];
+
+    for (const error of errors) {
+      const result = { ok: false, commandId, error } satisfies IntentionMutationResult;
+      expect(IntentionMutationResultSchema.safeParse(result).success, error.code).toBe(true);
+    }
+    expect(
+      IntentionMutationResultSchema.safeParse({
+        ok: false,
+        commandId,
+        error: { code: "stale-version", gameId: "game-4", expectedVersion: 0 },
+      }).success,
+    ).toBe(false);
+    expect(
+      IntentionMutationResultSchema.safeParse({
+        ok: false,
+        commandId,
+        error: {
+          code: "stale-version",
+          gameId: "game-4",
+          intentionId: "intention-1",
+          expectedVersion: 2,
+          current: activeIntentionFixture,
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      IntentionMutationResultSchema.safeParse({
+        ok: false,
+        commandId,
+        error: {
+          code: "active-intention-conflict",
+          gameId: "different-game",
+          current: activeIntentionFixture,
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      IntentionMutationResultSchema.safeParse({
+        ok: false,
+        commandId,
+        error: { code: "command-reuse", commandId: "123e4567-e89b-42d3-a456-426614174001" },
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("future useful-profile identity contract", () => {
+  test("reproduces supported, limited, comparator, veto, and ordering evidence", () => {
+    for (const entityClass of ["mechanic", "designer", "artist"] as const) {
+      expect(
+        ProfileEntityClassResultSchema.safeParse({
+          ...mechanicClassFixture,
+          entityClass,
+        }).success,
+        entityClass,
+      ).toBe(true);
+    }
+    expect(FutureUsefulProfileSchema.safeParse(usefulProfileFixture).success).toBe(true);
+    expect(mechanicClassFixture.comparator.games.at(-1)).toEqual({
+      gameId: "game-3",
+      gameName: "Gamma",
+      currentFitness: 0,
+      vetoed: true,
+    });
+  });
+
+  test.each([
+    [
+      "non-finite aggregate",
+      (value: typeof mechanicClassFixture) => (value.entities[0].meanCurrentFitness = Number.NaN),
+    ],
+    [
+      "altered mean",
+      (value: typeof mechanicClassFixture) => (value.entities[0].meanCurrentFitness = 7),
+    ],
+    [
+      "noncanonical near-equal mean",
+      (value: typeof mechanicClassFixture) => (value.entities[0].meanCurrentFitness += 1e-12),
+    ],
+    [
+      "altered deviation",
+      (value: typeof mechanicClassFixture) => (value.entities[0].populationStandardDeviation = 1),
+    ],
+    ["altered range", (value: typeof mechanicClassFixture) => (value.entities[0].range.max = 9)],
+    [
+      "altered comparator",
+      (value: typeof mechanicClassFixture) => (value.comparator.meanCurrentFitness = 7),
+    ],
+    [
+      "duplicate entity ID",
+      (value: typeof mechanicClassFixture) =>
+        (value.entities[1].entityId = value.entities[0].entityId),
+    ],
+    [
+      "duplicate game contribution",
+      (value: typeof mechanicClassFixture) =>
+        value.entities[0].games.push(value.entities[0].games[0]),
+    ],
+    [
+      "wrong rating order",
+      (value: typeof mechanicClassFixture) => value.orderings.rating.reverse(),
+    ],
+    [
+      "wrong support order",
+      (value: typeof mechanicClassFixture) => value.orderings.support.reverse(),
+    ],
+    ["wrong name order", (value: typeof mechanicClassFixture) => value.orderings.name.reverse()],
+    [
+      "unsupported overview entity",
+      (value: typeof mechanicClassFixture) => (value.overviewEntityIds = [102]),
+    ],
+  ])("rejects %s", (_label, mutate) => {
+    const value = structuredClone(mechanicClassFixture);
+    mutate(value);
+    expect(ProfileEntityClassResultSchema.safeParse(value).success).toBe(false);
+  });
+
+  test("rejects comparator membership and exclusion contradictions", () => {
+    const missingComparatorGame = structuredClone(mechanicClassFixture);
+    missingComparatorGame.comparator.games.splice(0, 1);
+    missingComparatorGame.comparator.gameCount = 2;
+    missingComparatorGame.comparator.meanCurrentFitness = 3;
+    expect(ProfileEntityClassResultSchema.safeParse(missingComparatorGame).success).toBe(false);
+
+    const duplicateExclusion = structuredClone(mechanicClassFixture);
+    duplicateExclusion.exclusions = [
+      {
+        gameId: "game-5",
+        gameName: "Excluded",
+        reason: "predicted-fitness",
+        hasEntityAssociation: true,
+        correctionDestination: null,
+      },
+      {
+        gameId: "game-5",
+        gameName: "Excluded",
+        reason: "missing-or-invalid-fitness",
+        hasEntityAssociation: true,
+        correctionDestination: null,
+      },
+    ];
+    expect(ProfileEntityClassResultSchema.safeParse(duplicateExclusion).success).toBe(false);
+
+    const mismatchedEvidence = structuredClone(mechanicClassFixture);
+    mismatchedEvidence.entities[0].games[0] = {
+      ...mismatchedEvidence.entities[0].games[0],
+      gameName: "Different Alpha",
+    };
+    expect(ProfileEntityClassResultSchema.safeParse(mismatchedEvidence).success).toBe(false);
+
+    const unorderedEvidence = structuredClone(mechanicClassFixture);
+    unorderedEvidence.comparator.games.reverse();
+    expect(ProfileEntityClassResultSchema.safeParse(unorderedEvidence).success).toBe(false);
+  });
+
+  test("accepts mixed metadata readiness without erasing usable class evidence", () => {
+    const mixed = structuredClone(mechanicClassFixture);
+    mixed.result = "limited";
+    mixed.metadataReadiness = {
+      state: "partial",
+      ownedGameCount: 3,
+      completeGameCount: 1,
+      refreshNeededGameCount: 1,
+      unrefreshableGameCount: 1,
+    };
+    mixed.associatedGameCount = 1;
+    mixed.comparator = {
+      gameCount: 1,
+      meanCurrentFitness: 8,
+      games: [mixed.comparator.games[0]],
+    };
+    mixed.exclusions = [
+      {
+        gameId: "game-2",
+        gameName: "Beta",
+        reason: "refresh-needed-metadata",
+        hasEntityAssociation: false,
+        correctionDestination: { operationId: "shelf.game.bgg.refresh" },
+      },
+      {
+        gameId: "game-3",
+        gameName: "Gamma",
+        reason: "unrefreshable-metadata",
+        hasEntityAssociation: false,
+        correctionDestination: null,
+      },
+    ];
+    mixed.refreshWarnings = [
+      {
+        gameId: "game-1",
+        gameName: "Alpha",
+        attemptedAt: "2026-08-27T12:00:00.000Z",
+        message: "BGG refresh failed; using the last complete observation",
+      },
+    ];
+    mixed.entities = [
+      {
+        ...mixed.entities[1],
+        comparatorMeanCurrentFitness: 8,
+        differenceFromComparator: 0,
+      },
+    ];
+    mixed.overviewEntityIds = [];
+    mixed.orderings = { rating: [102], support: [102], name: [102] };
+
+    expect(ProfileEntityClassResultSchema.safeParse(mixed).success).toBe(true);
+  });
+
+  test("uses normalized Unicode code-point names and entity IDs to break ties", () => {
+    const tied = structuredClone(mechanicClassFixture);
+    tied.result = "limited";
+    tied.associatedGameCount = 1;
+    tied.metadataReadiness = {
+      state: "complete",
+      ownedGameCount: 1,
+      completeGameCount: 1,
+      refreshNeededGameCount: 0,
+      unrefreshableGameCount: 0,
+    };
+    tied.comparator = {
+      gameCount: 1,
+      meanCurrentFitness: 8,
+      games: [tied.comparator.games[0]],
+    };
+    tied.exclusions = [];
+    const base = {
+      ...tied.entities[1],
+      comparatorMeanCurrentFitness: 8,
+      differenceFromComparator: 0,
+    };
+    tied.entities = [
+      { ...base, entityId: 202, name: "e\u0301" },
+      { ...base, entityId: 201, name: "é" },
+    ];
+    tied.overviewEntityIds = [];
+    tied.orderings = { rating: [201, 202], support: [201, 202], name: [201, 202] };
+
+    expect(ProfileEntityClassResultSchema.safeParse(tied).success).toBe(true);
+  });
+
+  test("requires all three classes to describe the same owned games", () => {
+    const profile = structuredClone(usefulProfileFixture);
+    profile.identity.classes.designer.exclusions[0].gameName = "A different game";
+    expect(FutureUsefulProfileSchema.safeParse(profile).success).toBe(false);
+  });
+});
+
+describe("future useful-profile attention contract", () => {
+  test("accepts active attention, resolved history, nothing-to-decide, and unavailable", () => {
+    expect(FutureUsefulProfileSchema.safeParse(usefulProfileFixture).success).toBe(true);
+
+    const nothing = structuredClone(usefulProfileFixture);
+    nothing.attention = { state: "nothing-to-decide", items: [] };
+    expect(FutureUsefulProfileSchema.safeParse(nothing).success).toBe(true);
+
+    expect(
+      FutureUsefulProfileSchema.safeParse({
+        status: "unavailable",
+        error: { kind: "recomputation", message: "Could not compute current profile" },
+        retryDestination: { operationId: "shelf.profile.get" },
+      }).success,
+    ).toBe(true);
+
+    expect(
+      ResolvedPlayIntentionHistoryItemSchema.safeParse({
+        ...activeIntentionFixture,
+        gameName: "Heat",
+        version: 2,
+        resolution: {
+          outcome: "retired",
+          source: "owner-retired",
+          resolvedAt: "2026-08-27T12:00:00.000Z",
+        },
+      }).success,
+    ).toBe(true);
+  });
+
+  test("orders resolved history by resolution time descending then intention ID", () => {
+    const history = [
+      {
+        ...activeIntentionFixture,
+        intentionId: "intention-b",
+        gameName: "Heat",
+        version: 2,
+        resolution: {
+          outcome: "completed" as const,
+          source: "owner-confirmed" as const,
+          resolvedAt: "2026-08-28T12:00:00.000Z",
+        },
+      },
+      {
+        ...activeIntentionFixture,
+        intentionId: "intention-a",
+        gameName: "Heat",
+        version: 2,
+        resolution: {
+          outcome: "retired" as const,
+          source: "owner-retired" as const,
+          resolvedAt: "2026-08-27T12:00:00.000Z",
+        },
+      },
+    ];
+    expect(ResolvedPlayIntentionHistorySchema.safeParse(history).success).toBe(true);
+    expect(ResolvedPlayIntentionHistorySchema.safeParse([...history].reverse()).success).toBe(
+      false,
+    );
+
+    const sameTime = structuredClone(history);
+    sameTime[1].resolution.resolvedAt = sameTime[0].resolution.resolvedAt;
+    expect(ResolvedPlayIntentionHistorySchema.safeParse(sameTime).success).toBe(false);
+    expect(ResolvedPlayIntentionHistorySchema.safeParse([...sameTime].reverse()).success).toBe(
+      true,
+    );
+  });
+
+  test("validates attention and canonical names against the durable source snapshot", () => {
+    const metadata = (
+      entities: Array<{ id: number; name: string }>,
+    ): FutureUsefulProfileGameSource["entityMetadata"] => {
+      const complete = {
+        state: "complete" as const,
+        entities: [],
+        observedAt: "2026-08-27T12:00:00.000Z",
+        refreshFailure: null,
+        correctionDestination: null,
+      };
+      return { mechanic: { ...complete, entities }, designer: complete, artist: complete };
+    };
+    const source = {
+      ...futureSourceCollection(),
+      games: [
+        futureSourceGame("game-1", "owned", {
+          name: "Alpha",
+          entityMetadata: metadata([
+            { id: 101, name: "Worker Placement" },
+            { id: 102, name: "Solo" },
+          ]),
+        }),
+        futureSourceGame("game-2", "owned", {
+          name: "Beta",
+          entityMetadata: metadata([{ id: 101, name: "Worker Placement" }]),
+        }),
+        futureSourceGame("game-3", "owned", {
+          name: "Gamma",
+          entityMetadata: metadata([{ id: 101, name: "Worker Placement" }]),
+        }),
+        futureSourceGame("game-4", "owned", {
+          name: "Heat",
+          playCountEvidence: {
+            status: "valid",
+            value: 0,
+            source: "bgg-collection",
+            observedAt: "2026-08-27T10:00:00.000Z",
+          },
+        }),
+      ],
+    };
+    expect(
+      FutureUsefulProfileSnapshotSchema.safeParse({ source, profile: usefulProfileFixture })
+        .success,
+    ).toBe(true);
+
+    expect(
+      FutureUsefulProfileSnapshotSchema.safeParse({
+        source: { ...source, intentions: [] },
+        profile: usefulProfileFixture,
+      }).success,
+    ).toBe(false);
+
+    const wrongName = structuredClone(usefulProfileFixture);
+    wrongName.identity.classes.mechanic.entities[0].name = "Old Worker Placement Name";
+    wrongName.identity.classes.mechanic.orderings.name = [102, 101];
+    expect(
+      FutureUsefulProfileSnapshotSchema.safeParse({ source, profile: wrongName }).success,
+    ).toBe(false);
+
+    const missingMembership = structuredClone(source);
+    const gameTwoMetadata = missingMembership.games[1].entityMetadata.mechanic;
+    if (gameTwoMetadata.state !== "complete")
+      throw new Error("Expected complete mechanic metadata");
+    gameTwoMetadata.entities = [];
+    expect(
+      FutureUsefulProfileSnapshotSchema.safeParse({
+        source: missingMembership,
+        profile: usefulProfileFixture,
+      }).success,
+    ).toBe(false);
+
+    const mismatchedPlayEvidence = structuredClone(source);
+    mismatchedPlayEvidence.games[3].playCountEvidence = {
+      status: "valid",
+      value: 0,
+      source: "manual",
+      observedAt: "2026-08-27T10:00:00.000Z",
+    };
+    expect(
+      FutureUsefulProfileSnapshotSchema.safeParse({
+        source: mismatchedPlayEvidence,
+        profile: usefulProfileFixture,
+      }).success,
+    ).toBe(false);
+  });
+
+  test("rejects impossible attention cards and urgency fields", () => {
+    const wrongQuestion = structuredClone(usefulProfileFixture);
+    wrongQuestion.attention.items[0].question = "Should you sell Heat?";
+    expect(FutureUsefulProfileSchema.safeParse(wrongQuestion).success).toBe(false);
+
+    const resolved = structuredClone(usefulProfileFixture);
+    resolved.attention.items[0].intention.resolution = {
+      outcome: "completed",
+      source: "owner-confirmed",
+      resolvedAt: "2026-08-27T12:00:00.000Z",
+    };
+    expect(FutureUsefulProfileSchema.safeParse(resolved).success).toBe(false);
+
+    const urgency = structuredClone(usefulProfileFixture) as unknown as Record<string, unknown>;
+    const attention = urgency.attention as { items: Array<Record<string, unknown>> };
+    attention.items[0].urgency = "high";
+    expect(FutureUsefulProfileSchema.safeParse(urgency).success).toBe(false);
+
+    const supersededSurface = {
+      ...structuredClone(usefulProfileFixture),
+      narration: { summary: "This field belongs to the old profile." },
+    };
+    expect(FutureUsefulProfileSchema.safeParse(supersededSurface).success).toBe(false);
+
+    const contradictoryEmpty = structuredClone(usefulProfileFixture);
+    contradictoryEmpty.attention.state = "nothing-to-decide";
+    expect(FutureUsefulProfileSchema.safeParse(contradictoryEmpty).success).toBe(false);
+
+    const alreadyCompletedByEvidence = structuredClone(usefulProfileFixture);
+    alreadyCompletedByEvidence.attention.items[0].currentPlayEvidence.playCount = 1;
+    expect(FutureUsefulProfileSchema.safeParse(alreadyCompletedByEvidence).success).toBe(false);
+  });
+});

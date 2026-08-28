@@ -26,6 +26,47 @@ import type {
   JsonValue,
 } from "./types";
 
+import {
+  ProfileEntityClassSchema,
+  BggEntityLinkSchema,
+  EntityClassMetadataSchema,
+  EntityMetadataByClassSchema,
+  LatestPlayCountCheckSchema,
+  PlayIntentionBaselineSchema,
+  PlayIntentionResolutionSchema,
+  PlayIntentionSchema,
+  IntentionCommandSchema,
+  AcceptedIntentionMutationSchema,
+  IntentionMutationResultSchema,
+  IntentionCommandReceiptSchema,
+  FutureUsefulProfileSourceRecordsSchema,
+  ProfileEntityClassResultSchema,
+  PlayIntentionAttentionItemSchema,
+  ResolvedPlayIntentionHistoryItemSchema,
+  ResolvedPlayIntentionHistorySchema,
+  FutureUsefulProfileSchema,
+} from "./useful-profile-validation";
+
+export {
+  ProfileEntityClassSchema,
+  BggEntityLinkSchema,
+  EntityClassMetadataSchema,
+  EntityMetadataByClassSchema,
+  LatestPlayCountCheckSchema,
+  PlayIntentionBaselineSchema,
+  PlayIntentionResolutionSchema,
+  PlayIntentionSchema,
+  IntentionCommandSchema,
+  AcceptedIntentionMutationSchema,
+  IntentionMutationResultSchema,
+  IntentionCommandReceiptSchema,
+  ProfileEntityClassResultSchema,
+  PlayIntentionAttentionItemSchema,
+  ResolvedPlayIntentionHistoryItemSchema,
+  ResolvedPlayIntentionHistorySchema,
+  FutureUsefulProfileSchema,
+};
+
 export const CURRENT_COLLECTION_SCHEMA_VERSION = 3 as const;
 export const CURRENT_PROFILE_CONTRACT_VERSION = 6 as const;
 export const CURRENT_PROFILE_ALGORITHM_VERSION = 7 as const;
@@ -727,6 +768,371 @@ export const CollectionSchema = z
     updatedAt: z.string(),
   })
   .strict();
+
+const FutureUsefulProfileGameSchema = GameSchema.extend({
+  entityMetadata: EntityMetadataByClassSchema,
+  latestPlayCountCheck: LatestPlayCountCheckSchema,
+}).strict();
+
+export const FutureUsefulProfileCollectionSourceSchema = CollectionSchema.omit({
+  schemaVersion: true,
+  games: true,
+})
+  .extend({
+    schemaVersion: z.literal(4),
+    revision: z.number().int().safe().min(0),
+    games: z.array(FutureUsefulProfileGameSchema),
+    intentions: z.array(PlayIntentionSchema),
+    commandReceipts: z.array(IntentionCommandReceiptSchema),
+  })
+  .strict()
+  .superRefine((source, context) => {
+    const records = FutureUsefulProfileSourceRecordsSchema.safeParse({
+      revision: source.revision,
+      games: source.games.map(({ id, entityMetadata, latestPlayCountCheck }) => ({
+        gameId: id,
+        entityMetadata,
+        latestPlayCountCheck,
+      })),
+      intentions: source.intentions,
+      commandReceipts: source.commandReceipts,
+    });
+    if (!records.success) {
+      for (const issue of records.error.issues) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: issue.path,
+          message: issue.message,
+        });
+      }
+    }
+    const gamesById = new Map(source.games.map((game) => [game.id, game]));
+    for (const [index, game] of source.games.entries()) {
+      const metadata = Object.values(game.entityMetadata);
+      if (game.bggId !== null && (!Number.isSafeInteger(game.bggId) || game.bggId <= 0)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["games", index, "bggId"],
+          message: "Future BGG IDs must be positive safe integers",
+        });
+      }
+      if (
+        (game.bggId === null && metadata.some(({ state }) => state !== "unrefreshable")) ||
+        (game.bggId !== null && metadata.some(({ state }) => state === "unrefreshable"))
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["games", index, "entityMetadata"],
+          message: "Entity metadata refreshability must match BGG identity",
+        });
+      }
+      if (new Set(metadata.map(({ state }) => state)).size !== 1) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["games", index, "entityMetadata"],
+          message: "One BGG thing response must update all entity classes atomically",
+        });
+      }
+      const complete = metadata.filter(({ state }) => state === "complete");
+      if (
+        (complete.length > 0 && new Set(complete.map(({ observedAt }) => observedAt)).size !== 1) ||
+        new Set(metadata.map(({ refreshFailure }) => JSON.stringify(refreshFailure))).size !== 1
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["games", index, "entityMetadata"],
+          message: "Complete entity classes must share observation and refresh-failure provenance",
+        });
+      }
+      if (
+        game.latestPlayCountCheck?.status === "valid" &&
+        (game.playCountEvidence.status !== "valid" ||
+          game.playCountEvidence.source !== "bgg-collection" ||
+          game.playCountEvidence.value !== game.latestPlayCountCheck.value ||
+          game.playCountEvidence.observedAt !== game.latestPlayCountCheck.observedAt)
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["games", index, "latestPlayCountCheck"],
+          message: "A valid latest BGG check must be the current play-count evidence",
+        });
+      }
+      if (
+        game.latestPlayCountCheck !== null &&
+        game.latestPlayCountCheck.status !== "valid" &&
+        game.playCountEvidence.status !== "valid"
+      ) {
+        const statusMatches = game.playCountEvidence.status === game.latestPlayCountCheck.status;
+        const provenanceMatches =
+          game.playCountEvidence.source === "bgg-collection" &&
+          game.playCountEvidence.observedAt === game.latestPlayCountCheck.observedAt;
+        const invalidEvidenceMatches =
+          game.latestPlayCountCheck.status !== "invalid" ||
+          (game.playCountEvidence.status === "invalid" &&
+            JSON.stringify(game.playCountEvidence.evidence) ===
+              JSON.stringify(game.latestPlayCountCheck.evidence));
+        if (!statusMatches || !provenanceMatches || !invalidEvidenceMatches) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["games", index, "latestPlayCountCheck"],
+            message: "A non-valid latest BGG check must match current non-valid evidence",
+          });
+        }
+      }
+    }
+    for (const [index, intention] of source.intentions.entries()) {
+      if (intention.resolution === null && gamesById.get(intention.gameId)?.ownership !== "owned") {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["intentions", index, "gameId"],
+          message: "An active intention requires a currently owned game",
+        });
+      }
+    }
+  });
+
+function compareNormalizedCodePoints(left: string, right: string): number {
+  const leftPoints = Array.from(left.normalize("NFC"), (value) => value.codePointAt(0) ?? 0);
+  const rightPoints = Array.from(right.normalize("NFC"), (value) => value.codePointAt(0) ?? 0);
+  for (let index = 0; index < Math.min(leftPoints.length, rightPoints.length); index += 1) {
+    const difference = (leftPoints[index] ?? 0) - (rightPoints[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return leftPoints.length - rightPoints.length;
+}
+
+export const FutureUsefulProfileSnapshotSchema = z
+  .object({
+    source: FutureUsefulProfileCollectionSourceSchema,
+    profile: FutureUsefulProfileSchema,
+  })
+  .strict()
+  .superRefine(({ source, profile }, context) => {
+    if (profile.status !== "available") return;
+    const ownedGames = new Map(
+      source.games
+        .filter(({ ownership }) => ownership === "owned")
+        .map(({ id, name }) => [id, name]),
+    );
+    for (const entityClass of ["mechanic", "designer", "artist"] as const) {
+      const result = profile.identity.classes[entityClass];
+      const projectedGames = new Map(
+        [...result.comparator.games, ...result.exclusions].map(({ gameId, gameName }) => [
+          gameId,
+          gameName,
+        ]),
+      );
+      if (
+        projectedGames.size !== ownedGames.size ||
+        [...ownedGames].some(([gameId, gameName]) => projectedGames.get(gameId) !== gameName)
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["profile", "identity", "classes", entityClass],
+          message: "Identity class must correspond exactly to currently owned source games",
+        });
+      }
+    }
+    const activeIntentions = source.intentions
+      .filter(({ resolution }) => resolution === null)
+      .sort((left, right) => {
+        const leftName = source.games.find(({ id }) => id === left.gameId)?.name ?? "";
+        const rightName = source.games.find(({ id }) => id === right.gameId)?.name ?? "";
+        return (
+          compareNormalizedCodePoints(leftName, rightName) ||
+          compareNormalizedCodePoints(left.gameId, right.gameId)
+        );
+      });
+    if (
+      profile.attention.items.length !== activeIntentions.length ||
+      profile.attention.items.some((item, index) => {
+        const sourceIntention = activeIntentions[index];
+        const sourceGame = source.games.find(({ id }) => id === sourceIntention?.gameId);
+        return (
+          sourceIntention === undefined ||
+          sourceGame === undefined ||
+          item.gameName !== sourceGame.name ||
+          JSON.stringify(item.intention) !== JSON.stringify(sourceIntention)
+        );
+      })
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["profile", "attention", "items"],
+        message: "Attention items must correspond exactly to every durable active intention",
+      });
+    }
+    for (const [itemIndex, item] of profile.attention.items.entries()) {
+      const game = source.games.find(({ id }) => id === item.intention.gameId);
+      if (game === undefined) continue;
+      const evidence = game.playCountEvidence;
+      const latestCheck = game.latestPlayCountCheck;
+      const stale =
+        evidence.status === "valid" &&
+        latestCheck !== null &&
+        latestCheck.status !== "valid" &&
+        (evidence.observedAt === null ||
+          Date.parse(latestCheck.observedAt) > Date.parse(evidence.observedAt));
+      const expectedEvidence =
+        evidence.status === "valid" && !stale
+          ? {
+              status: "valid" as const,
+              playCount: evidence.value,
+              source: evidence.source,
+              observedAt: evidence.observedAt,
+              stale: false as const,
+            }
+          : evidence.status === "valid"
+            ? {
+                status: "stale" as const,
+                playCount: evidence.value,
+                source: evidence.source,
+                observedAt: evidence.observedAt,
+                warning: "A newer BGG check did not provide a valid play count." as const,
+              }
+            : evidence.status === "invalid" || latestCheck?.status === "invalid"
+              ? {
+                  status: "invalid" as const,
+                  playCount: null,
+                  source: evidence.source,
+                  observedAt: evidence.observedAt,
+                  warning: "Current play evidence is invalid." as const,
+                }
+              : {
+                  status: "missing" as const,
+                  playCount: null,
+                  source: evidence.source,
+                  observedAt: evidence.observedAt,
+                  warning: "Current play evidence is missing." as const,
+                };
+      const expectedOperation =
+        expectedEvidence.status === "valid" || game.bggId === null
+          ? "shelf.game.plays.set"
+          : "shelf.game.bgg.refresh";
+      if (
+        JSON.stringify(item.currentPlayEvidence) !== JSON.stringify(expectedEvidence) ||
+        item.evidenceDestination.operationId !== expectedOperation
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["profile", "attention", "items", itemIndex, "currentPlayEvidence"],
+          message: "Attention play evidence and destination must match durable current evidence",
+        });
+      }
+    }
+    for (const entityClass of ["mechanic", "designer", "artist"] as const) {
+      const classResult = profile.identity.classes[entityClass];
+      const sourceById = new Map(source.games.map((game) => [game.id, game]));
+      const readinessCounts = { complete: 0, "refresh-needed": 0, unrefreshable: 0 };
+      for (const game of source.games.filter(({ ownership }) => ownership === "owned")) {
+        readinessCounts[game.entityMetadata[entityClass].state] += 1;
+      }
+      if (
+        classResult.metadataReadiness.completeGameCount !== readinessCounts.complete ||
+        classResult.metadataReadiness.refreshNeededGameCount !==
+          readinessCounts["refresh-needed"] ||
+        classResult.metadataReadiness.unrefreshableGameCount !== readinessCounts.unrefreshable
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["profile", "identity", "classes", entityClass, "metadataReadiness"],
+          message: "Metadata readiness must match durable entity metadata",
+        });
+      }
+      for (const [exclusionIndex, exclusion] of classResult.exclusions.entries()) {
+        const metadata = sourceById.get(exclusion.gameId)?.entityMetadata[entityClass];
+        const expectedMetadataReason =
+          metadata?.state === "refresh-needed"
+            ? "refresh-needed-metadata"
+            : metadata?.state === "unrefreshable"
+              ? "unrefreshable-metadata"
+              : null;
+        const expectedAssociation = metadata?.state === "complete" && metadata.entities.length > 0;
+        if (
+          (expectedMetadataReason !== null && exclusion.reason !== expectedMetadataReason) ||
+          exclusion.hasEntityAssociation !== expectedAssociation
+        ) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["profile", "identity", "classes", entityClass, "exclusions", exclusionIndex],
+            message: "Metadata exclusion must match durable class metadata",
+          });
+        }
+      }
+      const expectedWarnings = source.games
+        .flatMap((game) => {
+          if (game.ownership !== "owned") return [];
+          const metadata = game.entityMetadata[entityClass];
+          if (metadata.state !== "complete" || metadata.refreshFailure === null) return [];
+          return [{ gameId: game.id, gameName: game.name, ...metadata.refreshFailure }];
+        })
+        .sort((left, right) => compareNormalizedCodePoints(left.gameId, right.gameId));
+      if (JSON.stringify(classResult.refreshWarnings) !== JSON.stringify(expectedWarnings)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["profile", "identity", "classes", entityClass, "refreshWarnings"],
+          message: "Refresh warnings must match durable failure provenance",
+        });
+      }
+      const expectedEntityIds = new Set(
+        classResult.comparator.games.flatMap((evidence) => {
+          const metadata = sourceById.get(evidence.gameId)?.entityMetadata[entityClass];
+          return metadata?.state === "complete" ? metadata.entities.map(({ id }) => id) : [];
+        }),
+      );
+      if (
+        expectedEntityIds.size !== classResult.entities.length ||
+        classResult.entities.some(({ entityId }) => !expectedEntityIds.has(entityId))
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["profile", "identity", "classes", entityClass, "entities"],
+          message: "Entity results must contain every eligible durable BGG association once",
+        });
+      }
+      for (const [entityIndex, entity] of profile.identity.classes[
+        entityClass
+      ].entities.entries()) {
+        const observations = source.games.flatMap((game) => {
+          if (game.ownership !== "owned") return [];
+          const metadata = game.entityMetadata[entityClass];
+          if (metadata.state !== "complete") return [];
+          return metadata.entities
+            .filter(({ id }) => id === entity.entityId)
+            .map(({ name }) => ({ name, observedAt: metadata.observedAt, gameId: game.id }));
+        });
+        observations.sort(
+          (left, right) =>
+            Date.parse(right.observedAt) - Date.parse(left.observedAt) ||
+            compareNormalizedCodePoints(left.name, right.name) ||
+            compareNormalizedCodePoints(left.gameId, right.gameId),
+        );
+        if (observations[0]?.name !== entity.name) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["profile", "identity", "classes", entityClass, "entities", entityIndex, "name"],
+            message: "Entity name must match the canonical current source observation",
+          });
+        }
+        const expectedGameIds = classResult.comparator.games
+          .filter((evidence) => {
+            const metadata = sourceById.get(evidence.gameId)?.entityMetadata[entityClass];
+            return (
+              metadata?.state === "complete" &&
+              metadata.entities.some(({ id }) => id === entity.entityId)
+            );
+          })
+          .map(({ gameId }) => gameId);
+        if (entity.games.map(({ gameId }) => gameId).join(",") !== expectedGameIds.join(",")) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["profile", "identity", "classes", entityClass, "entities", entityIndex, "games"],
+            message: "Entity memberships must match durable BGG links in eligible games",
+          });
+        }
+      }
+    }
+  });
 
 const FiniteNumberSchema = z.number().finite();
 const NonNegativeIntegerSchema = z.number().int().safe().min(0);

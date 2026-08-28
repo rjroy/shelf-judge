@@ -988,6 +988,315 @@ export interface ProfileData {
   narrationComputedAt: string | null; // ISO 8601
 }
 
+// Future useful-profile contracts. These remain additive until the coordinated
+// collection and profile version cutovers activate them.
+
+export type ProfileEntityClass = "mechanic" | "designer" | "artist";
+
+export interface BggEntityLink {
+  id: number;
+  name: string;
+}
+
+export interface EntityMetadataRefreshFailure {
+  attemptedAt: string;
+  message: string;
+}
+
+export type EntityClassMetadata =
+  | {
+      state: "complete";
+      entities: BggEntityLink[];
+      observedAt: string;
+      refreshFailure: EntityMetadataRefreshFailure | null;
+      correctionDestination: null;
+    }
+  | {
+      state: "refresh-needed";
+      entities: [];
+      observedAt: null;
+      refreshFailure: EntityMetadataRefreshFailure | null;
+      correctionDestination: { operationId: "shelf.game.bgg.refresh" };
+    }
+  | {
+      state: "unrefreshable";
+      entities: [];
+      observedAt: null;
+      refreshFailure: null;
+      correctionDestination: null;
+    };
+
+export type EntityMetadataByClass = Record<ProfileEntityClass, EntityClassMetadata>;
+
+export type LatestPlayCountCheck =
+  | { status: "valid"; value: number; observedAt: string }
+  | { status: "missing"; observedAt: string }
+  | { status: "invalid"; observedAt: string; evidence: InvalidEvidence }
+  | null;
+
+export type PlayIntentionKind = "first-play" | "replay";
+export type PlayIntentionResolutionSource =
+  | "observed-play-increase"
+  | "owner-confirmed"
+  | "owner-retired";
+
+export interface PlayIntentionBaseline {
+  playCount: number;
+  evidenceSource: FieldObservationSource;
+  observedAt: string;
+}
+
+export type PlayIntentionResolution =
+  | {
+      outcome: "completed";
+      source: "observed-play-increase" | "owner-confirmed";
+      resolvedAt: string;
+    }
+  | { outcome: "retired"; source: "owner-retired"; resolvedAt: string };
+
+export interface PlayIntention {
+  intentionId: string;
+  gameId: string;
+  kind: PlayIntentionKind;
+  baseline: PlayIntentionBaseline;
+  createdAt: string;
+  version: number;
+  resolution: PlayIntentionResolution | null;
+}
+
+export interface FutureUsefulProfileGameSource extends Game {
+  entityMetadata: EntityMetadataByClass;
+  latestPlayCountCheck: LatestPlayCountCheck;
+}
+
+export interface FutureUsefulProfileCollectionSource extends Omit<
+  Collection,
+  "schemaVersion" | "games"
+> {
+  schemaVersion: 4;
+  revision: number;
+  games: FutureUsefulProfileGameSource[];
+  intentions: PlayIntention[];
+  commandReceipts: IntentionCommandReceipt[];
+}
+
+export type CreateIntentionCommand = {
+  type: "create";
+  commandId: string;
+  gameId: string;
+  kind: PlayIntentionKind;
+  expectedActiveIntention: "absent";
+};
+
+export type ResolveIntentionCommand = {
+  type: "complete" | "retire";
+  commandId: string;
+  gameId: string;
+  intentionId: string;
+  expectedVersion: number;
+};
+
+export type IntentionCommand = CreateIntentionCommand | ResolveIntentionCommand;
+
+export interface LinkedOwnershipTransition {
+  gameId: string;
+  from: "owned";
+  to: "previously-owned";
+}
+
+export interface AcceptedIntentionMutation {
+  ok: true;
+  commandId: string;
+  intention: PlayIntention;
+  linkedOwnershipTransition: LinkedOwnershipTransition | null;
+}
+
+export type IntentionMutationError =
+  | { code: "validation"; issues: { field: string; message: string }[] }
+  | { code: "game-not-found"; gameId: string }
+  | { code: "intention-not-found"; gameId: string; intentionId: string }
+  | {
+      code: "ineligible-game";
+      gameId: string;
+      reason:
+        | "not-owned"
+        | "missing-play-evidence"
+        | "invalid-play-evidence"
+        | "stale-play-evidence"
+        | "kind-mismatch";
+    }
+  | { code: "active-intention-conflict"; gameId: string; current: PlayIntention }
+  | {
+      code: "stale-version";
+      gameId: string;
+      intentionId: string;
+      expectedVersion: number;
+      current: PlayIntention;
+    }
+  | { code: "command-reuse"; commandId: string }
+  | { code: "history-conflict"; gameId: string; intentionIds: string[] }
+  | { code: "persistence-failure"; operation: string; message: string };
+
+export type IntentionMutationResult =
+  | AcceptedIntentionMutation
+  | { ok: false; commandId: string; error: IntentionMutationError };
+
+export interface IntentionCommandReceipt {
+  commandId: string;
+  request: IntentionCommand;
+  result: AcceptedIntentionMutation;
+}
+
+export type CollectionMutationResult<Value> =
+  | { outcome: "accepted"; changed: true; value: Value }
+  | { outcome: "no-op"; changed: false; value: Value }
+  | { outcome: "rejected"; changed: false; error: IntentionMutationError };
+
+export interface ProfileGameFitnessEvidence {
+  gameId: string;
+  gameName: string;
+  currentFitness: number;
+  vetoed: boolean;
+}
+
+export type ProfileClassExclusionReason =
+  | "predicted-fitness"
+  | "missing-or-invalid-fitness"
+  | "refresh-needed-metadata"
+  | "unrefreshable-metadata";
+
+export interface ProfileClassExclusion {
+  gameId: string;
+  gameName: string;
+  reason: ProfileClassExclusionReason;
+  hasEntityAssociation: boolean;
+  correctionDestination: { operationId: "shelf.game.bgg.refresh" | "shelf.game.rating.set" } | null;
+}
+
+export interface ProfileMetadataReadiness {
+  state: "complete" | "partial" | "refresh-needed";
+  ownedGameCount: number;
+  completeGameCount: number;
+  refreshNeededGameCount: number;
+  unrefreshableGameCount: number;
+}
+
+export interface ProfileEntityEvidence {
+  entityId: number;
+  name: string;
+  support: "limited" | "supported";
+  associatedGameCount: number;
+  meanCurrentFitness: number;
+  populationStandardDeviation: number;
+  range: { min: number; max: number };
+  comparatorMeanCurrentFitness: number;
+  differenceFromComparator: number;
+  games: ProfileGameFitnessEvidence[];
+}
+
+export interface ProfileEntityOrderings {
+  rating: number[];
+  support: number[];
+  name: number[];
+}
+
+export interface ProfileEntityClassResult {
+  entityClass: ProfileEntityClass;
+  result: "supported" | "limited" | "no-eligible-ratings" | "evaluated-empty";
+  metadataReadiness: ProfileMetadataReadiness;
+  associatedGameCount: number;
+  comparator: {
+    gameCount: number;
+    meanCurrentFitness: number | null;
+    games: ProfileGameFitnessEvidence[];
+  };
+  exclusions: ProfileClassExclusion[];
+  refreshWarnings: { gameId: string; gameName: string; attemptedAt: string; message: string }[];
+  entities: ProfileEntityEvidence[];
+  overviewEntityIds: number[];
+  orderings: ProfileEntityOrderings;
+}
+
+export type AttentionPlayEvidence =
+  | {
+      status: "valid";
+      playCount: number;
+      source: FieldObservationSource;
+      observedAt: string;
+      stale: false;
+    }
+  | {
+      status: "missing" | "invalid" | "stale";
+      playCount: number | null;
+      source: FieldObservationSource | null;
+      observedAt: string | null;
+      warning:
+        | "Current play evidence is missing."
+        | "Current play evidence is invalid."
+        | "A newer BGG check did not provide a valid play count.";
+    };
+
+export interface PlayIntentionAttentionItem {
+  id: string;
+  decisionFamily: "play-intention";
+  intention: PlayIntention;
+  gameName: string;
+  question: string;
+  whyNow: "You asked Shelf Judge to keep this intention visible.";
+  currentPlayEvidence: AttentionPlayEvidence;
+  responses: ["leave-visible", "complete", "retire", "correct-or-refresh-evidence"];
+  abstentionBasis: "Only an explicit active intention qualifies.";
+  resolution: null;
+  reopenCondition: "Create a new explicit intention after resolution.";
+  destination: { gameId: string; operationId: "shelf.game.intention.manage" };
+  evidenceDestination: {
+    gameId: string;
+    operationId: "shelf.game.plays.set" | "shelf.game.bgg.refresh";
+  };
+}
+
+export interface ResolvedPlayIntentionHistoryItem {
+  intentionId: string;
+  gameId: string;
+  gameName: string;
+  kind: PlayIntentionKind;
+  baseline: PlayIntentionBaseline;
+  createdAt: string;
+  version: number;
+  resolution: PlayIntentionResolution;
+}
+
+export type ResolvedPlayIntentionHistory = ResolvedPlayIntentionHistoryItem[];
+
+export interface FutureUsefulCollectionProfile {
+  status: "available";
+  identity: {
+    collectionState: "populated" | "empty";
+    classes: Record<ProfileEntityClass, ProfileEntityClassResult>;
+    axisDistributions: AxisDistribution[];
+  };
+  attention: {
+    state: "active" | "nothing-to-decide" | "empty-collection";
+    items: PlayIntentionAttentionItem[];
+  };
+  computedAt: string;
+}
+
+export interface FutureUsefulCollectionProfileUnavailable {
+  status: "unavailable";
+  error: { kind: "transport" | "validation" | "recomputation"; message: string };
+  retryDestination: { operationId: "shelf.profile.get" };
+}
+
+export type FutureUsefulProfileResult =
+  | FutureUsefulCollectionProfile
+  | FutureUsefulCollectionProfileUnavailable;
+
+export interface FutureUsefulProfileSnapshot {
+  source: FutureUsefulProfileCollectionSource;
+  profile: FutureUsefulProfileResult;
+}
+
 // Prediction types
 
 export type PredictionConfidence = "actual" | "strong" | "moderate" | "weak" | "insufficient";
