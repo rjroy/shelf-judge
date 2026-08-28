@@ -5,12 +5,10 @@ import {
   getGame,
   listAxes,
   getTournamentGameStats,
-  getProfile,
   getNicheSettings,
   getShelfConfig,
 } from "@/lib/api";
 import type {
-  CollectionProfile,
   TournamentGameStatsDisplay,
   FitnessResult,
   NichePosition,
@@ -27,9 +25,6 @@ import { BoxDimensionsForm } from "@/components/box-dimensions-form";
 import { ShelfAssignmentForm } from "@/components/shelf-assignment-form";
 import { AcquisitionForm } from "@/components/acquisition-form";
 import { PurchaseUtilizationPanel } from "@/components/purchase-utilization-panel";
-import { Divergence } from "@/components/profile/divergence";
-import { Outliers } from "@/components/profile/outliers";
-import { Suggestions } from "@/components/profile/suggestions";
 
 export async function generateMetadata({
   params,
@@ -47,27 +42,6 @@ export async function generateMetadata({
 
 export const dynamic = "force-dynamic";
 
-export type GameProfileInsights = {
-  divergence: CollectionProfile["divergence"];
-  outliers: CollectionProfile["outliers"] | null;
-  suggestions: CollectionProfile["suggestions"] | null;
-};
-
-export async function loadGameProfileInsights(
-  loadProfile: () => Promise<CollectionProfile> = getProfile,
-): Promise<GameProfileInsights> {
-  try {
-    const profile = await loadProfile();
-    return {
-      divergence: profile.divergence,
-      outliers: profile.outliers,
-      suggestions: profile.suggestions,
-    };
-  } catch {
-    return { divergence: null, outliers: null, suggestions: null };
-  }
-}
-
 export default async function GameDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
@@ -75,11 +49,6 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
   let data;
   let axes;
   let tournamentStats: TournamentGameStatsDisplay | null = null;
-  let profileInsights: GameProfileInsights = {
-    divergence: null,
-    outliers: null,
-    suggestions: null,
-  };
   let ignoredTags: NicheTagFilter[] = [];
   let shelfOptions: Array<{ shelfId: string; label: string; dimensionless: boolean }> = [];
   try {
@@ -99,7 +68,6 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
     } catch {
       // Tournament stats may not exist yet
     }
-    profileInsights = await loadGameProfileInsights();
     try {
       const nicheSettings = await getNicheSettings();
       ignoredTags = nicheSettings.ignoredTags;
@@ -311,8 +279,6 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
           isPreviouslyOwned={isPreviouslyOwned}
         />
 
-        <GameProfileInsightSurface profileInsights={profileInsights} gameId={id} />
-
         {tournamentStats && tournamentStats.comparisonCount > 0 && (
           <div className="tournament-breakdown-panel">
             <div className="panel-section-title">Tournament Breakdown</div>
@@ -445,22 +411,6 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
 
 export function GameDetailMain({ children }: { children: ReactNode }) {
   return <div className="main-scroll">{children}</div>;
-}
-
-export function GameProfileInsightSurface({
-  profileInsights,
-  gameId,
-}: {
-  profileInsights: GameProfileInsights;
-  gameId: string;
-}) {
-  return (
-    <div className="game-profile-insights" data-profile-insight-surface="game-detail">
-      <Divergence games={profileInsights.divergence} gameId={gameId} />
-      <Outliers outliers={profileInsights.outliers} gameId={gameId} />
-      <Suggestions suggestions={profileInsights.suggestions} gameId={gameId} />
-    </div>
-  );
 }
 
 export function GameDetailHero({ children }: { children: ReactNode }) {

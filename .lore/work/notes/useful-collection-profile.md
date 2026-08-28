@@ -4,7 +4,7 @@ date: 2026-08-28
 status: in_progress
 tags: [implementation, collection, profile, bgg-metadata]
 source: .lore/work/plans/useful-collection-profile.md
-modules: [shared, daemon]
+modules: [shared, daemon, web]
 ---
 
 # Implementation notes: useful collection profile
@@ -13,6 +13,7 @@ modules: [shared, daemon]
 
 - [x] Step 4: Persist complete BGG entity metadata and refresh states (`shelf-judge-1q2.9`), accepted through the local gate
 - [x] Step 6: Durable intention lifecycle and linked transitions (`shelf-judge-1q2.5`), accepted through the local gate
+- [x] Step 10: Replacement web profile and drilldowns (`shelf-judge-1q2.17`), accepted through the local gate
 - [ ] Overall plan remains in progress; later steps and terminal validation are not complete
 
 ## Step 4 Evidence Map
@@ -271,6 +272,90 @@ Snapshot scope: exact output of `git status --porcelain=v1 --untracked-files=all
 | `??`   | `packages/daemon/tests/services/intention-service.test.ts`                      | `absent`                                   | `08147659f6e7b156951d1512397ecc6a6edaaa24f19e0bcc0bacfcd13fd85191` |
 | `??`   | `packages/web/tests/mutation-api.test.ts`                                       | `absent`                                   | `7d0bce97135cde296d5d0314702dc154fdbdc517a461d6dc991e3394329b3c4e` |
 
+## Step 10 Evidence Map
+
+| Obligation                                                    | Accepted implementation and evidence                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A. Exact overview hierarchy and classes                       | The root renders one `h1`, `Collection Profile`, followed in order by exactly the `h2` questions `What does my collection reveal about me?` and `What deserves my attention or a decision now?`. Identity renders separate `h3` sections in daemon class order: Mechanics, Designers, Artists. Overview cards resolve only each class's supplied `overviewEntityIds`; integration tests assert heading counts/order, class separation, and overview membership. |
+| B. Supplied overview and drilldown orderings                  | The API parses and returns the complete `FutureUsefulProfileResult` without projection, aggregation, inference, or reordering. `/profile/entities` uses native GET controls for rating, support, and name and traverses only the matching supplied ID array; tests assert exact overview IDs and all three exact drilldown orders and audit against local `sort`, `localeCompare`, or `reduce`.                                                                 |
+| C. Complete evidence, readiness, exclusions, and destinations | The drilldown renders every supplied entity and support state, aggregate and comparator values, linked-game scores and veto text, comparator cohort, every exclusion reason, complete/partial/refresh-needed metadata readiness, warning provenance, and each non-null correction destination while suppressing null destinations. API malformed-field tests and drilldown cases cover the complete contract.                                                   |
+| D. Diagnostic axes                                            | `/profile/axes` renders supplied current-axis distributions and histogram counts beneath identity, explicitly labels them diagnostics for rating coverage/spread, and does not promote them to identity claims or attention. Focused drilldown evidence asserts values, counts, and the non-claim/non-attention language.                                                                                                                                       |
+| E. Active attention contract, warnings, and order             | Active items remain in supplied order and render stable ID, decision family, question, why-now text, first-play/replay kind, creation provenance, baseline, current evidence, exact missing/invalid/stale warning, every approved response in supplied order, abstention basis, null active resolution, reopen condition, game destination, and the valid correction/refresh destination. Focused overview cases cover active and evidence-warning attention.   |
+| F. Empty, nothing, unavailable, and retry states              | Whole-profile unavailable, transport failure, empty collection, class result states (`supported`, `limited`, `no-eligible-ratings`, `evaluated-empty`, `not-evaluated`), active attention, evidence warning, and successful nothing-to-decide are textually and structurally distinct. Failure renders a native GET retry and never the successful nothing-to-decide message; empty identity offers import/add destinations.                                    |
+| G. Semantic/static accessibility and wrapping                 | Sections and articles use labelled semantic heading structure, native links/form/select/button controls, status text, definition lists, and warning semantics. Static audits verify semantic tokens, visible `:focus-visible`, wrapping and `min-width: 0`, responsive single-column rules, and minimum 44px action targets. Real-browser interaction and visual evidence remains correctly assigned to Step 12.                                                |
+| H. Superseded-surface removal with retained analyses          | Narration, axis-weight, utility-curve, standalone BGG-clustering, divergence, outlier, suggestion, and trusted-insight components, consumers, tests, and dead CSS were removed. Source audits pass for deleted imports, selectors, and obsolete profile computations while purchase utilization and the independent redundancy page remain present and linked.                                                                                                  |
+
+## Step 10 Local Gate
+
+- Status: complete and accepted for `shelf-judge-1q2.17`. The overall useful-profile implementation and frontmatter remain `in_progress` because Steps 11 and 12 remain.
+- Root typecheck: pass.
+- Root lint: pass.
+- Full repository tests: 2,058 pass, 1 skip, 0 fail across 116 files with 8,126 assertions.
+- Web TypeScript check: pass.
+- Production build: pass with 18 routes.
+- Changed-file Prettier: 18 of 18 paths pass.
+- `git diff --check`: pass.
+- Focused shared/web profile suites: 61 pass with 294 assertions.
+- Source-removal audits: pass.
+- Initial independent review: no findings.
+- Terminal independent review: no findings.
+
+### Accepted Findings Closure
+
+- `SJ10-VAL-001` closed: removed the unused `entityClasses` fixture constant that blocked lint while retaining explicit mechanic, designer, and artist fixture construction and class-separation assertions.
+- `SJ10-VAL-002` closed: removed dead superseded CSS for narration, legacy profile cards and distributions, axis weights, BGG clustering, utility curves, divergence, outliers, suggestions, trusted insights, stale/recompute controls, and removed game-detail additions. Replacement profile CSS and independently used axis-management rules remain, with source-audit coverage preventing regression.
+- Step 10 terminal acceptance found no material findings. The A-H map above is the accepted obligation-to-evidence record.
+
+### Residual Gates
+
+- Step 11 owns mutation controls plus live behavior and focus handling for those controls.
+- Step 12 owns Chromium viewport, zoom, overflow, contrast, keyboard, and touch validation.
+- These are later-step gates, not Step 10 failures. Step 10 is accepted through its local gate while the overall plan remains `in_progress`.
+
+### Step 10 Accepted Changed-Path Manifest
+
+Snapshot scope: exact output of `git status --porcelain=v1 --untracked-files=all` at `2026-08-28T12:25:12-07:00`, after `shelf-judge-1q2.17` was closed and immediately before this final manifest was refreshed for the resulting Beads metadata changes. Status values preserve the exact two-character porcelain code. Index values are the blobs reported by `git ls-files -s`; `absent` means the path had no index entry. Working values are SHA-256 content digests, or `deleted` when the working-tree path was removed. Following the established Step 6 convention, the note's `7514551aad1497c7f111d05fec7a4dbe27e3f4b2d11a21a8ce062507737d0092` digest is explicitly its pre-final-manifest hash; the final note necessarily differs rather than claiming an impossible self-referential digest.
+
+| Status | Path                                                           | Index blob or absent marker                | Accepted working SHA-256                                           |
+| ------ | -------------------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------------ |
+| ` M`   | `.beads/interactions.jsonl`                                    | `e4eb46d873d5f4a4f12555af3180845daef2aa7a` | `276e7ac4e4d301b6bf4cb424142e84d1af84878a7a17c1c87103555611f5783b` |
+| ` M`   | `.beads/issues.jsonl`                                          | `29b2431d5d38ba91b9d2539e3304a3d4ac571060` | `03bf59812bffb71763e7f883bc8f8deec9a46242cacabc1ba2133d055a4e226e` |
+| ` M`   | `.lore/work/notes/useful-collection-profile.md`                | `c0e5e602de460bbdd28381476e637b8ec4465b6c` | `7514551aad1497c7f111d05fec7a4dbe27e3f4b2d11a21a8ce062507737d0092` |
+| ` M`   | `packages/web/app/games/[id]/page.tsx`                         | `82107646091a8262f0965261d6b0eb515465d729` | `52adef9c6665050b42a9781770dfa7e5269637d98821f5329566569586172dc9` |
+| ` M`   | `packages/web/app/globals.css`                                 | `036c6c41a8d7902abd0ecdd038eaa3c6ed7e389a` | `37dbfe7eb093d1b1db2f388abc29b0c9b4fbdc812ecec3a25f3e8466a25b4548` |
+| ` M`   | `packages/web/app/page.tsx`                                    | `281bd91aabfd90f94a269ebbc0d054e86823d77e` | `92f4c59a36a1b30d62a500a442031ec0aaacfae204e95891a8ed49729a1c3a8b` |
+| ` M`   | `packages/web/components/profile/axis-distributions.tsx`       | `0aec6ea3547bfb4618c9814e30354f413a314918` | `d387af56a86cef1013ae12778bc1e0312cfa87db34dce81338c0bcb79acb7b04` |
+| ` D`   | `packages/web/components/profile/axis-weights.tsx`             | `3d198b631c730ef2225255779fbeedf706c0bb17` | `deleted`                                                          |
+| ` D`   | `packages/web/components/profile/bgg-clustering.tsx`           | `e84606b0225df9b3a48fb1aafe5d5ef2b0f7ce86` | `deleted`                                                          |
+| ` D`   | `packages/web/components/profile/divergence.tsx`               | `c8dfdb10a6d5fbfef4c22eb66151c3187a1daa9b` | `deleted`                                                          |
+| ` D`   | `packages/web/components/profile/narration-actions.tsx`        | `7d962889a93c608ce7e3f75fa08e6c91bad74b5d` | `deleted`                                                          |
+| ` D`   | `packages/web/components/profile/narration-empty.tsx`          | `f7df42a5d92f11ece3593a9f5a968def68e51114` | `deleted`                                                          |
+| ` D`   | `packages/web/components/profile/narration-section.tsx`        | `c1221df830bf68448cdc18a0fbf0f1429dd9435d` | `deleted`                                                          |
+| ` D`   | `packages/web/components/profile/outliers.tsx`                 | `4e4be49cbe7fb10658e822e6302015a905482da3` | `deleted`                                                          |
+| ` D`   | `packages/web/components/profile/suggestions.tsx`              | `4ab620f59b1c82736bfaaecaf272b02cc649b6f8` | `deleted`                                                          |
+| ` D`   | `packages/web/components/profile/trusted-insights.tsx`         | `bbcdc8e7ff8181503ad0f06168f14181ee90cbaf` | `deleted`                                                          |
+| ` D`   | `packages/web/components/profile/utility-curves.tsx`           | `7d915406c281f01058e0c9f481d8dfb10215a103` | `deleted`                                                          |
+| ` M`   | `packages/web/lib/api.ts`                                      | `62cd6e0fa3c7b56905e940259eaece2716ba1446` | `ec65dcd2e58ab043802b171c90b8e70311e3ac11f2e9bbd43913a480ed245be3` |
+| ` M`   | `packages/web/tests/game-links.test.tsx`                       | `1b6914898b1c845e13d6caca99ef233380a00e36` | `93f6c6b1fed1259dc5d845ad8c272110c044673adcb287c09a7895bab0d9ba64` |
+| ` D`   | `packages/web/tests/narration-section.test.tsx`                | `def3e47a36ce9505cfdd27e1ab8a1a7506ac5722` | `deleted`                                                          |
+| ` M`   | `packages/web/tests/profile-api.test.ts`                       | `3d439d8717af8f4ab73e451dd2676f22d3f344e2` | `f10fcb9b45af9617c9dd9e9f55094ee89c486d3db59a37634fea675a1190c863` |
+| ` M`   | `packages/web/tests/profile-consumers-integration.test.tsx`    | `2e19ba835b28c36669e9e5e5d9b83b837fb1a1fd` | `78c41daf0d867b86840131101ab0128ef756a6af7accd431005436a3fd3f1149` |
+| ` D`   | `packages/web/tests/profile-derived-display.test.tsx`          | `5ba4f2c1536a522ced2689f86e00982544cfccb3` | `deleted`                                                          |
+| ` D`   | `packages/web/tests/trusted-insight-presentation.test.tsx`     | `b1e790cafaabea0ed0ff180ca0d60b9f8c9b46e3` | `deleted`                                                          |
+| `??`   | `packages/web/app/profile/axes/page.tsx`                       | `absent`                                   | `a70b1db59d41a6b7870b8ab5a299b949f9cde7f70c1618fe66acc5b7b7e5d492` |
+| `??`   | `packages/web/app/profile/entities/page.tsx`                   | `absent`                                   | `fa8d9fcc6f56b0b319f63dffe9b7bb3c39a138058397e12d1a208adc031b2810` |
+| `??`   | `packages/web/components/profile/attention-section.tsx`        | `absent`                                   | `4ebf9da46799b3bd9992b2817f654dc4f267ce96c6be48cc17301981d05ce640` |
+| `??`   | `packages/web/components/profile/entity-card.tsx`              | `absent`                                   | `f1fe125e4b2d9f07153da22807a69fe86d281d54d251a1dd440e50645cf7fa9c` |
+| `??`   | `packages/web/components/profile/entity-evidence.tsx`          | `absent`                                   | `1da7c04c577cc9a237fae72d26a31b2f52421f817b42c7527b0be50de370823a` |
+| `??`   | `packages/web/components/profile/identity-section.tsx`         | `absent`                                   | `da45dba5df6231147f191f2817d1f04ae7f051b5909a28d12a614778e1902e31` |
+| `??`   | `packages/web/components/profile/profile-unavailable.tsx`      | `absent`                                   | `62913175d3d083735234e2d4b2591283dfc988fc6ce24dcf278dcd935b99bef5` |
+| `??`   | `packages/web/tests/profile-accessibility-and-removal.test.ts` | `absent`                                   | `96c80911d6cf030cfc94110b062ee8c377057e8f089262d9a4ca82533f79443e` |
+| `??`   | `packages/web/tests/profile-drilldowns.test.tsx`               | `absent`                                   | `febe4555ee6cb668663c282deeedff554d71a9f399aa313aa69c01f31cca827a` |
+
+### Step 10 Plan Timing Divergence
+
+- The plan places removal of profile-specific divergence, outlier, and suggestion cards from game detail in Step 11. The active Step 8 daemon response has already removed those fields, and this Step 10 request explicitly required those superseded surfaces to disappear. Their read-only game-detail consumer and now-dead components/tests were therefore removed in Step 10. Intention controls and history remain Step 11 scope.
+
 ## Log
 
 ### 2026-08-28
@@ -301,3 +386,5 @@ Snapshot scope: exact output of `git status --porcelain=v1 --untracked-files=all
 - SJ-VERIFY-001 focused evidence passed: BGG client tests 54 passed with one existing timeout test skipped, and game-service BGG tests 45 passed. Terminal repository validation passed: typecheck, ESLint, 2,032 full-suite tests with one existing skip and zero failures, and the production web build. Changed-file Prettier and `git diff --check` passed.
 - Independent acceptance closed `SJ-VERIFY-001` and the Step 4 local gate. Focused validation passed 289 tests with one existing skip; the full suite passed 2,032 tests with one existing skip and zero failures. Root typecheck, root ESLint, web TypeScript, the production web build, changed-file Prettier, and `git diff --check` passed. Root formatting recorded only the three generated Beads baseline failures. Step 4 is complete; the overall useful-profile implementation remains in progress.
 - Independent acceptance closed `INT-VAL-1` through `INT-VAL-4`, `SJ6-IR-001` through `SJ6-IR-007`, `SJ6-AR-001` through `SJ6-AR-004`, and `SJ6-TAR-001`, completing the Step 6 local gate for `shelf-judge-1q2.5`. Final validation passed 2,085 tests with one existing skip and zero failures; root shared/daemon/CLI typecheck, root ESLint, web TypeScript, production web build, scoped formatting, and `git diff --check` passed. Root formatting reported only the three generated Beads baseline files. Step 4 acceptance remains unchanged, and the overall useful-profile status remains `in_progress`.
+- Implemented Step 10 after reading the approved plan/specification, existing implementation notes, active shared profile types/refinements and fixture, daemon profile route/service, current web API, root/game-detail profile consumers, tests, and CSS patterns. Focused TypeScript and 45 affected tests pass; dedicated validation and acceptance remain pending.
+- Corrected and closed `SJ10-VAL-001` and `SJ10-VAL-002`, then passed terminal acceptance with no material findings. Root typecheck and lint, 2,058 full-suite tests with one skip and zero failures across 116 files and 8,126 assertions, web TypeScript, the 18-route production build, changed-file Prettier, `git diff --check`, 61 focused shared/web profile tests with 294 assertions, and source-removal audits passed. Step 10 is complete through its local gate; Steps 11 and 12 and overall-plan acceptance remain outstanding.

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { generateNarration, getProfile } from "@/lib/api";
-import { trustedInsightProfileFixture } from "../../shared/tests/fixtures/trusted-profile";
+import { getProfile } from "@/lib/api";
+import { usefulProfileFixture } from "../../shared/tests/fixtures/useful-profile";
 
 async function rejectionMessage(action: () => Promise<unknown>): Promise<string> {
   try {
@@ -13,38 +13,65 @@ async function rejectionMessage(action: () => Promise<unknown>): Promise<string>
 }
 
 describe("web profile API boundary", () => {
-  test("parses a complete trusted profile response", async () => {
-    const profile = await getProfile(() =>
-      Promise.resolve(structuredClone(trustedInsightProfileFixture)),
-    );
+  test("runtime-validates and preserves the complete useful profile response", async () => {
+    const response = structuredClone(usefulProfileFixture);
+    const profile = await getProfile(() => Promise.resolve(response));
 
-    expect(profile).toEqual(trustedInsightProfileFixture);
+    expect(profile).toEqual(response);
+  });
+
+  test("preserves a validated daemon unavailable response", async () => {
+    const response = {
+      status: "unavailable" as const,
+      error: { kind: "recomputation" as const, message: "Profile source changed" },
+      retryDestination: { operationId: "shelf.profile.get" as const },
+    };
+
+    expect(await getProfile(() => Promise.resolve(response))).toEqual(response);
   });
 
   test.each([
-    ["malformed shape", { ...trustedInsightProfileFixture, outliers: "invalid" }],
+    ["projected response", { status: "available", identity: usefulProfileFixture.identity }],
     [
-      "unsupported insight contract version",
+      "altered aggregate",
       {
-        ...trustedInsightProfileFixture,
-        suggestions: trustedInsightProfileFixture.suggestions.map((insight, index) =>
-          index === 0 ? { ...insight, contractVersion: 2 } : insight,
-        ),
+        ...structuredClone(usefulProfileFixture),
+        identity: {
+          ...structuredClone(usefulProfileFixture.identity),
+          classes: {
+            ...structuredClone(usefulProfileFixture.identity.classes),
+            mechanic: {
+              ...structuredClone(usefulProfileFixture.identity.classes.mechanic),
+              entities: usefulProfileFixture.identity.classes.mechanic.entities.map(
+                (entity, index) => (index === 0 ? { ...entity, meanCurrentFitness: 99 } : entity),
+              ),
+            },
+          },
+        },
       },
     ],
-  ])("rejects a %s", async (_label, response) => {
+    [
+      "altered ordering",
+      {
+        ...structuredClone(usefulProfileFixture),
+        identity: {
+          ...structuredClone(usefulProfileFixture.identity),
+          classes: {
+            ...structuredClone(usefulProfileFixture.identity.classes),
+            mechanic: {
+              ...structuredClone(usefulProfileFixture.identity.classes.mechanic),
+              orderings: {
+                ...usefulProfileFixture.identity.classes.mechanic.orderings,
+                rating: [101, 102],
+              },
+            },
+          },
+        },
+      },
+    ],
+  ])("rejects a %s rather than projecting or recomputing it", async (_label, response) => {
     expect(await rejectionMessage(() => getProfile(() => Promise.resolve(response)))).toContain(
       "Invalid profile response",
     );
-  });
-
-  test("validates generated narration responses through the same boundary", async () => {
-    expect(
-      await rejectionMessage(() =>
-        generateNarration(() =>
-          Promise.resolve({ ...trustedInsightProfileFixture, computedAt: "not-a-timestamp" }),
-        ),
-      ),
-    ).toContain("Invalid profile response");
   });
 });

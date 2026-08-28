@@ -187,11 +187,11 @@ export async function importBggCollection(username: string): Promise<Response> {
 
 // Profile API functions
 
-import { CollectionProfileSchema } from "@shelf-judge/shared";
-import type { CollectionProfile } from "@shelf-judge/shared";
+import { FutureUsefulProfileSchema } from "@shelf-judge/shared";
+import type { FutureUsefulProfileResult } from "@shelf-judge/shared";
 
-function parseCollectionProfileResponse(response: unknown): CollectionProfile {
-  const parsed = CollectionProfileSchema.safeParse(response);
+function parseCollectionProfileResponse(response: unknown): FutureUsefulProfileResult {
+  const parsed = FutureUsefulProfileSchema.safeParse(response);
   if (!parsed.success) {
     throw new Error(`Invalid profile response: ${parsed.error.message}`);
   }
@@ -200,13 +200,7 @@ function parseCollectionProfileResponse(response: unknown): CollectionProfile {
 
 export async function getProfile(
   load: () => Promise<unknown> = () => daemonJson("/api/profile"),
-): Promise<CollectionProfile> {
-  return parseCollectionProfileResponse(await load());
-}
-
-export async function generateNarration(
-  load: () => Promise<unknown> = () => daemonJson("/api/profile/narrate", { method: "POST" }),
-): Promise<CollectionProfile> {
+): Promise<FutureUsefulProfileResult> {
   return parseCollectionProfileResponse(await load());
 }
 
@@ -466,7 +460,7 @@ export type {
   BggSearchResult,
   ImportProgress,
   ImportComplete,
-  CollectionProfile,
+  FutureUsefulProfileResult,
   PredictionReadiness,
   NichePosition,
   NicheEntry,

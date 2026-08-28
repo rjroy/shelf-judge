@@ -1,77 +1,62 @@
 import type { AxisDistribution } from "@shelf-judge/shared";
 
-export function AxisDistributions({
-  distributions,
-  gameCount,
-}: {
-  distributions: AxisDistribution[];
-  gameCount: number;
-}) {
-  if (distributions.length === 0) return null;
+const ratingLabels = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
 
+export function AxisDistributions({ distributions }: { distributions: AxisDistribution[] }) {
+  if (distributions.length === 0) {
+    return (
+      <p className="profile-state" data-axis-state="empty">
+        No axis distributions are available.
+      </p>
+    );
+  }
   return (
-    <div className="section-card">
-      <div className="section-header">
-        <span className="section-title-main">Effective Rating Distributions (1-10)</span>
-        <span className="section-count">
-          {distributions.length} {distributions.length === 1 ? "axis" : "axes"} &middot; {gameCount}{" "}
-          games
-        </span>
-      </div>
-      <div className="section-body" style={{ paddingBottom: 4 }}>
-        {distributions.map((dist) => {
-          const maxCount = Math.max(...dist.histogram, 1);
-          return (
-            <div key={dist.axisId} className="axis-dist-row">
-              <div className="axis-dist-top">
-                <span className="axis-name">{dist.axisName}</span>
-                <div className="axis-stats">
-                  <div className="axis-stat">
-                    <span className="axis-stat-val">{dist.mean.toFixed(1)}</span>
-                    <span className="axis-stat-lbl">Mean</span>
-                  </div>
-                  <div className="axis-stat">
-                    <span className="axis-stat-val">{dist.median.toFixed(1)}</span>
-                    <span className="axis-stat-lbl">Median</span>
-                  </div>
-                  <div className="axis-stat">
-                    <span className="axis-stat-val">{dist.standardDeviation.toFixed(1)}</span>
-                    <span className="axis-stat-lbl">Std Dev</span>
-                  </div>
-                  <div className="axis-stat">
-                    <span className="axis-stat-val">
-                      {dist.range.min.toFixed(1)}&ndash;{dist.range.max.toFixed(1)}
-                    </span>
-                    <span className="axis-stat-lbl">Range</span>
-                  </div>
-                </div>
-              </div>
-              <div className="mini-histogram">
-                {dist.histogram.map((count, i) => {
-                  const height = Math.max(2, (count / maxCount) * 100);
-                  const isPeak = count >= maxCount * 0.85;
-                  const isZero = count === 0;
-                  return (
-                    <div
-                      key={i}
-                      className={`hist-bar${isPeak ? " peak" : ""}${isZero ? " zero" : ""}`}
-                      style={{ height: `${height}%` }}
-                    />
-                  );
-                })}
-              </div>
-              <div className="hist-labels">
-                {Array.from({ length: 10 }, (_, i) => (
-                  <span key={i} className="hist-label-tick">
-                    {i + 1}
-                  </span>
-                ))}
-              </div>
-              <div className="axis-dist-scale-label">Effective preference rating, 1-10</div>
+    <div className="axis-diagnostic-list">
+      {distributions.map((distribution) => (
+        <section
+          key={distribution.axisId}
+          className="axis-diagnostic"
+          aria-labelledby={`axis-${distribution.axisId}`}
+        >
+          <h2 id={`axis-${distribution.axisId}`}>{distribution.axisName}</h2>
+          <p className="profile-status-label">Diagnostic distribution, not an identity claim</p>
+          <dl className="profile-facts">
+            <div>
+              <dt>Rated games</dt>
+              <dd>{distribution.ratedGameCount}</dd>
             </div>
-          );
-        })}
-      </div>
+            <div>
+              <dt>Mean</dt>
+              <dd>{distribution.mean.toFixed(1)}</dd>
+            </div>
+            <div>
+              <dt>Median</dt>
+              <dd>{distribution.median.toFixed(1)}</dd>
+            </div>
+            <div>
+              <dt>Population standard deviation</dt>
+              <dd>{distribution.standardDeviation.toFixed(1)}</dd>
+            </div>
+            <div>
+              <dt>Range</dt>
+              <dd>
+                {distribution.range.min.toFixed(1)} to {distribution.range.max.toFixed(1)}
+              </dd>
+            </div>
+          </dl>
+          <ol
+            className="axis-histogram"
+            aria-label="Effective preference rating counts from 1 to 10"
+          >
+            {distribution.histogram.map((count, index) => (
+              <li key={index}>
+                <span>Rating {ratingLabels[index] ?? ""}</span>
+                <strong>{count} games</strong>
+              </li>
+            ))}
+          </ol>
+        </section>
+      ))}
     </div>
   );
 }
