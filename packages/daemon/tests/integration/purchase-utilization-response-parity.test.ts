@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Collection, Game, GameWithPurchaseUtilization } from "@shelf-judge/shared";
+import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import {
   canonicalUtilizationCases,
   componentContract,
@@ -25,6 +26,8 @@ describe("canonical purchase utilization response parity", () => {
     const games: Game[] = canonicalUtilizationCases.map((fixture) => ({
       id: fixture.id,
       bggId: null,
+      entityMetadata: createInitialEntityMetadata(null),
+      latestPlayCountCheck: null,
       name: fixture.name,
       yearPublished: null,
       minPlayers:
@@ -54,7 +57,8 @@ describe("canonical purchase utilization response parity", () => {
       updatedAt: UTILIZATION_OBSERVED_AT,
     }));
     const collection: Collection = {
-      schemaVersion: 3,
+      schemaVersion: 4,
+      revision: 0,
       id: "parity-collection",
       name: "Parity",
       axes: [
@@ -72,6 +76,8 @@ describe("canonical purchase utilization response parity", () => {
       ],
       games,
       entertainmentBenchmark: canonicalUtilizationCases[0].input.entertainmentBenchmark,
+      intentions: [],
+      commandReceipts: [],
       createdAt: UTILIZATION_OBSERVED_AT,
       updatedAt: UTILIZATION_OBSERVED_AT,
     };

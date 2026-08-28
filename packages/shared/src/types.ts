@@ -158,6 +158,8 @@ export interface Game {
   playerRangeEvidence: PlayerRangeEvidence;
   suggestedPlayerPoll: SuggestedPlayerPoll;
   bestPlayersInvalidEvidence: InvalidEvidence | null;
+  entityMetadata: EntityMetadataByClass;
+  latestPlayCountCheck: LatestPlayCountCheck;
   ownership: OwnershipStatus;
   boxDimensions: BoxDimensions | null;
   manualShelfId: string | null;
@@ -231,11 +233,14 @@ export type Axis = PersonalAxis | TournamentAxis | DerivedAxis | DisabledLegacyA
 export type AxisSource = Axis["source"];
 export type EnabledAxis = PersonalAxis | TournamentAxis | DerivedAxis;
 export interface Collection {
-  schemaVersion: 3;
+  schemaVersion: 4;
+  revision: number;
   id: string;
   name: string;
   axes: Axis[];
   games: Game[];
+  intentions: PlayIntention[];
+  commandReceipts: IntentionCommandReceipt[];
   entertainmentBenchmark: EntertainmentBenchmark;
   createdAt: string;
   updatedAt: string;
@@ -1064,21 +1069,9 @@ export interface PlayIntention {
   resolution: PlayIntentionResolution | null;
 }
 
-export interface FutureUsefulProfileGameSource extends Game {
-  entityMetadata: EntityMetadataByClass;
-  latestPlayCountCheck: LatestPlayCountCheck;
-}
+export type FutureUsefulProfileGameSource = Game;
 
-export interface FutureUsefulProfileCollectionSource extends Omit<
-  Collection,
-  "schemaVersion" | "games"
-> {
-  schemaVersion: 4;
-  revision: number;
-  games: FutureUsefulProfileGameSource[];
-  intentions: PlayIntention[];
-  commandReceipts: IntentionCommandReceipt[];
-}
+export type FutureUsefulProfileCollectionSource = Collection;
 
 export type CreateIntentionCommand = {
   type: "create";

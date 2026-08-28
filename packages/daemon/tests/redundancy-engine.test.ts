@@ -5,6 +5,7 @@ import {
   DEFAULT_REDUNDANCY_SETTINGS,
 } from "../src/services/redundancy-engine";
 import type { FitnessResult, GameWithScore, Game, RedundancySettings } from "@shelf-judge/shared";
+import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import type { FeatureVector } from "../src/services/feature-vector";
 
 // --- Fixture helpers ---
@@ -13,6 +14,8 @@ function makeGame(id: string, name: string): Game {
   return {
     id,
     bggId: null,
+    entityMetadata: createInitialEntityMetadata(null),
+    latestPlayCountCheck: null,
     name,
     yearPublished: 2020,
     minPlayers: 2,

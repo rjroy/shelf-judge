@@ -27,17 +27,8 @@ export type CollectionMutationOutcome<Value> =
 
 export interface CollectionRevisionStrategy<Source = Collection> {
   identity(collection: Source): Readonly<Record<string, string | number>>;
-  advance(collection: Source): Source;
+  advance(collection: Source, current: Source): Source;
 }
-
-export const schemaV3RevisionStrategy: CollectionRevisionStrategy = {
-  identity(collection) {
-    return { collectionId: collection.id, schemaVersion: collection.schemaVersion };
-  },
-  advance(collection) {
-    return collection;
-  },
-};
 
 export const schemaV4RevisionStrategy: CollectionRevisionStrategy<FutureUsefulProfileCollectionSource> =
   {
@@ -48,11 +39,11 @@ export const schemaV4RevisionStrategy: CollectionRevisionStrategy<FutureUsefulPr
         revision: collection.revision,
       };
     },
-    advance(collection) {
-      if (collection.revision >= Number.MAX_SAFE_INTEGER) {
+    advance(collection, current) {
+      if (current.revision >= Number.MAX_SAFE_INTEGER) {
         throw new Error("Collection revision cannot advance beyond the safe integer range");
       }
-      return { ...collection, revision: collection.revision + 1 };
+      return { ...collection, revision: current.revision + 1 };
     },
   };
 
@@ -96,7 +87,7 @@ export function createCollectionMutationService(
 ): CollectionMutationService {
   const existing = coordinators.get(deps.storageService);
   if (existing) return existing;
-  const revisionStrategy = deps.revisionStrategy ?? schemaV3RevisionStrategy;
+  const revisionStrategy = deps.revisionStrategy ?? schemaV4RevisionStrategy;
   const logger = deps.logger ?? createLogger("collection-mutation");
   let operations: Promise<void> = Promise.resolve();
 
@@ -185,7 +176,7 @@ export function createCollectionMutationService(
 
       let accepted: Collection;
       try {
-        accepted = CollectionSchema.parse(revisionStrategy.advance(candidate));
+        accepted = CollectionSchema.parse(revisionStrategy.advance(candidate, current));
       } catch (error) {
         logger.warn("collection mutation rejected", {
           ...fields,

@@ -67,7 +67,7 @@ export {
   FutureUsefulProfileSchema,
 };
 
-export const CURRENT_COLLECTION_SCHEMA_VERSION = 3 as const;
+export const CURRENT_COLLECTION_SCHEMA_VERSION = 4 as const;
 export const CURRENT_PROFILE_CONTRACT_VERSION = 6 as const;
 export const CURRENT_PROFILE_ALGORITHM_VERSION = 7 as const;
 export const PROFILE_NARRATION_ABSTENTION =
@@ -721,7 +721,7 @@ const BoxDimensionsSchema = z
   })
   .strict();
 
-export const GameSchema = z
+export const CollectionGameV3Schema = z
   .object({
     id: z.string().min(1),
     bggId: z.number().int().nullable(),
@@ -756,32 +756,29 @@ export const GameSchema = z
   })
   .strict();
 
-export const CollectionSchema = z
+export const CollectionSchemaV3 = z
   .object({
-    schemaVersion: z.literal(CURRENT_COLLECTION_SCHEMA_VERSION),
+    schemaVersion: z.literal(3),
     id: z.string().min(1),
     name: z.string().min(1),
     axes: z.array(AxisSchema),
-    games: z.array(GameSchema),
+    games: z.array(CollectionGameV3Schema),
     entertainmentBenchmark: EntertainmentBenchmarkSchema,
     createdAt: z.string(),
     updatedAt: z.string(),
   })
   .strict();
 
-const FutureUsefulProfileGameSchema = GameSchema.extend({
+export const GameSchema = CollectionGameV3Schema.extend({
   entityMetadata: EntityMetadataByClassSchema,
   latestPlayCountCheck: LatestPlayCountCheckSchema,
 }).strict();
 
-export const FutureUsefulProfileCollectionSourceSchema = CollectionSchema.omit({
-  schemaVersion: true,
-  games: true,
-})
+export const CollectionSchema = CollectionSchemaV3.omit({ schemaVersion: true, games: true })
   .extend({
     schemaVersion: z.literal(4),
     revision: z.number().int().safe().min(0),
-    games: z.array(FutureUsefulProfileGameSchema),
+    games: z.array(GameSchema),
     intentions: z.array(PlayIntentionSchema),
     commandReceipts: z.array(IntentionCommandReceiptSchema),
   })
@@ -890,6 +887,8 @@ export const FutureUsefulProfileCollectionSourceSchema = CollectionSchema.omit({
       }
     }
   });
+
+export const FutureUsefulProfileCollectionSourceSchema = CollectionSchema;
 
 function compareNormalizedCodePoints(left: string, right: string): number {
   const leftPoints = Array.from(left.normalize("NFC"), (value) => value.codePointAt(0) ?? 0);

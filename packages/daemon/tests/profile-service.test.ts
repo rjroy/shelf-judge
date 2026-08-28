@@ -10,6 +10,7 @@ import type {
 import {
   CURRENT_PROFILE_ALGORITHM_VERSION,
   CURRENT_PROFILE_CONTRACT_VERSION,
+  createInitialEntityMetadata,
 } from "@shelf-judge/shared";
 import { createProfileService } from "../src/services/profile-service.js";
 import type { StorageService } from "../src/services/storage-service.js";
@@ -22,6 +23,8 @@ function makeGame(id: string, name: string): Game {
   return {
     id,
     bggId: null,
+    entityMetadata: createInitialEntityMetadata(null),
+    latestPlayCountCheck: null,
     name,
     yearPublished: null,
     minPlayers: null,
@@ -55,12 +58,15 @@ function makeGame(id: string, name: string): Game {
 function makeCollection(updatedAt?: string): Collection {
   const now = updatedAt ?? new Date().toISOString();
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
+    revision: 0,
     id: "test-col",
     name: "Test Collection",
     axes: [],
     games: [],
     entertainmentBenchmark: null,
+    intentions: [],
+    commandReceipts: [],
     createdAt: now,
     updatedAt: now,
   };

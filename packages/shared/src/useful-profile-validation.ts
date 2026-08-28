@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { JsonValue } from "./types";
 
 const TimestampSchema = z.string().datetime({ offset: true });
 const IdSchema = z.string().min(1);
@@ -20,9 +21,7 @@ function compareCodePoints(left: string, right: string): number {
   return leftPoints.length - rightPoints.length;
 }
 
-const JsonValueSchema: z.ZodType<
-  string | number | boolean | null | Array<unknown> | Record<string, unknown>
-> = z.lazy(() =>
+const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
   z.union([
     z.string(),
     FiniteNumberSchema,

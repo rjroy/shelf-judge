@@ -236,7 +236,9 @@ export {
   SuggestedPlayerPollSchema,
   isUsableSuggestedPlayerPoll,
   GameSchema,
+  CollectionGameV3Schema,
   CollectionSchema,
+  CollectionSchemaV3,
   CollectionProfileSchema,
   ProfileDataSchema,
   ProfileEntityClassSchema,
@@ -280,6 +282,8 @@ export {
 export type { ExactRationalJson, ExactComparison } from "./exact-rational";
 
 export { parseAmountInput, formatStoredAmount, formatExactAmount, amountSortKey } from "./amount";
+
+export { createInitialEntityMetadata } from "./useful-profile-source";
 
 export { calculatePurchaseUtilization, resolveModeledPlayerCount } from "./purchase-utilization";
 

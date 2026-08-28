@@ -7,6 +7,7 @@ import type {
   PersonalAxis,
   TournamentAxis,
 } from "@shelf-judge/shared";
+import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import { createFitnessService } from "../../src/services/fitness-service.js";
 import {
   assessReadiness,
@@ -25,6 +26,7 @@ const settings = DEFAULT_PREDICTION_SETTINGS;
 const fitness = createFitnessService();
 
 function game(overrides: Partial<Game> = {}): Game {
+  const bggId = overrides.bggId === undefined ? 1 : overrides.bggId;
   return {
     id: "target",
     bggId: 1,
@@ -56,6 +58,8 @@ function game(overrides: Partial<Game> = {}): Game {
     createdAt: timestamp,
     updatedAt: timestamp,
     ...overrides,
+    entityMetadata: createInitialEntityMetadata(bggId),
+    latestPlayCountCheck: null,
   };
 }
 

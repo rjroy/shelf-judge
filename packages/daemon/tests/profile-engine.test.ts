@@ -9,7 +9,7 @@ import type {
   TournamentAxis,
   TournamentGameStatsDisplay,
 } from "@shelf-judge/shared";
-import { CollectionProfileSchema } from "@shelf-judge/shared";
+import { CollectionProfileSchema, createInitialEntityMetadata } from "@shelf-judge/shared";
 import {
   computeAxisDistributions,
   computeAxisWeights,
@@ -25,8 +25,10 @@ import type { ProfileInput } from "../src/services/profile-engine.js";
 // --- Test helpers ---
 
 function makeGame(overrides: Partial<Game> & { id: string; name: string }): Game {
-  return {
+  const game: Game = {
     bggId: null,
+    entityMetadata: createInitialEntityMetadata(null),
+    latestPlayCountCheck: null,
     yearPublished: null,
     minPlayers: null,
     maxPlayers: null,
@@ -54,6 +56,11 @@ function makeGame(overrides: Partial<Game> & { id: string; name: string }): Game
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:00Z",
     ...overrides,
+  };
+  return {
+    ...game,
+    entityMetadata: createInitialEntityMetadata(game.bggId),
+    latestPlayCountCheck: null,
   };
 }
 

@@ -46,6 +46,8 @@ describe("shared public surface (Phase 6 strike)", () => {
           observedAt: null,
         },
         bestPlayersInvalidEvidence: null,
+        entityMetadata: shared.createInitialEntityMetadata(1),
+        latestPlayCountCheck: null,
         bggData: null,
         ownership: "owned",
         boxDimensions: null,

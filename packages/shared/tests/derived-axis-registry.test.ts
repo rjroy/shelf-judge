@@ -14,6 +14,7 @@ import {
   validateDerivedAxisPayload,
 } from "../src/derived-axis-registry";
 import { AXIS_VALIDATION_CODES } from "../src/errors";
+import { createInitialEntityMetadata } from "../src/useful-profile-source";
 import type {
   Axis,
   Collection,
@@ -25,9 +26,10 @@ import type {
 } from "../src/types";
 
 function makeGame(overrides: Partial<Game> = {}): Game {
+  const bggId = overrides.bggId ?? null;
   return {
     id: "game",
-    bggId: null,
+    bggId,
     name: "Game",
     yearPublished: null,
     minPlayers: null,
@@ -56,6 +58,8 @@ function makeGame(overrides: Partial<Game> = {}): Game {
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:00Z",
     ...overrides,
+    entityMetadata: overrides.entityMetadata ?? createInitialEntityMetadata(bggId),
+    latestPlayCountCheck: overrides.latestPlayCountCheck ?? null,
   };
 }
 
@@ -865,18 +869,21 @@ describe("current-axis helpers", () => {
     expect(summarizeDerivedAxisConfiguration(time)).toBe("Scoring cap: 360 minutes");
   });
 
-  test("supports an additive versioned persisted collection contract", () => {
+  test("supports the active versioned persisted collection contract", () => {
     const collection: Collection = {
-      schemaVersion: 3,
+      schemaVersion: 4,
+      revision: 0,
       id: "collection",
       name: "Collection",
       axes: [personal, tournament, derived, disabled],
       games: [makeGame()],
+      intentions: [],
+      commandReceipts: [],
       entertainmentBenchmark: null,
       createdAt: "2026-01-01T00:00:00Z",
       updatedAt: "2026-01-01T00:00:00Z",
     };
-    expect(collection.schemaVersion).toBe(3);
+    expect(collection.schemaVersion).toBe(4);
     expect(collection.axes).toEqual([personal, tournament, derived, disabled]);
   });
 });

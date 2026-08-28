@@ -8,6 +8,7 @@ import type {
   TournamentData,
 } from "@shelf-judge/shared";
 import { AxisSchema } from "@shelf-judge/shared";
+import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import { createFitnessService } from "../../src/services/fitness-service.js";
 import { migrateCollection } from "../../src/services/collection-migration.js";
 
@@ -15,6 +16,7 @@ const service = createFitnessService();
 const timestamp = "2026-01-01T00:00:00.000Z";
 
 function game(overrides: Partial<Game> = {}): Game {
+  const bggId = overrides.bggId ?? null;
   return {
     id: "game-1",
     bggId: null,
@@ -46,6 +48,8 @@ function game(overrides: Partial<Game> = {}): Game {
     createdAt: timestamp,
     updatedAt: timestamp,
     ...overrides,
+    entityMetadata: createInitialEntityMetadata(bggId),
+    latestPlayCountCheck: null,
   };
 }
 

@@ -123,7 +123,7 @@ describe("persisted purchase utilization flow", () => {
     ).toHaveProperty("status", 200);
 
     const migrated = await initial.storageService.loadCollection();
-    expect(migrated.schemaVersion).toBe(3);
+    expect(migrated.schemaVersion).toBe(4);
     expect(migrated.games[0].playCountEvidence).toMatchObject({
       status: "valid",
       value: 1,

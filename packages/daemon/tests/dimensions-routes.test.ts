@@ -6,6 +6,7 @@ import type {
   GameWithScore,
   Game,
 } from "@shelf-judge/shared";
+import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import { createGameRoutes } from "../src/routes/games";
 import type { GameService } from "../src/services/game-service";
 import { createTestPurchaseUtilizationService } from "./helpers/test-app";
@@ -16,6 +17,8 @@ function makeGame(id: string, name: string, boxDimensions: BoxDimensions | null 
   return {
     id,
     bggId: 1,
+    entityMetadata: createInitialEntityMetadata(1),
+    latestPlayCountCheck: null,
     name,
     yearPublished: 2020,
     minPlayers: 2,

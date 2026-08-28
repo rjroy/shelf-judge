@@ -84,6 +84,7 @@ function createDefaultCollection(dependencies?: CollectionMigrationDependencies)
   const createId = dependencies === undefined ? uuidv4 : () => dependencies.createId();
   return CollectionSchema.parse({
     schemaVersion: CURRENT_COLLECTION_SCHEMA_VERSION,
+    revision: 0,
     id: createId(),
     name: "My Collection",
     axes: [
@@ -101,6 +102,8 @@ function createDefaultCollection(dependencies?: CollectionMigrationDependencies)
       },
     ],
     games: [],
+    intentions: [],
+    commandReceipts: [],
     entertainmentBenchmark: null,
     createdAt: now,
     updatedAt: now,
@@ -134,7 +137,9 @@ function storedInvalidEvidence(value: unknown, present: boolean): InvalidEvidenc
 }
 
 export function decodeStoredCollection(raw: unknown, logger: Logger): StoredCollectionDecodeResult {
-  if (!isRecord(raw) || raw.schemaVersion !== 3) return { data: raw, normalized: false };
+  if (!isRecord(raw) || (raw.schemaVersion !== 3 && raw.schemaVersion !== 4)) {
+    return { data: raw, normalized: false };
+  }
 
   let normalized = false;
   const collectionId = typeof raw.id === "string" ? raw.id : "unknown";
@@ -311,10 +316,17 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
         logger.log(
           `collection migration checked sourceVersion=${migration.sourceVersion} targetVersion=${CURRENT_COLLECTION_SCHEMA_VERSION} axes=${migration.data.axes.length} games=${migration.data.games.length} converted=${migration.convertedAxisCount} disabled=${migration.disabledAxisCount}`,
         );
-        const validated = validateCollection(migration.data);
+        const normalizedCurrent = decoded.normalized && migration.sourceVersion === 4;
+        const candidate = normalizedCurrent
+          ? {
+              ...migration.data,
+              revision: migration.data.revision + 1,
+            }
+          : migration.data;
+        const validated = validateCollection(candidate);
         if (!migration.migrated && !decoded.normalized) return validated;
 
-        if (migration.migrated) {
+        if (migration.migrated || normalizedCurrent) {
           const artifactContext = createCollectionArtifactContext(
             dataDir,
             fileOps,

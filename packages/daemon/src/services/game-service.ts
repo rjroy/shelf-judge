@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import {
   AddGameSchema,
+  createInitialEntityMetadata,
   AXIS_VALIDATION_CODES,
   CodedAxisValidationError,
   toErrorMessage,
@@ -346,6 +347,8 @@ export function createGameService(deps: GameServiceDeps): GameService {
           observedAt: null,
         },
         bestPlayersInvalidEvidence: null,
+        entityMetadata: createInitialEntityMetadata(parsed.bggId ?? null),
+        latestPlayCountCheck: null,
         ownership: "owned",
         boxDimensions: null,
         manualShelfId: null,
@@ -801,6 +804,8 @@ export function createGameService(deps: GameServiceDeps): GameService {
                   observedAt: null,
                 },
                 bestPlayersInvalidEvidence: null,
+                entityMetadata: createInitialEntityMetadata(bggId),
+                latestPlayCountCheck: null,
                 ownership: "owned",
                 boxDimensions: null,
                 manualShelfId: null,

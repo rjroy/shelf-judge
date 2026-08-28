@@ -7,7 +7,7 @@ import type {
   PredictionUnavailable,
   TournamentGameStatsDisplay,
 } from "@shelf-judge/shared";
-import { isEnabledScoringAxis } from "@shelf-judge/shared";
+import { createInitialEntityMetadata, isEnabledScoringAxis } from "@shelf-judge/shared";
 import type { StorageService } from "./storage-service";
 import type { FitnessService } from "./fitness-service";
 import type { TournamentService } from "./tournament-service";
@@ -336,6 +336,8 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
           observedAt: null,
         },
         bestPlayersInvalidEvidence: null,
+        entityMetadata: createInitialEntityMetadata(bggId),
+        latestPlayCountCheck: null,
         ownership: "owned",
         boxDimensions: null,
         manualShelfId: null,

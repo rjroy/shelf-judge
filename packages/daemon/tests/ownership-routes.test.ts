@@ -9,6 +9,7 @@ import type {
   NicheSettings,
   Collection,
 } from "@shelf-judge/shared";
+import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import { createGameRoutes } from "../src/routes/games";
 import type { GameService } from "../src/services/game-service";
 import type { PredictionService } from "../src/services/prediction-service";
@@ -57,6 +58,8 @@ function makeGame(
   return {
     id,
     bggId: 1,
+    entityMetadata: createInitialEntityMetadata(1),
+    latestPlayCountCheck: null,
     name,
     yearPublished: 2020,
     minPlayers: 2,
@@ -117,7 +120,8 @@ const prevOwned = makeGame("prev", "Delta", "previously-owned");
 // Mutable collection for setOwnership tests
 function makeCollection(): Collection {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
+    revision: 0,
     id: "coll-1",
     name: "Test",
     axes: [
@@ -139,6 +143,8 @@ function makeCollection(): Collection {
       structuredClone(prevOwned),
     ],
     entertainmentBenchmark: null,
+    intentions: [],
+    commandReceipts: [],
     createdAt: now,
     updatedAt: now,
   };
@@ -511,7 +517,9 @@ describe("wishlist interaction with previously-owned games", () => {
   test("previously-owned game cannot be wishlisted (returns 409)", async () => {
     const coll = makeCollection();
     // Give prevOwned a unique bggId so the wishlist check matches
-    coll.games.find((g) => g.id === "prev")!.bggId = 999;
+    const previouslyOwned = coll.games.find((g) => g.id === "prev")!;
+    previouslyOwned.bggId = 999;
+    previouslyOwned.entityMetadata = createInitialEntityMetadata(previouslyOwned.bggId);
 
     const storage = createMockStorageService(coll);
     const mockWishlistService: WishlistService = {

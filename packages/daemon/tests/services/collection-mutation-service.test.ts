@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { Collection, FutureUsefulProfileCollectionSource } from "@shelf-judge/shared";
+import type { Collection } from "@shelf-judge/shared";
 import {
   collectionMutationServiceFor,
   createCollectionMutationService,
@@ -15,11 +15,14 @@ const initialTime = "2026-01-01T00:00:00.000Z";
 
 function collection(): Collection {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
+    revision: 0,
     id: "collection-1",
     name: "Private collection name",
     axes: [],
     games: [],
+    intentions: [],
+    commandReceipts: [],
     entertainmentBenchmark: null,
     createdAt: initialTime,
     updatedAt: initialTime,
@@ -59,14 +62,10 @@ function controlledStorage(options: { failFirstSave?: boolean } = {}) {
 }
 
 describe("CollectionMutationService", () => {
-  test("exposes inactive schema-v4 monotonic revision semantics", () => {
-    const source: FutureUsefulProfileCollectionSource = {
+  test("uses monotonic schema-v4 revision semantics", () => {
+    const source: Collection = {
       ...collection(),
-      schemaVersion: 4,
       revision: 7,
-      games: [],
-      intentions: [],
-      commandReceipts: [],
     };
 
     expect(schemaV4RevisionStrategy.identity(source)).toEqual({
@@ -74,10 +73,13 @@ describe("CollectionMutationService", () => {
       schemaVersion: 4,
       revision: 7,
     });
-    expect(schemaV4RevisionStrategy.advance(source).revision).toBe(8);
+    expect(schemaV4RevisionStrategy.advance(source, source).revision).toBe(8);
     expect(source.revision).toBe(7);
     expect(() =>
-      schemaV4RevisionStrategy.advance({ ...source, revision: Number.MAX_SAFE_INTEGER }),
+      schemaV4RevisionStrategy.advance(
+        { ...source, revision: 0 },
+        { ...source, revision: Number.MAX_SAFE_INTEGER },
+      ),
     ).toThrow("safe integer range");
   });
 
@@ -89,6 +91,7 @@ describe("CollectionMutationService", () => {
       { operation: "game.ownership.set", trigger: "owner", gameIds: ["game-1"] },
       (candidate) => {
         candidate.name = "Game writer accepted";
+        candidate.revision = 99;
         return { changed: true, value: "game" };
       },
     );
@@ -115,9 +118,10 @@ describe("CollectionMutationService", () => {
       amount: { hundredths: 800 },
     });
     expect(ctx.saveCount()).toBe(2);
+    expect(ctx.stored().revision).toBe(2);
   });
 
-  test("does not persist no-ops and keeps the schema-v3 identity unchanged", async () => {
+  test("does not persist no-ops or advance the revision", async () => {
     const ctx = controlledStorage();
     const service = createCollectionMutationService({ storageService: ctx.storage });
 
@@ -130,7 +134,7 @@ describe("CollectionMutationService", () => {
       outcome: "no-op",
       changed: false,
       value: "collection-1",
-      collection: { schemaVersion: 3, id: "collection-1", updatedAt: initialTime },
+      collection: { schemaVersion: 4, revision: 0, id: "collection-1", updatedAt: initialTime },
     });
     expect(ctx.saveCount()).toBe(0);
   });
@@ -150,7 +154,7 @@ describe("CollectionMutationService", () => {
     await expect(
       service.mutate({ operation: "axis.create", trigger: "owner" }, (candidate) => {
         candidate.name = "";
-        candidate.schemaVersion = 99 as 3;
+        candidate.schemaVersion = 99 as 4;
         return { changed: true, value: undefined };
       }),
     ).rejects.toThrow();
@@ -184,6 +188,7 @@ describe("CollectionMutationService", () => {
     await expect(failed).rejects.toThrow("disk unavailable");
     await retry;
     expect(ctx.stored().name).toBe("retry accepted");
+    expect(ctx.stored().revision).toBe(1);
     expect(ctx.saveCount()).toBe(2);
   });
 

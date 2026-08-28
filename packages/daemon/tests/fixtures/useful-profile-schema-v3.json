@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 3,
+  "id": "collection-v3",
+  "name": "Useful profile migration fixture",
+  "axes": [],
+  "games": [
+    {
+      "id": "bgg-game",
+      "bggId": 123,
+      "name": "BGG Game",
+      "yearPublished": 2020,
+      "minPlayers": 2,
+      "maxPlayers": 4,
+      "bestPlayers": 3,
+      "playingTime": 60,
+      "imageUrl": null,
+      "bggData": {
+        "communityRating": 7.5,
+        "bayesAverage": 7,
+        "weight": 2.5,
+        "numWeightVotes": 10,
+        "description": null,
+        "mechanics": [{ "id": 7, "name": "Legacy Mechanic" }],
+        "categories": [],
+        "families": [],
+        "subdomains": [],
+        "bestPlayerCount": 3,
+        "fetchedAt": "2026-01-01T00:00:00.000Z"
+      },
+      "numPlays": 4,
+      "acquisition": { "state": "unknown" },
+      "playCountEvidence": {
+        "status": "valid",
+        "value": 4,
+        "source": "legacy-unknown",
+        "observedAt": null
+      },
+      "durationEvidence": {
+        "status": "valid",
+        "value": 60,
+        "source": "legacy-unknown",
+        "observedAt": null
+      },
+      "playerRangeEvidence": {
+        "status": "valid",
+        "value": { "minPlayers": 2, "maxPlayers": 4 },
+        "source": "legacy-unknown",
+        "observedAt": null
+      },
+      "suggestedPlayerPoll": {
+        "status": "valid",
+        "state": "legacy-unknown",
+        "buckets": [],
+        "source": "legacy-unknown",
+        "observedAt": null
+      },
+      "bestPlayersInvalidEvidence": null,
+      "ownership": "owned",
+      "boxDimensions": null,
+      "manualShelfId": null,
+      "ratings": {},
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "manual-game",
+      "bggId": null,
+      "name": "Manual Game",
+      "yearPublished": null,
+      "minPlayers": null,
+      "maxPlayers": null,
+      "bestPlayers": null,
+      "playingTime": null,
+      "imageUrl": null,
+      "bggData": null,
+      "numPlays": null,
+      "acquisition": { "state": "unknown" },
+      "playCountEvidence": { "status": "missing", "source": "manual", "observedAt": null },
+      "durationEvidence": { "status": "missing", "source": "manual", "observedAt": null },
+      "playerRangeEvidence": { "status": "missing", "source": "manual", "observedAt": null },
+      "suggestedPlayerPoll": {
+        "status": "valid",
+        "state": "absent",
+        "buckets": [],
+        "source": "manual",
+        "observedAt": null
+      },
+      "bestPlayersInvalidEvidence": null,
+      "ownership": "owned",
+      "boxDimensions": null,
+      "manualShelfId": null,
+      "ratings": {},
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    }
+  ],
+  "entertainmentBenchmark": null,
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+}

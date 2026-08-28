@@ -11,6 +11,7 @@ import type {
   BggGameData,
   NicheSettings,
 } from "@shelf-judge/shared";
+import { createInitialEntityMetadata } from "@shelf-judge/shared";
 
 // --- Test fixture helpers ---
 
@@ -38,9 +39,12 @@ function makeBggData(
 }
 
 function makeGame(id: string, name: string, bggData: BggGameData | null): Game {
+  const bggId = bggData ? 1 : null;
   return {
     id,
-    bggId: bggData ? 1 : null,
+    bggId,
+    entityMetadata: createInitialEntityMetadata(bggId),
+    latestPlayCountCheck: null,
     name,
     yearPublished: 2020,
     minPlayers: 2,

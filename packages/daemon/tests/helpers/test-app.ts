@@ -50,11 +50,14 @@ export function createTestPurchaseUtilizationService(
   const fallbackStorage = {
     loadCollection: () =>
       Promise.resolve({
-        schemaVersion: 3 as const,
+        schemaVersion: 4 as const,
+        revision: 0,
         id: "test-collection",
         name: "Test Collection",
         axes: [],
         games: [],
+        intentions: [],
+        commandReceipts: [],
         entertainmentBenchmark: null,
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",

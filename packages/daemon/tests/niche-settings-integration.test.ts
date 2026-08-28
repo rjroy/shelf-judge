@@ -10,6 +10,7 @@ import type {
   NicheSettings,
   Collection,
 } from "@shelf-judge/shared";
+import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import { DEFAULT_REDUNDANCY_SETTINGS } from "../src/services/redundancy-engine";
 import type { GameService } from "../src/services/game-service";
 import type { PredictionService } from "../src/services/prediction-service";
@@ -42,9 +43,12 @@ function makeBggData(
 }
 
 function makeGame(id: string, name: string, bggData: BggGameData | null): Game {
+  const bggId = bggData ? 1 : null;
   return {
     id,
-    bggId: bggData ? 1 : null,
+    bggId,
+    entityMetadata: createInitialEntityMetadata(bggId),
+    latestPlayCountCheck: null,
     name,
     yearPublished: 2020,
     minPlayers: 2,
@@ -120,12 +124,15 @@ const allGamesWithScores: GameWithScore[] = [
 // --- Mock factories ---
 
 const defaultCollection: Collection = {
-  schemaVersion: 3,
+  schemaVersion: 4,
+  revision: 0,
   id: "collection-1",
   name: "Test",
   axes: [],
   games: [gameA, gameB, gameC],
   entertainmentBenchmark: null,
+  intentions: [],
+  commandReceipts: [],
   createdAt: "2026-01-01T00:00:00Z",
   updatedAt: "2026-01-01T00:00:00Z",
 };

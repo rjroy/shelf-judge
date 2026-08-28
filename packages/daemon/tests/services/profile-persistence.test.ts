@@ -14,6 +14,7 @@ import type {
 } from "@shelf-judge/shared";
 import {
   CollectionProfileSchema,
+  createInitialEntityMetadata,
   CURRENT_PROFILE_ALGORITHM_VERSION,
   CURRENT_PROFILE_CONTRACT_VERSION,
 } from "@shelf-judge/shared";
@@ -272,6 +273,7 @@ function profileGame(index: number, outlier = false): Game {
     id: outlier ? "war" : `euro-${index}`,
     name: outlier ? "Long Wargame" : `Economic Game ${index}`,
     bggId: null,
+    entityMetadata: createInitialEntityMetadata(null),
     yearPublished: 2020,
     minPlayers: 2,
     maxPlayers: outlier ? 2 : 4,
@@ -286,6 +288,7 @@ function profileGame(index: number, outlier = false): Game {
       categories: [outlier ? { id: 11, name: "Wargame" } : { id: 10, name: "Economic" }],
     }),
     numPlays: null,
+    latestPlayCountCheck: null,
     acquisition: { state: "unknown" },
     playCountEvidence: { status: "missing", source: "manual", observedAt: null },
     durationEvidence: {

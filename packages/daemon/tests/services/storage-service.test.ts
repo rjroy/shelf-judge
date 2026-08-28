@@ -9,6 +9,7 @@ import type {
 } from "@shelf-judge/shared";
 import {
   createFreshCollectionDerivedAxes,
+  createInitialEntityMetadata,
   CURRENT_PROFILE_ALGORITHM_VERSION,
   CURRENT_PROFILE_CONTRACT_VERSION,
 } from "@shelf-judge/shared";
@@ -18,6 +19,7 @@ import { createMockFileOps } from "../helpers/mock-file-ops.js";
 const DATA_DIR = "/test/data";
 const CONFIG_PATH = "/test/config.json";
 const COLLECTION_PATH = "/test/data/collection.json";
+const PROFILE_PATH = "/test/data/profile.json";
 const TOURNAMENT_PATH = "/test/data/tournament.json";
 const WISHLIST_PATH = "/test/data/wishlist.json";
 
@@ -33,11 +35,14 @@ function makeService(initialFiles?: Record<string, string>) {
 
 function currentCollection(overrides: Partial<Collection> = {}): Collection {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
+    revision: 0,
     id: "col-1",
     name: "Test",
     axes: [],
     games: [],
+    intentions: [],
+    commandReceipts: [],
     entertainmentBenchmark: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -46,6 +51,7 @@ function currentCollection(overrides: Partial<Collection> = {}): Collection {
 }
 
 function currentGame(overrides: Partial<Game> = {}): Game {
+  const bggId = overrides.bggId ?? null;
   return {
     id: "game-1",
     bggId: null,
@@ -77,6 +83,8 @@ function currentGame(overrides: Partial<Game> = {}): Game {
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
+    entityMetadata: createInitialEntityMetadata(bggId),
+    latestPlayCountCheck: null,
   };
 }
 
@@ -87,7 +95,7 @@ describe("StorageService.loadCollection", () => {
     const collection = await service.loadCollection();
 
     expect(collection.name).toBe("My Collection");
-    expect(collection.schemaVersion).toBe(3);
+    expect(collection.schemaVersion).toBe(4);
     expect(collection.axes).toHaveLength(3);
     expect(collection.games).toHaveLength(0);
 
@@ -113,6 +121,34 @@ describe("StorageService.loadCollection", () => {
     expect(tournament).toBeDefined();
     expect(tournament!.name).toBe("Tournament");
     expect(tournament!.enabled).toBe(true);
+  });
+
+  test("normalizes current v4 source with a new revision and invalidates profile cache", async () => {
+    const malformedGame = {
+      ...currentGame(),
+      acquisition: { state: "purchase", amount: { hundredths: "invalid" } },
+    };
+    const raw = {
+      ...currentCollection({ revision: 5 }),
+      games: [malformedGame],
+    };
+    const { service, fileOps } = makeService({
+      [COLLECTION_PATH]: JSON.stringify(raw),
+      [PROFILE_PATH]: "disposable profile",
+    });
+
+    const loaded = await service.loadCollection();
+
+    expect(loaded.revision).toBe(6);
+    expect(loaded.games[0]?.acquisition).toEqual({
+      state: "invalid",
+      evidence: {
+        presence: "present",
+        value: { state: "purchase", amount: { hundredths: "invalid" } },
+      },
+    });
+    expect(fileOps.files.has(PROFILE_PATH)).toBe(false);
+    expect(JSON.parse(fileOps.files.get(COLLECTION_PATH) ?? "null")).toEqual(loaded);
   });
 
   test("projects fresh derived axes from registry defaults without optional templates", async () => {
@@ -216,12 +252,21 @@ describe("StorageService.loadCollection", () => {
     ];
 
     for (const testCase of cases) {
-      const rawGame = { ...currentGame(), acquisition: testCase.acquisition };
-      const rawCollection = {
+      const rawGame: Record<string, unknown> = {
+        ...currentGame(),
+        acquisition: testCase.acquisition,
+      };
+      delete rawGame.entityMetadata;
+      delete rawGame.latestPlayCountCheck;
+      const rawCollection: Record<string, unknown> = {
         ...currentCollection(),
+        schemaVersion: 3,
         games: [rawGame],
         entertainmentBenchmark: { state: "configured", amount: { hundredths: "12345" } },
       };
+      delete rawCollection.revision;
+      delete rawCollection.intentions;
+      delete rawCollection.commandReceipts;
       const entries: string[] = [];
       const fileOps = createMockFileOps({ [COLLECTION_PATH]: JSON.stringify(rawCollection) });
       const service = createStorageService({
@@ -256,21 +301,32 @@ describe("StorageService.loadCollection", () => {
   test("distinguishes absent fields and does not rewrap normalized invalid values", async () => {
     const rawGame: Partial<Game> = currentGame();
     delete rawGame.acquisition;
-    const rawCollection: Partial<Collection> = currentCollection({ games: [] });
+    delete rawGame.entityMetadata;
+    delete rawGame.latestPlayCountCheck;
+    const rawCollection: Record<string, unknown> = {
+      ...currentCollection({ games: [] }),
+      schemaVersion: 3,
+    };
     delete rawCollection.entertainmentBenchmark;
+    delete rawCollection.revision;
+    delete rawCollection.intentions;
+    delete rawCollection.commandReceipts;
     expect(rawGame).not.toHaveProperty("acquisition");
     expect(rawCollection).not.toHaveProperty("entertainmentBenchmark");
     const normalizedInvalid = {
       state: "invalid" as const,
       evidence: { presence: "missing" as const },
     };
+    const normalizedInvalidGame: Record<string, unknown> = {
+      ...currentGame({ id: "already-invalid" }),
+      acquisition: normalizedInvalid,
+    };
+    delete normalizedInvalidGame.entityMetadata;
+    delete normalizedInvalidGame.latestPlayCountCheck;
     const { service } = makeService({
       [COLLECTION_PATH]: JSON.stringify({
         ...rawCollection,
-        games: [
-          rawGame,
-          { ...currentGame({ id: "already-invalid" }), acquisition: normalizedInvalid },
-        ],
+        games: [rawGame, normalizedInvalidGame],
       }),
     });
 
@@ -281,7 +337,7 @@ describe("StorageService.loadCollection", () => {
     expect(await service.loadCollection()).toEqual(loaded);
   });
 
-  test("round-trips valid v3 amounts, observations, invalid data, and later correction", async () => {
+  test("round-trips valid v4 amounts, observations, invalid data, and later correction", async () => {
     const invalidAcquisition = {
       state: "invalid" as const,
       evidence: {
@@ -525,8 +581,6 @@ describe("StorageService.saveConfig", () => {
     expect(writeCalls[1].method).toBe("rename");
   });
 });
-
-const PROFILE_PATH = "/test/data/profile.json";
 
 function makeEmptyProfile(): CollectionProfile {
   return {

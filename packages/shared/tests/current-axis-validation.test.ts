@@ -591,10 +591,13 @@ describe("legacy contracts", () => {
 describe("current persisted collection validation", () => {
   const currentCollection = {
     schemaVersion: CURRENT_COLLECTION_SCHEMA_VERSION,
+    revision: 0,
     id: "collection-1",
     name: "Current",
     axes: [communityRatingAxis()],
     games: [],
+    intentions: [],
+    commandReceipts: [],
     entertainmentBenchmark: null,
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -680,6 +683,30 @@ describe("current persisted collection validation", () => {
             observedAt: null,
           },
           bestPlayersInvalidEvidence: null,
+          entityMetadata: {
+            mechanic: {
+              state: "unrefreshable",
+              entities: [],
+              observedAt: null,
+              refreshFailure: null,
+              correctionDestination: null,
+            },
+            designer: {
+              state: "unrefreshable",
+              entities: [],
+              observedAt: null,
+              refreshFailure: null,
+              correctionDestination: null,
+            },
+            artist: {
+              state: "unrefreshable",
+              entities: [],
+              observedAt: null,
+              refreshFailure: null,
+              correctionDestination: null,
+            },
+          },
+          latestPlayCountCheck: null,
           ownership: "owned",
           boxDimensions: null,
           manualShelfId: null,
@@ -772,7 +799,7 @@ describe("current persisted collection validation", () => {
   });
 
   test("rejects future versions and extra persisted fields", () => {
-    expect(CollectionSchema.safeParse({ ...currentCollection, schemaVersion: 4 }).success).toBe(
+    expect(CollectionSchema.safeParse({ ...currentCollection, schemaVersion: 5 }).success).toBe(
       false,
     );
     expect(CollectionSchema.safeParse({ ...currentCollection, unexpected: true }).success).toBe(

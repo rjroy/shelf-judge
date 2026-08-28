@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/await-thenable */
 import { describe, expect, test, beforeEach } from "bun:test";
 import type { Collection, Game, ShelfConfiguration } from "@shelf-judge/shared";
+import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import type { StorageService } from "../src/services/storage-service";
 import {
   createShelfService,
@@ -26,11 +27,14 @@ function createMockStorage(): StorageService & {
       updatedAt: NOW,
     } as ShelfConfiguration,
     collection: {
-      schemaVersion: 3,
+      schemaVersion: 4,
+      revision: 0,
       id: "collection-1",
       name: "Test",
       axes: [],
       games: [],
+      intentions: [],
+      commandReceipts: [],
       entertainmentBenchmark: null,
       createdAt: NOW,
       updatedAt: NOW,
@@ -75,6 +79,7 @@ function assignedGame(id: string, shelfId: string): Game {
   return {
     id,
     bggId: null,
+    entityMetadata: createInitialEntityMetadata(null),
     name: id,
     yearPublished: null,
     minPlayers: null,
@@ -84,6 +89,7 @@ function assignedGame(id: string, shelfId: string): Game {
     imageUrl: null,
     bggData: null,
     numPlays: null,
+    latestPlayCountCheck: null,
     acquisition: { state: "unknown" },
     playCountEvidence: { status: "missing", source: "manual", observedAt: null },
     durationEvidence: { status: "missing", source: "manual", observedAt: null },
