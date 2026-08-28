@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type {
   BggGameData,
+  Collection,
   FitnessResult,
   Axis,
   EnabledAxis,
@@ -9,13 +10,20 @@ import type {
   TournamentAxis,
   TournamentGameStatsDisplay,
 } from "@shelf-judge/shared";
-import { CollectionProfileSchema, createInitialEntityMetadata } from "@shelf-judge/shared";
+import {
+  CollectionProfileSchema,
+  FutureUsefulProfileSnapshotSchema,
+  FutureUsefulProfileSchema,
+  createCompleteEntityMetadata,
+  createInitialEntityMetadata,
+} from "@shelf-judge/shared";
 import {
   computeAxisDistributions,
   computeAxisWeights,
   computeBggClustering,
   computeDivergence,
   computeProfile,
+  computeUsefulProfile,
   detectOutliers,
   extractUtilityCurves,
   generateSuggestions,
@@ -59,8 +67,8 @@ function makeGame(overrides: Partial<Game> & { id: string; name: string }): Game
   };
   return {
     ...game,
-    entityMetadata: createInitialEntityMetadata(game.bggId),
-    latestPlayCountCheck: null,
+    entityMetadata: overrides.entityMetadata ?? createInitialEntityMetadata(game.bggId),
+    latestPlayCountCheck: overrides.latestPlayCountCheck ?? null,
   };
 }
 
@@ -1877,6 +1885,579 @@ describe("computeProfile", () => {
         narrationState: "empty",
         computedAt: "2026-01-01T00:00:00.000Z",
       }).success,
+    ).toBe(true);
+  });
+});
+
+function makeUsefulFitness(
+  score: number,
+  options: { vetoed?: boolean; predicted?: boolean } = {},
+): FitnessResult {
+  const result = makeFitness(score, options.vetoed ?? false);
+  result.breakdown = [
+    {
+      axisId: "fun",
+      axisName: "Fun",
+      weight: 100,
+      contribution: score,
+      source: options.predicted ? "predicted" : "personal",
+      derivedField: null,
+      sourceValue: score,
+      scoringRawValue: score,
+      effectiveRating: score,
+      preferenceShape: "higher-is-better",
+      curveAffected: false,
+      unit: "rating",
+      provenance: null,
+      configurationSummary: null,
+      overridden: false,
+      overrideValue: null,
+      predictionConfidence: options.predicted ? "strong" : null,
+      referenceGames: options.predicted ? [] : null,
+    },
+  ];
+  result.predictionMeta = options.predicted
+    ? {
+        readinessStage: 3,
+        confidence: "strong",
+        predictedAxisCount: 1,
+        actualAxisCount: 0,
+        referenceGameCount: 3,
+        coveragePercent: 100,
+      }
+    : null;
+  return result;
+}
+
+function makeUsefulCollection(
+  games: Game[],
+  intentions: Collection["intentions"] = [],
+): Collection {
+  return {
+    schemaVersion: 4,
+    revision: 1,
+    id: "collection",
+    name: "Collection",
+    axes: [makeAxis({ id: "fun", name: "Fun", weight: 100 })],
+    games,
+    intentions,
+    commandReceipts: [],
+    entertainmentBenchmark: null,
+    createdAt: "2026-08-27T00:00:00.000Z",
+    updatedAt: "2026-08-28T00:00:00.000Z",
+  };
+}
+
+describe("computeUsefulProfile", () => {
+  test("reproduces class arithmetic, canonical names, exclusions, and deterministic orderings", () => {
+    const complete = (
+      mechanic: { id: number; name: string }[],
+      designer: { id: number; name: string }[],
+      artist: { id: number; name: string }[],
+      observedAt: string,
+    ) => createCompleteEntityMetadata({ mechanic, designer, artist }, observedAt);
+    const games = [
+      makeGame({
+        id: "g1",
+        name: "Alpha",
+        bggId: 1,
+        entityMetadata: complete(
+          [
+            { id: 100, name: "Cafe\u0301" },
+            { id: 400, name: "😀" },
+            { id: 401, name: "Zed" },
+          ],
+          [{ id: 500, name: "Designer" }],
+          [{ id: 600, name: "Artist A" }],
+          "2026-08-25T00:00:00.000Z",
+        ),
+      }),
+      makeGame({
+        id: "g2",
+        name: "Beta",
+        bggId: 2,
+        entityMetadata: complete(
+          [{ id: 100, name: "Café" }],
+          [{ id: 500, name: "Designer" }],
+          [{ id: 601, name: "Artist B" }],
+          "2026-08-26T00:00:00.000Z",
+        ),
+      }),
+      makeGame({
+        id: "g3",
+        name: "Gamma",
+        bggId: 3,
+        entityMetadata: complete(
+          [
+            { id: 100, name: "Older Name" },
+            { id: 200, name: "Veto Mechanic" },
+          ],
+          [{ id: 500, name: "Designer" }],
+          [{ id: 600, name: "Artist A" }],
+          "2026-08-24T00:00:00.000Z",
+        ),
+      }),
+      makeGame({
+        id: "g4",
+        name: "Predicted",
+        bggId: 4,
+        entityMetadata: complete(
+          [
+            { id: 100, name: "Aardvark" },
+            { id: 200, name: "Veto Mechanic" },
+          ],
+          [],
+          [],
+          "2026-08-26T00:00:00.000Z",
+        ),
+      }),
+      makeGame({
+        id: "g5",
+        name: "Unrated",
+        bggId: 5,
+        entityMetadata: complete(
+          [{ id: 300, name: "Unrated Mechanic" }],
+          [],
+          [],
+          "2026-08-27T00:00:00.000Z",
+        ),
+      }),
+      makeGame({ id: "g6", name: "Needs Refresh", bggId: 6 }),
+      makeGame({ id: "g7", name: "Manual", bggId: null }),
+      makeGame({
+        id: "old",
+        name: "Previously Owned",
+        ownership: "previously-owned",
+        bggId: 8,
+        entityMetadata: complete(
+          [{ id: 999, name: "Ignored" }],
+          [{ id: 999, name: "Ignored" }],
+          [{ id: 999, name: "Ignored" }],
+          "2026-08-28T00:00:00.000Z",
+        ),
+      }),
+    ];
+    const collection = makeUsefulCollection(games);
+    const fitnessResults = new Map<string, FitnessResult>([
+      ["g1", makeUsefulFitness(8)],
+      ["g2", makeUsefulFitness(6)],
+      ["g3", makeUsefulFitness(0, { vetoed: true })],
+      ["g4", makeUsefulFitness(7, { predicted: true })],
+      ["g6", makeUsefulFitness(5)],
+      ["g7", makeUsefulFitness(4)],
+      ["old", makeUsefulFitness(10)],
+    ]);
+
+    const profile = computeUsefulProfile({
+      collection,
+      fitnessResults,
+      computedAt: "2026-08-28T12:00:00.000Z",
+    });
+    const mechanic = profile.identity.classes.mechanic;
+    expect(mechanic.metadataReadiness).toEqual({
+      state: "partial",
+      ownedGameCount: 7,
+      completeGameCount: 5,
+      refreshNeededGameCount: 1,
+      unrefreshableGameCount: 1,
+    });
+    expect(mechanic.comparator.games.map(({ gameId }) => gameId)).toEqual(["g1", "g2", "g3"]);
+    expect(mechanic.comparator.meanCurrentFitness).toBe(14 / 3);
+    expect(mechanic.exclusions.map(({ reason }) => reason)).toEqual([
+      "predicted-fitness",
+      "missing-or-invalid-fitness",
+      "refresh-needed-metadata",
+      "unrefreshable-metadata",
+    ]);
+    expect(mechanic.associatedGameCount).toBe(5);
+    const cafe = mechanic.entities.find(({ entityId }) => entityId === 100);
+    expect(cafe).toMatchObject({
+      name: "Aardvark",
+      support: "supported",
+      associatedGameCount: 3,
+      meanCurrentFitness: 14 / 3,
+      range: { min: 0, max: 8 },
+      comparatorMeanCurrentFitness: 14 / 3,
+      differenceFromComparator: 0,
+    });
+    expect(cafe?.populationStandardDeviation).toBe(
+      Math.sqrt(((8 - 14 / 3) ** 2 + (6 - 14 / 3) ** 2 + (0 - 14 / 3) ** 2) / 3),
+    );
+    expect(cafe?.games.map(({ gameId }) => gameId)).toEqual(["g1", "g2", "g3"]);
+    expect(cafe?.games[2]).toMatchObject({ currentFitness: 0, vetoed: true });
+    expect(mechanic.orderings.name).toEqual([100, 200, 401, 400]);
+    expect(mechanic.overviewEntityIds).toEqual([100]);
+    expect(profile.identity.classes.designer.result).toBe("supported");
+    expect(profile.identity.classes.artist.result).toBe("limited");
+    expect(profile.identity.axisDistributions[0].ratedGameCount).toBe(6);
+    expect(FutureUsefulProfileSchema.safeParse(profile).success).toBe(true);
+    const snapshot = FutureUsefulProfileSnapshotSchema.safeParse({ source: collection, profile });
+    if (!snapshot.success) throw snapshot.error;
+  });
+
+  test("defensively counts duplicate entity links from one game once", () => {
+    const game = makeGame({
+      id: "duplicate",
+      name: "Duplicate Source",
+      bggId: 1,
+      entityMetadata: createCompleteEntityMetadata(
+        {
+          mechanic: [
+            { id: 100, name: "Mechanic" },
+            { id: 100, name: "Mechanic" },
+          ],
+          designer: [],
+          artist: [],
+        },
+        "2026-08-27T00:00:00.000Z",
+      ),
+    });
+    const profile = computeUsefulProfile({
+      collection: makeUsefulCollection([game]),
+      fitnessResults: new Map([[game.id, makeUsefulFitness(1e-7)]]),
+      computedAt: "2026-08-28T00:00:00.000Z",
+    });
+
+    expect(profile.identity.classes.mechanic.entities[0]).toMatchObject({
+      associatedGameCount: 1,
+      games: [{ gameId: game.id }],
+    });
+    expect(FutureUsefulProfileSchema.safeParse(profile).success).toBe(true);
+  });
+
+  test("keeps active intentions visible with exact evidence warnings and no time-based ordering", () => {
+    const metadata = createCompleteEntityMetadata(
+      { mechanic: [], designer: [], artist: [] },
+      "2026-08-27T00:00:00.000Z",
+    );
+    const valid = makeGame({
+      id: "valid",
+      name: "😀 Game",
+      bggId: 1,
+      entityMetadata: metadata,
+      numPlays: 0,
+      playCountEvidence: {
+        status: "valid",
+        value: 0,
+        source: "manual",
+        observedAt: "2026-08-27T01:00:00.000Z",
+      },
+    });
+    const stale = makeGame({
+      id: "stale",
+      name: "Zed",
+      bggId: 2,
+      entityMetadata: metadata,
+      numPlays: 2,
+      playCountEvidence: {
+        status: "valid",
+        value: 2,
+        source: "bgg-collection",
+        observedAt: "2026-08-27T01:00:00.000Z",
+      },
+      latestPlayCountCheck: {
+        status: "missing",
+        observedAt: "2026-08-27T02:00:00.000Z",
+      },
+    });
+    const intentions: Collection["intentions"] = [
+      {
+        intentionId: "newer",
+        gameId: valid.id,
+        kind: "first-play",
+        baseline: {
+          playCount: 0,
+          evidenceSource: "manual",
+          observedAt: "2026-08-27T01:00:00.000Z",
+        },
+        createdAt: "2036-01-01T00:00:00.000Z",
+        version: 1,
+        resolution: null,
+      },
+      {
+        intentionId: "older",
+        gameId: stale.id,
+        kind: "replay",
+        baseline: {
+          playCount: 2,
+          evidenceSource: "bgg-collection",
+          observedAt: "2026-08-27T01:00:00.000Z",
+        },
+        createdAt: "2026-08-27T01:01:00.000Z",
+        version: 1,
+        resolution: null,
+      },
+    ];
+    const collection = makeUsefulCollection([valid, stale], intentions);
+    const first = computeUsefulProfile({
+      collection,
+      fitnessResults: new Map(),
+      computedAt: "2026-08-28T00:00:00.000Z",
+    });
+    const advanced = computeUsefulProfile({
+      collection,
+      fitnessResults: new Map(),
+      computedAt: "2099-08-28T00:00:00.000Z",
+    });
+
+    expect(first.attention.items.map(({ gameName }) => gameName)).toEqual(["Zed", "😀 Game"]);
+    expect(first.attention.items[0]).toMatchObject({
+      question: "Do you still intend to replay Zed?",
+      currentPlayEvidence: {
+        status: "stale",
+        warning: "A newer BGG check did not provide a valid play count.",
+      },
+      evidenceDestination: { operationId: "shelf.game.bgg.refresh" },
+    });
+    expect(first.attention).toEqual(advanced.attention);
+    expect(first.identity).toEqual(advanced.identity);
+    expect(
+      FutureUsefulProfileSnapshotSchema.safeParse({ source: collection, profile: first }).success,
+    ).toBe(true);
+  });
+
+  test("distinguishes empty collection from populated nothing-to-decide", () => {
+    const emptyCollection = makeUsefulCollection([
+      makeGame({ id: "old", name: "Old", ownership: "previously-owned" }),
+    ]);
+    const empty = computeUsefulProfile({
+      collection: emptyCollection,
+      fitnessResults: new Map(),
+      computedAt: "2026-08-28T00:00:00.000Z",
+    });
+    const populatedCollection = makeUsefulCollection([makeGame({ id: "owned", name: "Owned" })]);
+    const populated = computeUsefulProfile({
+      collection: populatedCollection,
+      fitnessResults: new Map(),
+      computedAt: "2026-08-28T00:00:00.000Z",
+    });
+
+    expect(empty.identity.collectionState).toBe("empty");
+    expect(empty.attention.state).toBe("empty-collection");
+    expect(populated.identity.collectionState).toBe("populated");
+    expect(populated.attention.state).toBe("nothing-to-decide");
+    expect(empty.identity.classes.mechanic.result).toBe("not-evaluated");
+    expect(populated.identity.classes.mechanic.result).toBe("not-evaluated");
+    expect(empty.attention.items).toEqual([]);
+    expect(populated.attention.items).toEqual([]);
+    expect(
+      FutureUsefulProfileSnapshotSchema.safeParse({ source: emptyCollection, profile: empty })
+        .success,
+    ).toBe(true);
+    expect(
+      FutureUsefulProfileSnapshotSchema.safeParse({
+        source: populatedCollection,
+        profile: populated,
+      }).success,
+    ).toBe(true);
+  });
+
+  test("projects missing and invalid attention evidence without hiding intentions", () => {
+    const missing = makeGame({ id: "missing", name: "Missing", bggId: null });
+    const invalidEvidence = { presence: "present" as const, value: "not-a-count" };
+    const invalid = makeGame({
+      id: "invalid",
+      name: "Invalid",
+      bggId: 2,
+      entityMetadata: createCompleteEntityMetadata(
+        { mechanic: [], designer: [], artist: [] },
+        "2026-08-27T00:00:00.000Z",
+      ),
+      playCountEvidence: {
+        status: "invalid",
+        evidence: invalidEvidence,
+        source: "bgg-collection",
+        observedAt: "2026-08-27T02:00:00.000Z",
+      },
+      latestPlayCountCheck: {
+        status: "invalid",
+        evidence: invalidEvidence,
+        observedAt: "2026-08-27T02:00:00.000Z",
+      },
+    });
+    const intentions: Collection["intentions"] = [
+      {
+        intentionId: "missing-intention",
+        gameId: missing.id,
+        kind: "first-play",
+        baseline: {
+          playCount: 0,
+          evidenceSource: "manual",
+          observedAt: "2026-08-27T01:00:00.000Z",
+        },
+        createdAt: "2026-08-27T01:01:00.000Z",
+        version: 1,
+        resolution: null,
+      },
+      {
+        intentionId: "invalid-intention",
+        gameId: invalid.id,
+        kind: "replay",
+        baseline: {
+          playCount: 1,
+          evidenceSource: "bgg-collection",
+          observedAt: "2026-08-27T01:00:00.000Z",
+        },
+        createdAt: "2026-08-27T01:01:00.000Z",
+        version: 1,
+        resolution: null,
+      },
+    ];
+    const collection = makeUsefulCollection([missing, invalid], intentions);
+    const profile = computeUsefulProfile({
+      collection,
+      fitnessResults: new Map(),
+      computedAt: "2026-08-28T00:00:00.000Z",
+    });
+
+    expect(profile.attention.items).toHaveLength(2);
+    expect(profile.attention.items.find(({ gameName }) => gameName === "Missing")).toMatchObject({
+      currentPlayEvidence: {
+        status: "missing",
+        warning: "Current play evidence is missing.",
+      },
+      evidenceDestination: { operationId: "shelf.game.plays.set" },
+    });
+    expect(profile.attention.items.find(({ gameName }) => gameName === "Invalid")).toMatchObject({
+      currentPlayEvidence: {
+        status: "invalid",
+        warning: "Current play evidence is invalid.",
+      },
+      evidenceDestination: { operationId: "shelf.game.bgg.refresh" },
+    });
+    expect(
+      FutureUsefulProfileSnapshotSchema.safeParse({ source: collection, profile }).success,
+    ).toBe(true);
+  });
+
+  test("distinguishes complete-empty, no eligible ratings, and refresh-failed metadata", () => {
+    const completeEmpty = createCompleteEntityMetadata(
+      { mechanic: [], designer: [], artist: [] },
+      "2026-08-27T00:00:00.000Z",
+    );
+    const completeAssociated = createCompleteEntityMetadata(
+      {
+        mechanic: [{ id: 100, name: "Known Mechanic" }],
+        designer: [],
+        artist: [],
+      },
+      "2026-08-27T00:00:00.000Z",
+    );
+    for (const metadata of Object.values(completeAssociated)) {
+      metadata.refreshFailure = {
+        attemptedAt: "2026-08-28T00:00:00.000Z",
+        message: "BGG refresh failed",
+      };
+    }
+    const games = [
+      makeGame({
+        id: "empty",
+        name: "Complete Empty",
+        bggId: 1,
+        entityMetadata: completeEmpty,
+      }),
+      makeGame({
+        id: "associated",
+        name: "Associated",
+        bggId: 2,
+        entityMetadata: completeAssociated,
+      }),
+    ];
+    const collection = makeUsefulCollection(games);
+    const profile = computeUsefulProfile({
+      collection,
+      fitnessResults: new Map(),
+      computedAt: "2026-08-28T01:00:00.000Z",
+    });
+
+    expect(profile.identity.classes.mechanic.result).toBe("no-eligible-ratings");
+    expect(profile.identity.classes.designer.result).toBe("evaluated-empty");
+    expect(profile.identity.classes.mechanic.refreshWarnings).toEqual([
+      {
+        gameId: "associated",
+        gameName: "Associated",
+        attemptedAt: "2026-08-28T00:00:00.000Z",
+        message: "BGG refresh failed",
+      },
+    ]);
+    expect(
+      FutureUsefulProfileSnapshotSchema.safeParse({ source: collection, profile }).success,
+    ).toBe(true);
+  });
+
+  test("uses exact means before deterministic tie-breakers", () => {
+    const entries = [
+      ["g1", "Zulu", 100, 0.1],
+      ["g2", "Zulu", 100, 0.2],
+      ["g3", "Zulu", 100, 0.3],
+      ["g4", "Alpha", 200, 0.2],
+      ["g5", "Alpha", 200, 0.3],
+      ["g6", "Alpha", 200, 0.1],
+    ] as const;
+    const games = entries.map(([id, entityName, entityId]) =>
+      makeGame({
+        id,
+        name: id,
+        bggId: Number(id.slice(1)),
+        entityMetadata: createCompleteEntityMetadata(
+          {
+            mechanic: [{ id: entityId, name: entityName }],
+            designer: [],
+            artist: [],
+          },
+          "2026-08-27T00:00:00.000Z",
+        ),
+      }),
+    );
+    const collection = makeUsefulCollection(games);
+    const profile = computeUsefulProfile({
+      collection,
+      fitnessResults: new Map(entries.map(([id, , , score]) => [id, makeUsefulFitness(score)])),
+      computedAt: "2026-08-28T00:00:00.000Z",
+    });
+
+    expect(profile.identity.classes.mechanic.orderings.rating).toEqual([200, 100]);
+    expect(profile.identity.classes.mechanic.overviewEntityIds).toEqual([200, 100]);
+    expect(
+      profile.identity.classes.mechanic.entities.map(
+        ({ meanCurrentFitness }) => meanCurrentFitness,
+      ),
+    ).toEqual([0.2, 0.2]);
+    expect(
+      FutureUsefulProfileSnapshotSchema.safeParse({ source: collection, profile }).success,
+    ).toBe(true);
+  });
+
+  test("keeps aggregates finite for subnormal eligible scores", () => {
+    const games = ["tiny", "ten"].map((id, index) =>
+      makeGame({
+        id,
+        name: id,
+        bggId: index + 1,
+        entityMetadata: createCompleteEntityMetadata(
+          {
+            mechanic: [{ id: 100, name: "Mechanic" }],
+            designer: [],
+            artist: [],
+          },
+          "2026-08-27T00:00:00.000Z",
+        ),
+      }),
+    );
+    const collection = makeUsefulCollection(games);
+    const profile = computeUsefulProfile({
+      collection,
+      fitnessResults: new Map([
+        ["tiny", makeUsefulFitness(5e-324)],
+        ["ten", makeUsefulFitness(10)],
+      ]),
+      computedAt: "2026-08-28T00:00:00.000Z",
+    });
+
+    expect(profile.identity.classes.mechanic.comparator.meanCurrentFitness).toBe(5);
+    expect(profile.identity.classes.mechanic.entities[0].meanCurrentFitness).toBe(5);
+    expect(
+      FutureUsefulProfileSnapshotSchema.safeParse({ source: collection, profile }).success,
     ).toBe(true);
   });
 });

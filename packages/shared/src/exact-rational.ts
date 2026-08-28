@@ -5,7 +5,7 @@ export interface ExactRationalJson {
 
 export type ExactComparison = -1 | 0 | 1;
 
-const DECIMAL_PATTERN = /^([+-]?)(\d+)(?:\.(\d+))?$/;
+const DECIMAL_PATTERN = /^([+-]?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/;
 const UNSIGNED_DECIMAL_PATTERN = /^(?:0|[1-9]\d*)$/;
 
 function greatestCommonDivisor(left: bigint, right: bigint): bigint {
@@ -50,10 +50,16 @@ export class ExactRational {
       throw new Error(`Invalid exact decimal: ${value}`);
     }
 
-    const [, sign, whole, fractional = ""] = match;
-    const denominator = powerOfTen(fractional.length);
-    const magnitude = BigInt(whole) * denominator + BigInt(fractional || "0");
-    return new ExactRational(sign === "-" ? -magnitude : magnitude, denominator);
+    const [, sign, whole, fractional = "", exponentText = "0"] = match;
+    const exponent = Number(exponentText);
+    if (!Number.isSafeInteger(exponent) || Math.abs(exponent) > 10_000) {
+      throw new Error(`Exact decimal exponent is out of range: ${value}`);
+    }
+    const magnitude = BigInt(`${whole}${fractional}`);
+    const scale = fractional.length - exponent;
+    const numerator = scale < 0 ? magnitude * powerOfTen(-scale) : magnitude;
+    const denominator = scale > 0 ? powerOfTen(scale) : 1n;
+    return new ExactRational(sign === "-" ? -numerator : numerator, denominator);
   }
 
   add(other: ExactRational): ExactRational {
@@ -130,6 +136,34 @@ export class ExactRational {
     const whole = magnitude / scale;
     const fractional = (magnitude % scale).toString().padStart(decimalPlaces, "0");
     return `${sign}${whole}.${fractional}`;
+  }
+
+  toNumber(): number {
+    if (this.#numerator === 0n) return 0;
+
+    const negative = this.#numerator < 0n;
+    const numerator = negative ? -this.#numerator : this.#numerator;
+    const denominator = this.#denominator;
+    let exponent = numerator.toString().length - denominator.toString().length;
+    const belowExponent =
+      exponent >= 0
+        ? numerator < denominator * powerOfTen(exponent)
+        : numerator * powerOfTen(-exponent) < denominator;
+    if (belowExponent) exponent -= 1;
+
+    const precision = 18;
+    const scale = precision - 1 - exponent;
+    const scaledNumerator = scale >= 0 ? numerator * powerOfTen(scale) : numerator;
+    const scaledDenominator = scale >= 0 ? denominator : denominator * powerOfTen(-scale);
+    let significant = scaledNumerator / scaledDenominator;
+    if ((scaledNumerator % scaledDenominator) * 2n >= scaledDenominator) significant += 1n;
+    const precisionLimit = powerOfTen(precision);
+    if (significant === precisionLimit) {
+      significant /= 10n;
+      exponent += 1;
+    }
+    const digits = significant.toString().padStart(precision, "0");
+    return Number(`${negative ? "-" : ""}${digits[0]}.${digits.slice(1)}e${exponent}`);
   }
 
   toJSON(): ExactRationalJson {

@@ -1223,7 +1223,7 @@ export interface ProfileEntityOrderings {
 
 export interface ProfileEntityClassResult {
   entityClass: ProfileEntityClass;
-  result: "supported" | "limited" | "no-eligible-ratings" | "evaluated-empty";
+  result: "supported" | "limited" | "no-eligible-ratings" | "evaluated-empty" | "not-evaluated";
   metadataReadiness: ProfileMetadataReadiness;
   associatedGameCount: number;
   comparator: {

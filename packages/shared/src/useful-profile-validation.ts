@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { JsonValue } from "./types";
+import { ExactRational } from "./exact-rational";
 
 const TimestampSchema = z.string().datetime({ offset: true });
 const IdSchema = z.string().min(1);
@@ -9,6 +10,15 @@ const FiniteNumberSchema = z.number().finite();
 
 function valuesMatch(left: number, right: number): boolean {
   return Object.is(left, right);
+}
+
+function exactMean(values: number[]): ExactRational {
+  return values
+    .reduce(
+      (sum, value) => sum.add(ExactRational.fromDecimal(value.toString())),
+      new ExactRational(0n),
+    )
+    .divide(new ExactRational(BigInt(values.length)));
 }
 
 function compareCodePoints(left: string, right: string): number {
@@ -647,7 +657,7 @@ const ProfileEntityEvidenceSchema = z
   .superRefine((entity, context) => {
     const values = entity.games.map(({ currentFitness }) => currentFitness);
     const ids = entity.games.map(({ gameId }) => gameId);
-    const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+    const mean = exactMean(values).toNumber();
     const deviation = Math.sqrt(
       values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length,
     );
@@ -680,10 +690,10 @@ const ProfileEntityEvidenceSchema = z
 
 function expectedEntityOrders(entities: Array<z.infer<typeof ProfileEntityEvidenceSchema>>) {
   const evidenceMean = (entity: (typeof entities)[number]) =>
-    entity.games.reduce((sum, game) => sum + game.currentFitness, 0) / entity.games.length;
+    exactMean(entity.games.map(({ currentFitness }) => currentFitness));
   const rating = [...entities].sort(
     (left, right) =>
-      evidenceMean(right) - evidenceMean(left) ||
+      evidenceMean(right).compare(evidenceMean(left)) ||
       right.associatedGameCount - left.associatedGameCount ||
       compareCodePoints(left.name, right.name) ||
       left.entityId - right.entityId,
@@ -691,7 +701,7 @@ function expectedEntityOrders(entities: Array<z.infer<typeof ProfileEntityEviden
   const support = [...entities].sort(
     (left, right) =>
       right.associatedGameCount - left.associatedGameCount ||
-      evidenceMean(right) - evidenceMean(left) ||
+      evidenceMean(right).compare(evidenceMean(left)) ||
       compareCodePoints(left.name, right.name) ||
       left.entityId - right.entityId,
   );
@@ -708,7 +718,13 @@ function expectedEntityOrders(entities: Array<z.infer<typeof ProfileEntityEviden
 export const ProfileEntityClassResultSchema = z
   .object({
     entityClass: ProfileEntityClassSchema,
-    result: z.enum(["supported", "limited", "no-eligible-ratings", "evaluated-empty"]),
+    result: z.enum([
+      "supported",
+      "limited",
+      "no-eligible-ratings",
+      "evaluated-empty",
+      "not-evaluated",
+    ]),
     metadataReadiness: ProfileMetadataReadinessSchema,
     associatedGameCount: SafeCountSchema,
     comparator: z
@@ -802,8 +818,7 @@ export const ProfileEntityClassResultSchema = z
     const comparatorMean =
       result.comparator.games.length === 0
         ? null
-        : result.comparator.games.reduce((sum, game) => sum + game.currentFitness, 0) /
-          result.comparator.games.length;
+        : exactMean(result.comparator.games.map(({ currentFitness }) => currentFitness)).toNumber();
     if (
       (comparatorMean === null) !== (result.comparator.meanCurrentFitness === null) ||
       (comparatorMean !== null &&
@@ -858,7 +873,9 @@ export const ProfileEntityClassResultSchema = z
         ? "limited"
         : result.associatedGameCount > 0
           ? "no-eligible-ratings"
-          : "evaluated-empty";
+          : result.metadataReadiness.completeGameCount > 0
+            ? "evaluated-empty"
+            : "not-evaluated";
     if (result.result !== expectedResult)
       issue(["result"], `Class result must be ${expectedResult}`);
     const orders = expectedEntityOrders(result.entities);

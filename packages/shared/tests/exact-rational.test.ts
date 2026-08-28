@@ -24,9 +24,24 @@ describe("ExactRational", () => {
       numerator: "-1",
       denominator: "8",
     });
-    for (const malformed of ["", ".5", "5.", "1e2", " 5", "5 "]) {
+    expect(ExactRational.fromDecimal("1e2").toJSON()).toEqual({
+      numerator: "100",
+      denominator: "1",
+    });
+    expect(ExactRational.fromDecimal("1.25e-2").toJSON()).toEqual({
+      numerator: "1",
+      denominator: "80",
+    });
+    expect(ExactRational.fromDecimal("1e-7").toNumber()).toBe(1e-7);
+    const subnormalMean = ExactRational.fromDecimal("10")
+      .add(ExactRational.fromDecimal("5e-324"))
+      .divide(new ExactRational(2n));
+    expect(ExactRational.fromDecimal("5e-324").toNumber()).toBe(5e-324);
+    expect(subnormalMean.toNumber()).toBe(5);
+    for (const malformed of ["", ".5", "5.", " 5", "5 "]) {
       expect(() => ExactRational.fromDecimal(malformed)).toThrow("Invalid exact decimal");
     }
+    expect(() => ExactRational.fromDecimal("1e10001")).toThrow("exponent is out of range");
   });
 
   test("adds, subtracts, multiplies, and divides exactly", () => {
