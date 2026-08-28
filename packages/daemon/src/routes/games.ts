@@ -6,7 +6,7 @@ import {
   NotFoundError,
   toErrorMessage,
 } from "@shelf-judge/shared";
-import type { GameWithScore, Game, RedundancySettings } from "@shelf-judge/shared";
+import type { GameWithScore } from "@shelf-judge/shared";
 import { z } from "zod";
 import type { GameService } from "../services/game-service.js";
 import type { BggClient } from "../services/bgg-client.js";
@@ -17,22 +17,14 @@ import {
   type RouteModule,
   type OperationDefinition,
 } from "../operations.js";
-import { computeNichePositions } from "../services/niche-engine.js";
-import { computeRedundancyAdjustments } from "../services/redundancy-engine.js";
-import {
-  buildVocabulary,
-  computeContinuousRanges,
-  encodeGame,
-  getOrderedVectorAxes,
-  getVectorAxisValues,
-} from "../services/feature-vector.js";
-import type { FeatureVector } from "../services/feature-vector.js";
-
 import type { WishlistService } from "../services/wishlist-service.js";
-import { deriveDisplayStats } from "../services/tournament-service.js";
 import type { PurchaseUtilizationService } from "../services/purchase-utilization-service.js";
 import { PurchaseUtilizationValidationError } from "../services/purchase-utilization-service.js";
 import { createLogger, type Logger } from "../services/logger.js";
+import {
+  createDisplayedFitnessService,
+  type DisplayedFitnessService,
+} from "../services/displayed-fitness-service.js";
 
 const INTERNAL_ERROR_RESPONSE = { error: "Internal server error", code: "internal_error" } as const;
 
@@ -47,6 +39,7 @@ export interface GameRoutesDeps {
   storageService?: StorageService;
   wishlistService?: WishlistService;
   purchaseUtilizationService: PurchaseUtilizationService;
+  displayedFitnessService?: DisplayedFitnessService;
   logger?: Logger;
 }
 
@@ -87,62 +80,6 @@ function bggNotConfiguredResponse(c: Context) {
   );
 }
 
-/**
- * Build a getFeatureVector callback and apply redundancy adjustments to scored games.
- * Shared logic for GET /games and GET /games/:id.
- * Order: scores first, niches second (on pre-redundancy scores per REQ-REDUN-26),
- * redundancy third.
- *
- * When `universe` is provided, pairwise similarity and penalties are computed against
- * the universe (e.g. prediction-enriched games), but only `games` are annotated.
- * This ensures the same game gets the same penalty regardless of which route returns it.
- */
-async function applyRedundancy(
-  games: GameWithScore[],
-  settings: RedundancySettings,
-  storageService: StorageService,
-  universe?: GameWithScore[],
-): Promise<void> {
-  if (!settings.enabled) return;
-
-  const computeGames = universe ?? games;
-
-  const [collection, tournamentData] = await Promise.all([
-    storageService.loadCollection(),
-    storageService.loadTournament(),
-  ]);
-  const gamesWithBgg = collection.games.filter((g) => g.bggData);
-  const vocabulary = buildVocabulary(gamesWithBgg);
-  const ranges = computeContinuousRanges(gamesWithBgg);
-  const vectorAxes = getOrderedVectorAxes(collection.axes);
-
-  // Per-request feature vector cache (Open Question 1 from the plan)
-  const vectorCache = new Map<string, FeatureVector>();
-  const getFeatureVector = (game: Game): FeatureVector => {
-    const cached = vectorCache.get(game.id);
-    if (cached) return cached;
-    const values = getVectorAxisValues(
-      game,
-      vectorAxes,
-      deriveDisplayStats(game.id, tournamentData).normalizedScore,
-    );
-    const vec = encodeGame(game, vocabulary, vectorAxes, values, ranges);
-    vectorCache.set(game.id, vec);
-    return vec;
-  };
-
-  const adjustments = computeRedundancyAdjustments(computeGames, settings, getFeatureVector);
-
-  for (const gws of games) {
-    if (!gws.score) continue;
-    const adj = adjustments.get(gws.game.id) ?? null;
-    gws.score.redundancyAdjustment = adj;
-    if (adj && settings.stage === "integrated") {
-      gws.score.score = adj.adjustedScore;
-    }
-  }
-}
-
 function filterByOwnership(games: GameWithScore[], ownership: string): GameWithScore[] {
   if (ownership === "all") return games;
   if (ownership === "previously-owned") {
@@ -152,61 +89,26 @@ function filterByOwnership(games: GameWithScore[], ownership: string): GameWithS
   return games.filter((g) => g.game.ownership !== "previously-owned");
 }
 
+function toPublicGameWithScore(entry: GameWithScore): GameWithScore {
+  return {
+    game: entry.game,
+    score: entry.score,
+    bggDataStale: entry.bggDataStale,
+    nichePosition: entry.nichePosition,
+  };
+}
+
 export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
-  const {
-    gameService,
-    bggClient,
-    predictionService,
-    storageService,
-    wishlistService,
-    purchaseUtilizationService,
-  } = deps;
+  const { gameService, bggClient, wishlistService, purchaseUtilizationService } = deps;
+  const displayedFitnessService =
+    deps.displayedFitnessService ??
+    createDisplayedFitnessService({
+      gameService,
+      predictionService: deps.predictionService,
+      storageService: deps.storageService,
+    });
   const logger = deps.logger ?? createLogger("purchase-utilization-routes");
   const routes = new Hono();
-
-  async function assembleFinalGames(
-    includePredicted: boolean,
-    includeNiches: boolean,
-  ): Promise<GameWithScore[]> {
-    let predictedGames: GameWithScore[] | undefined;
-    const getPredictedGames = async (): Promise<GameWithScore[]> => {
-      if (!predictionService) return gameService.listGames();
-      predictedGames ??= await predictionService.listGamesWithPredictions();
-      return predictedGames;
-    };
-
-    const allGames =
-      includePredicted && predictionService
-        ? await getPredictedGames()
-        : await gameService.listGames();
-    const ownedGames = allGames.filter((entry) => entry.game.ownership !== "previously-owned");
-
-    if (includeNiches && predictionService) {
-      const nicheSettings = storageService ? await storageService.loadNicheSettings() : undefined;
-      const nicheUniverse = includePredicted
-        ? ownedGames
-        : (await getPredictedGames()).filter(
-            (entry) => entry.game.ownership !== "previously-owned",
-          );
-      const nicheMap = computeNichePositions(nicheUniverse, nicheSettings);
-      for (const entry of allGames) {
-        entry.nichePosition = nicheMap.get(entry.game.id) ?? null;
-      }
-    }
-
-    if (storageService) {
-      const redundancySettings = await storageService.loadRedundancySettings();
-      const universe =
-        !includePredicted && predictionService
-          ? (await getPredictedGames()).filter(
-              (entry) => entry.game.ownership !== "previously-owned",
-            )
-          : undefined;
-      await applyRedundancy(ownedGames, redundancySettings, storageService, universe);
-    }
-
-    return allGames;
-  }
 
   async function enrichFinalGames(games: GameWithScore[], responseKind: "list" | "detail") {
     const benchmark = await purchaseUtilizationService.getEntertainmentBenchmark();
@@ -279,8 +181,12 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       const includePredicted = c.req.query("includePredicted") === "true";
       const includeNiches = c.req.query("includeNiches") === "true";
       const ownershipFilter = c.req.query("ownership") ?? "owned";
-      const assembled = await assembleFinalGames(includePredicted, includeNiches);
-      const response = filterByOwnership(assembled, ownershipFilter);
+      const assembled = await displayedFitnessService.listGames({
+        includePredicted,
+        includeNiches,
+      });
+      const publicGames = assembled.map(toPublicGameWithScore);
+      const response = filterByOwnership(publicGames, ownershipFilter);
       return c.json(await enrichFinalGames(response, "list"));
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 500);
@@ -307,9 +213,13 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     }
     try {
       const includePredicted = includePredictedQuery === "true";
-      const assembled = await assembleFinalGames(includePredicted, true);
-      const result = assembled.find((entry) => entry.game.id === id);
-      if (!result) throw new NotFoundError(`Game not found: ${id}`);
+      const assembled = await displayedFitnessService.listGames({
+        includePredicted,
+        includeNiches: true,
+      });
+      const assembledResult = assembled.find((entry) => entry.game.id === id);
+      if (!assembledResult) throw new NotFoundError(`Game not found: ${id}`);
+      const result = toPublicGameWithScore(assembledResult);
       const [enriched] = await enrichFinalGames([result], "detail");
       return c.json(enriched);
     } catch (err) {

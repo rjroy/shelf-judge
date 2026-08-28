@@ -27,6 +27,7 @@ import type { PredictionService } from "./services/prediction-service.js";
 import type { OperationDefinition } from "./operations.js";
 import { createPurchaseUtilizationService } from "./services/purchase-utilization-service.js";
 import type { CollectionMutationService } from "./services/collection-mutation-service.js";
+import type { DisplayedFitnessService } from "./services/displayed-fitness-service.js";
 
 export interface AppDeps {
   storageService: StorageService;
@@ -36,6 +37,7 @@ export interface AppDeps {
   tournamentService: TournamentService;
   profileService: ProfileService;
   predictionService: PredictionService;
+  displayedFitnessService: DisplayedFitnessService;
   bggClient?: BggClient;
   onShutdown?: () => void;
 }
@@ -54,6 +56,7 @@ export function createApp(deps: AppDeps): AppResult {
     tournamentService,
     profileService,
     predictionService,
+    displayedFitnessService,
     bggClient,
     onShutdown,
   } = deps;
@@ -77,6 +80,7 @@ export function createApp(deps: AppDeps): AppResult {
     storageService,
     wishlistService,
     purchaseUtilizationService,
+    displayedFitnessService,
   });
   const collectionRouteModule = createCollectionRoutes({ purchaseUtilizationService });
   const axisRouteModule = createAxisRoutes({ axisService });

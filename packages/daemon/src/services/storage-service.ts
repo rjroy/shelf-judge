@@ -49,13 +49,24 @@ export interface CollectionPersistence {
   saveCollection(collection: Collection): Promise<void>;
 }
 
+export interface ProfileFitnessSettings {
+  prediction: PredictionSettings;
+  redundancy: RedundancySettings;
+  revision: number | null;
+}
+
 export interface StorageService extends CollectionReader, CollectionPersistence {
   loadConfig(): Promise<AppConfig>;
   saveConfig(config: AppConfig): Promise<void>;
   loadTournament(): Promise<TournamentData>;
   saveTournament(data: TournamentData): Promise<void>;
   loadProfile(): Promise<ProfileData | null>;
-  saveProfile(data: ProfileData, expectedComputedAt?: string): Promise<void>;
+  loadProfileFitnessSettings?(): Promise<ProfileFitnessSettings>;
+  saveProfile(
+    data: ProfileData,
+    expectedComputedAt?: string,
+    expectedFitnessSettings?: ProfileFitnessSettings,
+  ): Promise<void>;
   loadPredictionSettings(): Promise<PredictionSettings>;
   savePredictionSettings(settings: PredictionSettings): Promise<void>;
   loadNicheSettings(): Promise<NicheSettings>;
@@ -218,6 +229,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
   // and the lock has no observable effect.
   const inFlightLoads = new Map<string, Promise<unknown>>();
   let profileOperations: Promise<void> = Promise.resolve();
+  let fitnessSettingsRevision = 0;
   function withLoadLock<T>(filePath: string, fn: () => Promise<T>): Promise<T> {
     const existing = inFlightLoads.get(filePath);
     if (existing) return existing as Promise<T>;
@@ -239,6 +251,15 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
 
   async function writeAtomically(filePath: string, content: string): Promise<void> {
     await atomicWrite(filePath, content, fileOps, deps.temporaryPathForAttempt);
+  }
+
+  async function invalidateProfile(
+    trigger: "prediction-settings" | "redundancy-settings",
+  ): Promise<void> {
+    if (!(await fileOps.exists(profilePath))) return;
+    logger.log(`profile cache invalidation attempt path=${profilePath} trigger=${trigger}`);
+    await fileOps.unlink(profilePath);
+    logger.log(`profile cache invalidation completed path=${profilePath} trigger=${trigger}`);
   }
 
   function validateCollection(collection: unknown): Collection {
@@ -434,7 +455,19 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
       });
     },
 
-    saveProfile(data: ProfileData, expectedComputedAt?: string): Promise<void> {
+    async loadProfileFitnessSettings(): Promise<ProfileFitnessSettings> {
+      const [prediction, redundancy] = await Promise.all([
+        this.loadPredictionSettings(),
+        this.loadRedundancySettings(),
+      ]);
+      return { prediction, redundancy, revision: fitnessSettingsRevision };
+    },
+
+    saveProfile(
+      data: ProfileData,
+      expectedComputedAt?: string,
+      expectedFitnessSettings?: ProfileFitnessSettings,
+    ): Promise<void> {
       return withProfileLock(async () => {
         const validated = ProfileDataSchema.parse(data);
         if (expectedComputedAt !== undefined) {
@@ -446,6 +479,22 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
           );
           if (!current.success || current.data.computedAt !== expectedComputedAt) {
             throw new Error("Profile changed during narration generation");
+          }
+        }
+        if (expectedFitnessSettings !== undefined) {
+          const [prediction, redundancy] = await Promise.all([
+            this.loadPredictionSettings(),
+            this.loadRedundancySettings(),
+          ]);
+          if (
+            fitnessSettingsRevision !== expectedFitnessSettings.revision ||
+            JSON.stringify({ prediction, redundancy }) !==
+              JSON.stringify({
+                prediction: expectedFitnessSettings.prediction,
+                redundancy: expectedFitnessSettings.redundancy,
+              })
+          ) {
+            throw new Error("Fitness settings changed during profile computation");
           }
         }
         await fileOps.mkdir(dataDir);
@@ -468,8 +517,12 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
 
     async savePredictionSettings(settings: PredictionSettings): Promise<void> {
       const predictionSettingsPath = path.join(dataDir, "prediction-settings.json");
-      await fileOps.mkdir(dataDir);
-      await writeAtomically(predictionSettingsPath, JSON.stringify(settings, null, 2));
+      await withProfileLock(async () => {
+        await fileOps.mkdir(dataDir);
+        await writeAtomically(predictionSettingsPath, JSON.stringify(settings, null, 2));
+        fitnessSettingsRevision++;
+        await invalidateProfile("prediction-settings");
+      });
     },
 
     async loadNicheSettings(): Promise<NicheSettings> {
@@ -498,8 +551,12 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
 
     async saveRedundancySettings(settings: RedundancySettings): Promise<void> {
       const redundancySettingsPath = path.join(dataDir, "redundancy-settings.json");
-      await fileOps.mkdir(dataDir);
-      await writeAtomically(redundancySettingsPath, JSON.stringify(settings, null, 2));
+      await withProfileLock(async () => {
+        await fileOps.mkdir(dataDir);
+        await writeAtomically(redundancySettingsPath, JSON.stringify(settings, null, 2));
+        fitnessSettingsRevision++;
+        await invalidateProfile("redundancy-settings");
+      });
     },
 
     async loadWishlist(): Promise<WishlistEntry[]> {

@@ -69,7 +69,7 @@ export {
 
 export const CURRENT_COLLECTION_SCHEMA_VERSION = 4 as const;
 export const CURRENT_PROFILE_CONTRACT_VERSION = 6 as const;
-export const CURRENT_PROFILE_ALGORITHM_VERSION = 7 as const;
+export const CURRENT_PROFILE_ALGORITHM_VERSION = 8 as const;
 export const PROFILE_NARRATION_ABSTENTION =
   "No reported trusted insights are available to narrate." as const;
 

@@ -12,6 +12,7 @@ import { createNarrationService } from "./services/narration-service.js";
 import { createApp } from "./app.js";
 import { createLogger } from "./services/logger.js";
 import { createCollectionMutationService } from "./services/collection-mutation-service.js";
+import { createDisplayedFitnessService } from "./services/displayed-fitness-service.js";
 
 const logger = createLogger("daemon");
 
@@ -48,20 +49,24 @@ async function main() {
     onGameDeleted: (gameId) => tournamentService.onGameDeleted(gameId),
   });
 
-  const narrationService = createNarrationService();
-
-  const profileService = createProfileService({
-    storageService,
-    gameService,
-    tournamentService,
-    narrationService,
-  });
-
   const predictionService = createPredictionService({
     storageService,
     fitnessService,
     tournamentService,
     bggClient,
+  });
+  const displayedFitnessService = createDisplayedFitnessService({
+    gameService,
+    predictionService,
+    storageService,
+  });
+
+  const narrationService = createNarrationService();
+  const profileService = createProfileService({
+    storageService,
+    displayedFitnessService,
+    tournamentService,
+    narrationService,
   });
 
   // Forward-declared so the shutdown route can reference the server.
@@ -77,6 +82,7 @@ async function main() {
     tournamentService,
     profileService,
     predictionService,
+    displayedFitnessService,
     bggClient,
     onShutdown() {
       logger.log("Shutting down via API...");

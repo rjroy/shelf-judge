@@ -10,8 +10,8 @@ import {
   CURRENT_PROFILE_ALGORITHM_VERSION,
   CURRENT_PROFILE_CONTRACT_VERSION,
 } from "@shelf-judge/shared";
-import type { StorageService } from "./storage-service.js";
-import type { GameService } from "./game-service.js";
+import type { ProfileFitnessSettings, StorageService } from "./storage-service.js";
+import type { DisplayedFitnessService } from "./displayed-fitness-service.js";
 import type { TournamentService } from "./tournament-service.js";
 import type { NarrationService } from "./narration-service.js";
 import { computeProfile } from "./profile-engine.js";
@@ -27,7 +27,7 @@ export interface ProfileService {
 
 export interface ProfileServiceDeps {
   storageService: StorageService;
-  gameService: GameService;
+  displayedFitnessService: DisplayedFitnessService;
   tournamentService: TournamentService;
   narrationService?: NarrationService;
 }
@@ -54,6 +54,23 @@ function getLatestTournamentTimestamp(
   return latest;
 }
 
+function sameFitnessSettings(left: ProfileFitnessSettings, right: ProfileFitnessSettings): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+async function loadFitnessSettings(
+  storageService: StorageService,
+): Promise<ProfileFitnessSettings> {
+  if (storageService.loadProfileFitnessSettings) {
+    return storageService.loadProfileFitnessSettings();
+  }
+  const [prediction, redundancy] = await Promise.all([
+    storageService.loadPredictionSettings(),
+    storageService.loadRedundancySettings(),
+  ]);
+  return { prediction, redundancy, revision: null };
+}
+
 export function deriveNarrationState(
   narration: ProfileNarration | null | undefined,
   narrationComputedAt: string | null | undefined,
@@ -65,7 +82,7 @@ export function deriveNarrationState(
 }
 
 export function createProfileService(deps: ProfileServiceDeps): ProfileService {
-  const { storageService, gameService, tournamentService, narrationService } = deps;
+  const { storageService, displayedFitnessService, tournamentService, narrationService } = deps;
 
   function attachNarration(
     profile: CollectionProfile,
@@ -113,11 +130,22 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
       }
 
       // Recompute profile
-      const gamesWithScores = await gameService.listGames();
+      let gamesWithScores;
+      let fitnessSettings: ProfileFitnessSettings;
+      for (;;) {
+        const before = await loadFitnessSettings(storageService);
+        const candidateGames = await displayedFitnessService.listGames({ includePredicted: true });
+        const after = await loadFitnessSettings(storageService);
+        if (sameFitnessSettings(before, after)) {
+          gamesWithScores = candidateGames;
+          fitnessSettings = after;
+          break;
+        }
+      }
       const games = gamesWithScores.map((gws) => gws.game);
       const fitnessResults = new Map<string, FitnessResult>();
       for (const gws of gamesWithScores) {
-        if (gws.score !== null) {
+        if (gws.score !== null && gws.hasScoringContribution && !gws.hasPredictedContribution) {
           fitnessResults.set(gws.game.id, gws.score);
         }
       }
@@ -157,7 +185,17 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
         narrationComputedAt: null,
       };
 
-      await storageService.saveProfile(profileData);
+      try {
+        await storageService.saveProfile(profileData, undefined, fitnessSettings);
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message === "Fitness settings changed during profile computation"
+        ) {
+          return this.getProfile();
+        }
+        throw error;
+      }
 
       return attachNarration(profile, profileData);
     },

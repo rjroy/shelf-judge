@@ -665,6 +665,76 @@ describe("StorageService.saveProfile", () => {
     expect(loaded!.computedAt).toBe("2026-03-15T12:00:00.000Z");
     expect(loaded!.profile.gameCount).toBe(42);
   });
+
+  for (const settingsKind of ["prediction", "redundancy"] as const) {
+    test(`invalidates the profile after ${settingsKind} settings change`, async () => {
+      const { service } = makeService();
+      await service.saveProfile({
+        contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
+        algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
+        tournamentSettings: {
+          kFactorThreshold: 15,
+          normalizationHalfWidth: 400,
+          provisionalThreshold: 6,
+        },
+        profile: makeEmptyProfile(),
+        computedAt: "2026-01-01T00:00:00.000Z",
+        narration: null,
+        narrationComputedAt: null,
+      });
+
+      if (settingsKind === "prediction") {
+        const settings = await service.loadPredictionSettings();
+        await service.savePredictionSettings({ ...settings, defaultK: settings.defaultK + 1 });
+      } else {
+        const settings = await service.loadRedundancySettings();
+        await service.saveRedundancySettings({ ...settings, enabled: !settings.enabled });
+      }
+
+      expect(await service.loadProfile()).toBeNull();
+    });
+  }
+
+  test("rejects a stale profile after settings change away and back", async () => {
+    const { service } = makeService();
+    const expectedFitnessSettings = {
+      prediction: await service.loadPredictionSettings(),
+      redundancy: await service.loadRedundancySettings(),
+      revision: 0,
+    };
+    await service.savePredictionSettings({
+      ...expectedFitnessSettings.prediction,
+      defaultK: expectedFitnessSettings.prediction.defaultK + 1,
+    });
+    await service.savePredictionSettings(expectedFitnessSettings.prediction);
+
+    const staleSave = service.saveProfile(
+      {
+        contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
+        algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
+        tournamentSettings: {
+          kFactorThreshold: 15,
+          normalizationHalfWidth: 400,
+          provisionalThreshold: 6,
+        },
+        profile: makeEmptyProfile(),
+        computedAt: "2026-01-01T00:00:00.000Z",
+        narration: null,
+        narrationComputedAt: null,
+      },
+      undefined,
+      expectedFitnessSettings,
+    );
+    let rejected: unknown;
+    try {
+      await staleSave;
+    } catch (error) {
+      rejected = error;
+    }
+    expect(rejected).toBeInstanceOf(Error);
+    expect((rejected as Error).message).toBe("Fitness settings changed during profile computation");
+    expect(await service.loadProfile()).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------

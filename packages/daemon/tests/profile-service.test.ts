@@ -6,6 +6,7 @@ import type {
   Game,
   CollectionProfile,
   TournamentGameStatsDisplay,
+  FitnessResult,
 } from "@shelf-judge/shared";
 import {
   CURRENT_PROFILE_ALGORITHM_VERSION,
@@ -16,6 +17,7 @@ import { createProfileService } from "../src/services/profile-service.js";
 import type { StorageService } from "../src/services/storage-service.js";
 import type { GameService } from "../src/services/game-service.js";
 import type { TournamentService } from "../src/services/tournament-service.js";
+import type { DisplayedFitnessService } from "../src/services/displayed-fitness-service.js";
 import { trustedInsightProfileFixture } from "../../shared/tests/fixtures/trusted-profile.js";
 
 function makeGame(id: string, name: string): Game {
@@ -190,6 +192,20 @@ function createStubGameService(games: Game[]): GameService {
   };
 }
 
+function createStubDisplayedFitnessService(games: Game[]): DisplayedFitnessService {
+  const gameService = createStubGameService(games);
+  return {
+    async listGames() {
+      return (await gameService.listGames()).map((entry) => ({
+        ...entry,
+        hasPredictedContribution: false,
+        hasScoringContribution:
+          entry.score?.breakdown.some((axis) => axis.contribution !== null) ?? false,
+      }));
+    },
+  };
+}
+
 function createStubTournamentService(
   stats?: Record<string, TournamentGameStatsDisplay>,
 ): TournamentService {
@@ -210,6 +226,108 @@ function createStubTournamentService(
 }
 
 describe("ProfileService", () => {
+  test("uses prediction-enabled displayed fitness and excludes predicted contributions", async () => {
+    const actualGame = makeGame("actual", "Actual");
+    const predictedGame = makeGame("predicted", "Predicted");
+    const vetoedGame = makeGame("vetoed", "Vetoed");
+    const collection = makeCollection();
+    collection.axes = [
+      {
+        id: "fun",
+        name: "Fun",
+        description: null,
+        weight: 100,
+        enabled: true,
+        source: "personal",
+        createdAt: collection.createdAt,
+        updatedAt: collection.updatedAt,
+      },
+    ];
+    const requestedOptions: { includePredicted: boolean }[] = [];
+    const makeScore = (effectiveRating: number, predictedAxisCount: number): FitnessResult => ({
+      score: effectiveRating,
+      ratedAxisCount: predictedAxisCount > 0 ? 0 : 1,
+      totalAxisCount: 1,
+      breakdown: [
+        {
+          axisId: "fun",
+          axisName: "Fun",
+          weight: 100,
+          contribution: effectiveRating,
+          source: predictedAxisCount > 0 ? "predicted" : "personal",
+          derivedField: null,
+          sourceValue: effectiveRating,
+          scoringRawValue: effectiveRating,
+          effectiveRating,
+          preferenceShape: "higher-is-better",
+          curveAffected: false,
+          unit: null,
+          provenance: null,
+          configurationSummary: null,
+          overridden: false,
+          overrideValue: null,
+          predictionConfidence: predictedAxisCount > 0 ? "weak" : null,
+          referenceGames: predictedAxisCount > 0 ? [] : null,
+        },
+      ],
+      vetoed: false,
+      vetoedBy: null,
+      hypotheticalScore: null,
+      predictionMeta:
+        predictedAxisCount > 0
+          ? {
+              readinessStage: 1,
+              confidence: "weak",
+              predictedAxisCount,
+              actualAxisCount: 0,
+              referenceGameCount: 5,
+              coveragePercent: 1,
+            }
+          : null,
+      redundancyAdjustment: null,
+    });
+    const displayedFitnessService: DisplayedFitnessService = {
+      listGames(options) {
+        requestedOptions.push(options);
+        return Promise.resolve([
+          {
+            game: actualGame,
+            score: makeScore(4, 0),
+            hasPredictedContribution: false,
+            hasScoringContribution: true,
+          },
+          {
+            game: predictedGame,
+            score: makeScore(9, 1),
+            hasPredictedContribution: true,
+            hasScoringContribution: true,
+          },
+          {
+            game: vetoedGame,
+            score: {
+              ...makeScore(2, 0),
+              score: 0,
+              vetoed: true,
+              hypotheticalScore: 8,
+            },
+            hasPredictedContribution: false,
+            hasScoringContribution: true,
+          },
+        ]);
+      },
+    };
+    const service = createProfileService({
+      storageService: createStubStorage({ collection }),
+      displayedFitnessService,
+      tournamentService: createStubTournamentService(),
+    });
+
+    const profile = await service.getProfile();
+
+    expect(requestedOptions).toEqual([{ includePredicted: true }]);
+    expect(profile.axisDistributions[0]).toMatchObject({ ratedGameCount: 2, mean: 3 });
+  });
+
   test("drops persisted narration when recomputation replaces its trusted evidence", async () => {
     const oldComputedAt = "2026-01-01T00:00:00.000Z";
     const cachedProfile: CollectionProfile = {
@@ -243,7 +361,7 @@ describe("ProfileService", () => {
     });
     const service = createProfileService({
       storageService: storage,
-      gameService: createStubGameService([]),
+      displayedFitnessService: createStubDisplayedFitnessService([]),
       tournamentService: createStubTournamentService(),
     });
 
@@ -270,7 +388,7 @@ describe("ProfileService", () => {
     };
     const service = createProfileService({
       storageService: storage,
-      gameService: createStubGameService([]),
+      displayedFitnessService: createStubDisplayedFitnessService([]),
       tournamentService: createStubTournamentService(),
     });
 
@@ -284,7 +402,7 @@ describe("ProfileService", () => {
     const storage = createStubStorage();
     const service = createProfileService({
       storageService: storage,
-      gameService: createStubGameService(games),
+      displayedFitnessService: createStubDisplayedFitnessService(games),
       tournamentService: createStubTournamentService(),
     });
 
@@ -337,7 +455,7 @@ describe("ProfileService", () => {
 
     const service = createProfileService({
       storageService: storage,
-      gameService: createStubGameService(games),
+      displayedFitnessService: createStubDisplayedFitnessService(games),
       tournamentService: createStubTournamentService(),
     });
 
@@ -388,7 +506,7 @@ describe("ProfileService", () => {
     });
     const service = createProfileService({
       storageService: storage,
-      gameService: createStubGameService([makeGame("g1", "Game 1")]),
+      displayedFitnessService: createStubDisplayedFitnessService([makeGame("g1", "Game 1")]),
       tournamentService: createStubTournamentService(),
     });
 
@@ -438,7 +556,7 @@ describe("ProfileService", () => {
     });
     const service = createProfileService({
       storageService: storage,
-      gameService: createStubGameService([makeGame("g1", "Game 1")]),
+      displayedFitnessService: createStubDisplayedFitnessService([makeGame("g1", "Game 1")]),
       tournamentService: createStubTournamentService(),
     });
 
@@ -489,7 +607,7 @@ describe("ProfileService", () => {
 
     const service = createProfileService({
       storageService: storage,
-      gameService: createStubGameService(games),
+      displayedFitnessService: createStubDisplayedFitnessService(games),
       tournamentService: createStubTournamentService(),
     });
 
@@ -558,7 +676,7 @@ describe("ProfileService", () => {
 
     const service = createProfileService({
       storageService: storage,
-      gameService: createStubGameService(games),
+      displayedFitnessService: createStubDisplayedFitnessService(games),
       tournamentService: createStubTournamentService(),
     });
 
@@ -636,7 +754,7 @@ describe("ProfileService", () => {
 
     const service = createProfileService({
       storageService: storage,
-      gameService: createStubGameService(games),
+      displayedFitnessService: createStubDisplayedFitnessService(games),
       tournamentService: createStubTournamentService(),
     });
 
@@ -653,7 +771,7 @@ describe("ProfileService", () => {
 
     const service = createProfileService({
       storageService: storage,
-      gameService: createStubGameService(games),
+      displayedFitnessService: createStubDisplayedFitnessService(games),
       tournamentService: createStubTournamentService(),
     });
 

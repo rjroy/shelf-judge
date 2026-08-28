@@ -21,13 +21,17 @@ import {
 import { trustedInsightProfileFixture } from "../../../shared/tests/fixtures/trusted-profile.js";
 import { createProfileRoutes } from "../../src/routes/profile.js";
 import { createFileOps } from "../../src/services/file-ops.js";
-import type { GameService } from "../../src/services/game-service.js";
 import { createProfileService } from "../../src/services/profile-service.js";
 import { computeProfile } from "../../src/services/profile-engine.js";
 import { createStorageService } from "../../src/services/storage-service.js";
 import type { TournamentService } from "../../src/services/tournament-service.js";
+import type { DisplayedFitnessService } from "../../src/services/displayed-fitness-service.js";
 
 const COMPUTED_AT = "2026-08-27T12:00:00.000Z";
+
+function emptyDisplayedFitnessService(): DisplayedFitnessService {
+  return { listGames: () => Promise.resolve([]) };
+}
 
 function emptyProfile(): CollectionProfile {
   return {
@@ -324,24 +328,6 @@ function silentLogger() {
   return { log() {}, warn() {}, error() {} };
 }
 
-function emptyGameService(): GameService {
-  const unsupported = () => Promise.reject(new Error("not used by profile persistence test"));
-  return {
-    listGames: () => Promise.resolve([]),
-    getGame: unsupported,
-    addGame: unsupported,
-    rateGame: unsupported,
-    removeGame: unsupported,
-    searchGames: unsupported,
-    refreshBggData: unsupported,
-    refreshAllBggData: unsupported,
-    importBggCollection: unsupported,
-    setOwnership: unsupported,
-    setBoxDimensions: unsupported,
-    setManualShelf: unsupported,
-  };
-}
-
 function emptyTournamentService(): TournamentService {
   const unsupported = () => Promise.reject(new Error("not used by profile persistence test"));
   return {
@@ -397,7 +383,7 @@ describe("persisted profile contract", () => {
       await createStorage().saveProfile(currentProfileData());
 
       const reloaded = await createStorage().loadProfile();
-      expect(reloaded?.algorithmVersion).toBe(7);
+      expect(reloaded?.algorithmVersion).toBe(CURRENT_PROFILE_ALGORITHM_VERSION);
       expect(reloaded).toEqual(currentProfileData());
     });
   });
@@ -492,7 +478,7 @@ describe("persisted profile contract", () => {
       const freshStorage = createStorage();
       const freshService = createProfileService({
         storageService: freshStorage,
-        gameService: emptyGameService(),
+        displayedFitnessService: emptyDisplayedFitnessService(),
         tournamentService: emptyTournamentService(),
       });
       const app = new Hono();
@@ -614,7 +600,7 @@ describe("persisted profile contract", () => {
 
       const service = createProfileService({
         storageService: createStorage(),
-        gameService: emptyGameService(),
+        displayedFitnessService: emptyDisplayedFitnessService(),
         tournamentService: emptyTournamentService(),
       });
       const recomputed = await service.getProfile();
@@ -627,7 +613,7 @@ describe("persisted profile contract", () => {
     });
   });
 
-  test("discards and recomputes an algorithm-v6 artifact as v7", async () => {
+  test("discards and recomputes an algorithm-v6 artifact under current semantics", async () => {
     await withStorage(async ({ profilePath, createStorage }) => {
       await fs.writeFile(
         profilePath,
@@ -637,14 +623,14 @@ describe("persisted profile contract", () => {
 
       const service = createProfileService({
         storageService: createStorage(),
-        gameService: emptyGameService(),
+        displayedFitnessService: emptyDisplayedFitnessService(),
         tournamentService: emptyTournamentService(),
       });
       const recomputed = await service.getProfile();
       const persisted = await createStorage().loadProfile();
 
       expect(recomputed.gameCount).toBe(0);
-      expect(persisted?.algorithmVersion).toBe(7);
+      expect(persisted?.algorithmVersion).toBe(CURRENT_PROFILE_ALGORITHM_VERSION);
       expect(persisted?.profile).toEqual(recomputed);
       expect(await exists(profilePath)).toBe(true);
     });
@@ -779,7 +765,7 @@ describe("persisted profile contract", () => {
       const storage = createStorage();
       const service = createProfileService({
         storageService: storage,
-        gameService: emptyGameService(),
+        displayedFitnessService: emptyDisplayedFitnessService(),
         tournamentService: emptyTournamentService(),
       });
 

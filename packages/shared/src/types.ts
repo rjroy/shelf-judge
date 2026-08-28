@@ -985,7 +985,7 @@ export interface CollectionProfile {
 
 export interface ProfileData {
   contractVersion: 6;
-  algorithmVersion: 7;
+  algorithmVersion: 8;
   tournamentSettings: TournamentSettings;
   profile: CollectionProfile;
   computedAt: string; // ISO 8601

@@ -23,6 +23,10 @@ import {
   createCollectionMutationService,
   type CollectionMutationService,
 } from "../../src/services/collection-mutation-service.js";
+import {
+  createDisplayedFitnessService,
+  type DisplayedFitnessService,
+} from "../../src/services/displayed-fitness-service.js";
 
 export interface TestAppContext {
   app: AppResult["app"];
@@ -35,6 +39,7 @@ export interface TestAppContext {
   tournamentService: TournamentService;
   profileService: ProfileService;
   predictionService: PredictionService;
+  displayedFitnessService: DisplayedFitnessService;
   bggClient: BggClient | undefined;
   fileOps: ReturnType<typeof createMockFileOps>;
 }
@@ -99,18 +104,22 @@ export function createTestApp(options?: TestAppOptions): TestAppContext {
     onGameDeleted: (gameId) => tournamentService.onGameDeleted(gameId),
   });
 
-  const profileService = createProfileService({
-    storageService,
-    gameService,
-    tournamentService,
-    narrationService,
-  });
-
   const predictionService = createPredictionService({
     storageService,
     fitnessService,
     tournamentService,
     bggClient,
+  });
+  const displayedFitnessService = createDisplayedFitnessService({
+    gameService,
+    predictionService,
+    storageService,
+  });
+  const profileService = createProfileService({
+    storageService,
+    displayedFitnessService,
+    tournamentService,
+    narrationService,
   });
 
   const { app, operations } = createApp({
@@ -121,6 +130,7 @@ export function createTestApp(options?: TestAppOptions): TestAppContext {
     tournamentService,
     profileService,
     predictionService,
+    displayedFitnessService,
     bggClient,
   });
 
@@ -135,6 +145,7 @@ export function createTestApp(options?: TestAppOptions): TestAppContext {
     tournamentService,
     profileService,
     predictionService,
+    displayedFitnessService,
     bggClient,
     fileOps,
   };
