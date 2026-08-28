@@ -1,4 +1,11 @@
-import type { Game, GameWithScore, RedundancySettings } from "@shelf-judge/shared";
+import type {
+  Collection,
+  Game,
+  GameWithScore,
+  PredictionSettings,
+  RedundancySettings,
+  TournamentData,
+} from "@shelf-judge/shared";
 import type { GameService } from "./game-service.js";
 import type { PredictionService } from "./prediction-service.js";
 import type { StorageService } from "./storage-service.js";
@@ -26,6 +33,15 @@ export interface DisplayedFitnessOptions {
 
 export interface DisplayedFitnessService {
   listGames(options: DisplayedFitnessOptions): Promise<DisplayedGameFitness[]>;
+  listGamesFromSnapshot(
+    snapshot: {
+      collection: Collection;
+      tournament: TournamentData;
+      predictionSettings: PredictionSettings;
+      redundancySettings: RedundancySettings;
+    },
+    options: DisplayedFitnessOptions,
+  ): Promise<DisplayedGameFitness[]>;
 }
 
 export interface DisplayedFitnessServiceDeps {
@@ -42,19 +58,16 @@ function hasScoringContribution(entry: GameWithScore): boolean {
   return entry.score?.breakdown.some((axis) => axis.contribution !== null) ?? false;
 }
 
-async function applyRedundancy(
+function applyRedundancy(
   games: GameWithScore[],
   settings: RedundancySettings,
-  storageService: StorageService,
+  collection: Collection,
+  tournamentData: TournamentData,
   universe?: GameWithScore[],
-): Promise<void> {
+): void {
   if (!settings.enabled) return;
 
   const computeGames = universe ?? games;
-  const [collection, tournamentData] = await Promise.all([
-    storageService.loadCollection(),
-    storageService.loadTournament(),
-  ]);
   const gamesWithBgg = collection.games.filter((game) => game.bggData);
   const vocabulary = buildVocabulary(gamesWithBgg);
   const ranges = computeContinuousRanges(gamesWithBgg);
@@ -125,9 +138,44 @@ export function createDisplayedFitnessService(
                 (entry) => entry.game.ownership !== "previously-owned",
               )
             : undefined;
-        await applyRedundancy(ownedGames, redundancySettings, storageService, universe);
+        if (redundancySettings.enabled) {
+          const [collection, tournament] = await Promise.all([
+            storageService.loadCollection(),
+            storageService.loadTournament(),
+          ]);
+          applyRedundancy(ownedGames, redundancySettings, collection, tournament, universe);
+        }
       }
 
+      return allGames.map((entry) => ({
+        ...entry,
+        hasPredictedContribution: hasPredictedContribution(entry),
+        hasScoringContribution: hasScoringContribution(entry),
+      }));
+    },
+
+    async listGamesFromSnapshot(snapshot, options): Promise<DisplayedGameFitness[]> {
+      if (!predictionService?.listGamesWithPredictionsFromSnapshot) {
+        throw new Error("Snapshot fitness requires prediction service");
+      }
+      if (!options.includePredicted) {
+        throw new Error("Snapshot fitness currently supports prediction-enabled display only");
+      }
+      const collection = structuredClone(snapshot.collection);
+      const tournament = structuredClone(snapshot.tournament);
+      const predicted = await predictionService.listGamesWithPredictionsFromSnapshot(
+        collection,
+        tournament,
+        structuredClone(snapshot.predictionSettings),
+      );
+      const allGames = predicted;
+      const ownedGames = allGames.filter((entry) => entry.game.ownership !== "previously-owned");
+      applyRedundancy(
+        ownedGames,
+        structuredClone(snapshot.redundancySettings),
+        collection,
+        tournament,
+      );
       return allGames.map((entry) => ({
         ...entry,
         hasPredictedContribution: hasPredictedContribution(entry),

@@ -217,40 +217,26 @@ Tournament scores appear on game detail pages and are visible alongside fitness 
 
 ![Profile](screenshots/profile.png)
 
-The Profile page summarizes enabled axes, BGG attributes, configured utility curves, and three families of trusted collection insights. Reported cards expose the method, eligible and included cohort, sufficiency gates, game-level measurements and sources, comparator, notability rule, and known limitations. Abstention cards instead lead with the failed gates and explanation; they show evidence or a comparator only when the method had those details available before it abstained.
+The Profile page answers two questions: what the collection reveals about your preferences, and what explicit play intentions still need a decision. The daemon operation is `shelf.profile.get` (`GET /api/profile`). It returns the complete profile used by the overview and its entity and axis drilldowns.
 
-The basic profile sections use the following data:
+The identity section uses the following data:
 
 - **Axis rating distributions** use effective ratings from each enabled axis's fitness breakdown. They show a histogram, mean, median, population standard deviation, and range. An axis with no usable values remains visible with a zero count.
-- **Axis weights** use enabled scoring axes and express each weight as a percentage of their total.
-- **BGG clustering** uses games with BGG data to count mechanics, categories, families, and subdomains. Weight-range percentages use only games with a BGG weight.
-- **Utility curves** show enabled axes with explicit curve or veto configuration, including native scale, unit, and provenance where available.
+- **Mechanics, designers, and artists** use complete BGG entity metadata and current displayed fitness. Each association includes its supporting games and the collection comparator. Associations supported by fewer than three games remain visible as limited evidence.
+- **Attention items** come only from active owner-created first-play or replay intentions. Profile reads never infer, age, prioritize, complete, or retire an intention.
 
-The trusted insight families have separate prerequisites:
-
-- **Preference divergence** needs a normalized, non-provisional Tournament result with at least the configured provisional comparison threshold (six by default), plus a fitness score recomposed from rated non-Tournament axes. Tournament axes and Tournament vetoes are excluded from that comparator, so the comparison is independent rather than self-referential. A record is reported only when the absolute gap is greater than 1.5 points.
-- **Collection outliers** use currently owned games with complete mechanics, categories, BGG weight, player-count range, and playing-time data. Evaluation needs at least six usable owned games and at least 60% factual metadata coverage. A reported game is distant from both of its two nearest usable owned neighbors across the factual dimensions, not from a collection centroid. Personal ratings do not drive detection; a current fitness score may appear only as separately sourced context.
-- **Questions from your collection** need BGG mechanics or categories, sufficient non-provisional Tournament outcomes, and the same independent non-Tournament fitness comparator. The current method publishes each signed Tournament-minus-fitness gap at one-decimal precision and uses those published gaps as the complete arithmetic evidence. It independently rounds each group's evidence-derived mean, then derives and rounds the directional effect from the canonical published gaps rather than subtracting the displayed means. It requires at least three games in each group, same-direction support, directional consistency, and a comparator-backed effect above the reporting threshold. The result is an observational question such as whether an attribute could explain a directional gap, not a recommendation to create an axis.
-
-Insight records use these states:
-
-- **Reported** means every declared sufficiency gate passed and the declared notability threshold was exceeded. The card includes sourced evidence, an explicit comparator, and the contract-owned notability explanation. Current producers do not claim calibrated confidence levels.
-- **Insufficient** means the method abstained because its sample, coverage, normalized result, or comparator was missing. The failed gate and abstention explanation remain visible rather than being omitted. Evidence and comparator details appear only when they were available.
-- **Suppressed** means a candidate is not interpretable under the current method, for example because another attribute has nearly identical collection membership. The card explains the failed interpretation gate and includes evidence or comparator details only when available.
-- **Retired** records explain when an old concentration-only or high-variance suggestion rule would have fired. Those rules no longer produce recommendations, and retired cards do not imply that reported evidence, a comparator, or a current notability decision exists.
-- **Evaluated, nothing notable** means the family ran successfully and returned an empty array. This is different from **Analysis unavailable**, which means the profile or that family could not be loaded or evaluated. Preference divergence is unavailable until Tournament results exist.
-
-**Collection Narrative:**
-Narration is user-initiated. The model selects only canonical **Reported** insight records; the server supplies the exact stored observations and interpretations and validates every insight and game reference. It cannot add free-form claims from distributions, abstained records, or general collection context. If no reported insight exists, generated narration uses the canonical abstention: `No reported trusted insights are available to narrate.` A narration request can be unavailable if its configured model or service cannot run; the deterministic profile still works.
+Each entity class reports its metadata readiness separately. A class can be supported, limited, evaluated with no associations, missing valid fitness, or waiting for metadata without changing the result for another class. Predicted fitness is excluded, while a vetoed current score remains eligible at `0`.
 
 **Persistence and recomputation:**
-The current persisted profile contract is version 6 and the current algorithm is version 7. `profile.json` is a disposable local cache, not a compatibility boundary. A valid current cache is reused until collection data, Tournament activity, or Tournament settings are newer or different. Collection schema migration invalidates the cache. Invalid, older-contract, or older-algorithm artifacts, including algorithm-v6 caches, are discarded and recomputed on the next profile read. Recompute saves a fresh profile and clears prior narration instead of carrying claims across changed evidence. Narration generated against a profile that changes during generation is rejected.
+The persisted profile contract is version 7 and the algorithm is version 9. `profile.json` is a disposable local cache, not a compatibility boundary. A cache is reused only when its collection ID, schema version, revision, complete Tournament hash, prediction-settings hash, and redundancy-settings hash all match the captured source snapshot. Invalid, non-finite, older-contract, and older-algorithm artifacts are deleted and recreated on the next profile read. A failed recomputation returns an unavailable result with the profile retry operation instead of serving stale data.
+
+**Version 4 upgrade:**
+Back up the data directory before upgrading. Shelf Judge automatically migrates an older collection when it first loads, then recreates disposable profile data from the migrated collection and current Tournament and scoring settings. After Shelf Judge successfully writes collection schema version 4, downgrading to a release that only understands an older collection schema is unsupported.
 
 **Limitations:**
 
-- Reporting thresholds and distance rules are deterministic heuristics. Shelf Judge does not claim statistical significance, population inference, probability, or calibrated confidence.
-- Tournament preference reflects only the opponents compared so far, and BGG labels are observational rather than causal preference measures.
-- Games missing required factual fields are excluded from outlier comparison rather than estimated.
+- Entity associations describe this collection only. Shelf Judge does not claim causation, statistical significance, population inference, probability, or creator responsibility.
+- Games with predicted fitness or incomplete entity metadata are excluded with an explicit reason rather than estimated.
 - The profile describes current collection evidence. It does not advise what to buy, sell, keep, or remove.
 
 ---

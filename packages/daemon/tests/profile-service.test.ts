@@ -1,784 +1,349 @@
-import { describe, test, expect } from "bun:test";
-import type {
-  Collection,
-  TournamentData,
-  ProfileData,
-  Game,
-  CollectionProfile,
-  TournamentGameStatsDisplay,
-  FitnessResult,
-} from "@shelf-judge/shared";
-import {
-  CURRENT_PROFILE_ALGORITHM_VERSION,
-  CURRENT_PROFILE_CONTRACT_VERSION,
-  createInitialEntityMetadata,
-} from "@shelf-judge/shared";
+import { describe, expect, test } from "bun:test";
+import type { DisplayedFitnessService } from "../src/services/displayed-fitness-service.js";
 import { createProfileService } from "../src/services/profile-service.js";
 import type { StorageService } from "../src/services/storage-service.js";
-import type { GameService } from "../src/services/game-service.js";
-import type { TournamentService } from "../src/services/tournament-service.js";
-import type { DisplayedFitnessService } from "../src/services/displayed-fitness-service.js";
-import { trustedInsightProfileFixture } from "../../shared/tests/fixtures/trusted-profile.js";
+import { ZodError } from "zod";
+import {
+  canonicalJson,
+  canonicalSha256,
+  profileSourceIdentity,
+} from "../src/services/profile-source-coordinator.js";
+import { createTestApp, jsonRequest } from "./helpers/test-app.js";
 
-function makeGame(id: string, name: string): Game {
-  const now = new Date().toISOString();
-  return {
-    id,
-    bggId: null,
-    entityMetadata: createInitialEntityMetadata(null),
-    latestPlayCountCheck: null,
-    name,
-    yearPublished: null,
-    minPlayers: null,
-    maxPlayers: null,
-    bestPlayers: null,
-    playingTime: null,
-    numPlays: null,
-    acquisition: { state: "unknown" },
-    playCountEvidence: { status: "missing", source: "manual", observedAt: null },
-    durationEvidence: { status: "missing", source: "manual", observedAt: null },
-    playerRangeEvidence: { status: "missing", source: "manual", observedAt: null },
-    suggestedPlayerPoll: {
-      status: "valid",
-      state: "absent",
-      buckets: [],
-      source: "manual",
-      observedAt: null,
-    },
-    bestPlayersInvalidEvidence: null,
-    ownership: "owned",
-    boxDimensions: null,
-    manualShelfId: null,
-    ratings: {},
-    imageUrl: null,
-    bggData: null,
-    createdAt: now,
-    updatedAt: now,
-  };
-}
+describe("profile source identity", () => {
+  test("canonicalizes recursively sorted object keys before hashing", () => {
+    const left = { z: [{ b: 2, a: 1 }], a: { y: true, x: null } };
+    const right = { a: { x: null, y: true }, z: [{ a: 1, b: 2 }] };
 
-function makeCollection(updatedAt?: string): Collection {
-  const now = updatedAt ?? new Date().toISOString();
-  return {
-    schemaVersion: 4,
-    revision: 0,
-    id: "test-col",
-    name: "Test Collection",
-    axes: [],
-    games: [],
-    entertainmentBenchmark: null,
-    intentions: [],
-    commandReceipts: [],
-    createdAt: now,
-    updatedAt: now,
-  };
-}
+    expect(canonicalJson(left)).toBe(canonicalJson(right));
+    expect(canonicalSha256(left)).toBe(canonicalSha256(right));
+    expect(canonicalSha256(left)).toMatch(/^[a-f0-9]{64}$/);
+  });
 
-function defaultTournament(): TournamentData {
-  return {
-    settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
-    sessions: [],
-    gameStats: {},
-  };
-}
-
-function createStubStorage(overrides?: {
-  collection?: Collection;
-  tournament?: TournamentData;
-  profile?: ProfileData | null;
-}): StorageService & {
-  savedProfile: ProfileData | null;
-} {
-  const collectionData = overrides?.collection ?? makeCollection();
-  const tournamentData = overrides?.tournament ?? defaultTournament();
-
-  const stub = {
-    savedProfile: null as ProfileData | null,
-    loadCollection() {
-      return Promise.resolve(structuredClone(collectionData));
-    },
-    saveCollection() {
-      return Promise.resolve();
-    },
-    loadConfig() {
-      return Promise.resolve({} as never);
-    },
-    saveConfig() {
-      return Promise.resolve();
-    },
-    loadTournament() {
-      return Promise.resolve(structuredClone(tournamentData));
-    },
-    saveTournament() {
-      return Promise.resolve();
-    },
-    loadProfile(): Promise<ProfileData | null> {
-      return Promise.resolve(
-        overrides?.profile !== undefined ? structuredClone(overrides.profile) : null,
-      );
-    },
-    saveProfile(data: ProfileData) {
-      stub.savedProfile = structuredClone(data);
-      return Promise.resolve();
-    },
-    loadPredictionSettings() {
-      return Promise.resolve({
-        stageThresholds: [5, 15, 30] as [number, number, number],
-        defaultK: 5,
-        minSimilarityThreshold: 0.2,
-        tournamentStabilityBoost: 0.2,
-      });
-    },
-    savePredictionSettings() {
-      return Promise.resolve();
-    },
-    loadNicheSettings() {
-      return Promise.resolve({ ignoredTags: [] });
-    },
-    saveNicheSettings() {
-      return Promise.resolve();
-    },
-    loadRedundancySettings() {
-      return Promise.resolve({
-        enabled: false,
-        stage: "annotation" as const,
-        similarityThreshold: 0.6,
-        maxPenalty: 2.0,
-        componentWeights: { binary: 0.4, continuous: 0.3, personalAxes: 0.3 },
-        minNeighbors: 1,
-        expectedNeighbors: 5,
-      });
-    },
-    saveRedundancySettings() {
-      return Promise.resolve();
-    },
-    loadWishlist() {
-      return Promise.resolve([]);
-    },
-    saveWishlist() {
-      return Promise.resolve();
-    },
-    loadShelfConfig() {
-      return Promise.resolve({ units: [], createdAt: "", updatedAt: "" });
-    },
-    saveShelfConfig() {
-      return Promise.resolve();
-    },
-  };
-
-  return stub;
-}
-
-function createStubGameService(games: Game[]): GameService {
-  return {
-    listGames() {
-      return Promise.resolve(games.map((game) => ({ game, score: null })));
-    },
-    getGame(id: string) {
-      const game = games.find((g) => g.id === id);
-      if (!game) return Promise.reject(new Error(`Game not found: ${id}`));
-      return Promise.resolve({ game, score: null });
-    },
-    addGame: () => Promise.reject(new Error("not implemented")),
-    rateGame: () => Promise.reject(new Error("not implemented")),
-    removeGame: () => Promise.reject(new Error("not implemented")),
-    searchGames: () => Promise.reject(new Error("not implemented")),
-    refreshBggData: () => Promise.reject(new Error("not implemented")),
-    refreshAllBggData: () => Promise.reject(new Error("not implemented")),
-    importBggCollection: () => Promise.reject(new Error("not implemented")),
-    setOwnership: () => Promise.reject(new Error("not implemented")),
-    setBoxDimensions: () => Promise.reject(new Error("not implemented")),
-    setManualShelf: () => Promise.reject(new Error("not implemented")),
-  };
-}
-
-function createStubDisplayedFitnessService(games: Game[]): DisplayedFitnessService {
-  const gameService = createStubGameService(games);
-  return {
-    async listGames() {
-      return (await gameService.listGames()).map((entry) => ({
-        ...entry,
-        hasPredictedContribution: false,
-        hasScoringContribution:
-          entry.score?.breakdown.some((axis) => axis.contribution !== null) ?? false,
-      }));
-    },
-  };
-}
-
-function createStubTournamentService(
-  stats?: Record<string, TournamentGameStatsDisplay>,
-): TournamentService {
-  return {
-    getAllGameStats: () => Promise.resolve(stats ?? {}),
-    getGameStats: () => Promise.reject(new Error("not implemented")),
-    startSession: () => Promise.reject(new Error("not implemented")),
-    getActiveSession: () => Promise.resolve(null),
-    endSession: () => Promise.reject(new Error("not implemented")),
-    getNextPair: () => Promise.reject(new Error("not implemented")),
-    submitComparison: () => Promise.reject(new Error("not implemented")),
-    listSessions: () => Promise.resolve([]),
-    normalizeFitness: () => Promise.reject(new Error("not implemented")),
-    onGameDeleted: () => Promise.resolve(),
-    getSettings: () => Promise.reject(new Error("not implemented")),
-    updateSettings: () => Promise.reject(new Error("not implemented")),
-  };
-}
+  test("rejects non-finite canonical values", () => {
+    expect(() => canonicalJson({ value: Number.POSITIVE_INFINITY })).toThrow("non-finite");
+  });
+});
 
 describe("ProfileService", () => {
-  test("uses prediction-enabled displayed fitness and excludes predicted contributions", async () => {
-    const actualGame = makeGame("actual", "Actual");
-    const predictedGame = makeGame("predicted", "Predicted");
-    const vetoedGame = makeGame("vetoed", "Vetoed");
-    const collection = makeCollection();
-    collection.axes = [
-      {
-        id: "fun",
-        name: "Fun",
-        description: null,
-        weight: 100,
-        enabled: true,
-        source: "personal",
-        createdAt: collection.createdAt,
-        updatedAt: collection.updatedAt,
-      },
-    ];
-    const requestedOptions: { includePredicted: boolean }[] = [];
-    const makeScore = (effectiveRating: number, predictedAxisCount: number): FitnessResult => ({
-      score: effectiveRating,
-      ratedAxisCount: predictedAxisCount > 0 ? 0 : 1,
-      totalAxisCount: 1,
-      breakdown: [
-        {
-          axisId: "fun",
-          axisName: "Fun",
-          weight: 100,
-          contribution: effectiveRating,
-          source: predictedAxisCount > 0 ? "predicted" : "personal",
-          derivedField: null,
-          sourceValue: effectiveRating,
-          scoringRawValue: effectiveRating,
-          effectiveRating,
-          preferenceShape: "higher-is-better",
-          curveAffected: false,
-          unit: null,
-          provenance: null,
-          configurationSummary: null,
-          overridden: false,
-          overrideValue: null,
-          predictionConfidence: predictedAxisCount > 0 ? "weak" : null,
-          referenceGames: predictedAxisCount > 0 ? [] : null,
-        },
-      ],
-      vetoed: false,
-      vetoedBy: null,
-      hypotheticalScore: null,
-      predictionMeta:
-        predictedAxisCount > 0
-          ? {
-              readinessStage: 1,
-              confidence: "weak",
-              predictedAxisCount,
-              actualAxisCount: 0,
-              referenceGameCount: 5,
-              coveragePercent: 1,
-            }
-          : null,
-      redundancyAdjustment: null,
-    });
+  test("reuses only an exact current source identity and recomputes for all four sources", async () => {
+    const ctx = createTestApp();
+    let clock = 0;
+    let computations = 0;
     const displayedFitnessService: DisplayedFitnessService = {
-      listGames(options) {
-        requestedOptions.push(options);
-        return Promise.resolve([
-          {
-            game: actualGame,
-            score: makeScore(4, 0),
-            hasPredictedContribution: false,
-            hasScoringContribution: true,
-          },
-          {
-            game: predictedGame,
-            score: makeScore(9, 1),
-            hasPredictedContribution: true,
-            hasScoringContribution: true,
-          },
-          {
-            game: vetoedGame,
-            score: {
-              ...makeScore(2, 0),
-              score: 0,
-              vetoed: true,
-              hypotheticalScore: 8,
-            },
-            hasPredictedContribution: false,
-            hasScoringContribution: true,
-          },
-        ]);
+      ...ctx.displayedFitnessService,
+      async listGamesFromSnapshot(snapshot, options) {
+        computations += 1;
+        return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
       },
     };
     const service = createProfileService({
-      storageService: createStubStorage({ collection }),
+      storageService: ctx.storageService,
       displayedFitnessService,
-      tournamentService: createStubTournamentService(),
+      now: () => `2026-08-28T00:00:0${clock++}.000Z`,
     });
 
-    const profile = await service.getProfile();
+    const first = await service.getProfile();
+    const firstIdentity = (await ctx.storageService.loadProfile())!.sourceIdentity;
+    expect(first.status).toBe("available");
+    expect(await service.getProfile()).toEqual(first);
+    expect(computations).toBe(1);
 
-    expect(requestedOptions).toEqual([{ includePredicted: true }]);
-    expect(profile.axisDistributions[0]).toMatchObject({ ratedGameCount: 2, mean: 3 });
-  });
-
-  test("drops persisted narration when recomputation replaces its trusted evidence", async () => {
-    const oldComputedAt = "2026-01-01T00:00:00.000Z";
-    const cachedProfile: CollectionProfile = {
-      ...structuredClone(trustedInsightProfileFixture),
-      computedAt: oldComputedAt,
-      narration: {
-        summary: [
-          {
-            observation: "Game 3 is compositionally distant from its two nearest comparison games",
-            interpretation: "Separately, its current preference fitness score is 8.0",
-            evidenceReferences: [{ insightId: "outlier:game-3", gameIds: ["game-3"] }],
-          },
-        ],
-        surprises: [],
-        tensions: [],
-        abstention: null,
-      },
-      narrationState: "fresh",
-    };
-    const storage = createStubStorage({
-      collection: makeCollection("2026-01-02T00:00:00.000Z"),
-      profile: {
-        contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
-        algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
-        tournamentSettings: defaultTournament().settings,
-        profile: cachedProfile,
-        computedAt: oldComputedAt,
-        narration: cachedProfile.narration,
-        narrationComputedAt: oldComputedAt,
-      },
-    });
-    const service = createProfileService({
-      storageService: storage,
-      displayedFitnessService: createStubDisplayedFitnessService([]),
-      tournamentService: createStubTournamentService(),
-    });
-
-    const profile = await service.getProfile();
-
-    expect(profile.narration).toBeNull();
-    expect(profile.narrationState).toBe("empty");
-    expect(storage.savedProfile?.narration).toBeNull();
-  });
-
-  test("loads the collection before its dependent profile artifact", async () => {
-    const storage = createStubStorage();
-    const loadCollection = storage.loadCollection.bind(storage);
-    const loadProfile = storage.loadProfile.bind(storage);
-    let collectionLoaded = false;
-    storage.loadCollection = async () => {
-      const collection = await loadCollection();
-      collectionLoaded = true;
-      return collection;
-    };
-    storage.loadProfile = () => {
-      if (!collectionLoaded) return Promise.reject(new Error("profile loaded before collection"));
-      return loadProfile();
-    };
-    const service = createProfileService({
-      storageService: storage,
-      displayedFitnessService: createStubDisplayedFitnessService([]),
-      tournamentService: createStubTournamentService(),
-    });
-
+    await jsonRequest(ctx.app, "POST", "/api/games", { name: "Changed collection" });
     await service.getProfile();
+    const collectionIdentity = (await ctx.storageService.loadProfile())!.sourceIdentity;
+    expect(collectionIdentity.collectionRevision).toBeGreaterThan(firstIdentity.collectionRevision);
 
-    expect(collectionLoaded).toBe(true);
+    await ctx.tournamentService.updateSettings({ provisionalThreshold: 7 });
+    await service.getProfile();
+    const tournamentIdentity = (await ctx.storageService.loadProfile())!.sourceIdentity;
+    expect(tournamentIdentity.tournamentHash).not.toBe(collectionIdentity.tournamentHash);
+
+    await ctx.predictionService.updateSettings({ defaultK: 6 });
+    await service.getProfile();
+    const predictionIdentity = (await ctx.storageService.loadProfile())!.sourceIdentity;
+    expect(predictionIdentity.predictionSettingsHash).not.toBe(
+      tournamentIdentity.predictionSettingsHash,
+    );
+
+    await jsonRequest(ctx.app, "PATCH", "/api/redundancy/settings", { enabled: true });
+    await service.getProfile();
+    const redundancyIdentity = (await ctx.storageService.loadProfile())!.sourceIdentity;
+    expect(redundancyIdentity.redundancySettingsHash).not.toBe(
+      predictionIdentity.redundancySettingsHash,
+    );
+    expect(computations).toBe(5);
   });
 
-  test("computes fresh profile when no stored profile exists", async () => {
-    const games = [makeGame("g1", "Game 1"), makeGame("g2", "Game 2")];
-    const storage = createStubStorage();
+  test("recomputes a current-identity cache that does not match the collection source", async () => {
+    const ctx = createTestApp();
+    await jsonRequest(ctx.app, "POST", "/api/games", { name: "Source game" });
+    const first = await ctx.profileService.getProfile();
+    expect(first.status).toBe("available");
+    const cached = (await ctx.storageService.loadProfile())!;
+    for (const entityClass of ["mechanic", "designer", "artist"] as const) {
+      const exclusion = cached.profile.identity.classes[entityClass].exclusions[0];
+      if (!exclusion) throw new Error("Expected incomplete metadata exclusion");
+      exclusion.gameName = "Forged name";
+    }
+    await ctx.storageService.saveProfile(cached);
+
+    let computations = 0;
     const service = createProfileService({
-      storageService: storage,
-      displayedFitnessService: createStubDisplayedFitnessService(games),
-      tournamentService: createStubTournamentService(),
+      storageService: ctx.storageService,
+      displayedFitnessService: {
+        ...ctx.displayedFitnessService,
+        async listGamesFromSnapshot(snapshot, options) {
+          computations += 1;
+          return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+        },
+      },
     });
 
-    const profile = await service.getProfile();
-
-    expect(profile).toBeDefined();
-    expect(profile.gameCount).toBe(2);
-    expect(profile.computedAt).toBeDefined();
-    expect(storage.savedProfile).not.toBeNull();
+    const result = await service.getProfile();
+    expect(result.status).toBe("available");
+    expect(computations).toBe(1);
+    if (result.status !== "available") throw new Error("Expected available profile");
+    expect(result.identity.classes.mechanic.exclusions[0]?.gameName).toBe("Source game");
   });
 
-  test("returns cached profile when not stale", async () => {
-    const games = [makeGame("g1", "Game 1")];
-    const futureDate = new Date(Date.now() + 60_000).toISOString();
-    const pastDate = new Date(Date.now() - 60_000).toISOString();
+  test("discards a source-invalid cache before a failed recomputation", async () => {
+    const ctx = createTestApp();
+    await jsonRequest(ctx.app, "POST", "/api/games", { name: "Source game" });
+    await ctx.profileService.getProfile();
+    const cached = (await ctx.storageService.loadProfile())!;
+    for (const entityClass of ["mechanic", "designer", "artist"] as const) {
+      const exclusion = cached.profile.identity.classes[entityClass].exclusions[0];
+      if (!exclusion) throw new Error("Expected incomplete metadata exclusion");
+      exclusion.gameName = "Forged name";
+    }
+    await ctx.storageService.saveProfile(cached);
 
-    const cachedProfile: CollectionProfile = {
-      axisDistributions: [],
-      axisWeights: [],
-      bggClustering: {
-        mechanics: [],
-        categories: [],
-        families: [],
-        subdomains: [],
-        weightRanges: [],
+    const result = await createProfileService({
+      storageService: ctx.storageService,
+      displayedFitnessService: {
+        listGames: () => Promise.resolve([]),
+        listGamesFromSnapshot: () => Promise.reject(new Error("fitness failed")),
       },
-      utilityCurves: [],
-      divergence: null,
-      outliers: [],
-      suggestions: [],
-      narration: null,
-      narrationState: "empty",
-      gameCount: 99,
-      ratedGameCount: 0,
-      computedAt: futureDate,
-    };
+    }).getProfile();
 
-    const storage = createStubStorage({
-      collection: makeCollection(pastDate),
-      profile: {
-        contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
-        algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
-        tournamentSettings: defaultTournament().settings,
-        profile: cachedProfile,
-        computedAt: futureDate,
-        narration: null,
-        narrationComputedAt: null,
-      },
-    });
-
-    const service = createProfileService({
-      storageService: storage,
-      displayedFitnessService: createStubDisplayedFitnessService(games),
-      tournamentService: createStubTournamentService(),
-    });
-
-    const profile = await service.getProfile();
-
-    // Should return cached (gameCount 99), not recompute (gameCount 1)
-    expect(profile.gameCount).toBe(99);
-    expect(storage.savedProfile).toBeNull();
+    expect(result.status).toBe("unavailable");
+    expect(await ctx.storageService.loadProfile()).toBeNull();
   });
 
-  test("recomputes when the Tournament comparison threshold changes", async () => {
-    const futureDate = new Date(Date.now() + 60_000).toISOString();
-    const pastDate = new Date(Date.now() - 60_000).toISOString();
-    const cachedProfile: CollectionProfile = {
-      axisDistributions: [],
-      axisWeights: [],
-      bggClustering: {
-        mechanics: [],
-        categories: [],
-        families: [],
-        subdomains: [],
-        weightRanges: [],
-      },
-      utilityCurves: [],
-      divergence: null,
-      outliers: [],
-      suggestions: [],
-      narration: null,
-      narrationState: "empty",
-      gameCount: 99,
-      ratedGameCount: 0,
-      computedAt: futureDate,
-    };
-    const tournament = defaultTournament();
-    tournament.settings.provisionalThreshold = 8;
-    const storage = createStubStorage({
-      collection: makeCollection(pastDate),
-      tournament,
-      profile: {
-        contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
-        algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
-        tournamentSettings: defaultTournament().settings,
-        profile: cachedProfile,
-        computedAt: futureDate,
-        narration: null,
-        narrationComputedAt: null,
-      },
-    });
-    const service = createProfileService({
-      storageService: storage,
-      displayedFitnessService: createStubDisplayedFitnessService([makeGame("g1", "Game 1")]),
-      tournamentService: createStubTournamentService(),
-    });
+  test("serializes all four source mutations through snapshot, save, and return", async () => {
+    for (const source of ["collection", "tournament", "prediction", "redundancy"] as const) {
+      const ctx = createTestApp();
+      let release!: () => void;
+      let captured!: () => void;
+      const capturedPromise = new Promise<void>((resolve) => {
+        captured = resolve;
+      });
+      const releasePromise = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const displayedFitnessService: DisplayedFitnessService = {
+        ...ctx.displayedFitnessService,
+        async listGamesFromSnapshot(snapshot, options) {
+          captured();
+          await releasePromise;
+          return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+        },
+      };
+      const service = createProfileService({
+        storageService: ctx.storageService,
+        displayedFitnessService,
+      });
 
-    const profile = await service.getProfile();
-
-    expect(profile.gameCount).toBe(1);
-    expect(storage.savedProfile?.tournamentSettings.provisionalThreshold).toBe(8);
-  });
-
-  test("recomputes when Tournament normalization changes", async () => {
-    const futureDate = new Date(Date.now() + 60_000).toISOString();
-    const pastDate = new Date(Date.now() - 60_000).toISOString();
-    const cachedProfile: CollectionProfile = {
-      axisDistributions: [],
-      axisWeights: [],
-      bggClustering: {
-        mechanics: [],
-        categories: [],
-        families: [],
-        subdomains: [],
-        weightRanges: [],
-      },
-      utilityCurves: [],
-      divergence: null,
-      outliers: [],
-      suggestions: [],
-      narration: null,
-      narrationState: "empty",
-      gameCount: 99,
-      ratedGameCount: 0,
-      computedAt: futureDate,
-    };
-    const tournament = defaultTournament();
-    tournament.settings.normalizationHalfWidth = 300;
-    const storage = createStubStorage({
-      collection: makeCollection(pastDate),
-      tournament,
-      profile: {
-        contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
-        algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
-        tournamentSettings: defaultTournament().settings,
-        profile: cachedProfile,
-        computedAt: futureDate,
-        narration: null,
-        narrationComputedAt: null,
-      },
-    });
-    const service = createProfileService({
-      storageService: storage,
-      displayedFitnessService: createStubDisplayedFitnessService([makeGame("g1", "Game 1")]),
-      tournamentService: createStubTournamentService(),
-    });
-
-    const profile = await service.getProfile();
-
-    expect(profile.gameCount).toBe(1);
-    expect(storage.savedProfile?.tournamentSettings.normalizationHalfWidth).toBe(300);
-  });
-
-  test("recomputes when collection.updatedAt > computedAt", async () => {
-    const games = [makeGame("g1", "Game 1")];
-    const middleDate = new Date(Date.now() - 60_000).toISOString();
-    const recentDate = new Date(Date.now() - 1_000).toISOString();
-
-    const cachedProfile: CollectionProfile = {
-      axisDistributions: [],
-      axisWeights: [],
-      bggClustering: {
-        mechanics: [],
-        categories: [],
-        families: [],
-        subdomains: [],
-        weightRanges: [],
-      },
-      utilityCurves: [],
-      divergence: null,
-      outliers: [],
-      suggestions: [],
-      narration: null,
-      narrationState: "empty",
-      gameCount: 99,
-      ratedGameCount: 0,
-      computedAt: middleDate,
-    };
-
-    const storage = createStubStorage({
-      collection: makeCollection(recentDate),
-      profile: {
-        contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
-        algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
-        tournamentSettings: defaultTournament().settings,
-        profile: cachedProfile,
-        computedAt: middleDate,
-        narration: null,
-        narrationComputedAt: null,
-      },
-    });
-
-    const service = createProfileService({
-      storageService: storage,
-      displayedFitnessService: createStubDisplayedFitnessService(games),
-      tournamentService: createStubTournamentService(),
-    });
-
-    const profile = await service.getProfile();
-
-    // Should recompute (gameCount 1), not return cached (gameCount 99)
-    expect(profile.gameCount).toBe(1);
-    expect(storage.savedProfile).not.toBeNull();
-  });
-
-  test("recomputes when tournament data is newer than computedAt", async () => {
-    const games = [makeGame("g1", "Game 1")];
-    const middleDate = new Date(Date.now() - 60_000).toISOString();
-    const recentDate = new Date(Date.now() - 1_000).toISOString();
-    const oldDate = new Date(Date.now() - 120_000).toISOString();
-
-    const cachedProfile: CollectionProfile = {
-      axisDistributions: [],
-      axisWeights: [],
-      bggClustering: {
-        mechanics: [],
-        categories: [],
-        families: [],
-        subdomains: [],
-        weightRanges: [],
-      },
-      utilityCurves: [],
-      divergence: null,
-      outliers: [],
-      suggestions: [],
-      narration: null,
-      narrationState: "empty",
-      gameCount: 99,
-      ratedGameCount: 0,
-      computedAt: middleDate,
-    };
-
-    const storage = createStubStorage({
-      collection: makeCollection(oldDate),
-      tournament: {
-        settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
-        gameStats: {},
-        sessions: [
-          {
-            id: "s1",
-            status: "completed",
-            comparisonCount: 1,
-            createdAt: oldDate,
-            updatedAt: recentDate,
-            comparisons: [],
-            gameIds: ["g1"],
-            filters: [],
-          },
-        ],
-      },
-      profile: {
-        contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
-        algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
-        tournamentSettings: defaultTournament().settings,
-        profile: cachedProfile,
-        computedAt: middleDate,
-        narration: null,
-        narrationComputedAt: null,
-      },
-    });
-
-    const service = createProfileService({
-      storageService: storage,
-      displayedFitnessService: createStubDisplayedFitnessService(games),
-      tournamentService: createStubTournamentService(),
-    });
-
-    const profile = await service.getProfile();
-
-    // Session updatedAt > computedAt, should recompute
-    expect(profile.gameCount).toBe(1);
-    expect(storage.savedProfile).not.toBeNull();
-  });
-
-  test("recomputes when comparison createdAt is newer than computedAt", async () => {
-    const games = [makeGame("g1", "Game 1"), makeGame("g2", "Game 2")];
-    const oldDate = new Date(Date.now() - 120_000).toISOString();
-    const middleDate = new Date(Date.now() - 60_000).toISOString();
-    const recentDate = new Date(Date.now() - 1_000).toISOString();
-
-    const cachedProfile: CollectionProfile = {
-      axisDistributions: [],
-      axisWeights: [],
-      bggClustering: {
-        mechanics: [],
-        categories: [],
-        families: [],
-        subdomains: [],
-        weightRanges: [],
-      },
-      utilityCurves: [],
-      divergence: null,
-      outliers: [],
-      suggestions: [],
-      narration: null,
-      narrationState: "empty",
-      gameCount: 99,
-      ratedGameCount: 0,
-      computedAt: middleDate,
-    };
-
-    const storage = createStubStorage({
-      collection: makeCollection(oldDate),
-      tournament: {
-        settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
-        gameStats: {},
-        sessions: [
-          {
-            id: "s1",
-            status: "active",
-            comparisonCount: 1,
-            createdAt: oldDate,
-            updatedAt: oldDate,
-            comparisons: [
-              {
-                id: "c1",
-                gameAId: "g1",
-                gameBId: "g2",
-                winnerId: "g1",
-                sessionId: "s1",
-                createdAt: recentDate,
+      const profileRead = service.getProfile();
+      await capturedPromise;
+      let mutationFinished = false;
+      const mutationOperation =
+        source === "collection"
+          ? ctx.collectionMutationService.mutate(
+              { operation: "test.profile-source", trigger: "test" },
+              (collection) => {
+                collection.name = "Changed while profile computes";
+                return { changed: true, value: undefined };
               },
-            ],
-            gameIds: ["g1", "g2"],
-            filters: [],
-          },
-        ],
-      },
-      profile: {
-        contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
-        algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
-        tournamentSettings: defaultTournament().settings,
-        profile: cachedProfile,
-        computedAt: middleDate,
-        narration: null,
-        narrationComputedAt: null,
-      },
-    });
+            )
+          : source === "tournament"
+            ? ctx.tournamentService.updateSettings({ provisionalThreshold: 7 })
+            : source === "prediction"
+              ? ctx.predictionService.updateSettings({ defaultK: 7 })
+              : jsonRequest(ctx.app, "PATCH", "/api/redundancy/settings", { enabled: true });
+      const mutation = mutationOperation.then(() => {
+        mutationFinished = true;
+      });
+      await Promise.resolve();
+      expect(mutationFinished).toBe(false);
 
-    const service = createProfileService({
-      storageService: storage,
-      displayedFitnessService: createStubDisplayedFitnessService(games),
-      tournamentService: createStubTournamentService(),
-    });
+      release();
+      expect((await profileRead).status).toBe("available");
+      await mutation;
+      expect(mutationFinished).toBe(true);
 
-    const profile = await service.getProfile();
-
-    // Comparison createdAt > computedAt, should recompute
-    expect(profile.gameCount).toBe(2);
-    expect(storage.savedProfile).not.toBeNull();
+      expect((await service.getProfile()).status).toBe("available");
+      const [collection, tournament, predictionSettings, redundancySettings] = await Promise.all([
+        ctx.storageService.loadCollection(),
+        ctx.storageService.loadTournament(),
+        ctx.storageService.loadPredictionSettings(),
+        ctx.storageService.loadRedundancySettings(),
+      ]);
+      expect((await ctx.storageService.loadProfile())?.sourceIdentity).toEqual(
+        profileSourceIdentity({
+          collection,
+          tournament,
+          predictionSettings,
+          redundancySettings,
+        }),
+      );
+    }
   });
 
-  test("saves computed profile to storage", async () => {
-    const games = [makeGame("g1", "Game 1")];
-    const storage = createStubStorage();
-
+  test("does not read between linked collection and Tournament deletion writes", async () => {
+    const ctx = createTestApp();
+    const created = await ctx.gameService.addGame({ name: "Deleted game" });
+    let releaseTournamentSave!: () => void;
+    let tournamentSaveStarted!: () => void;
+    const releaseTournamentSavePromise = new Promise<void>((resolve) => {
+      releaseTournamentSave = resolve;
+    });
+    const tournamentSaveStartedPromise = new Promise<void>((resolve) => {
+      tournamentSaveStarted = resolve;
+    });
+    const saveTournament = ctx.storageService.saveTournament.bind(ctx.storageService);
+    ctx.storageService.saveTournament = async (data) => {
+      tournamentSaveStarted();
+      await releaseTournamentSavePromise;
+      await saveTournament(data);
+    };
+    let snapshotCaptured = false;
     const service = createProfileService({
-      storageService: storage,
-      displayedFitnessService: createStubDisplayedFitnessService(games),
-      tournamentService: createStubTournamentService(),
+      storageService: ctx.storageService,
+      displayedFitnessService: {
+        ...ctx.displayedFitnessService,
+        async listGamesFromSnapshot(snapshot, options) {
+          snapshotCaptured = true;
+          return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+        },
+      },
     });
 
-    await service.getProfile();
+    const deletion = ctx.gameService.removeGame(created.game.id);
+    await tournamentSaveStartedPromise;
+    const profileRead = service.getProfile();
+    await Promise.resolve();
+    expect(snapshotCaptured).toBe(false);
 
-    expect(storage.savedProfile).not.toBeNull();
-    expect(storage.savedProfile!.computedAt).toBeDefined();
-    expect(storage.savedProfile!.profile.gameCount).toBe(1);
+    releaseTournamentSave();
+    await deletion;
+    const profile = await profileRead;
+    expect(profile.status).toBe("available");
+    expect(snapshotCaptured).toBe(true);
+    const collection = await ctx.storageService.loadCollection();
+    const tournament = await ctx.storageService.loadTournament();
+    expect(collection.games.some(({ id }) => id === created.game.id)).toBe(false);
+    expect(tournament.gameStats[created.game.id]).toBeUndefined();
+  });
+
+  test("holds source mutations after atomic cache save until the profile operation returns", async () => {
+    const ctx = createTestApp();
+    let releaseSave!: () => void;
+    let saveCompleted!: () => void;
+    const releaseSavePromise = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    const saveCompletedPromise = new Promise<void>((resolve) => {
+      saveCompleted = resolve;
+    });
+    const saveProfile = ctx.storageService.saveProfile.bind(ctx.storageService);
+    ctx.storageService.saveProfile = async (data) => {
+      await saveProfile(data);
+      saveCompleted();
+      await releaseSavePromise;
+    };
+    const service = createProfileService({
+      storageService: ctx.storageService,
+      displayedFitnessService: ctx.displayedFitnessService,
+    });
+
+    const profileRead = service.getProfile();
+    await saveCompletedPromise;
+    let mutationFinished = false;
+    const mutation = ctx.tournamentService.updateSettings({ provisionalThreshold: 7 }).then(() => {
+      mutationFinished = true;
+    });
+    await Promise.resolve();
+    expect(mutationFinished).toBe(false);
+
+    releaseSave();
+    expect((await profileRead).status).toBe("available");
+    await mutation;
+    expect(mutationFinished).toBe(true);
+  });
+
+  test("returns retryable unavailable on recomputation failure without mutating collection", async () => {
+    const ctx = createTestApp();
+    const before = await ctx.storageService.loadCollection();
+    const service = createProfileService({
+      storageService: ctx.storageService,
+      displayedFitnessService: {
+        listGames: () => Promise.resolve([]),
+        listGamesFromSnapshot: () => Promise.reject(new Error("fitness failed")),
+      },
+    });
+
+    const result = await service.getProfile();
+
+    expect(result).toEqual({
+      status: "unavailable",
+      error: { kind: "recomputation", message: "fitness failed" },
+      retryDestination: { operationId: "shelf.profile.get" },
+    });
+    expect(await ctx.storageService.loadCollection()).toEqual(before);
+    expect(await ctx.storageService.loadProfile()).toBeNull();
+  });
+
+  test("distinguishes source validation and cache transport failures", async () => {
+    const validationContext = createTestApp();
+    const invalidStorage: StorageService = {
+      ...validationContext.storageService,
+      loadPredictionSettings: () => Promise.reject(new ZodError([])),
+    };
+    const validation = await createProfileService({
+      storageService: invalidStorage,
+      displayedFitnessService: validationContext.displayedFitnessService,
+    }).getProfile();
+    expect(validation.status).toBe("unavailable");
+    if (validation.status !== "unavailable") throw new Error("Expected unavailable profile");
+    expect(validation.error.kind).toBe("validation");
+
+    const malformedStorage: StorageService = {
+      ...validationContext.storageService,
+      loadPredictionSettings: () => Promise.reject(new SyntaxError("Malformed JSON")),
+    };
+    const malformed = await createProfileService({
+      storageService: malformedStorage,
+      displayedFitnessService: validationContext.displayedFitnessService,
+    }).getProfile();
+    expect(malformed.status).toBe("unavailable");
+    if (malformed.status !== "unavailable") throw new Error("Expected unavailable profile");
+    expect(malformed.error.kind).toBe("validation");
+
+    const transportContext = createTestApp();
+    const failingStorage: StorageService = {
+      ...transportContext.storageService,
+      saveProfile: () => Promise.reject(new Error("disk unavailable")),
+    };
+    const transport = await createProfileService({
+      storageService: failingStorage,
+      displayedFitnessService: transportContext.displayedFitnessService,
+    }).getProfile();
+    expect(transport).toEqual({
+      status: "unavailable",
+      error: { kind: "transport", message: "disk unavailable" },
+      retryDestination: { operationId: "shelf.profile.get" },
+    });
   });
 });

@@ -8,7 +8,6 @@ import { createBggClient } from "./services/bgg-client.js";
 import { createTournamentService } from "./services/tournament-service.js";
 import { createProfileService } from "./services/profile-service.js";
 import { createPredictionService } from "./services/prediction-service.js";
-import { createNarrationService } from "./services/narration-service.js";
 import { createApp } from "./app.js";
 import { createLogger } from "./services/logger.js";
 import { createCollectionMutationService } from "./services/collection-mutation-service.js";
@@ -63,12 +62,9 @@ async function main() {
     storageService,
   });
 
-  const narrationService = createNarrationService();
   const profileService = createProfileService({
     storageService,
     displayedFitnessService,
-    tournamentService,
-    narrationService,
   });
 
   // Forward-declared so the shutdown route can reference the server.

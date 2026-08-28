@@ -27,6 +27,7 @@ import {
   collectionMutationServiceFor,
   type CollectionMutationService,
 } from "./collection-mutation-service.js";
+import { profileSourceCoordinatorFor } from "./profile-source-coordinator.js";
 import type { FitnessService } from "./fitness-service.js";
 import type { BggClient, BggGameResult } from "./bgg-client.js";
 import type { BggCollectionItem } from "./bgg-xml-parser.js";
@@ -372,6 +373,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
   const { storageService, fitnessService, bggClient } = deps;
   const collectionMutationService =
     deps.collectionMutationService ?? collectionMutationServiceFor(storageService);
+  const profileSourceCoordinator = profileSourceCoordinatorFor(storageService);
   const successGenerations = successGenerationsFor(collectionMutationService);
   const now = deps.now ?? (() => new Date().toISOString());
   const logger = deps.logger ?? createLogger("import");
@@ -598,21 +600,23 @@ export function createGameService(deps: GameServiceDeps): GameService {
     },
 
     async removeGame(id: string): Promise<void> {
-      await collectionMutationService.mutate(
-        { operation: "game.remove", trigger: "owner", gameIds: [id] },
-        (collection) => {
-          const index = collection.games.findIndex((game) => game.id === id);
-          if (index === -1) throw new Error(`Game not found: ${id}`);
-          const intentionIds = collection.intentions
-            .filter((intention) => intention.gameId === id)
-            .map((intention) => intention.intentionId);
-          if (intentionIds.length > 0) throw new GameHistoryConflictError(id, intentionIds);
-          collection.games.splice(index, 1);
-          collection.updatedAt = now();
-          return { changed: true, value: undefined };
-        },
-      );
-      await deps.onGameDeleted?.(id);
+      await profileSourceCoordinator.runExclusive(async () => {
+        await collectionMutationService.mutate(
+          { operation: "game.remove", trigger: "owner", gameIds: [id] },
+          (collection) => {
+            const index = collection.games.findIndex((game) => game.id === id);
+            if (index === -1) throw new Error(`Game not found: ${id}`);
+            const intentionIds = collection.intentions
+              .filter((intention) => intention.gameId === id)
+              .map((intention) => intention.intentionId);
+            if (intentionIds.length > 0) throw new GameHistoryConflictError(id, intentionIds);
+            collection.games.splice(index, 1);
+            collection.updatedAt = now();
+            return { changed: true, value: undefined };
+          },
+        );
+        await deps.onGameDeleted?.(id);
+      });
     },
 
     async setOwnership(id: string, ownership: OwnershipStatus): Promise<OwnershipMutationResult> {

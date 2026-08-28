@@ -1,12 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type {
-  Collection,
-  ProfileData,
-  CollectionProfile,
-  WishlistEntry,
-  Game,
-  JsonValue,
-} from "@shelf-judge/shared";
+import type { Collection, ProfileData, WishlistEntry, Game, JsonValue } from "@shelf-judge/shared";
 import {
   createFreshCollectionDerivedAxes,
   createInitialEntityMetadata,
@@ -14,6 +7,8 @@ import {
   CURRENT_PROFILE_CONTRACT_VERSION,
 } from "@shelf-judge/shared";
 import { createStorageService } from "../../src/services/storage-service.js";
+import { computeUsefulProfile } from "../../src/services/profile-engine.js";
+import { profileSourceIdentity } from "../../src/services/profile-source-coordinator.js";
 import { createMockFileOps } from "../helpers/mock-file-ops.js";
 
 const DATA_DIR = "/test/data";
@@ -582,26 +577,39 @@ describe("StorageService.saveConfig", () => {
   });
 });
 
-function makeEmptyProfile(): CollectionProfile {
+function makeEmptyProfileData(computedAt = "2026-01-01T00:00:00.000Z"): ProfileData {
+  const collection = currentCollection();
+  const tournament = {
+    settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
+    sessions: [],
+    gameStats: {},
+  };
+  const predictionSettings = {
+    stageThresholds: [5, 15, 30] as [number, number, number],
+    defaultK: 5,
+    minSimilarityThreshold: 0.2,
+    tournamentStabilityBoost: 0.2,
+  };
+  const redundancySettings = {
+    enabled: false,
+    stage: "annotation" as const,
+    similarityThreshold: 0.6,
+    maxPenalty: 2,
+    componentWeights: { binary: 0.4, continuous: 0.3, personalAxes: 0.3 },
+    minNeighbors: 1,
+    expectedNeighbors: 5,
+  };
   return {
-    axisDistributions: [],
-    axisWeights: [],
-    bggClustering: {
-      mechanics: [],
-      categories: [],
-      families: [],
-      subdomains: [],
-      weightRanges: [],
-    },
-    utilityCurves: [],
-    divergence: null,
-    outliers: [],
-    suggestions: [],
-    gameCount: 0,
-    ratedGameCount: 0,
-    computedAt: "2026-01-01T00:00:00.000Z",
-    narration: null,
-    narrationState: "empty",
+    contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
+    algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
+    sourceIdentity: profileSourceIdentity({
+      collection,
+      tournament,
+      predictionSettings,
+      redundancySettings,
+    }),
+    profile: computeUsefulProfile({ collection, fitnessResults: new Map(), computedAt }),
+    computedAt,
   };
 }
 
@@ -613,19 +621,7 @@ describe("StorageService.loadProfile", () => {
   });
 
   test("loads profile from valid JSON file", async () => {
-    const profileData: ProfileData = {
-      contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
-      algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
-      tournamentSettings: {
-        kFactorThreshold: 15,
-        normalizationHalfWidth: 400,
-        provisionalThreshold: 6,
-      },
-      profile: makeEmptyProfile(),
-      computedAt: "2026-01-01T00:00:00.000Z",
-      narration: null,
-      narrationComputedAt: null,
-    };
+    const profileData = makeEmptyProfileData();
     const { service } = makeService({
       [PROFILE_PATH]: JSON.stringify(profileData),
     });
@@ -633,55 +629,27 @@ describe("StorageService.loadProfile", () => {
     const loaded = await service.loadProfile();
     expect(loaded).not.toBeNull();
     expect(loaded!.computedAt).toBe("2026-01-01T00:00:00.000Z");
-    expect(loaded!.profile.gameCount).toBe(0);
+    expect(loaded!.profile.identity.collectionState).toBe("empty");
   });
 });
 
 describe("StorageService.saveProfile", () => {
   test("writes and loads correctly (round-trip)", async () => {
     const { service } = makeService();
-    const profileData: ProfileData = {
-      contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
-      algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
-      tournamentSettings: {
-        kFactorThreshold: 15,
-        normalizationHalfWidth: 400,
-        provisionalThreshold: 6,
-      },
-      profile: {
-        ...makeEmptyProfile(),
-        gameCount: 42,
-        computedAt: "2026-03-15T12:00:00.000Z",
-      },
-      computedAt: "2026-03-15T12:00:00.000Z",
-      narration: null,
-      narrationComputedAt: null,
-    };
+    const profileData = makeEmptyProfileData("2026-03-15T12:00:00.000Z");
 
     await service.saveProfile(profileData);
     const loaded = await service.loadProfile();
 
     expect(loaded).not.toBeNull();
     expect(loaded!.computedAt).toBe("2026-03-15T12:00:00.000Z");
-    expect(loaded!.profile.gameCount).toBe(42);
+    expect(loaded!.profile.identity.collectionState).toBe("empty");
   });
 
   for (const settingsKind of ["prediction", "redundancy"] as const) {
     test(`invalidates the profile after ${settingsKind} settings change`, async () => {
       const { service } = makeService();
-      await service.saveProfile({
-        contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
-        algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
-        tournamentSettings: {
-          kFactorThreshold: 15,
-          normalizationHalfWidth: 400,
-          provisionalThreshold: 6,
-        },
-        profile: makeEmptyProfile(),
-        computedAt: "2026-01-01T00:00:00.000Z",
-        narration: null,
-        narrationComputedAt: null,
-      });
+      await service.saveProfile(makeEmptyProfileData());
 
       if (settingsKind === "prediction") {
         const settings = await service.loadPredictionSettings();
@@ -694,47 +662,6 @@ describe("StorageService.saveProfile", () => {
       expect(await service.loadProfile()).toBeNull();
     });
   }
-
-  test("rejects a stale profile after settings change away and back", async () => {
-    const { service } = makeService();
-    const expectedFitnessSettings = {
-      prediction: await service.loadPredictionSettings(),
-      redundancy: await service.loadRedundancySettings(),
-      revision: 0,
-    };
-    await service.savePredictionSettings({
-      ...expectedFitnessSettings.prediction,
-      defaultK: expectedFitnessSettings.prediction.defaultK + 1,
-    });
-    await service.savePredictionSettings(expectedFitnessSettings.prediction);
-
-    const staleSave = service.saveProfile(
-      {
-        contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
-        algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
-        tournamentSettings: {
-          kFactorThreshold: 15,
-          normalizationHalfWidth: 400,
-          provisionalThreshold: 6,
-        },
-        profile: makeEmptyProfile(),
-        computedAt: "2026-01-01T00:00:00.000Z",
-        narration: null,
-        narrationComputedAt: null,
-      },
-      undefined,
-      expectedFitnessSettings,
-    );
-    let rejected: unknown;
-    try {
-      await staleSave;
-    } catch (error) {
-      rejected = error;
-    }
-    expect(rejected).toBeInstanceOf(Error);
-    expect((rejected as Error).message).toBe("Fitness settings changed during profile computation");
-    expect(await service.loadProfile()).toBeNull();
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -821,19 +748,7 @@ describe("StorageService.loadCollection — tournament axis migration", () => {
 
   test("deletes profile.json when migration runs", async () => {
     const stored = legacyCollectionWithoutTournamentAxis();
-    const profileData: ProfileData = {
-      contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
-      algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
-      tournamentSettings: {
-        kFactorThreshold: 15,
-        normalizationHalfWidth: 400,
-        provisionalThreshold: 6,
-      },
-      profile: makeEmptyProfile(),
-      computedAt: "2026-01-01T00:00:00.000Z",
-      narration: null,
-      narrationComputedAt: null,
-    };
+    const profileData = makeEmptyProfileData();
     const { service, fileOps } = makeService({
       [COLLECTION_PATH]: JSON.stringify(stored),
       [PROFILE_PATH]: JSON.stringify(profileData),

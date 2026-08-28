@@ -5,6 +5,7 @@ import {
 } from "@shelf-judge/shared";
 import { createLogger, type Logger } from "./logger.js";
 import type { CollectionPersistence, CollectionReader } from "./storage-service.js";
+import { profileSourceCoordinatorFor } from "./profile-source-coordinator.js";
 
 export interface CollectionMutationContext {
   operation: string;
@@ -90,6 +91,7 @@ export function createCollectionMutationService(
   if (existing) return existing;
   const revisionStrategy = deps.revisionStrategy ?? schemaV4RevisionStrategy;
   const logger = deps.logger ?? createLogger("collection-mutation");
+  const profileSourceCoordinator = profileSourceCoordinatorFor(deps.storageService);
   let operations: Promise<void> = Promise.resolve();
 
   function serialize<Value>(operation: () => Promise<Value>): Promise<Value> {
@@ -126,108 +128,110 @@ export function createCollectionMutationService(
       collection: Collection,
     ) => CollectionMutationDecision<Value> | Promise<CollectionMutationDecision<Value>>,
   ): Promise<CollectionMutationOutcome<Value>> {
-    return serialize(async () => {
-      const requestFields = {
-        operation: context.operation,
-        trigger: context.trigger,
-        gameIds: [...(context.gameIds ?? [])],
-        intentionIds: [...(context.intentionIds ?? [])],
-      };
-      logger.log("collection mutation load attempt", requestFields);
-      let current: Collection;
-      try {
-        current = await deps.storageService.loadCollection();
-      } catch (error) {
-        logger.error("collection mutation load failed", {
-          ...requestFields,
-          outcome: "load-failed",
-        });
-        throw error;
-      }
-      const before = revisionStrategy.identity(current);
-      const fields = {
-        ...requestFields,
-        before,
-      };
-      logger.log("collection mutation attempt", fields);
-
-      let decision: CollectionMutationDecision<Value>;
-      const candidate = structuredClone(current);
-      try {
-        decision = await mutation(candidate);
-      } catch (error) {
-        logger.warn("collection mutation rejected", { ...fields, outcome: "rejected" });
-        throw error;
-      }
-
-      if (!decision.changed) {
-        logger.log("collection mutation completed", {
-          ...fields,
-          after: before,
-          changed: false,
-          outcome: "no-op",
-        });
-        return {
-          outcome: "no-op",
-          changed: false,
-          value: decision.value,
-          collection: current,
+    return profileSourceCoordinator.runExclusive(() =>
+      serialize(async () => {
+        const requestFields = {
+          operation: context.operation,
+          trigger: context.trigger,
+          gameIds: [...(context.gameIds ?? [])],
+          intentionIds: [...(context.intentionIds ?? [])],
         };
-      }
-
-      let accepted: Collection;
-      try {
-        accepted = CollectionSchema.parse(revisionStrategy.advance(candidate, current));
-      } catch (error) {
-        logger.warn("collection mutation rejected", {
-          ...fields,
-          outcome: "validation-failed",
-        });
-        await compensate(fields, decision.onPersistenceFailure, error);
-        throw error;
-      }
-
-      const after = revisionStrategy.identity(accepted);
-      logger.log("collection mutation persistence attempt", { ...fields, after });
-      try {
-        await deps.storageService.saveCollection(accepted);
-      } catch (error) {
-        logger.error("collection mutation persistence failed", {
-          ...fields,
-          after,
-          outcome: "persistence-failed",
-        });
-        await compensate({ ...fields, after }, decision.onPersistenceFailure, error);
-        throw error;
-      }
-      logger.log("collection mutation persistence completed", { ...fields, after });
-      if (decision.onPersistenceSuccess) {
-        logger.log("collection mutation post-commit attempt", { ...fields, after });
+        logger.log("collection mutation load attempt", requestFields);
+        let current: Collection;
         try {
-          await decision.onPersistenceSuccess();
-          logger.log("collection mutation post-commit completed", { ...fields, after });
+          current = await deps.storageService.loadCollection();
         } catch (error) {
-          logger.error("collection mutation post-commit failed", {
-            ...fields,
-            after,
-            outcome: "post-commit-failed",
+          logger.error("collection mutation load failed", {
+            ...requestFields,
+            outcome: "load-failed",
           });
           throw error;
         }
-      }
-      logger.log("collection mutation completed", {
-        ...fields,
-        after,
-        changed: true,
-        outcome: "accepted",
-      });
-      return {
-        outcome: "accepted",
-        changed: true,
-        value: decision.value,
-        collection: accepted,
-      };
-    });
+        const before = revisionStrategy.identity(current);
+        const fields = {
+          ...requestFields,
+          before,
+        };
+        logger.log("collection mutation attempt", fields);
+
+        let decision: CollectionMutationDecision<Value>;
+        const candidate = structuredClone(current);
+        try {
+          decision = await mutation(candidate);
+        } catch (error) {
+          logger.warn("collection mutation rejected", { ...fields, outcome: "rejected" });
+          throw error;
+        }
+
+        if (!decision.changed) {
+          logger.log("collection mutation completed", {
+            ...fields,
+            after: before,
+            changed: false,
+            outcome: "no-op",
+          });
+          return {
+            outcome: "no-op",
+            changed: false,
+            value: decision.value,
+            collection: current,
+          };
+        }
+
+        let accepted: Collection;
+        try {
+          accepted = CollectionSchema.parse(revisionStrategy.advance(candidate, current));
+        } catch (error) {
+          logger.warn("collection mutation rejected", {
+            ...fields,
+            outcome: "validation-failed",
+          });
+          await compensate(fields, decision.onPersistenceFailure, error);
+          throw error;
+        }
+
+        const after = revisionStrategy.identity(accepted);
+        logger.log("collection mutation persistence attempt", { ...fields, after });
+        try {
+          await deps.storageService.saveCollection(accepted);
+        } catch (error) {
+          logger.error("collection mutation persistence failed", {
+            ...fields,
+            after,
+            outcome: "persistence-failed",
+          });
+          await compensate({ ...fields, after }, decision.onPersistenceFailure, error);
+          throw error;
+        }
+        logger.log("collection mutation persistence completed", { ...fields, after });
+        if (decision.onPersistenceSuccess) {
+          logger.log("collection mutation post-commit attempt", { ...fields, after });
+          try {
+            await decision.onPersistenceSuccess();
+            logger.log("collection mutation post-commit completed", { ...fields, after });
+          } catch (error) {
+            logger.error("collection mutation post-commit failed", {
+              ...fields,
+              after,
+              outcome: "post-commit-failed",
+            });
+            throw error;
+          }
+        }
+        logger.log("collection mutation completed", {
+          ...fields,
+          after,
+          changed: true,
+          outcome: "accepted",
+        });
+        return {
+          outcome: "accepted",
+          changed: true,
+          value: decision.value,
+          collection: accepted,
+        };
+      }),
+    );
   }
 
   const service = { mutate };

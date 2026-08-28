@@ -983,18 +983,8 @@ export interface CollectionProfile {
   computedAt: string; // ISO 8601
 }
 
-export interface ProfileData {
-  contractVersion: 6;
-  algorithmVersion: 8;
-  tournamentSettings: TournamentSettings;
-  profile: CollectionProfile;
-  computedAt: string; // ISO 8601
-  narration: ProfileNarration | null;
-  narrationComputedAt: string | null; // ISO 8601
-}
-
-// Future useful-profile contracts. These remain additive until the coordinated
-// collection and profile version cutovers activate them.
+// Useful-profile contracts are authoritative in the daemon. CollectionProfile
+// remains the temporary consumer alias until the Step 9/10 CLI and web cutovers.
 
 export type ProfileEntityClass = "mechanic" | "designer" | "artist";
 
@@ -1312,6 +1302,23 @@ export interface FutureUsefulCollectionProfileUnavailable {
 export type FutureUsefulProfileResult =
   | FutureUsefulCollectionProfile
   | FutureUsefulCollectionProfileUnavailable;
+
+export interface ProfileSourceIdentity {
+  collectionId: string;
+  collectionSchemaVersion: 4;
+  collectionRevision: number;
+  tournamentHash: string;
+  predictionSettingsHash: string;
+  redundancySettingsHash: string;
+}
+
+export interface ProfileData {
+  contractVersion: 7;
+  algorithmVersion: 9;
+  sourceIdentity: ProfileSourceIdentity;
+  profile: FutureUsefulCollectionProfile;
+  computedAt: string;
+}
 
 export interface FutureUsefulProfileSnapshot {
   source: FutureUsefulProfileCollectionSource;

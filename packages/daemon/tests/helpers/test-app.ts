@@ -13,7 +13,6 @@ import {
   type PredictionService,
 } from "../../src/services/prediction-service.js";
 import type { BggClient } from "../../src/services/bgg-client.js";
-import type { NarrationService } from "../../src/services/narration-service.js";
 import {
   createPurchaseUtilizationService,
   type PurchaseUtilizationService,
@@ -51,7 +50,6 @@ export interface TestAppContext {
 
 export interface TestAppOptions {
   bggClient?: BggClient;
-  narrationService?: NarrationService;
   fileOps?: ReturnType<typeof createMockFileOps>;
   now?: () => string;
   intentionService?: IntentionService;
@@ -100,7 +98,6 @@ export function createTestApp(options?: TestAppOptions): TestAppContext {
   const collectionMutationService = createCollectionMutationService({ storageService });
   const fitnessService = createFitnessService();
   const bggClient = options?.bggClient;
-  const narrationService = options?.narrationService;
 
   const axisService = createAxisService({ storageService, collectionMutationService });
   const tournamentService = createTournamentService({ storageService });
@@ -133,8 +130,6 @@ export function createTestApp(options?: TestAppOptions): TestAppContext {
   const profileService = createProfileService({
     storageService,
     displayedFitnessService,
-    tournamentService,
-    narrationService,
   });
 
   const { app, operations } = createApp({

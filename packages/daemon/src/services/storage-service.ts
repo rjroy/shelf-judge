@@ -17,6 +17,8 @@ import {
   AcquisitionSchema,
   CURRENT_COLLECTION_SCHEMA_VERSION,
   ProfileDataSchema,
+  PredictionSettingsSchema,
+  RedundancySettingsSchema,
   createFreshCollectionDerivedAxes,
   CollectionSchema,
   EntertainmentBenchmarkSchema,
@@ -49,24 +51,14 @@ export interface CollectionPersistence {
   saveCollection(collection: Collection): Promise<void>;
 }
 
-export interface ProfileFitnessSettings {
-  prediction: PredictionSettings;
-  redundancy: RedundancySettings;
-  revision: number | null;
-}
-
 export interface StorageService extends CollectionReader, CollectionPersistence {
   loadConfig(): Promise<AppConfig>;
   saveConfig(config: AppConfig): Promise<void>;
   loadTournament(): Promise<TournamentData>;
   saveTournament(data: TournamentData): Promise<void>;
   loadProfile(): Promise<ProfileData | null>;
-  loadProfileFitnessSettings?(): Promise<ProfileFitnessSettings>;
-  saveProfile(
-    data: ProfileData,
-    expectedComputedAt?: string,
-    expectedFitnessSettings?: ProfileFitnessSettings,
-  ): Promise<void>;
+  discardProfile?(): Promise<void>;
+  saveProfile(data: ProfileData): Promise<void>;
   loadPredictionSettings(): Promise<PredictionSettings>;
   savePredictionSettings(settings: PredictionSettings): Promise<void>;
   loadNicheSettings(): Promise<NicheSettings>;
@@ -229,7 +221,6 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
   // and the lock has no observable effect.
   const inFlightLoads = new Map<string, Promise<unknown>>();
   let profileOperations: Promise<void> = Promise.resolve();
-  let fitnessSettingsRevision = 0;
   function withLoadLock<T>(filePath: string, fn: () => Promise<T>): Promise<T> {
     const existing = inFlightLoads.get(filePath);
     if (existing) return existing as Promise<T>;
@@ -428,8 +419,9 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     },
 
     async saveTournament(data: TournamentData): Promise<void> {
+      const validated = TournamentDataSchema.parse(data);
       await fileOps.mkdir(dataDir);
-      await writeAtomically(tournamentPath, JSON.stringify(data, null, 2));
+      await writeAtomically(tournamentPath, JSON.stringify(validated, null, 2));
     },
 
     loadProfile(): Promise<ProfileData | null> {
@@ -455,48 +447,18 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
       });
     },
 
-    async loadProfileFitnessSettings(): Promise<ProfileFitnessSettings> {
-      const [prediction, redundancy] = await Promise.all([
-        this.loadPredictionSettings(),
-        this.loadRedundancySettings(),
-      ]);
-      return { prediction, redundancy, revision: fitnessSettingsRevision };
+    discardProfile(): Promise<void> {
+      return withProfileLock(async () => {
+        if (!(await fileOps.exists(profilePath))) return;
+        logger.log(`profile cache discard attempt path=${profilePath}`);
+        await fileOps.unlink(profilePath);
+        logger.log(`profile cache discard completed path=${profilePath}`);
+      });
     },
 
-    saveProfile(
-      data: ProfileData,
-      expectedComputedAt?: string,
-      expectedFitnessSettings?: ProfileFitnessSettings,
-    ): Promise<void> {
+    saveProfile(data: ProfileData): Promise<void> {
       return withProfileLock(async () => {
         const validated = ProfileDataSchema.parse(data);
-        if (expectedComputedAt !== undefined) {
-          if (!(await fileOps.exists(profilePath))) {
-            throw new Error("Profile changed during narration generation");
-          }
-          const current = ProfileDataSchema.safeParse(
-            JSON.parse(await fileOps.readFile(profilePath)),
-          );
-          if (!current.success || current.data.computedAt !== expectedComputedAt) {
-            throw new Error("Profile changed during narration generation");
-          }
-        }
-        if (expectedFitnessSettings !== undefined) {
-          const [prediction, redundancy] = await Promise.all([
-            this.loadPredictionSettings(),
-            this.loadRedundancySettings(),
-          ]);
-          if (
-            fitnessSettingsRevision !== expectedFitnessSettings.revision ||
-            JSON.stringify({ prediction, redundancy }) !==
-              JSON.stringify({
-                prediction: expectedFitnessSettings.prediction,
-                redundancy: expectedFitnessSettings.redundancy,
-              })
-          ) {
-            throw new Error("Fitness settings changed during profile computation");
-          }
-        }
         await fileOps.mkdir(dataDir);
         logger.log(
           `profile cache persistence attempt path=${profilePath} contractVersion=${validated.contractVersion} algorithmVersion=${validated.algorithmVersion}`,
@@ -509,18 +471,18 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     async loadPredictionSettings(): Promise<PredictionSettings> {
       const predictionSettingsPath = path.join(dataDir, "prediction-settings.json");
       const exists = await fileOps.exists(predictionSettingsPath);
-      if (!exists) return { ...DEFAULT_PREDICTION_SETTINGS };
+      if (!exists) return PredictionSettingsSchema.parse({ ...DEFAULT_PREDICTION_SETTINGS });
 
       const raw = await fileOps.readFile(predictionSettingsPath);
-      return JSON.parse(raw) as PredictionSettings;
+      return PredictionSettingsSchema.parse(JSON.parse(raw));
     },
 
     async savePredictionSettings(settings: PredictionSettings): Promise<void> {
       const predictionSettingsPath = path.join(dataDir, "prediction-settings.json");
+      const validated = PredictionSettingsSchema.parse(settings);
       await withProfileLock(async () => {
         await fileOps.mkdir(dataDir);
-        await writeAtomically(predictionSettingsPath, JSON.stringify(settings, null, 2));
-        fitnessSettingsRevision++;
+        await writeAtomically(predictionSettingsPath, JSON.stringify(validated, null, 2));
         await invalidateProfile("prediction-settings");
       });
     },
@@ -543,18 +505,18 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     async loadRedundancySettings(): Promise<RedundancySettings> {
       const redundancySettingsPath = path.join(dataDir, "redundancy-settings.json");
       const exists = await fileOps.exists(redundancySettingsPath);
-      if (!exists) return { ...DEFAULT_REDUNDANCY_SETTINGS };
+      if (!exists) return RedundancySettingsSchema.parse({ ...DEFAULT_REDUNDANCY_SETTINGS });
 
       const raw = await fileOps.readFile(redundancySettingsPath);
-      return JSON.parse(raw) as RedundancySettings;
+      return RedundancySettingsSchema.parse(JSON.parse(raw));
     },
 
     async saveRedundancySettings(settings: RedundancySettings): Promise<void> {
       const redundancySettingsPath = path.join(dataDir, "redundancy-settings.json");
+      const validated = RedundancySettingsSchema.parse(settings);
       await withProfileLock(async () => {
         await fileOps.mkdir(dataDir);
-        await writeAtomically(redundancySettingsPath, JSON.stringify(settings, null, 2));
-        fitnessSettingsRevision++;
+        await writeAtomically(redundancySettingsPath, JSON.stringify(validated, null, 2));
         await invalidateProfile("redundancy-settings");
       });
     },

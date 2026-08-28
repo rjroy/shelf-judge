@@ -68,8 +68,8 @@ export {
 };
 
 export const CURRENT_COLLECTION_SCHEMA_VERSION = 4 as const;
-export const CURRENT_PROFILE_CONTRACT_VERSION = 6 as const;
-export const CURRENT_PROFILE_ALGORITHM_VERSION = 8 as const;
+export const CURRENT_PROFILE_CONTRACT_VERSION = 7 as const;
+export const CURRENT_PROFILE_ALGORITHM_VERSION = 9 as const;
 export const PROFILE_NARRATION_ABSTENTION =
   "No reported trusted insights are available to narrate." as const;
 
@@ -2400,51 +2400,75 @@ export const CollectionProfileSchema = z
     }
   });
 
+const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
+
+export const ProfileSourceIdentitySchema = z
+  .object({
+    collectionId: z.string().min(1),
+    collectionSchemaVersion: z.literal(CURRENT_COLLECTION_SCHEMA_VERSION),
+    collectionRevision: z.number().int().nonnegative().safe(),
+    tournamentHash: Sha256Schema,
+    predictionSettingsHash: Sha256Schema,
+    redundancySettingsHash: Sha256Schema,
+  })
+  .strict();
+
+export const PredictionSettingsSchema = z
+  .object({
+    stageThresholds: z
+      .tuple([
+        z.number().int().nonnegative(),
+        z.number().int().nonnegative(),
+        z.number().int().nonnegative(),
+      ])
+      .refine(([first, second, third]) => first <= second && second <= third, {
+        message: "Prediction stage thresholds must be ordered",
+      }),
+    defaultK: z.number().int().positive(),
+    minSimilarityThreshold: z.number().min(0).max(1),
+    tournamentStabilityBoost: z.number().nonnegative(),
+  })
+  .strict();
+
+export const RedundancySettingsSchema = z
+  .object({
+    enabled: z.boolean(),
+    stage: z.enum(["annotation", "integrated"]),
+    similarityThreshold: z.number().min(0).max(1),
+    maxPenalty: z.number().min(0.5).max(5),
+    componentWeights: z
+      .object({
+        binary: z.number().nonnegative(),
+        continuous: z.number().nonnegative(),
+        personalAxes: z.number().nonnegative(),
+      })
+      .strict()
+      .refine(({ binary, continuous, personalAxes }) => binary + continuous + personalAxes > 0, {
+        message: "Redundancy component weights must have a positive sum",
+      }),
+    minNeighbors: z.number().int().positive(),
+    expectedNeighbors: z.number().int().positive(),
+  })
+  .strict();
+
 export const ProfileDataSchema = z
   .object({
     contractVersion: z.literal(CURRENT_PROFILE_CONTRACT_VERSION),
     algorithmVersion: z.literal(CURRENT_PROFILE_ALGORITHM_VERSION),
-    tournamentSettings: z
-      .object({
-        kFactorThreshold: z.number().int().min(1),
-        normalizationHalfWidth: z.number().positive(),
-        provisionalThreshold: z.number().int().min(0),
-      })
-      .strict(),
-    profile: CollectionProfileSchema,
+    sourceIdentity: ProfileSourceIdentitySchema,
+    profile: FutureUsefulProfileSchema.refine((profile) => profile.status === "available", {
+      message: "Unavailable profiles are not cacheable",
+    }),
     computedAt: TimestampSchema,
-    narration: ProfileNarrationSchema.nullable(),
-    narrationComputedAt: TimestampSchema.nullable(),
   })
   .strict()
   .superRefine((data, context) => {
-    if (data.profile.computedAt !== data.computedAt) {
+    if (data.profile.status === "available" && data.profile.computedAt !== data.computedAt) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["profile", "computedAt"],
         message: "Profile timestamps must match",
       });
-    }
-    if ((data.narration === null) !== (data.narrationComputedAt === null)) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["narrationComputedAt"],
-        message: "Narration and its timestamp must both be present or absent",
-      });
-    }
-    if (data.narration !== null) {
-      const groundedProfile = CollectionProfileSchema.safeParse({
-        ...data.profile,
-        narration: data.narration,
-        narrationState: "fresh",
-      });
-      if (!groundedProfile.success) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["narration"],
-          message: "Persisted narration must match the persisted profile evidence",
-        });
-      }
     }
   });
 

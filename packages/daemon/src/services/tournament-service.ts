@@ -13,6 +13,7 @@ import type {
 import { matchesBggTag } from "@shelf-judge/shared";
 import type { StorageService } from "./storage-service.js";
 import { calculateNewRatings, normalizeElo, shouldDisplayRanking } from "./elo-engine.js";
+import { profileSourceCoordinatorFor } from "./profile-source-coordinator.js";
 
 export interface TournamentService {
   startSession(filters: SessionFilter[] | null, games: GameWithScore[]): Promise<TournamentSession>;
@@ -155,8 +156,9 @@ export function deriveDisplayStats(
 
 export function createTournamentService(deps: TournamentServiceDeps): TournamentService {
   const { storageService } = deps;
+  const profileSourceCoordinator = profileSourceCoordinatorFor(storageService);
 
-  return {
+  const service: TournamentService = {
     async startSession(
       filters: SessionFilter[] | null,
       games: GameWithScore[],
@@ -493,5 +495,21 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
       await storageService.saveTournament(data);
       return data.settings;
     },
+  };
+
+  const serialize =
+    <Arguments extends unknown[], Result>(operation: (...args: Arguments) => Promise<Result>) =>
+    (...args: Arguments): Promise<Result> =>
+      profileSourceCoordinator.runExclusive(() => operation(...args));
+
+  return {
+    ...service,
+    startSession: serialize(service.startSession.bind(service)),
+    endSession: serialize(service.endSession.bind(service)),
+    getNextPair: serialize(service.getNextPair.bind(service)),
+    submitComparison: serialize(service.submitComparison.bind(service)),
+    normalizeFitness: serialize(service.normalizeFitness.bind(service)),
+    onGameDeleted: serialize(service.onGameDeleted.bind(service)),
+    updateSettings: serialize(service.updateSettings.bind(service)),
   };
 }
