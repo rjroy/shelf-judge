@@ -122,6 +122,7 @@ function baseGame(): Game {
       observedAt: null,
     },
     bestPlayersInvalidEvidence: null,
+    manualValues: { playingTime: null, playerCount: null },
     entityMetadata: {
       mechanic: completeEmptyMetadata,
       designer: completeEmptyMetadata,

@@ -112,6 +112,7 @@ function makeGame(
       observedAt: null,
     },
     bestPlayersInvalidEvidence: null,
+    manualValues: { playingTime: null, playerCount: null },
     ownership: "owned",
     boxDimensions: null,
     manualShelfId: null,
@@ -139,7 +140,7 @@ function makeGame(
 
 function makeCollection(games: Game[], axes: Axis[]): Collection {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     revision: 0,
     id: "test-col",
     name: "Test Collection",

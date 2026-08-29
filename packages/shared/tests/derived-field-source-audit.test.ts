@@ -20,6 +20,7 @@ const currentSchemaWriteOwners = new Map<string, ReadonlySet<string>>([
   ["packages/daemon/src/services/bgg-xml-parser.ts", new Set(["playingTime"])],
   ["packages/daemon/src/services/game-service.ts", new Set(["playingTime"])],
   ["packages/daemon/src/services/prediction-service.ts", new Set(["playingTime"])],
+  ["packages/web/components/manual-game-values-form.tsx", new Set(["playingTime"])],
 ]);
 
 function parseSource(filePath: string, source: string): ts.SourceFile {
@@ -78,7 +79,11 @@ function isApprovedCurrentSchemaWrite(filePath: string, node: ts.Node): boolean 
     return false;
   }
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return true;
-  return ts.isIdentifier(node) && ts.isPropertyAssignment(node.parent) && node.parent.name === node;
+  return (
+    ts.isIdentifier(node) &&
+    ((ts.isPropertyAssignment(node.parent) && node.parent.name === node) ||
+      (ts.isShorthandPropertyAssignment(node.parent) && node.parent.name === node))
+  );
 }
 
 function containsBehavior(initializer: ts.Expression): boolean {

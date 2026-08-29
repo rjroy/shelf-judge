@@ -294,7 +294,7 @@ describe("migrateCollection", () => {
     const result = migrateCollection(raw, dependencies);
 
     expect(result).toMatchObject({ migrated: true, sourceVersion: 1 });
-    expect(result.data.schemaVersion).toBe(4);
+    expect(result.data.schemaVersion).toBe(5);
     expect(result.data.axes).toEqual(expectedAxes);
     expect(result.data.games.map(({ bestPlayers }) => bestPlayers)).toEqual([3, 4, null]);
     expect(result.data.games[0]?.bestPlayersInvalidEvidence).toBeNull();
@@ -596,7 +596,7 @@ describe("migrateCollection", () => {
     ]);
   });
 
-  test("chains v0 through v4, inserts Tournament once, and is byte-stable at v4", () => {
+  test("chains v0 through v5, inserts Tournament once, and is byte-stable at v5", () => {
     expect(
       COLLECTION_MIGRATION_STEPS.map(({ fromVersion, toVersion }) => ({ fromVersion, toVersion })),
     ).toEqual([
@@ -604,6 +604,7 @@ describe("migrateCollection", () => {
       { fromVersion: 1, toVersion: 2 },
       { fromVersion: 2, toVersion: 3 },
       { fromVersion: 3, toVersion: 4 },
+      { fromVersion: 4, toVersion: 5 },
     ]);
     const first = migrateCollection(historicalCollection(), dependencies);
     expect(first.data.axes.filter((axis) => axis.source === "tournament")).toHaveLength(1);
@@ -613,12 +614,59 @@ describe("migrateCollection", () => {
     expect(JSON.stringify(second.data)).toBe(JSON.stringify(first.data));
   });
 
+  test("v4 to v5 adds empty manual values and drops only irrecoverable affected score overrides", () => {
+    const current = migrateCollection(historicalCollection(), dependencies).data;
+    const playingTimeAxis = {
+      id: "play-time-axis",
+      name: "Play Time",
+      description: null,
+      weight: 50,
+      enabled: true,
+      source: "derived",
+      derivedField: "playingTime",
+      configuration: { maximumScoringTime: 240 },
+      createdAt: NOW,
+      updatedAt: NOW,
+    } as const;
+    const playerCountAxis = {
+      ...playingTimeAxis,
+      id: "player-count-axis",
+      name: "Player Count Fit",
+      derivedField: "playerCountFit",
+      configuration: { targetPlayerCount: 4 },
+    } as const;
+    const games = current.games.map(({ manualValues, ...game }) => {
+      void manualValues;
+      return {
+        ...game,
+        ratings: {
+          ...game.ratings,
+          [playingTimeAxis.id]: 8,
+          [playerCountAxis.id]: 7,
+        },
+      };
+    });
+    const result = migrateCollection({
+      ...current,
+      schemaVersion: 4,
+      axes: [...current.axes, playingTimeAxis, playerCountAxis],
+      games,
+    });
+
+    expect(result).toMatchObject({ migrated: true, sourceVersion: 4 });
+    expect(result.data.games[0]?.manualValues).toEqual({ playingTime: null, playerCount: null });
+    expect(result.data.games[0]?.ratings).toEqual({
+      "axis-community": 9,
+      "axis-unknown": 3,
+    });
+  });
+
   test("validates current collections on every pass and rejects malformed or future current data", () => {
     const current = migrateCollection(historicalCollection(), dependencies).data;
     expect(CollectionSchema.parse(migrateCollection(current, dependencies).data)).toEqual(current);
     expect(() => migrateCollection({ ...current, unexpected: true }, dependencies)).toThrow();
-    expect(() => migrateCollection({ ...current, schemaVersion: 5 }, dependencies)).toThrow(
-      "Unsupported collection schema version 5; current version is 4",
+    expect(() => migrateCollection({ ...current, schemaVersion: 6 }, dependencies)).toThrow(
+      "Unsupported collection schema version 6; current version is 5",
     );
     expect(() =>
       migrateCollection(
@@ -640,7 +688,7 @@ describe("migrateCollection", () => {
 
     expect(result).toMatchObject({ migrated: true, sourceVersion: 3 });
     expect(result.data).toMatchObject({
-      schemaVersion: 4,
+      schemaVersion: 5,
       revision: 0,
       intentions: [],
       commandReceipts: [],

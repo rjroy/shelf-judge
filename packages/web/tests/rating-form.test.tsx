@@ -4,7 +4,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   buildRatingMutation,
   createRatingFormState,
-  derivedOverrideDraft,
   RatingFormContent,
   ratingFormReducer,
   saveRatings,
@@ -128,7 +127,7 @@ describe("RatingForm controller", () => {
     ).toEqual({ [personalAxis.id]: 7 });
   });
 
-  test("enters, changes, and clears derived overrides", () => {
+  test("excludes affected derived axes from score overrides", () => {
     const initial = createRatingFormState([derivedAxis], {});
     const entered = ratingFormReducer(initial, {
       type: "change",
@@ -142,14 +141,12 @@ describe("RatingForm controller", () => {
     });
     const cleared = ratingFormReducer(changed, { type: "remove", axisId: derivedAxis.id });
 
-    expect(buildRatingMutation([derivedAxis], {}, entered.ratings).ratings).toEqual({
-      [derivedAxis.id]: 8,
-    });
+    expect(initial.ratings).toEqual({});
+    expect(buildRatingMutation([derivedAxis], {}, entered.ratings).ratings).toEqual({});
     expect(changed.ratings[derivedAxis.id]).toBe("6");
     expect(
       buildRatingMutation([derivedAxis], { [derivedAxis.id]: 6 }, cleared.ratings).ratings,
-    ).toEqual({ [derivedAxis.id]: null });
-    expect(derivedOverrideDraft(7.5)).toBe(8);
+    ).toEqual({});
   });
 
   test("tracks saving, failure, and reset transitions", () => {
@@ -256,13 +253,12 @@ describe("RatingForm controller", () => {
     });
 
     expect(html).toContain("Very Good");
-    expect(html).toContain("Stored override (1-10): 8");
-    expect(html).toContain("Target: 4 players");
-    expect(html).toContain("Scoring cap: 240 minutes");
-    expect(html).toContain("Publisher-listed playing time imported from BoardGameGeek");
+    expect(html).not.toContain("Stored override (1-10): 8");
+    expect(html).not.toContain("Target: 4 players");
+    expect(html).not.toContain("Scoring cap: 240 minutes");
   });
 
   test("renders metadata fallback when no derived score is available", () => {
-    expect(renderForm()).toContain("Source metadata unavailable");
+    expect(renderForm()).not.toContain("Source metadata unavailable");
   });
 });

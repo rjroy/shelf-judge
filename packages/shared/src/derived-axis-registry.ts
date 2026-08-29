@@ -24,6 +24,7 @@ import type {
   PreferenceShape,
   TournamentAxis,
 } from "./types";
+import { resolveEffectivePlayerCount, resolveManualOverSource } from "./manual-game-values";
 
 export interface DerivedAxisTemplateDefaults<Configuration> {
   name: string;
@@ -47,6 +48,7 @@ export interface DerivedSuggestionProjection extends DerivedSuggestionAnalysis {
 export interface DerivedFieldDefinition<Configuration> {
   id: DerivedFieldId;
   includedInFreshCollection: boolean;
+  acceptsScoreOverride: boolean;
   label: string;
   description: string;
   provenance: string;
@@ -304,6 +306,7 @@ export const DERIVED_AXIS_REGISTRY = {
   communityRating: defineDerivedField({
     id: "communityRating",
     includedInFreshCollection: true,
+    acceptsScoreOverride: true,
     label: "Community Rating",
     description: "BGG community average rating",
     provenance: "BoardGameGeek community average rating",
@@ -338,6 +341,7 @@ export const DERIVED_AXIS_REGISTRY = {
   weight: defineDerivedField({
     id: "weight",
     includedInFreshCollection: true,
+    acceptsScoreOverride: true,
     label: "Complexity",
     description: "BGG weight normalized to 1-10 scale",
     provenance: "BoardGameGeek community weight rating",
@@ -372,6 +376,7 @@ export const DERIVED_AXIS_REGISTRY = {
   playerCountFit: defineDerivedField({
     id: "playerCountFit",
     includedInFreshCollection: false,
+    acceptsScoreOverride: false,
     label: "Player Count Fit",
     description:
       "Scores a target player count using BGG suggested-player-count poll data, falling back to publisher bounds.",
@@ -398,6 +403,12 @@ export const DERIVED_AXIS_REGISTRY = {
     nativeScale: () => ({ min: 1, max: 10 }),
     resolve: (game, configuration) => {
       const target = configuration.targetPlayerCount;
+      const manual = resolveEffectivePlayerCount(game, null);
+      if (manual !== null && manual.status === "valid") {
+        const penalty = 2 * Math.abs(target - manual.value);
+        const value = Math.min(10, Math.max(1, 10 - penalty));
+        return { sourceValue: value, scoringRawValue: value };
+      }
       const best = game.bestPlayers;
       if (best != null && Number.isFinite(best) && best > 0) {
         // Best might be multiple votes, so consider it a valid range.
@@ -445,6 +456,7 @@ export const DERIVED_AXIS_REGISTRY = {
   playingTime: defineDerivedField({
     id: "playingTime",
     includedInFreshCollection: false,
+    acceptsScoreOverride: false,
     label: "Play Time",
     description: "Scores publisher-listed playing time against your preferred duration.",
     provenance: "Publisher-listed playing time imported from BoardGameGeek",
@@ -473,7 +485,10 @@ export const DERIVED_AXIS_REGISTRY = {
     defaultNativeScale: { min: 1, max: 240 },
     nativeScale: ({ maximumScoringTime }) => ({ min: 1, max: maximumScoringTime }),
     resolve: (game, { maximumScoringTime }) => {
-      const value = projectPlayingTime(game);
+      const value = resolveManualOverSource(
+        game.manualValues.playingTime?.value ?? null,
+        projectPlayingTime(game),
+      );
       if (value === null) return null;
       return { sourceValue: value, scoringRawValue: Math.min(value, maximumScoringTime) };
     },
@@ -568,6 +583,10 @@ export function getDerivedAxisNativeScale<Field extends DerivedFieldId>(
 
 export function isEnabledScoringAxis(axis: Axis): axis is EnabledAxis {
   return axis.enabled;
+}
+
+export function axisAcceptsScoreOverride(axis: Axis): boolean {
+  return axis.source !== "derived" || DERIVED_AXIS_REGISTRY[axis.derivedField].acceptsScoreOverride;
 }
 
 export function isVectorEligibleAxis(axis: Axis): axis is PersonalAxis | TournamentAxis {

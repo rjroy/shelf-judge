@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import {
   AddGameSchema,
+  axisAcceptsScoreOverride,
   createInitialEntityMetadata,
   AXIS_VALIDATION_CODES,
   CodedAxisValidationError,
@@ -21,6 +22,7 @@ import {
   type PlayerRangeEvidence,
   type PlayEvidenceMutationResult,
   type OwnershipMutationResult,
+  ManualGameValuesMutationRequestSchema,
 } from "@shelf-judge/shared";
 import type { CollectionPersistence, StorageService } from "./storage-service.js";
 import {
@@ -75,6 +77,7 @@ export interface GameService {
   setOwnership(id: string, ownership: OwnershipStatus): Promise<OwnershipMutationResult>;
   setBoxDimensions(id: string, dimensions: BoxDimensions | null): Promise<Game>;
   setManualShelf(id: string, shelfId: string | null): Promise<Game>;
+  setManualValues(id: string, values: unknown): Promise<Game>;
   importBggCollection(
     onProgress?: (event: ImportProgressEvent) => Promise<void> | void,
   ): Promise<ImportSummary>;
@@ -478,6 +481,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
           observedAt: null,
         },
         bestPlayersInvalidEvidence: null,
+        manualValues: { playingTime: null, playerCount: null },
         entityMetadata: createInitialEntityMetadata(parsed.bggId ?? null),
         latestPlayCountCheck: null,
         ownership: "owned",
@@ -579,6 +583,9 @@ export function createGameService(deps: GameServiceDeps): GameService {
                 [{ field: "axisId", path: ["ratings", axisId] }],
               );
             }
+            if (!axisAcceptsScoreOverride(axis)) {
+              throw new Error(`${axis.name} accepts native game values, not 1-10 score overrides`);
+            }
             if (rating !== null && (!Number.isInteger(rating) || rating < 1 || rating > 10)) {
               throw new Error(
                 `Rating must be an integer between 1 and 10, got ${rating} for axis "${axis.name}"`,
@@ -597,6 +604,41 @@ export function createGameService(deps: GameServiceDeps): GameService {
       const tournamentData = await storageService.loadTournament();
       const score = computeScore(game, collection.axes, tournamentData);
       return { game, score, bggDataStale: isBggDataStale(game) };
+    },
+
+    async setManualValues(id, values) {
+      const parsed = ManualGameValuesMutationRequestSchema.parse(values);
+      const requestedFields = Object.keys(parsed);
+      logger.log("manual game values mutation attempt", { gameId: id, requestedFields });
+      const result = await collectionMutationService.mutate(
+        { operation: "game.manual-values.set", trigger: "owner", gameIds: [id] },
+        (collection) => {
+          const game = collection.games.find((candidate) => candidate.id === id);
+          if (!game) throw new Error(`Game not found: ${id}`);
+          const changed = requestedFields.some((field) => {
+            const key = field as keyof typeof parsed;
+            return (game.manualValues[key]?.value ?? null) !== parsed[key];
+          });
+          if (!changed) return { changed: false, value: game };
+          const changedAt = now();
+          for (const field of ["playingTime", "playerCount"] as const) {
+            const value = parsed[field];
+            if (value === undefined) continue;
+            game.manualValues[field] =
+              value === null ? null : { value, source: "manual", confirmedAt: changedAt };
+          }
+          game.updatedAt = changedAt;
+          collection.updatedAt = changedAt;
+          return { changed: true, value: game };
+        },
+      );
+      logger.log("manual game values mutation completed", {
+        gameId: id,
+        requestedFields,
+        changed: result.changed,
+        outcome: result.outcome,
+      });
+      return result.value;
     },
 
     async removeGame(id: string): Promise<void> {
@@ -1217,6 +1259,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
                   observedAt: null,
                 },
                 bestPlayersInvalidEvidence: null,
+                manualValues: { playingTime: null, playerCount: null },
                 entityMetadata: structuredClone(result.entityMetadata),
                 latestPlayCountCheck,
                 ownership: "owned",

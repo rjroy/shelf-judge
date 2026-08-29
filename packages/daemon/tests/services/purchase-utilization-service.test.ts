@@ -59,6 +59,7 @@ function game(overrides: Partial<Game> = {}): Game {
       observedAt: initialTime,
     },
     bestPlayersInvalidEvidence: null,
+    manualValues: { playingTime: null, playerCount: null },
     ownership: "owned",
     boxDimensions: null,
     manualShelfId: null,
@@ -73,7 +74,7 @@ function game(overrides: Partial<Game> = {}): Game {
 
 function collection(overrides: Partial<Collection> = {}): Collection {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     revision: 0,
     id: "collection-1",
     name: "Test",
@@ -594,6 +595,38 @@ describe("PurchaseUtilizationService mutations", () => {
 });
 
 describe("PurchaseUtilizationService response enrichment", () => {
+  test("uses the same independent manual duration and player-count values", () => {
+    const ctx = harness();
+    const record = game({
+      manualValues: {
+        playingTime: { value: 90, source: "manual", confirmedAt: changedTime },
+        playerCount: { value: 4, source: "manual", confirmedAt: changedTime },
+      },
+    });
+    const [result] = ctx.service.enrichGames([{ game: record, score: score(6) }], null, "detail");
+
+    expect(result.purchaseUtilization.evidence.duration).toEqual({
+      status: "valid",
+      value: 90,
+      source: "manual",
+      observedAt: changedTime,
+    });
+    expect(result.purchaseUtilization.components.modeledPlayerCount).toMatchObject({
+      outcome: "calculated",
+      display: "4 players",
+      value: { source: "manual", resolution: "manual", observedAt: changedTime },
+    });
+    expect(result.purchaseUtilization.components.modeledPlayerHours).toMatchObject({
+      outcome: "calculated",
+      display: "6 player-hours",
+    });
+    expect(record.durationEvidence).toMatchObject({ value: 60, source: "bgg-thing" });
+    expect(record.playerRangeEvidence).toMatchObject({
+      value: { minPlayers: 2, maxPlayers: 2 },
+      source: "bgg-player-range",
+    });
+  });
+
   test("projects final score once and passes the exact display score into utilization", () => {
     const ctx = harness();
     const record = game({

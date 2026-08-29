@@ -220,10 +220,21 @@ export function calculatePurchaseUtilization(
   input: PurchaseUtilizationInput,
 ): PurchaseUtilizationResult {
   const fitness = parseFitness(input.fitness);
-  const modeledPlayerCount = resolveModeledPlayerCount(
-    input.suggestedPlayerPoll,
-    input.playerRange,
-  );
+  const modeledPlayerCount: UtilizationComponent<ModeledPlayerCountValue> =
+    input.playerCountOverride?.status === "valid"
+      ? calculated<ModeledPlayerCountValue>(
+          LABELS.modeledPlayerCount,
+          {
+            exact: new ExactRational(BigInt(input.playerCountOverride.value)).toJSON(),
+            source: "manual" as const,
+            observedAt: input.playerCountOverride.observedAt,
+            resolution: "manual" as const,
+            winningBestVotes: null,
+            winningPlayerCounts: [],
+          },
+          `${input.playerCountOverride.value} players`,
+        )
+      : resolveModeledPlayerCount(input.suggestedPlayerPoll, input.playerRange);
   const playCount =
     input.playCount.status === "valid" && isNonNegativeSafeInteger(input.playCount.value)
       ? input.playCount.value

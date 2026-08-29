@@ -40,6 +40,7 @@ function makeGame(bggId: number, name: string): Game {
       observedAt: null,
     },
     bestPlayersInvalidEvidence: null,
+    manualValues: { playingTime: null, playerCount: null },
     bggData: {
       communityRating: 7.5,
       bayesAverage: 7.2,
@@ -123,7 +124,7 @@ function createMockStorage(
 ): StorageService {
   let stored = structuredClone(wishlist);
   const coll: Collection = {
-    schemaVersion: 4,
+    schemaVersion: 5,
     revision: 0,
     id: "coll-1",
     name: "Test",
@@ -206,6 +207,7 @@ function createMockGameService(): GameService {
     importBggCollection: () => Promise.reject(new Error("not implemented")),
     setOwnership: () => Promise.reject(new Error("not implemented")),
     setBoxDimensions: () => Promise.reject(new Error("not implemented")),
+    setManualValues: () => Promise.reject(new Error("not implemented")),
     setManualShelf: () => Promise.reject(new Error("not implemented")),
   };
 }

@@ -54,6 +54,7 @@ function game(id = "game-1", ownership: Game["ownership"] = "owned"): Game {
       observedAt: null,
     },
     bestPlayersInvalidEvidence: null,
+    manualValues: { playingTime: null, playerCount: null },
     entityMetadata: { mechanic: metadata, designer: metadata, artist: metadata },
     latestPlayCountCheck: null,
     ownership,

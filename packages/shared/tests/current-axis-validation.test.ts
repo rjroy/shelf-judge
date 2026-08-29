@@ -683,6 +683,7 @@ describe("current persisted collection validation", () => {
             observedAt: null,
           },
           bestPlayersInvalidEvidence: null,
+          manualValues: { playingTime: null, playerCount: null },
           entityMetadata: {
             mechanic: {
               state: "unrefreshable",
@@ -765,6 +766,7 @@ describe("current persisted collection validation", () => {
               observedAt: null,
             },
             bestPlayersInvalidEvidence: null,
+            manualValues: { playingTime: null, playerCount: null },
             ownership: "owned",
             boxDimensions: null,
             manualShelfId: null,
@@ -805,7 +807,7 @@ describe("current persisted collection validation", () => {
   });
 
   test("rejects future versions and extra persisted fields", () => {
-    expect(CollectionSchema.safeParse({ ...currentCollection, schemaVersion: 5 }).success).toBe(
+    expect(CollectionSchema.safeParse({ ...currentCollection, schemaVersion: 6 }).success).toBe(
       false,
     );
     expect(CollectionSchema.safeParse({ ...currentCollection, unexpected: true }).success).toBe(

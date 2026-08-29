@@ -57,6 +57,7 @@ function game(ratings: Record<string, number> = {}, overrides: Partial<Game> = {
       observedAt: null,
     },
     bestPlayersInvalidEvidence: null,
+    manualValues: { playingTime: null, playerCount: null },
     ownership: "owned",
     boxDimensions: null,
     manualShelfId: null,

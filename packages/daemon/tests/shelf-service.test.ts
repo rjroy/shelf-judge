@@ -27,7 +27,7 @@ function createMockStorage(): StorageService & {
       updatedAt: NOW,
     } as ShelfConfiguration,
     collection: {
-      schemaVersion: 4,
+      schemaVersion: 5,
       revision: 0,
       id: "collection-1",
       name: "Test",
@@ -102,6 +102,7 @@ function assignedGame(id: string, shelfId: string): Game {
       observedAt: null,
     },
     bestPlayersInvalidEvidence: null,
+    manualValues: { playingTime: null, playerCount: null },
     ownership: "owned",
     boxDimensions: { width: 10, height: 10, depth: 2 },
     manualShelfId: shelfId,

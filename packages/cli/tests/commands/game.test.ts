@@ -818,6 +818,7 @@ function correctionGame(): Game {
       observedAt: null,
     },
     bestPlayersInvalidEvidence: null,
+    manualValues: { playingTime: null, playerCount: null },
     entityMetadata: createInitialEntityMetadata(null),
     latestPlayCountCheck: null,
     ownership: "owned",

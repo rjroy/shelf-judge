@@ -3,7 +3,7 @@
 import { useReducer } from "react";
 import { useRouter } from "next/navigation";
 import type { Axis, FitnessResult } from "@shelf-judge/shared";
-import { getRatingLabel } from "@shelf-judge/shared";
+import { axisAcceptsScoreOverride, getRatingLabel } from "@shelf-judge/shared";
 
 export interface RatingFormProps {
   gameId: string;
@@ -431,7 +431,10 @@ export function buildRatingMutation(
 }
 
 function isEditableRatingAxis(axis: Axis): boolean {
-  return axis.enabled && (axis.source === "personal" || axis.source === "derived");
+  return (
+    axis.enabled &&
+    (axis.source === "personal" || (axis.source === "derived" && axisAcceptsScoreOverride(axis)))
+  );
 }
 
 export function derivedOverrideDraft(effectiveRating: number | null): number {

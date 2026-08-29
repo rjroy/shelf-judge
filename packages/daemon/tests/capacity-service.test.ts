@@ -54,6 +54,7 @@ function makeGame(
       observedAt: null,
     },
     bestPlayersInvalidEvidence: null,
+    manualValues: { playingTime: null, playerCount: null },
     ownership: opts.ownership ?? "owned",
     boxDimensions: opts.boxDimensions ?? null,
     manualShelfId: opts.manualShelfId ?? null,
@@ -90,7 +91,7 @@ function createMockStorage(units: ShelfUnit[], axes?: Axis[]): StorageService {
     saveShelfConfig: () => Promise.resolve(),
     loadCollection: () =>
       Promise.resolve({
-        schemaVersion: 4,
+        schemaVersion: 5,
         revision: 0,
         id: "mock",
         name: "Mock",
@@ -163,6 +164,7 @@ function createMockGameService(games: GameWithScore[]): GameService {
     importBggCollection: () => Promise.reject(new Error("not implemented")),
     setOwnership: () => Promise.reject(new Error("not implemented")),
     setBoxDimensions: () => Promise.reject(new Error("not implemented")),
+    setManualValues: () => Promise.reject(new Error("not implemented")),
     setManualShelf: () => Promise.reject(new Error("not implemented")),
   };
 }
