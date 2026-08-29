@@ -11,6 +11,7 @@ import type {
   PredictionReadiness,
   PredictionSettings,
   NicheImpact,
+  GameDetailWithPurchaseUtilization,
   GameWithPurchaseUtilization,
 } from "@shelf-judge/shared";
 import type { BggGameResult } from "../../src/services/bgg-client.js";
@@ -198,11 +199,19 @@ describe("prediction routes", () => {
       ).json()) as GameWithPurchaseUtilization[];
       const predictedDetail = (await (
         await jsonRequest(ctx.app, "GET", `/api/games/${targetGame.id}?includePredicted=true`)
-      ).json()) as GameWithPurchaseUtilization;
+      ).json()) as GameDetailWithPurchaseUtilization;
       const actualDetail = (await (
         await jsonRequest(ctx.app, "GET", `/api/games/${targetGame.id}?includePredicted=false`)
-      ).json()) as GameWithPurchaseUtilization;
-      expect(predictedList).toContainEqual(predictedDetail);
+      ).json()) as GameDetailWithPurchaseUtilization;
+      const sharedPredictedDetail: GameWithPurchaseUtilization = {
+        game: predictedDetail.game,
+        score: predictedDetail.score,
+        bggDataStale: predictedDetail.bggDataStale,
+        nichePosition: predictedDetail.nichePosition,
+        displayScore: predictedDetail.displayScore,
+        purchaseUtilization: predictedDetail.purchaseUtilization,
+      };
+      expect(predictedList).toContainEqual(sharedPredictedDetail);
       expect(predictedDetail.score?.score).toBe(prediction.score.score);
       expect(predictedDetail.displayScore).toBe(
         predictedDetail.purchaseUtilization.evidence.fitness.status === "valid"

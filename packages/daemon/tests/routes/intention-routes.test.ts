@@ -1,19 +1,332 @@
 import { describe, expect, test } from "bun:test";
 import {
+  GameIntentionDetailSchema,
+  IntentionCommandSchema,
   IntentionMutationResultSchema,
   type AddGameResult,
+  type IntentionCommand,
   type IntentionMutationResult,
+  type PlayIntention,
 } from "@shelf-judge/shared";
 import * as path from "node:path";
 import { parseThingItems } from "../../src/services/bgg-xml-parser.js";
 import type { BggGameResult } from "../../src/services/bgg-client.js";
 import type { IntentionService } from "../../src/services/intention-service.js";
+import { GameHistoryConflictError } from "../../src/services/game-service.js";
 import { createMockBggClient, createTestApp, jsonRequest } from "../helpers/test-app.js";
 
 const createCommandId = "20000000-0000-4000-8000-000000000001";
 const resolveCommandId = "20000000-0000-4000-8000-000000000002";
+const observedAt = "2026-08-28T10:00:00.000Z";
+
+function routeIntention(overrides: Partial<PlayIntention> = {}): PlayIntention {
+  return {
+    intentionId: "intention-1",
+    gameId: "game-1",
+    kind: "first-play",
+    baseline: { playCount: 0, evidenceSource: "manual", observedAt },
+    createdAt: "2026-08-28T10:01:00.000Z",
+    version: 1,
+    resolution: null,
+    ...overrides,
+  };
+}
+
+function appReturningIntentionResult(
+  buildResult: (command: IntentionCommand) => IntentionMutationResult,
+) {
+  const intentionService: IntentionService = {
+    execute: (input) => Promise.resolve(buildResult(IntentionCommandSchema.parse(input))),
+    setPlayCount: () => Promise.reject(new Error("Unexpected setPlayCount call")),
+    getGameDetail: () => Promise.resolve({ activeIntention: null, resolvedHistory: [] }),
+  };
+  return createTestApp({ intentionService }).app;
+}
 
 describe("game intention and play routes", () => {
+  test("returns internal errors for cross-game mutation results at every route-owned seam", async () => {
+    const expectInternalError = async (response: Response) => {
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({
+        error: "Internal server error",
+        code: "internal_error",
+      });
+    };
+
+    const ownershipContext = createTestApp();
+    const ownershipGame = (await (
+      await jsonRequest(ownershipContext.app, "POST", "/api/games", { name: "Ownership Route" })
+    ).json()) as AddGameResult;
+    ownershipContext.gameService.setOwnership = () =>
+      Promise.resolve({
+        game: { ...ownershipGame.game, id: "other-game", ownership: "previously-owned" },
+        linkedIntentionTransition: null,
+      });
+    await expectInternalError(
+      await jsonRequest(
+        ownershipContext.app,
+        "PATCH",
+        `/api/games/${ownershipGame.game.id}/ownership`,
+        { ownership: "previously-owned" },
+      ),
+    );
+    ownershipContext.gameService.setOwnership = () =>
+      Promise.resolve({ game: ownershipGame.game, linkedIntentionTransition: null });
+    await expectInternalError(
+      await jsonRequest(
+        ownershipContext.app,
+        "PATCH",
+        `/api/games/${ownershipGame.game.id}/ownership`,
+        { ownership: "previously-owned" },
+      ),
+    );
+
+    const playContext = createTestApp();
+    const playGame = (await (
+      await jsonRequest(playContext.app, "POST", "/api/games", {
+        name: "Play Route",
+        numPlays: 0,
+      })
+    ).json()) as AddGameResult;
+    playContext.intentionService.setPlayCount = () =>
+      Promise.resolve({
+        ok: true,
+        game: { ...playGame.game, id: "other-game" },
+        linkedIntentionTransition: null,
+      });
+    await expectInternalError(
+      await jsonRequest(playContext.app, "PUT", `/api/games/${playGame.game.id}/plays`, {
+        playCount: 0,
+      }),
+    );
+    playContext.intentionService.setPlayCount = () =>
+      Promise.resolve({
+        ok: false,
+        error: {
+          code: "non-monotonic-observation",
+          gameId: "other-game",
+          attemptedObservedAt: "2026-08-28T10:00:00.000Z",
+          latestAcceptedAt: "2026-08-28T11:00:00.000Z",
+        },
+      });
+    await expectInternalError(
+      await jsonRequest(playContext.app, "PUT", `/api/games/${playGame.game.id}/plays`, {
+        playCount: 0,
+      }),
+    );
+
+    const refreshContext = createTestApp({ bggClient: createMockBggClient() });
+    const refreshGame = (await (
+      await jsonRequest(refreshContext.app, "POST", "/api/games", { name: "Refresh Route" })
+    ).json()) as AddGameResult;
+    refreshContext.gameService.refreshBggData = () =>
+      Promise.resolve({
+        game: { ...refreshGame.game, id: "other-game" },
+        linkedIntentionTransition: null,
+      });
+    await expectInternalError(
+      await jsonRequest(refreshContext.app, "POST", `/api/games/${refreshGame.game.id}/refresh`),
+    );
+
+    const deletionContext = createTestApp();
+    const deletionGame = (await (
+      await jsonRequest(deletionContext.app, "POST", "/api/games", { name: "Deletion Route" })
+    ).json()) as AddGameResult;
+    deletionContext.gameService.removeGame = () =>
+      Promise.reject(new GameHistoryConflictError("other-game", ["intention-1"]));
+    await expectInternalError(
+      await jsonRequest(deletionContext.app, "DELETE", `/api/games/${deletionGame.game.id}`),
+    );
+  });
+
+  test("returns an internal error for schema-valid service results incoherent with the route command", async () => {
+    const resolved = (outcome: "completed" | "retired"): PlayIntention =>
+      routeIntention({
+        version: 2,
+        resolution:
+          outcome === "completed"
+            ? {
+                outcome,
+                source: "owner-confirmed",
+                resolvedAt: "2026-08-28T10:02:00.000Z",
+              }
+            : {
+                outcome,
+                source: "owner-retired",
+                resolvedAt: "2026-08-28T10:02:00.000Z",
+              },
+      });
+    const cases: Array<{
+      path: string;
+      body: {
+        commandId: string;
+        kind?: "first-play";
+        expectedActiveIntention?: "absent";
+        expectedVersion?: number;
+      };
+      result: (command: IntentionCommand) => IntentionMutationResult;
+    }> = [
+      {
+        path: "/api/games/game-1/intention",
+        body: { commandId: createCommandId, kind: "first-play", expectedActiveIntention: "absent" },
+        result: () => ({
+          ok: true,
+          commandId: "20000000-0000-4000-8000-000000000099",
+          intention: routeIntention(),
+          linkedOwnershipTransition: null,
+        }),
+      },
+      {
+        path: "/api/games/game-1/intention",
+        body: { commandId: createCommandId, kind: "first-play", expectedActiveIntention: "absent" },
+        result: (command) => ({
+          ok: true,
+          commandId: command.commandId,
+          intention: routeIntention({
+            gameId: "game-2",
+            kind: "replay",
+            baseline: { playCount: 2, evidenceSource: "manual", observedAt },
+          }),
+          linkedOwnershipTransition: null,
+        }),
+      },
+      {
+        path: "/api/games/game-1/intention/intention-1/complete",
+        body: { commandId: resolveCommandId, expectedVersion: 1 },
+        result: (command) => ({
+          ok: true,
+          commandId: command.commandId,
+          intention: resolved("retired"),
+          linkedOwnershipTransition: null,
+        }),
+      },
+      {
+        path: "/api/games/game-1/intention/intention-1/retire",
+        body: { commandId: resolveCommandId, expectedVersion: 1 },
+        result: (command) => ({
+          ok: true,
+          commandId: command.commandId,
+          intention: resolved("completed"),
+          linkedOwnershipTransition: null,
+        }),
+      },
+      {
+        path: "/api/games/game-1/intention/intention-1/complete",
+        body: { commandId: resolveCommandId, expectedVersion: 1 },
+        result: (command) => ({
+          ok: true,
+          commandId: command.commandId,
+          intention: { ...resolved("completed"), intentionId: "other-intention" },
+          linkedOwnershipTransition: null,
+        }),
+      },
+      {
+        path: "/api/games/game-1/intention/intention-1/complete",
+        body: { commandId: resolveCommandId, expectedVersion: 1 },
+        result: (command) => ({
+          ok: false,
+          commandId: command.commandId,
+          error: {
+            code: "stale-version",
+            gameId: "game-1",
+            intentionId: "other-intention",
+            expectedVersion: 1,
+            current: { ...resolved("completed"), intentionId: "other-intention" },
+          },
+        }),
+      },
+    ];
+
+    for (const testCase of cases) {
+      const response = await jsonRequest(
+        appReturningIntentionResult(testCase.result),
+        "POST",
+        testCase.path,
+        testCase.body,
+      );
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({
+        error: "Internal server error",
+        code: "internal_error",
+      });
+    }
+  });
+
+  test("projects active and restart-backed resolved history on game detail in stable order", async () => {
+    const original = createTestApp();
+    const add = (await (
+      await jsonRequest(original.app, "POST", "/api/games", { name: "History Game" })
+    ).json()) as AddGameResult;
+    const source = await original.storageService.loadCollection();
+    source.intentions = [
+      {
+        intentionId: "active-intention",
+        gameId: add.game.id,
+        kind: "replay",
+        baseline: {
+          playCount: 2,
+          evidenceSource: "manual",
+          observedAt: "2026-08-28T08:00:00.000Z",
+        },
+        createdAt: "2026-08-28T09:00:00.000Z",
+        version: 1,
+        resolution: null,
+      },
+      {
+        intentionId: "resolved-b",
+        gameId: add.game.id,
+        kind: "first-play",
+        baseline: {
+          playCount: 0,
+          evidenceSource: "manual",
+          observedAt: "2026-08-26T08:00:00.000Z",
+        },
+        createdAt: "2026-08-26T09:00:00.000Z",
+        version: 2,
+        resolution: {
+          outcome: "retired",
+          source: "owner-retired",
+          resolvedAt: "2026-08-28T10:00:00.000Z",
+        },
+      },
+      {
+        intentionId: "resolved-a",
+        gameId: add.game.id,
+        kind: "first-play",
+        baseline: {
+          playCount: 0,
+          evidenceSource: "manual",
+          observedAt: "2026-08-25T08:00:00.000Z",
+        },
+        createdAt: "2026-08-25T09:00:00.000Z",
+        version: 2,
+        resolution: {
+          outcome: "completed",
+          source: "owner-confirmed",
+          resolvedAt: "2026-08-28T10:00:00.000Z",
+        },
+      },
+    ];
+    await original.storageService.saveCollection(source);
+
+    const restarted = createTestApp({ fileOps: original.fileOps });
+    const response = await jsonRequest(restarted.app, "GET", `/api/games/${add.game.id}`);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { intentions: unknown };
+    const detail = GameIntentionDetailSchema.parse(body.intentions);
+    expect(detail.activeIntention?.intentionId).toBe("active-intention");
+    expect(detail.resolvedHistory.map(({ intentionId }) => intentionId)).toEqual([
+      "resolved-a",
+      "resolved-b",
+    ]);
+    expect(detail.resolvedHistory[0]).toMatchObject({
+      gameName: "History Game",
+      kind: "first-play",
+      baseline: { playCount: 0, evidenceSource: "manual" },
+      resolution: { outcome: "completed", source: "owner-confirmed" },
+    });
+  });
+
   test("registers exactly the four Step 6 operations with request, response, and errors", async () => {
     const context = createTestApp();
     const operations = context.operations.filter(({ operationId }) =>

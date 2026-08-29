@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { OwnershipStatus } from "@shelf-judge/shared";
+import type { OwnershipStatus, PlayIntention } from "@shelf-judge/shared";
+import { changeOwnership, refreshGameBgg, removeGameFromCollection } from "@/lib/browser-mutations";
 
 export function GameActions({
   gameId,
@@ -15,23 +16,28 @@ export function GameActions({
   const router = useRouter();
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [announcement, setAnnouncement] = useState<string | null>(null);
+  const generation = useRef(0);
+  const statusRef = useRef<HTMLDivElement>(null);
 
   async function handleRefresh() {
+    const requestGeneration = ++generation.current;
     setRefreshing(true);
     setError(null);
     try {
-      const res = await fetch(`/api/daemon/games/${gameId}/refresh`, {
-        method: "POST",
-      });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({ error: "Unknown error" }))) as {
-          error?: string;
-        };
-        throw new Error(data.error ?? `Failed: ${res.status}`);
-      }
+      const result = await refreshGameBgg(gameId);
+      if (requestGeneration !== generation.current) return;
+      setAnnouncement(
+        result.linkedIntentionTransition === null
+          ? "BGG data refreshed."
+          : "BGG data refreshed and the active intention completed automatically.",
+      );
+      statusRef.current?.focus();
       router.refresh();
     } catch (err) {
+      if (requestGeneration !== generation.current) return;
       setError(err instanceof Error ? err.message : "Failed to refresh");
+      statusRef.current?.focus();
     } finally {
       setRefreshing(false);
     }
@@ -39,9 +45,17 @@ export function GameActions({
 
   return (
     <div className="topbar-actions">
-      {error && <span className="error-banner">{error}</span>}
+      <div ref={statusRef} tabIndex={-1} aria-live="polite" className="action-live-status">
+        {announcement}
+      </div>
+      {error && (
+        <span className="error-banner" role="alert">
+          {error}
+        </span>
+      )}
       {hasBggId && (
         <button
+          id="bgg-refresh"
           className="btn btn-secondary"
           onClick={() => {
             void handleRefresh();
@@ -51,6 +65,35 @@ export function GameActions({
           {refreshing ? "Refreshing..." : "↺ Refresh BGG"}
         </button>
       )}
+    </div>
+  );
+}
+
+export function OwnershipMutationNotice({
+  ownership,
+  linkedIntentionTransition,
+}: {
+  ownership: OwnershipStatus;
+  linkedIntentionTransition: PlayIntention | null;
+}) {
+  return <>{ownershipMutationMessage(ownership, linkedIntentionTransition)}</>;
+}
+
+function ownershipMutationMessage(
+  ownership: OwnershipStatus,
+  linkedIntentionTransition: PlayIntention | null,
+): string {
+  return linkedIntentionTransition === null
+    ? `Ownership changed to ${ownership}.`
+    : `Ownership changed to previously owned. Active intention ${linkedIntentionTransition.intentionId} was retired in the same update.`;
+}
+
+export function DeletionHistoryConflict({ intentionIds }: { intentionIds: string[] }) {
+  return (
+    <div className="history-conflict-guidance" role="status">
+      <strong>History retained:</strong> Intention IDs {intentionIds.join(", ")} protect this
+      game&apos;s history. Retire any active intention, then use <em>Previously Owned</em> status
+      instead. Shelf Judge does not offer deletion of intention history.
     </div>
   );
 }
@@ -68,28 +111,28 @@ export function OwnershipActions({
   const [toggling, setToggling] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [announcement, setAnnouncement] = useState<string | null>(null);
+  const [historyConflict, setHistoryConflict] = useState<string[] | null>(null);
+  const generation = useRef(0);
+  const statusRef = useRef<HTMLDivElement>(null);
 
   const isPreviouslyOwned = ownership === "previously-owned";
 
   async function handleToggleOwnership() {
+    const requestGeneration = ++generation.current;
     const newStatus: OwnershipStatus = isPreviouslyOwned ? "owned" : "previously-owned";
     setToggling(true);
     setError(null);
     try {
-      const res = await fetch(`/api/daemon/games/${gameId}/ownership`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ownership: newStatus }),
-      });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({ error: "Unknown error" }))) as {
-          error?: string;
-        };
-        throw new Error(data.error ?? `Failed: ${res.status}`);
-      }
+      const result = await changeOwnership(gameId, newStatus);
+      if (requestGeneration !== generation.current) return;
+      setAnnouncement(ownershipMutationMessage(newStatus, result.linkedIntentionTransition));
+      statusRef.current?.focus();
       router.refresh();
     } catch (err) {
+      if (requestGeneration !== generation.current) return;
       setError(err instanceof Error ? err.message : "Failed to update ownership");
+      statusRef.current?.focus();
     } finally {
       setToggling(false);
     }
@@ -99,21 +142,26 @@ export function OwnershipActions({
     if (!confirm(`Remove "${gameName}" from your collection? This cannot be undone.`)) {
       return;
     }
+    const requestGeneration = ++generation.current;
     setRemoving(true);
     setError(null);
     try {
-      const res = await fetch(`/api/daemon/games/${gameId}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({ error: "Unknown error" }))) as {
-          error?: string;
-        };
-        throw new Error(data.error ?? `Failed: ${res.status}`);
+      const result = await removeGameFromCollection(gameId);
+      if (requestGeneration !== generation.current) return;
+      if (!result.ok) {
+        if (result.error.code !== "history-conflict") {
+          throw new Error("Game removal was rejected.");
+        }
+        setHistoryConflict(result.error.intentionIds);
+        setError("Permanent deletion is blocked because this game has play-intention history.");
+        statusRef.current?.focus();
+        return;
       }
       router.push("/");
     } catch (err) {
+      if (requestGeneration !== generation.current) return;
       setError(err instanceof Error ? err.message : "Failed to remove game");
+      statusRef.current?.focus();
     } finally {
       setRemoving(false);
     }
@@ -121,7 +169,15 @@ export function OwnershipActions({
 
   return (
     <div className="action-section">
-      {error && <div className="error-banner">{error}</div>}
+      <div ref={statusRef} tabIndex={-1} aria-live="polite" className="action-live-status">
+        {announcement}
+      </div>
+      {error && (
+        <div className="error-banner" role="alert">
+          {error}
+        </div>
+      )}
+      {historyConflict !== null && <DeletionHistoryConflict intentionIds={historyConflict} />}
       <div className="action-group-label">Ownership</div>
       <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
         {isPreviouslyOwned ? (

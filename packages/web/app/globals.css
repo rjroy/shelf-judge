@@ -7817,3 +7817,186 @@ body {
     font-size: 16px !important;
   }
 }
+/* ===== Game Detail Intentions ===== */
+
+.intention-panel,
+.intention-history {
+  margin: 20px 32px 0;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-surface);
+  min-width: 0;
+}
+
+.intention-panel h2,
+.intention-history h2 {
+  margin: 0 0 12px;
+  font-size: var(--text-lg);
+}
+
+.intention-panel :focus-visible,
+.intention-history :focus-visible,
+.action-section :focus-visible,
+.topbar-actions :focus-visible {
+  outline: 3px solid var(--action);
+  outline-offset: 3px;
+}
+
+.intention-live-status:empty,
+.action-live-status:empty {
+  display: none;
+}
+
+.intention-live-status,
+.action-live-status {
+  color: var(--success);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.intention-warning,
+.history-conflict-guidance {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--warning-border);
+  border-radius: 6px;
+  background: var(--warning-subtle);
+  color: var(--warning-text);
+  overflow-wrap: anywhere;
+}
+
+.intention-evidence,
+.intention-help,
+.intention-ineligible,
+.intention-leave-active {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.intention-status-label {
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.intention-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.intention-actions .btn,
+.play-correction > .btn,
+.intention-refresh-link {
+  min-height: 44px;
+}
+
+.play-correction {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.play-correction form {
+  display: grid;
+  gap: 8px;
+  max-width: 460px;
+}
+
+.play-correction label {
+  font-weight: 600;
+}
+
+.play-correction input {
+  width: min(100%, 180px);
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 16px;
+}
+
+.play-correction input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.field-error {
+  margin: 0;
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.intention-refresh-link {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.intention-history-list {
+  display: grid;
+  gap: 12px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.intention-history-item {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-subtle);
+  min-width: 0;
+}
+
+.intention-history-item h3 {
+  margin: 0 0 10px;
+}
+
+.intention-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 14px;
+  margin: 0;
+}
+
+.intention-facts dt {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.intention-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.intention-id {
+  font-family: monospace;
+}
+
+@media (max-width: 700px) {
+  .intention-panel,
+  .intention-history {
+    margin: 16px;
+    padding: 16px;
+  }
+
+  .intention-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .intention-facts {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+
+  .intention-facts dd + dt {
+    margin-top: 8px;
+  }
+}

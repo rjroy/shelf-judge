@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { JsonValue } from "./types";
+import type { IntentionCommand, IntentionMutationResult, JsonValue } from "./types";
 import { ExactRational } from "./exact-rational";
 
 const TimestampSchema = z.string().datetime({ offset: true });
@@ -388,6 +388,65 @@ export const IntentionMutationResultSchema = z
       });
     }
   });
+
+export function intentionMutationResultMatchesCommand(
+  command: IntentionCommand,
+  result: IntentionMutationResult,
+): boolean {
+  if (result.commandId !== command.commandId) return false;
+  if (result.ok) {
+    if (result.intention.gameId !== command.gameId || result.linkedOwnershipTransition !== null) {
+      return false;
+    }
+    if (command.type === "create") {
+      return (
+        result.intention.kind === command.kind &&
+        result.intention.version === 1 &&
+        result.intention.resolution === null
+      );
+    }
+    if (
+      result.intention.intentionId !== command.intentionId ||
+      result.intention.version !== command.expectedVersion + 1
+    ) {
+      return false;
+    }
+    return command.type === "complete"
+      ? result.intention.resolution?.outcome === "completed" &&
+          result.intention.resolution.source === "owner-confirmed"
+      : result.intention.resolution?.outcome === "retired" &&
+          result.intention.resolution.source === "owner-retired";
+  }
+
+  switch (result.error.code) {
+    case "validation":
+    case "persistence-failure":
+      return true;
+    case "command-reuse":
+      return result.error.commandId === command.commandId;
+    case "game-not-found":
+      return result.error.gameId === command.gameId;
+    case "ineligible-game":
+      return command.type === "create" && result.error.gameId === command.gameId;
+    case "active-intention-conflict":
+      return command.type === "create" && result.error.gameId === command.gameId;
+    case "intention-not-found":
+      return (
+        command.type !== "create" &&
+        result.error.gameId === command.gameId &&
+        result.error.intentionId === command.intentionId
+      );
+    case "stale-version":
+      return (
+        command.type !== "create" &&
+        result.error.gameId === command.gameId &&
+        result.error.intentionId === command.intentionId &&
+        result.error.expectedVersion === command.expectedVersion
+      );
+    case "history-conflict":
+      return false;
+  }
+}
 
 export const IntentionCommandReceiptSchema = z
   .object({
@@ -1053,6 +1112,32 @@ export const ResolvedPlayIntentionHistorySchema = z
       context.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Resolved history must be ordered by resolution time descending then intention ID",
+      });
+    }
+  });
+
+export const GameIntentionDetailSchema = z
+  .object({
+    activeIntention: PlayIntentionSchema.nullable(),
+    resolvedHistory: ResolvedPlayIntentionHistorySchema,
+  })
+  .strict()
+  .superRefine((detail, context) => {
+    if (detail.activeIntention !== null && detail.activeIntention.resolution !== null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["activeIntention"],
+        message: "The active game-detail intention must be unresolved",
+      });
+    }
+    const gameIds = [
+      ...(detail.activeIntention === null ? [] : [detail.activeIntention.gameId]),
+      ...detail.resolvedHistory.map(({ gameId }) => gameId),
+    ];
+    if (new Set(gameIds).size > 1) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Game-detail intentions must all belong to one game",
       });
     }
   });

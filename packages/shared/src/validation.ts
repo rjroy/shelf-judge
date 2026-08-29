@@ -38,6 +38,7 @@ import {
   IntentionCommandSchema,
   AcceptedIntentionMutationSchema,
   IntentionMutationResultSchema,
+  intentionMutationResultMatchesCommand,
   IntentionMutationErrorSchema,
   IntentionCommandReceiptSchema,
   FutureUsefulProfileSourceRecordsSchema,
@@ -45,6 +46,7 @@ import {
   PlayIntentionAttentionItemSchema,
   ResolvedPlayIntentionHistoryItemSchema,
   ResolvedPlayIntentionHistorySchema,
+  GameIntentionDetailSchema,
   FutureUsefulProfileSchema,
 } from "./useful-profile-validation";
 
@@ -60,12 +62,14 @@ export {
   IntentionCommandSchema,
   AcceptedIntentionMutationSchema,
   IntentionMutationResultSchema,
+  intentionMutationResultMatchesCommand,
   IntentionMutationErrorSchema,
   IntentionCommandReceiptSchema,
   ProfileEntityClassResultSchema,
   PlayIntentionAttentionItemSchema,
   ResolvedPlayIntentionHistoryItemSchema,
   ResolvedPlayIntentionHistorySchema,
+  GameIntentionDetailSchema,
   FutureUsefulProfileSchema,
 };
 
@@ -1146,6 +1150,306 @@ const FiniteNumberSchema = z.number().finite();
 const NonNegativeIntegerSchema = z.number().int().safe().min(0);
 const PercentageSchema = FiniteNumberSchema.min(0).max(100);
 const TimestampSchema = z.string().datetime({ offset: true });
+const DerivedFieldIdSchema = z.custom<DerivedFieldId>(
+  (value) => typeof value === "string" && Object.hasOwn(DERIVED_AXIS_REGISTRY, value),
+);
+
+const PurchaseUtilizationReasonSchema = z.enum([
+  "missing-acquisition",
+  "invalid-acquisition",
+  "no-owner-cost",
+  "missing-benchmark",
+  "invalid-benchmark",
+  "missing-play-count",
+  "invalid-play-count",
+  "missing-modeled-duration",
+  "invalid-modeled-duration",
+  "missing-modeled-player-count",
+  "invalid-modeled-player-count",
+  "missing-fitness",
+  "invalid-fitness",
+  "unreachable-at-current-fitness",
+]);
+
+const ExactUtilizationValueSchema = z
+  .object({
+    exact: z.object({ numerator: z.string(), denominator: z.string() }).strict(),
+  })
+  .strict();
+
+function utilizationComponentSchema<ValueSchema extends z.ZodTypeAny>(value: ValueSchema) {
+  const base = { label: z.string(), reasons: z.array(PurchaseUtilizationReasonSchema) };
+  return z.union([
+    z
+      .object({
+        ...base,
+        outcome: z.literal("calculated"),
+        value,
+        display: z.string(),
+        reasons: z.tuple([]),
+      })
+      .strict(),
+    z
+      .object({ ...base, outcome: z.literal("unavailable"), display: z.literal("Unavailable") })
+      .strict(),
+    z.object({ ...base, outcome: z.literal("not-applicable"), display: z.string() }).strict(),
+    z
+      .object({
+        ...base,
+        outcome: z.literal("unreachable"),
+        display: z.literal("Unreachable at current fitness"),
+        reasons: z.tuple([z.literal("unreachable-at-current-fitness")]),
+      })
+      .strict(),
+  ]);
+}
+
+const ModeledPlayerCountValueSchema = ExactUtilizationValueSchema.extend({
+  ...EvidenceObservationSchemaFields,
+  resolution: z.enum(["poll-winner", "poll-tie-average", "player-range-midpoint"]),
+  winningBestVotes: NonNegativeIntegerSchema.nullable(),
+  winningPlayerCounts: z.array(z.string()),
+}).strict();
+
+const PurchaseUtilizationFitnessInputSchema = z.union([
+  z
+    .object({
+      ...EvidenceObservationSchemaFields,
+      status: z.literal("valid"),
+      value: z.string(),
+    })
+    .strict(),
+  z
+    .object({
+      ...EvidenceObservationSchemaFields,
+      status: z.literal("missing"),
+    })
+    .strict(),
+  z
+    .object({
+      ...EvidenceObservationSchemaFields,
+      status: z.literal("invalid"),
+      value: z.string(),
+    })
+    .strict(),
+]);
+
+const PurchaseUtilizationResultSchema = z
+  .object({
+    outcome: z.enum(["met", "not-met", "unavailable", "not-applicable"]),
+    outcomeLabel: z.enum([
+      "Value threshold met",
+      "Value threshold not yet met",
+      "Purchase value unavailable",
+      "Purchase value not applicable",
+    ]),
+    reasons: z.array(PurchaseUtilizationReasonSchema),
+    components: z
+      .object({
+        costPerRecordedPlay: utilizationComponentSchema(ExactUtilizationValueSchema),
+        modeledPlayerCount: utilizationComponentSchema(ModeledPlayerCountValueSchema),
+        modeledPlayerHours: utilizationComponentSchema(ExactUtilizationValueSchema),
+        costPerModeledPlayerHour: utilizationComponentSchema(ExactUtilizationValueSchema),
+        fitnessAdjustedHourlyBenchmark: utilizationComponentSchema(ExactUtilizationValueSchema),
+        valueMultiplier: utilizationComponentSchema(
+          ExactUtilizationValueSchema.extend({ status: z.enum(["met", "not-met"]) }).strict(),
+        ),
+        valueRemaining: utilizationComponentSchema(ExactUtilizationValueSchema),
+        estimatedAdditionalPlays: utilizationComponentSchema(
+          z.object({ wholePlays: z.string() }).strict(),
+        ),
+      })
+      .strict(),
+    evidence: z
+      .object({
+        acquisition: AcquisitionSchema,
+        entertainmentBenchmark: EntertainmentBenchmarkSchema,
+        playCount: PlayCountEvidenceSchema,
+        duration: DurationEvidenceSchema,
+        playerRange: PlayerRangeEvidenceSchema,
+        suggestedPlayerPoll: SuggestedPlayerPollSchema,
+        fitness: PurchaseUtilizationFitnessInputSchema,
+      })
+      .strict(),
+    assumptions: z
+      .object({
+        modeledSessions: z.literal(
+          "Models each recorded play at the shown duration and player count; actual sessions may differ.",
+        ),
+        futurePlays: z.literal(
+          "Estimated additional plays assumes future plays use the shown duration, player count, fitness, and entertainment benchmark.",
+        ),
+        fitnessAdjustment: z.literal(
+          "The fitness-adjusted hourly benchmark changes in direct proportion to current fitness; fitness 6 uses the collection benchmark.",
+        ),
+      })
+      .strict(),
+    sort: z
+      .object({
+        valueRemainingHundredths: z.string().nullable(),
+        estimatedAdditionalPlays: z.union([
+          z.object({ category: z.literal("finite"), wholePlays: z.string() }).strict(),
+          z
+            .object({
+              category: z.enum(["unreachable", "unavailable", "not-applicable"]),
+              wholePlays: z.null(),
+            })
+            .strict(),
+        ]),
+      })
+      .strict(),
+  })
+  .strict();
+
+const RedundancyAdjustmentResponseSchema = z
+  .object({
+    penalty: FiniteNumberSchema,
+    originalScore: FiniteNumberSchema,
+    adjustedScore: FiniteNumberSchema,
+    nicheNeighbors: z.array(
+      z
+        .object({
+          gameId: z.string().min(1),
+          gameName: z.string().min(1),
+          similarity: FiniteNumberSchema,
+          fitnessScore: FiniteNumberSchema,
+          isPredicted: z.boolean(),
+        })
+        .strict(),
+    ),
+    nicheRank: NonNegativeIntegerSchema,
+    nicheSize: NonNegativeIntegerSchema,
+  })
+  .strict();
+
+const FitnessResultResponseSchema = z
+  .object({
+    score: FiniteNumberSchema,
+    ratedAxisCount: NonNegativeIntegerSchema,
+    totalAxisCount: NonNegativeIntegerSchema,
+    breakdown: z.array(
+      z
+        .object({
+          axisId: z.string().min(1),
+          axisName: z.string().min(1),
+          weight: FiniteNumberSchema,
+          contribution: FiniteNumberSchema.nullable(),
+          source: z.enum(["personal", "tournament", "derived", "override", "predicted"]),
+          derivedField: DerivedFieldIdSchema.nullable(),
+          sourceValue: FiniteNumberSchema.nullable(),
+          scoringRawValue: FiniteNumberSchema.nullable(),
+          effectiveRating: FiniteNumberSchema.nullable(),
+          preferenceShape: z.enum(["higher-is-better", "lower-is-better", "sweet-spot"]),
+          curveAffected: z.boolean(),
+          unit: z.string().nullable(),
+          provenance: z.string().nullable(),
+          configurationSummary: z.string().nullable(),
+          overridden: z.boolean(),
+          overrideValue: FiniteNumberSchema.nullable(),
+          predictionConfidence: z
+            .enum(["actual", "strong", "moderate", "weak", "insufficient"])
+            .nullable(),
+          referenceGames: z
+            .array(
+              z
+                .object({
+                  gameId: z.string().min(1),
+                  gameName: z.string().min(1),
+                  similarity: FiniteNumberSchema,
+                })
+                .strict(),
+            )
+            .nullable(),
+        })
+        .strict(),
+    ),
+    vetoed: z.boolean(),
+    vetoedBy: z
+      .object({
+        axisId: z.string().min(1),
+        axisName: z.string().min(1),
+        threshold: FiniteNumberSchema,
+        direction: z.enum(["below", "above"]),
+        rawValue: FiniteNumberSchema,
+      })
+      .strict()
+      .nullable(),
+    hypotheticalScore: FiniteNumberSchema.nullable(),
+    predictionMeta: z
+      .object({
+        readinessStage: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]),
+        confidence: z.enum(["actual", "strong", "moderate", "weak", "insufficient"]),
+        predictedAxisCount: NonNegativeIntegerSchema,
+        actualAxisCount: NonNegativeIntegerSchema,
+        referenceGameCount: NonNegativeIntegerSchema,
+        coveragePercent: FiniteNumberSchema,
+      })
+      .strict()
+      .nullable(),
+    redundancyAdjustment: RedundancyAdjustmentResponseSchema.nullable(),
+  })
+  .strict();
+
+const NicheNeighborResponseSchema = z
+  .object({
+    gameId: z.string().min(1),
+    gameName: z.string().min(1),
+    fitnessScore: FiniteNumberSchema,
+    isPredicted: z.boolean(),
+  })
+  .strict();
+
+const NichePositionResponseSchema = z
+  .object({
+    niches: z.array(
+      z
+        .object({
+          type: z.enum(["mechanic", "category", "family"]),
+          name: z.string().min(1),
+          size: NonNegativeIntegerSchema,
+          rank: NonNegativeIntegerSchema,
+          isChampion: z.boolean(),
+          champion: NicheNeighborResponseSchema,
+          above: z.array(NicheNeighborResponseSchema),
+          below: z.array(NicheNeighborResponseSchema),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+
+export const GameDetailWithPurchaseUtilizationSchema = z
+  .object({
+    game: GameSchema,
+    score: FitnessResultResponseSchema.nullable(),
+    bggDataStale: z.boolean().optional(),
+    nichePosition: NichePositionResponseSchema.nullable().optional(),
+    displayScore: z.string().nullable(),
+    purchaseUtilization: PurchaseUtilizationResultSchema,
+    intentions: GameIntentionDetailSchema,
+  })
+  .strict()
+  .superRefine((detail, context) => {
+    if (
+      detail.intentions.activeIntention !== null &&
+      detail.intentions.activeIntention.gameId !== detail.game.id
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["intentions", "activeIntention", "gameId"],
+        message: "Active intention must belong to the detail game",
+      });
+    }
+    for (const [index, intention] of detail.intentions.resolvedHistory.entries()) {
+      if (intention.gameId !== detail.game.id) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["intentions", "resolvedHistory", index, "gameId"],
+          message: "Resolved intention must belong to the detail game",
+        });
+      }
+    }
+  });
 
 const NarrationEvidenceReferenceSchema = z
   .object({
@@ -1237,11 +1541,7 @@ const UtilityCurveDeclarationSchema = z
   .object({
     axisId: z.string().min(1),
     axisName: z.string().min(1),
-    derivedField: z
-      .custom<DerivedFieldId>(
-        (value) => typeof value === "string" && Object.hasOwn(DERIVED_AXIS_REGISTRY, value),
-      )
-      .nullable(),
+    derivedField: DerivedFieldIdSchema.nullable(),
     shape: z.enum(["higher-is-better", "lower-is-better", "sweet-spot"]),
     idealValue: FiniteNumberSchema.nullable(),
     tolerance: z.enum(["flexible", "moderate", "strict"]).nullable(),

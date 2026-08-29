@@ -1284,6 +1284,15 @@ export interface ResolvedPlayIntentionHistoryItem {
 
 export type ResolvedPlayIntentionHistory = ResolvedPlayIntentionHistoryItem[];
 
+export interface GameIntentionDetail {
+  activeIntention: PlayIntention | null;
+  resolvedHistory: ResolvedPlayIntentionHistory;
+}
+
+export interface GameDetailWithPurchaseUtilization extends GameWithPurchaseUtilization {
+  intentions: GameIntentionDetail;
+}
+
 export interface FutureUsefulCollectionProfile {
   status: "available";
   identity: {

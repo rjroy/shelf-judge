@@ -5,6 +5,7 @@ import type {
   PredictionConfidence,
   FitnessBreakdownEntry,
 } from "@shelf-judge/shared";
+import { DeletionHistoryConflict, OwnershipMutationNotice } from "@/components/game-actions";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -176,6 +177,59 @@ describe("Surfaces that must remain unchanged", () => {
   test("search results do not have game-link class in source", async () => {
     const file = await Bun.file("packages/web/app/search/page.tsx").text();
     expect(file).not.toContain("game-link");
+  });
+});
+
+describe("game detail Step 11 surfaces", () => {
+  test("keeps purchase utilization and redundancy while profile-specific cards remain absent", async () => {
+    const source = await Bun.file("packages/web/app/games/[id]/page.tsx").text();
+    expect(source).toContain("PurchaseUtilizationPanel");
+    expect(source).toContain("RedundancyPanel");
+    expect(source).toContain("IntentionControls");
+    for (const removed of ["divergence", "outlier", "suggestion"]) {
+      expect(source.toLowerCase()).not.toContain(removed);
+    }
+  });
+
+  test("uses native named controls and explicit ownership/deletion outcome language", async () => {
+    const controls = await Bun.file("packages/web/components/intention-controls.tsx").text();
+    const actions = await Bun.file("packages/web/components/game-actions.tsx").text();
+    expect(controls).toContain('name="playCount"');
+    expect(controls).toContain('type="number"');
+    expect(controls).toContain('type="submit"');
+    expect(controls).toContain('aria-live="polite"');
+    expect(actions).toContain("was retired in the same update");
+    expect(actions).toContain("Previously Owned");
+    expect(actions).toContain("does not offer deletion of intention history");
+
+    const ownership = renderToString(
+      <OwnershipMutationNotice
+        ownership="previously-owned"
+        linkedIntentionTransition={{
+          intentionId: "intention-1",
+          gameId: "game-1",
+          kind: "first-play",
+          baseline: {
+            playCount: 0,
+            evidenceSource: "manual",
+            observedAt: "2026-08-28T09:00:00.000Z",
+          },
+          createdAt: "2026-08-28T10:00:00.000Z",
+          version: 2,
+          resolution: {
+            outcome: "retired",
+            source: "owner-retired",
+            resolvedAt: "2026-08-28T11:00:00.000Z",
+          },
+        }}
+      />,
+    );
+    expect(ownership).toContain("was retired in the same update");
+
+    const conflict = renderToString(<DeletionHistoryConflict intentionIds={["intention-1"]} />);
+    expect(conflict).toContain("Retire any active intention");
+    expect(conflict).toContain("Previously Owned");
+    expect(conflict).toContain("does not offer deletion of intention history");
   });
 });
 

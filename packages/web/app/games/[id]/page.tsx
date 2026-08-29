@@ -25,6 +25,7 @@ import { BoxDimensionsForm } from "@/components/box-dimensions-form";
 import { ShelfAssignmentForm } from "@/components/shelf-assignment-form";
 import { AcquisitionForm } from "@/components/acquisition-form";
 import { PurchaseUtilizationPanel } from "@/components/purchase-utilization-panel";
+import { IntentionControls } from "@/components/intention-controls";
 
 export async function generateMetadata({
   params,
@@ -278,6 +279,8 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
           result={purchaseUtilization}
           isPreviouslyOwned={isPreviouslyOwned}
         />
+
+        <IntentionControls game={game} detail={data.intentions} />
 
         {tournamentStats && tournamentStats.comparisonCount > 0 && (
           <div className="tournament-breakdown-panel">

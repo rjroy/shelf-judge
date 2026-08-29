@@ -18,6 +18,7 @@ import type {
   AddGameResult,
   GameWithScore,
   GameWithPurchaseUtilization,
+  GameDetailWithPurchaseUtilization,
   BggSearchResult,
 } from "@shelf-judge/shared";
 import { createCompleteEntityMetadata } from "@shelf-judge/shared";
@@ -252,8 +253,16 @@ describe("Game Routes", () => {
       ).json()) as GameWithPurchaseUtilization[];
       const detail = (await (
         await jsonRequest(ctx.app, "GET", `/api/games/${game.id}`)
-      ).json()) as GameWithPurchaseUtilization;
-      expect(list).toContainEqual(detail);
+      ).json()) as GameDetailWithPurchaseUtilization;
+      const sharedDetail: GameWithPurchaseUtilization = {
+        game: detail.game,
+        score: detail.score,
+        bggDataStale: detail.bggDataStale,
+        nichePosition: detail.nichePosition,
+        displayScore: detail.displayScore,
+        purchaseUtilization: detail.purchaseUtilization,
+      };
+      expect(list).toContainEqual(sharedDetail);
     });
 
     test("previously owned detail is enriched but remains outside niche and redundancy universes", async () => {

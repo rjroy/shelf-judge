@@ -28,8 +28,10 @@ import type {
   GameWithPurchaseUtilization,
   PlayEvidenceMutationResult,
   OwnershipMutationResult,
+  GameDetailWithPurchaseUtilization,
 } from "@shelf-judge/shared";
 import {
+  GameDetailWithPurchaseUtilizationSchema,
   OwnershipMutationResultSchema,
   PlayEvidenceMutationResultSchema,
 } from "@shelf-judge/shared";
@@ -46,8 +48,11 @@ export async function listGames(opts?: {
   return daemonJson(`/api/games${qs ? `?${qs}` : ""}`);
 }
 
-export async function getGame(id: string): Promise<GameWithPurchaseUtilization> {
-  return daemonJson(`/api/games/${id}?includePredicted=true`);
+export async function getGame(
+  id: string,
+  load: () => Promise<unknown> = () => daemonJson(`/api/games/${id}?includePredicted=true`),
+): Promise<GameDetailWithPurchaseUtilization> {
+  return GameDetailWithPurchaseUtilizationSchema.parse(await load());
 }
 
 export async function setGameAcquisition(

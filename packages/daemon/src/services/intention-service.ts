@@ -9,6 +9,8 @@ import {
   type IntentionMutationResult,
   type ManualPlayCorrectionResult,
   type PlayIntention,
+  type GameIntentionDetail,
+  GameIntentionDetailSchema,
 } from "@shelf-judge/shared";
 import type { CollectionMutationService } from "./collection-mutation-service.js";
 import { createLogger, type Logger } from "./logger.js";
@@ -18,6 +20,7 @@ const INVALID_COMMAND_ID = "00000000-0000-0000-0000-000000000000";
 export interface IntentionService {
   execute(command: unknown): Promise<IntentionMutationResult>;
   setPlayCount(gameId: string, playCount: number): Promise<ManualPlayCorrectionResult>;
+  getGameDetail(gameId: string, gameName: string): Promise<GameIntentionDetail>;
 }
 
 export interface IntentionServiceDeps {
@@ -146,6 +149,39 @@ export function createIntentionService(deps: IntentionServiceDeps): IntentionSer
   const now = deps.now ?? (() => new Date().toISOString());
   const createId = deps.createId ?? uuidv4;
   const logger = deps.logger ?? createLogger("intention");
+
+  async function getGameDetail(gameId: string, gameName: string): Promise<GameIntentionDetail> {
+    const { value } = await deps.collectionMutationService.mutate(
+      { operation: "game.intention.detail", trigger: "game-detail-read", gameIds: [gameId] },
+      (collection) => {
+        const matching = collection.intentions.filter((intention) => intention.gameId === gameId);
+        const activeIntention = matching.find(({ resolution }) => resolution === null) ?? null;
+        const resolvedHistory = matching
+          .filter(
+            (
+              intention,
+            ): intention is PlayIntention & {
+              resolution: NonNullable<PlayIntention["resolution"]>;
+            } => intention.resolution !== null,
+          )
+          .map((intention) => ({ ...structuredClone(intention), gameName }))
+          .sort(
+            (left, right) =>
+              Date.parse(right.resolution.resolvedAt) - Date.parse(left.resolution.resolvedAt) ||
+              (left.intentionId < right.intentionId
+                ? -1
+                : left.intentionId > right.intentionId
+                  ? 1
+                  : 0),
+          );
+        return {
+          changed: false,
+          value: GameIntentionDetailSchema.parse({ activeIntention, resolvedHistory }),
+        };
+      },
+    );
+    return value;
+  }
 
   async function execute(commandInput: unknown): Promise<IntentionMutationResult> {
     const parsed = IntentionCommandSchema.safeParse(commandInput);
@@ -562,5 +598,5 @@ export function createIntentionService(deps: IntentionServiceDeps): IntentionSer
     }
   }
 
-  return { execute, setPlayCount };
+  return { execute, setPlayCount, getGameDetail };
 }

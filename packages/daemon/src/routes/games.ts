@@ -5,8 +5,10 @@ import {
   CodedAxisValidationError,
   NotFoundError,
   toErrorMessage,
+  type IntentionCommand,
   type IntentionMutationResult,
   IntentionMutationResultSchema,
+  intentionMutationResultMatchesCommand,
   ManualPlayCorrectionResultSchema,
   PlayEvidenceMutationResultSchema,
   OwnershipMutationResultSchema,
@@ -352,7 +354,11 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       if (!assembledResult) throw new NotFoundError(`Game not found: ${id}`);
       const result = toPublicGameWithScore(assembledResult);
       const [enriched] = await enrichFinalGames([result], "detail");
-      return c.json(enriched);
+      const intentionDetail =
+        intentionService === undefined
+          ? { activeIntention: null, resolvedHistory: [] }
+          : await intentionService.getGameDetail(enriched.game.id, enriched.game.name);
+      return c.json({ ...enriched, intentions: intentionDetail });
     } catch (err) {
       if (err instanceof NotFoundError) {
         return c.json(gameNotFoundResponse(id), 404);
@@ -490,6 +496,7 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       return c.body(null, 204);
     } catch (err) {
       if (err instanceof GameHistoryConflictError) {
+        if (err.error.gameId !== id) return c.json(INTERNAL_ERROR_RESPONSE, 500);
         return c.json(err.error, 409);
       }
       const message = toErrorMessage(err);
@@ -526,6 +533,9 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       const result = OwnershipMutationResultSchema.parse(
         await gameService.setOwnership(id, parsed.data.ownership),
       );
+      if (result.game.id !== id || result.game.ownership !== parsed.data.ownership) {
+        return c.json(INTERNAL_ERROR_RESPONSE, 500);
+      }
       return c.json(result);
     } catch (err) {
       const message = toErrorMessage(err);
@@ -538,10 +548,14 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
 
   async function intentionResponse(
     resultPromise: Promise<IntentionMutationResult>,
+    command: IntentionCommand,
   ): Promise<Response> {
     let result: IntentionMutationResult;
     try {
       result = IntentionMutationResultSchema.parse(await resultPromise);
+      if (!intentionMutationResultMatchesCommand(command, result)) {
+        return Response.json(INTERNAL_ERROR_RESPONSE, { status: 500 });
+      }
     } catch {
       return Response.json(INTERNAL_ERROR_RESPONSE, { status: 500 });
     }
@@ -592,15 +606,14 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     }
     const parsed = CreateIntentionBodySchema.safeParse(body);
     if (!parsed.success) return intentionValidationResponse(body, parsed.error);
-    return intentionResponse(
-      intentions().execute({
-        type: "create",
-        commandId: parsed.data.commandId,
-        gameId: c.req.param("id"),
-        kind: parsed.data.kind,
-        expectedActiveIntention: parsed.data.expectedActiveIntention,
-      }),
-    );
+    const command = {
+      type: "create",
+      commandId: parsed.data.commandId,
+      gameId: c.req.param("id"),
+      kind: parsed.data.kind,
+      expectedActiveIntention: parsed.data.expectedActiveIntention,
+    } satisfies IntentionCommand;
+    return intentionResponse(intentions().execute(command), command);
   });
 
   for (const type of ["complete", "retire"] as const) {
@@ -613,15 +626,14 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       }
       const parsed = ResolveIntentionBodySchema.safeParse(body);
       if (!parsed.success) return intentionValidationResponse(body, parsed.error);
-      return intentionResponse(
-        intentions().execute({
-          type,
-          commandId: parsed.data.commandId,
-          gameId: c.req.param("id"),
-          intentionId: c.req.param("intentionId"),
-          expectedVersion: parsed.data.expectedVersion,
-        }),
-      );
+      const command = {
+        type,
+        commandId: parsed.data.commandId,
+        gameId: c.req.param("id"),
+        intentionId: c.req.param("intentionId"),
+        expectedVersion: parsed.data.expectedVersion,
+      } satisfies IntentionCommand;
+      return intentionResponse(intentions().execute(command), command);
     });
   }
 
@@ -649,9 +661,13 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       );
     }
     try {
+      const gameId = c.req.param("id");
       const result = ManualPlayCorrectionResultSchema.parse(
-        await intentions().setPlayCount(c.req.param("id"), parsed.data.playCount),
+        await intentions().setPlayCount(gameId, parsed.data.playCount),
       );
+      if (result.ok ? result.game.id !== gameId : result.error.gameId !== gameId) {
+        return c.json(INTERNAL_ERROR_RESPONSE, 500);
+      }
       return result.ok ? c.json(result) : c.json(result, 409);
     } catch (error) {
       const message = toErrorMessage(error);
@@ -751,6 +767,7 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
 
     try {
       const result = PlayEvidenceMutationResultSchema.parse(await gameService.refreshBggData(id));
+      if (result.game.id !== id) return c.json(INTERNAL_ERROR_RESPONSE, 500);
       return c.json(result);
     } catch (err) {
       const message = toErrorMessage(err);
