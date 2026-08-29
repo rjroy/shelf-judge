@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ProfileDataSchema } from "@shelf-judge/shared";
 import type { DisplayedFitnessService } from "../src/services/displayed-fitness-service.js";
 import { createProfileService } from "../src/services/profile-service.js";
 import type { StorageService } from "../src/services/storage-service.js";
@@ -7,7 +8,9 @@ import {
   canonicalJson,
   canonicalSha256,
   profileSourceIdentity,
+  type ProfileSources,
 } from "../src/services/profile-source-coordinator.js";
+import { createMockFileOps } from "./helpers/mock-file-ops.js";
 import { createTestApp, jsonRequest } from "./helpers/test-app.js";
 
 describe("profile source identity", () => {
@@ -131,22 +134,52 @@ describe("ProfileService", () => {
     expect(await ctx.storageService.loadProfile()).toBeNull();
   });
 
-  test("serializes all four source mutations through snapshot, save, and return", async () => {
-    for (const source of ["collection", "tournament", "prediction", "redundancy"] as const) {
-      const ctx = createTestApp();
-      let release!: () => void;
-      let captured!: () => void;
-      const capturedPromise = new Promise<void>((resolve) => {
-        captured = resolve;
-      });
-      const releasePromise = new Promise<void>((resolve) => {
-        release = resolve;
-      });
+  test("publishes the captured identity before each of the four source mutations", async () => {
+    const sourcePaths = {
+      collection: "/test/data/collection.json",
+      tournament: "/test/data/tournament.json",
+      prediction: "/test/data/prediction-settings.json",
+      redundancy: "/test/data/redundancy-settings.json",
+    } as const;
+
+    for (const source of Object.keys(sourcePaths) as Array<keyof typeof sourcePaths>) {
+      const fileOps = createMockFileOps();
+      const ctx = createTestApp({ fileOps });
+      await ctx.gameService.addGame({ name: "Profile source baseline" });
+      await ctx.storageService.loadTournament();
+
+      let snapshotCaptured!: () => void;
+      let releaseComputation!: () => void;
+      let profilePublished!: () => void;
+      let releasePublication!: () => void;
+      const snapshotCapturedPromise = new Promise<void>((resolve) => (snapshotCaptured = resolve));
+      const releaseComputationPromise = new Promise<void>(
+        (resolve) => (releaseComputation = resolve),
+      );
+      const profilePublishedPromise = new Promise<void>((resolve) => (profilePublished = resolve));
+      const releasePublicationPromise = new Promise<void>(
+        (resolve) => (releasePublication = resolve),
+      );
+      let capturedSources: ProfileSources | null = null;
+      let sourcePersistenceStarted = false;
+      let armed = false;
+      const rename = fileOps.rename.bind(fileOps);
+      fileOps.rename = async (from, to) => {
+        if (armed && to === "/test/data/profile.json") {
+          await rename(from, to);
+          profilePublished();
+          await releasePublicationPromise;
+          return;
+        }
+        if (armed && to === sourcePaths[source]) sourcePersistenceStarted = true;
+        await rename(from, to);
+      };
       const displayedFitnessService: DisplayedFitnessService = {
         ...ctx.displayedFitnessService,
         async listGamesFromSnapshot(snapshot, options) {
-          captured();
-          await releasePromise;
+          capturedSources = structuredClone(snapshot);
+          snapshotCaptured();
+          await releaseComputationPromise;
           return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
         },
       };
@@ -155,33 +188,35 @@ describe("ProfileService", () => {
         displayedFitnessService,
       });
 
+      armed = true;
       const profileRead = service.getProfile();
-      await capturedPromise;
-      let mutationFinished = false;
-      const mutationOperation =
+      await snapshotCapturedPromise;
+      const mutation =
         source === "collection"
-          ? ctx.collectionMutationService.mutate(
-              { operation: "test.profile-source", trigger: "test" },
-              (collection) => {
-                collection.name = "Changed while profile computes";
-                return { changed: true, value: undefined };
-              },
-            )
+          ? ctx.gameService.addGame({ name: "Concurrent source" })
           : source === "tournament"
             ? ctx.tournamentService.updateSettings({ provisionalThreshold: 7 })
             : source === "prediction"
               ? ctx.predictionService.updateSettings({ defaultK: 7 })
               : jsonRequest(ctx.app, "PATCH", "/api/redundancy/settings", { enabled: true });
-      const mutation = mutationOperation.then(() => {
-        mutationFinished = true;
-      });
       await Promise.resolve();
-      expect(mutationFinished).toBe(false);
+      expect(sourcePersistenceStarted).toBe(false);
 
-      release();
+      releaseComputation();
+      await profilePublishedPromise;
+      expect(sourcePersistenceStarted).toBe(false);
+      if (capturedSources === null) throw new Error("Profile source snapshot was not captured");
+      const firstCacheRaw = fileOps.files.get("/test/data/profile.json");
+      if (firstCacheRaw === undefined) throw new Error("First profile cache was not published");
+      const firstIdentity = profileSourceIdentity(capturedSources);
+      expect(ProfileDataSchema.parse(JSON.parse(firstCacheRaw)).sourceIdentity).toEqual(
+        firstIdentity,
+      );
+
+      releasePublication();
       expect((await profileRead).status).toBe("available");
       await mutation;
-      expect(mutationFinished).toBe(true);
+      expect(sourcePersistenceStarted).toBe(true);
 
       expect((await service.getProfile()).status).toBe("available");
       const [collection, tournament, predictionSettings, redundancySettings] = await Promise.all([
@@ -190,14 +225,14 @@ describe("ProfileService", () => {
         ctx.storageService.loadPredictionSettings(),
         ctx.storageService.loadRedundancySettings(),
       ]);
-      expect((await ctx.storageService.loadProfile())?.sourceIdentity).toEqual(
-        profileSourceIdentity({
-          collection,
-          tournament,
-          predictionSettings,
-          redundancySettings,
-        }),
-      );
+      const secondIdentity = profileSourceIdentity({
+        collection,
+        tournament,
+        predictionSettings,
+        redundancySettings,
+      });
+      expect(secondIdentity).not.toEqual(firstIdentity);
+      expect((await ctx.storageService.loadProfile())?.sourceIdentity).toEqual(secondIdentity);
     }
   });
 

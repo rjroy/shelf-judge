@@ -1,7 +1,7 @@
 ---
 title: Useful collection profile
 date: 2026-08-27
-status: approved
+status: implemented
 tags: [collection, profile, identity, attention, decision-support]
 modules: [shared, daemon, cli, web]
 related:

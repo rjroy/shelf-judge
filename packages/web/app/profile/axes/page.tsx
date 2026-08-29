@@ -1,18 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import type { FutureUsefulCollectionProfile } from "@shelf-judge/shared";
+import type { CollectionProfile } from "@shelf-judge/shared";
 import { getProfile } from "@/lib/api";
-import { AxisDistributions } from "@/components/profile/axis-distributions";
+import { CollectionProfileAxisDistributions } from "@/components/profile/axis-distributions";
 import { ProfileRetry } from "@/components/profile/profile-unavailable";
 
 export const metadata: Metadata = { title: "Axis Diagnostics" };
 export const dynamic = "force-dynamic";
 
-export function AxisDiagnosticsContent({
-  identity,
-}: {
-  identity: FutureUsefulCollectionProfile["identity"];
-}) {
+export function AxisDiagnosticsContent({ identity }: { identity: CollectionProfile["identity"] }) {
   return (
     <>
       <div className="topbar">
@@ -27,7 +23,7 @@ export function AxisDiagnosticsContent({
           values. They are diagnostics beneath collection identity, not identity claims or attention
           items.
         </p>
-        <AxisDistributions distributions={identity.axisDistributions} />
+        <CollectionProfileAxisDistributions distributions={identity.axisDistributions} />
       </main>
     </>
   );

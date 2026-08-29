@@ -11,6 +11,10 @@ import {
   intentionControlReducer,
   isPlayEvidenceStale,
 } from "@/components/intention-controls";
+import {
+  canonicalActiveIntention,
+  canonicalIntentionMutationCases,
+} from "../../shared/tests/fixtures/intention-mutation";
 
 const observedAt = "2026-08-28T10:00:00.000Z";
 
@@ -165,125 +169,98 @@ describe("intention create eligibility", () => {
 });
 
 describe("intention reducer outcomes", () => {
-  test("creates, completes, retires, and keeps leave-active as a non-mutation response", () => {
-    const commandId = "10000000-0000-4000-8000-000000000001";
-    let state = intentionControlReducer(createIntentionControlState(game(), emptyDetail), {
-      type: "request-start",
-      generation: 1,
-    });
-    state = intentionControlReducer(state, {
-      type: "intention-result",
-      generation: 1,
-      gameName: "Test Game",
-      result: {
-        ok: true,
-        commandId,
-        intention: intention(),
-        linkedOwnershipTransition: null,
-      },
-    });
-    expect(state.activeIntention?.intentionId).toBe("intention-1");
-    expect(state.announcement).toContain("intention created");
+  test.each([...canonicalIntentionMutationCases])(
+    "renders canonical $label without inventing a transport result",
+    ({ command, result }) => {
+      const startsActive = command.type !== "create";
+      let state = createIntentionControlState(game(), {
+        activeIntention: startsActive ? canonicalActiveIntention : null,
+        resolvedHistory: [],
+      });
+      state = intentionControlReducer(state, { type: "play-count-input", value: "7" });
+      state = intentionControlReducer(state, { type: "request-start", generation: 1 });
+      state = intentionControlReducer(state, {
+        type: "intention-result",
+        generation: 1,
+        gameName: "Test Game",
+        result,
+      });
 
-    const activeHtml = renderToStaticMarkup(
-      <IntentionControls
-        game={game()}
-        detail={{ activeIntention: intention(), resolvedHistory: [] }}
-      />,
-    );
-    expect(activeHtml).toContain("Mark complete from personal knowledge");
-    expect(activeHtml).toContain("Retire intention");
-    expect(activeHtml).toContain("Leave active (no change)");
-
-    for (const outcome of ["completed", "retired"] as const) {
-      const resolution =
-        outcome === "completed"
-          ? ({
-              outcome,
-              source: "owner-confirmed",
-              resolvedAt: "2026-08-28T12:00:00.000Z",
-            } as const)
-          : ({
-              outcome,
-              source: "owner-retired",
-              resolvedAt: "2026-08-28T12:00:00.000Z",
-            } as const);
-      const resolved = intention({ version: 2, resolution });
-      const result = intentionControlReducer(
-        { ...state, activeIntention: intention(), history: [] },
-        {
-          type: "intention-result",
-          generation: state.generation,
-          gameName: "Test Game",
-          result: { ok: true, commandId, intention: resolved, linkedOwnershipTransition: null },
-        },
+      expect(state.playCountInput).toBe("7");
+      expect(state.focusTarget).toBe("status");
+      const html = renderToStaticMarkup(
+        <>
+          <IntentionFeedback state={state} />
+          <ActiveIntentionControl
+            game={state.game}
+            active={state.activeIntention}
+            pending={state.pending}
+            onAction={() => undefined}
+          />
+        </>,
       );
-      expect(result.activeIntention).toBeNull();
-      expect(result.history[0]?.resolution.outcome).toBe(outcome);
-    }
-  });
+      expect(html).toContain('class="intention-live-status"');
+      expect(html).toContain('aria-live="polite"');
+      expect(html).toContain('tabindex="-1"');
 
-  test("retains input, consumes returned stale state, and ignores delayed generations", () => {
-    let state = createIntentionControlState(game(), {
-      activeIntention: intention(),
-      resolvedHistory: [],
-    });
-    state = intentionControlReducer(state, { type: "play-count-input", value: "7" });
-    state = intentionControlReducer(state, { type: "request-start", generation: 1 });
-    state = intentionControlReducer(state, {
-      type: "intention-result",
-      generation: 1,
-      gameName: "Test Game",
-      result: {
-        ok: false,
-        commandId: "10000000-0000-4000-8000-000000000001",
-        error: {
-          code: "stale-version",
-          gameId: "game-1",
-          intentionId: "intention-1",
-          expectedVersion: 1,
-          current: intention({
-            version: 2,
-            resolution: {
-              outcome: "retired",
-              source: "owner-retired",
-              resolvedAt: "2026-08-28T12:00:00.000Z",
-            },
-          }),
-        },
-      },
-    });
-    expect(state.playCountInput).toBe("7");
-    expect(state.activeIntention).toBeNull();
-    expect(state.history).toHaveLength(1);
-    expect(state.staleGuidance).toContain("will not retry automatically");
-    expect(state.focusTarget).toBe("status");
+      let focused: "status" | "play-count" | null = null;
+      focusIntentionControlTarget(
+        state.focusTarget,
+        { current: { focus: () => (focused = "status") } },
+        { current: { focus: () => (focused = "play-count") } },
+      );
+      expect(focused).toBe("status");
 
-    const staleFeedback = renderToStaticMarkup(
-      <>
-        <IntentionFeedback state={state} />
-        <ActiveIntentionControl
-          game={state.game}
-          active={state.activeIntention}
-          pending={state.pending}
-          onAction={() => undefined}
-        />
-      </>,
-    );
-    expect(staleFeedback).toContain('class="intention-live-status"');
-    expect(staleFeedback).toContain('tabindex="-1"');
-    expect(staleFeedback).toContain("Refresh and review:");
-    expect(staleFeedback).toContain("Shelf Judge will not retry automatically.");
-    expect(staleFeedback).not.toContain("Mark complete from personal knowledge");
+      if (result.ok) {
+        expect(state.error).toBeNull();
+        expect(state.announcement).not.toBeNull();
+        expect(html).not.toContain('role="alert"');
+        if (result.intention.resolution === null) {
+          expect(state.activeIntention).toEqual(result.intention);
+          expect(state.history).toEqual([]);
+          expect(html).toContain("Mark complete from personal knowledge");
+          expect(html).toContain("Retire intention");
+          expect(html).toContain("Leave active (no change)");
+        } else {
+          expect(state.activeIntention).toBeNull();
+          expect(state.history[0]).toMatchObject(result.intention);
+          expect(html).not.toContain("Mark complete from personal knowledge");
+        }
+        return;
+      }
 
-    let focused: "status" | "play-count" | null = null;
-    focusIntentionControlTarget(
-      state.focusTarget,
-      { current: { focus: () => (focused = "status") } },
-      { current: { focus: () => (focused = "play-count") } },
-    );
-    expect(focused).toBe("status");
+      expect(state.announcement).toBeNull();
+      expect(state.error).not.toBeNull();
+      expect(html).toContain('role="alert"');
+      if (result.error.code === "ineligible-game") {
+        expect(html).toContain("not eligible for this intention");
+        expect(html).toContain("Review ownership and current play evidence");
+        expect(state.activeIntention).toBeNull();
+        expect(state.history).toEqual([]);
+        expect(html).not.toContain("intention created");
+      } else if (result.error.code === "command-reuse") {
+        expect(html).toContain("command identity was already used");
+        expect(html).toContain("Refresh and review before trying again");
+        expect(state.activeIntention).toBe(canonicalActiveIntention);
+        expect(state.history).toEqual([]);
+        expect(html).toContain("Mark complete from personal knowledge");
+        expect(html).not.toContain("Intention retired");
+      } else if (result.error.code === "stale-version") {
+        expect(state.activeIntention).toBeNull();
+        expect(state.history[0]).toMatchObject(result.error.current);
+        expect(state.staleGuidance).toContain("will not retry automatically");
+        expect(html).toContain("Refresh and review:");
+        expect(html).toContain("Shelf Judge will not retry automatically.");
+        expect(html).not.toContain("Mark complete from personal knowledge");
+        expect(html).not.toContain("Intention completed");
+      } else {
+        throw new Error(`Unexpected canonical UI error: ${result.error.code}`);
+      }
+    },
+  );
 
+  test("ignores delayed generations after reopening correction", () => {
+    let state = createIntentionControlState(game(), emptyDetail);
     state = intentionControlReducer(state, { type: "open-correction", generation: 2 });
     const reopened = state;
     state = intentionControlReducer(state, {

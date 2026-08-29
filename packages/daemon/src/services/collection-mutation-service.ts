@@ -1,7 +1,7 @@
 import {
   CollectionSchema,
   type Collection,
-  type FutureUsefulProfileCollectionSource,
+  type CollectionProfileCollectionSource,
 } from "@shelf-judge/shared";
 import { createLogger, type Logger } from "./logger.js";
 import type { CollectionPersistence, CollectionReader } from "./storage-service.js";
@@ -32,7 +32,7 @@ export interface CollectionRevisionStrategy<Source = Collection> {
   advance(collection: Source, current: Source): Source;
 }
 
-export const schemaV4RevisionStrategy: CollectionRevisionStrategy<FutureUsefulProfileCollectionSource> =
+export const schemaV4RevisionStrategy: CollectionRevisionStrategy<CollectionProfileCollectionSource> =
   {
     identity(collection) {
       return {
@@ -129,7 +129,7 @@ export function createCollectionMutationService(
     ) => CollectionMutationDecision<Value> | Promise<CollectionMutationDecision<Value>>,
   ): Promise<CollectionMutationOutcome<Value>> {
     return profileSourceCoordinator.runExclusive(() =>
-      serialize(async () => {
+      serialize(async (): Promise<CollectionMutationOutcome<Value>> => {
         const requestFields = {
           operation: context.operation,
           trigger: context.trigger,

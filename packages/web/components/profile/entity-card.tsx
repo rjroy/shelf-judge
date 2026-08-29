@@ -1,5 +1,8 @@
 import Link from "next/link";
-import type { ProfileEntityEvidence, ProfileEntityClass } from "@shelf-judge/shared";
+import type {
+  CollectionProfileEntityEvidence,
+  CollectionProfileEntityClass,
+} from "@shelf-judge/shared";
 
 function score(value: number): string {
   return value.toFixed(1);
@@ -9,8 +12,8 @@ export function EntityCard({
   entity,
   entityClass,
 }: {
-  entity: ProfileEntityEvidence;
-  entityClass: ProfileEntityClass;
+  entity: CollectionProfileEntityEvidence;
+  entityClass: CollectionProfileEntityClass;
 }) {
   return (
     <article className="profile-entity-summary" data-support={entity.support}>

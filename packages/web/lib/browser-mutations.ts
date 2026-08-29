@@ -32,10 +32,11 @@ export async function createIntention(
   gameId: string,
   kind: PlayIntentionKind,
   fetcher: BrowserFetch = fetch,
+  createCommandId: () => string = () => crypto.randomUUID(),
 ): Promise<IntentionMutationResult> {
   const command = {
     type: "create",
-    commandId: crypto.randomUUID(),
+    commandId: createCommandId(),
     gameId,
     kind,
     expectedActiveIntention: "absent",
@@ -61,10 +62,11 @@ export async function resolveIntention(
   expectedVersion: number,
   resolution: "complete" | "retire",
   fetcher: BrowserFetch = fetch,
+  createCommandId: () => string = () => crypto.randomUUID(),
 ): Promise<IntentionMutationResult> {
   const command = {
     type: resolution,
-    commandId: crypto.randomUUID(),
+    commandId: createCommandId(),
     gameId,
     intentionId,
     expectedVersion,

@@ -1,12 +1,12 @@
 import Link from "next/link";
 import type {
-  ProfileClassExclusion,
-  ProfileEntityClassResult,
-  ProfileEntityEvidence,
-  ProfileGameFitnessEvidence,
+  CollectionProfileClassExclusion,
+  CollectionProfileEntityClassResult,
+  CollectionProfileEntityEvidence,
+  CollectionProfileGameFitnessEvidence,
 } from "@shelf-judge/shared";
 
-const exclusionLabels: Record<ProfileClassExclusion["reason"], string> = {
+const exclusionLabels: Record<CollectionProfileClassExclusion["reason"], string> = {
   "predicted-fitness": "Predicted fitness",
   "missing-or-invalid-fitness": "Missing or invalid fitness",
   "refresh-needed-metadata": "Metadata refresh needed",
@@ -17,7 +17,7 @@ function score(value: number): string {
   return value.toFixed(1);
 }
 
-function GameEvidence({ game }: { game: ProfileGameFitnessEvidence }) {
+function GameEvidence({ game }: { game: CollectionProfileGameFitnessEvidence }) {
   return (
     <li>
       <Link href={`/games/${game.gameId}`}>{game.gameName}</Link>: {score(game.currentFitness)}{" "}
@@ -30,8 +30,8 @@ export function EntityEvidence({
   entity,
   entityClass,
 }: {
-  entity: ProfileEntityEvidence;
-  entityClass: ProfileEntityClassResult["entityClass"];
+  entity: CollectionProfileEntityEvidence;
+  entityClass: CollectionProfileEntityClassResult["entityClass"];
 }) {
   const headingId = `${entityClass}-${entity.entityId}-heading`;
   return (
@@ -93,7 +93,7 @@ export function EntityEvidence({
   );
 }
 
-export function ClassEvidence({ result }: { result: ProfileEntityClassResult }) {
+export function ClassEvidence({ result }: { result: CollectionProfileEntityClassResult }) {
   return (
     <aside className="class-evidence" aria-label={`${result.entityClass} class evidence`}>
       <p className="profile-readiness" data-readiness={result.metadataReadiness.state}>

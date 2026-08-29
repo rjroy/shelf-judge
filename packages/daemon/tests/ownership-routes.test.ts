@@ -19,7 +19,6 @@ import type { FileOps } from "../src/services/file-ops";
 import { DEFAULT_REDUNDANCY_SETTINGS } from "../src/services/redundancy-engine";
 import { createWishlistRoutes } from "../src/routes/wishlist";
 import type { WishlistService } from "../src/services/wishlist-service";
-import { computeProfile } from "../src/services/profile-engine";
 import { createTestPurchaseUtilizationService } from "./helpers/test-app";
 
 const now = "2026-01-01T00:00:00Z";
@@ -583,27 +582,6 @@ describe("wishlist interaction with previously-owned games", () => {
     expect(res.status).toBe(409);
     const data = (await res.json()) as { error: string };
     expect(data.error).toContain("already in your collection");
-  });
-});
-
-describe("profile computation includes previously-owned games", () => {
-  test("previously-owned games contribute to profile game count", () => {
-    const coll = makeCollection();
-    const games = coll.games;
-    const fitnessResults = new Map<string, FitnessResult>();
-    for (const game of games) {
-      fitnessResults.set(game.id, makeScore(7.0));
-    }
-
-    const profile = computeProfile({
-      games,
-      axes: coll.axes,
-      fitnessResults,
-      tournamentStats: null,
-    });
-
-    // All 4 games (3 owned + 1 previously-owned) should be counted
-    expect(profile.gameCount).toBe(4);
   });
 });
 

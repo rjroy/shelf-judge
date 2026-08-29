@@ -1,23 +1,20 @@
 import Link from "next/link";
-import type {
-  FutureUsefulCollectionProfile,
-  PlayIntentionAttentionItem,
-} from "@shelf-judge/shared";
+import type { CollectionProfile, CollectionProfileAttentionItem } from "@shelf-judge/shared";
 
-const responseLabels: Record<PlayIntentionAttentionItem["responses"][number], string> = {
+const responseLabels: Record<CollectionProfileAttentionItem["responses"][number], string> = {
   "leave-visible": "Leave it visible or prioritize the play outside Shelf Judge",
   complete: "Mark the intention complete from personal knowledge",
   retire: "Retire it because it is no longer an intention",
   "correct-or-refresh-evidence": "Correct or refresh the play evidence before deciding",
 };
 
-function evidenceActionLabel(item: PlayIntentionAttentionItem): string {
+function evidenceActionLabel(item: CollectionProfileAttentionItem): string {
   return item.evidenceDestination.operationId === "shelf.game.bgg.refresh"
     ? "Refresh play evidence"
     : "Correct play evidence";
 }
 
-function AttentionItem({ item }: { item: PlayIntentionAttentionItem }) {
+function AttentionItem({ item }: { item: CollectionProfileAttentionItem }) {
   const headingId = `${item.id}-heading`;
   const evidenceId = `${item.id}-evidence`;
   const current = item.currentPlayEvidence;
@@ -106,8 +103,8 @@ export function AttentionSection({
   attention,
   collectionState,
 }: {
-  attention: FutureUsefulCollectionProfile["attention"];
-  collectionState: FutureUsefulCollectionProfile["identity"]["collectionState"];
+  attention: CollectionProfile["attention"];
+  collectionState: CollectionProfile["identity"]["collectionState"];
 }) {
   return (
     <section className="profile-question" aria-labelledby="attention-question">

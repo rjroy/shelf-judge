@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { FutureUsefulProfileSchema, type FutureUsefulProfileResult } from "@shelf-judge/shared";
+import { CollectionProfileResultSchema, type CollectionProfileResult } from "@shelf-judge/shared";
 import { canonicalUsefulProfileFixtures } from "../../../shared/tests/fixtures/useful-profile.js";
 import { createProfileRoutes } from "../../src/routes/profile.js";
 import { createTestApp, jsonRequest } from "../helpers/test-app.js";
@@ -12,7 +12,7 @@ describe("profile routes", () => {
         profileService: { getProfile: () => Promise.resolve(structuredClone(fixture)) },
       });
       const response = await routes.request("/profile");
-      const parsed: FutureUsefulProfileResult = FutureUsefulProfileSchema.parse(
+      const parsed: CollectionProfileResult = CollectionProfileResultSchema.parse(
         await response.json(),
       );
 
@@ -24,7 +24,7 @@ describe("profile routes", () => {
   test("GET /api/profile passes through the complete useful profile", async () => {
     const ctx = createTestApp();
     const response = await jsonRequest(ctx.app, "GET", "/api/profile");
-    const profile = FutureUsefulProfileSchema.parse(await response.json());
+    const profile = CollectionProfileResultSchema.parse(await response.json());
 
     expect(response.status).toBe(200);
     expect(profile.status).toBe("available");
@@ -33,14 +33,6 @@ describe("profile routes", () => {
     for (const result of Object.values(profile.identity.classes)) {
       expect(result.orderings).toEqual({ rating: [], support: [], name: [] });
     }
-  });
-
-  test("narration route and operation are absent", async () => {
-    const ctx = createTestApp();
-    const response = await jsonRequest(ctx.app, "POST", "/api/profile/narrate");
-
-    expect(response.status).toBe(404);
-    expect(ctx.operations.some(({ operationId }) => operationId.includes("narrat"))).toBe(false);
   });
 
   test("returns an exact cached response on a second read", async () => {

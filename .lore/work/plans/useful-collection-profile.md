@@ -1,7 +1,7 @@
 ---
 title: "Implementation plan: useful collection profile"
 date: 2026-08-27
-status: approved
+status: executed
 tags: [plan, collection, profile, identity, attention, intentions]
 modules: [shared, daemon, cli, web]
 related:

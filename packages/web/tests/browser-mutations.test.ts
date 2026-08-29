@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Game, PlayIntention } from "@shelf-judge/shared";
+import { canonicalIntentionMutationCases } from "../../shared/tests/fixtures/intention-mutation";
 import {
   changeOwnership,
   correctPlayCount,
@@ -87,6 +88,45 @@ async function rejection(action: () => Promise<unknown>): Promise<unknown> {
 }
 
 describe("browser mutation boundaries", () => {
+  test.each([...canonicalIntentionMutationCases])(
+    "preserves canonical $label through browser request validation",
+    async ({ command, result: fixture, status }) => {
+      const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+      const fetcher = (input: RequestInfo | URL, init?: RequestInit) => {
+        requests.push({ input, init });
+        return Promise.resolve(jsonResponse(structuredClone(fixture), status));
+      };
+      const result =
+        command.type === "create"
+          ? await createIntention(command.gameId, command.kind, fetcher, () => command.commandId)
+          : await resolveIntention(
+              command.gameId,
+              command.intentionId,
+              command.expectedVersion,
+              command.type,
+              fetcher,
+              () => command.commandId,
+            );
+
+      expect(result).toEqual(fixture);
+      expect(requests).toHaveLength(1);
+      expect(requests[0]?.input).toBe(
+        command.type === "create"
+          ? `/api/daemon/games/${command.gameId}/intention`
+          : `/api/daemon/games/${command.gameId}/intention/${command.intentionId}/${command.type}`,
+      );
+      expect(requestBody(requests[0]?.init)).toEqual(
+        command.type === "create"
+          ? {
+              commandId: command.commandId,
+              kind: command.kind,
+              expectedActiveIntention: command.expectedActiveIntention,
+            }
+          : { commandId: command.commandId, expectedVersion: command.expectedVersion },
+      );
+    },
+  );
+
   test("sends one create request and runtime-validates the shared result", async () => {
     const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
     const fetcher = (input: RequestInfo | URL, init?: RequestInit) => {

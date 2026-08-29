@@ -2,14 +2,14 @@ import type {
   BggEntityLink,
   EntityClassMetadata,
   EntityMetadataByClass,
-  ProfileEntityClass,
+  CollectionProfileEntityClass,
 } from "./types";
 
 export function createCompleteEntityMetadata(
-  entities: Record<ProfileEntityClass, BggEntityLink[]>,
+  entities: Record<CollectionProfileEntityClass, BggEntityLink[]>,
   observedAt: string,
 ): EntityMetadataByClass {
-  const complete = (entityClass: ProfileEntityClass): EntityClassMetadata => ({
+  const complete = (entityClass: CollectionProfileEntityClass): EntityClassMetadata => ({
     state: "complete",
     entities: structuredClone(entities[entityClass]),
     observedAt,

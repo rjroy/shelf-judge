@@ -54,7 +54,7 @@ export function createMockClient(config: MockClientConfig = {}): DaemonClient {
       return Promise.resolve();
     },
     async getProfile() {
-      const res = await request<import("@shelf-judge/shared").FutureUsefulProfileResult>(
+      const res = await request<import("@shelf-judge/shared").CollectionProfileResult>(
         "GET",
         "/api/profile",
       );

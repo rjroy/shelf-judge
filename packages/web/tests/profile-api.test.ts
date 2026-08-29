@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { getProfile } from "@/lib/api";
-import { usefulProfileFixture } from "../../shared/tests/fixtures/useful-profile";
+import {
+  canonicalUsefulProfileFixtures,
+  usefulProfileFixture,
+} from "../../shared/tests/fixtures/useful-profile";
 
 async function rejectionMessage(action: () => Promise<unknown>): Promise<string> {
   try {
@@ -13,12 +16,13 @@ async function rejectionMessage(action: () => Promise<unknown>): Promise<string>
 }
 
 describe("web profile API boundary", () => {
-  test("runtime-validates and preserves the complete useful profile response", async () => {
-    const response = structuredClone(usefulProfileFixture);
-    const profile = await getProfile(() => Promise.resolve(response));
-
-    expect(profile).toEqual(response);
-  });
+  test.each(canonicalUsefulProfileFixtures)(
+    "runtime-validates and preserves canonical %s",
+    async (_label, fixture) => {
+      const response = structuredClone(fixture);
+      expect(await getProfile(() => Promise.resolve(response))).toEqual(fixture);
+    },
+  );
 
   test("preserves a validated daemon unavailable response", async () => {
     const response = {

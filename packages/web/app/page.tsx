@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import type { FutureUsefulProfileResult } from "@shelf-judge/shared";
+import type { CollectionProfileResult } from "@shelf-judge/shared";
 import { getProfile } from "@/lib/api";
 import { IdentitySection } from "@/components/profile/identity-section";
 import { AttentionSection } from "@/components/profile/attention-section";
@@ -9,11 +9,11 @@ export const metadata: Metadata = { title: "Shelf Judge" };
 export const dynamic = "force-dynamic";
 
 export type ProfileOverviewState =
-  | { status: "loaded"; profile: FutureUsefulProfileResult }
+  | { status: "loaded"; profile: CollectionProfileResult }
   | { status: "unavailable"; message: string };
 
 export async function loadProfileOverview(
-  loadProfile: () => Promise<FutureUsefulProfileResult> = getProfile,
+  loadProfile: () => Promise<CollectionProfileResult> = getProfile,
 ): Promise<ProfileOverviewState> {
   try {
     return { status: "loaded", profile: await loadProfile() };

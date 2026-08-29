@@ -1,4 +1,5 @@
 import { describe, test, expect } from "bun:test";
+import { canonicalIntentionMutationCases } from "../../../shared/tests/fixtures/intention-mutation.js";
 import {
   gameSearch,
   gameAdd,
@@ -829,6 +830,61 @@ function correctionGame(): Game {
 }
 
 describe("game intentions", () => {
+  test.each([...canonicalIntentionMutationCases])(
+    "preserves canonical $label through CLI stdout, stderr, and exit behavior",
+    async ({ command, result, status }) => {
+      const route =
+        command.type === "create"
+          ? `POST /api/games/${command.gameId}/intention`
+          : `POST /api/games/${command.gameId}/intention/${command.intentionId}/${command.type}`;
+      const client = createMockClient({
+        routes: { [route]: { response: { ok: status === 200, status, data: result } } },
+      });
+      let stdout = "";
+      let stderr = "";
+      let exitCode = 0;
+      try {
+        stdout =
+          command.type === "create"
+            ? await gameIntentionSet(
+                client,
+                [command.gameId, command.kind, "--command-id", command.commandId],
+                { json: true },
+                { writeStderr: (message) => (stderr += message) },
+              )
+            : await gameIntentionResolve(
+                client,
+                command.type,
+                [
+                  command.gameId,
+                  command.intentionId,
+                  "--expected-version",
+                  String(command.expectedVersion),
+                  "--command-id",
+                  command.commandId,
+                ],
+                { json: true },
+                { writeStderr: (message) => (stderr += message) },
+              );
+      } catch (error) {
+        exitCode = 1;
+        stderr = formatCliError(error);
+      }
+
+      if (result.ok) {
+        expect(exitCode).toBe(0);
+        expect(stderr).toBe("");
+        expect(JSON.parse(stdout)).toEqual(result);
+      } else {
+        expect(exitCode).toBe(1);
+        expect(stdout).toBe("");
+        const rendered = JSON.parse(stderr) as IntentionMutationResult & { guidance?: string };
+        expect(rendered).toMatchObject(result);
+        expect(rendered.guidance !== undefined).toBe(result.error.code === "stale-version");
+      }
+    },
+  );
+
   test("set sends the strict create body and preserves a supplied command ID", async () => {
     const result = acceptedIntention(commandIds.create);
     const client = createMockClient({

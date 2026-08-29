@@ -7,7 +7,7 @@ import {
   CURRENT_PROFILE_ALGORITHM_VERSION,
   CURRENT_PROFILE_CONTRACT_VERSION,
 } from "@shelf-judge/shared";
-import { computeUsefulProfile } from "../../src/services/profile-engine.js";
+import { computeCollectionProfile } from "../../src/services/collection-profile-engine.js";
 import { createFileOps } from "../../src/services/file-ops.js";
 import {
   profileSourceIdentity,
@@ -54,7 +54,7 @@ async function currentData(storage: ReturnType<typeof createStorageService>): Pr
     contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
     algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
     sourceIdentity: profileSourceIdentity(sources),
-    profile: computeUsefulProfile({ collection, fitnessResults: new Map(), computedAt }),
+    profile: computeCollectionProfile({ collection, fitnessResults: new Map(), computedAt }),
     computedAt,
   };
 }

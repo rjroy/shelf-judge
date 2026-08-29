@@ -1,7 +1,7 @@
 // Unix socket HTTP client for communicating with the shelf-judge daemon.
 
-import type { FutureUsefulProfileResult } from "@shelf-judge/shared";
-import { FutureUsefulProfileSchema, resolveSocketPath } from "@shelf-judge/shared";
+import type { CollectionProfileResult } from "@shelf-judge/shared";
+import { CollectionProfileResultSchema, resolveSocketPath } from "@shelf-judge/shared";
 
 export interface DaemonClientOptions {
   socketPath?: string;
@@ -21,7 +21,7 @@ export interface DaemonClient {
   patch<T = unknown>(path: string, body?: unknown): Promise<DaemonResponse<T>>;
   del<T = unknown>(path: string, body?: unknown): Promise<DaemonResponse<T>>;
   postSSE(path: string, body: unknown, onEvent: (event: SSEEvent) => void): Promise<void>;
-  getProfile(): Promise<FutureUsefulProfileResult>;
+  getProfile(): Promise<CollectionProfileResult>;
   isReachable(): Promise<boolean>;
   socketPath: string;
 }
@@ -134,10 +134,10 @@ export function createDaemonClient(options: DaemonClientOptions = {}): DaemonCli
     }
   }
 
-  async function getProfile(): Promise<FutureUsefulProfileResult> {
+  async function getProfile(): Promise<CollectionProfileResult> {
     const res = await request<unknown>("GET", "/api/profile");
     if (!res.ok) throw new Error(`Failed to get profile: ${res.status}`);
-    const parsed = FutureUsefulProfileSchema.safeParse(res.data);
+    const parsed = CollectionProfileResultSchema.safeParse(res.data);
     if (!parsed.success) throw new Error(`Invalid profile response: ${parsed.error.message}`);
     return parsed.data;
   }

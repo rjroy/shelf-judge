@@ -1,19 +1,19 @@
 import type {
   FitnessResult,
-  FutureUsefulCollectionProfile,
-  FutureUsefulProfileResult,
+  CollectionProfile,
+  CollectionProfileResult,
   ProfileData,
 } from "@shelf-judge/shared";
 import {
   CURRENT_PROFILE_ALGORITHM_VERSION,
   CURRENT_PROFILE_CONTRACT_VERSION,
-  FutureUsefulProfileSchema,
-  FutureUsefulProfileSnapshotSchema,
+  CollectionProfileResultSchema,
+  CollectionProfileSnapshotSchema,
 } from "@shelf-judge/shared";
 import { ZodError } from "zod";
 import type { StorageService } from "./storage-service.js";
 import type { DisplayedFitnessService } from "./displayed-fitness-service.js";
-import { computeUsefulProfile } from "./profile-engine.js";
+import { computeCollectionProfile } from "./collection-profile-engine.js";
 import {
   profileSourceCoordinatorFor,
   profileSourceIdentity,
@@ -22,7 +22,7 @@ import {
 } from "./profile-source-coordinator.js";
 
 export interface ProfileService {
-  getProfile(): Promise<FutureUsefulProfileResult>;
+  getProfile(): Promise<CollectionProfileResult>;
 }
 
 export interface ProfileServiceDeps {
@@ -34,8 +34,8 @@ export interface ProfileServiceDeps {
 function unavailable(
   kind: "transport" | "validation" | "recomputation",
   error: unknown,
-): FutureUsefulProfileResult {
-  return FutureUsefulProfileSchema.parse({
+): CollectionProfileResult {
+  return CollectionProfileResultSchema.parse({
     status: "unavailable",
     error: {
       kind,
@@ -55,7 +55,7 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
   const coordinator = profileSourceCoordinatorFor(storageService);
 
   return {
-    getProfile(): Promise<FutureUsefulProfileResult> {
+    getProfile(): Promise<CollectionProfileResult> {
       return coordinator.runExclusive(async () => {
         let sources: ProfileSources;
         let cache: ProfileData;
@@ -85,7 +85,7 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
           return unavailable(failureKind(error), error);
         }
         if (stored && sameProfileSourceIdentity(stored.sourceIdentity, identity)) {
-          const cachedSnapshot = FutureUsefulProfileSnapshotSchema.safeParse({
+          const cachedSnapshot = CollectionProfileSnapshotSchema.safeParse({
             source: sources.collection,
             profile: stored.profile,
           });
@@ -112,15 +112,15 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
           }
 
           const computedAt = now();
-          const profile = computeUsefulProfile({
+          const profile = computeCollectionProfile({
             collection: sources.collection,
             fitnessResults,
             computedAt,
           });
-          const validated = FutureUsefulProfileSnapshotSchema.parse({
+          const validated = CollectionProfileSnapshotSchema.parse({
             source: sources.collection,
             profile,
-          }).profile as FutureUsefulCollectionProfile;
+          }).profile as CollectionProfile;
           const finalIdentity = profileSourceIdentity(sources);
           if (!sameProfileSourceIdentity(identity, finalIdentity)) {
             throw new Error("Profile source snapshot changed during computation");

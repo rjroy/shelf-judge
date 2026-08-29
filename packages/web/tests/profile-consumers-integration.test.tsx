@@ -1,19 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type {
-  FutureUsefulCollectionProfile,
-  ProfileEntityClass,
-  ProfileEntityClassResult,
+  CollectionProfileEntityClass,
+  CollectionProfileEntityClassResult,
 } from "@shelf-judge/shared";
 import { loadProfileOverview, ProfileOverviewContent, type ProfileOverviewState } from "@/app/page";
 import { IdentitySection } from "@/components/profile/identity-section";
 import { AttentionSection } from "@/components/profile/attention-section";
 import {
+  canonicalUsefulProfileFixtures,
+  emptyUsefulProfileFixture,
   mechanicClassFixture,
   usefulProfileFixture,
 } from "../../shared/tests/fixtures/useful-profile";
 
-function emptyClass(entityClass: ProfileEntityClass): ProfileEntityClassResult {
+function emptyClass(entityClass: CollectionProfileEntityClass): CollectionProfileEntityClassResult {
   return {
     entityClass,
     result: "not-evaluated",
@@ -34,22 +35,7 @@ function emptyClass(entityClass: ProfileEntityClass): ProfileEntityClassResult {
   };
 }
 
-const emptyProfile: FutureUsefulCollectionProfile = {
-  status: "available",
-  identity: {
-    collectionState: "empty",
-    classes: {
-      mechanic: emptyClass("mechanic"),
-      designer: emptyClass("designer"),
-      artist: emptyClass("artist"),
-    },
-    axisDistributions: [],
-  },
-  attention: { state: "empty-collection", items: [] },
-  computedAt: "2026-08-28T12:00:00.000Z",
-};
-
-function renderClass(result: ProfileEntityClassResult): string {
+function renderClass(result: CollectionProfileEntityClassResult): string {
   const classes = {
     mechanic: emptyClass("mechanic"),
     designer: emptyClass("designer"),
@@ -62,6 +48,23 @@ function renderClass(result: ProfileEntityClassResult): string {
 }
 
 describe("profile overview consumer", () => {
+  test.each(canonicalUsefulProfileFixtures)(
+    "loads and renders the canonical %s state without projection",
+    async (_label, fixture) => {
+      const state = await loadProfileOverview(() => Promise.resolve(structuredClone(fixture)));
+      expect(state).toEqual({ status: "loaded", profile: fixture });
+      const html = renderToStaticMarkup(<ProfileOverviewContent state={state} />);
+      expect(html).toContain("Collection Profile");
+      expect(html).toContain(
+        fixture.status === "unavailable"
+          ? 'data-profile-state="unavailable"'
+          : fixture.identity.collectionState === "empty"
+            ? 'data-profile-state="empty-collection"'
+            : "What does my collection reveal about me?",
+      );
+    },
+  );
+
   test("uses one page title followed by exactly the two approved headline questions", () => {
     const html = renderToStaticMarkup(
       <ProfileOverviewContent state={{ status: "loaded", profile: usefulProfileFixture }} />,
@@ -101,7 +104,7 @@ describe("profile overview consumer", () => {
     };
     const daemonHtml = renderToStaticMarkup(<ProfileOverviewContent state={daemonState} />);
     const emptyHtml = renderToStaticMarkup(
-      <ProfileOverviewContent state={{ status: "loaded", profile: emptyProfile }} />,
+      <ProfileOverviewContent state={{ status: "loaded", profile: emptyUsefulProfileFixture }} />,
     );
 
     for (const html of [transportHtml, daemonHtml]) {
@@ -171,7 +174,7 @@ describe("identity state distinctions", () => {
   });
 
   test("shows partial and refresh-needed readiness, exclusions, and refresh warnings as metadata", () => {
-    const partial: ProfileEntityClassResult = {
+    const partial: CollectionProfileEntityClassResult = {
       ...mechanicClassFixture,
       metadataReadiness: {
         ...mechanicClassFixture.metadataReadiness,

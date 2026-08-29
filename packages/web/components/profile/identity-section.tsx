@@ -1,21 +1,21 @@
 import Link from "next/link";
 import type {
-  FutureUsefulCollectionProfile,
-  ProfileEntityClass,
-  ProfileEntityClassResult,
-  ProfileEntityEvidence,
+  CollectionProfile,
+  CollectionProfileEntityClass,
+  CollectionProfileEntityClassResult,
+  CollectionProfileEntityEvidence,
 } from "@shelf-judge/shared";
 import { EntityCard } from "./entity-card";
 
-const entityClasses: ProfileEntityClass[] = ["mechanic", "designer", "artist"];
+const entityClasses: CollectionProfileEntityClass[] = ["mechanic", "designer", "artist"];
 
-const classLabels: Record<ProfileEntityClass, string> = {
+const classLabels: Record<CollectionProfileEntityClass, string> = {
   mechanic: "Mechanics",
   designer: "Designers",
   artist: "Artists",
 };
 
-const resultLabels: Record<ProfileEntityClassResult["result"], string> = {
+const resultLabels: Record<CollectionProfileEntityClassResult["result"], string> = {
   supported: "Supported associations available",
   limited: "Limited evidence only",
   "no-eligible-ratings": "Associations found, but no eligible ratings",
@@ -23,14 +23,16 @@ const resultLabels: Record<ProfileEntityClassResult["result"], string> = {
   "not-evaluated": "Not evaluated",
 };
 
-function overviewEntities(result: ProfileEntityClassResult): ProfileEntityEvidence[] {
+function overviewEntities(
+  result: CollectionProfileEntityClassResult,
+): CollectionProfileEntityEvidence[] {
   return result.overviewEntityIds.flatMap((entityId) => {
     const entity = result.entities.find((candidate) => candidate.entityId === entityId);
     return entity === undefined ? [] : [entity];
   });
 }
 
-function ClassOverview({ result }: { result: ProfileEntityClassResult }) {
+function ClassOverview({ result }: { result: CollectionProfileEntityClassResult }) {
   const entities = overviewEntities(result);
   const headingId = `profile-${result.entityClass}-heading`;
   return (
@@ -71,11 +73,7 @@ function ClassOverview({ result }: { result: ProfileEntityClassResult }) {
   );
 }
 
-export function IdentitySection({
-  identity,
-}: {
-  identity: FutureUsefulCollectionProfile["identity"];
-}) {
+export function IdentitySection({ identity }: { identity: CollectionProfile["identity"] }) {
   return (
     <section className="profile-question" aria-labelledby="identity-question">
       <h2 id="identity-question">What does my collection reveal about me?</h2>

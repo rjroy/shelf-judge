@@ -52,7 +52,7 @@ const InvalidEvidenceSchema = z.union([
     .strict(),
 ]);
 
-export const ProfileEntityClassSchema = z.enum(["mechanic", "designer", "artist"]);
+export const CollectionProfileEntityClassSchema = z.enum(["mechanic", "designer", "artist"]);
 export const BggEntityLinkSchema = z
   .object({ id: PositiveSafeIntegerSchema, name: z.string().trim().min(1) })
   .strict();
@@ -534,7 +534,7 @@ export const IntentionCommandReceiptSchema = z
     }
   });
 
-export const FutureUsefulProfileGameSourceExtensionSchema = z
+export const CollectionProfileGameSourceExtensionSchema = z
   .object({
     gameId: IdSchema,
     entityMetadata: EntityMetadataByClassSchema,
@@ -542,10 +542,10 @@ export const FutureUsefulProfileGameSourceExtensionSchema = z
   })
   .strict();
 
-export const FutureUsefulProfileSourceRecordsSchema = z
+export const CollectionProfileSourceRecordsSchema = z
   .object({
     revision: SafeCountSchema,
-    games: z.array(FutureUsefulProfileGameSourceExtensionSchema),
+    games: z.array(CollectionProfileGameSourceExtensionSchema),
     intentions: z.array(PlayIntentionSchema),
     commandReceipts: z.array(IntentionCommandReceiptSchema),
   })
@@ -628,7 +628,7 @@ export const FutureUsefulProfileSourceRecordsSchema = z
     }
   });
 
-const ProfileGameFitnessEvidenceSchema = z
+const CollectionProfileGameFitnessEvidenceSchema = z
   .object({
     gameId: IdSchema,
     gameName: z.string().min(1),
@@ -645,7 +645,7 @@ const ProfileGameFitnessEvidenceSchema = z
       });
     }
   });
-const ProfileClassExclusionSchema = z
+const CollectionProfileClassExclusionSchema = z
   .object({
     gameId: IdSchema,
     gameName: z.string().min(1),
@@ -663,7 +663,7 @@ const ProfileClassExclusionSchema = z
   })
   .strict();
 
-const ProfileMetadataReadinessSchema = z
+const CollectionProfileMetadataReadinessSchema = z
   .object({
     state: z.enum(["complete", "partial", "refresh-needed"]),
     ownedGameCount: SafeCountSchema,
@@ -699,7 +699,7 @@ const ProfileMetadataReadinessSchema = z
       });
   });
 
-const ProfileEntityEvidenceSchema = z
+const CollectionProfileEntityEvidenceSchema = z
   .object({
     entityId: PositiveSafeIntegerSchema,
     name: z.string().min(1),
@@ -710,7 +710,7 @@ const ProfileEntityEvidenceSchema = z
     range: z.object({ min: FiniteNumberSchema, max: FiniteNumberSchema }).strict(),
     comparatorMeanCurrentFitness: FiniteNumberSchema,
     differenceFromComparator: FiniteNumberSchema,
-    games: z.array(ProfileGameFitnessEvidenceSchema).nonempty(),
+    games: z.array(CollectionProfileGameFitnessEvidenceSchema).nonempty(),
   })
   .strict()
   .superRefine((entity, context) => {
@@ -747,7 +747,9 @@ const ProfileEntityEvidenceSchema = z
       issue(["differenceFromComparator"], "Entity difference must match its means");
   });
 
-function expectedEntityOrders(entities: Array<z.infer<typeof ProfileEntityEvidenceSchema>>) {
+function expectedEntityOrders(
+  entities: Array<z.infer<typeof CollectionProfileEntityEvidenceSchema>>,
+) {
   const evidenceMean = (entity: (typeof entities)[number]) =>
     exactMean(entity.games.map(({ currentFitness }) => currentFitness));
   const rating = [...entities].sort(
@@ -774,9 +776,9 @@ function expectedEntityOrders(entities: Array<z.infer<typeof ProfileEntityEviden
   };
 }
 
-export const ProfileEntityClassResultSchema = z
+export const CollectionProfileEntityClassResultSchema = z
   .object({
-    entityClass: ProfileEntityClassSchema,
+    entityClass: CollectionProfileEntityClassSchema,
     result: z.enum([
       "supported",
       "limited",
@@ -784,16 +786,16 @@ export const ProfileEntityClassResultSchema = z
       "evaluated-empty",
       "not-evaluated",
     ]),
-    metadataReadiness: ProfileMetadataReadinessSchema,
+    metadataReadiness: CollectionProfileMetadataReadinessSchema,
     associatedGameCount: SafeCountSchema,
     comparator: z
       .object({
         gameCount: SafeCountSchema,
         meanCurrentFitness: FiniteNumberSchema.nullable(),
-        games: z.array(ProfileGameFitnessEvidenceSchema),
+        games: z.array(CollectionProfileGameFitnessEvidenceSchema),
       })
       .strict(),
-    exclusions: z.array(ProfileClassExclusionSchema),
+    exclusions: z.array(CollectionProfileClassExclusionSchema),
     refreshWarnings: z.array(
       z
         .object({
@@ -804,7 +806,7 @@ export const ProfileEntityClassResultSchema = z
         })
         .strict(),
     ),
-    entities: z.array(ProfileEntityEvidenceSchema),
+    entities: z.array(CollectionProfileEntityEvidenceSchema),
     overviewEntityIds: z.array(PositiveSafeIntegerSchema).max(3),
     orderings: z
       .object({
@@ -981,7 +983,7 @@ const AttentionPlayEvidenceSchema = z.union([
     .strict(),
 ]);
 
-export const PlayIntentionAttentionItemSchema = z
+export const CollectionProfileAttentionItemSchema = z
   .object({
     id: IdSchema,
     decisionFamily: z.literal("play-intention"),
@@ -1142,7 +1144,7 @@ export const GameIntentionDetailSchema = z
     }
   });
 
-const AvailableUsefulProfileSchema = z
+const AvailableCollectionProfileSchema = z
   .object({
     status: z.literal("available"),
     identity: z
@@ -1150,9 +1152,9 @@ const AvailableUsefulProfileSchema = z
         collectionState: z.enum(["populated", "empty"]),
         classes: z
           .object({
-            mechanic: ProfileEntityClassResultSchema,
-            designer: ProfileEntityClassResultSchema,
-            artist: ProfileEntityClassResultSchema,
+            mechanic: CollectionProfileEntityClassResultSchema,
+            designer: CollectionProfileEntityClassResultSchema,
+            artist: CollectionProfileEntityClassResultSchema,
           })
           .strict(),
         axisDistributions: z.array(
@@ -1174,7 +1176,7 @@ const AvailableUsefulProfileSchema = z
     attention: z
       .object({
         state: z.enum(["active", "nothing-to-decide", "empty-collection"]),
-        items: z.array(PlayIntentionAttentionItemSchema),
+        items: z.array(CollectionProfileAttentionItemSchema),
       })
       .strict(),
     computedAt: TimestampSchema,
@@ -1269,7 +1271,7 @@ const AvailableUsefulProfileSchema = z
       });
   });
 
-const UnavailableUsefulProfileSchema = z
+const UnavailableCollectionProfileSchema = z
   .object({
     status: z.literal("unavailable"),
     error: z
@@ -1282,7 +1284,7 @@ const UnavailableUsefulProfileSchema = z
   })
   .strict();
 
-export const FutureUsefulProfileSchema = z.union([
-  AvailableUsefulProfileSchema,
-  UnavailableUsefulProfileSchema,
+export const CollectionProfileResultSchema = z.union([
+  AvailableCollectionProfileSchema,
+  UnavailableCollectionProfileSchema,
 ]);

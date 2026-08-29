@@ -30,8 +30,11 @@ import {
   createIntentionService,
   type IntentionService,
 } from "../../src/services/intention-service.js";
+import type { FileOps } from "../../src/services/file-ops.js";
 
-export interface TestAppContext {
+type MockFileOps = ReturnType<typeof createMockFileOps>;
+
+export interface TestAppContext<TFileOps extends FileOps = MockFileOps> {
   app: AppResult["app"];
   operations: AppResult["operations"];
   storageService: StorageService;
@@ -45,13 +48,16 @@ export interface TestAppContext {
   displayedFitnessService: DisplayedFitnessService;
   intentionService: IntentionService;
   bggClient: BggClient | undefined;
-  fileOps: ReturnType<typeof createMockFileOps>;
+  fileOps: TFileOps;
 }
 
-export interface TestAppOptions {
+export interface TestAppOptions<TFileOps extends FileOps = MockFileOps> {
   bggClient?: BggClient;
-  fileOps?: ReturnType<typeof createMockFileOps>;
+  fileOps?: TFileOps;
+  dataDir?: string;
+  configPath?: string;
   now?: () => string;
+  createIntentionId?: () => string;
   intentionService?: IntentionService;
 }
 
@@ -85,10 +91,12 @@ export function createTestPurchaseUtilizationService(
   });
 }
 
-export function createTestApp(options?: TestAppOptions): TestAppContext {
-  const fileOps = options?.fileOps ?? createMockFileOps();
-  const dataDir = "/test/data";
-  const configPath = "/test/config.json";
+export function createTestApp<TFileOps extends FileOps = MockFileOps>(
+  options?: TestAppOptions<TFileOps>,
+): TestAppContext<TFileOps> {
+  const fileOps = options?.fileOps ?? (createMockFileOps() as unknown as TFileOps);
+  const dataDir = options?.dataDir ?? "/test/data";
+  const configPath = options?.configPath ?? "/test/config.json";
 
   const storageService = createStorageService({
     dataDir,
@@ -126,6 +134,7 @@ export function createTestApp(options?: TestAppOptions): TestAppContext {
     createIntentionService({
       collectionMutationService,
       now: options?.now,
+      createId: options?.createIntentionId,
     });
   const profileService = createProfileService({
     storageService,

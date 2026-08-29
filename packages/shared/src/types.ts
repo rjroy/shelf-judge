@@ -625,7 +625,7 @@ export interface AppConfig {
 
 // Profile types (collection-profiling spec)
 
-export interface AxisDistribution {
+export interface CollectionProfileAxisDistribution {
   axisId: string;
   axisName: string;
   mean: number;
@@ -636,357 +636,7 @@ export interface AxisDistribution {
   histogram: number[]; // 10-element array: game counts per rating bucket (1-10)
 }
 
-export interface AxisWeightEntry {
-  axisId: string;
-  axisName: string;
-  weight: number;
-  percentage: number; // weight / totalWeight * 100
-}
-
-export interface AttributeCluster {
-  name: string;
-  count: number;
-  percentage: number; // count / totalGames * 100
-}
-
-export interface WeightRangeCluster {
-  range: string; // "Light", "Medium-Light", etc.
-  min: number;
-  max: number;
-  count: number;
-  percentage: number;
-}
-
-export interface UtilityCurveDeclaration {
-  axisId: string;
-  axisName: string;
-  derivedField: DerivedFieldId | null;
-  shape: PreferenceShape;
-  idealValue: number | null;
-  tolerance: ToleranceLevel | null;
-  toleranceWidth: number | null;
-  leanDirection: LeanDirection | null;
-  vetoThreshold: VetoConfig | null;
-  nativeScale: NativeScale;
-  unit: string | null;
-  provenance: string | null;
-  configurationSummary: string | null;
-}
-
-export type InsightStatus = "reported" | "insufficient" | "suppressed" | "retired";
-
-export interface InsightMethod {
-  id: string;
-  version: number;
-  description: string;
-}
-
-export interface InsightEvidenceMeasurement {
-  key: string;
-  label: string;
-  value: string | number | boolean | null;
-  unit: string | null;
-  source: string;
-}
-
-export interface InsightEvidenceGame {
-  gameId: string;
-  gameName: string;
-  role: "subject" | "supporting" | "comparator";
-  measurements: InsightEvidenceMeasurement[];
-}
-
-export interface InsightCohort {
-  description: string;
-  eligibleGameCount: number;
-  includedGameCount: number;
-  excludedGameCount: number;
-  coveragePercent: number; // percentage in [0,100]
-}
-
-export interface InsightSufficiencyRequirement {
-  criterion: string;
-  observed: number;
-  required: number;
-  met: boolean;
-}
-
-export interface InsightComparator {
-  description: string;
-  gameIds: string[];
-}
-
-export interface InsightNotability {
-  metric: string;
-  value: number;
-  threshold: number | null;
-  direction: "above" | "below" | "two-sided";
-  explanation: string;
-}
-
-export interface InsightConfidence {
-  level: "low" | "moderate" | "high";
-  basis: string;
-}
-
-interface TrustedInsightBase {
-  contractVersion: 1;
-  id: string;
-  method: InsightMethod;
-  cohort: InsightCohort;
-  sufficiency: InsightSufficiencyRequirement[];
-  evidence: InsightEvidenceGame[];
-  comparator: InsightComparator | null;
-  limitations: string[];
-}
-
-type NonEmptyArray<T> = [T, ...T[]];
-
-export interface ReportedInsightEvidenceGame extends Omit<InsightEvidenceGame, "measurements"> {
-  measurements: NonEmptyArray<InsightEvidenceMeasurement>;
-}
-
-export interface SatisfiedInsightRequirement extends InsightSufficiencyRequirement {
-  met: true;
-}
-
-export interface UnmetInsightRequirement extends InsightSufficiencyRequirement {
-  met: false;
-}
-
-export interface ReportedInsight<TDetails> extends TrustedInsightBase {
-  status: "reported";
-  sufficiency: NonEmptyArray<SatisfiedInsightRequirement>;
-  evidence: NonEmptyArray<ReportedInsightEvidenceGame>;
-  observation: string;
-  interpretation: string | null;
-  details: TDetails;
-  notability: InsightNotability;
-  confidence: InsightConfidence | null;
-}
-
-export type InsightAbstentionReason =
-  | "insufficient-sample"
-  | "insufficient-coverage"
-  | "missing-comparator"
-  | "unsupported-method"
-  | "superseded";
-
-interface AbstainedInsightBase extends TrustedInsightBase {
-  explanation: string;
-}
-
-export interface InsufficientSampleInsight extends AbstainedInsightBase {
-  status: "insufficient";
-  reason: "insufficient-sample";
-  sufficiency: [UnmetInsightRequirement, ...InsightSufficiencyRequirement[]];
-}
-
-export interface InsufficientCoverageInsight extends AbstainedInsightBase {
-  status: "insufficient";
-  reason: "insufficient-coverage";
-  sufficiency: [UnmetInsightRequirement, ...InsightSufficiencyRequirement[]];
-}
-
-export interface MissingComparatorInsight extends AbstainedInsightBase {
-  status: "insufficient";
-  reason: "missing-comparator";
-  comparator: null;
-}
-
-export interface SuppressedInsight extends AbstainedInsightBase {
-  status: "suppressed";
-  reason: "unsupported-method";
-}
-
-export interface RetiredInsight extends AbstainedInsightBase {
-  status: "retired";
-  reason: "superseded";
-}
-
-export type InsufficientInsight =
-  | InsufficientSampleInsight
-  | InsufficientCoverageInsight
-  | MissingComparatorInsight;
-
-export type AbstainedInsight = InsufficientInsight | SuppressedInsight | RetiredInsight;
-
-export type TrustedInsight<TDetails> = ReportedInsight<TDetails> | AbstainedInsight;
-
-type AboveThresholdInsightNotability = Omit<InsightNotability, "threshold" | "direction"> & {
-  threshold: number;
-  direction: "above";
-};
-
-export interface TournamentDivergenceDetails {
-  gameId: string;
-  gameName: string;
-  independentFitnessScore: number;
-  normalizedTournamentScore: number;
-  gap: number; // absolute difference
-  direction: "tournament-outlier" | "fitness-outlier";
-  comparisonCount: number;
-  provisional: boolean;
-}
-
-export interface ReportedTournamentDivergence extends Omit<
-  ReportedInsight<TournamentDivergenceDetails>,
-  "confidence" | "notability"
-> {
-  confidence: null;
-  notability: AboveThresholdInsightNotability;
-}
-
-export type TournamentDivergenceInsight = ReportedTournamentDivergence | InsufficientInsight;
-
-export interface ComponentDistances {
-  binary: number;
-  continuous: number;
-  personalAxes: number | null;
-  composite: number;
-}
-
-export type CollectionOutlierDimension =
-  | "mechanics"
-  | "categories"
-  | "complexity"
-  | "player-count"
-  | "playing-time";
-
-export interface CollectionOutlierComparison {
-  gameId: string;
-  gameName: string;
-  distance: number; // factual compositional distance [0,1]
-}
-
-export interface CollectionOutlierDriver {
-  dimension: CollectionOutlierDimension;
-  label: string;
-  distance: number; // contribution distance [0,1]
-  subjectValue: string | number;
-  comparatorValues: { gameId: string; value: string | number }[];
-  explanation: string;
-}
-
-export interface CollectionOutlierDetails {
-  gameId: string;
-  gameName: string;
-  neighborhoodDistance: number;
-  nearestComparisons: [CollectionOutlierComparison, CollectionOutlierComparison];
-  drivers: [CollectionOutlierDriver, CollectionOutlierDriver, ...CollectionOutlierDriver[]];
-  fitnessScore: number | null;
-}
-
-export interface ReportedCollectionOutlier extends Omit<
-  ReportedInsight<CollectionOutlierDetails>,
-  "confidence" | "notability"
-> {
-  confidence: null;
-  notability: AboveThresholdInsightNotability;
-}
-
-export type CollectionOutlier = ReportedCollectionOutlier | InsufficientInsight;
-
-export interface AxisSuggestionDetails {
-  source: "divergence-repair";
-  attribute: string;
-  attributeType: "mechanic" | "category";
-  direction: "tournament-outlier" | "fitness-outlier";
-  supportingGameCount: number;
-  comparatorGameCount: number;
-  supportingMeanGap: number;
-  comparatorMeanGap: number;
-  effect: number;
-}
-
-export interface CurrentAxisSuggestionMethod extends InsightMethod {
-  id: "directional-divergence-attribute-effect";
-  version: 1;
-}
-
-export type RetiredAxisSuggestionMethod =
-  | (InsightMethod & { id: "unexpressed-concentration"; version: 1 })
-  | (InsightMethod & { id: "high-variance"; version: 1 });
-
-type WithAxisSuggestionMethod<TInsight, TMethod extends InsightMethod> = TInsight extends {
-  method: InsightMethod;
-}
-  ? Omit<TInsight, "method"> & { method: TMethod }
-  : never;
-
-export type ReportedAxisSuggestion = Omit<
-  ReportedInsight<AxisSuggestionDetails>,
-  "comparator" | "confidence" | "interpretation" | "method" | "notability"
-> & {
-  method: CurrentAxisSuggestionMethod;
-  comparator: InsightComparator;
-  confidence: null;
-  interpretation: string;
-  notability: AboveThresholdInsightNotability;
-};
-
-export type CurrentAxisSuggestionAbstention = WithAxisSuggestionMethod<
-  InsufficientInsight | SuppressedInsight,
-  CurrentAxisSuggestionMethod
->;
-
-export type RetiredAxisSuggestion = WithAxisSuggestionMethod<
-  RetiredInsight,
-  RetiredAxisSuggestionMethod
->;
-
-export type AxisSuggestion =
-  | ReportedAxisSuggestion
-  | CurrentAxisSuggestionAbstention
-  | RetiredAxisSuggestion;
-
-// LLM narration types (collection-profiling spec, LLM Narration section)
-
-export interface NarrationEvidenceReference {
-  insightId: string;
-  gameIds: string[];
-}
-
-export interface NarratedClaim {
-  observation: string;
-  interpretation: string | null;
-  evidenceReferences: [NarrationEvidenceReference, ...NarrationEvidenceReference[]];
-}
-
-export interface ProfileNarration {
-  summary: NarratedClaim[];
-  surprises: NarratedClaim[];
-  tensions: NarratedClaim[];
-  abstention: string | null;
-}
-
-export type NarrationCacheState = "fresh" | "stale" | "empty";
-
-export interface CollectionProfile {
-  axisDistributions: AxisDistribution[];
-  axisWeights: AxisWeightEntry[];
-  bggClustering: {
-    mechanics: AttributeCluster[];
-    categories: AttributeCluster[];
-    families: AttributeCluster[];
-    subdomains: AttributeCluster[];
-    weightRanges: WeightRangeCluster[];
-  };
-  utilityCurves: UtilityCurveDeclaration[];
-  divergence: TournamentDivergenceInsight[] | null; // null when no tournament data
-  outliers: CollectionOutlier[];
-  suggestions: AxisSuggestion[];
-  narration: ProfileNarration | null;
-  narrationState: NarrationCacheState;
-  gameCount: number;
-  ratedGameCount: number;
-  computedAt: string; // ISO 8601
-}
-
-// Useful-profile contracts are authoritative in the daemon. CollectionProfile
-// remains the temporary consumer alias until the Step 9/10 CLI and web cutovers.
-
-export type ProfileEntityClass = "mechanic" | "designer" | "artist";
+export type CollectionProfileEntityClass = "mechanic" | "designer" | "artist";
 
 export interface BggEntityLink {
   id: number;
@@ -1022,7 +672,7 @@ export type EntityClassMetadata =
       explanation: "This game has no BGG ID, so Shelf Judge cannot refresh entity metadata.";
     };
 
-export type EntityMetadataByClass = Record<ProfileEntityClass, EntityClassMetadata>;
+export type EntityMetadataByClass = Record<CollectionProfileEntityClass, EntityClassMetadata>;
 
 export type LatestPlayCountCheck =
   | { status: "valid"; value: number; observedAt: string }
@@ -1091,9 +741,9 @@ export interface OwnershipMutationResult {
   linkedIntentionTransition: PlayIntention | null;
 }
 
-export type FutureUsefulProfileGameSource = Game;
+export type CollectionProfileGameSource = Game;
 
-export type FutureUsefulProfileCollectionSource = Collection;
+export type CollectionProfileCollectionSource = Collection;
 
 export type CreateIntentionCommand = {
   type: "create";
@@ -1168,28 +818,28 @@ export type CollectionMutationResult<Value> =
   | { outcome: "no-op"; changed: false; value: Value }
   | { outcome: "rejected"; changed: false; error: IntentionMutationError };
 
-export interface ProfileGameFitnessEvidence {
+export interface CollectionProfileGameFitnessEvidence {
   gameId: string;
   gameName: string;
   currentFitness: number;
   vetoed: boolean;
 }
 
-export type ProfileClassExclusionReason =
+export type CollectionProfileClassExclusionReason =
   | "predicted-fitness"
   | "missing-or-invalid-fitness"
   | "refresh-needed-metadata"
   | "unrefreshable-metadata";
 
-export interface ProfileClassExclusion {
+export interface CollectionProfileClassExclusion {
   gameId: string;
   gameName: string;
-  reason: ProfileClassExclusionReason;
+  reason: CollectionProfileClassExclusionReason;
   hasEntityAssociation: boolean;
   correctionDestination: { operationId: "shelf.game.bgg.refresh" | "shelf.game.rating.set" } | null;
 }
 
-export interface ProfileMetadataReadiness {
+export interface CollectionProfileMetadataReadiness {
   state: "complete" | "partial" | "refresh-needed";
   ownedGameCount: number;
   completeGameCount: number;
@@ -1197,7 +847,7 @@ export interface ProfileMetadataReadiness {
   unrefreshableGameCount: number;
 }
 
-export interface ProfileEntityEvidence {
+export interface CollectionProfileEntityEvidence {
   entityId: number;
   name: string;
   support: "limited" | "supported";
@@ -1207,30 +857,30 @@ export interface ProfileEntityEvidence {
   range: { min: number; max: number };
   comparatorMeanCurrentFitness: number;
   differenceFromComparator: number;
-  games: ProfileGameFitnessEvidence[];
+  games: CollectionProfileGameFitnessEvidence[];
 }
 
-export interface ProfileEntityOrderings {
+export interface CollectionProfileEntityOrderings {
   rating: number[];
   support: number[];
   name: number[];
 }
 
-export interface ProfileEntityClassResult {
-  entityClass: ProfileEntityClass;
+export interface CollectionProfileEntityClassResult {
+  entityClass: CollectionProfileEntityClass;
   result: "supported" | "limited" | "no-eligible-ratings" | "evaluated-empty" | "not-evaluated";
-  metadataReadiness: ProfileMetadataReadiness;
+  metadataReadiness: CollectionProfileMetadataReadiness;
   associatedGameCount: number;
   comparator: {
     gameCount: number;
     meanCurrentFitness: number | null;
-    games: ProfileGameFitnessEvidence[];
+    games: CollectionProfileGameFitnessEvidence[];
   };
-  exclusions: ProfileClassExclusion[];
+  exclusions: CollectionProfileClassExclusion[];
   refreshWarnings: { gameId: string; gameName: string; attemptedAt: string; message: string }[];
-  entities: ProfileEntityEvidence[];
+  entities: CollectionProfileEntityEvidence[];
   overviewEntityIds: number[];
-  orderings: ProfileEntityOrderings;
+  orderings: CollectionProfileEntityOrderings;
 }
 
 export type AttentionPlayEvidence =
@@ -1252,7 +902,7 @@ export type AttentionPlayEvidence =
         | "A newer BGG check did not provide a valid play count.";
     };
 
-export interface PlayIntentionAttentionItem {
+export interface CollectionProfileAttentionItem {
   id: string;
   decisionFamily: "play-intention";
   intention: PlayIntention;
@@ -1293,29 +943,27 @@ export interface GameDetailWithPurchaseUtilization extends GameWithPurchaseUtili
   intentions: GameIntentionDetail;
 }
 
-export interface FutureUsefulCollectionProfile {
+export interface CollectionProfile {
   status: "available";
   identity: {
     collectionState: "populated" | "empty";
-    classes: Record<ProfileEntityClass, ProfileEntityClassResult>;
-    axisDistributions: AxisDistribution[];
+    classes: Record<CollectionProfileEntityClass, CollectionProfileEntityClassResult>;
+    axisDistributions: CollectionProfileAxisDistribution[];
   };
   attention: {
     state: "active" | "nothing-to-decide" | "empty-collection";
-    items: PlayIntentionAttentionItem[];
+    items: CollectionProfileAttentionItem[];
   };
   computedAt: string;
 }
 
-export interface FutureUsefulCollectionProfileUnavailable {
+export interface CollectionProfileUnavailable {
   status: "unavailable";
   error: { kind: "transport" | "validation" | "recomputation"; message: string };
   retryDestination: { operationId: "shelf.profile.get" };
 }
 
-export type FutureUsefulProfileResult =
-  | FutureUsefulCollectionProfile
-  | FutureUsefulCollectionProfileUnavailable;
+export type CollectionProfileResult = CollectionProfile | CollectionProfileUnavailable;
 
 export interface ProfileSourceIdentity {
   collectionId: string;
@@ -1330,13 +978,13 @@ export interface ProfileData {
   contractVersion: 7;
   algorithmVersion: 9;
   sourceIdentity: ProfileSourceIdentity;
-  profile: FutureUsefulCollectionProfile;
+  profile: CollectionProfile;
   computedAt: string;
 }
 
-export interface FutureUsefulProfileSnapshot {
-  source: FutureUsefulProfileCollectionSource;
-  profile: FutureUsefulProfileResult;
+export interface CollectionProfileSnapshot {
+  source: CollectionProfileCollectionSource;
+  profile: CollectionProfileResult;
 }
 
 // Prediction types
@@ -1450,6 +1098,13 @@ export interface ComponentWeights {
   binary: number;
   continuous: number;
   personalAxes: number;
+}
+
+export interface ComponentDistances {
+  binary: number;
+  continuous: number;
+  personalAxes: number | null;
+  composite: number;
 }
 
 export interface RedundancyNeighbor {

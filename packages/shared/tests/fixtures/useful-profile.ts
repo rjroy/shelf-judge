@@ -1,8 +1,8 @@
 import type {
-  FutureUsefulCollectionProfile,
-  FutureUsefulProfileResult,
+  CollectionProfile,
+  CollectionProfileResult,
   PlayIntention,
-  ProfileEntityClassResult,
+  CollectionProfileEntityClassResult,
 } from "@shelf-judge/shared";
 
 export const activeIntentionFixture: PlayIntention = {
@@ -41,7 +41,7 @@ const readiness = {
   unrefreshableGameCount: 0,
 };
 
-export const mechanicClassFixture: ProfileEntityClassResult = {
+export const mechanicClassFixture: CollectionProfileEntityClassResult = {
   entityClass: "mechanic",
   result: "supported",
   metadataReadiness: readiness,
@@ -95,7 +95,9 @@ export const mechanicClassFixture: ProfileEntityClassResult = {
   },
 };
 
-const emptyClass = (entityClass: "mechanic" | "designer" | "artist"): ProfileEntityClassResult => ({
+const emptyClass = (
+  entityClass: "mechanic" | "designer" | "artist",
+): CollectionProfileEntityClassResult => ({
   entityClass,
   result: "evaluated-empty",
   metadataReadiness: readiness,
@@ -120,7 +122,7 @@ const emptyClass = (entityClass: "mechanic" | "designer" | "artist"): ProfileEnt
   orderings: { rating: [], support: [], name: [] },
 });
 
-export const usefulProfileFixture: FutureUsefulCollectionProfile = {
+export const usefulProfileFixture: CollectionProfile = {
   status: "available",
   identity: {
     collectionState: "populated",
@@ -160,12 +162,12 @@ export const usefulProfileFixture: FutureUsefulCollectionProfile = {
   computedAt: "2026-08-27T12:00:00.000Z",
 };
 
-export const supportedUsefulProfileFixture: FutureUsefulCollectionProfile = {
+export const supportedUsefulProfileFixture: CollectionProfile = {
   ...structuredClone(usefulProfileFixture),
   attention: { state: "nothing-to-decide", items: [] },
 };
 
-export const limitedUsefulProfileFixture: FutureUsefulCollectionProfile = (() => {
+export const limitedUsefulProfileFixture: CollectionProfile = (() => {
   const profile = structuredClone(supportedUsefulProfileFixture);
   const mechanic = profile.identity.classes.mechanic;
   mechanic.result = "limited";
@@ -176,7 +178,7 @@ export const limitedUsefulProfileFixture: FutureUsefulCollectionProfile = (() =>
   return profile;
 })();
 
-export const mixedReadinessUsefulProfileFixture: FutureUsefulCollectionProfile = (() => {
+export const mixedReadinessUsefulProfileFixture: CollectionProfile = (() => {
   const profile = structuredClone(supportedUsefulProfileFixture);
   const designer = profile.identity.classes.designer;
   designer.metadataReadiness = {
@@ -198,10 +200,9 @@ export const mixedReadinessUsefulProfileFixture: FutureUsefulCollectionProfile =
   return profile;
 })();
 
-export const activeUsefulProfileFixture: FutureUsefulCollectionProfile =
-  structuredClone(usefulProfileFixture);
+export const activeUsefulProfileFixture: CollectionProfile = structuredClone(usefulProfileFixture);
 
-export const warningUsefulProfileFixture: FutureUsefulCollectionProfile = (() => {
+export const warningUsefulProfileFixture: CollectionProfile = (() => {
   const profile = structuredClone(activeUsefulProfileFixture);
   profile.attention.items[0].currentPlayEvidence = {
     status: "stale",
@@ -213,7 +214,7 @@ export const warningUsefulProfileFixture: FutureUsefulCollectionProfile = (() =>
   return profile;
 })();
 
-export const nothingToDecideUsefulProfileFixture: FutureUsefulCollectionProfile = {
+export const nothingToDecideUsefulProfileFixture: CollectionProfile = {
   status: "available",
   identity: {
     collectionState: "populated",
@@ -230,7 +231,7 @@ export const nothingToDecideUsefulProfileFixture: FutureUsefulCollectionProfile 
 
 const emptyCollectionClass = (
   entityClass: "mechanic" | "designer" | "artist",
-): ProfileEntityClassResult => ({
+): CollectionProfileEntityClassResult => ({
   entityClass,
   result: "not-evaluated",
   metadataReadiness: {
@@ -249,7 +250,7 @@ const emptyCollectionClass = (
   orderings: { rating: [], support: [], name: [] },
 });
 
-export const emptyUsefulProfileFixture: FutureUsefulCollectionProfile = {
+export const emptyUsefulProfileFixture: CollectionProfile = {
   status: "available",
   identity: {
     collectionState: "empty",
@@ -264,7 +265,7 @@ export const emptyUsefulProfileFixture: FutureUsefulCollectionProfile = {
   computedAt: "2026-08-27T12:00:00.000Z",
 };
 
-export const unavailableUsefulProfileFixture: FutureUsefulProfileResult = {
+export const unavailableUsefulProfileFixture: CollectionProfileResult = {
   status: "unavailable",
   error: { kind: "transport", message: "Daemon unavailable" },
   retryDestination: { operationId: "shelf.profile.get" },
@@ -282,7 +283,7 @@ export const canonicalUsefulProfileFixtures: ReadonlyArray<
       | "empty"
       | "unavailable"
     ),
-    FutureUsefulProfileResult,
+    CollectionProfileResult,
   ]
 > = [
   ["supported", supportedUsefulProfileFixture],

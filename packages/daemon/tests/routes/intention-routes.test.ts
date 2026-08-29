@@ -13,6 +13,7 @@ import { parseThingItems } from "../../src/services/bgg-xml-parser.js";
 import type { BggGameResult } from "../../src/services/bgg-client.js";
 import type { IntentionService } from "../../src/services/intention-service.js";
 import { GameHistoryConflictError } from "../../src/services/game-service.js";
+import { canonicalIntentionMutationCases } from "../../../shared/tests/fixtures/intention-mutation.js";
 import { createMockBggClient, createTestApp, jsonRequest } from "../helpers/test-app.js";
 
 const createCommandId = "20000000-0000-4000-8000-000000000001";
@@ -44,6 +45,29 @@ function appReturningIntentionResult(
 }
 
 describe("game intention and play routes", () => {
+  test.each([...canonicalIntentionMutationCases])(
+    "preserves canonical $label at the daemon boundary",
+    async ({ command, result, status }) => {
+      const app = appReturningIntentionResult(() => structuredClone(result));
+      const route =
+        command.type === "create"
+          ? `/api/games/${command.gameId}/intention`
+          : `/api/games/${command.gameId}/intention/${command.intentionId}/${command.type}`;
+      const body =
+        command.type === "create"
+          ? {
+              commandId: command.commandId,
+              kind: command.kind,
+              expectedActiveIntention: command.expectedActiveIntention,
+            }
+          : { commandId: command.commandId, expectedVersion: command.expectedVersion };
+      const response = await jsonRequest(app, "POST", route, body);
+
+      expect(response.status).toBe(status);
+      expect(await response.json()).toEqual(result);
+    },
+  );
+
   test("returns internal errors for cross-game mutation results at every route-owned seam", async () => {
     const expectInternalError = async (response: Response) => {
       expect(response.status).toBe(500);

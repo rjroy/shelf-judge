@@ -1,8 +1,12 @@
-import type { AxisDistribution } from "@shelf-judge/shared";
+import type { CollectionProfileAxisDistribution } from "@shelf-judge/shared";
 
 const ratingLabels = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
 
-export function AxisDistributions({ distributions }: { distributions: AxisDistribution[] }) {
+export function CollectionProfileAxisDistributions({
+  distributions,
+}: {
+  distributions: CollectionProfileAxisDistribution[];
+}) {
   if (distributions.length === 0) {
     return (
       <p className="profile-state" data-axis-state="empty">

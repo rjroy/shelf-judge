@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import type {
-  FutureUsefulCollectionProfile,
-  ProfileEntityClass,
-  ProfileEntityClassResult,
-  ProfileEntityEvidence,
-  ProfileEntityOrderings,
+  CollectionProfile,
+  CollectionProfileEntityClass,
+  CollectionProfileEntityClassResult,
+  CollectionProfileEntityEvidence,
+  CollectionProfileEntityOrderings,
 } from "@shelf-judge/shared";
 import { getProfile } from "@/lib/api";
 import { ClassEvidence, EntityEvidence } from "@/components/profile/entity-evidence";
@@ -14,19 +14,19 @@ import { ProfileRetry } from "@/components/profile/profile-unavailable";
 export const metadata: Metadata = { title: "Entity Evidence" };
 export const dynamic = "force-dynamic";
 
-export type EntityOrdering = keyof ProfileEntityOrderings;
+export type EntityOrdering = keyof CollectionProfileEntityOrderings;
 
-const entityClasses: ProfileEntityClass[] = ["mechanic", "designer", "artist"];
-const classLabels: Record<ProfileEntityClass, string> = {
+const entityClasses: CollectionProfileEntityClass[] = ["mechanic", "designer", "artist"];
+const classLabels: Record<CollectionProfileEntityClass, string> = {
   mechanic: "Mechanics",
   designer: "Designers",
   artist: "Artists",
 };
 
 export function entitiesInSuppliedOrder(
-  result: ProfileEntityClassResult,
+  result: CollectionProfileEntityClassResult,
   ordering: EntityOrdering,
-): ProfileEntityEvidence[] {
+): CollectionProfileEntityEvidence[] {
   return result.orderings[ordering].flatMap((entityId) => {
     const entity = result.entities.find((candidate) => candidate.entityId === entityId);
     return entity === undefined ? [] : [entity];
@@ -37,7 +37,7 @@ export function EntityDrilldownContent({
   profile,
   ordering,
 }: {
-  profile: FutureUsefulCollectionProfile;
+  profile: CollectionProfile;
   ordering: EntityOrdering;
 }) {
   return (

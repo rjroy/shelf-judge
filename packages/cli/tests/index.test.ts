@@ -153,13 +153,6 @@ describe("intention and play command parsing", () => {
     },
   );
 
-  test("does not dispatch removed profile narration", () => {
-    expect(parseArgs(["bun", "shelf-judge", "profile", "narrate"])).toMatchObject({
-      commandPath: "profile",
-      positional: ["narrate"],
-    });
-  });
-
   test("preserves unrelated recognized flags so command validation rejects them", () => {
     expect(
       parseArgs([

@@ -7,7 +7,7 @@ import {
   CURRENT_PROFILE_CONTRACT_VERSION,
 } from "@shelf-judge/shared";
 import { createStorageService } from "../../src/services/storage-service.js";
-import { computeUsefulProfile } from "../../src/services/profile-engine.js";
+import { computeCollectionProfile } from "../../src/services/collection-profile-engine.js";
 import { profileSourceIdentity } from "../../src/services/profile-source-coordinator.js";
 import { createMockFileOps } from "../helpers/mock-file-ops.js";
 
@@ -608,7 +608,7 @@ function makeEmptyProfileData(computedAt = "2026-01-01T00:00:00.000Z"): ProfileD
       predictionSettings,
       redundancySettings,
     }),
-    profile: computeUsefulProfile({ collection, fitnessResults: new Map(), computedAt }),
+    profile: computeCollectionProfile({ collection, fitnessResults: new Map(), computedAt }),
     computedAt,
   };
 }

@@ -1,20 +1,20 @@
 import { describe, expect, expectTypeOf, test } from "bun:test";
 import {
   EntityClassMetadataSchema,
-  FutureUsefulProfileCollectionSourceSchema,
-  FutureUsefulProfileSnapshotSchema,
-  FutureUsefulProfileSchema,
+  CollectionProfileCollectionSourceSchema,
+  CollectionProfileSnapshotSchema,
+  CollectionProfileResultSchema,
   IntentionCommandReceiptSchema,
   IntentionMutationResultSchema,
   ManualPlayCorrectionResultSchema,
   OwnershipMutationResultSchema,
   PlayEvidenceMutationResultSchema,
   PlayIntentionSchema,
-  ProfileEntityClassResultSchema,
+  CollectionProfileEntityClassResultSchema,
   ResolvedPlayIntentionHistorySchema,
   ResolvedPlayIntentionHistoryItemSchema,
-  type FutureUsefulProfileResult,
-  type FutureUsefulProfileGameSource,
+  type CollectionProfileResult,
+  type CollectionProfileGameSource,
   type IntentionMutationError,
   type IntentionMutationResult,
 } from "../src/index";
@@ -30,8 +30,8 @@ const commandId = "123e4567-e89b-42d3-a456-426614174000";
 function futureSourceGame(
   id: string,
   ownership: "owned" | "previously-owned" = "owned",
-  overrides: Partial<FutureUsefulProfileGameSource> = {},
-): FutureUsefulProfileGameSource {
+  overrides: Partial<CollectionProfileGameSource> = {},
+): CollectionProfileGameSource {
   const complete = {
     state: "complete" as const,
     entities: [],
@@ -99,7 +99,7 @@ function futureSourceCollection(
   };
 }
 
-describe("future useful-profile source contracts", () => {
+describe("collection profile source contracts", () => {
   test("validates linked play-evidence transitions against the returned game", () => {
     const completedAt = "2026-08-27T12:00:00.000Z";
     const game = futureSourceGame("game-4", "owned", {
@@ -351,11 +351,20 @@ describe("future useful-profile source contracts", () => {
   });
 
   test("keeps active collection and profile aliases separate from future contracts", () => {
-    expectTypeOf<FutureUsefulProfileResult>().not.toEqualTypeOf<
+    expectTypeOf<CollectionProfileResult>().not.toEqualTypeOf<
       typeof usefulProfileFixture.identity
     >();
-    expect(FutureUsefulProfileSchema.safeParse(usefulProfileFixture).success).toBe(true);
+    expect(CollectionProfileResultSchema.safeParse(usefulProfileFixture).success).toBe(true);
   });
+
+  test.each(["axisWeights", "narration", "gameCount"])(
+    "rejects retired profile field %s at the strict current boundary",
+    (field) => {
+      expect(
+        CollectionProfileResultSchema.safeParse({ ...usefulProfileFixture, [field]: null }).success,
+      ).toBe(false);
+    },
+  );
 
   test("distinguishes complete-empty, refresh-needed, and unrefreshable entity metadata", () => {
     const complete = {
@@ -417,7 +426,7 @@ describe("future useful-profile source contracts", () => {
       observedAt: "2026-08-27T10:00:00.000Z",
     };
     expect(
-      FutureUsefulProfileCollectionSourceSchema.safeParse({
+      CollectionProfileCollectionSourceSchema.safeParse({
         ...futureSourceCollection([]),
         games: [
           futureSourceGame("game-4", "owned", {
@@ -434,7 +443,7 @@ describe("future useful-profile source contracts", () => {
       }).success,
     ).toBe(true);
     expect(
-      FutureUsefulProfileCollectionSourceSchema.safeParse({
+      CollectionProfileCollectionSourceSchema.safeParse({
         ...futureSourceCollection([]),
         games: [
           futureSourceGame("game-4", "owned", {
@@ -480,9 +489,9 @@ describe("future useful-profile source contracts", () => {
     ).toBe(false);
 
     const source = futureSourceCollection();
-    expect(FutureUsefulProfileCollectionSourceSchema.safeParse(source).success).toBe(true);
+    expect(CollectionProfileCollectionSourceSchema.safeParse(source).success).toBe(true);
     expect(
-      FutureUsefulProfileCollectionSourceSchema.safeParse({
+      CollectionProfileCollectionSourceSchema.safeParse({
         ...source,
         intentions: [
           activeIntentionFixture,
@@ -491,7 +500,7 @@ describe("future useful-profile source contracts", () => {
       }).success,
     ).toBe(false);
     expect(
-      FutureUsefulProfileCollectionSourceSchema.safeParse({
+      CollectionProfileCollectionSourceSchema.safeParse({
         ...source,
         games: [
           futureSourceGame("game-4", "owned", {
@@ -517,13 +526,13 @@ describe("future useful-profile source contracts", () => {
       observedAt: "2026-08-27T12:01:00.000Z",
     };
     expect(
-      FutureUsefulProfileCollectionSourceSchema.safeParse({
+      CollectionProfileCollectionSourceSchema.safeParse({
         ...source,
         games: [mismatchedObservation],
       }).success,
     ).toBe(false);
     expect(
-      FutureUsefulProfileCollectionSourceSchema.safeParse({
+      CollectionProfileCollectionSourceSchema.safeParse({
         ...source,
         games: [futureSourceGame("game-4", "previously-owned")],
       }).success,
@@ -559,13 +568,13 @@ describe("future useful-profile source contracts", () => {
       },
     });
     expect(
-      FutureUsefulProfileCollectionSourceSchema.safeParse({
+      CollectionProfileCollectionSourceSchema.safeParse({
         ...source,
         games: [noBgg],
       }).success,
     ).toBe(true);
     expect(
-      FutureUsefulProfileCollectionSourceSchema.safeParse({
+      CollectionProfileCollectionSourceSchema.safeParse({
         ...source,
         games: [{ ...futureSourceGame("game-4"), bggId: null }],
       }).success,
@@ -601,12 +610,12 @@ describe("future useful-profile source contracts", () => {
 
     expect(IntentionCommandReceiptSchema.safeParse(receipt).success).toBe(true);
     expect(
-      FutureUsefulProfileCollectionSourceSchema.safeParse(
+      CollectionProfileCollectionSourceSchema.safeParse(
         futureSourceCollection([completed], [receipt]),
       ).success,
     ).toBe(true);
     expect(
-      FutureUsefulProfileCollectionSourceSchema.safeParse(
+      CollectionProfileCollectionSourceSchema.safeParse(
         futureSourceCollection(
           [
             {
@@ -724,11 +733,11 @@ describe("future useful-profile source contracts", () => {
   });
 });
 
-describe("future useful-profile identity contract", () => {
+describe("collection profile identity contract", () => {
   test.each(canonicalUsefulProfileFixtures)(
     "validates the canonical %s daemon result",
     (_label, profile) => {
-      const parsed: FutureUsefulProfileResult = FutureUsefulProfileSchema.parse(
+      const parsed: CollectionProfileResult = CollectionProfileResultSchema.parse(
         structuredClone(profile),
       );
       expect(parsed).toEqual(profile);
@@ -738,14 +747,14 @@ describe("future useful-profile identity contract", () => {
   test("reproduces supported, limited, comparator, veto, and ordering evidence", () => {
     for (const entityClass of ["mechanic", "designer", "artist"] as const) {
       expect(
-        ProfileEntityClassResultSchema.safeParse({
+        CollectionProfileEntityClassResultSchema.safeParse({
           ...mechanicClassFixture,
           entityClass,
         }).success,
         entityClass,
       ).toBe(true);
     }
-    expect(FutureUsefulProfileSchema.safeParse(usefulProfileFixture).success).toBe(true);
+    expect(CollectionProfileResultSchema.safeParse(usefulProfileFixture).success).toBe(true);
     expect(mechanicClassFixture.comparator.games.at(-1)).toEqual({
       gameId: "game-3",
       gameName: "Gamma",
@@ -802,7 +811,7 @@ describe("future useful-profile identity contract", () => {
   ])("rejects %s", (_label, mutate) => {
     const value = structuredClone(mechanicClassFixture);
     mutate(value);
-    expect(ProfileEntityClassResultSchema.safeParse(value).success).toBe(false);
+    expect(CollectionProfileEntityClassResultSchema.safeParse(value).success).toBe(false);
   });
 
   test("rejects comparator membership and exclusion contradictions", () => {
@@ -810,7 +819,9 @@ describe("future useful-profile identity contract", () => {
     missingComparatorGame.comparator.games.splice(0, 1);
     missingComparatorGame.comparator.gameCount = 2;
     missingComparatorGame.comparator.meanCurrentFitness = 3;
-    expect(ProfileEntityClassResultSchema.safeParse(missingComparatorGame).success).toBe(false);
+    expect(CollectionProfileEntityClassResultSchema.safeParse(missingComparatorGame).success).toBe(
+      false,
+    );
 
     const duplicateExclusion = structuredClone(mechanicClassFixture);
     duplicateExclusion.exclusions = [
@@ -829,18 +840,24 @@ describe("future useful-profile identity contract", () => {
         correctionDestination: null,
       },
     ];
-    expect(ProfileEntityClassResultSchema.safeParse(duplicateExclusion).success).toBe(false);
+    expect(CollectionProfileEntityClassResultSchema.safeParse(duplicateExclusion).success).toBe(
+      false,
+    );
 
     const mismatchedEvidence = structuredClone(mechanicClassFixture);
     mismatchedEvidence.entities[0].games[0] = {
       ...mismatchedEvidence.entities[0].games[0],
       gameName: "Different Alpha",
     };
-    expect(ProfileEntityClassResultSchema.safeParse(mismatchedEvidence).success).toBe(false);
+    expect(CollectionProfileEntityClassResultSchema.safeParse(mismatchedEvidence).success).toBe(
+      false,
+    );
 
     const unorderedEvidence = structuredClone(mechanicClassFixture);
     unorderedEvidence.comparator.games.reverse();
-    expect(ProfileEntityClassResultSchema.safeParse(unorderedEvidence).success).toBe(false);
+    expect(CollectionProfileEntityClassResultSchema.safeParse(unorderedEvidence).success).toBe(
+      false,
+    );
   });
 
   test("accepts mixed metadata readiness without erasing usable class evidence", () => {
@@ -893,7 +910,7 @@ describe("future useful-profile identity contract", () => {
     mixed.overviewEntityIds = [];
     mixed.orderings = { rating: [102], support: [102], name: [102] };
 
-    expect(ProfileEntityClassResultSchema.safeParse(mixed).success).toBe(true);
+    expect(CollectionProfileEntityClassResultSchema.safeParse(mixed).success).toBe(true);
   });
 
   test("uses normalized Unicode code-point names and entity IDs to break ties", () => {
@@ -925,26 +942,26 @@ describe("future useful-profile identity contract", () => {
     tied.overviewEntityIds = [];
     tied.orderings = { rating: [201, 202], support: [201, 202], name: [201, 202] };
 
-    expect(ProfileEntityClassResultSchema.safeParse(tied).success).toBe(true);
+    expect(CollectionProfileEntityClassResultSchema.safeParse(tied).success).toBe(true);
   });
 
   test("requires all three classes to describe the same owned games", () => {
     const profile = structuredClone(usefulProfileFixture);
     profile.identity.classes.designer.exclusions[0].gameName = "A different game";
-    expect(FutureUsefulProfileSchema.safeParse(profile).success).toBe(false);
+    expect(CollectionProfileResultSchema.safeParse(profile).success).toBe(false);
   });
 });
 
-describe("future useful-profile attention contract", () => {
+describe("collection profile attention contract", () => {
   test("accepts active attention, resolved history, nothing-to-decide, and unavailable", () => {
-    expect(FutureUsefulProfileSchema.safeParse(usefulProfileFixture).success).toBe(true);
+    expect(CollectionProfileResultSchema.safeParse(usefulProfileFixture).success).toBe(true);
 
     const nothing = structuredClone(usefulProfileFixture);
     nothing.attention = { state: "nothing-to-decide", items: [] };
-    expect(FutureUsefulProfileSchema.safeParse(nothing).success).toBe(true);
+    expect(CollectionProfileResultSchema.safeParse(nothing).success).toBe(true);
 
     expect(
-      FutureUsefulProfileSchema.safeParse({
+      CollectionProfileResultSchema.safeParse({
         status: "unavailable",
         error: { kind: "recomputation", message: "Could not compute current profile" },
         retryDestination: { operationId: "shelf.profile.get" },
@@ -1006,7 +1023,7 @@ describe("future useful-profile attention contract", () => {
   test("validates attention and canonical names against the durable source snapshot", () => {
     const metadata = (
       entities: Array<{ id: number; name: string }>,
-    ): FutureUsefulProfileGameSource["entityMetadata"] => {
+    ): CollectionProfileGameSource["entityMetadata"] => {
       const complete = {
         state: "complete" as const,
         entities: [],
@@ -1046,12 +1063,11 @@ describe("future useful-profile attention contract", () => {
       ],
     };
     expect(
-      FutureUsefulProfileSnapshotSchema.safeParse({ source, profile: usefulProfileFixture })
-        .success,
+      CollectionProfileSnapshotSchema.safeParse({ source, profile: usefulProfileFixture }).success,
     ).toBe(true);
 
     expect(
-      FutureUsefulProfileSnapshotSchema.safeParse({
+      CollectionProfileSnapshotSchema.safeParse({
         source: { ...source, intentions: [] },
         profile: usefulProfileFixture,
       }).success,
@@ -1060,9 +1076,9 @@ describe("future useful-profile attention contract", () => {
     const wrongName = structuredClone(usefulProfileFixture);
     wrongName.identity.classes.mechanic.entities[0].name = "Old Worker Placement Name";
     wrongName.identity.classes.mechanic.orderings.name = [102, 101];
-    expect(
-      FutureUsefulProfileSnapshotSchema.safeParse({ source, profile: wrongName }).success,
-    ).toBe(false);
+    expect(CollectionProfileSnapshotSchema.safeParse({ source, profile: wrongName }).success).toBe(
+      false,
+    );
 
     const missingMembership = structuredClone(source);
     const gameTwoMetadata = missingMembership.games[1].entityMetadata.mechanic;
@@ -1070,7 +1086,7 @@ describe("future useful-profile attention contract", () => {
       throw new Error("Expected complete mechanic metadata");
     gameTwoMetadata.entities = [];
     expect(
-      FutureUsefulProfileSnapshotSchema.safeParse({
+      CollectionProfileSnapshotSchema.safeParse({
         source: missingMembership,
         profile: usefulProfileFixture,
       }).success,
@@ -1084,7 +1100,7 @@ describe("future useful-profile attention contract", () => {
       observedAt: "2026-08-27T10:00:00.000Z",
     };
     expect(
-      FutureUsefulProfileSnapshotSchema.safeParse({
+      CollectionProfileSnapshotSchema.safeParse({
         source: mismatchedPlayEvidence,
         profile: usefulProfileFixture,
       }).success,
@@ -1094,7 +1110,7 @@ describe("future useful-profile attention contract", () => {
   test("rejects impossible attention cards and urgency fields", () => {
     const wrongQuestion = structuredClone(usefulProfileFixture);
     wrongQuestion.attention.items[0].question = "Should you sell Heat?";
-    expect(FutureUsefulProfileSchema.safeParse(wrongQuestion).success).toBe(false);
+    expect(CollectionProfileResultSchema.safeParse(wrongQuestion).success).toBe(false);
 
     const resolved = structuredClone(usefulProfileFixture);
     resolved.attention.items[0].intention.resolution = {
@@ -1102,25 +1118,19 @@ describe("future useful-profile attention contract", () => {
       source: "owner-confirmed",
       resolvedAt: "2026-08-27T12:00:00.000Z",
     };
-    expect(FutureUsefulProfileSchema.safeParse(resolved).success).toBe(false);
+    expect(CollectionProfileResultSchema.safeParse(resolved).success).toBe(false);
 
     const urgency = structuredClone(usefulProfileFixture) as unknown as Record<string, unknown>;
     const attention = urgency.attention as { items: Array<Record<string, unknown>> };
     attention.items[0].urgency = "high";
-    expect(FutureUsefulProfileSchema.safeParse(urgency).success).toBe(false);
-
-    const supersededSurface = {
-      ...structuredClone(usefulProfileFixture),
-      narration: { summary: "This field belongs to the old profile." },
-    };
-    expect(FutureUsefulProfileSchema.safeParse(supersededSurface).success).toBe(false);
+    expect(CollectionProfileResultSchema.safeParse(urgency).success).toBe(false);
 
     const contradictoryEmpty = structuredClone(usefulProfileFixture);
     contradictoryEmpty.attention.state = "nothing-to-decide";
-    expect(FutureUsefulProfileSchema.safeParse(contradictoryEmpty).success).toBe(false);
+    expect(CollectionProfileResultSchema.safeParse(contradictoryEmpty).success).toBe(false);
 
     const alreadyCompletedByEvidence = structuredClone(usefulProfileFixture);
     alreadyCompletedByEvidence.attention.items[0].currentPlayEvidence.playCount = 1;
-    expect(FutureUsefulProfileSchema.safeParse(alreadyCompletedByEvidence).success).toBe(false);
+    expect(CollectionProfileResultSchema.safeParse(alreadyCompletedByEvidence).success).toBe(false);
   });
 });

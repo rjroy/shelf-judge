@@ -2,6 +2,8 @@ node_modules/
 dist/
 *.tsbuildinfo
 .next/
+playwright-report/
+test-results/
 .shelf-judge/
 
 # Editor

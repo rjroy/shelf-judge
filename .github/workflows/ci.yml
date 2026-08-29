@@ -40,10 +40,23 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run test
 
+  browser:
+    name: Browser release gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - run: bun run --cwd packages/web test:browser:install:ci
+      - run: bun run typecheck:browser
+      - run: bun run test:browser
+
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, test]
+    needs: [lint, typecheck, test, browser]
     steps:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2

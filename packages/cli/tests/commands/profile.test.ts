@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { FutureUsefulProfileResult } from "@shelf-judge/shared";
+import type { CollectionProfileResult } from "@shelf-judge/shared";
 import {
   canonicalUsefulProfileFixtures,
   usefulProfileFixture,
@@ -7,7 +7,7 @@ import {
 import { profileCommand } from "../../src/commands/profile.js";
 import { createMockClient } from "../helpers/mock-client.js";
 
-function clientFor(profile: FutureUsefulProfileResult) {
+function clientFor(profile: CollectionProfileResult) {
   return createMockClient({
     routes: {
       "GET /api/profile": { response: { ok: true, status: 200, data: profile } },
