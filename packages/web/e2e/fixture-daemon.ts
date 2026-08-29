@@ -7,8 +7,12 @@ import {
   type CollectionProfileResult,
   type Game,
   type GameDetailWithPurchaseUtilization,
+  type GameWithPurchaseUtilization,
+  type NichePosition,
   type PlayIntention,
+  type PurchaseUtilizationResult,
   type ResolvedPlayIntentionHistory,
+  type TournamentGameStatsDisplay,
 } from "@shelf-judge/shared";
 import {
   emptyUsefulProfileFixture,
@@ -24,7 +28,18 @@ const createdAt = "2026-08-28T10:01:00.000Z";
 const resolvedAt = "2026-08-28T12:00:00.000Z";
 const gameId = "game-4";
 
-type Scenario = "profile" | "empty" | "unavailable" | "create" | "active" | "stale";
+type Scenario = "profile" | "empty" | "unavailable" | "create" | "active" | "stale" | "collection";
+
+interface CollectionFixtureState {
+  deletedIds: Set<string>;
+  previouslyOwnedIds: Set<string>;
+  empty: boolean;
+  axesAvailable: boolean;
+  tournamentAvailable: boolean;
+  predictionsAvailable: boolean;
+  nichesAvailable: boolean;
+  integratedRedundancy: boolean;
+}
 
 const axis = AxisSchema.parse({
   id: "axis-enjoyment",
@@ -122,6 +137,278 @@ function baseGame(): Game {
   };
 }
 
+interface CollectionDefinition {
+  readonly id: string;
+  readonly name: string;
+  readonly score: number | null;
+  readonly plays: number;
+  readonly players: readonly [number, number];
+  readonly dimensions: {
+    readonly width: number;
+    readonly height: number;
+    readonly depth: number;
+  } | null;
+  readonly remaining: string | null;
+  readonly additional: string | null;
+  readonly previouslyOwned?: boolean;
+}
+
+const collectionDefinitions: readonly CollectionDefinition[] = [
+  {
+    id: "game-1",
+    name: "Atlas Equal",
+    score: 8,
+    plays: 0,
+    players: [1, 2] as const,
+    dimensions: null,
+    remaining: "600",
+    additional: "9",
+  },
+  {
+    id: "game-2",
+    name: "Borealis: A Deliberately Long Collection Game Name for Responsive Navigation Evidence",
+    score: 8,
+    plays: 0,
+    players: [2, 4] as const,
+    dimensions: null,
+    remaining: "200",
+    additional: "3",
+  },
+  {
+    id: "game-3",
+    name: "Cinder Equal",
+    score: 8,
+    plays: 2,
+    players: [2, 5] as const,
+    dimensions: { width: 12, height: 12, depth: 3 },
+    remaining: "200",
+    additional: "3",
+  },
+  {
+    id: "game-5",
+    name: "Distant Previously Owned",
+    score: 7,
+    plays: 0,
+    players: [1, 2] as const,
+    dimensions: null,
+    remaining: "400",
+    additional: "6",
+    previouslyOwned: true,
+  },
+  {
+    id: "game-6",
+    name: "Isolated Beacon",
+    score: null,
+    plays: 0,
+    players: [2, 2] as const,
+    dimensions: null,
+    remaining: null,
+    additional: null,
+  },
+  {
+    id: "game-7",
+    name: "Zephyr Mutable Target With Another Exceptionally Long Name for Full Accessible Labels",
+    score: 5,
+    plays: 4,
+    players: [3, 6] as const,
+    dimensions: { width: 10, height: 10, depth: 2 },
+    remaining: null,
+    additional: "12",
+  },
+];
+
+function collectionGame(definition: CollectionDefinition): Game {
+  const game = baseGame();
+  const ownership =
+    definition.previouslyOwned === true || collectionState.previouslyOwnedIds.has(definition.id)
+      ? "previously-owned"
+      : "owned";
+  return {
+    ...game,
+    id: definition.id,
+    name: definition.name,
+    yearPublished: 2010 + Number(definition.id.slice(5)),
+    minPlayers: definition.players[0],
+    maxPlayers: definition.players[1],
+    bestPlayers: definition.players[0],
+    playingTime: definition.score === null ? null : 30 + Number(definition.id.slice(5)) * 10,
+    numPlays: definition.plays,
+    playCountEvidence: {
+      status: "valid",
+      value: definition.plays,
+      source: "manual",
+      observedAt,
+    },
+    playerRangeEvidence: {
+      status: "valid",
+      value: { minPlayers: definition.players[0], maxPlayers: definition.players[1] },
+      source: "manual",
+      observedAt,
+    },
+    boxDimensions: definition.dimensions,
+    ownership,
+    ratings: definition.score === null ? {} : { [axis.id]: definition.score },
+    updatedAt: `2026-08-${String(10 + Number(definition.id.slice(5))).padStart(2, "0")}T10:00:00.000Z`,
+  };
+}
+
+function utilization(game: Game, definition: CollectionDefinition): PurchaseUtilizationResult {
+  const base = calculatePurchaseUtilization({
+    acquisition: game.acquisition,
+    entertainmentBenchmark: null,
+    playCount: game.playCountEvidence,
+    duration: game.durationEvidence,
+    playerRange: game.playerRangeEvidence,
+    suggestedPlayerPoll: game.suggestedPlayerPoll,
+    fitness: definition.score === null ? null : definition.score.toFixed(1),
+  });
+  const valueRemaining: PurchaseUtilizationResult["components"]["valueRemaining"] =
+    definition.remaining === null
+      ? { label: "Value remaining", outcome: "unavailable", display: "Unavailable", reasons: [] }
+      : {
+          label: "Value remaining",
+          outcome: "calculated",
+          value: { exact: { numerator: definition.remaining, denominator: "1" } },
+          display: `$${definition.remaining}`,
+          reasons: [],
+        };
+  const estimatedAdditionalPlays: PurchaseUtilizationResult["components"]["estimatedAdditionalPlays"] =
+    definition.additional === null
+      ? {
+          label: "Estimated additional plays to value threshold",
+          outcome: "unavailable",
+          display: "Unavailable",
+          reasons: [],
+        }
+      : {
+          label: "Estimated additional plays to value threshold",
+          outcome: "calculated",
+          value: { wholePlays: definition.additional },
+          display: definition.additional,
+          reasons: [],
+        };
+  return {
+    ...base,
+    components: { ...base.components, valueRemaining, estimatedAdditionalPlays },
+    sort: {
+      valueRemainingHundredths: definition.remaining,
+      estimatedAdditionalPlays:
+        definition.additional === null
+          ? { category: "unavailable", wholePlays: null }
+          : { category: "finite", wholePlays: definition.additional },
+    },
+  };
+}
+
+function score(definition: CollectionDefinition, predicted: boolean) {
+  if (definition.score === null && !predicted) return null;
+  const value = definition.score ?? 6.5;
+  return {
+    score: predicted ? value + 0.25 : value,
+    ratedAxisCount: definition.score === null ? 0 : 1,
+    totalAxisCount: 1,
+    breakdown: [],
+    vetoed: false,
+    vetoedBy: null,
+    hypotheticalScore: null,
+    predictionMeta: predicted
+      ? {
+          readinessStage: 3 as const,
+          confidence: "strong" as const,
+          predictedAxisCount: definition.score === null ? 1 : 0,
+          actualAxisCount: definition.score === null ? 0 : 1,
+          referenceGameCount: 4,
+          coveragePercent: 1,
+        }
+      : null,
+    redundancyAdjustment: {
+      penalty: Number(definition.id.slice(5)) / 10,
+      originalScore: value,
+      adjustedScore: value - Number(definition.id.slice(5)) / 10,
+      nicheNeighbors: [],
+      nicheRank: 1,
+      nicheSize: 2,
+    },
+  };
+}
+
+function neighbor(definition: CollectionDefinition) {
+  return {
+    gameId: definition.id,
+    gameName: definition.name,
+    fitnessScore: definition.score ?? 6.5,
+    isPredicted: definition.score === null,
+  };
+}
+
+function nichePosition(definition: CollectionDefinition): NichePosition {
+  const atlas = collectionDefinitions[0];
+  const borealis = collectionDefinitions[1];
+  if (atlas === undefined || borealis === undefined)
+    throw new Error("Collection fixture is incomplete");
+  const shared = {
+    type: "mechanic" as const,
+    name: "Shared Strategy",
+    size: 4,
+    rank: Number(definition.id.slice(5)),
+    isChampion: definition.id === atlas.id,
+    champion: neighbor(atlas),
+    above: definition.id === atlas.id ? [] : [neighbor(atlas)],
+    below: definition.id === borealis.id ? [] : [neighbor(borealis)],
+  };
+  const niches: NichePosition["niches"] = [shared];
+  if (definition.id === atlas.id || definition.id === borealis.id) {
+    niches.push({ ...shared, type: "category", name: "Duplicate Membership" });
+  }
+  return { niches };
+}
+
+function collectionEntry(
+  definition: CollectionDefinition,
+  options: { predicted: boolean; niches: boolean },
+): GameWithPurchaseUtilization {
+  const game = collectionGame(definition);
+  const fitness = score(definition, options.predicted);
+  return {
+    game,
+    score: fitness,
+    displayScore: fitness === null ? null : fitness.score.toFixed(1),
+    purchaseUtilization: utilization(game, definition),
+    nichePosition: options.niches ? nichePosition(definition) : null,
+  };
+}
+
+function collectionEntries(
+  options: {
+    predicted?: boolean;
+    niches?: boolean;
+  } = {},
+): GameWithPurchaseUtilization[] {
+  if (collectionState.empty) return [];
+  return collectionDefinitions
+    .filter(({ id }) => !collectionState.deletedIds.has(id))
+    .map((definition) =>
+      collectionEntry(definition, {
+        predicted: options.predicted === true,
+        niches: options.niches === true,
+      }),
+    );
+}
+
+function tournamentStats(definition: CollectionDefinition): TournamentGameStatsDisplay {
+  const value = 4 + Number(definition.id.slice(5)) / 2;
+  return {
+    eloRating: 1400 + value * 20,
+    comparisonCount: 8,
+    normalizedScore: value,
+    isProvisional: false,
+    displayLabel: value.toFixed(1),
+    wins: 4,
+    losses: 4,
+    recentComparisons: [],
+  };
+}
+
 function activeIntention(id = "intention-browser-1"): PlayIntention {
   return {
     intentionId: id,
@@ -140,6 +427,20 @@ let active: PlayIntention | null = activeIntention();
 let history: ResolvedPlayIntentionHistory = [];
 let staleOnce = false;
 let intentionSequence = 1;
+let collectionState: CollectionFixtureState = createCollectionState();
+
+function createCollectionState(): CollectionFixtureState {
+  return {
+    deletedIds: new Set(),
+    previouslyOwnedIds: new Set(),
+    empty: false,
+    axesAvailable: true,
+    tournamentAvailable: true,
+    predictionsAvailable: true,
+    nichesAvailable: true,
+    integratedRedundancy: false,
+  };
+}
 
 function reset(next: Scenario): void {
   scenario = next;
@@ -148,35 +449,48 @@ function reset(next: Scenario): void {
   staleOnce = next === "stale";
   active = next === "active" || next === "stale" || next === "profile" ? activeIntention() : null;
   intentionSequence = 1;
+  collectionState = createCollectionState();
 }
 
-function detail(): GameDetailWithPurchaseUtilization {
+function detail(requestedGameId = gameId): GameDetailWithPurchaseUtilization {
+  const definition = collectionDefinitions.find(({ id }) => id === requestedGameId);
+  const detailGame = definition === undefined ? game : collectionGame(definition);
+  const detailScore =
+    definition === undefined
+      ? {
+          score: 6,
+          ratedAxisCount: 1,
+          totalAxisCount: 1,
+          breakdown: [],
+          vetoed: false,
+          vetoedBy: null,
+          hypotheticalScore: null,
+          predictionMeta: null,
+          redundancyAdjustment: null,
+        }
+      : score(definition, false);
   return GameDetailWithPurchaseUtilizationSchema.parse({
-    game,
-    score: {
-      score: 6,
-      ratedAxisCount: 1,
-      totalAxisCount: 1,
-      breakdown: [],
-      vetoed: false,
-      vetoedBy: null,
-      hypotheticalScore: null,
-      predictionMeta: null,
-      redundancyAdjustment: null,
-    },
+    game: detailGame,
+    score: detailScore,
     bggDataStale: false,
-    nichePosition: null,
-    displayScore: "6.0",
-    purchaseUtilization: calculatePurchaseUtilization({
-      acquisition: game.acquisition,
-      entertainmentBenchmark: null,
-      playCount: game.playCountEvidence,
-      duration: game.durationEvidence,
-      playerRange: game.playerRangeEvidence,
-      suggestedPlayerPoll: game.suggestedPlayerPoll,
-      fitness: "6.0",
-    }),
-    intentions: { activeIntention: active, resolvedHistory: history },
+    nichePosition: definition === undefined ? null : nichePosition(definition),
+    displayScore: detailScore?.score.toFixed(1) ?? null,
+    purchaseUtilization:
+      definition === undefined
+        ? calculatePurchaseUtilization({
+            acquisition: detailGame.acquisition,
+            entertainmentBenchmark: null,
+            playCount: detailGame.playCountEvidence,
+            duration: detailGame.durationEvidence,
+            playerRange: detailGame.playerRangeEvidence,
+            suggestedPlayerPoll: detailGame.suggestedPlayerPoll,
+            fitness: "6.0",
+          })
+        : utilization(detailGame, definition),
+    intentions: {
+      activeIntention: requestedGameId === gameId ? active : null,
+      resolvedHistory: requestedGameId === gameId ? history : [],
+    },
   });
 }
 
@@ -221,12 +535,38 @@ async function handle(request: Request): Promise<Response> {
       requested !== "unavailable" &&
       requested !== "create" &&
       requested !== "active" &&
-      requested !== "stale"
+      requested !== "stale" &&
+      requested !== "collection"
     ) {
       return json({ error: "Unknown fixture scenario" }, 400);
     }
     reset(requested);
     return json({ scenario });
+  }
+
+  if (path === "/api/test/collection-state" && request.method === "POST") {
+    const requested = await body(request);
+    if (Array.isArray(requested.deletedIds)) {
+      collectionState.deletedIds = new Set(
+        requested.deletedIds.filter((id): id is string => typeof id === "string"),
+      );
+    }
+    if (Array.isArray(requested.previouslyOwnedIds)) {
+      collectionState.previouslyOwnedIds = new Set(
+        requested.previouslyOwnedIds.filter((id): id is string => typeof id === "string"),
+      );
+    }
+    for (const field of [
+      "empty",
+      "axesAvailable",
+      "tournamentAvailable",
+      "predictionsAvailable",
+      "nichesAvailable",
+      "integratedRedundancy",
+    ] as const) {
+      if (typeof requested[field] === "boolean") collectionState[field] = requested[field];
+    }
+    return json({ ok: true });
   }
 
   if (path === "/api/profile" && request.method === "GET") {
@@ -239,13 +579,77 @@ async function handle(request: Request): Promise<Response> {
     return json(CollectionProfileResultSchema.parse(response));
   }
 
-  if (path === `/api/games/${gameId}` && request.method === "GET") return json(detail());
-  if (path === "/api/axes" && request.method === "GET") return json([axis]);
+  if (path === "/api/games" && request.method === "GET") {
+    const predicted = url.searchParams.get("includePredicted") === "true";
+    const niches = url.searchParams.get("includeNiches") === "true";
+    if (predicted && !collectionState.predictionsAvailable)
+      return json({ error: "Predictions unavailable" }, 503);
+    if (niches && !collectionState.nichesAvailable)
+      return json({ error: "Niches unavailable" }, 503);
+    return json(collectionEntries({ predicted, niches }));
+  }
+  const detailMatch = path.match(/^\/api\/games\/([^/]+)$/);
+  if (detailMatch !== null && request.method === "GET") {
+    const requestedGameId = decodeURIComponent(detailMatch[1] ?? "");
+    if (
+      collectionState.deletedIds.has(requestedGameId) ||
+      (scenario === "collection" && !collectionDefinitions.some(({ id }) => id === requestedGameId))
+    ) {
+      return json({ error: `Game not found: ${requestedGameId}` }, 404);
+    }
+    return json(detail(requestedGameId));
+  }
+  if (path === "/api/axes" && request.method === "GET") {
+    return json(collectionState.axesAvailable ? [axis] : []);
+  }
   if (path === "/api/shelf/config" && request.method === "GET") {
     return json({ units: [], createdAt, updatedAt: createdAt });
   }
   if (path === "/api/niches/settings" && request.method === "GET") {
     return json({ ignoredTags: [] });
+  }
+  if (path === "/api/redundancy/settings" && request.method === "GET") {
+    return json({
+      enabled: collectionState.integratedRedundancy,
+      stage: collectionState.integratedRedundancy ? "integrated" : "annotation",
+      similarityThreshold: 0.8,
+      maxPenalty: 2,
+      componentWeights: { binary: 1, continuous: 1, personalAxes: 1 },
+      minNeighbors: 1,
+      expectedNeighbors: 2,
+    });
+  }
+  if (path === "/api/shelf/capacity" && request.method === "GET") {
+    return json({
+      configured: true,
+      totalShelfCount: 1,
+      gamesWithDimensions: 2,
+      gamesWithoutDimensions: 4,
+      overflowing: false,
+      hasPlacementProblems: false,
+      assignments: [],
+      assignmentConflicts: [],
+      unfittableGames: [],
+      overflowGames: [],
+    });
+  }
+  if (path === "/api/tournament/stats" && request.method === "GET") {
+    if (!collectionState.tournamentAvailable) return json({ error: "Tournament unavailable" }, 503);
+    return json(
+      collectionDefinitions.map((definition) => ({
+        gameId: definition.id,
+        gameName: definition.name,
+        stats: tournamentStats(definition),
+      })),
+    );
+  }
+  const tournamentMatch = path.match(/^\/api\/tournament\/games\/([^/]+)\/stats$/);
+  if (tournamentMatch !== null && request.method === "GET") {
+    const definition = collectionDefinitions.find(({ id }) => id === tournamentMatch[1]);
+    if (!collectionState.tournamentAvailable || definition === undefined) {
+      return json({ error: "No tournament stats" }, 404);
+    }
+    return json(tournamentStats(definition));
   }
   if (path === `/api/tournament/games/${gameId}/stats` && request.method === "GET") {
     return json({ error: "No tournament stats" }, 404);

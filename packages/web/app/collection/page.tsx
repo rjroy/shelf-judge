@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import {
   listGames,
   listAxes,
@@ -21,6 +20,10 @@ import { CollectionTable } from "@/components/collection-table";
 export const metadata: Metadata = { title: "Collection" };
 export const dynamic = "force-dynamic";
 
+function singularParam(value: string | string[] | undefined): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
 export default async function CollectionPage({
   searchParams,
 }: {
@@ -30,6 +33,10 @@ export default async function CollectionPage({
   const showPrevOwned = params.ownership === "all";
   // Server-side cull filter from capacity surfaces (REQ-SHELF-31).
   const missingDimensionsOnly = params.dimensions === "missing";
+  const collectionContext = singularParam(params.collectionContext);
+  const collectionOrigin = singularParam(params.collectionOrigin);
+  const collectionReturnAttempt =
+    params.collectionContext !== undefined || params.collectionOrigin !== undefined;
 
   let games;
   let predictedGames;
@@ -106,38 +113,18 @@ export default async function CollectionPage({
       ).length
     : 0;
 
-  if (games.length === 0 && previouslyOwnedCount === 0) {
-    return (
-      <>
-        <div className="topbar">
-          <div className="topbar-title">My Collection</div>
-        </div>
-        <div className="main-scroll">
-          <div className="empty-state">
-            <h3>No games yet</h3>
-            <p>Add games to your collection to start rating and tracking fitness scores.</p>
-            <div className="empty-state-actions">
-              <Link href="/import" className="btn btn-secondary">
-                Import BGG Collection
-              </Link>
-              <Link href="/search" className="btn btn-primary">
-                Add Game
-              </Link>
-            </div>
-          </div>
-        </div>
-      </>
-    );
-  }
-
   return (
     <>
       <div className="topbar">
-        <div className="topbar-title">My Collection</div>
-        <div className="topbar-meta">
-          <NormalizeFitnessButton />
-          <RefreshAllButton />
-        </div>
+        <h1 id="collection-heading" className="topbar-title" tabIndex={-1}>
+          My Collection
+        </h1>
+        {games.length > 0 && (
+          <div className="topbar-meta">
+            <NormalizeFitnessButton />
+            <RefreshAllButton />
+          </div>
+        )}
       </div>
 
       <div className="main-scroll">
@@ -158,6 +145,9 @@ export default async function CollectionPage({
           showPreviouslyOwned={showPrevOwned}
           missingDimensionsOnly={missingDimensionsOnly}
           capacity={capacity}
+          collectionContext={collectionContext}
+          collectionOrigin={collectionOrigin}
+          collectionReturnAttempt={collectionReturnAttempt}
         />
       </div>
     </>

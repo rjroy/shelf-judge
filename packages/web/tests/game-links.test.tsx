@@ -180,6 +180,77 @@ describe("Surfaces that must remain unchanged", () => {
   });
 });
 
+describe("Collection contextual game links", () => {
+  test("parses only singular return transport and always mounts CollectionTable", async () => {
+    const source = await Bun.file("packages/web/app/collection/page.tsx").text();
+    expect(source).toContain('typeof value === "string" ? value : undefined');
+    expect(source).toContain("params.collectionContext !== undefined");
+    expect(source).toContain("params.collectionOrigin !== undefined");
+    expect(source).toContain("collectionReturnAttempt={collectionReturnAttempt}");
+    expect(source).not.toContain("if (games.length === 0 && previouslyOwnedCount === 0)");
+  });
+
+  test("uses a semantic stable Collection heading and neutral restore state", async () => {
+    const page = await Bun.file("packages/web/app/collection/page.tsx").text();
+    const table = await Bun.file("packages/web/components/collection-table.tsx").text();
+    expect(page).toContain('<h1 id="collection-heading" className="topbar-title" tabIndex={-1}>');
+    expect(table).toContain("Restoring collection...");
+    expect(table).toContain('role="status"');
+  });
+
+  test("passes complete hrefs into rows and keeps grouped rows explicitly plain", async () => {
+    const source = await Bun.file("packages/web/components/collection-table.tsx").text();
+    expect(source).toContain(
+      'onClick={href.includes("collectionContext=") ? preserveCollectionScrollPosition : undefined}',
+    );
+    expect(source).toContain("Reflect.deleteProperty(nextState, COLLECTION_SCROLL_HISTORY_KEY)");
+    expect(source).toContain('window.history.replaceState(nextState, "")');
+    expect(source).toContain("href={buildCollectionGameHref(gws.game.id, null)}");
+    expect(source).toContain("href={buildCollectionGameHref(gws.game.id, navigationContextKey)}");
+    expect(source).not.toContain("<Link href={`/games/${game.id}`}");
+  });
+
+  test("assigns stable focus IDs only at flat row call sites", async () => {
+    const source = await Bun.file("packages/web/components/collection-table.tsx").text();
+    expect(source.match(/focusId=\{collectionRowId\(gws\.game\.id\)\}/g)).toHaveLength(2);
+    const groupedCall = source.match(
+      /nicheHighlight=\{nicheEntry\?\.isChampion[\s\S]*?href=\{buildCollectionGameHref\(gws\.game\.id, null\)\}[\s\S]*?\/>/,
+    )?.[0];
+    expect(groupedCall).toBeDefined();
+    expect(groupedCall).not.toContain("focusId=");
+  });
+});
+
+describe("Game detail contextual navigation boundary", () => {
+  test("parses only singular detail transport after the existing data error path", async () => {
+    const source = await Bun.file("packages/web/app/games/[id]/page.tsx").text();
+    expect(source).toContain('typeof detailParams.collectionContext === "string"');
+    expect(source).toContain('typeof detailParams.collectionOrigin === "string"');
+    expect(source.indexOf("catch (err)")).toBeLessThan(source.indexOf("await searchParams"));
+    expect(source).toContain("<GameDetailCollectionNavigation");
+    expect(source).toContain("<GameActions");
+  });
+
+  test("keeps unrelated detail links context-free and delegates target availability", async () => {
+    const source = await Bun.file("packages/web/app/games/[id]/page.tsx").text();
+    for (const href of [
+      "href={`/games/${c.opponentGameId}`}",
+      "href={`/games/${niche.champion.gameId}`}",
+      "href={`/games/${neighbor.gameId}`}",
+      "href={`/games/${n.gameId}`}",
+    ]) {
+      expect(source).toContain(href);
+    }
+
+    const navigation = await Bun.file(
+      "packages/web/components/game-detail-collection-navigation.tsx",
+    ).text();
+    expect(navigation).toContain("buildGameHref(entry.id, contextKey, originId)");
+    expect(navigation).not.toContain("getGame(");
+    expect(navigation).not.toContain("exists");
+  });
+});
+
 describe("game detail Step 11 surfaces", () => {
   test("keeps purchase utilization and redundancy while profile-specific cards remain absent", async () => {
     const source = await Bun.file("packages/web/app/games/[id]/page.tsx").text();

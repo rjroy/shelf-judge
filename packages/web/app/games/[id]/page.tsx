@@ -26,6 +26,7 @@ import { ShelfAssignmentForm } from "@/components/shelf-assignment-form";
 import { AcquisitionForm } from "@/components/acquisition-form";
 import { PurchaseUtilizationPanel } from "@/components/purchase-utilization-panel";
 import { IntentionControls } from "@/components/intention-controls";
+import { GameDetailCollectionNavigation } from "@/components/game-detail-collection-navigation";
 
 export async function generateMetadata({
   params,
@@ -43,7 +44,13 @@ export async function generateMetadata({
 
 export const dynamic = "force-dynamic";
 
-export default async function GameDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function GameDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { id } = await params;
 
   let familyPrefix: string | null = null;
@@ -86,18 +93,22 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
   const { game, score, displayScore, purchaseUtilization, nichePosition } = data;
   const isPreviouslyOwned = game.ownership === "previously-owned";
   const hasPredictions = score?.predictionMeta !== null && score?.predictionMeta !== undefined;
+  const detailParams = await searchParams;
+  const collectionContext =
+    typeof detailParams.collectionContext === "string" ? detailParams.collectionContext : undefined;
+  const collectionOrigin =
+    typeof detailParams.collectionOrigin === "string" ? detailParams.collectionOrigin : undefined;
 
   return (
     <>
-      {/* Topbar with breadcrumb */}
-      <div className="topbar">
-        <div className="breadcrumb">
-          <Link href="/collection">Collection</Link>
-          <span>&rsaquo;</span>
-          <strong>{game.name}</strong>
-        </div>
+      <GameDetailCollectionNavigation
+        gameId={game.id}
+        gameName={game.name}
+        collectionContext={collectionContext}
+        collectionOrigin={collectionOrigin}
+      >
         <GameActions gameId={game.id} gameName={game.name} hasBggId={game.bggId !== null} />
-      </div>
+      </GameDetailCollectionNavigation>
 
       <GameDetailMain>
         {/* Game hero section */}
