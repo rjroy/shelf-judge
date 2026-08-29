@@ -14,8 +14,23 @@ import {
   getScoreDisplay,
   getSeparatorLabel,
   buildSortFields,
+  DEFAULT_FILTERS,
+  DEFAULT_SORT,
   type FilterState,
+  type SortState,
 } from "@/lib/collection-utils";
+import type { CollectionNavigationContextV1 } from "@/lib/collection-navigation-context";
+import {
+  buildCollectionGameHref,
+  canRestoreCollectionProjection,
+  collectionRowId,
+  effectiveCollectionPredictionsOn,
+  normalizeCollectionSort,
+  persistCollectionPreferences,
+  removeCollectionReturnTransport,
+  selectCollectionReturnFocusId,
+  shouldCaptureCollectionScroll,
+} from "@/components/collection-table";
 
 // ---------------------------------------------------------------------------
 // Test fixtures
@@ -456,7 +471,113 @@ describe("sortGames", () => {
     expect(asc.withValue.map((g) => g.game.name)).toEqual(["Low", "High"]);
   });
 
-  test("withoutValue sorted alphabetically by name", () => {
+  test.each([
+    ["numeric", "fitness", makeScore(5)],
+    ["date", "createdAt", null],
+  ] as const)(
+    "keeps equal %s primary values in identity order in both directions",
+    (_, field, score) => {
+      const zulu = makeGWS(
+        { id: "zulu", name: "Zulu", createdAt: "2026-01-01T00:00:00.000Z" },
+        score,
+      );
+      const alpha = makeGWS(
+        { id: "alpha", name: "Alpha", createdAt: "2026-01-01T00:00:00.000Z" },
+        score,
+      );
+
+      for (const direction of ["asc", "desc"] as const) {
+        const { withValue } = sortGames([zulu, alpha], field, direction, EMPTY_TOURNAMENT);
+        expect(withValue.map((game) => game.game.id)).toEqual(["alpha", "zulu"]);
+      }
+    },
+  );
+
+  test("uses Unicode code-point identity order for equal generic values", () => {
+    const bmp = makeGWS({ id: "bmp", name: "\uE000" }, makeScore(5));
+    const supplementary = makeGWS({ id: "supplementary", name: "\u{10000}" }, makeScore(5));
+
+    for (const direction of ["asc", "desc"] as const) {
+      const { withValue } = sortGames([supplementary, bmp], "fitness", direction, EMPTY_TOURNAMENT);
+      expect(withValue.map((game) => game.game.id)).toEqual(["bmp", "supplementary"]);
+    }
+  });
+
+  test("uses lowercased names for the Name primary comparison", () => {
+    const uppercaseInitial = makeGWS({ id: "zoo", name: "Zoo" });
+    const lowercaseInitial = makeGWS({ id: "apple", name: "apple" });
+
+    expect(
+      sortGames(
+        [uppercaseInitial, lowercaseInitial],
+        "name",
+        "asc",
+        EMPTY_TOURNAMENT,
+      ).withValue.map((game) => game.game.id),
+    ).toEqual(["apple", "zoo"]);
+    expect(
+      sortGames(
+        [uppercaseInitial, lowercaseInitial],
+        "name",
+        "desc",
+        EMPTY_TOURNAMENT,
+      ).withValue.map((game) => game.game.id),
+    ).toEqual(["zoo", "apple"]);
+  });
+
+  test("preserves case-insensitive Name ordering and uses original name for ties", () => {
+    const lowercase = makeGWS({ id: "lower", name: "alpha" });
+    const uppercase = makeGWS({ id: "upper", name: "Alpha" });
+
+    for (const direction of ["asc", "desc"] as const) {
+      const { withValue } = sortGames([lowercase, uppercase], "name", direction, EMPTY_TOURNAMENT);
+      expect(withValue.map((game) => game.game.id)).toEqual(["upper", "lower"]);
+    }
+  });
+
+  test("normalizes identity names to NFC before falling back to stable ID", () => {
+    const composed = makeGWS({ id: "b", name: "\u00e9" }, makeScore(5));
+    const decomposed = makeGWS({ id: "a", name: "e\u0301" }, makeScore(5));
+
+    for (const direction of ["asc", "desc"] as const) {
+      const { withValue } = sortGames(
+        [composed, decomposed],
+        "fitness",
+        direction,
+        EMPTY_TOURNAMENT,
+      );
+      expect(withValue.map((game) => game.game.id)).toEqual(["a", "b"]);
+    }
+  });
+
+  test("uses stable ID for identical generic names in both directions", () => {
+    const later = makeGWS({ id: "id-b", name: "Same" }, makeScore(5));
+    const earlier = makeGWS({ id: "id-a", name: "Same" }, makeScore(5));
+
+    for (const direction of ["asc", "desc"] as const) {
+      const { withValue } = sortGames([later, earlier], "fitness", direction, EMPTY_TOURNAMENT);
+      expect(withValue.map((game) => game.game.id)).toEqual(["id-a", "id-b"]);
+    }
+  });
+
+  test("sorts no-value games by complete normalized identity in both directions", () => {
+    const supplementary = makeGWS({ id: "supplementary", name: "\u{10000}" });
+    const bmp = makeGWS({ id: "bmp", name: "\uE000" });
+    const composed = makeGWS({ id: "b", name: "\u00e9" });
+    const decomposed = makeGWS({ id: "a", name: "e\u0301" });
+
+    for (const direction of ["asc", "desc"] as const) {
+      const { withoutValue } = sortGames(
+        [supplementary, composed, bmp, decomposed],
+        "fitness",
+        direction,
+        EMPTY_TOURNAMENT,
+      );
+      expect(withoutValue.map((game) => game.game.id)).toEqual(["a", "b", "bmp", "supplementary"]);
+    }
+  });
+
+  test("withoutValue sorted by Unicode code-point name order", () => {
     const g1 = makeGWS({ id: "1", name: "Zulu" });
     const g2 = makeGWS({ id: "2", name: "Alpha" });
     const g3 = makeGWS({ id: "3", name: "Mike" });
@@ -954,5 +1075,204 @@ describe("getSeparatorLabel", () => {
 
   test("singular game count", () => {
     expect(getSeparatorLabel("fitness", 1, AXES)).toBe("Not yet rated - 1 game");
+  });
+});
+
+describe("Collection contextual return helpers", () => {
+  function navigationContext(
+    overrides: Partial<CollectionNavigationContextV1["projection"]> = {},
+  ): CollectionNavigationContextV1 {
+    return {
+      version: 1,
+      key: "00000000-0000-4000-8000-000000000001",
+      entries: [{ id: "game-1", name: "Game One" }],
+      collectionScope: { showPreviouslyOwned: false, missingDimensionsOnly: false },
+      projection: {
+        sort: { field: "fitness", direction: "desc" },
+        filters: DEFAULT_FILTERS,
+        predictionsOn: false,
+        effectivePredictionsOn: false,
+        nichesOn: false,
+        ...overrides,
+      },
+      lastAccessedAt: 1_000,
+    };
+  }
+
+  function capabilities(
+    overrides: Partial<Parameters<typeof canRestoreCollectionProjection>[1]> = {},
+  ): Parameters<typeof canRestoreCollectionProjection>[1] {
+    return {
+      scope: { showPreviouslyOwned: false, missingDimensionsOnly: false },
+      availableSortFields: new Set(["fitness", "tournament", "bggRating", "axis:fun"]),
+      predictionSourceAvailable: true,
+      nicheSourceAvailable: true,
+      effectivePredictionsOn: false,
+      collectionEmpty: false,
+      ...overrides,
+    };
+  }
+
+  test("requires exact scope and current sort capability", () => {
+    const context = navigationContext();
+    expect(canRestoreCollectionProjection(context, capabilities())).toBe(true);
+    expect(
+      canRestoreCollectionProjection(
+        context,
+        capabilities({
+          scope: { showPreviouslyOwned: true, missingDimensionsOnly: false },
+        }),
+      ),
+    ).toBe(false);
+
+    for (const field of ["axis:removed", "tournament", "bggRating"]) {
+      const sorted = navigationContext({ sort: { field, direction: "desc" } });
+      expect(
+        canRestoreCollectionProjection(
+          sorted,
+          capabilities({ availableSortFields: new Set(["fitness"]) }),
+        ),
+        field,
+      ).toBe(false);
+    }
+  });
+
+  test("requires enabled enrichment sources and matching effective prediction state", () => {
+    const predicted = navigationContext({
+      predictionsOn: true,
+      effectivePredictionsOn: true,
+      nichesOn: true,
+    });
+    expect(
+      canRestoreCollectionProjection(predicted, capabilities({ effectivePredictionsOn: true })),
+    ).toBe(true);
+    expect(
+      canRestoreCollectionProjection(
+        predicted,
+        capabilities({ predictionSourceAvailable: false, effectivePredictionsOn: false }),
+      ),
+    ).toBe(false);
+    expect(
+      canRestoreCollectionProjection(
+        predicted,
+        capabilities({ nicheSourceAvailable: false, effectivePredictionsOn: true }),
+      ),
+    ).toBe(false);
+    expect(
+      canRestoreCollectionProjection(predicted, capabilities({ effectivePredictionsOn: false })),
+    ).toBe(false);
+  });
+
+  test("restores a structurally valid empty collection despite row capability loss", () => {
+    const context = navigationContext({
+      sort: { field: "axis:removed", direction: "asc" },
+      predictionsOn: true,
+      effectivePredictionsOn: true,
+      nichesOn: true,
+    });
+    expect(
+      canRestoreCollectionProjection(
+        context,
+        capabilities({
+          availableSortFields: new Set(),
+          predictionSourceAvailable: false,
+          nicheSourceAvailable: false,
+          effectivePredictionsOn: false,
+          collectionEmpty: true,
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      canRestoreCollectionProjection(
+        context,
+        capabilities({
+          scope: { showPreviouslyOwned: true, missingDimensionsOnly: false },
+          collectionEmpty: true,
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  test("computes effective prediction use under source and integrated settings", () => {
+    expect(effectiveCollectionPredictionsOn(true, true, 0, false)).toBe(true);
+    expect(effectiveCollectionPredictionsOn(false, true, 2, true)).toBe(true);
+    expect(effectiveCollectionPredictionsOn(false, true, 2, false)).toBe(false);
+    expect(effectiveCollectionPredictionsOn(true, false, 2, true)).toBe(false);
+  });
+
+  test("normalizes and persists ordinary and restored preferences", () => {
+    const unavailable = { field: "axis:removed", direction: "asc" } as const;
+    expect(normalizeCollectionSort(unavailable, new Set(["fitness"]), false)).toEqual(DEFAULT_SORT);
+    expect(normalizeCollectionSort(unavailable, new Set(), true)).toBe(unavailable);
+
+    const writes: Array<SortState | FilterState> = [];
+    persistCollectionPreferences(
+      { sort: unavailable, filters: DEFAULT_FILTERS },
+      (sort) => writes.push(sort),
+      (filters) => writes.push(filters),
+    );
+    expect(writes).toEqual([unavailable, DEFAULT_FILTERS]);
+  });
+
+  test("builds atomic contextual hrefs and stable flat-row focus IDs", () => {
+    const key = "00000000-0000-4000-8000-000000000001";
+    expect(buildCollectionGameHref("game / one", null)).toBe("/games/game%20%2F%20one");
+    expect(buildCollectionGameHref("game / one", key)).toBe(
+      `/games/game%20%2F%20one?collectionContext=${key}&collectionOrigin=game+%2F+one`,
+    );
+    expect(collectionRowId("game / one")).toBe("collection-game-game%20%2F%20one");
+  });
+
+  test("cleans only return transport while preserving scope, other params, and fragment", () => {
+    expect(
+      removeCollectionReturnTransport(
+        "/collection?ownership=all&collectionContext=key&dimensions=missing&collectionOrigin=game&other=1#collection-game-game",
+      ),
+    ).toBe("/collection?ownership=all&dimensions=missing&other=1#collection-game-game");
+    expect(removeCollectionReturnTransport("/collection?collectionContext=bad#kept")).toBe(
+      "/collection#kept",
+    );
+  });
+
+  test("selects the origin primary link or heading without changing projection", () => {
+    const entries = [{ id: "first" }, { id: "origin" }];
+    expect(selectCollectionReturnFocusId("origin", entries)).toBe(collectionRowId("origin"));
+    expect(selectCollectionReturnFocusId("deleted", entries)).toBe("collection-heading");
+    expect(selectCollectionReturnFocusId("origin", [])).toBe("collection-heading");
+  });
+});
+
+describe("Collection scroll capture activation", () => {
+  const primaryActivation = {
+    button: 0,
+    altKey: false,
+    ctrlKey: false,
+    metaKey: false,
+    shiftKey: false,
+    defaultPrevented: false,
+    target: null,
+  };
+
+  test("accepts unmodified primary and keyboard-generated same-tab activation", () => {
+    expect(shouldCaptureCollectionScroll(primaryActivation)).toBe(true);
+    expect(shouldCaptureCollectionScroll({ ...primaryActivation, target: "_self" })).toBe(true);
+    expect(shouldCaptureCollectionScroll({ ...primaryActivation, target: "_SELF" })).toBe(true);
+  });
+
+  test("rejects modifiers, non-primary buttons, prevented clicks, and non-self targets", () => {
+    const rejected = [
+      { altKey: true },
+      { ctrlKey: true },
+      { metaKey: true },
+      { shiftKey: true },
+      { button: 1 },
+      { button: 2 },
+      { defaultPrevented: true },
+      { target: "_blank" },
+      { target: "named-frame" },
+    ];
+    for (const override of rejected) {
+      expect(shouldCaptureCollectionScroll({ ...primaryActivation, ...override })).toBe(false);
+    }
   });
 });

@@ -1,6 +1,14 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import {
+  useState,
+  useEffect,
+  useRef,
+  useMemo,
+  useCallback,
+  type MouseEvent as ReactMouseEvent,
+  type SetStateAction,
+} from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type {
@@ -32,6 +40,158 @@ import {
   saveSort,
   sortGames,
 } from "@/lib/collection-utils";
+import {
+  resolveCollectionNavigationContext,
+  type CollectionNavigationContextV1,
+  type CollectionNavigationProjection,
+  type CollectionNavigationScope,
+} from "@/lib/collection-navigation-context";
+import {
+  createCollectionNavigationEntries,
+  useCollectionNavigationProducer,
+  type CollectionNavigationFingerprintInput,
+} from "@/lib/collection-navigation-producer";
+
+export const COLLECTION_HEADING_ID = "collection-heading";
+const COLLECTION_ROW_ID_PREFIX = "collection-game-";
+const COLLECTION_SCROLL_HISTORY_KEY = "shelfJudgeCollectionScrollTop";
+
+export interface CollectionReturnCapabilities {
+  readonly scope: CollectionNavigationScope;
+  readonly availableSortFields: ReadonlySet<string>;
+  readonly predictionSourceAvailable: boolean;
+  readonly nicheSourceAvailable: boolean;
+  readonly effectivePredictionsOn: boolean;
+  readonly collectionEmpty: boolean;
+}
+
+export function canRestoreCollectionProjection(
+  context: CollectionNavigationContextV1,
+  capabilities: CollectionReturnCapabilities,
+): boolean {
+  if (
+    context.collectionScope.showPreviouslyOwned !== capabilities.scope.showPreviouslyOwned ||
+    context.collectionScope.missingDimensionsOnly !== capabilities.scope.missingDimensionsOnly
+  ) {
+    return false;
+  }
+  if (capabilities.collectionEmpty) return true;
+  if (!capabilities.availableSortFields.has(context.projection.sort.field)) return false;
+  if (
+    (context.projection.predictionsOn || context.projection.effectivePredictionsOn) &&
+    !capabilities.predictionSourceAvailable
+  ) {
+    return false;
+  }
+  if (context.projection.nichesOn && !capabilities.nicheSourceAvailable) return false;
+  return context.projection.effectivePredictionsOn === capabilities.effectivePredictionsOn;
+}
+
+export function normalizeCollectionSort(
+  sort: SortState,
+  availableSortFields: ReadonlySet<string>,
+  collectionEmpty: boolean,
+): SortState {
+  return collectionEmpty || availableSortFields.has(sort.field) ? sort : DEFAULT_SORT;
+}
+
+export function effectiveCollectionPredictionsOn(
+  predictionsOn: boolean,
+  predictionSourceAvailable: boolean,
+  predictedCount: number,
+  isIntegratedRedundancy: boolean,
+): boolean {
+  return (
+    predictionSourceAvailable && (predictionsOn || (predictedCount > 0 && isIntegratedRedundancy))
+  );
+}
+
+export function collectionRowId(gameId: string): string {
+  return `${COLLECTION_ROW_ID_PREFIX}${encodeURIComponent(gameId)}`;
+}
+
+export function buildCollectionGameHref(gameId: string, contextKey: string | null): string {
+  const route = `/games/${encodeURIComponent(gameId)}`;
+  if (contextKey === null) return route;
+  const params = new URLSearchParams({
+    collectionContext: contextKey,
+    collectionOrigin: gameId,
+  });
+  return `${route}?${params.toString()}`;
+}
+
+export function removeCollectionReturnTransport(url: string): string {
+  const parsed = new URL(url, "http://collection.local");
+  parsed.searchParams.delete("collectionContext");
+  parsed.searchParams.delete("collectionOrigin");
+  return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+}
+
+export function selectCollectionReturnFocusId(
+  originId: string,
+  entries: readonly { readonly id: string }[],
+): string {
+  return entries.some((entry) => entry.id === originId)
+    ? collectionRowId(originId)
+    : COLLECTION_HEADING_ID;
+}
+
+export function persistCollectionPreferences(
+  projection: Pick<CollectionNavigationProjection, "sort" | "filters">,
+  persistSort: (sort: SortState) => void = saveSort,
+  persistFilters: (filters: FilterState) => void = saveFilters,
+): void {
+  persistSort(projection.sort);
+  persistFilters(projection.filters);
+}
+
+export interface CollectionScrollActivation {
+  readonly button: number;
+  readonly altKey: boolean;
+  readonly ctrlKey: boolean;
+  readonly metaKey: boolean;
+  readonly shiftKey: boolean;
+  readonly defaultPrevented: boolean;
+  readonly target: string | null;
+}
+
+export function shouldCaptureCollectionScroll(activation: CollectionScrollActivation): boolean {
+  const target = activation.target?.toLowerCase() ?? "";
+  return (
+    !activation.defaultPrevented &&
+    activation.button === 0 &&
+    !activation.altKey &&
+    !activation.ctrlKey &&
+    !activation.metaKey &&
+    !activation.shiftKey &&
+    (target === "" || target === "_self")
+  );
+}
+
+function preserveCollectionScrollPosition(event: ReactMouseEvent<HTMLAnchorElement>): void {
+  if (
+    !shouldCaptureCollectionScroll({
+      button: event.button,
+      altKey: event.altKey,
+      ctrlKey: event.ctrlKey,
+      metaKey: event.metaKey,
+      shiftKey: event.shiftKey,
+      defaultPrevented: event.defaultPrevented,
+      target: event.currentTarget.getAttribute("target"),
+    })
+  ) {
+    return;
+  }
+  const scrollOwner = document.querySelector(".main-scroll");
+  if (scrollOwner === null) return;
+  const currentState: unknown = window.history.state;
+  const nextState =
+    typeof currentState === "object" && currentState !== null ? { ...currentState } : {};
+  window.history.replaceState(
+    { ...nextState, [COLLECTION_SCROLL_HISTORY_KEY]: scrollOwner.scrollTop },
+    "",
+  );
+}
 
 interface CollectionTableProps {
   games: GameWithPurchaseUtilization[];
@@ -50,6 +210,22 @@ interface CollectionTableProps {
   showPreviouslyOwned: boolean;
   missingDimensionsOnly: boolean;
   capacity: ShelfCapacityResult | null;
+  collectionContext?: string;
+  collectionOrigin?: string;
+  collectionReturnAttempt: boolean;
+}
+
+interface CollectionViewState {
+  readonly status: "ready" | "restoring";
+  readonly hydrated: boolean;
+  readonly sort: SortState;
+  readonly filters: FilterState;
+  readonly playerCountInput: string;
+  readonly predictionsOn: boolean;
+  readonly nichesOn: boolean;
+  readonly nicheViewMode: boolean;
+  readonly returnOrigin: string | null;
+  readonly cleanupReturnTransport: boolean;
 }
 
 export function CollectionTable({
@@ -69,26 +245,64 @@ export function CollectionTable({
   showPreviouslyOwned,
   missingDimensionsOnly,
   capacity,
+  collectionContext,
+  collectionOrigin,
+  collectionReturnAttempt,
 }: CollectionTableProps) {
   const router = useRouter();
-  // Sort state: default on SSR, hydrate from localStorage after mount
-  const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
-  const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
-  const [hydrated, setHydrated] = useState(false);
+  const [view, setView] = useState<CollectionViewState>(() => ({
+    status: collectionReturnAttempt ? "restoring" : "ready",
+    hydrated: false,
+    sort: DEFAULT_SORT,
+    filters: DEFAULT_FILTERS,
+    playerCountInput: "",
+    predictionsOn: false,
+    nichesOn: false,
+    nicheViewMode: false,
+    returnOrigin: null,
+    cleanupReturnTransport: false,
+  }));
   const [menuOpen, setMenuOpen] = useState(false);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
-  const [playerCountInput, setPlayerCountInput] = useState("");
-  const [predictionsOn, setPredictionsOn] = useState(false);
-  const [nichesOn, setNichesOn] = useState(false);
-  const [nicheViewMode, setNicheViewMode] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    setSort(loadSort());
-    const loaded = loadFilters();
-    setFilters(loaded);
-    setPlayerCountInput(loaded.playerCount !== null ? String(loaded.playerCount) : "");
-    setHydrated(true);
+  const { sort, filters, playerCountInput, predictionsOn, nichesOn, nicheViewMode, hydrated } =
+    view;
+  const setSort = useCallback((next: SetStateAction<SortState>) => {
+    setView((current) => ({
+      ...current,
+      sort: typeof next === "function" ? next(current.sort) : next,
+    }));
+  }, []);
+  const setFilters = useCallback((next: SetStateAction<FilterState>) => {
+    setView((current) => ({
+      ...current,
+      filters: typeof next === "function" ? next(current.filters) : next,
+    }));
+  }, []);
+  const setPlayerCountInput = useCallback((next: SetStateAction<string>) => {
+    setView((current) => ({
+      ...current,
+      playerCountInput: typeof next === "function" ? next(current.playerCountInput) : next,
+    }));
+  }, []);
+  const setPredictionsOn = useCallback((next: SetStateAction<boolean>) => {
+    setView((current) => ({
+      ...current,
+      predictionsOn: typeof next === "function" ? next(current.predictionsOn) : next,
+    }));
+  }, []);
+  const setNichesOn = useCallback((next: SetStateAction<boolean>) => {
+    setView((current) => ({
+      ...current,
+      nichesOn: typeof next === "function" ? next(current.nichesOn) : next,
+    }));
+  }, []);
+  const setNicheViewMode = useCallback((next: SetStateAction<boolean>) => {
+    setView((current) => ({
+      ...current,
+      nicheViewMode: typeof next === "function" ? next(current.nicheViewMode) : next,
+    }));
   }, []);
 
   useEffect(() => {
@@ -98,6 +312,32 @@ export function CollectionTable({
   useEffect(() => {
     if (hydrated) saveFilters(filters);
   }, [filters, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated || collectionReturnAttempt) return;
+    const currentState: unknown = window.history.state;
+    if (typeof currentState !== "object" || currentState === null) return;
+    const scrollTop = Reflect.get(currentState, COLLECTION_SCROLL_HISTORY_KEY) as unknown;
+    if (typeof scrollTop !== "number" || !Number.isFinite(scrollTop) || scrollTop < 0) return;
+    const frame = requestAnimationFrame(() => {
+      const scrollOwner = document.querySelector(".main-scroll");
+      if (scrollOwner === null) return;
+      scrollOwner.scrollTop = scrollTop;
+
+      const activeState: unknown = window.history.state;
+      if (
+        typeof activeState !== "object" ||
+        activeState === null ||
+        Reflect.get(activeState, COLLECTION_SCROLL_HISTORY_KEY) !== scrollTop
+      ) {
+        return;
+      }
+      const nextState = structuredClone(activeState);
+      Reflect.deleteProperty(nextState, COLLECTION_SCROLL_HISTORY_KEY);
+      window.history.replaceState(nextState, "");
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [collectionReturnAttempt, hydrated]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -112,7 +352,12 @@ export function CollectionTable({
   }, [menuOpen]);
 
   // Use predicted games when toggle is on, otherwise use standard games
-  const usePredictions = predictionsOn || (predictedCount > 0 && isIntegratedRedundancy);
+  const usePredictions = effectiveCollectionPredictionsOn(
+    predictionsOn,
+    predictedGames !== null,
+    predictedCount,
+    isIntegratedRedundancy,
+  );
   const baseGames = usePredictions && predictedGames ? predictedGames : games;
 
   // When niches toggle is on, merge nichePosition data from nicheGames onto active games
@@ -135,6 +380,122 @@ export function CollectionTable({
     [axes, hasTournamentData, hasBggData],
   );
   const activeDef = sortFields.find((f) => f.id === sort.field) ?? sortFields[0];
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function hydrateCollection(): Promise<void> {
+      if (
+        collectionReturnAttempt &&
+        collectionContext !== undefined &&
+        collectionOrigin !== undefined
+      ) {
+        const context = await resolveCollectionNavigationContext(collectionContext, {
+          originId: collectionOrigin,
+        });
+        if (cancelled) return;
+        if (context !== null) {
+          const effectivePredictions = effectiveCollectionPredictionsOn(
+            context.projection.predictionsOn,
+            predictedGames !== null,
+            predictedCount,
+            isIntegratedRedundancy,
+          );
+          const restoredSource =
+            effectivePredictions && predictedGames !== null ? predictedGames : games;
+          const restoredSortFields = new Set(
+            buildSortFields(
+              axes,
+              hasTournamentData,
+              restoredSource.some((game) => game.game.bggData !== null),
+            ).map((field) => field.id),
+          );
+          if (
+            canRestoreCollectionProjection(context, {
+              scope: { showPreviouslyOwned, missingDimensionsOnly },
+              availableSortFields: restoredSortFields,
+              predictionSourceAvailable: predictedGames !== null,
+              nicheSourceAvailable: nicheGames !== null,
+              effectivePredictionsOn: effectivePredictions,
+              collectionEmpty: games.length === 0,
+            })
+          ) {
+            persistCollectionPreferences(context.projection);
+            setView({
+              status: "ready",
+              hydrated: true,
+              sort: context.projection.sort,
+              filters: context.projection.filters,
+              playerCountInput:
+                context.projection.filters.playerCount === null
+                  ? ""
+                  : String(context.projection.filters.playerCount),
+              predictionsOn: context.projection.predictionsOn,
+              nichesOn: context.projection.nichesOn,
+              nicheViewMode: false,
+              returnOrigin: collectionOrigin,
+              cleanupReturnTransport: true,
+            });
+            return;
+          }
+        }
+      }
+
+      const loadedFilters = loadFilters();
+      const ordinaryPredictions = effectiveCollectionPredictionsOn(
+        false,
+        predictedGames !== null,
+        predictedCount,
+        isIntegratedRedundancy,
+      );
+      const ordinarySource =
+        ordinaryPredictions && predictedGames !== null ? predictedGames : games;
+      const ordinarySortFields = new Set(
+        buildSortFields(
+          axes,
+          hasTournamentData,
+          ordinarySource.some((game) => game.game.bggData !== null),
+        ).map((field) => field.id),
+      );
+      const loadedSort = normalizeCollectionSort(
+        loadSort(),
+        ordinarySortFields,
+        games.length === 0,
+      );
+      if (games.length > 0) saveSort(loadedSort);
+      setView({
+        status: "ready",
+        hydrated: true,
+        sort: loadedSort,
+        filters: loadedFilters,
+        playerCountInput:
+          loadedFilters.playerCount === null ? "" : String(loadedFilters.playerCount),
+        predictionsOn: false,
+        nichesOn: false,
+        nicheViewMode: false,
+        returnOrigin: null,
+        cleanupReturnTransport: collectionReturnAttempt,
+      });
+    }
+
+    void hydrateCollection();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    axes,
+    collectionContext,
+    collectionOrigin,
+    collectionReturnAttempt,
+    games,
+    hasTournamentData,
+    isIntegratedRedundancy,
+    missingDimensionsOnly,
+    nicheGames,
+    predictedCount,
+    predictedGames,
+    showPreviouslyOwned,
+  ]);
 
   const handleSortSelect = useCallback(
     (fieldId: string) => {
@@ -218,6 +579,59 @@ export function CollectionTable({
     () => sortGames(filtered, sort.field, sort.direction, tournamentStats, axes),
     [filtered, sort.field, sort.direction, tournamentStats, axes],
   );
+  const navigationEntries = useMemo(
+    () => createCollectionNavigationEntries(withValue, withoutValue),
+    [withValue, withoutValue],
+  );
+  const navigationFingerprintInput = useMemo<CollectionNavigationFingerprintInput>(
+    () => ({
+      entries: navigationEntries,
+      collectionScope: { showPreviouslyOwned, missingDimensionsOnly },
+      projection: {
+        sort,
+        filters,
+        predictionsOn,
+        effectivePredictionsOn: usePredictions,
+        nichesOn,
+      },
+      viewMode: nicheViewMode && nichesOn ? "grouped" : "flat",
+    }),
+    [
+      filters,
+      missingDimensionsOnly,
+      navigationEntries,
+      nicheViewMode,
+      nichesOn,
+      predictionsOn,
+      showPreviouslyOwned,
+      sort,
+      usePredictions,
+    ],
+  );
+  const navigationContextKey = useCollectionNavigationProducer({
+    hydrated: hydrated && view.status === "ready",
+    fingerprintInput: navigationFingerprintInput,
+  });
+
+  useEffect(() => {
+    if (!hydrated || !view.cleanupReturnTransport) return;
+
+    if (view.returnOrigin !== null) {
+      document
+        .getElementById(selectCollectionReturnFocusId(view.returnOrigin, navigationEntries))
+        ?.focus();
+    }
+    window.history.replaceState(
+      window.history.state,
+      "",
+      removeCollectionReturnTransport(window.location.href),
+    );
+    setView((current) => ({
+      ...current,
+      returnOrigin: null,
+      cleanupReturnTransport: false,
+    }));
+  }, [hydrated, navigationEntries, view.cleanupReturnTransport, view.returnOrigin]);
   const axisMap = useMemo(() => new Map(axes.map((a) => [a.id, a])), [axes]);
   const isAxisSort = sort.field.startsWith("axis:");
   const separatorLabel =
@@ -311,6 +725,39 @@ export function CollectionTable({
     label: GROUP_LABELS[group],
     fields: sortFields.filter((f) => f.group === group),
   })).filter((g) => g.fields.length > 0);
+
+  if (view.status === "restoring") {
+    return (
+      <div className="collection-restoring" role="status" aria-live="polite">
+        Restoring collection...
+      </div>
+    );
+  }
+
+  if (!hydrated && games.length === 0) {
+    return (
+      <div className="collection-restoring" role="status" aria-live="polite">
+        Loading collection...
+      </div>
+    );
+  }
+
+  if (games.length === 0) {
+    return (
+      <div className="empty-state">
+        <h2>No games yet</h2>
+        <p>Add games to your collection to start rating and tracking fitness scores.</p>
+        <div className="empty-state-actions">
+          <Link href="/import" className="btn btn-secondary">
+            Import BGG Collection
+          </Link>
+          <Link href="/search" className="btn btn-primary">
+            Add Game
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -711,6 +1158,7 @@ export function CollectionTable({
                       nicheHighlight={nicheEntry?.isChampion ? "champion" : undefined}
                       nicheSummary={null}
                       isIntegratedRedundancy={isIntegratedRedundancy}
+                      href={buildCollectionGameHref(gws.game.id, null)}
                     />
                   );
                 })}
@@ -752,6 +1200,8 @@ export function CollectionTable({
               showConfidence={usePredictions}
               nicheSummary={nichesOn ? (gws.nichePosition ?? null) : null}
               isIntegratedRedundancy={isIntegratedRedundancy}
+              href={buildCollectionGameHref(gws.game.id, navigationContextKey)}
+              focusId={collectionRowId(gws.game.id)}
             />
           ))}
 
@@ -777,6 +1227,8 @@ export function CollectionTable({
               showConfidence={usePredictions}
               nicheSummary={nichesOn ? (gws.nichePosition ?? null) : null}
               isIntegratedRedundancy={isIntegratedRedundancy}
+              href={buildCollectionGameHref(gws.game.id, navigationContextKey)}
+              focusId={collectionRowId(gws.game.id)}
             />
           ))}
         </>
@@ -801,6 +1253,8 @@ interface GameRowProps {
   nicheSummary?: import("@shelf-judge/shared").NichePosition | null;
   nicheHighlight?: "champion";
   isIntegratedRedundancy: boolean;
+  href: string;
+  focusId?: string;
 }
 
 function GameRow({
@@ -815,6 +1269,8 @@ function GameRow({
   isIntegratedRedundancy,
   nicheSummary,
   nicheHighlight,
+  href,
+  focusId,
 }: GameRowProps) {
   const { game, score } = gws;
   const display = getScoreDisplay(gws, sortField, tournamentStats, axes);
@@ -846,7 +1302,12 @@ function GameRow({
   ].join("");
 
   return (
-    <Link href={`/games/${game.id}`} className={rowClass}>
+    <Link
+      href={href}
+      id={focusId}
+      className={rowClass}
+      onClick={href.includes("collectionContext=") ? preserveCollectionScrollPosition : undefined}
+    >
       <div className="rank">{rank !== null ? rank : "\u2014"}</div>
       <div className="game-thumb-col">
         {game.imageUrl ? (

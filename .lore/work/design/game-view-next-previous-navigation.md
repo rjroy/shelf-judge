@@ -1,7 +1,7 @@
 ---
 title: Design for Collection-scoped game detail navigation
 date: 2026-08-29
-status: approved
+status: implemented
 tags: [navigation, game-detail, collection, local-storage, accessibility]
 modules: [web-ui]
 related:
@@ -340,19 +340,19 @@ The existing `200-percent` Playwright project uses a 720x450 CSS viewport with d
 
 ## Failure Behavior
 
-| Failure | Result |
-|---------|--------|
-| Context write fails | Collection rows remain plain links. |
-| Stored JSON is corrupt or unsupported | Detail uses plain breadcrumb and no strip; cleanup may remove the record. |
-| Valid read succeeds but timestamp refresh fails | Current page uses the context; stored expiry does not advance. |
-| Context or origin query is duplicated or malformed | Treat context as absent. |
-| Current or origin ID is not unique in snapshot | Treat context as invalid. |
-| Adjacent target was deleted | Existing game-detail error behavior handles the destination. |
-| Origin is absent from restored current projection | Keep restored controls and focus Collection heading. |
-| Final origin was deleted and Collection is empty | Structural/scope validity overrides missing row-derived capabilities: restore snapshot state, render the empty panel, focus Collection heading, and consume return parameters. |
-| Stored sort or enrichment capability is unavailable | Treat contextual return as invalid and reveal ordinary persisted-state Collection without mismatched controls. |
-| Context expires or is evicted in another tab | Current mounted model may continue; a later route load degrades to plain detail. |
-| Projection changes before new snapshot persists | Newly rendered rows are immediately plain, never attached to the old key. |
+| Failure                                             | Result                                                                                                                                                                         |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Context write fails                                 | Collection rows remain plain links.                                                                                                                                            |
+| Stored JSON is corrupt or unsupported               | Detail uses plain breadcrumb and no strip; cleanup may remove the record.                                                                                                      |
+| Valid read succeeds but timestamp refresh fails     | Current page uses the context; stored expiry does not advance.                                                                                                                 |
+| Context or origin query is duplicated or malformed  | Treat context as absent.                                                                                                                                                       |
+| Current or origin ID is not unique in snapshot      | Treat context as invalid.                                                                                                                                                      |
+| Adjacent target was deleted                         | Existing game-detail error behavior handles the destination.                                                                                                                   |
+| Origin is absent from restored current projection   | Keep restored controls and focus Collection heading.                                                                                                                           |
+| Final origin was deleted and Collection is empty    | Structural/scope validity overrides missing row-derived capabilities: restore snapshot state, render the empty panel, focus Collection heading, and consume return parameters. |
+| Stored sort or enrichment capability is unavailable | Treat contextual return as invalid and reveal ordinary persisted-state Collection without mismatched controls.                                                                 |
+| Context expires or is evicted in another tab        | Current mounted model may continue; a later route load degrades to plain detail.                                                                                               |
+| Projection changes before new snapshot persists     | Newly rendered rows are immediately plain, never attached to the old key.                                                                                                      |
 
 ## Changed Surface
 

@@ -277,14 +277,15 @@ export function sortGames(
   withValue.sort((a, b) => {
     const av = getSortValue(a, field, tournamentStats, axes);
     const bv = getSortValue(b, field, tournamentStats, axes);
-    if (av === null || bv === null) return 0;
-    if (typeof av === "string" && typeof bv === "string") {
-      return dir * av.localeCompare(bv);
-    }
-    return dir * ((av as number) - (bv as number));
+    if (av === null || bv === null) return compareCollectionIdentity(a, b);
+    const primary =
+      typeof av === "string" && typeof bv === "string"
+        ? av.localeCompare(bv)
+        : (av as number) - (bv as number);
+    return primary === 0 ? compareCollectionIdentity(a, b) : dir * primary;
   });
 
-  withoutValue.sort((a, b) => a.game.name.localeCompare(b.game.name));
+  withoutValue.sort(compareCollectionIdentity);
 
   return { withValue, withoutValue };
 }
@@ -307,7 +308,7 @@ function compareCodePoints(left: string, right: string): number {
   }
 }
 
-function compareUtilizationTie(
+function compareCollectionIdentity(
   left: GameWithPurchaseUtilization,
   right: GameWithPurchaseUtilization,
 ): number {
@@ -336,11 +337,11 @@ function sortByValueRemaining(
   withValue.sort((left, right) => {
     const leftKey = left.purchaseUtilization.sort.valueRemainingHundredths;
     const rightKey = right.purchaseUtilization.sort.valueRemainingHundredths;
-    if (leftKey === null || rightKey === null) return compareUtilizationTie(left, right);
+    if (leftKey === null || rightKey === null) return compareCollectionIdentity(left, right);
     const primary = compareUnsignedDecimals(leftKey, rightKey);
-    return primary === 0 ? compareUtilizationTie(left, right) : primaryDirection * primary;
+    return primary === 0 ? compareCollectionIdentity(left, right) : primaryDirection * primary;
   });
-  withoutValue.sort(compareUtilizationTie);
+  withoutValue.sort(compareCollectionIdentity);
   return { withValue, withoutValue };
 }
 
@@ -371,9 +372,9 @@ function sortByEstimatedAdditionalPlays(
       const primary = compareUnsignedDecimals(leftSort.wholePlays, rightSort.wholePlays);
       if (primary !== 0) return direction === "asc" ? primary : -primary;
     }
-    return compareUtilizationTie(left, right);
+    return compareCollectionIdentity(left, right);
   });
-  withoutValue.sort(compareUtilizationTie);
+  withoutValue.sort(compareCollectionIdentity);
   return { withValue, withoutValue };
 }
 

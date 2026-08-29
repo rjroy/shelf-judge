@@ -1,7 +1,7 @@
 ---
 title: Previous and next navigation in game detail
 date: 2026-08-29
-status: approved
+status: implemented
 tags: [navigation, game-detail, collection, sorting, filtering, accessibility]
 modules: [web-ui]
 related:

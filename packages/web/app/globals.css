@@ -706,6 +706,12 @@ body {
   background: var(--row-hover);
 }
 
+.game-row:focus-visible,
+#collection-heading:focus-visible {
+  outline: 3px solid var(--bgg-accent);
+  outline-offset: -3px;
+}
+
 .game-row.unrated {
   opacity: 0.7;
 }
@@ -904,11 +910,21 @@ body {
   color: var(--text-muted);
 }
 
+.empty-state h2,
 .empty-state h3 {
   font-size: var(--text-lg);
   font-weight: 600;
   color: var(--text-secondary);
   margin-bottom: 8px;
+}
+
+.collection-restoring {
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  padding: var(--content-padding);
+  color: var(--text-muted);
+  font-size: var(--text-base);
 }
 
 .empty-state p {
@@ -959,6 +975,7 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   font-size: var(--text-sm);
   color: var(--text-muted);
 }
@@ -969,8 +986,69 @@ body {
 }
 
 .breadcrumb strong {
+  min-width: 0;
+  overflow: hidden;
   color: var(--text-primary);
   font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-collection-navigation {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-height: 56px;
+  flex-shrink: 0;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.detail-navigation-link,
+.detail-navigation-boundary {
+  display: flex;
+  min-width: 0;
+  min-height: 44px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px var(--content-padding);
+  font-size: var(--text-sm);
+}
+
+.detail-navigation-link {
+  color: var(--action);
+  text-decoration: none;
+}
+
+.detail-navigation-link.next,
+.detail-navigation-boundary.next {
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.detail-navigation-link:focus-visible {
+  outline: 3px solid var(--bgg-accent);
+  outline-offset: -3px;
+}
+
+.detail-navigation-link:hover .detail-navigation-name {
+  text-decoration: underline;
+}
+
+.detail-navigation-label {
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.detail-navigation-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-navigation-boundary {
+  color: var(--text-muted);
 }
 
 .topbar-actions {
@@ -4189,6 +4267,13 @@ body {
     flex-wrap: wrap;
     padding: 12px var(--content-padding);
     gap: 8px;
+  }
+
+  .detail-navigation-link,
+  .detail-navigation-boundary {
+    gap: 5px;
+    padding: 6px var(--content-padding);
+    font-size: var(--text-xs);
   }
 
   .topbar-meta {

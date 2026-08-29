@@ -103,14 +103,14 @@ Use an origin-only navigation snapshot with an opaque context key.
 
 The conceptual snapshot is:
 
-| Field | Purpose |
-|-------|---------|
-| Version | Allows incompatible stored shapes to fail closed. |
-| Ordered entries | Stable game ID and display name for every visible result. |
-| Collection destination | Restores URL-owned ownership and dimensions scope. |
-| Projection state | Restores the originating client-owned sort and filters on explicit return. |
-| Origin row | Identifies the row to restore or focus when returning. |
-| Created or accessed time | Supports bounded cleanup of stale snapshots. |
+| Field                    | Purpose                                                                    |
+| ------------------------ | -------------------------------------------------------------------------- |
+| Version                  | Allows incompatible stored shapes to fail closed.                          |
+| Ordered entries          | Stable game ID and display name for every visible result.                  |
+| Collection destination   | Restores URL-owned ownership and dimensions scope.                         |
+| Projection state         | Restores the originating client-owned sort and filters on explicit return. |
+| Origin row               | Identifies the row to restore or focus when returning.                     |
+| Created or accessed time | Supports bounded cleanup of stale snapshots.                               |
 
 The URL needs only the context key. The key is navigation enhancement, not game identity. Removing it leaves the same game route.
 

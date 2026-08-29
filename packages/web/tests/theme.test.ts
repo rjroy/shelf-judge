@@ -1,13 +1,6 @@
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { loadTheme, saveTheme, resolveTheme } from "../lib/theme";
 
-// Ensure window exists in test env (loadTheme's SSR guard checks typeof window)
-if (typeof globalThis.window === "undefined") {
-  // @ts-expect-error -- minimal window stub for SSR guard
-  globalThis.window = globalThis;
-}
-
-// Stub localStorage for tests
 function createMockStorage(): Storage {
   const store = new Map<string, string>();
   return {
@@ -20,6 +13,14 @@ function createMockStorage(): Storage {
     },
     key: (index: number) => [...store.keys()][index] ?? null,
   };
+}
+
+function restoreGlobalProperty(name: "localStorage" | "window", descriptor?: PropertyDescriptor) {
+  if (descriptor === undefined) {
+    Reflect.deleteProperty(globalThis, name);
+  } else {
+    Object.defineProperty(globalThis, name, descriptor);
+  }
 }
 
 function createMockMatchMedia(darkMode: boolean) {
@@ -36,55 +37,71 @@ function createMockMatchMedia(darkMode: boolean) {
     }) as MediaQueryList;
 }
 
-describe("loadTheme", () => {
+describe("theme persistence", () => {
   let mockStorage: Storage;
+  let originalStorageDescriptor: PropertyDescriptor | undefined;
+  let originalWindowDescriptor: PropertyDescriptor | undefined;
 
   beforeEach(() => {
+    originalStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    originalWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window");
     mockStorage = createMockStorage();
-    Object.defineProperty(globalThis, "localStorage", { value: mockStorage, writable: true });
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      writable: true,
+      value: mockStorage,
+    });
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      writable: true,
+      value: globalThis,
+    });
   });
 
-  test("returns 'system' when localStorage is empty", () => {
-    expect(loadTheme()).toBe("system");
+  afterEach(() => {
+    try {
+      restoreGlobalProperty("localStorage", originalStorageDescriptor);
+    } finally {
+      restoreGlobalProperty("window", originalWindowDescriptor);
+    }
   });
 
-  test("returns the stored value when valid", () => {
-    mockStorage.setItem("shelf-judge-theme", "dark");
-    expect(loadTheme()).toBe("dark");
+  describe("loadTheme", () => {
+    test("returns 'system' when localStorage is empty", () => {
+      expect(loadTheme()).toBe("system");
+    });
 
-    mockStorage.setItem("shelf-judge-theme", "light");
-    expect(loadTheme()).toBe("light");
+    test("returns the stored value when valid", () => {
+      mockStorage.setItem("shelf-judge-theme", "dark");
+      expect(loadTheme()).toBe("dark");
 
-    mockStorage.setItem("shelf-judge-theme", "system");
-    expect(loadTheme()).toBe("system");
+      mockStorage.setItem("shelf-judge-theme", "light");
+      expect(loadTheme()).toBe("light");
+
+      mockStorage.setItem("shelf-judge-theme", "system");
+      expect(loadTheme()).toBe("system");
+    });
+
+    test("returns 'system' for invalid stored values", () => {
+      mockStorage.setItem("shelf-judge-theme", "invalid");
+      expect(loadTheme()).toBe("system");
+
+      mockStorage.setItem("shelf-judge-theme", "");
+      expect(loadTheme()).toBe("system");
+    });
   });
 
-  test("returns 'system' for invalid stored values", () => {
-    mockStorage.setItem("shelf-judge-theme", "invalid");
-    expect(loadTheme()).toBe("system");
+  describe("saveTheme", () => {
+    test("persists to localStorage", () => {
+      saveTheme("dark");
+      expect(mockStorage.getItem("shelf-judge-theme")).toBe("dark");
 
-    mockStorage.setItem("shelf-judge-theme", "");
-    expect(loadTheme()).toBe("system");
-  });
-});
+      saveTheme("light");
+      expect(mockStorage.getItem("shelf-judge-theme")).toBe("light");
 
-describe("saveTheme", () => {
-  let mockStorage: Storage;
-
-  beforeEach(() => {
-    mockStorage = createMockStorage();
-    Object.defineProperty(globalThis, "localStorage", { value: mockStorage, writable: true });
-  });
-
-  test("persists to localStorage", () => {
-    saveTheme("dark");
-    expect(mockStorage.getItem("shelf-judge-theme")).toBe("dark");
-
-    saveTheme("light");
-    expect(mockStorage.getItem("shelf-judge-theme")).toBe("light");
-
-    saveTheme("system");
-    expect(mockStorage.getItem("shelf-judge-theme")).toBe("system");
+      saveTheme("system");
+      expect(mockStorage.getItem("shelf-judge-theme")).toBe("system");
+    });
   });
 });
 
