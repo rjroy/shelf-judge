@@ -87,7 +87,9 @@ describe("profile overview consumer", () => {
       expect(html).toContain(`>${label}</h3>`);
     expect(html).toContain("Worker Placement");
     expect(html).not.toContain(">Solo<");
-    expect(html).toContain('href="/profile/entities#mechanic-101"');
+    expect(html).toContain('href="/profile/entities?class=mechanic&amp;entity=101"');
+    for (const entityClass of ["mechanic", "designer", "artist"])
+      expect(html).toContain(`href="/profile/entities?class=${entityClass}"`);
     expect(html).toContain('href="/profile/axes"');
   });
 

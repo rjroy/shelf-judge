@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { EntityDrilldownContent, entitiesInSuppliedOrder } from "@/app/profile/entities/page";
+import {
+  EntityDrilldownContent,
+  entitiesInSuppliedOrder,
+  entityExplorerUrl,
+  filterEntityExplorerResults,
+  parseEntityExplorerState,
+  type EntityExplorerState,
+} from "@/app/profile/entities/page";
 import { AxisDiagnosticsContent } from "@/app/profile/axes/page";
 import { ClassEvidence } from "@/components/profile/entity-evidence";
 import {
@@ -9,6 +16,54 @@ import {
 } from "../../shared/tests/fixtures/useful-profile";
 
 describe("entity drilldown", () => {
+  const defaultState: EntityExplorerState = {
+    entityClass: "mechanic",
+    entityId: null,
+    ordering: "rating",
+    support: "all",
+    query: "",
+  };
+
+  test("parses complete URL state and falls back for invalid or repeated values", () => {
+    expect(
+      parseEntityExplorerState({
+        class: "artist",
+        entity: "102",
+        order: "support",
+        support: "limited",
+        q: "  Alpha  ",
+      }),
+    ).toEqual({
+      entityClass: "artist",
+      entityId: 102,
+      ordering: "support",
+      support: "limited",
+      query: "Alpha",
+    });
+    expect(
+      parseEntityExplorerState({
+        class: ["mechanic", "artist"],
+        entity: "not-an-id",
+        order: "newest",
+        support: "unknown",
+      }),
+    ).toEqual(defaultState);
+  });
+
+  test("builds canonical shareable URLs", () => {
+    expect(entityExplorerUrl(defaultState)).toBe("/profile/entities?class=mechanic");
+    expect(
+      entityExplorerUrl(defaultState, {
+        entityId: 101,
+        ordering: "name",
+        support: "supported",
+        query: "worker placement",
+      }),
+    ).toBe(
+      "/profile/entities?class=mechanic&entity=101&order=name&support=supported&q=worker+placement",
+    );
+  });
+
   test.each([
     ["rating" as const, [102, 101]],
     ["support" as const, [101, 102]],
@@ -18,14 +73,41 @@ describe("entity drilldown", () => {
       entitiesInSuppliedOrder(mechanicClassFixture, ordering).map(({ entityId }) => entityId),
     ).toEqual(ids);
     const html = renderToStaticMarkup(
-      <EntityDrilldownContent profile={usefulProfileFixture} ordering={ordering} />,
+      <EntityDrilldownContent
+        profile={usefulProfileFixture}
+        state={{ ...defaultState, ordering }}
+      />,
     );
-    const positions = ids.map((id) => html.indexOf(`id="mechanic-${id}-heading"`));
+    const positions = ids.map((id) => html.indexOf(`id="entity-${id}"`));
     expect(positions[0]).toBeLessThan(positions[1]);
-    expect(html).toContain(`data-ordering="${ordering}"`);
+    expect(html.match(/class="entity-evidence"/g)).toHaveLength(1);
   });
 
-  test("renders every entity, sparse labels, aggregate and comparator evidence, exclusions, warnings, and valid links", () => {
+  test("filters by daemon support and matches entity or eligible supporting-game names without reordering", () => {
+    expect(
+      filterEntityExplorerResults(mechanicClassFixture, {
+        ...defaultState,
+        support: "supported",
+      }).map(({ entity }) => entity.entityId),
+    ).toEqual([101]);
+    expect(
+      filterEntityExplorerResults(mechanicClassFixture, {
+        ...defaultState,
+        query: "alpha",
+      }).map(({ entity, matchedGameName }) => [entity.entityId, matchedGameName]),
+    ).toEqual([
+      [102, "Alpha"],
+      [101, "Alpha"],
+    ]);
+    expect(
+      filterEntityExplorerResults(mechanicClassFixture, {
+        ...defaultState,
+        query: "worker",
+      })[0]?.matchedGameName,
+    ).toBeNull();
+  });
+
+  test("renders compact results, one selected dossier, and progressively disclosed class evidence", () => {
     const mechanic = {
       ...mechanicClassFixture,
       refreshWarnings: [
@@ -45,27 +127,73 @@ describe("entity drilldown", () => {
       },
     };
     const html = renderToStaticMarkup(
-      <EntityDrilldownContent profile={profile} ordering="rating" />,
+      <EntityDrilldownContent profile={profile} state={defaultState} />,
     );
 
     for (const text of [
       "Worker Placement",
       "Solo",
-      "Limited evidence: 1 game",
+      "Limited evidence · 1 game",
       "Population standard deviation",
       "Difference from collection",
       "Supporting games",
       "Eligible collection comparator",
       "Missing or invalid fitness",
-      "Refresh warnings",
+      "Refresh warnings (1)",
       "BGG unavailable",
-      "Veto applied; displayed fitness is 0.",
+      "Vetoed; displayed as 0",
     ])
       expect(html).toContain(text);
     for (const id of ["game-1", "game-2", "game-3", "game-4"])
       expect(html).toContain(`href="/games/${id}"`);
     expect(html).toContain('aria-labelledby="mechanic-102-heading"');
     expect(html).toContain('aria-label="mechanic class evidence"');
+    expect(html.match(/class="entity-evidence"/g)).toHaveLength(1);
+    expect(html).toContain("Review class evidence");
+    expect(html).toContain("Eligible games (3)");
+  });
+
+  test("keeps a valid explicit selection outside filters and treats a cross-class ID as absent", () => {
+    const outside = renderToStaticMarkup(
+      <EntityDrilldownContent
+        profile={usefulProfileFixture}
+        state={{ ...defaultState, entityId: 101, support: "limited" }}
+      />,
+    );
+    expect(outside).toContain("Selected entity is outside the current results");
+    expect(outside).toContain("Worker Placement");
+    expect(outside).toContain("Clear filters and return to Mechanics results");
+    expect(outside).toContain("has-explicit-selection");
+
+    const absent = renderToStaticMarkup(
+      <EntityDrilldownContent
+        profile={usefulProfileFixture}
+        state={{ ...defaultState, entityId: 999 }}
+      />,
+    );
+    expect(absent).not.toContain("has-explicit-selection");
+    expect(absent).toContain('aria-labelledby="mechanic-102-heading"');
+  });
+
+  test("distinguishes excluded-game search, filtered empty, and intrinsic class states", () => {
+    const excluded = renderToStaticMarkup(
+      <EntityDrilldownContent
+        profile={usefulProfileFixture}
+        state={{ ...defaultState, query: "Heat" }}
+      />,
+    );
+    expect(excluded).toContain("That game is excluded from this class&#x27;s entity evidence");
+    expect(excluded).toContain("Clear search and filters");
+
+    const intrinsic = renderToStaticMarkup(
+      <EntityDrilldownContent
+        profile={usefulProfileFixture}
+        state={{ ...defaultState, entityClass: "designer", query: "Heat" }}
+      />,
+    );
+    expect(intrinsic).toContain('data-result="evaluated-empty"');
+    expect(intrinsic).toContain("Complete metadata contains no associations in this class.");
+    expect(intrinsic).not.toContain("Clear search and filters");
   });
 
   test("does not render an action for an unrefreshable exclusion with no destination", () => {
@@ -89,7 +217,7 @@ describe("entity drilldown", () => {
       },
     };
     const html = renderToStaticMarkup(
-      <EntityDrilldownContent profile={profile} ordering="rating" />,
+      <EntityDrilldownContent profile={profile} state={defaultState} />,
     );
     const exclusion = html.match(/Manual game[\s\S]*?<\/li>/)?.[0];
     expect(exclusion).toContain("Metadata cannot be refreshed");

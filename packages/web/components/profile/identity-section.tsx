@@ -66,7 +66,7 @@ function ClassOverview({ result }: { result: CollectionProfileEntityClassResult 
           {result.refreshWarnings.length} refresh warnings.
         </p>
       )}
-      <Link href={`/profile/entities#${result.entityClass}`}>
+      <Link href={`/profile/entities?class=${result.entityClass}`}>
         View all {classLabels[result.entityClass].toLowerCase()} and evidence
       </Link>
     </section>

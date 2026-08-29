@@ -27,7 +27,7 @@ export function EntityCard({
         <strong>{score(entity.comparatorMeanCurrentFitness)}</strong> across the eligible
         collection. Based on {entity.associatedGameCount} games.
       </p>
-      <Link href={`/profile/entities#${entityClass}-${entity.entityId}`}>
+      <Link href={`/profile/entities?class=${entityClass}&entity=${entity.entityId}`}>
         Inspect complete evidence for {entity.name}
       </Link>
     </article>

@@ -39,6 +39,22 @@ const axis = AxisSchema.parse({
 
 const profileFixture: CollectionProfileResult = (() => {
   const profile = structuredClone(warningUsefulProfileFixture);
+  const mechanic = profile.identity.classes.mechanic;
+  const workerPlacement = mechanic.entities.find(({ entityId }) => entityId === 101);
+  if (workerPlacement === undefined) throw new Error("Expected mechanic fixture evidence");
+  const generatedEntities = Array.from({ length: 167 }, (_, index) => ({
+    ...structuredClone(workerPlacement),
+    entityId: 1_000 + index,
+    name: `Worker Placement Variant ${String(index + 1).padStart(3, "0")}`,
+  }));
+  mechanic.entities = [workerPlacement, ...generatedEntities];
+  const productionOrder = mechanic.entities.map(({ entityId }) => entityId);
+  mechanic.orderings = {
+    rating: productionOrder,
+    support: productionOrder,
+    name: productionOrder,
+  };
+  mechanic.overviewEntityIds = productionOrder.slice(0, 3);
   profile.identity.axisDistributions = [
     {
       axisId: axis.id,

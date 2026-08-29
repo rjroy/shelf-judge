@@ -34,6 +34,7 @@ describe("profile accessibility and removed surfaces", () => {
       "components/profile/identity-section.tsx",
       "components/profile/entity-card.tsx",
       "components/profile/entity-evidence.tsx",
+      "components/profile/entity-explorer-focus.tsx",
       "components/profile/attention-section.tsx",
     ];
     for (const path of paths) {

@@ -162,6 +162,8 @@ async function expectMinimumTargets(page: Page): Promise<void> {
             style.display !== "none" &&
             style.visibility !== "hidden" &&
             !control.disabled &&
+            rect.width > 0 &&
+            rect.height > 0 &&
             (rect.width < 44 || rect.height < 44)
           );
         })
@@ -338,14 +340,40 @@ test.describe("useful profile responsive release gate", () => {
     await expectAllTextContrast(page, ".profile-page");
   });
 
-  test("entity ordering and axis diagnostics remain keyboard operable", async ({
+  test("entity explorer and axis diagnostics remain keyboard operable", async ({
     page,
   }, testInfo) => {
     await reset(page, "profile");
     await page.goto("/profile/entities");
     await applyProjectViewport(page, testInfo.project.name);
 
-    const order = page.getByLabel("Order every entity by");
+    await expect(page.getByRole("link", { name: "Mechanics 168" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    await expect(page.locator(".entity-index-row")).toHaveCount(168);
+    await expect(page.locator(".entity-evidence")).toHaveCount(1);
+    await expect(
+      page.getByRole("heading", { name: "Worker Placement", exact: true }),
+    ).toBeVisible();
+
+    await page.getByRole("link", { name: "Designers 0" }).click();
+    await expect(page).toHaveURL(/class=designer$/);
+    await expect(page.getByText("Complete metadata contains no associations")).toBeVisible();
+    await page.getByRole("link", { name: "Mechanics 168" }).click();
+
+    await page.getByLabel("Find an entity or supporting game").fill("Variant 010");
+    await page.getByRole("button", { name: "Search" }).click();
+    await expect(page).toHaveURL(/class=mechanic&q=Variant\+010/);
+    await expect(page.locator(".entity-index-row")).toHaveCount(1);
+    await page.goto("/profile/entities");
+
+    await page.getByLabel("Evidence", { exact: true }).selectOption("supported");
+    await page.getByRole("button", { name: "Apply evidence filter" }).click();
+    await expect(page).toHaveURL(/class=mechanic&support=supported/);
+    await expect(page.locator(".entity-index-row")).toHaveCount(168);
+
+    const order = page.getByLabel("Order", { exact: true });
     await expectVisibleFocus(page, order);
     await page.keyboard.press("Home");
     await page.keyboard.press("ArrowDown");
@@ -356,13 +384,40 @@ test.describe("useful profile responsive release gate", () => {
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/order=support/);
     await applyProjectViewport(page, testInfo.project.name);
-    const suppliedOrdering = page.locator('.entity-evidence-list[data-ordering="support"]');
-    await expect(suppliedOrdering).toHaveCount(1);
-    await expect(suppliedOrdering.locator(".entity-evidence")).toHaveCount(2);
-    await expect(page.getByText("Eligible collection comparator").first()).toBeVisible();
-    await expect(page.getByText("Exclusions").first()).toBeVisible();
-    await expect(page.getByText("Refresh warnings").first()).toBeVisible();
-    await expect(page.getByText("Veto applied; displayed fitness is 0.").first()).toBeVisible();
+
+    const selected = page.getByRole("link", { name: /Worker Placement Variant 001/ });
+    await selected.click();
+    await expect(page).toHaveURL(/class=mechanic.*entity=1000.*order=support.*support=supported/);
+    const selectedHeading = page.getByRole("heading", { name: "Worker Placement Variant 001" });
+    await expect(selectedHeading).toBeVisible();
+    await expect(selectedHeading).toBeFocused();
+    if (
+      testInfo.project.name.includes("desktop") &&
+      !testInfo.project.name.includes("200-percent")
+    ) {
+      await expect(page.locator(".entity-index")).toBeVisible();
+    } else {
+      await expect(page.locator(".entity-index")).toBeHidden();
+      const back = page.getByRole("link", { name: "Back to Mechanics results" });
+      await expect(back).toBeVisible();
+      await back.click();
+      await expect(page.locator(".entity-index")).toBeVisible();
+      await expect(page.locator("#entity-1000")).toBeFocused();
+      await page.locator("#entity-1000").click();
+      await expect(selectedHeading).toBeFocused();
+    }
+
+    const classEvidence = page.getByText("Review class evidence", { exact: true });
+    await classEvidence.click();
+    await expect(page.getByText("Eligible collection comparator", { exact: false })).toBeVisible();
+    await expect(page.getByText("Exclusions (1)")).toBeVisible();
+    await expect(page.getByText("Refresh warnings (0)")).toBeVisible();
+    await expect(page.getByText("Vetoed; displayed as 0").first()).toBeHidden();
+    await page.getByText("Eligible games (3)").click();
+    await expect(page.getByText("Vetoed; displayed as 0").first()).toBeVisible();
+    await page.evaluate(() => localStorage.setItem("shelf-judge-theme", "dark"));
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await expectNoHorizontalOverflow(page);
     await expectMinimumTargets(page);
 
@@ -380,6 +435,55 @@ test.describe("useful profile responsive release gate", () => {
     expect(renderedBarHeights[0]).toBeGreaterThanOrEqual(2);
     await expectNoHorizontalOverflow(page);
     await expectMinimumTargets(page);
+  });
+
+  test("entity explorer GET navigation works without JavaScript", async ({ browser }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== "chromium-mobile",
+      "One no-JavaScript project is sufficient",
+    );
+    const context = await browser.newContext({
+      baseURL: "http://127.0.0.1:3100",
+      javaScriptEnabled: false,
+      viewport: { width: 375, height: 812 },
+    });
+    const page = await context.newPage();
+    try {
+      await reset(page, "profile");
+      await page.goto("/profile/entities");
+      await page.getByLabel("Find an entity or supporting game").fill("Variant 010");
+      await page.getByRole("button", { name: "Search" }).click();
+      await expect(page).toHaveURL(/class=mechanic&q=Variant\+010/);
+      await expect(page.locator(".entity-index-row")).toHaveCount(1);
+
+      await page.getByLabel("Evidence", { exact: true }).selectOption("supported");
+      await page.getByRole("button", { name: "Apply evidence filter" }).click();
+      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({
+        class: "mechanic",
+        q: "Variant 010",
+        support: "supported",
+      });
+
+      await page.getByLabel("Order", { exact: true }).selectOption("name");
+      await page.getByRole("button", { name: "Apply order" }).click();
+      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({
+        class: "mechanic",
+        order: "name",
+        q: "Variant 010",
+        support: "supported",
+      });
+
+      await page.getByRole("link", { name: "Designers 0" }).click();
+      await expect(page).toHaveURL(/class=designer&order=name$/);
+      await page.getByRole("link", { name: "Mechanics 168" }).click();
+      await page.locator(".entity-index-row").first().click();
+      await expect(page).toHaveURL(/class=mechanic&entity=101&order=name/);
+      await expect(
+        page.getByRole("heading", { name: "Worker Placement", exact: true }),
+      ).toBeVisible();
+    } finally {
+      await context.close();
+    }
   });
 
   test("empty and unavailable are visibly distinct", async ({ page }, testInfo) => {
