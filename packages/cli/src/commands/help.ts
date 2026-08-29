@@ -20,6 +20,36 @@ interface LocalCommandHelp {
 // One API operation can intentionally back multiple CLI commands. Keep those
 // CLI-only aliases here instead of advertising duplicate daemon operations.
 const LOCAL_OPERATION_COMMANDS: Record<string, LocalCommandHelp[]> = {
+  "shelf.game.intention.set": [
+    {
+      name: "intention set",
+      usage: "shelf-judge game intention set <game-id> <first-play|replay> [--command-id <uuid>]",
+      description: "Create an explicit eligible play intention",
+    },
+  ],
+  "shelf.game.intention.complete": [
+    {
+      name: "intention complete",
+      usage:
+        "shelf-judge game intention complete <game-id> <intention-id> --expected-version <n> [--command-id <uuid>]",
+      description: "Complete an intention from personal knowledge without changing play count",
+    },
+  ],
+  "shelf.game.intention.retire": [
+    {
+      name: "intention retire",
+      usage:
+        "shelf-judge game intention retire <game-id> <intention-id> --expected-version <n> [--command-id <uuid>]",
+      description: "Retire an intention that is no longer active",
+    },
+  ],
+  "shelf.game.plays.set": [
+    {
+      name: "plays set",
+      usage: "shelf-judge game plays set <game-id> <count>",
+      description: "Correct recorded play evidence and report any automatic completion",
+    },
+  ],
   "shelf.axis.create": [
     {
       name: "create",

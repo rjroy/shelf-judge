@@ -2,8 +2,8 @@
 // shelf-judge CLI entry point.
 // Parses arguments, checks daemon reachability, dispatches to command handlers.
 
-import { toErrorMessage } from "@shelf-judge/shared";
 import { createDaemonClient } from "./client.js";
+import { formatCliError } from "./errors.js";
 import {
   gameSearch,
   gameAdd,
@@ -17,6 +17,9 @@ import {
   gameClearShelf,
   gameAcquisition,
   gameValue,
+  gameIntentionSet,
+  gameIntentionResolve,
+  gamePlaysSet,
 } from "./commands/game.js";
 import { collectionBenchmark } from "./commands/collection.js";
 import {
@@ -39,7 +42,7 @@ import {
   tournamentStop,
   tournamentStats,
 } from "./commands/tournament.js";
-import { profileCommand, profileNarrateCommand } from "./commands/profile.js";
+import { profileCommand } from "./commands/profile.js";
 import { predictGame, predictBggGame, predictReadiness } from "./commands/predict.js";
 import { nicheIgnored, nicheIgnore, nicheUnignore } from "./commands/niche.js";
 import {
@@ -81,6 +84,10 @@ const COMMANDS: Record<string, number> = {
   "game clear-shelf": 2,
   "game acquisition": 2,
   "game value": 2,
+  "game intention set": 3,
+  "game intention complete": 3,
+  "game intention retire": 3,
+  "game plays set": 3,
   "collection benchmark": 2,
   "axis list": 2,
   "axis templates": 2,
@@ -95,7 +102,6 @@ const COMMANDS: Record<string, number> = {
   "tournament pick": 2,
   "tournament stop": 2,
   "tournament stats": 2,
-  "profile narrate": 2,
   "predict bgg": 2,
   "predict readiness": 2,
   "niche ignored": 2,
@@ -132,6 +138,10 @@ const EXACT_POSITIONAL_COMMANDS = new Set([
   "game acquisition",
   "game value",
   "collection benchmark",
+  "game intention set",
+  "game intention complete",
+  "game intention retire",
+  "game plays set",
 ]);
 
 interface ParsedArgs {
@@ -170,8 +180,8 @@ interface ParsedArgs {
 export function parseArgs(argv: string[]): ParsedArgs {
   const raw = argv.slice(2); // skip bun and script path
   const commandTokens = raw.filter((arg) => arg !== "--json");
-  const exactPositionalCommand = EXACT_POSITIONAL_COMMANDS.has(
-    `${commandTokens[0]} ${commandTokens[1]}`,
+  const exactPositionalCommand = [...EXACT_POSITIONAL_COMMANDS].some(
+    (command) => commandTokens.slice(0, command.split(" ").length).join(" ") === command,
   );
 
   // Separate flags from non-flag tokens
@@ -279,19 +289,13 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let commandPath = "";
   let positional: string[] = tokens;
 
-  // Try 2-token match first, then 1-token
-  if (tokens.length >= 2) {
-    const twoToken = `${tokens[0]} ${tokens[1]}`;
-    if (COMMANDS[twoToken] !== undefined) {
-      commandPath = twoToken;
-      positional = tokens.slice(2);
-    }
-  }
-  if (!commandPath && tokens.length >= 1) {
-    const oneToken = tokens[0];
-    if (COMMANDS[oneToken] !== undefined) {
-      commandPath = oneToken;
-      positional = tokens.slice(1);
+  for (const depth of [3, 2, 1]) {
+    if (tokens.length < depth) continue;
+    const candidate = tokens.slice(0, depth).join(" ");
+    if (COMMANDS[candidate] !== undefined) {
+      commandPath = candidate;
+      positional = tokens.slice(depth);
+      break;
     }
   }
 
@@ -394,6 +398,18 @@ async function main(): Promise<void> {
       break;
     case "game value":
       output = await gameValue(client, args, opts);
+      break;
+    case "game intention set":
+      output = await gameIntentionSet(client, args, opts);
+      break;
+    case "game intention complete":
+      output = await gameIntentionResolve(client, "complete", args, opts);
+      break;
+    case "game intention retire":
+      output = await gameIntentionResolve(client, "retire", args, opts);
+      break;
+    case "game plays set":
+      output = await gamePlaysSet(client, args, opts);
       break;
     case "collection benchmark":
       output = await collectionBenchmark(client, args, opts);
@@ -575,9 +591,6 @@ async function main(): Promise<void> {
     case "config set":
       output = await configSet(client, args, opts);
       break;
-    case "profile narrate":
-      output = await profileNarrateCommand(client, args, opts);
-      break;
     case "profile":
       output = await profileCommand(client, args, opts);
       break;
@@ -601,7 +614,7 @@ async function main(): Promise<void> {
 
 if (import.meta.main) {
   main().catch((err) => {
-    console.error(toErrorMessage(err));
+    console.error(formatCliError(err));
     process.exit(1);
   });
 }

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Axis, Game, PersonalAxis, TournamentAxis } from "@shelf-judge/shared";
+import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import {
   FACTUAL_VECTOR_DIMENSIONS,
   buildVocabulary,
@@ -16,9 +17,11 @@ import {
 import type { FeatureVector } from "../src/services/feature-vector";
 
 function makeGame(overrides: Partial<Game> = {}): Game {
-  return {
+  const game: Game = {
     id: "test-id",
     bggId: 1,
+    entityMetadata: createInitialEntityMetadata(1),
+    latestPlayCountCheck: null,
     name: "Test Game",
     yearPublished: 2020,
     minPlayers: 2,
@@ -62,6 +65,11 @@ function makeGame(overrides: Partial<Game> = {}): Game {
     createdAt: "2025-01-01T00:00:00.000Z",
     updatedAt: "2025-01-01T00:00:00.000Z",
     ...overrides,
+  };
+  return {
+    ...game,
+    entityMetadata: createInitialEntityMetadata(game.bggId),
+    latestPlayCountCheck: null,
   };
 }
 

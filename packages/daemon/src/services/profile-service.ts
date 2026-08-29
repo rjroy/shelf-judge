@@ -1,180 +1,147 @@
 import type {
-  CollectionProfile,
   FitnessResult,
-  NarrationCacheState,
+  CollectionProfile,
+  CollectionProfileResult,
   ProfileData,
-  ProfileNarration,
-  TournamentGameStatsDisplay,
 } from "@shelf-judge/shared";
+import {
+  CURRENT_PROFILE_ALGORITHM_VERSION,
+  CURRENT_PROFILE_CONTRACT_VERSION,
+  CollectionProfileResultSchema,
+  CollectionProfileSnapshotSchema,
+} from "@shelf-judge/shared";
+import { ZodError } from "zod";
 import type { StorageService } from "./storage-service.js";
-import type { GameService } from "./game-service.js";
-import type { TournamentService } from "./tournament-service.js";
-import type { NarrationService } from "./narration-service.js";
-import { computeProfile } from "./profile-engine.js";
-import type { ProfileInput } from "./profile-engine.js";
-import { createLogger } from "./logger.js";
-
-const logger = createLogger("profile-service");
+import type { DisplayedFitnessService } from "./displayed-fitness-service.js";
+import { computeCollectionProfile } from "./collection-profile-engine.js";
+import {
+  profileSourceCoordinatorFor,
+  profileSourceIdentity,
+  sameProfileSourceIdentity,
+  type ProfileSources,
+} from "./profile-source-coordinator.js";
 
 export interface ProfileService {
-  getProfile(): Promise<CollectionProfile>;
-  generateNarration(): Promise<CollectionProfile>;
+  getProfile(): Promise<CollectionProfileResult>;
 }
 
 export interface ProfileServiceDeps {
   storageService: StorageService;
-  gameService: GameService;
-  tournamentService: TournamentService;
-  narrationService?: NarrationService;
+  displayedFitnessService: DisplayedFitnessService;
+  now?: () => string;
 }
 
-function getLatestTournamentTimestamp(
-  sessions: { updatedAt?: string; createdAt?: string }[],
-  comparisons: { createdAt: string }[],
-): string | null {
-  let latest: string | null = null;
-
-  for (const session of sessions) {
-    const ts = session.updatedAt ?? session.createdAt;
-    if (ts && (!latest || ts > latest)) {
-      latest = ts;
-    }
-  }
-
-  for (const comparison of comparisons) {
-    if (comparison.createdAt > (latest ?? "")) {
-      latest = comparison.createdAt;
-    }
-  }
-
-  return latest;
+function unavailable(
+  kind: "transport" | "validation" | "recomputation",
+  error: unknown,
+): CollectionProfileResult {
+  return CollectionProfileResultSchema.parse({
+    status: "unavailable",
+    error: {
+      kind,
+      message: error instanceof Error ? error.message : "Profile computation failed",
+    },
+    retryDestination: { operationId: "shelf.profile.get" },
+  });
 }
 
-export function deriveNarrationState(
-  narration: ProfileNarration | null | undefined,
-  narrationComputedAt: string | null | undefined,
-  profileComputedAt: string,
-): NarrationCacheState {
-  if (!narration) return "empty";
-  if (narrationComputedAt && narrationComputedAt >= profileComputedAt) return "fresh";
-  return "stale";
+function failureKind(error: unknown): "transport" | "validation" {
+  return error instanceof ZodError || error instanceof SyntaxError ? "validation" : "transport";
 }
 
 export function createProfileService(deps: ProfileServiceDeps): ProfileService {
-  const { storageService, gameService, tournamentService, narrationService } = deps;
-
-  function attachNarration(
-    profile: CollectionProfile,
-    stored: ProfileData | null,
-  ): CollectionProfile {
-    const narration = stored?.narration ?? null;
-    const narrationState = deriveNarrationState(
-      narration,
-      stored?.narrationComputedAt,
-      profile.computedAt,
-    );
-    return { ...profile, narration, narrationState };
-  }
+  const { storageService, displayedFitnessService } = deps;
+  const now = deps.now ?? (() => new Date().toISOString());
+  const coordinator = profileSourceCoordinatorFor(storageService);
 
   return {
-    async getProfile(): Promise<CollectionProfile> {
-      const [stored, collection, tournamentData] = await Promise.all([
-        storageService.loadProfile(),
-        storageService.loadCollection(),
-        storageService.loadTournament(),
-      ]);
-
-      // Determine if stored profile is stale
-      if (stored) {
-        const computedAt = stored.computedAt;
-        const collectionStale = collection.updatedAt > computedAt;
-
-        const allComparisons = tournamentData.sessions.flatMap((s) => s.comparisons ?? []);
-        const tournamentTimestamp = getLatestTournamentTimestamp(
-          tournamentData.sessions,
-          allComparisons,
-        );
-        const tournamentStale = tournamentTimestamp !== null && tournamentTimestamp > computedAt;
-
-        if (!collectionStale && !tournamentStale) {
-          return attachNarration(stored.profile, stored);
+    getProfile(): Promise<CollectionProfileResult> {
+      return coordinator.runExclusive(async () => {
+        let sources: ProfileSources;
+        let cache: ProfileData;
+        try {
+          // Collection load may migrate storage and invalidate dependent artifacts.
+          const collection = await storageService.loadCollection();
+          const [tournament, predictionSettings, redundancySettings] = await Promise.all([
+            storageService.loadTournament(),
+            storageService.loadPredictionSettings(),
+            storageService.loadRedundancySettings(),
+          ]);
+          sources = structuredClone({
+            collection,
+            tournament,
+            predictionSettings,
+            redundancySettings,
+          });
+        } catch (error) {
+          return unavailable(failureKind(error), error);
         }
-      }
 
-      // Recompute profile
-      const gamesWithScores = await gameService.listGames();
-      const games = gamesWithScores.map((gws) => gws.game);
-      const fitnessResults = new Map<string, FitnessResult>();
-      for (const gws of gamesWithScores) {
-        if (gws.score !== null) {
-          fitnessResults.set(gws.game.id, gws.score);
+        const identity = profileSourceIdentity(sources);
+        let stored: ProfileData | null;
+        try {
+          stored = await storageService.loadProfile();
+        } catch (error) {
+          return unavailable(failureKind(error), error);
         }
-      }
+        if (stored && sameProfileSourceIdentity(stored.sourceIdentity, identity)) {
+          const cachedSnapshot = CollectionProfileSnapshotSchema.safeParse({
+            source: sources.collection,
+            profile: stored.profile,
+          });
+          if (cachedSnapshot.success) return cachedSnapshot.data.profile;
+          try {
+            await storageService.discardProfile?.();
+          } catch (error) {
+            return unavailable(failureKind(error), error);
+          }
+        }
 
-      const allStatsRecord = await tournamentService.getAllGameStats();
-      let tournamentStats: Map<string, TournamentGameStatsDisplay> | null = null;
-      const statsEntries = Object.entries(allStatsRecord);
-      if (statsEntries.length > 0) {
-        tournamentStats = new Map(statsEntries);
-      }
+        try {
+          if (!displayedFitnessService.listGamesFromSnapshot) {
+            throw new Error("Snapshot-backed displayed fitness is not configured");
+          }
+          const games = await displayedFitnessService.listGamesFromSnapshot(sources, {
+            includePredicted: true,
+          });
+          const fitnessResults = new Map<string, FitnessResult>();
+          for (const entry of games) {
+            if (entry.score !== null && entry.hasScoringContribution) {
+              fitnessResults.set(entry.game.id, entry.score);
+            }
+          }
 
-      const input: ProfileInput = {
-        games,
-        axes: collection.axes,
-        fitnessResults,
-        tournamentStats,
-      };
-
-      const now = new Date().toISOString();
-      const computedProfile = computeProfile(input);
-      // computeProfile doesn't set narration fields; add them as empty
-      const profile: CollectionProfile = {
-        ...computedProfile,
-        narration: null,
-        narrationState: "empty",
-        computedAt: now,
-      };
-
-      const profileData: ProfileData = {
-        profile,
-        computedAt: now,
-        narration: stored?.narration ?? null,
-        narrationComputedAt: stored?.narrationComputedAt ?? null,
-      };
-
-      await storageService.saveProfile(profileData);
-
-      return attachNarration(profile, profileData);
-    },
-
-    async generateNarration(): Promise<CollectionProfile> {
-      if (!narrationService) {
-        logger.error("narration requested but narrationService is not configured");
-        throw new Error("Narration service not configured");
-      }
-
-      logger.log("generating narration — fetching current profile...");
-      const profile = await this.getProfile();
-      logger.log(
-        `profile ready: ${profile.gameCount} games, ${profile.ratedGameCount} rated — invoking narration service`,
-      );
-      const narration = await narrationService.generateNarration(profile);
-      logger.log("narration service returned successfully");
-      const now = new Date().toISOString();
-
-      // Load stored data so we can write narration back
-      const stored = await storageService.loadProfile();
-      if (!stored) {
-        logger.error("no stored profile to attach narration to");
-        throw new Error("No stored profile to attach narration to");
-      }
-
-      stored.narration = narration;
-      stored.narrationComputedAt = now;
-      await storageService.saveProfile(stored);
-      logger.log("narration saved to profile store");
-
-      return { ...profile, narration, narrationState: "fresh" };
+          const computedAt = now();
+          const profile = computeCollectionProfile({
+            collection: sources.collection,
+            fitnessResults,
+            computedAt,
+          });
+          const validated = CollectionProfileSnapshotSchema.parse({
+            source: sources.collection,
+            profile,
+          }).profile as CollectionProfile;
+          const finalIdentity = profileSourceIdentity(sources);
+          if (!sameProfileSourceIdentity(identity, finalIdentity)) {
+            throw new Error("Profile source snapshot changed during computation");
+          }
+          cache = {
+            contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
+            algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
+            sourceIdentity: identity,
+            profile: validated,
+            computedAt,
+          };
+        } catch (error) {
+          return unavailable(error instanceof ZodError ? "validation" : "recomputation", error);
+        }
+        try {
+          await storageService.saveProfile(cache);
+          return cache.profile;
+        } catch (error) {
+          return unavailable(failureKind(error), error);
+        }
+      });
     },
   };
 }

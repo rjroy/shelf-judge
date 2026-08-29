@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import type { Collection, GameWithPurchaseUtilization } from "@shelf-judge/shared";
+import {
+  createCompleteEntityMetadata,
+  type Collection,
+  type GameWithPurchaseUtilization,
+} from "@shelf-judge/shared";
 import type { BggGameResult } from "../../src/services/bgg-client.js";
 import {
   createMockBggClient,
@@ -32,6 +36,10 @@ function boot(collectionText: string, result?: BggGameResult): TestAppContext {
 
 function refreshedBggResult(): BggGameResult {
   return {
+    entityMetadata: createCompleteEntityMetadata(
+      { mechanic: [], designer: [], artist: [] },
+      thingObservedAt,
+    ),
     metadata: {
       bggId: 101,
       name: "Ordinary Purchase",
@@ -123,7 +131,7 @@ describe("persisted purchase utilization flow", () => {
     ).toHaveProperty("status", 200);
 
     const migrated = await initial.storageService.loadCollection();
-    expect(migrated.schemaVersion).toBe(3);
+    expect(migrated.schemaVersion).toBe(4);
     expect(migrated.games[0].playCountEvidence).toMatchObject({
       status: "valid",
       value: 1,

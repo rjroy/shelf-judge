@@ -5,7 +5,11 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test:browser:install": "playwright install chromium",
+    "test:browser:install:ci": "./node_modules/.bin/playwright install --with-deps chromium",
+    "typecheck:browser": "tsc --noEmit -p tsconfig.e2e.json",
+    "test:browser": "playwright test"
   },
   "dependencies": {
     "@shelf-judge/shared": "workspace:*",
@@ -14,6 +18,7 @@
     "react-dom": "^19.2.4"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.1",
     "@types/node": "^25.5.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

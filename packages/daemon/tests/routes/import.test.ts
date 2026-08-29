@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach } from "bun:test";
 import { createTestApp, createMockBggClient, type TestAppContext } from "../helpers/test-app.js";
 import type { BggGameResult } from "../../src/services/bgg-client.js";
 import type { BggCollectionItem } from "../../src/services/bgg-xml-parser.js";
+import { createCompleteEntityMetadata } from "@shelf-judge/shared";
 
 let ctx: TestAppContext;
 
@@ -60,6 +61,10 @@ describe("POST /api/import/bgg", () => {
 
     const gameResults = new Map<number, BggGameResult>();
     gameResults.set(1, {
+      entityMetadata: createCompleteEntityMetadata(
+        { mechanic: [], designer: [], artist: [] },
+        "2026-08-28T00:00:00.000Z",
+      ),
       metadata: {
         bggId: 1,
         name: "Game 1",
@@ -85,6 +90,10 @@ describe("POST /api/import/bgg", () => {
       },
     });
     gameResults.set(2, {
+      entityMetadata: createCompleteEntityMetadata(
+        { mechanic: [], designer: [], artist: [] },
+        "2026-08-28T00:00:00.000Z",
+      ),
       metadata: {
         bggId: 2,
         name: "Game 2",
@@ -113,7 +122,7 @@ describe("POST /api/import/bgg", () => {
     const mockClient = createMockBggClient({
       getUserCollection: () => Promise.resolve(collectionItems),
       getGames: async (_ids, onBatch) => {
-        await onBatch?.({ batchIds: _ids, results: gameResults });
+        await onBatch?.({ batchIds: _ids, results: gameResults, failures: new Map() });
         return gameResults;
       },
     });

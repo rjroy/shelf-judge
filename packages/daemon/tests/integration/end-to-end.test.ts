@@ -14,11 +14,15 @@ import type {
   Axis,
   Collection,
   DerivedFieldDiscoveryResponse,
-  ProfileData,
   FitnessResult,
   FitnessBreakdownEntry,
   AddGameResult,
   GameWithScore,
+} from "@shelf-judge/shared";
+import {
+  createCompleteEntityMetadata,
+  CURRENT_PROFILE_ALGORITHM_VERSION,
+  CURRENT_PROFILE_CONTRACT_VERSION,
 } from "@shelf-judge/shared";
 
 // Response shapes returned by the daemon API
@@ -59,12 +63,16 @@ interface ErrorResponse {
 
 interface PersistedMigrationFixture {
   collection: Record<string, unknown>;
-  profile: ProfileData;
+  profile: Record<string, unknown> & { contractVersion: number; algorithmVersion: number };
   wishlist: Record<string, unknown>[];
 }
 
 // Shared fixtures
 const wingspanBgg: BggGameResult = {
+  entityMetadata: createCompleteEntityMetadata(
+    { mechanic: [{ id: 2004, name: "Set Collection" }], designer: [], artist: [] },
+    "2026-08-28T00:00:00.000Z",
+  ),
   metadata: {
     bggId: 266192,
     name: "Wingspan",
@@ -91,6 +99,10 @@ const wingspanBgg: BggGameResult = {
 };
 
 const gloomhavenBgg: BggGameResult = {
+  entityMetadata: createCompleteEntityMetadata(
+    { mechanic: [{ id: 2023, name: "Cooperative Play" }], designer: [], artist: [] },
+    "2026-08-28T00:00:00.000Z",
+  ),
   metadata: {
     bggId: 174430,
     name: "Gloomhaven",
@@ -266,7 +278,7 @@ describe("Integration: End-to-end scenarios", () => {
           const filtered = new Map(
             ids.filter((id) => bggResults.has(id)).map((id) => [id, bggResults.get(id)!]),
           );
-          await onBatch?.({ batchIds: ids, results: filtered });
+          await onBatch?.({ batchIds: ids, results: filtered, failures: new Map() });
           return filtered;
         },
         getGame: (id) => {
@@ -622,13 +634,14 @@ describe("Integration: End-to-end scenarios", () => {
       ctx.fileOps.files.set(profilePath, JSON.stringify(fixture.profile));
       ctx.fileOps.files.set(wishlistPath, JSON.stringify(fixture.wishlist));
 
-      expect(await ctx.storageService.loadProfile()).toEqual(fixture.profile);
-      expect(fixture.profile.profile.narrationState).toBe("stale");
+      expect(fixture.profile).toMatchObject({ contractVersion: 4, algorithmVersion: 4 });
+      expect(await ctx.storageService.loadProfile()).toBeNull();
+      expect(ctx.fileOps.files.has(profilePath)).toBe(false);
 
       const migrated = await ctx.storageService.loadCollection();
       const persisted = JSON.parse(ctx.fileOps.files.get(collectionPath) ?? "null") as Collection;
       expect(persisted).toEqual(migrated);
-      expect(persisted.schemaVersion).toBe(3);
+      expect(persisted.schemaVersion).toBe(4);
       expect(persisted.axes).toHaveLength(5);
       expect(persisted.axes.find(({ id }) => id === "community-axis")).toMatchObject({
         id: "community-axis",
@@ -796,6 +809,21 @@ describe("Integration: End-to-end scenarios", () => {
           ({ method, args }) => method === "rename" && args[1] === collectionPath,
         ),
       ).toHaveLength(persistenceCountAfterRepair);
+
+      const profileResponse = await jsonRequest(ctx.app, "GET", "/api/profile");
+      expect(profileResponse.status).toBe(200);
+      const currentProfile = await ctx.storageService.loadProfile();
+      expect(currentProfile).not.toBeNull();
+      expect(currentProfile).toMatchObject({
+        contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
+        algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
+      });
+      const persistedCurrentProfile = ctx.fileOps.files.get(profilePath);
+      expect(persistedCurrentProfile).toBeDefined();
+
+      const idempotentProfileReload = await ctx.storageService.loadProfile();
+      expect(idempotentProfileReload).toEqual(currentProfile);
+      expect(ctx.fileOps.files.get(profilePath)).toBe(persistedCurrentProfile);
     });
   });
 });

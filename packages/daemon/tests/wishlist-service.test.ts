@@ -6,6 +6,7 @@ import type {
   Game,
   FitnessResult,
 } from "@shelf-judge/shared";
+import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import type { StorageService } from "../src/services/storage-service";
 import type { PredictionService, PredictedGameResult } from "../src/services/prediction-service";
 import type { GameService } from "../src/services/game-service";
@@ -17,6 +18,7 @@ function makeGame(bggId: number, name: string): Game {
   return {
     id: `preview-${bggId}`,
     bggId,
+    entityMetadata: createInitialEntityMetadata(bggId),
     name,
     yearPublished: 2020,
     minPlayers: 2,
@@ -25,6 +27,7 @@ function makeGame(bggId: number, name: string): Game {
     playingTime: 60,
     imageUrl: `https://example.com/${bggId}.jpg`,
     numPlays: null,
+    latestPlayCountCheck: null,
     acquisition: { state: "unknown" },
     playCountEvidence: { status: "missing", source: "manual", observedAt: null },
     durationEvidence: { status: "missing", source: "manual", observedAt: null },
@@ -120,11 +123,14 @@ function createMockStorage(
 ): StorageService {
   let stored = structuredClone(wishlist);
   const coll: Collection = {
-    schemaVersion: 3,
+    schemaVersion: 4,
+    revision: 0,
     id: "coll-1",
     name: "Test",
     axes: [],
     games: [],
+    intentions: [],
+    commandReceipts: [],
     entertainmentBenchmark: null,
     createdAt: NOW,
     updatedAt: NOW,

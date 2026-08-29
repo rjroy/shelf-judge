@@ -294,7 +294,7 @@ describe("migrateCollection", () => {
     const result = migrateCollection(raw, dependencies);
 
     expect(result).toMatchObject({ migrated: true, sourceVersion: 1 });
-    expect(result.data.schemaVersion).toBe(3);
+    expect(result.data.schemaVersion).toBe(4);
     expect(result.data.axes).toEqual(expectedAxes);
     expect(result.data.games.map(({ bestPlayers }) => bestPlayers)).toEqual([3, 4, null]);
     expect(result.data.games[0]?.bestPlayersInvalidEvidence).toBeNull();
@@ -553,7 +553,7 @@ describe("migrateCollection", () => {
     expect(game.bestPlayersInvalidEvidence).toBeNull();
   });
 
-  test("produces equivalent v3 data from direct and chained historical versions", () => {
+  test("produces equivalent v4 data from direct and chained historical versions", () => {
     const v0 = historicalCollection();
     const v1Step = COLLECTION_MIGRATION_STEPS[0]?.migrate(v0, dependencies).data;
     const v2Step = COLLECTION_MIGRATION_STEPS[1]?.migrate(v1Step, dependencies).data;
@@ -562,6 +562,14 @@ describe("migrateCollection", () => {
     const fromZero = migrateCollection(v0, dependencies).data;
     expect(migrateCollection(v1Step, dependencies).data).toEqual(fromZero);
     expect(migrateCollection(v2Step, dependencies).data).toEqual(fromZero);
+  });
+
+  test("repeats default v0 migration byte-for-byte without injected IDs or time", () => {
+    const raw = historicalCollection();
+
+    expect(JSON.stringify(migrateCollection(raw).data)).toBe(
+      JSON.stringify(migrateCollection(raw).data),
+    );
   });
 
   test("migrates the pinned historical game-shape fixture", async () => {
@@ -588,13 +596,14 @@ describe("migrateCollection", () => {
     ]);
   });
 
-  test("chains v0 through v3, inserts Tournament once, and is byte-stable at v3", () => {
+  test("chains v0 through v4, inserts Tournament once, and is byte-stable at v4", () => {
     expect(
       COLLECTION_MIGRATION_STEPS.map(({ fromVersion, toVersion }) => ({ fromVersion, toVersion })),
     ).toEqual([
       { fromVersion: 0, toVersion: 1 },
       { fromVersion: 1, toVersion: 2 },
       { fromVersion: 2, toVersion: 3 },
+      { fromVersion: 3, toVersion: 4 },
     ]);
     const first = migrateCollection(historicalCollection(), dependencies);
     expect(first.data.axes.filter((axis) => axis.source === "tournament")).toHaveLength(1);
@@ -608,8 +617,8 @@ describe("migrateCollection", () => {
     const current = migrateCollection(historicalCollection(), dependencies).data;
     expect(CollectionSchema.parse(migrateCollection(current, dependencies).data)).toEqual(current);
     expect(() => migrateCollection({ ...current, unexpected: true }, dependencies)).toThrow();
-    expect(() => migrateCollection({ ...current, schemaVersion: 4 }, dependencies)).toThrow(
-      "Unsupported collection schema version 4; current version is 3",
+    expect(() => migrateCollection({ ...current, schemaVersion: 5 }, dependencies)).toThrow(
+      "Unsupported collection schema version 5; current version is 4",
     );
     expect(() =>
       migrateCollection(
@@ -620,5 +629,34 @@ describe("migrateCollection", () => {
         dependencies,
       ),
     ).toThrow();
+  });
+
+  test("migrates v3 source records without fabricating readiness, checks, or intentions", async () => {
+    const fixture: unknown = await Bun.file(
+      new URL("../fixtures/useful-profile-schema-v3.json", import.meta.url),
+    ).json();
+
+    const result = migrateCollection(fixture, dependencies);
+
+    expect(result).toMatchObject({ migrated: true, sourceVersion: 3 });
+    expect(result.data).toMatchObject({
+      schemaVersion: 4,
+      revision: 0,
+      intentions: [],
+      commandReceipts: [],
+    });
+    expect(result.data.games[0]?.entityMetadata.mechanic).toEqual({
+      state: "refresh-needed",
+      entities: [],
+      observedAt: null,
+      refreshFailure: null,
+      correctionDestination: { operationId: "shelf.game.bgg.refresh" },
+    });
+    expect(result.data.games[0]?.entityMetadata.designer.state).toBe("refresh-needed");
+    expect(result.data.games[0]?.entityMetadata.artist.state).toBe("refresh-needed");
+    expect(result.data.games[0]?.bggData?.mechanics).toEqual([{ id: 7, name: "Legacy Mechanic" }]);
+    expect(result.data.games[0]?.latestPlayCountCheck).toBeNull();
+    expect(result.data.games[1]?.entityMetadata.mechanic.state).toBe("unrefreshable");
+    expect(migrateCollection(result.data, dependencies).data).toEqual(result.data);
   });
 });

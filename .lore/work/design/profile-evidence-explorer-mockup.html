@@ -1,0 +1,1396 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Profile Evidence Explorer Mockup</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg-base: #f4f1ec;
+        --bg-surface: #fefcf9;
+        --bg-elevated: #ffffff;
+        --bg-subtle: #f9f7f4;
+        --border: #ddd8d0;
+        --border-strong: #c4bfb8;
+        --row-hover: #f0ede8;
+        --table-header: #ede9e3;
+        --text-primary: #1a1714;
+        --text-secondary: #6b6560;
+        --text-muted: #706a62;
+        --score: #b86c1a;
+        --score-text: #8c4d10;
+        --action: #1c3d5e;
+        --action-hover: #2a5580;
+        --action-subtle: #eef2f5;
+        --warning-subtle: #fff3e0;
+        --warning-border: #e8d060;
+        --warning-text: #7a5f10;
+        --nav-bg: #1a1714;
+        --nav-text: #e8e4dc;
+      }
+
+      [data-theme="dark"] {
+        color-scheme: dark;
+        --bg-base: #1a1916;
+        --bg-surface: #242320;
+        --bg-elevated: #2e2d29;
+        --bg-subtle: #201f1c;
+        --border: #3d3a35;
+        --border-strong: #524e48;
+        --row-hover: #2a2825;
+        --table-header: #282724;
+        --text-primary: #f1eee8;
+        --text-secondary: #c4beb5;
+        --text-muted: #aaa39a;
+        --score: #d58b3a;
+        --score-text: #e09a4d;
+        --action: #8bb5dc;
+        --action-hover: #a7cae9;
+        --action-subtle: #263745;
+        --warning-subtle: #3a301b;
+        --warning-border: #8d7730;
+        --warning-text: #ead27b;
+        --nav-bg: #11100e;
+        --nav-text: #e8e4dc;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        font-family:
+          Inter,
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        color: var(--text-primary);
+        background: var(--bg-base);
+      }
+
+      body {
+        min-width: 320px;
+        margin: 0;
+      }
+
+      button,
+      input,
+      select {
+        min-height: 44px;
+        font: inherit;
+      }
+
+      button,
+      select {
+        cursor: pointer;
+      }
+
+      :focus-visible {
+        outline: 3px solid var(--action);
+        outline-offset: 3px;
+      }
+
+      .shell {
+        display: grid;
+        grid-template-columns: 208px minmax(0, 1fr);
+        min-height: 100dvh;
+      }
+
+      .sidebar {
+        position: sticky;
+        top: 0;
+        display: flex;
+        flex-direction: column;
+        height: 100dvh;
+        padding: 22px 14px;
+        color: var(--nav-text);
+        background: var(--nav-bg);
+      }
+
+      .brand {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin: 0 8px 34px;
+        font-size: 15px;
+        font-weight: 750;
+      }
+
+      .brand-mark {
+        display: flex;
+        gap: 3px;
+        align-items: end;
+        height: 18px;
+      }
+
+      .brand-mark span {
+        display: block;
+        width: 4px;
+        background: var(--score);
+      }
+
+      .brand-mark span:nth-child(1) {
+        height: 10px;
+      }
+
+      .brand-mark span:nth-child(2) {
+        height: 17px;
+        background: #e8d4b9;
+      }
+
+      .brand-mark span:nth-child(3) {
+        height: 13px;
+      }
+
+      .nav-label {
+        margin: 24px 8px 8px;
+        color: #918b83;
+        font-size: 10px;
+        font-weight: 750;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .nav-item {
+        display: flex;
+        gap: 9px;
+        min-height: 42px;
+        padding: 11px 12px;
+        border-radius: 5px;
+        color: #aaa49d;
+        font-size: 13px;
+        text-decoration: none;
+      }
+
+      .nav-icon {
+        width: 16px;
+        color: #817b74;
+        text-align: center;
+      }
+
+      .readiness-widget {
+        margin-top: auto;
+        padding: 12px;
+        border: 1px solid #285c52;
+        border-radius: 7px;
+        background: #132a26;
+      }
+
+      .readiness-label {
+        color: #7eb8a7;
+        font-size: 9px;
+        font-weight: 750;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .readiness-stage {
+        margin-top: 6px;
+        color: var(--nav-text);
+        font-size: 12px;
+      }
+
+      .readiness-track {
+        height: 4px;
+        margin: 9px 0 6px;
+        border-radius: 4px;
+        background: #31413e;
+        overflow: hidden;
+      }
+
+      .readiness-track::after {
+        display: block;
+        width: 74%;
+        height: 100%;
+        border-radius: inherit;
+        background: #4ab5a1;
+        content: "";
+      }
+
+      .readiness-count {
+        color: #9faaa5;
+        font-size: 10px;
+      }
+
+      .sidebar-footer {
+        display: flex;
+        margin-top: 12px;
+        padding: 10px 5px 0;
+        border-top: 1px solid #302e2a;
+        justify-content: space-between;
+        color: #77716a;
+        font-size: 10px;
+      }
+
+      .nav-item.active {
+        color: white;
+        background: #2a251f;
+        box-shadow: inset 3px 0 var(--score);
+      }
+
+      .app {
+        min-width: 0;
+      }
+
+      .topbar {
+        display: flex;
+        min-height: 58px;
+        padding: 0 28px;
+        border-bottom: 1px solid var(--border);
+        align-items: center;
+        justify-content: space-between;
+        background: var(--bg-surface);
+      }
+
+      .topbar h1 {
+        margin: 0;
+        font-size: 16px;
+      }
+
+      .mobile-brand,
+      .hamburger {
+        display: none;
+      }
+
+      .topbar-actions {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .theme-toggle {
+        min-height: 36px;
+        padding: 0 10px;
+        border: 1px solid var(--border-strong);
+        border-radius: 5px;
+        color: var(--text-secondary);
+        background: var(--bg-elevated);
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .mockup-label {
+        color: var(--text-muted);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      main {
+        width: min(1080px, calc(100% - 48px));
+        margin: 0 auto;
+        padding: 24px 0 48px;
+      }
+
+      .breadcrumb {
+        display: inline-flex;
+        min-height: 44px;
+        align-items: center;
+        color: var(--action);
+        font-size: 13px;
+        font-weight: 650;
+        text-decoration: none;
+      }
+
+      .page-heading {
+        margin: 8px 0 20px;
+      }
+
+      .page-heading h2 {
+        margin: 0 0 6px;
+        font-size: clamp(25px, 3vw, 34px);
+        letter-spacing: -0.025em;
+      }
+
+      .page-heading p {
+        max-width: 720px;
+        margin: 0;
+        color: var(--text-secondary);
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      .class-tabs {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        margin-bottom: 16px;
+        border: 1px solid var(--border-strong);
+        border-radius: 8px;
+        overflow: hidden;
+        background: var(--bg-surface);
+      }
+
+      .class-tab {
+        min-height: 56px;
+        padding: 8px 16px;
+        border: 0;
+        border-right: 1px solid var(--border);
+        color: var(--text-secondary);
+        background: transparent;
+        text-align: left;
+      }
+
+      .class-tab:last-child {
+        border-right: 0;
+      }
+
+      .class-tab[aria-pressed="true"] {
+        color: var(--text-primary);
+        background: var(--action-subtle);
+        box-shadow: inset 0 -3px var(--action);
+      }
+
+      .class-tab strong,
+      .class-tab span {
+        display: block;
+      }
+
+      .class-tab strong {
+        font-size: 14px;
+      }
+
+      .class-tab span {
+        margin-top: 3px;
+        color: var(--text-muted);
+        font-size: 11px;
+      }
+
+      .class-summary {
+        display: flex;
+        gap: 18px;
+        min-height: 66px;
+        margin-bottom: 16px;
+        padding: 12px 16px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        align-items: center;
+        justify-content: space-between;
+        background: var(--bg-surface);
+      }
+
+      .summary-main {
+        margin: 0 0 3px;
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      .summary-meta {
+        margin: 0;
+        color: var(--text-secondary);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .audit-button,
+      .secondary-button {
+        padding: 0 14px;
+        border: 1px solid var(--action);
+        border-radius: 5px;
+        color: var(--action);
+        background: var(--bg-elevated);
+        font-size: 13px;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+
+      .toolbar {
+        display: grid;
+        grid-template-columns: minmax(240px, 1fr) auto auto;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+
+      .search-wrap {
+        position: relative;
+      }
+
+      .search-wrap::before {
+        position: absolute;
+        top: 13px;
+        left: 14px;
+        color: var(--text-muted);
+        content: "⌕";
+        font-size: 18px;
+      }
+
+      .search-wrap input,
+      .toolbar select {
+        width: 100%;
+        border: 1px solid var(--border-strong);
+        border-radius: 5px;
+        color: var(--text-primary);
+        background: var(--bg-elevated);
+      }
+
+      .search-wrap input {
+        padding: 0 14px 0 40px;
+      }
+
+      .toolbar select {
+        min-width: 148px;
+        padding: 0 34px 0 12px;
+      }
+
+      .result-meta {
+        display: flex;
+        min-height: 34px;
+        align-items: center;
+        justify-content: space-between;
+        color: var(--text-secondary);
+        font-size: 12px;
+      }
+
+      .workspace {
+        display: grid;
+        grid-template-columns: clamp(340px, 36%, 440px) minmax(0, 1fr);
+        min-height: 540px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+        background: var(--bg-surface);
+      }
+
+      .index {
+        border-right: 1px solid var(--border-strong);
+        background: var(--bg-surface);
+      }
+
+      .index-head {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 48px 52px;
+        gap: 8px;
+        min-height: 42px;
+        padding: 0 12px;
+        align-items: center;
+        color: var(--text-muted);
+        background: var(--table-header);
+        font-size: 10px;
+        font-weight: 750;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .index-head span:not(:first-child) {
+        text-align: right;
+      }
+
+      .entity-list {
+        max-height: min(610px, calc(100dvh - 510px));
+        margin: 0;
+        padding: 0;
+        overflow-y: auto;
+        list-style: none;
+      }
+
+      .entity-button {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 48px 52px;
+        gap: 8px;
+        width: 100%;
+        min-height: 58px;
+        padding: 8px 12px;
+        border: 0;
+        border-bottom: 1px solid var(--border);
+        align-items: center;
+        color: var(--text-primary);
+        background: transparent;
+        text-align: left;
+      }
+
+      .entity-button:hover {
+        background: var(--row-hover);
+      }
+
+      .entity-button[aria-current="true"] {
+        background: var(--action-subtle);
+        box-shadow: inset 3px 0 var(--action);
+      }
+
+      .entity-title,
+      .entity-subtitle {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .entity-title {
+        font-size: 15px;
+        font-weight: 650;
+      }
+
+      .entity-subtitle {
+        margin-top: 3px;
+        color: var(--text-secondary);
+        font-size: 11px;
+      }
+
+      .number {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .mean {
+        color: var(--score-text);
+        font-size: 15px;
+        font-weight: 750;
+      }
+
+      .delta {
+        color: var(--text-secondary);
+        font-size: 13px;
+      }
+
+      .detail {
+        min-width: 0;
+        padding: 26px 28px 36px;
+      }
+
+      .mobile-return {
+        display: none;
+      }
+
+      .detail-kicker {
+        margin: 0 0 8px;
+        color: var(--text-muted);
+        font-size: 11px;
+        font-weight: 750;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .detail h3 {
+        margin: 0;
+        font-size: 26px;
+        letter-spacing: -0.02em;
+      }
+
+      .detail-support {
+        margin: 6px 0 0;
+        color: var(--text-secondary);
+        font-size: 13px;
+      }
+
+      .facts {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 1px;
+        margin: 24px 0 30px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        overflow: hidden;
+        background: var(--border);
+      }
+
+      .fact {
+        min-width: 0;
+        padding: 14px;
+        background: var(--bg-subtle);
+      }
+
+      .fact strong,
+      .fact span {
+        display: block;
+      }
+
+      .fact strong {
+        color: var(--score);
+        font-size: 20px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .fact span {
+        margin-top: 4px;
+        color: var(--text-muted);
+        font-size: 10px;
+        font-weight: 750;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+
+      .section-heading {
+        display: flex;
+        min-height: 34px;
+        margin-bottom: 4px;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .section-heading h4 {
+        margin: 0;
+        font-size: 12px;
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
+      }
+
+      .section-heading span {
+        color: var(--text-muted);
+        font-size: 11px;
+      }
+
+      .game-list {
+        margin: 0;
+        padding: 0;
+        border-top: 1px solid var(--border-strong);
+        list-style: none;
+      }
+
+      .game-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 16px;
+        min-height: 42px;
+        padding: 9px 4px;
+        border-bottom: 1px solid var(--border);
+        align-items: center;
+      }
+
+      .game-row a {
+        color: var(--action);
+        font-size: 13px;
+        font-weight: 600;
+        text-decoration: none;
+      }
+
+      .game-score {
+        color: var(--score-text);
+        font-size: 13px;
+        font-weight: 750;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .limited-note {
+        display: none;
+        margin: 20px 0;
+        padding: 11px 12px;
+        border: 1px solid var(--warning-border);
+        border-radius: 5px;
+        color: var(--warning-text);
+        background: var(--warning-subtle);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .detail[data-support="limited"] .limited-note {
+        display: block;
+      }
+
+      .mockup-note {
+        margin: 18px 0 0;
+        color: var(--text-muted);
+        font-size: 11px;
+        line-height: 1.5;
+      }
+
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
+      @media (max-height: 720px) and (min-width: 901px) {
+        .entity-list {
+          max-height: none;
+          overflow-y: visible;
+        }
+      }
+
+      @media (max-width: 900px) {
+        .shell {
+          display: block;
+        }
+
+        .sidebar {
+          display: none;
+        }
+
+        .topbar {
+          min-height: 54px;
+          padding: 0 16px;
+        }
+
+        .desktop-title {
+          display: none;
+        }
+
+        .mobile-brand {
+          display: inline;
+          font-size: 14px;
+        }
+
+        .hamburger {
+          display: inline-grid;
+          width: 44px;
+          min-height: 44px;
+          margin-left: -10px;
+          padding: 0;
+          border: 0;
+          place-items: center;
+          color: var(--text-primary);
+          background: transparent;
+          font-size: 21px;
+        }
+
+        .topbar h1 {
+          display: flex;
+          align-items: center;
+        }
+
+        .mockup-label {
+          display: none;
+        }
+
+        .theme-toggle {
+          width: 44px;
+          min-height: 44px;
+          padding: 0;
+          font-size: 0;
+        }
+
+        .theme-toggle::after {
+          content: "◐";
+          font-size: 18px;
+        }
+
+        main {
+          width: calc(100% - 28px);
+          padding-top: 12px;
+        }
+
+        .page-heading {
+          margin-top: 0;
+        }
+
+        .page-heading h2 {
+          font-size: 25px;
+        }
+
+        .class-tabs {
+          grid-template-columns: 1fr;
+        }
+
+        .class-tab,
+        .class-tab:last-child {
+          min-height: 48px;
+          border-right: 0;
+          border-bottom: 1px solid var(--border);
+        }
+
+        .class-tab:last-child {
+          border-bottom: 0;
+        }
+
+        .class-tab[aria-pressed="true"] {
+          box-shadow: inset 3px 0 var(--action);
+        }
+
+        .class-tab strong,
+        .class-tab span {
+          display: inline;
+        }
+
+        .class-tab span {
+          margin-left: 8px;
+        }
+
+        .class-summary {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .audit-button {
+          width: 100%;
+        }
+
+        .toolbar {
+          grid-template-columns: 1fr 1fr;
+        }
+
+        .search-wrap {
+          grid-column: 1 / -1;
+        }
+
+        .toolbar select {
+          min-width: 0;
+        }
+
+        .workspace {
+          display: block;
+          min-height: 0;
+        }
+
+        .index {
+          border-right: 0;
+        }
+
+        .entity-list {
+          max-height: none;
+          overflow: visible;
+        }
+
+        .detail {
+          display: none;
+          padding: 20px 16px 28px;
+        }
+
+        body.detail-mode .toolbar,
+        body.detail-mode .result-meta,
+        body.detail-mode .index {
+          display: none;
+        }
+
+        body.detail-mode .page-heading {
+          margin-bottom: 10px;
+        }
+
+        body.detail-mode .page-heading p {
+          display: none;
+        }
+
+        body.detail-mode .class-tabs {
+          grid-template-columns: repeat(3, 1fr);
+          margin-bottom: 10px;
+        }
+
+        body.detail-mode .class-tab,
+        body.detail-mode .class-tab:last-child {
+          min-height: 46px;
+          padding: 6px 8px;
+          border-right: 1px solid var(--border);
+          border-bottom: 0;
+          text-align: center;
+        }
+
+        body.detail-mode .class-tab:last-child {
+          border-right: 0;
+        }
+
+        body.detail-mode .class-tab span {
+          display: none;
+        }
+
+        body.detail-mode .class-tab[aria-pressed="true"] {
+          box-shadow: inset 0 -3px var(--action);
+        }
+
+        body.detail-mode .class-summary {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          gap: 8px;
+          min-height: 0;
+          margin-bottom: 10px;
+          padding: 10px 12px;
+          align-items: center;
+        }
+
+        body.detail-mode .summary-main {
+          font-size: 12px;
+        }
+
+        body.detail-mode .summary-meta {
+          font-size: 10px;
+        }
+
+        body.detail-mode .audit-button {
+          width: auto;
+          padding: 0 10px;
+          font-size: 0;
+        }
+
+        body.detail-mode .audit-button::after {
+          content: "Audit";
+          font-size: 12px;
+        }
+
+        body.detail-mode .detail {
+          display: block;
+        }
+
+        body.detail-mode .workspace {
+          border: 1px solid var(--border);
+        }
+
+        .mobile-return {
+          display: inline-flex;
+          min-height: 44px;
+          margin: -8px 0 12px;
+          align-items: center;
+          color: var(--action);
+          background: transparent;
+          border: 0;
+          font-size: 13px;
+          font-weight: 700;
+        }
+
+        .detail h3 {
+          font-size: 22px;
+        }
+
+        .facts {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .fact strong {
+          font-size: 18px;
+        }
+
+        .entity-button {
+          min-height: 64px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar" aria-label="Primary navigation">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+          Shelf Judge
+        </div>
+        <p class="nav-label">Overview</p>
+        <a class="nav-item active" href="#"><span class="nav-icon">◉</span>Profile</a>
+        <p class="nav-label">Library</p>
+        <a class="nav-item" href="#"><span class="nav-icon">▤</span>Collection</a>
+        <a class="nav-item" href="#"><span class="nav-icon">▣</span>Wishlist</a>
+        <a class="nav-item" href="#"><span class="nav-icon">⊕</span>Add Games</a>
+        <p class="nav-label">Ranking</p>
+        <a class="nav-item" href="#"><span class="nav-icon">▼</span>Tournament</a>
+        <p class="nav-label">Settings</p>
+        <a class="nav-item" href="#"><span class="nav-icon">⚙</span>General</a>
+        <a class="nav-item" href="#"><span class="nav-icon">☰</span>Axes</a>
+        <a class="nav-item" href="#"><span class="nav-icon">◑</span>Redundancy</a>
+        <a class="nav-item" href="#"><span class="nav-icon">☷</span>Shelves</a>
+        <a class="nav-item" href="#"><span class="nav-icon">▦</span>Capacity</a>
+        <a class="nav-item" href="#"><span class="nav-icon">↔</span>Import / BGG</a>
+        <div class="readiness-widget">
+          <div class="readiness-label">Predictions</div>
+          <div class="readiness-stage">Stage 3 · Strong</div>
+          <div class="readiness-track"></div>
+          <div class="readiness-count">168 rated</div>
+        </div>
+        <div class="sidebar-footer"><span>Shelf Judge v0.1</span><span>System</span></div>
+      </aside>
+
+      <div class="app">
+        <header class="topbar">
+          <h1>
+            <button class="hamburger" type="button" aria-label="Open navigation">☰</button>
+            <span class="desktop-title">Collection Profile</span>
+            <span class="mobile-brand">Shelf Judge</span>
+          </h1>
+          <div class="topbar-actions">
+            <span class="mockup-label">Interactive design mockup</span>
+            <button id="theme-toggle" class="theme-toggle" type="button">Dark theme</button>
+          </div>
+        </header>
+
+        <main>
+          <a class="breadcrumb" href="#">← Back to profile</a>
+          <div class="page-heading">
+            <h2>Collection Entity Evidence</h2>
+            <p>
+              Explore the games behind the mechanics, designers, and artists associated with your
+              collection’s current fitness.
+            </p>
+          </div>
+
+          <div class="class-tabs" role="group" aria-label="Entity class">
+            <button
+              class="class-tab"
+              type="button"
+              aria-pressed="true"
+              data-class="Mechanics"
+              data-count="168"
+            >
+              <strong>Mechanics</strong><span>168 entities</span>
+            </button>
+            <button
+              class="class-tab"
+              type="button"
+              aria-pressed="false"
+              data-class="Designers"
+              data-count="94"
+            >
+              <strong>Designers</strong><span>94 entities</span>
+            </button>
+            <button
+              class="class-tab"
+              type="button"
+              aria-pressed="false"
+              data-class="Artists"
+              data-count="61"
+            >
+              <strong>Artists</strong><span>61 entities</span>
+            </button>
+          </div>
+
+          <section class="class-summary" aria-label="Mechanics evidence status">
+            <div>
+              <p class="summary-main">
+                <span id="summary-class">Mechanics</span>: supported result · complete for 160 of
+                168 games
+              </p>
+              <p class="summary-meta">
+                5 refresh needed · 3 unrefreshable · 8 exclusions · 2 refresh warnings
+              </p>
+            </div>
+            <button class="audit-button" type="button">Review class evidence</button>
+          </section>
+
+          <div class="toolbar" aria-label="Evidence controls">
+            <label class="search-wrap">
+              <span class="sr-only">Find an entity or supporting game</span>
+              <input id="search" type="search" placeholder="Find an entity or supporting game" />
+            </label>
+            <label>
+              <span class="sr-only">Evidence support</span>
+              <select id="support-filter">
+                <option value="all">All evidence</option>
+                <option value="supported">Supported</option>
+                <option value="limited">Limited</option>
+              </select>
+            </label>
+            <label>
+              <span class="sr-only">Order entities</span>
+              <select id="order">
+                <option value="rating">Rating</option>
+                <option value="support">Support</option>
+                <option value="name">Name</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="result-meta">
+            <span id="result-count">168 results</span>
+            <span>Eligible collection mean 7.5</span>
+          </div>
+
+          <div class="workspace">
+            <section class="index" aria-label="Mechanics results">
+              <div class="index-head" aria-hidden="true">
+                <span>Entity</span><span>Mean</span><span>vs coll.</span>
+              </div>
+              <ul id="entity-list" class="entity-list"></ul>
+            </section>
+
+            <article
+              id="detail"
+              class="detail"
+              data-support="supported"
+              aria-labelledby="detail-name"
+            >
+              <button id="mobile-return" class="mobile-return" type="button">
+                ← Back to Mechanics results
+              </button>
+              <p class="detail-kicker" id="detail-kicker">Mechanic evidence</p>
+              <h3 id="detail-name" tabindex="-1">Deck Building</h3>
+              <p class="detail-support" id="detail-support">
+                Supported association · 24 eligible games
+              </p>
+
+              <p class="limited-note">
+                One or two games are not enough to establish a recurring collection pattern.
+              </p>
+
+              <div class="facts" aria-label="Evidence summary">
+                <div class="fact"><strong id="fact-mean">8.7</strong><span>Mean fitness</span></div>
+                <div class="fact">
+                  <strong id="fact-delta">+1.2</strong><span>vs collection</span>
+                </div>
+                <div class="fact">
+                  <strong id="fact-spread">1.3</strong><span>Population spread</span>
+                </div>
+                <div class="fact"><strong id="fact-range">6.0–9.7</strong><span>Range</span></div>
+              </div>
+
+              <div class="section-heading">
+                <h4>Supporting games</h4>
+                <span id="game-count">24 eligible games</span>
+              </div>
+              <ul id="game-list" class="game-list"></ul>
+              <p class="mockup-note">
+                Mock data is shaped to show production density. Evidence calculations and ordering
+                remain daemon-authoritative in the implementation.
+              </p>
+            </article>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <script>
+      const mechanicNames = [
+        "Deck Building",
+        "Hand Management",
+        "Worker Placement",
+        "Card Drafting",
+        "Variable Player Powers",
+        "Action Selection",
+        "Set Collection",
+        "Solo / Solitaire Game",
+        "Cooperative Game",
+        "Area Majority / Influence",
+        "Tile Placement",
+        "Network and Route Building",
+        "Push Your Luck",
+        "Dice Rolling",
+        "Engine Building",
+        "Campaign / Battle Card Driven",
+        "Simultaneous Action Selection",
+        "Pattern Building",
+        "Deck Construction",
+        "Contracts",
+        "Resource Management",
+        "Tech Trees / Tech Tracks",
+        "End Game Bonuses",
+        "Open Drafting",
+        "Turn Order: Progressive",
+        "Multi-Use Cards",
+        "Income",
+        "Market",
+        "Modular Board",
+        "Scenario / Mission / Campaign",
+        "Action Points",
+        "Hidden Roles",
+      ];
+
+      const designerNames = [
+        "Uwe Rosenberg",
+        "Vlaada Chvátil",
+        "Reiner Knizia",
+        "Simone Luciani",
+        "Alexander Pfister",
+        "Elizabeth Hargrave",
+        "Cole Wehrle",
+        "Vital Lacerda",
+        "Antoine Bauza",
+        "Bruno Cathala",
+      ];
+
+      const artistNames = [
+        "Ian O'Toole",
+        "Vincent Dutrait",
+        "Kwanchai Moriya",
+        "Beth Sobel",
+        "Kyle Ferrin",
+        "Andrew Bosley",
+        "The Mico",
+        "Weberson Santiago",
+      ];
+
+      const games = [
+        ["Dune: Imperium", 9.7],
+        ["Lost Ruins of Arnak", 9.1],
+        ["The Quest for El Dorado", 8.9],
+        ["Dominion", 8.8],
+        ["Clank!: Catacombs", 8.7],
+        ["Aeon's End", 8.5],
+        ["Mage Knight Board Game", 8.4],
+        ["Great Western Trail", 8.2],
+        ["Concordia", 8.1],
+        ["Ark Nova", 8.0],
+      ];
+
+      let activeClass = "Mechanics";
+      let selectedId = 0;
+      let entities = [];
+
+      function namesForClass() {
+        return activeClass === "Mechanics"
+          ? mechanicNames
+          : activeClass === "Designers"
+            ? designerNames
+            : artistNames;
+      }
+
+      function countForClass() {
+        return activeClass === "Mechanics" ? 168 : activeClass === "Designers" ? 94 : 61;
+      }
+
+      function buildEntities() {
+        const names = namesForClass();
+        const count = countForClass();
+        entities = Array.from({ length: count }, (_, index) => {
+          const cycle = Math.floor(index / names.length);
+          const baseName = names[index % names.length];
+          const mean = Math.max(4.8, 8.7 - index * 0.022);
+          const supportCount =
+            index < Math.round(count * 0.72) ? 3 + ((index * 7) % 39) : 1 + (index % 2);
+          const supportingGames = [];
+          const hasDuneEvidence = [0, 2, 5, 12, 34, 71].includes(index);
+          if (hasDuneEvidence) supportingGames.push(games[0]);
+          const gamePool = games.slice(1);
+          const displayedGameCount = Math.min(supportCount, hasDuneEvidence ? 10 : 9);
+          for (let gameIndex = 0; supportingGames.length < displayedGameCount; gameIndex += 1) {
+            const game = gamePool[(index * 3 + gameIndex) % gamePool.length];
+            if (!supportingGames.includes(game)) supportingGames.push(game);
+          }
+          return {
+            id: index,
+            name: cycle === 0 ? baseName : `${baseName} ${cycle + 1}`,
+            mean,
+            delta: mean - 7.5,
+            count: supportCount,
+            support: supportCount >= 3 ? "supported" : "limited",
+            games: supportingGames,
+          };
+        });
+        selectedId = 0;
+      }
+
+      function filteredEntities() {
+        const query = document.querySelector("#search").value.trim().toLocaleLowerCase();
+        const support = document.querySelector("#support-filter").value;
+        const order = document.querySelector("#order").value;
+        const filtered = entities.filter((entity) => {
+          const matchesQuery =
+            entity.name.toLocaleLowerCase().includes(query) ||
+            entity.games.some(([name]) => name.toLocaleLowerCase().includes(query));
+          const matchesSupport = support === "all" || entity.support === support;
+          return matchesQuery && matchesSupport;
+        });
+        if (order === "name") filtered.sort((a, b) => a.name.localeCompare(b.name));
+        if (order === "support") filtered.sort((a, b) => b.count - a.count || b.mean - a.mean);
+        return filtered;
+      }
+
+      function renderList() {
+        const visible = filteredEntities();
+        document.querySelector("#result-count").textContent =
+          `${visible.length} ${visible.length === 1 ? "result" : "results"}`;
+        const list = document.querySelector("#entity-list");
+        list.replaceChildren();
+
+        for (const entity of visible) {
+          const item = document.createElement("li");
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "entity-button";
+          button.dataset.id = String(entity.id);
+          button.setAttribute("aria-current", String(entity.id === selectedId));
+          button.innerHTML = `
+            <span><span class="entity-title">${entity.name}</span><span class="entity-subtitle">${entity.count} ${entity.count === 1 ? "game" : "games"} · ${entity.support === "supported" ? "Supported" : "Limited"}</span></span>
+            <span class="number mean"><span class="sr-only">Mean fitness </span>${entity.mean.toFixed(1)}</span>
+            <span class="number delta"><span class="sr-only">Difference from collection </span>${entity.delta >= 0 ? "+" : ""}${entity.delta.toFixed(1)}</span>`;
+          button.addEventListener("click", () => selectEntity(entity.id, true));
+          item.append(button);
+          list.append(item);
+        }
+      }
+
+      function selectEntity(id, enterDetail) {
+        selectedId = id;
+        const entity = entities.find((candidate) => candidate.id === id) ?? entities[0];
+        document
+          .querySelectorAll(".entity-button")
+          .forEach((button) =>
+            button.setAttribute("aria-current", String(Number(button.dataset.id) === id)),
+          );
+        document.querySelector("#detail").dataset.support = entity.support;
+        document.querySelector("#detail-name").textContent = entity.name;
+        document.querySelector("#detail-kicker").textContent =
+          `${activeClass.slice(0, -1)} evidence`;
+        document.querySelector("#detail-support").textContent =
+          `${entity.support === "supported" ? "Supported association" : "Limited evidence"} · ${entity.count} eligible ${entity.count === 1 ? "game" : "games"}`;
+        document.querySelector("#fact-mean").textContent = entity.mean.toFixed(1);
+        document.querySelector("#fact-delta").textContent =
+          `${entity.delta >= 0 ? "+" : ""}${entity.delta.toFixed(1)}`;
+        document.querySelector("#fact-spread").textContent = (0.7 + (entity.id % 9) * 0.1).toFixed(
+          1,
+        );
+        document.querySelector("#fact-range").textContent =
+          `${Math.max(0, entity.mean - 2.7).toFixed(1)}–${Math.min(10, entity.mean + 1).toFixed(1)}`;
+        document.querySelector("#game-count").textContent =
+          `${entity.count} eligible ${entity.count === 1 ? "game" : "games"}`;
+        document.querySelector("#mobile-return").textContent = `← Back to ${activeClass} results`;
+
+        const gameList = document.querySelector("#game-list");
+        gameList.replaceChildren();
+        const shownGames = entity.games;
+        for (const [name, score] of shownGames) {
+          const row = document.createElement("li");
+          row.className = "game-row";
+          row.innerHTML = `<a href="#">${name}</a><span class="game-score">${Math.max(0, score - entity.id * 0.03).toFixed(1)}</span>`;
+          gameList.append(row);
+        }
+
+        if (entity.count > shownGames.length) {
+          const row = document.createElement("li");
+          row.className = "game-row";
+          row.innerHTML = `<span>And ${entity.count - shownGames.length} more supporting games</span><span></span>`;
+          gameList.append(row);
+        }
+
+        if (enterDetail && matchMedia("(max-width: 900px)").matches) {
+          document.body.classList.add("detail-mode");
+          window.scrollTo({ top: 0, behavior: "instant" });
+          document.querySelector("#detail-name").focus({ preventScroll: true });
+        }
+      }
+
+      document.querySelector("#mobile-return").addEventListener("click", () => {
+        document.body.classList.remove("detail-mode");
+        window.scrollTo({
+          top: document.querySelector(".toolbar").offsetTop - 12,
+          behavior: "instant",
+        });
+        requestAnimationFrame(() =>
+          document.querySelector(`.entity-button[data-id="${selectedId}"]`)?.focus(),
+        );
+      });
+
+      document.querySelectorAll(".class-tab").forEach((tab) => {
+        tab.addEventListener("click", () => {
+          document
+            .querySelectorAll(".class-tab")
+            .forEach((candidate) => candidate.setAttribute("aria-pressed", "false"));
+          tab.setAttribute("aria-pressed", "true");
+          activeClass = tab.dataset.class;
+          document.querySelector("#summary-class").textContent = activeClass;
+          document
+            .querySelector(".class-summary")
+            .setAttribute("aria-label", `${activeClass} evidence status`);
+          document.body.classList.remove("detail-mode");
+          buildEntities();
+          renderList();
+          selectEntity(0, false);
+        });
+      });
+
+      for (const selector of ["#search", "#support-filter", "#order"]) {
+        document
+          .querySelector(selector)
+          .addEventListener(selector === "#search" ? "input" : "change", renderList);
+      }
+
+      document.querySelector("#theme-toggle").addEventListener("click", () => {
+        const isDark = document.documentElement.dataset.theme === "dark";
+        document.documentElement.dataset.theme = isDark ? "light" : "dark";
+        document.querySelector("#theme-toggle").textContent = isDark ? "Dark theme" : "Light theme";
+      });
+
+      buildEntities();
+      renderList();
+      selectEntity(0, false);
+
+      if (new URLSearchParams(location.search).get("mode") === "detail") {
+        document.body.classList.add("detail-mode");
+      }
+      if (new URLSearchParams(location.search).get("theme") === "dark") {
+        document.documentElement.dataset.theme = "dark";
+        document.querySelector("#theme-toggle").textContent = "Light theme";
+      }
+    </script>
+  </body>
+</html>

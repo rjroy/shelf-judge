@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/await-thenable */
 import { describe, expect, test, beforeEach } from "bun:test";
 import type { Collection, Game, ShelfConfiguration } from "@shelf-judge/shared";
+import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import type { StorageService } from "../src/services/storage-service";
 import {
   createShelfService,
@@ -8,6 +9,8 @@ import {
   ShelfNotFoundError,
 } from "../src/services/shelf-service";
 import type { ShelfService } from "../src/services/shelf-service";
+import { createGameService } from "../src/services/game-service";
+import { createFitnessService } from "../src/services/fitness-service";
 
 const NOW = "2026-04-13T12:00:00.000Z";
 
@@ -24,11 +27,14 @@ function createMockStorage(): StorageService & {
       updatedAt: NOW,
     } as ShelfConfiguration,
     collection: {
-      schemaVersion: 3,
+      schemaVersion: 4,
+      revision: 0,
       id: "collection-1",
       name: "Test",
       axes: [],
       games: [],
+      intentions: [],
+      commandReceipts: [],
       entertainmentBenchmark: null,
       createdAt: NOW,
       updatedAt: NOW,
@@ -73,6 +79,7 @@ function assignedGame(id: string, shelfId: string): Game {
   return {
     id,
     bggId: null,
+    entityMetadata: createInitialEntityMetadata(null),
     name: id,
     yearPublished: null,
     minPlayers: null,
@@ -82,6 +89,7 @@ function assignedGame(id: string, shelfId: string): Game {
     imageUrl: null,
     bggData: null,
     numPlays: null,
+    latestPlayCountCheck: null,
     acquisition: { state: "unknown" },
     playCountEvidence: { status: "missing", source: "manual", observedAt: null },
     durationEvidence: { status: "missing", source: "manual", observedAt: null },
@@ -118,6 +126,53 @@ describe("shelf service", () => {
       expect(config.units).toEqual([]);
       expect(config.createdAt).toBe(NOW);
     });
+  });
+
+  test("serializes shelf removal with manual assignment validation", async () => {
+    storage.config.units = [
+      {
+        id: "unit-1",
+        name: "Unit",
+        shelves: [
+          {
+            id: "shelf-1",
+            name: "Shelf",
+            dimensionless: false,
+            width: 20,
+            height: 20,
+            depth: 20,
+          },
+        ],
+      },
+    ];
+    storage.collection.games = [assignedGame("game-1", "shelf-1")];
+    let signalSaveStarted = () => {};
+    let releaseSave = () => {};
+    const saveStarted = new Promise<void>((resolve) => {
+      signalSaveStarted = resolve;
+    });
+    const saveRelease = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    storage.saveCollection = async (next) => {
+      signalSaveStarted();
+      await saveRelease;
+      storage.collection = structuredClone(next);
+    };
+    const gameService = createGameService({
+      storageService: storage,
+      fitnessService: createFitnessService(),
+    });
+
+    const removal = service.removeUnit("unit-1");
+    await saveStarted;
+    const assignment = gameService.setManualShelf("game-1", "shelf-1");
+    releaseSave();
+    await removal;
+    await expect(assignment).rejects.toThrow("Shelf not found: shelf-1");
+
+    expect(storage.config.units).toEqual([]);
+    expect(storage.collection.games[0]?.manualShelfId).toBeNull();
   });
 
   describe("addUnit", () => {

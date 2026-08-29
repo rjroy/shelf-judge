@@ -4,6 +4,8 @@ import type {
   GameWithScore,
   PredictionReadiness,
   PredictionSettings,
+  Collection,
+  TournamentData,
   PredictionUnavailable,
   TournamentGameStatsDisplay,
 } from "@shelf-judge/shared";
@@ -24,6 +26,7 @@ import type { FeatureVector } from "./feature-vector";
 import { computePredictedFitness, assessReadiness } from "./prediction-engine";
 import type { ReferenceGameCandidate, ClusterMembership } from "./prediction-engine";
 import { canonicalSuggestedPlayerPoll } from "./suggested-player-poll.js";
+import { profileSourceCoordinatorFor } from "./profile-source-coordinator.js";
 
 export interface PredictedGameResult {
   game: Game;
@@ -31,7 +34,11 @@ export interface PredictedGameResult {
   predictionUnavailable: PredictionUnavailable | null;
   bggObservations?: Pick<
     BggGameResult,
-    "metadataObservation" | "playerRangeObservation" | "suggestedPlayerPoll" | "collectionData"
+    | "metadataObservation"
+    | "playerRangeObservation"
+    | "suggestedPlayerPoll"
+    | "collectionData"
+    | "entityMetadata"
   >;
 }
 
@@ -40,6 +47,11 @@ export interface PredictionService {
   predictBggGame(bggId: number): Promise<PredictedGameResult>;
   getReadiness(): Promise<PredictionReadiness>;
   listGamesWithPredictions(): Promise<GameWithScore[]>;
+  listGamesWithPredictionsFromSnapshot?(
+    collection: Collection,
+    tournamentData: TournamentData,
+    settings: PredictionSettings,
+  ): Promise<GameWithScore[]>;
   getSettings(): Promise<PredictionSettings>;
   updateSettings(patch: Partial<PredictionSettings>): Promise<PredictionSettings>;
 }
@@ -58,20 +70,29 @@ function flattenVector(fv: FeatureVector): number[] {
 
 export function createPredictionService(deps: PredictionServiceDeps): PredictionService {
   const { storageService, fitnessService, bggClient } = deps;
+  const profileSourceCoordinator = profileSourceCoordinatorFor(storageService);
   const now = deps.now ?? (() => new Date().toISOString());
 
-  async function loadPredictionContext() {
+  async function loadPredictionContext(snapshot?: {
+    collection: Collection;
+    settings: PredictionSettings;
+    tournamentData: TournamentData;
+  }) {
     // Load collection, prediction settings, and tournament data in parallel.
     // Tournament settings and per-game stats are projected from the same
     // TournamentData object so we don't read tournament.json three times.
     // The raw tournament data is also needed by calculateScore so the
     // tournament axis can contribute its normalized ELO score per the cohort
     // floor (REQ-TAXIS-6/7).
-    const [collection, settings, tournamentData] = await Promise.all([
-      storageService.loadCollection(),
-      storageService.loadPredictionSettings(),
-      storageService.loadTournament(),
-    ]);
+    const { collection, settings, tournamentData } =
+      snapshot ??
+      (([collection, settings, tournamentData]) => ({ collection, settings, tournamentData }))(
+        await Promise.all([
+          storageService.loadCollection(),
+          storageService.loadPredictionSettings(),
+          storageService.loadTournament(),
+        ]),
+      );
     const tournamentSettings = tournamentData.settings;
     const allGameStats: Record<string, TournamentGameStatsDisplay> = {};
     for (const gameId of Object.keys(tournamentData.gameStats)) {
@@ -172,6 +193,37 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
       settings,
       tournamentData,
     };
+  }
+
+  function listGamesWithPredictionsFromContext(
+    ctx: Awaited<ReturnType<typeof loadPredictionContext>>,
+  ): GameWithScore[] {
+    const results: GameWithScore[] = [];
+    for (const game of ctx.games) {
+      const actualScore = fitnessService.calculateScore(game, ctx.axes, ctx.tournamentData);
+      const allRated = actualScore && actualScore.ratedAxisCount === ctx.axes.length;
+      const targetVector = ctx.gameVectors.get(game.id);
+      if (allRated || !game.bggData || !targetVector) {
+        results.push({ game, score: actualScore });
+        continue;
+      }
+      const { fitnessResult } = computePredictedFitness(
+        game,
+        ctx.axes,
+        ctx.referenceGames,
+        targetVector,
+        ctx.settings,
+        ctx.readinessStage,
+        (candidate, axes) => fitnessService.calculateScore(candidate, axes, ctx.tournamentData),
+      );
+      results.push({ game, score: fitnessResult });
+    }
+    return results.sort((left, right) => {
+      if (left.score !== null && right.score !== null) return right.score.score - left.score.score;
+      if (left.score !== null) return -1;
+      if (right.score !== null) return 1;
+      return 0;
+    });
   }
 
   return {
@@ -336,6 +388,8 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
           observedAt: null,
         },
         bestPlayersInvalidEvidence: null,
+        entityMetadata: structuredClone(bggResult.entityMetadata),
+        latestPlayCountCheck: null,
         ownership: "owned",
         boxDimensions: null,
         manualShelfId: null,
@@ -384,6 +438,7 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
                 playerRangeObservation: bggResult.playerRangeObservation,
                 suggestedPlayerPoll: bggResult.suggestedPlayerPoll,
                 collectionData: bggResult.collectionData,
+                entityMetadata: bggResult.entityMetadata,
               },
             }
           : {}),
@@ -453,49 +508,12 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
 
     async listGamesWithPredictions(): Promise<GameWithScore[]> {
       const ctx = await loadPredictionContext();
-      const results: GameWithScore[] = [];
+      return listGamesWithPredictionsFromContext(ctx);
+    },
 
-      for (const game of ctx.games) {
-        const actualScore = fitnessService.calculateScore(game, ctx.axes, ctx.tournamentData);
-
-        // If all axes are rated (or no prediction possible), use actual score
-        const allRated = actualScore && actualScore.ratedAxisCount === ctx.axes.length;
-        const noBggData = !game.bggData;
-
-        if (allRated || noBggData) {
-          results.push({ game, score: actualScore });
-          continue;
-        }
-
-        // Run prediction for this game
-        const targetVector = ctx.gameVectors.get(game.id);
-        if (!targetVector) {
-          results.push({ game, score: actualScore });
-          continue;
-        }
-
-        const { fitnessResult } = computePredictedFitness(
-          game,
-          ctx.axes,
-          ctx.referenceGames,
-          targetVector,
-          ctx.settings,
-          ctx.readinessStage,
-          (g, a) => fitnessService.calculateScore(g, a, ctx.tournamentData),
-        );
-
-        results.push({ game, score: fitnessResult });
-      }
-
-      // Sort by fitness descending, unscored at end
-      results.sort((a, b) => {
-        if (a.score !== null && b.score !== null) return b.score.score - a.score.score;
-        if (a.score !== null) return -1;
-        if (b.score !== null) return 1;
-        return 0;
-      });
-
-      return results;
+    async listGamesWithPredictionsFromSnapshot(collection, tournamentData, settings) {
+      const ctx = await loadPredictionContext({ collection, tournamentData, settings });
+      return listGamesWithPredictionsFromContext(ctx);
     },
 
     async getSettings(): Promise<PredictionSettings> {
@@ -503,10 +521,12 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
     },
 
     async updateSettings(patch: Partial<PredictionSettings>): Promise<PredictionSettings> {
-      const current = await storageService.loadPredictionSettings();
-      const updated: PredictionSettings = { ...current, ...patch };
-      await storageService.savePredictionSettings(updated);
-      return updated;
+      return profileSourceCoordinator.runExclusive(async () => {
+        const current = await storageService.loadPredictionSettings();
+        const updated: PredictionSettings = { ...current, ...patch };
+        await storageService.savePredictionSettings(updated);
+        return updated;
+      });
     },
   };
 }

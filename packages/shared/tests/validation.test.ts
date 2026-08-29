@@ -693,6 +693,18 @@ describe("TournamentSettingsUpdateSchema", () => {
     expect(result.success).toBe(false);
   });
 
+  test("rejects settings that cannot produce a valid persisted profile", () => {
+    expect(TournamentSettingsUpdateSchema.safeParse({ provisionalThreshold: 2.5 }).success).toBe(
+      false,
+    );
+    expect(TournamentSettingsUpdateSchema.safeParse({ provisionalThreshold: -1 }).success).toBe(
+      false,
+    );
+    expect(TournamentSettingsUpdateSchema.safeParse({ normalizationHalfWidth: 0 }).success).toBe(
+      false,
+    );
+  });
+
   test("rejects unknown fields (strict)", () => {
     const result = TournamentSettingsUpdateSchema.safeParse({
       kFactorThreshold: 20,
@@ -715,6 +727,23 @@ describe("TournamentSettingsSchema", () => {
   test("rejects missing required fields", () => {
     const result = TournamentSettingsSchema.safeParse({ kFactorThreshold: 15 });
     expect(result.success).toBe(false);
+  });
+
+  test("rejects non-integral thresholds and non-positive normalization", () => {
+    expect(
+      TournamentSettingsSchema.safeParse({
+        kFactorThreshold: 15,
+        normalizationHalfWidth: 0,
+        provisionalThreshold: 6,
+      }).success,
+    ).toBe(false);
+    expect(
+      TournamentSettingsSchema.safeParse({
+        kFactorThreshold: 15,
+        normalizationHalfWidth: 400,
+        provisionalThreshold: 1.5,
+      }).success,
+    ).toBe(false);
   });
 });
 

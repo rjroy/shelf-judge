@@ -13,30 +13,52 @@ import {
   type PredictionService,
 } from "../../src/services/prediction-service.js";
 import type { BggClient } from "../../src/services/bgg-client.js";
-import type { NarrationService } from "../../src/services/narration-service.js";
 import {
   createPurchaseUtilizationService,
   type PurchaseUtilizationService,
 } from "../../src/services/purchase-utilization-service.js";
 import { createApp, type AppResult } from "../../src/app.js";
+import {
+  createCollectionMutationService,
+  type CollectionMutationService,
+} from "../../src/services/collection-mutation-service.js";
+import {
+  createDisplayedFitnessService,
+  type DisplayedFitnessService,
+} from "../../src/services/displayed-fitness-service.js";
+import {
+  createIntentionService,
+  type IntentionService,
+} from "../../src/services/intention-service.js";
+import type { FileOps } from "../../src/services/file-ops.js";
 
-export interface TestAppContext {
+type MockFileOps = ReturnType<typeof createMockFileOps>;
+
+export interface TestAppContext<TFileOps extends FileOps = MockFileOps> {
   app: AppResult["app"];
   operations: AppResult["operations"];
   storageService: StorageService;
+  collectionMutationService: CollectionMutationService;
   fitnessService: FitnessService;
   axisService: AxisService;
   gameService: GameService;
   tournamentService: TournamentService;
   profileService: ProfileService;
   predictionService: PredictionService;
+  displayedFitnessService: DisplayedFitnessService;
+  intentionService: IntentionService;
   bggClient: BggClient | undefined;
-  fileOps: ReturnType<typeof createMockFileOps>;
+  fileOps: TFileOps;
 }
 
-export interface TestAppOptions {
+export interface TestAppOptions<TFileOps extends FileOps = MockFileOps> {
   bggClient?: BggClient;
-  narrationService?: NarrationService;
+  fileOps?: TFileOps;
+  dataDir?: string;
+  configPath?: string;
+  now?: () => string;
+  createIntentionId?: () => string;
+  intentionService?: IntentionService;
 }
 
 export function createTestPurchaseUtilizationService(
@@ -45,48 +67,55 @@ export function createTestPurchaseUtilizationService(
   const fallbackStorage = {
     loadCollection: () =>
       Promise.resolve({
-        schemaVersion: 3 as const,
+        schemaVersion: 4 as const,
+        revision: 0,
         id: "test-collection",
         name: "Test Collection",
         axes: [],
         games: [],
+        intentions: [],
+        commandReceipts: [],
         entertainmentBenchmark: null,
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
       }),
     saveCollection: () => Promise.resolve(),
   } as unknown as StorageService;
-  return createPurchaseUtilizationService({ storageService: storageService ?? fallbackStorage });
+  const selectedStorage = storageService ?? fallbackStorage;
+  const collectionMutationService = createCollectionMutationService({
+    storageService: selectedStorage,
+  });
+  return createPurchaseUtilizationService({
+    storageService: selectedStorage,
+    collectionMutationService,
+  });
 }
 
-export function createTestApp(options?: TestAppOptions): TestAppContext {
-  const fileOps = createMockFileOps();
-  const dataDir = "/test/data";
-  const configPath = "/test/config.json";
+export function createTestApp<TFileOps extends FileOps = MockFileOps>(
+  options?: TestAppOptions<TFileOps>,
+): TestAppContext<TFileOps> {
+  const fileOps = options?.fileOps ?? (createMockFileOps() as unknown as TFileOps);
+  const dataDir = options?.dataDir ?? "/test/data";
+  const configPath = options?.configPath ?? "/test/config.json";
 
   const storageService = createStorageService({
     dataDir,
     configPath,
     fileOps,
   });
+  const collectionMutationService = createCollectionMutationService({ storageService });
   const fitnessService = createFitnessService();
   const bggClient = options?.bggClient;
-  const narrationService = options?.narrationService;
 
-  const axisService = createAxisService({ storageService });
+  const axisService = createAxisService({ storageService, collectionMutationService });
   const tournamentService = createTournamentService({ storageService });
   const gameService = createGameService({
     storageService,
+    collectionMutationService,
     fitnessService,
     bggClient,
+    now: options?.now,
     onGameDeleted: (gameId) => tournamentService.onGameDeleted(gameId),
-  });
-
-  const profileService = createProfileService({
-    storageService,
-    gameService,
-    tournamentService,
-    narrationService,
   });
 
   const predictionService = createPredictionService({
@@ -95,14 +124,33 @@ export function createTestApp(options?: TestAppOptions): TestAppContext {
     tournamentService,
     bggClient,
   });
+  const displayedFitnessService = createDisplayedFitnessService({
+    gameService,
+    predictionService,
+    storageService,
+  });
+  const intentionService =
+    options?.intentionService ??
+    createIntentionService({
+      collectionMutationService,
+      now: options?.now,
+      createId: options?.createIntentionId,
+    });
+  const profileService = createProfileService({
+    storageService,
+    displayedFitnessService,
+  });
 
   const { app, operations } = createApp({
     storageService,
+    collectionMutationService,
     axisService,
     gameService,
     tournamentService,
     profileService,
     predictionService,
+    displayedFitnessService,
+    intentionService,
     bggClient,
   });
 
@@ -110,12 +158,15 @@ export function createTestApp(options?: TestAppOptions): TestAppContext {
     app,
     operations,
     storageService,
+    collectionMutationService,
     fitnessService,
     axisService,
     gameService,
     tournamentService,
     profileService,
     predictionService,
+    displayedFitnessService,
+    intentionService,
     bggClient,
     fileOps,
   };
@@ -127,7 +178,7 @@ export function createMockBggClient(overrides?: Partial<BggClient>): BggClient {
     searchGames: () => Promise.resolve([]),
     getGame: () => Promise.reject(new Error("Not implemented in mock")),
     getGames: async (_ids, onBatch) => {
-      await onBatch?.({ batchIds: _ids, results: new Map() });
+      await onBatch?.({ batchIds: _ids, results: new Map(), failures: new Map() });
       return new Map();
     },
     getUserCollection: () => Promise.resolve([]),

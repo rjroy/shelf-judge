@@ -31,7 +31,7 @@ export interface OperationErrorDefinition {
   status: number;
   code: string;
   description: string;
-  response: { error: string; code: string; [key: string]: OperationJsonValue };
+  response: { [key: string]: OperationJsonValue };
 }
 
 export interface OperationDefinition {
@@ -41,6 +41,7 @@ export interface OperationDefinition {
   invocation: { method: string; path: string };
   requestSchema?: ZodType;
   request?: { body: { [key: string]: OperationJsonValue } };
+  response?: { body: { [key: string]: OperationJsonValue } };
   hierarchy: { root: string; feature: string };
   parameters?: OperationParameter[];
   errors?: OperationErrorDefinition[];
@@ -60,6 +61,7 @@ export interface OperationTreeNode {
   idempotent?: boolean;
   parameters?: OperationParameter[];
   request?: { body: { [key: string]: OperationJsonValue } };
+  response?: { body: { [key: string]: OperationJsonValue } };
   errors?: OperationErrorDefinition[];
   children?: Record<string, OperationTreeNode>;
 }
@@ -86,6 +88,7 @@ export function buildOperationTree(operations: OperationDefinition[]): Operation
           idempotent: op.idempotent,
           parameters: op.parameters,
           request: op.request,
+          response: op.response,
           errors: op.errors,
         };
       } else {

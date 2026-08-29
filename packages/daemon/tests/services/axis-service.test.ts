@@ -3,6 +3,7 @@ import {
   AXIS_VALIDATION_CODES,
   CodedAxisValidationError,
   CollectionSchema,
+  createInitialEntityMetadata,
   type AxisValidationCode,
   type Collection,
   type DisabledLegacyAxis,
@@ -39,6 +40,7 @@ function game(id: string, rating: number): Collection["games"][number] {
   return {
     id,
     bggId: null,
+    entityMetadata: createInitialEntityMetadata(null),
     name: "Game",
     yearPublished: null,
     minPlayers: null,
@@ -48,6 +50,7 @@ function game(id: string, rating: number): Collection["games"][number] {
     imageUrl: null,
     bggData: null,
     numPlays: null,
+    latestPlayCountCheck: null,
     acquisition: { state: "unknown" },
     playCountEvidence: { status: "missing", source: "manual", observedAt: null },
     durationEvidence: { status: "missing", source: "manual", observedAt: null },

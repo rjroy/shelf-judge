@@ -7,6 +7,7 @@ import type {
   Game,
   GameWithScore,
 } from "@shelf-judge/shared";
+import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import {
   createPurchaseUtilizationService,
   PurchaseUtilizationValidationError,
@@ -18,6 +19,7 @@ const initialTime = "2026-01-01T00:00:00.000Z";
 const changedTime = "2026-02-02T00:00:00.000Z";
 
 function game(overrides: Partial<Game> = {}): Game {
+  const bggId = overrides.bggId ?? null;
   return {
     id: "game-1",
     bggId: null,
@@ -64,16 +66,21 @@ function game(overrides: Partial<Game> = {}): Game {
     createdAt: initialTime,
     updatedAt: initialTime,
     ...overrides,
+    entityMetadata: createInitialEntityMetadata(bggId),
+    latestPlayCountCheck: null,
   };
 }
 
 function collection(overrides: Partial<Collection> = {}): Collection {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
+    revision: 0,
     id: "collection-1",
     name: "Test",
     axes: [],
     games: [game()],
+    intentions: [],
+    commandReceipts: [],
     entertainmentBenchmark: null,
     createdAt: initialTime,
     updatedAt: initialTime,
@@ -477,6 +484,41 @@ describe("PurchaseUtilizationService mutations", () => {
         outcome: "failed",
       },
     ]);
+  });
+
+  test("benchmark clear failure logs failure without a false completion", async () => {
+    const original = collection({
+      entertainmentBenchmark: {
+        state: "configured",
+        amount: { hundredths: 500, source: "manual", confirmedAt: initialTime },
+      },
+    });
+    const ctx = harness({ initial: original, failSave: true });
+
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+    await expect(ctx.service.clearEntertainmentBenchmark()).rejects.toThrow("disk unavailable");
+
+    expect(ctx.stored()).toEqual(original);
+    expect(ctx.logs).toContainEqual([
+      "benchmark persistence failed",
+      {
+        collectionId: "collection-1",
+        previousState: "configured",
+        nextState: "unknown",
+        changedFields: ["entertainmentBenchmark", "updatedAt"],
+        outcome: "failed",
+      },
+    ]);
+    expect(
+      ctx.logs.some(
+        ([message, fields]) =>
+          message === "benchmark mutation completed" &&
+          typeof fields === "object" &&
+          fields !== null &&
+          "changed" in fields &&
+          fields.changed === true,
+      ),
+    ).toBe(false);
   });
 
   test("benchmark logs include safe transitions, outcomes, and service validation codes", async () => {

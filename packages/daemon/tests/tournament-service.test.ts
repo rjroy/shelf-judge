@@ -3,6 +3,7 @@ import { createTournamentService } from "../src/services/tournament-service.js";
 import type { TournamentService } from "../src/services/tournament-service.js";
 import type { StorageService } from "../src/services/storage-service.js";
 import type { TournamentData, Game, BggGameData, GameWithScore } from "@shelf-judge/shared";
+import { createInitialEntityMetadata } from "@shelf-judge/shared";
 
 // In-memory storage stub for tournament data
 function createStubStorage(): StorageService & { tournamentData: TournamentData } {
@@ -93,6 +94,7 @@ function createStubStorage(): StorageService & { tournamentData: TournamentData 
 
 function makeGame(id: string, name: string, overrides?: Partial<Game>): Game {
   const now = new Date().toISOString();
+  const bggId = overrides?.bggId ?? null;
   return {
     id,
     bggId: null,
@@ -124,6 +126,8 @@ function makeGame(id: string, name: string, overrides?: Partial<Game>): Game {
     createdAt: now,
     updatedAt: now,
     ...overrides,
+    entityMetadata: createInitialEntityMetadata(bggId),
+    latestPlayCountCheck: null,
   };
 }
 

@@ -1,41 +1,15 @@
 import { describe, test, expect } from "bun:test";
 import { renderToString } from "react-dom/server";
 import type {
-  DivergentGame,
-  CollectionOutlier,
   ReferenceGame,
   PredictionConfidence,
   FitnessBreakdownEntry,
 } from "@shelf-judge/shared";
-import { Divergence } from "@/components/profile/divergence";
-import { Outliers } from "@/components/profile/outliers";
+import { DeletionHistoryConflict, OwnershipMutationNotice } from "@/components/game-actions";
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
-
-function makeDivergentGame(overrides: Partial<DivergentGame> = {}): DivergentGame {
-  return {
-    gameId: "game-123",
-    gameName: "Test Game",
-    fitnessScore: 7.5,
-    normalizedTournamentScore: 5.2,
-    gap: 2.3,
-    direction: "fitness-outlier",
-    ...overrides,
-  };
-}
-
-function makeOutlier(overrides: Partial<CollectionOutlier> = {}): CollectionOutlier {
-  return {
-    gameId: "outlier-456",
-    gameName: "Outlier Game",
-    distances: { binary: 0.8, continuous: 0.6, personalAxes: 0.5, composite: 0.7 },
-    classifications: ["lone-wolf"],
-    fitnessScore: 6.0,
-    ...overrides,
-  };
-}
 
 function makeReferenceGame(overrides: Partial<ReferenceGame> = {}): ReferenceGame {
   return {
@@ -45,76 +19,6 @@ function makeReferenceGame(overrides: Partial<ReferenceGame> = {}): ReferenceGam
     ...overrides,
   };
 }
-
-// ---------------------------------------------------------------------------
-// Helper: extract all <a> tags with their href from rendered HTML
-// ---------------------------------------------------------------------------
-
-function extractLinks(html: string): Array<{ href: string; text: string }> {
-  const links: Array<{ href: string; text: string }> = [];
-  const regex = /<a[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/g;
-  let match;
-  while ((match = regex.exec(html)) !== null) {
-    links.push({ href: match[1], text: match[2] });
-  }
-  return links;
-}
-
-// ---------------------------------------------------------------------------
-// Divergence links (REQ-GLINK-1)
-// ---------------------------------------------------------------------------
-
-describe("Divergence game links", () => {
-  test("each game name links to /games/{gameId}", () => {
-    const games = [
-      makeDivergentGame({ gameId: "abc", gameName: "Alpha" }),
-      makeDivergentGame({ gameId: "def", gameName: "Bravo" }),
-    ];
-    const html = renderToString(<Divergence games={games} />);
-    const links = extractLinks(html);
-
-    expect(links).toContainEqual({ href: "/games/abc", text: "Alpha" });
-    expect(links).toContainEqual({ href: "/games/def", text: "Bravo" });
-  });
-
-  test("links have game-link class", () => {
-    const html = renderToString(<Divergence games={[makeDivergentGame({ gameId: "x" })]} />);
-    expect(html).toContain('class="game-link"');
-  });
-
-  test("empty games array renders nothing", () => {
-    const html = renderToString(<Divergence games={[]} />);
-    expect(html).toBe("");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Outliers links (REQ-GLINK-2)
-// ---------------------------------------------------------------------------
-
-describe("Outliers game links", () => {
-  test("each outlier name links to /games/{gameId}", () => {
-    const outliers = [
-      makeOutlier({ gameId: "o1", gameName: "Odd One" }),
-      makeOutlier({ gameId: "o2", gameName: "Strange Pick" }),
-    ];
-    const html = renderToString(<Outliers outliers={outliers} />);
-    const links = extractLinks(html);
-
-    expect(links).toContainEqual({ href: "/games/o1", text: "Odd One" });
-    expect(links).toContainEqual({ href: "/games/o2", text: "Strange Pick" });
-  });
-
-  test("links have game-link class", () => {
-    const html = renderToString(<Outliers outliers={[makeOutlier({ gameId: "x" })]} />);
-    expect(html).toContain('class="game-link"');
-  });
-
-  test("empty outliers array renders nothing", () => {
-    const html = renderToString(<Outliers outliers={[]} />);
-    expect(html).toBe("");
-  });
-});
 
 // ---------------------------------------------------------------------------
 // Score breakdown reference game links (REQ-GLINK-3)
@@ -273,6 +177,59 @@ describe("Surfaces that must remain unchanged", () => {
   test("search results do not have game-link class in source", async () => {
     const file = await Bun.file("packages/web/app/search/page.tsx").text();
     expect(file).not.toContain("game-link");
+  });
+});
+
+describe("game detail Step 11 surfaces", () => {
+  test("keeps purchase utilization and redundancy while profile-specific cards remain absent", async () => {
+    const source = await Bun.file("packages/web/app/games/[id]/page.tsx").text();
+    expect(source).toContain("PurchaseUtilizationPanel");
+    expect(source).toContain("RedundancyPanel");
+    expect(source).toContain("IntentionControls");
+    for (const removed of ["divergence", "outlier", "suggestion"]) {
+      expect(source.toLowerCase()).not.toContain(removed);
+    }
+  });
+
+  test("uses native named controls and explicit ownership/deletion outcome language", async () => {
+    const controls = await Bun.file("packages/web/components/intention-controls.tsx").text();
+    const actions = await Bun.file("packages/web/components/game-actions.tsx").text();
+    expect(controls).toContain('name="playCount"');
+    expect(controls).toContain('type="number"');
+    expect(controls).toContain('type="submit"');
+    expect(controls).toContain('aria-live="polite"');
+    expect(actions).toContain("was retired in the same update");
+    expect(actions).toContain("Previously Owned");
+    expect(actions).toContain("does not offer deletion of intention history");
+
+    const ownership = renderToString(
+      <OwnershipMutationNotice
+        ownership="previously-owned"
+        linkedIntentionTransition={{
+          intentionId: "intention-1",
+          gameId: "game-1",
+          kind: "first-play",
+          baseline: {
+            playCount: 0,
+            evidenceSource: "manual",
+            observedAt: "2026-08-28T09:00:00.000Z",
+          },
+          createdAt: "2026-08-28T10:00:00.000Z",
+          version: 2,
+          resolution: {
+            outcome: "retired",
+            source: "owner-retired",
+            resolvedAt: "2026-08-28T11:00:00.000Z",
+          },
+        }}
+      />,
+    );
+    expect(ownership).toContain("was retired in the same update");
+
+    const conflict = renderToString(<DeletionHistoryConflict intentionIds={["intention-1"]} />);
+    expect(conflict).toContain("Retire any active intention");
+    expect(conflict).toContain("Previously Owned");
+    expect(conflict).toContain("does not offer deletion of intention history");
   });
 });
 

@@ -8,6 +8,7 @@ import type {
   ShelfConfiguration,
   ShelfUnit,
 } from "@shelf-judge/shared";
+import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import type { StorageService } from "../src/services/storage-service";
 import type { GameService } from "../src/services/game-service";
 import { createCapacityService } from "../src/services/capacity-service";
@@ -30,6 +31,8 @@ function makeGame(
   const game: Game = {
     id,
     bggId: null,
+    entityMetadata: createInitialEntityMetadata(null),
+    latestPlayCountCheck: null,
     name,
     yearPublished: null,
     minPlayers: opts.minPlayers ?? null,
@@ -87,11 +90,14 @@ function createMockStorage(units: ShelfUnit[], axes?: Axis[]): StorageService {
     saveShelfConfig: () => Promise.resolve(),
     loadCollection: () =>
       Promise.resolve({
-        schemaVersion: 3,
+        schemaVersion: 4,
+        revision: 0,
         id: "mock",
         name: "Mock",
         games: [],
         entertainmentBenchmark: null,
+        intentions: [],
+        commandReceipts: [],
         axes: axes ?? [
           {
             id: "players",

@@ -1,6 +1,7 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import { Hono } from "hono";
 import type { AddGameResult, GameWithScore, Game, WishlistEntry } from "@shelf-judge/shared";
+import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import { createWishlistRoutes } from "../src/routes/wishlist";
 import { createGameRoutes } from "../src/routes/games";
 import type { WishlistService } from "../src/services/wishlist-service";
@@ -252,6 +253,7 @@ function makeGame(bggId: number | null, name: string): Game {
   return {
     id: `game-${bggId ?? name}`,
     bggId,
+    entityMetadata: createInitialEntityMetadata(bggId),
     name,
     yearPublished: 2020,
     minPlayers: 2,
@@ -260,6 +262,7 @@ function makeGame(bggId: number | null, name: string): Game {
     playingTime: 60,
     imageUrl: null,
     numPlays: null,
+    latestPlayCountCheck: null,
     acquisition: { state: "unknown" },
     playCountEvidence: { status: "missing", source: "manual", observedAt: null },
     durationEvidence: { status: "missing", source: "manual", observedAt: null },

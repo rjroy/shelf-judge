@@ -272,7 +272,7 @@ export function jaccardDistance(a: number[], b: number[]): number {
  * Each element is already [0,1] from encoding, so result is [0,1].
  * Returns 0 when vectors are empty.
  * Throws on dimension mismatch: iterating off the end of `b` silently produces
- * NaN distances (NaN → null in JSON), which has bitten the profile outlier path.
+ * NaN distances (NaN -> null in JSON), which cannot be persisted as valid evidence.
  */
 export function normalizedManhattanDistance(a: number[], b: number[]): number {
   if (a.length !== b.length) {

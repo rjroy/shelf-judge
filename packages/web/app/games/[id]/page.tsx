@@ -5,14 +5,11 @@ import {
   getGame,
   listAxes,
   getTournamentGameStats,
-  getProfile,
   getNicheSettings,
   getShelfConfig,
 } from "@/lib/api";
 import type {
   TournamentGameStatsDisplay,
-  DivergentGame,
-  CollectionOutlier,
   FitnessResult,
   NichePosition,
   NicheEntry,
@@ -28,6 +25,7 @@ import { BoxDimensionsForm } from "@/components/box-dimensions-form";
 import { ShelfAssignmentForm } from "@/components/shelf-assignment-form";
 import { AcquisitionForm } from "@/components/acquisition-form";
 import { PurchaseUtilizationPanel } from "@/components/purchase-utilization-panel";
+import { IntentionControls } from "@/components/intention-controls";
 
 export async function generateMetadata({
   params,
@@ -52,8 +50,6 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
   let data;
   let axes;
   let tournamentStats: TournamentGameStatsDisplay | null = null;
-  let profileDivergence: DivergentGame | null = null;
-  let profileOutlier: CollectionOutlier | null = null;
   let ignoredTags: NicheTagFilter[] = [];
   let shelfOptions: Array<{ shelfId: string; label: string; dimensionless: boolean }> = [];
   try {
@@ -72,13 +68,6 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
       tournamentStats = await getTournamentGameStats(id);
     } catch {
       // Tournament stats may not exist yet
-    }
-    try {
-      const profile = await getProfile();
-      profileDivergence = profile.divergence?.find((d) => d.gameId === id) ?? null;
-      profileOutlier = profile.outliers.find((o) => o.gameId === id) ?? null;
-    } catch {
-      // Profile may not exist yet
     }
     try {
       const nicheSettings = await getNicheSettings();
@@ -118,7 +107,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
           </div>
           <div className="game-hero-info">
             <div className="game-hero-title-row">
-              <div className="game-hero-title">{game.name}</div>
+              <h1 className="game-hero-title">{game.name}</h1>
               {isPreviouslyOwned && (
                 <span className="status-badge prev-owned">Previously Owned</span>
               )}
@@ -291,88 +280,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
           isPreviouslyOwned={isPreviouslyOwned}
         />
 
-        {profileDivergence && (
-          <div className="profile-divergence-detail">
-            <div className="profile-detail-title">Profile Divergence</div>
-            <div className="divergence-row">
-              <div className="div-game-name">
-                {profileDivergence.direction === "tournament-outlier"
-                  ? "Tournament rates higher than fitness"
-                  : "Fitness rates higher than tournament"}
-              </div>
-              <div className="div-scores">
-                <div className="div-score">
-                  <span className="div-score-val fitness">
-                    {profileDivergence.fitnessScore.toFixed(1)}
-                  </span>
-                  <span className="div-score-lbl">Fitness</span>
-                </div>
-                <span className="div-arrow">&rarr;</span>
-                <div className="div-score">
-                  <span className="div-score-val tournament">
-                    {profileDivergence.normalizedTournamentScore.toFixed(1)}
-                  </span>
-                  <span className="div-score-lbl">Tournament</span>
-                </div>
-                <span className={`div-gap ${profileDivergence.direction}`}>
-                  {profileDivergence.direction === "tournament-outlier" ? "+" : "\u2212"}
-                  {profileDivergence.gap.toFixed(1)}
-                </span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {profileOutlier && (
-          <div className="profile-outlier-detail">
-            <div className="profile-detail-title">Collection Outlier</div>
-            <div className="outlier-row">
-              <div className="outlier-info">
-                <div className="outlier-reason">
-                  Composite distance <span>{profileOutlier.distances.composite.toFixed(2)}</span>{" "}
-                  from collection centroid
-                </div>
-                <div className="outlier-distance">
-                  {profileOutlier.distances.binary !== null && (
-                    <span
-                      className={`dist-component${profileOutlier.distances.binary >= 0.7 ? " high" : ""}`}
-                    >
-                      Mechanics: {profileOutlier.distances.binary.toFixed(2)}
-                    </span>
-                  )}
-                  {profileOutlier.distances.continuous !== null && (
-                    <span
-                      className={`dist-component${profileOutlier.distances.continuous >= 0.7 ? " high" : ""}`}
-                    >
-                      BGG attrs: {profileOutlier.distances.continuous.toFixed(2)}
-                    </span>
-                  )}
-                  {profileOutlier.distances.personalAxes !== null && (
-                    <span
-                      className={`dist-component${profileOutlier.distances.personalAxes >= 0.7 ? " high" : ""}`}
-                    >
-                      Axis ratings: {profileOutlier.distances.personalAxes.toFixed(2)}
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="outlier-type-tags">
-                {profileOutlier.classifications.map((cls) => (
-                  <span
-                    key={cls}
-                    className={`outlier-type-tag ${cls === "lone-wolf" ? "lone-wolf" : cls === "category-orphan" ? "category-orphan" : "high-fitness"}`}
-                  >
-                    {cls === "lone-wolf"
-                      ? "Lone Wolf"
-                      : cls === "category-orphan"
-                        ? "Category Orphan"
-                        : "High-Fitness"}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
+        <IntentionControls game={game} detail={data.intentions} />
 
         {tournamentStats && tournamentStats.comparisonCount > 0 && (
           <div className="tournament-breakdown-panel">

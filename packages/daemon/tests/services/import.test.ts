@@ -17,6 +17,30 @@ async function readFixture(filename: string): Promise<string> {
   return Bun.file(path.join(fixturesDir, filename)).text();
 }
 
+function collectionXmlForImport(ids: readonly number[]): string {
+  return `<items>${ids
+    .map(
+      (id) =>
+        `<item objectid="${id}"><name>Collection Game ${id}</name><yearpublished>2020</yearpublished><numplays>${id}</numplays></item>`,
+    )
+    .join("")}</items>`;
+}
+
+function thingXmlForImport(ids: readonly number[]): string {
+  return `<items>${ids
+    .map(
+      (id) => `<item type="boardgame" id="${id}">
+        <name type="primary" value="Thing Game ${id}"/>
+        <yearpublished value="2025"/>
+        <minplayers value="1"/>
+        <maxplayers value="4"/>
+        <playingtime value="60"/>
+        <statistics><ratings><average value="7"/></ratings></statistics>
+      </item>`,
+    )
+    .join("")}</items>`;
+}
+
 let fileOps: MockFileOps;
 let storageService: StorageService;
 let gameService: GameService;
@@ -276,6 +300,41 @@ describe("Collection Import", () => {
     expect(summary.skipped).toBe(0);
     expect(summary.errors).toHaveLength(1);
     expect(summary.errors[0]).toContain("Terraforming Mars");
+  });
+
+  test("does not import an unsolicited game from a wrong-only thing response", async () => {
+    mockFetch.enqueue(200, collectionXmlForImport([1]));
+    mockFetch.enqueue(200, thingXmlForImport([999]));
+
+    const summary = await gameService.importBggCollection();
+    const persisted = await storageService.loadCollection();
+
+    expect(summary).toEqual({
+      imported: 0,
+      skipped: 0,
+      errors: [
+        'Failed to fetch full data for "Collection Game 1" (BGG ID 1): BGG thing response did not include requested BGG ID 1; returned BGG IDs: 999',
+      ],
+    });
+    expect(persisted.games).toEqual([]);
+  });
+
+  test("persists only valid requested games from a mixed response", async () => {
+    mockFetch.enqueue(200, collectionXmlForImport([1, 2, 3]));
+    mockFetch.enqueue(200, thingXmlForImport([1, 2, 2, 999]));
+
+    const summary = await gameService.importBggCollection();
+    const persisted = await storageService.loadCollection();
+
+    expect(summary.imported).toBe(1);
+    expect(summary.skipped).toBe(0);
+    expect(summary.errors).toEqual([
+      'Failed to fetch full data for "Collection Game 2" (BGG ID 2): BGG thing response was ambiguous for requested BGG ID 2; returned 2 matching items',
+      'Failed to fetch full data for "Collection Game 3" (BGG ID 3): BGG thing response did not include requested BGG ID 3; returned BGG IDs: 1, 2, 2, 999',
+    ]);
+    expect(persisted.games).toHaveLength(1);
+    expect(persisted.games[0]).toMatchObject({ bggId: 1, name: "Thing Game 1" });
+    expect(persisted.games.some(({ bggId }) => bggId === 2 || bggId === 999)).toBe(false);
   });
 
   test("handles empty collection", async () => {

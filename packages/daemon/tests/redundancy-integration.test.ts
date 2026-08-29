@@ -13,6 +13,7 @@ import type {
   Collection,
   PredictedGameResponse,
 } from "@shelf-judge/shared";
+import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import type { GameService } from "../src/services/game-service";
 import type { PredictionService } from "../src/services/prediction-service";
 import type { StorageService } from "../src/services/storage-service";
@@ -51,9 +52,11 @@ function makeGame(
   bggData: BggGameData | null,
   overrides: Partial<Game> = {},
 ): Game {
-  return {
+  const game: Game = {
     id,
     bggId: bggData ? 1 : null,
+    entityMetadata: createInitialEntityMetadata(bggData ? 1 : null),
+    latestPlayCountCheck: null,
     name,
     yearPublished: 2020,
     minPlayers: 2,
@@ -82,6 +85,11 @@ function makeGame(
     createdAt: now,
     updatedAt: now,
     ...overrides,
+  };
+  return {
+    ...game,
+    entityMetadata: createInitialEntityMetadata(game.bggId),
+    latestPlayCountCheck: null,
   };
 }
 
@@ -137,7 +145,8 @@ const allGamesWithScores: GameWithScore[] = [
 ];
 
 const defaultCollection: Collection = {
-  schemaVersion: 3,
+  schemaVersion: 4,
+  revision: 0,
   id: "collection-1",
   name: "Test",
   axes: [
@@ -168,6 +177,8 @@ const defaultCollection: Collection = {
   ],
   games: [gameA, gameB, gameC],
   entertainmentBenchmark: null,
+  intentions: [],
+  commandReceipts: [],
   createdAt: now,
   updatedAt: now,
 };

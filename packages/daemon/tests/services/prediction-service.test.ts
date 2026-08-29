@@ -8,7 +8,11 @@ import type {
   TournamentGameStatsDisplay,
   TournamentSettings,
 } from "@shelf-judge/shared";
-import { SuggestedPlayerPollSchema } from "@shelf-judge/shared";
+import {
+  createCompleteEntityMetadata,
+  createInitialEntityMetadata,
+  SuggestedPlayerPollSchema,
+} from "@shelf-judge/shared";
 import { createPredictionService } from "../../src/services/prediction-service.js";
 import { createFitnessService } from "../../src/services/fitness-service.js";
 import type { BggGameData } from "@shelf-judge/shared";
@@ -83,9 +87,11 @@ function makeGame(
   ratings: Record<string, number> = {},
   hasBgg = true,
 ): Game {
+  const bggId = hasBgg ? 12345 : null;
   return {
     id,
-    bggId: hasBgg ? 12345 : null,
+    bggId,
+    entityMetadata: createInitialEntityMetadata(bggId),
     name,
     yearPublished: 2020,
     minPlayers: 2,
@@ -93,6 +99,7 @@ function makeGame(
     bestPlayers: null,
     playingTime: 60,
     numPlays: null,
+    latestPlayCountCheck: null,
     acquisition: { state: "unknown" },
     playCountEvidence: { status: "missing", source: "manual", observedAt: null },
     durationEvidence: { status: "missing", source: "manual", observedAt: null },
@@ -132,11 +139,14 @@ function makeGame(
 
 function makeCollection(games: Game[], axes: Axis[]): Collection {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
+    revision: 0,
     id: "test-col",
     name: "Test Collection",
     axes,
     games,
+    intentions: [],
+    commandReceipts: [],
     entertainmentBenchmark: null,
     createdAt: now,
     updatedAt: now,
@@ -662,6 +672,14 @@ describe("prediction-service", () => {
     });
 
     const makeBggResult = (name: string, bggData?: BggGameData): BggGameResult => ({
+      entityMetadata: createCompleteEntityMetadata(
+        {
+          mechanic: bggData?.mechanics ?? makeBggData().mechanics,
+          designer: [],
+          artist: [],
+        },
+        now,
+      ),
       metadata: {
         bggId: 99999,
         name,
@@ -723,6 +741,10 @@ describe("prediction-service", () => {
             fieldsReturned: ["numPlays"],
           },
         },
+        entityMetadata: createCompleteEntityMetadata(
+          { mechanic: bggData.mechanics, designer: [], artist: [] },
+          now,
+        ),
       };
       const bggClient = createStubBggClient({
         ...makeBggResult("New Game", bggData),
@@ -741,6 +763,7 @@ describe("prediction-service", () => {
       expect(result.game.name).toBe("New Game");
       expect(result.game.bggId).toBe(99999);
       expect(result.game.bestPlayers).toBe(3);
+      expect(result.game.entityMetadata).toEqual(bggObservations.entityMetadata);
       expect(result.score).toBeDefined();
       expect(result.bggObservations).toEqual(bggObservations);
       // Temporary game has no ratings, so all personal axes should be predicted
@@ -856,6 +879,7 @@ describe("prediction-service", () => {
       const collection = buildRatedCollection(6);
       // Give one game a specific bggId
       collection.games[0].bggId = 42;
+      collection.games[0].entityMetadata = createInitialEntityMetadata(42);
       const bggClient = createStubBggClient();
 
       const service = createPredictionService({

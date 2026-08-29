@@ -16,6 +16,8 @@ related:
 
 # Plan: Collection Identity and Taste Profiling
 
+> **Historical and superseded.** This executed plan records the original April 2026 implementation sequence. It is not the current profiling contract. See [Collection Identity and Trusted Insight Profiling](../../specs/collection/collection-profiling.md) for implemented behavior. In particular, the centroid/two-standard-deviation outlier design and classifications, full-fitness divergence, concentration/high-variance suggestions, omitted insufficiency, and deferred/free-form narration described below have been repaired, replaced, retired, or rejected.
+
 ## Spec Reference
 
 **Spec**: `.lore/specs/collection/collection-profiling.md`

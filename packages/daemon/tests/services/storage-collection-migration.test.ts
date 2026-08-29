@@ -109,7 +109,7 @@ describe("storage collection migration ordering and recovery", () => {
       const migrated = await service.loadCollection();
       const persistedAfterMigration = await fs.readFile(collectionPath, "utf8");
       expect(JSON.parse(persistedAfterMigration)).toEqual(migrated);
-      expect(migrated.schemaVersion).toBe(3);
+      expect(migrated.schemaVersion).toBe(4);
       expect(
         await fs.stat(profilePath).then(
           () => true,
@@ -162,13 +162,13 @@ describe("storage collection migration ordering and recovery", () => {
       dataDir: DATA_DIR,
       configPath: "/test/config.json",
       fileOps: createMockFileOps({
-        [COLLECTION_PATH]: JSON.stringify({ ...historicalCollection, schemaVersion: 4 }),
+        [COLLECTION_PATH]: JSON.stringify({ ...historicalCollection, schemaVersion: 5 }),
       }),
       logger: migrationLog,
     });
     // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
     await expect(migrationService.loadCollection()).rejects.toThrow(
-      "Unsupported collection schema version 4",
+      "Unsupported collection schema version 5",
     );
     expect(
       migrationLog.entries.some((entry) => entry.includes("collection migration failed")),
@@ -182,11 +182,14 @@ describe("storage collection migration ordering and recovery", () => {
       logger: validationLog,
     });
     const invalidCurrent: Collection = {
-      schemaVersion: 3,
+      schemaVersion: 4,
+      revision: 0,
       id: "collection-1",
       name: "",
       axes: [],
       games: [],
+      intentions: [],
+      commandReceipts: [],
       entertainmentBenchmark: null,
       createdAt: NOW,
       updatedAt: NOW,
@@ -293,7 +296,7 @@ describe("storage collection migration ordering and recovery", () => {
 
     const migrated = await service.loadCollection();
 
-    expect(migrated.schemaVersion).toBe(3);
+    expect(migrated.schemaVersion).toBe(4);
     expect(invalidated).toEqual(["v1-derived-artifact"]);
     expect(JSON.parse(fileOps.files.get(COLLECTION_PATH) ?? "null")).toEqual(migrated);
   });
@@ -372,5 +375,32 @@ describe("storage collection migration ordering and recovery", () => {
     expect(
       CollectionSchema.safeParse(JSON.parse(fileOps.files.get(COLLECTION_PATH) ?? "null")).success,
     ).toBe(true);
+  });
+
+  test("collection temporary-write failure keeps the old version and retries safely", async () => {
+    const { service, fileOps, original } = makeService();
+    const originalWrite = fileOps.writeFileExclusive.bind(fileOps);
+    let failCollectionWrite = true;
+    fileOps.writeFileExclusive = (filePath, content) => {
+      if (
+        filePath.includes("collection.json") &&
+        filePath.endsWith(".tmp") &&
+        failCollectionWrite
+      ) {
+        failCollectionWrite = false;
+        return Promise.reject(new Error("injected collection temporary-write failure"));
+      }
+      return originalWrite(filePath, content);
+    };
+
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+    await expect(service.loadCollection()).rejects.toThrow(
+      "injected collection temporary-write failure",
+    );
+    expect(fileOps.files.get(COLLECTION_PATH)).toBe(original);
+
+    const loaded = await service.loadCollection();
+    expect(loaded.schemaVersion).toBe(4);
+    expect(JSON.parse(fileOps.files.get(COLLECTION_PATH) ?? "null")).toEqual(loaded);
   });
 });

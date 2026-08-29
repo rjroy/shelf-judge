@@ -7,6 +7,7 @@ import type {
   TournamentAxis,
   TournamentData,
 } from "@shelf-judge/shared";
+import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import { createFitnessService } from "../src/services/fitness-service.js";
 
 const service = createFitnessService();
@@ -30,9 +31,11 @@ function bgg(overrides: Partial<BggGameData> = {}): BggGameData {
 }
 
 function game(ratings: Record<string, number> = {}, overrides: Partial<Game> = {}): Game {
-  return {
+  const target: Game = {
     id: "game-1",
     bggId: null,
+    entityMetadata: createInitialEntityMetadata(null),
+    latestPlayCountCheck: null,
     name: "Game",
     yearPublished: null,
     minPlayers: null,
@@ -61,6 +64,11 @@ function game(ratings: Record<string, number> = {}, overrides: Partial<Game> = {
     createdAt: now,
     updatedAt: now,
     ...overrides,
+  };
+  return {
+    ...target,
+    entityMetadata: createInitialEntityMetadata(target.bggId),
+    latestPlayCountCheck: null,
   };
 }
 

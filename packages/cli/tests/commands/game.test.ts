@@ -1,4 +1,5 @@
 import { describe, test, expect } from "bun:test";
+import { canonicalIntentionMutationCases } from "../../../shared/tests/fixtures/intention-mutation.js";
 import {
   gameSearch,
   gameAdd,
@@ -10,13 +11,21 @@ import {
   gameClearShelf,
   gameAcquisition,
   gameValue,
+  gameIntentionSet,
+  gameIntentionResolve,
+  gamePlaysSet,
 } from "../../src/commands/game.js";
 import {
   calculatePurchaseUtilization,
+  createInitialEntityMetadata,
   type Acquisition,
+  type Game,
+  type IntentionMutationResult,
+  type PlayIntention,
   type PurchaseUtilizationInput,
 } from "@shelf-judge/shared";
 import { createMockClient } from "../helpers/mock-client.js";
+import { StructuredCliError, formatCliError } from "../../src/errors.js";
 
 async function expectThrows(fn: () => Promise<unknown>, match: string): Promise<void> {
   const noError = Symbol("no error");
@@ -631,6 +640,28 @@ describe("game remove", () => {
     const parsed = JSON.parse(output) as { removed: boolean };
     expect(parsed.removed).toBe(true);
   });
+
+  test("preserves a structured intention-history conflict", async () => {
+    const failure = {
+      code: "history-conflict" as const,
+      gameId: "abc-123",
+      intentionIds: ["intention-1"],
+    };
+    const conflictClient = createMockClient({
+      routes: {
+        "DELETE /api/games/abc-123": {
+          response: { ok: false, status: 409, data: failure },
+        },
+      },
+    });
+    try {
+      await gameRemove(conflictClient, ["abc-123"], { json: true });
+      throw new Error("Expected removal to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(StructuredCliError);
+      expect(JSON.parse(formatCliError(error))).toEqual(failure);
+    }
+  });
 });
 
 describe("parseRateArgs", () => {
@@ -732,5 +763,428 @@ describe("game shelf assignment", () => {
     const client = createMockClient();
     await expectThrows(() => gameClearShelf(client, [], { json: false }), "Usage");
     await expectThrows(() => gameClearShelf(client, ["one", "two"], { json: false }), "Usage");
+  });
+});
+
+const commandIds = {
+  create: "30000000-0000-4000-8000-000000000001",
+  complete: "30000000-0000-4000-8000-000000000002",
+  retire: "30000000-0000-4000-8000-000000000003",
+};
+const activeIntention = {
+  intentionId: "intention-1",
+  gameId: "game/1",
+  kind: "first-play" as const,
+  baseline: {
+    playCount: 0,
+    evidenceSource: "manual" as const,
+    observedAt: "2026-08-28T10:00:00.000Z",
+  },
+  createdAt: "2026-08-28T10:01:00.000Z",
+  version: 1,
+  resolution: null,
+};
+
+function acceptedIntention(
+  commandId: string,
+  intention: PlayIntention = activeIntention,
+): IntentionMutationResult {
+  return { ok: true, commandId, intention, linkedOwnershipTransition: null };
+}
+
+function correctionGame(): Game {
+  const observedAt = "2026-08-28T10:02:00.000Z";
+  return {
+    id: "game/1",
+    bggId: null,
+    name: "Game",
+    yearPublished: null,
+    minPlayers: null,
+    maxPlayers: null,
+    bestPlayers: null,
+    playingTime: null,
+    imageUrl: null,
+    bggData: null,
+    numPlays: 1,
+    acquisition: { state: "unknown" },
+    playCountEvidence: { status: "valid", value: 1, source: "manual", observedAt },
+    durationEvidence: { status: "missing", source: "manual", observedAt: null },
+    playerRangeEvidence: { status: "missing", source: "manual", observedAt: null },
+    suggestedPlayerPoll: {
+      status: "valid",
+      state: "absent",
+      buckets: [],
+      source: "manual",
+      observedAt: null,
+    },
+    bestPlayersInvalidEvidence: null,
+    entityMetadata: createInitialEntityMetadata(null),
+    latestPlayCountCheck: null,
+    ownership: "owned",
+    boxDimensions: null,
+    manualShelfId: null,
+    ratings: {},
+    createdAt: "2026-08-28T09:00:00.000Z",
+    updatedAt: observedAt,
+  };
+}
+
+describe("game intentions", () => {
+  test.each([...canonicalIntentionMutationCases])(
+    "preserves canonical $label through CLI stdout, stderr, and exit behavior",
+    async ({ command, result, status }) => {
+      const route =
+        command.type === "create"
+          ? `POST /api/games/${command.gameId}/intention`
+          : `POST /api/games/${command.gameId}/intention/${command.intentionId}/${command.type}`;
+      const client = createMockClient({
+        routes: { [route]: { response: { ok: status === 200, status, data: result } } },
+      });
+      let stdout = "";
+      let stderr = "";
+      let exitCode = 0;
+      try {
+        stdout =
+          command.type === "create"
+            ? await gameIntentionSet(
+                client,
+                [command.gameId, command.kind, "--command-id", command.commandId],
+                { json: true },
+                { writeStderr: (message) => (stderr += message) },
+              )
+            : await gameIntentionResolve(
+                client,
+                command.type,
+                [
+                  command.gameId,
+                  command.intentionId,
+                  "--expected-version",
+                  String(command.expectedVersion),
+                  "--command-id",
+                  command.commandId,
+                ],
+                { json: true },
+                { writeStderr: (message) => (stderr += message) },
+              );
+      } catch (error) {
+        exitCode = 1;
+        stderr = formatCliError(error);
+      }
+
+      if (result.ok) {
+        expect(exitCode).toBe(0);
+        expect(stderr).toBe("");
+        expect(JSON.parse(stdout)).toEqual(result);
+      } else {
+        expect(exitCode).toBe(1);
+        expect(stdout).toBe("");
+        const rendered = JSON.parse(stderr) as IntentionMutationResult & { guidance?: string };
+        expect(rendered).toMatchObject(result);
+        expect(rendered.guidance !== undefined).toBe(result.error.code === "stale-version");
+      }
+    },
+  );
+
+  test("set sends the strict create body and preserves a supplied command ID", async () => {
+    const result = acceptedIntention(commandIds.create);
+    const client = createMockClient({
+      routes: {
+        "POST /api/games/game%2F1/intention": {
+          response: { ok: true, status: 200, data: result },
+        },
+      },
+    });
+    const originalPost = client.post.bind(client);
+    let body: unknown;
+    client.post = <T>(path: string, nextBody?: unknown) => {
+      body = nextBody;
+      return originalPost<T>(path, nextBody);
+    };
+
+    const output = await gameIntentionSet(
+      client,
+      ["game/1", "first-play", "--command-id", commandIds.create],
+      { json: false },
+    );
+    expect(body).toEqual({
+      commandId: commandIds.create,
+      kind: "first-play",
+      expectedActiveIntention: "absent",
+    });
+    expect(JSON.parse(output)).toEqual(result);
+  });
+
+  test.each(["complete", "retire"] as const)(
+    "%s sends only commandId and expectedVersion and preserves owner resolution evidence",
+    async (type) => {
+      const commandId = commandIds[type];
+      const intention = {
+        ...activeIntention,
+        version: 2,
+        resolution:
+          type === "complete"
+            ? {
+                outcome: "completed" as const,
+                source: "owner-confirmed" as const,
+                resolvedAt: "2026-08-28T10:02:00.000Z",
+              }
+            : {
+                outcome: "retired" as const,
+                source: "owner-retired" as const,
+                resolvedAt: "2026-08-28T10:02:00.000Z",
+              },
+      };
+      const result = acceptedIntention(commandId, intention);
+      const path = `/api/games/game%2F1/intention/intention-1/${type}`;
+      const client = createMockClient({
+        routes: { [`POST ${path}`]: { response: { ok: true, status: 200, data: result } } },
+      });
+      const originalPost = client.post.bind(client);
+      let body: unknown;
+      client.post = <T>(requestPath: string, nextBody?: unknown) => {
+        body = nextBody;
+        return originalPost<T>(requestPath, nextBody);
+      };
+
+      const output = await gameIntentionResolve(
+        client,
+        type,
+        ["game/1", "intention-1", "--expected-version", "1", "--command-id", commandId],
+        { json: true },
+      );
+      expect(body).toEqual({ commandId, expectedVersion: 1 });
+      expect(JSON.parse(output)).toEqual(result);
+      expect(JSON.parse(output)).not.toHaveProperty("game");
+    },
+  );
+
+  test("preserves stale current state and adds refresh-and-review guidance", async () => {
+    const stale = {
+      ok: false as const,
+      commandId: commandIds.complete,
+      error: {
+        code: "stale-version" as const,
+        gameId: "game/1",
+        intentionId: "intention-1",
+        expectedVersion: 1,
+        current: {
+          ...activeIntention,
+          version: 2,
+          resolution: {
+            outcome: "completed" as const,
+            source: "owner-confirmed" as const,
+            resolvedAt: "2026-08-28T10:02:00.000Z",
+          },
+        },
+      },
+    };
+    const client = createMockClient({
+      routes: {
+        "POST /api/games/game%2F1/intention/intention-1/complete": {
+          response: { ok: false, status: 409, data: stale },
+        },
+      },
+    });
+    try {
+      await gameIntentionResolve(
+        client,
+        "complete",
+        ["game/1", "intention-1", "--expected-version", "1", "--command-id", commandIds.complete],
+        { json: true },
+      );
+      throw new Error("Expected stale command to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(StructuredCliError);
+      const rendered = JSON.parse(formatCliError(error)) as {
+        error: typeof stale.error;
+        guidance: string;
+      };
+      expect(rendered.error.current).toEqual(stale.error.current);
+      expect(rendered.guidance).toMatch(/Refresh.*review.*Do not retry/i);
+    }
+  });
+
+  test.each([
+    { code: "validation", issues: [{ field: "kind", message: "Invalid kind" }] },
+    { code: "game-not-found", gameId: "game/1" },
+    { code: "intention-not-found", gameId: "game/1", intentionId: "intention-1" },
+    { code: "ineligible-game", gameId: "game/1", reason: "not-owned" },
+    { code: "active-intention-conflict", gameId: "game/1", current: activeIntention },
+    { code: "command-reuse", commandId: commandIds.create },
+    { code: "history-conflict", gameId: "game/1", intentionIds: ["intention-1"] },
+    { code: "persistence-failure", operation: "game.intention.create", message: "disk full" },
+  ] as const)("validates and preserves structured intention failure %#", async (error) => {
+    const failure = { ok: false as const, commandId: commandIds.create, error };
+    const client = createMockClient({
+      routes: {
+        "POST /api/games/game%2F1/intention": {
+          response: { ok: false, status: 400, data: failure },
+        },
+      },
+    });
+    try {
+      await gameIntentionSet(client, ["game/1", "first-play", "--command-id", commandIds.create], {
+        json: true,
+      });
+      throw new Error("Expected command to fail");
+    } catch (caught) {
+      expect(caught).toBeInstanceOf(StructuredCliError);
+      expect(JSON.parse(formatCliError(caught))).toEqual(failure);
+    }
+  });
+
+  test.each(
+    (
+      [
+        [],
+        ["game-1"],
+        ["game-1", "invalid-kind"],
+        ["game-1", "first-play", "extra"],
+        ["game-1", "first-play", "--unknown", "value"],
+        ["game-1", "first-play", "--command-id"],
+        ["game-1", "first-play", "--command-id", "not-a-uuid"],
+        [
+          "game-1",
+          "first-play",
+          "--command-id",
+          commandIds.create,
+          "--command-id",
+          commandIds.create,
+        ],
+      ] as string[][]
+    ).map((args) => [args] as [string[]]),
+  )("set rejects malformed arguments %#", async (args) => {
+    await expectThrows(() => gameIntentionSet(createMockClient(), args, { json: false }), "Usage");
+  });
+
+  test.each(
+    (
+      [
+        [],
+        ["game-1", "intention-1"],
+        ["game-1", "intention-1", "--expected-version"],
+        ["game-1", "intention-1", "--expected-version", "0"],
+        ["game-1", "intention-1", "--expected-version", "1.5"],
+        ["game-1", "intention-1", "--expected-version", "1", "extra"],
+        ["game-1", "intention-1", "--other", "1"],
+      ] as string[][]
+    ).map((args) => [args] as [string[]]),
+  )("resolve rejects malformed arguments %#", async (args) => {
+    await expectThrows(
+      () => gameIntentionResolve(createMockClient(), "complete", args, { json: false }),
+      "Usage",
+    );
+  });
+
+  test("rejects malformed success and failure responses", async () => {
+    for (const data of [
+      { ok: true, commandId: commandIds.create },
+      { ok: false, commandId: commandIds.create, error: { code: "unknown" } },
+    ]) {
+      const client = createMockClient({
+        routes: {
+          "POST /api/games/game-1/intention": {
+            response: { ok: data.ok, status: data.ok ? 200 : 400, data },
+          },
+        },
+      });
+      await expectThrows(
+        () =>
+          gameIntentionSet(client, ["game-1", "first-play", "--command-id", commandIds.create], {
+            json: true,
+          }),
+        "Invalid intention response",
+      );
+    }
+  });
+});
+
+describe("manual play correction", () => {
+  test("sends an exact count and renders updated evidence plus automatic completion", async () => {
+    const game = correctionGame();
+    const linkedIntentionTransition = {
+      ...activeIntention,
+      version: 2,
+      resolution: {
+        outcome: "completed" as const,
+        source: "observed-play-increase" as const,
+        resolvedAt: game.updatedAt,
+      },
+    };
+    const result = { ok: true as const, game, linkedIntentionTransition };
+    const client = createMockClient({
+      routes: {
+        "PUT /api/games/game%2F1/plays": { response: { ok: true, status: 200, data: result } },
+      },
+    });
+    const originalPut = client.put.bind(client);
+    let body: unknown;
+    client.put = <T>(path: string, nextBody?: unknown) => {
+      body = nextBody;
+      return originalPut<T>(path, nextBody);
+    };
+    const output = await gamePlaysSet(client, ["game/1", "1"], { json: false });
+    expect(body).toEqual({ playCount: 1 });
+    expect(JSON.parse(output)).toEqual(result);
+  });
+
+  test.each(
+    (
+      [
+        [],
+        ["game-1"],
+        ["game-1", "-1"],
+        ["game-1", "1.5"],
+        ["game-1", "NaN"],
+        ["game-1", String(Number.MAX_SAFE_INTEGER + 1)],
+        ["game-1", "1", "extra"],
+      ] as string[][]
+    ).map((args) => [args] as [string[]]),
+  )("rejects malformed arguments %#", async (args) => {
+    await expectThrows(() => gamePlaysSet(createMockClient(), args, { json: false }), "Usage");
+  });
+
+  test.each([
+    { code: "validation", issues: [{ field: "playCount", message: "Required" }] },
+    { code: "game_not_found", error: "Game not found: missing" },
+    { code: "persistence-failure", operation: "shelf.game.plays.set", message: "disk full" },
+    {
+      ok: false,
+      error: {
+        code: "non-monotonic-observation",
+        gameId: "game-1",
+        attemptedObservedAt: "2026-08-28T10:00:00.000Z",
+        latestAcceptedAt: "2026-08-28T10:00:00.000Z",
+      },
+    },
+  ])("validates and preserves structured daemon failure %#", async (failure) => {
+    const client = createMockClient({
+      routes: {
+        "PUT /api/games/game-1/plays": {
+          response: { ok: false, status: 400, data: failure },
+        },
+      },
+    });
+    try {
+      await gamePlaysSet(client, ["game-1", "1"], { json: true });
+      throw new Error("Expected correction to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(StructuredCliError);
+      expect(JSON.parse(formatCliError(error))).toEqual(failure);
+    }
+  });
+
+  test("rejects an unvalidated manual-play error shape", async () => {
+    const client = createMockClient({
+      routes: {
+        "PUT /api/games/game-1/plays": {
+          response: { ok: false, status: 409, data: { code: "stale-version", current: {} } },
+        },
+      },
+    });
+    await expectThrows(
+      () => gamePlaysSet(client, ["game-1", "1"], { json: true }),
+      "Invalid play-correction response",
+    );
   });
 });

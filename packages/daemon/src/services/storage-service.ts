@@ -16,6 +16,9 @@ import type {
 import {
   AcquisitionSchema,
   CURRENT_COLLECTION_SCHEMA_VERSION,
+  ProfileDataSchema,
+  PredictionSettingsSchema,
+  RedundancySettingsSchema,
   createFreshCollectionDerivedAxes,
   CollectionSchema,
   EntertainmentBenchmarkSchema,
@@ -40,14 +43,21 @@ import { DEFAULT_NICHE_SETTINGS } from "./niche-engine.js";
 import { DEFAULT_REDUNDANCY_SETTINGS } from "./redundancy-engine.js";
 import { createLogger, type Logger } from "./logger.js";
 
-export interface StorageService {
+export interface CollectionReader {
   loadCollection(): Promise<Collection>;
+}
+
+export interface CollectionPersistence {
   saveCollection(collection: Collection): Promise<void>;
+}
+
+export interface StorageService extends CollectionReader, CollectionPersistence {
   loadConfig(): Promise<AppConfig>;
   saveConfig(config: AppConfig): Promise<void>;
   loadTournament(): Promise<TournamentData>;
   saveTournament(data: TournamentData): Promise<void>;
   loadProfile(): Promise<ProfileData | null>;
+  discardProfile?(): Promise<void>;
   saveProfile(data: ProfileData): Promise<void>;
   loadPredictionSettings(): Promise<PredictionSettings>;
   savePredictionSettings(settings: PredictionSettings): Promise<void>;
@@ -77,6 +87,7 @@ function createDefaultCollection(dependencies?: CollectionMigrationDependencies)
   const createId = dependencies === undefined ? uuidv4 : () => dependencies.createId();
   return CollectionSchema.parse({
     schemaVersion: CURRENT_COLLECTION_SCHEMA_VERSION,
+    revision: 0,
     id: createId(),
     name: "My Collection",
     axes: [
@@ -94,6 +105,8 @@ function createDefaultCollection(dependencies?: CollectionMigrationDependencies)
       },
     ],
     games: [],
+    intentions: [],
+    commandReceipts: [],
     entertainmentBenchmark: null,
     createdAt: now,
     updatedAt: now,
@@ -127,7 +140,9 @@ function storedInvalidEvidence(value: unknown, present: boolean): InvalidEvidenc
 }
 
 export function decodeStoredCollection(raw: unknown, logger: Logger): StoredCollectionDecodeResult {
-  if (!isRecord(raw) || raw.schemaVersion !== 3) return { data: raw, normalized: false };
+  if (!isRecord(raw) || (raw.schemaVersion !== 3 && raw.schemaVersion !== 4)) {
+    return { data: raw, normalized: false };
+  }
 
   let normalized = false;
   const collectionId = typeof raw.id === "string" ? raw.id : "unknown";
@@ -205,6 +220,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
   // a missing tmp. Once the file exists on disk, the read path is idempotent
   // and the lock has no observable effect.
   const inFlightLoads = new Map<string, Promise<unknown>>();
+  let profileOperations: Promise<void> = Promise.resolve();
   function withLoadLock<T>(filePath: string, fn: () => Promise<T>): Promise<T> {
     const existing = inFlightLoads.get(filePath);
     if (existing) return existing as Promise<T>;
@@ -215,8 +231,26 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     return promise;
   }
 
+  function withProfileLock<T>(fn: () => Promise<T>): Promise<T> {
+    const operation = profileOperations.then(fn, fn);
+    profileOperations = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return operation;
+  }
+
   async function writeAtomically(filePath: string, content: string): Promise<void> {
     await atomicWrite(filePath, content, fileOps, deps.temporaryPathForAttempt);
+  }
+
+  async function invalidateProfile(
+    trigger: "prediction-settings" | "redundancy-settings",
+  ): Promise<void> {
+    if (!(await fileOps.exists(profilePath))) return;
+    logger.log(`profile cache invalidation attempt path=${profilePath} trigger=${trigger}`);
+    await fileOps.unlink(profilePath);
+    logger.log(`profile cache invalidation completed path=${profilePath} trigger=${trigger}`);
   }
 
   function validateCollection(collection: unknown): Collection {
@@ -294,10 +328,17 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
         logger.log(
           `collection migration checked sourceVersion=${migration.sourceVersion} targetVersion=${CURRENT_COLLECTION_SCHEMA_VERSION} axes=${migration.data.axes.length} games=${migration.data.games.length} converted=${migration.convertedAxisCount} disabled=${migration.disabledAxisCount}`,
         );
-        const validated = validateCollection(migration.data);
+        const normalizedCurrent = decoded.normalized && migration.sourceVersion === 4;
+        const candidate = normalizedCurrent
+          ? {
+              ...migration.data,
+              revision: migration.data.revision + 1,
+            }
+          : migration.data;
+        const validated = validateCollection(candidate);
         if (!migration.migrated && !decoded.normalized) return validated;
 
-        if (migration.migrated) {
+        if (migration.migrated || normalizedCurrent) {
           const artifactContext = createCollectionArtifactContext(
             dataDir,
             fileOps,
@@ -378,36 +419,72 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     },
 
     async saveTournament(data: TournamentData): Promise<void> {
+      const validated = TournamentDataSchema.parse(data);
       await fileOps.mkdir(dataDir);
-      await writeAtomically(tournamentPath, JSON.stringify(data, null, 2));
+      await writeAtomically(tournamentPath, JSON.stringify(validated, null, 2));
     },
 
-    async loadProfile(): Promise<ProfileData | null> {
-      const exists = await fileOps.exists(profilePath);
-      if (!exists) return null;
+    loadProfile(): Promise<ProfileData | null> {
+      return withProfileLock(async () => {
+        const exists = await fileOps.exists(profilePath);
+        if (!exists) return null;
 
-      const raw = await fileOps.readFile(profilePath);
-      return JSON.parse(raw) as ProfileData;
+        logger.log(`profile cache read attempt path=${profilePath}`);
+        const raw = await fileOps.readFile(profilePath);
+        logger.log(`profile cache read completed path=${profilePath} bytes=${raw.length}`);
+        try {
+          const profile = ProfileDataSchema.parse(JSON.parse(raw));
+          logger.log(
+            `profile cache validation completed path=${profilePath} contractVersion=${profile.contractVersion} algorithmVersion=${profile.algorithmVersion}`,
+          );
+          return profile;
+        } catch (error) {
+          logger.warn(`profile cache invalid; discarding path=${profilePath}`, error);
+          await fileOps.unlink(profilePath);
+          logger.log(`profile cache discarded path=${profilePath}`);
+          return null;
+        }
+      });
     },
 
-    async saveProfile(data: ProfileData): Promise<void> {
-      await fileOps.mkdir(dataDir);
-      await writeAtomically(profilePath, JSON.stringify(data, null, 2));
+    discardProfile(): Promise<void> {
+      return withProfileLock(async () => {
+        if (!(await fileOps.exists(profilePath))) return;
+        logger.log(`profile cache discard attempt path=${profilePath}`);
+        await fileOps.unlink(profilePath);
+        logger.log(`profile cache discard completed path=${profilePath}`);
+      });
+    },
+
+    saveProfile(data: ProfileData): Promise<void> {
+      return withProfileLock(async () => {
+        const validated = ProfileDataSchema.parse(data);
+        await fileOps.mkdir(dataDir);
+        logger.log(
+          `profile cache persistence attempt path=${profilePath} contractVersion=${validated.contractVersion} algorithmVersion=${validated.algorithmVersion}`,
+        );
+        await writeAtomically(profilePath, JSON.stringify(validated, null, 2));
+        logger.log(`profile cache persistence completed path=${profilePath}`);
+      });
     },
 
     async loadPredictionSettings(): Promise<PredictionSettings> {
       const predictionSettingsPath = path.join(dataDir, "prediction-settings.json");
       const exists = await fileOps.exists(predictionSettingsPath);
-      if (!exists) return { ...DEFAULT_PREDICTION_SETTINGS };
+      if (!exists) return PredictionSettingsSchema.parse({ ...DEFAULT_PREDICTION_SETTINGS });
 
       const raw = await fileOps.readFile(predictionSettingsPath);
-      return JSON.parse(raw) as PredictionSettings;
+      return PredictionSettingsSchema.parse(JSON.parse(raw));
     },
 
     async savePredictionSettings(settings: PredictionSettings): Promise<void> {
       const predictionSettingsPath = path.join(dataDir, "prediction-settings.json");
-      await fileOps.mkdir(dataDir);
-      await writeAtomically(predictionSettingsPath, JSON.stringify(settings, null, 2));
+      const validated = PredictionSettingsSchema.parse(settings);
+      await withProfileLock(async () => {
+        await fileOps.mkdir(dataDir);
+        await writeAtomically(predictionSettingsPath, JSON.stringify(validated, null, 2));
+        await invalidateProfile("prediction-settings");
+      });
     },
 
     async loadNicheSettings(): Promise<NicheSettings> {
@@ -428,16 +505,20 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     async loadRedundancySettings(): Promise<RedundancySettings> {
       const redundancySettingsPath = path.join(dataDir, "redundancy-settings.json");
       const exists = await fileOps.exists(redundancySettingsPath);
-      if (!exists) return { ...DEFAULT_REDUNDANCY_SETTINGS };
+      if (!exists) return RedundancySettingsSchema.parse({ ...DEFAULT_REDUNDANCY_SETTINGS });
 
       const raw = await fileOps.readFile(redundancySettingsPath);
-      return JSON.parse(raw) as RedundancySettings;
+      return RedundancySettingsSchema.parse(JSON.parse(raw));
     },
 
     async saveRedundancySettings(settings: RedundancySettings): Promise<void> {
       const redundancySettingsPath = path.join(dataDir, "redundancy-settings.json");
-      await fileOps.mkdir(dataDir);
-      await writeAtomically(redundancySettingsPath, JSON.stringify(settings, null, 2));
+      const validated = RedundancySettingsSchema.parse(settings);
+      await withProfileLock(async () => {
+        await fileOps.mkdir(dataDir);
+        await writeAtomically(redundancySettingsPath, JSON.stringify(validated, null, 2));
+        await invalidateProfile("redundancy-settings");
+      });
     },
 
     async loadWishlist(): Promise<WishlistEntry[]> {

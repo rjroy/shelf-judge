@@ -1,85 +1,72 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import type { CollectionProfileResult } from "@shelf-judge/shared";
 import { getProfile } from "@/lib/api";
-import { NarrationSection } from "@/components/profile/narration-section";
-import { AxisDistributions } from "@/components/profile/axis-distributions";
-import { AxisWeights } from "@/components/profile/axis-weights";
-import { BggClustering } from "@/components/profile/bgg-clustering";
-import { UtilityCurves } from "@/components/profile/utility-curves";
-import { Divergence } from "@/components/profile/divergence";
-import { Outliers } from "@/components/profile/outliers";
-import { Suggestions } from "@/components/profile/suggestions";
+import { IdentitySection } from "@/components/profile/identity-section";
+import { AttentionSection } from "@/components/profile/attention-section";
+import { ProfileRetry } from "@/components/profile/profile-unavailable";
 
 export const metadata: Metadata = { title: "Shelf Judge" };
 export const dynamic = "force-dynamic";
 
-export default async function ProfileOverviewPage() {
-  let profile;
+export type ProfileOverviewState =
+  | { status: "loaded"; profile: CollectionProfileResult }
+  | { status: "unavailable"; message: string };
+
+export async function loadProfileOverview(
+  loadProfile: () => Promise<CollectionProfileResult> = getProfile,
+): Promise<ProfileOverviewState> {
   try {
-    profile = await getProfile();
-  } catch {
-    return (
-      <>
-        <div className="topbar">
-          <div className="topbar-title">Collection Profile</div>
-        </div>
-        <div className="main-scroll">
-          <div className="empty-state">
-            <h3>No profile available</h3>
-            <p>
-              Add games to your collection and rate them to generate a profile of your preferences.
-            </p>
-            <div className="empty-state-actions">
-              <Link href="/collection" className="btn btn-secondary">
-                View Collection
-              </Link>
-              <Link href="/search" className="btn btn-primary">
-                Add Game
-              </Link>
-            </div>
-          </div>
-        </div>
-      </>
-    );
+    return { status: "loaded", profile: await loadProfile() };
+  } catch (error) {
+    return {
+      status: "unavailable",
+      message: error instanceof Error ? error.message : "The profile request failed.",
+    };
   }
+}
 
-  // Exclude predicted-only scores from actual averages
-  // (profile data comes from the daemon which already handles this, but defensive)
+export default async function ProfileOverviewPage() {
+  return <ProfileOverviewContent state={await loadProfileOverview()} />;
+}
 
-  const computedDate = new Date(profile.computedAt).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+export function ProfileOverviewContent({ state }: { state: ProfileOverviewState }) {
+  const unavailable =
+    state.status === "unavailable"
+      ? state.message
+      : state.profile.status === "unavailable"
+        ? state.profile.error.message
+        : null;
 
   return (
     <>
       <div className="topbar">
-        <div className="topbar-title">Collection Profile</div>
-        <div className="topbar-meta">
-          <span>Computed {computedDate}</span>
-          <span>
-            {" "}
-            &middot; {profile.gameCount} {profile.gameCount === 1 ? "game" : "games"} &middot;{" "}
-            {profile.axisDistributions.length}{" "}
-            {profile.axisDistributions.length === 1 ? "axis" : "axes"}
-          </span>
-        </div>
+        <h1 className="topbar-title">Collection Profile</h1>
       </div>
-
-      <div className="main-scroll">
-        <NarrationSection profile={profile} />
-        <AxisDistributions
-          distributions={profile.axisDistributions}
-          gameCount={profile.gameCount}
-        />
-        <AxisWeights weights={profile.axisWeights} />
-        <BggClustering clustering={profile.bggClustering} gameCount={profile.gameCount} />
-        <UtilityCurves curves={profile.utilityCurves} />
-        {profile.divergence !== null && <Divergence games={profile.divergence} />}
-        {profile.outliers.length > 0 && <Outliers outliers={profile.outliers} />}
-        {profile.suggestions.length > 0 && <Suggestions suggestions={profile.suggestions} />}
-      </div>
+      <main className="main-scroll profile-page">
+        {unavailable !== null ? (
+          <>
+            <section className="profile-question" aria-labelledby="identity-question">
+              <h2 id="identity-question">What does my collection reveal about me?</h2>
+              <div className="profile-unavailable" data-profile-state="unavailable">
+                <p className="profile-status-label">Identity unavailable</p>
+                <p>The collection identity could not be loaded or validated.</p>
+              </div>
+            </section>
+            <section className="profile-question" aria-labelledby="attention-question">
+              <h2 id="attention-question">What deserves my attention or a decision now?</h2>
+              <ProfileRetry message={unavailable} />
+            </section>
+          </>
+        ) : state.status === "loaded" && state.profile.status === "available" ? (
+          <>
+            <IdentitySection identity={state.profile.identity} />
+            <AttentionSection
+              attention={state.profile.attention}
+              collectionState={state.profile.identity.collectionState}
+            />
+          </>
+        ) : null}
+      </main>
     </>
   );
 }

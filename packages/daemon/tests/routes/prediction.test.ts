@@ -11,9 +11,11 @@ import type {
   PredictionReadiness,
   PredictionSettings,
   NicheImpact,
+  GameDetailWithPurchaseUtilization,
   GameWithPurchaseUtilization,
 } from "@shelf-judge/shared";
 import type { BggGameResult } from "../../src/services/bgg-client.js";
+import { createCompleteEntityMetadata } from "@shelf-judge/shared";
 
 describe("prediction routes", () => {
   let ctx: TestAppContext;
@@ -102,6 +104,10 @@ describe("prediction routes", () => {
     test("returns successful prediction with predictionMeta and breakdown", async () => {
       // Set up a mock BGG client that returns distinct game data
       const makeBggResult = (bggId: number, name: string, weight: number): BggGameResult => ({
+        entityMetadata: createCompleteEntityMetadata(
+          { mechanic: [{ id: 1, name: "Deck Building" }], designer: [], artist: [] },
+          "2026-08-28T00:00:00.000Z",
+        ),
         metadata: {
           bggId,
           name,
@@ -193,11 +199,19 @@ describe("prediction routes", () => {
       ).json()) as GameWithPurchaseUtilization[];
       const predictedDetail = (await (
         await jsonRequest(ctx.app, "GET", `/api/games/${targetGame.id}?includePredicted=true`)
-      ).json()) as GameWithPurchaseUtilization;
+      ).json()) as GameDetailWithPurchaseUtilization;
       const actualDetail = (await (
         await jsonRequest(ctx.app, "GET", `/api/games/${targetGame.id}?includePredicted=false`)
-      ).json()) as GameWithPurchaseUtilization;
-      expect(predictedList).toContainEqual(predictedDetail);
+      ).json()) as GameDetailWithPurchaseUtilization;
+      const sharedPredictedDetail: GameWithPurchaseUtilization = {
+        game: predictedDetail.game,
+        score: predictedDetail.score,
+        bggDataStale: predictedDetail.bggDataStale,
+        nichePosition: predictedDetail.nichePosition,
+        displayScore: predictedDetail.displayScore,
+        purchaseUtilization: predictedDetail.purchaseUtilization,
+      };
+      expect(predictedList).toContainEqual(sharedPredictedDetail);
       expect(predictedDetail.score?.score).toBe(prediction.score.score);
       expect(predictedDetail.displayScore).toBe(
         predictedDetail.purchaseUtilization.evidence.fitness.status === "valid"
@@ -237,6 +251,10 @@ describe("prediction routes", () => {
       const bggClient = createMockBggClient({
         getGame: (bggId: number) =>
           Promise.resolve({
+            entityMetadata: createCompleteEntityMetadata(
+              { mechanic: [{ id: 1, name: "Deck Building" }], designer: [], artist: [] },
+              "2026-08-28T00:00:00.000Z",
+            ),
             metadata: {
               bggId,
               name: `Game-${bggId}`,
@@ -284,6 +302,10 @@ describe("prediction routes", () => {
 
   describe("GET /api/predictions/bgg/:bggId", () => {
     const makeBggResult = (bggId: number, name: string): BggGameResult => ({
+      entityMetadata: createCompleteEntityMetadata(
+        { mechanic: [{ id: 1, name: "Dice Rolling" }], designer: [], artist: [] },
+        "2026-08-28T00:00:00.000Z",
+      ),
       metadata: {
         bggId,
         name,

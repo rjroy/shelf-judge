@@ -5,10 +5,17 @@ import {
   CodedAxisValidationError,
   NotFoundError,
   toErrorMessage,
+  type IntentionCommand,
+  type IntentionMutationResult,
+  IntentionMutationResultSchema,
+  intentionMutationResultMatchesCommand,
+  ManualPlayCorrectionResultSchema,
+  PlayEvidenceMutationResultSchema,
+  OwnershipMutationResultSchema,
 } from "@shelf-judge/shared";
-import type { GameWithScore, Game, RedundancySettings } from "@shelf-judge/shared";
+import type { GameWithScore } from "@shelf-judge/shared";
 import { z } from "zod";
-import type { GameService } from "../services/game-service.js";
+import { GameHistoryConflictError, type GameService } from "../services/game-service.js";
 import type { BggClient } from "../services/bgg-client.js";
 import type { PredictionService } from "../services/prediction-service.js";
 import type { StorageService } from "../services/storage-service.js";
@@ -16,28 +23,125 @@ import {
   UNSAFE_STORED_AMOUNT_SCHEMA,
   type RouteModule,
   type OperationDefinition,
+  type OperationJsonValue,
 } from "../operations.js";
-import { computeNichePositions } from "../services/niche-engine.js";
-import { computeRedundancyAdjustments } from "../services/redundancy-engine.js";
-import {
-  buildVocabulary,
-  computeContinuousRanges,
-  encodeGame,
-  getOrderedVectorAxes,
-  getVectorAxisValues,
-} from "../services/feature-vector.js";
-import type { FeatureVector } from "../services/feature-vector.js";
-
 import type { WishlistService } from "../services/wishlist-service.js";
-import { deriveDisplayStats } from "../services/tournament-service.js";
 import type { PurchaseUtilizationService } from "../services/purchase-utilization-service.js";
 import { PurchaseUtilizationValidationError } from "../services/purchase-utilization-service.js";
 import { createLogger, type Logger } from "../services/logger.js";
+import {
+  createDisplayedFitnessService,
+  type DisplayedFitnessService,
+} from "../services/displayed-fitness-service.js";
+import type { IntentionService } from "../services/intention-service.js";
 
 const INTERNAL_ERROR_RESPONSE = { error: "Internal server error", code: "internal_error" } as const;
 
 function gameNotFoundResponse(gameId: string) {
   return { error: `Game not found: ${gameId}`, code: "game_not_found" } as const;
+}
+
+const DISCOVERY_COMMAND_ID = "10000000-0000-4000-8000-000000000001";
+const DISCOVERY_ACTIVE_INTENTION = {
+  intentionId: ":intentionId",
+  gameId: ":id",
+  kind: "first-play",
+  baseline: {
+    playCount: 0,
+    evidenceSource: "manual",
+    observedAt: "2026-08-28T10:00:00.000Z",
+  },
+  createdAt: "2026-08-28T10:01:00.000Z",
+  version: 1,
+  resolution: null,
+} as const;
+
+function intentionOperationErrors(
+  type: "create" | "complete" | "retire",
+): OperationDefinition["errors"] {
+  const result = (error: Record<string, OperationJsonValue>) => ({
+    ok: false,
+    commandId: DISCOVERY_COMMAND_ID,
+    error,
+  });
+  const common: OperationDefinition["errors"] = [
+    {
+      status: 400,
+      code: "validation",
+      description: "The body does not match the strict command payload",
+      response: result({
+        code: "validation",
+        issues: [{ field: "commandId", message: "Invalid UUID" }],
+      }),
+    },
+    {
+      status: 404,
+      code: "game-not-found",
+      description: "The game does not exist",
+      response: result({ code: "game-not-found", gameId: ":id" }),
+    },
+    {
+      status: 409,
+      code: "command-reuse",
+      description: "The command ID was already accepted with another canonical payload",
+      response: result({ code: "command-reuse", commandId: DISCOVERY_COMMAND_ID }),
+    },
+    {
+      status: 500,
+      code: "persistence-failure",
+      description: "The durable collection write failed",
+      response: result({
+        code: "persistence-failure",
+        operation: `game.intention.${type}`,
+        message: "Persistence failed",
+      }),
+    },
+  ];
+  const commandSpecific: OperationDefinition["errors"] =
+    type === "create"
+      ? [
+          {
+            status: 400,
+            code: "ineligible-game",
+            description: "Ownership or current play evidence does not permit creation",
+            response: result({ code: "ineligible-game", gameId: ":id", reason: "kind-mismatch" }),
+          },
+          {
+            status: 409,
+            code: "active-intention-conflict",
+            description: "The game already has an active intention",
+            response: result({
+              code: "active-intention-conflict",
+              gameId: ":id",
+              current: DISCOVERY_ACTIVE_INTENTION,
+            }),
+          },
+        ]
+      : [
+          {
+            status: 404,
+            code: "intention-not-found",
+            description: "The intention does not exist for the game",
+            response: result({
+              code: "intention-not-found",
+              gameId: ":id",
+              intentionId: ":intentionId",
+            }),
+          },
+          {
+            status: 409,
+            code: "stale-version",
+            description: "The expected version or active state is stale",
+            response: result({
+              code: "stale-version",
+              gameId: ":id",
+              intentionId: ":intentionId",
+              expectedVersion: 2,
+              current: DISCOVERY_ACTIVE_INTENTION,
+            }),
+          },
+        ];
+  return [...common.slice(0, 2), ...commandSpecific, ...common.slice(2)];
 }
 
 export interface GameRoutesDeps {
@@ -47,6 +151,8 @@ export interface GameRoutesDeps {
   storageService?: StorageService;
   wishlistService?: WishlistService;
   purchaseUtilizationService: PurchaseUtilizationService;
+  displayedFitnessService?: DisplayedFitnessService;
+  intentionService?: IntentionService;
   logger?: Logger;
 }
 
@@ -73,6 +179,20 @@ const ShelfAssignmentBodySchema = z.object({
   shelfId: z.string().min(1).nullable(),
 });
 
+const CreateIntentionBodySchema = z
+  .object({
+    commandId: z.string().uuid(),
+    kind: z.enum(["first-play", "replay"]),
+    expectedActiveIntention: z.literal("absent"),
+  })
+  .strict();
+
+const ResolveIntentionBodySchema = z
+  .object({ commandId: z.string().uuid(), expectedVersion: z.number().int().safe().positive() })
+  .strict();
+
+const SetPlayCountBodySchema = z.object({ playCount: z.number().int().safe().min(0) }).strict();
+
 function isBggConfigured(bggClient?: BggClient): boolean {
   return bggClient !== undefined && bggClient.isConfigured();
 }
@@ -87,62 +207,6 @@ function bggNotConfiguredResponse(c: Context) {
   );
 }
 
-/**
- * Build a getFeatureVector callback and apply redundancy adjustments to scored games.
- * Shared logic for GET /games and GET /games/:id.
- * Order: scores first, niches second (on pre-redundancy scores per REQ-REDUN-26),
- * redundancy third.
- *
- * When `universe` is provided, pairwise similarity and penalties are computed against
- * the universe (e.g. prediction-enriched games), but only `games` are annotated.
- * This ensures the same game gets the same penalty regardless of which route returns it.
- */
-async function applyRedundancy(
-  games: GameWithScore[],
-  settings: RedundancySettings,
-  storageService: StorageService,
-  universe?: GameWithScore[],
-): Promise<void> {
-  if (!settings.enabled) return;
-
-  const computeGames = universe ?? games;
-
-  const [collection, tournamentData] = await Promise.all([
-    storageService.loadCollection(),
-    storageService.loadTournament(),
-  ]);
-  const gamesWithBgg = collection.games.filter((g) => g.bggData);
-  const vocabulary = buildVocabulary(gamesWithBgg);
-  const ranges = computeContinuousRanges(gamesWithBgg);
-  const vectorAxes = getOrderedVectorAxes(collection.axes);
-
-  // Per-request feature vector cache (Open Question 1 from the plan)
-  const vectorCache = new Map<string, FeatureVector>();
-  const getFeatureVector = (game: Game): FeatureVector => {
-    const cached = vectorCache.get(game.id);
-    if (cached) return cached;
-    const values = getVectorAxisValues(
-      game,
-      vectorAxes,
-      deriveDisplayStats(game.id, tournamentData).normalizedScore,
-    );
-    const vec = encodeGame(game, vocabulary, vectorAxes, values, ranges);
-    vectorCache.set(game.id, vec);
-    return vec;
-  };
-
-  const adjustments = computeRedundancyAdjustments(computeGames, settings, getFeatureVector);
-
-  for (const gws of games) {
-    if (!gws.score) continue;
-    const adj = adjustments.get(gws.game.id) ?? null;
-    gws.score.redundancyAdjustment = adj;
-    if (adj && settings.stage === "integrated") {
-      gws.score.score = adj.adjustedScore;
-    }
-  }
-}
-
 function filterByOwnership(games: GameWithScore[], ownership: string): GameWithScore[] {
   if (ownership === "all") return games;
   if (ownership === "previously-owned") {
@@ -152,61 +216,32 @@ function filterByOwnership(games: GameWithScore[], ownership: string): GameWithS
   return games.filter((g) => g.game.ownership !== "previously-owned");
 }
 
+function toPublicGameWithScore(entry: GameWithScore): GameWithScore {
+  return {
+    game: entry.game,
+    score: entry.score,
+    bggDataStale: entry.bggDataStale,
+    nichePosition: entry.nichePosition,
+  };
+}
+
 export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
-  const {
-    gameService,
-    bggClient,
-    predictionService,
-    storageService,
-    wishlistService,
-    purchaseUtilizationService,
-  } = deps;
+  const { gameService, bggClient, wishlistService, purchaseUtilizationService, intentionService } =
+    deps;
+
+  function intentions(): IntentionService {
+    if (intentionService === undefined) throw new Error("Intention service is not configured");
+    return intentionService;
+  }
+  const displayedFitnessService =
+    deps.displayedFitnessService ??
+    createDisplayedFitnessService({
+      gameService,
+      predictionService: deps.predictionService,
+      storageService: deps.storageService,
+    });
   const logger = deps.logger ?? createLogger("purchase-utilization-routes");
   const routes = new Hono();
-
-  async function assembleFinalGames(
-    includePredicted: boolean,
-    includeNiches: boolean,
-  ): Promise<GameWithScore[]> {
-    let predictedGames: GameWithScore[] | undefined;
-    const getPredictedGames = async (): Promise<GameWithScore[]> => {
-      if (!predictionService) return gameService.listGames();
-      predictedGames ??= await predictionService.listGamesWithPredictions();
-      return predictedGames;
-    };
-
-    const allGames =
-      includePredicted && predictionService
-        ? await getPredictedGames()
-        : await gameService.listGames();
-    const ownedGames = allGames.filter((entry) => entry.game.ownership !== "previously-owned");
-
-    if (includeNiches && predictionService) {
-      const nicheSettings = storageService ? await storageService.loadNicheSettings() : undefined;
-      const nicheUniverse = includePredicted
-        ? ownedGames
-        : (await getPredictedGames()).filter(
-            (entry) => entry.game.ownership !== "previously-owned",
-          );
-      const nicheMap = computeNichePositions(nicheUniverse, nicheSettings);
-      for (const entry of allGames) {
-        entry.nichePosition = nicheMap.get(entry.game.id) ?? null;
-      }
-    }
-
-    if (storageService) {
-      const redundancySettings = await storageService.loadRedundancySettings();
-      const universe =
-        !includePredicted && predictionService
-          ? (await getPredictedGames()).filter(
-              (entry) => entry.game.ownership !== "previously-owned",
-            )
-          : undefined;
-      await applyRedundancy(ownedGames, redundancySettings, storageService, universe);
-    }
-
-    return allGames;
-  }
 
   async function enrichFinalGames(games: GameWithScore[], responseKind: "list" | "detail") {
     const benchmark = await purchaseUtilizationService.getEntertainmentBenchmark();
@@ -279,8 +314,12 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       const includePredicted = c.req.query("includePredicted") === "true";
       const includeNiches = c.req.query("includeNiches") === "true";
       const ownershipFilter = c.req.query("ownership") ?? "owned";
-      const assembled = await assembleFinalGames(includePredicted, includeNiches);
-      const response = filterByOwnership(assembled, ownershipFilter);
+      const assembled = await displayedFitnessService.listGames({
+        includePredicted,
+        includeNiches,
+      });
+      const publicGames = assembled.map(toPublicGameWithScore);
+      const response = filterByOwnership(publicGames, ownershipFilter);
       return c.json(await enrichFinalGames(response, "list"));
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 500);
@@ -307,11 +346,19 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     }
     try {
       const includePredicted = includePredictedQuery === "true";
-      const assembled = await assembleFinalGames(includePredicted, true);
-      const result = assembled.find((entry) => entry.game.id === id);
-      if (!result) throw new NotFoundError(`Game not found: ${id}`);
+      const assembled = await displayedFitnessService.listGames({
+        includePredicted,
+        includeNiches: true,
+      });
+      const assembledResult = assembled.find((entry) => entry.game.id === id);
+      if (!assembledResult) throw new NotFoundError(`Game not found: ${id}`);
+      const result = toPublicGameWithScore(assembledResult);
       const [enriched] = await enrichFinalGames([result], "detail");
-      return c.json(enriched);
+      const intentionDetail =
+        intentionService === undefined
+          ? { activeIntention: null, resolvedHistory: [] }
+          : await intentionService.getGameDetail(enriched.game.id, enriched.game.name);
+      return c.json({ ...enriched, intentions: intentionDetail });
     } catch (err) {
       if (err instanceof NotFoundError) {
         return c.json(gameNotFoundResponse(id), 404);
@@ -448,6 +495,10 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       await gameService.removeGame(id);
       return c.body(null, 204);
     } catch (err) {
+      if (err instanceof GameHistoryConflictError) {
+        if (err.error.gameId !== id) return c.json(INTERNAL_ERROR_RESPONSE, 500);
+        return c.json(err.error, 409);
+      }
       const message = toErrorMessage(err);
       if (message.includes("not found")) {
         return c.json({ error: message }, 404);
@@ -479,14 +530,153 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     }
 
     try {
-      const game = await gameService.setOwnership(id, parsed.data.ownership);
-      return c.json({ game });
+      const result = OwnershipMutationResultSchema.parse(
+        await gameService.setOwnership(id, parsed.data.ownership),
+      );
+      if (result.game.id !== id || result.game.ownership !== parsed.data.ownership) {
+        return c.json(INTERNAL_ERROR_RESPONSE, 500);
+      }
+      return c.json(result);
     } catch (err) {
       const message = toErrorMessage(err);
       if (message.includes("not found")) {
         return c.json({ error: message }, 404);
       }
       return c.json({ error: message }, 500);
+    }
+  });
+
+  async function intentionResponse(
+    resultPromise: Promise<IntentionMutationResult>,
+    command: IntentionCommand,
+  ): Promise<Response> {
+    let result: IntentionMutationResult;
+    try {
+      result = IntentionMutationResultSchema.parse(await resultPromise);
+      if (!intentionMutationResultMatchesCommand(command, result)) {
+        return Response.json(INTERNAL_ERROR_RESPONSE, { status: 500 });
+      }
+    } catch {
+      return Response.json(INTERNAL_ERROR_RESPONSE, { status: 500 });
+    }
+    if (result.ok) return Response.json(result);
+    const status =
+      result.error.code === "game-not-found" || result.error.code === "intention-not-found"
+        ? 404
+        : result.error.code === "persistence-failure"
+          ? 500
+          : result.error.code === "active-intention-conflict" ||
+              result.error.code === "stale-version" ||
+              result.error.code === "command-reuse"
+            ? 409
+            : 400;
+    return Response.json(result, { status });
+  }
+
+  function intentionValidationResponse(body: unknown, error: z.ZodError): Response {
+    const parsedCommandId =
+      typeof body === "object" && body !== null && "commandId" in body
+        ? z.string().uuid().safeParse(body.commandId)
+        : null;
+    return Response.json(
+      {
+        ok: false,
+        commandId:
+          parsedCommandId?.success === true
+            ? parsedCommandId.data
+            : "00000000-0000-0000-0000-000000000000",
+        error: {
+          code: "validation",
+          issues: error.issues.map((issue) => ({
+            field: issue.path.join(".") || "request",
+            message: issue.message,
+          })),
+        },
+      },
+      { status: 400 },
+    );
+  }
+
+  routes.post("/games/:id/intention", async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      body = null;
+    }
+    const parsed = CreateIntentionBodySchema.safeParse(body);
+    if (!parsed.success) return intentionValidationResponse(body, parsed.error);
+    const command = {
+      type: "create",
+      commandId: parsed.data.commandId,
+      gameId: c.req.param("id"),
+      kind: parsed.data.kind,
+      expectedActiveIntention: parsed.data.expectedActiveIntention,
+    } satisfies IntentionCommand;
+    return intentionResponse(intentions().execute(command), command);
+  });
+
+  for (const type of ["complete", "retire"] as const) {
+    routes.post(`/games/:id/intention/:intentionId/${type}`, async (c) => {
+      let body: unknown;
+      try {
+        body = await c.req.json();
+      } catch {
+        body = null;
+      }
+      const parsed = ResolveIntentionBodySchema.safeParse(body);
+      if (!parsed.success) return intentionValidationResponse(body, parsed.error);
+      const command = {
+        type,
+        commandId: parsed.data.commandId,
+        gameId: c.req.param("id"),
+        intentionId: c.req.param("intentionId"),
+        expectedVersion: parsed.data.expectedVersion,
+      } satisfies IntentionCommand;
+      return intentionResponse(intentions().execute(command), command);
+    });
+  }
+
+  routes.put("/games/:id/plays", async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json(
+        { code: "validation", issues: [{ field: "request", message: "Invalid JSON" }] },
+        400,
+      );
+    }
+    const parsed = SetPlayCountBodySchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json(
+        {
+          code: "validation",
+          issues: parsed.error.issues.map((issue) => ({
+            field: issue.path.join(".") || "request",
+            message: issue.message,
+          })),
+        },
+        400,
+      );
+    }
+    try {
+      const gameId = c.req.param("id");
+      const result = ManualPlayCorrectionResultSchema.parse(
+        await intentions().setPlayCount(gameId, parsed.data.playCount),
+      );
+      if (result.ok ? result.game.id !== gameId : result.error.gameId !== gameId) {
+        return c.json(INTERNAL_ERROR_RESPONSE, 500);
+      }
+      return result.ok ? c.json(result) : c.json(result, 409);
+    } catch (error) {
+      const message = toErrorMessage(error);
+      if (message.includes("not found"))
+        return c.json(gameNotFoundResponse(c.req.param("id")), 404);
+      return c.json(
+        { code: "persistence-failure", operation: "shelf.game.plays.set", message },
+        500,
+      );
     }
   });
 
@@ -576,8 +766,9 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     }
 
     try {
-      const game = await gameService.refreshBggData(id);
-      return c.json({ game });
+      const result = PlayEvidenceMutationResultSchema.parse(await gameService.refreshBggData(id));
+      if (result.game.id !== id) return c.json(INTERNAL_ERROR_RESPONSE, 500);
+      return c.json(result);
     } catch (err) {
       const message = toErrorMessage(err);
       if (message.includes("not found")) {
@@ -588,6 +779,130 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
   });
 
   const operations: OperationDefinition[] = [
+    {
+      operationId: "shelf.game.intention.set",
+      name: "set",
+      description: "Create the eligible first-play or replay intention for an owned game",
+      invocation: { method: "POST", path: "/api/games/:id/intention" },
+      requestSchema: CreateIntentionBodySchema,
+      request: {
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["commandId", "kind", "expectedActiveIntention"],
+          properties: {
+            commandId: { type: "string", format: "uuid" },
+            kind: { type: "string", enum: ["first-play", "replay"] },
+            expectedActiveIntention: { const: "absent" },
+          },
+        },
+      },
+      response: { body: { oneOf: ["accepted-intention-mutation", "intention-mutation-error"] } },
+      hierarchy: { root: "shelf", feature: "game" },
+      parameters: [{ name: "id", in: "path", description: "Game ID", required: true }],
+      errors: intentionOperationErrors("create"),
+      idempotent: true,
+    },
+    ...(["complete", "retire"] as const).map(
+      (type): OperationDefinition => ({
+        operationId: `shelf.game.intention.${type}`,
+        name: type,
+        description: `${type === "complete" ? "Complete" : "Retire"} an active intention at its expected version`,
+        invocation: {
+          method: "POST",
+          path: `/api/games/:id/intention/:intentionId/${type}`,
+        },
+        requestSchema: ResolveIntentionBodySchema,
+        request: {
+          body: {
+            type: "object",
+            additionalProperties: false,
+            required: ["commandId", "expectedVersion"],
+            properties: {
+              commandId: { type: "string", format: "uuid" },
+              expectedVersion: { type: "integer", minimum: 1 },
+            },
+          },
+        },
+        response: { body: { oneOf: ["accepted-intention-mutation", "intention-mutation-error"] } },
+        hierarchy: { root: "shelf", feature: "game" },
+        parameters: [
+          { name: "id", in: "path", description: "Game ID", required: true },
+          {
+            name: "intentionId",
+            in: "path",
+            description: "Intention ID",
+            required: true,
+          },
+        ],
+        errors: intentionOperationErrors(type),
+        idempotent: true,
+      }),
+    ),
+    {
+      operationId: "shelf.game.plays.set",
+      name: "set",
+      description: "Set current manual play-count evidence and return any automatic completion",
+      invocation: { method: "PUT", path: "/api/games/:id/plays" },
+      requestSchema: SetPlayCountBodySchema,
+      request: {
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["playCount"],
+          properties: { playCount: { type: "integer", minimum: 0 } },
+        },
+      },
+      response: {
+        body: {
+          oneOf: ["accepted-manual-play-correction", "manual-play-correction-conflict"],
+        },
+      },
+      hierarchy: { root: "shelf", feature: "game" },
+      parameters: [{ name: "id", in: "path", description: "Game ID", required: true }],
+      errors: [
+        {
+          status: 400,
+          code: "validation",
+          description: "Invalid play count",
+          response: {
+            code: "validation",
+            issues: [{ field: "playCount", message: "Must be a nonnegative safe integer" }],
+          },
+        },
+        {
+          status: 404,
+          code: "game_not_found",
+          description: "Game not found",
+          response: { error: "Game not found: :id", code: "game_not_found" },
+        },
+        {
+          status: 409,
+          code: "non-monotonic-observation",
+          description: "The daemon clock cannot produce a newer truthful observation",
+          response: {
+            ok: false,
+            error: {
+              code: "non-monotonic-observation",
+              gameId: ":id",
+              attemptedObservedAt: "2026-08-28T10:00:00.000Z",
+              latestAcceptedAt: "2026-08-28T10:00:00.000Z",
+            },
+          },
+        },
+        {
+          status: 500,
+          code: "persistence-failure",
+          description: "Persistence failed",
+          response: {
+            code: "persistence-failure",
+            operation: "shelf.game.plays.set",
+            message: "Persistence failed",
+          },
+        },
+      ],
+      idempotent: false,
+    },
     {
       operationId: "shelf.game.search",
       name: "search",

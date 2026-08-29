@@ -1,6 +1,8 @@
 import {
   CURRENT_COLLECTION_SCHEMA_VERSION,
   CollectionSchema,
+  CollectionSchemaV3,
+  createInitialEntityMetadata,
   isUsableSuggestedPlayerPoll,
   type Axis,
   type AxisBase,
@@ -39,10 +41,24 @@ export interface CollectionMigrationStep {
   ): CollectionMigrationStepResult;
 }
 
-const defaultDependencies: CollectionMigrationDependencies = {
-  createId: () => crypto.randomUUID(),
-  now: () => new Date().toISOString(),
-};
+function deterministicDependencies(raw: unknown): CollectionMigrationDependencies {
+  const record = typeof raw === "object" && raw !== null ? raw : {};
+  const collectionId = "id" in record && typeof record.id === "string" ? record.id : "collection";
+  const timestamp =
+    "updatedAt" in record && typeof record.updatedAt === "string"
+      ? record.updatedAt
+      : "createdAt" in record && typeof record.createdAt === "string"
+        ? record.createdAt
+        : "1970-01-01T00:00:00.000Z";
+  let idSequence = 0;
+  return {
+    createId() {
+      idSequence += 1;
+      return `${collectionId}-migration-${idSequence}`;
+    },
+    now: () => timestamp,
+  };
+}
 
 const legacyCurveFields = {
   preferenceShape: z.enum(["higher-is-better", "lower-is-better", "sweet-spot"]).optional(),
@@ -621,6 +637,26 @@ function migrateVersionTwoToThree(raw: unknown): CollectionMigrationStepResult {
   };
 }
 
+function migrateVersionThreeToFour(raw: unknown): CollectionMigrationStepResult {
+  const historical = CollectionSchemaV3.parse(raw);
+  return {
+    data: {
+      ...historical,
+      schemaVersion: 4,
+      revision: 0,
+      games: historical.games.map((game) => ({
+        ...game,
+        entityMetadata: createInitialEntityMetadata(game.bggId),
+        latestPlayCountCheck: null,
+      })),
+      intentions: [],
+      commandReceipts: [],
+    },
+    convertedAxisCount: 0,
+    disabledAxisCount: 0,
+  };
+}
+
 export const COLLECTION_MIGRATION_STEPS: readonly CollectionMigrationStep[] = [
   {
     fromVersion: 0,
@@ -637,6 +673,11 @@ export const COLLECTION_MIGRATION_STEPS: readonly CollectionMigrationStep[] = [
     toVersion: 3,
     migrate: migrateVersionTwoToThree,
   },
+  {
+    fromVersion: 3,
+    toVersion: 4,
+    migrate: migrateVersionThreeToFour,
+  },
 ];
 
 function readSchemaVersion(raw: unknown): number {
@@ -650,7 +691,7 @@ function readSchemaVersion(raw: unknown): number {
 
 export function migrateCollection(
   raw: unknown,
-  dependencies: CollectionMigrationDependencies = defaultDependencies,
+  dependencies: CollectionMigrationDependencies = deterministicDependencies(raw),
 ): CollectionMigrationResult {
   const sourceVersion = readSchemaVersion(raw);
   if (sourceVersion > CURRENT_COLLECTION_SCHEMA_VERSION) {

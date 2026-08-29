@@ -39,6 +39,30 @@ const mockTree = {
             "Set or clear a game's manual shelf assignment; assigning requires an owned game with complete box dimensions",
           invocation: { method: "PUT", path: "/api/games/:id/shelf-assignment" },
         },
+        "intention-set": {
+          operationId: "shelf.game.intention.set",
+          name: "set",
+          description: "Create intention",
+          invocation: { method: "POST", path: "/api/games/:id/intention" },
+        },
+        "intention-complete": {
+          operationId: "shelf.game.intention.complete",
+          name: "complete",
+          description: "Complete intention",
+          invocation: { method: "POST", path: "/api/games/:id/intention/:intentionId/complete" },
+        },
+        "intention-retire": {
+          operationId: "shelf.game.intention.retire",
+          name: "retire",
+          description: "Retire intention",
+          invocation: { method: "POST", path: "/api/games/:id/intention/:intentionId/retire" },
+        },
+        "plays-set": {
+          operationId: "shelf.game.plays.set",
+          name: "set",
+          description: "Set play evidence",
+          invocation: { method: "PUT", path: "/api/games/:id/plays" },
+        },
       },
     },
     collection: {
@@ -152,6 +176,27 @@ describe("help command", () => {
     expect(result).toContain("shelf-judge axis repair <axis-id> --template <template-id>");
     expect(result).toContain("--target-player-count <count>");
     expect(result).toContain("--maximum-scoring-time <minutes>");
+  });
+
+  test("help game exposes exact intention and play syntax without removed profile language", async () => {
+    const client = createMockClient({
+      routes: {
+        "GET /api/help/game": { response: { ok: true, status: 200, data: mockTree } },
+      },
+    });
+    const result = await helpCommand(client, ["game"], { json: false });
+    expect(result).toContain(
+      "shelf-judge game intention set <game-id> <first-play|replay> [--command-id <uuid>]",
+    );
+    expect(result).toContain(
+      "shelf-judge game intention complete <game-id> <intention-id> --expected-version <n> [--command-id <uuid>]",
+    );
+    expect(result).toContain(
+      "shelf-judge game intention retire <game-id> <intention-id> --expected-version <n> [--command-id <uuid>]",
+    );
+    expect(result).toContain("shelf-judge game plays set <game-id> <count>");
+    expect(result).toContain("without changing play count");
+    expect(result).not.toMatch(/narrat|urgenc|source\s+profile/i);
   });
 
   test("documents purchase utilization commands and semantics without collection sorts", async () => {

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { Axis, BggGameData, DerivedAxis, Game, PersonalAxis } from "../src/types";
 import { resolveAxisValues } from "../src/axis-utils";
+import { createInitialEntityMetadata } from "../src/useful-profile-source";
 
 function makeBggData(overrides: Partial<BggGameData> = {}): BggGameData {
   return {
@@ -82,9 +83,10 @@ function playerCount(targetPlayerCount: number): DerivedAxis<"playerCountFit"> {
 }
 
 function makeGame(overrides: Partial<Game> = {}): Game {
+  const bggId = overrides.bggId ?? null;
   return {
     id: "g1",
-    bggId: null,
+    bggId,
     name: "Game",
     yearPublished: null,
     minPlayers: null,
@@ -112,6 +114,8 @@ function makeGame(overrides: Partial<Game> = {}): Game {
     ratings: {},
     ...timestamps,
     ...overrides,
+    entityMetadata: overrides.entityMetadata ?? createInitialEntityMetadata(bggId),
+    latestPlayCountCheck: overrides.latestPlayCountCheck ?? null,
   };
 }
 

@@ -158,6 +158,8 @@ export interface Game {
   playerRangeEvidence: PlayerRangeEvidence;
   suggestedPlayerPoll: SuggestedPlayerPoll;
   bestPlayersInvalidEvidence: InvalidEvidence | null;
+  entityMetadata: EntityMetadataByClass;
+  latestPlayCountCheck: LatestPlayCountCheck;
   ownership: OwnershipStatus;
   boxDimensions: BoxDimensions | null;
   manualShelfId: string | null;
@@ -231,11 +233,14 @@ export type Axis = PersonalAxis | TournamentAxis | DerivedAxis | DisabledLegacyA
 export type AxisSource = Axis["source"];
 export type EnabledAxis = PersonalAxis | TournamentAxis | DerivedAxis;
 export interface Collection {
-  schemaVersion: 3;
+  schemaVersion: 4;
+  revision: number;
   id: string;
   name: string;
   axes: Axis[];
   games: Game[];
+  intentions: PlayIntention[];
+  commandReceipts: IntentionCommandReceipt[];
   entertainmentBenchmark: EntertainmentBenchmark;
   createdAt: string;
   updatedAt: string;
@@ -620,7 +625,7 @@ export interface AppConfig {
 
 // Profile types (collection-profiling spec)
 
-export interface AxisDistribution {
+export interface CollectionProfileAxisDistribution {
   axisId: string;
   axisName: string;
   mean: number;
@@ -631,114 +636,355 @@ export interface AxisDistribution {
   histogram: number[]; // 10-element array: game counts per rating bucket (1-10)
 }
 
-export interface AxisWeightEntry {
-  axisId: string;
-  axisName: string;
-  weight: number;
-  percentage: number; // weight / totalWeight * 100
-}
+export type CollectionProfileEntityClass = "mechanic" | "designer" | "artist";
 
-export interface AttributeCluster {
+export interface BggEntityLink {
+  id: number;
   name: string;
-  count: number;
-  percentage: number; // count / totalGames * 100
 }
 
-export interface WeightRangeCluster {
-  range: string; // "Light", "Medium-Light", etc.
-  min: number;
-  max: number;
-  count: number;
-  percentage: number;
+export interface EntityMetadataRefreshFailure {
+  attemptedAt: string;
+  message: string;
 }
 
-export interface UtilityCurveDeclaration {
-  axisId: string;
-  axisName: string;
-  derivedField: DerivedFieldId | null;
-  shape: PreferenceShape;
-  idealValue: number | null;
-  tolerance: ToleranceLevel | null;
-  toleranceWidth: number | null;
-  leanDirection: LeanDirection | null;
-  vetoThreshold: VetoConfig | null;
-  nativeScale: NativeScale;
-  unit: string | null;
-  provenance: string | null;
-  configurationSummary: string | null;
+export type EntityClassMetadata =
+  | {
+      state: "complete";
+      entities: BggEntityLink[];
+      observedAt: string;
+      refreshFailure: EntityMetadataRefreshFailure | null;
+      correctionDestination: null;
+    }
+  | {
+      state: "refresh-needed";
+      entities: [];
+      observedAt: null;
+      refreshFailure: EntityMetadataRefreshFailure | null;
+      correctionDestination: { operationId: "shelf.game.bgg.refresh" };
+    }
+  | {
+      state: "unrefreshable";
+      entities: [];
+      observedAt: null;
+      refreshFailure: null;
+      correctionDestination: null;
+      explanation: "This game has no BGG ID, so Shelf Judge cannot refresh entity metadata.";
+    };
+
+export type EntityMetadataByClass = Record<CollectionProfileEntityClass, EntityClassMetadata>;
+
+export type LatestPlayCountCheck =
+  | { status: "valid"; value: number; observedAt: string }
+  | { status: "missing"; observedAt: string }
+  | { status: "invalid"; observedAt: string; evidence: InvalidEvidence }
+  | null;
+
+export type PlayIntentionKind = "first-play" | "replay";
+export type PlayIntentionResolutionSource =
+  | "observed-play-increase"
+  | "owner-confirmed"
+  | "owner-retired";
+
+export interface PlayIntentionBaseline {
+  playCount: number;
+  evidenceSource: FieldObservationSource;
+  observedAt: string;
 }
 
-export interface DivergentGame {
+export type PlayIntentionResolution =
+  | {
+      outcome: "completed";
+      source: "observed-play-increase" | "owner-confirmed";
+      resolvedAt: string;
+    }
+  | { outcome: "retired"; source: "owner-retired"; resolvedAt: string };
+
+export interface PlayIntention {
+  intentionId: string;
+  gameId: string;
+  kind: PlayIntentionKind;
+  baseline: PlayIntentionBaseline;
+  createdAt: string;
+  version: number;
+  resolution: PlayIntentionResolution | null;
+}
+
+export interface PlayEvidenceMutationResult {
+  game: Game;
+  linkedIntentionTransition: PlayIntention | null;
+}
+
+export type ManualPlayCorrectionResult =
+  | {
+      ok: true;
+      game: Game;
+      linkedIntentionTransition: PlayIntention | null;
+    }
+  | {
+      ok: false;
+      error: {
+        code: "non-monotonic-observation";
+        gameId: string;
+        attemptedObservedAt: string;
+        latestAcceptedAt: string;
+      };
+    };
+
+export type ManualPlayCorrectionResponse =
+  | ManualPlayCorrectionResult
+  | Extract<IntentionMutationError, { code: "validation" | "persistence-failure" }>
+  | { code: "game_not_found"; error: string };
+
+export interface OwnershipMutationResult {
+  game: Game;
+  linkedIntentionTransition: PlayIntention | null;
+}
+
+export type CollectionProfileGameSource = Game;
+
+export type CollectionProfileCollectionSource = Collection;
+
+export type CreateIntentionCommand = {
+  type: "create";
+  commandId: string;
+  gameId: string;
+  kind: PlayIntentionKind;
+  expectedActiveIntention: "absent";
+};
+
+export type ResolveIntentionCommand = {
+  type: "complete" | "retire";
+  commandId: string;
+  gameId: string;
+  intentionId: string;
+  expectedVersion: number;
+};
+
+export type IntentionCommand = CreateIntentionCommand | ResolveIntentionCommand;
+
+export interface LinkedOwnershipTransition {
+  gameId: string;
+  from: "owned";
+  to: "previously-owned";
+}
+
+export interface AcceptedIntentionMutation {
+  ok: true;
+  commandId: string;
+  intention: PlayIntention;
+  linkedOwnershipTransition: LinkedOwnershipTransition | null;
+}
+
+export type IntentionMutationError =
+  | { code: "validation"; issues: { field: string; message: string }[] }
+  | { code: "game-not-found"; gameId: string }
+  | { code: "intention-not-found"; gameId: string; intentionId: string }
+  | {
+      code: "ineligible-game";
+      gameId: string;
+      reason:
+        | "not-owned"
+        | "missing-play-evidence"
+        | "invalid-play-evidence"
+        | "missing-observation-time"
+        | "stale-play-evidence"
+        | "kind-mismatch";
+    }
+  | { code: "active-intention-conflict"; gameId: string; current: PlayIntention }
+  | {
+      code: "stale-version";
+      gameId: string;
+      intentionId: string;
+      expectedVersion: number;
+      current: PlayIntention;
+    }
+  | { code: "command-reuse"; commandId: string }
+  | { code: "history-conflict"; gameId: string; intentionIds: string[] }
+  | { code: "persistence-failure"; operation: string; message: string };
+
+export type IntentionMutationResult =
+  | AcceptedIntentionMutation
+  | { ok: false; commandId: string; error: IntentionMutationError };
+
+export interface IntentionCommandReceipt {
+  commandId: string;
+  request: IntentionCommand;
+  result: AcceptedIntentionMutation;
+}
+
+export type CollectionMutationResult<Value> =
+  | { outcome: "accepted"; changed: true; value: Value }
+  | { outcome: "no-op"; changed: false; value: Value }
+  | { outcome: "rejected"; changed: false; error: IntentionMutationError };
+
+export interface CollectionProfileGameFitnessEvidence {
   gameId: string;
   gameName: string;
-  fitnessScore: number;
-  normalizedTournamentScore: number;
-  gap: number; // absolute difference
-  direction: "tournament-outlier" | "fitness-outlier";
+  currentFitness: number;
+  vetoed: boolean;
 }
 
-export interface ComponentDistances {
-  binary: number; // Jaccard distance [0,1]
-  continuous: number; // normalized Manhattan [0,1]
-  personalAxes: number | null; // normalized Manhattan [0,1], null when no shared axes
-  composite: number; // weighted combination [0,1]
-}
+export type CollectionProfileClassExclusionReason =
+  | "predicted-fitness"
+  | "missing-or-invalid-fitness"
+  | "refresh-needed-metadata"
+  | "unrefreshable-metadata";
 
-export type OutlierClassification = "lone-wolf" | "category-orphan" | "high-fitness-outlier";
-
-export interface CollectionOutlier {
+export interface CollectionProfileClassExclusion {
   gameId: string;
   gameName: string;
-  distances: ComponentDistances;
-  classifications: OutlierClassification[];
-  fitnessScore: number | null;
+  reason: CollectionProfileClassExclusionReason;
+  hasEntityAssociation: boolean;
+  correctionDestination: { operationId: "shelf.game.bgg.refresh" | "shelf.game.rating.set" } | null;
 }
 
-export interface AxisSuggestion {
-  source: "unexpressed-concentration" | "high-variance" | "divergence-repair";
-  attribute: string; // mechanic name, category name, or BGG field
-  reason: string; // human-readable explanation
-  evidence: { gameCount?: number; percentage?: number; variance?: number };
+export interface CollectionProfileMetadataReadiness {
+  state: "complete" | "partial" | "refresh-needed";
+  ownedGameCount: number;
+  completeGameCount: number;
+  refreshNeededGameCount: number;
+  unrefreshableGameCount: number;
 }
 
-// LLM narration types (collection-profiling spec, LLM Narration section)
-
-export interface ProfileNarration {
-  summary: string; // 2-4 paragraph overview of collection identity
-  surprises: string[]; // Unexpected patterns
-  tensions: string[]; // Disagreements between stated and revealed preferences
-  blindSpots: string[]; // Absent or underrepresented attribute categories
-  curveInsights: string[]; // Utility curve observations
+export interface CollectionProfileEntityEvidence {
+  entityId: number;
+  name: string;
+  support: "limited" | "supported";
+  associatedGameCount: number;
+  meanCurrentFitness: number;
+  populationStandardDeviation: number;
+  range: { min: number; max: number };
+  comparatorMeanCurrentFitness: number;
+  differenceFromComparator: number;
+  games: CollectionProfileGameFitnessEvidence[];
 }
 
-export type NarrationCacheState = "fresh" | "stale" | "empty";
+export interface CollectionProfileEntityOrderings {
+  rating: number[];
+  support: number[];
+  name: number[];
+}
+
+export interface CollectionProfileEntityClassResult {
+  entityClass: CollectionProfileEntityClass;
+  result: "supported" | "limited" | "no-eligible-ratings" | "evaluated-empty" | "not-evaluated";
+  metadataReadiness: CollectionProfileMetadataReadiness;
+  associatedGameCount: number;
+  comparator: {
+    gameCount: number;
+    meanCurrentFitness: number | null;
+    games: CollectionProfileGameFitnessEvidence[];
+  };
+  exclusions: CollectionProfileClassExclusion[];
+  refreshWarnings: { gameId: string; gameName: string; attemptedAt: string; message: string }[];
+  entities: CollectionProfileEntityEvidence[];
+  overviewEntityIds: number[];
+  orderings: CollectionProfileEntityOrderings;
+}
+
+export type AttentionPlayEvidence =
+  | {
+      status: "valid";
+      playCount: number;
+      source: FieldObservationSource;
+      observedAt: string;
+      stale: false;
+    }
+  | {
+      status: "missing" | "invalid" | "stale";
+      playCount: number | null;
+      source: FieldObservationSource | null;
+      observedAt: string | null;
+      warning:
+        | "Current play evidence is missing."
+        | "Current play evidence is invalid."
+        | "A newer BGG check did not provide a valid play count.";
+    };
+
+export interface CollectionProfileAttentionItem {
+  id: string;
+  decisionFamily: "play-intention";
+  intention: PlayIntention;
+  gameName: string;
+  question: string;
+  whyNow: "You asked Shelf Judge to keep this intention visible.";
+  currentPlayEvidence: AttentionPlayEvidence;
+  responses: ["leave-visible", "complete", "retire", "correct-or-refresh-evidence"];
+  abstentionBasis: "Only an explicit active intention qualifies.";
+  resolution: null;
+  reopenCondition: "Create a new explicit intention after resolution.";
+  destination: { gameId: string; operationId: "shelf.game.intention.manage" };
+  evidenceDestination: {
+    gameId: string;
+    operationId: "shelf.game.plays.set" | "shelf.game.bgg.refresh";
+  };
+}
+
+export interface ResolvedPlayIntentionHistoryItem {
+  intentionId: string;
+  gameId: string;
+  gameName: string;
+  kind: PlayIntentionKind;
+  baseline: PlayIntentionBaseline;
+  createdAt: string;
+  version: number;
+  resolution: PlayIntentionResolution;
+}
+
+export type ResolvedPlayIntentionHistory = ResolvedPlayIntentionHistoryItem[];
+
+export interface GameIntentionDetail {
+  activeIntention: PlayIntention | null;
+  resolvedHistory: ResolvedPlayIntentionHistory;
+}
+
+export interface GameDetailWithPurchaseUtilization extends GameWithPurchaseUtilization {
+  intentions: GameIntentionDetail;
+}
 
 export interface CollectionProfile {
-  axisDistributions: AxisDistribution[];
-  axisWeights: AxisWeightEntry[];
-  bggClustering: {
-    mechanics: AttributeCluster[];
-    categories: AttributeCluster[];
-    families: AttributeCluster[];
-    subdomains: AttributeCluster[];
-    weightRanges: WeightRangeCluster[];
+  status: "available";
+  identity: {
+    collectionState: "populated" | "empty";
+    classes: Record<CollectionProfileEntityClass, CollectionProfileEntityClassResult>;
+    axisDistributions: CollectionProfileAxisDistribution[];
   };
-  utilityCurves: UtilityCurveDeclaration[];
-  divergence: DivergentGame[] | null; // null when no tournament data
-  outliers: CollectionOutlier[];
-  suggestions: AxisSuggestion[];
-  narration: ProfileNarration | null;
-  narrationState: NarrationCacheState;
-  gameCount: number;
-  ratedGameCount: number;
-  computedAt: string; // ISO 8601
+  attention: {
+    state: "active" | "nothing-to-decide" | "empty-collection";
+    items: CollectionProfileAttentionItem[];
+  };
+  computedAt: string;
+}
+
+export interface CollectionProfileUnavailable {
+  status: "unavailable";
+  error: { kind: "transport" | "validation" | "recomputation"; message: string };
+  retryDestination: { operationId: "shelf.profile.get" };
+}
+
+export type CollectionProfileResult = CollectionProfile | CollectionProfileUnavailable;
+
+export interface ProfileSourceIdentity {
+  collectionId: string;
+  collectionSchemaVersion: 4;
+  collectionRevision: number;
+  tournamentHash: string;
+  predictionSettingsHash: string;
+  redundancySettingsHash: string;
 }
 
 export interface ProfileData {
+  contractVersion: 7;
+  algorithmVersion: 9;
+  sourceIdentity: ProfileSourceIdentity;
   profile: CollectionProfile;
-  computedAt: string; // ISO 8601
-  narration: ProfileNarration | null;
-  narrationComputedAt: string | null; // ISO 8601
+  computedAt: string;
+}
+
+export interface CollectionProfileSnapshot {
+  source: CollectionProfileCollectionSource;
+  profile: CollectionProfileResult;
 }
 
 // Prediction types
@@ -852,6 +1098,13 @@ export interface ComponentWeights {
   binary: number;
   continuous: number;
   personalAxes: number;
+}
+
+export interface ComponentDistances {
+  binary: number;
+  continuous: number;
+  personalAxes: number | null;
+  composite: number;
 }
 
 export interface RedundancyNeighbor {

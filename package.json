@@ -17,7 +17,10 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "bun test",
-    "build": "bun run --filter @shelf-judge/web build"
+    "build": "bun run --filter @shelf-judge/web build",
+    "test:browser:install": "bun run --cwd packages/web test:browser:install",
+    "typecheck:browser": "bun run --cwd packages/web typecheck:browser",
+    "test:browser": "bun run --cwd packages/web test:browser"
   },
   "devDependencies": {
     "@eslint/js": "^9.24.0",

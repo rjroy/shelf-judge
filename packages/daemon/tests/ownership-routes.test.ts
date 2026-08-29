@@ -9,6 +9,7 @@ import type {
   NicheSettings,
   Collection,
 } from "@shelf-judge/shared";
+import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import { createGameRoutes } from "../src/routes/games";
 import type { GameService } from "../src/services/game-service";
 import type { PredictionService } from "../src/services/prediction-service";
@@ -18,7 +19,6 @@ import type { FileOps } from "../src/services/file-ops";
 import { DEFAULT_REDUNDANCY_SETTINGS } from "../src/services/redundancy-engine";
 import { createWishlistRoutes } from "../src/routes/wishlist";
 import type { WishlistService } from "../src/services/wishlist-service";
-import { computeProfile } from "../src/services/profile-engine";
 import { createTestPurchaseUtilizationService } from "./helpers/test-app";
 
 const now = "2026-01-01T00:00:00Z";
@@ -45,8 +45,8 @@ function makeBggData(
   };
 }
 
-const mech = (name: string) => ({ id: Math.random(), name });
-const cat = (name: string) => ({ id: Math.random(), name });
+const mech = (name: string) => ({ id: 1, name });
+const cat = (name: string) => ({ id: 2, name });
 
 function makeGame(
   id: string,
@@ -57,6 +57,8 @@ function makeGame(
   return {
     id,
     bggId: 1,
+    entityMetadata: createInitialEntityMetadata(1),
+    latestPlayCountCheck: null,
     name,
     yearPublished: 2020,
     minPlayers: 2,
@@ -117,7 +119,8 @@ const prevOwned = makeGame("prev", "Delta", "previously-owned");
 // Mutable collection for setOwnership tests
 function makeCollection(): Collection {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
+    revision: 0,
     id: "coll-1",
     name: "Test",
     axes: [
@@ -139,6 +142,8 @@ function makeCollection(): Collection {
       structuredClone(prevOwned),
     ],
     entertainmentBenchmark: null,
+    intentions: [],
+    commandReceipts: [],
     createdAt: now,
     updatedAt: now,
   };
@@ -206,11 +211,16 @@ function createMockGameService(collection?: Collection): GameService {
     setOwnership: (id: string, ownership: "owned" | "previously-owned") => {
       const game = coll.games.find((g) => g.id === id);
       if (!game) return Promise.reject(new Error(`Game not found: ${id}`));
-      if (game.ownership === ownership) return Promise.resolve(structuredClone(game));
+      if (game.ownership === ownership) {
+        return Promise.resolve({
+          game: structuredClone(game),
+          linkedIntentionTransition: null,
+        });
+      }
       game.ownership = ownership;
       game.updatedAt = new Date().toISOString();
       coll.updatedAt = game.updatedAt;
-      return Promise.resolve(structuredClone(game));
+      return Promise.resolve({ game: structuredClone(game), linkedIntentionTransition: null });
     },
     setBoxDimensions: () => Promise.reject(new Error("not implemented")),
     setManualShelf: () => Promise.reject(new Error("not implemented")),
@@ -237,10 +247,10 @@ function createMockPredictionService(collection?: Collection): PredictionService
   };
 }
 
-function buildApp(collection?: Collection) {
+function buildApp(collection?: Collection, gameServiceOverride?: GameService) {
   const coll = collection ?? makeCollection();
   const storage = createMockStorageService(coll);
-  const gameService = createMockGameService(coll);
+  const gameService = gameServiceOverride ?? createMockGameService(coll);
   const predictionService = createMockPredictionService(coll);
   const app = new Hono();
   const { routes } = createGameRoutes({
@@ -328,6 +338,33 @@ describe("PATCH /games/:id/ownership", () => {
     expect(data.game.bggData).not.toBeNull();
     expect(data.game.numPlays).toBe(5);
     expect(data.game.name).toBe("Alpha");
+  });
+
+  test("rejects an incoherent ownership mutation service response", async () => {
+    const service = createMockGameService();
+    service.setOwnership = () =>
+      Promise.resolve({
+        game: makeGame("a", "Alpha", "owned"),
+        linkedIntentionTransition: {
+          intentionId: "intention-1",
+          gameId: "a",
+          kind: "first-play",
+          baseline: { playCount: 0, evidenceSource: "manual", observedAt: now },
+          createdAt: now,
+          version: 2,
+          resolution: {
+            outcome: "completed",
+            source: "owner-confirmed",
+            resolvedAt: now,
+          },
+        },
+      });
+    const response = await buildApp(undefined, service).request("/api/games/a/ownership", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ownership: "previously-owned" }),
+    });
+    expect(response.status).toBe(500);
   });
 });
 
@@ -511,7 +548,9 @@ describe("wishlist interaction with previously-owned games", () => {
   test("previously-owned game cannot be wishlisted (returns 409)", async () => {
     const coll = makeCollection();
     // Give prevOwned a unique bggId so the wishlist check matches
-    coll.games.find((g) => g.id === "prev")!.bggId = 999;
+    const previouslyOwned = coll.games.find((g) => g.id === "prev")!;
+    previouslyOwned.bggId = 999;
+    previouslyOwned.entityMetadata = createInitialEntityMetadata(previouslyOwned.bggId);
 
     const storage = createMockStorageService(coll);
     const mockWishlistService: WishlistService = {
@@ -543,27 +582,6 @@ describe("wishlist interaction with previously-owned games", () => {
     expect(res.status).toBe(409);
     const data = (await res.json()) as { error: string };
     expect(data.error).toContain("already in your collection");
-  });
-});
-
-describe("profile computation includes previously-owned games", () => {
-  test("previously-owned games contribute to profile game count", () => {
-    const coll = makeCollection();
-    const games = coll.games;
-    const fitnessResults = new Map<string, FitnessResult>();
-    for (const game of games) {
-      fitnessResults.set(game.id, makeScore(7.0));
-    }
-
-    const profile = computeProfile({
-      games,
-      axes: coll.axes,
-      fitnessResults,
-      tournamentStats: null,
-    });
-
-    // All 4 games (3 owned + 1 previously-owned) should be counted
-    expect(profile.gameCount).toBe(4);
   });
 });
 

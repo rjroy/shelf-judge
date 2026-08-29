@@ -26,14 +26,20 @@ import type { ProfileService } from "./services/profile-service.js";
 import type { PredictionService } from "./services/prediction-service.js";
 import type { OperationDefinition } from "./operations.js";
 import { createPurchaseUtilizationService } from "./services/purchase-utilization-service.js";
+import type { CollectionMutationService } from "./services/collection-mutation-service.js";
+import type { DisplayedFitnessService } from "./services/displayed-fitness-service.js";
+import type { IntentionService } from "./services/intention-service.js";
 
 export interface AppDeps {
   storageService: StorageService;
+  collectionMutationService: CollectionMutationService;
   axisService: AxisService;
   gameService: GameService;
   tournamentService: TournamentService;
   profileService: ProfileService;
   predictionService: PredictionService;
+  displayedFitnessService: DisplayedFitnessService;
+  intentionService: IntentionService;
   bggClient?: BggClient;
   onShutdown?: () => void;
 }
@@ -46,11 +52,14 @@ export interface AppResult {
 export function createApp(deps: AppDeps): AppResult {
   const {
     storageService,
+    collectionMutationService,
     axisService,
     gameService,
     tournamentService,
     profileService,
     predictionService,
+    displayedFitnessService,
+    intentionService,
     bggClient,
     onShutdown,
   } = deps;
@@ -61,7 +70,10 @@ export function createApp(deps: AppDeps): AppResult {
     predictionService,
     gameService,
   });
-  const purchaseUtilizationService = createPurchaseUtilizationService({ storageService });
+  const purchaseUtilizationService = createPurchaseUtilizationService({
+    storageService,
+    collectionMutationService,
+  });
 
   // Build routes
   const gameRouteModule = createGameRoutes({
@@ -71,6 +83,8 @@ export function createApp(deps: AppDeps): AppResult {
     storageService,
     wishlistService,
     purchaseUtilizationService,
+    displayedFitnessService,
+    intentionService,
   });
   const collectionRouteModule = createCollectionRoutes({ purchaseUtilizationService });
   const axisRouteModule = createAxisRoutes({ axisService });
@@ -81,7 +95,7 @@ export function createApp(deps: AppDeps): AppResult {
   const predictionRouteModule = createPredictionRoutes({ predictionService, storageService });
   const nicheRouteModule = createNicheRoutes({ storageService });
   const redundancyRouteModule = createRedundancyRoutes({ storageService });
-  const shelfService = createShelfService({ storageService });
+  const shelfService = createShelfService({ storageService, collectionMutationService });
   const capacityService = createCapacityService({ storageService, gameService });
   const shelfRouteModule = createShelfRoutes({ shelfService, capacityService });
   const wishlistRouteModule = createWishlistRoutes({ wishlistService });

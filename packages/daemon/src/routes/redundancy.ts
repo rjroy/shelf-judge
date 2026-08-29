@@ -3,6 +3,7 @@ import { toErrorMessage } from "@shelf-judge/shared";
 import type { RedundancySettings } from "@shelf-judge/shared";
 import type { StorageService } from "../services/storage-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
+import { profileSourceCoordinatorFor } from "../services/profile-source-coordinator.js";
 
 export interface RedundancyRoutesDeps {
   storageService: StorageService;
@@ -71,6 +72,7 @@ function validatePatch(patch: Record<string, unknown>): { error: string } | null
 
 export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule {
   const { storageService } = deps;
+  const profileSourceCoordinator = profileSourceCoordinatorFor(storageService);
   const routes = new Hono();
 
   // GET /redundancy/settings
@@ -104,38 +106,42 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
     }
 
     try {
-      const current = await storageService.loadRedundancySettings();
-      const updated: RedundancySettings = { ...current };
+      return await profileSourceCoordinator.runExclusive(async () => {
+        const current = await storageService.loadRedundancySettings();
+        const updated: RedundancySettings = { ...current };
 
-      if ("enabled" in patch) updated.enabled = patch.enabled as boolean;
-      if ("stage" in patch) updated.stage = patch.stage as RedundancySettings["stage"];
-      if ("similarityThreshold" in patch)
-        updated.similarityThreshold = patch.similarityThreshold as number;
-      if ("maxPenalty" in patch) updated.maxPenalty = patch.maxPenalty as number;
-      if ("minNeighbors" in patch) updated.minNeighbors = patch.minNeighbors as number;
-      if ("expectedNeighbors" in patch)
-        updated.expectedNeighbors = patch.expectedNeighbors as number;
-      if ("componentWeights" in patch) {
-        const cw = patch.componentWeights as Record<string, unknown>;
-        updated.componentWeights = {
-          binary: typeof cw.binary === "number" ? cw.binary : current.componentWeights.binary,
-          continuous:
-            typeof cw.continuous === "number" ? cw.continuous : current.componentWeights.continuous,
-          personalAxes:
-            typeof cw.personalAxes === "number"
-              ? cw.personalAxes
-              : current.componentWeights.personalAxes,
-        };
-      }
+        if ("enabled" in patch) updated.enabled = patch.enabled as boolean;
+        if ("stage" in patch) updated.stage = patch.stage as RedundancySettings["stage"];
+        if ("similarityThreshold" in patch)
+          updated.similarityThreshold = patch.similarityThreshold as number;
+        if ("maxPenalty" in patch) updated.maxPenalty = patch.maxPenalty as number;
+        if ("minNeighbors" in patch) updated.minNeighbors = patch.minNeighbors as number;
+        if ("expectedNeighbors" in patch)
+          updated.expectedNeighbors = patch.expectedNeighbors as number;
+        if ("componentWeights" in patch) {
+          const cw = patch.componentWeights as Record<string, unknown>;
+          updated.componentWeights = {
+            binary: typeof cw.binary === "number" ? cw.binary : current.componentWeights.binary,
+            continuous:
+              typeof cw.continuous === "number"
+                ? cw.continuous
+                : current.componentWeights.continuous,
+            personalAxes:
+              typeof cw.personalAxes === "number"
+                ? cw.personalAxes
+                : current.componentWeights.personalAxes,
+          };
+        }
 
-      // Post-merge validation: componentWeights sum > 0
-      const { binary, continuous, personalAxes } = updated.componentWeights;
-      if (binary + continuous + personalAxes === 0) {
-        return c.json({ error: "componentWeights sum must be greater than 0" }, 400);
-      }
+        // Post-merge validation: componentWeights sum > 0
+        const { binary, continuous, personalAxes } = updated.componentWeights;
+        if (binary + continuous + personalAxes === 0) {
+          return c.json({ error: "componentWeights sum must be greater than 0" }, 400);
+        }
 
-      await storageService.saveRedundancySettings(updated);
-      return c.json(updated);
+        await storageService.saveRedundancySettings(updated);
+        return c.json(updated);
+      });
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 500);
     }

@@ -217,18 +217,38 @@ Tournament scores appear on game detail pages and are visible alongside fitness 
 
 ![Profile](screenshots/profile.png)
 
-The Profile page is an analysis of your collection. It requires at least some rated games to compute.
+The Profile page answers two questions: what the collection reveals about your preferences, and what explicit play intentions still need a decision. The daemon operation is `shelf.profile.get` (`GET /api/profile`). It returns the complete profile used by the overview and its entity and axis drilldowns.
 
-**Collection Narrative:**
-An AI-generated summary of your collection — what it reveals about your preferences, notable tensions, and surprises. Click **Regenerate** to refresh it (uses an older cached profile if one exists).
+The CLI returns that same complete validated result with `shelf-judge profile`. Explicit intentions and manual play evidence use these commands:
 
-**Axis Rating Distributions:**
-A histogram per axis showing how your ratings are spread across the 1–10 scale. Statistics shown: mean, median, standard deviation, and range.
+```text
+shelf-judge game intention set <game-id> <first-play|replay> [--command-id <uuid>]
+shelf-judge game intention complete <game-id> <intention-id> --expected-version <n> [--command-id <uuid>]
+shelf-judge game intention retire <game-id> <intention-id> --expected-version <n> [--command-id <uuid>]
+shelf-judge game plays set <game-id> <count>
+```
 
-**Prediction confidence:**
-The sidebar shows your current prediction stage and how many games have been rated. Higher stage = more accurate predictions for unrated/wishlisted games.
+When an intention command omits `--command-id`, the CLI prints the generated ID to standard error before sending the request. Reuse that ID with the same command after a lost response. A stale expected version is not retried automatically; refresh and review the current intention first. Owner-confirmed completion resolves the intention without changing recorded play count.
 
-The profile also surfaces divergence (games where fitness and tournament scores disagree significantly) and outliers (games compositionally unlike the rest of your collection).
+The identity section uses the following data:
+
+- **Axis rating distributions** use effective ratings from each enabled axis's fitness breakdown. They show a histogram, mean, median, population standard deviation, and range. An axis with no usable values remains visible with a zero count.
+- **Mechanics, designers, and artists** use complete BGG entity metadata and current displayed fitness. Each association includes its supporting games and the collection comparator. Associations supported by fewer than three games remain visible as limited evidence.
+- **Attention items** come only from active owner-created first-play or replay intentions. Profile reads never infer, age, prioritize, complete, or retire an intention.
+
+Each entity class reports its metadata readiness separately. A class can be supported, limited, evaluated with no associations, missing valid fitness, or waiting for metadata without changing the result for another class. Predicted fitness is excluded, while a vetoed current score remains eligible at `0`.
+
+**Persistence and recomputation:**
+The persisted profile contract is version 7 and the algorithm is version 9. `profile.json` is a disposable local cache, not a compatibility boundary. A cache is reused only when its collection ID, schema version, revision, complete Tournament hash, prediction-settings hash, and redundancy-settings hash all match the captured source snapshot. Invalid, non-finite, older-contract, and older-algorithm artifacts are deleted and recreated on the next profile read. A failed recomputation returns an unavailable result with the profile retry operation instead of serving stale data.
+
+**Version 4 upgrade:**
+Back up the data directory before upgrading. Shelf Judge automatically migrates an older collection when it first loads, then recreates disposable profile data from the migrated collection and current Tournament and scoring settings. After Shelf Judge successfully writes collection schema version 4, downgrading to a release that only understands an older collection schema is unsupported.
+
+**Limitations:**
+
+- Entity associations describe this collection only. Shelf Judge does not claim causation, statistical significance, population inference, probability, or creator responsibility.
+- Games with predicted fitness or incomplete entity metadata are excluded with an explicit reason rather than estimated.
+- The profile describes current collection evidence. It does not advise what to buy, sell, keep, or remove.
 
 ---
 
