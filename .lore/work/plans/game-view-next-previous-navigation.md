@@ -71,10 +71,10 @@ bunx prettier --check packages/web/lib/collection-utils.ts packages/web/tests/co
 1. Define the version-1 context, projection, scope, and entry types without `any`, unsafe assertions, or unvalidated parsed JSON.
 2. Implement strict runtime validation for schema, field unions, finite timestamps, nonempty IDs/names, unique entry IDs, opaque UUID-format keys, and exact-once requested current/origin membership.
 3. Store each immutable context under its own versioned prefix. Never rewrite sequence, scope, or projection fields for an existing key.
-4. Inject storage, clock, UUID generation, and exclusive-lock execution into pure store operations; production defaults use `localStorage`, `Date.now`, `crypto.randomUUID`, and the named Web Lock.
+4. Inject storage, clock, UUID generation, and exclusive-lock execution into pure store operations; production defaults use `localStorage`, `Date.now`, native UUID/Web Lock APIs when available, and same-document fallbacks otherwise.
 5. Implement locked creation with collision checks, complete-write confirmation, and `null` on any failed create/write/read-back.
 6. Implement resolution in the approved order: read/validate, reject expiry, refresh timestamp monotonically, re-read when refresh succeeds, then clean malformed/expired records and retain the newest 20 while preferring the requested record on timestamp ties.
-7. If refresh alone fails, return the already-read valid record for the current page without advancing stored recency. If Web Locks are unavailable, creation fails and resolution is read-only with no unlocked mutation.
+7. If refresh alone fails, return the already-read valid record for the current page without advancing stored recency. If Web Locks are unavailable, serialize mutations with a same-document named queue.
 8. Keep cleanup and storage errors contained so no route or render throws because browser storage is unavailable or corrupt.
 
 **Local gate**

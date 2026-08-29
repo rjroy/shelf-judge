@@ -236,6 +236,32 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.describe("Collection snapshot production and traversal", () => {
+  test("mobile creates contextual navigation without secure-context APIs", async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== "chromium-mobile", "Regression targets mobile LAN access");
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "locks", { configurable: true, value: undefined });
+      Object.defineProperty(crypto, "randomUUID", { configurable: true, value: undefined });
+    });
+    await page.reload();
+
+    expect(await page.evaluate(() => [typeof navigator.locks, typeof crypto.randomUUID])).toEqual([
+      "undefined",
+      "undefined",
+    ]);
+    await waitForHydratedRows(page, DEFAULT_ORDER);
+    await expect(page.locator("#collection-game-game-3")).toHaveAttribute(
+      "href",
+      /collectionContext=/,
+    );
+    await page.locator("#collection-game-game-3").click();
+    await expect(page.getByRole("link", { name: /Previous game: Borealis/ })).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: new RegExp(`Next game: ${LONG_NEXT_NAME}`) }),
+    ).toBeVisible();
+  });
+
   test("snapshot IDs exactly equal flat DOM IDs and links activate atomically once", async ({
     page,
   }) => {

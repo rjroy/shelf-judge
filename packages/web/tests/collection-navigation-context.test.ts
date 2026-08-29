@@ -5,6 +5,7 @@ import {
   MAX_COLLECTION_NAVIGATION_CONTEXTS,
   createCollectionNavigationContext,
   resolveCollectionNavigationContext,
+  runCollectionNavigationExclusive,
   type CollectionNavigationContextDependencies,
   type CollectionNavigationContextV1,
   type CollectionNavigationExclusiveLockRunner,
@@ -130,6 +131,108 @@ function storedContext(storage: MemoryStorage, key: string): CollectionNavigatio
 }
 
 describe("collection navigation context store", () => {
+  test("generates valid fallback UUIDs and retries collisions without randomUUID", async () => {
+    const originalCryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+    const randomBytes = [new Uint8Array(16), new Uint8Array(16)];
+    randomBytes[1]?.fill(1);
+    Object.defineProperty(globalThis, "crypto", {
+      configurable: true,
+      value: {
+        getRandomValues<T extends ArrayBufferView>(array: T): T {
+          const bytes = randomBytes.shift();
+          if (bytes === undefined) throw new Error("Unexpected random byte request");
+          new Uint8Array(array.buffer, array.byteOffset, array.byteLength).set(bytes);
+          return array;
+        },
+      },
+    });
+
+    try {
+      const storage = new MemoryStorage();
+      const collidingKey = "00000000-0000-4000-8000-000000000000";
+      seed(storage, context(collidingKey, 500), collidingKey);
+
+      const key = await createCollectionNavigationContext(input(), {
+        storage,
+        clock: () => 1_000,
+        runExclusive: immediateLock,
+      });
+
+      expect(key).toBe("01010101-0101-4101-8101-010101010101");
+      expect(key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+      expect(storedContext(storage, collidingKey).lastAccessedAt).toBe(500);
+
+      Object.defineProperty(globalThis, "crypto", { configurable: true, value: undefined });
+      const keyWithoutCrypto = await createCollectionNavigationContext(input(), {
+        storage: new MemoryStorage(),
+        clock: () => 1_000,
+        runExclusive: immediateLock,
+      });
+      expect(keyWithoutCrypto).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      );
+    } finally {
+      if (originalCryptoDescriptor === undefined) {
+        Reflect.deleteProperty(globalThis, "crypto");
+      } else {
+        Object.defineProperty(globalThis, "crypto", originalCryptoDescriptor);
+      }
+    }
+  });
+
+  test("serializes fallback locks and recovers after an operation rejects", async () => {
+    const originalNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      value: {},
+    });
+    let releaseFirst: (() => void) | undefined;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const events: string[] = [];
+
+    try {
+      const first = runCollectionNavigationExclusive("fallback-test", async () => {
+        events.push("first:start");
+        await firstGate;
+        events.push("first:end");
+        return "first";
+      });
+      const rejected = runCollectionNavigationExclusive("fallback-test", () => {
+        events.push("rejected");
+        return Promise.reject(new Error("injected rejection"));
+      });
+      const rejectedResult = rejected.catch((error: unknown) => error);
+      const third = runCollectionNavigationExclusive("fallback-test", () => {
+        events.push("third");
+        return Promise.resolve("third");
+      });
+
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(events).toEqual(["first:start"]);
+      releaseFirst?.();
+      expect(await first).toBe("first");
+      expect(await rejectedResult).toBeInstanceOf(Error);
+      expect(await third).toBe("third");
+      expect(events).toEqual(["first:start", "first:end", "rejected", "third"]);
+
+      expect(
+        await runCollectionNavigationExclusive("fallback-test", () =>
+          Promise.resolve("after-idle"),
+        ),
+      ).toBe("after-idle");
+    } finally {
+      releaseFirst?.();
+      if (originalNavigatorDescriptor === undefined) {
+        Reflect.deleteProperty(globalThis, "navigator");
+      } else {
+        Object.defineProperty(globalThis, "navigator", originalNavigatorDescriptor);
+      }
+    }
+  });
+
   test("creates and resolves a complete versioned context", async () => {
     const storage = new MemoryStorage();
     const key = await createCollectionNavigationContext(input(), dependencies(storage, 10_000));

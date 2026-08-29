@@ -42,7 +42,7 @@ The snapshot producer will consume those same two arrays as `[...withValue, ...w
 
 ## Snapshot Store
 
-Add `packages/web/lib/collection-navigation-context.ts` as the only storage and validation boundary. Its mutating operations are asynchronous because cross-tab create, refresh, and cleanup run inside one named Web Lock.
+Add `packages/web/lib/collection-navigation-context.ts` as the only storage and validation boundary. Its mutating operations are asynchronous because create, refresh, and cleanup run through one named lock runner. Native Web Locks serialize across tabs when available; a same-document queue keeps insecure-origin clients functional otherwise.
 
 ### Stored Shape
 
@@ -80,7 +80,7 @@ shelf-judge-collection-navigation:v1:<opaque-key>
 
 There is no shared registry object. A whole-registry read-modify-write can lose one tab's new context when another tab writes concurrently. Independent records allow tabs to create immutable sequences without overwriting each other.
 
-The opaque key comes from `crypto.randomUUID()`. Store helpers receive an injectable storage object, clock, and key generator for deterministic tests. A key is accepted only as an opaque identifier matching the generated format; it can never select an arbitrary `localStorage` name.
+The opaque key comes from `crypto.randomUUID()` when available, with an RFC 4122 version-4 byte generator as a fallback. Store helpers receive an injectable storage object, clock, and key generator for deterministic tests. A key is accepted only as an opaque identifier matching the generated format; it can never select an arbitrary `localStorage` name.
 
 ### Creation And Immutability
 
@@ -103,7 +103,7 @@ An existing key's ordered entries and projection fields are never changed. Acces
 
 Creation sets `lastAccessedAt`. Successful detail resolution and successful contextual-return resolution attempt to refresh it. Rendering Collection links does not. If validation and reading succeed but the refresh write fails, the resolver returns the already-read context for the current page and leaves the stored timestamp unchanged.
 
-Every create or resolve requests the exclusive `shelf-judge-collection-navigation` Web Lock. Within that lock:
+Every create or resolve uses the exclusive `shelf-judge-collection-navigation` lock runner, backed by Web Locks when available and a same-document queue otherwise. Within that lock:
 
 1. read and validate the requested or newly written record;
 2. reject and remove it if its stored timestamp was already expired at operation start;
@@ -112,7 +112,7 @@ Every create or resolve requests the exclusive `shelf-judge-collection-navigatio
 5. scan only feature-prefixed records, remove malformed and expired records, and retain the 20 newest timestamps;
 6. prefer the context being resolved when timestamps tie so the operation does not immediately evict its own valid result.
 
-The exclusive lock prevents two tabs from applying stale access timestamps out of order and makes the 20-record postcondition exact when the operation completes. Independent records still prevent any sequence payload from being overwritten. If Web Locks are unavailable or lock acquisition fails, creation fails to plain links. Resolution may return a valid immutable record for the current page without refreshing or cleaning it; it does not attempt an unlocked write. This fallback preserves navigation without making unsupported cross-tab mutation guarantees.
+The exclusive Web Lock prevents two tabs from applying stale access timestamps out of order and makes the 20-record postcondition exact when the operation completes. If Web Locks are unavailable, a same-document named queue serializes operations while independent records prevent sequence payloads from being overwritten across tabs. If native lock acquisition fails, creation fails to plain links; resolution may return a valid immutable record for the current page without refreshing or cleaning it.
 
 Storage absence, access exceptions, quota failure, malformed JSON, and cleanup failure are contained inside this utility. Failure degrades to plain links or absent navigation.
 
@@ -159,7 +159,7 @@ This equality check is essential. React effects run after render, so state may s
 
 ### Effect Lifecycle
 
-One effect creates a snapshot for a hydrated flat fingerprint. The producer records an attempt before awaiting asynchronous Web Lock/storage work, so development effect replay does not consume duplicate keys. A changed fingerprint clears contextual eligibility by derivation, receives a new creation attempt, and switches all flat links together only after successful persistence. A late success for an older projection remains stored for links already copied or opened but cannot activate on the current Collection render.
+One effect creates a snapshot for a hydrated flat fingerprint. The producer records an attempt before awaiting asynchronous lock-runner/storage work, so development effect replay does not consume duplicate keys. A changed fingerprint clears contextual eligibility by derivation, receives a new creation attempt, and switches all flat links together only after successful persistence. A late success for an older projection remains stored for links already copied or opened but cannot activate on the current Collection render.
 
 If creation fails, the attempted fingerprint remains context-free for that render lifecycle. A later genuine projection change retries with a new fingerprint. The implementation need not retry continuously and churn storage.
 

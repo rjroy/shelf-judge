@@ -8,6 +8,7 @@ export const MAX_COLLECTION_NAVIGATION_CONTEXTS = 20;
 const LOCK_NAME = "shelf-judge-collection-navigation";
 const MAX_KEY_GENERATION_ATTEMPTS = 100;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const fallbackLockTails = new Map<string, Promise<void>>();
 
 export interface CollectionNavigationEntry {
   readonly id: string;
@@ -322,14 +323,47 @@ function cleanupContexts(
   }
 }
 
-async function defaultRunExclusive<Result>(
+export async function runCollectionNavigationExclusive<Result>(
   name: string,
   operation: () => Promise<Result>,
 ): Promise<Result> {
-  if (typeof navigator === "undefined" || navigator.locks === undefined) {
-    throw new Error("Web Locks are unavailable");
+  if (typeof navigator !== "undefined" && typeof navigator.locks?.request === "function") {
+    return navigator.locks.request(name, { mode: "exclusive" }, operation);
   }
-  return navigator.locks.request(name, { mode: "exclusive" }, operation);
+
+  const previous = fallbackLockTails.get(name) ?? Promise.resolve();
+  let release: (() => void) | undefined;
+  const tail = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  fallbackLockTails.set(name, tail);
+
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release?.();
+    if (fallbackLockTails.get(name) === tail) fallbackLockTails.delete(name);
+  }
+}
+
+function defaultGenerateKey(): string {
+  const cryptoApi = globalThis.crypto;
+  if (typeof cryptoApi?.randomUUID === "function") return cryptoApi.randomUUID();
+
+  const bytes = new Uint8Array(16);
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    cryptoApi.getRandomValues(bytes);
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256);
+    }
+  }
+  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x40;
+  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
+
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function resolveDependencies(
@@ -346,14 +380,14 @@ function resolveDependencies(
 
   let generateKey = dependencies.generateKey;
   if (generateKey === undefined) {
-    generateKey = () => crypto.randomUUID();
+    generateKey = defaultGenerateKey;
   }
 
   return {
     storage,
     clock: dependencies.clock ?? Date.now,
     generateKey,
-    runExclusive: dependencies.runExclusive ?? defaultRunExclusive,
+    runExclusive: dependencies.runExclusive ?? runCollectionNavigationExclusive,
   };
 }
 

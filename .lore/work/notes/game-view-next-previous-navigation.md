@@ -60,7 +60,7 @@ related:
 ### Phase 2: Versioned Context Store
 
 - Added `packages/web/lib/collection-navigation-context.ts` and `packages/web/tests/collection-navigation-context.test.ts`.
-- Implemented strict V1 validation, immutable per-context records, named Web Lock mutation, sliding seven-day expiry, deterministic 20-record LRU, refresh-failure current-page use, and lock/storage degradation.
+- Implemented strict V1 validation, immutable per-context records, native Web Lock mutation with a same-document fallback queue, sliding seven-day expiry, deterministic 20-record LRU, refresh-failure current-page use, and storage degradation.
 - Initial testing passed behavior but required six discriminating store assertions; all were added without production changes.
 - Review found and corrected one browser-boundary defect where the default `localStorage` getter itself could throw outside containment.
 - Gate evidence: 23 tests and 125 assertions passed; web typecheck, targeted ESLint, and Prettier passed; targeted verification closed `NAV-P2-001` with no new finding.
@@ -102,7 +102,7 @@ related:
 - Reconciled `REQ-GAME-NAV-1` through `REQ-GAME-NAV-29` to direct unit, static, browser, accessibility, history, storage, cross-tab, and native-zoom evidence.
 - Root typecheck, web typecheck, browser typecheck, lint, unit tests, production build, full Playwright suite, and `git diff --check` passed.
 - Formatted all four related navigation lore artifacts. Root `format:check` now differs only on the documented generated Beads baseline: `.beads/backup/backup_state.json`, `.beads/export-state.json`, and `.beads/push-state.json`.
-- Terminal acceptance review accepted the complete changed surface with no material findings. The only residual risk is intentional: unavailable browser storage or Web Locks degrades to context-free navigation.
+- Terminal acceptance review accepted the complete changed surface with no material findings. Unavailable browser storage still degrades to context-free navigation. Missing Web Locks alone uses same-document serialization; independent high-entropy context records prevent cross-tab sequence overwrite, while exact cross-tab recency/LRU serialization remains available only with native Web Locks.
 
 ## Accepted Manifest
 
