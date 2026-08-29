@@ -371,6 +371,13 @@ test.describe("useful profile responsive release gate", () => {
     await expect(page.getByRole("heading", { name: "Enjoyment" })).toBeVisible();
     await expect(page.getByText("Diagnostic distribution, not an identity claim")).toBeVisible();
     await expect(page.locator(".axis-histogram li")).toHaveCount(10);
+    const renderedBarHeights = await page
+      .locator(".axis-histogram-bar")
+      .evaluateAll((bars) => bars.map((bar) => bar.getBoundingClientRect().height));
+    expect(renderedBarHeights[5]).toBeCloseTo((renderedBarHeights[1] ?? 0) * 2, 0);
+    expect(renderedBarHeights[5]).toBeGreaterThan(renderedBarHeights[1] ?? 0);
+    expect(renderedBarHeights[1]).toBeGreaterThan(renderedBarHeights[0] ?? 0);
+    expect(renderedBarHeights[0]).toBeGreaterThanOrEqual(2);
     await expectNoHorizontalOverflow(page);
     await expectMinimumTargets(page);
   });

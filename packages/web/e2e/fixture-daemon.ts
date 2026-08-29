@@ -45,10 +45,10 @@ const profileFixture: CollectionProfileResult = (() => {
       axisName: axis.name,
       mean: 6,
       median: 6,
-      standardDeviation: Math.sqrt(32 / 3),
+      standardDeviation: Math.sqrt(8),
       range: { min: 2, max: 10 },
-      ratedGameCount: 3,
-      histogram: [0, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+      ratedGameCount: 4,
+      histogram: [0, 1, 0, 0, 0, 2, 0, 0, 0, 1],
     },
   ];
   return CollectionProfileResultSchema.parse(profile);

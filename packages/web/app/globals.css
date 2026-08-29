@@ -4873,23 +4873,83 @@ body {
   border-color: var(--warning-border);
 }
 
+.axis-histogram-frame {
+  min-width: 0;
+  padding: 14px 12px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-subtle);
+  overflow-x: auto;
+}
+
 .axis-histogram {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(10, minmax(24px, 1fr));
+  gap: clamp(3px, 1vw, 10px);
+  min-width: 300px;
+  margin: 0;
   padding: 0;
   list-style: none;
 }
 
 .axis-histogram li {
-  display: flex;
+  display: grid;
+  grid-template-rows: 30px 112px auto;
+  gap: 5px;
   min-width: 0;
-  padding: 7px;
-  flex-direction: column;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg-subtle);
+  text-align: center;
   font-size: var(--text-xs);
+}
+
+.axis-histogram-count {
+  display: flex;
+  align-items: center;
+  align-self: end;
+  flex-direction: column;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.axis-histogram-count small {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 500;
+}
+
+.axis-histogram-track {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  min-height: 0;
+  border-bottom: 1px solid var(--border-strong);
+}
+
+.axis-histogram-bar {
+  width: min(100%, 34px);
+  min-height: 2px;
+  border-radius: 3px 3px 0 0;
+  background: var(--score-color);
+  opacity: 0.72;
+}
+
+.axis-histogram-bar.zero {
+  background: var(--border-strong);
+  opacity: 0.45;
+}
+
+.axis-histogram-rating {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.axis-histogram-caption {
+  margin: 7px 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  text-align: center;
 }
 
 @media (max-width: 760px) {
@@ -4897,8 +4957,8 @@ body {
     grid-template-columns: 1fr;
   }
 
-  .axis-histogram {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .axis-histogram li {
+    grid-template-rows: 28px 82px auto;
   }
 }
 

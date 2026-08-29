@@ -165,7 +165,10 @@ describe("axis diagnostics", () => {
     expect(html).toContain("Axis Diagnostics");
     expect(html).toContain("Diagnostic distribution, not an identity claim");
     expect(html).toContain('aria-label="Effective preference rating counts from 1 to 10"');
-    expect(html).toContain("Rating 5</span><strong>1 games");
+    expect(html).toContain('aria-label="Rating 5: 1 game"');
+    expect(html).toContain('class="axis-histogram-bar" style="height:100%"');
+    expect(html).toContain('class="axis-histogram-bar zero" style="height:2px"');
+    expect(html).toContain("Effective preference rating, 1-10");
     expect(html).not.toContain("deserves my attention");
   });
 });
