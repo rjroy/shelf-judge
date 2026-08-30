@@ -5,7 +5,6 @@ import { formatTable, printOutput } from "../output.js";
 
 interface ConfigData {
   bggAuthToken: string | null;
-  dataDir: string;
 }
 
 export async function configGet(
@@ -22,13 +21,7 @@ export async function configGet(
 
   if (opts.json) return printOutput(data, opts);
 
-  return formatTable(
-    ["Key", "Value"],
-    [
-      ["bgg-token", data.bggAuthToken ?? "(not set)"],
-      ["data-dir", data.dataDir],
-    ],
-  );
+  return formatTable(["Key", "Value"], [["bgg-token", data.bggAuthToken ?? "(not set)"]]);
 }
 
 export async function configSet(

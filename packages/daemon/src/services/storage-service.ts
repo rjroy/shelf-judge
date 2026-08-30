@@ -204,16 +204,15 @@ function createDefaultTournament(): TournamentData {
   };
 }
 
-function defaultConfig(dataDir: string): AppConfig {
+function defaultConfig(): AppConfig {
   return {
     bggAuthToken: null,
-    dataDir,
     profileEntityPolicy: structuredClone(DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY),
     username: null,
   };
 }
 
-function parseConfig(value: unknown, defaultDataDir: string): AppConfig {
+function parseConfig(value: unknown): AppConfig {
   if (typeof value !== "object" || value === null) throw new Error("Config must be an object");
   const config = value as Record<string, unknown>;
   return {
@@ -221,7 +220,6 @@ function parseConfig(value: unknown, defaultDataDir: string): AppConfig {
       typeof config.bggAuthToken === "string" || config.bggAuthToken === null
         ? config.bggAuthToken
         : null,
-    dataDir: typeof config.dataDir === "string" ? config.dataDir : defaultDataDir,
     profileEntityPolicy: CollectionProfileEntityPolicySchema.parse(
       config.profileEntityPolicy ?? DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
     ),
@@ -304,7 +302,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
   async function loadAppConfig(): Promise<AppConfig> {
     const exists = await fileOps.exists(configPath);
     if (!exists) {
-      const config = defaultConfig(dataDir);
+      const config = defaultConfig();
       const configDir = path.dirname(configPath);
       await fileOps.mkdir(configDir);
       await writeAtomically(configPath, JSON.stringify(config, null, 2));
@@ -312,7 +310,14 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     }
 
     const raw = await fileOps.readFile(configPath);
-    return parseConfig(JSON.parse(raw), dataDir);
+    const stored = JSON.parse(raw) as unknown;
+    const config = parseConfig(stored);
+    if (isRecord(stored) && Object.hasOwn(stored, "dataDir")) {
+      logger.log(`config migration attempt path=${configPath} removedField=dataDir`);
+      await writeAtomically(configPath, JSON.stringify(config, null, 2));
+      logger.log(`config migration completed path=${configPath} removedField=dataDir`);
+    }
+    return config;
   }
 
   return {
@@ -415,7 +420,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
     loadConfig: loadAppConfig,
 
     async saveConfig(config: AppConfig): Promise<void> {
-      const validated = parseConfig(config, dataDir);
+      const validated = parseConfig(config);
       const configDir = path.dirname(configPath);
       await fileOps.mkdir(configDir);
       await writeAtomically(configPath, JSON.stringify(validated, null, 2));

@@ -639,7 +639,6 @@ export interface ImportComplete {
 
 export interface AppConfig {
   bggAuthToken: string | null;
-  dataDir: string;
   profileEntityPolicy: CollectionProfileEntityPolicy;
   username: string | null;
 }

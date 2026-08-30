@@ -23,7 +23,7 @@ Shelf Judge runs locally. There is no server, no cloud sync, no account.
 ```
 packages/
   shared/    TypeScript types and Zod schemas shared across all packages
-  daemon/    Hono server on a Unix socket (/tmp/shelf-judge.sock), JSON persistence (~/.shelf-judge/)
+  daemon/    Hono server on a Unix socket, JSON persistence (~/.shelf-judge/data/)
   web/       Next.js 16 frontend, proxies to daemon via /api/daemon/[...path]
   cli/       Bun CLI (shelf-judge / sj), communicates with daemon over Unix socket
 ```
@@ -154,7 +154,16 @@ Tests live alongside source files and in `packages/daemon/tests/`. BGG API tests
 
 ## Data Storage
 
-All data lives under `~/.shelf-judge/`:
+`resolveDataDir` is the single authority for the data directory. It uses
+`SHELF_JUDGE_DATA_DIR` when set, otherwise `$SHELF_JUDGE_DIR/data`, with
+`~/.shelf-judge/data` as the default. `config.json` contains application settings only and
+cannot relocate data.
+
+The Unix socket uses `SHELF_JUDGE_SOCKET` when set, otherwise
+`$SHELF_JUDGE_DIR/shelf-judge.sock`. `SHELF_JUDGE_CONFIG` can independently override the
+settings file path.
+
+The default layout is:
 
 ```
 ~/.shelf-judge/
