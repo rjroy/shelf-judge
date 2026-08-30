@@ -78,6 +78,7 @@ function makeGame(
       observedAt: null,
     },
     bestPlayersInvalidEvidence: null,
+    manualValues: { playingTime: null, playerCount: null },
     ownership: "owned",
     boxDimensions: null,
     manualShelfId: null,
@@ -145,7 +146,7 @@ const allGamesWithScores: GameWithScore[] = [
 ];
 
 const defaultCollection: Collection = {
-  schemaVersion: 4,
+  schemaVersion: 5,
   revision: 0,
   id: "collection-1",
   name: "Test",

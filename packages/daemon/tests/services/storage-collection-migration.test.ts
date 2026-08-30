@@ -109,7 +109,7 @@ describe("storage collection migration ordering and recovery", () => {
       const migrated = await service.loadCollection();
       const persistedAfterMigration = await fs.readFile(collectionPath, "utf8");
       expect(JSON.parse(persistedAfterMigration)).toEqual(migrated);
-      expect(migrated.schemaVersion).toBe(4);
+      expect(migrated.schemaVersion).toBe(5);
       expect(
         await fs.stat(profilePath).then(
           () => true,
@@ -162,13 +162,13 @@ describe("storage collection migration ordering and recovery", () => {
       dataDir: DATA_DIR,
       configPath: "/test/config.json",
       fileOps: createMockFileOps({
-        [COLLECTION_PATH]: JSON.stringify({ ...historicalCollection, schemaVersion: 5 }),
+        [COLLECTION_PATH]: JSON.stringify({ ...historicalCollection, schemaVersion: 6 }),
       }),
       logger: migrationLog,
     });
     // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
     await expect(migrationService.loadCollection()).rejects.toThrow(
-      "Unsupported collection schema version 5",
+      "Unsupported collection schema version 6",
     );
     expect(
       migrationLog.entries.some((entry) => entry.includes("collection migration failed")),
@@ -182,7 +182,7 @@ describe("storage collection migration ordering and recovery", () => {
       logger: validationLog,
     });
     const invalidCurrent: Collection = {
-      schemaVersion: 4,
+      schemaVersion: 5,
       revision: 0,
       id: "collection-1",
       name: "",
@@ -296,7 +296,7 @@ describe("storage collection migration ordering and recovery", () => {
 
     const migrated = await service.loadCollection();
 
-    expect(migrated.schemaVersion).toBe(4);
+    expect(migrated.schemaVersion).toBe(5);
     expect(invalidated).toEqual(["v1-derived-artifact"]);
     expect(JSON.parse(fileOps.files.get(COLLECTION_PATH) ?? "null")).toEqual(migrated);
   });
@@ -400,7 +400,7 @@ describe("storage collection migration ordering and recovery", () => {
     expect(fileOps.files.get(COLLECTION_PATH)).toBe(original);
 
     const loaded = await service.loadCollection();
-    expect(loaded.schemaVersion).toBe(4);
+    expect(loaded.schemaVersion).toBe(5);
     expect(JSON.parse(fileOps.files.get(COLLECTION_PATH) ?? "null")).toEqual(loaded);
   });
 });

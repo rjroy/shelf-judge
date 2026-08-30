@@ -388,6 +388,7 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
           observedAt: null,
         },
         bestPlayersInvalidEvidence: null,
+        manualValues: { playingTime: null, playerCount: null },
         entityMetadata: structuredClone(bggResult.entityMetadata),
         latestPlayCountCheck: null,
         ownership: "owned",

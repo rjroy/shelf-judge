@@ -43,6 +43,7 @@ function makeGame(overrides: Partial<Game> & { id: string; name: string }): Game
       observedAt: null,
     },
     bestPlayersInvalidEvidence: null,
+    manualValues: { playingTime: null, playerCount: null },
     ownership: "owned",
     boxDimensions: null,
     manualShelfId: null,
@@ -394,7 +395,7 @@ function makeUsefulCollection(
   intentions: Collection["intentions"] = [],
 ): Collection {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     revision: 1,
     id: "collection",
     name: "Collection",

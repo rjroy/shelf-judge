@@ -9,6 +9,7 @@ import {
   type IntentionMutationResult,
   IntentionMutationResultSchema,
   intentionMutationResultMatchesCommand,
+  ManualGameValuesMutationRequestSchema,
   ManualPlayCorrectionResultSchema,
   PlayEvidenceMutationResultSchema,
   OwnershipMutationResultSchema,
@@ -481,10 +482,39 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       if (message.includes("not found")) {
         return c.json({ error: message }, 404);
       }
-      if (message.includes("must be an integer") || message.includes("Axis not found")) {
+      if (
+        message.includes("must be an integer") ||
+        message.includes("Axis not found") ||
+        message.includes("native game values")
+      ) {
         return c.json({ error: message }, 400);
       }
       return c.json({ error: message }, 500);
+    }
+  });
+
+  routes.put("/games/:id/manual-values", async (c) => {
+    const id = c.req.param("id");
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body", code: "invalid_json" }, 400);
+    }
+    try {
+      const game = await gameService.setManualValues(id, body);
+      return c.json({ game });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return c.json(
+          { error: "Validation failed", code: "invalid_manual_values", details: error.issues },
+          400,
+        );
+      }
+      const message = toErrorMessage(error);
+      return message.includes("not found")
+        ? c.json(gameNotFoundResponse(id), 404)
+        : c.json(INTERNAL_ERROR_RESPONSE, 500);
     }
   });
 
@@ -1069,6 +1099,54 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
           status: 500,
           code: "internal_error",
           description: "Acquisition persistence failed",
+          response: INTERNAL_ERROR_RESPONSE,
+        },
+      ],
+      idempotent: true,
+    },
+    {
+      operationId: "shelf.game.set-manual-values",
+      name: "set-manual-values",
+      description: "Set or clear manual play time and player count source values",
+      invocation: { method: "PUT", path: "/api/games/:id/manual-values" },
+      requestSchema: ManualGameValuesMutationRequestSchema,
+      request: {
+        body: {
+          type: "object",
+          additionalProperties: false,
+          minProperties: 1,
+          properties: {
+            playingTime: { oneOf: [{ type: "integer", minimum: 1 }, { type: "null" }] },
+            playerCount: { oneOf: [{ type: "integer", minimum: 1 }, { type: "null" }] },
+          },
+        },
+      },
+      response: { body: { type: "object", required: ["game"] } },
+      hierarchy: { root: "shelf", feature: "game" },
+      parameters: [{ name: "id", in: "path", description: "Game ID", required: true }],
+      errors: [
+        {
+          status: 400,
+          code: "invalid_json",
+          description: "Request body is not valid JSON",
+          response: { error: "Invalid JSON body", code: "invalid_json" },
+        },
+        {
+          status: 400,
+          code: "invalid_manual_values",
+          description: "Request body does not contain valid native-unit values",
+          response: { error: "Validation failed", code: "invalid_manual_values", details: [] },
+        },
+        {
+          status: 404,
+          code: "game_not_found",
+          description: "No game exists with the requested ID",
+          response: { error: "Game not found: :id", code: "game_not_found" },
+        },
+        {
+          status: 500,
+          code: "internal_error",
+          description: "Manual game value persistence failed",
           response: INTERNAL_ERROR_RESPONSE,
         },
       ],

@@ -49,6 +49,7 @@ describe("canonical purchase utilization response parity", () => {
       playerRangeEvidence: fixture.input.playerRange,
       suggestedPlayerPoll: fixture.input.suggestedPlayerPoll,
       bestPlayersInvalidEvidence: null,
+      manualValues: { playingTime: null, playerCount: null },
       ownership: "owned",
       boxDimensions: null,
       manualShelfId: null,
@@ -57,7 +58,7 @@ describe("canonical purchase utilization response parity", () => {
       updatedAt: UTILIZATION_OBSERVED_AT,
     }));
     const collection: Collection = {
-      schemaVersion: 4,
+      schemaVersion: 5,
       revision: 0,
       id: "parity-collection",
       name: "Parity",

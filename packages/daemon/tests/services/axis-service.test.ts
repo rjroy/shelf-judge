@@ -63,6 +63,7 @@ function game(id: string, rating: number): Collection["games"][number] {
       observedAt: null,
     },
     bestPlayersInvalidEvidence: null,
+    manualValues: { playingTime: null, playerCount: null },
     ownership: "owned",
     boxDimensions: null,
     manualShelfId: null,

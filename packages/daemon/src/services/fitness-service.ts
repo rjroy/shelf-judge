@@ -1,6 +1,7 @@
 import {
   DERIVED_AXIS_REGISTRY,
   applyPreferenceCurve,
+  axisAcceptsScoreOverride,
   getAxisNativeScale,
   isPreferenceCurveApplicable,
   isEnabledScoringAxis,
@@ -54,7 +55,7 @@ export function createFitnessService(): FitnessService {
           toleranceWidth: axis.toleranceWidth,
           leanDirection: axis.leanDirection,
         };
-        const personalRating = game.ratings[axis.id];
+        const personalRating = axisAcceptsScoreOverride(axis) ? game.ratings[axis.id] : undefined;
         const resolution = axis.source === "derived" ? resolveDerivedAxisValue(axis, game) : null;
         const nativeScale = getAxisNativeScale(axis);
         let source: FitnessBreakdownSource = axis.source;

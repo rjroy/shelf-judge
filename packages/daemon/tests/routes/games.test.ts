@@ -664,6 +664,99 @@ describe("Game Routes", () => {
       const body = (await clearRes.json()) as GameRateResponse;
       expect(body.game.ratings[axis.id]).toBeUndefined();
     });
+
+    test("rejects score overrides for native-value derived axes", async () => {
+      const axisRes = await jsonRequest(ctx.app, "POST", "/api/axes", {
+        name: "Play Time",
+        weight: 50,
+        source: "derived",
+        derivedField: "playingTime",
+        configuration: { maximumScoringTime: 240 },
+        preferenceShape: "sweet-spot",
+        idealValue: 90,
+        toleranceWidth: 30,
+      });
+      const axis = (await axisRes.json()) as Axis;
+      const gameRes = await jsonRequest(ctx.app, "POST", "/api/games", { name: "Test Game" });
+      const game = ((await gameRes.json()) as GameAddResponse).game;
+
+      const response = await jsonRequest(ctx.app, "PUT", `/api/games/${game.id}/ratings`, {
+        ratings: { [axis.id]: 8 },
+      });
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: "Play Time accepts native game values, not 1-10 score overrides",
+      });
+    });
+  });
+
+  describe("PUT /api/games/:id/manual-values", () => {
+    test("registers a discoverable strict idempotent operation", () => {
+      const operation = ctx.operations.find(
+        ({ operationId }) => operationId === "shelf.game.set-manual-values",
+      );
+
+      expect(operation).toMatchObject({
+        invocation: { method: "PUT", path: "/api/games/:id/manual-values" },
+        idempotent: true,
+      });
+      expect(operation?.requestSchema?.safeParse({ playingTime: 90 }).success).toBe(true);
+      expect(operation?.requestSchema?.safeParse({ playerCount: null }).success).toBe(true);
+      expect(operation?.requestSchema?.safeParse({}).success).toBe(false);
+      expect(operation?.requestSchema?.safeParse({ playingTime: 0 }).success).toBe(false);
+    });
+
+    test("sets one field, preserves source data and the other field, then clears independently", async () => {
+      const gameRes = await jsonRequest(ctx.app, "POST", "/api/games", {
+        name: "Test Game",
+        playingTime: 60,
+        minPlayers: 2,
+        maxPlayers: 4,
+      });
+      const game = ((await gameRes.json()) as GameAddResponse).game;
+
+      const setTime = await jsonRequest(ctx.app, "PUT", `/api/games/${game.id}/manual-values`, {
+        playingTime: 90,
+      });
+      expect(setTime.status).toBe(200);
+      const afterTime = (await setTime.json()) as { game: Game };
+      expect(afterTime.game.manualValues.playingTime).toMatchObject({
+        value: 90,
+        source: "manual",
+      });
+      expect(afterTime.game.manualValues.playerCount).toBeNull();
+      expect(afterTime.game.playingTime).toBe(60);
+      expect(afterTime.game.durationEvidence).toMatchObject({ value: 60 });
+
+      const setCount = await jsonRequest(ctx.app, "PUT", `/api/games/${game.id}/manual-values`, {
+        playerCount: 3,
+      });
+      const afterCount = (await setCount.json()) as { game: Game };
+      expect(afterCount.game.manualValues.playingTime?.value).toBe(90);
+      expect(afterCount.game.manualValues.playerCount?.value).toBe(3);
+
+      const clearTime = await jsonRequest(ctx.app, "PUT", `/api/games/${game.id}/manual-values`, {
+        playingTime: null,
+      });
+      const cleared = (await clearTime.json()) as { game: Game };
+      expect(cleared.game.manualValues.playingTime).toBeNull();
+      expect(cleared.game.manualValues.playerCount?.value).toBe(3);
+      expect(cleared.game.playingTime).toBe(60);
+    });
+
+    test("validates native values and missing games", async () => {
+      const invalid = await jsonRequest(ctx.app, "PUT", "/api/games/missing/manual-values", {
+        playerCount: 0,
+      });
+      expect(invalid.status).toBe(400);
+      expect(await invalid.json()).toMatchObject({ code: "invalid_manual_values" });
+
+      const missing = await jsonRequest(ctx.app, "PUT", "/api/games/missing/manual-values", {
+        playerCount: 2,
+      });
+      expect(missing.status).toBe(404);
+    });
   });
 
   describe("DELETE /api/games/:id", () => {

@@ -87,6 +87,7 @@ function makeGame(
       observedAt: null,
     },
     bestPlayersInvalidEvidence: null,
+    manualValues: { playingTime: null, playerCount: null },
     ownership,
     boxDimensions: null,
     manualShelfId: null,
@@ -119,7 +120,7 @@ const prevOwned = makeGame("prev", "Delta", "previously-owned");
 // Mutable collection for setOwnership tests
 function makeCollection(): Collection {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     revision: 0,
     id: "coll-1",
     name: "Test",
@@ -223,6 +224,7 @@ function createMockGameService(collection?: Collection): GameService {
       return Promise.resolve({ game: structuredClone(game), linkedIntentionTransition: null });
     },
     setBoxDimensions: () => Promise.reject(new Error("not implemented")),
+    setManualValues: () => Promise.reject(new Error("not implemented")),
     setManualShelf: () => Promise.reject(new Error("not implemented")),
     searchGames: () => Promise.reject(new Error("not implemented")),
     refreshBggData: () => Promise.reject(new Error("not implemented")),

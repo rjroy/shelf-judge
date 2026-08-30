@@ -2,6 +2,7 @@ import {
   CURRENT_COLLECTION_SCHEMA_VERSION,
   CollectionSchema,
   CollectionSchemaV3,
+  CollectionSchemaV4,
   createInitialEntityMetadata,
   isUsableSuggestedPlayerPoll,
   type Axis,
@@ -657,6 +658,34 @@ function migrateVersionThreeToFour(raw: unknown): CollectionMigrationStepResult 
   };
 }
 
+function migrateVersionFourToFive(raw: unknown): CollectionMigrationStepResult {
+  const historical = CollectionSchemaV4.parse(raw);
+  const affectedAxisIds = new Set(
+    historical.axes.flatMap((axis) =>
+      axis.enabled &&
+      axis.source === "derived" &&
+      (axis.derivedField === "playingTime" || axis.derivedField === "playerCountFit")
+        ? [axis.id]
+        : [],
+    ),
+  );
+  return {
+    data: {
+      ...historical,
+      schemaVersion: 5,
+      games: historical.games.map((game) => ({
+        ...game,
+        manualValues: { playingTime: null, playerCount: null },
+        ratings: Object.fromEntries(
+          Object.entries(game.ratings).filter(([axisId]) => !affectedAxisIds.has(axisId)),
+        ),
+      })),
+    },
+    convertedAxisCount: 0,
+    disabledAxisCount: 0,
+  };
+}
+
 export const COLLECTION_MIGRATION_STEPS: readonly CollectionMigrationStep[] = [
   {
     fromVersion: 0,
@@ -677,6 +706,11 @@ export const COLLECTION_MIGRATION_STEPS: readonly CollectionMigrationStep[] = [
     fromVersion: 3,
     toVersion: 4,
     migrate: migrateVersionThreeToFour,
+  },
+  {
+    fromVersion: 4,
+    toVersion: 5,
+    migrate: migrateVersionFourToFive,
   },
 ];
 

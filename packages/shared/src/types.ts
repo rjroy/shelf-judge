@@ -103,6 +103,17 @@ export interface PersistedAmount {
   confirmedAt: string;
 }
 
+export interface PersistedManualValue {
+  value: number;
+  source: "manual";
+  confirmedAt: string;
+}
+
+export interface ManualGameValues {
+  playingTime: PersistedManualValue | null;
+  playerCount: PersistedManualValue | null;
+}
+
 export type Acquisition =
   | { state: "unknown" }
   | { state: "gift" }
@@ -158,6 +169,7 @@ export interface Game {
   playerRangeEvidence: PlayerRangeEvidence;
   suggestedPlayerPoll: SuggestedPlayerPoll;
   bestPlayersInvalidEvidence: InvalidEvidence | null;
+  manualValues: ManualGameValues;
   entityMetadata: EntityMetadataByClass;
   latestPlayCountCheck: LatestPlayCountCheck;
   ownership: OwnershipStatus;
@@ -233,7 +245,7 @@ export type Axis = PersonalAxis | TournamentAxis | DerivedAxis | DisabledLegacyA
 export type AxisSource = Axis["source"];
 export type EnabledAxis = PersonalAxis | TournamentAxis | DerivedAxis;
 export interface Collection {
-  schemaVersion: 4;
+  schemaVersion: 5;
   revision: number;
   id: string;
   name: string;
@@ -512,7 +524,7 @@ export interface MultiplierUtilizationValue extends ExactUtilizationValue {
 export interface ModeledPlayerCountValue extends ExactUtilizationValue {
   source: FieldObservationSource;
   observedAt: string | null;
-  resolution: "poll-winner" | "poll-tie-average" | "player-range-midpoint";
+  resolution: "manual" | "poll-winner" | "poll-tie-average" | "player-range-midpoint";
   winningBestVotes: number | null;
   winningPlayerCounts: string[];
 }
@@ -529,6 +541,7 @@ export interface PurchaseUtilizationInput {
   duration: FieldEvidence<number>;
   playerRange: PlayerRangeEvidence;
   suggestedPlayerPoll: SuggestedPlayerPoll;
+  playerCountOverride?: FieldEvidence<number> | null;
   fitness: string | null;
 }
 
@@ -584,6 +597,11 @@ export type AcquisitionMutationRequest =
 
 export interface EntertainmentBenchmarkMutationRequest {
   amount: string;
+}
+
+export interface ManualGameValuesMutationRequest {
+  playingTime?: number | null;
+  playerCount?: number | null;
 }
 
 export interface AddGameResult {
@@ -967,7 +985,7 @@ export type CollectionProfileResult = CollectionProfile | CollectionProfileUnava
 
 export interface ProfileSourceIdentity {
   collectionId: string;
-  collectionSchemaVersion: 4;
+  collectionSchemaVersion: 5;
   collectionRevision: number;
   tournamentHash: string;
   predictionSettingsHash: string;

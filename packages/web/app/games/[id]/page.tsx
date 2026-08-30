@@ -26,6 +26,7 @@ import { ShelfAssignmentForm } from "@/components/shelf-assignment-form";
 import { AcquisitionForm } from "@/components/acquisition-form";
 import { PurchaseUtilizationPanel } from "@/components/purchase-utilization-panel";
 import { IntentionControls } from "@/components/intention-controls";
+import { ManualGameValuesForm } from "@/components/manual-game-values-form";
 import { GameDetailCollectionNavigation } from "@/components/game-detail-collection-navigation";
 
 export async function generateMetadata({
@@ -407,6 +408,14 @@ export default async function GameDetailPage({
               />
               <OwnershipActions gameId={game.id} gameName={game.name} ownership={game.ownership} />
               <AcquisitionForm gameId={game.id} acquisition={game.acquisition} />
+              <ManualGameValuesForm
+                gameId={game.id}
+                values={game.manualValues}
+                sourcePlayingTime={
+                  game.durationEvidence.status === "valid" ? game.durationEvidence.value : null
+                }
+                sourcePlayerCount={game.bestPlayers}
+              />
               <BoxDimensionsForm gameId={game.id} currentDimensions={game.boxDimensions} />
               <ShelfAssignmentForm
                 gameId={game.id}

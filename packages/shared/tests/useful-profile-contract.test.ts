@@ -68,6 +68,7 @@ function futureSourceGame(
       observedAt: null,
     },
     bestPlayersInvalidEvidence: null,
+    manualValues: { playingTime: null, playerCount: null },
     ownership,
     boxDimensions: null,
     manualShelfId: null,
@@ -85,7 +86,7 @@ function futureSourceCollection(
   commandReceipts: unknown[] = [],
 ) {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     id: "collection",
     name: "Collection",
     axes: [],

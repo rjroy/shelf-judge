@@ -73,7 +73,7 @@ export {
   CollectionProfileResultSchema,
 };
 
-export const CURRENT_COLLECTION_SCHEMA_VERSION = 4 as const;
+export const CURRENT_COLLECTION_SCHEMA_VERSION = 5 as const;
 export const CURRENT_PROFILE_CONTRACT_VERSION = 7 as const;
 export const CURRENT_PROFILE_ALGORITHM_VERSION = 9 as const;
 const AmountInputSchema = z.string().superRefine((value, context) => {
@@ -110,6 +110,16 @@ export const EntertainmentBenchmarkMutationRequestSchema = z
         message: "Entertainment benchmark must be positive",
       });
     }
+  });
+
+export const ManualGameValuesMutationRequestSchema = z
+  .object({
+    playingTime: z.number().int().safe().positive().nullable().optional(),
+    playerCount: z.number().int().safe().positive().nullable().optional(),
+  })
+  .strict()
+  .refine((value) => value.playingTime !== undefined || value.playerCount !== undefined, {
+    message: "At least one manual value must be provided",
   });
 
 const VetoConfigSchema = z.object({
@@ -678,6 +688,19 @@ export const PersistedAmountSchema = z
     confirmedAt: z.string(),
   })
   .strict();
+const PersistedManualValueSchema = z
+  .object({
+    value: z.number().int().safe().positive(),
+    source: z.literal("manual"),
+    confirmedAt: z.string(),
+  })
+  .strict();
+const ManualGameValuesSchema = z
+  .object({
+    playingTime: PersistedManualValueSchema.nullable(),
+    playerCount: PersistedManualValueSchema.nullable(),
+  })
+  .strict();
 export const AcquisitionSchema = z.union([
   z.object({ state: z.literal("unknown") }).strict(),
   z.object({ state: z.literal("gift") }).strict(),
@@ -770,14 +793,28 @@ export const CollectionSchemaV3 = z
   })
   .strict();
 
-export const GameSchema = CollectionGameV3Schema.extend({
+export const CollectionGameV4Schema = CollectionGameV3Schema.extend({
   entityMetadata: EntityMetadataByClassSchema,
   latestPlayCountCheck: LatestPlayCountCheckSchema,
 }).strict();
 
-export const CollectionSchema = CollectionSchemaV3.omit({ schemaVersion: true, games: true })
+export const CollectionSchemaV4 = CollectionSchemaV3.omit({ schemaVersion: true, games: true })
   .extend({
     schemaVersion: z.literal(4),
+    revision: z.number().int().safe().min(0),
+    games: z.array(CollectionGameV4Schema),
+    intentions: z.array(PlayIntentionSchema),
+    commandReceipts: z.array(IntentionCommandReceiptSchema),
+  })
+  .strict();
+
+export const GameSchema = CollectionGameV4Schema.extend({
+  manualValues: ManualGameValuesSchema,
+}).strict();
+
+export const CollectionSchema = CollectionSchemaV3.omit({ schemaVersion: true, games: true })
+  .extend({
+    schemaVersion: z.literal(5),
     revision: z.number().int().safe().min(0),
     games: z.array(GameSchema),
     intentions: z.array(PlayIntentionSchema),
@@ -1200,7 +1237,7 @@ function utilizationComponentSchema<ValueSchema extends z.ZodTypeAny>(value: Val
 
 const ModeledPlayerCountValueSchema = ExactUtilizationValueSchema.extend({
   ...EvidenceObservationSchemaFields,
-  resolution: z.enum(["poll-winner", "poll-tie-average", "player-range-midpoint"]),
+  resolution: z.enum(["manual", "poll-winner", "poll-tie-average", "player-range-midpoint"]),
   winningBestVotes: NonNegativeIntegerSchema.nullable(),
   winningPlayerCounts: z.array(z.string()),
 }).strict();

@@ -13,6 +13,8 @@ export type {
   SuggestedPlayerPollState,
   SuggestedPlayerPoll,
   PersistedAmount,
+  PersistedManualValue,
+  ManualGameValues,
   Acquisition,
   EntertainmentBenchmark,
   BggResponseFieldState,
@@ -79,6 +81,7 @@ export type {
   PurchaseUtilizationResult,
   AcquisitionMutationRequest,
   EntertainmentBenchmarkMutationRequest,
+  ManualGameValuesMutationRequest,
   AddGameResult,
   BggSearchResult,
   ImportProgress,
@@ -200,8 +203,10 @@ export {
   ManualPlayCorrectionResponseSchema,
   OwnershipMutationResultSchema,
   CollectionGameV3Schema,
+  CollectionGameV4Schema,
   CollectionSchema,
   CollectionSchemaV3,
+  CollectionSchemaV4,
   ProfileDataSchema,
   ProfileSourceIdentitySchema,
   PredictionSettingsSchema,
@@ -240,6 +245,7 @@ export {
   ShelfConfigurationSchema,
   AcquisitionMutationRequestSchema,
   EntertainmentBenchmarkMutationRequestSchema,
+  ManualGameValuesMutationRequestSchema,
 } from "./validation";
 
 export {
@@ -256,6 +262,12 @@ export { createInitialEntityMetadata } from "./useful-profile-source";
 export { createCompleteEntityMetadata } from "./useful-profile-source";
 
 export { calculatePurchaseUtilization, resolveModeledPlayerCount } from "./purchase-utilization";
+export {
+  manualValueEvidence,
+  resolveManualOverSource,
+  resolveEffectivePlayingTime,
+  resolveEffectivePlayerCount,
+} from "./manual-game-values";
 
 export {
   toErrorMessage,
@@ -280,6 +292,7 @@ export {
   getAxisNativeScale,
   getDerivedAxisNativeScale,
   isEnabledScoringAxis,
+  axisAcceptsScoreOverride,
   isVectorEligibleAxis,
   summarizeDerivedAxisConfiguration,
   getDerivedFieldDiscovery,

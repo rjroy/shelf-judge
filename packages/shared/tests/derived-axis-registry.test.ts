@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  axisAcceptsScoreOverride,
   createDerivedAxisFromPayload,
   createFreshCollectionDerivedAxes,
   DERIVED_AXIS_REGISTRY,
@@ -51,6 +52,7 @@ function makeGame(overrides: Partial<Game> = {}): Game {
       observedAt: null,
     },
     bestPlayersInvalidEvidence: null,
+    manualValues: { playingTime: null, playerCount: null },
     ownership: "owned",
     boxDimensions: null,
     manualShelfId: null,
@@ -174,6 +176,39 @@ describe("derived axis registry contract", () => {
         updatedAt: "2026-01-01T00:00:00Z",
       },
     ]);
+  });
+
+  test("owns score-override policy for each derived field", () => {
+    expect(
+      Object.fromEntries(
+        Object.values(DERIVED_AXIS_REGISTRY).map(({ id, acceptsScoreOverride }) => [
+          id,
+          acceptsScoreOverride,
+        ]),
+      ),
+    ).toEqual({
+      communityRating: true,
+      weight: true,
+      playerCountFit: false,
+      playingTime: false,
+    });
+
+    expect(
+      axisAcceptsScoreOverride({
+        ...commonAxis,
+        source: "derived",
+        derivedField: "communityRating",
+        configuration: {},
+      }),
+    ).toBe(true);
+    expect(
+      axisAcceptsScoreOverride({
+        ...commonAxis,
+        source: "derived",
+        derivedField: "playingTime",
+        configuration: { maximumScoringTime: 240 },
+      }),
+    ).toBe(false);
   });
 
   test("keeps suggestion projections exhaustive with registry fields", () => {
@@ -871,7 +906,7 @@ describe("current-axis helpers", () => {
 
   test("supports the active versioned persisted collection contract", () => {
     const collection: Collection = {
-      schemaVersion: 4,
+      schemaVersion: 5,
       revision: 0,
       id: "collection",
       name: "Collection",
@@ -883,7 +918,7 @@ describe("current-axis helpers", () => {
       createdAt: "2026-01-01T00:00:00Z",
       updatedAt: "2026-01-01T00:00:00Z",
     };
-    expect(collection.schemaVersion).toBe(4);
+    expect(collection.schemaVersion).toBe(5);
     expect(collection.axes).toEqual([personal, tournament, derived, disabled]);
   });
 });

@@ -66,6 +66,7 @@ function makeGame(id: string, name: string, bggData: BggGameData | null): Game {
       observedAt: null,
     },
     bestPlayersInvalidEvidence: null,
+    manualValues: { playingTime: null, playerCount: null },
     ownership: "owned",
     boxDimensions: null,
     manualShelfId: null,

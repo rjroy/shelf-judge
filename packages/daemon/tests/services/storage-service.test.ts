@@ -30,7 +30,7 @@ function makeService(initialFiles?: Record<string, string>) {
 
 function currentCollection(overrides: Partial<Collection> = {}): Collection {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     revision: 0,
     id: "col-1",
     name: "Test",
@@ -71,6 +71,7 @@ function currentGame(overrides: Partial<Game> = {}): Game {
       observedAt: null,
     },
     bestPlayersInvalidEvidence: null,
+    manualValues: { playingTime: null, playerCount: null },
     ownership: "owned",
     boxDimensions: null,
     manualShelfId: null,
@@ -90,7 +91,7 @@ describe("StorageService.loadCollection", () => {
     const collection = await service.loadCollection();
 
     expect(collection.name).toBe("My Collection");
-    expect(collection.schemaVersion).toBe(4);
+    expect(collection.schemaVersion).toBe(5);
     expect(collection.axes).toHaveLength(3);
     expect(collection.games).toHaveLength(0);
 
@@ -253,6 +254,7 @@ describe("StorageService.loadCollection", () => {
       };
       delete rawGame.entityMetadata;
       delete rawGame.latestPlayCountCheck;
+      delete rawGame.manualValues;
       const rawCollection: Record<string, unknown> = {
         ...currentCollection(),
         schemaVersion: 3,
@@ -298,6 +300,7 @@ describe("StorageService.loadCollection", () => {
     delete rawGame.acquisition;
     delete rawGame.entityMetadata;
     delete rawGame.latestPlayCountCheck;
+    delete rawGame.manualValues;
     const rawCollection: Record<string, unknown> = {
       ...currentCollection({ games: [] }),
       schemaVersion: 3,
@@ -318,6 +321,7 @@ describe("StorageService.loadCollection", () => {
     };
     delete normalizedInvalidGame.entityMetadata;
     delete normalizedInvalidGame.latestPlayCountCheck;
+    delete normalizedInvalidGame.manualValues;
     const { service } = makeService({
       [COLLECTION_PATH]: JSON.stringify({
         ...rawCollection,

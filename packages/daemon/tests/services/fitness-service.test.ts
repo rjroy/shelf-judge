@@ -41,6 +41,7 @@ function game(overrides: Partial<Game> = {}): Game {
       observedAt: null,
     },
     bestPlayersInvalidEvidence: null,
+    manualValues: { playingTime: null, playerCount: null },
     ownership: "owned",
     boxDimensions: null,
     manualShelfId: null,
@@ -212,7 +213,7 @@ describe("derived fitness", () => {
     });
   });
 
-  test("invalid minute-native override is direct, retains facts, and bypasses veto", () => {
+  test("manual native values override source values for both affected derived axes", () => {
     const axis = derived(
       "playingTime",
       { maximumScoringTime: 240 },
@@ -223,40 +224,55 @@ describe("derived fitness", () => {
         veto: { direction: "above", threshold: 6 },
       },
     );
-    const result = service.calculateScore(game({ playingTime: 300, ratings: { [axis.id]: 7 } }), [
-      axis,
-    ]);
+    const result = service.calculateScore(
+      game({
+        playingTime: 300,
+        bestPlayers: 2,
+        manualValues: {
+          playingTime: { value: 90, source: "manual", confirmedAt: timestamp },
+          playerCount: { value: 4, source: "manual", confirmedAt: timestamp },
+        },
+        ratings: { [axis.id]: 7 },
+      }),
+      [axis, derived("playerCountFit", { targetPlayerCount: 4 })],
+    );
 
-    expect(result).toMatchObject({ score: 7, vetoed: false });
+    expect(result).toMatchObject({ score: 0, hypotheticalScore: 10, vetoed: true });
     expect(entry(result, axis.id)).toMatchObject({
-      source: "override",
-      sourceValue: 300,
-      scoringRawValue: 240,
-      effectiveRating: 7,
-      overrideValue: 7,
-      contribution: 7,
-      overridden: true,
-      curveAffected: false,
+      source: "derived",
+      sourceValue: 90,
+      scoringRawValue: 90,
+      overrideValue: null,
+      overridden: false,
     });
+    expect(entry(result, "playerCountFit")).toMatchObject({ sourceValue: 10, effectiveRating: 10 });
   });
 
-  test("invalid minute-native override is direct without inventing missing facts", () => {
+  test("one manual value does not replace the other field or invent missing source data", () => {
     const axis = derived(
       "playingTime",
       { maximumScoringTime: 240 },
       { preferenceShape: "sweet-spot", idealValue: 90, toleranceWidth: 30 },
     );
-    const result = service.calculateScore(game({ ratings: { [axis.id]: 9 } }), [axis]);
-    expect(result?.score).toBe(9);
+    const result = service.calculateScore(
+      game({
+        ratings: { [axis.id]: 9 },
+        manualValues: {
+          playingTime: null,
+          playerCount: { value: 3, source: "manual", confirmedAt: timestamp },
+        },
+      }),
+      [axis, derived("playerCountFit", { targetPlayerCount: 3 })],
+    );
+    expect(result?.score).toBe(10);
     expect(entry(result, axis.id)).toMatchObject({
-      source: "override",
+      source: "derived",
       sourceValue: null,
       scoringRawValue: null,
-      effectiveRating: 9,
-      overrideValue: 9,
-      contribution: 9,
-      overridden: true,
-      curveAffected: false,
+      effectiveRating: null,
+      overrideValue: null,
+      contribution: null,
+      overridden: false,
     });
   });
 

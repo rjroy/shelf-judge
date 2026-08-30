@@ -51,6 +51,7 @@ function game(overrides: Partial<Game> = {}): Game {
       observedAt: null,
     },
     bestPlayersInvalidEvidence: null,
+    manualValues: { playingTime: null, playerCount: null },
     entityMetadata: createInitialEntityMetadata(null),
     latestPlayCountCheck: null,
     ownership: "owned",
@@ -65,7 +66,7 @@ function game(overrides: Partial<Game> = {}): Game {
 
 function collection(sourceGame = game()): Collection {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     revision: 0,
     id: "collection",
     name: "Collection",
