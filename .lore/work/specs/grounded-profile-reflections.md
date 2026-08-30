@@ -509,11 +509,13 @@ An unsupported critical claim is any unsupported statement that changes the cent
 21. Run repository typecheck, lint, changed-file formatting, all automated tests, production build, and browser suite. Distinguish accepted repository-wide baseline failures from feature-introduced failures.
 22. Ask a fresh reviewer to explain why each question is useful, when it abstains, how testimony differs from computed evidence, what changes make output stale versus purged, when data leaves the machine, how cost is bounded, and why ordinary Profile reads remain useful without a model. Treat any ambiguous answer as a specification defect.
 
-## Decisions Requiring Owner Approval Before Implementation
+## Owner Review Decisions
+
+The owner approved these first-release choices on 2026-08-30:
 
 1. The first release uses the three Initial Questions and enables all three by default.
 2. Non-note source changes retain collapsed stale output for inspectability; note changes purge dependent output to honor the no-prior-note-text contract.
-3. Reflection and analyst features share one pi-agent boundary with explicit provider/model configuration and no implicit default.
+3. Reflection and analyst features share one pi-agent boundary with explicit provider/model configuration and no implicit default, superseding the prior Claude-Agent-SDK-only rule.
 4. Shelf Judge applies no fixed token or monetary cap; explicit per-question requests, bounded evidence, no retries, and usage disclosure are the application cost controls.
 
 Changing one of these choices requires updating examples, requirements, technical contracts, and evaluation fixtures together before approval.
