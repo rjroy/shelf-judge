@@ -15,6 +15,7 @@ import {
   type PlayIntentionKind,
   type Game,
 } from "@shelf-judge/shared";
+import { generateBrowserUuid } from "@/lib/browser-uuid";
 
 export type BrowserFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -34,7 +35,7 @@ export async function createIntention(
   gameId: string,
   kind: PlayIntentionKind,
   fetcher: BrowserFetch = fetch,
-  createCommandId: () => string = () => crypto.randomUUID(),
+  createCommandId: () => string = generateBrowserUuid,
 ): Promise<IntentionMutationResult> {
   const command = {
     type: "create",
@@ -64,7 +65,7 @@ export async function resolveIntention(
   expectedVersion: number,
   resolution: "complete" | "retire",
   fetcher: BrowserFetch = fetch,
-  createCommandId: () => string = () => crypto.randomUUID(),
+  createCommandId: () => string = generateBrowserUuid,
 ): Promise<IntentionMutationResult> {
   const command = {
     type: resolution,
