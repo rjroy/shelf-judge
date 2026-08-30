@@ -330,4 +330,6 @@ After importing, rate your games on your personal axes to get fitness scores. BG
 
 ## Data Storage
 
-All data is stored locally in `~/.shelf-judge/data/`. There is no cloud sync, no account, and no external service required beyond BGG for metadata. BGG data is cached and refreshed on demand (cache is valid for 7 days).
+All data is stored locally in `~/.shelf-judge/data/` by default. `resolveDataDir` is the canonical data-directory resolver: `SHELF_JUDGE_DATA_DIR` overrides the data directory, while `SHELF_JUDGE_DIR` changes the base used by the default data, socket, and config paths. The settings in `config.json` do not change the data directory. `SHELF_JUDGE_SOCKET` and `SHELF_JUDGE_CONFIG` independently override the Unix socket and settings file paths.
+
+There is no cloud sync, no account, and no external service required beyond BGG for metadata. BGG data is cached and refreshed on demand (cache is valid for 7 days).

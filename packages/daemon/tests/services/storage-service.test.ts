@@ -548,7 +548,6 @@ describe("StorageService.loadConfig", () => {
     const config = await service.loadConfig();
 
     expect(config.bggAuthToken).toBeNull();
-    expect(config.dataDir).toBe(DATA_DIR);
     expect(config.profileEntityPolicy).toEqual({
       mechanic: { overviewLimit: 3, minimumSupportedGames: 3 },
       designer: { overviewLimit: 3, minimumSupportedGames: 3 },
@@ -556,24 +555,25 @@ describe("StorageService.loadConfig", () => {
     });
   });
 
-  test("loads config from existing file", async () => {
+  test("loads config from an existing file and ignores a legacy dataDir", async () => {
     const stored = {
       bggAuthToken: "test-token",
       dataDir: "/custom/data",
       socketPath: "/custom/sock",
     };
-    const { service } = makeService({
+    const { service, fileOps } = makeService({
       [CONFIG_PATH]: JSON.stringify(stored),
     });
 
     const config = await service.loadConfig();
 
     expect(config.bggAuthToken).toBe("test-token");
-    expect(config.dataDir).toBe("/custom/data");
+    expect(config).not.toHaveProperty("dataDir");
     expect(config.profileEntityPolicy.mechanic).toEqual({
       overviewLimit: 3,
       minimumSupportedGames: 3,
     });
+    expect(JSON.parse(fileOps.files.get(CONFIG_PATH) ?? "null")).not.toHaveProperty("dataDir");
   });
 
   test("rejects invalid profile entity policy values", async () => {
@@ -600,7 +600,6 @@ describe("StorageService.saveConfig", () => {
     await service.saveConfig({
       bggAuthToken: "tok",
       username: null,
-      dataDir: DATA_DIR,
       profileEntityPolicy: {
         mechanic: { overviewLimit: 1, minimumSupportedGames: 2 },
         designer: { overviewLimit: 2, minimumSupportedGames: 3 },
@@ -621,6 +620,7 @@ describe("StorageService.saveConfig", () => {
       designer: { overviewLimit: 2, minimumSupportedGames: 3 },
       artist: { overviewLimit: 3, minimumSupportedGames: 4 },
     });
+    expect(persisted).not.toHaveProperty("dataDir");
   });
 });
 

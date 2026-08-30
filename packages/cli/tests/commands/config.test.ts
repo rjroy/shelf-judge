@@ -4,7 +4,6 @@ import { createMockClient } from "../helpers/mock-client.js";
 
 const configData = {
   bggAuthToken: "***configured***",
-  dataDir: "/home/user/.shelf-judge/data",
 };
 
 describe("config get", () => {
@@ -22,18 +21,14 @@ describe("config get", () => {
     expect(output).toContain("Value");
     expect(output).toContain("bgg-token");
     expect(output).toContain("***configured***");
-    expect(output).toContain("data-dir");
-    expect(output).toContain("/home/user/.shelf-judge/data");
   });
 
   test("--json outputs parseable config object", async () => {
     const output = await configGet(client, [], { json: true });
     const parsed = JSON.parse(output) as {
       bggAuthToken: string;
-      dataDir: string;
     };
     expect(parsed.bggAuthToken).toBe("***configured***");
-    expect(parsed.dataDir).toBe("/home/user/.shelf-judge/data");
   });
 });
 
@@ -55,9 +50,7 @@ describe("config set", () => {
     const output = await configSet(client, ["bgg-token", "my-secret-token"], { json: true });
     const parsed = JSON.parse(output) as {
       bggAuthToken: string;
-      dataDir: string;
     };
     expect(parsed.bggAuthToken).toBe("***configured***");
-    expect(parsed.dataDir).toBe("/home/user/.shelf-judge/data");
   });
 });
