@@ -24,11 +24,31 @@ const socketPath = process.env.SHELF_JUDGE_SOCKET;
 if (socketPath === undefined) throw new Error("SHELF_JUDGE_SOCKET is required");
 
 const observedAt = "2026-08-28T10:00:00.000Z";
+const externalObservedAt = "2026-08-28T10:05:00.000Z";
 const createdAt = "2026-08-28T10:01:00.000Z";
 const resolvedAt = "2026-08-28T12:00:00.000Z";
 const gameId = "game-4";
 
-type Scenario = "profile" | "empty" | "unavailable" | "create" | "active" | "stale" | "collection";
+type Scenario =
+  | "profile"
+  | "empty"
+  | "unavailable"
+  | "create"
+  | "active"
+  | "stale"
+  | "collection"
+  | "manual-values";
+
+interface ManualValuesFixtureState {
+  blockNextMutation: boolean;
+  blockNextDetail: boolean;
+  failNextMutation: boolean;
+  releaseMutation: (() => void) | null;
+  releaseDetail: (() => void) | null;
+  mutationBodies: Record<string, unknown>[];
+  activeMutations: number;
+  maxActiveMutations: number;
+}
 
 interface CollectionFixtureState {
   deletedIds: Set<string>;
@@ -429,6 +449,7 @@ let history: ResolvedPlayIntentionHistory = [];
 let staleOnce = false;
 let intentionSequence = 1;
 let collectionState: CollectionFixtureState = createCollectionState();
+let manualValuesState: ManualValuesFixtureState = createManualValuesState();
 
 function createCollectionState(): CollectionFixtureState {
   return {
@@ -443,6 +464,30 @@ function createCollectionState(): CollectionFixtureState {
   };
 }
 
+function createManualValuesState(): ManualValuesFixtureState {
+  return {
+    blockNextMutation: false,
+    blockNextDetail: false,
+    failNextMutation: false,
+    releaseMutation: null,
+    releaseDetail: null,
+    mutationBodies: [],
+    activeMutations: 0,
+    maxActiveMutations: 0,
+  };
+}
+
+async function waitForManualValuesRelease(kind: "mutation" | "detail"): Promise<void> {
+  const blockKey = kind === "mutation" ? "blockNextMutation" : "blockNextDetail";
+  const releaseKey = kind === "mutation" ? "releaseMutation" : "releaseDetail";
+  if (!manualValuesState[blockKey]) return;
+  manualValuesState[blockKey] = false;
+  await new Promise<void>((resolve) => {
+    manualValuesState[releaseKey] = resolve;
+  });
+  manualValuesState[releaseKey] = null;
+}
+
 function reset(next: Scenario): void {
   scenario = next;
   game = baseGame();
@@ -451,6 +496,13 @@ function reset(next: Scenario): void {
   active = next === "active" || next === "stale" || next === "profile" ? activeIntention() : null;
   intentionSequence = 1;
   collectionState = createCollectionState();
+  manualValuesState = createManualValuesState();
+  if (next === "manual-values") {
+    game.manualValues = {
+      playingTime: { value: 90, source: "manual", confirmedAt: observedAt },
+      playerCount: { value: 4, source: "manual", confirmedAt: observedAt },
+    };
+  }
 }
 
 function detail(requestedGameId = gameId): GameDetailWithPurchaseUtilization {
@@ -537,12 +589,52 @@ async function handle(request: Request): Promise<Response> {
       requested !== "create" &&
       requested !== "active" &&
       requested !== "stale" &&
-      requested !== "collection"
+      requested !== "collection" &&
+      requested !== "manual-values"
     ) {
       return json({ error: "Unknown fixture scenario" }, 400);
     }
     reset(requested);
     return json({ scenario });
+  }
+
+  if (path === "/api/test/manual-values-state") {
+    if (request.method === "GET") {
+      return json({
+        mutationBodies: manualValuesState.mutationBodies,
+        activeMutations: manualValuesState.activeMutations,
+        maxActiveMutations: manualValuesState.maxActiveMutations,
+      });
+    }
+    if (request.method === "POST") {
+      const requested = await body(request);
+      if (typeof requested.blockNextMutation === "boolean") {
+        manualValuesState.blockNextMutation = requested.blockNextMutation;
+      }
+      if (typeof requested.blockNextDetail === "boolean") {
+        manualValuesState.blockNextDetail = requested.blockNextDetail;
+      }
+      if (typeof requested.failNextMutation === "boolean") {
+        manualValuesState.failNextMutation = requested.failNextMutation;
+      }
+      if (typeof requested.externalPlayingTime === "number") {
+        game.manualValues.playingTime = {
+          value: requested.externalPlayingTime,
+          source: "manual",
+          confirmedAt: externalObservedAt,
+        };
+      }
+      if (typeof requested.externalPlayerCount === "number") {
+        game.manualValues.playerCount = {
+          value: requested.externalPlayerCount,
+          source: "manual",
+          confirmedAt: externalObservedAt,
+        };
+      }
+      if (requested.releaseMutation === true) manualValuesState.releaseMutation?.();
+      if (requested.releaseDetail === true) manualValuesState.releaseDetail?.();
+      return json({ ok: true });
+    }
   }
 
   if (path === "/api/test/collection-state" && request.method === "POST") {
@@ -598,7 +690,38 @@ async function handle(request: Request): Promise<Response> {
     ) {
       return json({ error: `Game not found: ${requestedGameId}` }, 404);
     }
+    if (scenario === "manual-values") await waitForManualValuesRelease("detail");
     return json(detail(requestedGameId));
+  }
+
+  if (path === `/api/games/${gameId}/manual-values` && request.method === "PUT") {
+    const requestBody = await body(request);
+    manualValuesState.mutationBodies.push(requestBody);
+    manualValuesState.activeMutations += 1;
+    manualValuesState.maxActiveMutations = Math.max(
+      manualValuesState.maxActiveMutations,
+      manualValuesState.activeMutations,
+    );
+    try {
+      await waitForManualValuesRelease("mutation");
+      if (manualValuesState.failNextMutation) {
+        manualValuesState.failNextMutation = false;
+        return json({ error: "Injected manual value failure" }, 503);
+      }
+      if (Object.hasOwn(requestBody, "playingTime")) {
+        const value = requestBody.playingTime;
+        game.manualValues.playingTime =
+          typeof value === "number" ? { value, source: "manual", confirmedAt: observedAt } : null;
+      }
+      if (Object.hasOwn(requestBody, "playerCount")) {
+        const value = requestBody.playerCount;
+        game.manualValues.playerCount =
+          typeof value === "number" ? { value, source: "manual", confirmedAt: observedAt } : null;
+      }
+      return json(game);
+    } finally {
+      manualValuesState.activeMutations -= 1;
+    }
   }
   if (path === "/api/axes" && request.method === "GET") {
     return json(collectionState.axesAvailable ? [axis] : []);

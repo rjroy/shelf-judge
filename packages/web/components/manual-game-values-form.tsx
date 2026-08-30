@@ -1,125 +1,65 @@
 "use client";
 
-import { useEffect, useReducer } from "react";
+import { useEffect, useReducer, useRef, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { ManualGameValues } from "@shelf-judge/shared";
 
 type Field = keyof ManualGameValues;
-type ManualGameValuesMutation = {
-  playingTime?: number | null;
-  playerCount?: number | null;
-};
-export type ManualGameValuesFormState = {
-  playingTime: string;
-  playerCount: string;
-  savedPlayingTime: string;
-  savedPlayerCount: string;
-  serverPlayingTime: string;
-  serverPlayerCount: string;
-  saving: Field | "both" | null;
-  pending: ManualGameValuesMutation | null;
+type FieldStatus = "idle" | "saving" | "clearing" | "refreshing";
+type ManualGameValuesRequest = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+type ManualGameValuesMutation =
+  | { playingTime: number | null; playerCount?: never }
+  | { playerCount: number | null; playingTime?: never };
+
+export interface ManualGameValueFieldState {
+  draft: string;
+  baseline: string;
+  status: FieldStatus;
   error: string | null;
-};
-export type ManualGameValuesFormAction =
-  | { type: "change"; field: Field; value: string }
-  | { type: "sync"; playingTime: string; playerCount: string }
-  | { type: "saving"; field: Field | "both"; body: ManualGameValuesMutation }
-  | { type: "saved"; body: ManualGameValuesMutation }
-  | { type: "failed"; error: string };
-
-function reconciledDraft(draft: string, saved: string, incoming: string): string {
-  return draft === saved ? incoming : draft;
 }
 
-function mutationValue(value: number | null): string {
-  return value === null ? "" : String(value);
-}
+export type ManualGameValueFieldAction =
+  | { type: "change"; value: string }
+  | { type: "sync"; value: string }
+  | { type: "saving" }
+  | { type: "clearing" }
+  | { type: "saved"; value: string }
+  | { type: "failed"; error: string }
+  | { type: "settled" };
 
-export function manualGameValuesFormReducer(
-  state: ManualGameValuesFormState,
-  action: ManualGameValuesFormAction,
-): ManualGameValuesFormState {
+export function manualGameValueFieldReducer(
+  state: ManualGameValueFieldState,
+  action: ManualGameValueFieldAction,
+): ManualGameValueFieldState {
   switch (action.type) {
     case "change":
-      return { ...state, [action.field]: action.value };
-    case "sync": {
-      const playingTimePending = state.pending?.playingTime !== undefined;
-      const playerCountPending = state.pending?.playerCount !== undefined;
+      return { ...state, draft: action.value, error: null };
+    case "sync":
       return {
         ...state,
-        playingTime: playingTimePending
-          ? state.playingTime
-          : reconciledDraft(state.playingTime, state.savedPlayingTime, action.playingTime),
-        playerCount: playerCountPending
-          ? state.playerCount
-          : reconciledDraft(state.playerCount, state.savedPlayerCount, action.playerCount),
-        savedPlayingTime: playingTimePending ? state.savedPlayingTime : action.playingTime,
-        savedPlayerCount: playerCountPending ? state.savedPlayerCount : action.playerCount,
-        serverPlayingTime: action.playingTime,
-        serverPlayerCount: action.playerCount,
+        draft:
+          state.status === "idle" && state.draft === state.baseline ? action.value : state.draft,
+        baseline: action.value,
       };
-    }
     case "saving":
-      return { ...state, saving: action.field, pending: action.body, error: null };
+      return { ...state, status: "saving", error: null };
+    case "clearing":
+      return { ...state, status: "clearing", error: null };
     case "saved":
-      return {
-        ...state,
-        savedPlayingTime:
-          action.body.playingTime === undefined
-            ? state.savedPlayingTime
-            : mutationValue(action.body.playingTime),
-        savedPlayerCount:
-          action.body.playerCount === undefined
-            ? state.savedPlayerCount
-            : mutationValue(action.body.playerCount),
-        serverPlayingTime:
-          action.body.playingTime === undefined
-            ? state.serverPlayingTime
-            : mutationValue(action.body.playingTime),
-        serverPlayerCount:
-          action.body.playerCount === undefined
-            ? state.serverPlayerCount
-            : mutationValue(action.body.playerCount),
-        saving: null,
-        pending: null,
-      };
-    case "failed": {
-      const playingTimePending = state.pending?.playingTime !== undefined;
-      const playerCountPending = state.pending?.playerCount !== undefined;
-      return {
-        ...state,
-        playingTime: playingTimePending
-          ? reconciledDraft(state.playingTime, state.savedPlayingTime, state.serverPlayingTime)
-          : state.playingTime,
-        playerCount: playerCountPending
-          ? reconciledDraft(state.playerCount, state.savedPlayerCount, state.serverPlayerCount)
-          : state.playerCount,
-        savedPlayingTime: playingTimePending ? state.serverPlayingTime : state.savedPlayingTime,
-        savedPlayerCount: playerCountPending ? state.serverPlayerCount : state.savedPlayerCount,
-        saving: null,
-        pending: null,
-        error: action.error,
-      };
-    }
+      return { ...state, draft: action.value, baseline: action.value, status: "refreshing" };
+    case "failed":
+      return { ...state, status: "idle", error: action.error };
+    case "settled":
+      return { ...state, status: "idle" };
   }
 }
 
-export function createManualGameValuesFormState(
-  values: ManualGameValues,
-): ManualGameValuesFormState {
-  const playingTime = values.playingTime === null ? "" : String(values.playingTime.value);
-  const playerCount = values.playerCount === null ? "" : String(values.playerCount.value);
-  return {
-    playingTime,
-    playerCount,
-    savedPlayingTime: playingTime,
-    savedPlayerCount: playerCount,
-    serverPlayingTime: playingTime,
-    serverPlayerCount: playerCount,
-    saving: null,
-    pending: null,
-    error: null,
-  };
+function valueFromProps(value: ManualGameValues[Field]): string {
+  return value === null ? "" : String(value.value);
+}
+
+export function createManualGameValueFieldState(value: string): ManualGameValueFieldState {
+  return { draft: value, baseline: value, status: "idle", error: null };
 }
 
 function parsed(value: string): number | undefined {
@@ -127,25 +67,10 @@ function parsed(value: string): number | undefined {
   return Number.isSafeInteger(number) && number > 0 ? number : undefined;
 }
 
-export function buildManualGameValuesMutation(
-  state: ManualGameValuesFormState,
-): ManualGameValuesMutation {
-  const playingTime = parsed(state.playingTime);
-  const playerCount = parsed(state.playerCount);
-  return {
-    ...(state.playingTime === state.savedPlayingTime || playingTime === undefined
-      ? {}
-      : { playingTime }),
-    ...(state.playerCount === state.savedPlayerCount || playerCount === undefined
-      ? {}
-      : { playerCount }),
-  };
-}
-
 export async function mutateManualGameValues(
   gameId: string,
   body: ManualGameValuesMutation,
-  request: typeof fetch = fetch,
+  request: ManualGameValuesRequest = fetch,
 ): Promise<void> {
   const response = await request(`/api/daemon/games/${gameId}/manual-values`, {
     method: "PUT",
@@ -158,33 +83,45 @@ export async function mutateManualGameValues(
   }
 }
 
-interface SubmitManualGameValuesOptions {
-  gameId: string;
-  body: ManualGameValuesMutation;
-  field: Field | "both";
-  dispatch: (action: ManualGameValuesFormAction) => void;
-  refresh: () => void;
-  request?: typeof fetch;
+interface MutationLock {
+  current: boolean;
 }
 
-export async function submitManualGameValues({
+interface SubmitManualGameValueOptions {
+  gameId: string;
+  body: ManualGameValuesMutation;
+  operation: "saving" | "clearing";
+  savedValue: string;
+  dispatch: (action: ManualGameValueFieldAction) => void;
+  beginRefresh: () => void;
+  lock: MutationLock;
+  request?: ManualGameValuesRequest;
+}
+
+export async function submitManualGameValue({
   gameId,
   body,
-  field,
+  operation,
+  savedValue,
   dispatch,
-  refresh,
+  beginRefresh,
+  lock,
   request = fetch,
-}: SubmitManualGameValuesOptions): Promise<void> {
-  dispatch({ type: "saving", field, body });
+}: SubmitManualGameValueOptions): Promise<void> {
+  if (lock.current) return;
+
+  lock.current = true;
+  dispatch({ type: operation });
   try {
     await mutateManualGameValues(gameId, body, request);
-    dispatch({ type: "saved", body });
-    refresh();
+    dispatch({ type: "saved", value: savedValue });
+    beginRefresh();
   } catch (error) {
     dispatch({
       type: "failed",
-      error: error instanceof Error ? error.message : "Failed to save values",
+      error: error instanceof Error ? error.message : "Failed to save value",
     });
+    lock.current = false;
   }
 }
 
@@ -198,7 +135,7 @@ interface ManualGameValuesFormProps {
   values: ManualGameValues;
   sourcePlayingTime: number | null;
   sourcePlayerCount: number | null;
-  request?: typeof fetch;
+  request?: ManualGameValuesRequest;
   refresh: () => void;
 }
 
@@ -210,108 +147,221 @@ export function ManualGameValuesFormContent({
   request = fetch,
   refresh,
 }: ManualGameValuesFormProps) {
-  const [state, dispatch] = useReducer(
-    manualGameValuesFormReducer,
-    values,
-    createManualGameValuesFormState,
+  const [playingTime, dispatchPlayingTime] = useReducer(
+    manualGameValueFieldReducer,
+    valueFromProps(values.playingTime),
+    createManualGameValueFieldState,
   );
+  const [playerCount, dispatchPlayerCount] = useReducer(
+    manualGameValueFieldReducer,
+    valueFromProps(values.playerCount),
+    createManualGameValueFieldState,
+  );
+  const [isRefreshPending, startRefresh] = useTransition();
+  const mutationLock = useRef(false);
+  const refreshObserved = useRef(false);
 
-  const playingTime = values.playingTime === null ? "" : String(values.playingTime.value);
-  const playerCount = values.playerCount === null ? "" : String(values.playerCount.value);
+  const incomingPlayingTime = valueFromProps(values.playingTime);
+  const incomingPlayerCount = valueFromProps(values.playerCount);
   useEffect(() => {
-    dispatch({ type: "sync", playingTime, playerCount });
-  }, [playingTime, playerCount]);
+    dispatchPlayingTime({ type: "sync", value: incomingPlayingTime });
+  }, [incomingPlayingTime, values.playingTime?.source, values.playingTime?.confirmedAt]);
+  useEffect(() => {
+    dispatchPlayerCount({ type: "sync", value: incomingPlayerCount });
+  }, [incomingPlayerCount, values.playerCount?.source, values.playerCount?.confirmedAt]);
 
-  function submit(body: ManualGameValuesMutation, field: Field | "both") {
-    return submitManualGameValues({ gameId, body, field, dispatch, refresh, request });
+  const refreshingField =
+    playingTime.status === "refreshing"
+      ? "playingTime"
+      : playerCount.status === "refreshing"
+        ? "playerCount"
+        : null;
+  useEffect(() => {
+    if (refreshingField === null) return;
+    if (isRefreshPending) {
+      refreshObserved.current = true;
+      return;
+    }
+    if (!refreshObserved.current) return;
+
+    if (refreshingField === "playingTime") dispatchPlayingTime({ type: "settled" });
+    else dispatchPlayerCount({ type: "settled" });
+    refreshObserved.current = false;
+    mutationLock.current = false;
+  }, [isRefreshPending, refreshingField]);
+
+  function submit(
+    body: ManualGameValuesMutation,
+    operation: "saving" | "clearing",
+    savedValue: string,
+    dispatch: (action: ManualGameValueFieldAction) => void,
+  ) {
+    return submitManualGameValue({
+      gameId,
+      body,
+      operation,
+      savedValue,
+      dispatch,
+      beginRefresh: () => startRefresh(() => refresh()),
+      lock: mutationLock,
+      request,
+    });
   }
 
   return (
     <ManualGameValuesFormView
-      state={state}
+      playingTime={playingTime}
+      playerCount={playerCount}
       sourcePlayingTime={sourcePlayingTime}
       sourcePlayerCount={sourcePlayerCount}
-      onChange={(field, value) => dispatch({ type: "change", field, value })}
-      onSubmit={submit}
+      onPlayingTimeChange={(value) => dispatchPlayingTime({ type: "change", value })}
+      onPlayerCountChange={(value) => dispatchPlayerCount({ type: "change", value })}
+      onSavePlayingTime={(value) =>
+        submit({ playingTime: value }, "saving", String(value), dispatchPlayingTime)
+      }
+      onClearPlayingTime={() => submit({ playingTime: null }, "clearing", "", dispatchPlayingTime)}
+      onSavePlayerCount={(value) =>
+        submit({ playerCount: value }, "saving", String(value), dispatchPlayerCount)
+      }
+      onClearPlayerCount={() => submit({ playerCount: null }, "clearing", "", dispatchPlayerCount)}
     />
   );
 }
 
 interface ManualGameValuesFormViewProps {
-  state: ManualGameValuesFormState;
+  playingTime: ManualGameValueFieldState;
+  playerCount: ManualGameValueFieldState;
   sourcePlayingTime: number | null;
   sourcePlayerCount: number | null;
-  onChange: (field: Field, value: string) => void;
-  onSubmit: (body: ManualGameValuesMutation, field: Field | "both") => Promise<void>;
+  onPlayingTimeChange: (value: string) => void;
+  onPlayerCountChange: (value: string) => void;
+  onSavePlayingTime: (value: number) => Promise<void>;
+  onClearPlayingTime: () => Promise<void>;
+  onSavePlayerCount: (value: number) => Promise<void>;
+  onClearPlayerCount: () => Promise<void>;
+}
+
+interface ManualValueControlProps {
+  label: string;
+  fieldName: "Play Time" | "Player Count";
+  state: ManualGameValueFieldState;
+  placeholder: string;
+  statusId: string;
+  formPending: boolean;
+  onChange: (value: string) => void;
+  onSave: (value: number) => Promise<void>;
+  onClear: () => Promise<void>;
+}
+
+function ManualValueControl({
+  label,
+  fieldName,
+  state,
+  placeholder,
+  statusId,
+  formPending,
+  onChange,
+  onSave,
+  onClear,
+}: ManualValueControlProps) {
+  const value = parsed(state.draft);
+  const pending = state.status !== "idle";
+  const status =
+    state.status === "saving"
+      ? `Saving ${fieldName}...`
+      : state.status === "clearing"
+        ? `Clearing ${fieldName}...`
+        : state.status === "refreshing"
+          ? `Refreshing ${fieldName}...`
+          : null;
+
+  return (
+    <div className="manual-game-value-control">
+      <label>
+        {label}
+        <input
+          aria-label={label}
+          aria-describedby={statusId}
+          type="number"
+          min={1}
+          step={1}
+          value={state.draft}
+          placeholder={placeholder}
+          disabled={pending}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      </label>
+      <button
+        type="button"
+        className="btn btn-secondary"
+        aria-describedby={statusId}
+        disabled={formPending || state.draft === state.baseline || value === undefined}
+        onClick={() => value !== undefined && void onSave(value)}
+      >
+        {state.status === "saving" ? `Saving ${fieldName}...` : `Save ${fieldName}`}
+      </button>
+      <button
+        type="button"
+        aria-describedby={statusId}
+        disabled={formPending || state.baseline === ""}
+        onClick={() => void onClear()}
+      >
+        {state.status === "clearing" ? `Clearing ${fieldName}...` : `Clear ${fieldName}`}
+      </button>
+      {state.error ? (
+        <div id={statusId} className="error-banner" role="alert">
+          {state.error}
+        </div>
+      ) : status ? (
+        <div id={statusId} role="status" aria-live="polite">
+          {status}
+        </div>
+      ) : (
+        <div id={statusId} />
+      )}
+    </div>
+  );
 }
 
 export function ManualGameValuesFormView({
-  state,
+  playingTime,
+  playerCount,
   sourcePlayingTime,
   sourcePlayerCount,
-  onChange,
-  onSubmit,
+  onPlayingTimeChange,
+  onPlayerCountChange,
+  onSavePlayingTime,
+  onClearPlayingTime,
+  onSavePlayerCount,
+  onClearPlayerCount,
 }: ManualGameValuesFormViewProps) {
-  const mutation = buildManualGameValuesMutation(state);
+  const formPending = playingTime.status !== "idle" || playerCount.status !== "idle";
 
   return (
     <div className="rating-field manual-game-values-form">
       <div className="panel-section-title">Play Details</div>
-      {state.error && <div className="error-banner">{state.error}</div>}
-      <label>
-        Play Time (minutes)
-        <input
-          aria-label="Play Time (minutes)"
-          type="number"
-          min={1}
-          step={1}
-          value={state.playingTime}
-          placeholder={sourcePlayingTime === null ? "No BGG value" : String(sourcePlayingTime)}
-          onChange={(event) => onChange("playingTime", event.target.value)}
-        />
-      </label>
-      <button
-        type="button"
-        disabled={state.savedPlayingTime === "" || state.saving !== null}
-        onClick={() => {
-          onChange("playingTime", "");
-          void onSubmit({ playingTime: null }, "playingTime");
-        }}
-      >
-        Clear Play Time
-      </button>
-      <label>
-        Player Count
-        <input
-          aria-label="Player Count"
-          type="number"
-          min={1}
-          step={1}
-          value={state.playerCount}
-          placeholder={sourcePlayerCount === null ? "No BGG value" : String(sourcePlayerCount)}
-          onChange={(event) => onChange("playerCount", event.target.value)}
-        />
-      </label>
-      <button
-        type="button"
-        disabled={state.savedPlayerCount === "" || state.saving !== null}
-        onClick={() => {
-          onChange("playerCount", "");
-          void onSubmit({ playerCount: null }, "playerCount");
-        }}
-      >
-        Clear Player Count
-      </button>
-      <button
-        type="button"
-        className="btn btn-secondary"
-        disabled={state.saving !== null || Object.keys(mutation).length === 0}
-        onClick={() => {
-          void onSubmit(mutation, "both");
-        }}
-      >
-        {state.saving === "both" ? "Saving..." : "Save Play Details"}
-      </button>
+      <ManualValueControl
+        label="Play Time (minutes)"
+        fieldName="Play Time"
+        state={playingTime}
+        placeholder={sourcePlayingTime === null ? "No BGG value" : String(sourcePlayingTime)}
+        statusId="playing-time-status"
+        formPending={formPending}
+        onChange={onPlayingTimeChange}
+        onSave={onSavePlayingTime}
+        onClear={onClearPlayingTime}
+      />
+      <ManualValueControl
+        label="Player Count"
+        fieldName="Player Count"
+        state={playerCount}
+        placeholder={sourcePlayerCount === null ? "No BGG value" : String(sourcePlayerCount)}
+        statusId="player-count-status"
+        formPending={formPending}
+        onChange={onPlayerCountChange}
+        onSave={onSavePlayerCount}
+        onClear={onClearPlayerCount}
+      />
       <div className="derived-rating-facts">
         <span>BGG play time: {sourcePlayingTime ?? "unavailable"}</span>
         <span>BGG player count: {sourcePlayerCount ?? "unavailable"}</span>
