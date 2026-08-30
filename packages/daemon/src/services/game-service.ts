@@ -78,6 +78,7 @@ export interface GameService {
   setBoxDimensions(id: string, dimensions: BoxDimensions | null): Promise<Game>;
   setManualShelf(id: string, shelfId: string | null): Promise<Game>;
   setManualValues(id: string, values: unknown): Promise<Game>;
+  setAdditionalBggIds(id: string, bggIds: number[]): Promise<Game>;
   importBggCollection(
     onProgress?: (event: ImportProgressEvent) => Promise<void> | void,
   ): Promise<ImportSummary>;
@@ -248,6 +249,10 @@ function applyBggResult(
   game.bggData = { ...result.bggData, bestPlayerCount };
   game.entityMetadata = structuredClone(result.entityMetadata);
   const playObservation = result.collectionData?.observation;
+  const playSource =
+    playObservation?.sourceRequest === "bgg-plays"
+      ? ("bgg-plays" as const)
+      : ("bgg-collection" as const);
   if (
     playObservation !== undefined &&
     (game.latestPlayCountCheck === null ||
@@ -262,7 +267,7 @@ function applyBggResult(
       if (game.playCountEvidence.status !== "valid" && replacesCurrentEvidence) {
         game.playCountEvidence = {
           status: "missing",
-          source: "bgg-collection",
+          source: playSource,
           observedAt: playObservation.observedAt,
         };
         game.numPlays = null;
@@ -277,7 +282,7 @@ function applyBggResult(
         game.playCountEvidence = {
           status: "valid",
           value: playCount,
-          source: "bgg-collection",
+          source: playSource,
           observedAt: playObservation.observedAt,
         };
         game.numPlays = playCount;
@@ -294,7 +299,7 @@ function applyBggResult(
         game.playCountEvidence = {
           status: "invalid",
           evidence,
-          source: "bgg-collection",
+          source: playSource,
           observedAt: playObservation.observedAt,
         };
         game.numPlays = null;
@@ -308,6 +313,7 @@ function applyBggResult(
   logger.log("applied BGG result", {
     gameId: game.id,
     bggId: game.bggId,
+    additionalBggIds: game.additionalBggIds ?? [],
     thingFieldsReturned: result.metadataObservation?.fieldsReturned ?? [],
     thingObservedAt: result.metadataObservation?.observedAt ?? null,
     playerRangeState: result.playerRangeObservation?.state ?? "absent",
@@ -334,6 +340,7 @@ function bggStateIdentity(game: Game): string {
   for (const metadata of Object.values(entityMetadata)) metadata.refreshFailure = null;
   return JSON.stringify({
     bggId: game.bggId,
+    additionalBggIds: game.additionalBggIds ?? [],
     name: game.name,
     yearPublished: game.yearPublished,
     minPlayers: game.minPlayers,
@@ -419,6 +426,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
       const game: Game = {
         id: uuidv4(),
         bggId: parsed.bggId ?? null,
+        additionalBggIds: [],
         name: parsed.name ?? "",
         yearPublished: parsed.yearPublished ?? null,
         minPlayers: initialRange?.minPlayers ?? null,
@@ -511,11 +519,13 @@ export function createGameService(deps: GameServiceDeps): GameService {
         { operation: "game.add", trigger: "owner", gameIds: [game.id] },
         (collection) => {
           if (game.bggId !== null) {
-            const existing = collection.games.find((candidate) => candidate.bggId === game.bggId);
+            const bggId = game.bggId;
+            const existing = collection.games.find(
+              (candidate) =>
+                candidate.bggId === bggId || (candidate.additionalBggIds ?? []).includes(bggId),
+            );
             if (existing) {
-              throw new Error(
-                `A game with BGG ID ${game.bggId} already exists: "${existing.name}"`,
-              );
+              throw new Error(`A game with BGG ID ${bggId} already exists: "${existing.name}"`);
             }
           }
           const accepted = structuredClone(game);
@@ -778,6 +788,49 @@ export function createGameService(deps: GameServiceDeps): GameService {
       return configuredBggClient().searchGames(query);
     },
 
+    async setAdditionalBggIds(id: string, bggIds: number[]): Promise<Game> {
+      const uniqueIds = new Set(bggIds);
+      if (
+        uniqueIds.size !== bggIds.length ||
+        bggIds.some((bggId) => !Number.isSafeInteger(bggId) || bggId <= 0)
+      ) {
+        throw new Error("Additional BGG IDs must be unique positive safe integers");
+      }
+      const { value } = await collectionMutationService.mutate(
+        { operation: "game.additional-bgg-ids.set", trigger: "owner", gameIds: [id] },
+        (collection) => {
+          const game = collection.games.find((candidate) => candidate.id === id);
+          if (!game) throw new Error(`Game not found: ${id}`);
+          if (game.bggId === null && bggIds.length > 0) {
+            throw new Error("Additional BGG IDs require a primary BGG ID");
+          }
+          if (game.bggId !== null && uniqueIds.has(game.bggId)) {
+            throw new Error("Additional BGG IDs cannot include the game's primary BGG ID");
+          }
+          const conflictingGame = collection.games.find(
+            (candidate) =>
+              candidate.id !== id &&
+              ((candidate.bggId !== null && uniqueIds.has(candidate.bggId)) ||
+                (candidate.additionalBggIds ?? []).some((bggId) => uniqueIds.has(bggId))),
+          );
+          if (conflictingGame) {
+            throw new Error(`BGG ID is already associated with "${conflictingGame.name}"`);
+          }
+          if (
+            (game.additionalBggIds ?? []).length === bggIds.length &&
+            (game.additionalBggIds ?? []).every((bggId, index) => bggId === bggIds[index])
+          ) {
+            return { changed: false, value: game };
+          }
+          game.additionalBggIds = [...bggIds];
+          game.updatedAt = now();
+          collection.updatedAt = game.updatedAt;
+          return { changed: true, value: game };
+        },
+      );
+      return value;
+    },
+
     async refreshBggData(gameId: string): Promise<PlayEvidenceMutationResult> {
       assertBggConfigured();
       const expectedSuccessGeneration = successGenerations.get(gameId) ?? 0;
@@ -800,6 +853,12 @@ export function createGameService(deps: GameServiceDeps): GameService {
       let result: BggGameResult;
       try {
         result = await configuredBggClient().getGame(game.bggId);
+        if ((game.additionalBggIds ?? []).length > 0) {
+          result.collectionData = await configuredBggClient().getPlayCount([
+            game.bggId,
+            ...(game.additionalBggIds ?? []),
+          ]);
+        }
       } catch (error) {
         const attemptedAt = now();
         const message = toErrorMessage(error);
@@ -946,6 +1005,21 @@ export function createGameService(deps: GameServiceDeps): GameService {
             for (const [bggId, failure] of failures) batchFailures.set(bggId, failure);
           },
         );
+        for (const game of bggGames) {
+          if ((game.additionalBggIds ?? []).length === 0) continue;
+          const result = bggResults.get(game.bggId);
+          if (!result) continue;
+          try {
+            result.collectionData = await configuredBggClient().getPlayCount([
+              game.bggId,
+              ...(game.additionalBggIds ?? []),
+            ]);
+          } catch (error) {
+            const message = toErrorMessage(error);
+            result.collectionData = undefined;
+            errors.push(`Play import failed for "${game.name}": ${message}`);
+          }
+        }
       } catch (err) {
         const message = toErrorMessage(err);
         batchCallFailure = message;
@@ -1112,9 +1186,10 @@ export function createGameService(deps: GameServiceDeps): GameService {
 
       const collection = await storageService.loadCollection();
       const existingBggIds = new Set(
-        collection.games
-          .filter((game): game is Game & { bggId: number } => game.bggId !== null)
-          .map((game) => game.bggId),
+        collection.games.flatMap((game) => [
+          ...(game.bggId === null ? [] : [game.bggId]),
+          ...(game.additionalBggIds ?? []),
+        ]),
       );
 
       let imported = 0;
@@ -1218,6 +1293,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
               const game: Game = {
                 id: uuidv4(),
                 bggId,
+                additionalBggIds: [],
                 name: result.metadata.name,
                 yearPublished: result.metadata.yearPublished,
                 minPlayers:

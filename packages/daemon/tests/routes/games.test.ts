@@ -88,6 +88,31 @@ describe("Game Routes", () => {
     ctx = createTestApp();
   });
 
+  test("PUT /api/games/:id/additional-bgg-ids replaces related entries", async () => {
+    const game = (await ctx.gameService.addGame({ name: "Base Game", bggId: 10 })).game;
+
+    const response = await jsonRequest(ctx.app, "PUT", `/api/games/${game.id}/additional-bgg-ids`, {
+      bggIds: [20, 30],
+    });
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { game: Game };
+    expect(body.game.additionalBggIds).toEqual([20, 30]);
+    expect((await ctx.storageService.loadCollection()).games[0]?.additionalBggIds).toEqual([
+      20, 30,
+    ]);
+  });
+
+  test("PUT /api/games/:id/additional-bgg-ids rejects duplicate IDs", async () => {
+    const game = (await ctx.gameService.addGame({ name: "Base Game", bggId: 10 })).game;
+
+    const response = await jsonRequest(ctx.app, "PUT", `/api/games/${game.id}/additional-bgg-ids`, {
+      bggIds: [20, 20],
+    });
+
+    expect(response.status).toBe(400);
+  });
+
   describe("POST /api/games", () => {
     test("manual game returns 201 with game object and bggImported: false", async () => {
       const res = await jsonRequest(ctx.app, "POST", "/api/games", {

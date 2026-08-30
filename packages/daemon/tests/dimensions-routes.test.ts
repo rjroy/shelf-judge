@@ -93,6 +93,7 @@ function createTestApp() {
     },
     setManualValues: () => Promise.reject(new Error("not implemented")),
     setManualShelf: () => Promise.reject(new Error("not implemented")),
+    setAdditionalBggIds: () => Promise.reject(new Error("not implemented")),
     importBggCollection() {
       return Promise.resolve({ imported: 0, skipped: 0, errors: [] as string[] });
     },

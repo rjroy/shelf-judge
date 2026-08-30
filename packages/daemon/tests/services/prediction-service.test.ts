@@ -702,6 +702,7 @@ describe("prediction-service", () => {
           : () => Promise.resolve(getGameResult ?? makeBggResult("Test Game")),
         getGames: () => Promise.reject(new Error("not implemented")),
         getUserCollection: () => Promise.reject(new Error("not implemented")),
+        getPlayCount: () => Promise.reject(new Error("not implemented")),
         isConfigured: () => true,
       };
     }

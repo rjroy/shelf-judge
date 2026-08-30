@@ -599,6 +599,7 @@ const EvidenceObservationSchemaFields = {
   source: z.enum([
     "manual",
     "bgg-collection",
+    "bgg-plays",
     "bgg-thing",
     "bgg-suggested-player-poll",
     "bgg-player-range",
@@ -816,6 +817,7 @@ export const CollectionSchemaV4 = CollectionSchemaV3.omit({ schemaVersion: true,
 
 export const GameSchema = CollectionGameV4Schema.extend({
   manualValues: ManualGameValuesSchema,
+  additionalBggIds: z.array(z.number().int().safe().positive()).optional(),
 }).strict();
 
 export const CollectionSchema = CollectionSchemaV3.omit({ schemaVersion: true, games: true })
@@ -848,6 +850,10 @@ export const CollectionSchema = CollectionSchemaV3.omit({ schemaVersion: true, g
       }
     }
     const gamesById = new Map(source.games.map((game) => [game.id, game]));
+    const primaryBggIds = new Set(
+      source.games.flatMap((game) => (game.bggId === null ? [] : [game.bggId])),
+    );
+    const additionalBggIdOwners = new Map<number, number>();
     for (const [index, game] of source.games.entries()) {
       const metadata = Object.values(game.entityMetadata);
       if (game.bggId !== null && (!Number.isSafeInteger(game.bggId) || game.bggId <= 0)) {
@@ -856,6 +862,33 @@ export const CollectionSchema = CollectionSchemaV3.omit({ schemaVersion: true, g
           path: ["games", index, "bggId"],
           message: "Future BGG IDs must be positive safe integers",
         });
+      }
+      const additionalBggIds = game.additionalBggIds ?? [];
+      if (game.bggId === null && additionalBggIds.length > 0) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["games", index, "additionalBggIds"],
+          message: "Additional BGG IDs require a primary BGG ID",
+        });
+      }
+      if (new Set(additionalBggIds).size !== additionalBggIds.length) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["games", index, "additionalBggIds"],
+          message: "Additional BGG IDs must be unique",
+        });
+      }
+      for (const bggId of additionalBggIds) {
+        const ownerIndex = additionalBggIdOwners.get(bggId);
+        if (primaryBggIds.has(bggId) || ownerIndex !== undefined) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["games", index, "additionalBggIds"],
+            message: `BGG ID ${bggId} is already associated with another collection entry`,
+          });
+        } else {
+          additionalBggIdOwners.set(bggId, index);
+        }
       }
       if (
         (game.bggId === null && metadata.some(({ state }) => state !== "unrefreshable")) ||
@@ -889,7 +922,8 @@ export const CollectionSchema = CollectionSchemaV3.omit({ schemaVersion: true, g
         game.latestPlayCountCheck?.status === "valid" &&
         !(
           (game.playCountEvidence.status === "valid" &&
-            game.playCountEvidence.source === "bgg-collection" &&
+            (game.playCountEvidence.source === "bgg-collection" ||
+              game.playCountEvidence.source === "bgg-plays") &&
             game.playCountEvidence.value === game.latestPlayCountCheck.value &&
             game.playCountEvidence.observedAt === game.latestPlayCountCheck.observedAt) ||
           (game.playCountEvidence.status === "valid" &&
@@ -912,7 +946,8 @@ export const CollectionSchema = CollectionSchemaV3.omit({ schemaVersion: true, g
       ) {
         const statusMatches = game.playCountEvidence.status === game.latestPlayCountCheck.status;
         const provenanceMatches =
-          game.playCountEvidence.source === "bgg-collection" &&
+          (game.playCountEvidence.source === "bgg-collection" ||
+            game.playCountEvidence.source === "bgg-plays") &&
           game.playCountEvidence.observedAt === game.latestPlayCountCheck.observedAt;
         const invalidEvidenceMatches =
           game.latestPlayCountCheck.status !== "invalid" ||
@@ -1612,7 +1647,7 @@ export const PlayEvidenceMutationResultSchema = z
     const mutationTime = Date.parse(result.game.updatedAt);
     const matchesValidLatestCheck =
       evidence.status === "valid" &&
-      evidence.source === "bgg-collection" &&
+      (evidence.source === "bgg-collection" || evidence.source === "bgg-plays") &&
       latestCheck?.status === "valid" &&
       evidence.value === latestCheck.value &&
       evidence.observedAt === latestCheck.observedAt;
@@ -1656,7 +1691,7 @@ export const PlayEvidenceMutationResultSchema = z
       latestCheck.status !== "valid" &&
       evidence.status !== "valid" &&
       (evidence.status !== latestCheck.status ||
-        evidence.source !== "bgg-collection" ||
+        (evidence.source !== "bgg-collection" && evidence.source !== "bgg-plays") ||
         evidence.observedAt !== latestCheck.observedAt ||
         (latestCheck.status === "invalid" &&
           evidence.status === "invalid" &&

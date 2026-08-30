@@ -8,6 +8,7 @@ import {
   refreshGameBgg,
   removeGameFromCollection,
   resolveIntention,
+  setAdditionalBggIds,
 } from "@/lib/browser-mutations";
 
 function jsonResponse(body: object, status = 200): Response {
@@ -89,6 +90,30 @@ async function rejection(action: () => Promise<unknown>): Promise<unknown> {
 }
 
 describe("browser mutation boundaries", () => {
+  test("replaces additional BGG IDs through the related-entry endpoint", async () => {
+    const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    const updated = { ...game(), additionalBggIds: [20, 30] };
+    const fetcher = (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input, init });
+      return Promise.resolve(jsonResponse({ game: updated }));
+    };
+
+    expect(await setAdditionalBggIds(updated.id, [20, 30], fetcher)).toEqual(updated);
+    expect(requests[0]?.input).toBe(`/api/daemon/games/${updated.id}/additional-bgg-ids`);
+    const body = requests[0]?.init?.body;
+    if (typeof body !== "string") throw new Error("Expected a JSON request body");
+    expect(JSON.parse(body)).toEqual({ bggIds: [20, 30] });
+  });
+
+  test("rejects an incoherent additional BGG ID response", async () => {
+    const fetcher = () =>
+      Promise.resolve(jsonResponse({ game: { ...game(), additionalBggIds: [99] } }));
+
+    const error = await rejection(() => setAdditionalBggIds("game-1", [20], fetcher));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("different additional BGG ID request");
+  });
+
   test.each([...canonicalIntentionMutationCases])(
     "preserves canonical $label through browser request validation",
     async ({ command, result: fixture, status }) => {

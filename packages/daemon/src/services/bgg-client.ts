@@ -9,6 +9,7 @@ import {
   parseThingItems,
   parseSearchResponse,
   parseCollectionResponse,
+  parsePlaysResponse,
   type BggCollectionItem,
   type ThingMetadata,
   type CollectiomItemMetadata,
@@ -56,6 +57,7 @@ export interface BggClient {
     onBatch?: (event: BatchProgressEvent) => Promise<void> | void,
   ): Promise<Map<number, BggGameResult>>;
   getUserCollection(): Promise<BggCollectionItem[]>;
+  getPlayCount(bggIds: number[]): Promise<CollectiomItemMetadata>;
   isConfigured(): boolean;
 }
 
@@ -749,6 +751,78 @@ export function createBggClient(deps: BggClientDeps): BggClient {
 
       logger.log(`getGames: complete, ${results.size}/${bggIds.length} results`);
       return results;
+    },
+
+    async getPlayCount(bggIds: number[]): Promise<CollectiomItemMetadata> {
+      assertConfigured();
+      if (!config.username) throw new Error("BGG username is required to import play records");
+      const uniqueBggIds = [...new Set(bggIds)];
+      if (uniqueBggIds.length === 0) throw new Error("At least one BGG ID is required");
+
+      logger.log("plays fetch attempt", {
+        bggIds: uniqueBggIds,
+        sourceRequest: "bgg-plays",
+        username: config.username,
+      });
+      const records = new Map<number, number>();
+      let observedAt: string | null = null;
+      let pagesFetched = 0;
+      try {
+        for (const bggId of uniqueBggIds) {
+          let page = 1;
+          let fetchedForId = 0;
+          while (true) {
+            const url = `${BGG_BASE_URL}/plays?username=${encodeURIComponent(config.username)}&id=${bggId}&type=thing&page=${page}`;
+            const response = await queuedFetch(url);
+            const xml = await response.text();
+            observedAt = now();
+            const playPage = parsePlaysResponse(xml);
+            pagesFetched++;
+            fetchedForId += playPage.records.length;
+            for (const record of playPage.records) {
+              if (!records.has(record.id)) records.set(record.id, record.quantity);
+            }
+            if (fetchedForId >= playPage.total) break;
+            if (playPage.records.length === 0) {
+              throw new Error(`BGG plays response ended before all records for BGG ID ${bggId}`);
+            }
+            page++;
+          }
+        }
+      } catch (error) {
+        logger.error("plays fetch outcome", {
+          bggIds: uniqueBggIds,
+          sourceRequest: "bgg-plays",
+          observedAt,
+          state: "failure",
+          pagesFetched,
+          error: toErrorMessage(error),
+          username: config.username,
+        });
+        throw error;
+      }
+
+      if (observedAt === null) throw new Error("BGG plays response was not observed");
+      const numPlays = [...records.values()].reduce((total, quantity) => total + quantity, 0);
+      logger.log("plays fetch outcome", {
+        bggIds: uniqueBggIds,
+        sourceRequest: "bgg-plays",
+        observedAt,
+        state: "complete",
+        pagesFetched,
+        uniquePlayRecords: records.size,
+        numPlays,
+        username: config.username,
+      });
+      return {
+        numPlays,
+        observation: {
+          sourceRequest: "bgg-plays",
+          observedAt,
+          state: "complete",
+          fieldsReturned: ["numPlays"],
+        },
+      };
     },
 
     async getUserCollection(): Promise<BggCollectionItem[]> {

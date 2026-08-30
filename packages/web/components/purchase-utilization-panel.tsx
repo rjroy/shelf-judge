@@ -27,6 +27,7 @@ const REASON_LABELS: Record<PurchaseUtilizationReason, string> = {
 const SOURCE_LABELS: Record<FieldObservationSource, string> = {
   manual: "Manual",
   "bgg-collection": "BGG collection",
+  "bgg-plays": "BGG play records",
   "bgg-thing": "BGG game data",
   "bgg-suggested-player-poll": "BGG suggested-player poll",
   "bgg-player-range": "BGG player range",

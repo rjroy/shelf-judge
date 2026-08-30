@@ -6,7 +6,30 @@ import {
   parseThingItems,
   parseSearchResponse,
   parseCollectionResponse,
+  parsePlaysResponse,
 } from "../../src/services/bgg-xml-parser.js";
+
+describe("parsePlaysResponse", () => {
+  test("parses stable play identities and quantities", () => {
+    expect(
+      parsePlaysResponse(
+        '<plays username="collector" total="2"><play id="101" quantity="2"/><play id="102" quantity="1"/></plays>',
+      ),
+    ).toEqual({
+      total: 2,
+      records: [
+        { id: 101, quantity: 2 },
+        { id: 102, quantity: 1 },
+      ],
+    });
+  });
+
+  test("rejects records without a valid source identity", () => {
+    expect(() => parsePlaysResponse('<plays total="1"><play quantity="1"/></plays>')).toThrow(
+      "play ID and quantity must be positive integers",
+    );
+  });
+});
 
 const fixturesDir = path.join(import.meta.dir, "../fixtures");
 

@@ -166,6 +166,7 @@ function createMockGameService(games: GameWithScore[]): GameService {
     setBoxDimensions: () => Promise.reject(new Error("not implemented")),
     setManualValues: () => Promise.reject(new Error("not implemented")),
     setManualShelf: () => Promise.reject(new Error("not implemented")),
+    setAdditionalBggIds: () => Promise.reject(new Error("not implemented")),
   };
 }
 

@@ -14,6 +14,7 @@ const mockBggClient: BggClient = {
   getGame: () => Promise.reject(new Error("not implemented")),
   getGames: () => Promise.reject(new Error("not implemented")),
   getUserCollection: () => Promise.reject(new Error("not implemented")),
+  getPlayCount: () => Promise.reject(new Error("not implemented")),
   isConfigured: () => true,
 };
 
@@ -302,6 +303,7 @@ function createMockGameService(overrides: Partial<GameService> = {}): GameServic
     setBoxDimensions: notImpl,
     setManualValues: notImpl,
     setManualShelf: notImpl,
+    setAdditionalBggIds: notImpl,
     ...overrides,
   };
 }

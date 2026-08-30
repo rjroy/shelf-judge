@@ -154,6 +154,7 @@ export const LatestPlayCountCheckSchema = z
 const FieldObservationSourceSchema = z.enum([
   "manual",
   "bgg-collection",
+  "bgg-plays",
   "bgg-thing",
   "bgg-suggested-player-poll",
   "bgg-player-range",
