@@ -66,6 +66,7 @@ describe("useful profile persisted flow", () => {
       isConfigured: () => true,
       searchGames: () => Promise.resolve([]),
       getUserCollection: () => Promise.resolve([]),
+      getPlayCount: () => Promise.reject(new Error("not implemented")),
       getGame: (bggId) =>
         Promise.resolve(
           result(

@@ -193,6 +193,13 @@ const ResolveIntentionBodySchema = z
   .strict();
 
 const SetPlayCountBodySchema = z.object({ playCount: z.number().int().safe().min(0) }).strict();
+const SetAdditionalBggIdsBodySchema = z
+  .object({ bggIds: z.array(z.number().int().safe().positive()) })
+  .strict()
+  .refine(({ bggIds }) => new Set(bggIds).size === bggIds.length, {
+    path: ["bggIds"],
+    message: "BGG IDs must be unique",
+  });
 
 function isBggConfigured(bggClient?: BggClient): boolean {
   return bggClient !== undefined && bggClient.isConfigured();
@@ -710,6 +717,34 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     }
   });
 
+  routes.put("/games/:id/additional-bgg-ids", async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+    const parsed = SetAdditionalBggIdsBodySchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json({ error: "Validation failed", details: parsed.error.issues }, 400);
+    }
+    try {
+      const game = await gameService.setAdditionalBggIds(c.req.param("id"), parsed.data.bggIds);
+      return c.json({ game });
+    } catch (error) {
+      const message = toErrorMessage(error);
+      if (message.includes("not found"))
+        return c.json(gameNotFoundResponse(c.req.param("id")), 404);
+      if (message.includes("BGG ID")) return c.json({ error: message }, 409);
+      logger.error("additional BGG ID update failed", {
+        gameId: c.req.param("id"),
+        bggIds: parsed.data.bggIds,
+        error: message,
+      });
+      return c.json(INTERNAL_ERROR_RESPONSE, 500);
+    }
+  });
+
   // PUT /games/:id/dimensions
   routes.put("/games/:id/dimensions", async (c) => {
     const id = c.req.param("id");
@@ -940,6 +975,16 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       invocation: { method: "GET", path: "/api/games/search" },
       hierarchy: { root: "shelf", feature: "game" },
       parameters: [{ name: "q", in: "query", description: "Search query", required: true }],
+      idempotent: true,
+    },
+    {
+      operationId: "shelf.game.additional-bgg-ids.set",
+      name: "set-additional-bgg-ids",
+      description: "Replace the additional BGG entries whose plays belong to a collected game",
+      invocation: { method: "PUT", path: "/api/games/:id/additional-bgg-ids" },
+      requestSchema: SetAdditionalBggIdsBodySchema,
+      hierarchy: { root: "shelf", feature: "game" },
+      parameters: [{ name: "id", in: "path", description: "Game ID", required: true }],
       idempotent: true,
     },
     {

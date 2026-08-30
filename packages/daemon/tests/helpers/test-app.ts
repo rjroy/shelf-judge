@@ -182,6 +182,7 @@ export function createMockBggClient(overrides?: Partial<BggClient>): BggClient {
       return new Map();
     },
     getUserCollection: () => Promise.resolve([]),
+    getPlayCount: () => Promise.reject(new Error("Not implemented in mock")),
     ...overrides,
   };
 }

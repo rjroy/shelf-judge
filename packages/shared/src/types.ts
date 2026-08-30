@@ -38,6 +38,7 @@ export type InvalidEvidence = { presence: "missing" } | { presence: "present"; v
 export type FieldObservationSource =
   | "manual"
   | "bgg-collection"
+  | "bgg-plays"
   | "bgg-thing"
   | "bgg-suggested-player-poll"
   | "bgg-player-range"
@@ -126,7 +127,7 @@ export type EntertainmentBenchmark =
   | null;
 
 export type BggResponseFieldState = "absent" | "partial" | "complete";
-export type BggSourceRequest = "bgg-search" | "bgg-thing" | "bgg-collection";
+export type BggSourceRequest = "bgg-search" | "bgg-thing" | "bgg-collection" | "bgg-plays";
 
 export interface BggRequestObservation {
   sourceRequest: BggSourceRequest;
@@ -154,6 +155,7 @@ export interface BggGameData {
 export interface Game {
   id: string; // UUID
   bggId: number | null;
+  additionalBggIds?: number[];
   name: string;
   yearPublished: number | null;
   minPlayers: number | null;

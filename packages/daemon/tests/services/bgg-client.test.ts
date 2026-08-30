@@ -195,6 +195,45 @@ describe("BggClient", () => {
     });
   });
 
+  describe("getPlayCount", () => {
+    test("pages each entry, deduplicates play IDs, and sums quantities", async () => {
+      const firstPage = Array.from(
+        { length: 100 },
+        (_, index) => `<play id="${index + 1}" quantity="1"/>`,
+      ).join("");
+      mockFetch.enqueue(200, `<plays total="101">${firstPage}</plays>`);
+      mockFetch.enqueue(200, '<plays total="101"><play id="101" quantity="2"/></plays>');
+      mockFetch.enqueue(
+        200,
+        '<plays total="2"><play id="101" quantity="2"/><play id="102" quantity="3"/></plays>',
+      );
+
+      const result = await client.getPlayCount([10, 20]);
+
+      expect(result.numPlays).toBe(105);
+      expect(result.observation).toMatchObject({
+        sourceRequest: "bgg-plays",
+        state: "complete",
+        fieldsReturned: ["numPlays"],
+      });
+      expect(mockFetch.calls.map(({ url }) => url)).toEqual([
+        "https://boardgamegeek.com/xmlapi2/plays?username=testuser&id=10&type=thing&page=1",
+        "https://boardgamegeek.com/xmlapi2/plays?username=testuser&id=10&type=thing&page=2",
+        "https://boardgamegeek.com/xmlapi2/plays?username=testuser&id=20&type=thing&page=1",
+      ]);
+    });
+
+    test("requires a configured collector identity", async () => {
+      const withoutUsername = createBggClient({
+        config: { bggAuthToken: "test-token", username: null },
+        fetchFn: mockFetch.fn,
+        delayMs: 0,
+      });
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(withoutUsername.getPlayCount([10])).rejects.toThrow("username is required");
+    });
+  });
+
   describe("isConfigured", () => {
     test("returns true when token is set", () => {
       expect(client.isConfigured()).toBe(true);

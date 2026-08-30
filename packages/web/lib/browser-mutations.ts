@@ -5,6 +5,7 @@ import {
   ManualPlayCorrectionResponseSchema,
   OwnershipMutationResultSchema,
   PlayEvidenceMutationResultSchema,
+  GameSchema,
   type IntentionMutationError,
   type IntentionCommand,
   type IntentionMutationResult,
@@ -12,6 +13,7 @@ import {
   type OwnershipMutationResult,
   type PlayEvidenceMutationResult,
   type PlayIntentionKind,
+  type Game,
 } from "@shelf-judge/shared";
 
 export type BrowserFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -131,6 +133,37 @@ export async function refreshGameBgg(
   const result = PlayEvidenceMutationResultSchema.parse(await responseJson(response));
   if (result.game.id !== gameId) incoherentResponse("BGG refresh request");
   return result;
+}
+
+export async function setAdditionalBggIds(
+  gameId: string,
+  bggIds: number[],
+  fetcher: BrowserFetch = fetch,
+): Promise<Game> {
+  const response = await fetcher(`/api/daemon/games/${gameId}/additional-bgg-ids`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ bggIds }),
+  });
+  const body = await responseJson(response);
+  if (!response.ok) {
+    const message =
+      typeof body === "object" && body !== null && "error" in body && typeof body.error === "string"
+        ? body.error
+        : `Additional BGG ID update failed (${response.status}).`;
+    throw new Error(message);
+  }
+  if (typeof body !== "object" || body === null || !("game" in body)) {
+    throw new Error("Daemon returned an invalid additional BGG ID response.");
+  }
+  const game = GameSchema.parse(body.game);
+  if (
+    game.id !== gameId ||
+    JSON.stringify(game.additionalBggIds ?? []) !== JSON.stringify(bggIds)
+  ) {
+    incoherentResponse("additional BGG ID request");
+  }
+  return game;
 }
 
 export type RemoveGameResult = { ok: true } | { ok: false; error: IntentionMutationError };

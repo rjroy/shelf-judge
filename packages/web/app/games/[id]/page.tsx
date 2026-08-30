@@ -28,6 +28,7 @@ import { PurchaseUtilizationPanel } from "@/components/purchase-utilization-pane
 import { IntentionControls } from "@/components/intention-controls";
 import { ManualGameValuesForm } from "@/components/manual-game-values-form";
 import { GameDetailCollectionNavigation } from "@/components/game-detail-collection-navigation";
+import { AdditionalBggIdsForm } from "@/components/additional-bgg-ids-form";
 
 export async function generateMetadata({
   params,
@@ -416,6 +417,12 @@ export default async function GameDetailPage({
                 }
                 sourcePlayerCount={game.bestPlayers}
               />
+              {game.bggId !== null && (
+                <AdditionalBggIdsForm
+                  gameId={game.id}
+                  additionalBggIds={game.additionalBggIds ?? []}
+                />
+              )}
               <BoxDimensionsForm gameId={game.id} currentDimensions={game.boxDimensions} />
               <ShelfAssignmentForm
                 gameId={game.id}

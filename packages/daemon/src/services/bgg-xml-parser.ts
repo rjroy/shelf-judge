@@ -22,6 +22,8 @@ interface BggXmlAttribute {
   "@_numplayers"?: string;
   "@_numvotes"?: string;
   "@_objectid"?: string;
+  "@_quantity"?: string;
+  "@_total"?: string;
 }
 
 interface BggXmlValueElement {
@@ -92,10 +94,16 @@ interface BggXmlCollectionDocument {
   items?: { item?: BggXmlCollectionItem[] };
 }
 
+type BggXmlPlay = BggXmlAttribute;
+
+interface BggXmlPlaysDocument {
+  plays?: BggXmlAttribute & { play?: BggXmlPlay[] };
+}
+
 const parser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: "@_",
-  isArray: (name) => ["item", "link", "name", "results", "result", "rank"].includes(name),
+  isArray: (name) => ["item", "link", "name", "results", "result", "rank", "play"].includes(name),
 });
 
 function cleanupString(value: string | undefined): string {
@@ -448,4 +456,43 @@ export function parseCollectionResponse(
       ),
     };
   });
+}
+
+export interface BggPlayRecord {
+  id: number;
+  quantity: number;
+}
+
+export interface BggPlayPage {
+  total: number;
+  records: BggPlayRecord[];
+}
+
+export function parsePlaysResponse(xml: string): BggPlayPage {
+  const parsed = parser.parse(xml) as BggXmlPlaysDocument;
+  const plays = parsed?.plays;
+  const total = parseNumber(plays?.["@_total"]);
+  if (plays === undefined || total === null || !Number.isSafeInteger(total) || total < 0) {
+    throw new Error("Malformed BGG plays response: missing or invalid <plays total> element");
+  }
+
+  const records = ensureArray(plays.play).map((play) => {
+    const id = parseNumber(play["@_id"]);
+    const quantity = parseNumber(play["@_quantity"] ?? "1");
+    if (
+      id === null ||
+      !Number.isSafeInteger(id) ||
+      id <= 0 ||
+      quantity === null ||
+      !Number.isSafeInteger(quantity) ||
+      quantity <= 0
+    ) {
+      throw new Error(
+        "Malformed BGG plays response: play ID and quantity must be positive integers",
+      );
+    }
+    return { id, quantity };
+  });
+
+  return { total, records };
 }
