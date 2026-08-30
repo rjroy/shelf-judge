@@ -1,7 +1,7 @@
 ---
 title: Profile evidence explorer
 date: 2026-08-29
-status: draft
+status: implemented
 tags: [profile, evidence, navigation, progressive-disclosure, responsive-layout]
 modules: [web, collection-profile]
 related:
@@ -10,7 +10,7 @@ related:
 
 # Profile evidence explorer
 
-Rendered responsive mockup: [interactive HTML](profile-evidence-explorer-mockup.html), [desktop screenshot](profile-evidence-explorer-desktop.png), [mobile detail screenshot](profile-evidence-explorer-mobile.png), and [dark-theme screenshot](profile-evidence-explorer-dark.png).
+The former rendered mockup and screenshots predate the adjusted-fit amendment and are retired as implementation references. They remain historical artifacts until regenerated from the final UI after browser validation; this document's prose and text compositions are authoritative.
 
 ## Decision
 
@@ -19,6 +19,10 @@ Replace the all-expanded entity evidence document with a class-scoped master-det
 The page shows one entity class, a compact searchable index of that class, and one selected entity's complete evidence. Class-wide comparator, exclusion, readiness, and warning details remain available in a separate disclosure on the same page. On wide screens the index and detail appear side by side. On narrow screens they become an index followed by the selected detail, with an explicit return-to-results control.
 
 This is progressive disclosure, not pagination. All evidence remains reachable, direct-linkable, and server-authoritative.
+
+The design is implemented and accepted. Terminal evidence includes 229 focused tests with 902 assertions, 2,274 full-suite tests with 1 skip and 9,062 assertions, and 86 browser tests with 30 intentional skips and no failures. Typechecks, build, changed-file formatting, and diff checks passed. Repository lint passed after `STEP8-LINT-1` replaced two unsafe route-test matchers with a typed exact-envelope helper; its focused rerun passed 17 tests with 43 assertions. Final review reported no material findings.
+
+The root format check retains only the accepted three-file generated Beads baseline. Validation ran on Bun 1.3.11 rather than declared Bun 1.4.0. Profile responsive coverage uses 720x450 CSS pixels at DPR 2 as the 200% zoom equivalent; the literal Chromium 200% probe is on collection detail. Review accepted both residual risks as non-material because the profile project independently verifies equivalent reflow, overflow, target, and evidence behavior.
 
 ## Problem
 
@@ -29,7 +33,7 @@ This is progressive disclosure, not pagination. All evidence remains reachable, 
 3. Class-wide audit data interrupts the primary entity lookup task.
 4. Mobile layout prevents overflow but turns the page into an extremely long single column.
 
-The overview does not share this problem. Its capped identity cards should remain unchanged except for their destination URLs.
+The overview does not share this problem. Its capped identity cards continue to follow daemon-supplied overview IDs, while their score hierarchy and destination URLs adopt adjusted fit.
 
 ## User Jobs
 
@@ -56,13 +60,13 @@ Supported result · Complete for 160 of 168 games
                                                 [Review class evidence]
 
 Find an entity or supporting game [________________________]
-[All evidence] [Supported] [Limited]        Order [Rating v]
+[All evidence] [Supported] [Limited]        Order [Adjusted fit v]
 168 results
 
 ┌──────────────────────────────────┬────────────────────────────────────────┐
 │ Entity index                     │ Selected evidence                      │
 │                                  │                                        │
-│ Deck Building        8.7  +1.2   │ Deck Building                          │
+│ Deck Building        8.5  +1.2   │ Deck Building                          │
 │ 24 games · Supported             │ Supported association · 24 games       │
 │                                  │                                        │
 │ Hand Management      8.4  +0.9   │ Mean 8.7  Delta +1.2  Spread 1.3 ...   │
@@ -84,8 +88,8 @@ Immediately below the tabs, show the independent class result and metadata-readi
 
 The class result remains explicit and distinct from readiness:
 
-- `Supported`: at least one entity has three eligible supporting games.
-- `Limited`: associations exist, but none has three eligible supporting games.
+- `Supported`: at least one entity meets the class's configured `minimumSupportedGames`, currently three by default.
+- `Limited`: associations exist, but none meets the class's configured minimum.
 - `No eligible ratings`: associations exist, but no associated game has eligible fitness.
 - `Evaluated empty`: complete metadata contains no associations for this class.
 - `Not evaluated`: no owned game has complete metadata for this class.
@@ -102,10 +106,10 @@ Matching a game name returns every entity in the active class for which that gam
 The evidence filter has three values:
 
 - `All evidence`;
-- `Supported` (three or more eligible associated games);
-- `Limited` (one or two eligible associated games).
+- `Supported` (at least the class's configured `minimumSupportedGames` eligible associated games);
+- `Limited` (below that configured minimum).
 
-Ordering retains the daemon-provided `rating`, `support`, and `name` sequences. Search and support filters select from those sequences but never recalculate ratings, support, or relative order. The initial state is Mechanics, All evidence, Rating.
+Ordering retains the daemon-provided `bestFit`, `support`, and `name` sequences. `bestFit` is labeled `Adjusted fit`; `support` is labeled `Associated game count (diagnostic)` and must not imply appreciation, preference, confidence, or identity strength. Search and support filters select from those sequences but never recalculate adjusted fit, support, or relative order. The initial state is Mechanics, All evidence, Adjusted fit.
 
 Display a live result count. Empty presentation depends on the daemon result:
 
@@ -121,6 +125,7 @@ The latter three are intrinsic evidence states. They never suggest that clearing
 Each result is a link-like row, not an expandable card. It contains only the values needed to identify and compare entities:
 
 - entity name;
+- adjusted mean current fitness, labeled `Adjusted fit`, as the primary numeric value;
 - mean current fitness;
 - signed difference from the eligible collection mean;
 - associated game count;
@@ -135,6 +140,7 @@ Do not use infinite scroll or virtualized rows. A class of roughly 168 compact r
 Render complete evidence for one entity only:
 
 - support status and explanation;
+- adjusted mean current fitness;
 - mean current fitness;
 - population standard deviation;
 - range;
@@ -191,16 +197,16 @@ Controls stack without horizontal scrolling. Class tabs may wrap into a three-ro
 Use query parameters so every meaningful explorer state is reload-safe and shareable:
 
 ```text
-/profile/entities?class=mechanic&entity=2664&order=rating&support=all&q=deck
+/profile/entities?class=mechanic&entity=2664&support=all&q=deck
 ```
 
 - `class`: `mechanic`, `designer`, or `artist`;
 - `entity`: stable entity ID;
-- `order`: `rating`, `support`, or `name`;
+- `order`: `bestFit`, `support`, or `name`, with omitted `order` as the canonical `bestFit` state;
 - `support`: `all`, `supported`, or `limited`;
 - `q`: optional trimmed search text.
 
-Omit default values when generating links where convenient, but parsing must apply the defaults consistently. Invalid values fall back to defaults rather than producing an error.
+Generated links omit the default `order`, and requests with omitted `order` render directly as canonical `bestFit`. Requests with empty `order=`, explicit `order=bestFit`, or legacy `order=rating` mean `bestFit` and redirect server-side to the same URL with only `order` removed. The redirect preserves `class`, `entity`, `support`, `q`, and unrelated query fields and must not loop. Explicit `support` and `name` values render without redirect. Invalid values fall back to the default without becoming generated compatibility URLs. A native GET order control may submit `bestFit`; canonicalization makes no-JavaScript navigation converge on the omitted-default URL.
 
 Update overview entity links to target the matching `class` and `entity` state instead of a fragment in a fully expanded document. Class-level `See all` links target the class with no selected entity, allowing the first daemon-ordered result to become selected.
 
@@ -230,6 +236,7 @@ The web layer may:
 The web layer must not:
 
 - recompute aggregate evidence;
+- calculate adjusted fit or compare rounded display values;
 - infer support from game count instead of using `entity.support`;
 - reorder results independently of daemon-provided ordering IDs;
 - omit class exclusions or warnings from the audit surface.
@@ -262,7 +269,7 @@ Three layout directions were considered against a production-sized class.
 
 #### Evidence ledger
 
-A compact ranked ledger occupies the left column and a stable evidence sheet occupies the right. Mean and difference retain aligned columns while support status and game count sit beneath the entity name. This provides fast lookup, enough comparison context, and repeated inspection without leaving the workspace.
+A compact ranked ledger occupies the left column and a stable evidence sheet occupies the right. Adjusted fit is the primary aligned value; raw mean and difference remain secondary evidence while support status and game count sit beneath the entity name. This provides fast lookup, enough comparison context, and repeated inspection without leaving the workspace.
 
 Strengths: best balance of lookup, comparison, and evidence reading; extends Shelf Judge's existing dense collection-row language; adapts cleanly to a detail-first mobile mode.
 
@@ -282,7 +289,7 @@ An alphabetical directory leads to a wide editorial evidence dossier, with suppo
 
 Strengths: excellent known-name lookup and a spacious detail presentation.
 
-Cost: alphabetical landmarks disappear under rating or support ordering, limited entities leave the third column sparse, and the responsive system becomes substantially more complex.
+Cost: alphabetical landmarks disappear under adjusted-fit or diagnostic support ordering, limited entities leave the third column sparse, and the responsive system becomes substantially more complex.
 
 The evidence ledger is the chosen direction. Borrow explicit numeric column headings from the scorebook. Alphabetic landmarks may be tested later for name ordering, but they are not part of the first implementation.
 
@@ -296,15 +303,15 @@ The evidence ledger is the chosen direction. Borrow explicit numeric column head
 │ Supported · 160/168 complete                       Review class evidence    │
 │ 5 refresh needed · 3 unrefreshable · 8 excluded · 2 warnings               │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│ Search entity or supporting game [______________] [All evidence] [Rating]  │
+│ Search entity or supporting game [________] [All evidence] [Adjusted fit]  │
 │ 168 results                                                                 │
 ├───────────────────────────────┬─────────────────────────────────────────────┤
-│ ENTITY             MEAN   Δ   │ DECK BUILDING                              │
-│ ▌Deck Building      8.7 +1.2  │ SUPPORTED · 24 GAMES                       │
+│ ENTITY          ADJ FIT  MEAN  │ DECK BUILDING                              │
+│ ▌Deck Building      8.5   8.7  │ SUPPORTED · 24 GAMES                       │
 │   24 games · Supported        │                                             │
-│  Hand Management    8.4 +0.9  │ 8.7       +1.2       1.3       6.0–9.7     │
-│   38 games · Supported        │ Mean      vs collection Spread    Range     │
-│  Worker Placement   8.1 +0.6  │                                             │
+│  Hand Management    8.3   8.4  │ 8.5       8.7       +1.2       1.3         │
+│   38 games · Supported        │ Adj fit  Raw mean  vs collection Spread     │
+│  Worker Placement   8.0   8.1  │                                             │
 │   19 games · Supported        │ SUPPORTING GAMES                            │
 │  ...                          │ Dune: Imperium                         9.7  │
 │                               │ Lost Ruins of Arnak                    9.1  │
@@ -333,14 +340,14 @@ Results mode:
 ├──────────────────────────────┤
 │ Search [___________________]  │
 │ Evidence [All evidence ▾]     │
-│ Order    [Rating ▾]          │
+│ Order    [Adjusted fit ▾]     │
 │ 168 results                  │
 ├──────────────────────────────┤
-│ ▌Deck Building       8.7     │
-│   24 games · +1.2 · Supported│
+│ ▌Deck Building       8.5 adj │
+│   Mean 8.7 · 24 games · Supported│
 │                              │
-│  Hand Management     8.4     │
-│   38 games · +0.9 · Supported│
+│  Hand Management     8.3 adj │
+│   Mean 8.4 · 38 games · Supported│
 └──────────────────────────────┘
 ```
 
@@ -362,8 +369,8 @@ Selected-detail mode:
 │ DECK BUILDING                │
 │ Supported · 24 games         │
 │                              │
-│ Mean 8.7          Δ +1.2     │
-│ Spread 1.3        6.0–9.7    │
+│ Adjusted fit 8.5  Mean 8.7   │
+│ Δ +1.2 · Spread 1.3 · 6.0–9.7│
 │                              │
 │ SUPPORTING GAMES             │
 │ Dune: Imperium          9.7  │
@@ -385,8 +392,8 @@ Selected-detail mode:
 | Selected row           | 3px inset `var(--action)` edge plus `var(--action-subtle)` background |
 | Hovered row            | `var(--row-hover)` without replacing the selected edge                |
 | Entity name            | 15px/20px, weight 600                                                 |
-| Mean fitness           | 15px/18px, weight 700, tabular numerals                               |
-| Delta and game count   | 13px/18px, tabular numerals                                           |
+| Adjusted fit           | 15px/18px, weight 700, tabular numerals                               |
+| Raw mean, delta, count | 13px/18px, tabular numerals                                           |
 | Status text            | 11px/15px, weight 700, uppercase, 0.06em tracking                     |
 | Detail title           | 24px/29px desktop, 20px/25px mobile                                   |
 | Primary fact value     | 20px/24px, weight 700, tabular numerals                               |
@@ -400,7 +407,7 @@ Supporting games use table-like rows rather than prose sentences. Omit `No veto 
 
 Use warning color only for incomplete evidence, refresh problems, and vetoes. Limited rows carry a neutral `Limited` status in the ledger; their selected detail contains the explanatory warning. Scores do not receive a color scale. Color identifies selection, action, or exceptional evidence, not rank.
 
-Desktop headings label the numeric columns `Mean` and `vs collection`. Mobile rows retain equivalent visually hidden labels so `8.7` and `+1.2` are never communicated by position alone.
+Desktop headings label the numeric columns `Adjusted fit` and `Raw mean`. Mobile rows retain equivalent visible or visually hidden labels so adjusted and raw values are never communicated by position alone. Detail and help text explain that ordering uses exact unrounded adjusted values, so equal one-decimal displays do not claim a tie. Limited detail explains that adjusted evidence remains drilldown-only until the entity reaches the configured support count.
 
 Enable the bounded desktop index only above 720px viewport height. Give the scroll region an accessible name, make it keyboard-focusable without adding application-style grid behavior, and show a quiet bottom-edge fade while additional rows remain. At shorter heights, let the entire page scroll normally instead of creating a cramped nested region.
 
@@ -444,7 +451,7 @@ The design succeeds when all of the following are true with production-shaped da
 3. At most one entity's complete supporting-game list is in the rendered document at a time.
 4. All class comparator games, exclusions, correction links, and refresh warnings remain reachable.
 5. Changing class, order, support filter, search, or selected entity produces a shareable URL and survives reload.
-6. Ratings and result order remain traceable to daemon-provided evidence and ordering IDs.
+6. Adjusted fit and result order remain traceable to daemon-provided evidence and `bestFit`, diagnostic `support`, or `name` ordering IDs; filtering preserves relative daemon order.
 7. Keyboard-only use covers class selection, filters, result selection, class evidence, game links, and return-to-results behavior.
 8. Mobile, tablet, desktop, and 200% zoom layouts have no horizontal page overflow and do not require swipe-only discovery.
 9. No-JavaScript GET navigation can select classes, filters, orderings, and entities.
@@ -453,6 +460,6 @@ The design succeeds when all of the following are true with production-shaped da
 
 ## Implementation Boundary
 
-Expected changes are limited to the entity drilldown route, entity evidence components, profile overview destinations, profile styles, and focused unit/E2E coverage. The profile engine and shared response contract should not change for the first implementation.
+Expected presentation changes are limited to the entity drilldown route, entity evidence components, profile overview destinations, profile styles, and focused unit/E2E coverage. The separately approved adjusted-fit contract supplies `adjustedMeanCurrentFitness` and the `bestFit`, `support`, and `name` sequences; the web does not recreate them.
 
-This design does not alter evidence calculations, support thresholds, identity claims, axis diagnostics, attention items, or correction behavior.
+This design does not independently alter evidence calculations, configured support policy, identity claims, axis diagnostics, attention items, or correction behavior.

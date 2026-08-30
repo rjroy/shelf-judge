@@ -59,7 +59,10 @@ export function ProfileOverviewContent({ state }: { state: ProfileOverviewState 
           </>
         ) : state.status === "loaded" && state.profile.status === "available" ? (
           <>
-            <IdentitySection identity={state.profile.identity} />
+            <IdentitySection
+              identity={state.profile.identity}
+              entityPolicy={state.profile.entityPolicy}
+            />
             <AttentionSection
               attention={state.profile.attention}
               collectionState={state.profile.identity.collectionState}

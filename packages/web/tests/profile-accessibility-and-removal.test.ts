@@ -44,4 +44,37 @@ describe("profile accessibility and removed surfaces", () => {
       expect(source).not.toContain(".reduce(");
     }
   });
+
+  test("entity explorer keeps adjusted and diagnostic evidence accessible without local ranking", async () => {
+    const page = await Bun.file(
+      new URL("../app/profile/entities/page.tsx", import.meta.url),
+    ).text();
+    const evidence = await Bun.file(
+      new URL("../components/profile/entity-evidence.tsx", import.meta.url),
+    ).text();
+    const css = await Bun.file(new URL("../app/globals.css", import.meta.url)).text();
+
+    for (const label of [
+      "Adjusted fit",
+      "Raw mean current fitness",
+      "Collection comparator",
+      "Associated game count (diagnostic)",
+      "Matched supporting game",
+    ])
+      expect(`${page}\n${evidence}`).toContain(label);
+    expect(page).toContain("result.orderings[ordering]");
+    expect(page).not.toMatch(/adjustedMeanCurrentFitness\s*[+*/-]/);
+    expect(page).not.toMatch(/associatedGameCount\s*(?:>=|>|<=|<)\s*minimumSupportedGames/);
+    expect(page).not.toMatch(/toFixed\([^)]*\)\s*(?:===|==|>|<)/);
+    expect(page.indexOf("canonicalEntityExplorerUrl(params)")).toBeLessThan(
+      page.indexOf("await loadProfile()"),
+    );
+    expect(evidence).toContain("Population standard deviation");
+    expect(evidence).toContain("Supporting games");
+    expect(evidence).toContain("Vetoed; displayed as 0");
+    const narrowLayout = css.slice(css.indexOf("@media (max-width: 600px)"));
+    expect(narrowLayout).toContain(".entity-index-delta");
+    expect(narrowLayout).toContain("grid-column: 1 / -1");
+    expect(narrowLayout).toContain("font-size: 16px");
+  });
 });

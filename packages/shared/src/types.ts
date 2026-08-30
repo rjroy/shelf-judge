@@ -882,6 +882,7 @@ export interface CollectionProfileEntityEvidence {
   support: "limited" | "supported";
   associatedGameCount: number;
   meanCurrentFitness: number;
+  adjustedMeanCurrentFitness: number;
   populationStandardDeviation: number;
   range: { min: number; max: number };
   comparatorMeanCurrentFitness: number;
@@ -890,7 +891,7 @@ export interface CollectionProfileEntityEvidence {
 }
 
 export interface CollectionProfileEntityOrderings {
-  rating: number[];
+  bestFit: number[];
   support: number[];
   name: number[];
 }
@@ -1005,8 +1006,8 @@ export interface ProfileSourceIdentity {
 }
 
 export interface ProfileData {
-  contractVersion: 8;
-  algorithmVersion: 10;
+  contractVersion: 9;
+  algorithmVersion: 11;
   sourceIdentity: ProfileSourceIdentity;
   profile: CollectionProfile;
   computedAt: string;

@@ -1,5 +1,10 @@
 import { Hono } from "hono";
-import { toErrorMessage } from "@shelf-judge/shared";
+import {
+  CollectionProfileEntityPolicySchema,
+  DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
+  createCollectionProfileResultSchema,
+  toErrorMessage,
+} from "@shelf-judge/shared";
 import type { ProfileService } from "../services/profile-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
 
@@ -14,7 +19,12 @@ export function createProfileRoutes(deps: ProfileRoutesDeps): RouteModule {
   routes.get("/profile", async (c) => {
     try {
       const profile = await profileService.getProfile();
-      return c.json(profile);
+      const entityPolicy =
+        profile.status === "available"
+          ? CollectionProfileEntityPolicySchema.parse(profile.entityPolicy)
+          : DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY;
+      const validatedProfile = createCollectionProfileResultSchema(entityPolicy).parse(profile);
+      return c.json(validatedProfile);
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 500);
     }

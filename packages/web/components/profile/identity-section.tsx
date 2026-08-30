@@ -4,6 +4,7 @@ import type {
   CollectionProfileEntityClass,
   CollectionProfileEntityClassResult,
   CollectionProfileEntityEvidence,
+  CollectionProfileEntityPolicy,
 } from "@shelf-judge/shared";
 import { EntityCard } from "./entity-card";
 
@@ -32,7 +33,13 @@ function overviewEntities(
   });
 }
 
-function ClassOverview({ result }: { result: CollectionProfileEntityClassResult }) {
+function ClassOverview({
+  result,
+  minimumSupportedGames,
+}: {
+  result: CollectionProfileEntityClassResult;
+  minimumSupportedGames: number;
+}) {
   const entities = overviewEntities(result);
   const headingId = `profile-${result.entityClass}-heading`;
   return (
@@ -47,6 +54,12 @@ function ClassOverview({ result }: { result: CollectionProfileEntityClassResult 
         {result.metadataReadiness.refreshNeededGameCount} need refresh and{" "}
         {result.metadataReadiness.unrefreshableGameCount} cannot be refreshed.
       </p>
+      {(result.result === "supported" || result.result === "limited") && (
+        <p>
+          The class minimum of {minimumSupportedGames} associated games is both the support
+          threshold and the comparator weight used for adjusted fit.
+        </p>
+      )}
       {entities.length > 0 ? (
         <div className="profile-entity-grid">
           {entities.map((entity) => (
@@ -56,7 +69,7 @@ function ClassOverview({ result }: { result: CollectionProfileEntityClassResult 
       ) : (
         <p className="profile-class-empty">
           {result.result === "limited"
-            ? "One- and two-game associations are available in the complete evidence drilldown, but are not identity claims."
+            ? "Associations below the configured class minimum are available in the complete evidence drilldown, but are not identity claims."
             : resultLabels[result.result] + "."}
         </p>
       )}
@@ -73,7 +86,13 @@ function ClassOverview({ result }: { result: CollectionProfileEntityClassResult 
   );
 }
 
-export function IdentitySection({ identity }: { identity: CollectionProfile["identity"] }) {
+export function IdentitySection({
+  identity,
+  entityPolicy,
+}: {
+  identity: CollectionProfile["identity"];
+  entityPolicy: CollectionProfileEntityPolicy;
+}) {
   return (
     <section className="profile-question" aria-labelledby="identity-question">
       <h2 id="identity-question">What does my collection reveal about me?</h2>
@@ -93,7 +112,11 @@ export function IdentitySection({ identity }: { identity: CollectionProfile["ide
       ) : (
         <div className="profile-class-list">
           {entityClasses.map((entityClass) => (
-            <ClassOverview key={entityClass} result={identity.classes[entityClass]} />
+            <ClassOverview
+              key={entityClass}
+              result={identity.classes[entityClass]}
+              minimumSupportedGames={entityPolicy[entityClass].minimumSupportedGames}
+            />
           ))}
         </div>
       )}

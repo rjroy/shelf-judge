@@ -69,6 +69,7 @@ export const mechanicClassFixture: CollectionProfileEntityClassResult = {
       support: "supported",
       associatedGameCount: 3,
       meanCurrentFitness: comparatorMean,
+      adjustedMeanCurrentFitness: comparatorMean,
       populationStandardDeviation: standardDeviation,
       range: { min: 0, max: 8 },
       comparatorMeanCurrentFitness: comparatorMean,
@@ -81,6 +82,7 @@ export const mechanicClassFixture: CollectionProfileEntityClassResult = {
       support: "limited",
       associatedGameCount: 1,
       meanCurrentFitness: 8,
+      adjustedMeanCurrentFitness: 11 / 2,
       populationStandardDeviation: 0,
       range: { min: 8, max: 8 },
       comparatorMeanCurrentFitness: comparatorMean,
@@ -90,7 +92,7 @@ export const mechanicClassFixture: CollectionProfileEntityClassResult = {
   ],
   overviewEntityIds: [101],
   orderings: {
-    rating: [102, 101],
+    bestFit: [102, 101],
     support: [101, 102],
     name: [102, 101],
   },
@@ -120,7 +122,7 @@ const emptyClass = (
   refreshWarnings: [],
   entities: [],
   overviewEntityIds: [],
-  orderings: { rating: [], support: [], name: [] },
+  orderings: { bestFit: [], support: [], name: [] },
 });
 
 export const usefulProfileFixture: CollectionProfile = {
@@ -176,7 +178,7 @@ export const limitedUsefulProfileFixture: CollectionProfile = (() => {
   mechanic.entities = [mechanic.entities[1]];
   mechanic.associatedGameCount = 1;
   mechanic.overviewEntityIds = [];
-  mechanic.orderings = { rating: [102], support: [102], name: [102] };
+  mechanic.orderings = { bestFit: [102], support: [102], name: [102] };
   return profile;
 })();
 
@@ -250,7 +252,7 @@ const emptyCollectionClass = (
   refreshWarnings: [],
   entities: [],
   overviewEntityIds: [],
-  orderings: { rating: [], support: [], name: [] },
+  orderings: { bestFit: [], support: [], name: [] },
 });
 
 export const emptyUsefulProfileFixture: CollectionProfile = {

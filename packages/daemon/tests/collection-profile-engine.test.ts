@@ -11,6 +11,7 @@ import type {
 import {
   CollectionProfileSnapshotSchema,
   CollectionProfileResultSchema,
+  CollectionProfileEntityClassResultSchema,
   createCollectionProfileSnapshotSchema,
   createCompleteEntityMetadata,
   createInitialEntityMetadata,
@@ -411,7 +412,266 @@ function makeUsefulCollection(
   };
 }
 
+interface EntityScenarioGroup {
+  entityId: number;
+  name: string;
+  scores: readonly number[];
+}
+
+function computeMechanicScenario(
+  groups: readonly EntityScenarioGroup[],
+  unassociatedScores: readonly number[],
+  reverseGames = false,
+) {
+  const entries = [
+    ...groups.flatMap((group) =>
+      group.scores.map((score) => ({ score, entity: { id: group.entityId, name: group.name } })),
+    ),
+    ...unassociatedScores.map((score) => ({ score, entity: null })),
+  ];
+  const games = entries.map(({ entity }, index) =>
+    makeGame({
+      id: `scenario-${String(index).padStart(2, "0")}`,
+      name: `Scenario ${index}`,
+      bggId: index + 1,
+      entityMetadata: createCompleteEntityMetadata(
+        { mechanic: entity === null ? [] : [entity], designer: [], artist: [] },
+        "2026-08-29T00:00:00.000Z",
+      ),
+    }),
+  );
+  const orderedGames = reverseGames ? [...games].reverse() : games;
+  return computeCollectionProfile({
+    collection: makeUsefulCollection(orderedGames),
+    fitnessResults: new Map(
+      games.map((game, index) => [
+        game.id,
+        makeUsefulFitness(entries[index].score, { vetoed: entries[index].score === 0 }),
+      ]),
+    ),
+    computedAt: "2026-08-29T01:00:00.000Z",
+  }).identity.classes.mechanic;
+}
+
 describe("computeCollectionProfile", () => {
+  test.each([
+    {
+      label: "three excellent versus many average",
+      groups: [
+        { entityId: 100, name: "Alpha", scores: [9, 9, 9] },
+        { entityId: 200, name: "Beta", scores: Array<number>(20).fill(7) },
+      ],
+      unassociated: [1],
+      adjusted: [8, 7],
+      bestFit: [100, 200],
+      support: [200, 100],
+      overview: [100, 200],
+    },
+    {
+      label: "tiny raw edge with stronger evidence",
+      groups: [
+        { entityId: 100, name: "Alpha", scores: [9, 9, 9] },
+        { entityId: 200, name: "Beta", scores: Array<number>(20).fill(8.9) },
+      ],
+      unassociated: [5, 0, 0, 0, 0, 0, 0],
+      adjusted: [8, 199 / 23],
+      bestFit: [200, 100],
+      support: [200, 100],
+      overview: [200, 100],
+    },
+    {
+      label: "quantity is not affinity",
+      groups: [
+        { entityId: 100, name: "Alpha", scores: [9, 9, 9] },
+        { entityId: 200, name: "Beta", scores: Array<number>(20).fill(5) },
+      ],
+      unassociated: [...Array<number>(11).fill(10), 8],
+      adjusted: [8, 121 / 23],
+      bestFit: [100, 200],
+      support: [200, 100],
+      overview: [100, 200],
+    },
+    {
+      label: "limited outlier",
+      groups: [
+        { entityId: 100, name: "Alpha", scores: [10] },
+        { entityId: 200, name: "Beta", scores: [8, 8, 8] },
+      ],
+      unassociated: [1],
+      adjusted: [31 / 4, 15 / 2],
+      bestFit: [100, 200],
+      support: [200, 100],
+      overview: [200],
+    },
+    {
+      label: "exact adjusted tie",
+      groups: [
+        { entityId: 100, name: "Alpha", scores: [8, 8, 8] },
+        { entityId: 200, name: "Beta", scores: [7.75, 7.75, 7.75, 7.75, 7.75, 7.75] },
+      ],
+      unassociated: [3.25, 3.25],
+      adjusted: [15 / 2, 15 / 2],
+      bestFit: [200, 100],
+      support: [200, 100],
+      overview: [200, 100],
+    },
+    {
+      label: "vetoed zero evidence",
+      groups: [
+        { entityId: 100, name: "Alpha", scores: [0, 9, 9] },
+        { entityId: 200, name: "Beta", scores: [6, 6, 6] },
+      ],
+      unassociated: [10, 10],
+      adjusted: [13 / 2, 13 / 2],
+      bestFit: [100, 200],
+      support: [100, 200],
+      overview: [100, 200],
+    },
+    {
+      label: "beyond display precision",
+      groups: [
+        { entityId: 100, name: "Alpha", scores: [9] },
+        { entityId: 200, name: "Beta", scores: [8.2, 8.35] },
+      ],
+      unassociated: [4.7, 4.75],
+      adjusted: [15 / 2, 751 / 100],
+      bestFit: [200, 100],
+      support: [200, 100],
+      overview: [],
+    },
+  ])(
+    "ranks $label with exact adjusted fit while preserving diagnostic support",
+    ({ groups, unassociated, adjusted, bestFit, support, overview }) => {
+      const result = computeMechanicScenario(groups, unassociated);
+      expect(
+        [...result.entities]
+          .sort((left, right) => left.entityId - right.entityId)
+          .map(({ adjustedMeanCurrentFitness }) => adjustedMeanCurrentFitness),
+      ).toEqual([...adjusted]);
+      expect(result.orderings.bestFit).toEqual([...bestFit]);
+      expect(result.orderings.support).toEqual([...support]);
+      expect(result.overviewEntityIds).toEqual([...overview]);
+      expect(CollectionProfileEntityClassResultSchema.safeParse(result).success).toBe(true);
+    },
+  );
+
+  test("uses each entity class's configured minimum as its independent prior weight", () => {
+    const associated = [9, 9, 9];
+    const entries = [...associated, 5, 5, 5];
+    const games = entries.map((score, index) =>
+      makeGame({
+        id: `prior-${index}`,
+        name: `Prior ${index}`,
+        bggId: index + 1,
+        entityMetadata: createCompleteEntityMetadata(
+          {
+            mechanic: index < 3 ? [{ id: 100, name: "Mechanic" }] : [],
+            designer: index < 3 ? [{ id: 200, name: "Designer" }] : [],
+            artist: index < 3 ? [{ id: 300, name: "Artist" }] : [],
+          },
+          "2026-08-29T00:00:00.000Z",
+        ),
+      }),
+    );
+    const entityPolicy: CollectionProfileEntityPolicy = {
+      mechanic: { overviewLimit: 3, minimumSupportedGames: 2 },
+      designer: { overviewLimit: 3, minimumSupportedGames: 3 },
+      artist: { overviewLimit: 3, minimumSupportedGames: 5 },
+    };
+    const profile = computeCollectionProfile({
+      collection: makeUsefulCollection(games),
+      fitnessResults: new Map(
+        games.map((game, index) => [game.id, makeUsefulFitness(entries[index])]),
+      ),
+      computedAt: "2026-08-29T01:00:00.000Z",
+      entityPolicy,
+    });
+
+    expect(profile.identity.classes.mechanic.entities[0].adjustedMeanCurrentFitness).toBe(41 / 5);
+    expect(profile.identity.classes.designer.entities[0].adjustedMeanCurrentFitness).toBe(8);
+    expect(profile.identity.classes.artist.entities[0].adjustedMeanCurrentFitness).toBe(31 / 4);
+    expect(
+      createCollectionProfileSnapshotSchema(entityPolicy).safeParse({
+        source: makeUsefulCollection(games),
+        profile,
+      }).success,
+    ).toBe(true);
+  });
+
+  test("isolates comparator cohorts and adjusted values when class inputs differ", () => {
+    const scores = [9, 7, 5, 1];
+    const games = scores.map((score, index) => {
+      const bggId = index + 1;
+      const entityMetadata = createCompleteEntityMetadata(
+        {
+          mechanic: index === 0 ? [{ id: 100, name: "Mechanic" }] : [],
+          designer: index === 0 ? [{ id: 200, name: "Designer" }] : [],
+          artist: index === 0 ? [{ id: 300, name: "Artist" }] : [],
+        },
+        "2026-08-29T00:00:00.000Z",
+      );
+      if (index >= 2) entityMetadata.mechanic = createInitialEntityMetadata(bggId).mechanic;
+      if (index === 1 || index === 3)
+        entityMetadata.designer = createInitialEntityMetadata(bggId).designer;
+      return makeGame({
+        id: `cohort-${index}`,
+        name: `Cohort ${index}`,
+        bggId,
+        entityMetadata,
+      });
+    });
+    const collection = makeUsefulCollection(games);
+    const entityPolicy: CollectionProfileEntityPolicy = {
+      mechanic: { overviewLimit: 3, minimumSupportedGames: 2 },
+      designer: { overviewLimit: 3, minimumSupportedGames: 3 },
+      artist: { overviewLimit: 3, minimumSupportedGames: 5 },
+    };
+    const profile = computeCollectionProfile({
+      collection,
+      fitnessResults: new Map(
+        games.map((game, index) => [game.id, makeUsefulFitness(scores[index])]),
+      ),
+      computedAt: "2026-08-29T01:00:00.000Z",
+      entityPolicy,
+    });
+
+    const mechanic = profile.identity.classes.mechanic;
+    const designer = profile.identity.classes.designer;
+    const artist = profile.identity.classes.artist;
+    expect(mechanic.comparator.games.map(({ gameId }) => gameId)).toEqual(["cohort-0", "cohort-1"]);
+    expect(designer.comparator.games.map(({ gameId }) => gameId)).toEqual(["cohort-0", "cohort-2"]);
+    expect(artist.comparator.games.map(({ gameId }) => gameId)).toEqual([
+      "cohort-0",
+      "cohort-1",
+      "cohort-2",
+      "cohort-3",
+    ]);
+    expect(mechanic.entities[0].adjustedMeanCurrentFitness).toBe(25 / 3);
+    expect(designer.entities[0].adjustedMeanCurrentFitness).toBe(15 / 2);
+    expect(artist.entities[0].adjustedMeanCurrentFitness).toBe(73 / 12);
+    expect(mechanic.orderings.bestFit).toEqual([100]);
+    expect(designer.orderings.bestFit).toEqual([200]);
+    expect(artist.orderings.bestFit).toEqual([300]);
+    expect(mechanic.overviewEntityIds).toEqual([]);
+    expect(designer.overviewEntityIds).toEqual([]);
+    expect(artist.overviewEntityIds).toEqual([]);
+  });
+
+  test("is deterministic across reordered source games and links", () => {
+    const groups = [
+      { entityId: 100, name: "Café", scores: [8, 8, 8] },
+      { entityId: 200, name: "A😀", scores: [8, 8, 8] },
+    ];
+    const forward = computeMechanicScenario(groups, [6, 6, 6]);
+    const reversed = computeMechanicScenario(groups, [6, 6, 6], true);
+    const byId = (result: typeof forward) =>
+      [...result.entities].sort((left, right) => left.entityId - right.entityId);
+
+    expect(byId(reversed)).toEqual(byId(forward));
+    expect(reversed.orderings).toEqual(forward.orderings);
+    expect(reversed.overviewEntityIds).toEqual(forward.overviewEntityIds);
+  });
+
   test("applies per-class support thresholds and overview limits", () => {
     const entityPolicy: CollectionProfileEntityPolicy = {
       mechanic: { overviewLimit: 1, minimumSupportedGames: 2 },
@@ -645,6 +905,7 @@ describe("computeCollectionProfile", () => {
       support: "supported",
       associatedGameCount: 3,
       meanCurrentFitness: 14 / 3,
+      adjustedMeanCurrentFitness: 14 / 3,
       range: { min: 0, max: 8 },
       comparatorMeanCurrentFitness: 14 / 3,
       differenceFromComparator: 0,
@@ -985,7 +1246,7 @@ describe("computeCollectionProfile", () => {
       computedAt: "2026-08-28T00:00:00.000Z",
     });
 
-    expect(profile.identity.classes.mechanic.orderings.rating).toEqual([200, 100]);
+    expect(profile.identity.classes.mechanic.orderings.bestFit).toEqual([200, 100]);
     expect(profile.identity.classes.mechanic.overviewEntityIds).toEqual([200, 100]);
     expect(
       profile.identity.classes.mechanic.entities.map(
@@ -1025,6 +1286,7 @@ describe("computeCollectionProfile", () => {
 
     expect(profile.identity.classes.mechanic.comparator.meanCurrentFitness).toBe(5);
     expect(profile.identity.classes.mechanic.entities[0].meanCurrentFitness).toBe(5);
+    expect(profile.identity.classes.mechanic.entities[0].adjustedMeanCurrentFitness).toBe(5);
     expect(CollectionProfileSnapshotSchema.safeParse({ source: collection, profile }).success).toBe(
       true,
     );

@@ -6,6 +6,7 @@ import type { BggClient, BggGameResult } from "../../src/services/bgg-client.js"
 import { parseThingItems } from "../../src/services/bgg-xml-parser.js";
 import { createFileOps } from "../../src/services/file-ops.js";
 import { GameHistoryConflictError } from "../../src/services/game-service.js";
+import { createProfileService } from "../../src/services/profile-service.js";
 import { createTestApp } from "../helpers/test-app.js";
 
 const fixturePath = path.join(import.meta.dir, "../fixtures/useful-profile-schema-v3.json");
@@ -22,6 +23,7 @@ function result(bggId: number, observedAt: string, plays: number | "missing"): B
       <minplayers value="1"/><maxplayers value="4"/><playingtime value="60"/>
       <link type="boardgamemechanic" id="101" value="Worker Placement"/>
       <link type="boardgamemechanic" id="${1000 + bggId}" value="Limited ${bggId}"/>
+      ${bggId === 124 || bggId === 125 ? '<link type="boardgamemechanic" id="777" value="Two Game Mechanic"/>' : ""}
       <link type="boardgamedesigner" id="201" value="Shared Designer"/>
       <link type="boardgameartist" id="301" value="Shared Artist"/>
       <statistics><ratings><average value="7"/><bayesaverage value="6.5"/>
@@ -104,6 +106,15 @@ describe("useful profile persisted flow", () => {
     });
 
     try {
+      const initialConfig = await firstProcess.storageService.loadConfig();
+      await firstProcess.storageService.saveConfig({
+        ...initialConfig,
+        profileEntityPolicy: {
+          mechanic: { overviewLimit: 3, minimumSupportedGames: 1 },
+          designer: { overviewLimit: 3, minimumSupportedGames: 1 },
+          artist: { overviewLimit: 3, minimumSupportedGames: 1 },
+        },
+      });
       expect((await firstProcess.storageService.loadCollection()).schemaVersion).toBe(5);
       await firstProcess.gameService.refreshBggData("bgg-game");
       const added = [];
@@ -121,8 +132,9 @@ describe("useful profile persisted flow", () => {
         weight: 100,
         source: "personal",
       });
+      const profileScores = [10, 9, 9, 1];
       for (const [index, game] of allGames.entries()) {
-        await firstProcess.gameService.rateGame(game.id, { [axis.id]: 8 - index });
+        await firstProcess.gameService.rateGame(game.id, { [axis.id]: profileScores[index] });
       }
 
       const initialProfile = await firstProcess.profileService.getProfile();
@@ -132,8 +144,8 @@ describe("useful profile persisted flow", () => {
         expect(initialProfile.identity.classes[entityClass].result).toBe("supported");
       }
       expect(
-        initialProfile.identity.classes.mechanic.entities.some(
-          ({ support }) => support === "limited",
+        initialProfile.identity.classes.mechanic.entities.every(
+          ({ support }) => support === "supported",
         ),
       ).toBe(true);
 
@@ -253,6 +265,7 @@ describe("useful profile persisted flow", () => {
             state: "complete",
             entities: [
               { id: 101, name: "Worker Placement" },
+              ...(bggId === 124 || bggId === 125 ? [{ id: 777, name: "Two Game Mechanic" }] : []),
               { id: 1000 + bggId, name: `Limited ${bggId}` },
             ],
           },
@@ -263,6 +276,69 @@ describe("useful profile persisted flow", () => {
 
       await firstProcess.profileService.getProfile();
       expect(await fileOps.exists(profilePath)).toBe(true);
+      const cachedBeforePolicyChange = await firstProcess.storageService.loadProfile();
+      if (cachedBeforePolicyChange === null) throw new Error("Expected current profile cache");
+      const restartedProcess = createTestApp({ fileOps, dataDir, configPath, bggClient, now });
+      let restartComputations = 0;
+      const restartedProfileService = createProfileService({
+        storageService: restartedProcess.storageService,
+        displayedFitnessService: {
+          ...restartedProcess.displayedFitnessService,
+          async listGamesFromSnapshot(snapshot, options) {
+            restartComputations += 1;
+            return restartedProcess.displayedFitnessService.listGamesFromSnapshot(
+              snapshot,
+              options,
+            );
+          },
+        },
+        now,
+      });
+      expect(await restartedProfileService.getProfile()).toEqual(cachedBeforePolicyChange.profile);
+      expect(restartComputations).toBe(0);
+      const mechanicBefore = cachedBeforePolicyChange.profile.identity.classes.mechanic;
+      expect(mechanicBefore.orderings.bestFit).toEqual([1123, 777, 1124, 1125, 101, 1126]);
+      expect(mechanicBefore.orderings.support).toEqual([101, 777, 1123, 1124, 1125, 1126]);
+      expect(mechanicBefore.overviewEntityIds).toEqual([1123, 777, 1124]);
+      expect(
+        mechanicBefore.entities.find(({ entityId }) => entityId === 1123)
+          ?.adjustedMeanCurrentFitness,
+      ).toBe(69 / 8);
+      expect(
+        mechanicBefore.entities.find(({ entityId }) => entityId === 777)
+          ?.adjustedMeanCurrentFitness,
+      ).toBe(101 / 12);
+      const config = await firstProcess.storageService.loadConfig();
+      await firstProcess.storageService.saveConfig({
+        ...config,
+        profileEntityPolicy: {
+          mechanic: { overviewLimit: 3, minimumSupportedGames: 5 },
+          designer: { overviewLimit: 3, minimumSupportedGames: 5 },
+          artist: { overviewLimit: 3, minimumSupportedGames: 5 },
+        },
+      });
+      expect(await firstProcess.storageService.loadProfile()).toBeNull();
+      const recomputedForPolicy = await firstProcess.profileService.getProfile();
+      if (recomputedForPolicy.status !== "available") {
+        throw new Error("Expected profile after policy change");
+      }
+      for (const entityClass of ["mechanic", "designer", "artist"] as const) {
+        const classResult = recomputedForPolicy.identity.classes[entityClass];
+        expect(classResult.result).toBe("limited");
+        expect(classResult.overviewEntityIds).toEqual([]);
+      }
+      const mechanicAfter = recomputedForPolicy.identity.classes.mechanic;
+      expect(mechanicAfter.orderings.bestFit).toEqual([777, 1123, 1124, 1125, 101, 1126]);
+      expect(mechanicAfter.orderings.support).toEqual([101, 777, 1123, 1124, 1125, 1126]);
+      expect(
+        mechanicAfter.entities.find(({ entityId }) => entityId === 1123)
+          ?.adjustedMeanCurrentFitness,
+      ).toBe(185 / 24);
+      expect(
+        mechanicAfter.entities.find(({ entityId }) => entityId === 777)?.adjustedMeanCurrentFitness,
+      ).toBe(31 / 4);
+      const policyCache = await firstProcess.storageService.loadProfile();
+      expect(policyCache?.profile.entityPolicy.mechanic.minimumSupportedGames).toBe(5);
       const serializedBeforeRestart = await readFile(collectionPath, "utf8");
       await firstProcess.storageService.discardProfile?.();
       expect(await fileOps.exists(profilePath)).toBe(false);

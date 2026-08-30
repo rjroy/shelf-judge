@@ -113,10 +113,18 @@ function exactFitnessMean(games: CollectionProfileGameFitnessEvidence[]): ExactR
     .divide(new ExactRational(BigInt(games.length)));
 }
 
-function entityOrderings(entities: CollectionProfileEntityEvidence[]) {
-  const rating = [...entities].sort(
+function entityOrderings(
+  entities: CollectionProfileEntityEvidence[],
+  adjustedMeans: ReadonlyMap<number, ExactRational>,
+) {
+  const adjustedMean = (entity: CollectionProfileEntityEvidence) => {
+    const value = adjustedMeans.get(entity.entityId);
+    if (value === undefined) throw new Error(`Entity ${entity.entityId} has no adjusted mean`);
+    return value;
+  };
+  const bestFit = [...entities].sort(
     (left, right) =>
-      exactFitnessMean(right.games).compare(exactFitnessMean(left.games)) ||
+      adjustedMean(right).compare(adjustedMean(left)) ||
       right.associatedGameCount - left.associatedGameCount ||
       compareNormalizedCodePoints(left.name, right.name) ||
       left.entityId - right.entityId,
@@ -133,7 +141,7 @@ function entityOrderings(entities: CollectionProfileEntityEvidence[]) {
       compareNormalizedCodePoints(left.name, right.name) || left.entityId - right.entityId,
   );
   return {
-    rating: rating.map(({ entityId }) => entityId),
+    bestFit: bestFit.map(({ entityId }) => entityId),
     support: support.map(({ entityId }) => entityId),
     name: name.map(({ entityId }) => entityId),
   };
@@ -159,8 +167,9 @@ function computeEntityClass(
   comparatorGames.sort((left, right) => compareNormalizedCodePoints(left.gameId, right.gameId));
   exclusions.sort((left, right) => compareNormalizedCodePoints(left.gameId, right.gameId));
 
-  const comparatorMean =
-    comparatorGames.length === 0 ? null : exactFitnessMean(comparatorGames).toNumber();
+  const exactComparatorMean =
+    comparatorGames.length === 0 ? null : exactFitnessMean(comparatorGames);
+  const comparatorMean = exactComparatorMean?.toNumber() ?? null;
   const eligibleById = new Map(comparatorGames.map((evidence) => [evidence.gameId, evidence]));
   const observations = new Map<
     number,
@@ -198,6 +207,7 @@ function computeEntityClass(
     }
   }
 
+  const adjustedMeans = new Map<number, ExactRational>();
   const entities = [...observations].map(([entityId, values]): CollectionProfileEntityEvidence => {
     const canonical = ownedGames
       .flatMap((game) => {
@@ -214,13 +224,21 @@ function computeEntityClass(
           compareNormalizedCodePoints(left.name, right.name) ||
           compareNormalizedCodePoints(left.gameId, right.gameId),
       )[0];
-    if (canonical === undefined || comparatorMean === null) {
+    if (canonical === undefined || comparatorMean === null || exactComparatorMean === null) {
       throw new Error(`Entity ${entityId} has no eligible evidence`);
     }
     const games = [
       ...new Map(values.map(({ evidence }) => [evidence.gameId, evidence])).values(),
     ].sort((left, right) => compareNormalizedCodePoints(left.gameId, right.gameId));
-    const entityMean = exactFitnessMean(games).toNumber();
+    const exactEntityMean = exactFitnessMean(games);
+    const entityMean = exactEntityMean.toNumber();
+    const entityCount = new ExactRational(BigInt(games.length));
+    const priorWeight = new ExactRational(BigInt(classPolicy.minimumSupportedGames));
+    const adjustedMean = exactEntityMean
+      .multiply(entityCount)
+      .add(exactComparatorMean.multiply(priorWeight))
+      .divide(entityCount.add(priorWeight));
+    adjustedMeans.set(entityId, adjustedMean);
     const populationStandardDeviation = Math.sqrt(
       games.reduce((sum, game) => sum + (game.currentFitness - entityMean) ** 2, 0) / games.length,
     );
@@ -230,6 +248,7 @@ function computeEntityClass(
       support: games.length >= classPolicy.minimumSupportedGames ? "supported" : "limited",
       associatedGameCount: games.length,
       meanCurrentFitness: entityMean,
+      adjustedMeanCurrentFitness: adjustedMean.toNumber(),
       populationStandardDeviation,
       range: {
         min: Math.min(...games.map(({ currentFitness }) => currentFitness)),
@@ -240,7 +259,7 @@ function computeEntityClass(
       games,
     };
   });
-  const orderings = entityOrderings(entities);
+  const orderings = entityOrderings(entities, adjustedMeans);
   const associatedGameIds = new Set(
     entities.flatMap(({ games }) => games.map(({ gameId }) => gameId)),
   );
@@ -289,7 +308,7 @@ function computeEntityClass(
       })
       .sort((left, right) => compareNormalizedCodePoints(left.gameId, right.gameId)),
     entities,
-    overviewEntityIds: orderings.rating
+    overviewEntityIds: orderings.bestFit
       .filter(
         (entityId) =>
           entities.find((entity) => entity.entityId === entityId)?.support === "supported",
