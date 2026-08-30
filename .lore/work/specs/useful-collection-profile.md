@@ -16,9 +16,13 @@ req-prefix: USEFUL-PROF
 
 ## Status And Authority
 
-The owner has reviewed and approved this product and behavior specification. Approval authorizes design and implementation planning, not implementation by itself.
+The owner reviewed and approved this product and behavior specification. The amended adjusted-fit requirements are implemented and passed terminal acceptance.
 
 Once approved, this specification supersedes the Profile Overview behavior in [Collection Identity and Trusted Insight Profiling](../../specs/collection/collection-profiling.md). The older document remains the record of the implemented contract before this redesign. It does not justify retaining a surface that this specification removes.
+
+Final validation passed 229 focused tests with 902 assertions, 2,274 full-suite tests with 1 skip and 9,062 assertions, and 86 browser tests with 30 intentional skips and no failures. Typechecks, lint after the typed `STEP8-LINT-1` route-test correction, build, changed-file formatting, and diff checks passed. The final reviewer accepted the amended behavior with no material findings. The root format check differs only on the three accepted generated Beads baseline files.
+
+Two accepted residual risks remain: local validation used Bun 1.3.11 rather than the declared Bun 1.4.0, and profile zoom coverage uses the 720x450 DPR 2 zoom-equivalent project while the literal Chromium 200% probe is on collection detail. Review accepted both as non-material to this implementation.
 
 ## Goal
 
@@ -29,7 +33,7 @@ The Collection Profile must answer exactly two questions:
 
 The first answer describes supported patterns in the owner's current collection. The second is a small inbox of choices the owner has explicitly made timely. Neither answer is a dashboard of everything Shelf Judge can calculate.
 
-The first release answers the identity question by rating mechanics, designers, and artists from the current fitness of associated owned games. It answers the attention question with a gentle list of explicit play and replay intentions that the owner chose to keep visible.
+The first release answers the identity question by ranking mechanics, designers, and artists by comparator-adjusted current fitness of associated owned games. It answers the attention question with a gentle list of explicit play and replay intentions that the owner chose to keep visible.
 
 It is a successful result for the profile to say that the available evidence does not yet support an identity statement or that nothing needs attention.
 
@@ -39,11 +43,11 @@ It is a successful result for the profile to say that the available evidence doe
 
 The owner has four eligible owned games credited with worker placement. Their current fitness scores are `8.1`, `7.8`, `8.4`, and `7.7`. The mean is `8.0`, compared with `6.9` across all eligible owned games.
 
-The identity overview can show:
+With the configured mechanic minimum of three used as the comparator weight, the adjusted fit is `(4 * 8.0 + 3 * 6.9) / 7`, or about `7.5`. The identity overview can show:
 
 > **Worker Placement**
 >
-> Games with this mechanic have an average current fitness of **8.0**, compared with **6.9** across your eligible collection. Based on 4 games.
+> Games with this mechanic have an adjusted fit of **7.5**, based on 4 games averaging **8.0** compared with **6.9** across your eligible collection.
 
 The owner can inspect all four games, each current fitness score, the range and dispersion, exclusions, and the collection comparator. The wording describes an association. It does not claim that worker placement caused the scores.
 
@@ -90,6 +94,7 @@ For each entity, Shelf Judge calculates:
 
 - eligible associated game count;
 - arithmetic mean current fitness;
+- comparator-adjusted mean current fitness;
 - population standard deviation;
 - minimum and maximum current fitness;
 - the arithmetic mean current fitness of all games eligible for that entity class, counting each game once; and
@@ -97,9 +102,9 @@ For each entity, Shelf Judge calculates:
 
 Each class exposes one shared comparator cohort with its count, game-level current fitness evidence, and class-level exclusions. Entity evidence references that cohort rather than duplicating it. This makes both the entity and comparator arithmetic reproducible.
 
-Three eligible associated games are required before an entity can appear as a supported identity pattern. One- and two-game associations remain available in drilldown with an explicit limited-evidence label. The threshold establishes repeated support, not statistical significance.
+An entity needs at least its class's configured `minimumSupportedGames`, currently three by default, before it can appear as a supported identity pattern. Associations below that threshold remain available in drilldown with an explicit limited-evidence label. The threshold establishes repeated support and supplies the comparator weight for adjusted fit; it is policy, not learned truth or statistical significance.
 
-The overview shows up to three supported entities in each class, ordered by mean current fitness descending, then eligible game count descending, normalized display name ascending, and BGG ID ascending. It does not manufacture a negative-preference section or a minimum difference gate. The complete drilldown includes every entity with at least one eligible associated game and supports deterministic ordering by rating, support, or name.
+The overview shows the first configured number of supported entities from each class's `bestFit` ordering. `bestFit` orders every drilldown entity by exact adjusted mean current fitness descending, then eligible game count descending, normalized display name ascending, and BGG ID ascending. It does not manufacture a negative-preference section or a minimum difference gate. The complete drilldown includes every entity with at least one eligible associated game and supports deterministic ordering by `bestFit`, diagnostic `support`, or `name`.
 
 ### Attention Means An Explicit Visible Intention
 
@@ -137,10 +142,10 @@ The section contains:
 1. Up to three supported mechanic associations.
 2. Up to three supported designer associations.
 3. Up to three supported artist associations.
-4. A path to the complete entity-rating drilldown, including sparse associations and exclusions.
+4. A path to the complete adjusted-fit entity drilldown, including sparse associations and exclusions.
 5. A link to the axis-distribution diagnostic drilldown.
 
-Mechanics, designers, and artists remain separate classes. Their ratings are not combined into one ranking because the same game can credit several entities and the classes answer different owner questions.
+Mechanics, designers, and artists remain separate classes. Their adjusted fits are not combined into one ranking because the same game can credit several entities and the classes answer different owner questions.
 
 Axis distributions remain diagnostic evidence under this identity question. They help the owner verify whether configured axes have the expected coverage, range, clustering, and effective values. They are not identity claims and do not appear as attention items.
 
@@ -216,11 +221,11 @@ When there are no currently owned games, the identity section explains that owne
 
 Each entity class has independent result, metadata, and exclusion dimensions rather than one overlapping status.
 
-| Dimension          | States                                                                                                                                                                                                                                                                                                                                                                                                              |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Result             | `supported` when at least one entity has three eligible games; `limited` when associations exist but none has three; `no-eligible-ratings` when at least one entity association exists but no associated game has eligible fitness; `evaluated-empty` only when complete metadata contains zero entity associations in the class; `not-evaluated` when no currently owned game has complete metadata for the class. |
-| Metadata readiness | `complete` when every currently owned game has a complete result for the class; `partial` when usable complete results coexist with refresh-needed or unrefreshable games; `refresh-needed` when no currently owned game has a complete result.                                                                                                                                                                     |
-| Exclusions         | Counts and game identities grouped by predicted fitness, missing or invalid fitness, refresh-needed metadata, unrefreshable metadata, and other contract-defined reason.                                                                                                                                                                                                                                            |
+| Dimension          | States                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Result             | `supported` when at least one entity meets the class's configured `minimumSupportedGames`; `limited` when associations exist but none meets that threshold; `no-eligible-ratings` when at least one entity association exists but no associated game has eligible fitness; `evaluated-empty` only when complete metadata contains zero entity associations in the class; `not-evaluated` when no currently owned game has complete metadata for the class. |
+| Metadata readiness | `complete` when every currently owned game has a complete result for the class; `partial` when usable complete results coexist with refresh-needed or unrefreshable games; `refresh-needed` when no currently owned game has a complete result.                                                                                                                                                                                                            |
+| Exclusions         | Counts and game identities grouped by predicted fitness, missing or invalid fitness, refresh-needed metadata, unrefreshable metadata, and other contract-defined reason.                                                                                                                                                                                                                                                                                   |
 
 The result state is computed from usable evidence even when metadata readiness is partial. The UI shows readiness warnings and exclusions alongside that result. The profile may therefore show supported mechanics while designers are awaiting metadata refresh without claiming complete designer coverage.
 
@@ -261,12 +266,12 @@ Every requirement is assigned to one headline question. Delivery requirements ar
 3. **REQ-USEFUL-PROF-3:** A game whose current fitness contains a predicted contribution must be excluded from entity evidence and the exclusion count and reason must remain inspectable.
 4. **REQ-USEFUL-PROF-4:** A vetoed game must contribute its displayed fitness of `0`, must be identified as vetoed in game evidence, and must never be replaced with hypothetical fitness.
 5. **REQ-USEFUL-PROF-5:** Each game must contribute at most once to an entity identified by BGG link ID, even if duplicate metadata links are received.
-6. **REQ-USEFUL-PROF-6:** Each entity result must expose its arithmetic mean, eligible associated game count, population standard deviation, range, class-specific eligible-collection mean, signed difference from that mean, and supporting games with current fitness.
+6. **REQ-USEFUL-PROF-6:** Each entity result must expose its arithmetic mean, comparator-adjusted mean current fitness, eligible associated game count, population standard deviation, range, class-specific eligible-collection mean, signed difference from that mean, and supporting games with current fitness.
 7. **REQ-USEFUL-PROF-7:** Each class must expose one comparator cohort with its count, every included game's current fitness, and class-level exclusions; it must count every eligible game once regardless of how many entities are credited to the game.
-8. **REQ-USEFUL-PROF-8:** At least three eligible associated games are required for overview placement or stable-pattern language. One- and two-game associations must remain drilldown-only and explicitly limited.
-9. **REQ-USEFUL-PROF-9:** The overview must show no more than three supported entities per class and use the deterministic ranking and tie rules in this specification.
-10. **REQ-USEFUL-PROF-10:** The full entity drilldown must include every association with at least one eligible game, expose entity and class comparator evidence and exclusions, and support deterministic ordering by rating, support, and name.
-11. **REQ-USEFUL-PROF-11:** Entity language must describe association within the owner's collection and must not claim causation, universal quality, statistical significance, or a creator's responsibility for a game's score.
+8. **REQ-USEFUL-PROF-8:** At least the class's serialized `minimumSupportedGames` eligible associated games are required for overview placement or stable-pattern language. Associations below that configured threshold must remain drilldown-only and explicitly limited.
+9. **REQ-USEFUL-PROF-9:** The overview must show no more than the configured class limit of supported entities, selected as the supported prefix of the exact `bestFit` ordering: adjusted mean current fitness descending, eligible associated game count descending for an exact adjusted tie, NFC-normalized display name in Unicode code-point order, then BGG ID ascending.
+10. **REQ-USEFUL-PROF-10:** The full entity drilldown must include every association with at least one eligible game, expose entity and class comparator evidence and exclusions, and support complete deterministic `bestFit`, diagnostic count-first `support`, and `name` orderings.
+11. **REQ-USEFUL-PROF-11:** Entity language must describe association within the owner's collection and must not claim causation, universal quality, statistical significance, confidence, preference, identity strength, representation as appreciation, or a creator's responsibility for a game's score.
 12. **REQ-USEFUL-PROF-12:** BGG thing metadata must preserve mechanic, designer, and artist link IDs and names, distinguish complete empty results from metadata not yet fetched, and retain source observation time.
 13. **REQ-USEFUL-PROF-13:** Existing games whose persisted schema cannot establish designer or artist completeness must migrate to a refresh-needed state rather than to a misleading complete empty list.
 14. **REQ-USEFUL-PROF-14:** Metadata refresh must update all three entity classes atomically for a game. A failed refresh must preserve complete last-validated metadata as eligible with a refresh-failed warning; migrated refresh-needed data remains ineligible. The first release has no age-based metadata expiration.
@@ -274,7 +279,7 @@ Every requirement is assigned to one headline question. Delivery requirements ar
 16. **REQ-USEFUL-PROF-16:** Mechanics frequency, categories, families, subdomains, BGG weight clustering, axis weights, utility declarations, variance, rarity, absence, and collection-wide averages must not appear as standalone identity findings.
 17. **REQ-USEFUL-PROF-17:** The identity answer must expose the independent result, metadata-readiness, and exclusion dimensions defined in this specification, plus refresh-failed warnings and whole-profile errors, without converting one into another.
 18. **REQ-USEFUL-PROF-18:** Identity computation must be deterministic local computation and must make no network or model call; metadata refresh remains a separate owner-initiated operation.
-19. **REQ-USEFUL-PROF-19:** The shared runtime contract must reject non-finite aggregates, duplicate entity identities, contradictory counts, mismatched evidence, or an entity or comparator not reproducible from its complete evidence cohort.
+19. **REQ-USEFUL-PROF-19:** The shared runtime contract must independently reproduce and verify each exact adjusted mean, every complete deterministic ordering, and the supported `bestFit` overview prefix, and must reject non-finite aggregates, duplicate entity identities, contradictory counts, mismatched evidence, or an entity or comparator not reproducible from its complete evidence cohort.
 20. **REQ-USEFUL-PROF-20:** `GET /api/profile`, the web client, and `shelf-judge profile` JSON must preserve and runtime-validate the complete identity result and its insufficiency states without consumer-side projection.
 21. **REQ-USEFUL-PROF-21:** The web identity section must use semantic headings, linked game evidence, keyboard-operable drilldowns, visible focus, non-color-only status cues, and WCAG 2.1 AA contrast.
 22. **REQ-USEFUL-PROF-22:** Identity cards, evidence, and controls must fit without horizontal page overflow in current Chromium at `375x812`, `768x1024`, and `1440x900` CSS pixels and at 200% desktop zoom; content must wrap without hiding evidence or requiring hover.
@@ -316,7 +321,7 @@ This section constrains implementation where product behavior depends on a consi
 
 ### Source And Derived Data
 
-Durable owner intent and resolution history belong in versioned collection source data. Computed entity ratings, attention projections, insufficiency states, and ordering belong in the disposable versioned profile cache.
+Durable owner intent and resolution history belong in versioned collection source data. Computed entity adjusted fits, attention projections, insufficiency states, and ordering belong in the disposable versioned profile cache.
 
 The profile cache must be invalidated by changes to:
 
@@ -324,10 +329,11 @@ The profile cache must be invalidated by changes to:
 - BGG entity metadata or its completeness state;
 - any input that changes displayed current fitness;
 - play-count value, validity, source, or observation time;
-- intention creation, baseline, state, version, or resolution; and
+- intention creation, baseline, state, version, or resolution;
+- the configured entity policy, including any class's `minimumSupportedGames`; and
 - the profile contract or algorithm version.
 
-No profile cache migration is required. A collection migration is required because intentions, resolutions, and BGG metadata completeness are durable source data.
+The current disposable profile contract is version 9 and its algorithm is version 11. The durable collection remains schema version 5. No profile cache migration is required: an older version or a profile whose serialized entity policy differs from current configuration is discarded and recomputed. A collection migration is required when durable intentions, resolutions, BGG metadata completeness, or another collection source field changes schema.
 
 Collection migration must write atomically. A failed or interrupted migration leaves the last validated source artifact unchanged and loadable. Repeating migration from the same prior version produces the same current artifact without duplicate history or further semantic changes.
 
@@ -343,10 +349,48 @@ For eligible scores `x1` through `xn`:
 entity mean = sum(xi) / n
 population standard deviation = sqrt(sum((xi - mean)^2) / n)
 collection comparator = sum(each class-eligible game's current fitness once) / eligible game count
+adjusted mean = (n * entity mean + minimumSupportedGames * collection comparator)
+                / (n + minimumSupportedGames)
 difference = entity mean - collection comparator
 ```
 
-Compute and compare unrounded finite values. Presentation may round fitness aggregates to one decimal place, but deterministic ordering uses unrounded values. Equal ordering values use NFC-normalized display names by Unicode code-point order and then numeric BGG ID.
+Compute adjusted values and ordering comparisons with exact arithmetic. Presentation may round fitness aggregates to one decimal place, but deterministic ordering never uses displayed values. `bestFit` orders by exact adjusted mean descending, exact ties by associated game count descending, then NFC-normalized display name by Unicode code-point order and numeric BGG ID. Diagnostic `support` orders by count descending, exact raw mean descending, normalized name, and ID. `name` orders by normalized name and ID. Every ordering contains every entity exactly once. The overview filters `bestFit` to supported entities before applying the configured class limit; a limited entity may lead the full ordering but cannot enter the overview.
+
+### Adjusted-Fit Scenarios
+
+The following exact fixtures use valid class comparator cohorts. Unless stated otherwise, `minimumSupportedGames = 3` and the cohort sum `C` divided by cohort count `k` is exactly `7`. Entity score sums are `E`, and the adjusted value is `(E * k + m * C) / (k * (n + m))`, equivalently `(E + 7m) / (n + m)` in these rows.
+
+| Scenario                             | Exact game evidence and comparator cohort                                                                                                                                                                                      | Expected result                                                                                                                                                                                   |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Three excellent versus many average  | A has `n=3`, scores `[9,9,9]`, `E=27`; B has `n=20`, all `7`, `E=140`; one unassociated comparator game scores `1`, so `k=24`, `C=168`.                                                                                        | A adjusts to `8`; B to `7`. A leads `bestFit`; B leads diagnostic `support`.                                                                                                                      |
+| Tiny raw edge with stronger evidence | A has `n=3`, scores `[9,9,9]`, `E=27`; B has `n=20`, all `8.9`, `E=178`; seven unassociated comparator games total `5`, so `k=30`, `C=210`.                                                                                    | A adjusts to `8`; B to `199/23`. B leads `bestFit`.                                                                                                                                               |
+| Quantity is not affinity             | A has `n=3`, scores `[9,9,9]`, `E=27`; B has `n=20`, all `5`, `E=100`; twelve unassociated games score eleven `10`s and one `8`, so `k=35`, `C=245`.                                                                           | A adjusts to `8`; B to `121/23`. Count cannot make B lead.                                                                                                                                        |
+| Limited outlier                      | A has `n=1`, score `[10]`, `E=10`; B has `n=3`, scores `[8,8,8]`, `E=24`; one unassociated game scores `1`, so `k=5`, `C=35`.                                                                                                  | A adjusts to `31/4` and leads full `bestFit`; B adjusts to `15/2` and is the first overview entry because A is limited.                                                                           |
+| Exact adjusted tie                   | A has `n=3`, scores `[8,8,8]`, `E=24`; B has `n=6`, scores totaling `46.5`, `E=46.5`; two unassociated games total `6.5`, so `k=11`, `C=77`.                                                                                   | Both adjust to `15/2`; B wins by count.                                                                                                                                                           |
+| Vetoed zero evidence                 | A scores `[0,9,9]`; B scores `[6,6,6]`; two unassociated games score `[10,10]`, so `k=8`, `C=56`.                                                                                                                              | Both raw means are `6` and both adjust to `13/2`; the veto remains zero, then normalized name and ID decide.                                                                                      |
+| Beyond display precision             | A has `n=1`, score `[9]`; B has `n=2`, scores `[8.2,8.35]`; two unassociated games total `9.45`, so `k=5`, `C=35`.                                                                                                             | A adjusts to `15/2`; B to `751/100`. Both display as `7.5`, but B leads by exact value.                                                                                                           |
+| Different class priors               | In each class, one entity has `n=3`, scores `[9,9,9]`; three unassociated games total `15`, so `k=6`, `C=42`. Use class minima `m=2`, `3`, and `5`.                                                                            | Adjusted values are respectively `41/5`, `8`, and `31/4`; each class is ordered independently.                                                                                                    |
+| Empty comparator                     | No eligible class games, so `k=0`, `C=0`, and there are no entities.                                                                                                                                                           | Every ordering and the overview are empty; an entity attached to this comparator is invalid.                                                                                                      |
+| Reordered Unicode ties               | IDs `30` `A😀`, `31` `A😁`, `20` `Café` (decomposed), and `40` `Café` (precomposed) all link to the same three games scoring `[8,8,8]`; three unassociated games total `18`, so `k=6`, `C=42`. Shuffle source games and links. | Every entity adjusts to `15/2`. `bestFit`, `support`, and `name` are all `[30,31,20,40]`; with limit three, overview is `[30,31,20]`. Records by ID and arrays remain identical after reordering. |
+
+The canonical target shape records `adjustedMeanCurrentFitness` beside each entity's raw aggregates, exposes exactly `orderings: { bestFit, support, name }`, and exposes one `overviewEntityIds` list. Each ordering is a full entity-ID permutation. `overviewEntityIds` is not a fourth ordering: it is the prefix of up to the configured length obtained by removing limited IDs from `bestFit`.
+
+One concrete canonical mechanics fixture uses `minimumSupportedGames = 3`, `overviewLimit = 3`, and an 11-game comparator totaling `77`:
+
+| ID   | Canonical name  | Associated scores | Raw mean | Exact adjusted mean | Support   |
+| ---- | --------------- | ----------------- | -------- | ------------------- | --------- |
+| `10` | `Limited Spark` | `[10]`            | `10`     | `31/4`              | limited   |
+| `20` | `Alpha`         | `[8,8,8]`         | `8`      | `15/2`              | supported |
+| `30` | `Many Average`  | `[7,7,7,7,7,7]`   | `7`      | `7`                 | supported |
+
+The ten associated games total `76`; one unassociated comparator game scores `1`, producing comparator mean `7`. The serialized adjusted values are respectively `7.75`, `7.5`, and `7`. Exact expected IDs are:
+
+```text
+orderings.bestFit = [10, 20, 30]
+orderings.support = [30, 20, 10]
+orderings.name = [20, 10, 30]
+overviewEntityIds = [20, 30]
+```
 
 ### Intention Lifecycle
 
@@ -388,6 +432,7 @@ Every successful mutation returns the accepted durable intention, version, and a
 - Inferring personality, taste causes, or universal creator quality
 - Rating categories, families, subdomains, publishers, or BGG weight in the first identity answer
 - Correcting for co-occurring mechanics, designer teams, or artist teams
+- Correcting common mechanics or prolific creators against external prevalence data
 - Learning a causal or multivariate entity model
 - Automatic buy, sell, keep, remove, rating, axis, weight, or model changes
 - Keep/remove or role decisions before owner-maintained role and curation context exist
@@ -400,11 +445,11 @@ Every successful mutation returns the accepted durable intention, version, and a
 
 ## AI Validation
 
-1. Confirm the recorded owner approval covers all three first-version semantics: three-game supported identity, veto inclusion at displayed zero, and a gentle intention list with no dates, aging, urgency, or overdue state.
+1. Confirm the recorded owner approval covers all three first-version semantics: the configured class support minimum, currently three by default; veto inclusion at displayed zero; and a gentle intention list with no dates, aging, urgency, or overdue state.
 2. Trace every requirement to exactly one of the two headline-question subsections. Reject any prominent output that cannot name its question and user job.
 3. Build deterministic entity fixtures covering mechanics, designers, and artists; duplicate links; one, two, and three associated games; ties; missing and complete-empty metadata; predicted scores; vetoed scores; previously owned games; and mixed class readiness.
 4. Reproduce every entity aggregate and comparator from its game evidence. Inject non-finite, duplicate, mismatched, and contradictory records and verify runtime validation rejects them before persistence or rendering.
-5. Verify overview ranking uses unrounded means, support, normalized name, and BGG ID in order, while sparse associations remain drilldown-only.
+5. Independently derive exact adjusted means from entity games, comparator games, and each class's serialized `minimumSupportedGames`. Verify `bestFit` uses exact adjusted mean, count, normalized name, and BGG ID in order; diagnostic `support` remains count-first; every ordering is a complete permutation; and the overview is the supported prefix of `bestFit` capped at the configured length. Cover every Adjusted-Fit Scenario, including equal displayed values with unequal exact values and a limited entity that leads the full ordering.
 6. Parse representative BGG thing responses with zero, one, and multiple designer and artist links. Verify new and refreshed games retain IDs, names, completeness, and observation time, migrated old games remain refresh-needed until real data is fetched, failed refresh preserves last-valid eligibility with a warning, and games without BGG IDs are unrefreshable without a false refresh action.
 7. Exercise the intention lifecycle from no intention through create, leave active across repeated reads and long elapsed time, complete, retire, automatic observed-play completion, ownership ending, re-ownership, and later explicit new intention. Reject creation for a game that is not currently owned. Verify IDs behave as specified and durable history survives daemon restart and profile-cache deletion.
 8. Test first-play with baseline zero and replay with a positive baseline. Reject mismatched kinds, missing or invalid creation evidence, duplicate active intentions, and stale expected versions.
@@ -424,7 +469,7 @@ Every successful mutation returns the accepted durable intention, version, and a
 
 The owner approved these first-version choices on 2026-08-27:
 
-1. **Supported identity threshold:** three eligible associated games for overview placement; one and two remain limited drilldown evidence.
+1. **Supported identity threshold:** the class's configured `minimumSupportedGames`, three by default, controls overview placement; associations below it remain limited drilldown evidence.
 2. **Veto treatment:** include the same displayed current fitness of `0`, visibly identify the veto, and never substitute hypothetical fitness.
 3. **Intention visibility:** every explicit active intention remains in a gentle list without dates, aging, urgency, or overdue language until valid current play evidence exceeds its baseline or the owner resolves it.
 

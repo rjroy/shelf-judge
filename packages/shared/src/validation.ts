@@ -80,8 +80,8 @@ export {
 };
 
 export const CURRENT_COLLECTION_SCHEMA_VERSION = 5 as const;
-export const CURRENT_PROFILE_CONTRACT_VERSION = 8 as const;
-export const CURRENT_PROFILE_ALGORITHM_VERSION = 10 as const;
+export const CURRENT_PROFILE_CONTRACT_VERSION = 9 as const;
+export const CURRENT_PROFILE_ALGORITHM_VERSION = 11 as const;
 const AmountInputSchema = z.string().superRefine((value, context) => {
   try {
     parseAmountInput(value);

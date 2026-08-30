@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import type {
   CollectionProfile,
   CollectionProfileEntityClass,
@@ -45,6 +46,25 @@ function single(value: string | string[] | undefined): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+export function canonicalEntityExplorerUrl(params: SearchParams): string | null {
+  const requestedOrder = single(params.order);
+  if (requestedOrder !== "rating" && requestedOrder !== "bestFit" && requestedOrder !== "") {
+    return null;
+  }
+
+  const canonicalParams = new URLSearchParams();
+  for (const [name, value] of Object.entries(params)) {
+    if (name === "order" || value === undefined) continue;
+    if (typeof value === "string") {
+      canonicalParams.append(name, value);
+    } else {
+      for (const item of value) canonicalParams.append(name, item);
+    }
+  }
+  const query = canonicalParams.toString();
+  return `/profile/entities${query === "" ? "" : `?${query}`}`;
+}
+
 export function parseEntityExplorerState(params: SearchParams): EntityExplorerState {
   const requestedClass = single(params.class);
   const requestedOrder = single(params.order);
@@ -55,7 +75,8 @@ export function parseEntityExplorerState(params: SearchParams): EntityExplorerSt
     entityClass:
       requestedClass === "designer" || requestedClass === "artist" ? requestedClass : "mechanic",
     entityId: parsedEntity !== null && Number.isSafeInteger(parsedEntity) ? parsedEntity : null,
-    ordering: requestedOrder === "support" || requestedOrder === "name" ? requestedOrder : "rating",
+    ordering:
+      requestedOrder === "support" || requestedOrder === "name" ? requestedOrder : "bestFit",
     support:
       requestedSupport === "supported" || requestedSupport === "limited" ? requestedSupport : "all",
     query: (single(params.q) ?? "").trim(),
@@ -70,7 +91,7 @@ export function entityExplorerUrl(
   const next = { ...state, ...overrides };
   const params = new URLSearchParams({ class: next.entityClass });
   if (next.entityId !== null) params.set("entity", String(next.entityId));
-  if (next.ordering !== "rating") params.set("order", next.ordering);
+  if (next.ordering !== "bestFit") params.set("order", next.ordering);
   if (next.support !== "all") params.set("support", next.support);
   if (next.query !== "") params.set("q", next.query);
   return `/profile/entities?${params.toString()}${fragment === undefined ? "" : `#${fragment}`}`;
@@ -220,7 +241,7 @@ export function EntityDrilldownContent({
             <section className="entity-explorer-controls" aria-label="Filter entity evidence">
               <form method="get" className="entity-search-form" role="search">
                 {hiddenInput("class", state.entityClass)}
-                {hiddenInput("order", state.ordering === "rating" ? null : state.ordering)}
+                {hiddenInput("order", state.ordering === "bestFit" ? null : state.ordering)}
                 {hiddenInput("support", state.support === "all" ? null : state.support)}
                 <label htmlFor="entity-search">Find an entity or supporting game</label>
                 <div>
@@ -232,7 +253,7 @@ export function EntityDrilldownContent({
               </form>
               <form method="get" className="entity-select-form">
                 {hiddenInput("class", state.entityClass)}
-                {hiddenInput("order", state.ordering === "rating" ? null : state.ordering)}
+                {hiddenInput("order", state.ordering === "bestFit" ? null : state.ordering)}
                 {hiddenInput("q", state.query)}
                 <label htmlFor="entity-support">Evidence</label>
                 <select id="entity-support" name="support" defaultValue={state.support}>
@@ -251,8 +272,8 @@ export function EntityDrilldownContent({
                 {hiddenInput("q", state.query)}
                 <label htmlFor="entity-order">Order</label>
                 <select id="entity-order" name="order" defaultValue={state.ordering}>
-                  <option value="rating">Rating</option>
-                  <option value="support">Support</option>
+                  <option value="bestFit">Adjusted fit</option>
+                  <option value="support">Associated game count (diagnostic)</option>
                   <option value="name">Name</option>
                 </select>
                 <button className="btn btn-secondary" type="submit">
@@ -261,6 +282,9 @@ export function EntityDrilldownContent({
               </form>
               <p className="entity-result-count" aria-live="polite">
                 {results.length} {results.length === 1 ? "result" : "results"}
+                {state.ordering === "bestFit" && (
+                  <>. Adjusted fit order uses exact unrounded values when displayed values match.</>
+                )}
               </p>
             </section>
 
@@ -268,8 +292,8 @@ export function EntityDrilldownContent({
               <section className="entity-index" aria-labelledby="entity-index-heading">
                 <div className="entity-index-heading">
                   <h3 id="entity-index-heading">Entity index</h3>
-                  <span>Mean</span>
-                  <span>vs collection</span>
+                  <span>Adjusted fit</span>
+                  <span>Raw mean</span>
                 </div>
                 {results.length === 0 ? (
                   <div className="entity-filtered-empty">
@@ -301,15 +325,16 @@ export function EntityDrilldownContent({
                             >
                               <strong>{entity.name}</strong>
                               <span className="entity-index-score">
-                                <span className="sr-only">Mean current fitness </span>
-                                {entity.meanCurrentFitness.toFixed(1)}
+                                <span className="sr-only">Adjusted fit </span>
+                                {entity.adjustedMeanCurrentFitness.toFixed(1)}
                               </span>
                               <span className="entity-index-delta">
-                                <span className="sr-only">Difference from collection </span>
-                                {entity.differenceFromComparator > 0 ? "+" : ""}
-                                {entity.differenceFromComparator.toFixed(1)}
+                                <span className="sr-only">Raw mean current fitness </span>
+                                {entity.meanCurrentFitness.toFixed(1)}
                               </span>
                               <span className="entity-index-meta">
+                                Collection comparator{" "}
+                                {entity.comparatorMeanCurrentFitness.toFixed(1)} ·{" "}
                                 {entity.associatedGameCount}{" "}
                                 {entity.associatedGameCount === 1 ? "game" : "games"} ·{" "}
                                 {entity.support}
@@ -342,7 +367,13 @@ export function EntityDrilldownContent({
                       <Link href={clearFiltersUrl}>Clear search and filters</Link>
                     </p>
                   )}
-                  <EntityEvidence entity={selectedEntity} entityClass={state.entityClass} />
+                  <EntityEvidence
+                    entity={selectedEntity}
+                    entityClass={state.entityClass}
+                    minimumSupportedGames={
+                      profile.entityPolicy[state.entityClass].minimumSupportedGames
+                    }
+                  />
                 </section>
               )}
             </div>
@@ -353,14 +384,25 @@ export function EntityDrilldownContent({
   );
 }
 
-export default async function EntityDrilldownPage({
-  searchParams,
-}: {
-  searchParams: Promise<SearchParams>;
-}) {
-  const state = parseEntityExplorerState(await searchParams);
+interface EntityDrilldownPageDependencies {
+  loadProfile: () => ReturnType<typeof getProfile>;
+  redirectTo: (url: string) => never;
+}
+
+export async function EntityDrilldownPage(
+  {
+    searchParams,
+  }: {
+    searchParams: Promise<SearchParams>;
+  },
+  { loadProfile, redirectTo }: EntityDrilldownPageDependencies,
+) {
+  const params = await searchParams;
+  const canonicalUrl = canonicalEntityExplorerUrl(params);
+  if (canonicalUrl !== null) redirectTo(canonicalUrl);
+  const state = parseEntityExplorerState(params);
   try {
-    const profile = await getProfile();
+    const profile = await loadProfile();
     if (profile.status === "unavailable") {
       return (
         <>
@@ -388,4 +430,12 @@ export default async function EntityDrilldownPage({
       </>
     );
   }
+}
+
+export default async function EntityDrilldownRoute({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}) {
+  return EntityDrilldownPage({ searchParams }, { loadProfile: getProfile, redirectTo: redirect });
 }

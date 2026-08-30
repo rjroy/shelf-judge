@@ -76,20 +76,22 @@ const profileFixture: CollectionProfileResult = (() => {
   const profile = structuredClone(warningUsefulProfileFixture);
   const mechanic = profile.identity.classes.mechanic;
   const workerPlacement = mechanic.entities.find(({ entityId }) => entityId === 101);
+  const solo = mechanic.entities.find(({ entityId }) => entityId === 102);
   if (workerPlacement === undefined) throw new Error("Expected mechanic fixture evidence");
-  const generatedEntities = Array.from({ length: 167 }, (_, index) => ({
+  if (solo === undefined) throw new Error("Expected limited mechanic fixture evidence");
+  const generatedEntities = Array.from({ length: 166 }, (_, index) => ({
     ...structuredClone(workerPlacement),
     entityId: 1_000 + index,
     name: `Worker Placement Variant ${String(index + 1).padStart(3, "0")}`,
   }));
-  mechanic.entities = [workerPlacement, ...generatedEntities];
-  const productionOrder = mechanic.entities.map(({ entityId }) => entityId);
+  const generatedIds = generatedEntities.map(({ entityId }) => entityId);
+  mechanic.entities = [workerPlacement, solo, ...generatedEntities];
   mechanic.orderings = {
-    rating: productionOrder,
-    support: productionOrder,
-    name: productionOrder,
+    bestFit: [solo.entityId, workerPlacement.entityId, ...generatedIds],
+    support: [workerPlacement.entityId, ...generatedIds, solo.entityId],
+    name: [solo.entityId, workerPlacement.entityId, ...generatedIds],
   };
-  mechanic.overviewEntityIds = productionOrder.slice(0, 3);
+  mechanic.overviewEntityIds = [workerPlacement.entityId, ...generatedIds.slice(0, 2)];
   profile.identity.axisDistributions = [
     {
       axisId: axis.id,

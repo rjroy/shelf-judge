@@ -30,9 +30,11 @@ function GameEvidence({ game }: { game: CollectionProfileGameFitnessEvidence }) 
 export function EntityEvidence({
   entity,
   entityClass,
+  minimumSupportedGames,
 }: {
   entity: CollectionProfileEntityEvidence;
   entityClass: CollectionProfileEntityClassResult["entityClass"];
+  minimumSupportedGames: number;
 }) {
   const headingId = `${entityClass}-${entity.entityId}-heading`;
   return (
@@ -48,12 +50,17 @@ export function EntityEvidence({
       </div>
       {entity.support === "limited" && (
         <p className="profile-warning">
-          One or two games are not enough to establish a recurring collection pattern.
+          This adjusted evidence remains available only in the drilldown until it reaches the
+          configured support count of {minimumSupportedGames} associated games.
         </p>
       )}
       <dl className="profile-facts entity-aggregates">
         <div>
-          <dt>Mean current fitness</dt>
+          <dt>Adjusted fit</dt>
+          <dd>{score(entity.adjustedMeanCurrentFitness)}</dd>
+        </div>
+        <div>
+          <dt>Raw mean current fitness</dt>
           <dd>{score(entity.meanCurrentFitness)}</dd>
         </div>
         <div>
@@ -74,7 +81,7 @@ export function EntityEvidence({
           </dd>
         </div>
         <div>
-          <dt>Eligible collection mean</dt>
+          <dt>Class comparator mean</dt>
           <dd>{score(entity.comparatorMeanCurrentFitness)}</dd>
         </div>
       </dl>

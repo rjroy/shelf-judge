@@ -1,7 +1,7 @@
 ---
 title: "Implementation plan: adjusted-fit profile ranking"
 date: 2026-08-29
-status: approved
+status: executed
 tags: [plan, collection-profile, adjusted-fit, ranking, exact-arithmetic]
 modules: [shared, daemon, cli, web]
 related:
@@ -19,7 +19,7 @@ Replace raw entity-mean ranking with the approved comparator-adjusted fitness ra
 
 The implementation adds an adjusted value to every drilldown entity, uses that value for the authoritative `bestFit` ordering and supported-only overview selection, and keeps count as evidence, shrinkage strength, support eligibility, an exact-tie breaker, and a diagnostic count-first ordering. It preserves the existing eligibility, exclusion, canonical-name, deduplication, comparator, evidence, readiness, warning, attention, and class-isolation behavior.
 
-This plan is the review artifact for Beads issue `shelf-judge-d4v`. The scoring decision was approved through completed research issue `shelf-judge-5gq`; implementation issue `shelf-judge-g0r` remains blocked until this plan is accepted. Planning does not implement production changes.
+This plan is the review artifact for Beads issue `shelf-judge-d4v`. The scoring decision was approved through completed research issue `shelf-judge-5gq`; implementation issue `shelf-judge-g0r` executed the accepted plan through all eight phases.
 
 ## Approved amendment to the current specification
 
@@ -295,6 +295,8 @@ Every ordering contains every entity ID exactly once. `overviewEntityIds` is the
 
 ## Step 8: Update user documentation and complete terminal validation
 
+**Status:** Complete
+
 **Files:**
 
 - `docs/usage.md`
@@ -394,4 +396,13 @@ Shared and service-boundary tests must reject or preserve behavior for:
 
 ## Completion boundary
 
-Implementation is complete only when contract 9/algorithm 11 profiles are produced, independently validated, persisted, passed through, rendered, documented, and exercised in Chromium; every old profile version is regenerated; every scenario and malformed case has discriminating evidence; and no production consumer recomputes ranking. Approval of this draft is required before implementation begins.
+Implementation is complete only when contract 9/algorithm 11 profiles are produced, independently validated, persisted, passed through, rendered, documented, and exercised in Chromium; every old profile version is regenerated; every scenario and malformed case has discriminating evidence; and no production consumer recomputes ranking.
+
+All eight phases are complete. Terminal acceptance passed 229 focused tests with 902 assertions across 13 files, 2,274 full-suite tests with 1 skip and 9,062 assertions across 127 files, and 86 browser tests with 30 intentional skips and 0 failures across 116 configured tests. Typecheck, browser typecheck, build, changed-file Prettier, and `git diff --check` passed. Strict lint initially found `STEP8-LINT-1` in two route-test assertions; the typed exact-envelope correction then passed repository lint, the 17-test route suite with 43 assertions, typecheck, focused Prettier, and `git diff --check`.
+
+The root format check retains only the accepted baseline exception in `.beads/backup/backup_state.json`, `.beads/export-state.json`, and `.beads/push-state.json`; no feature path or additional path failed. Final review accepted the implementation with no material findings.
+
+Acceptance records two explicit residual risks as non-blocking:
+
+- Validation used Bun 1.3.11 while `package.json` declares Bun 1.4.0, so exact declared-toolchain reproduction remains unproven.
+- Profile browser coverage uses a 720x450 CSS viewport at DPR 2 as the 200% zoom equivalent, while the literal Chromium 200% probe directly exercises collection detail rather than the profile page. Equivalent profile reflow and browser assertions made this non-material for acceptance.

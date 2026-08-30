@@ -3,7 +3,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type {
   CollectionProfileEntityClass,
   CollectionProfileEntityClassResult,
+  CollectionProfileEntityPolicy,
 } from "@shelf-judge/shared";
+import { DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY } from "@shelf-judge/shared";
 import { loadProfileOverview, ProfileOverviewContent, type ProfileOverviewState } from "@/app/page";
 import { IdentitySection } from "@/components/profile/identity-section";
 import { AttentionSection } from "@/components/profile/attention-section";
@@ -31,11 +33,14 @@ function emptyClass(entityClass: CollectionProfileEntityClass): CollectionProfil
     refreshWarnings: [],
     entities: [],
     overviewEntityIds: [],
-    orderings: { rating: [], support: [], name: [] },
+    orderings: { bestFit: [], support: [], name: [] },
   };
 }
 
-function renderClass(result: CollectionProfileEntityClassResult): string {
+function renderClass(
+  result: CollectionProfileEntityClassResult,
+  entityPolicy: CollectionProfileEntityPolicy = DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
+): string {
   const classes = {
     mechanic: emptyClass("mechanic"),
     designer: emptyClass("designer"),
@@ -43,7 +48,10 @@ function renderClass(result: CollectionProfileEntityClassResult): string {
     [result.entityClass]: result,
   };
   return renderToStaticMarkup(
-    <IdentitySection identity={{ collectionState: "populated", classes, axisDistributions: [] }} />,
+    <IdentitySection
+      identity={{ collectionState: "populated", classes, axisDistributions: [] }}
+      entityPolicy={entityPolicy}
+    />,
   );
 }
 
@@ -91,6 +99,80 @@ describe("profile overview consumer", () => {
     for (const entityClass of ["mechanic", "designer", "artist"])
       expect(html).toContain(`href="/profile/entities?class=${entityClass}"`);
     expect(html).toContain('href="/profile/axes"');
+  });
+
+  test("uses supplied overview membership and order when raw mean and count suggest otherwise", () => {
+    const mechanic = structuredClone(mechanicClassFixture);
+    const rawMeanLeader = {
+      ...structuredClone(mechanic.entities[0]),
+      entityId: 301,
+      name: "Raw Mean Leader",
+      associatedGameCount: 20,
+      meanCurrentFitness: 9.8,
+      adjustedMeanCurrentFitness: 9.4,
+    };
+    const daemonFirst = {
+      ...structuredClone(mechanic.entities[0]),
+      entityId: 302,
+      name: "Daemon First",
+      associatedGameCount: 3,
+      meanCurrentFitness: 6.1,
+      adjustedMeanCurrentFitness: 5.9,
+    };
+    mechanic.entities = [rawMeanLeader, mechanic.entities[0], daemonFirst];
+    mechanic.overviewEntityIds = [302, 301];
+
+    const html = renderClass(mechanic);
+    const cards = html.match(/<article class="profile-entity-summary"[\s\S]*?<\/article>/g) ?? [];
+
+    expect(html.indexOf("Daemon First")).toBeLessThan(html.indexOf("Raw Mean Leader"));
+    expect(html).not.toContain(">Worker Placement<");
+    expect(cards).toHaveLength(2);
+    for (const [index, evidence] of [
+      {
+        name: "Daemon First",
+        adjustedFit: "5.9",
+        rawMean: "6.1",
+        comparator: "4.7",
+        associatedGames: "3",
+      },
+      {
+        name: "Raw Mean Leader",
+        adjustedFit: "9.4",
+        rawMean: "9.8",
+        comparator: "4.7",
+        associatedGames: "20",
+      },
+    ].entries()) {
+      expect(cards[index]).toContain(`<strong>${evidence.name}</strong>`);
+      expect(cards[index]).toContain(`<strong>Adjusted fit</strong> ${evidence.adjustedFit}`);
+      expect(cards[index]).toContain("<dl");
+      expect(cards[index]).toContain(`<dt>Raw mean</dt><dd>${evidence.rawMean}</dd>`);
+      expect(cards[index]).toContain(`<dt>Class comparator</dt><dd>${evidence.comparator}</dd>`);
+      expect(cards[index]).toContain(
+        `<dt>Associated games</dt><dd>${evidence.associatedGames}</dd>`,
+      );
+    }
+  });
+
+  test("explains the supplied class minimum as support threshold and comparator weight", () => {
+    const policy = {
+      ...DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
+      mechanic: { overviewLimit: 3, minimumSupportedGames: 4 },
+    };
+
+    const html = renderClass(mechanicClassFixture, policy);
+
+    expect(html).toContain(
+      "The class minimum of 4 associated games is both the support threshold and the comparator weight used for adjusted fit.",
+    );
+    for (const forbidden of ["favorite", "preferred", "responsible", "confidence"])
+      expect(html.toLowerCase()).not.toContain(forbidden);
+    expect(html).not.toMatch(/(?:representation|share).{0,80}appreciation/i);
+    expect(html).not.toMatch(/appreciation.{0,80}(?:representation|share)/i);
+    expect(html).not.toMatch(
+      /preference|responsibility|creator|causal|significance|probability|learned/i,
+    );
   });
 
   test("renders every overview entity supplied for a class", () => {
@@ -189,6 +271,10 @@ describe("identity state distinctions", () => {
   ])("renders %s independently", (state, result) => {
     const html = renderClass(result);
     expect(html).toContain(`data-result="${state}"`);
+    if (state === "limited") {
+      expect(html).toContain("Associations below the configured class minimum");
+      expect(html).not.toContain("One- and two-game associations");
+    }
   });
 
   test("shows partial and refresh-needed readiness, exclusions, and refresh warnings as metadata", () => {

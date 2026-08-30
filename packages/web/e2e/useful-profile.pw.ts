@@ -176,6 +176,12 @@ async function expectMinimumTargets(page: Page): Promise<void> {
   expect(undersized).toEqual([]);
 }
 
+async function overviewEntityNames(page: Page): Promise<string[]> {
+  return page
+    .locator('.profile-class[data-result="supported"] .profile-entity-summary-heading strong')
+    .allTextContents();
+}
+
 async function expectUnscaledTarget(locator: Locator): Promise<void> {
   const dimensions = await locator.evaluate((element) => {
     const rect = element.getBoundingClientRect();
@@ -312,6 +318,24 @@ test.describe("useful profile responsive release gate", () => {
     await expect(page.getByRole("heading", { level: 1, name: "Collection Profile" })).toBeVisible();
     await expect(page.getByRole("heading", { level: 2 })).toHaveCount(2);
     await expect(page.getByText("Worker Placement", { exact: true }).first()).toBeVisible();
+    expect(await overviewEntityNames(page)).toEqual([
+      "Worker Placement",
+      "Worker Placement Variant 001",
+      "Worker Placement Variant 002",
+    ]);
+    await expect(page.getByText("Solo", { exact: true })).toHaveCount(0);
+    const overviewCards = page.locator(
+      '.profile-class[data-result="supported"] .profile-entity-summary',
+    );
+    await expect(overviewCards).toHaveCount(3);
+    for (const card of await overviewCards.all()) {
+      await expect(card.getByText("Adjusted fit", { exact: true })).toBeVisible();
+      await expect(card.locator("dt")).toHaveText([
+        "Raw mean",
+        "Class comparator",
+        "Associated games",
+      ]);
+    }
     await expect(page.getByRole("link", { name: "View all mechanics and evidence" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Evidence", exact: true })).toBeVisible();
     await expect(page.getByText("Evidence warning:", { exact: false })).toBeVisible();
@@ -353,9 +377,56 @@ test.describe("useful profile responsive release gate", () => {
     );
     await expect(page.locator(".entity-index-row")).toHaveCount(168);
     await expect(page.locator(".entity-evidence")).toHaveCount(1);
-    await expect(
-      page.getByRole("heading", { name: "Worker Placement", exact: true }),
-    ).toBeVisible();
+    const order = page.getByLabel("Order", { exact: true });
+    await expect(order).toHaveValue("bestFit");
+    await expect(order.locator("option")).toHaveText([
+      "Adjusted fit",
+      "Associated game count (diagnostic)",
+      "Name",
+    ]);
+    await expect(page.locator(".entity-index-row").first()).toContainText("Solo");
+    await expect(page.locator(".entity-index-row").nth(1)).toContainText("Worker Placement");
+    const soloEvidence = page.locator(".entity-evidence");
+    await expect(soloEvidence.getByRole("heading", { name: "Solo", exact: true })).toBeVisible();
+    await expect(soloEvidence).toHaveAttribute("data-support", "limited");
+    await expect(soloEvidence.locator("dt").nth(0)).toHaveText("Adjusted fit");
+    await expect(soloEvidence.locator("dt").nth(1)).toHaveText("Raw mean current fitness");
+    await expect(soloEvidence.locator("dd").nth(0)).toHaveText("5.5");
+    await expect(soloEvidence.locator("dd").nth(1)).toHaveText("8.0");
+    await expect(soloEvidence).toContainText(
+      "remains available only in the drilldown until it reaches the configured support count of 3",
+    );
+
+    const legacyUrl = new URL("/profile/entities", page.url());
+    legacyUrl.searchParams.set("class", "mechanic");
+    legacyUrl.searchParams.set("order", "rating");
+    legacyUrl.searchParams.set("support", "limited");
+    legacyUrl.searchParams.set("q", "Solo");
+    legacyUrl.searchParams.append("trace", "first");
+    legacyUrl.searchParams.append("trace", "second");
+    await page.goto(legacyUrl.toString());
+    await expect
+      .poll(() => {
+        const url = new URL(page.url());
+        return {
+          pathname: url.pathname,
+          order: url.searchParams.get("order"),
+          class: url.searchParams.get("class"),
+          support: url.searchParams.get("support"),
+          query: url.searchParams.get("q"),
+          trace: url.searchParams.getAll("trace"),
+        };
+      })
+      .toEqual({
+        pathname: "/profile/entities",
+        order: null,
+        class: "mechanic",
+        support: "limited",
+        query: "Solo",
+        trace: ["first", "second"],
+      });
+    await expect(page.getByLabel("Order", { exact: true })).toHaveValue("bestFit");
+    await page.goto("/profile/entities");
 
     await page.getByRole("link", { name: "Designers 0" }).click();
     await expect(page).toHaveURL(/class=designer$/);
@@ -368,12 +439,19 @@ test.describe("useful profile responsive release gate", () => {
     await expect(page.locator(".entity-index-row")).toHaveCount(1);
     await page.goto("/profile/entities");
 
+    await page.getByLabel("Find an entity or supporting game").fill("No matching entity");
+    await page.getByRole("button", { name: "Search" }).click();
+    await expect(page.locator(".entity-filtered-empty")).toContainText(
+      "No entities match the current search and evidence filter.",
+    );
+    await page.getByRole("link", { name: "Clear search and filters" }).click();
+    await expect(page.locator(".entity-index-row")).toHaveCount(168);
+
     await page.getByLabel("Evidence", { exact: true }).selectOption("supported");
     await page.getByRole("button", { name: "Apply evidence filter" }).click();
     await expect(page).toHaveURL(/class=mechanic&support=supported/);
-    await expect(page.locator(".entity-index-row")).toHaveCount(168);
+    await expect(page.locator(".entity-index-row")).toHaveCount(167);
 
-    const order = page.getByLabel("Order", { exact: true });
     await expectVisibleFocus(page, order);
     await page.keyboard.press("Home");
     await page.keyboard.press("ArrowDown");
@@ -384,6 +462,27 @@ test.describe("useful profile responsive release gate", () => {
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/order=support/);
     await applyProjectViewport(page, testInfo.project.name);
+    await expect(page.locator(".entity-index-row").first()).toContainText("Worker Placement");
+
+    await Promise.all([
+      page.waitForURL((url) => url.pathname === "/" && url.search === ""),
+      page.getByRole("link", { name: "Back to profile" }).click(),
+    ]);
+    await expect(page.getByRole("heading", { level: 1, name: "Collection Profile" })).toBeVisible();
+    await expect(
+      page.locator('.profile-class[data-result="supported"] .profile-entity-summary'),
+    ).toHaveCount(3);
+    expect(await overviewEntityNames(page)).toEqual([
+      "Worker Placement",
+      "Worker Placement Variant 001",
+      "Worker Placement Variant 002",
+    ]);
+    await page.getByRole("link", { name: "View all mechanics and evidence" }).click();
+    await expect(page).toHaveURL(/class=mechanic$/);
+    await page.getByLabel("Evidence", { exact: true }).selectOption("supported");
+    await page.getByRole("button", { name: "Apply evidence filter" }).click();
+    await page.getByLabel("Order", { exact: true }).selectOption("support");
+    await page.getByRole("button", { name: "Apply order" }).click();
 
     const selected = page.getByRole("link", { name: /Worker Placement Variant 001/ });
     await selected.click();
@@ -418,8 +517,21 @@ test.describe("useful profile responsive release gate", () => {
     await page.evaluate(() => localStorage.setItem("shelf-judge-theme", "dark"));
     await page.reload();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    const explorerText = await page.locator(".entity-explorer").innerText();
+    await page.locator(".entity-evidence").hover();
+    expect(await page.locator(".entity-explorer").innerText()).toBe(explorerText);
     await expectNoHorizontalOverflow(page);
     await expectMinimumTargets(page);
+    if (testInfo.project.name === "chromium-mobile") {
+      expect(
+        parseFloat(
+          await page
+            .getByLabel("Find an entity or supporting game")
+            .evaluate((element) => getComputedStyle(element).fontSize),
+        ),
+      ).toBeGreaterThanOrEqual(16);
+    }
+    await expectAllTextContrast(page, ".entity-evidence");
 
     await page.goto("/profile/axes");
     await applyProjectViewport(page, testInfo.project.name);
@@ -464,6 +576,15 @@ test.describe("useful profile responsive release gate", () => {
         support: "supported",
       });
 
+      await page.getByLabel("Order", { exact: true }).selectOption("bestFit");
+      await page.getByRole("button", { name: "Apply order" }).click();
+      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({
+        class: "mechanic",
+        q: "Variant 010",
+        support: "supported",
+      });
+      await expect(page.getByLabel("Order", { exact: true })).toHaveValue("bestFit");
+
       await page.getByLabel("Order", { exact: true }).selectOption("name");
       await page.getByRole("button", { name: "Apply order" }).click();
       expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({
@@ -477,10 +598,8 @@ test.describe("useful profile responsive release gate", () => {
       await expect(page).toHaveURL(/class=designer&order=name$/);
       await page.getByRole("link", { name: "Mechanics 168" }).click();
       await page.locator(".entity-index-row").first().click();
-      await expect(page).toHaveURL(/class=mechanic&entity=101&order=name/);
-      await expect(
-        page.getByRole("heading", { name: "Worker Placement", exact: true }),
-      ).toBeVisible();
+      await expect(page).toHaveURL(/class=mechanic&entity=102&order=name/);
+      await expect(page.getByRole("heading", { name: "Solo", exact: true })).toBeVisible();
     } finally {
       await context.close();
     }

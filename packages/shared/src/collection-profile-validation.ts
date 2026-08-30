@@ -716,6 +716,7 @@ const CollectionProfileEntityEvidenceSchema = z
     support: z.enum(["limited", "supported"]),
     associatedGameCount: PositiveSafeIntegerSchema,
     meanCurrentFitness: FiniteNumberSchema,
+    adjustedMeanCurrentFitness: FiniteNumberSchema,
     populationStandardDeviation: FiniteNumberSchema.min(0),
     range: z.object({ min: FiniteNumberSchema, max: FiniteNumberSchema }).strict(),
     comparatorMeanCurrentFitness: FiniteNumberSchema,
@@ -756,12 +757,15 @@ const CollectionProfileEntityEvidenceSchema = z
 
 function expectedEntityOrders(
   entities: Array<z.infer<typeof CollectionProfileEntityEvidenceSchema>>,
+  adjustedMeans: ReadonlyMap<number, ExactRational>,
 ) {
   const evidenceMean = (entity: (typeof entities)[number]) =>
     exactMean(entity.games.map(({ currentFitness }) => currentFitness));
-  const rating = [...entities].sort(
+  const adjustedMean = (entity: (typeof entities)[number]) =>
+    adjustedMeans.get(entity.entityId) ?? new ExactRational(0n);
+  const bestFit = [...entities].sort(
     (left, right) =>
-      evidenceMean(right).compare(evidenceMean(left)) ||
+      adjustedMean(right).compare(adjustedMean(left)) ||
       right.associatedGameCount - left.associatedGameCount ||
       compareCodePoints(left.name, right.name) ||
       left.entityId - right.entityId,
@@ -777,7 +781,7 @@ function expectedEntityOrders(
     (left, right) => compareCodePoints(left.name, right.name) || left.entityId - right.entityId,
   );
   return {
-    rating: rating.map(({ entityId }) => entityId),
+    bestFit: bestFit.map(({ entityId }) => entityId),
     support: support.map(({ entityId }) => entityId),
     name: name.map(({ entityId }) => entityId),
   };
@@ -820,7 +824,7 @@ export function createCollectionProfileEntityClassResultSchema(
       overviewEntityIds: z.array(PositiveSafeIntegerSchema),
       orderings: z
         .object({
-          rating: z.array(PositiveSafeIntegerSchema),
+          bestFit: z.array(PositiveSafeIntegerSchema),
           support: z.array(PositiveSafeIntegerSchema),
           name: z.array(PositiveSafeIntegerSchema),
         })
@@ -887,12 +891,11 @@ export function createCollectionProfileEntityClassResultSchema(
       }
       if (result.comparator.gameCount !== result.comparator.games.length)
         issue(["comparator", "gameCount"], "Comparator count must match evidence");
-      const comparatorMean =
+      const exactComparatorMean =
         result.comparator.games.length === 0
           ? null
-          : exactMean(
-              result.comparator.games.map(({ currentFitness }) => currentFitness),
-            ).toNumber();
+          : exactMean(result.comparator.games.map(({ currentFitness }) => currentFitness));
+      const comparatorMean = exactComparatorMean?.toNumber() ?? null;
       if (
         (comparatorMean === null) !== (result.comparator.meanCurrentFitness === null) ||
         (comparatorMean !== null &&
@@ -900,6 +903,7 @@ export function createCollectionProfileEntityClassResultSchema(
           !valuesMatch(comparatorMean, result.comparator.meanCurrentFitness))
       )
         issue(["comparator", "meanCurrentFitness"], "Comparator mean must match evidence");
+      const adjustedMeans = new Map<number, ExactRational>();
       for (const [index, entity] of result.entities.entries()) {
         const expectedSupport =
           entity.games.length >= classPolicy.minimumSupportedGames ? "supported" : "limited";
@@ -937,6 +941,22 @@ export function createCollectionProfileEntityClassResultSchema(
         const entityGameIds = entity.games.map(({ gameId }) => gameId);
         if (entityGameIds.join(",") !== [...entityGameIds].sort(compareCodePoints).join(","))
           issue(["entities", index, "games"], "Entity games must be ordered by stable game ID");
+        if (exactComparatorMean === null) {
+          issue(["entities", index], "Entity evidence requires a non-empty class comparator");
+        } else {
+          const entityCount = new ExactRational(BigInt(entity.games.length));
+          const priorWeight = new ExactRational(BigInt(classPolicy.minimumSupportedGames));
+          const adjustedMean = exactMean(entity.games.map(({ currentFitness }) => currentFitness))
+            .multiply(entityCount)
+            .add(exactComparatorMean.multiply(priorWeight))
+            .divide(entityCount.add(priorWeight));
+          adjustedMeans.set(entity.entityId, adjustedMean);
+          if (!valuesMatch(entity.adjustedMeanCurrentFitness, adjustedMean.toNumber()))
+            issue(
+              ["entities", index, "adjustedMeanCurrentFitness"],
+              "Entity adjusted mean must match its evidence, comparator, and class policy",
+            );
+        }
       }
       const associatedIds = new Set(
         result.entities.flatMap(({ games }) => games.map(({ gameId }) => gameId)),
@@ -956,14 +976,14 @@ export function createCollectionProfileEntityClassResultSchema(
               : "not-evaluated";
       if (result.result !== expectedResult)
         issue(["result"], `Class result must be ${expectedResult}`);
-      const orders = expectedEntityOrders(result.entities);
-      for (const ordering of ["rating", "support", "name"] as const)
+      const orders = expectedEntityOrders(result.entities, adjustedMeans);
+      for (const ordering of ["bestFit", "support", "name"] as const)
         if (result.orderings[ordering].join(",") !== orders[ordering].join(","))
           issue(
             ["orderings", ordering],
             `${ordering} ordering must contain every entity in deterministic order`,
           );
-      const expectedOverview = orders.rating
+      const expectedOverview = orders.bestFit
         .filter(
           (id) => result.entities.find((entity) => entity.entityId === id)?.support === "supported",
         )
@@ -971,7 +991,7 @@ export function createCollectionProfileEntityClassResultSchema(
       if (result.overviewEntityIds.join(",") !== expectedOverview.join(","))
         issue(
           ["overviewEntityIds"],
-          `Overview must contain the first ${classPolicy.overviewLimit} supported rating-ordered entities`,
+          `Overview must contain the first ${classPolicy.overviewLimit} supported best-fit entities`,
         );
     });
 }

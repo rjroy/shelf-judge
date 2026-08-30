@@ -39,6 +39,7 @@ describe("web profile API boundary", () => {
     const response = structuredClone(usefulProfileFixture);
     response.identity.classes.mechanic.result = "limited";
     response.identity.classes.mechanic.entities[0].support = "limited";
+    response.identity.classes.mechanic.entities[1].adjustedMeanCurrentFitness = 16 / 3;
     response.identity.classes.mechanic.overviewEntityIds = [];
     const policy = {
       ...DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
@@ -70,6 +71,25 @@ describe("web profile API boundary", () => {
       },
     ],
     [
+      "forged adjusted fit",
+      {
+        ...structuredClone(usefulProfileFixture),
+        identity: {
+          ...structuredClone(usefulProfileFixture.identity),
+          classes: {
+            ...structuredClone(usefulProfileFixture.identity.classes),
+            mechanic: {
+              ...structuredClone(usefulProfileFixture.identity.classes.mechanic),
+              entities: usefulProfileFixture.identity.classes.mechanic.entities.map(
+                (entity, index) =>
+                  index === 0 ? { ...entity, adjustedMeanCurrentFitness: 9.9 } : entity,
+              ),
+            },
+          },
+        },
+      },
+    ],
+    [
       "altered ordering",
       {
         ...structuredClone(usefulProfileFixture),
@@ -81,7 +101,27 @@ describe("web profile API boundary", () => {
               ...structuredClone(usefulProfileFixture.identity.classes.mechanic),
               orderings: {
                 ...usefulProfileFixture.identity.classes.mechanic.orderings,
-                rating: [101, 102],
+                bestFit: [101, 102],
+              },
+            },
+          },
+        },
+      },
+    ],
+    [
+      "legacy rating ordering",
+      {
+        ...structuredClone(usefulProfileFixture),
+        identity: {
+          ...structuredClone(usefulProfileFixture.identity),
+          classes: {
+            ...structuredClone(usefulProfileFixture.identity.classes),
+            mechanic: {
+              ...structuredClone(usefulProfileFixture.identity.classes.mechanic),
+              orderings: {
+                rating: usefulProfileFixture.identity.classes.mechanic.orderings.bestFit,
+                support: usefulProfileFixture.identity.classes.mechanic.orderings.support,
+                name: usefulProfileFixture.identity.classes.mechanic.orderings.name,
               },
             },
           },

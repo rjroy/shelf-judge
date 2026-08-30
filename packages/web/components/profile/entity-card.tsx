@@ -22,11 +22,23 @@ export function EntityCard({
         <span className="profile-status-label">Supported association</span>
       </div>
       <p>
-        Games associated with this {entityClass} average{" "}
-        <strong>{score(entity.meanCurrentFitness)}</strong> current fitness, compared with{" "}
-        <strong>{score(entity.comparatorMeanCurrentFitness)}</strong> across the eligible
-        collection. Based on {entity.associatedGameCount} games.
+        <strong>Adjusted fit</strong> {score(entity.adjustedMeanCurrentFitness)}
       </p>
+      <p>For games in this collection associated with this {entityClass}:</p>
+      <dl className="profile-facts">
+        <div>
+          <dt>Raw mean</dt>
+          <dd>{score(entity.meanCurrentFitness)}</dd>
+        </div>
+        <div>
+          <dt>Class comparator</dt>
+          <dd>{score(entity.comparatorMeanCurrentFitness)}</dd>
+        </div>
+        <div>
+          <dt>Associated games</dt>
+          <dd>{entity.associatedGameCount}</dd>
+        </div>
+      </dl>
       <Link href={`/profile/entities?class=${entityClass}&entity=${entity.entityId}`}>
         Inspect complete evidence for {entity.name}
       </Link>

@@ -11,6 +11,7 @@ import {
   PlayEvidenceMutationResultSchema,
   PlayIntentionSchema,
   CollectionProfileEntityClassResultSchema,
+  createCollectionProfileEntityClassResultSchema,
   ResolvedPlayIntentionHistorySchema,
   ResolvedPlayIntentionHistoryItemSchema,
   type CollectionProfileResult,
@@ -774,6 +775,21 @@ describe("collection profile identity contract", () => {
       (value: typeof mechanicClassFixture) => (value.entities[0].meanCurrentFitness = 7),
     ],
     [
+      "non-finite adjusted mean",
+      (value: typeof mechanicClassFixture) =>
+        (value.entities[0].adjustedMeanCurrentFitness = Number.NaN),
+    ],
+    [
+      "forged adjusted mean",
+      (value: typeof mechanicClassFixture) =>
+        (value.entities[0].adjustedMeanCurrentFitness = value.entities[0].meanCurrentFitness + 1),
+    ],
+    [
+      "rounded adjusted mean",
+      (value: typeof mechanicClassFixture) =>
+        (value.entities[1].adjustedMeanCurrentFitness = 5.5 + 1e-12),
+    ],
+    [
       "noncanonical near-equal mean",
       (value: typeof mechanicClassFixture) => (value.entities[0].meanCurrentFitness += 1e-12),
     ],
@@ -797,8 +813,20 @@ describe("collection profile identity contract", () => {
         value.entities[0].games.push(value.entities[0].games[0]),
     ],
     [
-      "wrong rating order",
-      (value: typeof mechanicClassFixture) => value.orderings.rating.reverse(),
+      "wrong best-fit order",
+      (value: typeof mechanicClassFixture) => value.orderings.bestFit.reverse(),
+    ],
+    [
+      "duplicate best-fit ID",
+      (value: typeof mechanicClassFixture) => (value.orderings.bestFit = [102, 102]),
+    ],
+    [
+      "missing best-fit ID",
+      (value: typeof mechanicClassFixture) => (value.orderings.bestFit = [102]),
+    ],
+    [
+      "extra best-fit ID",
+      (value: typeof mechanicClassFixture) => value.orderings.bestFit.push(999),
     ],
     [
       "wrong support order",
@@ -813,6 +841,94 @@ describe("collection profile identity contract", () => {
     const value = structuredClone(mechanicClassFixture);
     mutate(value);
     expect(CollectionProfileEntityClassResultSchema.safeParse(value).success).toBe(false);
+  });
+
+  test("rejects a missing adjusted value and an overview copied from diagnostic support order", () => {
+    const missingAdjusted = structuredClone(mechanicClassFixture);
+    Reflect.deleteProperty(missingAdjusted.entities[0], "adjustedMeanCurrentFitness");
+    expect(CollectionProfileEntityClassResultSchema.safeParse(missingAdjusted).success).toBe(false);
+
+    const policy = {
+      mechanic: { overviewLimit: 3, minimumSupportedGames: 1 },
+      designer: { overviewLimit: 3, minimumSupportedGames: 3 },
+      artist: { overviewLimit: 3, minimumSupportedGames: 3 },
+    };
+    const supportOrderedOverview = structuredClone(mechanicClassFixture);
+    supportOrderedOverview.entities[1].support = "supported";
+    supportOrderedOverview.entities[1].adjustedMeanCurrentFitness = 19 / 3;
+    supportOrderedOverview.overviewEntityIds = [101, 102];
+
+    expect(
+      createCollectionProfileEntityClassResultSchema(policy).safeParse(supportOrderedOverview)
+        .success,
+    ).toBe(false);
+  });
+
+  test("reconstructs adjusted ordering independently when raw mean would rank first", () => {
+    const evidence = (index: number, currentFitness: number) => ({
+      gameId: `adjusted-${String(index).padStart(2, "0")}`,
+      gameName: `Adjusted ${index}`,
+      currentFitness,
+      vetoed: currentFitness === 0,
+    });
+    const alphaGames = [evidence(0, 9), evidence(1, 9), evidence(2, 9)];
+    const betaGames = Array.from({ length: 20 }, (_, index) => evidence(index + 3, 8.9));
+    const comparatorGames = [
+      ...alphaGames,
+      ...betaGames,
+      evidence(23, 5),
+      ...Array.from({ length: 6 }, (_, index) => evidence(index + 24, 0)),
+    ];
+    const result = {
+      entityClass: "mechanic" as const,
+      result: "supported" as const,
+      metadataReadiness: {
+        state: "complete" as const,
+        ownedGameCount: 30,
+        completeGameCount: 30,
+        refreshNeededGameCount: 0,
+        unrefreshableGameCount: 0,
+      },
+      associatedGameCount: 23,
+      comparator: { gameCount: 30, meanCurrentFitness: 7, games: comparatorGames },
+      exclusions: [],
+      refreshWarnings: [],
+      entities: [
+        {
+          entityId: 100,
+          name: "Alpha",
+          support: "supported" as const,
+          associatedGameCount: 3,
+          meanCurrentFitness: 9,
+          adjustedMeanCurrentFitness: 8,
+          populationStandardDeviation: 0,
+          range: { min: 9, max: 9 },
+          comparatorMeanCurrentFitness: 7,
+          differenceFromComparator: 2,
+          games: alphaGames,
+        },
+        {
+          entityId: 200,
+          name: "Beta",
+          support: "supported" as const,
+          associatedGameCount: 20,
+          meanCurrentFitness: 8.9,
+          adjustedMeanCurrentFitness: 199 / 23,
+          populationStandardDeviation: 0,
+          range: { min: 8.9, max: 8.9 },
+          comparatorMeanCurrentFitness: 7,
+          differenceFromComparator: 1.9000000000000004,
+          games: betaGames,
+        },
+      ],
+      overviewEntityIds: [200, 100],
+      orderings: { bestFit: [200, 100], support: [200, 100], name: [100, 200] },
+    };
+    expect(CollectionProfileEntityClassResultSchema.safeParse(result).success).toBe(true);
+
+    result.orderings.bestFit = [100, 200];
+    result.overviewEntityIds = [100, 200];
+    expect(CollectionProfileEntityClassResultSchema.safeParse(result).success).toBe(false);
   });
 
   test("rejects comparator membership and exclusion contradictions", () => {
@@ -904,12 +1020,13 @@ describe("collection profile identity contract", () => {
     mixed.entities = [
       {
         ...mixed.entities[1],
+        adjustedMeanCurrentFitness: 8,
         comparatorMeanCurrentFitness: 8,
         differenceFromComparator: 0,
       },
     ];
     mixed.overviewEntityIds = [];
-    mixed.orderings = { rating: [102], support: [102], name: [102] };
+    mixed.orderings = { bestFit: [102], support: [102], name: [102] };
 
     expect(CollectionProfileEntityClassResultSchema.safeParse(mixed).success).toBe(true);
   });
@@ -933,6 +1050,7 @@ describe("collection profile identity contract", () => {
     tied.exclusions = [];
     const base = {
       ...tied.entities[1],
+      adjustedMeanCurrentFitness: 8,
       comparatorMeanCurrentFitness: 8,
       differenceFromComparator: 0,
     };
@@ -941,7 +1059,7 @@ describe("collection profile identity contract", () => {
       { ...base, entityId: 201, name: "é" },
     ];
     tied.overviewEntityIds = [];
-    tied.orderings = { rating: [201, 202], support: [201, 202], name: [201, 202] };
+    tied.orderings = { bestFit: [201, 202], support: [201, 202], name: [201, 202] };
 
     expect(CollectionProfileEntityClassResultSchema.safeParse(tied).success).toBe(true);
   });

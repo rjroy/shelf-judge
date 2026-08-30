@@ -217,7 +217,7 @@ Tournament scores appear on game detail pages and are visible alongside fitness 
 
 ![Profile](screenshots/profile.png)
 
-The Profile page answers two questions: what the collection reveals about your preferences, and what explicit play intentions still need a decision. The daemon operation is `shelf.profile.get` (`GET /api/profile`). It returns the complete profile used by the overview and its entity and axis drilldowns.
+The Profile page answers two questions: what associations appear in the collection, and what explicit play intentions still need a decision. The daemon operation is `shelf.profile.get` (`GET /api/profile`). It returns the complete profile used by the overview and its entity and axis drilldowns.
 
 The CLI returns that same complete validated result with `shelf-judge profile`. Explicit intentions and manual play evidence use these commands:
 
@@ -233,16 +233,51 @@ When an intention command omits `--command-id`, the CLI prints the generated ID 
 The identity section uses the following data:
 
 - **Axis rating distributions** use effective ratings from each enabled axis's fitness breakdown. They show a histogram, mean, median, population standard deviation, and range. An axis with no usable values remains visible with a zero count.
-- **Mechanics, designers, and artists** use complete BGG entity metadata and current displayed fitness. Each association includes its supporting games and the collection comparator. Associations supported by fewer than three games remain visible as limited evidence.
+- **Mechanics, designers, and artists** use complete BGG entity metadata and current displayed fitness. Each association includes its supporting games and class comparator. Associations below their class's configured `minimumSupportedGames` remain visible as limited drilldown evidence but do not enter the overview.
 - **Attention items** come only from active owner-created first-play or replay intentions. Profile reads never infer, age, prioritize, complete, or retire an intention.
 
 Each entity class reports its metadata readiness separately. A class can be supported, limited, evaluated with no associations, missing valid fitness, or waiting for metadata without changing the result for another class. Predicted fitness is excluded, while a vetoed current score remains eligible at `0`.
 
-**Persistence and recomputation:**
-The persisted profile contract is version 7 and the algorithm is version 9. `profile.json` is a disposable local cache, not a compatibility boundary. A cache is reused only when its collection ID, schema version, revision, complete Tournament hash, prediction-settings hash, and redundancy-settings hash all match the captured source snapshot. Invalid, non-finite, older-contract, and older-algorithm artifacts are deleted and recreated on the next profile read. A failed recomputation returns an unavailable result with the profile retry operation instead of serving stale data.
+### How Adjusted Fit Works
 
-**Version 4 upgrade:**
-Back up the data directory before upgrading. Shelf Judge automatically migrates an older collection when it first loads, then recreates disposable profile data from the migrated collection and current Tournament and scoring settings. After Shelf Judge successfully writes collection schema version 4, downgrading to a release that only understands an older collection schema is unsupported.
+Adjusted fit ranks associations with games that fit the collection's current scoring model while tempering a raw mean based on little evidence. For one mechanic, designer, or artist:
+
+- `n` is the number of unique eligible associated games;
+- `E` is the sum of those games' current fitness values;
+- `k` is the number of eligible games in that entity class's comparator cohort;
+- `C` is the sum of the comparator cohort's current fitness values; and
+- `m` is that class's serialized `minimumSupportedGames` setting.
+
+The entity's raw mean is `E / n`. The class comparator is `C / k`, counting each class-eligible game once even if it has several entity links. Shelf Judge calculates:
+
+```text
+adjusted fit = ((n * (E / n)) + (m * (C / k))) / (n + m)
+             = (E * k + m * C) / (k * (n + m))
+```
+
+The serialized `minimumSupportedGames` is configured policy. It is both the support threshold and the weight given to the class comparator in this adjustment. It is not a learned truth, probability, confidence measure, or claim of statistical significance.
+
+Associated-game count has only four ranking-related jobs: it controls how strongly the raw mean is pulled toward the comparator, determines limited versus supported evidence, breaks an exact adjusted-fit tie, and leads the diagnostic count ordering. Count and collection representation never add an appreciation bonus, establish preference, or create a representation overview.
+
+### Entity Orders And Evidence
+
+The complete entity drilldown accepts these daemon-supplied orders:
+
+- `bestFit`, shown as **Adjusted fit**, orders by exact adjusted fit descending, then count only for an exact adjusted-fit tie, NFC-normalized name, and entity ID;
+- `support`, shown as **Associated game count (diagnostic)**, orders by count descending, then exact raw mean, normalized name, and entity ID; and
+- `name` orders by normalized name and entity ID.
+
+The overview takes only supported entities from `bestFit`, up to the configured class limit. A limited entity can lead the full adjusted-fit drilldown but remains drilldown-only until its evidence reaches the configured support threshold. The drilldown retains the raw mean, comparator, difference, spread, range, supporting games, and veto state so the adjusted result can be inspected.
+
+Shelf Judge compares exact values before converting them for display. Two adjusted fits can both display as the same one-decimal number without being tied or changing order. Mechanics, designers, and artists use their own comparator evidence and configured policy; adjusted values are never compared across classes.
+
+Omitting `order` is the canonical `bestFit` URL. The explorer accepts `order=rating`, `order=bestFit`, and an empty `order` only as compatibility inputs, then redirects to the same URL without `order`. Generated links never create the legacy `order=rating` form. Shelf Judge does not apply an external prevalence correction for common mechanics or prolific creators because no stable external corpus and opportunity model are part of this feature.
+
+**Persistence and recomputation:**
+The persisted profile contract is version 9, the profile algorithm is version 11, and the durable collection schema remains version 5. `profile.json` is a disposable local cache, not a compatibility boundary. A cache is reused only when its collection ID, collection schema version, revision, complete Tournament hash, prediction-settings hash, redundancy-settings hash, and serialized entity policy match the current inputs. Invalid, non-finite, older-contract, older-algorithm, or policy-mismatched artifacts are deleted and recreated on the next profile read. A failed recomputation returns an unavailable result with the profile retry operation instead of serving stale data.
+
+**Version 5 upgrade:**
+Back up the data directory before upgrading. Shelf Judge automatically migrates an older collection when it first loads, then recreates disposable profile data from the migrated collection and current Tournament and scoring settings. After Shelf Judge successfully writes collection schema version 5, downgrading to a release that only understands an older collection schema is unsupported.
 
 **Limitations:**
 
