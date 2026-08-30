@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY } from "@shelf-judge/shared";
 import { usefulProfileFixture } from "../../shared/tests/fixtures/useful-profile.js";
 import { createDaemonClient } from "../src/client.js";
 
@@ -30,6 +31,20 @@ describe("daemon profile client", () => {
       error: { kind: "recomputation" as const, message: "Profile source changed" },
       retryDestination: { operationId: "shelf.profile.get" as const },
     };
+    expect(await clientReturning(response).getProfile()).toEqual(response);
+  });
+
+  test("validates profiles with the daemon's configured entity policy", async () => {
+    const response = structuredClone(usefulProfileFixture);
+    response.identity.classes.mechanic.result = "limited";
+    response.identity.classes.mechanic.entities[0].support = "limited";
+    response.identity.classes.mechanic.overviewEntityIds = [];
+    const policy = {
+      ...DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
+      mechanic: { overviewLimit: 3, minimumSupportedGames: 4 },
+    };
+    response.entityPolicy = policy;
+
     expect(await clientReturning(response).getProfile()).toEqual(response);
   });
 

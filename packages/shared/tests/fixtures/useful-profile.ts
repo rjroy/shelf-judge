@@ -4,6 +4,7 @@ import type {
   PlayIntention,
   CollectionProfileEntityClassResult,
 } from "@shelf-judge/shared";
+import { DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY } from "@shelf-judge/shared";
 
 export const activeIntentionFixture: PlayIntention = {
   intentionId: "intention-1",
@@ -124,6 +125,7 @@ const emptyClass = (
 
 export const usefulProfileFixture: CollectionProfile = {
   status: "available",
+  entityPolicy: DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
   identity: {
     collectionState: "populated",
     classes: {
@@ -216,6 +218,7 @@ export const warningUsefulProfileFixture: CollectionProfile = (() => {
 
 export const nothingToDecideUsefulProfileFixture: CollectionProfile = {
   status: "available",
+  entityPolicy: DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
   identity: {
     collectionState: "populated",
     classes: {
@@ -252,6 +255,7 @@ const emptyCollectionClass = (
 
 export const emptyUsefulProfileFixture: CollectionProfile = {
   status: "available",
+  entityPolicy: DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
   identity: {
     collectionState: "empty",
     classes: {

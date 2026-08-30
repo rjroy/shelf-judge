@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type {
   BggGameData,
   Collection,
+  CollectionProfileEntityPolicy,
   FitnessResult,
   EnabledAxis,
   Game,
@@ -10,6 +11,7 @@ import type {
 import {
   CollectionProfileSnapshotSchema,
   CollectionProfileResultSchema,
+  createCollectionProfileSnapshotSchema,
   createCompleteEntityMetadata,
   createInitialEntityMetadata,
 } from "@shelf-judge/shared";
@@ -410,6 +412,112 @@ function makeUsefulCollection(
 }
 
 describe("computeCollectionProfile", () => {
+  test("applies per-class support thresholds and overview limits", () => {
+    const entityPolicy: CollectionProfileEntityPolicy = {
+      mechanic: { overviewLimit: 1, minimumSupportedGames: 2 },
+      designer: { overviewLimit: 2, minimumSupportedGames: 3 },
+      artist: { overviewLimit: 3, minimumSupportedGames: 4 },
+    };
+    const links = [
+      {
+        mechanic: [
+          { id: 101, name: "Mechanic A" },
+          { id: 103, name: "Mechanic Limited" },
+        ],
+        designer: [
+          { id: 201, name: "Designer A" },
+          { id: 203, name: "Designer Limited" },
+        ],
+        artist: [
+          { id: 301, name: "Artist A" },
+          { id: 302, name: "Artist B" },
+          { id: 303, name: "Artist C" },
+          { id: 304, name: "Artist Limited" },
+        ],
+      },
+      {
+        mechanic: [
+          { id: 101, name: "Mechanic A" },
+          { id: 102, name: "Mechanic B" },
+        ],
+        designer: [
+          { id: 201, name: "Designer A" },
+          { id: 202, name: "Designer B" },
+          { id: 203, name: "Designer Limited" },
+        ],
+        artist: [
+          { id: 301, name: "Artist A" },
+          { id: 302, name: "Artist B" },
+          { id: 303, name: "Artist C" },
+          { id: 304, name: "Artist Limited" },
+        ],
+      },
+      {
+        mechanic: [{ id: 102, name: "Mechanic B" }],
+        designer: [
+          { id: 201, name: "Designer A" },
+          { id: 202, name: "Designer B" },
+        ],
+        artist: [
+          { id: 301, name: "Artist A" },
+          { id: 302, name: "Artist B" },
+          { id: 303, name: "Artist C" },
+          { id: 304, name: "Artist Limited" },
+        ],
+      },
+      {
+        mechanic: [],
+        designer: [{ id: 202, name: "Designer B" }],
+        artist: [
+          { id: 301, name: "Artist A" },
+          { id: 302, name: "Artist B" },
+          { id: 303, name: "Artist C" },
+        ],
+      },
+    ];
+    const games = links.map((entities, index) =>
+      makeGame({
+        id: `policy-${index + 1}`,
+        name: `Policy ${index + 1}`,
+        bggId: index + 1,
+        entityMetadata: createCompleteEntityMetadata(entities, "2026-08-29T00:00:00.000Z"),
+      }),
+    );
+    const collection = makeUsefulCollection(games);
+    const profile = computeCollectionProfile({
+      collection,
+      fitnessResults: new Map(games.map((game, index) => [game.id, makeUsefulFitness(9 - index)])),
+      computedAt: "2026-08-29T01:00:00.000Z",
+      entityPolicy,
+    });
+
+    expect(profile.identity.classes.mechanic.overviewEntityIds).toEqual([101]);
+    expect(profile.identity.classes.designer.overviewEntityIds).toEqual([201, 202]);
+    expect(profile.identity.classes.artist.overviewEntityIds).toEqual([301, 302, 303]);
+    expect(
+      profile.identity.classes.mechanic.entities.find(({ entityId }) => entityId === 103)?.support,
+    ).toBe("limited");
+    expect(
+      profile.identity.classes.designer.entities.find(({ entityId }) => entityId === 203)?.support,
+    ).toBe("limited");
+    expect(
+      profile.identity.classes.artist.entities.find(({ entityId }) => entityId === 304)?.support,
+    ).toBe("limited");
+
+    const snapshotSchema = createCollectionProfileSnapshotSchema(entityPolicy);
+    expect(snapshotSchema.safeParse({ source: collection, profile }).success).toBe(true);
+    for (const entityClass of ["mechanic", "designer", "artist"] as const) {
+      const result = profile.identity.classes[entityClass];
+      const inconsistentProfile = structuredClone(profile);
+      inconsistentProfile.identity.classes[entityClass].overviewEntityIds.pop();
+      expect(
+        snapshotSchema.safeParse({ source: collection, profile: inconsistentProfile }).success,
+        `${entityClass} inconsistent overview`,
+      ).toBe(false);
+      expect(result.result).toBe("supported");
+    }
+  });
+
   test("reproduces class arithmetic, canonical names, exclusions, and deterministic orderings", () => {
     const complete = (
       mechanic: { id: number; name: string }[],

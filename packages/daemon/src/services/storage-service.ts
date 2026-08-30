@@ -15,8 +15,10 @@ import type {
 } from "@shelf-judge/shared";
 import {
   AcquisitionSchema,
+  CollectionProfileEntityPolicySchema,
   CURRENT_COLLECTION_SCHEMA_VERSION,
-  ProfileDataSchema,
+  DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
+  createProfileDataSchema,
   PredictionSettingsSchema,
   RedundancySettingsSchema,
   createFreshCollectionDerivedAxes,
@@ -206,7 +208,25 @@ function defaultConfig(dataDir: string): AppConfig {
   return {
     bggAuthToken: null,
     dataDir,
+    profileEntityPolicy: structuredClone(DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY),
     username: null,
+  };
+}
+
+function parseConfig(value: unknown, defaultDataDir: string): AppConfig {
+  if (typeof value !== "object" || value === null) throw new Error("Config must be an object");
+  const config = value as Record<string, unknown>;
+  return {
+    bggAuthToken:
+      typeof config.bggAuthToken === "string" || config.bggAuthToken === null
+        ? config.bggAuthToken
+        : null,
+    dataDir: typeof config.dataDir === "string" ? config.dataDir : defaultDataDir,
+    profileEntityPolicy: CollectionProfileEntityPolicySchema.parse(
+      config.profileEntityPolicy ?? DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
+    ),
+    username:
+      typeof config.username === "string" || config.username === null ? config.username : null,
   };
 }
 
@@ -279,6 +299,20 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
       logger.error(`collection persistence failed path=${collectionPath}`, error);
       throw error;
     }
+  }
+
+  async function loadAppConfig(): Promise<AppConfig> {
+    const exists = await fileOps.exists(configPath);
+    if (!exists) {
+      const config = defaultConfig(dataDir);
+      const configDir = path.dirname(configPath);
+      await fileOps.mkdir(configDir);
+      await writeAtomically(configPath, JSON.stringify(config, null, 2));
+      return config;
+    }
+
+    const raw = await fileOps.readFile(configPath);
+    return parseConfig(JSON.parse(raw), dataDir);
   }
 
   return {
@@ -378,24 +412,13 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
       await persistCollection(collection);
     },
 
-    async loadConfig(): Promise<AppConfig> {
-      const exists = await fileOps.exists(configPath);
-      if (!exists) {
-        const config = defaultConfig(dataDir);
-        const configDir = path.dirname(configPath);
-        await fileOps.mkdir(configDir);
-        await writeAtomically(configPath, JSON.stringify(config, null, 2));
-        return config;
-      }
-
-      const raw = await fileOps.readFile(configPath);
-      return JSON.parse(raw) as AppConfig;
-    },
+    loadConfig: loadAppConfig,
 
     async saveConfig(config: AppConfig): Promise<void> {
+      const validated = parseConfig(config, dataDir);
       const configDir = path.dirname(configPath);
       await fileOps.mkdir(configDir);
-      await writeAtomically(configPath, JSON.stringify(config, null, 2));
+      await writeAtomically(configPath, JSON.stringify(validated, null, 2));
     },
 
     loadTournament(): Promise<TournamentData> {
@@ -436,7 +459,10 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
         const raw = await fileOps.readFile(profilePath);
         logger.log(`profile cache read completed path=${profilePath} bytes=${raw.length}`);
         try {
-          const profile = ProfileDataSchema.parse(JSON.parse(raw));
+          const config = await loadAppConfig();
+          const profile = createProfileDataSchema(config.profileEntityPolicy).parse(
+            JSON.parse(raw),
+          );
           logger.log(
             `profile cache validation completed path=${profilePath} contractVersion=${profile.contractVersion} algorithmVersion=${profile.algorithmVersion}`,
           );
@@ -461,7 +487,8 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
 
     saveProfile(data: ProfileData): Promise<void> {
       return withProfileLock(async () => {
-        const validated = ProfileDataSchema.parse(data);
+        const config = await loadAppConfig();
+        const validated = createProfileDataSchema(config.profileEntityPolicy).parse(data);
         await fileOps.mkdir(dataDir);
         logger.log(
           `profile cache persistence attempt path=${profilePath} contractVersion=${validated.contractVersion} algorithmVersion=${validated.algorithmVersion}`,

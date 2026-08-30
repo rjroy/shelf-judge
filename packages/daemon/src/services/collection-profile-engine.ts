@@ -8,17 +8,23 @@ import type {
   CollectionProfileEntityClass,
   CollectionProfileEntityClassResult,
   CollectionProfileEntityEvidence,
+  CollectionProfileEntityPolicy,
   CollectionProfileGameFitnessEvidence,
   FitnessResult,
   Game,
 } from "@shelf-judge/shared";
-import { ExactRational, isEnabledScoringAxis } from "@shelf-judge/shared";
+import {
+  DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
+  ExactRational,
+  isEnabledScoringAxis,
+} from "@shelf-judge/shared";
 import { computeCollectionProfileAxisDistributions } from "./collection-profile-axis-distributions.js";
 
 export interface CollectionProfileInput {
   collection: Collection;
   fitnessResults: ReadonlyMap<string, FitnessResult>;
   computedAt: string;
+  entityPolicy?: CollectionProfileEntityPolicy;
 }
 
 const PROFILE_ENTITY_CLASSES: CollectionProfileEntityClass[] = ["mechanic", "designer", "artist"];
@@ -137,7 +143,9 @@ function computeEntityClass(
   ownedGames: Game[],
   fitnessResults: ReadonlyMap<string, FitnessResult>,
   entityClass: CollectionProfileEntityClass,
+  policy: CollectionProfileEntityPolicy,
 ): CollectionProfileEntityClassResult {
+  const classPolicy = policy[entityClass];
   const readinessCounts = { complete: 0, "refresh-needed": 0, unrefreshable: 0 };
   const exclusions: CollectionProfileClassExclusion[] = [];
   const comparatorGames: CollectionProfileGameFitnessEvidence[] = [];
@@ -219,7 +227,7 @@ function computeEntityClass(
     return {
       entityId,
       name: canonical.name,
-      support: games.length >= 3 ? "supported" : "limited",
+      support: games.length >= classPolicy.minimumSupportedGames ? "supported" : "limited",
       associatedGameCount: games.length,
       meanCurrentFitness: entityMean,
       populationStandardDeviation,
@@ -286,7 +294,7 @@ function computeEntityClass(
         (entityId) =>
           entities.find((entity) => entity.entityId === entityId)?.support === "supported",
       )
-      .slice(0, 3),
+      .slice(0, classPolicy.overviewLimit),
     orderings,
   };
 }
@@ -369,6 +377,7 @@ function attentionItem(
 
 /** Compute the useful collection profile without reading or mutating external state. */
 export function computeCollectionProfile(input: CollectionProfileInput): CollectionProfile {
+  const entityPolicy = input.entityPolicy ?? DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY;
   const ownedGames = input.collection.games.filter(({ ownership }) => ownership === "owned");
   const gamesById = new Map(ownedGames.map((game) => [game.id, game]));
   const ownedFitnessResults = new Map(
@@ -389,12 +398,13 @@ export function computeCollectionProfile(input: CollectionProfileInput): Collect
   const collectionState = ownedGames.length === 0 ? "empty" : "populated";
   return {
     status: "available",
+    entityPolicy: structuredClone(entityPolicy),
     identity: {
       collectionState,
       classes: Object.fromEntries(
         PROFILE_ENTITY_CLASSES.map((entityClass) => [
           entityClass,
-          computeEntityClass(ownedGames, ownedFitnessResults, entityClass),
+          computeEntityClass(ownedGames, ownedFitnessResults, entityClass, entityPolicy),
         ]),
       ) as Record<CollectionProfileEntityClass, CollectionProfileEntityClassResult>,
       axisDistributions: computeCollectionProfileAxisDistributions(
