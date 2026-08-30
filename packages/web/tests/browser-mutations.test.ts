@@ -90,6 +90,47 @@ async function rejection(action: () => Promise<unknown>): Promise<unknown> {
 }
 
 describe("browser mutation boundaries", () => {
+  test("creates a replay intention when randomUUID is unavailable", async () => {
+    const originalCryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+    Object.defineProperty(globalThis, "crypto", {
+      configurable: true,
+      value: {
+        getRandomValues<T extends ArrayBufferView>(array: T): T {
+          new Uint8Array(array.buffer, array.byteOffset, array.byteLength).fill(1);
+          return array;
+        },
+      },
+    });
+
+    try {
+      let commandId: string | undefined;
+      const result = await createIntention("game-1", "replay", (_input, init) => {
+        const request = requestBody(init);
+        commandId = String(request.commandId);
+        return Promise.resolve(
+          jsonResponse({
+            ok: true,
+            commandId,
+            intention: intention({
+              kind: "replay",
+              baseline: { playCount: 2, evidenceSource: "manual", observedAt },
+            }),
+            linkedOwnershipTransition: null,
+          }),
+        );
+      });
+
+      expect(result.ok).toBe(true);
+      expect(commandId).toBe("01010101-0101-4101-8101-010101010101");
+    } finally {
+      if (originalCryptoDescriptor === undefined) {
+        Reflect.deleteProperty(globalThis, "crypto");
+      } else {
+        Object.defineProperty(globalThis, "crypto", originalCryptoDescriptor);
+      }
+    }
+  });
+
   test("replaces additional BGG IDs through the related-entry endpoint", async () => {
     const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
     const updated = { ...game(), additionalBggIds: [20, 30] };
