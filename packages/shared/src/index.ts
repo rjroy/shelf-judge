@@ -94,6 +94,8 @@ export type {
   CollectionProfileAxisDistribution,
   ProfileData,
   CollectionProfileEntityClass,
+  CollectionProfileEntityClassPolicy,
+  CollectionProfileEntityPolicy,
   BggEntityLink,
   EntityMetadataRefreshFailure,
   EntityClassMetadata,
@@ -174,6 +176,11 @@ export type {
 } from "./types";
 
 export {
+  DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
+  CollectionProfileEntityPolicySchema,
+} from "./collection-profile-entity-policy";
+
+export {
   CreateAxisSchema,
   UpdateAxisSchema,
   LegacyAxisRepairSchema,
@@ -207,6 +214,7 @@ export {
   CollectionSchema,
   CollectionSchemaV3,
   CollectionSchemaV4,
+  createProfileDataSchema,
   ProfileDataSchema,
   ProfileSourceIdentitySchema,
   PredictionSettingsSchema,
@@ -226,13 +234,16 @@ export {
   IntentionMutationErrorSchema,
   IntentionCommandReceiptSchema,
   CollectionProfileCollectionSourceSchema,
+  createCollectionProfileEntityClassResultSchema,
   CollectionProfileEntityClassResultSchema,
   CollectionProfileAttentionItemSchema,
   ResolvedPlayIntentionHistoryItemSchema,
   ResolvedPlayIntentionHistorySchema,
   GameIntentionDetailSchema,
+  createCollectionProfileResultSchema,
   GameDetailWithPurchaseUtilizationSchema,
   CollectionProfileResultSchema,
+  createCollectionProfileSnapshotSchema,
   CollectionProfileSnapshotSchema,
   RateGameSchema,
   AddGameSchema,

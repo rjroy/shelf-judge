@@ -93,6 +93,22 @@ describe("profile overview consumer", () => {
     expect(html).toContain('href="/profile/axes"');
   });
 
+  test("renders every overview entity supplied for a class", () => {
+    const mechanic = structuredClone(mechanicClassFixture);
+    const additionalEntities = ["Deck Building", "Drafting", "Trading"].map((name, index) => ({
+      ...structuredClone(mechanic.entities[0]),
+      entityId: 201 + index,
+      name,
+    }));
+    mechanic.entities.push(...additionalEntities);
+    mechanic.overviewEntityIds = [101, ...additionalEntities.map(({ entityId }) => entityId)];
+
+    const html = renderClass(mechanic);
+
+    for (const name of ["Worker Placement", "Deck Building", "Drafting", "Trading"])
+      expect(html).toContain(`>${name}<`);
+  });
+
   test("distinguishes daemon and transport failures from an empty collection with retry", async () => {
     const transport = await loadProfileOverview(() => Promise.reject(new Error("Socket offline")));
     const transportHtml = renderToStaticMarkup(<ProfileOverviewContent state={transport} />);

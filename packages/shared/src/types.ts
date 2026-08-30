@@ -638,6 +638,7 @@ export interface ImportComplete {
 export interface AppConfig {
   bggAuthToken: string | null;
   dataDir: string;
+  profileEntityPolicy: CollectionProfileEntityPolicy;
   username: string | null;
 }
 
@@ -655,6 +656,15 @@ export interface CollectionProfileAxisDistribution {
 }
 
 export type CollectionProfileEntityClass = "mechanic" | "designer" | "artist";
+
+export interface CollectionProfileEntityClassPolicy {
+  overviewLimit: number;
+  minimumSupportedGames: number;
+}
+
+export type CollectionProfileEntityPolicy = Readonly<
+  Record<CollectionProfileEntityClass, Readonly<CollectionProfileEntityClassPolicy>>
+>;
 
 export interface BggEntityLink {
   id: number;
@@ -963,6 +973,7 @@ export interface GameDetailWithPurchaseUtilization extends GameWithPurchaseUtili
 
 export interface CollectionProfile {
   status: "available";
+  entityPolicy: CollectionProfileEntityPolicy;
   identity: {
     collectionState: "populated" | "empty";
     classes: Record<CollectionProfileEntityClass, CollectionProfileEntityClassResult>;
@@ -993,8 +1004,8 @@ export interface ProfileSourceIdentity {
 }
 
 export interface ProfileData {
-  contractVersion: 7;
-  algorithmVersion: 9;
+  contractVersion: 8;
+  algorithmVersion: 10;
   sourceIdentity: ProfileSourceIdentity;
   profile: CollectionProfile;
   computedAt: string;

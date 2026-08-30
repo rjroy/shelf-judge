@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import type { Collection, ProfileData, WishlistEntry, Game, JsonValue } from "@shelf-judge/shared";
+import type {
+  AppConfig,
+  Collection,
+  ProfileData,
+  WishlistEntry,
+  Game,
+  JsonValue,
+} from "@shelf-judge/shared";
 import {
   createFreshCollectionDerivedAxes,
   createInitialEntityMetadata,
@@ -542,6 +549,11 @@ describe("StorageService.loadConfig", () => {
 
     expect(config.bggAuthToken).toBeNull();
     expect(config.dataDir).toBe(DATA_DIR);
+    expect(config.profileEntityPolicy).toEqual({
+      mechanic: { overviewLimit: 3, minimumSupportedGames: 3 },
+      designer: { overviewLimit: 3, minimumSupportedGames: 3 },
+      artist: { overviewLimit: 3, minimumSupportedGames: 3 },
+    });
   });
 
   test("loads config from existing file", async () => {
@@ -558,6 +570,26 @@ describe("StorageService.loadConfig", () => {
 
     expect(config.bggAuthToken).toBe("test-token");
     expect(config.dataDir).toBe("/custom/data");
+    expect(config.profileEntityPolicy.mechanic).toEqual({
+      overviewLimit: 3,
+      minimumSupportedGames: 3,
+    });
+  });
+
+  test("rejects invalid profile entity policy values", async () => {
+    const { service } = makeService({
+      [CONFIG_PATH]: JSON.stringify({
+        dataDir: DATA_DIR,
+        profileEntityPolicy: {
+          mechanic: { overviewLimit: -1, minimumSupportedGames: 3 },
+          designer: { overviewLimit: 3, minimumSupportedGames: 3 },
+          artist: { overviewLimit: 3, minimumSupportedGames: 0 },
+        },
+      }),
+    });
+
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+    await expect(service.loadConfig()).rejects.toThrow();
   });
 });
 
@@ -569,6 +601,11 @@ describe("StorageService.saveConfig", () => {
       bggAuthToken: "tok",
       username: null,
       dataDir: DATA_DIR,
+      profileEntityPolicy: {
+        mechanic: { overviewLimit: 1, minimumSupportedGames: 2 },
+        designer: { overviewLimit: 2, minimumSupportedGames: 3 },
+        artist: { overviewLimit: 3, minimumSupportedGames: 4 },
+      },
     });
 
     const writeCalls = fileOps.calls.filter(
@@ -578,6 +615,12 @@ describe("StorageService.saveConfig", () => {
     expect(writeCalls[0].method).toBe("writeFileExclusive");
     expect(writeCalls[0].args[0]).toContain(".tmp");
     expect(writeCalls[1].method).toBe("rename");
+    const persisted = JSON.parse(fileOps.files.get(CONFIG_PATH) ?? "null") as AppConfig;
+    expect(persisted.profileEntityPolicy).toEqual({
+      mechanic: { overviewLimit: 1, minimumSupportedGames: 2 },
+      designer: { overviewLimit: 2, minimumSupportedGames: 3 },
+      artist: { overviewLimit: 3, minimumSupportedGames: 4 },
+    });
   });
 });
 
@@ -648,6 +691,25 @@ describe("StorageService.saveProfile", () => {
     expect(loaded).not.toBeNull();
     expect(loaded!.computedAt).toBe("2026-03-15T12:00:00.000Z");
     expect(loaded!.profile.identity.collectionState).toBe("empty");
+  });
+
+  test("discards a cached profile after the configured entity policy changes", async () => {
+    const { service, fileOps } = makeService();
+    await service.saveProfile(makeEmptyProfileData());
+    const config = await service.loadConfig();
+    fileOps.files.set(
+      CONFIG_PATH,
+      JSON.stringify({
+        ...config,
+        profileEntityPolicy: {
+          ...config.profileEntityPolicy,
+          mechanic: { overviewLimit: 5, minimumSupportedGames: 2 },
+        },
+      }),
+    );
+
+    expect(await service.loadProfile()).toBeNull();
+    expect(fileOps.files.has(PROFILE_PATH)).toBe(false);
   });
 
   for (const settingsKind of ["prediction", "redundancy"] as const) {

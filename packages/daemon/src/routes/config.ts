@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { toErrorMessage } from "@shelf-judge/shared";
+import { CollectionProfileEntityPolicySchema, toErrorMessage } from "@shelf-judge/shared";
 import { z } from "zod";
 import type { StorageService } from "../services/storage-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
@@ -10,6 +10,7 @@ export interface ConfigRoutesDeps {
 
 const UpdateConfigSchema = z.object({
   bggAuthToken: z.string().nullable().optional(),
+  profileEntityPolicy: CollectionProfileEntityPolicySchema.optional(),
   username: z.string().optional(),
 });
 
@@ -53,6 +54,9 @@ export function createConfigRoutes(deps: ConfigRoutesDeps): RouteModule {
       }
       if (parsed.data.username !== undefined) {
         config.username = parsed.data.username;
+      }
+      if (parsed.data.profileEntityPolicy !== undefined) {
+        config.profileEntityPolicy = parsed.data.profileEntityPolicy;
       }
 
       await storageService.saveConfig(config);

@@ -192,21 +192,42 @@ export async function importBggCollection(username: string): Promise<Response> {
 
 // Profile API functions
 
-import { CollectionProfileResultSchema } from "@shelf-judge/shared";
-import type { CollectionProfileResult } from "@shelf-judge/shared";
+import {
+  CollectionProfileEntityPolicySchema,
+  DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
+  createCollectionProfileResultSchema,
+} from "@shelf-judge/shared";
+import type { CollectionProfileEntityPolicy, CollectionProfileResult } from "@shelf-judge/shared";
 
-function parseCollectionProfileResponse(response: unknown): CollectionProfileResult {
-  const parsed = CollectionProfileResultSchema.safeParse(response);
+function parseCollectionProfileResponse(
+  response: unknown,
+  entityPolicy: CollectionProfileEntityPolicy,
+): CollectionProfileResult {
+  const parsed = createCollectionProfileResultSchema(entityPolicy).safeParse(response);
   if (!parsed.success) {
     throw new Error(`Invalid profile response: ${parsed.error.message}`);
   }
   return parsed.data;
 }
 
+function profileEntityPolicy(response: unknown): CollectionProfileEntityPolicy {
+  if (
+    typeof response === "object" &&
+    response !== null &&
+    "status" in response &&
+    response.status === "available" &&
+    "entityPolicy" in response
+  ) {
+    return CollectionProfileEntityPolicySchema.parse(response.entityPolicy);
+  }
+  return DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY;
+}
+
 export async function getProfile(
   load: () => Promise<unknown> = () => daemonJson("/api/profile"),
 ): Promise<CollectionProfileResult> {
-  return parseCollectionProfileResponse(await load());
+  const response = await load();
+  return parseCollectionProfileResponse(response, profileEntityPolicy(response));
 }
 
 // Tournament API functions

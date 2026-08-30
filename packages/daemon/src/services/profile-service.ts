@@ -1,6 +1,7 @@
 import type {
   FitnessResult,
   CollectionProfile,
+  CollectionProfileEntityPolicy,
   CollectionProfileResult,
   ProfileData,
 } from "@shelf-judge/shared";
@@ -8,7 +9,7 @@ import {
   CURRENT_PROFILE_ALGORITHM_VERSION,
   CURRENT_PROFILE_CONTRACT_VERSION,
   CollectionProfileResultSchema,
-  CollectionProfileSnapshotSchema,
+  createCollectionProfileSnapshotSchema,
 } from "@shelf-judge/shared";
 import { ZodError } from "zod";
 import type { StorageService } from "./storage-service.js";
@@ -59,10 +60,12 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
       return coordinator.runExclusive(async () => {
         let sources: ProfileSources;
         let cache: ProfileData;
+        let entityPolicy: CollectionProfileEntityPolicy;
         try {
           // Collection load may migrate storage and invalidate dependent artifacts.
           const collection = await storageService.loadCollection();
-          const [tournament, predictionSettings, redundancySettings] = await Promise.all([
+          const [config, tournament, predictionSettings, redundancySettings] = await Promise.all([
+            storageService.loadConfig(),
             storageService.loadTournament(),
             storageService.loadPredictionSettings(),
             storageService.loadRedundancySettings(),
@@ -73,6 +76,7 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
             predictionSettings,
             redundancySettings,
           });
+          entityPolicy = config.profileEntityPolicy;
         } catch (error) {
           return unavailable(failureKind(error), error);
         }
@@ -85,7 +89,7 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
           return unavailable(failureKind(error), error);
         }
         if (stored && sameProfileSourceIdentity(stored.sourceIdentity, identity)) {
-          const cachedSnapshot = CollectionProfileSnapshotSchema.safeParse({
+          const cachedSnapshot = createCollectionProfileSnapshotSchema(entityPolicy).safeParse({
             source: sources.collection,
             profile: stored.profile,
           });
@@ -116,8 +120,9 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
             collection: sources.collection,
             fitnessResults,
             computedAt,
+            entityPolicy,
           });
-          const validated = CollectionProfileSnapshotSchema.parse({
+          const validated = createCollectionProfileSnapshotSchema(entityPolicy).parse({
             source: sources.collection,
             profile,
           }).profile as CollectionProfile;

@@ -1,7 +1,12 @@
 // Unix socket HTTP client for communicating with the shelf-judge daemon.
 
 import type { CollectionProfileResult } from "@shelf-judge/shared";
-import { CollectionProfileResultSchema, resolveSocketPath } from "@shelf-judge/shared";
+import {
+  CollectionProfileEntityPolicySchema,
+  DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
+  createCollectionProfileResultSchema,
+  resolveSocketPath,
+} from "@shelf-judge/shared";
 
 export interface DaemonClientOptions {
   socketPath?: string;
@@ -137,7 +142,14 @@ export function createDaemonClient(options: DaemonClientOptions = {}): DaemonCli
   async function getProfile(): Promise<CollectionProfileResult> {
     const res = await request<unknown>("GET", "/api/profile");
     if (!res.ok) throw new Error(`Failed to get profile: ${res.status}`);
-    const parsed = CollectionProfileResultSchema.safeParse(res.data);
+    if (typeof res.data !== "object" || res.data === null || !("status" in res.data)) {
+      throw new Error("Invalid profile response: missing status");
+    }
+    const entityPolicy =
+      res.data.status === "available" && "entityPolicy" in res.data
+        ? CollectionProfileEntityPolicySchema.parse(res.data.entityPolicy)
+        : DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY;
+    const parsed = createCollectionProfileResultSchema(entityPolicy).safeParse(res.data);
     if (!parsed.success) throw new Error(`Invalid profile response: ${parsed.error.message}`);
     return parsed.data;
   }

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY } from "@shelf-judge/shared";
 import { getProfile } from "@/lib/api";
 import {
   canonicalUsefulProfileFixtures,
@@ -30,6 +31,20 @@ describe("web profile API boundary", () => {
       error: { kind: "recomputation" as const, message: "Profile source changed" },
       retryDestination: { operationId: "shelf.profile.get" as const },
     };
+
+    expect(await getProfile(() => Promise.resolve(response))).toEqual(response);
+  });
+
+  test("validates profiles with the daemon's configured entity policy", async () => {
+    const response = structuredClone(usefulProfileFixture);
+    response.identity.classes.mechanic.result = "limited";
+    response.identity.classes.mechanic.entities[0].support = "limited";
+    response.identity.classes.mechanic.overviewEntityIds = [];
+    const policy = {
+      ...DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
+      mechanic: { overviewLimit: 3, minimumSupportedGames: 4 },
+    };
+    response.entityPolicy = policy;
 
     expect(await getProfile(() => Promise.resolve(response))).toEqual(response);
   });

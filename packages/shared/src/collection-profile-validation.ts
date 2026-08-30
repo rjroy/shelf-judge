@@ -1,6 +1,15 @@
 import { z } from "zod";
-import type { IntentionCommand, IntentionMutationResult, JsonValue } from "./types";
+import type {
+  CollectionProfileEntityPolicy,
+  IntentionCommand,
+  IntentionMutationResult,
+  JsonValue,
+} from "./types";
 import { ExactRational } from "./exact-rational";
+import {
+  CollectionProfileEntityPolicySchema,
+  DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
+} from "./collection-profile-entity-policy";
 
 const TimestampSchema = z.string().datetime({ offset: true });
 const IdSchema = z.string().min(1);
@@ -720,7 +729,6 @@ const CollectionProfileEntityEvidenceSchema = z
     const deviation = Math.sqrt(
       values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length,
     );
-    const expectedSupport = values.length >= 3 ? "supported" : "limited";
     const issue = (path: (string | number)[], message: string) =>
       context.addIssue({ code: z.ZodIssueCode.custom, path, message });
     if (new Set(ids).size !== ids.length)
@@ -736,8 +744,6 @@ const CollectionProfileEntityEvidenceSchema = z
       !valuesMatch(entity.range.max, Math.max(...values))
     )
       issue(["range"], "Entity range must match game evidence");
-    if (entity.support !== expectedSupport)
-      issue(["support"], `Entity support must be ${expectedSupport}`);
     if (
       !valuesMatch(
         entity.differenceFromComparator,
@@ -776,187 +782,201 @@ function expectedEntityOrders(
   };
 }
 
-export const CollectionProfileEntityClassResultSchema = z
-  .object({
-    entityClass: CollectionProfileEntityClassSchema,
-    result: z.enum([
-      "supported",
-      "limited",
-      "no-eligible-ratings",
-      "evaluated-empty",
-      "not-evaluated",
-    ]),
-    metadataReadiness: CollectionProfileMetadataReadinessSchema,
-    associatedGameCount: SafeCountSchema,
-    comparator: z
-      .object({
-        gameCount: SafeCountSchema,
-        meanCurrentFitness: FiniteNumberSchema.nullable(),
-        games: z.array(CollectionProfileGameFitnessEvidenceSchema),
-      })
-      .strict(),
-    exclusions: z.array(CollectionProfileClassExclusionSchema),
-    refreshWarnings: z.array(
-      z
+export function createCollectionProfileEntityClassResultSchema(
+  policy: CollectionProfileEntityPolicy,
+) {
+  return z
+    .object({
+      entityClass: CollectionProfileEntityClassSchema,
+      result: z.enum([
+        "supported",
+        "limited",
+        "no-eligible-ratings",
+        "evaluated-empty",
+        "not-evaluated",
+      ]),
+      metadataReadiness: CollectionProfileMetadataReadinessSchema,
+      associatedGameCount: SafeCountSchema,
+      comparator: z
         .object({
-          gameId: IdSchema,
-          gameName: z.string().min(1),
-          attemptedAt: TimestampSchema,
-          message: z.string().min(1),
+          gameCount: SafeCountSchema,
+          meanCurrentFitness: FiniteNumberSchema.nullable(),
+          games: z.array(CollectionProfileGameFitnessEvidenceSchema),
         })
         .strict(),
-    ),
-    entities: z.array(CollectionProfileEntityEvidenceSchema),
-    overviewEntityIds: z.array(PositiveSafeIntegerSchema).max(3),
-    orderings: z
-      .object({
-        rating: z.array(PositiveSafeIntegerSchema),
-        support: z.array(PositiveSafeIntegerSchema),
-        name: z.array(PositiveSafeIntegerSchema),
-      })
-      .strict(),
-  })
-  .strict()
-  .superRefine((result, context) => {
-    const issue = (path: (string | number)[], message: string) =>
-      context.addIssue({ code: z.ZodIssueCode.custom, path, message });
-    const entityIds = result.entities.map(({ entityId }) => entityId);
-    const comparatorIds = result.comparator.games.map(({ gameId }) => gameId);
-    const exclusionIds = result.exclusions.map(({ gameId }) => gameId);
-    if (new Set(entityIds).size !== entityIds.length)
-      issue(["entities"], "Entity identities must be unique");
-    if (new Set(comparatorIds).size !== comparatorIds.length)
-      issue(["comparator", "games"], "Comparator games must be unique");
-    const sortedComparatorIds = [...comparatorIds].sort(compareCodePoints);
-    if (comparatorIds.join(",") !== sortedComparatorIds.join(","))
-      issue(["comparator", "games"], "Comparator games must be ordered by stable game ID");
-    if (new Set(exclusionIds).size !== exclusionIds.length)
-      issue(["exclusions"], "Each excluded game must have exactly one reason");
-    if (exclusionIds.some((gameId) => new Set(comparatorIds).has(gameId)))
-      issue(["exclusions"], "A game cannot be both included and excluded");
-    if (
-      result.comparator.games.length + result.exclusions.length !==
-      result.metadataReadiness.ownedGameCount
-    )
-      issue(
-        ["metadataReadiness", "ownedGameCount"],
-        "Every owned game must occur once in the comparator or exclusions",
-      );
-    if (
-      result.exclusions.filter(({ reason }) => reason === "refresh-needed-metadata").length !==
-      result.metadataReadiness.refreshNeededGameCount
-    )
-      issue(
-        ["metadataReadiness", "refreshNeededGameCount"],
-        "Refresh-needed count must match exclusions",
-      );
-    if (
-      result.exclusions.filter(({ reason }) => reason === "unrefreshable-metadata").length !==
-      result.metadataReadiness.unrefreshableGameCount
-    )
-      issue(
-        ["metadataReadiness", "unrefreshableGameCount"],
-        "Unrefreshable count must match exclusions",
-      );
-    for (const [index, exclusion] of result.exclusions.entries()) {
-      const expectedOperation =
-        exclusion.reason === "refresh-needed-metadata"
-          ? "shelf.game.bgg.refresh"
-          : exclusion.reason === "missing-or-invalid-fitness"
-            ? "shelf.game.rating.set"
-            : null;
-      if (
-        exclusion.correctionDestination?.operationId !== expectedOperation &&
-        !(expectedOperation === null && exclusion.correctionDestination === null)
-      )
-        issue(
-          ["exclusions", index, "correctionDestination"],
-          "Exclusion correction destination must match its reason",
-        );
-    }
-    if (result.comparator.gameCount !== result.comparator.games.length)
-      issue(["comparator", "gameCount"], "Comparator count must match evidence");
-    const comparatorMean =
-      result.comparator.games.length === 0
-        ? null
-        : exactMean(result.comparator.games.map(({ currentFitness }) => currentFitness)).toNumber();
-    if (
-      (comparatorMean === null) !== (result.comparator.meanCurrentFitness === null) ||
-      (comparatorMean !== null &&
-        result.comparator.meanCurrentFitness !== null &&
-        !valuesMatch(comparatorMean, result.comparator.meanCurrentFitness))
-    )
-      issue(["comparator", "meanCurrentFitness"], "Comparator mean must match evidence");
-    for (const [index, entity] of result.entities.entries()) {
-      if (
-        result.comparator.meanCurrentFitness === null ||
-        !valuesMatch(entity.comparatorMeanCurrentFitness, result.comparator.meanCurrentFitness)
-      )
-        issue(
-          ["entities", index, "comparatorMeanCurrentFitness"],
-          "Entity comparator must match its class cohort",
-        );
-      if (entity.games.some(({ gameId }) => !new Set(comparatorIds).has(gameId)))
-        issue(
-          ["entities", index, "games"],
-          "Entity games must belong to the class comparator cohort",
-        );
-      const comparatorById = new Map(result.comparator.games.map((game) => [game.gameId, game]));
-      if (
-        entity.games.some((game) => {
-          const comparator = comparatorById.get(game.gameId);
-          return (
-            comparator === undefined ||
-            comparator.gameName !== game.gameName ||
-            comparator.currentFitness !== game.currentFitness ||
-            comparator.vetoed !== game.vetoed
-          );
+      exclusions: z.array(CollectionProfileClassExclusionSchema),
+      refreshWarnings: z.array(
+        z
+          .object({
+            gameId: IdSchema,
+            gameName: z.string().min(1),
+            attemptedAt: TimestampSchema,
+            message: z.string().min(1),
+          })
+          .strict(),
+      ),
+      entities: z.array(CollectionProfileEntityEvidenceSchema),
+      overviewEntityIds: z.array(PositiveSafeIntegerSchema),
+      orderings: z
+        .object({
+          rating: z.array(PositiveSafeIntegerSchema),
+          support: z.array(PositiveSafeIntegerSchema),
+          name: z.array(PositiveSafeIntegerSchema),
         })
+        .strict(),
+    })
+    .strict()
+    .superRefine((result, context) => {
+      const classPolicy = policy[result.entityClass];
+      const issue = (path: (string | number)[], message: string) =>
+        context.addIssue({ code: z.ZodIssueCode.custom, path, message });
+      const entityIds = result.entities.map(({ entityId }) => entityId);
+      const comparatorIds = result.comparator.games.map(({ gameId }) => gameId);
+      const exclusionIds = result.exclusions.map(({ gameId }) => gameId);
+      if (new Set(entityIds).size !== entityIds.length)
+        issue(["entities"], "Entity identities must be unique");
+      if (new Set(comparatorIds).size !== comparatorIds.length)
+        issue(["comparator", "games"], "Comparator games must be unique");
+      const sortedComparatorIds = [...comparatorIds].sort(compareCodePoints);
+      if (comparatorIds.join(",") !== sortedComparatorIds.join(","))
+        issue(["comparator", "games"], "Comparator games must be ordered by stable game ID");
+      if (new Set(exclusionIds).size !== exclusionIds.length)
+        issue(["exclusions"], "Each excluded game must have exactly one reason");
+      if (exclusionIds.some((gameId) => new Set(comparatorIds).has(gameId)))
+        issue(["exclusions"], "A game cannot be both included and excluded");
+      if (
+        result.comparator.games.length + result.exclusions.length !==
+        result.metadataReadiness.ownedGameCount
       )
         issue(
-          ["entities", index, "games"],
-          "Entity game evidence must exactly match the class comparator evidence",
+          ["metadataReadiness", "ownedGameCount"],
+          "Every owned game must occur once in the comparator or exclusions",
         );
-      const entityGameIds = entity.games.map(({ gameId }) => gameId);
-      if (entityGameIds.join(",") !== [...entityGameIds].sort(compareCodePoints).join(","))
-        issue(["entities", index, "games"], "Entity games must be ordered by stable game ID");
-    }
-    const associatedIds = new Set(
-      result.entities.flatMap(({ games }) => games.map(({ gameId }) => gameId)),
-    );
-    for (const exclusion of result.exclusions)
-      if (exclusion.hasEntityAssociation) associatedIds.add(exclusion.gameId);
-    if (result.associatedGameCount !== associatedIds.size)
-      issue(["associatedGameCount"], "Associated game count must match evidence and exclusions");
-    const expectedResult = result.entities.some(({ support }) => support === "supported")
-      ? "supported"
-      : result.entities.length > 0
-        ? "limited"
-        : result.associatedGameCount > 0
-          ? "no-eligible-ratings"
-          : result.metadataReadiness.completeGameCount > 0
-            ? "evaluated-empty"
-            : "not-evaluated";
-    if (result.result !== expectedResult)
-      issue(["result"], `Class result must be ${expectedResult}`);
-    const orders = expectedEntityOrders(result.entities);
-    for (const ordering of ["rating", "support", "name"] as const)
-      if (result.orderings[ordering].join(",") !== orders[ordering].join(","))
-        issue(
-          ["orderings", ordering],
-          `${ordering} ordering must contain every entity in deterministic order`,
-        );
-    const expectedOverview = orders.rating
-      .filter(
-        (id) => result.entities.find((entity) => entity.entityId === id)?.support === "supported",
+      if (
+        result.exclusions.filter(({ reason }) => reason === "refresh-needed-metadata").length !==
+        result.metadataReadiness.refreshNeededGameCount
       )
-      .slice(0, 3);
-    if (result.overviewEntityIds.join(",") !== expectedOverview.join(","))
-      issue(
-        ["overviewEntityIds"],
-        "Overview must contain the first three supported rating-ordered entities",
+        issue(
+          ["metadataReadiness", "refreshNeededGameCount"],
+          "Refresh-needed count must match exclusions",
+        );
+      if (
+        result.exclusions.filter(({ reason }) => reason === "unrefreshable-metadata").length !==
+        result.metadataReadiness.unrefreshableGameCount
+      )
+        issue(
+          ["metadataReadiness", "unrefreshableGameCount"],
+          "Unrefreshable count must match exclusions",
+        );
+      for (const [index, exclusion] of result.exclusions.entries()) {
+        const expectedOperation =
+          exclusion.reason === "refresh-needed-metadata"
+            ? "shelf.game.bgg.refresh"
+            : exclusion.reason === "missing-or-invalid-fitness"
+              ? "shelf.game.rating.set"
+              : null;
+        if (
+          exclusion.correctionDestination?.operationId !== expectedOperation &&
+          !(expectedOperation === null && exclusion.correctionDestination === null)
+        )
+          issue(
+            ["exclusions", index, "correctionDestination"],
+            "Exclusion correction destination must match its reason",
+          );
+      }
+      if (result.comparator.gameCount !== result.comparator.games.length)
+        issue(["comparator", "gameCount"], "Comparator count must match evidence");
+      const comparatorMean =
+        result.comparator.games.length === 0
+          ? null
+          : exactMean(
+              result.comparator.games.map(({ currentFitness }) => currentFitness),
+            ).toNumber();
+      if (
+        (comparatorMean === null) !== (result.comparator.meanCurrentFitness === null) ||
+        (comparatorMean !== null &&
+          result.comparator.meanCurrentFitness !== null &&
+          !valuesMatch(comparatorMean, result.comparator.meanCurrentFitness))
+      )
+        issue(["comparator", "meanCurrentFitness"], "Comparator mean must match evidence");
+      for (const [index, entity] of result.entities.entries()) {
+        const expectedSupport =
+          entity.games.length >= classPolicy.minimumSupportedGames ? "supported" : "limited";
+        if (entity.support !== expectedSupport)
+          issue(["entities", index, "support"], `Entity support must be ${expectedSupport}`);
+        if (
+          result.comparator.meanCurrentFitness === null ||
+          !valuesMatch(entity.comparatorMeanCurrentFitness, result.comparator.meanCurrentFitness)
+        )
+          issue(
+            ["entities", index, "comparatorMeanCurrentFitness"],
+            "Entity comparator must match its class cohort",
+          );
+        if (entity.games.some(({ gameId }) => !new Set(comparatorIds).has(gameId)))
+          issue(
+            ["entities", index, "games"],
+            "Entity games must belong to the class comparator cohort",
+          );
+        const comparatorById = new Map(result.comparator.games.map((game) => [game.gameId, game]));
+        if (
+          entity.games.some((game) => {
+            const comparator = comparatorById.get(game.gameId);
+            return (
+              comparator === undefined ||
+              comparator.gameName !== game.gameName ||
+              comparator.currentFitness !== game.currentFitness ||
+              comparator.vetoed !== game.vetoed
+            );
+          })
+        )
+          issue(
+            ["entities", index, "games"],
+            "Entity game evidence must exactly match the class comparator evidence",
+          );
+        const entityGameIds = entity.games.map(({ gameId }) => gameId);
+        if (entityGameIds.join(",") !== [...entityGameIds].sort(compareCodePoints).join(","))
+          issue(["entities", index, "games"], "Entity games must be ordered by stable game ID");
+      }
+      const associatedIds = new Set(
+        result.entities.flatMap(({ games }) => games.map(({ gameId }) => gameId)),
       );
-  });
+      for (const exclusion of result.exclusions)
+        if (exclusion.hasEntityAssociation) associatedIds.add(exclusion.gameId);
+      if (result.associatedGameCount !== associatedIds.size)
+        issue(["associatedGameCount"], "Associated game count must match evidence and exclusions");
+      const expectedResult = result.entities.some(({ support }) => support === "supported")
+        ? "supported"
+        : result.entities.length > 0
+          ? "limited"
+          : result.associatedGameCount > 0
+            ? "no-eligible-ratings"
+            : result.metadataReadiness.completeGameCount > 0
+              ? "evaluated-empty"
+              : "not-evaluated";
+      if (result.result !== expectedResult)
+        issue(["result"], `Class result must be ${expectedResult}`);
+      const orders = expectedEntityOrders(result.entities);
+      for (const ordering of ["rating", "support", "name"] as const)
+        if (result.orderings[ordering].join(",") !== orders[ordering].join(","))
+          issue(
+            ["orderings", ordering],
+            `${ordering} ordering must contain every entity in deterministic order`,
+          );
+      const expectedOverview = orders.rating
+        .filter(
+          (id) => result.entities.find((entity) => entity.entityId === id)?.support === "supported",
+        )
+        .slice(0, classPolicy.overviewLimit);
+      if (result.overviewEntityIds.join(",") !== expectedOverview.join(","))
+        issue(
+          ["overviewEntityIds"],
+          `Overview must contain the first ${classPolicy.overviewLimit} supported rating-ordered entities`,
+        );
+    });
+}
+
+export const CollectionProfileEntityClassResultSchema =
+  createCollectionProfileEntityClassResultSchema(DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY);
 
 const AttentionPlayEvidenceSchema = z.union([
   z
@@ -1144,132 +1164,143 @@ export const GameIntentionDetailSchema = z
     }
   });
 
-const AvailableCollectionProfileSchema = z
-  .object({
-    status: z.literal("available"),
-    identity: z
-      .object({
-        collectionState: z.enum(["populated", "empty"]),
-        classes: z
-          .object({
-            mechanic: CollectionProfileEntityClassResultSchema,
-            designer: CollectionProfileEntityClassResultSchema,
-            artist: CollectionProfileEntityClassResultSchema,
-          })
-          .strict(),
-        axisDistributions: z.array(
-          z
+function createAvailableCollectionProfileSchema(policy: CollectionProfileEntityPolicy) {
+  const entityClassResultSchema = createCollectionProfileEntityClassResultSchema(policy);
+  return z
+    .object({
+      status: z.literal("available"),
+      entityPolicy: CollectionProfileEntityPolicySchema,
+      identity: z
+        .object({
+          collectionState: z.enum(["populated", "empty"]),
+          classes: z
             .object({
-              axisId: IdSchema,
-              axisName: z.string().min(1),
-              mean: FiniteNumberSchema,
-              median: FiniteNumberSchema,
-              standardDeviation: FiniteNumberSchema.min(0),
-              range: z.object({ min: FiniteNumberSchema, max: FiniteNumberSchema }).strict(),
-              ratedGameCount: SafeCountSchema,
-              histogram: z.array(SafeCountSchema).length(10),
+              mechanic: entityClassResultSchema,
+              designer: entityClassResultSchema,
+              artist: entityClassResultSchema,
             })
             .strict(),
-        ),
-      })
-      .strict(),
-    attention: z
-      .object({
-        state: z.enum(["active", "nothing-to-decide", "empty-collection"]),
-        items: z.array(CollectionProfileAttentionItemSchema),
-      })
-      .strict(),
-    computedAt: TimestampSchema,
-  })
-  .strict()
-  .superRefine((profile, context) => {
-    for (const entityClass of ["mechanic", "designer", "artist"] as const)
-      if (profile.identity.classes[entityClass].entityClass !== entityClass)
+          axisDistributions: z.array(
+            z
+              .object({
+                axisId: IdSchema,
+                axisName: z.string().min(1),
+                mean: FiniteNumberSchema,
+                median: FiniteNumberSchema,
+                standardDeviation: FiniteNumberSchema.min(0),
+                range: z.object({ min: FiniteNumberSchema, max: FiniteNumberSchema }).strict(),
+                ratedGameCount: SafeCountSchema,
+                histogram: z.array(SafeCountSchema).length(10),
+              })
+              .strict(),
+          ),
+        })
+        .strict(),
+      attention: z
+        .object({
+          state: z.enum(["active", "nothing-to-decide", "empty-collection"]),
+          items: z.array(CollectionProfileAttentionItemSchema),
+        })
+        .strict(),
+      computedAt: TimestampSchema,
+    })
+    .strict()
+    .superRefine((profile, context) => {
+      if (JSON.stringify(profile.entityPolicy) !== JSON.stringify(policy))
         context.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ["identity", "classes", entityClass, "entityClass"],
-          message: "Class map key must match entity class",
+          path: ["entityPolicy"],
+          message: "Profile entity policy must match the validating policy",
         });
-    const expectedAttentionState =
-      profile.attention.items.length > 0
-        ? "active"
-        : profile.identity.collectionState === "empty"
-          ? "empty-collection"
-          : "nothing-to-decide";
-    if (profile.attention.state !== expectedAttentionState)
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["attention", "state"],
-        message: `Attention state must be ${expectedAttentionState}`,
-      });
-    const itemIds = profile.attention.items.map(({ intention }) => intention.intentionId);
-    const gameIds = profile.attention.items.map(({ intention }) => intention.gameId);
-    if (new Set(itemIds).size !== itemIds.length || new Set(gameIds).size !== gameIds.length)
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["attention", "items"],
-        message: "Attention items must map one-to-one to active intentions and games",
-      });
-    const sorted = [...profile.attention.items].sort(
-      (left, right) =>
-        compareCodePoints(left.gameName, right.gameName) ||
-        compareCodePoints(left.intention.gameId, right.intention.gameId),
-    );
-    if (
-      sorted.map(({ id }) => id).join(",") !== profile.attention.items.map(({ id }) => id).join(",")
-    )
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["attention", "items"],
-        message: "Attention items must use deterministic name and game-ID order",
-      });
-    const ownedCounts = Object.values(profile.identity.classes).map(
-      ({ metadataReadiness }) => metadataReadiness.ownedGameCount,
-    );
-    const expectedCollectionState = ownedCounts.every((count) => count === 0)
-      ? "empty"
-      : "populated";
-    if (
-      ownedCounts.some((count) => count !== ownedCounts[0]) ||
-      profile.identity.collectionState !== expectedCollectionState
-    )
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["identity", "collectionState"],
-        message: "Collection state and class owned-game counts must agree",
-      });
-    const classUniverses = Object.values(profile.identity.classes).map(
-      (result) =>
-        new Map(
-          [...result.comparator.games, ...result.exclusions].map((game) => [
-            game.gameId,
-            game.gameName,
-          ]),
-        ),
-    );
-    const firstUniverse = classUniverses[0] ?? new Map<string, string>();
-    if (
-      classUniverses.some(
-        (universe) =>
-          universe.size !== firstUniverse.size ||
-          [...firstUniverse].some(([gameId, gameName]) => universe.get(gameId) !== gameName),
+      for (const entityClass of ["mechanic", "designer", "artist"] as const)
+        if (profile.identity.classes[entityClass].entityClass !== entityClass)
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["identity", "classes", entityClass, "entityClass"],
+            message: "Class map key must match entity class",
+          });
+      const expectedAttentionState =
+        profile.attention.items.length > 0
+          ? "active"
+          : profile.identity.collectionState === "empty"
+            ? "empty-collection"
+            : "nothing-to-decide";
+      if (profile.attention.state !== expectedAttentionState)
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["attention", "state"],
+          message: `Attention state must be ${expectedAttentionState}`,
+        });
+      const itemIds = profile.attention.items.map(({ intention }) => intention.intentionId);
+      const gameIds = profile.attention.items.map(({ intention }) => intention.gameId);
+      if (new Set(itemIds).size !== itemIds.length || new Set(gameIds).size !== gameIds.length)
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["attention", "items"],
+          message: "Attention items must map one-to-one to active intentions and games",
+        });
+      const sorted = [...profile.attention.items].sort(
+        (left, right) =>
+          compareCodePoints(left.gameName, right.gameName) ||
+          compareCodePoints(left.intention.gameId, right.intention.gameId),
+      );
+      if (
+        sorted.map(({ id }) => id).join(",") !==
+        profile.attention.items.map(({ id }) => id).join(",")
       )
-    )
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["identity", "classes"],
-        message: "Every identity class must describe the same owned-game universe",
-      });
-    if (
-      profile.attention.items.some(({ intention }) => !firstUniverse.has(intention.gameId)) ||
-      (profile.identity.collectionState === "empty" && profile.attention.items.length > 0)
-    )
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["attention", "items"],
-        message: "Attention items must reference currently owned games",
-      });
-  });
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["attention", "items"],
+          message: "Attention items must use deterministic name and game-ID order",
+        });
+      const ownedCounts = Object.values(profile.identity.classes).map(
+        ({ metadataReadiness }) => metadataReadiness.ownedGameCount,
+      );
+      const expectedCollectionState = ownedCounts.every((count) => count === 0)
+        ? "empty"
+        : "populated";
+      if (
+        ownedCounts.some((count) => count !== ownedCounts[0]) ||
+        profile.identity.collectionState !== expectedCollectionState
+      )
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["identity", "collectionState"],
+          message: "Collection state and class owned-game counts must agree",
+        });
+      const classUniverses = Object.values(profile.identity.classes).map(
+        (result) =>
+          new Map(
+            [...result.comparator.games, ...result.exclusions].map((game) => [
+              game.gameId,
+              game.gameName,
+            ]),
+          ),
+      );
+      const firstUniverse = classUniverses[0] ?? new Map<string, string>();
+      if (
+        classUniverses.some(
+          (universe) =>
+            universe.size !== firstUniverse.size ||
+            [...firstUniverse].some(([gameId, gameName]) => universe.get(gameId) !== gameName),
+        )
+      )
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["identity", "classes"],
+          message: "Every identity class must describe the same owned-game universe",
+        });
+      if (
+        profile.attention.items.some(({ intention }) => !firstUniverse.has(intention.gameId)) ||
+        (profile.identity.collectionState === "empty" && profile.attention.items.length > 0)
+      )
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["attention", "items"],
+          message: "Attention items must reference currently owned games",
+        });
+    });
+}
 
 const UnavailableCollectionProfileSchema = z
   .object({
@@ -1284,7 +1315,13 @@ const UnavailableCollectionProfileSchema = z
   })
   .strict();
 
-export const CollectionProfileResultSchema = z.union([
-  AvailableCollectionProfileSchema,
-  UnavailableCollectionProfileSchema,
-]);
+export function createCollectionProfileResultSchema(policy: CollectionProfileEntityPolicy) {
+  return z.union([
+    createAvailableCollectionProfileSchema(policy),
+    UnavailableCollectionProfileSchema,
+  ]);
+}
+
+export const CollectionProfileResultSchema = createCollectionProfileResultSchema(
+  DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
+);
