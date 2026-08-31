@@ -13,6 +13,7 @@ import { createLogger } from "./services/logger.js";
 import { createCollectionMutationService } from "./services/collection-mutation-service.js";
 import { createDisplayedFitnessService } from "./services/displayed-fitness-service.js";
 import { createIntentionService } from "./services/intention-service.js";
+import { createOwnerGameNoteService } from "./services/owner-game-note-service.js";
 import { createGroundedAnalysisProvider } from "./services/grounded-analysis/provider.js";
 
 const logger = createLogger("daemon");
@@ -56,6 +57,7 @@ async function main() {
     onGameDeleted: (gameId) => tournamentService.onGameDeleted(gameId),
   });
   const intentionService = createIntentionService({ collectionMutationService });
+  const ownerGameNoteService = createOwnerGameNoteService({ collectionMutationService });
 
   const predictionService = createPredictionService({
     storageService,
@@ -89,6 +91,7 @@ async function main() {
     predictionService,
     displayedFitnessService,
     intentionService,
+    ownerGameNoteService,
     groundedAnalysisProvider,
     bggClient,
     onShutdown() {

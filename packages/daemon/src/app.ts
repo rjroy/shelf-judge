@@ -30,6 +30,7 @@ import { createPurchaseUtilizationService } from "./services/purchase-utilizatio
 import type { CollectionMutationService } from "./services/collection-mutation-service.js";
 import type { DisplayedFitnessService } from "./services/displayed-fitness-service.js";
 import type { IntentionService } from "./services/intention-service.js";
+import type { OwnerGameNoteService } from "./services/owner-game-note-service.js";
 import type { GroundedAnalysisProvider } from "./services/grounded-analysis/provider.js";
 import {
   createGroundedAnalysisTransportController,
@@ -50,6 +51,7 @@ export interface AppDeps {
   predictionService: PredictionService;
   displayedFitnessService: DisplayedFitnessService;
   intentionService: IntentionService;
+  ownerGameNoteService: OwnerGameNoteService;
   groundedAnalysisProvider: GroundedAnalysisProvider;
   groundedFeatureAnalyzers?: readonly GroundedFeatureAnalyzer<unknown>[];
   bggClient?: BggClient;
@@ -74,6 +76,7 @@ export function createApp(deps: AppDeps): AppResult {
     predictionService,
     displayedFitnessService,
     intentionService,
+    ownerGameNoteService,
     groundedAnalysisProvider,
     bggClient,
     onShutdown,
@@ -100,6 +103,7 @@ export function createApp(deps: AppDeps): AppResult {
     purchaseUtilizationService,
     displayedFitnessService,
     intentionService,
+    ownerGameNoteService,
   });
   const collectionRouteModule = createCollectionRoutes({ purchaseUtilizationService });
   const axisRouteModule = createAxisRoutes({ axisService });

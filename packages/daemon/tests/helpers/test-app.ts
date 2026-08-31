@@ -30,6 +30,10 @@ import {
   createIntentionService,
   type IntentionService,
 } from "../../src/services/intention-service.js";
+import {
+  createOwnerGameNoteService,
+  type OwnerGameNoteService,
+} from "../../src/services/owner-game-note-service.js";
 import type { FileOps } from "../../src/services/file-ops.js";
 import {
   createGroundedAnalysisProvider,
@@ -53,6 +57,7 @@ export interface TestAppContext<TFileOps extends FileOps = MockFileOps> {
   predictionService: PredictionService;
   displayedFitnessService: DisplayedFitnessService;
   intentionService: IntentionService;
+  ownerGameNoteService: OwnerGameNoteService;
   bggClient: BggClient | undefined;
   groundedAnalysisProvider: GroundedAnalysisProvider;
   groundedAnalysisTransportController: GroundedAnalysisTransportController;
@@ -67,6 +72,7 @@ export interface TestAppOptions<TFileOps extends FileOps = MockFileOps> {
   now?: () => string;
   createIntentionId?: () => string;
   intentionService?: IntentionService;
+  ownerGameNoteService?: OwnerGameNoteService;
   groundedAnalysisProvider?: GroundedAnalysisProvider;
 }
 
@@ -145,6 +151,9 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
       now: options?.now,
       createId: options?.createIntentionId,
     });
+  const ownerGameNoteService =
+    options?.ownerGameNoteService ??
+    createOwnerGameNoteService({ collectionMutationService, now: options?.now });
   const profileService = createProfileService({
     storageService,
     displayedFitnessService,
@@ -171,6 +180,7 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     predictionService,
     displayedFitnessService,
     intentionService,
+    ownerGameNoteService,
     groundedAnalysisProvider,
     bggClient,
   });
@@ -188,6 +198,7 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     predictionService,
     displayedFitnessService,
     intentionService,
+    ownerGameNoteService,
     bggClient,
     groundedAnalysisProvider,
     groundedAnalysisTransportController,

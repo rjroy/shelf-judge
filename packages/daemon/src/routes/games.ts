@@ -4,9 +4,15 @@ import {
   AddGameSchema,
   CodedAxisValidationError,
   NotFoundError,
+  OwnerGameNoteClearRequestSchema,
+  OwnerGameNoteMutationResultSchema,
+  OwnerGameNoteReadResultSchema,
+  OwnerGameNoteSetRequestSchema,
   toErrorMessage,
   type IntentionCommand,
   type IntentionMutationResult,
+  type OwnerGameNoteMutationResult,
+  type OwnerGameNoteOperation,
   IntentionMutationResultSchema,
   intentionMutationResultMatchesCommand,
   ManualGameValuesMutationRequestSchema,
@@ -33,6 +39,7 @@ import {
   type DisplayedFitnessService,
 } from "../services/displayed-fitness-service.js";
 import type { IntentionService } from "../services/intention-service.js";
+import type { OwnerGameNoteService } from "../services/owner-game-note-service.js";
 import {
   projectAddGameResult,
   projectGameDetailResponse,
@@ -52,6 +59,7 @@ function gameNotFoundResponse(gameId: string) {
 }
 
 const DISCOVERY_COMMAND_ID = "10000000-0000-4000-8000-000000000001";
+const INVALID_COMMAND_ID = "00000000-0000-0000-0000-000000000000";
 const DISCOVERY_ACTIVE_INTENTION = {
   intentionId: ":intentionId",
   gameId: ":id",
@@ -154,6 +162,72 @@ function intentionOperationErrors(
   return [...common.slice(0, 2), ...commandSpecific, ...common.slice(2)];
 }
 
+function noteMutationOperationErrors(
+  operation: OwnerGameNoteOperation,
+): OperationDefinition["errors"] {
+  const result = (error: Record<string, OperationJsonValue>) => ({
+    ok: false,
+    commandId: DISCOVERY_COMMAND_ID,
+    error,
+  });
+  return [
+    {
+      status: 400,
+      code: "validation",
+      description: "The body does not match the strict note command payload",
+      response: result({
+        code: "validation",
+        issues: [{ field: "commandId", message: "Invalid UUID" }],
+      }),
+    },
+    {
+      status: 404,
+      code: "game-not-found",
+      description: "The game does not exist",
+      response: result({ code: "game-not-found", gameId: ":id" }),
+    },
+    {
+      status: 409,
+      code: "stale-version",
+      description: "The expected note version is stale; the response includes current state",
+      response: result({
+        code: "stale-version",
+        gameId: ":id",
+        expectedVersion: 1,
+        current: { state: "missing", version: 0, updatedAt: null },
+      }),
+    },
+    {
+      status: 409,
+      code: "command-reuse",
+      description: "The command ID was already accepted with another canonical payload",
+      response: result({ code: "command-reuse", commandId: DISCOVERY_COMMAND_ID }),
+    },
+    {
+      status: 422,
+      code: "version-overflow",
+      description: "The note or collection version cannot be advanced safely",
+      response: result({ code: "version-overflow", target: "note" }),
+    },
+    {
+      status: 500,
+      code: "persistence-failure",
+      description: "The durable collection write failed",
+      response: result({
+        code: "persistence-failure",
+        operation: `shelf.game.note.${operation}`,
+        message: "Owner game note mutation failed",
+      }),
+    },
+    {
+      status: 500,
+      code: "internal_error",
+      description: "The note service response was unavailable, malformed, or incoherent",
+      response: INTERNAL_ERROR_RESPONSE,
+    },
+  ];
+}
+
 export interface GameRoutesDeps {
   gameService: GameService;
   bggClient?: BggClient;
@@ -163,6 +237,7 @@ export interface GameRoutesDeps {
   purchaseUtilizationService: PurchaseUtilizationService;
   displayedFitnessService?: DisplayedFitnessService;
   intentionService?: IntentionService;
+  ownerGameNoteService?: OwnerGameNoteService;
   logger?: Logger;
 }
 
@@ -268,12 +343,24 @@ function manualValuesMatchRequest(
 }
 
 export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
-  const { gameService, bggClient, wishlistService, purchaseUtilizationService, intentionService } =
-    deps;
+  const {
+    gameService,
+    bggClient,
+    wishlistService,
+    purchaseUtilizationService,
+    intentionService,
+    ownerGameNoteService,
+  } = deps;
 
   function intentions(): IntentionService {
     if (intentionService === undefined) throw new Error("Intention service is not configured");
     return intentionService;
+  }
+  function ownerNotes(): OwnerGameNoteService {
+    if (ownerGameNoteService === undefined) {
+      throw new Error("Owner game note service is not configured");
+    }
+    return ownerGameNoteService;
   }
   const displayedFitnessService =
     deps.displayedFitnessService ??
@@ -453,6 +540,127 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       return c.json(INTERNAL_ERROR_RESPONSE, 500);
     }
   });
+
+  routes.get("/games/:id/note", async (c) => {
+    const gameId = c.req.param("id");
+    try {
+      const result = OwnerGameNoteReadResultSchema.parse(await ownerNotes().get(gameId));
+      if (result.gameId !== gameId) return c.json(INTERNAL_ERROR_RESPONSE, 500);
+      return c.json(result);
+    } catch (error) {
+      if (error instanceof NotFoundError) {
+        return c.json({ code: "game-not-found", gameId }, 404);
+      }
+      return c.json(INTERNAL_ERROR_RESPONSE, 500);
+    }
+  });
+
+  function noteValidationResponse(body: unknown, error: z.ZodError): Response {
+    const commandId =
+      typeof body === "object" && body !== null && "commandId" in body
+        ? z.string().uuid().safeParse(body.commandId)
+        : null;
+    return Response.json(
+      {
+        ok: false,
+        commandId: commandId?.success === true ? commandId.data : INVALID_COMMAND_ID,
+        error: {
+          code: "validation",
+          issues: error.issues.map((issue) => ({
+            field: issue.path.join(".") || "request",
+            message: issue.message,
+          })),
+        },
+      } satisfies OwnerGameNoteMutationResult,
+      { status: 400 },
+    );
+  }
+
+  function noteResultMatchesRequest(
+    result: OwnerGameNoteMutationResult,
+    operation: OwnerGameNoteOperation,
+    gameId: string,
+    commandId: string,
+    expectedVersion: number,
+  ): boolean {
+    if (result.ok) {
+      const expectedResultVersion = result.accepted.alreadyClear
+        ? expectedVersion
+        : expectedVersion + 1;
+      return (
+        Number.isSafeInteger(expectedResultVersion) &&
+        result.accepted.operation === operation &&
+        result.accepted.gameId === gameId &&
+        result.accepted.commandId === commandId &&
+        result.accepted.version === expectedResultVersion
+      );
+    }
+    if (result.commandId !== commandId) return false;
+    if (result.error.code === "game-not-found") return result.error.gameId === gameId;
+    if (result.error.code === "stale-version") {
+      return result.error.gameId === gameId && result.error.expectedVersion === expectedVersion;
+    }
+    if (result.error.code === "command-reuse") return result.error.commandId === commandId;
+    if (result.error.code === "persistence-failure") {
+      return result.error.operation === `shelf.game.note.${operation}`;
+    }
+    return true;
+  }
+
+  async function noteMutationResponse(
+    operation: OwnerGameNoteOperation,
+    gameId: string,
+    body: unknown,
+  ): Promise<Response> {
+    const schema =
+      operation === "set" ? OwnerGameNoteSetRequestSchema : OwnerGameNoteClearRequestSchema;
+    const parsed = schema.safeParse(body);
+    if (!parsed.success) return noteValidationResponse(body, parsed.error);
+    try {
+      const result = OwnerGameNoteMutationResultSchema.parse(
+        operation === "set"
+          ? await ownerNotes().set(gameId, parsed.data)
+          : await ownerNotes().clear(gameId, parsed.data),
+      );
+      if (
+        !noteResultMatchesRequest(
+          result,
+          operation,
+          gameId,
+          parsed.data.commandId,
+          parsed.data.expectedVersion,
+        )
+      ) {
+        return Response.json(INTERNAL_ERROR_RESPONSE, { status: 500 });
+      }
+      if (result.ok) return Response.json(result);
+      const status =
+        result.error.code === "game-not-found"
+          ? 404
+          : result.error.code === "stale-version" || result.error.code === "command-reuse"
+            ? 409
+            : result.error.code === "version-overflow"
+              ? 422
+              : result.error.code === "persistence-failure"
+                ? 500
+                : 400;
+      return Response.json(result, { status });
+    } catch {
+      return Response.json(INTERNAL_ERROR_RESPONSE, { status: 500 });
+    }
+  }
+
+  for (const operation of ["set", "clear"] as const) {
+    routes.on(operation === "set" ? "PUT" : "DELETE", "/games/:id/note", async (c) => {
+      let body: unknown;
+      try {
+        body = await c.req.json();
+      } catch {
+        body = null;
+      }
+      return noteMutationResponse(operation, c.req.param("id"), body);
+    });
+  }
 
   routes.put("/games/:id/acquisition", async (c) => {
     const id = c.req.param("id");
@@ -950,6 +1158,75 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
   });
 
   const operations: OperationDefinition[] = [
+    {
+      operationId: "shelf.game.note.get",
+      name: "get",
+      description: "Read the complete current owner-note state for one game without changing it",
+      invocation: { method: "GET", path: "/api/games/:id/note" },
+      response: { body: { oneOf: ["owner-game-note-read"] } },
+      hierarchy: { root: "shelf", feature: "game" },
+      parameters: [{ name: "id", in: "path", description: "Game ID", required: true }],
+      errors: [
+        {
+          status: 404,
+          code: "game-not-found",
+          description: "The game does not exist",
+          response: { code: "game-not-found", gameId: ":id" },
+        },
+        {
+          status: 500,
+          code: "internal_error",
+          description: "The current note could not be read or validated",
+          response: INTERNAL_ERROR_RESPONSE,
+        },
+      ],
+      idempotent: true,
+    },
+    ...(["set", "clear"] as const).map(
+      (operation): OperationDefinition => ({
+        operationId: `shelf.game.note.${operation}`,
+        name: operation,
+        description:
+          operation === "set"
+            ? "Set validated plain-text owner-note state with version and command replay protection"
+            : "Clear owner-note state with version and command replay protection",
+        invocation: {
+          method: operation === "set" ? "PUT" : "DELETE",
+          path: "/api/games/:id/note",
+        },
+        requestSchema:
+          operation === "set" ? OwnerGameNoteSetRequestSchema : OwnerGameNoteClearRequestSchema,
+        request: {
+          body: {
+            type: "object",
+            additionalProperties: false,
+            required:
+              operation === "set"
+                ? ["commandId", "expectedVersion", "text"]
+                : ["commandId", "expectedVersion"],
+            properties: {
+              commandId: { type: "string", format: "uuid" },
+              expectedVersion: { type: "integer", minimum: 0 },
+              ...(operation === "set"
+                ? {
+                    text: {
+                      type: "string",
+                      minLength: 1,
+                      maxCodePoints: 10_000,
+                      description: "Plain text normalized to LF by the daemon",
+                    },
+                  }
+                : {}),
+            },
+          },
+        },
+        response: { body: { oneOf: ["accepted-owner-game-note-metadata", "note-command-error"] } },
+        hierarchy: { root: "shelf", feature: "game" },
+        parameters: [{ name: "id", in: "path", description: "Game ID", required: true }],
+        errors: noteMutationOperationErrors(operation),
+        idempotent: true,
+      }),
+    ),
     {
       operationId: "shelf.game.intention.set",
       name: "set",
