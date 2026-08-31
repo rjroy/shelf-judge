@@ -15,6 +15,7 @@ import { ZodError } from "zod";
 import type { StorageService } from "./storage-service.js";
 import type { DisplayedFitnessService } from "./displayed-fitness-service.js";
 import { computeCollectionProfile } from "./collection-profile-engine.js";
+import { projectProfileCollectionSource } from "./game-projection.js";
 import {
   profileSourceCoordinatorFor,
   profileSourceIdentity,
@@ -71,7 +72,7 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
             storageService.loadRedundancySettings(),
           ]);
           sources = structuredClone({
-            collection,
+            collection: projectProfileCollectionSource(collection),
             tournament,
             predictionSettings,
             redundancySettings,

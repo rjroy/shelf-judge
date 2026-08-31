@@ -54,8 +54,8 @@ function makeGame(
 ): Game {
   const game: Game = {
     id,
-    bggId: bggData ? 1 : null,
-    entityMetadata: createInitialEntityMetadata(bggData ? 1 : null),
+    bggId: bggData ? 12345 : null,
+    entityMetadata: createInitialEntityMetadata(bggData ? 12345 : null),
     latestPlayCountCheck: null,
     name,
     yearPublished: 2020,
@@ -108,8 +108,8 @@ function makeScore(score: number): FitnessResult {
   };
 }
 
-const mech = (name: string) => ({ id: Math.random(), name });
-const cat = (name: string) => ({ id: Math.random(), name });
+const mech = (name: string) => ({ id: name.length, name });
+const cat = (name: string) => ({ id: name.length, name });
 
 // Three games with identical mechanics (high similarity) and different scores.
 // This ensures the redundancy engine finds niche neighbors.

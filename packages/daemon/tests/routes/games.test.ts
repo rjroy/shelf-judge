@@ -88,6 +88,56 @@ describe("Game Routes", () => {
     ctx = createTestApp();
   });
 
+  test("rejects same-game results that do not correspond to the requested mutation", async () => {
+    const game = (await ctx.gameService.addGame({ name: "Wrong command result" })).game;
+    const gameService = {
+      ...ctx.gameService,
+      rateGame: () => Promise.resolve({ game, score: null }),
+      setManualValues: () => Promise.resolve(game),
+      setOwnership: () => Promise.resolve({ game, linkedIntentionTransition: null }),
+      setAdditionalBggIds: () => Promise.resolve(game),
+      setBoxDimensions: () => Promise.resolve(game),
+      setManualShelf: () => Promise.resolve(game),
+    };
+    const purchaseUtilizationService = {
+      ...createPurchaseUtilizationService({ storageService: ctx.storageService }),
+      setAcquisition: () => Promise.resolve(game),
+    };
+    const intentionService = {
+      ...ctx.intentionService,
+      setPlayCount: () =>
+        Promise.resolve({ ok: true as const, game, linkedIntentionTransition: null }),
+    };
+    const routeModule = createGameRoutes({
+      gameService,
+      storageService: ctx.storageService,
+      purchaseUtilizationService,
+      intentionService,
+    });
+    const app = new Hono();
+    app.route("/api", routeModule.routes);
+
+    const requests = [
+      ["PUT", `/api/games/${game.id}/acquisition`, { state: "gift" }],
+      ["PUT", `/api/games/${game.id}/ratings`, { ratings: { axis: 8 } }],
+      ["PUT", `/api/games/${game.id}/manual-values`, { playingTime: 60 }],
+      ["PUT", `/api/games/${game.id}/plays`, { playCount: 3 }],
+      ["PUT", `/api/games/${game.id}/additional-bgg-ids`, { bggIds: [2] }],
+      ["PUT", `/api/games/${game.id}/dimensions`, { width: 10, height: 10, depth: 3 }],
+      ["PUT", `/api/games/${game.id}/shelf-assignment`, { shelfId: "shelf-1" }],
+      ["PATCH", `/api/games/${game.id}/ownership`, { ownership: "previously-owned" }],
+    ] as const;
+
+    for (const [method, path, body] of requests) {
+      const response = await jsonRequest(app, method, path, body);
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({
+        error: "Internal server error",
+        code: "internal_error",
+      });
+    }
+  });
+
   test("PUT /api/games/:id/additional-bgg-ids replaces related entries", async () => {
     const game = (await ctx.gameService.addGame({ name: "Base Game", bggId: 10 })).game;
 

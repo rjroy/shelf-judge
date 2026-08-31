@@ -4,7 +4,7 @@ import type {
   GameWithScore,
   PredictionReadiness,
   PredictionSettings,
-  Collection,
+  CollectionProfileCollectionSource,
   TournamentData,
   PredictionUnavailable,
   TournamentGameStatsDisplay,
@@ -48,7 +48,7 @@ export interface PredictionService {
   getReadiness(): Promise<PredictionReadiness>;
   listGamesWithPredictions(): Promise<GameWithScore[]>;
   listGamesWithPredictionsFromSnapshot?(
-    collection: Collection,
+    collection: CollectionProfileCollectionSource,
     tournamentData: TournamentData,
     settings: PredictionSettings,
   ): Promise<GameWithScore[]>;
@@ -74,7 +74,7 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
   const now = deps.now ?? (() => new Date().toISOString());
 
   async function loadPredictionContext(snapshot?: {
-    collection: Collection;
+    collection: CollectionProfileCollectionSource;
     settings: PredictionSettings;
     tournamentData: TournamentData;
   }) {

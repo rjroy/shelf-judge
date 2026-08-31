@@ -10,9 +10,7 @@ import {
   IntentionMutationResultSchema,
   intentionMutationResultMatchesCommand,
   ManualGameValuesMutationRequestSchema,
-  ManualPlayCorrectionResultSchema,
-  PlayEvidenceMutationResultSchema,
-  OwnershipMutationResultSchema,
+  parseAmountInput,
 } from "@shelf-judge/shared";
 import type { GameWithScore } from "@shelf-judge/shared";
 import { z } from "zod";
@@ -35,6 +33,16 @@ import {
   type DisplayedFitnessService,
 } from "../services/displayed-fitness-service.js";
 import type { IntentionService } from "../services/intention-service.js";
+import {
+  projectAddGameResult,
+  projectGameDetailResponse,
+  projectGameList,
+  projectGameWithScore,
+  projectManualPlayCorrection,
+  projectOwnershipMutation,
+  projectPlayEvidenceMutation,
+  projectPublicGameMutation,
+} from "../services/game-projection.js";
 
 const INTERNAL_ERROR_RESPONSE = { error: "Internal server error", code: "internal_error" } as const;
 
@@ -225,12 +233,37 @@ function filterByOwnership(games: GameWithScore[], ownership: string): GameWithS
 }
 
 function toPublicGameWithScore(entry: GameWithScore): GameWithScore {
-  return {
-    game: entry.game,
-    score: entry.score,
-    bggDataStale: entry.bggDataStale,
-    nichePosition: entry.nichePosition,
-  };
+  return projectGameWithScore(entry);
+}
+
+function acquisitionMatchesRequest(
+  game: GameWithScore["game"],
+  request: z.infer<typeof AcquisitionMutationRequestSchema>,
+): boolean {
+  if (game.acquisition.state !== request.state) return false;
+  return (
+    request.state !== "purchase" ||
+    (game.acquisition.state === "purchase" &&
+      game.acquisition.amount.hundredths === parseAmountInput(request.amount))
+  );
+}
+
+function ratingsMatchRequest(
+  game: GameWithScore["game"],
+  ratings: Record<string, number | null>,
+): boolean {
+  return Object.entries(ratings).every(([axisId, rating]) =>
+    rating === null ? game.ratings[axisId] === undefined : game.ratings[axisId] === rating,
+  );
+}
+
+function manualValuesMatchRequest(
+  game: GameWithScore["game"],
+  request: z.infer<typeof ManualGameValuesMutationRequestSchema>,
+): boolean {
+  return (Object.keys(request) as Array<keyof typeof request>).every(
+    (field) => (game.manualValues[field]?.value ?? null) === request[field],
+  );
 }
 
 export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
@@ -300,13 +333,16 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
 
     try {
       const result = await gameService.addGame(parsed.data);
+      if (parsed.data.bggId != null && result.game.bggId !== parsed.data.bggId) {
+        return c.json(INTERNAL_ERROR_RESPONSE, 500);
+      }
 
       // REQ-WISH-10: auto-remove matching wishlist entry (fire-and-forget on error, not on completion)
       if (parsed.data.bggId && wishlistService) {
         await wishlistService.removeByBggId(parsed.data.bggId).catch(() => {});
       }
 
-      return c.json(result, 201);
+      return c.json(projectAddGameResult(result), 201);
     } catch (err) {
       const message = toErrorMessage(err);
       if (message.includes("already exists")) {
@@ -328,7 +364,7 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       });
       const publicGames = assembled.map(toPublicGameWithScore);
       const response = filterByOwnership(publicGames, ownershipFilter);
-      return c.json(await enrichFinalGames(response, "list"));
+      return c.json(projectGameList(await enrichFinalGames(response, "list")));
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 500);
     }
@@ -366,7 +402,7 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
         intentionService === undefined
           ? { activeIntention: null, resolvedHistory: [] }
           : await intentionService.getGameDetail(enriched.game.id, enriched.game.name);
-      return c.json({ ...enriched, intentions: intentionDetail });
+      return c.json(projectGameDetailResponse({ ...enriched, intentions: intentionDetail }));
     } catch (err) {
       if (err instanceof NotFoundError) {
         return c.json(gameNotFoundResponse(id), 404);
@@ -428,7 +464,10 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     }
     try {
       const game = await purchaseUtilizationService.setAcquisition(id, parsed.data);
-      return c.json({ game });
+      if (game.id !== id || !acquisitionMatchesRequest(game, parsed.data)) {
+        return c.json(INTERNAL_ERROR_RESPONSE, 500);
+      }
+      return c.json(projectPublicGameMutation(game));
     } catch (error) {
       if (error instanceof PurchaseUtilizationValidationError) {
         return c.json({ error: error.message, code: error.code, details: error.details }, 400);
@@ -471,7 +510,10 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     }
 
     try {
-      const result = await gameService.rateGame(id, parsed.data.ratings);
+      const result = projectGameWithScore(await gameService.rateGame(id, parsed.data.ratings));
+      if (result.game.id !== id || !ratingsMatchRequest(result.game, parsed.data.ratings)) {
+        return c.json(INTERNAL_ERROR_RESPONSE, 500);
+      }
       return c.json(result);
     } catch (err) {
       if (err instanceof CodedAxisValidationError) {
@@ -509,8 +551,12 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
       return c.json({ error: "Invalid JSON body", code: "invalid_json" }, 400);
     }
     try {
-      const game = await gameService.setManualValues(id, body);
-      return c.json({ game });
+      const request = ManualGameValuesMutationRequestSchema.parse(body);
+      const game = await gameService.setManualValues(id, request);
+      if (game.id !== id || !manualValuesMatchRequest(game, request)) {
+        return c.json(INTERNAL_ERROR_RESPONSE, 500);
+      }
+      return c.json(projectPublicGameMutation(game));
     } catch (error) {
       if (error instanceof z.ZodError) {
         return c.json(
@@ -567,7 +613,7 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     }
 
     try {
-      const result = OwnershipMutationResultSchema.parse(
+      const result = projectOwnershipMutation(
         await gameService.setOwnership(id, parsed.data.ownership),
       );
       if (result.game.id !== id || result.game.ownership !== parsed.data.ownership) {
@@ -699,10 +745,19 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     }
     try {
       const gameId = c.req.param("id");
-      const result = ManualPlayCorrectionResultSchema.parse(
+      const result = projectManualPlayCorrection(
         await intentions().setPlayCount(gameId, parsed.data.playCount),
       );
       if (result.ok ? result.game.id !== gameId : result.error.gameId !== gameId) {
+        return c.json(INTERNAL_ERROR_RESPONSE, 500);
+      }
+      if (
+        result.ok &&
+        (result.game.numPlays !== parsed.data.playCount ||
+          result.game.playCountEvidence.status !== "valid" ||
+          result.game.playCountEvidence.value !== parsed.data.playCount ||
+          result.game.playCountEvidence.source !== "manual")
+      ) {
         return c.json(INTERNAL_ERROR_RESPONSE, 500);
       }
       return result.ok ? c.json(result) : c.json(result, 409);
@@ -730,7 +785,13 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     }
     try {
       const game = await gameService.setAdditionalBggIds(c.req.param("id"), parsed.data.bggIds);
-      return c.json({ game });
+      if (
+        game.id !== c.req.param("id") ||
+        JSON.stringify(game.additionalBggIds ?? []) !== JSON.stringify(parsed.data.bggIds)
+      ) {
+        return c.json(INTERNAL_ERROR_RESPONSE, 500);
+      }
+      return c.json(projectPublicGameMutation(game));
     } catch (error) {
       const message = toErrorMessage(error);
       if (message.includes("not found"))
@@ -764,7 +825,10 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     try {
       const dimensions = "clear" in parsed.data ? null : parsed.data;
       const game = await gameService.setBoxDimensions(id, dimensions);
-      return c.json({ game });
+      if (game.id !== id || JSON.stringify(game.boxDimensions) !== JSON.stringify(dimensions)) {
+        return c.json(INTERNAL_ERROR_RESPONSE, 500);
+      }
+      return c.json(projectPublicGameMutation(game));
     } catch (err) {
       const message = toErrorMessage(err);
       if (message.includes("not found")) {
@@ -792,7 +856,10 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
 
     try {
       const game = await gameService.setManualShelf(id, parsed.data.shelfId);
-      return c.json({ game });
+      if (game.id !== id || game.manualShelfId !== parsed.data.shelfId) {
+        return c.json(INTERNAL_ERROR_RESPONSE, 500);
+      }
+      return c.json(projectPublicGameMutation(game));
     } catch (err) {
       const message = toErrorMessage(err);
       if (message.includes("not found")) {
@@ -831,7 +898,7 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     }
 
     try {
-      const result = PlayEvidenceMutationResultSchema.parse(await gameService.refreshBggData(id));
+      const result = projectPlayEvidenceMutation(await gameService.refreshBggData(id));
       if (result.game.id !== id) return c.json(INTERNAL_ERROR_RESPONSE, 500);
       return c.json(result);
     } catch (err) {

@@ -1,5 +1,5 @@
 import type {
-  Collection,
+  CollectionProfileCollectionSource,
   Game,
   GameWithScore,
   PredictionSettings,
@@ -35,7 +35,7 @@ export interface DisplayedFitnessService {
   listGames(options: DisplayedFitnessOptions): Promise<DisplayedGameFitness[]>;
   listGamesFromSnapshot(
     snapshot: {
-      collection: Collection;
+      collection: CollectionProfileCollectionSource;
       tournament: TournamentData;
       predictionSettings: PredictionSettings;
       redundancySettings: RedundancySettings;
@@ -61,7 +61,7 @@ function hasScoringContribution(entry: GameWithScore): boolean {
 function applyRedundancy(
   games: GameWithScore[],
   settings: RedundancySettings,
-  collection: Collection,
+  collection: Pick<CollectionProfileCollectionSource, "games" | "axes">,
   tournamentData: TournamentData,
   universe?: GameWithScore[],
 ): void {

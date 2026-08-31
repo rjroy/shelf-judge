@@ -8,6 +8,7 @@ import {
 import type { TournamentService } from "../services/tournament-service.js";
 import type { GameService } from "../services/game-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
+import { projectTournamentNextPair } from "../services/game-projection.js";
 
 export interface TournamentRoutesDeps {
   tournamentService: TournamentService;
@@ -99,7 +100,7 @@ export function createTournamentRoutes(deps: TournamentRoutesDeps): RouteModule 
         tournamentService.getGameStats(pair.gameB),
       ]);
 
-      return c.json({
+      const response = projectTournamentNextPair({
         gameA: gameAResult.game,
         gameB: gameBResult.game,
         gameAFitness: gameAResult.score?.score ?? null,
@@ -107,6 +108,14 @@ export function createTournamentRoutes(deps: TournamentRoutesDeps): RouteModule 
         gameAStats,
         gameBStats,
       });
+      if (
+        "done" in response ||
+        response.gameA.id !== pair.gameA ||
+        response.gameB.id !== pair.gameB
+      ) {
+        return c.json({ error: "Internal server error" }, 500);
+      }
+      return c.json(response);
     } catch (err) {
       const message = toErrorMessage(err);
       if (message.includes("not found")) {

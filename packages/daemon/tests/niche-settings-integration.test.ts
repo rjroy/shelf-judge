@@ -43,7 +43,7 @@ function makeBggData(
 }
 
 function makeGame(id: string, name: string, bggData: BggGameData | null): Game {
-  const bggId = bggData ? 1 : null;
+  const bggId = bggData ? 12345 : null;
   return {
     id,
     bggId,
@@ -97,8 +97,8 @@ function makeScore(score: number): FitnessResult {
 // Three games sharing "Deck Building" mechanic (forms a niche of size 3).
 // Two of those also share "Card Game" category (forms a niche of size 2).
 // One game has unique "Worker Placement" mechanic (no niche, <2 members).
-const mech = (name: string) => ({ id: Math.random(), name });
-const cat = (name: string) => ({ id: Math.random(), name });
+const mech = (name: string) => ({ id: name.length, name });
+const cat = (name: string) => ({ id: name.length, name });
 
 const gameA = makeGame(
   "a",
