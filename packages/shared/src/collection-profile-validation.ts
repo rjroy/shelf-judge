@@ -6,6 +6,7 @@ import type {
   JsonValue,
 } from "./types";
 import { ExactRational } from "./exact-rational";
+import { OwnerGameNoteCommandReceiptSchema } from "./owner-game-note";
 import {
   CollectionProfileEntityPolicySchema,
   DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
@@ -544,6 +545,11 @@ export const IntentionCommandReceiptSchema = z
     }
   });
 
+export const CommandReceiptSchema = z.union([
+  OwnerGameNoteCommandReceiptSchema,
+  IntentionCommandReceiptSchema,
+]);
+
 export const CollectionProfileGameSourceExtensionSchema = z
   .object({
     gameId: IdSchema,
@@ -557,7 +563,7 @@ export const CollectionProfileSourceRecordsSchema = z
     revision: SafeCountSchema,
     games: z.array(CollectionProfileGameSourceExtensionSchema),
     intentions: z.array(PlayIntentionSchema),
-    commandReceipts: z.array(IntentionCommandReceiptSchema),
+    commandReceipts: z.array(CommandReceiptSchema),
   })
   .strict()
   .superRefine((source, context) => {
@@ -596,7 +602,12 @@ export const CollectionProfileSourceRecordsSchema = z
         path: ["intentions"],
         message: "Every intention must reference a source game",
       });
-    if (source.commandReceipts.some(({ request }) => !gameIds.has(request.gameId)))
+    if (
+      source.commandReceipts.some((receipt) => {
+        const gameId = "request" in receipt ? receipt.request.gameId : receipt.gameId;
+        return !gameIds.has(gameId);
+      })
+    )
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["commandReceipts"],
@@ -604,7 +615,10 @@ export const CollectionProfileSourceRecordsSchema = z
       });
     const intentionIds = new Set(source.intentions.map(({ intentionId }) => intentionId));
     if (
-      source.commandReceipts.some(({ result }) => !intentionIds.has(result.intention.intentionId))
+      source.commandReceipts.some(
+        (receipt) =>
+          "request" in receipt && !intentionIds.has(receipt.result.intention.intentionId),
+      )
     )
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -615,6 +629,7 @@ export const CollectionProfileSourceRecordsSchema = z
       source.intentions.map((intention) => [intention.intentionId, intention]),
     );
     for (const [receiptIndex, receipt] of source.commandReceipts.entries()) {
+      if (!("request" in receipt)) continue;
       const durable = intentionsById.get(receipt.result.intention.intentionId);
       if (durable === undefined) continue;
       const accepted = receipt.result.intention;

@@ -182,6 +182,19 @@ export interface Game {
   updatedAt: string; // ISO 8601
 }
 
+export type OwnerGameNote =
+  | { state: "missing"; version: 0; updatedAt: null }
+  | { state: "present"; version: number; updatedAt: string; text: string }
+  | { state: "cleared"; version: number; updatedAt: string };
+
+export interface DurableGame extends Game {
+  ownerNote: OwnerGameNote;
+}
+
+export interface GameDetailGame extends Game {
+  ownerNote: OwnerGameNote;
+}
+
 export type DerivedFieldId = "communityRating" | "weight" | "playerCountFit" | "playingTime";
 
 export type EmptyDerivedAxisConfiguration = Record<string, never>;
@@ -258,6 +271,15 @@ export interface Collection {
   entertainmentBenchmark: EntertainmentBenchmark;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CollectionV6 extends Omit<
+  Collection,
+  "schemaVersion" | "games" | "commandReceipts"
+> {
+  schemaVersion: 6;
+  games: DurableGame[];
+  commandReceipts: CommandReceipt[];
 }
 
 // Fitness score types from .lore/designs/mvp-fitness-model.md
@@ -448,6 +470,17 @@ export interface TournamentGameStatsDisplay {
   recentComparisons: RecentComparison[]; // Read from cached TournamentGameStats.recentComparisons, enriched with game names at read time
 }
 
+export type TournamentNextPairResponse =
+  | { done: true }
+  | {
+      gameA: Game;
+      gameB: Game;
+      gameAFitness: number | null;
+      gameBFitness: number | null;
+      gameAStats: TournamentGameStatsDisplay;
+      gameBStats: TournamentGameStatsDisplay;
+    };
+
 // API response types (shared between daemon, web, and CLI)
 
 export interface GameWithScore {
@@ -610,6 +643,10 @@ export interface AddGameResult {
   game: Game;
   bggImported: boolean;
   warning?: string;
+}
+
+export interface PublicGameMutationResult {
+  game: Game;
 }
 
 export interface BggSearchResult {
@@ -842,6 +879,65 @@ export interface IntentionCommandReceipt {
   result: AcceptedIntentionMutation;
 }
 
+export type OwnerGameNoteOperation = "set" | "clear";
+
+export interface OwnerGameNoteReadResult {
+  gameId: string;
+  note: OwnerGameNote;
+}
+
+export interface OwnerGameNoteSetRequest {
+  commandId: string;
+  expectedVersion: number;
+  text: string;
+}
+
+export interface OwnerGameNoteClearRequest {
+  commandId: string;
+  expectedVersion: number;
+}
+
+export interface OwnerGameNoteAcceptedMetadata {
+  commandId: string;
+  gameId: string;
+  operation: OwnerGameNoteOperation;
+  state: OwnerGameNote["state"];
+  version: number;
+  updatedAt: string | null;
+  collectionRevision: number;
+  replayed: boolean;
+  alreadyClear: boolean;
+}
+
+export type OwnerGameNoteMutationError =
+  | { code: "validation"; issues: { field: string; message: string }[] }
+  | { code: "game-not-found"; gameId: string }
+  | {
+      code: "stale-version";
+      gameId: string;
+      expectedVersion: number;
+      current: OwnerGameNote;
+    }
+  | { code: "command-reuse"; commandId: string }
+  | { code: "version-overflow"; target: "note" | "collection" }
+  | { code: "persistence-failure"; operation: string; message: string };
+
+export type OwnerGameNoteMutationResult =
+  | { ok: true; accepted: OwnerGameNoteAcceptedMetadata }
+  | { ok: false; commandId: string; error: OwnerGameNoteMutationError };
+
+export interface OwnerGameNoteCommandReceipt {
+  receiptType: "owner-game-note";
+  commandId: string;
+  operation: OwnerGameNoteOperation;
+  gameId: string;
+  expectedVersion: number;
+  requestFingerprint: string;
+  accepted: Omit<OwnerGameNoteAcceptedMetadata, "replayed">;
+}
+
+export type CommandReceipt = IntentionCommandReceipt | OwnerGameNoteCommandReceipt;
+
 export type CollectionMutationResult<Value> =
   | { outcome: "accepted"; changed: true; value: Value }
   | { outcome: "no-op"; changed: false; value: Value }
@@ -971,6 +1067,17 @@ export interface GameIntentionDetail {
 
 export interface GameDetailWithPurchaseUtilization extends GameWithPurchaseUtilization {
   intentions: GameIntentionDetail;
+}
+
+export interface OwnerGameNoteDetailWithPurchaseUtilization extends Omit<
+  GameDetailWithPurchaseUtilization,
+  "game"
+> {
+  game: GameDetailGame;
+}
+
+export interface CollectionProfileCollectionSourceV6 extends Omit<CollectionV6, "games"> {
+  games: Game[];
 }
 
 export interface CollectionProfile {
