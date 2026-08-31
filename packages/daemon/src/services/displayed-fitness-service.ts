@@ -4,6 +4,7 @@ import type {
   GameWithScore,
   PredictionSettings,
   RedundancySettings,
+  NicheSettings,
   TournamentData,
 } from "@shelf-judge/shared";
 import type { GameService } from "./game-service.js";
@@ -39,6 +40,7 @@ export interface DisplayedFitnessService {
       tournament: TournamentData;
       predictionSettings: PredictionSettings;
       redundancySettings: RedundancySettings;
+      nicheSettings?: NicheSettings;
     },
     options: DisplayedFitnessOptions,
   ): Promise<DisplayedGameFitness[]>;
@@ -155,21 +157,42 @@ export function createDisplayedFitnessService(
     },
 
     async listGamesFromSnapshot(snapshot, options): Promise<DisplayedGameFitness[]> {
-      if (!predictionService?.listGamesWithPredictionsFromSnapshot) {
-        throw new Error("Snapshot fitness requires prediction service");
-      }
-      if (!options.includePredicted) {
-        throw new Error("Snapshot fitness currently supports prediction-enabled display only");
-      }
       const collection = structuredClone(snapshot.collection);
       const tournament = structuredClone(snapshot.tournament);
-      const predicted = await predictionService.listGamesWithPredictionsFromSnapshot(
-        collection,
-        tournament,
-        structuredClone(snapshot.predictionSettings),
-      );
-      const allGames = predicted;
+      const allGames = options.includePredicted
+        ? await (() => {
+            if (!predictionService?.listGamesWithPredictionsFromSnapshot) {
+              throw new Error("Snapshot prediction requires prediction service");
+            }
+            return predictionService.listGamesWithPredictionsFromSnapshot(
+              collection,
+              tournament,
+              structuredClone(snapshot.predictionSettings),
+            );
+          })()
+        : (() => {
+            if (gameService.listGamesFromSnapshot === undefined) {
+              throw new Error("Snapshot fitness requires snapshot-capable game service");
+            }
+            return gameService.listGamesFromSnapshot(collection, tournament);
+          })();
       const ownedGames = allGames.filter((entry) => entry.game.ownership !== "previously-owned");
+      if (options.includeNiches && predictionService) {
+        if (predictionService.listGamesWithPredictionsFromSnapshot === undefined) {
+          throw new Error("Snapshot niches require snapshot-capable prediction service");
+        }
+        const nicheUniverse = options.includePredicted
+          ? ownedGames
+          : (
+              await predictionService.listGamesWithPredictionsFromSnapshot(
+                collection,
+                tournament,
+                structuredClone(snapshot.predictionSettings),
+              )
+            ).filter((entry) => entry.game.ownership !== "previously-owned");
+        const nicheMap = computeNichePositions(nicheUniverse, snapshot.nicheSettings);
+        for (const entry of allGames) entry.nichePosition = nicheMap.get(entry.game.id) ?? null;
+      }
       applyRedundancy(
         ownedGames,
         structuredClone(snapshot.redundancySettings),

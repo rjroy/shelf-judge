@@ -83,7 +83,7 @@ export {
   CollectionProfileResultSchema,
 };
 
-export const CURRENT_COLLECTION_SCHEMA_VERSION = 5 as const;
+export const CURRENT_COLLECTION_SCHEMA_VERSION = 6 as const;
 export const CURRENT_PROFILE_CONTRACT_VERSION = 9 as const;
 export const CURRENT_PROFILE_ALGORITHM_VERSION = 11 as const;
 const AmountInputSchema = z.string().superRefine((value, context) => {
@@ -989,8 +989,6 @@ export const CollectionSchemaV5 = CollectionSchemaV5Base.superRefine((source, co
   }
 });
 
-export const CollectionSchema = CollectionSchemaV5;
-
 const CollectionSchemaV6Base = CollectionSchemaV3.omit({ schemaVersion: true, games: true })
   .extend({
     schemaVersion: z.literal(6),
@@ -1058,7 +1056,7 @@ export const CollectionSchemaV6 = CollectionSchemaV6Base.superRefine((source, co
   }
 });
 
-export const CollectionProfileCollectionSourceSchema = CollectionSchema;
+export const CollectionSchema = CollectionSchemaV6;
 
 export const CollectionProfileCollectionSourceV6Schema = CollectionSchemaV6Base.omit({
   games: true,
@@ -1097,6 +1095,8 @@ export const CollectionProfileCollectionSourceV6Schema = CollectionSchemaV6Base.
       }
     }
   });
+
+export const CollectionProfileCollectionSourceSchema = CollectionProfileCollectionSourceV6Schema;
 
 function compareNormalizedCodePoints(left: string, right: string): number {
   const leftPoints = Array.from(left.normalize("NFC"), (value) => value.codePointAt(0) ?? 0);
@@ -1696,39 +1696,6 @@ export const PredictedGameResponseSchema = z
 
 export const GameDetailWithPurchaseUtilizationSchema = z
   .object({
-    game: GameSchema,
-    score: FitnessResultResponseSchema.nullable(),
-    bggDataStale: z.boolean().optional(),
-    nichePosition: NichePositionResponseSchema.nullable().optional(),
-    displayScore: z.string().nullable(),
-    purchaseUtilization: PurchaseUtilizationResultSchema,
-    intentions: GameIntentionDetailSchema,
-  })
-  .strict()
-  .superRefine((detail, context) => {
-    if (
-      detail.intentions.activeIntention !== null &&
-      detail.intentions.activeIntention.gameId !== detail.game.id
-    ) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["intentions", "activeIntention", "gameId"],
-        message: "Active intention must belong to the detail game",
-      });
-    }
-    for (const [index, intention] of detail.intentions.resolvedHistory.entries()) {
-      if (intention.gameId !== detail.game.id) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["intentions", "resolvedHistory", index, "gameId"],
-          message: "Resolved intention must belong to the detail game",
-        });
-      }
-    }
-  });
-
-export const OwnerGameNoteDetailWithPurchaseUtilizationSchema = z
-  .object({
     game: GameDetailGameSchema,
     score: FitnessResultResponseSchema.nullable(),
     bggDataStale: z.boolean().optional(),
@@ -1759,6 +1726,9 @@ export const OwnerGameNoteDetailWithPurchaseUtilizationSchema = z
       }
     }
   });
+
+export const OwnerGameNoteDetailWithPurchaseUtilizationSchema =
+  GameDetailWithPurchaseUtilizationSchema;
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 

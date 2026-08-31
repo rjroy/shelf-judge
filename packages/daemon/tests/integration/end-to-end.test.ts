@@ -641,7 +641,7 @@ describe("Integration: End-to-end scenarios", () => {
       const migrated = await ctx.storageService.loadCollection();
       const persisted = JSON.parse(ctx.fileOps.files.get(collectionPath) ?? "null") as Collection;
       expect(persisted).toEqual(migrated);
-      expect(persisted.schemaVersion).toBe(5);
+      expect(persisted.schemaVersion).toBe(6);
       expect(persisted.axes).toHaveLength(5);
       expect(persisted.axes.find(({ id }) => id === "community-axis")).toMatchObject({
         id: "community-axis",

@@ -42,6 +42,7 @@ import {
   projectOwnershipMutation,
   projectPlayEvidenceMutation,
   projectPublicGameMutation,
+  createGameDetailSnapshotService,
 } from "../services/game-projection.js";
 
 const INTERNAL_ERROR_RESPONSE = { error: "Internal server error", code: "internal_error" } as const;
@@ -283,6 +284,10 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     });
   const logger = deps.logger ?? createLogger("purchase-utilization-routes");
   const routes = new Hono();
+  const detailSnapshotService =
+    deps.storageService === undefined
+      ? undefined
+      : createGameDetailSnapshotService(deps.storageService);
 
   async function enrichFinalGames(games: GameWithScore[], responseKind: "list" | "detail") {
     const benchmark = await purchaseUtilizationService.getEntertainmentBenchmark();
@@ -390,19 +395,53 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     }
     try {
       const includePredicted = includePredictedQuery === "true";
-      const assembled = await displayedFitnessService.listGames({
-        includePredicted,
-        includeNiches: true,
-      });
+      if (detailSnapshotService === undefined || deps.storageService === undefined) {
+        throw new Error("Game detail snapshot storage is not configured");
+      }
+      const detailSnapshot = await detailSnapshotService.capture(id);
+      const [tournament, predictionSettings, redundancySettings, nicheSettings] = await Promise.all(
+        [
+          deps.storageService.loadTournament(),
+          deps.storageService.loadPredictionSettings(),
+          deps.storageService.loadRedundancySettings(),
+          deps.storageService.loadNicheSettings(),
+        ],
+      );
+      const assembled = await displayedFitnessService.listGamesFromSnapshot(
+        {
+          collection: detailSnapshot.collection,
+          tournament,
+          predictionSettings,
+          redundancySettings,
+          nicheSettings,
+        },
+        { includePredicted, includeNiches: true },
+      );
       const assembledResult = assembled.find((entry) => entry.game.id === id);
       if (!assembledResult) throw new NotFoundError(`Game not found: ${id}`);
-      const result = toPublicGameWithScore(assembledResult);
-      const [enriched] = await enrichFinalGames([result], "detail");
+      const result = { ...toPublicGameWithScore(assembledResult), game: detailSnapshot.game };
+      const [enriched] = purchaseUtilizationService.enrichGames(
+        [result],
+        detailSnapshot.collection.entertainmentBenchmark,
+        "detail",
+      );
       const intentionDetail =
         intentionService === undefined
           ? { activeIntention: null, resolvedHistory: [] }
-          : await intentionService.getGameDetail(enriched.game.id, enriched.game.name);
-      return c.json(projectGameDetailResponse({ ...enriched, intentions: intentionDetail }));
+          : intentionService.getGameDetailFromCollection !== undefined
+            ? intentionService.getGameDetailFromCollection(
+                detailSnapshot.collection,
+                enriched.game.id,
+                enriched.game.name,
+              )
+            : await intentionService.getGameDetail(enriched.game.id, enriched.game.name);
+      return c.json(
+        projectGameDetailResponse({
+          ...enriched,
+          game: detailSnapshot.game,
+          intentions: intentionDetail,
+        }),
+      );
     } catch (err) {
       if (err instanceof NotFoundError) {
         return c.json(gameNotFoundResponse(id), 404);

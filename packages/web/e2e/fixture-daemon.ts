@@ -525,7 +525,10 @@ function detail(requestedGameId = gameId): GameDetailWithPurchaseUtilization {
         }
       : score(definition, false);
   return GameDetailWithPurchaseUtilizationSchema.parse({
-    game: detailGame,
+    game: {
+      ...detailGame,
+      ownerNote: { state: "missing", version: 0, updatedAt: null },
+    },
     score: detailScore,
     bggDataStale: false,
     nichePosition: definition === undefined ? null : nichePosition(definition),

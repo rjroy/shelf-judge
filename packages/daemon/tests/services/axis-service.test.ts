@@ -67,6 +67,7 @@ function game(id: string, rating: number): Collection["games"][number] {
     ownership: "owned",
     boxDimensions: null,
     manualShelfId: null,
+    ownerNote: { state: "missing", version: 0, updatedAt: null },
     ratings: { "legacy-axis": rating, "other-axis": 4 },
     createdAt: timestamp,
     updatedAt: timestamp,

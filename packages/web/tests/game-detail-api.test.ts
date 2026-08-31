@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   calculatePurchaseUtilization,
-  type Game,
+  type DurableGame,
   type GameDetailWithPurchaseUtilization,
 } from "@shelf-judge/shared";
 import { getGame } from "@/lib/api";
@@ -10,7 +10,7 @@ const observedAt = "2026-08-28T10:00:00.000Z";
 const createdAt = "2026-08-28T10:01:00.000Z";
 const resolvedAt = "2026-08-28T10:02:00.000Z";
 
-function game(): Game {
+function game(): DurableGame {
   const completeEmptyMetadata = {
     state: "complete" as const,
     entities: [],
@@ -55,6 +55,7 @@ function game(): Game {
     ratings: {},
     createdAt,
     updatedAt: createdAt,
+    ownerNote: { state: "missing", version: 0, updatedAt: null },
   };
 }
 

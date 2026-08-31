@@ -5,15 +5,22 @@ import type {
   GameWithPurchaseUtilization,
   GameWithScore,
   Game,
+  Collection,
+  DurableGame,
 } from "@shelf-judge/shared";
 import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import { createGameRoutes } from "../src/routes/games";
 import type { GameService } from "../src/services/game-service";
+import type { StorageService } from "../src/services/storage-service";
 import { createTestPurchaseUtilizationService } from "./helpers/test-app";
 
 const now = "2026-01-01T00:00:00Z";
 
-function makeGame(id: string, name: string, boxDimensions: BoxDimensions | null = null): Game {
+function makeGame(
+  id: string,
+  name: string,
+  boxDimensions: BoxDimensions | null = null,
+): DurableGame {
   return {
     id,
     bggId: 1,
@@ -44,6 +51,7 @@ function makeGame(id: string, name: string, boxDimensions: BoxDimensions | null 
     ownership: "owned",
     boxDimensions,
     manualShelfId: null,
+    ownerNote: { state: "missing", version: 0, updatedAt: null },
     ratings: {},
     createdAt: now,
     updatedAt: now,
@@ -63,6 +71,9 @@ function createTestApp() {
     },
     listGames() {
       return Promise.resolve([{ game: storedGame, score: null }]);
+    },
+    listGamesFromSnapshot(collection) {
+      return collection.games.map((game) => ({ game, score: null }));
     },
     rateGame() {
       throw new Error("not implemented");
@@ -99,8 +110,50 @@ function createTestApp() {
     },
   };
 
+  const storageService = {
+    loadCollection: () =>
+      Promise.resolve<Collection>({
+        schemaVersion: 6,
+        revision: 0,
+        id: "collection-1",
+        name: "Test",
+        axes: [],
+        games: [structuredClone(storedGame)],
+        intentions: [],
+        commandReceipts: [],
+        entertainmentBenchmark: null,
+        createdAt: now,
+        updatedAt: now,
+      }),
+    loadTournament: () =>
+      Promise.resolve({
+        settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
+        sessions: [],
+        gameStats: {},
+      }),
+    loadPredictionSettings: () =>
+      Promise.resolve({
+        stageThresholds: [5, 15, 30] as [number, number, number],
+        defaultK: 5,
+        minSimilarityThreshold: 0.2,
+        tournamentStabilityBoost: 0.2,
+      }),
+    loadRedundancySettings: () =>
+      Promise.resolve({
+        enabled: false,
+        stage: "annotation" as const,
+        similarityThreshold: 0.8,
+        minNeighbors: 2,
+        expectedNeighbors: 5,
+        penaltyStrength: 0.25,
+        minMultiplier: 0.5,
+      }),
+    loadNicheSettings: () => Promise.resolve({ ignoredTags: [] }),
+  } as unknown as StorageService;
+
   const routeModule = createGameRoutes({
     gameService,
+    storageService,
     purchaseUtilizationService: createTestPurchaseUtilizationService(),
   });
   const app = new Hono();

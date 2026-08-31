@@ -3,7 +3,7 @@ import type {
   Axis,
   Collection,
   DerivedAxis,
-  Game,
+  DurableGame,
   PredictionSettings,
   TournamentGameStatsDisplay,
   TournamentSettings,
@@ -86,7 +86,7 @@ function makeGame(
   name: string,
   ratings: Record<string, number> = {},
   hasBgg = true,
-): Game {
+): DurableGame {
   const bggId = hasBgg ? 12345 : null;
   return {
     id,
@@ -116,6 +116,7 @@ function makeGame(
     ownership: "owned",
     boxDimensions: null,
     manualShelfId: null,
+    ownerNote: { state: "missing", version: 0, updatedAt: null },
     ratings,
     imageUrl: null,
     bggData: hasBgg
@@ -138,9 +139,9 @@ function makeGame(
   };
 }
 
-function makeCollection(games: Game[], axes: Axis[]): Collection {
+function makeCollection(games: DurableGame[], axes: Axis[]): Collection {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     revision: 0,
     id: "test-col",
     name: "Test Collection",
@@ -231,7 +232,7 @@ describe("prediction-service", () => {
 
   function buildRatedCollection(ratedCount: number) {
     const axes = [themeAxis, complexityAxis];
-    const games: Game[] = [];
+    const games: DurableGame[] = [];
     for (let i = 0; i < ratedCount; i++) {
       games.push(makeGame(`rated-${i}`, `Rated Game ${i}`, { theme: 5 + (i % 6) }));
     }
@@ -466,7 +467,7 @@ describe("prediction-service", () => {
       // Build five rated games with comparisonCount >= 6 (above provisional
       // threshold) so deriveDisplayStats returns a non-null normalizedScore.
       // The cohort floor is 5, which we satisfy with five games.
-      const ratedGames: Game[] = [];
+      const ratedGames: DurableGame[] = [];
       const gameStats: Record<string, import("@shelf-judge/shared").TournamentGameStats> = {};
       for (let i = 0; i < 5; i++) {
         const gameId = `rated-${i}`;
@@ -528,7 +529,7 @@ describe("prediction-service", () => {
     });
 
     test("returns correct stage for rated games", async () => {
-      const games: Game[] = [];
+      const games: DurableGame[] = [];
       for (let i = 0; i < 16; i++) {
         games.push(makeGame(`g${i}`, `Game ${i}`, { theme: 7 }));
       }

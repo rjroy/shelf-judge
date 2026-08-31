@@ -8,6 +8,7 @@ import type {
   RedundancySettings,
   NicheSettings,
   Collection,
+  DurableGame,
 } from "@shelf-judge/shared";
 import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import { createGameRoutes } from "../src/routes/games";
@@ -53,7 +54,7 @@ function makeGame(
   name: string,
   ownership: "owned" | "previously-owned" = "owned",
   bggData?: BggGameData | null,
-): Game {
+): DurableGame {
   return {
     id,
     bggId: 1,
@@ -91,6 +92,7 @@ function makeGame(
     ownership,
     boxDimensions: null,
     manualShelfId: null,
+    ownerNote: { state: "missing", version: 0, updatedAt: null },
     ratings: { axis1: 7 },
     createdAt: now,
     updatedAt: now,
@@ -120,7 +122,7 @@ const prevOwned = makeGame("prev", "Delta", "previously-owned");
 // Mutable collection for setOwnership tests
 function makeCollection(): Collection {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     revision: 0,
     id: "coll-1",
     name: "Test",
@@ -207,6 +209,8 @@ function createMockGameService(collection?: Collection): GameService {
         coll.games.map((g) => ({ game: structuredClone(g), score: makeScore(7.0) })),
       );
     },
+    listGamesFromSnapshot: (snapshot) =>
+      snapshot.games.map((g) => ({ game: structuredClone(g), score: makeScore(7.0) })),
     rateGame: () => Promise.reject(new Error("not implemented")),
     removeGame: () => Promise.reject(new Error("not implemented")),
     setOwnership: (id: string, ownership: "owned" | "previously-owned") => {
@@ -242,6 +246,10 @@ function createMockPredictionService(collection?: Collection): PredictionService
         coll.games.map((g) => ({ game: structuredClone(g), score: makeScore(7.0) })),
       );
     },
+    listGamesWithPredictionsFromSnapshot: (snapshot) =>
+      Promise.resolve(
+        snapshot.games.map((g) => ({ game: structuredClone(g), score: makeScore(7.0) })),
+      ),
     predictGame: () => Promise.reject(new Error("not implemented")),
     predictBggGame: () => Promise.reject(new Error("not implemented")),
     getReadiness: () => Promise.reject(new Error("not implemented")),

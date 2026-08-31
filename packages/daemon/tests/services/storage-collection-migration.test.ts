@@ -2,14 +2,14 @@ import { describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { CollectionSchema } from "@shelf-judge/shared";
+import { CollectionSchema, CollectionSchemaV5 } from "@shelf-judge/shared";
 import type { Collection } from "@shelf-judge/shared";
 import {
   COLLECTION_ARTIFACTS,
   type CollectionArtifactDescriptor,
 } from "../../src/services/collection-artifacts.js";
 import { createStorageService } from "../../src/services/storage-service.js";
-import { createFileOps } from "../../src/services/file-ops.js";
+import { createFileOps, type FileOps } from "../../src/services/file-ops.js";
 import type { Logger } from "../../src/services/logger.js";
 import { createMockFileOps } from "../helpers/mock-file-ops.js";
 
@@ -18,6 +18,10 @@ const COLLECTION_PATH = `${DATA_DIR}/collection.json`;
 const PROFILE_PATH = `${DATA_DIR}/profile.json`;
 const WISHLIST_PATH = `${DATA_DIR}/wishlist.json`;
 const NOW = "2026-01-01T00:00:00.000Z";
+const migrationDependencies = {
+  createId: () => "real-filesystem-tournament-axis",
+  now: () => "2026-08-25T00:00:00.000Z",
+};
 
 const historicalCollection = {
   id: "collection-1",
@@ -109,7 +113,7 @@ describe("storage collection migration ordering and recovery", () => {
       const migrated = await service.loadCollection();
       const persistedAfterMigration = await fs.readFile(collectionPath, "utf8");
       expect(JSON.parse(persistedAfterMigration)).toEqual(migrated);
-      expect(migrated.schemaVersion).toBe(5);
+      expect(migrated.schemaVersion).toBe(6);
       expect(
         await fs.stat(profilePath).then(
           () => true,
@@ -131,6 +135,88 @@ describe("storage collection migration ordering and recovery", () => {
       await fs.rm(dataDir, { recursive: true, force: true });
     }
   });
+
+  test.each(["artifact invalidation", "temporary write", "rename"] as const)(
+    "real filesystem %s interruption survives restart and retries from v5",
+    async (boundary) => {
+      const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "shelf-judge-v5-recovery-"));
+      const collectionPath = path.join(dataDir, "collection.json");
+      const profilePath = path.join(dataDir, "profile.json");
+      const wishlistPath = path.join(dataDir, "wishlist.json");
+      const fixtureText = await Bun.file(
+        new URL("../fixtures/collection-schema-v5-owner-notes.json", import.meta.url),
+      ).text();
+
+      try {
+        await fs.writeFile(collectionPath, fixtureText, "utf8");
+        await fs.writeFile(profilePath, "disposable profile", "utf8");
+        await fs.writeFile(wishlistPath, JSON.stringify(wishlist), "utf8");
+
+        const interruptedFileOps: FileOps = createFileOps();
+        let collectionArtifacts: readonly CollectionArtifactDescriptor[] = COLLECTION_ARTIFACTS;
+        if (boundary === "artifact invalidation") {
+          collectionArtifacts = [
+            ...COLLECTION_ARTIFACTS,
+            {
+              identity: "interrupted-artifact",
+              dependencyVersion: 1,
+              path: (root) => path.join(root, "interrupted-artifact.json"),
+              invalidate: () => Promise.reject(new Error("injected artifact interruption")),
+            },
+          ];
+        } else if (boundary === "temporary write") {
+          const writeFileExclusive = interruptedFileOps.writeFileExclusive.bind(interruptedFileOps);
+          interruptedFileOps.writeFileExclusive = (filePath, content) =>
+            filePath.includes("collection.json") && filePath.endsWith(".tmp")
+              ? Promise.reject(new Error("injected temporary-write interruption"))
+              : writeFileExclusive(filePath, content);
+        } else {
+          const rename = interruptedFileOps.rename.bind(interruptedFileOps);
+          interruptedFileOps.rename = (oldPath, newPath) =>
+            newPath === collectionPath
+              ? Promise.reject(new Error("injected rename interruption"))
+              : rename(oldPath, newPath);
+        }
+
+        const interrupted = createStorageService({
+          dataDir,
+          configPath: path.join(dataDir, "config.json"),
+          fileOps: interruptedFileOps,
+          logger: logger(),
+          collectionArtifacts,
+          collectionMigrationDependencies: migrationDependencies,
+        });
+        // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+        await expect(interrupted.loadCollection()).rejects.toThrow("injected");
+
+        const prior: unknown = JSON.parse(await fs.readFile(collectionPath, "utf8"));
+        expect(CollectionSchemaV5.safeParse(prior).success).toBe(true);
+
+        const restarted = createStorageService({
+          dataDir,
+          configPath: path.join(dataDir, "config.json"),
+          fileOps: createFileOps(),
+          logger: logger(),
+          collectionMigrationDependencies: migrationDependencies,
+        });
+        const migrated = await restarted.loadCollection();
+        expect(migrated.schemaVersion).toBe(6);
+        expect(migrated.games.map(({ ownerNote }) => ownerNote)).toEqual([
+          { state: "missing", version: 0, updatedAt: null },
+        ]);
+
+        const reloaded = createStorageService({
+          dataDir,
+          configPath: path.join(dataDir, "config.json"),
+          fileOps: createFileOps(),
+          logger: logger(),
+        });
+        expect(await reloaded.loadCollection()).toEqual(migrated);
+      } finally {
+        await fs.rm(dataDir, { recursive: true, force: true });
+      }
+    },
+  );
 
   test("logs collection read, parse, migration, and validation failures at their boundaries", async () => {
     const readFiles = createMockFileOps({ [COLLECTION_PATH]: "present" });
@@ -162,13 +248,13 @@ describe("storage collection migration ordering and recovery", () => {
       dataDir: DATA_DIR,
       configPath: "/test/config.json",
       fileOps: createMockFileOps({
-        [COLLECTION_PATH]: JSON.stringify({ ...historicalCollection, schemaVersion: 6 }),
+        [COLLECTION_PATH]: JSON.stringify({ ...historicalCollection, schemaVersion: 7 }),
       }),
       logger: migrationLog,
     });
     // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
     await expect(migrationService.loadCollection()).rejects.toThrow(
-      "Unsupported collection schema version 6",
+      "Unsupported collection schema version 7",
     );
     expect(
       migrationLog.entries.some((entry) => entry.includes("collection migration failed")),
@@ -182,7 +268,7 @@ describe("storage collection migration ordering and recovery", () => {
       logger: validationLog,
     });
     const invalidCurrent: Collection = {
-      schemaVersion: 5,
+      schemaVersion: 6,
       revision: 0,
       id: "collection-1",
       name: "",
@@ -296,7 +382,7 @@ describe("storage collection migration ordering and recovery", () => {
 
     const migrated = await service.loadCollection();
 
-    expect(migrated.schemaVersion).toBe(5);
+    expect(migrated.schemaVersion).toBe(6);
     expect(invalidated).toEqual(["v1-derived-artifact"]);
     expect(JSON.parse(fileOps.files.get(COLLECTION_PATH) ?? "null")).toEqual(migrated);
   });
@@ -400,7 +486,7 @@ describe("storage collection migration ordering and recovery", () => {
     expect(fileOps.files.get(COLLECTION_PATH)).toBe(original);
 
     const loaded = await service.loadCollection();
-    expect(loaded.schemaVersion).toBe(5);
+    expect(loaded.schemaVersion).toBe(6);
     expect(JSON.parse(fileOps.files.get(COLLECTION_PATH) ?? "null")).toEqual(loaded);
   });
 });

@@ -906,19 +906,24 @@ describe("current-axis helpers", () => {
 
   test("supports the active versioned persisted collection contract", () => {
     const collection: Collection = {
-      schemaVersion: 5,
+      schemaVersion: 6,
       revision: 0,
       id: "collection",
       name: "Collection",
       axes: [personal, tournament, derived, disabled],
-      games: [makeGame()],
+      games: [
+        {
+          ...makeGame(),
+          ownerNote: { state: "missing", version: 0, updatedAt: null },
+        },
+      ],
       intentions: [],
       commandReceipts: [],
       entertainmentBenchmark: null,
       createdAt: "2026-01-01T00:00:00Z",
       updatedAt: "2026-01-01T00:00:00Z",
     };
-    expect(collection.schemaVersion).toBe(5);
+    expect(collection.schemaVersion).toBe(6);
     expect(collection.axes).toEqual([personal, tournament, derived, disabled]);
   });
 });

@@ -41,6 +41,7 @@ export type {
   DisabledLegacyAxis,
   EnabledAxis,
   Collection,
+  CollectionV5,
   CollectionV6,
   FitnessBreakdownSource,
   FitnessBreakdownEntry,

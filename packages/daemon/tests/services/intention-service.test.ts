@@ -3,7 +3,7 @@ import {
   CollectionSchema,
   createInitialEntityMetadata,
   type Collection,
-  type Game,
+  type DurableGame,
   type IntentionMutationResult,
 } from "@shelf-judge/shared";
 import { createCollectionMutationService } from "../../src/services/collection-mutation-service.js";
@@ -26,7 +26,7 @@ const commandIds = {
   later: "10000000-0000-4000-8000-000000000003",
 };
 
-function game(overrides: Partial<Game> = {}): Game {
+function game(overrides: Partial<DurableGame> = {}): DurableGame {
   return {
     id: "game-1",
     bggId: null,
@@ -57,6 +57,7 @@ function game(overrides: Partial<Game> = {}): Game {
     ownership: "owned",
     boxDimensions: null,
     manualShelfId: null,
+    ownerNote: { state: "missing", version: 0, updatedAt: null },
     ratings: {},
     createdAt: observedAt,
     updatedAt: observedAt,
@@ -66,7 +67,7 @@ function game(overrides: Partial<Game> = {}): Game {
 
 function collection(sourceGame = game()): Collection {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     revision: 0,
     id: "collection",
     name: "Collection",

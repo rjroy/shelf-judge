@@ -3,7 +3,7 @@ import type { Collection } from "@shelf-judge/shared";
 import {
   collectionMutationServiceFor,
   createCollectionMutationService,
-  schemaV4RevisionStrategy,
+  collectionRevisionStrategy,
 } from "../../src/services/collection-mutation-service.js";
 import type { Logger } from "../../src/services/logger.js";
 import type {
@@ -15,7 +15,7 @@ const initialTime = "2026-01-01T00:00:00.000Z";
 
 function collection(): Collection {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     revision: 0,
     id: "collection-1",
     name: "Private collection name",
@@ -62,21 +62,21 @@ function controlledStorage(options: { failFirstSave?: boolean } = {}) {
 }
 
 describe("CollectionMutationService", () => {
-  test("uses monotonic schema-v4 revision semantics", () => {
+  test("uses monotonic collection revision semantics", () => {
     const source: Collection = {
       ...collection(),
       revision: 7,
     };
 
-    expect(schemaV4RevisionStrategy.identity(source)).toEqual({
+    expect(collectionRevisionStrategy.identity(source)).toEqual({
       collectionId: "collection-1",
-      schemaVersion: 5,
+      schemaVersion: 6,
       revision: 7,
     });
-    expect(schemaV4RevisionStrategy.advance(source, source).revision).toBe(8);
+    expect(collectionRevisionStrategy.advance(source, source).revision).toBe(8);
     expect(source.revision).toBe(7);
     expect(() =>
-      schemaV4RevisionStrategy.advance(
+      collectionRevisionStrategy.advance(
         { ...source, revision: 0 },
         { ...source, revision: Number.MAX_SAFE_INTEGER },
       ),
@@ -134,7 +134,7 @@ describe("CollectionMutationService", () => {
       outcome: "no-op",
       changed: false,
       value: "collection-1",
-      collection: { schemaVersion: 5, revision: 0, id: "collection-1", updatedAt: initialTime },
+      collection: { schemaVersion: 6, revision: 0, id: "collection-1", updatedAt: initialTime },
     });
     expect(ctx.saveCount()).toBe(0);
   });
@@ -154,7 +154,7 @@ describe("CollectionMutationService", () => {
     await expect(
       service.mutate({ operation: "axis.create", trigger: "owner" }, (candidate) => {
         candidate.name = "";
-        candidate.schemaVersion = 99 as 5;
+        candidate.schemaVersion = 99 as 6;
         return { changed: true, value: undefined };
       }),
     ).rejects.toThrow();

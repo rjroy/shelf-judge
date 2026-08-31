@@ -1,7 +1,6 @@
 import {
   AddGameResultSchema,
   CollectionProfileCollectionSourceSchema,
-  CollectionProfileCollectionSourceV6Schema,
   GameDetailGameSchema,
   GameDetailWithPurchaseUtilizationSchema,
   GameListResponseSchema,
@@ -16,8 +15,6 @@ import {
   type AddGameResult,
   type Collection,
   type CollectionProfileCollectionSource,
-  type CollectionProfileCollectionSourceV6,
-  type CollectionV6,
   type DurableGame,
   type Game,
   type GameDetailGame,
@@ -70,7 +67,7 @@ export function projectGameDetailResponse(
 ): GameDetailWithPurchaseUtilization {
   return GameDetailWithPurchaseUtilizationSchema.parse({
     ...detail,
-    game: projectPublicGame(detail.game),
+    game: projectGameDetail(detail.game),
   });
 }
 
@@ -134,32 +131,24 @@ export function projectTournamentNextPair(
 
 export function projectProfileCollectionSource(
   collection: Collection,
-): CollectionProfileCollectionSource;
-export function projectProfileCollectionSource(
-  collection: CollectionV6,
-): CollectionProfileCollectionSourceV6;
-export function projectProfileCollectionSource(
-  collection: Collection | CollectionV6,
-): CollectionProfileCollectionSource | CollectionProfileCollectionSourceV6 {
+): CollectionProfileCollectionSource {
   const projected = {
     ...collection,
     games: collection.games.map(projectPublicGame),
   };
-  return collection.schemaVersion === 5
-    ? CollectionProfileCollectionSourceSchema.parse(projected)
-    : CollectionProfileCollectionSourceV6Schema.parse(projected);
+  return CollectionProfileCollectionSourceSchema.parse(projected);
 }
 
-export interface DormantGameDetailSnapshot {
+export interface GameDetailSnapshot {
   collectionRevision: number;
   game: GameDetailGame;
-  collection: CollectionProfileCollectionSourceV6;
+  collection: CollectionProfileCollectionSource;
 }
 
-export function createDormantGameDetailSnapshot(
-  collection: CollectionV6,
+export function createGameDetailSnapshot(
+  collection: Collection,
   gameId: string,
-): DormantGameDetailSnapshot {
+): GameDetailSnapshot {
   const game = collection.games.find(({ id }) => id === gameId);
   if (game === undefined) throw new Error(`Game not found: ${gameId}`);
   return {
@@ -169,18 +158,18 @@ export function createDormantGameDetailSnapshot(
   };
 }
 
-export interface DormantGameDetailSnapshotService {
-  capture(gameId: string): Promise<DormantGameDetailSnapshot>;
+export interface GameDetailSnapshotService {
+  capture(gameId: string): Promise<GameDetailSnapshot>;
 }
 
-export function createDormantGameDetailSnapshotService(collectionReader: {
-  loadCollection(): Promise<CollectionV6>;
-}): DormantGameDetailSnapshotService {
+export function createGameDetailSnapshotService(collectionReader: {
+  loadCollection(): Promise<Collection>;
+}): GameDetailSnapshotService {
   const coordinator = profileSourceCoordinatorFor(collectionReader);
   return {
     capture(gameId) {
       return coordinator.runExclusive(async () =>
-        createDormantGameDetailSnapshot(await collectionReader.loadCollection(), gameId),
+        createGameDetailSnapshot(await collectionReader.loadCollection(), gameId),
       );
     },
   };

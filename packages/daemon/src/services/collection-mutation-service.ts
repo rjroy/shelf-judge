@@ -32,7 +32,7 @@ export interface CollectionRevisionStrategy<Source = Collection> {
   advance(collection: Source, current: Source): Source;
 }
 
-export const schemaV4RevisionStrategy: CollectionRevisionStrategy<CollectionProfileCollectionSource> =
+export const collectionRevisionStrategy: CollectionRevisionStrategy<CollectionProfileCollectionSource> =
   {
     identity(collection) {
       return {
@@ -89,7 +89,7 @@ export function createCollectionMutationService(
 ): CollectionMutationService {
   const existing = coordinators.get(deps.storageService);
   if (existing) return existing;
-  const revisionStrategy = deps.revisionStrategy ?? schemaV4RevisionStrategy;
+  const revisionStrategy = deps.revisionStrategy ?? collectionRevisionStrategy;
   const logger = deps.logger ?? createLogger("collection-mutation");
   const profileSourceCoordinator = profileSourceCoordinatorFor(deps.storageService);
   let operations: Promise<void> = Promise.resolve();

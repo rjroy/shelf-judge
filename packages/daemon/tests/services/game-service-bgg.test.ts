@@ -12,7 +12,7 @@ import type { BggClient } from "../../src/services/bgg-client.js";
 import type { MockFileOps } from "../helpers/mock-file-ops.js";
 import { parseThingItems } from "../../src/services/bgg-xml-parser.js";
 import type { BggGameResult } from "../../src/services/bgg-client.js";
-import { GameSchema, type BggSearchResult, type Collection } from "@shelf-judge/shared";
+import { DurableGameSchema, type BggSearchResult, type Collection } from "@shelf-judge/shared";
 import { collectionMutationServiceFor } from "../../src/services/collection-mutation-service.js";
 import {
   createIntentionService,
@@ -344,9 +344,9 @@ describe("GameService BGG Integration", () => {
         source: "bgg-collection",
         observedAt,
       });
-      expect(GameSchema.safeParse((await storageService.loadCollection()).games[0]).success).toBe(
-        true,
-      );
+      expect(
+        DurableGameSchema.safeParse((await storageService.loadCollection()).games[0]).success,
+      ).toBe(true);
       expect((await service.refreshBggData(game.id)).game).toMatchObject({
         numPlays: 7,
         playCountEvidence: { status: "valid", value: 7, observedAt: correctedAt },
@@ -373,7 +373,7 @@ describe("GameService BGG Integration", () => {
         state: "unusable",
         buckets: unsafe.suggestedPlayerPoll?.buckets,
       });
-      expect(GameSchema.safeParse(game).success).toBe(true);
+      expect(DurableGameSchema.safeParse(game).success).toBe(true);
     });
   });
 
@@ -810,7 +810,10 @@ describe("GameService BGG Integration", () => {
       expect(refreshed.entityMetadata.mechanic.entities).toEqual([
         { id: 266192, name: "Mechanic 266192" },
       ]);
-      expect(persisted).toEqual(refreshed);
+      expect(persisted).toEqual({
+        ...refreshed,
+        ownerNote: { state: "missing", version: 0, updatedAt: null },
+      });
     });
 
     test("persists valid thing metadata without ambiguous secondary play evidence", async () => {
@@ -864,7 +867,10 @@ describe("GameService BGG Integration", () => {
           ({ refreshFailure }) => refreshFailure === null,
         ),
       ).toBe(true);
-      expect(persisted).toEqual(refreshed);
+      expect(persisted).toEqual({
+        ...refreshed,
+        ownerNote: { state: "missing", version: 0, updatedAt: null },
+      });
       const collectionOutcome = clientLogs.find(
         ([message]) => message === "collection fetch outcome",
       )?.[1];
@@ -1196,9 +1202,9 @@ describe("GameService BGG Integration", () => {
         source: "bgg-collection",
         observedAt,
       });
-      expect(GameSchema.safeParse((await storageService.loadCollection()).games[0]).success).toBe(
-        true,
-      );
+      expect(
+        DurableGameSchema.safeParse((await storageService.loadCollection()).games[0]).success,
+      ).toBe(true);
       expect((await service.refreshBggData(game.id)).game).toMatchObject({
         numPlays: 9,
         playCountEvidence: { status: "valid", value: 9, observedAt: correctedAt },
@@ -1601,7 +1607,7 @@ describe("GameService BGG Integration", () => {
         state: "unusable",
         buckets: unsafe.suggestedPlayerPoll?.buckets,
       });
-      expect(GameSchema.safeParse(refreshed).success).toBe(true);
+      expect(DurableGameSchema.safeParse(refreshed).success).toBe(true);
     });
 
     test("does not change old poll evidence when refresh fails", async () => {
@@ -2413,7 +2419,7 @@ describe("GameService BGG Integration", () => {
         source: "bgg-collection",
         observedAt,
       });
-      expect(GameSchema.safeParse(imported).success).toBe(true);
+      expect(DurableGameSchema.safeParse(imported).success).toBe(true);
       expect((await service.refreshBggData(imported.id)).game).toMatchObject({
         numPlays: 11,
         playCountEvidence: { status: "valid", value: 11, observedAt: correctedAt },
@@ -2444,7 +2450,7 @@ describe("GameService BGG Integration", () => {
         state: "unusable",
         buckets: unsafe.suggestedPlayerPoll?.buckets,
       });
-      expect(GameSchema.safeParse(imported).success).toBe(true);
+      expect(DurableGameSchema.safeParse(imported).success).toBe(true);
     });
 
     test("uses complete secondary plays and retains initial plays for absent or partial responses", async () => {

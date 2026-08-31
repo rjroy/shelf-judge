@@ -717,6 +717,7 @@ describe("current persisted collection validation", () => {
           ownership: "owned",
           boxDimensions: null,
           manualShelfId: null,
+          ownerNote: { state: "missing", version: 0, updatedAt: null },
           ratings: {},
           createdAt: timestamp,
           updatedAt: timestamp,
@@ -807,7 +808,7 @@ describe("current persisted collection validation", () => {
   });
 
   test("rejects future versions and extra persisted fields", () => {
-    expect(CollectionSchema.safeParse({ ...currentCollection, schemaVersion: 6 }).success).toBe(
+    expect(CollectionSchema.safeParse({ ...currentCollection, schemaVersion: 7 }).success).toBe(
       false,
     );
     expect(CollectionSchema.safeParse({ ...currentCollection, unexpected: true }).success).toBe(

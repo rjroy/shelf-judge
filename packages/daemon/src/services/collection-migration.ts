@@ -3,6 +3,7 @@ import {
   CollectionSchema,
   CollectionSchemaV3,
   CollectionSchemaV4,
+  CollectionSchemaV5,
   createInitialEntityMetadata,
   isUsableSuggestedPlayerPoll,
   type Axis,
@@ -686,6 +687,22 @@ function migrateVersionFourToFive(raw: unknown): CollectionMigrationStepResult {
   };
 }
 
+function migrateVersionFiveToSix(raw: unknown): CollectionMigrationStepResult {
+  const historical = CollectionSchemaV5.parse(raw);
+  return {
+    data: {
+      ...historical,
+      schemaVersion: 6,
+      games: historical.games.map((game) => ({
+        ...game,
+        ownerNote: { state: "missing" as const, version: 0 as const, updatedAt: null },
+      })),
+    },
+    convertedAxisCount: 0,
+    disabledAxisCount: 0,
+  };
+}
+
 export const COLLECTION_MIGRATION_STEPS: readonly CollectionMigrationStep[] = [
   {
     fromVersion: 0,
@@ -711,6 +728,11 @@ export const COLLECTION_MIGRATION_STEPS: readonly CollectionMigrationStep[] = [
     fromVersion: 4,
     toVersion: 5,
     migrate: migrateVersionFourToFive,
+  },
+  {
+    fromVersion: 5,
+    toVersion: 6,
+    migrate: migrateVersionFiveToSix,
   },
 ];
 

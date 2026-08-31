@@ -8,8 +8,8 @@ import type {
   TournamentNextPairResponse,
 } from "@shelf-judge/shared";
 import {
-  createDormantGameDetailSnapshot,
-  createDormantGameDetailSnapshotService,
+  createGameDetailSnapshot,
+  createGameDetailSnapshotService,
   projectAddGameResult,
   projectGameDetailResponse,
   projectGameList,
@@ -99,7 +99,6 @@ describe("game projections", () => {
       projectPublicGame(durableGame),
       projectAddGameResult({ ...added, game: durableGame }),
       projectGameList([{ ...listEntry, game: durableGame }]),
-      projectGameDetailResponse({ ...detail, game: durableGame }),
       projectPublicGameMutation(durableGame),
       projectPlayEvidenceMutation({ game: durableGame, linkedIntentionTransition: null }),
       projectManualPlayCorrection({
@@ -117,6 +116,9 @@ describe("game projections", () => {
       expect(serialized).not.toContain("ownerNote");
       expect(serialized).not.toContain(SENTINEL);
     }
+    expect(JSON.stringify(projectGameDetailResponse({ ...detail, game: durableGame }))).toContain(
+      SENTINEL,
+    );
   });
 
   test("keeps Profile source and identity unchanged across note-only differences", async () => {
@@ -185,7 +187,7 @@ describe("game projections", () => {
       ],
     };
 
-    const snapshot = createDormantGameDetailSnapshot(durable, game.id);
+    const snapshot = createGameDetailSnapshot(durable, game.id);
 
     expect(snapshot.collectionRevision).toBe(collection.revision);
     expect(snapshot.game.ownerNote).toEqual(durable.games[0]?.ownerNote);
@@ -193,7 +195,7 @@ describe("game projections", () => {
     expect(JSON.stringify(snapshot.collection)).not.toContain(SENTINEL);
   });
 
-  test("captures dormant detail snapshots through the collection mutation coordinator", async () => {
+  test("captures detail snapshots through the collection mutation coordinator", async () => {
     const context = createTestApp();
     const game = (await context.gameService.addGame({ name: "Serialized Detail" })).game;
     const collection = await context.storageService.loadCollection();
@@ -214,7 +216,7 @@ describe("game projections", () => {
         return Promise.resolve(durable);
       },
     };
-    const service = createDormantGameDetailSnapshotService(reader);
+    const service = createGameDetailSnapshotService(reader);
     let releaseMutation!: () => void;
     const mutationBlocked = new Promise<void>((resolve) => {
       releaseMutation = resolve;

@@ -203,8 +203,10 @@ describe("prediction routes", () => {
       const actualDetail = (await (
         await jsonRequest(ctx.app, "GET", `/api/games/${targetGame.id}?includePredicted=false`)
       ).json()) as GameDetailWithPurchaseUtilization;
+      const { ownerNote, ...publicPredictedGame } = predictedDetail.game;
+      void ownerNote;
       const sharedPredictedDetail: GameWithPurchaseUtilization = {
-        game: predictedDetail.game,
+        game: publicPredictedGame,
         score: predictedDetail.score,
         bggDataStale: predictedDetail.bggDataStale,
         nichePosition: predictedDetail.nichePosition,

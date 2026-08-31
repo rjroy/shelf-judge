@@ -7,6 +7,7 @@ import {
   CodedAxisValidationError,
   toErrorMessage,
   type Game,
+  type DurableGame,
   type OwnershipStatus,
   type AddGameInput,
   type Axis,
@@ -17,6 +18,7 @@ import {
   type BoxDimensions,
   type Collection,
   type TournamentData,
+  type CollectionProfileCollectionSource,
   type BggRequestObservation,
   type FieldEvidence,
   type PlayerRangeEvidence,
@@ -69,6 +71,10 @@ export interface GameService {
   addGame(input: AddGameInput): Promise<AddGameResult>;
   getGame(id: string): Promise<GameWithScore>;
   listGames(): Promise<GameWithScore[]>;
+  listGamesFromSnapshot?(
+    collection: CollectionProfileCollectionSource,
+    tournamentData: TournamentData,
+  ): GameWithScore[];
   rateGame(id: string, ratings: Record<string, number | null>): Promise<GameWithScore>;
   removeGame(id: string): Promise<void>;
   searchGames(query: string): Promise<BggSearchResult[]>;
@@ -423,7 +429,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
           : null;
       const partialRange =
         initialRange === null && (parsed.minPlayers !== null || parsed.maxPlayers !== null);
-      const game: Game = {
+      const game: DurableGame = {
         id: uuidv4(),
         bggId: parsed.bggId ?? null,
         additionalBggIds: [],
@@ -498,6 +504,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
         ratings: {},
         createdAt,
         updatedAt: createdAt,
+        ownerNote: { state: "missing", version: 0, updatedAt: null },
       };
 
       // Fetch BGG data if bggId is provided and client is available
@@ -574,6 +581,22 @@ export function createGameService(deps: GameServiceDeps): GameService {
         return 0;
       });
 
+      return results;
+    },
+
+    listGamesFromSnapshot(collection, tournamentData): GameWithScore[] {
+      const results = collection.games.map((game) => ({
+        game,
+        score: computeScore(game, collection.axes, tournamentData),
+        bggDataStale: isBggDataStale(game),
+      }));
+      results.sort((left, right) => {
+        if (left.score !== null && right.score !== null)
+          return right.score.score - left.score.score;
+        if (left.score !== null) return -1;
+        if (right.score !== null) return 1;
+        return 0;
+      });
       return results;
     },
 
@@ -973,7 +996,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
       const successGenerationsAtStart = new Map(successGenerations);
       const collection = await storageService.loadCollection();
       const bggGames = collection.games.filter(
-        (game): game is Game & { bggId: number } => game.bggId !== null,
+        (game): game is DurableGame & { bggId: number } => game.bggId !== null,
       );
       const requestedGames = new Map(
         bggGames.map((game) => [
@@ -1195,7 +1218,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
       let imported = 0;
       let skipped = 0;
       const errors: string[] = [];
-      const candidates: Game[] = [];
+      const candidates: DurableGame[] = [];
       const total = collectionItems.length;
 
       const newItems = collectionItems.filter((item) => !existingBggIds.has(item.bggId));
@@ -1290,7 +1313,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
                           },
                         };
               const bestPlayerCount = strictSafeBestPlayerCount(result.bggData.bestPlayerCount);
-              const game: Game = {
+              const game: DurableGame = {
                 id: uuidv4(),
                 bggId,
                 additionalBggIds: [],
@@ -1344,6 +1367,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
                 ratings: {},
                 createdAt,
                 updatedAt: createdAt,
+                ownerNote: { state: "missing", version: 0, updatedAt: null },
               };
 
               candidates.push(game);
@@ -1398,14 +1422,14 @@ export function createGameService(deps: GameServiceDeps): GameService {
           (latest) => {
             const existingIds = new Set(
               latest.games
-                .filter((game): game is Game & { bggId: number } => game.bggId !== null)
+                .filter((game): game is DurableGame & { bggId: number } => game.bggId !== null)
                 .map((game) => game.bggId),
             );
-            const accepted: Array<Game & { bggId: number }> = [];
+            const accepted: Array<DurableGame & { bggId: number }> = [];
             for (const game of candidates) {
               if (game.bggId === null || existingIds.has(game.bggId)) continue;
               existingIds.add(game.bggId);
-              accepted.push(game as Game & { bggId: number });
+              accepted.push(game as DurableGame & { bggId: number });
             }
             if (accepted.length === 0) return { changed: false, value: 0 };
             latest.games.push(...accepted.map((game) => structuredClone(game)));

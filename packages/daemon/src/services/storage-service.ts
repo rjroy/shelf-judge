@@ -144,7 +144,10 @@ function storedInvalidEvidence(value: unknown, present: boolean): InvalidEvidenc
 export function decodeStoredCollection(raw: unknown, logger: Logger): StoredCollectionDecodeResult {
   if (
     !isRecord(raw) ||
-    (raw.schemaVersion !== 3 && raw.schemaVersion !== 4 && raw.schemaVersion !== 5)
+    (raw.schemaVersion !== 3 &&
+      raw.schemaVersion !== 4 &&
+      raw.schemaVersion !== 5 &&
+      raw.schemaVersion !== CURRENT_COLLECTION_SCHEMA_VERSION)
   ) {
     return { data: raw, normalized: false };
   }
@@ -370,7 +373,8 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
         logger.log(
           `collection migration checked sourceVersion=${migration.sourceVersion} targetVersion=${CURRENT_COLLECTION_SCHEMA_VERSION} axes=${migration.data.axes.length} games=${migration.data.games.length} converted=${migration.convertedAxisCount} disabled=${migration.disabledAxisCount}`,
         );
-        const normalizedCurrent = decoded.normalized && migration.sourceVersion === 5;
+        const normalizedCurrent =
+          decoded.normalized && migration.sourceVersion === CURRENT_COLLECTION_SCHEMA_VERSION;
         const candidate = normalizedCurrent
           ? {
               ...migration.data,

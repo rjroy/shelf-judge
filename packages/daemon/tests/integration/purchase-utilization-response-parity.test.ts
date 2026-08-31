@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { Collection, Game, GameWithPurchaseUtilization } from "@shelf-judge/shared";
+import type { Collection, DurableGame, GameWithPurchaseUtilization } from "@shelf-judge/shared";
 import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import {
   canonicalUtilizationCases,
@@ -23,7 +23,7 @@ const expectedLabels = [
 describe("canonical purchase utilization response parity", () => {
   test("assembles every canonical case through the daemon HTTP boundary", async () => {
     const context = createTestApp();
-    const games: Game[] = canonicalUtilizationCases.map((fixture) => ({
+    const games: DurableGame[] = canonicalUtilizationCases.map((fixture) => ({
       id: fixture.id,
       bggId: null,
       entityMetadata: createInitialEntityMetadata(null),
@@ -53,12 +53,13 @@ describe("canonical purchase utilization response parity", () => {
       ownership: "owned",
       boxDimensions: null,
       manualShelfId: null,
+      ownerNote: { state: "missing", version: 0, updatedAt: null },
       ratings: { "parity-axis": fixture.id === "vetoed" ? 1 : 6 },
       createdAt: UTILIZATION_OBSERVED_AT,
       updatedAt: UTILIZATION_OBSERVED_AT,
     }));
     const collection: Collection = {
-      schemaVersion: 5,
+      schemaVersion: 6,
       revision: 0,
       id: "parity-collection",
       name: "Parity",

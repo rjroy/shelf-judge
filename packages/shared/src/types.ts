@@ -259,7 +259,7 @@ export interface DisabledLegacyAxis extends Omit<AxisBase, "enabled"> {
 export type Axis = PersonalAxis | TournamentAxis | DerivedAxis | DisabledLegacyAxis;
 export type AxisSource = Axis["source"];
 export type EnabledAxis = PersonalAxis | TournamentAxis | DerivedAxis;
-export interface Collection {
+export interface CollectionV5 {
   schemaVersion: 5;
   revision: number;
   id: string;
@@ -274,13 +274,15 @@ export interface Collection {
 }
 
 export interface CollectionV6 extends Omit<
-  Collection,
+  CollectionV5,
   "schemaVersion" | "games" | "commandReceipts"
 > {
   schemaVersion: 6;
   games: DurableGame[];
   commandReceipts: CommandReceipt[];
 }
+
+export type Collection = CollectionV6;
 
 // Fitness score types from .lore/designs/mvp-fitness-model.md
 
@@ -809,7 +811,9 @@ export interface OwnershipMutationResult {
 
 export type CollectionProfileGameSource = Game;
 
-export type CollectionProfileCollectionSource = Collection;
+export interface CollectionProfileCollectionSource extends Omit<Collection, "games"> {
+  games: Game[];
+}
 
 export type CreateIntentionCommand = {
   type: "create";
@@ -1065,20 +1069,17 @@ export interface GameIntentionDetail {
   resolvedHistory: ResolvedPlayIntentionHistory;
 }
 
-export interface GameDetailWithPurchaseUtilization extends GameWithPurchaseUtilization {
-  intentions: GameIntentionDetail;
-}
-
-export interface OwnerGameNoteDetailWithPurchaseUtilization extends Omit<
-  GameDetailWithPurchaseUtilization,
+export interface GameDetailWithPurchaseUtilization extends Omit<
+  GameWithPurchaseUtilization,
   "game"
 > {
   game: GameDetailGame;
+  intentions: GameIntentionDetail;
 }
 
-export interface CollectionProfileCollectionSourceV6 extends Omit<CollectionV6, "games"> {
-  games: Game[];
-}
+export type OwnerGameNoteDetailWithPurchaseUtilization = GameDetailWithPurchaseUtilization;
+
+export type CollectionProfileCollectionSourceV6 = CollectionProfileCollectionSource;
 
 export interface CollectionProfile {
   status: "available";
@@ -1105,7 +1106,7 @@ export type CollectionProfileResult = CollectionProfile | CollectionProfileUnava
 
 export interface ProfileSourceIdentity {
   collectionId: string;
-  collectionSchemaVersion: 5;
+  collectionSchemaVersion: 6;
   collectionRevision: number;
   tournamentHash: string;
   predictionSettingsHash: string;

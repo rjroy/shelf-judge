@@ -87,7 +87,7 @@ function futureSourceCollection(
   commandReceipts: unknown[] = [],
 ) {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     id: "collection",
     name: "Collection",
     axes: [],

@@ -3,7 +3,6 @@ import { Hono } from "hono";
 import { createGameRoutes } from "../src/routes/games";
 import { createPredictionRoutes } from "../src/routes/prediction";
 import type {
-  Game,
   GameWithScore,
   GameWithPurchaseUtilization,
   FitnessResult,
@@ -12,6 +11,7 @@ import type {
   NicheSettings,
   Collection,
   PredictedGameResponse,
+  DurableGame,
 } from "@shelf-judge/shared";
 import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import type { GameService } from "../src/services/game-service";
@@ -50,9 +50,9 @@ function makeGame(
   id: string,
   name: string,
   bggData: BggGameData | null,
-  overrides: Partial<Game> = {},
-): Game {
-  const game: Game = {
+  overrides: Partial<DurableGame> = {},
+): DurableGame {
+  const game: DurableGame = {
     id,
     bggId: bggData ? 12345 : null,
     entityMetadata: createInitialEntityMetadata(bggData ? 12345 : null),
@@ -82,6 +82,7 @@ function makeGame(
     ownership: "owned",
     boxDimensions: null,
     manualShelfId: null,
+    ownerNote: { state: "missing", version: 0, updatedAt: null },
     ratings: {},
     createdAt: now,
     updatedAt: now,
@@ -146,7 +147,7 @@ const allGamesWithScores: GameWithScore[] = [
 ];
 
 const defaultCollection: Collection = {
-  schemaVersion: 5,
+  schemaVersion: 6,
   revision: 0,
   id: "collection-1",
   name: "Test",
@@ -228,12 +229,15 @@ function createMockGameService(): Partial<GameService> {
       return Promise.resolve(structuredClone(gws));
     },
     listGames: () => Promise.resolve(structuredClone(allGamesWithScores)),
+    listGamesFromSnapshot: () => structuredClone(allGamesWithScores),
   };
 }
 
 function createMockPredictionService(): Partial<PredictionService> {
   return {
     listGamesWithPredictions: () => Promise.resolve(structuredClone(allGamesWithScores)),
+    listGamesWithPredictionsFromSnapshot: () =>
+      Promise.resolve(structuredClone(allGamesWithScores)),
     predictBggGame: () => {
       // Return a candidate sharing the same mechanics (high similarity)
       const candidateGame = makeGame(

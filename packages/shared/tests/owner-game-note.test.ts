@@ -305,7 +305,7 @@ describe("owner note receipt and collection contracts", () => {
     ).toBe(false);
   });
 
-  test("freezes v5 while defining strict future v6 storage and Profile source contracts", () => {
+  test("freezes v5 while activating strict v6 storage and Profile source contracts", () => {
     const baseCollection = {
       schemaVersion: 5 as const,
       revision: 1,
@@ -321,14 +321,14 @@ describe("owner note receipt and collection contracts", () => {
     };
     expect(CollectionGameV5Schema.safeParse(canonicalPublicGame).success).toBe(true);
     expect(CollectionSchemaV5.safeParse(baseCollection).success).toBe(true);
-    expect(CollectionSchema.safeParse(baseCollection).success).toBe(true);
+    expect(CollectionSchema.safeParse(baseCollection).success).toBe(false);
     expect(
       CollectionSchema.safeParse({
         ...baseCollection,
         schemaVersion: 6,
         games: [{ ...canonicalPublicGame, ownerNote: missingOwnerNote }],
       }).success,
-    ).toBe(false);
+    ).toBe(true);
 
     const v6 = {
       ...baseCollection,

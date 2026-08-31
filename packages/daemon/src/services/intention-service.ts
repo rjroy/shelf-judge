@@ -10,6 +10,7 @@ import {
   type ManualPlayCorrectionResult,
   type PlayIntention,
   type GameIntentionDetail,
+  type IntentionCommandReceipt,
   GameIntentionDetailSchema,
 } from "@shelf-judge/shared";
 import type { CollectionMutationService } from "./collection-mutation-service.js";
@@ -21,6 +22,11 @@ export interface IntentionService {
   execute(command: unknown): Promise<IntentionMutationResult>;
   setPlayCount(gameId: string, playCount: number): Promise<ManualPlayCorrectionResult>;
   getGameDetail(gameId: string, gameName: string): Promise<GameIntentionDetail>;
+  getGameDetailFromCollection?(
+    collection: Pick<Collection, "intentions">,
+    gameId: string,
+    gameName: string,
+  ): GameIntentionDetail;
 }
 
 export interface IntentionServiceDeps {
@@ -150,33 +156,41 @@ export function createIntentionService(deps: IntentionServiceDeps): IntentionSer
   const createId = deps.createId ?? uuidv4;
   const logger = deps.logger ?? createLogger("intention");
 
+  function getGameDetailFromCollection(
+    collection: Pick<Collection, "intentions">,
+    gameId: string,
+    gameName: string,
+  ): GameIntentionDetail {
+    const matching = collection.intentions.filter((intention) => intention.gameId === gameId);
+    const activeIntention = matching.find(({ resolution }) => resolution === null) ?? null;
+    const resolvedHistory = matching
+      .filter(
+        (
+          intention,
+        ): intention is PlayIntention & {
+          resolution: NonNullable<PlayIntention["resolution"]>;
+        } => intention.resolution !== null,
+      )
+      .map((intention) => ({ ...structuredClone(intention), gameName }))
+      .sort(
+        (left, right) =>
+          Date.parse(right.resolution.resolvedAt) - Date.parse(left.resolution.resolvedAt) ||
+          (left.intentionId < right.intentionId
+            ? -1
+            : left.intentionId > right.intentionId
+              ? 1
+              : 0),
+      );
+    return GameIntentionDetailSchema.parse({ activeIntention, resolvedHistory });
+  }
+
   async function getGameDetail(gameId: string, gameName: string): Promise<GameIntentionDetail> {
     const { value } = await deps.collectionMutationService.mutate(
       { operation: "game.intention.detail", trigger: "game-detail-read", gameIds: [gameId] },
       (collection) => {
-        const matching = collection.intentions.filter((intention) => intention.gameId === gameId);
-        const activeIntention = matching.find(({ resolution }) => resolution === null) ?? null;
-        const resolvedHistory = matching
-          .filter(
-            (
-              intention,
-            ): intention is PlayIntention & {
-              resolution: NonNullable<PlayIntention["resolution"]>;
-            } => intention.resolution !== null,
-          )
-          .map((intention) => ({ ...structuredClone(intention), gameName }))
-          .sort(
-            (left, right) =>
-              Date.parse(right.resolution.resolvedAt) - Date.parse(left.resolution.resolvedAt) ||
-              (left.intentionId < right.intentionId
-                ? -1
-                : left.intentionId > right.intentionId
-                  ? 1
-                  : 0),
-          );
         return {
           changed: false,
-          value: GameIntentionDetailSchema.parse({ activeIntention, resolvedHistory }),
+          value: getGameDetailFromCollection(collection, gameId, gameName),
         };
       },
     );
@@ -223,9 +237,13 @@ export function createIntentionService(deps: IntentionServiceDeps): IntentionSer
           const existingReceipt = collection.commandReceipts.find(
             (receipt) => receipt.commandId === command.commandId,
           );
+          const existingIntentionReceipt: IntentionCommandReceipt | undefined =
+            existingReceipt !== undefined && "request" in existingReceipt
+              ? existingReceipt
+              : undefined;
           const targetIntention =
             command.type === "create"
-              ? existingReceipt === undefined
+              ? existingIntentionReceipt === undefined
                 ? collection.intentions.find(
                     (candidate) =>
                       candidate.gameId === command.gameId && candidate.resolution === null,
@@ -233,7 +251,8 @@ export function createIntentionService(deps: IntentionServiceDeps): IntentionSer
                 : collection.intentions.find(
                     (candidate) =>
                       candidate.gameId === command.gameId &&
-                      candidate.intentionId === existingReceipt.result.intention.intentionId,
+                      candidate.intentionId ===
+                        existingIntentionReceipt.result.intention.intentionId,
                   )
               : collection.intentions.find(
                   (candidate) =>
@@ -258,11 +277,21 @@ export function createIntentionService(deps: IntentionServiceDeps): IntentionSer
             ...commandContext,
           });
           if (existingReceipt !== undefined) {
+            if (existingIntentionReceipt === undefined) {
+              return {
+                changed: false,
+                value: {
+                  ok: false,
+                  commandId: command.commandId,
+                  error: { code: "command-reuse", commandId: command.commandId },
+                } satisfies IntentionMutationResult,
+              };
+            }
             const samePayload =
-              canonicalCommand(existingReceipt.request) === canonicalCommand(command);
+              canonicalCommand(existingIntentionReceipt.request) === canonicalCommand(command);
             replayed = samePayload;
             const result: IntentionMutationResult = samePayload
-              ? structuredClone(existingReceipt.result)
+              ? structuredClone(existingIntentionReceipt.result)
               : {
                   ok: false,
                   commandId: command.commandId,
@@ -598,5 +627,5 @@ export function createIntentionService(deps: IntentionServiceDeps): IntentionSer
     }
   }
 
-  return { execute, setPlayCount, getGameDetail };
+  return { execute, setPlayCount, getGameDetail, getGameDetailFromCollection };
 }
