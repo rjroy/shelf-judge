@@ -11,6 +11,7 @@ import {
   type PlayIntention,
   type GameIntentionDetail,
   type IntentionCommandReceipt,
+  type CommandReceipt,
   GameIntentionDetailSchema,
 } from "@shelf-judge/shared";
 import type { CollectionMutationService } from "./collection-mutation-service.js";
@@ -151,6 +152,10 @@ function canonicalCommand(command: IntentionCommand): string {
   });
 }
 
+function isIntentionCommandReceipt(receipt: CommandReceipt): receipt is IntentionCommandReceipt {
+  return !("receiptType" in receipt);
+}
+
 export function createIntentionService(deps: IntentionServiceDeps): IntentionService {
   const now = deps.now ?? (() => new Date().toISOString());
   const createId = deps.createId ?? uuidv4;
@@ -238,7 +243,7 @@ export function createIntentionService(deps: IntentionServiceDeps): IntentionSer
             (receipt) => receipt.commandId === command.commandId,
           );
           const existingIntentionReceipt: IntentionCommandReceipt | undefined =
-            existingReceipt !== undefined && "request" in existingReceipt
+            existingReceipt !== undefined && isIntentionCommandReceipt(existingReceipt)
               ? existingReceipt
               : undefined;
           const targetIntention =

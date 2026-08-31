@@ -255,6 +255,37 @@ describe("CollectionMutationService", () => {
     expect(ctx.stored()).toEqual(collection());
   });
 
+  test("runs pre-persistence work after validation and compensates its failure without saving", async () => {
+    const ctx = controlledStorage();
+    const service = createCollectionMutationService({ storageService: ctx.storage });
+    const events: string[] = [];
+
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+    await expect(
+      service.mutate({ operation: "game.note.set", trigger: "owner" }, (candidate) => {
+        candidate.name = "candidate";
+        return {
+          changed: true,
+          value: undefined,
+          beforePersistence() {
+            events.push("invalidate");
+            throw new Error("invalidation unavailable");
+          },
+          onPersistenceFailure(error) {
+            events.push(`compensate:${String(error)}`);
+          },
+          onPersistenceSuccess() {
+            events.push("complete");
+          },
+        };
+      }),
+    ).rejects.toThrow("invalidation unavailable");
+
+    expect(events).toEqual(["invalidate", "compensate:Error: invalidation unavailable"]);
+    expect(ctx.saveCount()).toBe(0);
+    expect(ctx.stored()).toEqual(collection());
+  });
+
   test("propagates post-commit failure after durable persistence and releases the queue", async () => {
     const ctx = controlledStorage();
     const service = createCollectionMutationService({ storageService: ctx.storage });

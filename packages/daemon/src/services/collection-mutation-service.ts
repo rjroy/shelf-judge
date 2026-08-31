@@ -18,6 +18,7 @@ export type CollectionMutationDecision<Value> =
   | {
       changed: true;
       value: Value;
+      beforePersistence?: () => Promise<void> | void;
       onPersistenceFailure?: (error: unknown) => Promise<void> | void;
       onPersistenceSuccess?: () => Promise<void> | void;
     }
@@ -191,6 +192,21 @@ export function createCollectionMutationService(
         }
 
         const after = revisionStrategy.identity(accepted);
+        if (decision.beforePersistence) {
+          logger.log("collection mutation pre-persistence attempt", { ...fields, after });
+          try {
+            await decision.beforePersistence();
+            logger.log("collection mutation pre-persistence completed", { ...fields, after });
+          } catch (error) {
+            logger.error("collection mutation pre-persistence failed", {
+              ...fields,
+              after,
+              outcome: "pre-persistence-failed",
+            });
+            await compensate({ ...fields, after }, decision.onPersistenceFailure, error);
+            throw error;
+          }
+        }
         logger.log("collection mutation persistence attempt", { ...fields, after });
         try {
           await deps.storageService.saveCollection(accepted);
