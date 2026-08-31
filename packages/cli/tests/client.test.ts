@@ -125,3 +125,234 @@ describe("daemon profile client", () => {
     );
   });
 });
+
+describe("daemon SSE client transport ownership", () => {
+  test("validates each event before publication", async () => {
+    const published: unknown[] = [];
+    const client = createDaemonClient({
+      socketPath: "/tmp/shelf-judge-test.sock",
+      fetchFn: Object.assign(
+        () =>
+          Promise.resolve(
+            new Response('event: public\ndata: {"safe":true,"private":"leak"}\n\n', {
+              headers: { "Content-Type": "text/event-stream" },
+            }),
+          ),
+        { preconnect: fetch.preconnect },
+      ),
+    });
+
+    expect(
+      await rejectionMessage(() =>
+        client.postSSE("/api/stream", {}, (event) => published.push(event), {
+          validateEvent(event) {
+            const payload = JSON.parse(event.data) as Record<string, unknown>;
+            if (Object.keys(payload).some((field) => field !== "safe")) {
+              throw new Error("Invalid public daemon event");
+            }
+          },
+        }),
+      ),
+    ).toBe("Invalid public daemon event");
+    expect(published).toEqual([]);
+  });
+
+  test("does not expose daemon error bodies", async () => {
+    const client = createDaemonClient({
+      socketPath: "/tmp/shelf-judge-test.sock",
+      fetchFn: Object.assign(
+        () => Promise.resolve(new Response('{"error":"owner secret"}', { status: 500 })),
+        { preconnect: fetch.preconnect },
+      ),
+    });
+    expect(await rejectionMessage(() => client.postSSE("/api/stream", {}, () => undefined))).toBe(
+      "Daemon SSE request failed with status 500",
+    );
+  });
+
+  test("passes the caller abort signal through the streaming fetch", async () => {
+    const controller = new AbortController();
+    let capturedSignal: AbortSignal | null | undefined;
+    const fetchRequest: typeof fetch = Object.assign(
+      (_input: string | URL | Request, init?: RequestInit) => {
+        capturedSignal = init?.signal;
+        const body = new ReadableStream<Uint8Array>({
+          start(streamController) {
+            init?.signal?.addEventListener(
+              "abort",
+              () =>
+                streamController.error(new DOMException("The operation was aborted", "AbortError")),
+              { once: true },
+            );
+          },
+        });
+        return Promise.resolve(
+          new Response(body, { headers: { "Content-Type": "text/event-stream" } }),
+        );
+      },
+      { preconnect: fetch.preconnect },
+    );
+    const client = createDaemonClient({
+      socketPath: "/tmp/shelf-judge-test.sock",
+      fetchFn: fetchRequest,
+    });
+    const stream = client.postSSE("/api/stream", {}, () => undefined, {
+      signal: controller.signal,
+    });
+
+    while (capturedSignal === undefined) await Bun.sleep(1);
+    expect(capturedSignal).toBe(controller.signal);
+    controller.abort();
+    expect(await rejectionMessage(() => stream)).toContain("aborted");
+  });
+
+  test("cancels the response reader when event handling stops", async () => {
+    let cancelled = false;
+    const fetchRequest: typeof fetch = Object.assign(
+      () =>
+        Promise.resolve(
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode("event: progress\ndata: {}\n\n"));
+              },
+              cancel() {
+                cancelled = true;
+              },
+            }),
+            { headers: { "Content-Type": "text/event-stream" } },
+          ),
+        ),
+      { preconnect: fetch.preconnect },
+    );
+    const client = createDaemonClient({
+      socketPath: "/tmp/shelf-judge-test.sock",
+      fetchFn: fetchRequest,
+    });
+
+    expect(
+      await rejectionMessage(() =>
+        client.postSSE("/api/stream", {}, () => {
+          throw new Error("stop consuming");
+        }),
+      ),
+    ).toBe("stop consuming");
+    expect(cancelled).toBe(true);
+  });
+
+  test("preserves the event name when data arrives in a later stream chunk", async () => {
+    const events: Array<{ event: string; data: string }> = [];
+    const fetchRequest: typeof fetch = Object.assign(
+      () =>
+        Promise.resolve(
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                const encoder = new TextEncoder();
+                controller.enqueue(encoder.encode("event: progress\n"));
+                controller.enqueue(encoder.encode('data: {"sequence":1}\n\n'));
+                controller.close();
+              },
+            }),
+            { headers: { "Content-Type": "text/event-stream" } },
+          ),
+        ),
+      { preconnect: fetch.preconnect },
+    );
+    const client = createDaemonClient({
+      socketPath: "/tmp/shelf-judge-test.sock",
+      fetchFn: fetchRequest,
+    });
+
+    await client.postSSE("/api/stream", {}, (event) => events.push(event));
+
+    expect(events).toEqual([{ event: "progress", data: '{"sequence":1}' }]);
+  });
+
+  test("dispatches multiline CRLF data only at a blank event boundary", async () => {
+    const events: Array<{ event: string; data: string }> = [];
+    const encoder = new TextEncoder();
+    const chunks = [
+      ": keepalive\r\nevent: complete\r",
+      "\nid: 7\r\ndata: first line\r\ndata: second line\r\nretry: 1000\r\n",
+      "\r\n",
+    ];
+    const fetchRequest: typeof fetch = Object.assign(
+      () =>
+        Promise.resolve(
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+                controller.close();
+              },
+            }),
+            { headers: { "Content-Type": "text/event-stream" } },
+          ),
+        ),
+      { preconnect: fetch.preconnect },
+    );
+    const client = createDaemonClient({
+      socketPath: "/tmp/shelf-judge-test.sock",
+      fetchFn: fetchRequest,
+    });
+
+    await client.postSSE("/api/stream", {}, (event) => events.push(event), {
+      isTerminal: (event) => event.event === "complete",
+    });
+
+    expect(events).toEqual([{ event: "complete", data: "first line\nsecond line" }]);
+  });
+
+  test.each([
+    ["partial", "event: complete\ndata: unfinished"],
+    ["unterminated", "event: complete\ndata: unfinished\n"],
+    ["unframed", '{"type":"complete"}'],
+  ] as const)("rejects %s event data at EOF", async (_label, payload) => {
+    const events: Array<{ event: string; data: string }> = [];
+    const fetchRequest: typeof fetch = Object.assign(
+      () =>
+        Promise.resolve(
+          new Response(payload, { headers: { "Content-Type": "text/event-stream" } }),
+        ),
+      { preconnect: fetch.preconnect },
+    );
+    const client = createDaemonClient({
+      socketPath: "/tmp/shelf-judge-test.sock",
+      fetchFn: fetchRequest,
+    });
+
+    expect(
+      await rejectionMessage(() =>
+        client.postSSE("/api/stream", {}, (event) => events.push(event), {
+          isTerminal: (event) => event.event === "complete",
+        }),
+      ),
+    ).toContain("incomplete event frame");
+    expect(events).toEqual([]);
+  });
+
+  test("rejects a framed stream that ends without caller-defined terminal completion", async () => {
+    const fetchRequest: typeof fetch = Object.assign(
+      () =>
+        Promise.resolve(
+          new Response("event: progress\ndata: {}\n\n", {
+            headers: { "Content-Type": "text/event-stream" },
+          }),
+        ),
+      { preconnect: fetch.preconnect },
+    );
+    const client = createDaemonClient({
+      socketPath: "/tmp/shelf-judge-test.sock",
+      fetchFn: fetchRequest,
+    });
+
+    expect(
+      await rejectionMessage(() =>
+        client.postSSE("/api/stream", {}, () => undefined, {
+          isTerminal: (event) => event.event === "complete",
+        }),
+      ),
+    ).toContain("without a valid terminal completion event");
+  });
+});

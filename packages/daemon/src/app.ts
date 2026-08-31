@@ -9,6 +9,7 @@ import { createScoreRoutes } from "./routes/scores.js";
 import { createImportRoutes } from "./routes/import.js";
 import { createHelpRoutes } from "./routes/help.js";
 import { createConfigRoutes } from "./routes/config.js";
+import { createGroundedAnalysisRoutes } from "./routes/grounded-analysis.js";
 import { createShutdownRoutes } from "./routes/shutdown.js";
 import { createTournamentRoutes } from "./routes/tournament.js";
 import { createProfileRoutes } from "./routes/profile.js";
@@ -29,6 +30,15 @@ import { createPurchaseUtilizationService } from "./services/purchase-utilizatio
 import type { CollectionMutationService } from "./services/collection-mutation-service.js";
 import type { DisplayedFitnessService } from "./services/displayed-fitness-service.js";
 import type { IntentionService } from "./services/intention-service.js";
+import type { GroundedAnalysisProvider } from "./services/grounded-analysis/provider.js";
+import {
+  createGroundedAnalysisTransportController,
+  type GroundedAnalysisTransportController,
+} from "./services/grounded-analysis/transport-controller.js";
+import {
+  createGroundedFeatureAnalyzerRegistry,
+  type GroundedFeatureAnalyzer,
+} from "./services/grounded-analysis/feature-policy.js";
 
 export interface AppDeps {
   storageService: StorageService;
@@ -40,6 +50,8 @@ export interface AppDeps {
   predictionService: PredictionService;
   displayedFitnessService: DisplayedFitnessService;
   intentionService: IntentionService;
+  groundedAnalysisProvider: GroundedAnalysisProvider;
+  groundedFeatureAnalyzers?: readonly GroundedFeatureAnalyzer<unknown>[];
   bggClient?: BggClient;
   onShutdown?: () => void;
 }
@@ -47,6 +59,8 @@ export interface AppDeps {
 export interface AppResult {
   app: Hono;
   operations: OperationDefinition[];
+  groundedAnalysisProvider: GroundedAnalysisProvider;
+  groundedAnalysisTransportController: GroundedAnalysisTransportController;
 }
 
 export function createApp(deps: AppDeps): AppResult {
@@ -60,6 +74,7 @@ export function createApp(deps: AppDeps): AppResult {
     predictionService,
     displayedFitnessService,
     intentionService,
+    groundedAnalysisProvider,
     bggClient,
     onShutdown,
   } = deps;
@@ -99,6 +114,12 @@ export function createApp(deps: AppDeps): AppResult {
   const capacityService = createCapacityService({ storageService, gameService });
   const shelfRouteModule = createShelfRoutes({ shelfService, capacityService });
   const wishlistRouteModule = createWishlistRoutes({ wishlistService });
+  const groundedAnalysisRouteModule = createGroundedAnalysisRoutes({
+    configurationStatus: groundedAnalysisProvider.configurationStatus,
+  });
+  const groundedAnalysisTransportController = createGroundedAnalysisTransportController({
+    analyzers: createGroundedFeatureAnalyzerRegistry(deps.groundedFeatureAnalyzers ?? []),
+  });
 
   // Collect all operations
   const allOperations: OperationDefinition[] = [
@@ -114,6 +135,7 @@ export function createApp(deps: AppDeps): AppResult {
     ...wishlistRouteModule.operations,
     ...shelfRouteModule.operations,
     ...collectionRouteModule.operations,
+    ...groundedAnalysisRouteModule.operations,
   ];
 
   const helpRouteModule = createHelpRoutes({ operations: allOperations });
@@ -142,9 +164,15 @@ export function createApp(deps: AppDeps): AppResult {
   app.route("/api", wishlistRouteModule.routes);
   app.route("/api", shelfRouteModule.routes);
   app.route("/api", collectionRouteModule.routes);
+  app.route("/api", groundedAnalysisRouteModule.routes);
   app.route("/api", helpRouteModule.routes);
   app.route("/api", configRouteModule.routes);
   app.route("/api", shutdownRouteModule.routes);
 
-  return { app, operations: allOperations };
+  return {
+    app,
+    operations: allOperations,
+    groundedAnalysisProvider,
+    groundedAnalysisTransportController,
+  };
 }

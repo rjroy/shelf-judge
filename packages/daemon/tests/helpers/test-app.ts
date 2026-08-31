@@ -31,6 +31,12 @@ import {
   type IntentionService,
 } from "../../src/services/intention-service.js";
 import type { FileOps } from "../../src/services/file-ops.js";
+import {
+  createGroundedAnalysisProvider,
+  type GroundedAnalysisProvider,
+} from "../../src/services/grounded-analysis/provider.js";
+import type { GroundedProviderStartupConfiguration } from "../../src/services/grounded-analysis/provider-configuration.js";
+import type { GroundedAnalysisTransportController } from "../../src/services/grounded-analysis/transport-controller.js";
 
 type MockFileOps = ReturnType<typeof createMockFileOps>;
 
@@ -48,6 +54,8 @@ export interface TestAppContext<TFileOps extends FileOps = MockFileOps> {
   displayedFitnessService: DisplayedFitnessService;
   intentionService: IntentionService;
   bggClient: BggClient | undefined;
+  groundedAnalysisProvider: GroundedAnalysisProvider;
+  groundedAnalysisTransportController: GroundedAnalysisTransportController;
   fileOps: TFileOps;
 }
 
@@ -59,6 +67,7 @@ export interface TestAppOptions<TFileOps extends FileOps = MockFileOps> {
   now?: () => string;
   createIntentionId?: () => string;
   intentionService?: IntentionService;
+  groundedAnalysisProvider?: GroundedAnalysisProvider;
 }
 
 export function createTestPurchaseUtilizationService(
@@ -140,8 +149,19 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     storageService,
     displayedFitnessService,
   });
+  const unavailableGroundedConfiguration: GroundedProviderStartupConfiguration = {
+    status: "unavailable",
+    reason: "model-configuration",
+    safeDetail: "test-not-configured",
+    correctionDestination: {
+      operationId: "shelf.grounded-analysis.configuration.get",
+    },
+  };
+  const groundedAnalysisProvider =
+    options?.groundedAnalysisProvider ??
+    createGroundedAnalysisProvider({ configuration: unavailableGroundedConfiguration });
 
-  const { app, operations } = createApp({
+  const { app, operations, groundedAnalysisTransportController } = createApp({
     storageService,
     collectionMutationService,
     axisService,
@@ -151,6 +171,7 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     predictionService,
     displayedFitnessService,
     intentionService,
+    groundedAnalysisProvider,
     bggClient,
   });
 
@@ -168,6 +189,8 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     displayedFitnessService,
     intentionService,
     bggClient,
+    groundedAnalysisProvider,
+    groundedAnalysisTransportController,
     fileOps,
   };
 }

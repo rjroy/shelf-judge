@@ -13,19 +13,55 @@ export interface DaemonFetchOptions {
   method?: string;
   body?: unknown;
   signal?: AbortSignal;
+  socketPath?: string;
 }
 
-function makeRequest(
-  path: string,
-  options: DaemonFetchOptions = {},
-): Promise<http.IncomingMessage> {
-  const { method = "GET", body } = options;
+interface NodeDaemonRequest {
+  response: http.IncomingMessage;
+  destroy(): void;
+  release(): void;
+}
+
+function makeRequest(path: string, options: DaemonFetchOptions = {}): Promise<NodeDaemonRequest> {
+  const { method = "GET", body, signal, socketPath = SOCKET_PATH } = options;
   const bodyStr = body !== undefined ? JSON.stringify(body) : undefined;
 
-  return new Promise<http.IncomingMessage>((resolve, reject) => {
-    const req = http.request(
+  return new Promise<NodeDaemonRequest>((resolve, reject) => {
+    let responseReceived = false;
+    let request: http.ClientRequest | undefined;
+    let activeResponse: http.IncomingMessage | undefined;
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      signal?.removeEventListener("abort", abort);
+      request?.removeListener("error", onRequestError);
+      activeResponse?.removeListener("end", cleanup);
+      activeResponse?.removeListener("error", cleanup);
+      activeResponse?.removeListener("close", cleanup);
+      request = undefined;
+      activeResponse = undefined;
+    };
+    const destroy = () => {
+      const currentRequest = request;
+      const currentResponse = activeResponse;
+      cleanup();
+      currentResponse?.destroy();
+      currentResponse?.socket?.destroy();
+      currentRequest?.destroy();
+    };
+    const abort = () => {
+      const error = new DOMException("The operation was aborted", "AbortError");
+      destroy();
+      if (!responseReceived) reject(error);
+    };
+    const onRequestError = (error: Error) => {
+      cleanup();
+      if (!responseReceived) reject(error);
+    };
+    request = http.request(
       {
-        socketPath: SOCKET_PATH,
+        socketPath,
         path,
         method,
         headers:
@@ -33,13 +69,25 @@ function makeRequest(
             ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(bodyStr) }
             : undefined,
       },
-      resolve,
+      (response) => {
+        responseReceived = true;
+        activeResponse = response;
+        response.once("end", cleanup);
+        response.once("error", cleanup);
+        response.once("close", cleanup);
+        resolve({ response, destroy, release: cleanup });
+      },
     );
-    req.on("error", reject);
-    if (bodyStr !== undefined) {
-      req.write(bodyStr);
+    request.on("error", onRequestError);
+    if (signal?.aborted) {
+      abort();
+      return;
     }
-    req.end();
+    signal?.addEventListener("abort", abort, { once: true });
+    if (bodyStr !== undefined) {
+      request.write(bodyStr);
+    }
+    request.end();
   });
 }
 
@@ -62,19 +110,66 @@ export async function daemonRequest(
   path: string,
   options: DaemonFetchOptions = {},
 ): Promise<{ response: Response; isStream: boolean }> {
-  const res = await makeRequest(path, options);
+  const nodeRequest = await makeRequest(path, options);
+  const res = nodeRequest.response;
   const contentType = res.headers["content-type"] ?? "";
   const isStream = contentType.includes("text/event-stream");
 
   if (isStream) {
+    let cancelUpstream = () => nodeRequest.destroy();
     const stream = new ReadableStream({
       start(controller) {
-        res.on("data", (chunk: Buffer) => controller.enqueue(chunk));
-        res.on("end", () => controller.close());
-        res.on("error", (err) => controller.error(err));
+        let finished = false;
+        const cleanup = (releaseNodeRequest: boolean) => {
+          options.signal?.removeEventListener("abort", abort);
+          res.removeListener("data", onData);
+          res.removeListener("end", onEnd);
+          res.removeListener("error", onError);
+          res.removeListener("close", onClose);
+          if (releaseNodeRequest) nodeRequest.release();
+          cancelUpstream = () => undefined;
+        };
+        const finish = () => {
+          if (finished) return false;
+          finished = true;
+          cleanup(true);
+          return true;
+        };
+        const abort = () => {
+          if (finished) return;
+          finished = true;
+          cleanup(false);
+          const error = new DOMException("The operation was aborted", "AbortError");
+          nodeRequest.destroy();
+          controller.error(error);
+        };
+        const onData = (chunk: Buffer) => controller.enqueue(chunk);
+        const onEnd = () => {
+          if (!finish()) return;
+          controller.close();
+        };
+        const onError = (error: Error) => {
+          if (!finish()) return;
+          controller.error(error);
+        };
+        const onClose = () => {
+          if (!finish()) return;
+          controller.error(new Error("Daemon stream closed before completion"));
+        };
+        cancelUpstream = () => {
+          if (finished) return;
+          finished = true;
+          cleanup(false);
+          nodeRequest.destroy();
+        };
+        options.signal?.addEventListener("abort", abort, { once: true });
+        res.on("data", onData);
+        res.once("end", onEnd);
+        res.once("error", onError);
+        res.once("close", onClose);
       },
       cancel() {
-        res.destroy();
+        cancelUpstream();
       },
     });
 
@@ -89,8 +184,10 @@ export async function daemonRequest(
 
   const buffered = await new Promise<Response>((resolve, reject) => {
     const chunks: Buffer[] = [];
+    let finished = false;
     res.on("data", (chunk: Buffer) => chunks.push(chunk));
     res.on("end", () => {
+      finished = true;
       const status = res.statusCode ?? 200;
       const nullBody = status === 204 || status === 205 || status === 304;
       resolve(
@@ -101,6 +198,9 @@ export async function daemonRequest(
       );
     });
     res.on("error", reject);
+    res.on("close", () => {
+      if (!finished) reject(new Error("Daemon response closed before completion"));
+    });
   });
 
   return { response: buffered, isStream: false };

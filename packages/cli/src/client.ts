@@ -25,7 +25,12 @@ export interface DaemonClient {
   put<T = unknown>(path: string, body?: unknown): Promise<DaemonResponse<T>>;
   patch<T = unknown>(path: string, body?: unknown): Promise<DaemonResponse<T>>;
   del<T = unknown>(path: string, body?: unknown): Promise<DaemonResponse<T>>;
-  postSSE(path: string, body: unknown, onEvent: (event: SSEEvent) => void): Promise<void>;
+  postSSE(
+    path: string,
+    body: unknown,
+    onEvent: (event: SSEEvent) => void,
+    options?: SSEStreamOptions,
+  ): Promise<void>;
   getProfile(): Promise<CollectionProfileResult>;
   isReachable(): Promise<boolean>;
   socketPath: string;
@@ -34,6 +39,13 @@ export interface DaemonClient {
 export interface SSEEvent {
   event: string;
   data: string;
+}
+
+export interface SSEStreamOptions {
+  signal?: AbortSignal;
+  validateEvent?: (event: SSEEvent) => void;
+  isTerminal?: (event: SSEEvent) => boolean;
+  missingTerminalMessage?: string;
 }
 
 export function createDaemonClient(options: DaemonClientOptions = {}): DaemonClient {
@@ -77,56 +89,100 @@ export function createDaemonClient(options: DaemonClientOptions = {}): DaemonCli
     path: string,
     body: unknown,
     onEvent: (event: SSEEvent) => void,
+    streamOptions: SSEStreamOptions = {},
   ): Promise<void> {
     const url = `http://localhost${path}`;
     const response = await fetchFn(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
       body: JSON.stringify(body),
+      signal: streamOptions.signal,
       unix: socketPath,
     } as RequestInit);
 
     if (!response.ok) {
-      const text = await response.text();
-      let errorMsg: string;
-      try {
-        const parsed = JSON.parse(text) as { error?: string };
-        errorMsg = parsed.error ?? text;
-      } catch {
-        errorMsg = text;
-      }
-      throw new Error(errorMsg);
+      await response.body?.cancel();
+      throw new Error(`Daemon SSE request failed with status ${response.status}`);
     }
 
     if (!response.body) {
       throw new Error("No response body for SSE stream");
     }
 
-    // Simplified SSE parser: handles single event/data pairs per the daemon's
-    // current output format. Does not support multi-data-line events, id:, or
-    // retry: fields. Sufficient for the daemon's import endpoint.
     const reader = response.body.getReader();
-    const decoder = new TextDecoder();
+    const decoder = new TextDecoder("utf-8", { fatal: true });
     let buffer = "";
+    let eventName = "";
+    let dataLines: string[] = [];
+    let eventHasFields = false;
+    let terminalSeen = false;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      // Keep the last incomplete line in buffer
-      buffer = lines.pop() ?? "";
-
-      let currentEvent = "";
-      for (const line of lines) {
-        if (line.startsWith("event: ")) {
-          currentEvent = line.slice(7).trim();
-        } else if (line.startsWith("data: ")) {
-          onEvent({ event: currentEvent, data: line.slice(6) });
-          currentEvent = "";
-        }
+    function dispatchEvent(): void {
+      if (dataLines.length === 0) {
+        eventName = "";
+        eventHasFields = false;
+        return;
       }
+      if (terminalSeen) throw new Error("SSE stream emitted an event after terminal completion");
+      const event = { event: eventName, data: dataLines.join("\n") };
+      streamOptions.validateEvent?.(event);
+      onEvent(event);
+      terminalSeen = streamOptions.isTerminal?.(event) ?? false;
+      eventName = "";
+      dataLines = [];
+      eventHasFields = false;
+    }
+
+    function processLine(line: string): void {
+      if (line.length === 0) {
+        dispatchEvent();
+        return;
+      }
+      if (line.startsWith(":")) return;
+      eventHasFields = true;
+      const separator = line.indexOf(":");
+      const field = separator < 0 ? line : line.slice(0, separator);
+      let value = separator < 0 ? "" : line.slice(separator + 1);
+      if (value.startsWith(" ")) value = value.slice(1);
+      if (field === "event") eventName = value;
+      else if (field === "data") dataLines.push(value);
+      // id, retry, and unknown fields do not affect Shelf Judge dispatch.
+    }
+
+    function processCompleteLines(eof: boolean): void {
+      while (buffer.length > 0) {
+        const lineEnd = buffer.search(/[\r\n]/);
+        if (lineEnd < 0) break;
+        const delimiter = buffer[lineEnd];
+        if (delimiter === "\r" && lineEnd === buffer.length - 1 && !eof) break;
+        const line = buffer.slice(0, lineEnd);
+        const delimiterLength = delimiter === "\r" && buffer[lineEnd + 1] === "\n" ? 2 : 1;
+        buffer = buffer.slice(lineEnd + delimiterLength);
+        processLine(line);
+      }
+    }
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        processCompleteLines(false);
+      }
+      buffer += decoder.decode();
+      processCompleteLines(true);
+      if (buffer.length > 0 || eventHasFields || dataLines.length > 0) {
+        throw new Error("SSE stream ended with an incomplete event frame");
+      }
+      if (streamOptions.isTerminal && !terminalSeen) {
+        throw new Error(
+          streamOptions.missingTerminalMessage ??
+            "SSE stream ended without a valid terminal completion event",
+        );
+      }
+    } finally {
+      await reader.cancel().catch(() => undefined);
     }
   }
 

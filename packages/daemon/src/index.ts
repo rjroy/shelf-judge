@@ -13,6 +13,7 @@ import { createLogger } from "./services/logger.js";
 import { createCollectionMutationService } from "./services/collection-mutation-service.js";
 import { createDisplayedFitnessService } from "./services/displayed-fitness-service.js";
 import { createIntentionService } from "./services/intention-service.js";
+import { createGroundedAnalysisProvider } from "./services/grounded-analysis/provider.js";
 
 const logger = createLogger("daemon");
 
@@ -27,6 +28,12 @@ async function main() {
   });
 
   const appConfig = await storageService.loadConfig();
+  const groundedAnalysisProvider = createGroundedAnalysisProvider({
+    configuration: envConfig.groundedAnalysis,
+    piSessionFactory: {
+      cwd: process.cwd(),
+    },
+  });
 
   // Run versioned collection migration and artifact invalidation before routes can fire.
   // The first request therefore sees only a validated current collection and clean caches.
@@ -82,6 +89,7 @@ async function main() {
     predictionService,
     displayedFitnessService,
     intentionService,
+    groundedAnalysisProvider,
     bggClient,
     onShutdown() {
       logger.log("Shutting down via API...");
@@ -99,6 +107,9 @@ async function main() {
   logger.log(`shelf-judge daemon listening on ${envConfig.socketPath}`);
   logger.log(
     `BGG integration: ${bggClient.isConfigured() ? "configured" : "not configured (set bgg-token to enable)"}`,
+  );
+  logger.log(
+    `Grounded analysis: ${groundedAnalysisProvider.configurationStatus.status === "configured" ? "configured" : "not configured"}`,
   );
 
   function shutdown() {
