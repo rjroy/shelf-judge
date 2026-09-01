@@ -31,8 +31,12 @@ source: .lore/work/plans/grounded-profile-reflections.md
 - [x] Step 2 Phase 4 reusable adversarial harness implementation
 - [x] Step 2 Phase 4 local testing and review gates
 - [x] Step 2 complete shared-foundation terminal acceptance
+- [x] Step 4 implementation complete
+- [x] Step 4 focused and aggregate testing gates passed
+- [x] Step 4 initial review accepted
+- [x] Step 4 terminal acceptance
 
-Frontmatter remains `in_progress` because this note tracks the complete 12-step Grounded Profile Reflections plan. Steps 1 and 2 are accepted; Steps 3 through 12 remain pending.
+Frontmatter remains `in_progress` because this note tracks the complete 12-step Grounded Profile Reflections plan. Steps 1, 2, and 4 are accepted. The later steps remain pending, so the 12-step plan remains incomplete.
 
 ## Decision Log
 
@@ -475,3 +479,106 @@ No current shared-package source path appears in this porcelain snapshot. Step 1
 | `??`      | `packages/web/lib/daemon-proxy.ts`                                            | `absent`                                            | `dfc4ae197a37c86f07063c78c0715ca83b7cd05129c75ddeb52292c52eed608e` | Step 2 web proxy seam                                     |
 | `??`      | `packages/web/tests/daemon-transport.test.ts`                                 | `absent`                                            | `501d864f7cd8d9c1e1a38ba254d4d918612379001bf29b65ab65b1a9b316a155` | Step 2 web transport tests                                |
 | `??`      | `packages/web/tsconfig.daemon-transport-test.json`                            | `absent`                                            | `7b9953615ed2ab6019d81f2fd51bb458c580b33a2c76125930f2be65fcf9a2cd` | Step 2 focused web test typecheck                         |
+
+## Step 4 Progress
+
+Phase status: `ACCEPTED`. Step 4 implementation, focused and aggregate testing, initial review, and terminal acceptance are complete. The phase adds no route, provider invocation, durable package state, broad collection read, duplicate note store, or note-list operation. The overall note remains `in_progress` because the later steps in the 12-step plan remain pending.
+
+### Obligation To Executable Validation
+
+| Step 4 obligation                                                                                         | Implementation                                                                                                                      | Executable validation                                                                                                           | Status   |
+| --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| 1. One immutable complete package per question and captured provider/model from one fixed source snapshot | `ReflectionEvidencePackage`; outer coordinator-owned `assemble`                                                                     | all-question assembly, source-race, and deep-freeze tests                                                                       | Accepted |
+| 2. Consume only projection snapshots and narrow note gets                                                 | Service dependencies expose only `ReflectionProjectionSnapshotService` and `OwnerGameNoteService.get`                               | selective-read and privacy-exclusion assertions                                                                                 | Accepted |
+| 3. Share one coherent serialized boundary keyed by the exact storage object                               | `profileSourceCoordinatorFor(storageService).runExclusive`; dependency contract documents object identity                           | queued source-mutation race                                                                                                     | Accepted |
+| 4. Walk bounded deterministic pages and preserve question-specific scope                                  | Configurable validated `pageSize`; all pages walked and checked against fixed projection order                                      | page-size-one coverage for all questions; pattern-only supporting-game retrieval                                                | Accepted |
+| 5. Record every examined note dependency without text                                                     | Note dependencies for present, cleared, and missing states                                                                          | exact dependency and serialized privacy assertions                                                                              | Accepted |
+| 6. Admit testimony only from current present notes                                                        | Missing/cleared states create no evidence or citation; current version is the only read state                                       | current/cleared/missing/superseded exclusion assertions                                                                         | Accepted |
+| 7. Use one strict combined manifest and grounded registries                                               | `REFLECTION_EVIDENCE_MANIFEST`; fresh evidence and citation registries copy and validate deterministic entries                      | combined-class, exact citation count, and registry-backed assembly assertions                                                   | Accepted |
+| 8. Keep owner/imported prose and names inert                                                              | Prose is copied only into strict data payloads and summaries; destinations and fields remain server-selected                        | hostile note/name/tool/URL markup assertions                                                                                    | Accepted |
+| 9. Include strict identity, fingerprint, scope, evidence, citations, dependencies, and time               | Shared schemas parse identity, scope, citations, and dependencies; canonical provider dependency fingerprint                        | exact package-shape, scope, and immutability assertions                                                                         | Accepted |
+| 10. Revalidate sources under the coordinator before future transmission                                   | Typed `revalidate` result covers provider, contract, deterministic source, scope, note, and deletion mismatches; abort propagates   | success plus provider/model/extension, manifest, fingerprint/revision, candidate order, note version, deletion, and abort cases | Accepted |
+| 11. Cover required assembly behavior proportionately                                                      | Focused service suite uses closed synthetic projection snapshots and narrow note reads                                              | `bun test packages/daemon/tests/services/reflection-evidence-service.test.ts`                                                   | Accepted |
+| 12. Preserve deterministic evidence and Profile behavior                                                  | Existing projection service is consumed unchanged; generic citation envelope delegates extra-field strictness to the feature schema | existing grounded registry and deterministic projection suites                                                                  | Accepted |
+
+### Implementation Log
+
+- 2026-08-31: Added a daemon-local combined Reflection evidence manifest by extending the deterministic manifest with strict `{ gameId, text }` owner-note testimony. Missing and cleared notes remain dependency-only states and cannot supply evidence or citations.
+- 2026-08-31: Added fixed-page assembly for all three question scopes. Repeated values and recurring trade-offs examine every projected owned game; pattern exceptions examines only supporting game IDs while retaining the complete exact candidate order, exclusions, counterexamples, confounders, and deterministic entries from the projection.
+- 2026-08-31: Added canonical provider-configuration dependencies and strict shared evidence identity and scope construction. Every examined game receives a note dependency, including version zero missing notes and positive-version cleared notes.
+- 2026-08-31: Added typed coordinator-scoped source revalidation. It returns a narrow mismatch reason for provider configuration, contract versions, deterministic source identity, question scope, note versions, and deleted games, while abort exceptions propagate.
+- 2026-08-31: Adjusted the feature-neutral citation envelope to admit feature-specific fields before the caller's snapshotted strict schema validates them. This is required for Reflection's mandatory `testimony` discriminator; unknown fields remain rejected by `ReflectionCitationSchema`.
+- 2026-08-31: Added focused tests for all three questions, fixed paging, selective reads, exact pattern evidence, note states and versions, privacy exclusions, hostile prose inertia, immutability, source races, revalidation failures, and abort propagation.
+- 2026-08-31: Per implementation-role instruction, no test, typecheck, lint, formatting, build, or review command was run. All executable evidence and review gates remain pending.
+
+### Step 4 Correction Round 1
+
+Testing reported `TEST-TYPE-1`, `TEST-LINT-1`, `PRIVACY-FIXTURE-1`, `ABORT-COVERAGE-1`, and `FORMAT-1`; the Step 4 gate therefore failed and remains pending. The implementation now uses a nested discriminated-union predicate for present note reads, recursively freezes through `unknown` reflective values, and removes the test import and async-callback lint defects without assertions or non-null escapes.
+
+The privacy regression now creates four real durable games and drives supersession, clearing, current authorized testimony, command-receipt persistence, and unrelated current testimony through `OwnerGameNoteService.set` and `clear`. It verifies those source states and the sensitive receipt sentinel exist before proving that only current in-scope testimony enters the package. Executable abort coverage now invokes both `assemble` and `revalidate` with an aborted signal. Changed files were formatted, but no test, typecheck, lint, build, or review command was run in this correction role; all Step 4 validation statuses and the overall `in_progress` status remain unchanged.
+
+### Step 4 Correction Round 2
+
+The remaining `TEST-TYPE-1` race callback now returns `Promise.resolve()` after its controlled note mutation, satisfying `runExclusive` without an unnecessary `async` function. The two `TEST-LINT-1` abort assertions retain Bun's awaited `expect(...).rejects` matcher so both `assemble()` and `revalidate()` execute and prove rejection propagation, with the repository's targeted `@typescript-eslint/await-thenable` suppression documenting Bun's thenable matcher typing.
+
+Only the test and this Step 4 correction log were edited and formatted. No test, typecheck, lint, build, or review command was run; the Step 4 gate, Beads issue, and overall note remain `in_progress` pending independent validation and review.
+
+### Step 4 Correction Round 3
+
+The coordinator race regression now pauses the first note service read after the complete deterministic projection has been captured but before any note state is copied. While assembly is paused, it queues one coordinator mutation that replaces the projection revision and fingerprint and advances every in-scope note state and version. A deterministic microtask barrier proves the mutation callback cannot complete while assembly owns the coordinator.
+
+After releasing the note-read barrier, the test asserts that the package contains projection revision 9 and `snapshot-v1`, all four pre-mutation note dependencies, and only the two pre-mutation present-note payloads and source versions. It then confirms the queued source mutation installed projection revision 10 and all four new note versions, so an implementation that permits interleaving would produce a mixed package and fail. Only the test and this correction log were edited and formatted. No test, typecheck, lint, build, or review command was run; Step 4 remains pending testing and review.
+
+### Step 4 Local Gate
+
+- Focused service: 8 pass, 0 fail, 53 expectations.
+- Aggregate relevant: 66 pass, 0 fail, 408 expectations.
+- Workspace typecheck passed.
+- Focused ESLint and Prettier passed.
+- `git diff --check` passed.
+- The coordinator race is meaningful: assembly pauses after capturing the complete deterministic projection and before copying note state, a source mutation queues behind the same coordinator, and the resulting package remains wholly pre-mutation before the queued mutation installs the next projection and note versions.
+- Initial bun-typescript review accepted the Step 4 implementation and tests. Residual integration risk remains for future Steps 5 through 7, which will compose this package and revalidation boundary into provider and transport flows.
+
+Step 4 implementation, testing, and initial review are complete.
+
+### Terminal Acceptance
+
+Terminal acceptance status: `ACCEPTED`. On 2026-08-31, the bun-typescript terminal reviewer accepted the Step 4 implementation surface with no material findings. The accepted boundary is the package assembly, source revalidation, focused tests, and shared citation-registry adjustment recorded below. Integration into provider and transport flows remains assigned to later steps and is not part of this acceptance.
+
+The local implementation, testing, review, and terminal acceptance gates are complete. The frontmatter remains `in_progress`, and later plan steps remain pending.
+
+### Accepted Manifest
+
+This manifest records the exact output of `git status --porcelain=v1 --untracked-files=all` at terminal acceptance before this final notes-only edit. Porcelain values preserve the exact two-character status. Index identities are stage-zero mode, blob, and stage values from `git ls-files --stage`; `absent` means no index entry, and any unmerged path would be marked explicitly. Working-tree values are SHA-256 content hashes. No accepted implementation path is deleted or unmerged.
+
+```text
+ M .beads/issues.jsonl
+ M .lore/work/notes/grounded-profile-reflections.md
+ M packages/daemon/src/services/grounded-analysis/citation-registry.ts
+?? packages/daemon/src/services/reflection-evidence-service.ts
+?? packages/daemon/tests/services/reflection-evidence-service.test.ts
+```
+
+| Porcelain | Path                                                                  | Index blob identity or marker                       | Working-tree SHA-256 or marker                                     | Acceptance role                                                                               |
+| --------- | --------------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| ` M`      | `.beads/issues.jsonl`                                                 | `100644 79a064e42fe70787fb4ee42354863deb7b672cb2 0` | Tracker metadata, excluded                                         | Beads passive export; listed for exact worktree status, not implementation acceptance content |
+| ` M`      | `.lore/work/notes/grounded-profile-reflections.md`                    | `100644 b84022081bc6425af45599e18ee2f838627dd8f6 0` | Self-hash excluded                                                 | Acceptance record; embedding its final hash would change the file                             |
+| ` M`      | `packages/daemon/src/services/grounded-analysis/citation-registry.ts` | `100644 fabc57efdd3ff10ae5783eae747bd57344eabdd5 0` | `3119fe7a1b3f829f4534455add75b1901ac426811b63bb9b260eaae054a60ccd` | Shared registry adjustment accepted as Step 4 implementation content                          |
+| `??`      | `packages/daemon/src/services/reflection-evidence-service.ts`         | `absent`                                            | `398303fda083500edf162df35aa2651a0038a1cd20f8c85536de0cda31a10489` | Step 4 source accepted                                                                        |
+| `??`      | `packages/daemon/tests/services/reflection-evidence-service.test.ts`  | `absent`                                            | `4689978f0df90f66a3347c85c9ca6e4800b40d065a5f5733fabff9c4d9838796` | Step 4 tests accepted                                                                         |
+
+The notes path had status ` M` and the recorded index identity at acceptance. Its working-tree content changed while this acceptance record was written, so no pre-edit or purported final self-hash is presented as the hash of this finalized file. `.beads/issues.jsonl` is tracker metadata and is outside the accepted implementation content.
+
+No route, production composition, shared schema, note service, projection implementation, Profile behavior, or persistence file changed in this phase.
+
+### Final Full Repository Verification
+
+- `bun run typecheck`: passed.
+- `bun run lint`: passed.
+- `bun run test`: 2,536 passed, 1 skipped, 0 failed, with 10,560 assertions across 144 files.
+- Changed-file Prettier: passed.
+- `git diff --check`: passed.
+- The accepted Step 4 implementation hashes recorded above are unchanged.
+- The verification commands did not modify the worktree.
+
+Step 4 remains complete and accepted. The overall notes status remains `in_progress` because later plan steps are still pending.

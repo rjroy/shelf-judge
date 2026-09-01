@@ -12,7 +12,7 @@ const CitationEnvelopeSchema = z
     canonicalSummary: z.string().min(1),
     destination: z.unknown(),
   })
-  .strict();
+  .passthrough();
 
 const EvidenceIdentityEnvelopeSchema = z
   .object({
