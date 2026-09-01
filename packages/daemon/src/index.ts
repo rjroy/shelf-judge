@@ -16,6 +16,7 @@ import { createIntentionService } from "./services/intention-service.js";
 import { createOwnerGameNoteService } from "./services/owner-game-note-service.js";
 import { createGroundedAnalysisProvider } from "./services/grounded-analysis/provider.js";
 import { toErrorMessage } from "@shelf-judge/shared";
+import { createReflectionRuntime } from "./services/reflection-runtime.js";
 
 const logger = createLogger("daemon");
 
@@ -41,6 +42,26 @@ async function main() {
   // The first request therefore sees only a validated current collection and clean caches.
   await storageService.loadCollection();
   const collectionMutationService = createCollectionMutationService({ storageService });
+  const reflectionRuntime = createReflectionRuntime({
+    dataDir: envConfig.dataDir,
+    fileOps,
+    storageService,
+    providerIdentity:
+      groundedAnalysisProvider.configurationStatus.status === "configured"
+        ? groundedAnalysisProvider.configurationStatus.identity
+        : null,
+  });
+  logger.log("reflection recovery started", { trigger: "startup" });
+  try {
+    await reflectionRuntime.recover();
+    logger.log("reflection recovery completed", { trigger: "startup" });
+  } catch (error) {
+    logger.error("reflection recovery failed", {
+      trigger: "startup",
+      error: toErrorMessage(error),
+    });
+    throw error;
+  }
 
   const fitnessService = createFitnessService();
 
@@ -67,9 +88,13 @@ async function main() {
     fitnessService,
     bggClient,
     onGameDeleted: (gameId) => tournamentService.onGameDeleted(gameId),
+    deletionLifecycle: reflectionRuntime.gameDeletionLifecycle,
   });
   const intentionService = createIntentionService({ collectionMutationService });
-  const ownerGameNoteService = createOwnerGameNoteService({ collectionMutationService });
+  const ownerGameNoteService = createOwnerGameNoteService({
+    collectionMutationService,
+    invalidationLifecycle: reflectionRuntime.noteInvalidationLifecycle,
+  });
 
   const predictionService = createPredictionService({
     storageService,

@@ -28,7 +28,9 @@ import {
 } from "@shelf-judge/shared";
 import type { CollectionPersistence, StorageService } from "./storage-service.js";
 import {
+  collectionDurableIdentity,
   collectionMutationServiceFor,
+  type CollectionDurableIdentity,
   type CollectionMutationService,
 } from "./collection-mutation-service.js";
 import { profileSourceCoordinatorFor } from "./profile-source-coordinator.js";
@@ -106,12 +108,25 @@ export class GameHistoryConflictError extends Error {
   }
 }
 
+export interface PermanentGameDeletionContext {
+  gameId: string;
+  priorSourceIdentity: CollectionDurableIdentity;
+  targetSourceIdentity: CollectionDurableIdentity;
+}
+
+export interface PermanentGameDeletionLifecycle {
+  beforePersistence(context: PermanentGameDeletionContext): Promise<void> | void;
+  onPersistenceFailure(context: PermanentGameDeletionContext, error: unknown): Promise<void> | void;
+  onPersistenceSuccess(context: PermanentGameDeletionContext): Promise<void> | void;
+}
+
 type GameStorage = Pick<StorageService, "loadCollection" | "loadTournament" | "loadShelfConfig">;
 
 export type GameServiceDeps = {
   fitnessService: FitnessService;
   bggClient?: BggClient;
   onGameDeleted?: (gameId: string) => Promise<void>;
+  deletionLifecycle?: PermanentGameDeletionLifecycle;
   now?: () => string;
   logger?: Logger;
 } & (
@@ -685,6 +700,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
               .filter((intention) => intention.gameId === id)
               .map((intention) => intention.intentionId);
             if (intentionIds.length > 0) throw new GameHistoryConflictError(id, intentionIds);
+            const priorSourceIdentity = collectionDurableIdentity(collection);
             collection.commandReceipts = collection.commandReceipts.filter(
               (receipt) =>
                 !(
@@ -695,7 +711,29 @@ export function createGameService(deps: GameServiceDeps): GameService {
             );
             collection.games.splice(index, 1);
             collection.updatedAt = now();
-            return { changed: true, value: undefined };
+            const lifecycleContext: PermanentGameDeletionContext = {
+              gameId: id,
+              priorSourceIdentity,
+              targetSourceIdentity: collectionDurableIdentity({
+                ...collection,
+                revision: collection.revision + 1,
+              }),
+            };
+            return {
+              changed: true,
+              value: undefined,
+              beforePersistence: deps.deletionLifecycle
+                ? () => deps.deletionLifecycle?.beforePersistence(lifecycleContext)
+                : undefined,
+              onPersistenceFailure: deps.deletionLifecycle
+                ? (error: unknown) =>
+                    deps.deletionLifecycle?.onPersistenceFailure(lifecycleContext, error)
+                : undefined,
+              onPersistenceSuccess: deps.deletionLifecycle
+                ? () => deps.deletionLifecycle?.onPersistenceSuccess(lifecycleContext)
+                : undefined,
+              classifyPersistenceOutcome: deps.deletionLifecycle !== undefined,
+            };
           },
         );
         if (deps.onGameDeleted !== undefined) {

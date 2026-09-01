@@ -57,6 +57,17 @@ export function createMockFileOps(initialFiles?: Record<string, string>): MockFi
       return Promise.resolve();
     },
 
+    listFiles(dirPath: string): Promise<string[]> {
+      calls.push({ method: "listFiles", args: [dirPath] });
+      const prefix = `${dirPath}/`;
+      return Promise.resolve(
+        [...files.keys()]
+          .filter((filePath) => filePath.startsWith(prefix))
+          .map((filePath) => filePath.slice(prefix.length))
+          .filter((fileName) => !fileName.includes("/")),
+      );
+    },
+
     unlink(filePath: string): Promise<void> {
       calls.push({ method: "unlink", args: [filePath] });
       // ENOENT is swallowed in production; mirror that here.

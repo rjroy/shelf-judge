@@ -35,6 +35,9 @@ source: .lore/work/plans/grounded-profile-reflections.md
 - [x] Step 4 focused and aggregate testing gates passed
 - [x] Step 4 initial review accepted
 - [x] Step 4 terminal acceptance
+- [x] Step 6 recoverable purge transaction implementation
+- [x] Step 6 real-filesystem interruption, recovery, and race coverage
+- [x] Step 6 focused and daemon validation gates passed
 
 Frontmatter remains `in_progress` because this note tracks the complete 12-step Grounded Profile Reflections plan. Steps 1, 2, and 4 are accepted. The later steps remain pending, so the 12-step plan remains incomplete.
 
@@ -582,3 +585,143 @@ No route, production composition, shared schema, note service, projection implem
 - The verification commands did not modify the worktree.
 
 Step 4 remains complete and accepted. The overall notes status remains `in_progress` because later plan steps are still pending.
+
+## Step 6: Recoverable Purge Transactions And Late-Write Fencing
+
+Step 6 is locally stable. It adds a coordinator-scoped Reflection transaction service without composing speculative Reflection routes. Production still does not construct Reflection services, so the delivered integration boundary is explicit: construct storage and transactions with the exact collection storage coordinator, call `recover()` before use, supply `recoverBeforeUse` and `publishSettingsChange` to the state service, and attach the note and permanent-deletion lifecycle adapters.
+
+### Obligation To Evidence
+
+| Step 6 obligation                                                                                                                | Implementation evidence                                                                                                                                                                                                                              | Executable evidence                                                                                              |
+| -------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Serialize reads, publications, settings/delete actions, note invalidation, and deletion through the exact collection coordinator | `reflection-state-service.ts` requires the shared coordinator; transaction recovery and lifecycle work are reentrant on that coordinator                                                                                                             | State-service tests plus the real-filesystem blocked-journal concurrency test                                    |
+| Stage purged state/settings and publish a text-free journal before source persistence                                            | `reflection-storage.ts` content-hashes staged state/settings; `reflection-transaction-service.ts` journals transaction, source, affected IDs, and prior/target artifact identities                                                                   | Stage-before-journal, journal interruption, settings publication, and private-text absence tests                 |
+| Bind note mutation and deletion to durable identities stronger than revision                                                     | `collectionDurableIdentity` hashes schema-normalized collection content; note and deletion contexts include prior/target identities, including note receipts, game absence, and receipt removal                                                      | Lost-save-response note test and permanent-deletion receipt-removal test                                         |
+| Preserve the prior pairing on definite source failure and classify lost responses by reload                                      | Collection mutation outcome classification is opt-in for the Reflection lifecycle; prior reload compensates, target reload proceeds to promotion, and unknown outcome remains journaled                                                              | Definite rename failure preserves byte-equivalent state/attempt metadata; rename-then-throw accepts and promotes |
+| Recover every crash window idempotently or fail closed                                                                           | Recovery handles prior source, target source with stage, already-promoted stage absence, orphan stages, invalid journal/source/artifact identities, and separately valid settings                                                                    | Real-filesystem stage-write, journal, promotion, cleanup/replay, settings, orphan, and invalid-journal tests     |
+| Purge only affected questions while fencing every late completion                                                                | Note dependencies and deterministic `game:<id>:` source IDs select purge targets; generation advances globally and active attempts receive terminal metadata                                                                                         | Cross-question cache assertions, deletion dependency assertions, and stale generation/source completion tests    |
+| Revalidate current publication fences                                                                                            | `completeAttempt` now requires current sources and checks collection, contract/policy, provider/model, all dependencies including note versions/game existence, question enablement, attempt identity, and deletion generation under the coordinator | State-service changed-source final-publication regression                                                        |
+| Keep note/generated text out of journals, logs, diagnostics, and recovered reads                                                 | Journal fields and diagnostics are strict text-free identities/codes; ambiguous recovery destroys note-bearing state/stages without quarantine                                                                                                       | Private sentinel absent from journal, purged stage, active/recovery files, and post-recovery reads               |
+
+### Decisions And Discoveries
+
+- Full schema-normalized collection content is the durable mutation fingerprint. Revision remains visible metadata but is not trusted as proof of note receipt insertion or game/receipt removal.
+- Save-response classification is opt-in on mutation decisions that own a recoverable Reflection lifecycle. Unrelated collection mutations keep their established failure and load-count behavior.
+- A global deletion generation fences all in-flight completions. On committed source purge or disabling settings, unrelated refreshing attempts receive explicit `unavailable/internal` terminal metadata while their caches remain intact.
+- Settings and state are staged together under the same journal. Recovery completes both target artifacts or resets note-bearing state while preserving a separately valid active settings artifact.
+- Permanent tournament cleanup remains post-commit best effort. Reflection deletion cleanup moved to the new pre-persistence lifecycle and must complete promotion before source success returns.
+- Step 8 has not production-composed Reflection services. Step 6 therefore adds no routes and does not alter daemon startup; `recover()` and `recoverBeforeUse` are the required composition seams for that later step.
+
+### Commands And Results
+
+- `bun test packages/daemon/tests/services/reflection-transaction-service.test.ts packages/daemon/tests/services/reflection-storage.test.ts packages/daemon/tests/services/reflection-state-service.test.ts packages/daemon/tests/services/collection-mutation-service.test.ts packages/daemon/tests/services/owner-game-note-service.test.ts packages/daemon/tests/services/game-service.test.ts`: 95 pass, 0 fail, 398 expectations before the final explicit stage-write interruption case.
+- `bun test packages/daemon/tests/services/reflection-transaction-service.test.ts`: 10 pass, 0 fail, 42 expectations after adding that explicit real-filesystem stage-write interruption case.
+- `bun test packages/daemon/tests/services/axis-service.test.ts packages/daemon/tests/services/purchase-utilization-service.test.ts packages/daemon/tests/services/reflection-transaction-service.test.ts packages/daemon/tests/services/collection-mutation-service.test.ts packages/daemon/tests/services/owner-game-note-service.test.ts packages/daemon/tests/services/game-service.test.ts`: 115 pass, 0 fail, 519 expectations after correcting generic save-classification regressions.
+- `bun test packages/daemon/tests`: 1,448 pass, 1 skipped, 0 fail, 6,489 expectations across 79 files before the final explicit stage-write interruption case.
+- `bunx tsc --noEmit -p packages/daemon`: passed.
+- Changed-file ESLint: passed.
+- Changed-file Prettier: passed.
+- `git diff --check`: passed.
+- An initial full daemon run found three regressions from classifying every collection save failure. Two visible failures were canonical hashing of optional `undefined` fields and an extra durable reload in unrelated mutation tests. Schema normalization plus lifecycle opt-in classification corrected the root causes; the final full daemon result is recorded below.
+- Final workspace verification after the explicit stage-write case: `bun run typecheck` passed; `bun run lint` passed; `bun run test` passed with 2,606 tests, 1 skipped, 0 failed, and 10,806 expectations across 148 files.
+
+### Step 6 Changed-File Manifest
+
+This is the Step 6 surface only. It does not replace or reinterpret prior accepted manifests. `.beads/issues.jsonl` remains tracker metadata and is not Step 6 implementation content.
+
+- `.lore/work/notes/grounded-profile-reflections.md`
+- `packages/daemon/src/services/collection-mutation-service.ts`
+- `packages/daemon/src/services/file-ops.ts`
+- `packages/daemon/src/services/game-service.ts`
+- `packages/daemon/src/services/owner-game-note-service.ts`
+- `packages/daemon/src/services/reflection-state-service.ts`
+- `packages/daemon/src/services/reflection-storage.ts`
+- `packages/daemon/src/services/reflection-transaction-service.ts`
+- `packages/daemon/tests/helpers/mock-file-ops.ts`
+- `packages/daemon/tests/ownership-routes.test.ts`
+- `packages/daemon/tests/services/reflection-state-service.test.ts`
+- `packages/daemon/tests/services/reflection-transaction-service.test.ts`
+- `packages/daemon/tests/storage-backfill.test.ts`
+
+The overall Grounded Profile Reflections plan remains `in_progress`. This record marks only Step 6 locally complete; later orchestration, route, client, and final acceptance steps remain pending.
+
+### Step 6 Independent Validation Failure And Correction
+
+Independent validation failed after the initial local completion and `shelf-judge-6wv.8` was reopened. The failure identified six material gaps: missing production lifecycle composition (`SJ-TXN-001`), incomplete direct crash-window evidence (`SJ-TXN-002`), incomplete deletion privacy-surface scanning (`SJ-TXN-003`), a precomputed rather than coordinator-loaded final source fence (`SJ-TXN-004`), no unrelated-mutation race (`SJ-TXN-005`), and incomplete journal/fingerprint assertions (`SJ-TXN-006`).
+
+Corrections:
+
+- `SJ-TXN-001`: Added `reflection-runtime.ts` as the single composition boundary for Reflection storage, state, transactions, recovery, settings publication, note invalidation, and game deletion. Daemon startup now constructs it with the live storage object, logs and awaits recovery before route construction and `Bun.serve`, and passes its lifecycles to `OwnerGameNoteService` and `GameService`. `createTestApp` has opt-in equivalent wiring so unrelated route tests remain isolated. No Reflection routes were added.
+- `SJ-TXN-002`: Added named real-filesystem failpoints before and after stage rename, journal rename, collection rename, state promotion, and journal cleanup, plus explicit lost operation response and command replay. Every matrix row reconstructs collection storage, Reflection storage, the exact new coordinator, transactions, and note lifecycle from disk, then asserts the prior or target source/state pairing and absence of residual journals/stages. Existing orphan-stage, already-promoted, settings, invalid-journal, and fail-closed cases remain.
+- `SJ-TXN-003`: The permanent-deletion test now uses one sentinel as both deleted owner note text and generated Reflection excerpt, reconstructs services, reads the public Reflection projection, serializes captured logger calls, and scans every durable file. The sentinel is absent from active state, stages, journals, recovery records, collection data, logs, and post-restart reads.
+- `SJ-TXN-004`: `completeAttempt` now accepts a current-source loader and invokes it while holding the collection coordinator. Tests independently reject collection revision, note version, game-existence dependency, provider, model, enabled-state, deletion-generation, and attempt-identity mismatches. A controlled interleaving proves an unrelated coordinator operation cannot pass the final source load/publication boundary.
+- `SJ-TXN-005`: Added a race in which an unrelated game mutation holds the exact collection coordinator while a Reflection read remains queued. The operations complete without deadlock; a following affected note purge removes only the two dependent question caches and preserves the unrelated cache byte-for-byte.
+- `SJ-TXN-006`: Exported the strict internal journal schema for executable parsing. Tests assert transaction UUID, exact prior/target durable source identities, sorted affected game and question IDs, prior active artifact identity, and staged filename/content identity. A controlled same-revision deletion candidate proves the content fingerprint changes when the game and its note command receipt disappear.
+
+Correction validation so far:
+
+- `bun test packages/daemon/tests/services/reflection-transaction-service.test.ts packages/daemon/tests/services/reflection-state-service.test.ts`: 36 pass, 0 fail, 174 expectations.
+- Broader Reflection, mutation, game/note service, and route suite: 173 pass, 0 fail, 838 expectations across 9 files.
+- Changed-file ESLint and Prettier: passed.
+- Daemon TypeScript check: passed.
+- Final workspace `bun run typecheck`: passed.
+- Final workspace `bun run lint`: passed.
+- Final workspace `bun run test`: 2,625 pass, 1 skipped, 0 fail, 10,897 expectations across 149 files.
+- Final changed-file Prettier and `git diff --check`: passed.
+
+All six independent validation failures are corrected with focused and full executable evidence. Step 6 is ready for the Bead to close after the final notes formatting and diff checks.
+
+### Step 6 Final Review Failure And Correction
+
+Final review reopened `shelf-judge-6wv.8` for additional material findings.
+
+- `SJ6-001`: Default `atomicWrite` names a stage temporary file `.${base}.${token}.tmp`. Because Reflection stage bases already begin with `.`, process death after exclusive write could leave `..profile-reflections.stage.*.tmp`, which the stable-stage-only orphan matcher did not recognize. Reflection storage now classifies only exact Reflection-owned stable stages, double-dot state/settings stage temps, active state/settings temps, and their `.tmp` suffixes. Startup destroys those artifacts while retaining similarly named unrelated files. A real-filesystem regression writes raw note-bearing stage and active-state temps directly, bypassing `atomicWrite` cleanup, reconstructs services, runs recovery, and proves both files and their sentinel disappear. A separate settings regression proves settings stage/active temps are cleaned while valid active settings survive.
+- `SJ6-002`: Journal recovery previously returned after transaction classification and orphan cleanup without an explicit no-journal source-validation pass. A startup validator now runs once through the production Reflection runtime under the exact collection coordinator before routes listen. It loads current collection, settings, state, provider/model identity, manifest/profile/question policy, and every cache dependency without model work. Changed note versions and missing dependency games selectively purge affected caches and advance the deletion generation. Disabled questions cannot retain a cache or refreshing attempt. Interrupted attempts become `unavailable/internal` with `daemon-restarted`. Collection revision, provider/model, profile, manifest, and question-policy drift remain durable and visibly stale rather than being over-deleted. Validator failure invokes the existing global fail-closed reset, preserves valid settings, advances generation, and writes only the text-free `startup-validation-failed` recovery code.
+- `SJ6-003`: The `SJ6-001` orphan matcher still accepted every filename beginning with a stable-stage prefix and every `.tmp` suffix under an owned prefix, so recovery could delete unrelated files such as `.profile-reflections.stage.user-backup`. Classification now requires a cross-platform bare basename and one of the exact owned grammars: a state/settings stage with a valid transaction UUID, lowercase 64-hex SHA-256 identity, and exact `.json`; or an `atomicWrite` temp for a valid owned stable stage or exact active state/settings basename with a lowercase random UUID v4 token and exact `.tmp`. Table-driven tests cover every valid shape plus prefix lookalikes, malformed UUIDs/hashes/extensions/tokens, nested POSIX and Windows paths, backups, and unrelated dotfiles. Real-filesystem restart coverage proves valid raw temps and their note-bearing sentinel are removed while stable-prefix and malformed-temp lookalikes survive.
+
+Exact regressions cover raw stage/state temps, settings temps, changed note version, deleted game, provider/model drift, question-policy drift, collection revision drift, disabled settings with a refreshing attempt, stale-fence rejection after generation advance, and startup-validator failure.
+
+Final correction validation:
+
+- `bun test packages/daemon/tests/services/reflection-transaction-service.test.ts packages/daemon/tests/services/reflection-runtime.test.ts packages/daemon/tests/services/reflection-state-service.test.ts packages/daemon/tests/services/reflection-storage.test.ts`: 51 pass, 0 fail, 241 expectations.
+- `bun run typecheck`: passed.
+- `bun run lint`: passed.
+- `bun run test`: 2,632 pass, 1 skipped, 0 fail, 10,932 expectations across 149 files.
+- Changed-file Prettier and `git diff --check`: passed.
+
+`SJ6-003` correction validation:
+
+- `bun test packages/daemon/tests/services/reflection-storage.test.ts packages/daemon/tests/services/reflection-transaction-service.test.ts`: 61 pass, 0 fail, 202 expectations across 2 files.
+- `bun run typecheck`: passed.
+- `bun run lint`: passed.
+- Changed-file Prettier and `git diff --check`: passed.
+
+### Step 6 Final Acceptance
+
+Final acceptance review passed with `SJ6-001`, `SJ6-002`, and `SJ6-003` closed. Step 6 is accepted. The overall Grounded Profile Reflections notes status remains `in_progress` because later plan steps remain incomplete.
+
+The accepted manifest below records the exact worktree immediately before this final notes-only recording edit. This explicit boundary avoids pretending that a file can contain its own post-edit SHA-256. The final notes-only hash is reported at handoff; every production, test, tracker, and other lore path remains bound to this accepted snapshot. The snapshot matched the reviewed Step 6 surface: 16 tracked unstaged modifications and 5 untracked additions, with no staged, deleted, unmerged, or unexpected paths.
+
+| Porcelain status | Path                                                                    | Index blob identity                        | Working-tree SHA-256                                               |
+| ---------------- | ----------------------------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------------ |
+| ` M`             | `.beads/interactions.jsonl`                                             | `cf36622ae5f94ffcd7e0b65e63fbae45df98ec66` | `9e37e4c6784ac40480a5de855cad9ad2f04269c1f6cb4d4358c982e308a29bb2` |
+| ` M`             | `.beads/issues.jsonl`                                                   | `c952743dd277d1d632675d220d26b92d90d827af` | `177b63cbe048e77ecbe844e3213018e4edc4b5d15e0a3f261b44a0fb4dfa4110` |
+| ` M`             | `.lore/work/notes/grounded-profile-reflections.md`                      | `9b16e0ee52ee1d24e7fa6fee42dd3d1988901af9` | `8179b1f8f526cf167be693d1d0582ae7d00cb1d2d27ced06690623b19dbdddf3` |
+| ` M`             | `packages/daemon/src/index.ts`                                          | `f88b309651c17914eb2154c891cf500f5882c3f1` | `4e05adfa6702c437393d4bed54d8665b546f715a382d8dd929e1e32932b28e0f` |
+| ` M`             | `packages/daemon/src/services/collection-mutation-service.ts`           | `e5cd17f3936212629467f7fd6d942c846168796c` | `b90a7d5538e144c3245a1d91275008672528e0784c095310872893619a8b227b` |
+| ` M`             | `packages/daemon/src/services/file-ops.ts`                              | `57b0d4c05cd28eaa5d0677ce231a4cb290ab8f3b` | `5ade9e2518756f7dc5a8c7841990de8d395f00ab569bd3e9c93feb2e301e02dc` |
+| ` M`             | `packages/daemon/src/services/game-service.ts`                          | `8135b1d1addd07a0dead7b32d30dcbbe2ed474f1` | `8873c01accb7322a6da043e42fc1fe3958bcf096ea0dd4a80ad71077edb75094` |
+| ` M`             | `packages/daemon/src/services/owner-game-note-service.ts`               | `2d97b6b64d277fcc66511ec8f179bac6b81193b3` | `9f63f292f2ad0205775ebdec575d7449aad13bd5ae930c87ceca233aff3f1d1f` |
+| ` M`             | `packages/daemon/src/services/reflection-state-service.ts`              | `4e476b0b4dafe18407a2b8e1d3f23f299dc94bfb` | `34be51abebed681a5a461c5cec32b8708f2ec08be2e186d0ec52b364ea31942c` |
+| ` M`             | `packages/daemon/src/services/reflection-storage.ts`                    | `8bd5f4cd279f3ac82355863306d892912f78d9e9` | `0e4f201252579594553c326d9caffe9ed83ce755632a860484740922e4c17265` |
+| ` M`             | `packages/daemon/tests/helpers/mock-file-ops.ts`                        | `a3d246c04678739c3278f1db5c13cfd639cc6a98` | `a7109569baf05931261c35b0db83c691ec5147013b939b77cd24c3f361f7feb8` |
+| ` M`             | `packages/daemon/tests/helpers/test-app.ts`                             | `9cde74a7b61054b777e7d41cd118ab164869fcf0` | `c1aecc955f9e22e14ebf41715f151617bb561453c98f3612446631ecefbb700c` |
+| ` M`             | `packages/daemon/tests/ownership-routes.test.ts`                        | `092acad8fb320c74080254ee33bf2d271144409b` | `27f97fb610514ec9e1b431548f8455285fd980a944e935a3d2002bd273cd7810` |
+| ` M`             | `packages/daemon/tests/services/reflection-state-service.test.ts`       | `34ca7064180ebb58b5f2ffa8556f0f38d043d515` | `41e1da1e1023321f69742a23ed0555e3c11906aec50a300ca4d9ae3799da8ca6` |
+| ` M`             | `packages/daemon/tests/services/reflection-storage.test.ts`             | `9bf83e1e280563e24298fed40ff4cbff8070aba2` | `15beaf8a188fa283e1c5833d0aff70e13cc73c68ebc07ee2b73fa2a9d5e7d7bf` |
+| ` M`             | `packages/daemon/tests/storage-backfill.test.ts`                        | `bc9cd90cd154ed55971d2f6a3df72f9e0cd0e82f` | `69947487514e01fb7ac9e021e4b36071e76b43058ca6df1fba76ba745ae8d789` |
+| `??`             | `packages/daemon/src/services/reflection-runtime.ts`                    | `absent`                                   | `bbdf83fbfedad39a5920cb72caa41d4cf868ea29b26e0113989d6213590418c7` |
+| `??`             | `packages/daemon/src/services/reflection-startup-validation.ts`         | `absent`                                   | `6942eb39cf813f1742a754dbabd5b12ac282bd1bc479f9da82c842a4da8fd009` |
+| `??`             | `packages/daemon/src/services/reflection-transaction-service.ts`        | `absent`                                   | `494b61d28a5b0995cd4fb2ba5a9c761c646d10388292230868d467eadfa61ac7` |
+| `??`             | `packages/daemon/tests/services/reflection-runtime.test.ts`             | `absent`                                   | `d9bbb14e56f9be3a6e753169e7d0d6381bdc40e6644a35c32f7fe0e815cd41af` |
+| `??`             | `packages/daemon/tests/services/reflection-transaction-service.test.ts` | `absent`                                   | `ecc737bf1c6fcea320ca7a2e058c6b7ea57a9924d6318341474a4334d26ea6a4` |

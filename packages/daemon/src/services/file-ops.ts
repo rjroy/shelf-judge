@@ -9,6 +9,7 @@ export interface FileOps {
   rename(oldPath: string, newPath: string): Promise<void>;
   exists(filePath: string): Promise<boolean>;
   mkdir(dirPath: string): Promise<void>;
+  listFiles(dirPath: string): Promise<string[]>;
   /** Delete a file. Resolves silently if the file does not exist (ENOENT is swallowed). */
   unlink(filePath: string): Promise<void>;
 }
@@ -52,6 +53,15 @@ export function createFileOps(): FileOps {
 
     async mkdir(dirPath: string): Promise<void> {
       await fs.mkdir(dirPath, { recursive: true });
+    },
+
+    async listFiles(dirPath: string): Promise<string[]> {
+      try {
+        return await fs.readdir(dirPath);
+      } catch (error) {
+        if (hasErrorCode(error, "ENOENT")) return [];
+        throw error;
+      }
     },
 
     async unlink(filePath: string): Promise<void> {

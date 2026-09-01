@@ -648,6 +648,7 @@ describe("legacy data migration", () => {
       },
       exists: (p: string) => Promise.resolve(p in files),
       mkdir: () => Promise.resolve(),
+      listFiles: () => Promise.resolve([]),
       unlink: (p: string) => {
         delete files[p];
         return Promise.resolve();

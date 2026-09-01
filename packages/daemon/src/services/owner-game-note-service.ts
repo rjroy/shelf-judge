@@ -13,7 +13,11 @@ import {
   type OwnerGameNoteSetRequest,
   type CommandReceipt,
 } from "@shelf-judge/shared";
-import type { CollectionMutationService } from "./collection-mutation-service.js";
+import {
+  collectionDurableIdentity,
+  type CollectionDurableIdentity,
+  type CollectionMutationService,
+} from "./collection-mutation-service.js";
 import { createLogger, type Logger } from "./logger.js";
 
 const INVALID_COMMAND_ID = "00000000-0000-0000-0000-000000000000";
@@ -33,6 +37,8 @@ export interface OwnerGameNoteInvalidationContext {
   alreadyClear: boolean;
   priorCollectionRevision: number;
   resultingCollectionRevision: number;
+  priorSourceIdentity: CollectionDurableIdentity;
+  targetSourceIdentity: CollectionDurableIdentity;
 }
 
 export interface OwnerGameNoteInvalidationLifecycle {
@@ -41,6 +47,7 @@ export interface OwnerGameNoteInvalidationLifecycle {
     context: OwnerGameNoteInvalidationContext,
     error: unknown,
   ): Promise<void> | void;
+  onPersistenceSuccess?(context: OwnerGameNoteInvalidationContext): Promise<void> | void;
 }
 
 export interface OwnerGameNoteService {
@@ -275,6 +282,7 @@ export function createOwnerGameNoteService(deps: OwnerGameNoteServiceDeps): Owne
               } satisfies OwnerGameNoteMutationResult,
             };
           }
+          const priorSourceIdentity = collectionDurableIdentity(collection);
           priorVersion = game.ownerNote.version;
           if (game.ownerNote.version !== request.expectedVersion) {
             return {
@@ -362,6 +370,11 @@ export function createOwnerGameNoteService(deps: OwnerGameNoteServiceDeps): Owne
             alreadyClear,
             priorCollectionRevision,
             resultingCollectionRevision: acceptedCollectionRevision,
+            priorSourceIdentity,
+            targetSourceIdentity: collectionDurableIdentity({
+              ...collection,
+              revision: acceptedCollectionRevision,
+            }),
           };
           let invalidationAttempted = false;
           return {
@@ -382,6 +395,10 @@ export function createOwnerGameNoteService(deps: OwnerGameNoteServiceDeps): Owne
                     ? lifecycle.onPersistenceFailure(lifecycleContext, error)
                     : undefined
               : undefined,
+            onPersistenceSuccess: lifecycle?.onPersistenceSuccess
+              ? () => lifecycle.onPersistenceSuccess?.(lifecycleContext)
+              : undefined,
+            classifyPersistenceOutcome: lifecycle !== undefined,
           };
         },
       );

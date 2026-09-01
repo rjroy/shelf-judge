@@ -5,9 +5,12 @@ import {
   type ReflectionSettings,
 } from "@shelf-judge/shared";
 import {
+  REFLECTION_SETTINGS_STAGE_PREFIX,
   REFLECTION_SETTINGS_FILE,
+  REFLECTION_STAGE_PREFIX,
   REFLECTION_STATE_FILE,
   createReflectionStorage,
+  isReflectionOrphanArtifact,
 } from "../../src/services/reflection-storage.js";
 import { createMockFileOps } from "../helpers/mock-file-ops.js";
 
@@ -19,6 +22,11 @@ const GENERATIONS = [
   "00000000-0000-4000-8000-000000000002",
   "00000000-0000-4000-8000-000000000003",
 ];
+const TRANSACTION_ID = "33000000-0000-4000-8000-000000000001";
+const TEMP_TOKEN = "44000000-0000-4000-8000-000000000001";
+const SHA256 = "a".repeat(64);
+const STATE_STAGE = `${REFLECTION_STAGE_PREFIX}${TRANSACTION_ID}.${SHA256}.json`;
+const SETTINGS_STAGE = `${REFLECTION_SETTINGS_STAGE_PREFIX}${TRANSACTION_ID}.${SHA256}.json`;
 
 function setup(initialFiles: Record<string, string> = {}) {
   const fileOps = createMockFileOps(initialFiles);
@@ -38,6 +46,35 @@ function defaultSettings(): ReflectionSettings {
 }
 
 describe("Reflection storage", () => {
+  test.each([
+    [STATE_STAGE, true],
+    [SETTINGS_STAGE, true],
+    [`.${STATE_STAGE}.${TEMP_TOKEN}.tmp`, true],
+    [`.${SETTINGS_STAGE}.${TEMP_TOKEN}.tmp`, true],
+    [`.${REFLECTION_STATE_FILE}.${TEMP_TOKEN}.tmp`, true],
+    [`.${REFLECTION_SETTINGS_FILE}.${TEMP_TOKEN}.tmp`, true],
+    [".profile-reflections.stage.user-backup", false],
+    [".profile-reflection-settings.stage.user-backup", false],
+    [`${REFLECTION_STAGE_PREFIX}not-a-uuid.${SHA256}.json`, false],
+    [`${REFLECTION_STAGE_PREFIX}${TRANSACTION_ID}.${"a".repeat(63)}.json`, false],
+    [`${REFLECTION_STAGE_PREFIX}${TRANSACTION_ID}.${"g".repeat(64)}.json`, false],
+    [`${REFLECTION_STAGE_PREFIX}${TRANSACTION_ID}.${SHA256}.JSON`, false],
+    [`${REFLECTION_STAGE_PREFIX}${TRANSACTION_ID}.${SHA256}.json.backup`, false],
+    [`${REFLECTION_STAGE_PREFIX}${TRANSACTION_ID}.${SHA256}.extra.json`, false],
+    [`.${STATE_STAGE}.not-a-random-token.tmp`, false],
+    [`.${STATE_STAGE}.00000000-0000-0000-0000-000000000000.tmp`, false],
+    [`.${STATE_STAGE}.44000000-0000-1000-8000-000000000001.tmp`, false],
+    [`.${REFLECTION_STATE_FILE}.not-a-random-token.tmp`, false],
+    [`.${REFLECTION_STATE_FILE}.${TEMP_TOKEN}.tmp.backup`, false],
+    [`.profile-reflections.json.backup.${TEMP_TOKEN}.tmp`, false],
+    [`nested/${STATE_STAGE}`, false],
+    [`nested\\${STATE_STAGE}`, false],
+    [`../${STATE_STAGE}`, false],
+    [`.unrelated.${TEMP_TOKEN}.tmp`, false],
+  ])("classifies exact owned orphan artifact %s as %s", (fileName, expected) => {
+    expect(isReflectionOrphanArtifact(fileName)).toBe(expected);
+  });
+
   test("creates and round-trips separately versioned settings and note-bearing state", async () => {
     const { fileOps, storage } = setup();
     const settings = await storage.loadSettings();

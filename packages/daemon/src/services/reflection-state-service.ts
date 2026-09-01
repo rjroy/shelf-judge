@@ -15,6 +15,7 @@ import {
   type ReflectionUnavailableReason,
 } from "@shelf-judge/shared";
 import type { ReflectionDurableState, ReflectionStorage } from "./reflection-storage.js";
+import type { ProfileSourceCoordinator } from "./profile-source-coordinator.js";
 
 export interface ReflectionCurrentSources {
   collectionId: string;
@@ -42,7 +43,11 @@ export interface ReflectionStateService {
   read(sources: ReflectionCurrentSources): Promise<readonly ReflectionQuestionState[]>;
   setEnabled(questionId: ReflectionQuestionId, enabled: boolean): Promise<void>;
   startAttempt(questionId: ReflectionQuestionId, batchId: string): Promise<ReflectionAttemptFence>;
-  completeAttempt(fence: ReflectionAttemptFence, result: ReflectionCompleted): Promise<boolean>;
+  completeAttempt(
+    fence: ReflectionAttemptFence,
+    result: ReflectionCompleted,
+    loadCurrentSources: () => ReflectionCurrentSources | Promise<ReflectionCurrentSources>,
+  ): Promise<boolean>;
   cancelAttempt(fence: ReflectionAttemptFence): Promise<boolean>;
   failAttempt(
     fence: ReflectionAttemptFence,
@@ -60,6 +65,9 @@ export interface ReflectionStateServiceDeps {
   now?: () => string;
   createGeneration?: () => string;
   createAttemptId?: () => string;
+  coordinator: ProfileSourceCoordinator;
+  recoverBeforeUse?: () => Promise<void>;
+  publishSettingsChange?: (questionId: ReflectionQuestionId, enabled: boolean) => Promise<void>;
 }
 
 function dependencyKey(dependency: ReflectionDependency): string {
@@ -142,7 +150,6 @@ export function createReflectionStateService(
   const createAttemptId = deps.createAttemptId ?? (() => crypto.randomUUID());
   let initialized: Promise<{ settings: ReflectionSettings; state: ReflectionDurableState }> | null =
     null;
-  let operations: Promise<void> = Promise.resolve();
 
   function initialize(): Promise<{ settings: ReflectionSettings; state: ReflectionDurableState }> {
     if (initialized !== null) return initialized;
@@ -176,12 +183,11 @@ export function createReflectionStateService(
   }
 
   function runExclusive<Value>(operation: () => Promise<Value>): Promise<Value> {
-    const result = operations.then(operation, operation);
-    operations = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    return result;
+    return deps.coordinator.runExclusive(async () => {
+      await deps.recoverBeforeUse?.();
+      if (deps.recoverBeforeUse !== undefined) initialized = null;
+      return operation();
+    });
   }
 
   async function updateState(
@@ -308,6 +314,11 @@ export function createReflectionStateService(
 
     setEnabled(questionId, enabled): Promise<void> {
       return runExclusive(async () => {
+        if (deps.publishSettingsChange !== undefined) {
+          await deps.publishSettingsChange(questionId, enabled);
+          initialized = null;
+          return;
+        }
         const context = await initialize();
         const index = questionIndex(questionId);
         const settings = structuredClone(context.settings);
@@ -358,16 +369,18 @@ export function createReflectionStateService(
       });
     },
 
-    completeAttempt(fence, result): Promise<boolean> {
+    completeAttempt(fence, result, loadCurrentSources): Promise<boolean> {
       return runExclusive(async () => {
         const validated = ReflectionCompletedSchema.parse(result);
         if (validated.evidenceIdentity.questionId !== fence.questionId) {
           throw new Error("Reflection result question does not match its attempt fence");
         }
         const context = await initialize();
+        const sources = await loadCurrentSources();
         const index = questionIndex(fence.questionId);
         if (
           context.state.deletionGeneration !== fence.deletionGeneration ||
+          changedCategories(validated, sources).length > 0 ||
           !context.settings.questions[index].enabled ||
           context.state.questions[index].attempt.state !== "refreshing" ||
           context.state.questions[index].attempt.batchId !== fence.batchId ||

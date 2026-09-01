@@ -11,6 +11,7 @@ import {
   createReflectionStorage,
 } from "../../src/services/reflection-storage.js";
 import { createMockFileOps } from "../helpers/mock-file-ops.js";
+import { profileSourceCoordinatorFor } from "../../src/services/profile-source-coordinator.js";
 
 const DATA_DIR = "/test/data";
 const STATE_PATH = `${DATA_DIR}/${REFLECTION_STATE_FILE}`;
@@ -92,6 +93,17 @@ function completedWithNote(noteVersion: number): ReflectionCompleted {
   });
 }
 
+function completedWithGameDependencies(noteVersion: number): ReflectionCompleted {
+  const result = completedWithNote(noteVersion);
+  return ReflectionCompletedSchema.parse({
+    ...result,
+    dependencies: [
+      ...result.dependencies,
+      { category: "metadata", sourceId: "game:game-1:metadata", fingerprint: "game-present" },
+    ],
+  });
+}
+
 function current(overrides: Record<string, unknown> = {}) {
   const dependency = (questionId: ReflectionQuestionId): ReflectionDependency => ({
     category: "scoring",
@@ -127,13 +139,15 @@ function setup() {
     temporaryPathForAttempt: (filePath, attempt) => `${filePath}.${attempt}.tmp`,
     logger: { log() {}, warn() {}, error() {} },
   });
+  const coordinator = profileSourceCoordinatorFor(storage);
   const createService = () =>
     createReflectionStateService({
       storage,
       now: () => TIME,
       createGeneration: nextGeneration,
+      coordinator,
     });
-  return { fileOps, storage, createService };
+  return { fileOps, storage, coordinator, createService };
 }
 
 async function publish(
@@ -142,7 +156,9 @@ async function publish(
   result = completed(questionId),
 ) {
   const fence = await service.startAttempt(questionId, `batch-${questionId}`);
-  expect(await service.completeAttempt(fence, result)).toBe(true);
+  const sources = current();
+  sources.dependenciesByQuestion[questionId] = result.dependencies;
+  expect(await service.completeAttempt(fence, result, () => sources)).toBe(true);
 }
 
 describe("Reflection state service", () => {
@@ -159,7 +175,9 @@ describe("Reflection state service", () => {
 
     const firstFence = await service.startAttempt("repeated-values", "batch-1");
     expect((await service.read(current()))[0].attempt.state).toBe("refreshing");
-    expect(await service.completeAttempt(firstFence, completed("repeated-values"))).toBe(true);
+    expect(
+      await service.completeAttempt(firstFence, completed("repeated-values"), () => current()),
+    ).toBe(true);
     await publish(service, "pattern-exceptions");
 
     let questions = await service.read(current());
@@ -251,9 +269,140 @@ describe("Reflection state service", () => {
     expect(await service.cancelAttempt(oldFence)).toBe(true);
     const currentFence = await service.startAttempt("repeated-values", "old-batch");
 
-    expect(await service.completeAttempt(oldFence, completed("repeated-values"))).toBe(false);
+    expect(
+      await service.completeAttempt(oldFence, completed("repeated-values"), () => current()),
+    ).toBe(false);
     expect(await service.failAttempt(oldFence, "internal")).toBe(false);
-    expect(await service.completeAttempt(currentFence, completed("repeated-values"))).toBe(true);
+    expect(
+      await service.completeAttempt(currentFence, completed("repeated-values"), () => current()),
+    ).toBe(true);
+    expect((await service.read(current()))[0].cache.state).toBe("current");
+  });
+
+  test("rejects final cache publication when a currently available source fence changed", async () => {
+    const { createService } = setup();
+    const service = createService();
+    const fence = await service.startAttempt("repeated-values", "stale-source-batch");
+    expect(
+      await service.completeAttempt(fence, completed("repeated-values"), () =>
+        current({ collectionRevision: 3 }),
+      ),
+    ).toBe(false);
+    expect((await service.read(current()))[0].cache.state).toBe("none");
+  });
+
+  test("rejects final publication for every current-source mismatch", async () => {
+    const { createService } = setup();
+    const service = createService();
+    const result = completedWithGameDependencies(1);
+    const sources = current();
+    sources.dependenciesByQuestion["repeated-values"] = result.dependencies;
+    const fence = await service.startAttempt("repeated-values", "source-fence-batch");
+    const mismatches = [
+      { name: "collection revision", apply: () => ({ ...sources, collectionRevision: 3 }) },
+      {
+        name: "note version",
+        apply: () => ({
+          ...sources,
+          dependenciesByQuestion: {
+            ...sources.dependenciesByQuestion,
+            "repeated-values": result.dependencies.map((dependency) =>
+              dependency.category === "note" ? { ...dependency, noteVersion: 2 } : dependency,
+            ),
+          },
+        }),
+      },
+      {
+        name: "game existence",
+        apply: () => ({
+          ...sources,
+          dependenciesByQuestion: {
+            ...sources.dependenciesByQuestion,
+            "repeated-values": result.dependencies.filter(
+              (dependency) =>
+                dependency.category !== "note" &&
+                !(
+                  dependency.category === "metadata" &&
+                  dependency.sourceId.startsWith("game:game-1:")
+                ),
+            ),
+          },
+        }),
+      },
+      { name: "provider", apply: () => ({ ...sources, providerId: "replacement-provider" }) },
+      { name: "model", apply: () => ({ ...sources, modelId: "replacement-model" }) },
+    ];
+
+    for (const mismatch of mismatches) {
+      expect(
+        await service.completeAttempt(fence, result, () => mismatch.apply()),
+        mismatch.name,
+      ).toBe(false);
+    }
+    expect((await service.read(sources))[0].cache.state).toBe("none");
+  });
+
+  test("rejects final publication after enabled, generation, and attempt fences change", async () => {
+    const disabledSetup = setup();
+    const disabledService = disabledSetup.createService();
+    const disabledFence = await disabledService.startAttempt("repeated-values", "disabled-batch");
+    await disabledService.setEnabled("repeated-values", false);
+    expect(
+      await disabledService.completeAttempt(disabledFence, completed("repeated-values"), () =>
+        current(),
+      ),
+    ).toBe(false);
+
+    const generationSetup = setup();
+    const generationService = generationSetup.createService();
+    const generationFence = await generationService.startAttempt(
+      "repeated-values",
+      "generation-batch",
+    );
+    await generationService.purge(["pattern-exceptions"], "owner-deleted");
+    expect(
+      await generationService.completeAttempt(generationFence, completed("repeated-values"), () =>
+        current(),
+      ),
+    ).toBe(false);
+
+    const attemptSetup = setup();
+    const attemptService = attemptSetup.createService();
+    const oldFence = await attemptService.startAttempt("repeated-values", "attempt-batch");
+    await attemptService.cancelAttempt(oldFence);
+    await attemptService.startAttempt("repeated-values", "attempt-batch");
+    expect(
+      await attemptService.completeAttempt(oldFence, completed("repeated-values"), () => current()),
+    ).toBe(false);
+  });
+
+  test("loads final current sources and publishes while holding the collection coordinator", async () => {
+    const { coordinator, createService } = setup();
+    const service = createService();
+    const fence = await service.startAttempt("repeated-values", "coordinated-publication");
+    let releaseSourceLoad = () => {};
+    let signalSourceLoad = () => {};
+    const sourceLoadReached = new Promise<void>((resolve) => (signalSourceLoad = resolve));
+    const sourceLoadRelease = new Promise<void>((resolve) => (releaseSourceLoad = resolve));
+    let unrelatedMutationCompleted = false;
+
+    const publication = service.completeAttempt(fence, completed("repeated-values"), async () => {
+      signalSourceLoad();
+      await sourceLoadRelease;
+      return current();
+    });
+    await sourceLoadReached;
+    const unrelatedMutation = coordinator.runExclusive(() => {
+      unrelatedMutationCompleted = true;
+      return Promise.resolve();
+    });
+    await Promise.resolve();
+    expect(unrelatedMutationCompleted).toBe(false);
+
+    releaseSourceLoad();
+    expect(await publication).toBe(true);
+    await unrelatedMutation;
+    expect(unrelatedMutationCompleted).toBe(true);
     expect((await service.read(current()))[0].cache.state).toBe("current");
   });
 
@@ -273,6 +422,7 @@ describe("Reflection state service", () => {
       storage: interruptedStorage,
       now: () => TIME,
       createGeneration: () => GENERATIONS[3],
+      coordinator: profileSourceCoordinatorFor(interruptedStorage),
     });
 
     // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test rejects is thenable
@@ -319,7 +469,9 @@ describe("Reflection state service", () => {
     const priorGeneration = lateFence.deletionGeneration;
 
     await service.setEnabled("repeated-values", false);
-    expect(await service.completeAttempt(lateFence, completed("repeated-values"))).toBe(false);
+    expect(
+      await service.completeAttempt(lateFence, completed("repeated-values"), () => current()),
+    ).toBe(false);
     expect(await service.getDeletionGeneration()).not.toBe(priorGeneration);
     let questions = await service.read(current());
     expect(questions[0]).toMatchObject({
@@ -349,6 +501,7 @@ describe("Reflection state service", () => {
       storage,
       now: () => TIME,
       createGeneration: () => GENERATIONS[3],
+      coordinator: profileSourceCoordinatorFor(storage),
     });
     const settings = await restarted.getSettings();
     expect(settings.questions[1].enabled).toBe(false);
