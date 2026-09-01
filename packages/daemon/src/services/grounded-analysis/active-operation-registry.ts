@@ -128,6 +128,14 @@ export function createActiveGroundedOperationRegistry(options?: { now?: () => st
       record.terminalReservation = reservation;
       return reservation;
     },
+    releaseTerminal(reservation: GroundedOperationTerminalReservation): boolean {
+      const record = operations.get(reservation.operationId);
+      if (!record || record.state === "terminal" || record.terminalReservation !== reservation) {
+        return false;
+      }
+      record.terminalReservation = undefined;
+      return true;
+    },
     commitTerminal(
       reservation: GroundedOperationTerminalReservation,
       outcome: Exclude<GroundedOperationTerminalOutcome, "cancelled" | "transport-lost">,
