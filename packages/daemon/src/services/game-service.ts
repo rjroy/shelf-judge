@@ -220,7 +220,7 @@ function playerRangeEvidence(result: BggGameResult): PlayerRangeEvidence | null 
 }
 
 function applyBggResult(
-  game: Game,
+  game: DurableGame,
   result: BggGameResult,
   logger: Logger,
   retainPollOnRefreshOmission: boolean,
@@ -685,12 +685,30 @@ export function createGameService(deps: GameServiceDeps): GameService {
               .filter((intention) => intention.gameId === id)
               .map((intention) => intention.intentionId);
             if (intentionIds.length > 0) throw new GameHistoryConflictError(id, intentionIds);
+            collection.commandReceipts = collection.commandReceipts.filter(
+              (receipt) =>
+                !(
+                  "receiptType" in receipt &&
+                  receipt.receiptType === "owner-game-note" &&
+                  receipt.gameId === id
+                ),
+            );
             collection.games.splice(index, 1);
             collection.updatedAt = now();
             return { changed: true, value: undefined };
           },
         );
-        await deps.onGameDeleted?.(id);
+        if (deps.onGameDeleted !== undefined) {
+          try {
+            await deps.onGameDeleted(id);
+          } catch (error) {
+            logger.error("post-deletion cleanup failed", {
+              gameId: id,
+              outcome: "source-deletion-persisted",
+              error: toErrorMessage(error),
+            });
+          }
+        }
       });
     },
 

@@ -411,6 +411,36 @@ describe("GameService BGG Integration", () => {
   });
 
   describe("refreshBggData", () => {
+    test("preserves an owner note byte-for-byte while replacing BGG data", async () => {
+      const seed = createGameService({
+        storageService,
+        fitnessService: createFitnessService(),
+      });
+      const { game } = await seed.addGame({ name: "Original", bggId: 266192 });
+      const collection = await storageService.loadCollection();
+      const stored = collection.games.find(({ id }) => id === game.id);
+      if (stored === undefined) throw new Error("Expected stored game");
+      stored.ownerNote = {
+        state: "present",
+        version: 3,
+        updatedAt: "2026-08-25T09:00:00.000Z",
+        text: "  owner text\n<comment>not BGG prose</comment>  ",
+      };
+      await storageService.saveCollection(collection);
+      const originalNote = structuredClone(stored.ownerNote);
+      const parsed = parseThingItems(await readFixture("thing-wingspan-266192.xml"), observedAt)[0];
+      if (parsed === undefined) throw new Error("Expected Wingspan thing fixture");
+      const service = createGameService({
+        storageService,
+        fitnessService: createFitnessService(),
+        bggClient: clientForResults([parsed]),
+      });
+
+      await service.refreshBggData(game.id);
+
+      expect((await storageService.loadCollection()).games[0]?.ownerNote).toEqual(originalNote);
+    });
+
     test("replaces the primary collection count with deduplicated related-entry plays", async () => {
       const seedService = createGameService({
         storageService,
@@ -2336,6 +2366,50 @@ describe("GameService BGG Integration", () => {
   });
 
   describe("importBggCollection observations", () => {
+    test("starts new imports missing and preserves skipped existing notes", async () => {
+      const seed = createGameService({
+        storageService,
+        fitnessService: createFitnessService(),
+      });
+      const { game: existing } = await seed.addGame({ name: "Existing", bggId: 1 });
+      const collection = await storageService.loadCollection();
+      const stored = collection.games.find(({ id }) => id === existing.id);
+      if (stored === undefined) throw new Error("Expected existing game");
+      stored.ownerNote = {
+        state: "cleared",
+        version: 2,
+        updatedAt: "2026-08-25T09:00:00.000Z",
+      };
+      await storageService.saveCollection(collection);
+      const originalNote = structuredClone(stored.ownerNote);
+      const parsed = parseThingItems(await readFixture("thing-wingspan-266192.xml"), observedAt)[0];
+      if (parsed === undefined) throw new Error("Expected Wingspan thing fixture");
+      const service = createGameService({
+        storageService,
+        fitnessService: createFitnessService(),
+        bggClient: clientForResults(
+          [parsed],
+          [
+            { bggId: 1, name: "Existing", yearPublished: 2020, numplays: 1 },
+            { bggId: 266192, name: "Wingspan", yearPublished: 2019, numplays: 12 },
+          ],
+        ),
+      });
+
+      expect(await service.importBggCollection()).toMatchObject({
+        imported: 1,
+        skipped: 1,
+        errors: [],
+      });
+      const persisted = await storageService.loadCollection();
+      expect(persisted.games.find(({ id }) => id === existing.id)?.ownerNote).toEqual(originalNote);
+      expect(persisted.games.find(({ bggId }) => bggId === 266192)?.ownerNote).toEqual({
+        state: "missing",
+        version: 0,
+        updatedAt: null,
+      });
+    });
+
     test("persists all entity classes from each imported thing response", async () => {
       const parsed = parseThingItems(await readFixture("thing-wingspan-266192.xml"), observedAt)[0];
       if (parsed === undefined) throw new Error("Expected Wingspan thing fixture");
