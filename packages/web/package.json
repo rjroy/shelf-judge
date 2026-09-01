@@ -9,7 +9,9 @@
     "test:browser:install": "playwright install chromium",
     "test:browser:install:ci": "./node_modules/.bin/playwright install --with-deps chromium",
     "typecheck:browser": "tsc --noEmit -p tsconfig.e2e.json",
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "test:browser:owner-notes": "playwright test e2e/owner-game-notes.pw.ts",
+    "test:browser:owner-notes:zoom": "playwright test e2e/owner-game-notes.pw.ts --project=chromium-desktop --grep=\"native Chromium page zoom 200 percent\""
   },
   "dependencies": {
     "@shelf-judge/shared": "workspace:*",

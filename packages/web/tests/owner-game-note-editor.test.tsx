@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { OwnerGameNote, OwnerGameNoteMutationResult } from "@shelf-judge/shared";
 import {
   createOwnerGameNoteEditorState,
+  executeOwnerGameNoteCommand,
   focusOwnerGameNoteTarget,
   OwnerGameNoteConflict,
   OwnerGameNoteEditor,
@@ -66,6 +67,36 @@ function accepted(
 }
 
 describe("Owner game note editor reducer", () => {
+  test("runCommand omits the UI-only operation discriminator from its strict request", async () => {
+    const requests: unknown[] = [];
+    const client = {
+      set: (_gameId, request) => {
+        requests.push(request);
+        return Promise.resolve(accepted());
+      },
+      clear: (_gameId, request) => {
+        requests.push(request);
+        return Promise.resolve(
+          accepted({ operation: "clear", state: "cleared", alreadyClear: false }),
+        );
+      },
+    } satisfies Parameters<typeof executeOwnerGameNoteCommand>[2];
+    const setResult = await executeOwnerGameNoteCommand("game-1", setCommand, client);
+    const clearResult = await executeOwnerGameNoteCommand(
+      "game-1",
+      { operation: "clear", commandId, expectedVersion: 1 },
+      client,
+    );
+
+    expect(setResult.ok).toBe(true);
+    expect(clearResult.ok).toBe(true);
+    expect(requests).toEqual([
+      { commandId, expectedVersion: 1, text: "Local draft" },
+      { commandId, expectedVersion: 1 },
+    ]);
+    expect(requests.every((request) => !Object.hasOwn(request as object, "operation"))).toBe(true);
+  });
+
   test("tracks normalized dirty state and Unicode code points without autosaving", () => {
     let state = createOwnerGameNoteEditorState({ ...present, text: "Line one\n😀" });
     expect(ownerGameNoteIsDirty(state)).toBe(false);

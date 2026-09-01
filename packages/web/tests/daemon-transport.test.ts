@@ -94,6 +94,26 @@ describe("web daemon transport ownership", () => {
     expect(await response.text()).toBe(publicBytes);
   });
 
+  test("production proxy preserves daemon no-content responses", async () => {
+    const controller = new AbortController();
+    const response = await proxyDaemonRequest(
+      {
+        path: "/api/games/game-1",
+        method: "DELETE",
+        signal: controller.signal,
+      },
+      () =>
+        Promise.resolve({
+          response: new Response(null, { status: 204 }),
+          isStream: false,
+        }),
+    );
+
+    expect(response.status).toBe(204);
+    expect(response.body).toBeNull();
+    expect(await response.text()).toBe("");
+  });
+
   test("forwards daemon-validated public event bytes without projection", async () => {
     const publicBytes =
       'event: complete\nid: 0\ndata: {"version":1,"operationId":"public","sequence":0,"occurredAt":"2026-08-30T00:00:00.000Z","type":"complete","terminal":true,"answer":"safe"}\n\n';

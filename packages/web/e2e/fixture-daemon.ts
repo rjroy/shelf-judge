@@ -3,17 +3,27 @@ import {
   CollectionProfileResultSchema,
   GameDetailWithPurchaseUtilizationSchema,
   IntentionMutationResultSchema,
+  OwnerGameNoteClearRequestSchema,
+  OwnerGameNoteAcceptedMetadataSchema,
+  OwnerGameNoteMutationResultSchema,
+  OwnerGameNoteSchema,
+  OwnerGameNoteSetRequestSchema,
+  canonicalizeOwnerGameNoteRequest,
   calculatePurchaseUtilization,
   type CollectionProfileResult,
   type Game,
   type GameDetailWithPurchaseUtilization,
   type GameWithPurchaseUtilization,
   type NichePosition,
+  type OwnerGameNote,
+  type OwnerGameNoteAcceptedMetadata,
   type PlayIntention,
   type PurchaseUtilizationResult,
   type ResolvedPlayIntentionHistory,
   type TournamentGameStatsDisplay,
 } from "@shelf-judge/shared";
+import { createHash } from "node:crypto";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import {
   emptyUsefulProfileFixture,
   unavailableUsefulProfileFixture,
@@ -22,6 +32,7 @@ import {
 
 const socketPath = process.env.SHELF_JUDGE_SOCKET;
 if (socketPath === undefined) throw new Error("SHELF_JUDGE_SOCKET is required");
+const ownerNotePersistencePath = `${socketPath}.owner-notes.json`;
 
 const observedAt = "2026-08-28T10:00:00.000Z";
 const externalObservedAt = "2026-08-28T10:05:00.000Z";
@@ -37,7 +48,35 @@ type Scenario =
   | "active"
   | "stale"
   | "collection"
-  | "manual-values";
+  | "manual-values"
+  | "owner-notes";
+
+type NoteOperation = "set" | "clear";
+
+interface NoteReceipt {
+  operation: NoteOperation;
+  gameId: string;
+  expectedVersion: number;
+  requestFingerprint: string;
+  accepted: Omit<OwnerGameNoteAcceptedMetadata, "replayed">;
+}
+
+interface OwnerNoteFixtureState {
+  notes: Map<string, OwnerGameNote>;
+  receipts: Map<string, NoteReceipt>;
+  collectionRevision: number;
+  failNextMutation: boolean;
+  dropNextAcceptedResponse: boolean;
+  delayNextMutation: boolean;
+  releaseMutation: (() => void) | null;
+  mutationBodies: Array<{
+    method: string;
+    gameId: string;
+    body: Record<string, unknown>;
+  }>;
+  restartCount: number;
+  deletionBlockers: Map<string, string[]>;
+}
 
 interface ManualValuesFixtureState {
   blockNextMutation: boolean;
@@ -452,6 +491,7 @@ let staleOnce = false;
 let intentionSequence = 1;
 let collectionState: CollectionFixtureState = createCollectionState();
 let manualValuesState: ManualValuesFixtureState = createManualValuesState();
+let ownerNoteState: OwnerNoteFixtureState = createOwnerNoteState();
 
 function createCollectionState(): CollectionFixtureState {
   return {
@@ -479,6 +519,175 @@ function createManualValuesState(): ManualValuesFixtureState {
   };
 }
 
+function createOwnerNoteState(): OwnerNoteFixtureState {
+  return {
+    notes: new Map(),
+    receipts: new Map(),
+    collectionRevision: 1,
+    failNextMutation: false,
+    dropNextAcceptedResponse: false,
+    delayNextMutation: false,
+    releaseMutation: null,
+    mutationBodies: [],
+    restartCount: 0,
+    deletionBlockers: new Map(),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function assertExactKeys(
+  value: Record<string, unknown>,
+  keys: readonly string[],
+  label: string,
+): void {
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw new Error(`Invalid persisted ${label} keys`);
+  }
+}
+
+function persistOwnerNoteState(): void {
+  writeFileSync(
+    ownerNotePersistencePath,
+    JSON.stringify({
+      formatVersion: 1,
+      notes: Array.from(ownerNoteState.notes),
+      receipts: Array.from(ownerNoteState.receipts),
+      collectionRevision: ownerNoteState.collectionRevision,
+    }),
+  );
+}
+
+function reconstructOwnerNoteState(): OwnerNoteFixtureState {
+  const value: unknown = JSON.parse(readFileSync(ownerNotePersistencePath, "utf8"));
+  if (!isRecord(value)) throw new Error("Invalid persisted owner note state");
+  assertExactKeys(
+    value,
+    ["formatVersion", "notes", "receipts", "collectionRevision"],
+    "owner note state",
+  );
+  if (value.formatVersion !== 1 || !Number.isSafeInteger(value.collectionRevision)) {
+    throw new Error("Invalid persisted owner note state metadata");
+  }
+  if (!Array.isArray(value.notes) || !Array.isArray(value.receipts)) {
+    throw new Error("Invalid persisted owner note state entries");
+  }
+
+  const reconstructed = createOwnerNoteState();
+  reconstructed.collectionRevision = value.collectionRevision as number;
+  for (const entry of value.notes) {
+    if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== "string") {
+      throw new Error("Invalid persisted owner note entry");
+    }
+    const noteValue: unknown = entry[1];
+    reconstructed.notes.set(entry[0], OwnerGameNoteSchema.parse(noteValue));
+  }
+  for (const entry of value.receipts) {
+    if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== "string") {
+      throw new Error("Invalid persisted owner note receipt entry");
+    }
+    const receiptValue: unknown = entry[1];
+    if (!isRecord(receiptValue)) throw new Error("Invalid persisted owner note receipt");
+    assertExactKeys(
+      receiptValue,
+      ["operation", "gameId", "expectedVersion", "requestFingerprint", "accepted"],
+      "owner note receipt",
+    );
+    if (
+      (receiptValue.operation !== "set" && receiptValue.operation !== "clear") ||
+      typeof receiptValue.gameId !== "string" ||
+      !Number.isSafeInteger(receiptValue.expectedVersion) ||
+      typeof receiptValue.requestFingerprint !== "string" ||
+      !/^[a-f0-9]{64}$/.test(receiptValue.requestFingerprint)
+    ) {
+      throw new Error("Invalid persisted owner note receipt identity");
+    }
+    if (!isRecord(receiptValue.accepted)) throw new Error("Invalid persisted acceptance metadata");
+    const accepted = OwnerGameNoteAcceptedMetadataSchema.parse({
+      ...receiptValue.accepted,
+      replayed: false,
+    });
+    reconstructed.receipts.set(entry[0], {
+      operation: receiptValue.operation,
+      gameId: receiptValue.gameId,
+      expectedVersion: receiptValue.expectedVersion as number,
+      requestFingerprint: receiptValue.requestFingerprint,
+      accepted: {
+        commandId: accepted.commandId,
+        gameId: accepted.gameId,
+        operation: accepted.operation,
+        state: accepted.state,
+        version: accepted.version,
+        updatedAt: accepted.updatedAt,
+        collectionRevision: accepted.collectionRevision,
+        alreadyClear: accepted.alreadyClear,
+      },
+    });
+  }
+  return reconstructed;
+}
+
+function ownerNote(gameId: string): OwnerGameNote {
+  return ownerNoteState.notes.get(gameId) ?? { state: "missing", version: 0, updatedAt: null };
+}
+
+function noteRequestMatches(
+  receipt: NoteReceipt,
+  operation: NoteOperation,
+  gameId: string,
+  expectedVersion: number,
+  text?: string,
+): boolean {
+  return (
+    receipt.operation === operation &&
+    receipt.gameId === gameId &&
+    receipt.expectedVersion === expectedVersion &&
+    receipt.requestFingerprint ===
+      ownerNoteRequestFingerprint(operation, gameId, expectedVersion, text)
+  );
+}
+
+function ownerNoteRequestFingerprint(
+  operation: NoteOperation,
+  gameId: string,
+  expectedVersion: number,
+  text?: string,
+): string {
+  return createHash("sha256")
+    .update(
+      canonicalizeOwnerGameNoteRequest(
+        operation === "set"
+          ? {
+              operation,
+              commandId: "00000000-0000-4000-8000-000000000000",
+              gameId,
+              expectedVersion,
+              text: text ?? "",
+            }
+          : {
+              operation,
+              commandId: "00000000-0000-4000-8000-000000000000",
+              gameId,
+              expectedVersion,
+            },
+      ),
+    )
+    .digest("hex");
+}
+
+async function waitForOwnerNoteRelease(): Promise<void> {
+  if (!ownerNoteState.delayNextMutation) return;
+  ownerNoteState.delayNextMutation = false;
+  await new Promise<void>((resolve) => {
+    ownerNoteState.releaseMutation = resolve;
+  });
+  ownerNoteState.releaseMutation = null;
+}
+
 async function waitForManualValuesRelease(kind: "mutation" | "detail"): Promise<void> {
   const blockKey = kind === "mutation" ? "blockNextMutation" : "blockNextDetail";
   const releaseKey = kind === "mutation" ? "releaseMutation" : "releaseDetail";
@@ -499,6 +708,9 @@ function reset(next: Scenario): void {
   intentionSequence = 1;
   collectionState = createCollectionState();
   manualValuesState = createManualValuesState();
+  rmSync(ownerNotePersistencePath, { force: true });
+  ownerNoteState = createOwnerNoteState();
+  persistOwnerNoteState();
   if (next === "manual-values") {
     game.manualValues = {
       playingTime: { value: 90, source: "manual", confirmedAt: observedAt },
@@ -527,7 +739,7 @@ function detail(requestedGameId = gameId): GameDetailWithPurchaseUtilization {
   return GameDetailWithPurchaseUtilizationSchema.parse({
     game: {
       ...detailGame,
-      ownerNote: { state: "missing", version: 0, updatedAt: null },
+      ownerNote: ownerNote(requestedGameId),
     },
     score: detailScore,
     bggDataStale: false,
@@ -581,6 +793,151 @@ function resolvedHistoryItem(intention: PlayIntention) {
   return { ...intention, gameName: game.name, resolution: intention.resolution };
 }
 
+async function mutateOwnerNote(
+  request: Request,
+  requestedGameId: string,
+  operation: NoteOperation,
+): Promise<Response> {
+  const requestBody = await body(request);
+  ownerNoteState.mutationBodies.push({
+    method: request.method,
+    gameId: requestedGameId,
+    body: requestBody,
+  });
+  const parsedRequest =
+    operation === "set"
+      ? OwnerGameNoteSetRequestSchema.safeParse(requestBody)
+      : OwnerGameNoteClearRequestSchema.safeParse(requestBody);
+  if (!parsedRequest.success) {
+    const commandId =
+      typeof requestBody.commandId === "string" ? requestBody.commandId : crypto.randomUUID();
+    return json(
+      OwnerGameNoteMutationResultSchema.parse({
+        ok: false,
+        commandId,
+        error: {
+          code: "validation",
+          issues: parsedRequest.error.issues.map((issue) => ({
+            field: issue.path.join(".") || "request",
+            message: issue.message,
+          })),
+        },
+      }),
+      400,
+    );
+  }
+
+  const command = parsedRequest.data;
+  const text: string | undefined =
+    operation === "set" ? OwnerGameNoteSetRequestSchema.parse(requestBody).text : undefined;
+  const receipt = ownerNoteState.receipts.get(command.commandId);
+  if (receipt !== undefined) {
+    if (!noteRequestMatches(receipt, operation, requestedGameId, command.expectedVersion, text)) {
+      return json(
+        OwnerGameNoteMutationResultSchema.parse({
+          ok: false,
+          commandId: command.commandId,
+          error: { code: "command-reuse", commandId: command.commandId },
+        }),
+        409,
+      );
+    }
+    return json(
+      OwnerGameNoteMutationResultSchema.parse({
+        ok: true,
+        accepted: { ...receipt.accepted, replayed: true },
+      }),
+    );
+  }
+
+  if (ownerNoteState.failNextMutation) {
+    ownerNoteState.failNextMutation = false;
+    return json(
+      OwnerGameNoteMutationResultSchema.parse({
+        ok: false,
+        commandId: command.commandId,
+        error: {
+          code: "persistence-failure",
+          operation: `shelf.game.note.${operation}`,
+          message: "Injected owner note persistence failure",
+        },
+      }),
+      500,
+    );
+  }
+
+  await waitForOwnerNoteRelease();
+  const current = ownerNote(requestedGameId);
+  if (current.version !== command.expectedVersion) {
+    return json(
+      OwnerGameNoteMutationResultSchema.parse({
+        ok: false,
+        commandId: command.commandId,
+        error: {
+          code: "stale-version",
+          gameId: requestedGameId,
+          expectedVersion: command.expectedVersion,
+          current,
+        },
+      }),
+      409,
+    );
+  }
+
+  const alreadyClear = operation === "clear" && current.state !== "present";
+  const version = alreadyClear ? current.version : current.version + 1;
+  const updatedAt = alreadyClear
+    ? current.updatedAt
+    : `2026-08-28T13:${String(version).padStart(2, "0")}:00.000Z`;
+  const next: OwnerGameNote =
+    operation === "set"
+      ? { state: "present", version, updatedAt: updatedAt ?? externalObservedAt, text: text ?? "" }
+      : alreadyClear
+        ? current
+        : { state: "cleared", version, updatedAt: updatedAt ?? externalObservedAt };
+  ownerNoteState.notes.set(requestedGameId, next);
+  ownerNoteState.collectionRevision += 1;
+  const accepted = OwnerGameNoteMutationResultSchema.parse({
+    ok: true,
+    accepted: {
+      commandId: command.commandId,
+      gameId: requestedGameId,
+      operation,
+      state: next.state,
+      version: next.version,
+      updatedAt: next.updatedAt,
+      collectionRevision: ownerNoteState.collectionRevision,
+      replayed: false,
+      alreadyClear,
+    },
+  });
+  if (!accepted.ok) throw new Error("Fixture accepted result was unexpectedly rejected");
+  const { replayed: _replayed, ...storedAccepted } = accepted.accepted;
+  void _replayed;
+  ownerNoteState.receipts.set(command.commandId, {
+    operation,
+    gameId: requestedGameId,
+    expectedVersion: command.expectedVersion,
+    requestFingerprint: ownerNoteRequestFingerprint(
+      operation,
+      requestedGameId,
+      command.expectedVersion,
+      text,
+    ),
+    accepted: storedAccepted,
+  });
+  persistOwnerNoteState();
+
+  if (ownerNoteState.dropNextAcceptedResponse) {
+    ownerNoteState.dropNextAcceptedResponse = false;
+    return new Response("accepted response intentionally dropped", {
+      status: 200,
+      headers: { "Content-Type": "text/plain" },
+    });
+  }
+  return json(accepted);
+}
+
 async function handle(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
@@ -595,12 +952,80 @@ async function handle(request: Request): Promise<Response> {
       requested !== "active" &&
       requested !== "stale" &&
       requested !== "collection" &&
-      requested !== "manual-values"
+      requested !== "manual-values" &&
+      requested !== "owner-notes"
     ) {
       return json({ error: "Unknown fixture scenario" }, 400);
     }
     reset(requested);
     return json({ scenario });
+  }
+
+  if (path === "/api/test/owner-note-state") {
+    if (request.method === "GET") {
+      return json({
+        notes: Object.fromEntries(ownerNoteState.notes),
+        receipts: Array.from(ownerNoteState.receipts, ([commandId, receipt]) => ({
+          commandId,
+          ...receipt,
+        })),
+        persistedState: JSON.parse(readFileSync(ownerNotePersistencePath, "utf8")) as unknown,
+        collectionRevision: ownerNoteState.collectionRevision,
+        mutationBodies: ownerNoteState.mutationBodies,
+        restartCount: ownerNoteState.restartCount,
+      });
+    }
+    if (request.method === "POST") {
+      const requested = await body(request);
+      if (typeof requested.failNextMutation === "boolean") {
+        ownerNoteState.failNextMutation = requested.failNextMutation;
+      }
+      if (typeof requested.dropNextAcceptedResponse === "boolean") {
+        ownerNoteState.dropNextAcceptedResponse = requested.dropNextAcceptedResponse;
+      }
+      if (typeof requested.delayNextMutation === "boolean") {
+        ownerNoteState.delayNextMutation = requested.delayNextMutation;
+      }
+      if (requested.releaseMutation === true) ownerNoteState.releaseMutation?.();
+      if (typeof requested.externalGameId === "string") {
+        const current = ownerNote(requested.externalGameId);
+        const version = current.version + 1;
+        const next =
+          typeof requested.externalText === "string"
+            ? ({
+                state: "present",
+                version,
+                updatedAt: externalObservedAt,
+                text: requested.externalText,
+              } satisfies OwnerGameNote)
+            : ({
+                state: "cleared",
+                version,
+                updatedAt: externalObservedAt,
+              } satisfies OwnerGameNote);
+        ownerNoteState.notes.set(requested.externalGameId, next);
+        ownerNoteState.collectionRevision += 1;
+        persistOwnerNoteState();
+      }
+      if (typeof requested.blockDeletionGameId === "string") {
+        const ids = Array.isArray(requested.intentionIds)
+          ? requested.intentionIds.filter((id): id is string => typeof id === "string")
+          : ["intention-browser-blocker"];
+        ownerNoteState.deletionBlockers.set(requested.blockDeletionGameId, ids);
+      }
+      if (typeof requested.unblockDeletionGameId === "string") {
+        ownerNoteState.deletionBlockers.delete(requested.unblockDeletionGameId);
+      }
+      return json({ ok: true });
+    }
+  }
+
+  if (path === "/api/test/owner-note-restart" && request.method === "POST") {
+    const restartCount = ownerNoteState.restartCount + 1;
+    ownerNoteState.releaseMutation?.();
+    ownerNoteState = reconstructOwnerNoteState();
+    ownerNoteState.restartCount = restartCount;
+    return json({ ok: true, restartCount: ownerNoteState.restartCount });
   }
 
   if (path === "/api/test/manual-values-state") {
@@ -686,6 +1111,18 @@ async function handle(request: Request): Promise<Response> {
       return json({ error: "Niches unavailable" }, 503);
     return json(collectionEntries({ predicted, niches }));
   }
+  const noteMatch = path.match(/^\/api\/games\/([^/]+)\/note$/);
+  if (noteMatch !== null) {
+    const requestedGameId = decodeURIComponent(noteMatch[1] ?? "");
+    if (collectionState.deletedIds.has(requestedGameId)) {
+      return json({ error: `Game not found: ${requestedGameId}` }, 404);
+    }
+    if (request.method === "GET") {
+      return json({ gameId: requestedGameId, note: ownerNote(requestedGameId) });
+    }
+    if (request.method === "PUT") return mutateOwnerNote(request, requestedGameId, "set");
+    if (request.method === "DELETE") return mutateOwnerNote(request, requestedGameId, "clear");
+  }
   const detailMatch = path.match(/^\/api\/games\/([^/]+)$/);
   if (detailMatch !== null && request.method === "GET") {
     const requestedGameId = decodeURIComponent(detailMatch[1] ?? "");
@@ -697,6 +1134,43 @@ async function handle(request: Request): Promise<Response> {
     }
     if (scenario === "manual-values") await waitForManualValuesRelease("detail");
     return json(detail(requestedGameId));
+  }
+
+  const ownershipMatch = path.match(/^\/api\/games\/([^/]+)\/ownership$/);
+  if (ownershipMatch !== null && request.method === "PATCH") {
+    const requestedGameId = decodeURIComponent(ownershipMatch[1] ?? "");
+    const requestBody = await body(request);
+    const ownership = requestBody.ownership;
+    if (ownership !== "owned" && ownership !== "previously-owned") {
+      return json({ error: "Invalid ownership" }, 400);
+    }
+    if (ownership === "previously-owned") {
+      collectionState.previouslyOwnedIds.add(requestedGameId);
+    } else {
+      collectionState.previouslyOwnedIds.delete(requestedGameId);
+    }
+    if (requestedGameId === gameId) game = { ...game, ownership, updatedAt: externalObservedAt };
+    const definition = collectionDefinitions.find(({ id }) => id === requestedGameId);
+    const changedGame = definition === undefined ? game : collectionGame(definition);
+    return json({ game: changedGame, linkedIntentionTransition: null });
+  }
+
+  if (detailMatch !== null && request.method === "DELETE") {
+    const requestedGameId = decodeURIComponent(detailMatch[1] ?? "");
+    const blockers = ownerNoteState.deletionBlockers.get(requestedGameId);
+    if (blockers !== undefined) {
+      return json(
+        { code: "history-conflict", gameId: requestedGameId, intentionIds: blockers },
+        409,
+      );
+    }
+    collectionState.deletedIds.add(requestedGameId);
+    ownerNoteState.notes.delete(requestedGameId);
+    for (const [commandId, receipt] of ownerNoteState.receipts) {
+      if (receipt.gameId === requestedGameId) ownerNoteState.receipts.delete(commandId);
+    }
+    persistOwnerNoteState();
+    return new Response(null, { status: 204 });
   }
 
   if (path === `/api/games/${gameId}/manual-values` && request.method === "PUT") {
@@ -866,6 +1340,7 @@ const healthServer = Bun.serve({
 });
 
 function shutdown(): void {
+  rmSync(ownerNotePersistencePath, { force: true });
   void socketServer.stop();
   void healthServer.stop();
 }

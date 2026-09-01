@@ -40,6 +40,9 @@ export async function proxyDaemonRequest(
         headers.set(key, value);
       }
     });
+    if (response.status === 204 || response.status === 205 || response.status === 304) {
+      return new Response(null, { status: response.status, headers });
+    }
     if (!headers.has("content-type")) headers.set("Content-Type", "application/json");
     return new Response(await response.text(), { status: response.status, headers });
   } catch {

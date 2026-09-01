@@ -20,7 +20,7 @@ export default defineConfig({
     { name: "chromium-tablet", use: { viewport: { width: 768, height: 1024 } } },
     { name: "chromium-desktop", use: { viewport: { width: 1440, height: 900 } } },
     {
-      name: "chromium-desktop-200-percent",
+      name: "chromium-desktop-200-percent-layout-equivalent",
       use: {
         viewport: { width: 720, height: 450 },
         deviceScaleFactor: 2,

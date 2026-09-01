@@ -8751,6 +8751,7 @@ body {
 
   .owner-note-actions .btn {
     justify-content: center;
+    margin-inline: 0;
     width: 100%;
   }
 

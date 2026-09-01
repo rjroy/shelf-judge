@@ -26,10 +26,42 @@ import {
 import { generateBrowserUuid } from "@/lib/browser-uuid";
 import { clearOwnerGameNote, setOwnerGameNote } from "@/lib/browser-mutations";
 
-type NoteCommand =
+export type NoteCommand =
   | ({ operation: "set" } & OwnerGameNoteSetRequest)
   | ({ operation: "clear" } & OwnerGameNoteClearRequest);
 type NoteFocusTarget = "region" | "textarea" | null;
+
+function ownerGameNoteSetRequest(
+  command: Extract<NoteCommand, { operation: "set" }>,
+): OwnerGameNoteSetRequest {
+  return {
+    commandId: command.commandId,
+    expectedVersion: command.expectedVersion,
+    text: command.text,
+  };
+}
+
+function ownerGameNoteClearRequest(
+  command: Extract<NoteCommand, { operation: "clear" }>,
+): OwnerGameNoteClearRequest {
+  return {
+    commandId: command.commandId,
+    expectedVersion: command.expectedVersion,
+  };
+}
+
+export function executeOwnerGameNoteCommand(
+  gameId: string,
+  command: NoteCommand,
+  client: {
+    set: typeof setOwnerGameNote;
+    clear: typeof clearOwnerGameNote;
+  } = { set: setOwnerGameNote, clear: clearOwnerGameNote },
+): Promise<OwnerGameNoteMutationResult> {
+  return command.operation === "set"
+    ? client.set(gameId, ownerGameNoteSetRequest(command))
+    : client.clear(gameId, ownerGameNoteClearRequest(command));
+}
 
 interface FocusableTarget {
   focus(): void;
@@ -428,10 +460,7 @@ export function OwnerGameNoteEditor({
     const requestGeneration = nextGeneration();
     dispatch({ type: "request-start", generation: requestGeneration, command });
     try {
-      const result =
-        command.operation === "set"
-          ? await setOwnerGameNote(gameId, command)
-          : await clearOwnerGameNote(gameId, command);
+      const result = await executeOwnerGameNoteCommand(gameId, command);
       if (requestGeneration !== generation.current) return;
       if (result.ok) {
         const accepted = acceptedNote(command, result);
