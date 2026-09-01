@@ -20,6 +20,29 @@ interface LocalCommandHelp {
 // One API operation can intentionally back multiple CLI commands. Keep those
 // CLI-only aliases here instead of advertising duplicate daemon operations.
 const LOCAL_OPERATION_COMMANDS: Record<string, LocalCommandHelp[]> = {
+  "shelf.game.note.get": [
+    {
+      name: "note get",
+      usage: "shelf-judge game note get <game-id> [--json]",
+      description: "Read the complete current owner-note state",
+    },
+  ],
+  "shelf.game.note.set": [
+    {
+      name: "note set",
+      usage:
+        "shelf-judge game note set <game-id> --expected-version <n> --text <text> [--command-id <uuid>] [--json]",
+      description: "Set plain-text owner-note state with replay protection",
+    },
+  ],
+  "shelf.game.note.clear": [
+    {
+      name: "note clear",
+      usage:
+        "shelf-judge game note clear <game-id> --expected-version <n> [--command-id <uuid>] [--json]",
+      description: "Explicitly clear owner-note state with replay protection",
+    },
+  ],
   "shelf.game.intention.set": [
     {
       name: "intention set",
@@ -162,6 +185,9 @@ export async function helpCommand(
   );
   lines.push(
     "The entertainment benchmark is a positive acceptable cost per person-hour at fitness 6. Example: $16 / 2 hours = $8 per person-hour.",
+  );
+  lines.push(
+    "Owner-note text passed with --text may be visible in shell history and process arguments. Stdin, file input, and editor launching are not supported.",
   );
   return lines.join("\n");
 }

@@ -1,5 +1,5 @@
 // Game commands: search, add, list, rate, remove, set-status
-import type { DaemonClient } from "../client.js";
+import type { DaemonClient, DaemonResponse } from "../client.js";
 import type {
   AcquisitionMutationRequest,
   GameWithPurchaseUtilization,
@@ -11,6 +11,12 @@ import {
   IntentionMutationErrorSchema,
   IntentionMutationResultSchema,
   ManualPlayCorrectionResponseSchema,
+  OwnerGameNoteClearRequestSchema,
+  OwnerGameNoteDetailWithPurchaseUtilizationSchema,
+  OwnerGameNoteMutationErrorSchema,
+  OwnerGameNoteMutationResultSchema,
+  OwnerGameNoteReadResultSchema,
+  OwnerGameNoteSetRequestSchema,
 } from "@shelf-judge/shared";
 import type { OutputOptions } from "../output.js";
 import {
@@ -22,7 +28,7 @@ import {
 } from "../output.js";
 import { StructuredCliError } from "../errors.js";
 
-interface IntentionCommandDependencies {
+interface CommandDependencies {
   createCommandId?: () => string;
   writeStderr?: (message: string) => void;
 }
@@ -47,7 +53,6 @@ function parseFlags(
       flag === undefined ||
       value === undefined ||
       !allowedFlags.includes(flag) ||
-      value.startsWith("--") ||
       flags.has(flag)
     ) {
       throw new Error(usage);
@@ -57,14 +62,187 @@ function parseFlags(
   return { positional, flags };
 }
 
-function commandIdFor(
-  supplied: string | undefined,
-  dependencies: IntentionCommandDependencies,
-): string {
+function commandIdFor(supplied: string | undefined, dependencies: CommandDependencies): string {
   if (supplied !== undefined) return supplied;
   const commandId = (dependencies.createCommandId ?? (() => crypto.randomUUID()))();
   (dependencies.writeStderr ?? console.error)(`Command ID: ${commandId}`);
   return commandId;
+}
+
+function parseExpectedVersion(value: string | undefined, usage: string): number {
+  if (value === undefined || !/^\d+$/.test(value)) throw new Error(usage);
+  const version = Number(value);
+  if (!Number.isSafeInteger(version)) throw new Error(usage);
+  return version;
+}
+
+function renderOwnerNoteMutationResult(
+  response: DaemonResponse,
+  operation: "set" | "clear",
+  gameId: string,
+  commandId: string,
+  expectedVersion: number,
+  opts: OutputOptions,
+): string {
+  const parsed = OwnerGameNoteMutationResultSchema.safeParse(response.data);
+  if (!parsed.success) throw new Error(`Invalid owner-note response: ${parsed.error.message}`);
+  const result = parsed.data;
+  const expectedStatus = result.ok
+    ? 200
+    : result.error.code === "game-not-found"
+      ? 404
+      : result.error.code === "stale-version" || result.error.code === "command-reuse"
+        ? 409
+        : result.error.code === "version-overflow"
+          ? 422
+          : result.error.code === "persistence-failure"
+            ? 500
+            : 400;
+  const expectedResultVersion = result.ok
+    ? result.accepted.alreadyClear
+      ? expectedVersion
+      : expectedVersion + 1
+    : null;
+  const coherent =
+    response.ok === result.ok &&
+    response.status === expectedStatus &&
+    (result.ok
+      ? Number.isSafeInteger(expectedResultVersion) &&
+        result.accepted.operation === operation &&
+        result.accepted.gameId === gameId &&
+        result.accepted.commandId === commandId &&
+        result.accepted.version === expectedResultVersion
+      : result.commandId === commandId &&
+        (result.error.code === "game-not-found"
+          ? result.error.gameId === gameId
+          : result.error.code === "stale-version"
+            ? result.error.gameId === gameId && result.error.expectedVersion === expectedVersion
+            : result.error.code === "persistence-failure"
+              ? result.error.operation === `shelf.game.note.${operation}`
+              : true));
+  if (!coherent) throw new Error("Invalid owner-note response: command identity mismatch");
+  if (!result.ok) throw new StructuredCliError(result);
+  if (opts.json) return printOutput(result, opts);
+
+  const replay = result.accepted.replayed ? " (replayed)" : "";
+  if (operation === "set") {
+    return `Owner note saved for game ${gameId} at version ${result.accepted.version}${replay}.`;
+  }
+  if (result.accepted.alreadyClear) {
+    return `Owner note for game ${gameId} was already clear at version ${result.accepted.version}${replay}.`;
+  }
+  return `Owner note cleared for game ${gameId} at version ${result.accepted.version}${replay}.`;
+}
+
+export async function gameNoteGet(
+  client: DaemonClient,
+  args: string[],
+  opts: OutputOptions,
+): Promise<string> {
+  const [gameId, ...extra] = args;
+  if (gameId === undefined || extra.length > 0) {
+    throw new Error("Usage: shelf-judge game note get <game-id> [--json]");
+  }
+  const response = await client.get(`/api/games/${encodeURIComponent(gameId)}/note`);
+  if (!response.ok) {
+    const structured = OwnerGameNoteMutationErrorSchema.safeParse(response.data);
+    if (structured.success) throw new StructuredCliError(structured.data);
+    if (
+      typeof response.data === "object" &&
+      response.data !== null &&
+      Object.keys(response.data).length === 2 &&
+      "code" in response.data &&
+      response.data.code === "internal_error" &&
+      "error" in response.data &&
+      typeof response.data.error === "string"
+    ) {
+      throw new StructuredCliError(response.data);
+    }
+    throw new Error("Invalid owner-note error response");
+  }
+  const parsed = OwnerGameNoteReadResultSchema.safeParse(response.data);
+  if (!parsed.success || parsed.data.gameId !== gameId) {
+    const detail = parsed.success ? "game identity mismatch" : parsed.error.message;
+    throw new Error(`Invalid owner-note response: ${detail}`);
+  }
+  if (opts.json) return printOutput(parsed.data, opts);
+
+  const note = parsed.data.note;
+  if (note.state === "missing") return `Owner note for game ${gameId}: never authored (version 0).`;
+  if (note.state === "cleared") {
+    return `Owner note for game ${gameId}: explicitly cleared (version ${note.version}, updated ${note.updatedAt}).`;
+  }
+  return `Owner note for game ${gameId} (version ${note.version}, updated ${note.updatedAt}):\n${note.text}`;
+}
+
+export async function gameNoteSet(
+  client: DaemonClient,
+  args: string[],
+  opts: OutputOptions,
+  dependencies: CommandDependencies = {},
+): Promise<string> {
+  const usage =
+    "Usage: shelf-judge game note set <game-id> --expected-version <n> --text <text> [--command-id <uuid>] [--json]";
+  const { positional, flags } = parseFlags(
+    args,
+    1,
+    ["--expected-version", "--text", "--command-id"],
+    usage,
+  );
+  const [gameId] = positional;
+  const suppliedCommandId = flags.get("--command-id");
+  const expectedVersion = parseExpectedVersion(flags.get("--expected-version"), usage);
+  const preliminary = OwnerGameNoteSetRequestSchema.safeParse({
+    commandId: suppliedCommandId ?? "00000000-0000-4000-8000-000000000001",
+    expectedVersion,
+    text: flags.get("--text"),
+  });
+  if (!preliminary.success) throw new Error(usage);
+  const request = {
+    ...preliminary.data,
+    commandId: commandIdFor(suppliedCommandId, dependencies),
+  };
+  const response = await client.put(`/api/games/${encodeURIComponent(gameId)}/note`, request);
+  return renderOwnerNoteMutationResult(
+    response,
+    "set",
+    gameId,
+    request.commandId,
+    request.expectedVersion,
+    opts,
+  );
+}
+
+export async function gameNoteClear(
+  client: DaemonClient,
+  args: string[],
+  opts: OutputOptions,
+  dependencies: CommandDependencies = {},
+): Promise<string> {
+  const usage =
+    "Usage: shelf-judge game note clear <game-id> --expected-version <n> [--command-id <uuid>] [--json]";
+  const { positional, flags } = parseFlags(args, 1, ["--expected-version", "--command-id"], usage);
+  const [gameId] = positional;
+  const suppliedCommandId = flags.get("--command-id");
+  const expectedVersion = parseExpectedVersion(flags.get("--expected-version"), usage);
+  const preliminary = OwnerGameNoteClearRequestSchema.safeParse({
+    commandId: suppliedCommandId ?? "00000000-0000-4000-8000-000000000001",
+    expectedVersion,
+  });
+  if (!preliminary.success) throw new Error(usage);
+  const request = {
+    ...preliminary.data,
+    commandId: commandIdFor(suppliedCommandId, dependencies),
+  };
+  const response = await client.del(`/api/games/${encodeURIComponent(gameId)}/note`, request);
+  return renderOwnerNoteMutationResult(
+    response,
+    "clear",
+    gameId,
+    request.commandId,
+    request.expectedVersion,
+    opts,
+  );
 }
 
 function renderIntentionResult(data: unknown, opts: OutputOptions): string {
@@ -86,7 +264,7 @@ export async function gameIntentionSet(
   client: DaemonClient,
   args: string[],
   opts: OutputOptions,
-  dependencies: IntentionCommandDependencies = {},
+  dependencies: CommandDependencies = {},
 ): Promise<string> {
   const usage =
     "Usage: shelf-judge game intention set <game-id> <first-play|replay> [--command-id <uuid>]";
@@ -119,7 +297,7 @@ export async function gameIntentionResolve(
   type: "complete" | "retire",
   args: string[],
   opts: OutputOptions,
-  dependencies: IntentionCommandDependencies = {},
+  dependencies: CommandDependencies = {},
 ): Promise<string> {
   const usage = `Usage: shelf-judge game intention ${type} <game-id> <intention-id> --expected-version <n> [--command-id <uuid>]`;
   const { positional, flags } = parseFlags(args, 2, ["--expected-version", "--command-id"], usage);
@@ -328,7 +506,7 @@ export async function gameAcquisition(
     body,
   );
   if (!ok) {
-    const error = data as unknown as { error?: string };
+    const error = data as { error?: string };
     throw new Error(error.error ?? "Updating acquisition failed");
   }
   if (opts.json) return printOutput(data, opts);
@@ -358,14 +536,23 @@ export async function gameValue(
   if (!gameId || extra.length > 0) {
     throw new Error("Usage: shelf-judge game value <game-id>");
   }
-  const { ok, data } = await client.get<GameWithPurchaseUtilization>(
+  const { ok, data } = await client.get(
     `/api/games/${encodeURIComponent(gameId)}?includePredicted=true`,
   );
   if (!ok) {
-    const error = data as unknown as { error?: string };
+    const error = data as { error?: string };
     throw new Error(error.error ?? "Getting purchase utilization failed");
   }
-  return opts.json ? printOutput(data, opts) : formatPurchaseUtilization(data);
+  const parsed = OwnerGameNoteDetailWithPurchaseUtilizationSchema.safeParse(data);
+  if (!parsed.success) {
+    throw new Error(`Invalid game-detail response: ${parsed.error.message}`);
+  }
+  const { ownerNote, ...game } = parsed.data.game;
+  const { intentions, ...detail } = parsed.data;
+  void ownerNote;
+  void intentions;
+  const projected: GameWithPurchaseUtilization = { ...detail, game };
+  return opts.json ? printOutput(projected, opts) : formatPurchaseUtilization(projected);
 }
 
 interface RateParsed {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { GameWithPurchaseUtilization } from "@shelf-judge/shared";
+import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import { gameList, gameValue } from "../src/commands/game.js";
 import { createMockClient } from "./helpers/mock-client.js";
 import {
@@ -13,11 +13,51 @@ describe("purchase utilization CLI parity", () => {
     "renders and preserves the canonical daemon contract for $name",
     async (fixture) => {
       const response = {
-        game: { id: fixture.id, name: fixture.name, ownership: "owned" },
+        game: {
+          id: fixture.id,
+          bggId: null,
+          name: fixture.name,
+          yearPublished: null,
+          minPlayers: null,
+          maxPlayers: null,
+          bestPlayers: null,
+          playingTime: null,
+          imageUrl: null,
+          bggData: null,
+          numPlays: 0,
+          acquisition: { state: "unknown" },
+          playCountEvidence: {
+            status: "valid",
+            value: 0,
+            source: "manual",
+            observedAt: UTILIZATION_OBSERVED_AT,
+          },
+          durationEvidence: { status: "missing", source: "manual", observedAt: null },
+          playerRangeEvidence: { status: "missing", source: "manual", observedAt: null },
+          suggestedPlayerPoll: {
+            status: "valid",
+            state: "absent",
+            buckets: [],
+            source: "manual",
+            observedAt: null,
+          },
+          bestPlayersInvalidEvidence: null,
+          manualValues: { playingTime: null, playerCount: null },
+          entityMetadata: createInitialEntityMetadata(null),
+          latestPlayCountCheck: null,
+          ownership: "owned",
+          boxDimensions: null,
+          manualShelfId: null,
+          ratings: {},
+          createdAt: UTILIZATION_OBSERVED_AT,
+          updatedAt: UTILIZATION_OBSERVED_AT,
+          ownerNote: { state: "missing", version: 0, updatedAt: null },
+        },
         score: null,
         displayScore: fixture.input.fitness,
         purchaseUtilization: fixture.result,
-      } as unknown as GameWithPurchaseUtilization;
+        intentions: { activeIntention: null, resolvedHistory: [] },
+      };
       const client = createMockClient({
         routes: {
           [`GET /api/games/${fixture.id}?includePredicted=true`]: {
@@ -36,7 +76,14 @@ describe("purchase utilization CLI parity", () => {
       expect(human).toContain(`source=bgg-collection; observedAt=${UTILIZATION_OBSERVED_AT}`);
       expect(human).toContain(fixture.result.assumptions.modeledSessions);
       expect(human).toContain(fixture.result.assumptions.futurePlays);
-      expect(JSON.parse(await gameValue(client, [fixture.id], { json: true }))).toEqual(response);
+      const { ownerNote, ...game } = response.game;
+      const { intentions, ...detail } = response;
+      void ownerNote;
+      void intentions;
+      expect(JSON.parse(await gameValue(client, [fixture.id], { json: true }))).toEqual({
+        ...detail,
+        game,
+      });
     },
   );
 

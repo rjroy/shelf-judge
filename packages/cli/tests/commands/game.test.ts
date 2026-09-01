@@ -14,6 +14,9 @@ import {
   gameIntentionSet,
   gameIntentionResolve,
   gamePlaysSet,
+  gameNoteGet,
+  gameNoteSet,
+  gameNoteClear,
 } from "../../src/commands/game.js";
 import {
   calculatePurchaseUtilization,
@@ -302,11 +305,22 @@ function utilizationInput(
 
 function valueResponse(input: PurchaseUtilizationInput, ownership = "owned") {
   return {
-    game: { id: "game/1", name: "Canonical Example", ownership },
-    score: input.fitness === null ? null : { score: Number(input.fitness) },
+    game: {
+      ...correctionGame(),
+      id: "game/1",
+      name: "Canonical Example",
+      ownership,
+      ownerNote: {
+        state: "present" as const,
+        version: 1,
+        updatedAt: observedAt,
+        text: "PRIVATE OWNER NOTE",
+      },
+    },
+    score: null,
     displayScore: input.fitness,
     purchaseUtilization: calculatePurchaseUtilization(input),
-    extraDaemonField: { exactFraction: "1/3" },
+    intentions: { activeIntention: null, resolvedHistory: [] },
   };
 }
 
@@ -334,7 +348,13 @@ describe("game value", () => {
     expect(human).toContain(`source=bgg-collection; observedAt=${observedAt}`);
     expect(human).toContain(`confirmedAt=${observedAt}`);
     expect(human).toContain(response.purchaseUtilization.assumptions.futurePlays);
-    expect(JSON.parse(await gameValue(client, ["game/1"], { json: true }))).toEqual(response);
+    const json = JSON.parse(await gameValue(client, ["game/1"], { json: true })) as Record<
+      string,
+      unknown
+    >;
+    expect(json).not.toHaveProperty("intentions");
+    expect(json.game).not.toHaveProperty("ownerNote");
+    expect(JSON.stringify(json)).not.toContain("PRIVATE OWNER NOTE");
   });
 
   test("renders the canonical $20 example without recalculating daemon displays", async () => {
@@ -678,6 +698,322 @@ describe("parseRateArgs", () => {
 
   test("throws when no axis pairs provided", () => {
     expect(() => parseRateArgs(["abc-123"], [])).toThrow();
+  });
+});
+
+const noteCommandIds = {
+  set: "40000000-0000-4000-8000-000000000001",
+  clear: "40000000-0000-4000-8000-000000000002",
+};
+
+function acceptedNote(
+  operation: "set" | "clear",
+  commandId: string,
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    ok: true as const,
+    accepted: {
+      commandId,
+      gameId: "game/1",
+      operation,
+      state: operation === "set" ? ("present" as const) : ("cleared" as const),
+      version: 1,
+      updatedAt: "2026-08-30T12:00:00.000Z",
+      collectionRevision: 2,
+      replayed: false,
+      alreadyClear: false,
+      ...overrides,
+    },
+  };
+}
+
+describe("owner game notes", () => {
+  test.each([
+    [{ state: "missing", version: 0, updatedAt: null }, "never authored"],
+    [
+      {
+        state: "present",
+        version: 2,
+        updatedAt: "2026-08-30T12:00:00.000Z",
+        text: "First line\n<script>alert(1)</script>",
+      },
+      "First line\n<script>alert(1)</script>",
+    ],
+    [{ state: "cleared", version: 3, updatedAt: "2026-08-30T12:00:00.000Z" }, "explicitly cleared"],
+  ] as const)("renders the complete %s note state as inert text", async (note, expected) => {
+    const response = { gameId: "game/1", note };
+    const client = createMockClient({
+      routes: {
+        "GET /api/games/game%2F1/note": {
+          response: { ok: true, status: 200, data: response },
+        },
+      },
+    });
+    expect(await gameNoteGet(client, ["game/1"], { json: false })).toContain(expected);
+    expect(JSON.parse(await gameNoteGet(client, ["game/1"], { json: true }))).toEqual(response);
+  });
+
+  test("validates and preserves a structured missing-game read error", async () => {
+    const failure = { code: "game-not-found" as const, gameId: "missing" };
+    const client = createMockClient({
+      routes: {
+        "GET /api/games/missing/note": {
+          response: { ok: false, status: 404, data: failure },
+        },
+      },
+    });
+    try {
+      await gameNoteGet(client, ["missing"], { json: true });
+      throw new Error("Expected read to fail");
+    } catch (caught) {
+      expect(caught).toBeInstanceOf(StructuredCliError);
+      expect(JSON.parse(formatCliError(caught))).toEqual(failure);
+    }
+  });
+
+  test("sets multiline text with expected version zero and prints a generated ID before sending", async () => {
+    const commandId = noteCommandIds.set;
+    const result = acceptedNote("set", commandId);
+    const client = createMockClient({
+      routes: {
+        "PUT /api/games/game%2F1/note": { response: { ok: true, status: 200, data: result } },
+      },
+    });
+    const originalPut = client.put.bind(client);
+    const events: string[] = [];
+    let body: unknown;
+    client.put = <T>(path: string, nextBody?: unknown) => {
+      events.push("request");
+      body = nextBody;
+      return originalPut<T>(path, nextBody);
+    };
+    const output = await gameNoteSet(
+      client,
+      ["game/1", "--expected-version", "0", "--text", "line one\r\nline two"],
+      { json: false },
+      {
+        createCommandId: () => commandId,
+        writeStderr: (message) => events.push(message),
+      },
+    );
+    expect(events).toEqual([`Command ID: ${commandId}`, "request"]);
+    expect(body).toEqual({ commandId, expectedVersion: 0, text: "line one\nline two" });
+    expect(output).toContain("saved");
+    expect(output).not.toContain("line one");
+  });
+
+  test("preserves explicit IDs, emits no preflight line, and keeps mutation JSON text-free", async () => {
+    const result = acceptedNote("set", noteCommandIds.set, { replayed: true });
+    const client = createMockClient({
+      routes: {
+        "PUT /api/games/game%2F1/note": { response: { ok: true, status: 200, data: result } },
+      },
+    });
+    const stderr: string[] = [];
+    const output = await gameNoteSet(
+      client,
+      [
+        "game/1",
+        "--text",
+        "private text",
+        "--command-id",
+        noteCommandIds.set,
+        "--expected-version",
+        "0",
+      ],
+      { json: true },
+      { writeStderr: (message) => stderr.push(message) },
+    );
+    expect(stderr).toEqual([]);
+    expect(JSON.parse(output)).toEqual(result);
+    expect(output).not.toContain("private text");
+  });
+
+  test("accepts flag-shaped note text verbatim", async () => {
+    const result = acceptedNote("set", noteCommandIds.set);
+    const client = createMockClient({
+      routes: {
+        "PUT /api/games/game%2F1/note": { response: { ok: true, status: 200, data: result } },
+      },
+    });
+    const originalPut = client.put.bind(client);
+    let body: unknown;
+    client.put = <T>(path: string, nextBody?: unknown) => {
+      body = nextBody;
+      return originalPut<T>(path, nextBody);
+    };
+    await gameNoteSet(
+      client,
+      [
+        "game/1",
+        "--expected-version",
+        "0",
+        "--text",
+        "--keep-for-conventions",
+        "--command-id",
+        noteCommandIds.set,
+      ],
+      { json: false },
+    );
+    expect(body).toMatchObject({ text: "--keep-for-conventions" });
+  });
+
+  test.each([
+    [acceptedNote("clear", noteCommandIds.clear), "cleared"],
+    [
+      acceptedNote("clear", noteCommandIds.clear, {
+        state: "missing",
+        version: 0,
+        updatedAt: null,
+        alreadyClear: true,
+      }),
+      "already clear",
+    ],
+  ] as const)("renders clear result without note text", async (result, expected) => {
+    const client = createMockClient({
+      routes: {
+        "DELETE /api/games/game%2F1/note": {
+          response: { ok: true, status: 200, data: result },
+        },
+      },
+    });
+    const output = await gameNoteClear(
+      client,
+      ["game/1", "--expected-version", "0", "--command-id", noteCommandIds.clear],
+      { json: false },
+    );
+    expect(output).toContain(expected);
+  });
+
+  test.each([
+    { code: "validation", issues: [{ field: "text", message: "Note is too long" }] },
+    {
+      code: "stale-version",
+      gameId: "game/1",
+      expectedVersion: 0,
+      current: {
+        state: "present",
+        version: 1,
+        updatedAt: "2026-08-30T12:00:00.000Z",
+        text: "current private text",
+      },
+    },
+    { code: "command-reuse", commandId: noteCommandIds.set },
+    { code: "version-overflow", target: "note" },
+    { code: "version-overflow", target: "collection" },
+    { code: "persistence-failure", operation: "shelf.game.note.set", message: "disk full" },
+  ] as const)("preserves structured daemon failure %#", async (error) => {
+    const failure = { ok: false as const, commandId: noteCommandIds.set, error };
+    const status =
+      error.code === "stale-version" || error.code === "command-reuse"
+        ? 409
+        : error.code === "version-overflow"
+          ? 422
+          : error.code === "persistence-failure"
+            ? 500
+            : 400;
+    const client = createMockClient({
+      routes: {
+        "PUT /api/games/game%2F1/note": {
+          response: { ok: false, status, data: failure },
+        },
+      },
+    });
+    try {
+      await gameNoteSet(
+        client,
+        [
+          "game/1",
+          "--expected-version",
+          "0",
+          "--text",
+          "draft",
+          "--command-id",
+          noteCommandIds.set,
+        ],
+        { json: true },
+      );
+      throw new Error("Expected note mutation to fail");
+    } catch (caught) {
+      expect(caught).toBeInstanceOf(StructuredCliError);
+      expect(JSON.parse(formatCliError(caught))).toEqual(failure);
+    }
+  });
+
+  test.each(
+    [
+      [],
+      ["game-1"],
+      ["game-1", "--expected-version", "-1", "--text", "note"],
+      ["game-1", "--expected-version", "1.5", "--text", "note"],
+      ["game-1", "--expected-version", String(Number.MAX_SAFE_INTEGER + 1), "--text", "note"],
+      ["game-1", "--expected-version", "0", "--text", "   "],
+      ["game-1", "--expected-version", "0", "--text", "note", "--unknown", "value"],
+    ].map((args) => [args] as [string[]]),
+  )("rejects malformed set arguments %#", async (args) => {
+    await expectThrows(() => gameNoteSet(createMockClient(), args, { json: false }), "Usage");
+  });
+
+  test("rejects malformed and cross-game responses", async () => {
+    for (const response of [
+      { ok: true, status: 200, data: { ok: true, accepted: { commandId: noteCommandIds.set } } },
+      {
+        ok: true,
+        status: 200,
+        data: acceptedNote("set", noteCommandIds.set, { gameId: "other-game" }),
+      },
+      {
+        ok: true,
+        status: 200,
+        data: acceptedNote("set", noteCommandIds.set, { version: 2 }),
+      },
+      {
+        ok: false,
+        status: 409,
+        data: {
+          ok: false,
+          commandId: noteCommandIds.set,
+          error: {
+            code: "stale-version",
+            gameId: "other-game",
+            expectedVersion: 0,
+            current: {
+              state: "present",
+              version: 1,
+              updatedAt: "2026-08-30T12:00:00.000Z",
+              text: "must not be disclosed",
+            },
+          },
+        },
+      },
+      { ok: false, status: 500, data: acceptedNote("set", noteCommandIds.set) },
+    ]) {
+      const client = createMockClient({
+        routes: {
+          "PUT /api/games/game-1/note": {
+            response,
+          },
+        },
+      });
+      await expectThrows(
+        () =>
+          gameNoteSet(
+            client,
+            [
+              "game-1",
+              "--expected-version",
+              "0",
+              "--text",
+              "draft",
+              "--command-id",
+              noteCommandIds.set,
+            ],
+            { json: true },
+          ),
+        "Invalid owner-note response",
+      );
+    }
   });
 });
 

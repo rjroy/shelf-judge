@@ -172,3 +172,47 @@ describe("intention and play command parsing", () => {
     });
   });
 });
+
+describe("owner-note command parsing", () => {
+  test.each([
+    [["game", "note", "get", "game-1", "--json"], "game note get", ["game-1"]],
+    [
+      [
+        "game",
+        "note",
+        "set",
+        "game-1",
+        "--expected-version",
+        "0",
+        "--text",
+        "first line\nsecond line",
+      ],
+      "game note set",
+      ["game-1", "--expected-version", "0", "--text", "first line\nsecond line"],
+    ],
+    [
+      ["game", "note", "clear", "game-1", "--expected-version", "2", "--command-id", "id"],
+      "game note clear",
+      ["game-1", "--expected-version", "2", "--command-id", "id"],
+    ],
+    [
+      ["game", "note", "set", "game-1", "--expected-version", "0", "--text", "--json", "--json"],
+      "game note set",
+      ["game-1", "--expected-version", "0", "--text", "--json"],
+    ],
+    [
+      ["game", "note", "set", "game-1", "--expected-version", "0", "--text", "--text", "--json"],
+      "game note set",
+      ["game-1", "--expected-version", "0", "--text", "--text"],
+    ],
+  ] as Array<[string[], string, string[]]>)(
+    "keeps command-local note flags intact",
+    (tokens, commandPath, positional) => {
+      expect(parseArgs(["bun", "shelf-judge", ...tokens])).toMatchObject({
+        commandPath,
+        positional,
+        json: tokens.includes("--json"),
+      });
+    },
+  );
+});

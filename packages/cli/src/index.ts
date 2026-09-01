@@ -20,6 +20,9 @@ import {
   gameIntentionSet,
   gameIntentionResolve,
   gamePlaysSet,
+  gameNoteGet,
+  gameNoteSet,
+  gameNoteClear,
 } from "./commands/game.js";
 import { collectionBenchmark } from "./commands/collection.js";
 import {
@@ -88,6 +91,9 @@ const COMMANDS: Record<string, number> = {
   "game intention complete": 3,
   "game intention retire": 3,
   "game plays set": 3,
+  "game note get": 3,
+  "game note set": 3,
+  "game note clear": 3,
   "collection benchmark": 2,
   "axis list": 2,
   "axis templates": 2,
@@ -142,6 +148,9 @@ const EXACT_POSITIONAL_COMMANDS = new Set([
   "game intention complete",
   "game intention retire",
   "game plays set",
+  "game note get",
+  "game note set",
+  "game note clear",
 ]);
 
 interface ParsedArgs {
@@ -214,14 +223,19 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let template: string | undefined;
   let targetPlayerCount: number | undefined;
   let maximumScoringTime: number | undefined;
+  let expectingNoteTextValue = false;
 
   for (let i = 0; i < raw.length; i++) {
     const arg = raw[i];
 
-    if (arg === "--json") {
+    if (exactPositionalCommand && expectingNoteTextValue) {
+      tokens.push(arg);
+      expectingNoteTextValue = false;
+    } else if (arg === "--json") {
       json = true;
     } else if (exactPositionalCommand) {
       tokens.push(arg);
+      expectingNoteTextValue = arg === "--text";
     } else if (arg === "--bgg-id") {
       bggId = Number(raw[++i]);
     } else if (arg === "--name") {
@@ -410,6 +424,15 @@ async function main(): Promise<void> {
       break;
     case "game plays set":
       output = await gamePlaysSet(client, args, opts);
+      break;
+    case "game note get":
+      output = await gameNoteGet(client, args, opts);
+      break;
+    case "game note set":
+      output = await gameNoteSet(client, args, opts);
+      break;
+    case "game note clear":
+      output = await gameNoteClear(client, args, opts);
       break;
     case "collection benchmark":
       output = await collectionBenchmark(client, args, opts);
