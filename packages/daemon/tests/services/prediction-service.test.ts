@@ -214,6 +214,7 @@ function createStubTournamentService(
     listSessions: () => Promise.resolve([]),
     normalizeFitness: () => Promise.reject(new Error("not implemented")),
     onGameDeleted: () => Promise.resolve(),
+    reconcileWithCollection: () => Promise.reject(new Error("not implemented")),
     getSettings: () =>
       Promise.resolve(
         settings ?? {

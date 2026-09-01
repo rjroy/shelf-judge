@@ -15,6 +15,7 @@ import { createDisplayedFitnessService } from "./services/displayed-fitness-serv
 import { createIntentionService } from "./services/intention-service.js";
 import { createOwnerGameNoteService } from "./services/owner-game-note-service.js";
 import { createGroundedAnalysisProvider } from "./services/grounded-analysis/provider.js";
+import { toErrorMessage } from "@shelf-judge/shared";
 
 const logger = createLogger("daemon");
 
@@ -49,6 +50,17 @@ async function main() {
 
   const axisService = createAxisService({ storageService, collectionMutationService });
   const tournamentService = createTournamentService({ storageService });
+  logger.log("tournament reconciliation started", { trigger: "startup" });
+  try {
+    const result = await tournamentService.reconcileWithCollection();
+    logger.log("tournament reconciliation completed", { trigger: "startup", ...result });
+  } catch (error) {
+    logger.error("tournament reconciliation failed", {
+      trigger: "startup",
+      error: toErrorMessage(error),
+    });
+    throw error;
+  }
   const gameService = createGameService({
     storageService,
     collectionMutationService,

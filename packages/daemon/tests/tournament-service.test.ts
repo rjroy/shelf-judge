@@ -6,7 +6,11 @@ import type { TournamentData, Game, BggGameData, GameWithScore } from "@shelf-ju
 import { createInitialEntityMetadata } from "@shelf-judge/shared";
 
 // In-memory storage stub for tournament data
-function createStubStorage(): StorageService & { tournamentData: TournamentData } {
+function createStubStorage(): StorageService & {
+  tournamentData: TournamentData;
+  collectionGameIds: string[];
+  saveTournamentCalls: number;
+} {
   const defaultData: TournamentData = {
     settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
     sessions: [],
@@ -15,19 +19,22 @@ function createStubStorage(): StorageService & { tournamentData: TournamentData 
 
   const stub = {
     tournamentData: structuredClone(defaultData),
+    collectionGameIds: [],
+    saveTournamentCalls: 0,
 
     loadTournament(): Promise<TournamentData> {
       return Promise.resolve(structuredClone(stub.tournamentData));
     },
 
     saveTournament(data: TournamentData): Promise<void> {
+      stub.saveTournamentCalls++;
       stub.tournamentData = structuredClone(data);
       return Promise.resolve();
     },
 
     // Unused stubs required by the interface
     loadCollection(): Promise<never> {
-      return Promise.resolve({} as never);
+      return Promise.resolve({ games: stub.collectionGameIds.map((id) => ({ id })) } as never);
     },
     saveCollection(): Promise<void> {
       return Promise.resolve();
@@ -825,6 +832,92 @@ describe("TournamentService", () => {
       await service.startSession(null, games); // 5 games
       await service.onGameDeleted("g1"); // 4 remain
       expect(storage.tournamentData.sessions[0].status).toBe("active");
+    });
+  });
+
+  describe("collection reconciliation", () => {
+    test("removes stale cached stats and active-session references while preserving history", async () => {
+      const session = await service.startSession(null, games);
+      await service.submitComparison(session.id, "g1", "g2", "g1");
+      storage.tournamentData.gameStats["already-deleted"] = {
+        eloRating: 1400,
+        comparisonCount: 1,
+        wins: 0,
+        losses: 1,
+        recentComparisons: [],
+      };
+      storage.tournamentData.sessions.push({
+        id: "completed-session",
+        filters: null,
+        gameIds: ["historically-deleted"],
+        comparisonCount: 1,
+        status: "completed",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        comparisons: [],
+      });
+      storage.collectionGameIds = ["g2", "g3", "g4", "g5"];
+
+      const result = await service.reconcileWithCollection();
+
+      expect(result).toEqual({
+        changed: true,
+        gameStatsRemoved: 2,
+        activeSessionGameIdsRemoved: 1,
+        sessionsCompleted: 0,
+      });
+      expect(storage.tournamentData.gameStats["g1"]).toBeUndefined();
+      expect(storage.tournamentData.gameStats["already-deleted"]).toBeUndefined();
+      expect(storage.tournamentData.sessions[0].gameIds).toEqual(["g2", "g3", "g4", "g5"]);
+      expect(storage.tournamentData.sessions[1].gameIds).toEqual(["historically-deleted"]);
+      expect(storage.tournamentData.gameStats["g2"].recentComparisons[0].opponentGameId).toBe("g1");
+    });
+
+    test("completes an active session reduced below four available games", async () => {
+      const session = await service.startSession(null, games.slice(0, 4));
+      await service.submitComparison(session.id, "g1", "g2", "g1");
+      storage.collectionGameIds = ["g2", "g3", "g4"];
+
+      const result = await service.reconcileWithCollection();
+
+      expect(result.sessionsCompleted).toBe(1);
+      expect(storage.tournamentData.sessions[0].status).toBe("completed");
+      expect(storage.tournamentData.sessions[0].comparisons).toEqual([]);
+    });
+
+    test("does not save clean state and is idempotent after cleanup", async () => {
+      await service.startSession(null, games);
+      storage.collectionGameIds = games.map(({ game }) => game.id);
+      const cleanSaveCount = storage.saveTournamentCalls;
+
+      expect(await service.reconcileWithCollection()).toEqual({
+        changed: false,
+        gameStatsRemoved: 0,
+        activeSessionGameIdsRemoved: 0,
+        sessionsCompleted: 0,
+      });
+      expect(storage.saveTournamentCalls).toBe(cleanSaveCount);
+
+      storage.collectionGameIds = games.slice(1).map(({ game }) => game.id);
+      await service.reconcileWithCollection();
+      const reconciledSaveCount = storage.saveTournamentCalls;
+      expect((await service.reconcileWithCollection()).changed).toBe(false);
+      expect(storage.saveTournamentCalls).toBe(reconciledSaveCount);
+    });
+
+    test("propagates persistence failure without mutating durable state", async () => {
+      await service.startSession(null, games);
+      storage.collectionGameIds = games.slice(1).map(({ game }) => game.id);
+      const persistedBeforeReconciliation = structuredClone(storage.tournamentData);
+      storage.saveTournament = () => Promise.reject(new Error("disk unavailable"));
+
+      try {
+        await service.reconcileWithCollection();
+        expect.unreachable("reconciliation should have failed");
+      } catch (error) {
+        expect((error as Error).message).toBe("disk unavailable");
+      }
+      expect(storage.tournamentData).toEqual(persistedBeforeReconciliation);
     });
   });
 
