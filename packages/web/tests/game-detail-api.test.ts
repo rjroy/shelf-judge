@@ -4,7 +4,7 @@ import {
   type DurableGame,
   type GameDetailWithPurchaseUtilization,
 } from "@shelf-judge/shared";
-import { getGame } from "@/lib/api";
+import { getGame, getOwnerGameNote } from "@/lib/api";
 
 const observedAt = "2026-08-28T10:00:00.000Z";
 const createdAt = "2026-08-28T10:01:00.000Z";
@@ -122,10 +122,29 @@ describe("web game-detail API boundary", () => {
     expect(await getGame("game-1", () => Promise.resolve(response))).toEqual(response);
   });
 
+  test("validates dedicated note reads and exact game identity", async () => {
+    const response = { gameId: "game-1", note: game().ownerNote };
+    expect(await getOwnerGameNote("game-1", () => Promise.resolve(response))).toEqual(response);
+    expect(
+      getOwnerGameNote("game-1", () => Promise.resolve({ ...response, gameId: "game-2" })),
+    ).rejects.toThrow("different game");
+    expect(
+      getOwnerGameNote("game-1", () =>
+        Promise.resolve({ gameId: "game-1", note: { ...game().ownerNote, text: "leak" } }),
+      ),
+    ).rejects.toBeInstanceOf(Error);
+  });
+
   test("rejects an active intention belonging to another game", () => {
     const response = validDetail();
     if (response.intentions.activeIntention === null) throw new Error("Missing active fixture");
     response.intentions.activeIntention.gameId = "wrong-game";
+    rejects(response);
+  });
+
+  test("rejects complete detail belonging to another route game", () => {
+    const response = validDetail();
+    response.game.id = "game-2";
     rejects(response);
   });
 

@@ -6,6 +6,10 @@ import {
   OwnershipMutationResultSchema,
   PlayEvidenceMutationResultSchema,
   GameSchema,
+  OwnerGameNoteMutationResultSchema,
+  OwnerGameNoteReadResultSchema,
+  OwnerGameNoteSetRequestSchema,
+  OwnerGameNoteClearRequestSchema,
   type IntentionMutationError,
   type IntentionCommand,
   type IntentionMutationResult,
@@ -14,6 +18,10 @@ import {
   type PlayEvidenceMutationResult,
   type PlayIntentionKind,
   type Game,
+  type OwnerGameNoteClearRequest,
+  type OwnerGameNoteMutationResult,
+  type OwnerGameNoteReadResult,
+  type OwnerGameNoteSetRequest,
 } from "@shelf-judge/shared";
 import { generateBrowserUuid } from "@/lib/browser-uuid";
 
@@ -29,6 +37,109 @@ async function responseJson(response: Response): Promise<unknown> {
 
 function incoherentResponse(operation: string): never {
   throw new Error(`Daemon returned a response for a different ${operation}.`);
+}
+
+function ownerNoteResultStatus(result: OwnerGameNoteMutationResult): number {
+  if (result.ok) return 200;
+  switch (result.error.code) {
+    case "validation":
+      return 400;
+    case "game-not-found":
+      return 404;
+    case "stale-version":
+    case "command-reuse":
+      return 409;
+    case "version-overflow":
+      return 422;
+    case "persistence-failure":
+      return 500;
+  }
+}
+
+function ownerNoteResultMatchesRequest(
+  operation: "set" | "clear",
+  gameId: string,
+  request: OwnerGameNoteSetRequest | OwnerGameNoteClearRequest,
+  result: OwnerGameNoteMutationResult,
+): boolean {
+  if (result.ok) {
+    const expectedResultVersion = result.accepted.alreadyClear
+      ? request.expectedVersion
+      : request.expectedVersion + 1;
+    return (
+      Number.isSafeInteger(expectedResultVersion) &&
+      result.accepted.operation === operation &&
+      result.accepted.gameId === gameId &&
+      result.accepted.commandId === request.commandId &&
+      result.accepted.version === expectedResultVersion
+    );
+  }
+  if (result.commandId !== request.commandId) return false;
+  if (result.error.code === "game-not-found") return result.error.gameId === gameId;
+  if (result.error.code === "stale-version") {
+    return (
+      result.error.gameId === gameId && result.error.expectedVersion === request.expectedVersion
+    );
+  }
+  if (result.error.code === "command-reuse") {
+    return result.error.commandId === request.commandId;
+  }
+  if (result.error.code === "persistence-failure") {
+    return result.error.operation === `shelf.game.note.${operation}`;
+  }
+  return true;
+}
+
+export async function getOwnerGameNote(
+  gameId: string,
+  fetcher: BrowserFetch = fetch,
+): Promise<OwnerGameNoteReadResult> {
+  const response = await fetcher(`/api/daemon/games/${gameId}/note`);
+  if (!response.ok) throw new Error(`Owner note read failed (${response.status}).`);
+  const result = OwnerGameNoteReadResultSchema.parse(await responseJson(response));
+  if (result.gameId !== gameId) incoherentResponse("owner note read");
+  return result;
+}
+
+async function mutateOwnerGameNote(
+  operation: "set" | "clear",
+  gameId: string,
+  request: OwnerGameNoteSetRequest | OwnerGameNoteClearRequest,
+  fetcher: BrowserFetch,
+): Promise<OwnerGameNoteMutationResult> {
+  const parsedRequest =
+    operation === "set"
+      ? OwnerGameNoteSetRequestSchema.parse(request)
+      : OwnerGameNoteClearRequestSchema.parse(request);
+  const response = await fetcher(`/api/daemon/games/${gameId}/note`, {
+    method: operation === "set" ? "PUT" : "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(parsedRequest),
+  });
+  const result = OwnerGameNoteMutationResultSchema.parse(await responseJson(response));
+  if (response.status !== ownerNoteResultStatus(result)) {
+    throw new Error("Daemon returned an incoherent owner note status.");
+  }
+  if (!ownerNoteResultMatchesRequest(operation, gameId, parsedRequest, result)) {
+    incoherentResponse("owner note request");
+  }
+  return result;
+}
+
+export function setOwnerGameNote(
+  gameId: string,
+  request: OwnerGameNoteSetRequest,
+  fetcher: BrowserFetch = fetch,
+): Promise<OwnerGameNoteMutationResult> {
+  return mutateOwnerGameNote("set", gameId, request, fetcher);
+}
+
+export function clearOwnerGameNote(
+  gameId: string,
+  request: OwnerGameNoteClearRequest,
+  fetcher: BrowserFetch = fetch,
+): Promise<OwnerGameNoteMutationResult> {
+  return mutateOwnerGameNote("clear", gameId, request, fetcher);
 }
 
 export async function createIntention(

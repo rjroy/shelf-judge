@@ -29,6 +29,10 @@ import { IntentionControls } from "@/components/intention-controls";
 import { ManualGameValuesForm } from "@/components/manual-game-values-form";
 import { GameDetailCollectionNavigation } from "@/components/game-detail-collection-navigation";
 import { AdditionalBggIdsForm } from "@/components/additional-bgg-ids-form";
+import {
+  OwnerGameNoteEditor,
+  OwnerGameNoteStateProvider,
+} from "@/components/owner-game-note-editor";
 
 export async function generateMetadata({
   params,
@@ -112,329 +116,341 @@ export default async function GameDetailPage({
         <GameActions gameId={game.id} gameName={game.name} hasBggId={game.bggId !== null} />
       </GameDetailCollectionNavigation>
 
-      <GameDetailMain>
-        {/* Game hero section */}
-        <GameDetailHero>
-          <div className="game-cover">
-            {game.imageUrl ? <img src={game.imageUrl} alt={game.name} /> : <span>🎲</span>}
-          </div>
-          <div className="game-hero-info">
-            <div className="game-hero-title-row">
-              <h1 className="game-hero-title">{game.name}</h1>
-              {isPreviouslyOwned && (
-                <span className="status-badge prev-owned">Previously Owned</span>
-              )}
+      <OwnerGameNoteStateProvider key={game.id} initialNote={game.ownerNote}>
+        <GameDetailMain>
+          {/* Game hero section */}
+          <GameDetailHero>
+            <div className="game-cover">
+              {game.imageUrl ? <img src={game.imageUrl} alt={game.name} /> : <span>🎲</span>}
             </div>
-            <div className="game-hero-meta">
-              {game.yearPublished && <span>📅 {game.yearPublished}</span>}
-              {game.minPlayers && (
-                <span>
-                  👥{" "}
-                  {game.minPlayers === game.maxPlayers
-                    ? game.minPlayers
-                    : `${game.minPlayers}–${game.maxPlayers}`}{" "}
-                  players
-                </span>
-              )}
-              {game.playingTime && <span>⏱ {game.playingTime} min</span>}
-              {game.bggData?.weight && <span>⚖️ BGG Weight: {game.bggData.weight.toFixed(2)}</span>}
-              {game.numPlays && game.numPlays > 0 && <span>🎲 Plays: {game.numPlays}</span>}
-              {game.boxDimensions ? (
-                <span className="box-dims-display">
-                  📦 {game.boxDimensions.width} × {game.boxDimensions.height} ×{" "}
-                  {game.boxDimensions.depth} in
-                </span>
-              ) : (
-                <span className="box-dims-display box-dims-muted">📦 not measured</span>
-              )}
-              {game.bggId && (
-                <a
-                  className="bgg-link"
-                  href={`https://boardgamegeek.com/boardgame/${game.bggId}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  BGG ↗
-                </a>
-              )}
-            </div>
-            {game.bggData && (
-              <div className="bgg-data-line">
-                BGG data refreshed <strong>{formatRelativeDate(game.bggData.fetchedAt)}</strong>
-                {" · "}BGG community rating:{" "}
-                <span className="bgg-value">{game.bggData.communityRating.toFixed(1)}</span>
-              </div>
-            )}
-            {game.bggData && (
-              <div className="bgg-data-section">
-                {game.bggData?.mechanics && game.bggData.mechanics.length > 0 && (
-                  <div className="bgg-data-line">
-                    <strong>Mechanics:</strong>{" "}
-                    {game.bggData.mechanics.map((mechanic) => mechanic.name).join(", ")}
-                  </div>
-                )}
-                {game.bggData?.categories && game.bggData.categories.length > 0 && (
-                  <div className="bgg-data-line">
-                    <strong>Categories:</strong>{" "}
-                    {game.bggData.categories.map((category) => category.name).join(", ")}
-                  </div>
-                )}
-                {game.bggData?.families && game.bggData.families.length > 0 && (
-                  <div className="bgg-data-line">
-                    {(familyPrefix = null)}
-                    <strong>Families:</strong>{" "}
-                    {game.bggData.families.map((family) => {
-                      if (family.name.includes(":")) {
-                        const parts = family.name.split(":");
-                        const familyElement = (
-                          <span key={parts[1]}>
-                            {familyPrefix ? familyPrefix : ""}
-                            <em>{parts[0]}:</em>
-                            {parts[1]}
-                          </span>
-                        );
-                        familyPrefix = ", ";
-                        return familyElement;
-                      } else {
-                        return <span key={family.name}> {family.name}</span>;
-                      }
-                    })}
-                  </div>
-                )}
-                {game.bggData?.description && (
-                  <div className="bgg-data-line">
-                    <strong>Description:</strong> {game.bggData.description}
-                  </div>
+            <div className="game-hero-info">
+              <div className="game-hero-title-row">
+                <h1 className="game-hero-title">{game.name}</h1>
+                {isPreviouslyOwned && (
+                  <span className="status-badge prev-owned">Previously Owned</span>
                 )}
               </div>
-            )}
-          </div>
-          <div className="game-hero-score-section">
-            {score ? (
-              score.vetoed ? (
-                <>
-                  <div className="game-hero-score-value">
-                    <div className="score-hero-label">Fitness Score</div>
-                    <div className="score-hero-number score-hero-vetoed">VETOED</div>
-                    {score.hypotheticalScore !== null && (
-                      <div className="score-hero-out-of">
-                        hypothetical: {score.hypotheticalScore.toFixed(1)}
-                      </div>
-                    )}
-                  </div>
-                  <div className="game-hero-score-value">
-                    <div className="score-hero-rated">{score.ratedAxisCount} axes rated</div>
-                  </div>
-                </>
-              ) : hasPredictions ? (
-                <>
-                  <div className="game-hero-score-value">
-                    <div className="score-hero-label">Fitness Score</div>
-                    <div className="score-hero-number score-predicted">
-                      <span className="score-predicted-tilde">~</span>
-                      {displayScore}
-                    </div>
-                    <div className="score-hero-predict-summary">
-                      {score.predictionMeta!.actualAxisCount} actual &middot;{" "}
-                      {score.predictionMeta!.predictedAxisCount} predicted
-                    </div>
-                    <div className="score-hero-predict-summary" style={{ marginTop: 2 }}>
-                      <span className={`conf-badge conf-${score.predictionMeta!.confidence}`}>
-                        {score.predictionMeta!.confidence}
-                      </span>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="game-hero-score-value">
-                    <div className="score-hero-label">Fitness Score</div>
-                    <div className="score-hero-number">{displayScore}</div>
-                    <div className="score-hero-rated">{score.ratedAxisCount} axes rated</div>
-                  </div>
-                </>
-              )
-            ) : (
-              <div className="game-hero-score-value">
-                <div className="score-hero-label">Fitness Score</div>
-                <div className="score-hero-number score-hero-unrated">&mdash;</div>
-                <div className="score-hero-out-of">not yet rated</div>
-              </div>
-            )}
-            {tournamentStats && (
-              <div className="game-hero-score-value">
-                <div className="tournament-hero-rank">
-                  <div className="score-hero-label">Tournament Rank</div>
-                  <div
-                    className={`tournament-hero-value${tournamentStats.isProvisional ? " provisional" : ""}`}
-                  >
-                    {tournamentStats.displayLabel}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </GameDetailHero>
-
-        {isPreviouslyOwned && (
-          <div className="prev-owned-notice">
-            <span className="prev-owned-notice-icon">&#x25CE;</span>
-            <div>
-              <strong>Niche and redundancy data excluded.</strong> This game is no longer on your
-              shelf, so it doesn&apos;t affect niche rankings or redundancy scores for your current
-              collection. Fitness score and ratings are unchanged — they continue to improve
-              prediction accuracy.
-            </div>
-          </div>
-        )}
-
-        <PurchaseUtilizationPanel
-          result={purchaseUtilization}
-          isPreviouslyOwned={isPreviouslyOwned}
-        />
-
-        <IntentionControls game={game} detail={data.intentions} />
-
-        {tournamentStats && tournamentStats.comparisonCount > 0 && (
-          <div className="tournament-breakdown-panel">
-            <div className="panel-section-title">Tournament Breakdown</div>
-            <div className="tournament-breakdown-grid">
-              <div className="tournament-stat">
-                <div className="tournament-stat-value">{tournamentStats.comparisonCount}</div>
-                <div className="tournament-stat-label">Comparisons</div>
-              </div>
-              <div className="tournament-stat">
-                <div className="tournament-stat-value">
-                  {tournamentStats.wins}W / {tournamentStats.losses}L
-                </div>
-                <div className="tournament-stat-label">Record</div>
-              </div>
-              <div className="tournament-stat">
-                <div className="tournament-stat-value">{Math.round(tournamentStats.eloRating)}</div>
-                <div className="tournament-stat-label">Raw ELO</div>
-              </div>
-              <div className="tournament-stat">
-                <div className="tournament-stat-value">
-                  {tournamentStats.normalizedScore !== null
-                    ? tournamentStats.normalizedScore.toFixed(1)
-                    : "-"}
-                </div>
-                <div className="tournament-stat-label">Normalized</div>
-              </div>
-            </div>
-            {tournamentStats.recentComparisons.length > 0 && (
-              <div className="tournament-recent">
-                <div className="tournament-recent-title">Last 5 comparisons</div>
-                {tournamentStats.recentComparisons.slice(0, 5).map((c, i) => (
-                  <div key={i} className={`tournament-recent-row ${c.won ? "win" : "loss"}`}>
-                    <span className="tournament-result-badge">{c.won ? "W" : "L"}</span>
-                    <span className="tournament-opponent-id">
-                      vs{" "}
-                      <Link href={`/games/${c.opponentGameId}`} className="game-link">
-                        {c.opponentGameName ?? c.opponentGameId.slice(0, 8)}
-                      </Link>
-                    </span>
-                    <span className="tournament-recent-date">
-                      {new Date(c.createdAt).toLocaleDateString()}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Redundancy panel (REQ-REDUN-31, REQ-REDUN-32, REQ-REDUN-33) */}
-        {!isPreviouslyOwned && score?.redundancyAdjustment && (
-          <RedundancyPanel score={score} adjustment={score.redundancyAdjustment} />
-        )}
-
-        {/* Niche Position panel (REQ-NICHE-18, REQ-NICHE-19) */}
-        {!isPreviouslyOwned &&
-          (score?.vetoed ? (
-            <div className="niche-panel">
-              <div className="panel-section-title">Niche Position</div>
-              <div className="niche-vetoed-note">
-                This game is vetoed and excluded from niche rankings.
-              </div>
-            </div>
-          ) : (
-            nichePosition &&
-            (nichePosition.niches.length > 0 || ignoredTags.length > 0) && (
-              <NichePositionPanel nichePosition={nichePosition} ignoredTags={ignoredTags} />
-            )
-          ))}
-
-        {/* Two-panel layout */}
-        <GameDetailPanels
-          left={
-            <>
-              <div className="panel-section-title">
-                Score Breakdown
-                {score && !score.vetoed && (
-                  <span className="badge">
-                    How {hasPredictions ? "~" : ""}
-                    {displayScore} was calculated
+              <div className="game-hero-meta">
+                {game.yearPublished && <span>📅 {game.yearPublished}</span>}
+                {game.minPlayers && (
+                  <span>
+                    👥{" "}
+                    {game.minPlayers === game.maxPlayers
+                      ? game.minPlayers
+                      : `${game.minPlayers}–${game.maxPlayers}`}{" "}
+                    players
                   </span>
                 )}
-              </div>
-              <ScoreBreakdown
-                score={score}
-                displayScore={displayScore}
-                isPreviouslyOwned={isPreviouslyOwned}
-              />
-              <div className="calc-explanation">
-                <strong>How this is calculated:</strong> weighted average of all rated axes.
-                Formula: <code>sum(rating &times; weight) / sum(weight)</code>. Axes without ratings
-                are excluded from both the numerator and denominator.
-                {hasPredictions && (
-                  <>
-                    {" "}
-                    Predicted axes use similarity-weighted ratings from your most similar rated
-                    games. Insufficient-confidence axes are excluded.
-                  </>
+                {game.playingTime && <span>⏱ {game.playingTime} min</span>}
+                {game.bggData?.weight && (
+                  <span>⚖️ BGG Weight: {game.bggData.weight.toFixed(2)}</span>
+                )}
+                {game.numPlays && game.numPlays > 0 && <span>🎲 Plays: {game.numPlays}</span>}
+                {game.boxDimensions ? (
+                  <span className="box-dims-display">
+                    📦 {game.boxDimensions.width} × {game.boxDimensions.height} ×{" "}
+                    {game.boxDimensions.depth} in
+                  </span>
+                ) : (
+                  <span className="box-dims-display box-dims-muted">📦 not measured</span>
+                )}
+                {game.bggId && (
+                  <a
+                    className="bgg-link"
+                    href={`https://boardgamegeek.com/boardgame/${game.bggId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    BGG ↗
+                  </a>
                 )}
               </div>
-            </>
-          }
-          right={
-            <>
-              <div className="panel-section-title">Your Ratings</div>
-              <RatingForm
-                gameId={game.id}
-                axes={axes}
-                currentRatings={game.ratings}
-                score={score}
-                predictionScore={hasPredictions ? score : null}
-              />
-              <OwnershipActions gameId={game.id} gameName={game.name} ownership={game.ownership} />
-              <AcquisitionForm gameId={game.id} acquisition={game.acquisition} />
-              <ManualGameValuesForm
-                gameId={game.id}
-                values={game.manualValues}
-                sourcePlayingTime={
-                  game.durationEvidence.status === "valid" ? game.durationEvidence.value : null
-                }
-                sourcePlayerCount={game.bestPlayers}
-              />
-              {game.bggId !== null && (
-                <AdditionalBggIdsForm
-                  gameId={game.id}
-                  additionalBggIds={game.additionalBggIds ?? []}
-                />
+              {game.bggData && (
+                <div className="bgg-data-line">
+                  BGG data refreshed <strong>{formatRelativeDate(game.bggData.fetchedAt)}</strong>
+                  {" · "}BGG community rating:{" "}
+                  <span className="bgg-value">{game.bggData.communityRating.toFixed(1)}</span>
+                </div>
               )}
-              <BoxDimensionsForm gameId={game.id} currentDimensions={game.boxDimensions} />
-              <ShelfAssignmentForm
-                gameId={game.id}
-                currentShelfId={game.manualShelfId}
-                options={shelfOptions}
-                hasDimensions={game.boxDimensions !== null}
-                isPreviouslyOwned={isPreviouslyOwned}
-              />
-            </>
-          }
-        />
-      </GameDetailMain>
+              {game.bggData && (
+                <div className="bgg-data-section">
+                  {game.bggData?.mechanics && game.bggData.mechanics.length > 0 && (
+                    <div className="bgg-data-line">
+                      <strong>Mechanics:</strong>{" "}
+                      {game.bggData.mechanics.map((mechanic) => mechanic.name).join(", ")}
+                    </div>
+                  )}
+                  {game.bggData?.categories && game.bggData.categories.length > 0 && (
+                    <div className="bgg-data-line">
+                      <strong>Categories:</strong>{" "}
+                      {game.bggData.categories.map((category) => category.name).join(", ")}
+                    </div>
+                  )}
+                  {game.bggData?.families && game.bggData.families.length > 0 && (
+                    <div className="bgg-data-line">
+                      {(familyPrefix = null)}
+                      <strong>Families:</strong>{" "}
+                      {game.bggData.families.map((family) => {
+                        if (family.name.includes(":")) {
+                          const parts = family.name.split(":");
+                          const familyElement = (
+                            <span key={parts[1]}>
+                              {familyPrefix ? familyPrefix : ""}
+                              <em>{parts[0]}:</em>
+                              {parts[1]}
+                            </span>
+                          );
+                          familyPrefix = ", ";
+                          return familyElement;
+                        } else {
+                          return <span key={family.name}> {family.name}</span>;
+                        }
+                      })}
+                    </div>
+                  )}
+                  {game.bggData?.description && (
+                    <div className="bgg-data-line">
+                      <strong>Description:</strong> {game.bggData.description}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="game-hero-score-section">
+              {score ? (
+                score.vetoed ? (
+                  <>
+                    <div className="game-hero-score-value">
+                      <div className="score-hero-label">Fitness Score</div>
+                      <div className="score-hero-number score-hero-vetoed">VETOED</div>
+                      {score.hypotheticalScore !== null && (
+                        <div className="score-hero-out-of">
+                          hypothetical: {score.hypotheticalScore.toFixed(1)}
+                        </div>
+                      )}
+                    </div>
+                    <div className="game-hero-score-value">
+                      <div className="score-hero-rated">{score.ratedAxisCount} axes rated</div>
+                    </div>
+                  </>
+                ) : hasPredictions ? (
+                  <>
+                    <div className="game-hero-score-value">
+                      <div className="score-hero-label">Fitness Score</div>
+                      <div className="score-hero-number score-predicted">
+                        <span className="score-predicted-tilde">~</span>
+                        {displayScore}
+                      </div>
+                      <div className="score-hero-predict-summary">
+                        {score.predictionMeta!.actualAxisCount} actual &middot;{" "}
+                        {score.predictionMeta!.predictedAxisCount} predicted
+                      </div>
+                      <div className="score-hero-predict-summary" style={{ marginTop: 2 }}>
+                        <span className={`conf-badge conf-${score.predictionMeta!.confidence}`}>
+                          {score.predictionMeta!.confidence}
+                        </span>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="game-hero-score-value">
+                      <div className="score-hero-label">Fitness Score</div>
+                      <div className="score-hero-number">{displayScore}</div>
+                      <div className="score-hero-rated">{score.ratedAxisCount} axes rated</div>
+                    </div>
+                  </>
+                )
+              ) : (
+                <div className="game-hero-score-value">
+                  <div className="score-hero-label">Fitness Score</div>
+                  <div className="score-hero-number score-hero-unrated">&mdash;</div>
+                  <div className="score-hero-out-of">not yet rated</div>
+                </div>
+              )}
+              {tournamentStats && (
+                <div className="game-hero-score-value">
+                  <div className="tournament-hero-rank">
+                    <div className="score-hero-label">Tournament Rank</div>
+                    <div
+                      className={`tournament-hero-value${tournamentStats.isProvisional ? " provisional" : ""}`}
+                    >
+                      {tournamentStats.displayLabel}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </GameDetailHero>
+
+          {isPreviouslyOwned && (
+            <div className="prev-owned-notice">
+              <span className="prev-owned-notice-icon">&#x25CE;</span>
+              <div>
+                <strong>Niche and redundancy data excluded.</strong> This game is no longer on your
+                shelf, so it doesn&apos;t affect niche rankings or redundancy scores for your
+                current collection. Fitness score and ratings are unchanged — they continue to
+                improve prediction accuracy.
+              </div>
+            </div>
+          )}
+
+          <PurchaseUtilizationPanel
+            result={purchaseUtilization}
+            isPreviouslyOwned={isPreviouslyOwned}
+          />
+
+          <IntentionControls game={game} detail={data.intentions} />
+
+          <OwnerGameNoteEditor gameId={game.id} />
+
+          {tournamentStats && tournamentStats.comparisonCount > 0 && (
+            <div className="tournament-breakdown-panel">
+              <div className="panel-section-title">Tournament Breakdown</div>
+              <div className="tournament-breakdown-grid">
+                <div className="tournament-stat">
+                  <div className="tournament-stat-value">{tournamentStats.comparisonCount}</div>
+                  <div className="tournament-stat-label">Comparisons</div>
+                </div>
+                <div className="tournament-stat">
+                  <div className="tournament-stat-value">
+                    {tournamentStats.wins}W / {tournamentStats.losses}L
+                  </div>
+                  <div className="tournament-stat-label">Record</div>
+                </div>
+                <div className="tournament-stat">
+                  <div className="tournament-stat-value">
+                    {Math.round(tournamentStats.eloRating)}
+                  </div>
+                  <div className="tournament-stat-label">Raw ELO</div>
+                </div>
+                <div className="tournament-stat">
+                  <div className="tournament-stat-value">
+                    {tournamentStats.normalizedScore !== null
+                      ? tournamentStats.normalizedScore.toFixed(1)
+                      : "-"}
+                  </div>
+                  <div className="tournament-stat-label">Normalized</div>
+                </div>
+              </div>
+              {tournamentStats.recentComparisons.length > 0 && (
+                <div className="tournament-recent">
+                  <div className="tournament-recent-title">Last 5 comparisons</div>
+                  {tournamentStats.recentComparisons.slice(0, 5).map((c, i) => (
+                    <div key={i} className={`tournament-recent-row ${c.won ? "win" : "loss"}`}>
+                      <span className="tournament-result-badge">{c.won ? "W" : "L"}</span>
+                      <span className="tournament-opponent-id">
+                        vs{" "}
+                        <Link href={`/games/${c.opponentGameId}`} className="game-link">
+                          {c.opponentGameName ?? c.opponentGameId.slice(0, 8)}
+                        </Link>
+                      </span>
+                      <span className="tournament-recent-date">
+                        {new Date(c.createdAt).toLocaleDateString()}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Redundancy panel (REQ-REDUN-31, REQ-REDUN-32, REQ-REDUN-33) */}
+          {!isPreviouslyOwned && score?.redundancyAdjustment && (
+            <RedundancyPanel score={score} adjustment={score.redundancyAdjustment} />
+          )}
+
+          {/* Niche Position panel (REQ-NICHE-18, REQ-NICHE-19) */}
+          {!isPreviouslyOwned &&
+            (score?.vetoed ? (
+              <div className="niche-panel">
+                <div className="panel-section-title">Niche Position</div>
+                <div className="niche-vetoed-note">
+                  This game is vetoed and excluded from niche rankings.
+                </div>
+              </div>
+            ) : (
+              nichePosition &&
+              (nichePosition.niches.length > 0 || ignoredTags.length > 0) && (
+                <NichePositionPanel nichePosition={nichePosition} ignoredTags={ignoredTags} />
+              )
+            ))}
+
+          {/* Two-panel layout */}
+          <GameDetailPanels
+            left={
+              <>
+                <div className="panel-section-title">
+                  Score Breakdown
+                  {score && !score.vetoed && (
+                    <span className="badge">
+                      How {hasPredictions ? "~" : ""}
+                      {displayScore} was calculated
+                    </span>
+                  )}
+                </div>
+                <ScoreBreakdown
+                  score={score}
+                  displayScore={displayScore}
+                  isPreviouslyOwned={isPreviouslyOwned}
+                />
+                <div className="calc-explanation">
+                  <strong>How this is calculated:</strong> weighted average of all rated axes.
+                  Formula: <code>sum(rating &times; weight) / sum(weight)</code>. Axes without
+                  ratings are excluded from both the numerator and denominator.
+                  {hasPredictions && (
+                    <>
+                      {" "}
+                      Predicted axes use similarity-weighted ratings from your most similar rated
+                      games. Insufficient-confidence axes are excluded.
+                    </>
+                  )}
+                </div>
+              </>
+            }
+            right={
+              <>
+                <div className="panel-section-title">Your Ratings</div>
+                <RatingForm
+                  gameId={game.id}
+                  axes={axes}
+                  currentRatings={game.ratings}
+                  score={score}
+                  predictionScore={hasPredictions ? score : null}
+                />
+                <OwnershipActions
+                  gameId={game.id}
+                  gameName={game.name}
+                  ownership={game.ownership}
+                />
+                <AcquisitionForm gameId={game.id} acquisition={game.acquisition} />
+                <ManualGameValuesForm
+                  gameId={game.id}
+                  values={game.manualValues}
+                  sourcePlayingTime={
+                    game.durationEvidence.status === "valid" ? game.durationEvidence.value : null
+                  }
+                  sourcePlayerCount={game.bestPlayers}
+                />
+                {game.bggId !== null && (
+                  <AdditionalBggIdsForm
+                    gameId={game.id}
+                    additionalBggIds={game.additionalBggIds ?? []}
+                  />
+                )}
+                <BoxDimensionsForm gameId={game.id} currentDimensions={game.boxDimensions} />
+                <ShelfAssignmentForm
+                  gameId={game.id}
+                  currentShelfId={game.manualShelfId}
+                  options={shelfOptions}
+                  hasDimensions={game.boxDimensions !== null}
+                  isPreviouslyOwned={isPreviouslyOwned}
+                />
+              </>
+            }
+          />
+        </GameDetailMain>
+      </OwnerGameNoteStateProvider>
     </>
   );
 }

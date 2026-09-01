@@ -8435,7 +8435,8 @@ body {
 /* ===== Game Detail Intentions ===== */
 
 .intention-panel,
-.intention-history {
+.intention-history,
+.owner-note-panel {
   margin: 20px 32px 0;
   padding: 20px;
   border: 1px solid var(--border);
@@ -8445,13 +8446,15 @@ body {
 }
 
 .intention-panel h2,
-.intention-history h2 {
+.intention-history h2,
+.owner-note-panel h2 {
   margin: 0 0 12px;
   font-size: var(--text-lg);
 }
 
 .intention-panel :focus-visible,
 .intention-history :focus-visible,
+.owner-note-panel :focus-visible,
 .action-section :focus-visible,
 .topbar-actions :focus-visible {
   outline: 3px solid var(--action);
@@ -8459,12 +8462,14 @@ body {
 }
 
 .intention-live-status:empty,
-.action-live-status:empty {
+.action-live-status:empty,
+.owner-note-live-status:empty {
   display: none;
 }
 
 .intention-live-status,
-.action-live-status {
+.action-live-status,
+.owner-note-live-status {
   color: var(--success);
   font-weight: 600;
   overflow-wrap: anywhere;
@@ -8595,9 +8600,137 @@ body {
   font-family: monospace;
 }
 
+/* ===== Owner Game Note ===== */
+
+.owner-note-panel {
+  overflow: hidden;
+}
+
+.owner-note-heading-row,
+.owner-note-meta,
+.owner-note-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.owner-note-heading-row {
+  justify-content: space-between;
+}
+
+.owner-note-state,
+.owner-note-dirty-status {
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+
+.owner-note-state {
+  padding: 3px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-secondary);
+}
+
+.owner-note-state-present {
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.owner-note-help {
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.owner-note-panel form {
+  display: grid;
+  gap: 8px;
+}
+
+.owner-note-panel label {
+  font-weight: 700;
+}
+
+.owner-note-panel textarea {
+  display: block;
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.owner-note-panel textarea[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.owner-note-meta {
+  justify-content: space-between;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.owner-note-actions {
+  align-items: stretch;
+  margin-top: 6px;
+}
+
+.owner-note-actions .btn {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.owner-note-conflict {
+  margin-top: 18px;
+  padding: 16px;
+  border: 2px solid var(--warning-border);
+  border-radius: 8px;
+  background: var(--warning-subtle);
+  color: var(--warning-text);
+  min-width: 0;
+}
+
+.owner-note-conflict h3,
+.owner-note-conflict h4 {
+  margin-top: 0;
+}
+
+.owner-note-conflict-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.owner-note-conflict-grid > div {
+  min-width: 0;
+}
+
+.owner-note-conflict pre {
+  margin: 0;
+  min-height: 72px;
+  padding: 12px;
+  border: 1px solid var(--warning-border);
+  border-radius: 5px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 @media (max-width: 700px) {
   .intention-panel,
-  .intention-history {
+  .intention-history,
+  .owner-note-panel {
     margin: 16px;
     padding: 16px;
   }
@@ -8605,6 +8738,20 @@ body {
   .intention-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .owner-note-conflict-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .owner-note-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .owner-note-actions .btn {
+    justify-content: center;
+    width: 100%;
   }
 
   .intention-actions .btn,

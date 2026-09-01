@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { OwnershipStatus, PlayIntention } from "@shelf-judge/shared";
 import { changeOwnership, refreshGameBgg, removeGameFromCollection } from "@/lib/browser-mutations";
+import { useOwnerGameNoteState } from "@/components/owner-game-note-editor";
 
 export function GameActions({
   gameId,
@@ -107,6 +108,8 @@ export function OwnershipActions({
   gameName: string;
   ownership: OwnershipStatus;
 }) {
+  const { note: ownerNote } = useOwnerGameNoteState();
+  const hasOwnerNoteContent = ownerNote.state === "present";
   const router = useRouter();
   const [toggling, setToggling] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -139,7 +142,7 @@ export function OwnershipActions({
   }
 
   async function handleRemove() {
-    if (!confirm(`Remove "${gameName}" from your collection? This cannot be undone.`)) {
+    if (!confirm(permanentDeletionConfirmation(gameName, hasOwnerNoteContent))) {
       return;
     }
     const requestGeneration = ++generation.current;
@@ -210,8 +213,8 @@ export function OwnershipActions({
               {toggling ? "Updating..." : "Mark as Previously Owned"}
             </button>
             <div className="action-desc">
-              Sold or traded this game? Keeps all ratings and history — you can reverse this any
-              time. Removes it from niche and redundancy calculations.
+              Sold or traded this game? Keeps all ratings, history, and the Owner note. You can
+              reverse this any time. Removes it from niche and redundancy calculations.
             </div>
           </>
         )}
@@ -222,7 +225,7 @@ export function OwnershipActions({
       <div className="danger-zone">
         <div className="danger-zone-label">Danger Zone</div>
         <div className="danger-desc">
-          Permanently removes all ratings, history, and data. This cannot be undone.
+          <OwnerNoteDeletionDisclosure />
         </div>
         <button
           className="btn btn-danger-outline"
@@ -237,4 +240,25 @@ export function OwnershipActions({
       </div>
     </div>
   );
+}
+
+export function permanentDeletionDisclosure(hasOwnerNoteContent: boolean): string {
+  return hasOwnerNoteContent
+    ? "Permanently removes all ratings, history, data, and the current Owner note. The note cannot be restored by Shelf Judge."
+    : "Permanently removes all ratings, history, and data. This cannot be undone.";
+}
+
+export function OwnerNoteDeletionDisclosure() {
+  const { note } = useOwnerGameNoteState();
+  return <>{permanentDeletionDisclosure(note.state === "present")}</>;
+}
+
+export function permanentDeletionConfirmation(
+  gameName: string,
+  hasOwnerNoteContent: boolean,
+): string {
+  const noteWarning = hasOwnerNoteContent
+    ? " Its Owner note will also be deleted and cannot be restored by Shelf Judge."
+    : "";
+  return `Remove "${gameName}" from your collection? This cannot be undone.${noteWarning}`;
 }
