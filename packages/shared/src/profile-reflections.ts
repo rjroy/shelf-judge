@@ -136,7 +136,7 @@ const IdSchema = z.string().min(1);
 const TimestampSchema = z.string().datetime({ offset: true });
 const SafeCountSchema = z.number().int().safe().min(0);
 const PositiveSafeIntegerSchema = z.number().int().safe().positive();
-const PositiveSafeIntegerStringSchema = z
+export const PositiveSafeIntegerStringSchema = z
   .string()
   .regex(/^[1-9]\d*$/, "Note source version must be a canonical positive integer")
   .refine((value) => Number.isSafeInteger(Number(value)), {

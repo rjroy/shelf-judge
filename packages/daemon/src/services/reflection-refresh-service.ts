@@ -28,9 +28,11 @@ import {
 } from "./reflection-result-validator.js";
 import type {
   ReflectionAttemptFence,
+  ReflectionCompensationResult,
   ReflectionCurrentSources,
   ReflectionStateService,
 } from "./reflection-state-service.js";
+import { ReflectionCompensationPersistenceError } from "./reflection-state-service.js";
 
 type ActiveOperationRegistry = ReturnType<typeof createActiveGroundedOperationRegistry>;
 type ReflectionRefreshRequest = z.infer<typeof ReflectionRefreshRequestSchema>;
@@ -55,12 +57,14 @@ export interface ReflectionRefreshRunInput {
   readonly transportId: string;
   readonly request: unknown;
   readonly disconnectSignal?: AbortSignal;
+  readonly authorizeQuestions: (questionIds: readonly ReflectionQuestionId[]) => void;
   readonly emit: (event: ReflectionStreamEvent) => void | Promise<void>;
 }
 
 export interface ReflectionRefreshService {
   run(input: ReflectionRefreshRunInput): Promise<"completed" | "cancelled" | "failed">;
   cancel(batchId: string, capability: string): boolean;
+  cancelActive(): boolean;
   discover(): ReturnType<ActiveOperationRegistry["discover"]>;
 }
 
@@ -211,6 +215,7 @@ export function createReflectionRefreshService(
   const batchRequests = new Map<string, string>();
   const requestBatches = new Map<string, string>();
   const operationByBatch = new Map<string, string>();
+  const capabilityByBatch = new Map<string, string>();
   let activeBatchId: string | undefined;
 
   function admit(request: ReflectionRefreshRequest): void {
@@ -250,6 +255,7 @@ export function createReflectionRefreshService(
         if (questionIds.length === 0) {
           throw new ReflectionRefreshAdmissionError("question-disabled");
         }
+        input.authorizeQuestions(questionIds);
       } catch (error) {
         activeBatchId = undefined;
         throw error;
@@ -258,6 +264,7 @@ export function createReflectionRefreshService(
       batchRequests.set(request.batchId, request.requestId);
       requestBatches.set(request.requestId, request.batchId);
       operationByBatch.set(request.batchId, input.operationId);
+      capabilityByBatch.set(request.batchId, request.cancellationCapability);
       const operation = operations.start({
         operationId: input.operationId,
         batchId: request.batchId,
@@ -277,6 +284,8 @@ export function createReflectionRefreshService(
       let activeUsage: GroundedProviderUsage | GroundedUsageUnavailable = {
         state: "unavailable",
       };
+      let activeCacheTransition: ReflectionCompensationResult["cacheTransition"] = "none";
+      let compensationPersistenceFailure = false;
       let sequence = 0;
       const emit = async (event: unknown): Promise<void> => {
         const envelope = ReflectionStreamEventSchema.parse({
@@ -439,15 +448,17 @@ export function createReflectionRefreshService(
           });
 
           const batchComplete = index === questionIds.length - 1;
-          terminalReservation = operations.reserveTerminal(input.operationId);
+          terminalReservation = operations.reserveTerminal(input.operationId, {
+            deferInterruption: !batchComplete,
+          });
           if (terminalReservation === undefined) {
             operation.signal.throwIfAborted();
             throw new ReflectionRefreshFailure("internal", "reflection-terminal-race-lost");
           }
           let revalidationFailure: string | undefined;
-          let completed: boolean;
+          let publication: Awaited<ReturnType<ReflectionStateService["completeAttempt"]>>;
           try {
-            completed = await deps.state.completeAttempt(fence, result, async () => {
+            publication = await deps.state.completeAttempt(fence, result, async () => {
               let currentProvider: GroundedProviderIdentity;
               try {
                 currentProvider = configuredProvider(deps.provider);
@@ -475,13 +486,68 @@ export function createReflectionRefreshService(
               { cause: error },
             );
           }
-          if (!completed) {
+          if (publication === false) {
             throw new ReflectionRefreshFailure(
               revalidationFailure === "provider-configuration-changed"
                 ? "model-configuration"
                 : "evidence-load",
               revalidationFailure ?? "reflection-attempt-fence-lost",
             );
+          }
+          activeCacheTransition = "written";
+          if (!batchComplete) {
+            const interruption = operations.pendingInterruption(terminalReservation);
+            if (interruption !== undefined) {
+              let compensation: ReflectionCompensationResult;
+              try {
+                compensation = await deps.state.compensateAttempt(
+                  publication,
+                  interruption === "cancelled"
+                    ? { state: "cancelled" }
+                    : {
+                        state: "unavailable",
+                        reason: "transport",
+                        safeDetail: "transport-disconnected",
+                      },
+                );
+              } catch (error) {
+                if (error instanceof ReflectionCompensationPersistenceError) {
+                  activeCacheTransition = error.result.cacheTransition;
+                  compensationPersistenceFailure = true;
+                  logger.log({
+                    recordType: "reflection-publication-compensation",
+                    occurredAt: now(),
+                    ...activeAudit,
+                    interruption,
+                    outcome: "failed",
+                    cacheTransition: error.result.cacheTransition,
+                  });
+                  throw new ReflectionRefreshFailure(
+                    "persistence",
+                    "reflection-compensation-persistence-failed",
+                    { cause: error },
+                  );
+                }
+                throw error;
+              }
+              activeCacheTransition = compensation.cacheTransition;
+              logger.log({
+                recordType: "reflection-publication-compensation",
+                occurredAt: now(),
+                ...activeAudit,
+                interruption,
+                outcome: compensation.outcome,
+                cacheTransition: compensation.cacheTransition,
+              });
+            }
+            if (!operations.releaseTerminal(terminalReservation)) {
+              throw new ReflectionRefreshFailure(
+                "internal",
+                "reflection-publication-release-failed",
+              );
+            }
+            terminalReservation = undefined;
+            operation.signal.throwIfAborted();
           }
           await emit({
             type: "cache-outcome",
@@ -491,11 +557,19 @@ export function createReflectionRefreshService(
             outcome: "replaced",
           });
           if (batchComplete) {
-            if (!operations.commitTerminal(terminalReservation, "completed")) {
+            await emit({
+              type: "question-completed",
+              terminal: true,
+              batchId: request.batchId,
+              questionId,
+              outcome: result.outcome,
+              batchComplete: true,
+            });
+            if (
+              terminalReservation === undefined ||
+              !operations.commitTerminal(terminalReservation, "completed")
+            )
               throw new ReflectionRefreshFailure("internal", "reflection-terminal-commit-failed");
-            }
-          } else if (!operations.releaseTerminal(terminalReservation)) {
-            throw new ReflectionRefreshFailure("internal", "reflection-publication-release-failed");
           }
           terminalReservation = undefined;
           logger.log({
@@ -509,23 +583,20 @@ export function createReflectionRefreshService(
           });
           activeAudit = undefined;
           activeUsage = { state: "unavailable" };
-          await emit({
-            type: "question-completed",
-            terminal: batchComplete,
-            batchId: request.batchId,
-            questionId,
-            outcome: result.outcome,
-            batchComplete,
-          });
+          if (!batchComplete)
+            await emit({
+              type: "question-completed",
+              terminal: false,
+              batchId: request.batchId,
+              questionId,
+              outcome: result.outcome,
+              batchComplete: false,
+            });
           fence = undefined;
           activeQuestion = undefined;
         }
         return "completed";
       } catch (error) {
-        if (terminalReservation !== undefined) {
-          operations.releaseTerminal(terminalReservation);
-          terminalReservation = undefined;
-        }
         const operationOutcome = operations
           .discover()
           .find(({ operationId }) => operationId === input.operationId)?.outcome;
@@ -534,6 +605,14 @@ export function createReflectionRefreshService(
             ? { reason: "transport" as const, safeDetail: "transport-disconnected" }
             : { reason: "cancelled" as const, safeDetail: "cancelled" }
           : failureReason(error);
+        if (terminalReservation !== undefined) {
+          if (compensationPersistenceFailure) {
+            operations.commitTerminal(terminalReservation, "failed");
+          } else {
+            operations.releaseTerminal(terminalReservation);
+          }
+          terminalReservation = undefined;
+        }
         if (error instanceof GroundedAnalysisError && error.usage !== undefined) {
           activeUsage = error.usage;
         }
@@ -542,7 +621,7 @@ export function createReflectionRefreshService(
             if (failure.reason === "cancelled") await deps.state.cancelAttempt(fence);
             else await deps.state.failAttempt(fence, failure.reason, failure.safeDetail);
           } catch {
-            // The terminal transport outcome must survive a secondary persistence failure.
+            // The authoritative terminal outcome must survive a secondary persistence failure.
           }
         }
         if (failure.reason === "cancelled") {
@@ -553,7 +632,7 @@ export function createReflectionRefreshService(
               ...activeAudit,
               outcome: "cancelled",
               validation: "not-reached",
-              cacheTransition: "none",
+              cacheTransition: activeCacheTransition,
               usage: activeUsage,
               failureCategory: "cancelled",
             });
@@ -578,7 +657,7 @@ export function createReflectionRefreshService(
             ...activeAudit,
             outcome: "failed",
             validation: failure.reason === "output-validation" ? "rejected" : "not-reached",
-            cacheTransition: "none",
+            cacheTransition: activeCacheTransition,
             usage: activeUsage,
             failureCategory: failure.reason,
           });
@@ -609,6 +688,7 @@ export function createReflectionRefreshService(
         transport.release();
         operations.cleanup(input.operationId);
         operationByBatch.delete(request.batchId);
+        capabilityByBatch.delete(request.batchId);
         activeBatchId = undefined;
       }
     },
@@ -616,6 +696,15 @@ export function createReflectionRefreshService(
     cancel(batchId: string, capability: string): boolean {
       const operationId = operationByBatch.get(batchId);
       return operationId === undefined ? false : operations.cancel(operationId, capability);
+    },
+
+    cancelActive(): boolean {
+      if (activeBatchId === undefined) return false;
+      const capability = capabilityByBatch.get(activeBatchId);
+      const operationId = operationByBatch.get(activeBatchId);
+      return capability === undefined || operationId === undefined
+        ? false
+        : operations.cancel(operationId, capability);
     },
 
     discover: () => operations.discover(),

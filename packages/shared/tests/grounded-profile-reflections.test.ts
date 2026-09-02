@@ -436,6 +436,35 @@ describe("Reflection result and evidence contracts", () => {
     expect(
       ReflectionCitationSchema.safeParse({ ...ownerCitation, sourceVersion: "01" }).success,
     ).toBe(false);
+    for (const sourceVersion of [
+      "1",
+      "9",
+      "10",
+      "999999999999999",
+      "1000000000000000",
+      "8999999999999999",
+      "9000000000000000",
+      String(Number.MAX_SAFE_INTEGER),
+    ]) {
+      expect(ReflectionCitationSchema.safeParse({ ...ownerCitation, sourceVersion }).success).toBe(
+        true,
+      );
+    }
+    for (const sourceVersion of [
+      String(Number.MAX_SAFE_INTEGER + 1),
+      "9999999999999999",
+      "10000000000000000",
+      "0",
+      "01",
+      "+1",
+      "-1",
+      "1.0",
+      "1e1",
+    ]) {
+      expect(ReflectionCitationSchema.safeParse({ ...ownerCitation, sourceVersion }).success).toBe(
+        false,
+      );
+    }
     expect(
       ReflectionCitationSchema.safeParse({
         ...ownerCitation,

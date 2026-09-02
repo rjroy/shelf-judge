@@ -37,17 +37,56 @@ export interface ReflectionAttemptFence {
   deletionGeneration: string;
 }
 
+export interface ReflectionAttemptPublication {
+  readonly fence: ReflectionAttemptFence;
+  readonly priorCache: ReflectionCompleted | null;
+  readonly replacementCache: ReflectionCompleted;
+}
+
+export type ReflectionAttemptInterruption =
+  | { readonly state: "cancelled" }
+  | {
+      readonly state: "unavailable";
+      readonly reason: ReflectionUnavailableReason;
+      readonly safeDetail?: string;
+    };
+
+export interface ReflectionCompensationResult {
+  readonly outcome: "restored" | "superseded";
+  readonly cacheTransition: "none" | "written" | "invalidated";
+}
+
+export class ReflectionCompensationPersistenceError extends Error {
+  constructor(
+    readonly result: ReflectionCompensationResult,
+    options?: ErrorOptions,
+  ) {
+    super("reflection-compensation-persistence-failed", options);
+    this.name = "ReflectionCompensationPersistenceError";
+  }
+}
+
 export interface ReflectionStateService {
   getSettings(): Promise<ReflectionSettings>;
   getDeletionGeneration(): Promise<string>;
   read(sources: ReflectionCurrentSources): Promise<readonly ReflectionQuestionState[]>;
+  readSnapshot(
+    loadCurrentSources: () => ReflectionCurrentSources | Promise<ReflectionCurrentSources>,
+  ): Promise<{
+    settings: ReflectionSettings;
+    questions: readonly ReflectionQuestionState[];
+  }>;
   setEnabled(questionId: ReflectionQuestionId, enabled: boolean): Promise<void>;
   startAttempt(questionId: ReflectionQuestionId, batchId: string): Promise<ReflectionAttemptFence>;
   completeAttempt(
     fence: ReflectionAttemptFence,
     result: ReflectionCompleted,
     loadCurrentSources: () => ReflectionCurrentSources | Promise<ReflectionCurrentSources>,
-  ): Promise<boolean>;
+  ): Promise<ReflectionAttemptPublication | false>;
+  compensateAttempt(
+    publication: ReflectionAttemptPublication,
+    interruption: ReflectionAttemptInterruption,
+  ): Promise<ReflectionCompensationResult>;
   cancelAttempt(fence: ReflectionAttemptFence): Promise<boolean>;
   failAttempt(
     fence: ReflectionAttemptFence,
@@ -148,6 +187,7 @@ export function createReflectionStateService(
   const now = deps.now ?? (() => new Date().toISOString());
   const createGeneration = deps.createGeneration ?? (() => crypto.randomUUID());
   const createAttemptId = deps.createAttemptId ?? (() => crypto.randomUUID());
+  const issuedPublications = new WeakSet<ReflectionAttemptPublication>();
   let initialized: Promise<{ settings: ReflectionSettings; state: ReflectionDurableState }> | null =
     null;
 
@@ -204,6 +244,39 @@ export function createReflectionStateService(
     return REFLECTION_QUESTION_IDS.indexOf(questionId);
   }
 
+  function compensationResult(
+    state: ReflectionDurableState,
+    settings: ReflectionSettings,
+    publication: ReflectionAttemptPublication,
+    compensated?: ReflectionDurableState,
+  ): ReflectionCompensationResult {
+    if (
+      compensated !== undefined &&
+      deps.storage.stateIdentity(state) === deps.storage.stateIdentity(compensated)
+    ) {
+      return { outcome: "restored", cacheTransition: "none" };
+    }
+    const index = questionIndex(publication.fence.questionId);
+    const question = state.questions[index];
+    if (
+      state.deletionGeneration !== publication.fence.deletionGeneration ||
+      !settings.questions[index].enabled ||
+      question.attempt.state === "purged"
+    ) {
+      return {
+        outcome: "superseded",
+        cacheTransition: question.cache === null ? "invalidated" : "written",
+      };
+    }
+    if (JSON.stringify(question.cache) === JSON.stringify(publication.priorCache)) {
+      return { outcome: "superseded", cacheTransition: "none" };
+    }
+    return {
+      outcome: "superseded",
+      cacheTransition: question.cache === null ? "invalidated" : "written",
+    };
+  }
+
   function replaceQuestion(
     state: ReflectionDurableState,
     questionId: ReflectionQuestionId,
@@ -227,6 +300,82 @@ export function createReflectionStateService(
     );
   }
 
+  async function projectQuestions(
+    context: { settings: ReflectionSettings; state: ReflectionDurableState },
+    sources: ReflectionCurrentSources,
+  ): Promise<readonly ReflectionQuestionState[]> {
+    const noteChangedQuestionIds = context.state.questions
+      .filter(
+        (question) => question.cache !== null && noteDependencyChanged(question.cache, sources),
+      )
+      .map(({ questionId }) => questionId);
+    if (noteChangedQuestionIds.length > 0) {
+      const selected = new Set(noteChangedQuestionIds);
+      await updateState((state) => ({
+        ...state,
+        deletionGeneration: createGeneration(),
+        questions: state.questions.map((question) =>
+          selected.has(question.questionId)
+            ? {
+                ...question,
+                cache: null,
+                attempt: { state: "purged", reason: "note-changed", occurredAt: now() },
+              }
+            : question,
+        ) as ReflectionDurableState["questions"],
+      }));
+    }
+    const { settings, state } = context;
+    const questions = state.questions.map((question, index) => {
+      const enabled = settings.questions[index].enabled;
+      if (!enabled) {
+        return {
+          questionId: question.questionId,
+          enabled,
+          cache: { state: "none" },
+          attempt: { state: "idle" },
+        };
+      }
+      if (question.cache === null) {
+        return {
+          questionId: question.questionId,
+          enabled,
+          cache: { state: "none" },
+          attempt:
+            question.attempt.state === "refreshing"
+              ? {
+                  state: question.attempt.state,
+                  batchId: question.attempt.batchId,
+                  startedAt: question.attempt.startedAt,
+                }
+              : question.attempt,
+        };
+      }
+      const categories = changedCategories(question.cache, sources);
+      return {
+        questionId: question.questionId,
+        enabled,
+        cache:
+          categories.length === 0
+            ? { state: "current" as const, result: question.cache }
+            : {
+                state: "stale" as const,
+                changedCategories: categories,
+                result: question.cache,
+              },
+        attempt:
+          question.attempt.state === "refreshing"
+            ? {
+                state: question.attempt.state,
+                batchId: question.attempt.batchId,
+                startedAt: question.attempt.startedAt,
+              }
+            : question.attempt,
+      };
+    });
+    return ReflectionQuestionStateCollectionSchema.parse(questions);
+  }
+
   return {
     getSettings(): Promise<ReflectionSettings> {
       return runExclusive(async () => structuredClone((await initialize()).settings));
@@ -237,78 +386,15 @@ export function createReflectionStateService(
     },
 
     read(sources): Promise<readonly ReflectionQuestionState[]> {
+      return runExclusive(async () => projectQuestions(await initialize(), sources));
+    },
+
+    readSnapshot(loadCurrentSources) {
       return runExclusive(async () => {
         const context = await initialize();
-        const noteChangedQuestionIds = context.state.questions
-          .filter(
-            (question) => question.cache !== null && noteDependencyChanged(question.cache, sources),
-          )
-          .map(({ questionId }) => questionId);
-        if (noteChangedQuestionIds.length > 0) {
-          const selected = new Set(noteChangedQuestionIds);
-          await updateState((state) => ({
-            ...state,
-            deletionGeneration: createGeneration(),
-            questions: state.questions.map((question) =>
-              selected.has(question.questionId)
-                ? {
-                    ...question,
-                    cache: null,
-                    attempt: { state: "purged", reason: "note-changed", occurredAt: now() },
-                  }
-                : question,
-            ) as ReflectionDurableState["questions"],
-          }));
-        }
-        const { settings, state } = context;
-        const questions = state.questions.map((question, index) => {
-          const enabled = settings.questions[index].enabled;
-          if (!enabled) {
-            return {
-              questionId: question.questionId,
-              enabled,
-              cache: { state: "none" },
-              attempt: { state: "idle" },
-            };
-          }
-          if (question.cache === null) {
-            return {
-              questionId: question.questionId,
-              enabled,
-              cache: { state: "none" },
-              attempt:
-                question.attempt.state === "refreshing"
-                  ? {
-                      state: question.attempt.state,
-                      batchId: question.attempt.batchId,
-                      startedAt: question.attempt.startedAt,
-                    }
-                  : question.attempt,
-            };
-          }
-          const categories = changedCategories(question.cache, sources);
-          return {
-            questionId: question.questionId,
-            enabled,
-            cache:
-              categories.length === 0
-                ? { state: "current" as const, result: question.cache }
-                : {
-                    state: "stale" as const,
-                    changedCategories: categories,
-                    result: question.cache,
-                  },
-            attempt:
-              question.attempt.state === "refreshing"
-                ? {
-                    state: question.attempt.state,
-                    batchId: question.attempt.batchId,
-                    startedAt: question.attempt.startedAt,
-                  }
-                : question.attempt,
-          };
-        });
-        return ReflectionQuestionStateCollectionSchema.parse(questions);
+        const sources = await loadCurrentSources();
+        const questions = await projectQuestions(context, sources);
+        return { settings: structuredClone(context.settings), questions };
       });
     },
 
@@ -369,7 +455,11 @@ export function createReflectionStateService(
       });
     },
 
-    completeAttempt(fence, result, loadCurrentSources): Promise<boolean> {
+    completeAttempt(
+      fence,
+      result,
+      loadCurrentSources,
+    ): Promise<ReflectionAttemptPublication | false> {
       return runExclusive(async () => {
         const validated = ReflectionCompletedSchema.parse(result);
         if (validated.evidenceIdentity.questionId !== fence.questionId) {
@@ -388,6 +478,7 @@ export function createReflectionStateService(
         ) {
           return false;
         }
+        const priorCache = context.state.questions[index].cache;
         await updateState((state) =>
           replaceQuestion(state, fence.questionId, (question) => ({
             ...question,
@@ -395,7 +486,103 @@ export function createReflectionStateService(
             attempt: { state: "idle" },
           })),
         );
-        return true;
+        const publication: ReflectionAttemptPublication = Object.freeze({
+          fence: Object.freeze({ ...fence }),
+          priorCache: priorCache === null ? null : structuredClone(priorCache),
+          replacementCache: structuredClone(validated),
+        });
+        issuedPublications.add(publication);
+        return publication;
+      });
+    },
+
+    compensateAttempt(publication, interruption): Promise<ReflectionCompensationResult> {
+      return runExclusive(async () => {
+        if (!issuedPublications.has(publication)) {
+          const context = await initialize();
+          return compensationResult(context.state, context.settings, publication);
+        }
+        const context = await initialize();
+        const { fence } = publication;
+        const index = questionIndex(fence.questionId);
+        const question = context.state.questions[index];
+        if (
+          context.state.deletionGeneration !== fence.deletionGeneration ||
+          !context.settings.questions[index].enabled ||
+          question.attempt.state !== "idle" ||
+          JSON.stringify(question.cache) !== JSON.stringify(publication.replacementCache)
+        ) {
+          issuedPublications.delete(publication);
+          return compensationResult(context.state, context.settings, publication);
+        }
+        const attempt: Exclude<ReflectionAttemptState, { state: "refreshing" }> =
+          interruption.state === "cancelled"
+            ? { state: "cancelled", occurredAt: now() }
+            : {
+                state: "unavailable",
+                reason: interruption.reason,
+                ...(interruption.safeDetail === undefined
+                  ? {}
+                  : { safeDetail: interruption.safeDetail }),
+                occurredAt: now(),
+              };
+        const compensated = replaceQuestion(context.state, fence.questionId, (current) => ({
+          ...current,
+          cache: publication.priorCache === null ? null : structuredClone(publication.priorCache),
+          attempt,
+        }));
+        try {
+          await deps.storage.saveState(compensated);
+          context.state = compensated;
+        } catch (error) {
+          let persisted: ReflectionDurableState;
+          try {
+            persisted = await deps.storage.loadState();
+          } catch {
+            throw error;
+          }
+          const result = compensationResult(persisted, context.settings, publication, compensated);
+          if (result.outcome !== "restored") {
+            const persistedQuestion = persisted.questions[index];
+            if (
+              result.cacheTransition === "written" &&
+              persisted.deletionGeneration === fence.deletionGeneration &&
+              context.settings.questions[index].enabled &&
+              persistedQuestion.attempt.state === "idle" &&
+              JSON.stringify(persistedQuestion.cache) ===
+                JSON.stringify(publication.replacementCache)
+            ) {
+              const failed = replaceQuestion(persisted, fence.questionId, (current) => ({
+                ...current,
+                attempt: {
+                  state: "unavailable",
+                  reason: "persistence",
+                  safeDetail: "reflection-compensation-persistence-failed",
+                  occurredAt: now(),
+                },
+              }));
+              try {
+                await deps.storage.saveState(failed);
+                persisted = failed;
+              } catch {
+                try {
+                  const reloaded = await deps.storage.loadState();
+                  if (deps.storage.stateIdentity(reloaded) === deps.storage.stateIdentity(failed)) {
+                    persisted = reloaded;
+                  }
+                } catch {
+                  // Keep the confirmed durable image and the original compensation failure.
+                }
+              }
+            }
+            context.state = persisted;
+            issuedPublications.delete(publication);
+            throw new ReflectionCompensationPersistenceError(result, { cause: error });
+          }
+          context.state = persisted;
+        }
+        issuedPublications.delete(publication);
+        return { outcome: "restored", cacheTransition: "none" };
       });
     },
 

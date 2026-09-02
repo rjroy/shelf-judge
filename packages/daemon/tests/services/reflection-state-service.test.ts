@@ -5,7 +5,10 @@ import {
   type ReflectionDependency,
   type ReflectionQuestionId,
 } from "@shelf-judge/shared";
-import { createReflectionStateService } from "../../src/services/reflection-state-service.js";
+import {
+  createReflectionStateService,
+  ReflectionCompensationPersistenceError,
+} from "../../src/services/reflection-state-service.js";
 import {
   REFLECTION_STATE_FILE,
   createReflectionStorage,
@@ -158,7 +161,7 @@ async function publish(
   const fence = await service.startAttempt(questionId, `batch-${questionId}`);
   const sources = current();
   sources.dependenciesByQuestion[questionId] = result.dependencies;
-  expect(await service.completeAttempt(fence, result, () => sources)).toBe(true);
+  expect(await service.completeAttempt(fence, result, () => sources)).not.toBe(false);
 }
 
 describe("Reflection state service", () => {
@@ -177,7 +180,7 @@ describe("Reflection state service", () => {
     expect((await service.read(current()))[0].attempt.state).toBe("refreshing");
     expect(
       await service.completeAttempt(firstFence, completed("repeated-values"), () => current()),
-    ).toBe(true);
+    ).not.toBe(false);
     await publish(service, "pattern-exceptions");
 
     let questions = await service.read(current());
@@ -205,6 +208,210 @@ describe("Reflection state service", () => {
     expect(questions[0].cache.state).toBe("none");
     expect(questions[0].attempt.state).toBe("purged");
     expect(questions[1].cache.state).toBe("current");
+  });
+
+  test("compensates an exact published replacement with its byte-equivalent prior cache", async () => {
+    const { createService } = setup();
+    const service = createService();
+    const prior = completed("repeated-values");
+    await publish(service, "repeated-values", prior);
+    const fence = await service.startAttempt("repeated-values", "cancelled-publication");
+    const replacement = ReflectionCompletedSchema.parse({
+      ...prior,
+      explanation: "Replacement that must not survive cancellation.",
+    });
+    const publication = await service.completeAttempt(fence, replacement, () => current());
+    if (publication === false) throw new Error("Expected publication receipt");
+
+    expect(await service.compensateAttempt(publication, { state: "cancelled" })).toEqual({
+      outcome: "restored",
+      cacheTransition: "none",
+    });
+    expect(await service.compensateAttempt(publication, { state: "cancelled" })).toEqual({
+      outcome: "superseded",
+      cacheTransition: "none",
+    });
+
+    const [question] = await service.read(current());
+    expect(question.cache.state).toBe("current");
+    if (question.cache.state !== "current") throw new Error("Expected restored cache");
+    expect(JSON.stringify(question.cache.result)).toBe(JSON.stringify(prior));
+    expect(question.attempt).toEqual({ state: "cancelled", occurredAt: TIME });
+  });
+
+  test("classifies a lost compensation response from the durable restored state", async () => {
+    const { storage } = setup();
+    let loseNextResponse = false;
+    const interruptedStorage = {
+      ...storage,
+      async saveState(...args: Parameters<typeof storage.saveState>) {
+        await storage.saveState(...args);
+        if (loseNextResponse) {
+          loseNextResponse = false;
+          throw new Error("injected lost compensation response");
+        }
+      },
+    };
+    const service = createReflectionStateService({
+      storage: interruptedStorage,
+      now: () => TIME,
+      coordinator: profileSourceCoordinatorFor(interruptedStorage),
+    });
+    const prior = completed("repeated-values");
+    await publish(service, "repeated-values", prior);
+    const fence = await service.startAttempt("repeated-values", "lost-response-publication");
+    const replacement = ReflectionCompletedSchema.parse({
+      ...prior,
+      explanation: "Replacement before a lost compensation response.",
+    });
+    const publication = await service.completeAttempt(fence, replacement, () => current());
+    if (publication === false) throw new Error("Expected publication receipt");
+
+    loseNextResponse = true;
+    expect(await service.compensateAttempt(publication, { state: "cancelled" })).toEqual({
+      outcome: "restored",
+      cacheTransition: "none",
+    });
+    const [question] = await service.read(current());
+    expect(question.cache.state).toBe("current");
+    if (question.cache.state !== "current") throw new Error("Expected restored cache");
+    expect(JSON.stringify(question.cache.result)).toBe(JSON.stringify(prior));
+    expect(question.attempt.state).toBe("cancelled");
+  });
+
+  test("classifies definite compensation failures from the durable replacement", async () => {
+    for (const hasPriorCache of [true, false]) {
+      const { storage } = setup();
+      let failNextSave = false;
+      const interruptedStorage = {
+        ...storage,
+        saveState(...args: Parameters<typeof storage.saveState>) {
+          if (failNextSave) {
+            failNextSave = false;
+            return Promise.reject(new Error("injected definite compensation failure"));
+          }
+          return storage.saveState(...args);
+        },
+      };
+      const service = createReflectionStateService({
+        storage: interruptedStorage,
+        now: () => TIME,
+        coordinator: profileSourceCoordinatorFor(interruptedStorage),
+      });
+      const prior = completed("repeated-values");
+      if (hasPriorCache) await publish(service, "repeated-values", prior);
+      const fence = await service.startAttempt("repeated-values", "failed-compensation");
+      const replacement = ReflectionCompletedSchema.parse({
+        ...prior,
+        explanation: "Durable replacement after compensation failure.",
+      });
+      const publication = await service.completeAttempt(fence, replacement, () => current());
+      if (publication === false) throw new Error("Expected publication receipt");
+
+      failNextSave = true;
+      let failure: unknown;
+      try {
+        await service.compensateAttempt(publication, { state: "cancelled" });
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(ReflectionCompensationPersistenceError);
+      expect(failure).toMatchObject({
+        result: { outcome: "superseded", cacheTransition: "written" },
+      });
+      const [question] = await service.read(current());
+      expect(question.cache.state).toBe("current");
+      if (question.cache.state !== "current") throw new Error("Expected retained replacement");
+      expect(JSON.stringify(question.cache.result)).toBe(JSON.stringify(replacement));
+      expect(question.attempt).toEqual({
+        state: "unavailable",
+        reason: "persistence",
+        safeDetail: "reflection-compensation-persistence-failed",
+        occurredAt: TIME,
+      });
+    }
+  });
+
+  test("cancel compensation after first publication restores no cache", async () => {
+    const { createService } = setup();
+    const service = createService();
+    const result = completed("repeated-values");
+    const fence = await service.startAttempt("repeated-values", "cancelled-first-publication");
+    const publication = await service.completeAttempt(fence, result, () => current());
+    if (publication === false) throw new Error("Expected publication receipt");
+
+    expect(await service.compensateAttempt(publication, { state: "cancelled" })).toEqual({
+      outcome: "restored",
+      cacheTransition: "none",
+    });
+    expect((await service.read(current()))[0]).toMatchObject({
+      cache: { state: "none" },
+      attempt: { state: "cancelled", occurredAt: TIME },
+    });
+  });
+
+  test("transport compensation after first publication restores no cache", async () => {
+    const { createService } = setup();
+    const service = createService();
+    const fence = await service.startAttempt("repeated-values", "disconnected-first-publication");
+    const publication = await service.completeAttempt(fence, completed("repeated-values"), () =>
+      current(),
+    );
+    if (publication === false) throw new Error("Expected publication receipt");
+
+    expect(
+      await service.compensateAttempt(publication, {
+        state: "unavailable",
+        reason: "transport",
+        safeDetail: "transport-disconnected",
+      }),
+    ).toEqual({ outcome: "restored", cacheTransition: "none" });
+    expect((await service.read(current()))[0]).toMatchObject({
+      cache: { state: "none" },
+      attempt: {
+        state: "unavailable",
+        reason: "transport",
+        safeDetail: "transport-disconnected",
+        occurredAt: TIME,
+      },
+    });
+  });
+
+  test("destructive purge and disable win over publication compensation", async () => {
+    for (const destructiveAction of ["purge", "disable"] as const) {
+      const { createService } = setup();
+      const service = createService();
+      const prior = completed("repeated-values");
+      await publish(service, "repeated-values", prior);
+      const fence = await service.startAttempt(
+        "repeated-values",
+        `${destructiveAction}-publication`,
+      );
+      const replacement = ReflectionCompletedSchema.parse({
+        ...prior,
+        explanation: `Replacement before ${destructiveAction}.`,
+      });
+      const publication = await service.completeAttempt(fence, replacement, () => current());
+      if (publication === false) throw new Error("Expected publication receipt");
+
+      if (destructiveAction === "purge") {
+        await service.purge(["repeated-values"], "owner-deleted");
+      } else {
+        await service.setEnabled("repeated-values", false);
+      }
+
+      expect(
+        await service.compensateAttempt(publication, {
+          state: "unavailable",
+          reason: "transport",
+          safeDetail: "transport-disconnected",
+        }),
+      ).toEqual({ outcome: "superseded", cacheTransition: "invalidated" });
+      const [question] = await service.read(current());
+      expect(question.cache.state).toBe("none");
+      expect(JSON.stringify(question)).not.toContain("Replacement before");
+      expect(JSON.stringify(question)).not.toContain("No material synthesis");
+    }
   });
 
   test("derives ordered staleness categories on read and retains captured citations", async () => {
@@ -275,7 +482,7 @@ describe("Reflection state service", () => {
     expect(await service.failAttempt(oldFence, "internal")).toBe(false);
     expect(
       await service.completeAttempt(currentFence, completed("repeated-values"), () => current()),
-    ).toBe(true);
+    ).not.toBe(false);
     expect((await service.read(current()))[0].cache.state).toBe("current");
   });
 
@@ -400,10 +607,84 @@ describe("Reflection state service", () => {
     expect(unrelatedMutationCompleted).toBe(false);
 
     releaseSourceLoad();
-    expect(await publication).toBe(true);
+    expect(await publication).not.toBe(false);
     await unrelatedMutation;
     expect(unrelatedMutationCompleted).toBe(true);
     expect((await service.read(current()))[0].cache.state).toBe("current");
+  });
+
+  test("reads settings and affected or unrelated dependencies from one coordinator snapshot", async () => {
+    const { coordinator, createService } = setup();
+    const service = createService();
+    await publish(service, "repeated-values");
+    await publish(service, "recurring-trade-offs");
+    const sources = current();
+    let releaseSourceLoad = () => {};
+    let signalSourceLoad = () => {};
+    const sourceLoadReached = new Promise<void>((resolve) => (signalSourceLoad = resolve));
+    const sourceLoadRelease = new Promise<void>((resolve) => (releaseSourceLoad = resolve));
+
+    const read = service.readSnapshot(async () => {
+      const captured = structuredClone(sources);
+      signalSourceLoad();
+      await sourceLoadRelease;
+      return captured;
+    });
+    await sourceLoadReached;
+    let settingsMutationCompleted = false;
+    let affectedMutationCompleted = false;
+    let unrelatedMutationCompleted = false;
+    const settingsMutation = service
+      .setEnabled("pattern-exceptions", false)
+      .then(() => (settingsMutationCompleted = true));
+    const affectedMutation = coordinator.runExclusive(() => {
+      sources.dependenciesByQuestion["repeated-values"] = [
+        {
+          category: "scoring",
+          sourceId: "repeated-values-score",
+          fingerprint: "repeated-values-score-2",
+        },
+      ];
+      affectedMutationCompleted = true;
+      return Promise.resolve();
+    });
+    const unrelatedMutation = coordinator.runExclusive(() => {
+      sources.dependenciesByQuestion["recurring-trade-offs"] = [
+        {
+          category: "metadata",
+          sourceId: "unrelated-game-metadata",
+          fingerprint: "metadata-2",
+        },
+      ];
+      unrelatedMutationCompleted = true;
+      return Promise.resolve();
+    });
+    await Promise.resolve();
+    expect([
+      settingsMutationCompleted,
+      affectedMutationCompleted,
+      unrelatedMutationCompleted,
+    ]).toEqual([false, false, false]);
+
+    releaseSourceLoad();
+    const before = await read;
+    expect(before.settings.questions[1].enabled).toBe(true);
+    expect(before.questions.map(({ enabled }) => enabled)).toEqual([true, true, true]);
+    expect(before.questions[0].cache.state).toBe("current");
+    expect(before.questions[2].cache.state).toBe("current");
+    await Promise.all([settingsMutation, affectedMutation, unrelatedMutation]);
+
+    const after = await service.readSnapshot(() => structuredClone(sources));
+    expect(after.settings.questions[1].enabled).toBe(false);
+    expect(after.questions.map(({ enabled }) => enabled)).toEqual([true, false, true]);
+    expect(after.questions[0].cache).toMatchObject({
+      state: "stale",
+      changedCategories: ["scoring"],
+    });
+    expect(after.questions[2].cache).toMatchObject({
+      state: "stale",
+      changedCategories: ["scoring", "metadata"],
+    });
   });
 
   test("clears output before publishing settings changes so interrupted writes cannot restore it", async () => {

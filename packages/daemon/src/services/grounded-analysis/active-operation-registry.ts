@@ -21,12 +21,18 @@ export interface GroundedOperationTerminalReservation {
   readonly operationId: string;
 }
 
+export interface GroundedOperationTerminalReservationOptions {
+  readonly deferInterruption?: boolean;
+}
+
 interface OperationRecord extends GroundedActiveOperationDiscovery {
   capability: string;
   controller: AbortController;
   transportId?: string;
   transportClaimed: boolean;
   terminalReservation?: GroundedOperationTerminalReservation;
+  deferInterruption: boolean;
+  pendingInterruption?: Extract<GroundedOperationTerminalOutcome, "cancelled" | "transport-lost">;
 }
 
 export function createActiveGroundedOperationRegistry(options?: { now?: () => string }) {
@@ -78,6 +84,7 @@ export function createActiveGroundedOperationRegistry(options?: { now?: () => st
         startedAt: now(),
         controller: new AbortController(),
         transportClaimed: false,
+        deferInterruption: false,
       };
       operations.set(record.operationId, record);
       return Object.freeze({
@@ -101,7 +108,12 @@ export function createActiveGroundedOperationRegistry(options?: { now?: () => st
         disconnectSignal?.removeEventListener("abort", release);
         if (record.transportId !== transportId) return;
         record.transportId = undefined;
-        if (record.state === "active") terminalize(record, "transport-lost");
+        if (record.state !== "active") return;
+        if (record.terminalReservation && record.deferInterruption) {
+          record.pendingInterruption ??= "transport-lost";
+        } else {
+          terminalize(record, "transport-lost");
+        }
       };
       if (disconnectSignal?.aborted) release();
       else disconnectSignal?.addEventListener("abort", release, { once: true });
@@ -110,6 +122,11 @@ export function createActiveGroundedOperationRegistry(options?: { now?: () => st
     cancel(operationId: string, capability: string): boolean {
       const record = operations.get(operationId);
       if (!record || record.capability !== capability || record.state === "terminal") return false;
+      if (record.terminalReservation) {
+        if (!record.deferInterruption || record.pendingInterruption !== undefined) return false;
+        record.pendingInterruption = "cancelled";
+        return true;
+      }
       return terminalize(record, "cancelled");
     },
     terminalize(
@@ -120,13 +137,23 @@ export function createActiveGroundedOperationRegistry(options?: { now?: () => st
       if (!record) throw new Error("Operation is not registered");
       return terminalize(record, outcome);
     },
-    reserveTerminal(operationId: string): GroundedOperationTerminalReservation | undefined {
+    reserveTerminal(
+      operationId: string,
+      options?: GroundedOperationTerminalReservationOptions,
+    ): GroundedOperationTerminalReservation | undefined {
       const record = operations.get(operationId);
       if (!record) throw new Error("Operation is not registered");
       if (record.state === "terminal" || record.terminalReservation) return undefined;
       const reservation = Object.freeze({ operationId });
       record.terminalReservation = reservation;
+      record.deferInterruption = options?.deferInterruption ?? false;
       return reservation;
+    },
+    pendingInterruption(
+      reservation: GroundedOperationTerminalReservation,
+    ): Extract<GroundedOperationTerminalOutcome, "cancelled" | "transport-lost"> | undefined {
+      const record = operations.get(reservation.operationId);
+      return record?.terminalReservation === reservation ? record.pendingInterruption : undefined;
     },
     releaseTerminal(reservation: GroundedOperationTerminalReservation): boolean {
       const record = operations.get(reservation.operationId);
@@ -134,6 +161,12 @@ export function createActiveGroundedOperationRegistry(options?: { now?: () => st
         return false;
       }
       record.terminalReservation = undefined;
+      record.deferInterruption = false;
+      if (record.pendingInterruption !== undefined) {
+        const outcome = record.pendingInterruption;
+        record.pendingInterruption = undefined;
+        return commitOutcome(record, outcome);
+      }
       return true;
     },
     commitTerminal(
@@ -145,6 +178,8 @@ export function createActiveGroundedOperationRegistry(options?: { now?: () => st
         return false;
       }
       record.terminalReservation = undefined;
+      record.deferInterruption = false;
+      record.pendingInterruption = undefined;
       return commitOutcome(record, outcome);
     },
     discover(): readonly GroundedActiveOperationDiscovery[] {

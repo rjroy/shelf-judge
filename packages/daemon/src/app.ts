@@ -40,6 +40,16 @@ import {
   createGroundedFeatureAnalyzerRegistry,
   type GroundedFeatureAnalyzer,
 } from "./services/grounded-analysis/feature-policy.js";
+import { REFLECTION_MANIFEST_VERSION } from "@shelf-judge/shared";
+import { createProfileReflectionRoutes } from "./routes/profile-reflections.js";
+import { createReflectionEvidenceService } from "./services/reflection-evidence-service.js";
+import { createReflectionProjectionSnapshotService } from "./services/reflection-evidence-projections.js";
+import {
+  createReflectionRefreshService,
+  type ReflectionRefreshService,
+} from "./services/reflection-refresh-service.js";
+import { createReflectionResultValidator } from "./services/reflection-result-validator.js";
+import type { ReflectionRuntime } from "./services/reflection-runtime.js";
 
 export interface AppDeps {
   storageService: StorageService;
@@ -53,6 +63,7 @@ export interface AppDeps {
   intentionService: IntentionService;
   ownerGameNoteService: OwnerGameNoteService;
   groundedAnalysisProvider: GroundedAnalysisProvider;
+  reflectionRuntime: ReflectionRuntime;
   groundedFeatureAnalyzers?: readonly GroundedFeatureAnalyzer<unknown>[];
   bggClient?: BggClient;
   onShutdown?: () => void;
@@ -63,6 +74,7 @@ export interface AppResult {
   operations: OperationDefinition[];
   groundedAnalysisProvider: GroundedAnalysisProvider;
   groundedAnalysisTransportController: GroundedAnalysisTransportController;
+  reflectionRefreshService: ReflectionRefreshService;
 }
 
 export function createApp(deps: AppDeps): AppResult {
@@ -78,6 +90,7 @@ export function createApp(deps: AppDeps): AppResult {
     intentionService,
     ownerGameNoteService,
     groundedAnalysisProvider,
+    reflectionRuntime,
     bggClient,
     onShutdown,
   } = deps;
@@ -124,6 +137,60 @@ export function createApp(deps: AppDeps): AppResult {
   const groundedAnalysisTransportController = createGroundedAnalysisTransportController({
     analyzers: createGroundedFeatureAnalyzerRegistry(deps.groundedFeatureAnalyzers ?? []),
   });
+  const reflectionProjectionSnapshotService = createReflectionProjectionSnapshotService({
+    storageService,
+    displayedFitnessService,
+  });
+  const reflectionEvidenceService = createReflectionEvidenceService({
+    storageService,
+    projectionSnapshotService: reflectionProjectionSnapshotService,
+    ownerGameNoteService,
+  });
+  const reflectionRefreshService = createReflectionRefreshService({
+    provider: groundedAnalysisProvider,
+    evidence: reflectionEvidenceService,
+    state: reflectionRuntime.state,
+    validator: createReflectionResultValidator(),
+  });
+  const reflectionRouteModule = createProfileReflectionRoutes({
+    configurationStatus: groundedAnalysisProvider.configurationStatus,
+    state: reflectionRuntime.state,
+    refresh: reflectionRefreshService,
+    async loadCurrentSources() {
+      const provider =
+        groundedAnalysisProvider.configurationStatus.status === "configured"
+          ? groundedAnalysisProvider.configurationStatus.identity
+          : { providerId: "unavailable", modelId: "unavailable", extensionIds: [] };
+      const [repeatedValues, patternExceptions, recurringTradeOffs] = await Promise.all([
+        reflectionEvidenceService.assemble("repeated-values", provider),
+        reflectionEvidenceService.assemble("pattern-exceptions", provider),
+        reflectionEvidenceService.assemble("recurring-trade-offs", provider),
+      ]);
+      const packages = [repeatedValues, patternExceptions, recurringTradeOffs] as const;
+      const identity = repeatedValues.evidenceIdentity;
+      return {
+        collectionId: identity.collectionId,
+        collectionSchemaVersion: identity.collectionSchemaVersion,
+        collectionRevision: identity.collectionRevision,
+        profileContractVersion: identity.profileContractVersion,
+        profileAlgorithmVersion: identity.profileAlgorithmVersion,
+        providerId: provider.providerId,
+        modelId: provider.modelId,
+        manifestVersion: REFLECTION_MANIFEST_VERSION,
+        questionVersions: Object.fromEntries(
+          packages.map(({ evidenceIdentity }) => [
+            evidenceIdentity.questionId,
+            evidenceIdentity.questionVersion,
+          ]),
+        ),
+        dependenciesByQuestion: {
+          "repeated-values": repeatedValues.dependencies,
+          "pattern-exceptions": patternExceptions.dependencies,
+          "recurring-trade-offs": recurringTradeOffs.dependencies,
+        },
+      };
+    },
+  });
 
   // Collect all operations
   const allOperations: OperationDefinition[] = [
@@ -140,6 +207,7 @@ export function createApp(deps: AppDeps): AppResult {
     ...shelfRouteModule.operations,
     ...collectionRouteModule.operations,
     ...groundedAnalysisRouteModule.operations,
+    ...reflectionRouteModule.operations,
   ];
 
   const helpRouteModule = createHelpRoutes({ operations: allOperations });
@@ -169,6 +237,7 @@ export function createApp(deps: AppDeps): AppResult {
   app.route("/api", shelfRouteModule.routes);
   app.route("/api", collectionRouteModule.routes);
   app.route("/api", groundedAnalysisRouteModule.routes);
+  app.route("/api", reflectionRouteModule.routes);
   app.route("/api", helpRouteModule.routes);
   app.route("/api", configRouteModule.routes);
   app.route("/api", shutdownRouteModule.routes);
@@ -178,5 +247,6 @@ export function createApp(deps: AppDeps): AppResult {
     operations: allOperations,
     groundedAnalysisProvider,
     groundedAnalysisTransportController,
+    reflectionRefreshService,
   };
 }

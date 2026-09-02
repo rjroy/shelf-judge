@@ -511,6 +511,73 @@ describe("active grounded operation lifecycle", () => {
     expect(aborts).toBe(1);
     expect(registry.discover()[0]?.outcome).toBe("failed");
   });
+
+  test("latches exact cancellation for a deferrable reservation until atomic release", () => {
+    const registry = createActiveGroundedOperationRegistry();
+    const operation = registry.start(input);
+    let aborts = 0;
+    operation.signal.addEventListener("abort", () => aborts++);
+    const reservation = registry.reserveTerminal(input.operationId, {
+      deferInterruption: true,
+    });
+    if (!reservation) throw new Error("Expected deferrable terminal reservation");
+
+    expect(registry.cancel(input.operationId, "b".repeat(64))).toBe(false);
+    expect(operation.signal.aborted).toBe(false);
+    expect(registry.discover()[0]).toMatchObject({ state: "active" });
+    expect(registry.cancel(input.operationId, capability)).toBe(true);
+    expect(operation.signal.aborted).toBe(false);
+    expect(registry.releaseTerminal(reservation)).toBe(true);
+    expect(operation.signal.aborted).toBe(true);
+    expect(aborts).toBe(1);
+    expect(registry.discover()[0]).toMatchObject({
+      state: "terminal",
+      outcome: "cancelled",
+    });
+    expect(registry.commitTerminal(reservation, "completed")).toBe(false);
+  });
+
+  test("latches transport loss distinctly during a deferrable reservation", () => {
+    const registry = createActiveGroundedOperationRegistry();
+    const operation = registry.start(input);
+    const request = new AbortController();
+    registry.claimTransport(input.operationId, "transport-1", request.signal);
+    const reservation = registry.reserveTerminal(input.operationId, {
+      deferInterruption: true,
+    });
+    if (!reservation) throw new Error("Expected deferrable terminal reservation");
+
+    request.abort();
+
+    expect(operation.signal.aborted).toBe(false);
+    expect(registry.pendingInterruption(reservation)).toBe("transport-lost");
+    expect(registry.cancel(input.operationId, capability)).toBe(false);
+    expect(registry.releaseTerminal(reservation)).toBe(true);
+    expect(operation.signal.aborted).toBe(true);
+    expect(registry.discover()[0]).toMatchObject({
+      state: "terminal",
+      outcome: "transport-lost",
+    });
+    expect(registry.releaseTerminal(reservation)).toBe(false);
+  });
+
+  test("keeps the first deferred interruption when cancellation beats disconnect", () => {
+    const registry = createActiveGroundedOperationRegistry();
+    registry.start(input);
+    const request = new AbortController();
+    registry.claimTransport(input.operationId, "transport-1", request.signal);
+    const reservation = registry.reserveTerminal(input.operationId, {
+      deferInterruption: true,
+    });
+    if (!reservation) throw new Error("Expected deferrable terminal reservation");
+
+    expect(registry.cancel(input.operationId, capability)).toBe(true);
+    request.abort();
+
+    expect(registry.pendingInterruption(reservation)).toBe("cancelled");
+    expect(registry.releaseTerminal(reservation)).toBe(true);
+    expect(registry.discover()[0]?.outcome).toBe("cancelled");
+  });
 });
 
 describe("grounded stream writer", () => {

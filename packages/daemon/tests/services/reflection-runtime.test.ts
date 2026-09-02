@@ -3,14 +3,13 @@ import { REFLECTION_TRANSACTION_FILE } from "../../src/services/reflection-trans
 import { createTestApp } from "../helpers/test-app.js";
 
 describe("Reflection runtime composition", () => {
-  test("test-app wiring remains opt-in for route tests", () => {
-    expect(createTestApp().reflectionRuntime).toBeUndefined();
+  test("test-app wiring uses the production-equivalent Reflection runtime", () => {
+    expect(createTestApp().reflectionRuntime).toBeDefined();
   });
 
   test("wires startup recovery, note invalidation, and permanent deletion to one runtime", async () => {
-    const context = createTestApp({ wireReflectionPersistence: true });
+    const context = createTestApp();
     const runtime = context.reflectionRuntime;
-    if (runtime === undefined) throw new Error("Expected Reflection runtime");
     await runtime.recover();
 
     const game = (await context.gameService.addGame({ name: "Lifecycle game" })).game;

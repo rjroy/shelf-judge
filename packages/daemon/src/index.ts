@@ -130,6 +130,7 @@ async function main() {
     intentionService,
     ownerGameNoteService,
     groundedAnalysisProvider,
+    reflectionRuntime,
     bggClient,
     onShutdown() {
       logger.log("Shutting down via API...");
