@@ -274,10 +274,12 @@ Shelf Judge compares exact values before converting them for display. Two adjust
 Omitting `order` is the canonical `bestFit` URL. The explorer accepts `order=rating`, `order=bestFit`, and an empty `order` only as compatibility inputs, then redirects to the same URL without `order`. Generated links never create the legacy `order=rating` form. Shelf Judge does not apply an external prevalence correction for common mechanics or prolific creators because no stable external corpus and opportunity model are part of this feature.
 
 **Persistence and recomputation:**
-The persisted profile contract is version 9, the profile algorithm is version 11, and the durable collection schema remains version 5. `profile.json` is a disposable local cache, not a compatibility boundary. A cache is reused only when its collection ID, collection schema version, revision, complete Tournament hash, prediction-settings hash, redundancy-settings hash, and serialized entity policy match the current inputs. Invalid, non-finite, older-contract, older-algorithm, or policy-mismatched artifacts are deleted and recreated on the next profile read. A failed recomputation returns an unavailable result with the profile retry operation instead of serving stale data.
+The persisted profile contract is version 9, the profile algorithm is version 11, and the durable collection schema is version 6. `profile.json` is a disposable local cache, not a compatibility boundary or a source of owner notes. A cache is reused only when its collection ID, collection schema version, revision, complete Tournament hash, prediction-settings hash, redundancy-settings hash, and serialized entity policy match the current inputs. Invalid, non-finite, older-contract, older-algorithm, or policy-mismatched artifacts are deleted and recreated on the next profile read. A failed recomputation returns an unavailable result with the profile retry operation instead of serving stale data.
 
-**Version 5 upgrade:**
-Back up the data directory before upgrading. Shelf Judge automatically migrates an older collection when it first loads, then recreates disposable profile data from the migrated collection and current Tournament and scoring settings. After Shelf Judge successfully writes collection schema version 5, downgrading to a release that only understands an older collection schema is unsupported.
+**Version 5 upgrade and recovery:**
+When it first loads a version-5 collection, Shelf Judge atomically writes a complete version-6 collection. Every existing game receives a `missing` owner-note state with version `0` and no update time or text. The migration does not derive note text from BGG, ratings, wishlist data, or other existing fields. If the migration fails, the prior valid collection remains loadable for a later attempt. After Shelf Judge writes version 6, a release that understands only version 5 cannot safely read the collection, so downgrade is unsupported.
+
+Before upgrading, stop the daemon and copy the complete data directory. To recover, keep the daemon stopped, replace the complete data directory with that copy, then restart the daemon so normal validation and migration can run. This is the only supported manual recovery procedure and preserves both owner notes and their replay receipts. Do not back up or restore individual JSON files, and do not treat `profile.json` or another derived artifact as a note backup.
 
 **Limitations:**
 
@@ -367,4 +369,20 @@ After importing, rate your games on your personal axes to get fitness scores. BG
 
 All data is stored locally in `~/.shelf-judge/data/` by default. `resolveDataDir` is the canonical data-directory resolver: `SHELF_JUDGE_DATA_DIR` overrides the data directory, while `SHELF_JUDGE_DIR` changes the base used by the default data, socket, and config paths. The settings in `config.json` do not change the data directory. `SHELF_JUDGE_SOCKET` and `SHELF_JUDGE_CONFIG` independently override the Unix socket and settings file paths.
 
-There is no cloud sync, no account, and no external service required beyond BGG for metadata. BGG data is cached and refreshed on demand (cache is valid for 7 days).
+There is no cloud sync or account. Owner notes and note-command replay receipts are stored in the collection, so a raw backup of the complete data directory includes them. Shelf Judge has no first-class collection export or restore command. BGG import and BGG-oriented export do not read or write owner notes, including BGG comments, descriptions, and private notes.
+
+Owner notes are available to local clients that can access the daemon. This release does not add user authentication, encryption, or secure erasure. Shelf Judge retains only the current note state, not a note history. Clearing removes the current note text but retains the cleared state, version, and command receipts. Permanent game deletion removes the game and its associated note receipts. Neither operation can erase prior filesystem copies, process memory, or owner-created backups. Replay receipts contain metadata and a request fingerprint, not prior note text; a fingerprint is not a secure-erasure or resistance-to-guessing guarantee.
+
+Owner-note reads, saves, and clears operate locally and do not make network or model calls. Profile reads and recomputation do not automatically make model calls or transmit note text outside the local Shelf Judge boundary. BGG metadata operations do make BGG network requests, but do not transmit owner-note text. Separate Reflection workflows may use an explicitly configured provider, so they are not evidence that every application feature is offline.
+
+### Owner-note CLI
+
+The owner-note commands use this canonical syntax:
+
+```text
+shelf-judge game note get <game-id> [--json]
+shelf-judge game note set <game-id> --expected-version <n> --text <text> [--command-id <uuid>] [--json]
+shelf-judge game note clear <game-id> --expected-version <n> [--command-id <uuid>] [--json]
+```
+
+`--text` is the only note-text input. It can be visible in shell history and process arguments; stdin, file input, and editor launching are not supported. A mutation retry must use the same `--command-id` and canonical request payload as the original request so Shelf Judge can replay the accepted result. Reusing a command ID with a different payload is rejected.

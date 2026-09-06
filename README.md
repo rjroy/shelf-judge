@@ -71,6 +71,11 @@ shelf-judge game list
 # Rate a game
 shelf-judge game rate <id> --axis "Wife will play it" 8 --axis "Visual design" 9
 
+# Owner notes
+shelf-judge game note get <game-id>
+shelf-judge game note set <game-id> --expected-version <n> --text "Keep for game night"
+shelf-judge game note clear <game-id> --expected-version <n>
+
 # Axes
 shelf-judge axis list
 shelf-judge axis create "Wife will play it" --weight 40
@@ -101,6 +106,16 @@ shelf-judge stop
 ```
 
 Every command accepts `--json` for raw JSON output — useful for scripting and agent consumption.
+
+Owner-note commands use this canonical syntax:
+
+```text
+shelf-judge game note get <game-id> [--json]
+shelf-judge game note set <game-id> --expected-version <n> --text <text> [--command-id <uuid>] [--json]
+shelf-judge game note clear <game-id> --expected-version <n> [--command-id <uuid>] [--json]
+```
+
+Owner-note text is accepted only through the `--text <text>` argument to `game note set`; quote it when it contains spaces or shell-supported line breaks. This can expose the text in shell history and process arguments. The CLI does not accept owner-note text from standard input, a file, or an editor. If a mutation response is lost, retry with the same `--command-id` and canonical request payload. Reusing a command ID with a different payload is rejected. `get`, `set`, and `clear` are available through `shelf-judge game note --help`.
 
 ## Web UI
 
@@ -177,6 +192,14 @@ The default layout is:
 ```
 
 Writes are atomic (write to temp file, rename into place). A crash mid-write cannot corrupt existing data.
+
+`collection.json` uses schema version 6. On first load, Shelf Judge atomically migrates a version-5 collection by adding a missing owner-note state to every game. After version 6 has been written, downgrade to a version-5-only release is unsupported.
+
+Before upgrading, run `shelf-judge stop` and copy the complete data directory. If recovery is needed, keep the daemon stopped, replace the complete data directory with the backup, and run `shelf-judge start`. This complete-directory procedure is the supported manual recovery path and preserves owner notes and replay receipts. There is no first-class application export or restore command. Do not back up or restore individual files, and do not use disposable derived data such as `profile.json` as a note backup.
+
+Owner notes and their replay receipts are local durable collection data, so a raw complete-directory backup includes them. BGG import and BGG-oriented export do not carry owner notes. Notes are accessible to local clients that can access the daemon. This release provides no user authentication, encryption, or secure erasure. It retains current note state only, not note history. Clearing removes the current note text but retains the cleared state, version, and command receipts. Permanent game deletion removes the game and its associated note receipts. Neither operation can erase older filesystem copies, process memory, or owner-created backups. Note receipt fingerprints do not contain prior note text, but are not a guarantee against guessing attacks on raw storage.
+
+Owner-note reads, saves, and clears operate locally and do not make network or model calls. Profile reads and recomputation do not automatically make model calls or transmit note text outside the local Shelf Judge boundary. BGG metadata operations do make BGG network requests, but do not transmit owner-note text. Reflection is a separate explicit workflow that can use a configured model provider.
 
 ## Project Status
 
