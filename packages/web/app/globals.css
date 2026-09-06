@@ -139,6 +139,88 @@
   --scrollbar-thumb-hover: var(--text-muted);
 }
 
+/* Optional reflections remain a nested Profile subsection and wrap at narrow/zoomed widths. */
+.optional-reflections,
+.reflection-card,
+.reflection-disclosure {
+  min-width: 0;
+}
+
+.reflection-settings {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  min-width: 0;
+}
+
+.reflection-settings label {
+  align-items: center;
+  display: flex;
+  gap: 0.5rem;
+  overflow-wrap: anywhere;
+}
+
+.reflection-disclosure {
+  background: var(--bg-surface, white);
+  box-shadow: 0 0 0 100vmax rgb(0 0 0 / 35%);
+  position: relative;
+  z-index: 1;
+}
+
+.optional-reflections {
+  margin-top: 2rem;
+  border-top: 1px solid var(--border, #c7c7c7);
+  padding-top: 1.5rem;
+}
+
+.reflection-card,
+.reflection-disclosure {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border, #c7c7c7);
+  border-radius: 0.5rem;
+}
+
+.reflection-status,
+.reflection-scope,
+.reflection-live {
+  overflow-wrap: anywhere;
+}
+
+.reflection-stale {
+  border-inline-start: 4px solid #8a5a00;
+  padding-inline-start: 0.75rem;
+}
+
+.reflection-citations {
+  padding-inline-start: 1.25rem;
+  overflow-wrap: anywhere;
+}
+
+.optional-reflections button,
+.reflection-card button,
+.reflection-disclosure button {
+  min-height: 44px;
+}
+
+@media (max-width: 600px) {
+  .optional-reflections input,
+  .optional-reflections select,
+  .optional-reflections textarea,
+  .optional-reflections button {
+    font-size: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .optional-reflections *,
+  .optional-reflections *::before,
+  .optional-reflections *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 /* ===== Dark Mode Overrides ===== */
 
 [data-theme="dark"] {

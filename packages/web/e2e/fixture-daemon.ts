@@ -8,6 +8,9 @@ import {
   OwnerGameNoteMutationResultSchema,
   OwnerGameNoteSchema,
   OwnerGameNoteSetRequestSchema,
+  REFLECTION_CONTRACT_VERSION,
+  REFLECTION_QUESTION_IDS,
+  ReflectionGetResultSchema,
   canonicalizeOwnerGameNoteRequest,
   calculatePurchaseUtilization,
   type CollectionProfileResult,
@@ -20,6 +23,8 @@ import {
   type PlayIntention,
   type PurchaseUtilizationResult,
   type ResolvedPlayIntentionHistory,
+  type ReflectionGetResult,
+  type ReflectionQuestionId,
   type TournamentGameStatsDisplay,
 } from "@shelf-judge/shared";
 import { createHash } from "node:crypto";
@@ -492,6 +497,127 @@ let intentionSequence = 1;
 let collectionState: CollectionFixtureState = createCollectionState();
 let manualValuesState: ManualValuesFixtureState = createManualValuesState();
 let ownerNoteState: OwnerNoteFixtureState = createOwnerNoteState();
+let reflectionState: ReflectionGetResult = createReflectionState();
+let activeReflectionBatch: { batchId: string; questionIds: ReflectionQuestionId[] } | null = null;
+let reflectionFixtureMode: "normal" | "malformed" | "configuration-race" = "normal";
+let reflectionCurrentGameName: string | null = null;
+
+function isReflectionQuestionId(value: unknown): value is ReflectionQuestionId {
+  return (
+    typeof value === "string" && REFLECTION_QUESTION_IDS.some((questionId) => questionId === value)
+  );
+}
+
+function createReflectionState(): ReflectionGetResult {
+  return ReflectionGetResultSchema.parse({
+    contractVersion: REFLECTION_CONTRACT_VERSION,
+    configuration: {
+      status: "configured",
+      identity: { providerId: "fixture-provider", modelId: "fixture-model", extensionIds: [] },
+    },
+    settings: {
+      version: 1,
+      questions: REFLECTION_QUESTION_IDS.map((questionId) => ({ questionId, enabled: true })),
+    },
+    questions: REFLECTION_QUESTION_IDS.map((questionId) => ({
+      questionId,
+      enabled: true,
+      cache: { state: "none" },
+      attempt: { state: "idle" },
+    })),
+  });
+}
+
+function reflectionResult(questionId: ReflectionQuestionId, outcome: "answered" | "abstained") {
+  const base = {
+    supportingBlocks:
+      outcome === "answered"
+        ? [
+            {
+              text: "Two independent notes support this bounded pattern.",
+              citationIds: ["note-1", "note-2", "score-1"],
+            },
+          ]
+        : [],
+    citations:
+      outcome === "answered"
+        ? [
+            {
+              citationId: "note-1",
+              sourceId: "game-1",
+              sourceVersion: "1",
+              canonicalSummary: "Owner note for Atlas Equal",
+              destination: { operationId: "shelf.game.get", parameters: { gameId: "game-1" } },
+              evidenceClass: "owner-game-note",
+              testimony: true,
+            },
+            {
+              citationId: "note-2",
+              sourceId: "game-2",
+              sourceVersion: "1",
+              canonicalSummary: "Owner note for Borealis",
+              destination: { operationId: "shelf.game.get", parameters: { gameId: "game-2" } },
+              evidenceClass: "owner-game-note",
+              testimony: true,
+            },
+            {
+              citationId: "score-1",
+              sourceId: "game-1-score",
+              sourceVersion: "1",
+              canonicalSummary: "Current fitness score",
+              destination: { operationId: "shelf.game.get", parameters: { gameId: "game-1" } },
+              evidenceClass: "current-scoring",
+              testimony: false,
+            },
+          ]
+        : [],
+    scope: {
+      examinedPresentNoteCount: outcome === "answered" ? 2 : 0,
+      totalPresentNoteCount: outcome === "answered" ? 2 : 0,
+      examinedGameCount: outcome === "answered" ? 2 : 0,
+      relevantEligibleGameCount: outcome === "answered" ? 2 : 0,
+      excludedGameCount: 0,
+      exhaustiveNotes: true,
+      ...(questionId === "pattern-exceptions" ? { patternCandidateIds: [] } : {}),
+    },
+    evidenceIdentity: {
+      manifestVersion: 1,
+      questionId,
+      questionVersion: 1,
+      collectionId: "fixture-collection",
+      collectionSchemaVersion: 6,
+      collectionRevision: 1,
+      profileContractVersion: 1,
+      profileAlgorithmVersion: 1,
+      providerId: "fixture-provider",
+      modelId: "fixture-model",
+    },
+    dependencies:
+      outcome === "answered"
+        ? [
+            { category: "note", gameId: "game-1", noteVersion: 1 },
+            { category: "note", gameId: "game-2", noteVersion: 1 },
+          ]
+        : [],
+    generatedAt: observedAt,
+    usage: { state: "unavailable" },
+  };
+  return outcome === "answered"
+    ? {
+        ...base,
+        outcome,
+        centralSynthesis: {
+          text: "Quick setup recurs in owner testimony while current scores provide context.",
+          citationIds: ["note-1", "note-2", "score-1"],
+        },
+      }
+    : {
+        ...base,
+        outcome,
+        reason: "no-owner-testimony",
+        explanation: "No current owner testimony is available for this question.",
+      };
+}
 
 function createCollectionState(): CollectionFixtureState {
   return {
@@ -710,6 +836,10 @@ function reset(next: Scenario): void {
   manualValuesState = createManualValuesState();
   rmSync(ownerNotePersistencePath, { force: true });
   ownerNoteState = createOwnerNoteState();
+  reflectionState = createReflectionState();
+  activeReflectionBatch = null;
+  reflectionFixtureMode = "normal";
+  reflectionCurrentGameName = null;
   persistOwnerNoteState();
   if (next === "manual-values") {
     game.manualValues = {
@@ -721,7 +851,10 @@ function reset(next: Scenario): void {
 
 function detail(requestedGameId = gameId): GameDetailWithPurchaseUtilization {
   const definition = collectionDefinitions.find(({ id }) => id === requestedGameId);
-  const detailGame = definition === undefined ? game : collectionGame(definition);
+  let detailGame = definition === undefined ? game : collectionGame(definition);
+  if (requestedGameId === "game-1" && reflectionCurrentGameName !== null) {
+    detailGame = { ...detailGame, name: reflectionCurrentGameName };
+  }
   const detailScore =
     definition === undefined
       ? {
@@ -1100,6 +1233,238 @@ async function handle(request: Request): Promise<Response> {
           ? unavailableUsefulProfileFixture
           : profileFixture;
     return json(CollectionProfileResultSchema.parse(response));
+  }
+
+  if (path === "/api/profile/reflections" && request.method === "GET") {
+    if (reflectionFixtureMode === "malformed") return json({ questions: "not-a-contract" });
+    return json(reflectionState);
+  }
+  if (path === "/api/test/reflection-state" && request.method === "POST") {
+    const requested = await body(request);
+    const mode = requested.mode;
+    reflectionFixtureMode = mode === "malformed" || mode === "configuration-race" ? mode : "normal";
+    if (mode === "mutate-current") reflectionCurrentGameName = "Changed current game evidence";
+    const firstQuestion = reflectionState.questions[0];
+    if (firstQuestion === undefined)
+      throw new Error("Reflection fixture requires its first question");
+    if (mode === "answered" || mode === "abstained" || mode === "stale" || mode === "purge-note") {
+      const result = reflectionResult(
+        "repeated-values",
+        mode === "abstained" ? "abstained" : "answered",
+      );
+      reflectionState = ReflectionGetResultSchema.parse({
+        ...reflectionState,
+        questions: [
+          {
+            ...firstQuestion,
+            cache:
+              mode === "stale"
+                ? { state: "stale", changedCategories: ["metadata"], result }
+                : mode === "purge-note"
+                  ? { state: "none" }
+                  : { state: "current", result },
+            attempt:
+              mode === "purge-note"
+                ? { state: "purged", reason: "note-changed", occurredAt: observedAt }
+                : { state: "idle" },
+          },
+          reflectionState.questions[1],
+          reflectionState.questions[2],
+        ],
+      });
+    }
+    return json({ ok: true });
+  }
+  if (path === "/api/profile/reflections/settings" && request.method === "PUT") {
+    const requestBody = await body(request);
+    const questionId = requestBody.questionId;
+    const enabled = requestBody.enabled;
+    if (
+      !REFLECTION_QUESTION_IDS.includes(questionId as (typeof REFLECTION_QUESTION_IDS)[number]) ||
+      typeof enabled !== "boolean"
+    ) {
+      return json({ error: "Invalid reflection settings request" }, 400);
+    }
+    reflectionState = ReflectionGetResultSchema.parse({
+      ...reflectionState,
+      settings: {
+        ...reflectionState.settings,
+        questions: reflectionState.settings.questions.map((question) =>
+          question.questionId === questionId ? { ...question, enabled } : question,
+        ),
+      },
+      questions: reflectionState.questions.map((question) =>
+        question.questionId === questionId
+          ? { ...question, enabled, cache: { state: "none" }, attempt: { state: "idle" } }
+          : question,
+      ),
+    });
+    return json({ outcome: "accepted", requestId: requestBody.requestId });
+  }
+  if (path === "/api/profile/reflections" && request.method === "DELETE") {
+    reflectionState = ReflectionGetResultSchema.parse({
+      ...reflectionState,
+      questions: reflectionState.questions.map((question) => ({
+        ...question,
+        cache: { state: "none" },
+        attempt: question.enabled
+          ? { state: "purged", reason: "owner-deleted", occurredAt: observedAt }
+          : { state: "idle" },
+      })),
+    });
+    const requestBody = await body(request);
+    return json({ outcome: "accepted", requestId: requestBody.requestId });
+  }
+  if (path === "/api/profile/reflections/cancel" && request.method === "POST") {
+    const requestBody = await body(request);
+    if (activeReflectionBatch?.batchId === requestBody.batchId) {
+      reflectionState = ReflectionGetResultSchema.parse({
+        ...reflectionState,
+        questions: reflectionState.questions.map((question) =>
+          activeReflectionBatch?.questionIds.includes(question.questionId) &&
+          question.attempt.state === "refreshing"
+            ? { ...question, attempt: { state: "cancelled", occurredAt: observedAt } }
+            : question,
+        ),
+      });
+      activeReflectionBatch = null;
+    }
+    return json({ outcome: "accepted", requestId: requestBody.batchId });
+  }
+  if (path === "/api/profile/reflections/refresh" && request.method === "POST") {
+    const requestBody = await body(request);
+    const batchId = typeof requestBody.batchId === "string" ? requestBody.batchId : "invalid-batch";
+    const questionIds: ReflectionQuestionId[] =
+      requestBody.questionId === undefined
+        ? [...REFLECTION_QUESTION_IDS]
+        : isReflectionQuestionId(requestBody.questionId)
+          ? [requestBody.questionId]
+          : [...REFLECTION_QUESTION_IDS];
+    const now = "2026-08-28T14:00:00.000Z";
+    const accepted = {
+      version: 1,
+      operationId: "fixture-reflection-operation",
+      sequence: 0,
+      occurredAt: now,
+      type: "accepted",
+      terminal: false,
+      batchId: requestBody.batchId,
+      requestId: requestBody.requestId,
+      cancellationCapability: requestBody.cancellationCapability,
+      questionIds,
+    };
+    const questionStarted = {
+      version: 1,
+      operationId: "fixture-reflection-operation",
+      sequence: 1,
+      occurredAt: now,
+      type: "question-started",
+      terminal: false,
+      batchId: requestBody.batchId,
+      questionId: questionIds[0],
+      questionVersion: 1,
+    };
+    const evidenceStarted = {
+      version: 1,
+      operationId: "fixture-reflection-operation",
+      sequence: 2,
+      occurredAt: now,
+      type: "evidence-retrieval",
+      terminal: false,
+      batchId: requestBody.batchId,
+      questionId: questionIds[0],
+      status: "started",
+      examinedItemCount: 0,
+    };
+    const failed = {
+      version: 1,
+      operationId: "fixture-reflection-operation",
+      sequence: 3,
+      occurredAt: now,
+      type: "failed",
+      terminal: true,
+      batchId: requestBody.batchId,
+      questionId: questionIds[0],
+      reason: "provider-outage",
+      safeDetail: "fixture-provider-unavailable",
+    };
+    if (reflectionFixtureMode === "configuration-race") {
+      failed.reason = "model-configuration";
+      failed.safeDetail = "fixture-model-changed";
+    }
+    activeReflectionBatch = { batchId, questionIds };
+    reflectionState = ReflectionGetResultSchema.parse({
+      ...reflectionState,
+      questions: reflectionState.questions.map((question) =>
+        questionIds.includes(question.questionId)
+          ? {
+              ...question,
+              attempt: { state: "refreshing", batchId: requestBody.batchId, startedAt: now },
+            }
+          : question,
+      ),
+    });
+    const event = (name: string, value: unknown) =>
+      `event: ${name}\ndata: ${JSON.stringify(value)}\n\n`;
+    const encoder = new TextEncoder();
+    let cancelled = false;
+    return new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(event("accepted", accepted)));
+          setTimeout(() => {
+            if (!cancelled)
+              controller.enqueue(encoder.encode(event("question-started", questionStarted)));
+          }, 20);
+          setTimeout(() => {
+            if (!cancelled)
+              controller.enqueue(encoder.encode(event("evidence-retrieval", evidenceStarted)));
+          }, 50);
+          setTimeout(() => {
+            if (cancelled) return;
+            if (activeReflectionBatch?.batchId === requestBody.batchId) {
+              controller.enqueue(encoder.encode(event("failed", failed)));
+              activeReflectionBatch = null;
+              reflectionState = ReflectionGetResultSchema.parse({
+                ...reflectionState,
+                questions: reflectionState.questions.map((question) =>
+                  question.questionId === failed.questionId
+                    ? {
+                        ...question,
+                        attempt: {
+                          state: "unavailable",
+                          reason: "provider-outage",
+                          safeDetail: "fixture-provider-unavailable",
+                          occurredAt: now,
+                        },
+                      }
+                    : question,
+                ),
+              });
+            }
+            controller.close();
+          }, 250);
+        },
+        cancel() {
+          cancelled = true;
+          if (activeReflectionBatch?.batchId === batchId) {
+            reflectionState = ReflectionGetResultSchema.parse({
+              ...reflectionState,
+              questions: reflectionState.questions.map((question) =>
+                activeReflectionBatch?.questionIds.includes(question.questionId) &&
+                question.attempt.state === "refreshing"
+                  ? { ...question, attempt: { state: "cancelled", occurredAt: observedAt } }
+                  : question,
+              ),
+            });
+            activeReflectionBatch = null;
+          }
+        },
+      }),
+      {
+        headers: { "Content-Type": "text/event-stream" },
+      },
+    );
   }
 
   if (path === "/api/games" && request.method === "GET") {
