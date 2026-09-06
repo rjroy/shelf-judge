@@ -216,3 +216,38 @@ describe("owner-note command parsing", () => {
     },
   );
 });
+
+describe("profile reflection command parsing", () => {
+  test.each([
+    [["profile", "reflections"], "profile reflections", []],
+    [
+      ["profile", "reflections", "refresh", "--question", "repeated-values"],
+      "profile reflections refresh",
+      ["--question", "repeated-values"],
+    ],
+    [
+      ["profile", "reflections", "cancel", "batch-1", "--capability", "a".repeat(64)],
+      "profile reflections cancel",
+      ["batch-1", "--capability", "a".repeat(64)],
+    ],
+    [
+      ["profile", "reflections", "enable", "pattern-exceptions"],
+      "profile reflections enable",
+      ["pattern-exceptions"],
+    ],
+    [
+      ["profile", "reflections", "disable", "recurring-trade-offs"],
+      "profile reflections disable",
+      ["recurring-trade-offs"],
+    ],
+    [["profile", "reflections", "delete"], "profile reflections delete", []],
+  ] as Array<[string[], string, string[]]>)(
+    "keeps reflection options command-local",
+    (tokens, commandPath, positional) => {
+      expect(parseArgs(["bun", "shelf-judge", ...tokens])).toMatchObject({
+        commandPath,
+        positional,
+      });
+    },
+  );
+});

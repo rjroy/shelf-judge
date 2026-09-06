@@ -20,6 +20,47 @@ interface LocalCommandHelp {
 // One API operation can intentionally back multiple CLI commands. Keep those
 // CLI-only aliases here instead of advertising duplicate daemon operations.
 const LOCAL_OPERATION_COMMANDS: Record<string, LocalCommandHelp[]> = {
+  "shelf.profile.reflections.get": [
+    {
+      name: "reflections",
+      usage: "shelf-judge profile reflections [--json]",
+      description: "Read optional profile reflection settings and cached states",
+    },
+  ],
+  "shelf.profile.reflections.refresh.stream": [
+    {
+      name: "reflections refresh",
+      usage:
+        "shelf-judge profile reflections refresh [--question <id>] [--acknowledge-disclosure] [--json]",
+      description: "Refresh enabled optional reflections after acknowledging the disclosure",
+    },
+  ],
+  "shelf.profile.reflections.cancel": [
+    {
+      name: "reflections cancel",
+      usage: "shelf-judge profile reflections cancel <batch-id> --capability <token> [--json]",
+      description: "Cancel an active reflection batch",
+    },
+  ],
+  "shelf.profile.reflections.settings.update": [
+    {
+      name: "reflections enable",
+      usage: "shelf-judge profile reflections enable <question-id> [--json]",
+      description: "Enable an optional reflection question",
+    },
+    {
+      name: "reflections disable",
+      usage: "shelf-judge profile reflections disable <question-id> [--json]",
+      description: "Disable a question and delete its cached reflection",
+    },
+  ],
+  "shelf.profile.reflections.delete": [
+    {
+      name: "reflections delete",
+      usage: "shelf-judge profile reflections delete [--json]",
+      description: "Delete all cached optional reflections",
+    },
+  ],
   "shelf.game.note.get": [
     {
       name: "note get",

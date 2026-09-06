@@ -46,6 +46,7 @@ import {
   tournamentStats,
 } from "./commands/tournament.js";
 import { profileCommand } from "./commands/profile.js";
+import { profileReflectionsCommand } from "./commands/profile-reflections.js";
 import { predictGame, predictBggGame, predictReadiness } from "./commands/predict.js";
 import { nicheIgnored, nicheIgnore, nicheUnignore } from "./commands/niche.js";
 import {
@@ -130,6 +131,12 @@ const COMMANDS: Record<string, number> = {
   "shelf remove-shelf": 2,
   "shelf status": 2,
   "shelf capacity": 2,
+  "profile reflections": 2,
+  "profile reflections refresh": 3,
+  "profile reflections cancel": 3,
+  "profile reflections enable": 3,
+  "profile reflections disable": 3,
+  "profile reflections delete": 3,
   "import bgg-collection": 2,
   "config get": 2,
   "config set": 2,
@@ -368,7 +375,7 @@ async function main(): Promise<void> {
   const opts = { json: parsed.json };
   const args = parsed.positional;
 
-  let output: string;
+  let output: string | undefined;
 
   switch (parsed.commandPath) {
     case "game search":
@@ -617,6 +624,14 @@ async function main(): Promise<void> {
     case "profile":
       output = await profileCommand(client, args, opts);
       break;
+    case "profile reflections":
+    case "profile reflections refresh":
+    case "profile reflections cancel":
+    case "profile reflections enable":
+    case "profile reflections disable":
+    case "profile reflections delete":
+      output = await profileReflectionsCommand(client, parsed.commandPath, args, opts);
+      break;
     case "start":
       output = await daemonStart(client, args, opts);
       break;
@@ -632,12 +647,17 @@ async function main(): Promise<void> {
       process.exit(1);
   }
 
-  console.log(output);
+  if (output !== undefined) console.log(output);
 }
 
 if (import.meta.main) {
   main().catch((err) => {
-    console.error(formatCliError(err));
+    const formatted = formatCliError(err);
+    console.error(
+      process.argv.includes("--json") && !(err instanceof Error && "details" in err)
+        ? JSON.stringify({ error: { code: "command-failed", message: formatted } })
+        : formatted,
+    );
     process.exit(1);
   });
 }
