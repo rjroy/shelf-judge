@@ -589,7 +589,7 @@ test("responsive hostile 10,000-code-point conflict is inert, complete, accessib
   await expect(editor(page)).toBeFocused();
 });
 
-test("strict production proxy keeps broad payloads note-free without BGG, model, or provider access", async ({
+test("strict production proxy keeps broad payloads note-free without external browser requests", async ({
   page,
   networkEvidence,
 }, testInfo) => {
