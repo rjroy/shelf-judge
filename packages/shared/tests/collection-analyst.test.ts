@@ -93,19 +93,21 @@ describe("Collection Analyst closed manifest", () => {
         {
           id: "current-scoring",
           fields: [
+            "gameId",
             "displayedFitness",
             "validatedBreakdown",
             "veto",
             "predictionStatus",
             "sourceState",
           ],
-          sourceIdentity: "game ID and collection revision",
+          sourceIdentity: "game ID, collection revision, and Profile algorithm version",
           observationTime: "none",
           canonicalSummary: "Current validated scoring evidence",
         },
         {
           id: "imported-metadata",
           fields: [
+            "gameId",
             "name",
             "description",
             "categories",
@@ -121,13 +123,14 @@ describe("Collection Analyst closed manifest", () => {
             "sourceTime",
             "refreshWarnings",
           ],
-          sourceIdentity: "game ID and imported metadata revision",
+          sourceIdentity: "game ID and hash of authorized imported metadata source",
           observationTime: "sourceTime when present",
           canonicalSummary: "Current validated imported metadata",
         },
         {
           id: "play-acquisition",
           fields: [
+            "gameId",
             "playCount",
             "acquisitionDate",
             "acquisitionPrice",
@@ -141,7 +144,7 @@ describe("Collection Analyst closed manifest", () => {
         },
         {
           id: "collection-structure",
-          fields: ["shelfAssignment", "redundancy"],
+          fields: ["gameId", "shelfAssignment", "redundancy"],
           sourceIdentity: "game ID and collection revision",
           observationTime: "none",
           canonicalSummary: "Current collection structure evidence",
@@ -149,6 +152,9 @@ describe("Collection Analyst closed manifest", () => {
         {
           id: "profile-evidence",
           fields: [
+            "entityClass",
+            "entityId",
+            "name",
             "entityAssociations",
             "comparatorCohort",
             "support",
@@ -157,6 +163,8 @@ describe("Collection Analyst closed manifest", () => {
             "exclusions",
             "activeIntentions",
             "evidenceWarnings",
+            "confounders",
+            "associationNotPreference",
           ],
           sourceIdentity:
             "entity class, entity ID, profile algorithm version, and collection revision",

@@ -39,14 +39,22 @@ export const ANALYST_EVIDENCE_MANIFEST = {
     },
     {
       id: "current-scoring",
-      fields: ["displayedFitness", "validatedBreakdown", "veto", "predictionStatus", "sourceState"],
-      sourceIdentity: "game ID and collection revision",
+      fields: [
+        "gameId",
+        "displayedFitness",
+        "validatedBreakdown",
+        "veto",
+        "predictionStatus",
+        "sourceState",
+      ],
+      sourceIdentity: "game ID, collection revision, and Profile algorithm version",
       observationTime: "none",
       canonicalSummary: "Current validated scoring evidence",
     },
     {
       id: "imported-metadata",
       fields: [
+        "gameId",
         "name",
         "description",
         "categories",
@@ -62,13 +70,14 @@ export const ANALYST_EVIDENCE_MANIFEST = {
         "sourceTime",
         "refreshWarnings",
       ],
-      sourceIdentity: "game ID and imported metadata revision",
+      sourceIdentity: "game ID and hash of authorized imported metadata source",
       observationTime: "sourceTime when present",
       canonicalSummary: "Current validated imported metadata",
     },
     {
       id: "play-acquisition",
       fields: [
+        "gameId",
         "playCount",
         "acquisitionDate",
         "acquisitionPrice",
@@ -82,7 +91,7 @@ export const ANALYST_EVIDENCE_MANIFEST = {
     },
     {
       id: "collection-structure",
-      fields: ["shelfAssignment", "redundancy"],
+      fields: ["gameId", "shelfAssignment", "redundancy"],
       sourceIdentity: "game ID and collection revision",
       observationTime: "none",
       canonicalSummary: "Current collection structure evidence",
@@ -90,6 +99,9 @@ export const ANALYST_EVIDENCE_MANIFEST = {
     {
       id: "profile-evidence",
       fields: [
+        "entityClass",
+        "entityId",
+        "name",
         "entityAssociations",
         "comparatorCohort",
         "support",
@@ -98,6 +110,8 @@ export const ANALYST_EVIDENCE_MANIFEST = {
         "exclusions",
         "activeIntentions",
         "evidenceWarnings",
+        "confounders",
+        "associationNotPreference",
       ],
       sourceIdentity: "entity class, entity ID, profile algorithm version, and collection revision",
       observationTime: "none",

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   createCompleteEntityMetadata,
+  ANALYST_EVIDENCE_MANIFEST,
   type CollectionProfileCollectionSource,
   type FitnessResult,
   type Game,
@@ -14,6 +15,10 @@ import {
   buildReflectionProjectionSnapshot,
   createReflectionProjectionSnapshotService,
 } from "../../src/services/reflection-evidence-projections.js";
+import {
+  ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST,
+  buildAnalystProjectionSnapshot,
+} from "../../src/services/analyst-evidence-projections.js";
 import { createTestApp } from "../helpers/test-app.js";
 
 const OBSERVED_AT = "2026-08-27T10:00:00.000Z";
@@ -217,6 +222,369 @@ function fixture() {
 }
 
 describe("Reflection deterministic evidence projections", () => {
+  test("projects exact Analyst evidence without broad durable fields", () => {
+    const analyst = buildAnalystProjectionSnapshot(fixture());
+    const scoring = analyst.sources.find(({ sourceId }) => sourceId === "game:game-1:scoring");
+    const profile = analyst.sources.find(({ sourceId }) => sourceId === "profile:mechanic:101");
+    expect(scoring?.payload).toEqual({
+      gameId: "game-1",
+      displayedFitness: 8,
+      validatedBreakdown: [
+        {
+          axisId: "axis-1",
+          axisName: "Fit",
+          weight: 100,
+          contribution: 8,
+          source: "personal",
+          derivedField: null,
+          sourceValue: 8,
+          scoringRawValue: 8,
+          effectiveRating: 8,
+          preferenceShape: "higher-is-better",
+          curveAffected: false,
+          unit: null,
+          provenance: null,
+          configurationSummary: null,
+          overridden: false,
+          overrideValue: null,
+          predictionConfidence: null,
+          referenceGames: null,
+        },
+      ],
+      veto: null,
+      predictionStatus: null,
+      sourceState: "available",
+    });
+    expect(
+      analyst.sources.find(({ sourceId }) => sourceId === "game:game-3:scoring")?.payload,
+    ).toEqual({
+      gameId: "game-3",
+      displayedFitness: 0,
+      validatedBreakdown: [
+        {
+          axisId: "axis-1",
+          axisName: "Fit",
+          weight: 100,
+          contribution: 0,
+          source: "personal",
+          derivedField: null,
+          sourceValue: 0,
+          scoringRawValue: 0,
+          effectiveRating: 0,
+          preferenceShape: "higher-is-better",
+          curveAffected: false,
+          unit: null,
+          provenance: null,
+          configurationSummary: null,
+          overridden: false,
+          overrideValue: null,
+          predictionConfidence: null,
+          referenceGames: null,
+        },
+      ],
+      veto: { axisId: "axis-1", axisName: "Fit", threshold: 2, direction: "below", rawValue: 1 },
+      predictionStatus: null,
+      sourceState: "available",
+    });
+    expect(profile?.payload).toEqual({
+      entityClass: "mechanic",
+      entityId: 101,
+      name: "Worker Placement",
+      entityAssociations: [
+        { gameId: "game-1", gameName: "Alpha", currentFitness: 8, vetoed: false },
+        { gameId: "game-2", gameName: "Beta", currentFitness: 6, vetoed: false },
+        { gameId: "game-3", gameName: "Gamma", currentFitness: 0, vetoed: true },
+      ],
+      comparatorCohort: {
+        gameCount: 3,
+        meanCurrentFitness: 14 / 3,
+        games: [
+          { gameId: "game-1", gameName: "Alpha", currentFitness: 8, vetoed: false },
+          { gameId: "game-2", gameName: "Beta", currentFitness: 6, vetoed: false },
+          { gameId: "game-3", gameName: "Gamma", currentFitness: 0, vetoed: true },
+        ],
+      },
+      support: "supported",
+      dispersion: { populationStandardDeviation: Math.sqrt(104 / 9), range: { min: 0, max: 8 } },
+      supportingGames: [
+        { gameId: "game-1", gameName: "Alpha", currentFitness: 8, vetoed: false },
+        { gameId: "game-2", gameName: "Beta", currentFitness: 6, vetoed: false },
+        { gameId: "game-3", gameName: "Gamma", currentFitness: 0, vetoed: true },
+      ],
+      exclusions: [
+        {
+          gameId: "game-4",
+          gameName: "Heat",
+          reason: "missing-or-invalid-fitness",
+          hasEntityAssociation: false,
+          correctionDestination: { operationId: "shelf.game.rating.set" },
+        },
+      ],
+      activeIntentions: [],
+      evidenceWarnings: [],
+      confounders: [
+        {
+          entityId: 103,
+          name: "Deck Building",
+          cooccurringGameCount: 2,
+          gameIds: ["game-2", "game-3"],
+        },
+        { entityId: 102, name: "Solo", cooccurringGameCount: 1, gameIds: ["game-1"] },
+      ],
+      associationNotPreference: true,
+    });
+    expect(
+      analyst.sources.find(({ sourceId }) => sourceId === "game:game-1:play-acquisition")?.payload,
+    ).toMatchObject({
+      acquisitionDate: null,
+      purchaseUtilization: {
+        outcome: "met",
+        valueMultiplier: { outcome: "calculated", exact: { numerator: "8", denominator: "5" } },
+      },
+    });
+    expect(
+      analyst.sources.find(({ sourceId }) => sourceId === "game:game-1:structure")?.observedAt,
+    ).toBeUndefined();
+    expect(ANALYST_EVIDENCE_MANIFEST.classes.map(({ id, fields }) => ({ id, fields }))).toEqual([
+      {
+        id: "game-identity-ownership",
+        fields: ["gameId", "displayName", "bggId", "ownershipState"],
+      },
+      {
+        id: "current-scoring",
+        fields: [
+          "gameId",
+          "displayedFitness",
+          "validatedBreakdown",
+          "veto",
+          "predictionStatus",
+          "sourceState",
+        ],
+      },
+      {
+        id: "imported-metadata",
+        fields: [
+          "gameId",
+          "name",
+          "description",
+          "categories",
+          "mechanics",
+          "families",
+          "subdomains",
+          "designers",
+          "artists",
+          "playerCounts",
+          "playTime",
+          "weight",
+          "completeness",
+          "sourceTime",
+          "refreshWarnings",
+        ],
+      },
+      {
+        id: "play-acquisition",
+        fields: [
+          "gameId",
+          "playCount",
+          "acquisitionDate",
+          "acquisitionPrice",
+          "source",
+          "observedAt",
+          "purchaseUtilization",
+        ],
+      },
+      { id: "collection-structure", fields: ["gameId", "shelfAssignment", "redundancy"] },
+      {
+        id: "profile-evidence",
+        fields: [
+          "entityClass",
+          "entityId",
+          "name",
+          "entityAssociations",
+          "comparatorCohort",
+          "support",
+          "dispersion",
+          "supportingGames",
+          "exclusions",
+          "activeIntentions",
+          "evidenceWarnings",
+          "confounders",
+          "associationNotPreference",
+        ],
+      },
+      { id: "owner-game-note", fields: ["gameId", "noteVersion", "state", "text"] },
+    ]);
+    expect(buildAnalystProjectionSnapshot(structuredClone(fixture())).snapshotFingerprint).toBe(
+      analyst.snapshotFingerprint,
+    );
+    const revisionChanged = fixture();
+    revisionChanged.collection.revision += 1;
+    const revised = buildAnalystProjectionSnapshot(revisionChanged);
+    expect(
+      revised.sources.find(({ sourceId }) => sourceId === "game:game-1:scoring")?.sourceVersion,
+    ).not.toBe(scoring?.sourceVersion);
+    expect(
+      revised.sources.find(({ sourceId }) => sourceId === "profile:mechanic:101")?.sourceVersion,
+    ).not.toBe(profile?.sourceVersion);
+    const metadataChanged = fixture();
+    const changedMetadata = metadataChanged.collection.games[0]?.bggData;
+    if (changedMetadata === undefined || changedMetadata === null)
+      throw new Error("Expected metadata fixture");
+    changedMetadata.fetchedAt = "2026-08-28T10:00:00.000Z";
+    const metadataSnapshot = buildAnalystProjectionSnapshot(metadataChanged);
+    expect(
+      metadataSnapshot.sources.find(({ sourceId }) => sourceId === "game:game-1:metadata")
+        ?.sourceVersion,
+    ).not.toBe(
+      analyst.sources.find(({ sourceId }) => sourceId === "game:game-1:metadata")?.sourceVersion,
+    );
+    expect(JSON.stringify(analyst)).not.toContain("unauthorized.invalid");
+    expect(JSON.stringify(analyst)).not.toContain("commandReceipts");
+    for (const entry of analyst.sources) {
+      const schema = ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST.evidence[entry.evidenceClass];
+      expect(
+        schema.safeParse({ ...(entry.payload as object), unauthorizedRootField: true }).success,
+      ).toBe(false);
+    }
+    expect(
+      ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST.evidence["profile-evidence"].safeParse({
+        ...(profile?.payload as object),
+        activeIntentions: [
+          {
+            ...(profile?.payload as { activeIntentions: readonly object[] }).activeIntentions[0],
+            unauthorizedNestedField: true,
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST.evidence["profile-evidence"].safeParse({
+        ...(profile?.payload as object),
+        confounders: [
+          {
+            ...(profile?.payload as { confounders: readonly object[] }).confounders[0],
+            unauthorizedNestedField: true,
+          },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+
+  test("emits strict class summaries when Profile has no entity rows", () => {
+    const input = fixture();
+    input.collection.intentions = [
+      {
+        intentionId: "intention-1",
+        gameId: "game-1",
+        kind: "replay",
+        baseline: { playCount: 2, evidenceSource: "bgg-plays", observedAt: OBSERVED_AT },
+        createdAt: "2026-08-27T11:30:00.000Z",
+        version: 1,
+        resolution: null,
+      },
+    ];
+    for (const entry of input.collection.games) {
+      entry.entityMetadata = createCompleteEntityMetadata(
+        { mechanic: [], designer: [], artist: [] },
+        OBSERVED_AT,
+      );
+      entry.entityMetadata.mechanic.refreshFailure = {
+        attemptedAt: "2026-08-27T11:00:00.000Z",
+        message: "BGG mechanic refresh timed out",
+      };
+      entry.entityMetadata.designer.refreshFailure = {
+        attemptedAt: "2026-08-27T11:00:00.000Z",
+        message: "BGG mechanic refresh timed out",
+      };
+      entry.entityMetadata.artist.refreshFailure = {
+        attemptedAt: "2026-08-27T11:00:00.000Z",
+        message: "BGG mechanic refresh timed out",
+      };
+    }
+    input.displayedGames = input.displayedGames.map((entry, index) => {
+      const collectionGame = input.collection.games[index];
+      if (collectionGame === undefined) throw new Error("Expected collection game fixture");
+      return { ...entry, game: collectionGame };
+    });
+    const scores = new Map(
+      input.displayedGames.flatMap(({ game, score }) =>
+        score === null ? [] : [[game.id, score] as const],
+      ),
+    );
+    input.profile = computeCollectionProfile({
+      collection: input.collection,
+      fitnessResults: scores,
+      computedAt: "2026-08-27T12:00:00.000Z",
+    });
+
+    const snapshot = buildAnalystProjectionSnapshot(input);
+    const summaries = snapshot.sources.filter(({ sourceId }) => sourceId.endsWith(":summary"));
+
+    expect(summaries).toHaveLength(3);
+    expect(summaries.map(({ sourceId }) => sourceId)).toEqual([
+      "profile:artist:summary",
+      "profile:designer:summary",
+      "profile:mechanic:summary",
+    ]);
+    for (const summary of summaries) {
+      expect(summary.payload).toMatchObject({
+        entityId: null,
+        entityAssociations: [],
+        support: null,
+        dispersion: null,
+        supportingGames: [],
+        confounders: [],
+        comparatorCohort: { gameCount: 3 },
+        exclusions: [{ gameId: "game-4", reason: "missing-or-invalid-fitness" }],
+        activeIntentions: [
+          {
+            intentionId: "intention-1",
+            gameId: "game-1",
+            gameName: "Alpha",
+            kind: "replay",
+            baseline: { playCount: 2, evidenceSource: "bgg-plays", observedAt: OBSERVED_AT },
+            createdAt: "2026-08-27T11:30:00.000Z",
+            version: 1,
+          },
+        ],
+        evidenceWarnings: [
+          {
+            gameId: "game-1",
+            gameName: "Alpha",
+            attemptedAt: "2026-08-27T11:00:00.000Z",
+            message: "BGG mechanic refresh timed out",
+          },
+          {
+            gameId: "game-2",
+            gameName: "Beta",
+            attemptedAt: "2026-08-27T11:00:00.000Z",
+            message: "BGG mechanic refresh timed out",
+          },
+          {
+            gameId: "game-3",
+            gameName: "Gamma",
+            attemptedAt: "2026-08-27T11:00:00.000Z",
+            message: "BGG mechanic refresh timed out",
+          },
+          {
+            gameId: "game-4",
+            gameName: "Heat",
+            attemptedAt: "2026-08-27T11:00:00.000Z",
+            message: "BGG mechanic refresh timed out",
+          },
+        ],
+        associationNotPreference: true,
+      });
+      expect(
+        ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST.evidence["profile-evidence"].safeParse({
+          ...(summary.payload as object),
+          entityId: 0,
+          support: null,
+        }).success,
+      ).toBe(false);
+    }
+  });
+
   test("preserves candidate order and projects complete confounders, exclusions, and exact values", () => {
     const snapshot = buildReflectionProjectionSnapshot(fixture());
     const patterns = snapshot.projections["pattern-exceptions"];
