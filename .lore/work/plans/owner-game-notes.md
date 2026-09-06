@@ -1,7 +1,7 @@
 ---
 title: "Implementation plan: owner game notes"
 date: 2026-08-30
-status: approved
+status: executed
 tags: [plan, collection, game-detail, notes, privacy, concurrency]
 modules: [shared, daemon, cli, web]
 related:

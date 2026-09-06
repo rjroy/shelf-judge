@@ -1,7 +1,7 @@
 ---
 title: Owner game notes
 date: 2026-08-30
-status: approved
+status: implemented
 tags: [collection, game-detail, notes, owner-context]
 modules: [shared, daemon, cli, web]
 related:

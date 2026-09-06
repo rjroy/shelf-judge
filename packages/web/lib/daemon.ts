@@ -45,15 +45,23 @@ function makeRequest(path: string, options: DaemonFetchOptions = {}): Promise<No
     const destroy = () => {
       const currentRequest = request;
       const currentResponse = activeResponse;
-      cleanup();
+      // ClientRequest emits its connection error asynchronously after destroy().
+      // Keep its error listener until that event is delivered so an aborted Unix
+      // socket request cannot surface as an unhandled "socket hang up".
+      signal?.removeEventListener("abort", abort);
+      activeResponse?.removeListener("end", cleanup);
+      activeResponse?.removeListener("error", cleanup);
+      activeResponse?.removeListener("close", cleanup);
+      request = undefined;
+      activeResponse = undefined;
       currentResponse?.destroy();
       currentResponse?.socket?.destroy();
       currentRequest?.destroy();
     };
     const abort = () => {
       const error = new DOMException("The operation was aborted", "AbortError");
-      destroy();
       if (!responseReceived) reject(error);
+      destroy();
     };
     const onRequestError = (error: Error) => {
       cleanup();
