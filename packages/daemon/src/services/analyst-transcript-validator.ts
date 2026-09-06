@@ -38,14 +38,27 @@ export function createAnalystTranscriptValidator(options: {
           message.validationAttestation,
         );
         if (!authentic) return { valid: false as const, outcome: "invalid-transcript" };
-
-        if (
-          options.compareNoteDependencies &&
-          (await options.compareNoteDependencies(message.noteDependencies)) === "stale"
-        ) {
-          return { valid: false as const, outcome: "stale-transcript" };
+      }
+      const dependencies = new Map<string, number>();
+      for (const message of assistantMessages) {
+        for (const dependency of message.noteDependencies) {
+          const existing = dependencies.get(dependency.gameId);
+          if (existing !== undefined && existing !== dependency.noteVersion)
+            return { valid: false as const, outcome: "stale-transcript" };
+          dependencies.set(dependency.gameId, dependency.noteVersion);
         }
       }
+      if (dependencies.size > 0 && options.compareNoteDependencies === undefined)
+        return { valid: false as const, outcome: "stale-transcript" };
+      if (
+        options.compareNoteDependencies !== undefined &&
+        (await options.compareNoteDependencies(
+          [...dependencies]
+            .map(([gameId, noteVersion]) => ({ gameId, noteVersion }))
+            .sort((left, right) => left.gameId.localeCompare(right.gameId)),
+        )) === "stale"
+      )
+        return { valid: false as const, outcome: "stale-transcript" };
       return { valid: true as const };
     },
   });

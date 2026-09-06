@@ -260,12 +260,39 @@ const ProfileEvidenceSchema = z.union([
     })
     .strict(),
 ]);
+const OwnerGameNoteEvidenceSchema = z.discriminatedUnion("state", [
+  z
+    .object({
+      gameId: IdSchema,
+      noteVersion: z.literal(0),
+      state: z.literal("missing"),
+      text: z.null(),
+    })
+    .strict(),
+  z
+    .object({
+      gameId: IdSchema,
+      noteVersion: z.number().int().safe().positive(),
+      state: z.literal("present"),
+      text: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      gameId: IdSchema,
+      noteVersion: z.number().int().safe().positive(),
+      state: z.literal("cleared"),
+      text: z.null(),
+    })
+    .strict(),
+]);
 
 /** The only serialized fields that may cross the Analyst evidence boundary. */
 export const ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST = Object.freeze({
   manifestId: "collection-analyst-deterministic",
   manifestVersion: String(ANALYST_MANIFEST_VERSION),
   evidence: Object.freeze({
+    "owner-game-note": OwnerGameNoteEvidenceSchema,
     "game-identity-ownership": z
       .object({
         gameId: IdSchema,
@@ -342,7 +369,7 @@ export interface AnalystEvidencePageCursor {
   readonly offset: number;
 }
 export interface AnalystEvidenceSource {
-  readonly evidenceClass: Exclude<AnalystEvidenceClass, "owner-game-note">;
+  readonly evidenceClass: AnalystEvidenceClass;
   readonly sourceId: string;
   readonly sourceVersion: string;
   readonly citationId: string;

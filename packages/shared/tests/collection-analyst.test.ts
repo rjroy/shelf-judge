@@ -255,7 +255,7 @@ describe("Collection Analyst requests and results", () => {
         { role: "owner", content: "First" },
         {
           ...prior,
-          noteDependencies: [{ gameId: "game-1", noteVersion: 0 }],
+          noteDependencies: [{ gameId: "game-1", noteVersion: -1 }],
         },
         { role: "owner", content: "Follow-up" },
       ]),
@@ -289,7 +289,8 @@ describe("Collection Analyst requests and results", () => {
     expect(AnalystCitationSchema.safeParse({ ...citation, sourceVersion: "01" }).success).toBe(
       false,
     );
-    expect(AnalystCitationSchema.safeParse({ ...citation, testimony: false }).success).toBe(false);
+    expect(AnalystCitationSchema.safeParse({ ...citation, sourceVersion: "0" }).success).toBe(true);
+    expect(AnalystCitationSchema.safeParse({ ...citation, testimony: false }).success).toBe(true);
     expect(
       AnalystAnswerBlockSchema.safeParse({ ...block, citationIds: ["citation-1", "citation-1"] })
         .success,

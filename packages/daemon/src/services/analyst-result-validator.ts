@@ -37,6 +37,16 @@ export function validateAnalystResult(options: {
       ) {
         return { valid: false };
       }
+      if (citation.evidenceClass === "owner-game-note") {
+        const payload = evidence.payload;
+        if (
+          payload === null ||
+          typeof payload !== "object" ||
+          !("state" in payload) ||
+          citation.testimony !== (payload.state === "present")
+        )
+          return { valid: false };
+      }
     }
     if (
       options.mandatoryUncertaintyCitationIds &&

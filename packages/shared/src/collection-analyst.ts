@@ -154,7 +154,7 @@ const PositiveSafeIntegerSchema = z.number().int().safe().positive();
 const TimestampSchema = z.string().datetime({ offset: true });
 const NoteVersionSchema = z
   .string()
-  .regex(/^[1-9]\d*$/)
+  .regex(/^(0|[1-9]\d*)$/)
   .refine((value) => Number.isSafeInteger(Number(value)));
 
 const analystEvidence = createGroundedEvidenceSchemas({
@@ -212,7 +212,7 @@ export const AnalystConfigurationSchema = z
   .strict();
 
 export const AnalystNoteDependencySchema = z
-  .object({ gameId: IdSchema, noteVersion: PositiveSafeIntegerSchema })
+  .object({ gameId: IdSchema, noteVersion: SafeCountSchema })
   .strict();
 const AnalystAssistantMessageSchema = z
   .object({
@@ -292,11 +292,11 @@ export const AnalystCitationSchema = z
   })
   .strict()
   .superRefine((citation, context) => {
-    if (citation.testimony !== (citation.evidenceClass === "owner-game-note")) {
+    if (citation.evidenceClass !== "owner-game-note" && citation.testimony) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["testimony"],
-        message: "Only owner notes are testimony",
+        message: "Only owner notes may be testimony",
       });
     }
     if (

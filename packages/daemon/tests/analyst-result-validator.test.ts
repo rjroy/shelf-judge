@@ -4,6 +4,7 @@ import { z } from "zod";
 import { createGroundedEvidenceRegistry } from "../src/services/grounded-analysis/evidence-registry.js";
 import { createAnalystAttestationService } from "../src/services/analyst-attestation-service.js";
 import { createAnalystCompletionService } from "../src/services/analyst-completion-service.js";
+import type { AnalystRetrievedEvidence } from "../src/services/analyst-evidence-service.js";
 import { validateAnalystResult } from "../src/services/analyst-result-validator.js";
 
 function evidence() {
@@ -55,6 +56,22 @@ function result(): AnalystFinal {
     ],
     usage: { state: "unavailable" as const },
   };
+}
+
+function retrieved(noteDependencies: AnalystRetrievedEvidence["noteDependencies"] = []) {
+  return {
+    snapshotFingerprint: "snapshot",
+    evidence: evidence(),
+    citations: result().citations,
+    noteDependencies,
+    scope: {
+      totalSourceCount: 1,
+      matchingSourceCount: 1,
+      examinedSourceCount: 1,
+      exhaustive: true,
+    },
+    nextCursor: null,
+  } satisfies AnalystRetrievedEvidence;
 }
 
 describe("Analyst structured result validation", () => {
@@ -135,7 +152,7 @@ describe("Analyst structured result validation", () => {
     }
   });
 
-  test("rejects forged server-owned citation presentation and never signs invalid output", () => {
+  test("rejects forged server-owned citation presentation and never signs invalid output", async () => {
     const snapshot = evidence();
     const registeredCitations = result().citations;
     for (const citation of [
@@ -156,21 +173,43 @@ describe("Analyst structured result validation", () => {
     }
     const completion = createAnalystCompletionService({
       attestationService: createAnalystAttestationService(new Uint8Array(32).fill(1)),
+      withRetrievedEvidence: (value, operation) => operation(value),
     });
     expect(
-      completion.complete({
+      await completion.complete({
         submission: {
           ...result(),
           citations: [{ ...registeredCitations[0], canonicalSummary: "Forged" }],
         },
-        evidence: snapshot,
-        registeredCitations,
+        retrieved: retrieved(),
         mandatoryUncertaintyCitationIds: new Set(),
         conversationId: "conversation",
         turnIndex: 0,
         provider: { providerId: "provider", modelId: "model" },
-        noteDependencies: [],
       }),
     ).toEqual({ valid: false });
+
+    let attestationAttempts = 0;
+    const sourceChangingCompletion = createAnalystCompletionService({
+      attestationService: {
+        attest() {
+          attestationAttempts += 1;
+          return "must-not-be-created";
+        },
+        verifies: () => false,
+      },
+      withRetrievedEvidence: () => Promise.reject(new Error("source changed")),
+    });
+    expect(
+      await sourceChangingCompletion.complete({
+        submission: result(),
+        retrieved: retrieved([{ gameId: "game-1", noteVersion: 1 }]),
+        mandatoryUncertaintyCitationIds: new Set(),
+        conversationId: "conversation",
+        turnIndex: 0,
+        provider: { providerId: "provider", modelId: "model" },
+      }),
+    ).toEqual({ valid: false, reason: "source-changed" });
+    expect(attestationAttempts).toBe(0);
   });
 });
