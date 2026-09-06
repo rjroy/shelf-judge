@@ -302,6 +302,10 @@ export function createDerivedAxisFromPayload(
   );
 }
 
+// Analyst evidence references this registered deterministic projection by name.
+export const PURCHASE_UTILIZATION_EVIDENCE_FIELD = "purchaseUtilization" as const;
+export const WEIGHT_DERIVED_FIELD_ID = "weight" as const;
+
 export const DERIVED_AXIS_REGISTRY = {
   communityRating: defineDerivedField({
     id: "communityRating",

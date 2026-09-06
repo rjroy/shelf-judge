@@ -87,9 +87,8 @@ export function addUniqueCitationIssues(
   context: z.RefinementCtx,
 ): void {
   const citationIds = citations.map(({ citationId }) => citationId);
-  const sourceIdentities = citations.map(
-    ({ sourceId, sourceVersion, evidenceClass }) =>
-      `${sourceId}\u0000${sourceVersion}\u0000${evidenceClass}`,
+  const sourceIdentities = citations.map(({ sourceId, sourceVersion, evidenceClass }) =>
+    JSON.stringify([sourceId, sourceVersion, evidenceClass]),
   );
   if (new Set(citationIds).size !== citationIds.length) {
     context.addIssue({

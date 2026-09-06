@@ -318,6 +318,7 @@ export * from "./grounded-analysis";
 export * from "./grounded-evidence";
 export * from "./grounded-stream";
 export * from "./profile-reflections";
+export * from "./collection-analyst";
 
 export {
   ExactRational,
