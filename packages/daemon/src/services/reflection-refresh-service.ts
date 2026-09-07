@@ -150,7 +150,7 @@ function currentSources(
   };
 }
 
-function modelPrompts(
+export function modelPrompts(
   questionId: ReflectionQuestionId,
   evidencePackage: ReflectionEvidencePackage,
 ) {

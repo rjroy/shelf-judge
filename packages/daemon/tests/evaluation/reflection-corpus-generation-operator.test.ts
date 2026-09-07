@@ -4,7 +4,11 @@ import type {
   GroundedAnalysisRequest,
 } from "../../src/services/grounded-analysis/provider.js";
 import { GroundedAnalysisError } from "../../src/services/grounded-analysis/failure-mapping.js";
-import { runReflectionCorpusGenerationOperator } from "./reflection-corpus-generation-operator.js";
+import {
+  parseReflectionCorpusGenerationArtifact,
+  runReflectionCorpusGenerationOperator,
+  summarizeReflectionCorpusGenerationArtifact,
+} from "./reflection-corpus-generation-operator.js";
 
 const artifactPath = ".shelf-judge/reflection-evaluation/corpus-test.json";
 const fixtureIds = "repeated-values-01-setup-friction,pattern-exceptions-01-setup-friction";
@@ -67,6 +71,59 @@ test("corpus generation checkpoints deterministic baseline provenance and suppor
   expect(writes[1] ?? "").toContain('"provenanceHash"');
 });
 
+test("corpus summary retains reproducibility metadata and makes diagnostic release blockers explicit", async () => {
+  const writes: string[] = [];
+  const failedProvider: GroundedAnalysisProvider = {
+    ...provider(),
+    analyze: () =>
+      Promise.reject(
+        new GroundedAnalysisError("output-validation", "invalid-structured-submission"),
+      ),
+  };
+  await runReflectionCorpusGenerationOperator(
+    ["--artifact", artifactPath, "--fixtures", fixtureIds],
+    deps(writes, failedProvider),
+  );
+  const summary = summarizeReflectionCorpusGenerationArtifact(
+    parseReflectionCorpusGenerationArtifact(writes[1] ?? ""),
+  );
+  expect(summary).toMatchObject({
+    purpose: "synthetic-unreviewed-diagnostic-corpus",
+    productionFidelity: "synthetic-typed-production-contracts",
+    fixtureCounts: { checkpointed: 2, succeeded: 0, failed: 2 },
+    outcomeCounts: { answered: 0, abstained: 0 },
+    releaseStatus: "not-release-evidence",
+    failureCounts: [
+      { reason: "output-validation", detail: "invalid-structured-submission", count: 2 },
+    ],
+  });
+  expect(summary.releaseBlockers).toContain(
+    "Synthetic evidence packages are diagnostic fixtures, not production snapshots.",
+  );
+});
+
+test("summary-only operator reads an existing artifact without provider access or fixture identifiers", async () => {
+  const writes: string[] = [];
+  await runReflectionCorpusGenerationOperator(
+    ["--artifact", artifactPath, "--fixtures", "repeated-values-01-setup-friction"],
+    deps(writes),
+  );
+  const result = await runReflectionCorpusGenerationOperator(
+    ["--summary", "--artifact", artifactPath],
+    {
+      ...deps([]),
+      readArtifact: () => Promise.resolve(writes[0] ?? ""),
+      createProvider: () => {
+        throw new Error("Summary must not create a provider");
+      },
+    },
+  );
+  expect(result.exitCode).toBe(0);
+  expect(result.lines).toHaveLength(1);
+  expect(result.lines[0]).not.toContain("repeated-values-01-setup-friction");
+  expect(result.lines[0]).toContain('"releaseStatus":"not-release-evidence"');
+});
+
 test("corpus prompt does not transmit fixture outcome or rubric answer keys", async () => {
   const requests: GroundedAnalysisRequest<unknown>[] = [];
   await runReflectionCorpusGenerationOperator(
@@ -77,7 +134,7 @@ test("corpus prompt does not transmit fixture outcome or rubric answer keys", as
   expect(request?.prompt).not.toContain("expectedOutcome");
   expect(request?.prompt).not.toContain("requiredClaims");
   expect(request?.prompt).not.toContain("no-material-synthesis");
-  expect(request?.systemPrompt).toContain("answered Reflection or an abstained Reflection");
+  expect(request?.systemPrompt).toContain("outcome: answered");
 });
 
 test("corpus records an abort-aware provider timeout and continues to later fixtures", async () => {
