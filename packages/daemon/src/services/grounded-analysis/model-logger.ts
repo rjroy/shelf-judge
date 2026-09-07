@@ -23,6 +23,14 @@ const SafeValidationIssueSchema = z
     path: z.array(z.union([SafeIdentifierSchema, z.number().int().safe().min(0)])).max(16),
   })
   .strict();
+const SubmissionArgumentShapeSchema = z
+  .object({
+    topLevel: z.enum(["object", "non-object"]),
+    submission: z.enum(["missing", "object", "non-object"]),
+    result: z.enum(["missing", "object", "non-object"]),
+    outcome: z.enum(["missing", "answered", "abstained", "other-string", "non-string"]),
+  })
+  .strict();
 
 function requireUniqueEvidenceClasses(
   value: { evidenceClassCounts: readonly { evidenceClass: string }[] },
@@ -90,6 +98,11 @@ export const GroundedModelOutcomeLogSchema = BaseModelLogSchema.extend({
         assistantNonemptyTextPresent: z.boolean().optional(),
         assistantTextTurns: z.number().int().safe().min(0).optional(),
         validationIssues: z.array(SafeValidationIssueSchema).max(8).optional(),
+        argumentShapes: z.array(SubmissionArgumentShapeSchema).max(2).optional(),
+        assistantStopReasons: z
+          .array(z.enum(["stop", "length", "tool-use", "error", "aborted", "other"]))
+          .max(2)
+          .optional(),
       })
       .strict(),
     z.object({ state: z.literal("unavailable") }).strict(),

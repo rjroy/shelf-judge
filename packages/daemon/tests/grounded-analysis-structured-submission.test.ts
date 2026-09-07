@@ -29,8 +29,48 @@ test("structured submission exposes nested Zod constraints to pi", () => {
         properties: {
           result: {
             anyOf: [
-              { type: "object", properties: { outcome: { const: "answered" } } },
-              { type: "object", properties: { outcome: { const: "abstained" } } },
+              {
+                type: "object",
+                properties: { outcome: { type: "string", enum: ["answered"] } },
+              },
+              {
+                type: "object",
+                properties: { outcome: { type: "string", enum: ["abstained"] } },
+              },
+            ],
+          },
+        },
+      },
+    },
+  });
+});
+
+test("structured submission conveys enum constraints directly instead of a union of constants", () => {
+  const submission = createGroundedStructuredSubmission(ReflectionModelSubmissionSchema);
+  expect(submission.tool.parameters).toMatchObject({
+    properties: {
+      submission: {
+        properties: {
+          result: {
+            anyOf: [
+              {},
+              {
+                properties: {
+                  outcome: { type: "string", enum: ["abstained"] },
+                  reason: {
+                    type: "string",
+                    enum: [
+                      "no-owner-testimony",
+                      "insufficient-independent-testimony",
+                      "no-supported-pattern",
+                      "no-material-synthesis",
+                      "conflicting-evidence",
+                      "incomplete-scope",
+                      "question-not-applicable",
+                    ],
+                  },
+                },
+              },
             ],
           },
         },
@@ -65,6 +105,43 @@ test("structured submission retains bounded schema-path validation diagnostics",
     { code: "invalid_type", path: ["result", "text"] },
     { code: "unrecognized_keys", path: ["result"] },
   ]);
+  expect(submission.getAttemptState().argumentShapes).toEqual([
+    {
+      topLevel: "object",
+      submission: "object",
+      result: "object",
+      outcome: "answered",
+    },
+  ]);
+});
+
+test("structured submission records only safe discriminator shape for rejected arguments", () => {
+  const submission = createGroundedStructuredSubmission(ReflectionModelSubmissionSchema);
+  const execute = submission.tool.execute.bind(submission.tool);
+  expect(() => {
+    Reflect.apply(execute, undefined, [
+      "call",
+      {
+        submission: {
+          result: {
+            outcome: "private-unrecognized-enum",
+            explanation: "private fixture testimony must never be retained",
+          },
+        },
+      },
+    ]);
+  }).toThrow(GroundedStructuredSubmissionValidationError);
+  expect(submission.getAttemptState().argumentShapes).toEqual([
+    {
+      topLevel: "object",
+      submission: "object",
+      result: "object",
+      outcome: "other-string",
+    },
+  ]);
+  expect(JSON.stringify(submission.getAttemptState().argumentShapes)).not.toContain(
+    "private-unrecognized-enum",
+  );
 });
 
 test("structured submission failures remain output-validation failures", () => {

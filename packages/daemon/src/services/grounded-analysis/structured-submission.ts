@@ -49,9 +49,12 @@ function zodToToolSchema(schema: z.ZodTypeAny): TSchema {
   }
   if (schema instanceof z.ZodNumber) return Type.Number();
   if (schema instanceof z.ZodBoolean) return Type.Boolean();
+  if (schema instanceof z.ZodLiteral && typeof schema.value === "string") {
+    return Type.Unsafe({ type: "string", enum: [schema.value] });
+  }
   if (schema instanceof z.ZodLiteral) return Type.Literal(schema.value);
   if (schema instanceof z.ZodEnum)
-    return Type.Union((schema.options as readonly string[]).map((option) => Type.Literal(option)));
+    return Type.Unsafe({ type: "string", enum: [...(schema.options as readonly string[])] });
   if (schema instanceof z.ZodArray) {
     const { minLength, maxLength } = schema._def;
     return Type.Array(zodToToolSchema(schema.element as z.ZodTypeAny), {
@@ -94,6 +97,7 @@ export interface GroundedStructuredSubmission<Output> {
     rejectedAttempts: number;
     acceptedResultPresent: boolean;
     validationIssues: readonly GroundedStructuredSubmissionIssue[];
+    argumentShapes: readonly GroundedStructuredSubmissionArgumentShape[];
   }>;
 }
 
@@ -102,7 +106,63 @@ export interface GroundedStructuredSubmissionIssue {
   readonly path: (string | number)[];
 }
 
+export interface GroundedStructuredSubmissionArgumentShape {
+  readonly topLevel: "object" | "non-object";
+  readonly submission: "missing" | "object" | "non-object";
+  readonly result: "missing" | "object" | "non-object";
+  readonly outcome: "missing" | "answered" | "abstained" | "other-string" | "non-string";
+}
+
 const MAX_SAFE_VALIDATION_ISSUES = 8;
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function argumentShape(parameters: unknown): GroundedStructuredSubmissionArgumentShape {
+  const topLevel = objectValue(parameters);
+  if (topLevel === undefined)
+    return {
+      topLevel: "non-object",
+      submission: "missing",
+      result: "missing",
+      outcome: "missing",
+    };
+  const submissionValue = topLevel.submission;
+  const submission = objectValue(submissionValue);
+  if (submission === undefined)
+    return {
+      topLevel: "object",
+      submission: submissionValue === undefined ? "missing" : "non-object",
+      result: "missing",
+      outcome: "missing",
+    };
+  const resultValue = submission.result;
+  const result = objectValue(resultValue);
+  if (result === undefined)
+    return {
+      topLevel: "object",
+      submission: "object",
+      result: resultValue === undefined ? "missing" : "non-object",
+      outcome: "missing",
+    };
+  const outcome = result.outcome;
+  return {
+    topLevel: "object",
+    submission: "object",
+    result: "object",
+    outcome:
+      outcome === undefined
+        ? "missing"
+        : outcome === "answered" || outcome === "abstained"
+          ? outcome
+          : typeof outcome === "string"
+            ? "other-string"
+            : "non-string",
+  };
+}
 
 function schemaKeys(schema: z.ZodTypeAny, keys = new Set<string>()): ReadonlySet<string> {
   if (schema instanceof z.ZodObject) {
@@ -146,6 +206,7 @@ export function createGroundedStructuredSubmission<Output>(
   let toolCallAttempts = 0;
   let rejectedAttempts = 0;
   let validationIssues: readonly GroundedStructuredSubmissionIssue[] = [];
+  const argumentShapes: GroundedStructuredSubmissionArgumentShape[] = [];
   let preparedInvocationPending = false;
   const tool = defineTool({
     name: GROUNDED_SUBMISSION_TOOL_NAME,
@@ -158,6 +219,7 @@ export function createGroundedStructuredSubmission<Output>(
     ),
     prepareArguments(parameters) {
       toolCallAttempts += 1;
+      if (argumentShapes.length < 2) argumentShapes.push(argumentShape(parameters));
       try {
         if (result !== undefined) throw new Error("A grounded result was already submitted");
         const prepared = prepareGroundedStructuredSubmission(schema, parameters);
@@ -173,6 +235,8 @@ export function createGroundedStructuredSubmission<Output>(
     },
     execute(_toolCallId, parameters) {
       if (!preparedInvocationPending) toolCallAttempts += 1;
+      if (!preparedInvocationPending && argumentShapes.length < 2)
+        argumentShapes.push(argumentShape(parameters));
       preparedInvocationPending = false;
       try {
         if (result !== undefined) throw new Error("A grounded result was already submitted");
@@ -202,6 +266,7 @@ export function createGroundedStructuredSubmission<Output>(
         rejectedAttempts,
         acceptedResultPresent: result !== undefined,
         validationIssues,
+        argumentShapes,
       }),
   };
 }

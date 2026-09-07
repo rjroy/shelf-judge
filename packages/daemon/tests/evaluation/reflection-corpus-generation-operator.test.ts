@@ -176,6 +176,15 @@ test("corpus preserves allowlisted categorized failures, usage, and submission d
             acceptedResultPresent: false,
             rejectedAttempts: 2,
             validationIssues: [{ code: "invalid_type", path: ["result", "centralSynthesis"] }],
+            argumentShapes: [
+              {
+                topLevel: "object",
+                submission: "object",
+                result: "object",
+                outcome: "other-string",
+              },
+            ],
+            assistantStopReasons: ["length"],
           },
         }),
       ),
@@ -191,6 +200,8 @@ test("corpus preserves allowlisted categorized failures, usage, and submission d
   expect(writes[0] ?? "").toContain('"inferenceRoundTrips": 2');
   expect(writes[0] ?? "").toContain('"toolCallAttempts": 2');
   expect(writes[0] ?? "").toContain('"validationIssues"');
+  expect(writes[0] ?? "").toContain('"outcome": "other-string"');
+  expect(writes[0] ?? "").toContain('"assistantStopReasons"');
 });
 
 test("corpus rejects unsafe or oversized submission diagnostic identifiers", async () => {

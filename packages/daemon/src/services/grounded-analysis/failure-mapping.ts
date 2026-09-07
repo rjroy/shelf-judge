@@ -27,6 +27,13 @@ export type GroundedSubmissionDiagnostics =
         code: string;
         path: (string | number)[];
       }[];
+      argumentShapes?: {
+        topLevel: "object" | "non-object";
+        submission: "missing" | "object" | "non-object";
+        result: "missing" | "object" | "non-object";
+        outcome: "missing" | "answered" | "abstained" | "other-string" | "non-string";
+      }[];
+      assistantStopReasons?: ("stop" | "length" | "tool-use" | "error" | "aborted" | "other")[];
     };
 
 export class GroundedAnalysisError extends Error {

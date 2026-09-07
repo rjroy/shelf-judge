@@ -78,3 +78,34 @@ bun run generate:reflection-smoke -- \
 ```
 
 The runner uses an empty external-extension allowlist and registers its explicit Ollama configuration through the repository-local `createOllamaProviderExtension` factory, using pi's supported `registerProvider` API. The grounded session deliberately uses in-memory settings, so it does not create a misleading `models.json`. No global `~/.pi` settings or credentials are read or changed.
+
+## Structured-output diagnostic finding
+
+The diagnostic tool schema now represents string literals and Zod enums as JSON Schema
+`type: string` plus `enum`, rather than expressing every enum option as a nested
+`anyOf` of `const` values. This is a wire-schema correction, not a validation
+relaxation: runtime Zod validation remains authoritative and rejects every malformed
+submission.
+
+The prior Qwen diagnostic pair demonstrated nonconforming tool arguments below the
+1,024-token ceiling: an answered fixture succeeded at 300 output tokens; the abstained
+fixture made two tool calls at 341 output tokens, first with an unrecognized outcome
+and then with an invalid abstention reason. Privacy-safe diagnostics retain only the
+argument structure/discriminator category, Zod path/code, normalized finish reason,
+and usage. They never retain testimony, arbitrary tool arguments, or raw provider text.
+`length` is recorded distinctly from normal/tool-use termination, so a future token
+ceiling diagnosis is evidence-based rather than inferred from an unknown finish reason.
+
+After the wire-schema change, the same representative answered and abstained fixtures
+both passed strict runtime validation with one accepted tool call and no retries. The
+answered fixture used 314 output tokens and the abstained fixture used 213, each ending
+with normalized `tool-use`, under the same 1,024-token budget and 180-second timeout.
+The ignored diagnostic artifact is
+`.shelf-judge/reflection-evaluation/ollama-diagnostic-enum-schema-pair-qwen3.6-27b-timeout180.json`.
+This before-and-after result, together with the generated-schema regression tests,
+supports the narrow finding that Ollama/Qwen follows explicit string enums more reliably
+than the previous nested `anyOf`/`const` representation. It does not prove that every
+failure in the original 60-fixture run had the same cause or establish deterministic
+model behavior. The original
+`.shelf-judge/reflection-evaluation/ollama-diagnostic-corpus60-qwen3.6-27b-timeout180.json`
+remains unchanged.

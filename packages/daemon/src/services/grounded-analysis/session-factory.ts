@@ -34,6 +34,14 @@ export interface GroundedSessionRunResult {
   inferenceRoundTrips: number;
   assistantText: readonly string[];
   usages: readonly GroundedAssistantUsage[];
+  assistantStopReasons?: readonly (
+    | "stop"
+    | "length"
+    | "tool-use"
+    | "error"
+    | "aborted"
+    | "other"
+  )[];
 }
 
 export const GROUNDED_MAX_INFERENCE_ROUND_TRIPS = 2;
@@ -77,6 +85,26 @@ function isAssistantMessage(
   message: AgentMessage,
 ): message is Extract<AgentMessage, { role: "assistant" }> {
   return message.role === "assistant";
+}
+
+function safeStopReason(
+  stopReason: string | undefined,
+): "stop" | "length" | "tool-use" | "error" | "aborted" | "other" {
+  if (
+    stopReason === "stop" ||
+    stopReason === "length" ||
+    stopReason === "error" ||
+    stopReason === "aborted"
+  )
+    return stopReason;
+  if (
+    stopReason === "tool_use" ||
+    stopReason === "tool-use" ||
+    stopReason === "tool_calls" ||
+    stopReason === "toolUse"
+  )
+    return "tool-use";
+  return "other";
 }
 
 function extensionCapabilities(
@@ -183,6 +211,7 @@ function createBoundSession(
           cacheWriteTokens: usage.cacheWrite,
           monetaryCostUsd: usage.cost.total,
         })),
+        assistantStopReasons: assistantMessages.map(({ stopReason }) => safeStopReason(stopReason)),
       };
       const failedMessage = assistantMessages.find(
         (message) => message.stopReason === "error" || message.stopReason === "aborted",

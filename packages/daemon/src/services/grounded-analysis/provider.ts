@@ -218,6 +218,9 @@ export function createGroundedAnalysisProvider(
         state: "observed",
         ...attemptState,
         validationIssues,
+        argumentShapes: attemptState.argumentShapes.map((argumentShape) => ({
+          ...argumentShape,
+        })),
         ...(runResult === undefined
           ? {}
           : {
@@ -225,6 +228,7 @@ export function createGroundedAnalysisProvider(
                 (text) => text.trim().length > 0,
               ),
               assistantTextTurns: runResult.assistantText.length,
+              assistantStopReasons: [...(runResult.assistantStopReasons ?? [])],
             }),
       });
     };

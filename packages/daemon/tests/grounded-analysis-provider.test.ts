@@ -43,6 +43,7 @@ interface LocalProviderControls {
     | "submit-then-free-text"
     | "submit-with-text"
     | "no-submission"
+    | "length"
     | "malformed"
     | "malformed-then-valid"
     | "unrelated-tool-then-valid"
@@ -145,6 +146,7 @@ function localProviderExtension(controls: LocalProviderControls): ExtensionFacto
           if (
             (!hasToolResult || repeatedSubmission || requiresSecondToolCall) &&
             controls.mode !== "no-submission" &&
+            controls.mode !== "length" &&
             controls.mode !== "free-text"
           ) {
             const toolCall: ToolCall = {
@@ -207,7 +209,13 @@ function localProviderExtension(controls: LocalProviderControls): ExtensionFacto
             controls.mode === "free-text" || controls.mode === "submit-then-free-text"
               ? [{ type: "text" as const, text: "not allowed" }]
               : [];
-          const message = assistantMessage(model, content, "stop", roundTrip, monetaryCostUsd);
+          const message = assistantMessage(
+            model,
+            content,
+            controls.mode === "length" ? "length" : "stop",
+            roundTrip,
+            monetaryCostUsd,
+          );
           stream.push({ type: "start", partial: message });
           if (content.length > 0) {
             stream.push({ type: "text_start", contentIndex: 0, partial: message });
@@ -696,6 +704,15 @@ describe("grounded-analysis provider lifecycle", () => {
         rejectedAttempts: 0,
         assistantNonemptyTextPresent: false,
         assistantTextTurns: 0,
+        argumentShapes: [
+          {
+            topLevel: "object",
+            submission: "object",
+            result: "missing",
+            outcome: "missing",
+          },
+        ],
+        assistantStopReasons: ["tool-use"],
       },
     });
     expect(JSON.stringify(controls.modelLogs)).not.toContain("not allowed");
@@ -740,6 +757,22 @@ describe("grounded-analysis provider lifecycle", () => {
         rejectedAttempts: 0,
         assistantNonemptyTextPresent: true,
         assistantTextTurns: 1,
+      },
+    });
+  });
+
+  test("records a provider length finish as a safe truncation diagnostic", async () => {
+    const controls: LocalProviderControls = { transmissions: [], mode: "length", modelLogs: [] };
+
+    await captureFailure(configuredProvider(controls).analyze(request()));
+
+    expect(controls.modelLogs?.at(-1)).toMatchObject({
+      submissionDiagnostics: {
+        state: "observed",
+        toolCallAttempts: 0,
+        acceptedResultPresent: false,
+        rejectedAttempts: 0,
+        assistantStopReasons: ["length"],
       },
     });
   });

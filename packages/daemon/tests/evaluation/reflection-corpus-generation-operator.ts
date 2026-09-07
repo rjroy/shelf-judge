@@ -76,6 +76,23 @@ const submissionDiagnosticsSchema = z.union([
         )
         .max(8)
         .optional(),
+      argumentShapes: z
+        .array(
+          z
+            .object({
+              topLevel: z.enum(["object", "non-object"]),
+              submission: z.enum(["missing", "object", "non-object"]),
+              result: z.enum(["missing", "object", "non-object"]),
+              outcome: z.enum(["missing", "answered", "abstained", "other-string", "non-string"]),
+            })
+            .strict(),
+        )
+        .max(2)
+        .optional(),
+      assistantStopReasons: z
+        .array(z.enum(["stop", "length", "tool-use", "error", "aborted", "other"]))
+        .max(2)
+        .optional(),
     })
     .strict(),
   z.object({ state: z.literal("unavailable") }).strict(),
