@@ -755,6 +755,7 @@ describe("grounded model logger", () => {
       usage: { state: "unavailable" },
       validation: "accepted",
       cacheTransition: "written",
+      submissionDiagnostics: { state: "unavailable" },
     });
     expect(records).toHaveLength(2);
     expect(Object.isFrozen(attempt.configuration)).toBe(true);
@@ -802,6 +803,7 @@ describe("grounded model logger", () => {
       usage: { state: "unavailable" },
       validation: "accepted",
       cacheTransition: "none",
+      submissionDiagnostics: { state: "unavailable" },
     };
     expect(() => logger.outcome(outcome)).toThrow("requires a prior attempt");
     logger.attempt(attempt);

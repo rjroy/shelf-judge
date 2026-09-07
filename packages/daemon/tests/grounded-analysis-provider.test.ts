@@ -22,6 +22,10 @@ import {
 } from "../src/services/grounded-analysis/model-logger.js";
 import { createPiGroundedAnalysisSessionFactory } from "../src/services/grounded-analysis/session-factory.js";
 import {
+  createOllamaProviderExtension,
+  createOllamaRequestPayloadHook,
+} from "../src/services/grounded-analysis/ollama-provider-extension.js";
+import {
   createGroundedSubmissionOnlyToolManifest,
   GROUNDED_SUBMISSION_TOOL_NAME,
 } from "../src/services/grounded-analysis/structured-submission.js";
@@ -36,12 +40,17 @@ interface LocalProviderControls {
     | "submit"
     | "cancel"
     | "free-text"
+    | "submit-then-free-text"
+    | "submit-with-text"
     | "no-submission"
     | "malformed"
+    | "malformed-then-valid"
+    | "unrelated-tool-then-valid"
     | "provider-error"
     | "cancel-no-message"
     | "repeat-malformed"
-    | "repeat-duplicate";
+    | "repeat-duplicate"
+    | "same-turn-duplicate";
   monetaryCosts?: readonly number[];
   modelLogs?: GroundedModelLogRecord[];
 }
@@ -130,41 +139,74 @@ function localProviderExtension(controls: LocalProviderControls): ExtensionFacto
           const hasToolResult = context.messages.some((message) => message.role === "toolResult");
           const repeatedSubmission =
             controls.mode === "repeat-malformed" || controls.mode === "repeat-duplicate";
+          const requiresSecondToolCall =
+            controls.mode === "malformed-then-valid" ||
+            controls.mode === "unrelated-tool-then-valid";
           if (
-            (!hasToolResult || repeatedSubmission) &&
+            (!hasToolResult || repeatedSubmission || requiresSecondToolCall) &&
             controls.mode !== "no-submission" &&
             controls.mode !== "free-text"
           ) {
             const toolCall: ToolCall = {
               type: "toolCall",
               id: `submission-${roundTrip}`,
-              name: "submit_grounded_analysis",
+              name:
+                controls.mode === "unrelated-tool-then-valid" && roundTrip === 1
+                  ? "unrelated_tool"
+                  : "submit_grounded_analysis",
               arguments: {
                 submission: {
                   answer:
-                    controls.mode === "malformed" || controls.mode === "repeat-malformed"
+                    controls.mode === "malformed" ||
+                    controls.mode === "repeat-malformed" ||
+                    (controls.mode === "malformed-then-valid" && roundTrip === 1)
                       ? 42
                       : "grounded",
                 },
               },
             };
-            const message = assistantMessage(
-              model,
-              [toolCall],
-              "toolUse",
-              roundTrip,
-              monetaryCostUsd,
-            );
+            const toolCalls =
+              controls.mode === "same-turn-duplicate"
+                ? [toolCall, { ...toolCall, id: `submission-duplicate-${roundTrip}` }]
+                : [toolCall];
+            const content =
+              controls.mode === "submit-with-text"
+                ? [...toolCalls, { type: "text" as const, text: "not allowed" }]
+                : toolCalls;
+            const message = assistantMessage(model, content, "toolUse", roundTrip, monetaryCostUsd);
             stream.push({ type: "start", partial: message });
             stream.push({ type: "toolcall_start", contentIndex: 0, partial: message });
             stream.push({ type: "toolcall_end", contentIndex: 0, toolCall, partial: message });
+            if (toolCalls.length === 2) {
+              const duplicate = toolCalls[1];
+              if (duplicate === undefined) throw new Error("Expected duplicate tool call");
+              stream.push({ type: "toolcall_start", contentIndex: 1, partial: message });
+              stream.push({
+                type: "toolcall_end",
+                contentIndex: 1,
+                toolCall: duplicate,
+                partial: message,
+              });
+            }
+            if (controls.mode === "submit-with-text") {
+              const textIndex = toolCalls.length;
+              stream.push({ type: "text_start", contentIndex: textIndex, partial: message });
+              stream.push({
+                type: "text_end",
+                contentIndex: textIndex,
+                content: "not allowed",
+                partial: message,
+              });
+            }
             stream.push({ type: "done", reason: "toolUse", message });
             stream.end();
             return;
           }
 
           const content =
-            controls.mode === "free-text" ? [{ type: "text" as const, text: "not allowed" }] : [];
+            controls.mode === "free-text" || controls.mode === "submit-then-free-text"
+              ? [{ type: "text" as const, text: "not allowed" }]
+              : [];
           const message = assistantMessage(model, content, "stop", roundTrip, monetaryCostUsd);
           stream.push({ type: "start", partial: message });
           if (content.length > 0) {
@@ -241,6 +283,90 @@ async function captureFailure(promise: Promise<unknown>): Promise<GroundedAnalys
 }
 
 describe("grounded-analysis provider lifecycle", () => {
+  test("serializes Ollama's documented token budget and thinking disable controls", async () => {
+    let requestPayload: unknown;
+    const server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        expect(new URL(request.url).pathname).toBe("/v1/chat/completions");
+        requestPayload = await request.json();
+        const toolArguments = JSON.stringify({ submission: { answer: "grounded" } });
+        const response = [
+          `data: ${JSON.stringify({
+            id: "mock-completion",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "ollama-test",
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  role: "assistant",
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: "call_1",
+                      type: "function",
+                      function: { name: GROUNDED_SUBMISSION_TOOL_NAME, arguments: toolArguments },
+                    },
+                  ],
+                },
+                finish_reason: null,
+              },
+            ],
+          })}\n\n`,
+          `data: ${JSON.stringify({
+            id: "mock-completion",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "ollama-test",
+            choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+            usage: { prompt_tokens: 12, completion_tokens: 6, total_tokens: 18 },
+          })}\n\n`,
+          "data: [DONE]\n\n",
+        ].join("");
+        return new Response(response, {
+          headers: { "content-type": "text/event-stream" },
+        });
+      },
+    });
+    try {
+      const maxTokens = 123;
+      const provider = createGroundedAnalysisProvider({
+        configuration: {
+          status: "configured",
+          providerId: "ollama",
+          modelId: "ollama-test",
+          extensionIds: ["ollama-test"],
+        },
+        sessionFactory: createPiGroundedAnalysisSessionFactory({
+          cwd: process.cwd(),
+          extensionIds: [],
+          extensionFactories: [
+            createOllamaProviderExtension(
+              "ollama-test",
+              maxTokens,
+              `http://127.0.0.1:${server.port}/v1`,
+            ),
+          ],
+          onPayload: createOllamaRequestPayloadHook(maxTokens),
+        }),
+      });
+
+      const result = await provider.analyze(request());
+      expect(result).toMatchObject({
+        output: { answer: "grounded" },
+      });
+      expect(requestPayload).toMatchObject({
+        max_tokens: maxTokens,
+        reasoning_effort: "none",
+      });
+      expect(requestPayload).not.toHaveProperty("think");
+    } finally {
+      await server.stop(true);
+    }
+  });
+
   test("uses the bound session registry, structured submission, and exact usage", async () => {
     const controls: LocalProviderControls = { transmissions: [], modelLogs: [] };
     const lifecycle: string[] = [];
@@ -252,12 +378,12 @@ describe("grounded-analysis provider lifecycle", () => {
       output: { answer: "grounded" },
       usage: {
         state: "reported",
-        inputTokens: 3,
-        outputTokens: 5,
-        cacheReadTokens: 7,
-        cacheWriteTokens: 9,
+        inputTokens: 1,
+        outputTokens: 2,
+        cacheReadTokens: 3,
+        cacheWriteTokens: 4,
         monetaryCost: { amount: "0", currency: "USD" },
-        inferenceRoundTrips: 2,
+        inferenceRoundTrips: 1,
       },
     });
     expect(lifecycle).toEqual([
@@ -269,7 +395,6 @@ describe("grounded-analysis provider lifecycle", () => {
       "prompt",
     ]);
     expect(controls.transmissions.map(({ systemPrompt }) => systemPrompt)).toEqual([
-      "EXACT POLICY",
       "EXACT POLICY",
     ]);
     expect(controls.transmissions[0]?.messages).toMatchObject([
@@ -285,7 +410,15 @@ describe("grounded-analysis provider lifecycle", () => {
         recordType: "grounded-model-outcome",
         outcome: "completed",
         validation: "accepted",
-        usage: { state: "reported", inferenceRoundTrips: 2 },
+        usage: { state: "reported", inferenceRoundTrips: 1 },
+        submissionDiagnostics: {
+          state: "observed",
+          toolCallAttempts: 1,
+          acceptedResultPresent: true,
+          rejectedAttempts: 0,
+          assistantNonemptyTextPresent: false,
+          assistantTextTurns: 0,
+        },
       },
     ]);
     expect(JSON.stringify(controls.modelLogs)).not.toContain("EXACT POLICY");
@@ -341,7 +474,7 @@ describe("grounded-analysis provider lifecycle", () => {
 
     await provider.analyze(request());
     expect(publishedStatus.identity.extensionIds).toEqual(["local-provider"]);
-    expect(controls.transmissions).toHaveLength(2);
+    expect(controls.transmissions).toHaveLength(1);
     expect(controls.modelLogs).toHaveLength(2);
     expect(controls.modelLogs?.map(({ configuration }) => configuration)).toEqual([
       publishedStatus,
@@ -351,7 +484,7 @@ describe("grounded-analysis provider lifecycle", () => {
 
   test.each([
     [[0.0000001, 0], "0.0000001"],
-    [[0.1, 0.2], "0.3"],
+    [[0.1, 0.2], "0.1"],
     [[1e21, 0], "1000000000000000000000"],
   ] as const)("preserves provider-reported costs %j as %s", async (monetaryCosts, amount) => {
     const controls: LocalProviderControls = {
@@ -364,7 +497,7 @@ describe("grounded-analysis provider lifecycle", () => {
     expect(result.usage).toMatchObject({
       state: "reported",
       monetaryCost: { amount, currency: "USD" },
-      inferenceRoundTrips: 2,
+      inferenceRoundTrips: 1,
     });
   });
 
@@ -539,6 +672,78 @@ describe("grounded-analysis provider lifecycle", () => {
     });
   });
 
+  test("stops after an accepted tool submission before requesting a trailing text turn", async () => {
+    const controls: LocalProviderControls = {
+      transmissions: [],
+      mode: "submit-then-free-text",
+      modelLogs: [],
+    };
+
+    const result = await configuredProvider(controls).analyze(request());
+
+    expect(result).toMatchObject({
+      output: { answer: "grounded" },
+      usage: { state: "reported", inferenceRoundTrips: 1 },
+    });
+    expect(controls.transmissions).toHaveLength(1);
+    expect(controls.modelLogs?.at(-1)).toMatchObject({
+      outcome: "completed",
+      validation: "accepted",
+      submissionDiagnostics: {
+        state: "observed",
+        toolCallAttempts: 1,
+        acceptedResultPresent: true,
+        rejectedAttempts: 0,
+        assistantNonemptyTextPresent: false,
+        assistantTextTurns: 0,
+      },
+    });
+    expect(JSON.stringify(controls.modelLogs)).not.toContain("not allowed");
+  });
+
+  test("rejects free-form text in the same accepted submission turn", async () => {
+    const controls: LocalProviderControls = {
+      transmissions: [],
+      mode: "submit-with-text",
+      modelLogs: [],
+    };
+
+    const failure = await captureFailure(configuredProvider(controls).analyze(request()));
+
+    expect(failure).toMatchObject({
+      reason: "output-validation",
+      safeDetail: "free-form-model-output",
+      usage: { state: "reported", inferenceRoundTrips: 1 },
+    });
+    expect(controls.transmissions).toHaveLength(1);
+    expect(controls.modelLogs?.at(-1)).toMatchObject({
+      submissionDiagnostics: {
+        state: "observed",
+        acceptedResultPresent: true,
+        rejectedAttempts: 0,
+        assistantNonemptyTextPresent: true,
+        assistantTextTurns: 1,
+      },
+    });
+  });
+
+  test("records no tool call separately from unavailable submission runtime state", async () => {
+    const controls: LocalProviderControls = { transmissions: [], mode: "free-text", modelLogs: [] };
+
+    await captureFailure(configuredProvider(controls).analyze(request()));
+
+    expect(controls.modelLogs?.at(-1)).toMatchObject({
+      submissionDiagnostics: {
+        state: "observed",
+        toolCallAttempts: 0,
+        acceptedResultPresent: false,
+        rejectedAttempts: 0,
+        assistantNonemptyTextPresent: true,
+        assistantTextTurns: 1,
+      },
+    });
+  });
+
   test("does not retry or replace a failed provider request", async () => {
     const controls: LocalProviderControls = {
       transmissions: [],
@@ -580,50 +785,119 @@ describe("grounded-analysis provider lifecycle", () => {
     expect(JSON.stringify(controls.modelLogs)).not.toContain("socket network timeout");
   });
 
-  test.each(["repeat-malformed", "repeat-duplicate"] as const)(
-    "stops %s tool behavior before a third provider transmission",
-    async (mode) => {
-      const controls: LocalProviderControls = {
-        transmissions: [],
-        mode,
-        monetaryCosts: [0.1, 0.2, 999],
-        modelLogs: [],
-      };
+  test("retains the two-turn ceiling and aggregates usage for repeated invalid submissions", async () => {
+    const controls: LocalProviderControls = {
+      transmissions: [],
+      mode: "repeat-malformed",
+      monetaryCosts: [0.1, 0.2, 999],
+      modelLogs: [],
+    };
 
-      const failure = await captureFailure(configuredProvider(controls).analyze(request()));
-      await Bun.sleep(10);
+    const failure = await captureFailure(configuredProvider(controls).analyze(request()));
+    await Bun.sleep(10);
 
-      expect(failure).toMatchObject({
-        reason: "output-validation",
-        safeDetail: "invalid-structured-submission",
-        usage: {
-          state: "reported",
-          inputTokens: 3,
-          outputTokens: 5,
-          cacheReadTokens: 7,
-          cacheWriteTokens: 9,
-          monetaryCost: { amount: "0.3", currency: "USD" },
-          inferenceRoundTrips: 2,
-        },
-      });
-      expect(controls.transmissions).toHaveLength(2);
-      expect(controls.transmissions.map(({ systemPrompt }) => systemPrompt)).toEqual([
-        "EXACT POLICY",
-        "EXACT POLICY",
-      ]);
-      expect(controls.modelLogs).toHaveLength(2);
-      expect(controls.modelLogs).toMatchObject([
-        { recordType: "grounded-model-attempt" },
-        {
-          recordType: "grounded-model-outcome",
-          outcome: "failed",
-          failureCategory: "output-validation",
-          validation: "rejected",
-          usage: failure.usage,
-        },
-      ]);
-    },
-  );
+    expect(failure).toMatchObject({
+      reason: "output-validation",
+      safeDetail: "invalid-structured-submission",
+      usage: {
+        state: "reported",
+        inputTokens: 3,
+        outputTokens: 5,
+        cacheReadTokens: 7,
+        cacheWriteTokens: 9,
+        monetaryCost: { amount: "0.3", currency: "USD" },
+        inferenceRoundTrips: 2,
+      },
+    });
+    expect(controls.transmissions).toHaveLength(2);
+    expect(controls.transmissions.map(({ systemPrompt }) => systemPrompt)).toEqual([
+      "EXACT POLICY",
+      "EXACT POLICY",
+    ]);
+    expect(controls.modelLogs).toHaveLength(2);
+    expect(controls.modelLogs).toMatchObject([
+      { recordType: "grounded-model-attempt" },
+      {
+        recordType: "grounded-model-outcome",
+        outcome: "failed",
+        failureCategory: "output-validation",
+        validation: "rejected",
+        usage: failure.usage,
+      },
+    ]);
+  });
+
+  test("rejects a run after the SDK rejects an invalid submission before execution", async () => {
+    const controls: LocalProviderControls = {
+      transmissions: [],
+      mode: "malformed-then-valid",
+    };
+
+    const failure = await captureFailure(configuredProvider(controls).analyze(request()));
+    expect(failure).toMatchObject({
+      reason: "output-validation",
+      safeDetail: "invalid-structured-submission",
+    });
+    expect(controls.transmissions).toHaveLength(2);
+  });
+
+  test("rejects a second submission in the accepted submission turn without another transmission", async () => {
+    const controls: LocalProviderControls = {
+      transmissions: [],
+      mode: "same-turn-duplicate",
+      modelLogs: [],
+    };
+
+    const failure = await captureFailure(configuredProvider(controls).analyze(request()));
+
+    expect(failure).toMatchObject({
+      reason: "output-validation",
+      safeDetail: "invalid-structured-submission",
+      usage: { state: "reported", inferenceRoundTrips: 1 },
+    });
+    expect(controls.transmissions).toHaveLength(1);
+    expect(controls.modelLogs?.at(-1)).toMatchObject({
+      submissionDiagnostics: {
+        state: "observed",
+        toolCallAttempts: 3,
+        acceptedResultPresent: true,
+        rejectedAttempts: 1,
+      },
+    });
+  });
+
+  test("rejects a numeric string field before Pi can coerce it", async () => {
+    const controls: LocalProviderControls = { transmissions: [], mode: "malformed", modelLogs: [] };
+
+    const failure = await captureFailure(configuredProvider(controls).analyze(request()));
+    expect(failure).toMatchObject({
+      reason: "output-validation",
+      safeDetail: "invalid-structured-submission",
+    });
+    expect(controls.modelLogs?.at(-1)).toMatchObject({
+      submissionDiagnostics: {
+        state: "observed",
+        toolCallAttempts: 1,
+        acceptedResultPresent: false,
+        rejectedAttempts: 1,
+        assistantNonemptyTextPresent: false,
+        assistantTextTurns: 0,
+      },
+    });
+  });
+
+  test("does not treat an unrelated rejected tool as a rejected submission", async () => {
+    const controls: LocalProviderControls = {
+      transmissions: [],
+      mode: "unrelated-tool-then-valid",
+    };
+
+    const result = await configuredProvider(controls).analyze(request());
+    expect(result).toMatchObject({
+      output: { answer: "grounded" },
+    });
+    expect(controls.transmissions).toHaveLength(2);
+  });
 
   test("reports a configured model that is absent from the bound registry", async () => {
     const controls: LocalProviderControls = { transmissions: [] };

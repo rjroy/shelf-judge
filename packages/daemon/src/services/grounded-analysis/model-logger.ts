@@ -17,6 +17,12 @@ const EvidenceClassCountSchema = z
     count: z.number().int().safe().min(0),
   })
   .strict();
+const SafeValidationIssueSchema = z
+  .object({
+    code: SafeIdentifierSchema,
+    path: z.array(z.union([SafeIdentifierSchema, z.number().int().safe().min(0)])).max(16),
+  })
+  .strict();
 
 function requireUniqueEvidenceClasses(
   value: { evidenceClassCounts: readonly { evidenceClass: string }[] },
@@ -74,6 +80,20 @@ export const GroundedModelOutcomeLogSchema = BaseModelLogSchema.extend({
   usage: z.union([GroundedProviderUsageSchema, GroundedUsageUnavailableSchema]),
   validation: z.enum(["accepted", "rejected", "not-reached"]),
   cacheTransition: z.enum(["none", "written", "invalidated"]),
+  submissionDiagnostics: z.union([
+    z
+      .object({
+        state: z.literal("observed"),
+        toolCallAttempts: z.number().int().safe().min(0),
+        acceptedResultPresent: z.boolean(),
+        rejectedAttempts: z.number().int().safe().min(0),
+        assistantNonemptyTextPresent: z.boolean().optional(),
+        assistantTextTurns: z.number().int().safe().min(0).optional(),
+        validationIssues: z.array(SafeValidationIssueSchema).max(8).optional(),
+      })
+      .strict(),
+    z.object({ state: z.literal("unavailable") }).strict(),
+  ]),
   failureCategory: z
     .enum([
       "cancelled",

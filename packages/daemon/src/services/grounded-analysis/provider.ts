@@ -12,7 +12,11 @@ import {
   snapshotGroundedAllowedToolManifest,
   type GroundedAllowedToolManifest,
 } from "./capability-inspection.js";
-import { GroundedAnalysisError, mapGroundedAnalysisFailure } from "./failure-mapping.js";
+import {
+  GroundedAnalysisError,
+  mapGroundedAnalysisFailure,
+  type GroundedSubmissionDiagnostics,
+} from "./failure-mapping.js";
 import { createLogger } from "../logger.js";
 import {
   createGroundedModelLogger,
@@ -36,6 +40,8 @@ import {
   createGroundedStructuredSubmission,
   GROUNDED_SUBMISSION_TOOL_NAME,
 } from "./structured-submission.js";
+
+type SubmissionDiagnostics = GroundedSubmissionDiagnostics;
 
 export interface GroundedAnalysisRequest<Output> {
   systemPrompt: string;
@@ -187,6 +193,7 @@ export function createGroundedAnalysisProvider(
     request: GroundedAnalysisRequest<Output>,
     allowedTools: GroundedAllowedToolManifest,
     feature: string,
+    recordSubmissionDiagnostics: (diagnostics: SubmissionDiagnostics) => void,
   ): Promise<GroundedAnalysisResult<Output>> {
     if (!configured || !sessionFactory) {
       throw new GroundedAnalysisError("model-configuration", "grounded-analysis-not-configured");
@@ -201,6 +208,27 @@ export function createGroundedAnalysisProvider(
 
     const submissionSchema = freezeGroundedSchema(request.submissionSchema);
     const submission = createGroundedStructuredSubmission(submissionSchema);
+    const recordAttemptState = (runResult?: GroundedSessionRunResult) => {
+      const attemptState = submission.getAttemptState();
+      const validationIssues = attemptState.validationIssues.map(({ code, path }) => ({
+        code,
+        path: [...path],
+      }));
+      recordSubmissionDiagnostics({
+        state: "observed",
+        ...attemptState,
+        validationIssues,
+        ...(runResult === undefined
+          ? {}
+          : {
+              assistantNonemptyTextPresent: runResult.assistantText.some(
+                (text) => text.trim().length > 0,
+              ),
+              assistantTextTurns: runResult.assistantText.length,
+            }),
+      });
+    };
+    recordAttemptState();
     let session: Awaited<ReturnType<GroundedAnalysisSessionFactory["create"]>> | undefined;
     try {
       session = await sessionFactory.create({ systemPrompt: request.systemPrompt, submission });
@@ -211,12 +239,20 @@ export function createGroundedAnalysisProvider(
         throw new GroundedAnalysisError("model-configuration", "configured-model-not-found");
       }
       await session.setModel();
-      const runResult = await session.prompt(request.prompt, request.signal);
+      let runResult: GroundedSessionRunResult;
+      try {
+        runResult = await session.prompt(request.prompt, request.signal);
+      } catch (error) {
+        if (error instanceof GroundedSessionRunError) recordAttemptState(error.runResult);
+        throw error;
+      }
       const usage = aggregateUsage(runResult);
+      recordAttemptState(runResult);
       if (runResult.assistantText.some((text) => text.trim().length > 0)) {
         throw new GroundedAnalysisError("output-validation", "free-form-model-output", { usage });
       }
-      if (submission.getAttemptState().rejectedAttempts > 0) {
+      const attemptState = submission.getAttemptState();
+      if (attemptState.rejectedAttempts > 0) {
         throw new GroundedAnalysisError("output-validation", "invalid-structured-submission", {
           usage,
         });
@@ -246,8 +282,17 @@ export function createGroundedAnalysisProvider(
         occurredAt: now(),
       });
       const result = await (async () => {
+        let submissionDiagnostics: SubmissionDiagnostics = { state: "unavailable" };
         try {
-          return await performAnalysis(request, allowedTools, audit.feature);
+          const result = await performAnalysis(
+            request,
+            allowedTools,
+            audit.feature,
+            (diagnostics) => {
+              submissionDiagnostics = diagnostics;
+            },
+          );
+          return { result, submissionDiagnostics };
         } catch (error) {
           const runUsage =
             error instanceof GroundedSessionRunError
@@ -259,12 +304,10 @@ export function createGroundedAnalysisProvider(
             error instanceof GroundedSessionRunError ? error.cause : error,
             request.signal,
           );
-          const failure =
-            mapped.usage === runUsage
-              ? mapped
-              : new GroundedAnalysisError(mapped.reason, mapped.safeDetail, {
-                  usage: runUsage,
-                });
+          const failure = new GroundedAnalysisError(mapped.reason, mapped.safeDetail, {
+            usage: runUsage,
+            submissionDiagnostics,
+          });
           modelLogger.outcome({
             ...logBase,
             recordType: "grounded-model-outcome",
@@ -274,6 +317,7 @@ export function createGroundedAnalysisProvider(
             usage: runUsage,
             validation: failure.reason === "output-validation" ? "rejected" : "not-reached",
             cacheTransition: "none",
+            submissionDiagnostics,
             failureCategory: failure.reason,
           });
           throw failure;
@@ -285,11 +329,12 @@ export function createGroundedAnalysisProvider(
         occurredAt: now(),
         outcome: "completed",
         durationMs: Math.max(0, Math.round(nowMs() - startedAt)),
-        usage: result.usage,
+        usage: result.result.usage,
         validation: "accepted",
         cacheTransition: "none",
+        submissionDiagnostics: result.submissionDiagnostics,
       });
-      return result;
+      return result.result;
     },
   };
   return Object.freeze(provider);

@@ -14,6 +14,21 @@ export type GroundedAnalysisFailureReason =
   | "transport"
   | "internal";
 
+export type GroundedSubmissionDiagnostics =
+  | { state: "unavailable" }
+  | {
+      state: "observed";
+      toolCallAttempts: number;
+      acceptedResultPresent: boolean;
+      rejectedAttempts: number;
+      assistantNonemptyTextPresent?: boolean;
+      assistantTextTurns?: number;
+      validationIssues?: {
+        code: string;
+        path: (string | number)[];
+      }[];
+    };
+
 export class GroundedAnalysisError extends Error {
   readonly usage?: GroundedProviderUsage | GroundedUsageUnavailable;
 
@@ -22,12 +37,16 @@ export class GroundedAnalysisError extends Error {
     readonly safeDetail?: string,
     options?: ErrorOptions & {
       usage?: GroundedProviderUsage | GroundedUsageUnavailable;
+      submissionDiagnostics?: GroundedSubmissionDiagnostics;
     },
   ) {
     super(safeDetail ?? reason, options);
     this.name = "GroundedAnalysisError";
     this.usage = options?.usage;
+    this.submissionDiagnostics = options?.submissionDiagnostics;
   }
+
+  readonly submissionDiagnostics?: GroundedSubmissionDiagnostics;
 }
 
 interface FailureEvidence {
@@ -84,6 +103,11 @@ export function mapGroundedAnalysisFailure(
   }
   if (error instanceof GroundedCapabilityError) {
     return new GroundedAnalysisError("extension-binding", error.safeDetail, { cause: error });
+  }
+  if (/\binvalid structured submission\b/.test(evidence.text)) {
+    return new GroundedAnalysisError("output-validation", "invalid-structured-submission", {
+      cause: error,
+    });
   }
 
   if (evidence.status === 401 || evidence.status === 403) {

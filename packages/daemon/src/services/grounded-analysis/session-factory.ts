@@ -9,7 +9,7 @@ import {
   type ExtensionFactory,
   type LoadExtensionsResult,
 } from "@earendil-works/pi-coding-agent";
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import type { GroundedSessionCapabilities } from "./capability-inspection.js";
 import { GroundedAnalysisError } from "./failure-mapping.js";
 import type { GroundedStructuredSubmission } from "./structured-submission.js";
@@ -69,6 +69,7 @@ export interface PiGroundedAnalysisSessionFactoryOptions {
   extensionIds: readonly string[];
   agentDir?: string;
   extensionFactories?: readonly ExtensionFactory[];
+  onPayload?: SimpleStreamOptions["onPayload"];
   onLifecycleStage?: (stage: GroundedSessionLifecycleStage) => void;
 }
 
@@ -99,6 +100,7 @@ function createBoundSession(
   extensionsResult: LoadExtensionsResult,
   lifecycle: (stage: GroundedSessionLifecycleStage) => void,
   exactPromptHandler: (...args: unknown[]) => unknown,
+  submission: GroundedStructuredSubmission<unknown>,
 ): GroundedAnalysisSession {
   let extensionsBound = false;
   let resolvedModel: Model<Api> | undefined;
@@ -146,6 +148,7 @@ function createBoundSession(
       const previousShouldStopAfterTurn = session.agent.shouldStopAfterTurn;
       session.agent.shouldStopAfterTurn = async (context, activeSignal) => {
         if (await previousShouldStopAfterTurn?.(context, activeSignal)) return true;
+        if (submission.getAttemptState().acceptedResultPresent) return true;
         return assistantMessages.length >= GROUNDED_MAX_INFERENCE_ROUND_TRIPS;
       };
       const abort = () => void session.abort();
@@ -256,7 +259,20 @@ export function createPiGroundedAnalysisSessionFactory(
         noTools: "builtin",
         customTools: [submission.tool],
       });
-      return createBoundSession(session, extensionsResult, lifecycle, exactPromptHandler);
+      if (options.onPayload) {
+        const existingOnPayload = session.agent.onPayload;
+        session.agent.onPayload = async (payload, model) => {
+          const existingPayload = await existingOnPayload?.(payload, model);
+          return options.onPayload?.(existingPayload ?? payload, model);
+        };
+      }
+      return createBoundSession(
+        session,
+        extensionsResult,
+        lifecycle,
+        exactPromptHandler,
+        submission,
+      );
     },
   };
 }

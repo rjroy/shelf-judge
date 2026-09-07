@@ -299,10 +299,13 @@ export interface ReflectionPairedOutput {
   readonly outcome: ReflectionExpectedOutcome;
   readonly text: string;
   readonly source: "reflection" | "baseline";
+  readonly provider: {
+    readonly providerId: string;
+    readonly modelId: string;
+  };
 }
 export interface ReflectionReview {
   readonly reviewerId: string;
-  readonly providerIdentity: string;
   readonly lockedAt: string;
   readonly revealedAt?: string;
   readonly outputs: readonly [ReflectionPairedOutput, ReflectionPairedOutput];
@@ -435,24 +438,25 @@ export function evaluateReflectionRelease(
   evidence?: ReflectionEvaluationEvidence,
 ): ReflectionReleaseReport {
   const failures = validateCorpus();
+  const pending: string[] = [];
   if (reflectionEvaluationCorpus.some((fixture) => fixture.authorship !== "independently-attested"))
-    failures.push("fixture independent-authorship attestations are pending");
+    pending.push("fixture independent-authorship attestations are pending");
   if (!evidence)
     return {
       passed: false,
       pending: true,
       failures: [
         ...failures,
+        ...pending,
         "credentialed provider outputs and blinded human reviews are pending",
       ],
     };
   failures.push(...validateReflectionEvaluationEvidence(evidence));
   const records = new Map(evidence.records.map((record) => [record.fixtureId, record]));
-  if (
+  const incomplete =
     records.size !== reflectionEvaluationCorpus.length ||
-    reflectionEvaluationCorpus.some((fixture) => !records.has(fixture.id))
-  )
-    failures.push("every corpus fixture requires one evaluation record");
+    reflectionEvaluationCorpus.some((fixture) => !records.has(fixture.id));
+  if (incomplete) pending.push("every corpus fixture requires one evaluation record");
   const answerable = reflectionEvaluationCorpus
     .filter((fixture) => fixture.expectedOutcome === "answered")
     .map((fixture) => records.get(fixture.id))
@@ -461,6 +465,13 @@ export function evaluateReflectionRelease(
     if (!denominator || numerator / denominator < threshold)
       failures.push(`${label} is below ${threshold * 100}%`);
   };
+  if (incomplete) {
+    return {
+      passed: false,
+      pending: failures.length === 0,
+      failures: [...failures, ...pending],
+    };
+  }
   for (const questionId of reflectionQuestionIds) {
     const question = answerable.filter((record) => record.fixtureId.startsWith(questionId));
     for (const dimension of ["grounding", "scopeHonesty", "citationInspectability"] as const)
@@ -498,7 +509,11 @@ export function evaluateReflectionRelease(
     answerable.length,
     0.7,
   );
-  return { passed: failures.length === 0, pending: failures.length > 0, failures };
+  return {
+    passed: failures.length === 0 && pending.length === 0,
+    pending: failures.length === 0 && pending.length > 0,
+    failures: [...failures, ...pending],
+  };
 }
 export function validateCorpus(): string[] {
   const failures: string[] = [];
