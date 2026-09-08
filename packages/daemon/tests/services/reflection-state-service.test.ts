@@ -469,6 +469,76 @@ describe("Reflection state service", () => {
     });
   });
 
+  test("keeps an in-process attempt live across read and publishes its durable result", async () => {
+    const { storage, coordinator } = setup();
+    let recoveryCalls = 0;
+    const service = createReflectionStateService({
+      storage,
+      now: () => TIME,
+      coordinator,
+      recoverBeforeUse: async () => {
+        recoveryCalls += 1;
+        const state = await storage.loadState();
+        const active = state.questions[0];
+        if (active.attempt.state !== "refreshing") return;
+        await storage.saveState({
+          ...state,
+          questions: state.questions.map((question, index) =>
+            index === 0
+              ? {
+                  ...question,
+                  attempt: {
+                    state: "unavailable" as const,
+                    reason: "internal" as const,
+                    safeDetail: "daemon-restarted",
+                    occurredAt: TIME,
+                  },
+                }
+              : question,
+          ) as typeof state.questions,
+        });
+      },
+    });
+
+    const fence = await service.startAttempt("repeated-values", "same-process");
+    expect((await service.read(current()))[0].attempt.state).toBe("refreshing");
+    expect(await service.completeAttempt(fence, completed("repeated-values"), () => current())).not.toBe(
+      false,
+    );
+
+    expect(recoveryCalls).toBe(1);
+    expect((await storage.loadState()).questions[0]).toMatchObject({
+      cache: { outcome: "abstained" },
+      attempt: { state: "idle" },
+    });
+  });
+
+  test("fences an active attempt after an external durable state replacement", async () => {
+    const { storage, coordinator } = setup();
+    const service = createReflectionStateService({
+      storage,
+      now: () => TIME,
+      coordinator,
+      recoverBeforeUse: async () => {},
+    });
+    const fence = await service.startAttempt("repeated-values", "externally-replaced");
+    const externalState = await storage.loadState();
+    await storage.saveState({
+      ...externalState,
+      questions: externalState.questions.map((question, index) =>
+        index === 0 ? { ...question, attempt: { state: "idle" as const } } : question,
+      ) as typeof externalState.questions,
+    });
+
+    expect(
+      await service.completeAttempt(fence, completed("repeated-values"), () => current()),
+    ).toBe(false);
+    expect((await storage.loadState()).questions[0]).toMatchObject({
+      cache: null,
+      attempt: { state: "idle" },
+    });
+  });
+
   test("rejects late completion and terminal updates from an older attempt", async () => {
     const { createService } = setup();
     const service = createService();

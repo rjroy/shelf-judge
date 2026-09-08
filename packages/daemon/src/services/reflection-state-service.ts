@@ -190,6 +190,7 @@ export function createReflectionStateService(
   const issuedPublications = new WeakSet<ReflectionAttemptPublication>();
   let initialized: Promise<{ settings: ReflectionSettings; state: ReflectionDurableState }> | null =
     null;
+  const liveAttemptIds = new Set<string>();
 
   function initialize(): Promise<{ settings: ReflectionSettings; state: ReflectionDurableState }> {
     if (initialized !== null) return initialized;
@@ -224,8 +225,19 @@ export function createReflectionStateService(
 
   function runExclusive<Value>(operation: () => Promise<Value>): Promise<Value> {
     return deps.coordinator.runExclusive(async () => {
-      await deps.recoverBeforeUse?.();
-      if (deps.recoverBeforeUse !== undefined) initialized = null;
+      // Recovery classifies persisted refreshing attempts as interrupted daemon work.
+      // Do not run it between operations for an unchanged attempt owned by this
+      // process, but do run it when the durable state changed underneath that attempt.
+      let shouldRecover = liveAttemptIds.size === 0 || initialized === null;
+      if (!shouldRecover && initialized !== null) {
+        const [context, persistedState] = await Promise.all([initialized, deps.storage.loadState()]);
+        shouldRecover =
+          deps.storage.stateIdentity(context.state) !== deps.storage.stateIdentity(persistedState);
+      }
+      if (shouldRecover) {
+        await deps.recoverBeforeUse?.();
+        if (deps.recoverBeforeUse !== undefined) initialized = null;
+      }
       return operation();
     });
   }
@@ -446,6 +458,7 @@ export function createReflectionStateService(
             attempt: { state: "refreshing", batchId, attemptId, startedAt: now() },
           })),
         );
+        liveAttemptIds.add(attemptId);
         return {
           questionId,
           batchId,
@@ -461,38 +474,42 @@ export function createReflectionStateService(
       loadCurrentSources,
     ): Promise<ReflectionAttemptPublication | false> {
       return runExclusive(async () => {
-        const validated = ReflectionCompletedSchema.parse(result);
-        if (validated.evidenceIdentity.questionId !== fence.questionId) {
-          throw new Error("Reflection result question does not match its attempt fence");
+        try {
+          const validated = ReflectionCompletedSchema.parse(result);
+          if (validated.evidenceIdentity.questionId !== fence.questionId) {
+            throw new Error("Reflection result question does not match its attempt fence");
+          }
+          const context = await initialize();
+          const sources = await loadCurrentSources();
+          const index = questionIndex(fence.questionId);
+          if (
+            context.state.deletionGeneration !== fence.deletionGeneration ||
+            changedCategories(validated, sources).length > 0 ||
+            !context.settings.questions[index].enabled ||
+            context.state.questions[index].attempt.state !== "refreshing" ||
+            context.state.questions[index].attempt.batchId !== fence.batchId ||
+            context.state.questions[index].attempt.attemptId !== fence.attemptId
+          ) {
+            return false;
+          }
+          const priorCache = context.state.questions[index].cache;
+          await updateState((state) =>
+            replaceQuestion(state, fence.questionId, (question) => ({
+              ...question,
+              cache: validated,
+              attempt: { state: "idle" },
+            })),
+          );
+          const publication: ReflectionAttemptPublication = Object.freeze({
+            fence: Object.freeze({ ...fence }),
+            priorCache: priorCache === null ? null : structuredClone(priorCache),
+            replacementCache: structuredClone(validated),
+          });
+          issuedPublications.add(publication);
+          return publication;
+        } finally {
+          liveAttemptIds.delete(fence.attemptId);
         }
-        const context = await initialize();
-        const sources = await loadCurrentSources();
-        const index = questionIndex(fence.questionId);
-        if (
-          context.state.deletionGeneration !== fence.deletionGeneration ||
-          changedCategories(validated, sources).length > 0 ||
-          !context.settings.questions[index].enabled ||
-          context.state.questions[index].attempt.state !== "refreshing" ||
-          context.state.questions[index].attempt.batchId !== fence.batchId ||
-          context.state.questions[index].attempt.attemptId !== fence.attemptId
-        ) {
-          return false;
-        }
-        const priorCache = context.state.questions[index].cache;
-        await updateState((state) =>
-          replaceQuestion(state, fence.questionId, (question) => ({
-            ...question,
-            cache: validated,
-            attempt: { state: "idle" },
-          })),
-        );
-        const publication: ReflectionAttemptPublication = Object.freeze({
-          fence: Object.freeze({ ...fence }),
-          priorCache: priorCache === null ? null : structuredClone(priorCache),
-          replacementCache: structuredClone(validated),
-        });
-        issuedPublications.add(publication);
-        return publication;
       });
     },
 
@@ -588,40 +605,48 @@ export function createReflectionStateService(
 
     cancelAttempt(fence): Promise<boolean> {
       return runExclusive(async () => {
-        const context = await initialize();
-        const attempt = context.state.questions[questionIndex(fence.questionId)].attempt;
-        if (
-          context.state.deletionGeneration !== fence.deletionGeneration ||
-          attempt.state !== "refreshing" ||
-          attempt.batchId !== fence.batchId ||
-          attempt.attemptId !== fence.attemptId
-        ) {
-          return false;
+        try {
+          const context = await initialize();
+          const attempt = context.state.questions[questionIndex(fence.questionId)].attempt;
+          if (
+            context.state.deletionGeneration !== fence.deletionGeneration ||
+            attempt.state !== "refreshing" ||
+            attempt.batchId !== fence.batchId ||
+            attempt.attemptId !== fence.attemptId
+          ) {
+            return false;
+          }
+          await setAttempt(fence.questionId, { state: "cancelled", occurredAt: now() });
+          return true;
+        } finally {
+          liveAttemptIds.delete(fence.attemptId);
         }
-        await setAttempt(fence.questionId, { state: "cancelled", occurredAt: now() });
-        return true;
       });
     },
 
     failAttempt(fence, reason, safeDetail): Promise<boolean> {
       return runExclusive(async () => {
-        const context = await initialize();
-        const attempt = context.state.questions[questionIndex(fence.questionId)].attempt;
-        if (
-          context.state.deletionGeneration !== fence.deletionGeneration ||
-          attempt.state !== "refreshing" ||
-          attempt.batchId !== fence.batchId ||
-          attempt.attemptId !== fence.attemptId
-        ) {
-          return false;
+        try {
+          const context = await initialize();
+          const attempt = context.state.questions[questionIndex(fence.questionId)].attempt;
+          if (
+            context.state.deletionGeneration !== fence.deletionGeneration ||
+            attempt.state !== "refreshing" ||
+            attempt.batchId !== fence.batchId ||
+            attempt.attemptId !== fence.attemptId
+          ) {
+            return false;
+          }
+          await setAttempt(fence.questionId, {
+            state: "unavailable",
+            reason,
+            ...(safeDetail === undefined ? {} : { safeDetail }),
+            occurredAt: now(),
+          });
+          return true;
+        } finally {
+          liveAttemptIds.delete(fence.attemptId);
         }
-        await setAttempt(fence.questionId, {
-          state: "unavailable",
-          reason,
-          ...(safeDetail === undefined ? {} : { safeDetail }),
-          occurredAt: now(),
-        });
-        return true;
       });
     },
 

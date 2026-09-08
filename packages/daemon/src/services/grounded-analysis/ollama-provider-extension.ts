@@ -1,6 +1,8 @@
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { SimpleStreamOptions } from "@earendil-works/pi-ai";
 
+export const OLLAMA_GROUNDED_MAX_TOKENS = 1024;
+
 /**
  * Makes Pi's OpenAI-compatible request match Ollama's documented controls.
  * This hook is intentionally opt-in at the evaluation session call site.
@@ -21,7 +23,7 @@ export function createOllamaRequestPayloadHook(
 /** Registers the operator-selected local model without discovering user extensions. */
 export function createOllamaProviderExtension(
   modelId: string,
-  maxTokens = 512,
+  maxTokens = OLLAMA_GROUNDED_MAX_TOKENS,
   baseUrl = "http://127.0.0.1:11434/v1",
 ): ExtensionFactory {
   return (pi) => {

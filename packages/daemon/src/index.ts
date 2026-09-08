@@ -15,6 +15,7 @@ import { createDisplayedFitnessService } from "./services/displayed-fitness-serv
 import { createIntentionService } from "./services/intention-service.js";
 import { createOwnerGameNoteService } from "./services/owner-game-note-service.js";
 import { createGroundedAnalysisProvider } from "./services/grounded-analysis/provider.js";
+import { createProviderSessionExtensions } from "./services/grounded-analysis/provider-extension-factories.js";
 import { toErrorMessage } from "@shelf-judge/shared";
 import { createReflectionRuntime } from "./services/reflection-runtime.js";
 
@@ -35,6 +36,11 @@ async function main() {
     configuration: envConfig.groundedAnalysis,
     piSessionFactory: {
       cwd: process.cwd(),
+      ...(envConfig.groundedAnalysis.status === "configured"
+        ? {
+            ...createProviderSessionExtensions(envConfig.groundedAnalysis),
+          }
+        : {}),
     },
   });
 
