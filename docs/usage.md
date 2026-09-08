@@ -12,6 +12,7 @@ Shelf Judge is a board game collection curation tool. It scores every game in yo
 - [Game Detail Page](#game-detail-page)
 - [Tournament](#tournament)
 - [Collection Profile](#collection-profile)
+- [Optional Reflections](#optional-reflections)
 - [Redundancy](#redundancy)
 - [Shelf Configuration and Capacity](#shelf-configuration-and-capacity)
 - [Import from BoardGameGeek](#import-from-boardgamegeek)
@@ -286,6 +287,58 @@ Before upgrading, stop the daemon and copy the complete data directory. To recov
 - Entity associations describe this collection only. Shelf Judge does not claim causation, statistical significance, population inference, probability, or creator responsibility.
 - Games with predicted fitness or incomplete entity metadata are excluded with an explicit reason rather than estimated.
 - The profile describes current collection evidence. It does not advise what to buy, sell, keep, or remove.
+
+## Optional Reflections
+
+Optional reflections are a separate, model-assisted subsection of the first
+Profile question. They never run when the Profile loads, recomputes, or changes.
+Use **Refresh reflections** (or an individual question's refresh action) and
+acknowledge the disclosure before any Reflection evidence leaves the local
+application boundary.
+
+The daemon operator must configure a grounded provider ID, model ID, and JSON
+extension allowlist in the daemon launch environment. Missing or invalid model
+configuration leaves the deterministic Profile available and reports
+`model-configuration` for Reflection operations. Shelf Judge does not silently
+select a provider or model.
+
+Before a refresh, the web UI and CLI identify the provider and model, relevant
+owner notes and deterministic evidence categories to be sent, local retention,
+the provider-policy boundary, the lack of a fixed application token or monetary
+cap, the number of model operations and maximum provider round trips, and how to
+cancel. Provider processing and retention follow that provider's configuration
+and policy. Cancellation stops subsequent local work, but content already sent
+may have been processed and may have incurred cost.
+
+Each enabled question can be refreshed, disabled, or re-enabled independently.
+Disabling deletes its cached Reflection and does not change source collection
+data. **Delete all reflections** removes all cached output but preserves source
+data, settings, and provider configuration. Results can be answered or honestly
+abstained; an abstention is a valid outcome, not an error.
+
+Non-note source changes make a cached result stale. Stale prose remains hidden
+until you explicitly show it and its citations resolve to captured evidence
+snapshots. Changing or clearing an examined note, or permanently deleting an
+examined game, instead purges dependent Reflection output and retained note
+excerpts immediately. Reflections are derived local artifacts, not backups of
+notes. Neither local deletion nor provider processing provides a secure-erasure
+guarantee for process memory, filesystem history, backups, or provider systems.
+
+The CLI equivalents are:
+
+```text
+shelf-judge profile reflections [--json]
+shelf-judge profile reflections refresh [--question <id>] [--json] [--acknowledge-disclosure]
+shelf-judge profile reflections cancel <batch-id> --capability <token> [--json]
+shelf-judge profile reflections enable <question-id> [--json]
+shelf-judge profile reflections disable <question-id> [--json]
+shelf-judge profile reflections delete [--json]
+```
+
+Noninteractive and JSON refreshes require `--acknowledge-disclosure`. The CLI
+prints the batch ID and cancellation capability before work begins. Avoid placing
+the capability in shell history when possible; `Ctrl-C` in the initiating process
+uses the same cancellation operation.
 
 ---
 

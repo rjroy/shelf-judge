@@ -1,6 +1,10 @@
 import { defineConfig } from "@playwright/test";
 
-const socketPath = "/tmp/shelf-judge-playwright.sock";
+const fixturePort = process.env.SHELF_JUDGE_E2E_FIXTURE_PORT ?? "3101";
+const webPort = process.env.SHELF_JUDGE_E2E_WEB_PORT ?? "3100";
+const socketPath = process.env.SHELF_JUDGE_E2E_SOCKET ?? "/tmp/shelf-judge-playwright.sock";
+const fixtureUrl = `http://127.0.0.1:${fixturePort}`;
+const webUrl = `http://127.0.0.1:${webPort}`;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -10,7 +14,7 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? "github" : "list",
   use: {
-    baseURL: "http://127.0.0.1:3100",
+    baseURL: webUrl,
     browserName: "chromium",
     colorScheme: "light",
     trace: "retain-on-failure",
@@ -30,13 +34,16 @@ export default defineConfig({
   webServer: [
     {
       command: "bun e2e/fixture-daemon.ts",
-      url: "http://127.0.0.1:3101/health",
-      env: { SHELF_JUDGE_SOCKET: socketPath },
+      url: `${fixtureUrl}/health`,
+      env: {
+        SHELF_JUDGE_E2E_FIXTURE_PORT: fixturePort,
+        SHELF_JUDGE_SOCKET: socketPath,
+      },
       reuseExistingServer: false,
     },
     {
-      command: "bun run dev --hostname 127.0.0.1 --port 3100",
-      url: "http://127.0.0.1:3100",
+      command: `bun run dev --hostname 127.0.0.1 --port ${webPort}`,
+      url: webUrl,
       env: { SHELF_JUDGE_SOCKET: socketPath },
       reuseExistingServer: !process.env.CI,
     },

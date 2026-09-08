@@ -611,6 +611,19 @@ staleness, purge, and clients remain feature-owned.
    semantic scoring as automatically proven. Mark the plan `executed` and
    specification `implemented` only after the remaining technical gates pass.
 
+### Final validation record
+
+The terminal validation record is maintained in
+`.lore/work/grounded-profile-reflections-final-validation.md`. It
+records exact command outcomes, the configured-provider output-readiness
+evidence from Step 11, requirement-to-evidence traces, and the separate
+pre-existing root-format baseline. It must not turn diagnostic evaluation,
+authorship, corpus, reviewer, baseline, semantic, or usefulness results into
+release gates. The final isolated browser run passed 128 tests with 60 intentional
+project-selection skips and no failures after secondary test contexts were
+corrected to respect the configured web port. Independent review repeated the
+full browser gate and accepted the final technical validation record.
+
 ## Dependency order and implementation task boundaries
 
 1. Step 1 blocks all model and feature implementation contracts.

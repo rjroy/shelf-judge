@@ -14,6 +14,7 @@ const gameId = "game-4";
 const gamePath = `/games/${gameId}`;
 const hostilePrefix =
   '<img src=x onerror="window.__ownerNoteExecuted=true"><script>alert(1)</script>';
+const webUrl = `http://127.0.0.1:${process.env.SHELF_JUDGE_E2E_WEB_PORT ?? "3100"}`;
 
 interface NetworkEvidence {
   externalRequests: string[];
@@ -637,7 +638,7 @@ test("native Chromium page zoom 200 percent records setting and complete owner-n
       executablePath: browser.browserType().executablePath(),
       headless: true,
       viewport: null,
-      baseURL: "http://127.0.0.1:3100",
+      baseURL: webUrl,
       colorScheme: "light",
       args: ["--window-size=1440,900", "--window-position=0,0"],
     });

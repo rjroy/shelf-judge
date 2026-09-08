@@ -1,6 +1,8 @@
 import { chromium, expect, test, type BrowserContext } from "@playwright/test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 
+const webUrl = `http://127.0.0.1:${process.env.SHELF_JUDGE_E2E_WEB_PORT ?? "3100"}`;
+
 async function reset(page: import("@playwright/test").Page): Promise<void> {
   const response = await page.request.post("/api/daemon/test/reset", {
     data: { scenario: "profile" },
@@ -218,7 +220,7 @@ test("native Chromium 200 percent page zoom records reflection width evidence", 
       executablePath: browser.browserType().executablePath(),
       headless: true,
       viewport: null,
-      baseURL: "http://127.0.0.1:3100",
+      baseURL: webUrl,
       args: ["--window-size=1440,900", "--window-position=0,0"],
     });
     const settingsPage = context.pages()[0] ?? (await context.newPage());

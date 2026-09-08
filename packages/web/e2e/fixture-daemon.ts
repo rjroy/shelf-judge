@@ -37,6 +37,10 @@ import {
 
 const socketPath = process.env.SHELF_JUDGE_SOCKET;
 if (socketPath === undefined) throw new Error("SHELF_JUDGE_SOCKET is required");
+const healthPort = Number(process.env.SHELF_JUDGE_E2E_FIXTURE_PORT ?? "3101");
+if (!Number.isSafeInteger(healthPort) || healthPort < 1 || healthPort > 65_535) {
+  throw new Error("SHELF_JUDGE_E2E_FIXTURE_PORT must be a valid TCP port");
+}
 const ownerNotePersistencePath = `${socketPath}.owner-notes.json`;
 
 const observedAt = "2026-08-28T10:00:00.000Z";
@@ -1700,7 +1704,7 @@ async function handle(request: Request): Promise<Response> {
 const socketServer = Bun.serve({ unix: socketPath, fetch: handle, idleTimeout: 0 as never });
 const healthServer = Bun.serve({
   hostname: "127.0.0.1",
-  port: 3101,
+  port: healthPort,
   fetch: () => new Response("ok"),
 });
 
