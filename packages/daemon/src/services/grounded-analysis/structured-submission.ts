@@ -3,6 +3,7 @@ import { Type, type TSchema } from "typebox";
 import { z } from "zod";
 
 export const GROUNDED_SUBMISSION_TOOL_NAME = "submit_grounded_analysis";
+export const ANALYST_EVIDENCE_RETRIEVAL_TOOL_NAME = "retrieve_analyst_evidence";
 
 export class GroundedStructuredSubmissionValidationError extends Error {
   readonly issues: readonly z.ZodIssue[];
@@ -86,6 +87,13 @@ export function createGroundedSubmissionOnlyToolManifest(feature: string) {
   return Object.freeze({
     feature,
     toolNames: Object.freeze([GROUNDED_SUBMISSION_TOOL_NAME] as const),
+  });
+}
+
+export function createAnalystToolManifest() {
+  return Object.freeze({
+    feature: "collection-analyst",
+    toolNames: Object.freeze([ANALYST_EVIDENCE_RETRIEVAL_TOOL_NAME, GROUNDED_SUBMISSION_TOOL_NAME]),
   });
 }
 

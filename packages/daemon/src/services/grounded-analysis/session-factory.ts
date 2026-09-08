@@ -13,6 +13,7 @@ import type { Api, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import type { GroundedSessionCapabilities } from "./capability-inspection.js";
 import { GroundedAnalysisError } from "./failure-mapping.js";
 import type { GroundedStructuredSubmission } from "./structured-submission.js";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 export type GroundedSessionLifecycleStage =
   | "resource-reload"
@@ -45,6 +46,13 @@ export interface GroundedSessionRunResult {
 }
 
 export const GROUNDED_MAX_INFERENCE_ROUND_TRIPS = 2;
+export const ANALYST_MAX_INFERENCE_ROUND_TRIPS = 4;
+
+function assertFeatureInferenceRoundTripLimit(limit: number): void {
+  if (limit !== GROUNDED_MAX_INFERENCE_ROUND_TRIPS && limit !== ANALYST_MAX_INFERENCE_ROUND_TRIPS) {
+    throw new Error("Grounded inference round-trip limit is not feature-authorized");
+  }
+}
 
 export class GroundedSessionRunError extends Error {
   constructor(
@@ -69,6 +77,8 @@ export interface GroundedAnalysisSessionFactory {
   create<Output>(input: {
     systemPrompt: string;
     submission: GroundedStructuredSubmission<Output>;
+    retrievalTools?: readonly ToolDefinition[];
+    maxInferenceRoundTrips?: number;
   }): Promise<GroundedAnalysisSession>;
 }
 
@@ -129,6 +139,7 @@ function createBoundSession(
   lifecycle: (stage: GroundedSessionLifecycleStage) => void,
   exactPromptHandler: (...args: unknown[]) => unknown,
   submission: GroundedStructuredSubmission<unknown>,
+  maxInferenceRoundTrips: number,
 ): GroundedAnalysisSession {
   let extensionsBound = false;
   let resolvedModel: Model<Api> | undefined;
@@ -177,7 +188,7 @@ function createBoundSession(
       session.agent.shouldStopAfterTurn = async (context, activeSignal) => {
         if (await previousShouldStopAfterTurn?.(context, activeSignal)) return true;
         if (submission.getAttemptState().acceptedResultPresent) return true;
-        return assistantMessages.length >= GROUNDED_MAX_INFERENCE_ROUND_TRIPS;
+        return assistantMessages.length >= maxInferenceRoundTrips;
       };
       const abort = () => void session.abort();
       signal.addEventListener("abort", abort, { once: true });
@@ -243,7 +254,13 @@ export function createPiGroundedAnalysisSessionFactory(
   const extensionIds = Object.freeze([...options.extensionIds]);
   const extensionFactories = Object.freeze([...(options.extensionFactories ?? [])]);
   return {
-    async create({ systemPrompt, submission }) {
+    async create({
+      systemPrompt,
+      submission,
+      retrievalTools = [],
+      maxInferenceRoundTrips = GROUNDED_MAX_INFERENCE_ROUND_TRIPS,
+    }) {
+      assertFeatureInferenceRoundTripLimit(maxInferenceRoundTrips);
       const settingsManager = SettingsManager.inMemory({
         packages: [],
         extensions: [],
@@ -286,7 +303,7 @@ export function createPiGroundedAnalysisSessionFactory(
         sessionManager: SessionManager.inMemory(cwd),
         settingsManager,
         noTools: "builtin",
-        customTools: [submission.tool],
+        customTools: [...retrievalTools, submission.tool],
       });
       if (options.onPayload) {
         const existingOnPayload = session.agent.onPayload;
@@ -301,6 +318,7 @@ export function createPiGroundedAnalysisSessionFactory(
         lifecycle,
         exactPromptHandler,
         submission,
+        maxInferenceRoundTrips,
       );
     },
   };

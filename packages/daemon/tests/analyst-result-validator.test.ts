@@ -87,18 +87,25 @@ describe("Analyst structured result validation", () => {
       valid: true,
       result: result(),
     });
-    for (const citation of [
-      { ...result().citations[0], citationId: "fabricated" },
-      { ...result().citations[0], sourceId: "other-game" },
-      { ...result().citations[0], sourceVersion: "2" },
-    ])
+    for (const [citation, field] of [
+      [{ ...result().citations[0], citationId: "fabricated" }, "evidence"],
+      [{ ...result().citations[0], sourceId: "other-game" }, "sourceId"],
+      [{ ...result().citations[0], sourceVersion: "2" }, "sourceVersion"],
+    ] as const) {
+      const submission = { ...result(), citations: [citation] };
+      if (citation.citationId === "fabricated")
+        submission.blocks = [{ ...submission.blocks[0], citationIds: ["fabricated"] }];
       expect(
         validateAnalystResult({
-          submission: { ...result(), citations: [citation] },
+          submission,
           evidence: snapshot,
           registeredCitations: result().citations,
         }),
-      ).toEqual({ valid: false });
+      ).toEqual({
+        valid: false,
+        diagnostic: { reason: "citation-mismatch", citationIndex: 0, field },
+      });
+    }
     expect(
       validateAnalystResult({
         submission: result(),
@@ -106,7 +113,7 @@ describe("Analyst structured result validation", () => {
         registeredCitations: result().citations,
         mandatoryUncertaintyCitationIds: new Set(["citation-a"]),
       }),
-    ).toEqual({ valid: false });
+    ).toEqual({ valid: false, diagnostic: { reason: "mandatory-uncertainty-missing" } });
   });
 
   test("accepts mandatory uncertainty only when the affected block states it", () => {
@@ -155,21 +162,35 @@ describe("Analyst structured result validation", () => {
   test("rejects forged server-owned citation presentation and never signs invalid output", async () => {
     const snapshot = evidence();
     const registeredCitations = result().citations;
-    for (const citation of [
-      { ...registeredCitations[0], canonicalSummary: "Forged label" },
-      { ...registeredCitations[0], testimony: true },
-      {
-        ...registeredCitations[0],
-        destination: { operationId: "shelf.collection.get", parameters: {} },
-      },
-    ]) {
+    for (const [citation, field] of [
+      [{ ...registeredCitations[0], canonicalSummary: "Forged label" }, "canonicalSummary"],
+      [{ ...registeredCitations[0], testimony: true }, "testimony"],
+      [
+        {
+          ...registeredCitations[0],
+          destination: { operationId: "shelf.collection.get", parameters: {} },
+        },
+        "destination",
+      ],
+    ] as const) {
       expect(
         validateAnalystResult({
           submission: { ...result(), citations: [citation] },
           evidence: snapshot,
           registeredCitations,
         }),
-      ).toEqual({ valid: false });
+      ).toMatchObject(
+        field === "testimony"
+          ? {
+              valid: false,
+              diagnostic: {
+                reason: "schema-invalid",
+                code: "custom",
+                path: ["citations", 0, "testimony"],
+              },
+            }
+          : { valid: false, diagnostic: { reason: "citation-mismatch", citationIndex: 0, field } },
+      );
     }
     const completion = createAnalystCompletionService({
       attestationService: createAnalystAttestationService(new Uint8Array(32).fill(1)),

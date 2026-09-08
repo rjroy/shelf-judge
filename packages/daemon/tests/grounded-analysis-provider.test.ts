@@ -8,7 +8,7 @@ import {
   type SimpleStreamOptions,
   type ToolCall,
 } from "@earendil-works/pi-ai";
-import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import { defineTool, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { z } from "zod";
 import {
@@ -16,6 +16,13 @@ import {
   mapGroundedAnalysisFailure,
 } from "../src/services/grounded-analysis/failure-mapping.js";
 import { createGroundedAnalysisProvider } from "../src/services/grounded-analysis/provider.js";
+import { createAnalystTurnService } from "../src/services/analyst-turn-service.js";
+import { AnalystEvidenceSourceChangedError } from "../src/services/analyst-evidence-service.js";
+import {
+  createAnalystEvidenceService,
+  type AnalystEvidenceService,
+} from "../src/services/analyst-evidence-service.js";
+import type { AnalystProjectionSnapshot } from "../src/services/analyst-evidence-projections.js";
 import {
   createGroundedModelLogger,
   type GroundedModelLogRecord,
@@ -27,6 +34,7 @@ import {
 } from "../src/services/grounded-analysis/ollama-provider-extension.js";
 import {
   createGroundedSubmissionOnlyToolManifest,
+  createAnalystToolManifest,
   GROUNDED_SUBMISSION_TOOL_NAME,
 } from "../src/services/grounded-analysis/structured-submission.js";
 
@@ -51,7 +59,14 @@ interface LocalProviderControls {
     | "cancel-no-message"
     | "repeat-malformed"
     | "repeat-duplicate"
-    | "same-turn-duplicate";
+    | "same-turn-duplicate"
+    | "retrieve-then-submit"
+    | "retrieve-three-then-submit"
+    | "retrieve-until-exhausted"
+    | "analyst-retrieve-then-submit"
+    | "analyst-invalid-schema"
+    | "analyst-unknown-citation"
+    | "analyst-multi-page";
   monetaryCosts?: readonly number[];
   modelLogs?: GroundedModelLogRecord[];
 }
@@ -142,7 +157,27 @@ function localProviderExtension(controls: LocalProviderControls): ExtensionFacto
             controls.mode === "repeat-malformed" || controls.mode === "repeat-duplicate";
           const requiresSecondToolCall =
             controls.mode === "malformed-then-valid" ||
-            controls.mode === "unrelated-tool-then-valid";
+            controls.mode === "unrelated-tool-then-valid" ||
+            controls.mode === "retrieve-then-submit" ||
+            controls.mode === "retrieve-three-then-submit" ||
+            controls.mode === "retrieve-until-exhausted" ||
+            controls.mode === "analyst-retrieve-then-submit" ||
+            controls.mode === "analyst-invalid-schema" ||
+            controls.mode === "analyst-unknown-citation" ||
+            controls.mode === "analyst-multi-page";
+          const retrievalRound =
+            controls.mode === "retrieve-then-submit"
+              ? roundTrip === 1
+              : controls.mode === "retrieve-three-then-submit"
+                ? roundTrip <= 3
+                : controls.mode === "analyst-retrieve-then-submit"
+                  ? roundTrip === 1
+                  : controls.mode === "analyst-invalid-schema" ||
+                      controls.mode === "analyst-unknown-citation"
+                    ? roundTrip === 1
+                    : controls.mode === "analyst-multi-page"
+                      ? roundTrip <= 2
+                      : controls.mode === "retrieve-until-exhausted";
           if (
             (!hasToolResult || repeatedSubmission || requiresSecondToolCall) &&
             controls.mode !== "no-submission" &&
@@ -153,18 +188,101 @@ function localProviderExtension(controls: LocalProviderControls): ExtensionFacto
               type: "toolCall",
               id: `submission-${roundTrip}`,
               name:
-                controls.mode === "unrelated-tool-then-valid" && roundTrip === 1
-                  ? "unrelated_tool"
+                (controls.mode === "unrelated-tool-then-valid" && roundTrip === 1) || retrievalRound
+                  ? retrievalRound
+                    ? "retrieve_analyst_evidence"
+                    : "unrelated_tool"
                   : "submit_grounded_analysis",
               arguments: {
-                submission: {
-                  answer:
-                    controls.mode === "malformed" ||
-                    controls.mode === "repeat-malformed" ||
-                    (controls.mode === "malformed-then-valid" && roundTrip === 1)
-                      ? 42
-                      : "grounded",
-                },
+                ...(retrievalRound
+                  ? controls.mode === "analyst-retrieve-then-submit" ||
+                    controls.mode === "analyst-invalid-schema" ||
+                    controls.mode === "analyst-unknown-citation" ||
+                    controls.mode === "analyst-multi-page"
+                    ? {
+                        evidenceClasses: ["game-identity-ownership"],
+                        limit: 1,
+                        ...(controls.mode === "analyst-multi-page" && roundTrip === 2
+                          ? {
+                              cursor: z
+                                .object({ nextCursor: z.unknown() })
+                                .parse(
+                                  JSON.parse(
+                                    String(
+                                      (
+                                        context.messages.findLast(
+                                          (message) => message.role === "toolResult",
+                                        )?.content[0] as { text?: string } | undefined
+                                      )?.text,
+                                    ),
+                                  ),
+                                ).nextCursor,
+                            }
+                          : {}),
+                      }
+                    : { page: 1 }
+                  : {
+                      submission: {
+                        ...(controls.mode === "analyst-retrieve-then-submit" ||
+                        controls.mode === "analyst-invalid-schema" ||
+                        controls.mode === "analyst-unknown-citation" ||
+                        controls.mode === "analyst-multi-page"
+                          ? {
+                              ...(controls.mode === "analyst-invalid-schema"
+                                ? { outcome: "invalid" }
+                                : { outcome: "answered" }),
+                              blocks: [
+                                {
+                                  text: "Grounded",
+                                  citationIds: [
+                                    controls.mode === "analyst-multi-page"
+                                      ? "citation-b"
+                                      : controls.mode === "analyst-unknown-citation"
+                                        ? "citation-unknown"
+                                        : "citation-a",
+                                  ],
+                                },
+                              ],
+                              citations: [
+                                {
+                                  citationId:
+                                    controls.mode === "analyst-unknown-citation"
+                                      ? "citation-unknown"
+                                      : controls.mode === "analyst-multi-page"
+                                        ? "citation-b"
+                                        : "citation-a",
+                                  sourceId:
+                                    controls.mode === "analyst-multi-page" ? "game-b" : "game-a",
+                                  sourceVersion: "1",
+                                  evidenceClass: "game-identity-ownership",
+                                  canonicalSummary:
+                                    controls.mode === "analyst-multi-page"
+                                      ? "Current game B identity"
+                                      : "Current game identity",
+                                  testimony: false,
+                                  destination: {
+                                    operationId: "shelf.game.get",
+                                    parameters: {
+                                      gameId:
+                                        controls.mode === "analyst-multi-page"
+                                          ? "game-b"
+                                          : "game-a",
+                                    },
+                                  },
+                                },
+                              ],
+                              usage: { state: "unavailable" },
+                            }
+                          : {
+                              answer:
+                                controls.mode === "malformed" ||
+                                controls.mode === "repeat-malformed" ||
+                                (controls.mode === "malformed-then-valid" && roundTrip === 1)
+                                  ? 42
+                                  : "grounded",
+                            }),
+                      },
+                    }),
               },
             };
             const toolCalls =
@@ -431,6 +549,389 @@ describe("grounded-analysis provider lifecycle", () => {
     ]);
     expect(JSON.stringify(controls.modelLogs)).not.toContain("EXACT POLICY");
     expect(JSON.stringify(controls.modelLogs)).not.toContain("EXACT EVIDENCE");
+  });
+
+  test("executes an authorized Analyst retrieval before structured submission", async () => {
+    const controls: LocalProviderControls = { transmissions: [], mode: "retrieve-then-submit" };
+    const retrieval = defineTool({
+      name: "retrieve_analyst_evidence",
+      label: "Retrieve evidence",
+      description: "Read-only test retrieval",
+      parameters: Type.Object({ page: Type.Integer() }, { additionalProperties: false }),
+      execute() {
+        return Promise.resolve({
+          content: [{ type: "text", text: '{"citations":[]}' }],
+          details: undefined,
+        });
+      },
+    });
+
+    const result = await configuredProvider(controls).analyze({
+      ...request(),
+      audit: { ...request().audit, feature: "collection-analyst" },
+      allowedTools: createAnalystToolManifest(),
+      retrievalTools: [retrieval],
+    });
+
+    expect(result).toMatchObject({ output: { answer: "grounded" } });
+    expect(controls.transmissions).toHaveLength(2);
+  });
+
+  test("orchestrates an authorized Analyst evidence page through citation validation and handoff", async () => {
+    const snapshot: AnalystProjectionSnapshot = {
+      collectionId: "collection",
+      collectionRevision: 1,
+      snapshotFingerprint: "analyst-snapshot",
+      sources: [
+        {
+          evidenceClass: "game-identity-ownership",
+          sourceId: "game-a",
+          sourceVersion: "1",
+          citationId: "citation-a",
+          payload: {
+            gameId: "game-a",
+            displayName: "Game A",
+            bggId: null,
+            ownershipState: "owned",
+          },
+          canonicalSummary: "Current game identity",
+          destination: { operationId: "shelf.game.get", parameters: { gameId: "game-a" } },
+        },
+      ],
+      page: () => ({ sources: [], nextCursor: null, totalSourceCount: 1 }),
+    };
+    const evidenceService = createAnalystEvidenceService({
+      storageService: {},
+      projectionSnapshotService: { capture: () => Promise.resolve(snapshot) },
+    });
+    const controls: LocalProviderControls = {
+      transmissions: [],
+      mode: "analyst-retrieve-then-submit",
+    };
+    const service = createAnalystTurnService({
+      provider: configuredProvider(controls),
+      evidenceService,
+    });
+
+    const result = await service.run({
+      systemPrompt: "EXACT POLICY",
+      prompt: "EXACT EVIDENCE",
+      signal: new AbortController().signal,
+      audit: { ...request().audit, feature: "collection-analyst" },
+    });
+
+    expect(result).toMatchObject({
+      output: { outcome: "answered", citations: [{ citationId: "citation-a" }] },
+      retrieved: [{ citations: [{ citationId: "citation-a" }] }],
+    });
+    expect(controls.transmissions).toHaveLength(2);
+  });
+
+  test("does not capture evidence when an Analyst turn is already cancelled", () => {
+    let captures = 0;
+    const evidenceService = createAnalystEvidenceService({
+      storageService: {},
+      projectionSnapshotService: {
+        capture: () => {
+          captures += 1;
+          throw new Error("capture must not run");
+        },
+      },
+    });
+    const controller = new AbortController();
+    controller.abort();
+    const controls: LocalProviderControls = { transmissions: [] };
+
+    expect(
+      createAnalystTurnService({ provider: configuredProvider(controls), evidenceService }).run({
+        systemPrompt: "EXACT POLICY",
+        prompt: "EXACT EVIDENCE",
+        signal: controller.signal,
+        audit: { ...request().audit, feature: "collection-analyst" },
+      }),
+    ).rejects.toThrow("aborted");
+    expect(captures).toBe(0);
+    expect(controls.transmissions).toEqual([]);
+  });
+
+  test("rejects unapproved extension tools and hooks before captured evidence reaches the Analyst model", () => {
+    const snapshot: AnalystProjectionSnapshot = {
+      collectionId: "collection",
+      collectionRevision: 1,
+      snapshotFingerprint: "analyst-snapshot",
+      sources: [],
+      page: () => ({ sources: [], nextCursor: null, totalSourceCount: 0 }),
+    };
+    for (const extension of [
+      ((pi) =>
+        pi.registerTool({
+          name: "unapproved",
+          label: "Unapproved",
+          description: "Must not be visible",
+          parameters: Type.Object({}),
+          execute: () => Promise.resolve({ content: [], details: undefined }),
+        })) satisfies ExtensionFactory,
+      ((pi) => pi.on("before_agent_start", () => undefined)) satisfies ExtensionFactory,
+    ]) {
+      let captures = 0;
+      const controls: LocalProviderControls = { transmissions: [] };
+      const service = createAnalystTurnService({
+        provider: configuredProvider(controls, [extension]),
+        evidenceService: createAnalystEvidenceService({
+          storageService: {},
+          projectionSnapshotService: {
+            capture: () => {
+              captures += 1;
+              return Promise.resolve(snapshot);
+            },
+          },
+        }),
+      });
+      expect(
+        service.run({
+          systemPrompt: "EXACT POLICY",
+          prompt: "OWNER NOTE SECRET",
+          signal: new AbortController().signal,
+          audit: { ...request().audit, feature: "collection-analyst" },
+        }),
+      ).rejects.toMatchObject({ reason: "extension-binding" });
+      expect(captures).toBe(1);
+      expect(controls.transmissions).toEqual([]);
+    }
+  });
+
+  test("rejects invalid Analyst schema and unknown citations after actual retrieval", () => {
+    const snapshot: AnalystProjectionSnapshot = {
+      collectionId: "collection",
+      collectionRevision: 1,
+      snapshotFingerprint: "analyst-snapshot",
+      sources: [
+        {
+          evidenceClass: "game-identity-ownership",
+          sourceId: "game-a",
+          sourceVersion: "1",
+          citationId: "citation-a",
+          payload: {
+            gameId: "game-a",
+            displayName: "Game A",
+            bggId: null,
+            ownershipState: "owned",
+          },
+          canonicalSummary: "Current game identity",
+          destination: { operationId: "shelf.game.get", parameters: { gameId: "game-a" } },
+        },
+      ],
+      page: () => ({ sources: [], nextCursor: null, totalSourceCount: 1 }),
+    };
+    for (const mode of ["analyst-invalid-schema", "analyst-unknown-citation"] as const) {
+      const service = createAnalystTurnService({
+        provider: configuredProvider({ transmissions: [], mode }),
+        evidenceService: createAnalystEvidenceService({
+          storageService: {},
+          projectionSnapshotService: { capture: () => Promise.resolve(snapshot) },
+        }),
+      });
+      const run = service.run({
+        systemPrompt: "EXACT POLICY",
+        prompt: "EXACT EVIDENCE",
+        signal: new AbortController().signal,
+        audit: { ...request().audit, feature: "collection-analyst" },
+      });
+      if (mode === "analyst-invalid-schema") {
+        expect(run).rejects.toMatchObject({ safeDetail: "invalid-structured-submission" });
+      } else {
+        expect(run).resolves.toMatchObject({
+          valid: false,
+          reason: "invalid-submission",
+          diagnostic: { reason: "citation-mismatch", citationIndex: 0, field: "evidence" },
+        });
+      }
+    }
+  });
+
+  test("follows an opaque cursor through real evidence pages to a validated Analyst result", async () => {
+    const sources: AnalystProjectionSnapshot["sources"] = ["a", "b"].map((suffix) => ({
+      evidenceClass: "game-identity-ownership",
+      sourceId: `game-${suffix}`,
+      sourceVersion: "1",
+      citationId: `citation-${suffix}`,
+      payload: {
+        gameId: `game-${suffix}`,
+        displayName: `Game ${suffix.toUpperCase()}`,
+        bggId: null,
+        ownershipState: "owned",
+      },
+      canonicalSummary: `Current game ${suffix.toUpperCase()} identity`,
+      destination: {
+        operationId: "shelf.game.get" as const,
+        parameters: { gameId: `game-${suffix}` },
+      },
+    }));
+    const snapshot: AnalystProjectionSnapshot = {
+      collectionId: "collection",
+      collectionRevision: 1,
+      snapshotFingerprint: "analyst-snapshot",
+      sources,
+      page: () => ({ sources: [], nextCursor: null, totalSourceCount: 2 }),
+    };
+    const requests: unknown[] = [];
+    const baseEvidence = createAnalystEvidenceService({
+      storageService: {},
+      projectionSnapshotService: { capture: () => Promise.resolve(snapshot) },
+    });
+    const evidenceService: AnalystEvidenceService = {
+      ...baseEvidence,
+      retrieve: async (captured, retrievalRequest) => {
+        requests.push(structuredClone(retrievalRequest));
+        return baseEvidence.retrieve(captured, retrievalRequest);
+      },
+    };
+    const result = await createAnalystTurnService({
+      provider: configuredProvider({ transmissions: [], mode: "analyst-multi-page" }),
+      evidenceService,
+    }).run({
+      systemPrompt: "EXACT POLICY",
+      prompt: "EXACT EVIDENCE",
+      signal: new AbortController().signal,
+      audit: { ...request().audit, feature: "collection-analyst" },
+    });
+
+    expect(result).toMatchObject({
+      output: { citations: [{ citationId: "citation-b" }] },
+      retrieved: [{ scope: { exhaustive: false } }, { scope: { exhaustive: true } }],
+    });
+    expect(requests).toHaveLength(2);
+    const secondRequest = requests[1] as { cursor?: { token?: string } };
+    expect(secondRequest.cursor?.token).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
+  });
+
+  test("returns handoff-failed when the final evidence handoff throws unexpectedly", () => {
+    const snapshot: AnalystProjectionSnapshot = {
+      collectionId: "collection",
+      collectionRevision: 1,
+      snapshotFingerprint: "analyst-snapshot",
+      sources: [
+        {
+          evidenceClass: "game-identity-ownership",
+          sourceId: "game-a",
+          sourceVersion: "1",
+          citationId: "citation-a",
+          payload: {
+            gameId: "game-a",
+            displayName: "Game A",
+            bggId: null,
+            ownershipState: "owned",
+          },
+          canonicalSummary: "Current game identity",
+          destination: { operationId: "shelf.game.get", parameters: { gameId: "game-a" } },
+        },
+      ],
+      page: () => ({ sources: [], nextCursor: null, totalSourceCount: 1 }),
+    };
+    const baseEvidence = createAnalystEvidenceService({
+      storageService: {},
+      projectionSnapshotService: { capture: () => Promise.resolve(snapshot) },
+    });
+    const evidenceService: AnalystEvidenceService = {
+      ...baseEvidence,
+      handoff: () => {
+        return Promise.reject(new Error("source mutated after retrieval"));
+      },
+    };
+    expect(
+      createAnalystTurnService({
+        provider: configuredProvider({ transmissions: [], mode: "analyst-retrieve-then-submit" }),
+        evidenceService,
+      }).run({
+        systemPrompt: "EXACT POLICY",
+        prompt: "EXACT EVIDENCE",
+        signal: new AbortController().signal,
+        audit: { ...request().audit, feature: "collection-analyst" },
+      }),
+    ).resolves.toEqual({ valid: false, reason: "handoff-failed" });
+  });
+
+  test("returns source-changed only for the typed evidence-source race", () => {
+    const baseEvidence = createAnalystEvidenceService({
+      storageService: {},
+      projectionSnapshotService: {
+        capture: () =>
+          Promise.resolve({
+            collectionId: "collection",
+            collectionRevision: 1,
+            snapshotFingerprint: "analyst-snapshot",
+            sources: [],
+            page: () => ({ sources: [], nextCursor: null, totalSourceCount: 0 }),
+          }),
+      },
+    });
+    const evidenceService: AnalystEvidenceService = {
+      ...baseEvidence,
+      handoff: () => Promise.reject(new AnalystEvidenceSourceChangedError()),
+    };
+    return expect(
+      createAnalystTurnService({
+        provider: configuredProvider({ transmissions: [], mode: "analyst-retrieve-then-submit" }),
+        evidenceService,
+      }).run({
+        systemPrompt: "EXACT POLICY",
+        prompt: "EXACT EVIDENCE",
+        signal: new AbortController().signal,
+        audit: { ...request().audit, feature: "collection-analyst" },
+      }),
+    ).resolves.toEqual({ valid: false, reason: "source-changed" });
+  });
+
+  test("allows three paginated Analyst retrievals and a submission without loosening Reflection", async () => {
+    const controls: LocalProviderControls = {
+      transmissions: [],
+      mode: "retrieve-three-then-submit",
+    };
+    const retrieval = defineTool({
+      name: "retrieve_analyst_evidence",
+      label: "Retrieve evidence",
+      description: "Read-only test retrieval",
+      parameters: Type.Object({ page: Type.Integer() }, { additionalProperties: false }),
+      execute() {
+        return Promise.resolve({ content: [{ type: "text", text: "page" }], details: undefined });
+      },
+    });
+    const analyst = await configuredProvider(controls).analyze({
+      ...request(),
+      audit: { ...request().audit, feature: "collection-analyst" },
+      allowedTools: createAnalystToolManifest(),
+      retrievalTools: [retrieval],
+    });
+    expect(analyst).toMatchObject({ output: { answer: "grounded" } });
+    expect(controls.transmissions).toHaveLength(4);
+
+    const reflection = await configuredProvider({ transmissions: [] }).analyze(request());
+    expect(reflection.usage).toMatchObject({ inferenceRoundTrips: 1 });
+  });
+
+  test("exhausts the Analyst feature ceiling when retrieval never submits", async () => {
+    const controls: LocalProviderControls = { transmissions: [], mode: "retrieve-until-exhausted" };
+    const retrieval = defineTool({
+      name: "retrieve_analyst_evidence",
+      label: "Retrieve evidence",
+      description: "Read-only test retrieval",
+      parameters: Type.Object({ page: Type.Integer() }, { additionalProperties: false }),
+      execute() {
+        return Promise.resolve({ content: [{ type: "text", text: "page" }], details: undefined });
+      },
+    });
+    const failure = await captureFailure(
+      configuredProvider(controls).analyze({
+        ...request(),
+        audit: { ...request().audit, feature: "collection-analyst" },
+        allowedTools: createAnalystToolManifest(),
+        retrievalTools: [retrieval],
+      }),
+    );
+    expect(failure).toMatchObject({ safeDetail: "missing-structured-submission" });
+    expect(controls.transmissions).toHaveLength(4);
   });
 
   test("owns immutable configuration and session extension snapshots", async () => {

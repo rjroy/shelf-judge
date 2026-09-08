@@ -6,6 +6,7 @@ import {
   type GroundedUsageUnavailable,
 } from "@shelf-judge/shared";
 import type { z } from "zod";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
   assertGroundedSessionCapabilities,
   GroundedCapabilityError,
@@ -31,15 +32,24 @@ import {
 } from "./provider-configuration.js";
 import {
   createPiGroundedAnalysisSessionFactory,
+  ANALYST_MAX_INFERENCE_ROUND_TRIPS,
+  GROUNDED_MAX_INFERENCE_ROUND_TRIPS,
   type GroundedAnalysisSessionFactory,
   GroundedSessionRunError,
   type GroundedSessionRunResult,
   type PiGroundedAnalysisSessionFactoryOptions,
 } from "./session-factory.js";
 import {
+  ANALYST_EVIDENCE_RETRIEVAL_TOOL_NAME,
   createGroundedStructuredSubmission,
   GROUNDED_SUBMISSION_TOOL_NAME,
 } from "./structured-submission.js";
+
+const GROUNDED_SUBMISSION_ONLY_TOOL_NAMES = Object.freeze([GROUNDED_SUBMISSION_TOOL_NAME] as const);
+const ANALYST_TOOL_NAMES = Object.freeze([
+  ANALYST_EVIDENCE_RETRIEVAL_TOOL_NAME,
+  GROUNDED_SUBMISSION_TOOL_NAME,
+] as const);
 
 type SubmissionDiagnostics = GroundedSubmissionDiagnostics;
 
@@ -50,6 +60,8 @@ export interface GroundedAnalysisRequest<Output> {
   signal: AbortSignal;
   audit: GroundedModelAuditContext;
   allowedTools: GroundedAllowedToolManifest;
+  /** Daemon-created tools whose names must exactly match the feature manifest. */
+  retrievalTools?: readonly ToolDefinition[];
 }
 
 export interface GroundedAnalysisResult<Output> {
@@ -198,10 +210,25 @@ export function createGroundedAnalysisProvider(
     if (!configured || !sessionFactory) {
       throw new GroundedAnalysisError("model-configuration", "grounded-analysis-not-configured");
     }
+    const retrievalTools = request.retrievalTools ?? [];
+    const registeredToolNames = [
+      ...retrievalTools.map(({ name }) => name),
+      GROUNDED_SUBMISSION_TOOL_NAME,
+    ];
+    const submissionOnly =
+      allowedTools.toolNames.length === GROUNDED_SUBMISSION_ONLY_TOOL_NAMES.length &&
+      allowedTools.toolNames.every(
+        (toolName, index) => toolName === GROUNDED_SUBMISSION_ONLY_TOOL_NAMES[index],
+      );
+    const analystTools =
+      allowedTools.toolNames.length === ANALYST_TOOL_NAMES.length &&
+      ANALYST_TOOL_NAMES.every((toolName) => allowedTools.toolNames.includes(toolName));
     if (
       allowedTools.feature !== feature ||
-      allowedTools.toolNames.length !== 1 ||
-      allowedTools.toolNames[0] !== GROUNDED_SUBMISSION_TOOL_NAME
+      new Set(registeredToolNames).size !== registeredToolNames.length ||
+      allowedTools.toolNames.length !== registeredToolNames.length ||
+      allowedTools.toolNames.some((toolName) => !registeredToolNames.includes(toolName)) ||
+      (feature === "collection-analyst" ? !analystTools : !submissionOnly)
     ) {
       throw new GroundedCapabilityError("unsupported-feature-tool-manifest");
     }
@@ -228,14 +255,22 @@ export function createGroundedAnalysisProvider(
                 (text) => text.trim().length > 0,
               ),
               assistantTextTurns: runResult.assistantText.length,
-              assistantStopReasons: [...(runResult.assistantStopReasons ?? [])],
+              assistantStopReasons: [...(runResult.assistantStopReasons ?? [])].slice(0, 2),
             }),
       });
     };
     recordAttemptState();
     let session: Awaited<ReturnType<GroundedAnalysisSessionFactory["create"]>> | undefined;
     try {
-      session = await sessionFactory.create({ systemPrompt: request.systemPrompt, submission });
+      session = await sessionFactory.create({
+        systemPrompt: request.systemPrompt,
+        submission,
+        retrievalTools,
+        maxInferenceRoundTrips:
+          feature === "collection-analyst"
+            ? ANALYST_MAX_INFERENCE_ROUND_TRIPS
+            : GROUNDED_MAX_INFERENCE_ROUND_TRIPS,
+      });
       await session.bindExtensions();
       const capabilities = session.getCapabilities(allowedTools.toolNames);
       assertGroundedSessionCapabilities(capabilities, allowedTools);
