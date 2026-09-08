@@ -568,6 +568,7 @@ describe("Collection Analyst stream contracts", () => {
         type: "completed",
         terminal: true,
         result: final(),
+        noteDependencies: [],
         validationAttestation: "attestation",
       },
     ];

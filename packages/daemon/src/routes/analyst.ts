@@ -620,6 +620,7 @@ export function createAnalystRoutes(deps: AnalystRoutesDeps): AnalystRouteModule
                 conversationId: request.conversationId,
                 requestId: request.requestId,
                 result: result.output,
+                noteDependencies: uniqueDependencies,
                 validationAttestation,
               });
             }

@@ -1,7 +1,7 @@
 import { defineConfig } from "@playwright/test";
 
-const fixturePort = process.env.SHELF_JUDGE_E2E_FIXTURE_PORT ?? "3101";
-const webPort = process.env.SHELF_JUDGE_E2E_WEB_PORT ?? "3100";
+const fixturePort = process.env.SHELF_JUDGE_E2E_FIXTURE_PORT ?? "3111";
+const webPort = process.env.SHELF_JUDGE_E2E_WEB_PORT ?? "3110";
 const socketPath = process.env.SHELF_JUDGE_E2E_SOCKET ?? "/tmp/shelf-judge-playwright.sock";
 const fixtureUrl = `http://127.0.0.1:${fixturePort}`;
 const webUrl = `http://127.0.0.1:${webPort}`;
@@ -44,8 +44,8 @@ export default defineConfig({
     {
       command: `bun run dev --hostname 127.0.0.1 --port ${webPort}`,
       url: webUrl,
-      env: { SHELF_JUDGE_SOCKET: socketPath },
-      reuseExistingServer: !process.env.CI,
+      env: { SHELF_JUDGE_SOCKET: socketPath, SHELF_JUDGE_NEXT_DIST_DIR: ".next-e2e" },
+      reuseExistingServer: false,
     },
   ],
 });

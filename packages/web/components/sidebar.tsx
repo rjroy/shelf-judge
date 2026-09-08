@@ -27,6 +27,15 @@ const navGroups = [
           </svg>
         ),
       },
+      {
+        href: "/analyst",
+        name: "Collection Analyst",
+        icon: (
+          <svg className="nav-icon" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M2 2h12v9H6l-3 3v-3H2V2zm2 3h8v1H4V5zm0 2h6v1H4V7z" />
+          </svg>
+        ),
+      },
     ],
   },
   {

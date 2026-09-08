@@ -463,6 +463,7 @@ const analystStream = createGroundedStreamSchemas([
       conversationId: IdSchema,
       requestId: IdSchema,
       result: AnalystFinalSchema,
+      noteDependencies: z.array(AnalystNoteDependencySchema),
       validationAttestation: z.string().min(1),
     },
   },

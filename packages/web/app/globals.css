@@ -8852,3 +8852,14 @@ body {
     margin-top: 8px;
   }
 }
+.analyst-page { max-width: 900px; }
+.analyst-transcript { display: grid; gap: 1rem; margin: 1rem 0; }
+.analyst-message { border: 1px solid var(--border, #d1d5db); border-radius: 8px; padding: 1rem; }
+.analyst-message-owner { background: var(--surface-muted, #f3f4f6); }
+.analyst-message h2 { font-size: 1rem; margin: 0 0 .5rem; }
+.analyst-live { min-height: 1.5rem; }
+.analyst-question { display: grid; gap: .5rem; margin-top: 1rem; }
+.analyst-question textarea { min-height: 7rem; padding: .75rem; }
+.analyst-dialog-backdrop { align-items: center; background: rgb(0 0 0 / 45%); display: flex; inset: 0; justify-content: center; padding: 1rem; position: fixed; z-index: 20; }
+.analyst-dialog { background: var(--surface, white); border-radius: 8px; max-width: 38rem; padding: 1.5rem; }
+.analyst-actions { display: flex; flex-wrap: wrap; gap: .75rem; justify-content: flex-end; }
