@@ -41,6 +41,18 @@ into daemon persistence.
 
 ## Approved decisions and reconciled prerequisites
 
+### Delivery override, 2026-09-07
+
+`.lore/work/plans/notes-and-agents-delivery.md` is the concise delivery order
+for this plan. The owner judges output usefulness. Corpus quotas, blinded or
+independent review, authorship/provenance packets, baseline comparisons, and
+usefulness scores are not implementation or release gates. Retain deterministic
+evidence authorization, citation/schema validation, privacy, capability
+isolation, read-only authority, cancellation, and offline regression fixtures.
+The first usable web milestone is Steps 5, 6, and 8; it does not wait for CLI
+parity or Reflection epic closure. There is no scheduler, background trigger,
+or new agent subsystem.
+
 The source specification has `status: approved`. Its final “Decisions Requiring
 Owner Approval” section and its statement that the architecture reference still
 requires Claude Agent SDK are stale drafting language. The current authoritative
@@ -82,7 +94,7 @@ grounded-analysis, evidence, and stream primitives. Analyst contracts may extend
 those primitives but must not redefine them. Analyst implementation tasks depend
 directly on `shelf-judge-6wv.3` or `shelf-judge-6wv.4` as appropriate, not on the
 Reflection epic or on completion of Reflection-specific projections, cache,
-orchestration, CLI, web, evaluation, or release work.
+orchestration, CLI, web, or release work.
 
 ### Exact owner-note prerequisites
 
@@ -104,7 +116,7 @@ their integration gates wait for `shelf-judge-1d4.3` through `.6`. Permanent
 deletion behavior and deletion-race release evidence additionally wait for
 `shelf-judge-1d4.8`. Analyst contracts,
 non-note projections, shared provider infrastructure, transport, client shells,
-and non-note evaluation fixtures can proceed independently. Owner-note CLI, web
+and non-note deterministic fixtures can proceed independently. Owner-note CLI, web
 editor, browser validation, documentation, and epic completion are not Analyst
 prerequisites.
 
@@ -340,8 +352,9 @@ prerequisites.
 5. Enforce prohibited inference and outcome policy structurally where possible:
    empty versus insufficient evidence, prohibited action versus unsupported
    request, no generated prose as evidence, conditional suggestions carrying the
-   owner criterion, and source-class/testimony labels. Leave semantic entailment
-   and relevance to the release corpus rather than claiming schemas can prove it.
+   owner criterion, and source-class/testimony labels. Schemas do not claim to
+   prove semantic entailment or relevance; deterministic fixtures may exercise
+   known bad cases without becoming a semantic or usefulness release gate.
 
 **Validation gate:**
 
@@ -380,6 +393,11 @@ prerequisites.
    strict paginated Analyst evidence tools plus one Analyst schema-backed
    submission tool. Do not expose Reflection tools, shell, filesystem, network,
    browser, mutation, credentials, operation discovery, or general route access.
+   Extend the shared `grounded-analysis/provider.ts` and session factory narrowly
+   so an Analyst turn can register only its feature-owned, manifest-authorized
+   read-only retrieval tools alongside its submission tool. Reflection continues
+   to register its submission-only tool set; provider extensions and all other
+   model-visible tools or hooks remain rejected before evidence is supplied.
 3. Supply policy and the bounded transcript as delimited untrusted data. Continue
    pi-agent's tool loop without an Analyst application round-trip cap, stopping on
    validated terminal submission, model/provider context limit, cancellation, or
@@ -408,8 +426,13 @@ prerequisites.
 **Validation gate:**
 
 - The shared real-library local provider proves bind-before-resolution,
-  capability inspection before data, structured submission, tool-loop behavior,
-  cancellation, usage, and exact failure mapping for Analyst policy.
+  capability inspection before data, an authorized retrieval-to-structured-result
+  turn, cancellation, usage, and exact failure mapping for Analyst policy.
+- Isolation tests prove Reflection remains submission-only and that unapproved
+  retrieval tools, provider-extension tools, and hooks are rejected. Analyst
+  retrieval keeps its manifest pagination and model/provider context limits;
+  this does not loosen Reflection's `1 | 2` round-trip contract or add an
+  application-wide cap.
 - Simultaneous-conversation, guessed capability, colliding ID, request replay,
   duplicate transport, cancellation, disconnect, and source-change races produce
   at most one model operation and no cross-conversation data.
@@ -586,66 +609,25 @@ prerequisites.
   keyboard behavior, reduced motion, software-keyboard reachability, target sizes,
   and no horizontal overflow through the production proxy.
 
-## Step 9: Build the versioned Analyst evaluation corpus
+## Step 9: Retired evaluation corpus
 
-**Dependencies:**
-
-- Steps 2-5
-- Shared adversarial harness from `shelf-judge-6wv.4`
-
-**Files:**
-
-- New versioned Analyst fixture corpus and evaluator under daemon test/evaluation
-  directories
-- Shared grounded-analysis adversarial harness
-- Recorded blinded reviews, rationales, scores, and adjudications
-
-**Changes:**
-
-1. Author at least five cases in each required group: direct explanation,
-   multi-source comparison, sparse/conflicting evidence, adversarial proxy or
-   prompt content, and deliberately unanswerable questions. Include score
-   explanation, game comparison, Profile pattern challenge, note synthesis,
-   aggregate calculation, mixed jobs, conditional criteria, and all abstention
-   reasons.
-2. Record expected authorized scope, source-class meanings, required/prohibited
-   claims, exact calculations, material counterexamples/confounders, expected
-   uncertainty, citations, outcome, and rationale before generation.
-3. Add structural adversarial cases for prompt injection in every untrusted source,
-   capability/tool isolation, citation fabrication and mismatch, transcript
-   tampering, cross-conversation isolation, incomplete paging, proxy-to-intent
-   inference, and future note-mutation attempts.
-4. Compare Analyst output with card-only evidence in randomized blinded review.
-   Preserve two independent `0` through `3` scores and rationales for grounding,
-   scope honesty, citation inspectability, and additional usefulness. A third
-   blinded reviewer adjudicates disagreements; original reviews remain intact.
-5. Keep credentialed provider generation outside deterministic CI while versioning
-   corpus inputs, manifest/prompt versions, provider/model identity, outputs, and
-   review results. Deterministic CI validates fixtures, policies, thresholds, and
-   previously recorded results.
-
-**Release thresholds:**
-
-- Zero unsupported critical claims, privacy leaks, unauthorized fields,
-  capability/isolation failures, or unreported material counterexamples.
-- At least 90 percent of answerable cases score `2` or `3` for grounding, scope
-  honesty, and citation inspectability.
-- Analyst additional usefulness exceeds card-only evidence in at least 70 percent
-  of answerable cases; ties do not count.
-- Unanswerable cases pass only when both reviewers accept the exact abstention and
-  reject an invented answer.
+`shelf-judge-3p5.10` is closed as **SUPERSEDED**. Do not implement a versioned
+corpus quota, reviewer/blinding workflow, authorship/provenance artifacts,
+scores, baseline comparison, or usefulness threshold. Keep the deterministic
+adversarial fixtures already required by the implementation steps for safety and
+regression detection; they are not a semantic or usefulness release gate.
 
 ## Step 10: Complete persisted-flow, privacy, documentation, and release validation
 
 **Dependencies:**
 
-- Steps 1-9
+- Steps 1-8
 - Owner-note prerequisites listed for Step 3
 
 **Files:**
 
 - New real-filesystem and multi-client Analyst integration tests
-- Shared fixtures used across daemon, CLI, web, and evaluation
+- Shared fixtures used across daemon, CLI, and web
 - `docs/usage.md`
 - Existing Collection, Profile, game, owner-note, import, refresh, storage,
   logging, CLI, web, and browser suites
@@ -687,14 +669,11 @@ prerequisites.
 8. Run tests in aggregate and varied order to detect leaked registries, secrets,
    capabilities, attestations, abort signals, fixture state, clocks, configuration,
    and mutation/source coordinators.
-9. Ask fresh reviewers to explain why questions are open-ended but answers are
-   bounded, what leaves the machine, why notes are testimony, how citations are
-   authorized, what survives reload, how cancellation/retry affect cost, why there
-   is no fixed cap, and why model output cannot mutate state. Ambiguity fails the
-   documentation/specification gate.
-10. Trace every requirement and AI Validation group to passing executable or
-    recorded evidence. Mark this plan `executed` and the source specification
-    `implemented` only after every gate passes.
+9. Trace every requirement and every non-retired AI Validation group to passing
+   executable or recorded deterministic evidence. AI Validation 24 is retired;
+   AI Validation 26 is optional feedback, not a gate. Mark this plan `executed`
+   and the source specification `implemented` only after the remaining technical
+   gates pass.
 
 ## Dependency order and implementation task boundaries
 
@@ -710,8 +689,8 @@ The implementation breakdown is tracked as follows:
 | 6         | `shelf-judge-3p5.8`  | Analyst Steps 3 and 5                     |
 | 7         | `shelf-judge-3p5.9`  | Analyst Step 6                            |
 | 8         | `shelf-judge-3p5.12` | Analyst Step 6                            |
-| 9         | `shelf-judge-3p5.10` | Analyst Steps 3 and 5                     |
-| 10        | `shelf-judge-3p5.11` | Analyst Steps 6-9 and `shelf-judge-1d4.8` |
+| 9         | Retired              | No implementation or release dependency   |
+| 10        | `shelf-judge-3p5.11` | Analyst Steps 6-8 and `shelf-judge-1d4.8` |
 
 The Beads graph makes `shelf-judge-3p5.7` depend directly on
 `shelf-judge-6wv.4`. This enforces the shared foundation as a blocker for both
@@ -737,8 +716,8 @@ model integrations without making either feature epic block the other.
 7. Steps 7 and 8 may proceed in parallel after Step 6. Shared transport changes
    belong to `shelf-judge-6wv.4`; Analyst tasks add only feature-specific process
    and presentation behavior.
-8. Step 9 fixtures may be authored earlier but release scoring waits for the real
-   structured boundary. Step 10 is terminal.
+8. Step 9 is retired. Its former scoring workflow creates no dependency; Step 10
+   is terminal for the remaining technical gates.
 
 Do not create a second provider stack, broaden the shared manifest to a union,
 pass broad durable objects to the model, expose general operations as tools,
@@ -748,55 +727,55 @@ capture as part of this plan.
 
 ## Requirement coverage
 
-| Requirement    | Implementation steps  | Primary validation                                |
-| -------------- | --------------------- | ------------------------------------------------- |
-| REQ-ANALYST-1  | 1, 2, 5, 9            | Free-form corpus without question allowlist       |
-| REQ-ANALYST-2  | 1-3, 5, 9-10          | Manifest and provider-payload field audit         |
-| REQ-ANALYST-3  | 2, 5, 10              | Byte snapshots and deterministic cache parity     |
-| REQ-ANALYST-4  | 1, 4-5, 9             | Citation fault injection and entailment review    |
-| REQ-ANALYST-5  | 1-4, 7-8              | Canonical citation identity/destination parity    |
-| REQ-ANALYST-6  | 3-5, 9                | Selective testimony retrieval and hostile notes   |
-| REQ-ANALYST-7  | 3-5, 9                | Untrusted-content capability adversarial tests    |
-| REQ-ANALYST-8  | shared 6wv.4, 5, 9    | Effective-session capability inspection           |
-| REQ-ANALYST-9  | 1, 4-5, 7-9           | Partial/abstention and uncertainty matrix         |
-| REQ-ANALYST-10 | 4-5, 9                | Proxy-inference and conditional-criterion corpus  |
-| REQ-ANALYST-11 | 1, 4, 7-8, 10         | Process/page lifetime and persistence scans       |
-| REQ-ANALYST-12 | 2-5, 10               | Fresh snapshots, attestations, note/source races  |
-| REQ-ANALYST-13 | 1, 4-8, 10            | Capability, concurrency, replay, isolation tests  |
-| REQ-ANALYST-14 | 1, 6-8, 10            | Exact per-conversation disclosure parity          |
-| REQ-ANALYST-15 | 4, 6-8, 10            | Provider-change forced-new-conversation tests     |
-| REQ-ANALYST-16 | shared 6wv.3-4, 5     | One bound-session pi-agent boundary               |
-| REQ-ANALYST-17 | shared 6wv.4, 5-8     | Configuration/auth/failure mapping tests          |
-| REQ-ANALYST-18 | 1, 5, 7-10            | No-cap disclosure and exact usage states          |
-| REQ-ANALYST-19 | 1-3, 5, 9             | Strict projections, paging, context handling      |
-| REQ-ANALYST-20 | 1, shared 6wv.4, 5-8  | Typed validated-only stream inspection            |
-| REQ-ANALYST-21 | shared 6wv.4, 5-8, 10 | End-to-end abort and incomplete-block tests       |
-| REQ-ANALYST-22 | 5-8, 10               | No reconnect, retry, or fallback instrumentation  |
-| REQ-ANALYST-23 | shared 6wv.4, 5, 10   | Redacted attempt/outcome log audit                |
-| REQ-ANALYST-24 | 1, 4-8                | Outcome/reason parity across every boundary       |
-| REQ-ANALYST-25 | 8                     | Complete web state and interaction suite          |
-| REQ-ANALYST-26 | 7                     | CLI process, human, NDJSON, and signal suite      |
-| REQ-ANALYST-27 | 1, 6-8                | Shared schemas and passive-client boundary audit  |
-| REQ-ANALYST-28 | 2, 5, 10              | Deterministic/model isolation instrumentation     |
-| REQ-ANALYST-29 | 8, 10                 | Keyboard, focus, announcement, motion gates       |
-| REQ-ANALYST-30 | 8, 10                 | Viewport, keyboard, targets, literal zoom gates   |
-| REQ-ANALYST-31 | 5-10                  | Mutation-surface audit and future-contract review |
-| REQ-ANALYST-32 | 4-5, 7-10             | Persistence and durable-truth leakage scans       |
-| REQ-ANALYST-33 | prerequisites, 1-5    | Exact owner-note tasks and shared 6wv.4 gate      |
+| Requirement    | Implementation steps  | Primary validation                                    |
+| -------------- | --------------------- | ----------------------------------------------------- |
+| REQ-ANALYST-1  | 1, 2, 5               | Free-form deterministic fixtures without an allowlist |
+| REQ-ANALYST-2  | 1-3, 5, 10            | Manifest and provider-payload field audit             |
+| REQ-ANALYST-3  | 2, 5, 10              | Byte snapshots and deterministic cache parity         |
+| REQ-ANALYST-4  | 1, 4-5                | Citation fault injection and structural grounding     |
+| REQ-ANALYST-5  | 1-4, 7-8              | Canonical citation identity/destination parity        |
+| REQ-ANALYST-6  | 3-5                   | Selective testimony retrieval and hostile notes       |
+| REQ-ANALYST-7  | 3-5                   | Untrusted-content capability adversarial tests        |
+| REQ-ANALYST-8  | shared 6wv.4, 5       | Effective-session capability inspection               |
+| REQ-ANALYST-9  | 1, 4-5, 7-8           | Partial/abstention and uncertainty matrix             |
+| REQ-ANALYST-10 | 4-5                   | Proxy-inference and conditional-criterion fixtures    |
+| REQ-ANALYST-11 | 1, 4, 7-8, 10         | Process/page lifetime and persistence scans           |
+| REQ-ANALYST-12 | 2-5, 10               | Fresh snapshots, attestations, note/source races      |
+| REQ-ANALYST-13 | 1, 4-8, 10            | Capability, concurrency, replay, isolation tests      |
+| REQ-ANALYST-14 | 1, 6-8, 10            | Exact per-conversation disclosure parity              |
+| REQ-ANALYST-15 | 4, 6-8, 10            | Provider-change forced-new-conversation tests         |
+| REQ-ANALYST-16 | shared 6wv.3-4, 5     | One bound-session pi-agent boundary                   |
+| REQ-ANALYST-17 | shared 6wv.4, 5-8     | Configuration/auth/failure mapping tests              |
+| REQ-ANALYST-18 | 1, 5, 7-10            | No-cap disclosure and exact usage states              |
+| REQ-ANALYST-19 | 1-3, 5                | Strict projections, paging, context handling          |
+| REQ-ANALYST-20 | 1, shared 6wv.4, 5-8  | Typed validated-only stream inspection                |
+| REQ-ANALYST-21 | shared 6wv.4, 5-8, 10 | End-to-end abort and incomplete-block tests           |
+| REQ-ANALYST-22 | 5-8, 10               | No reconnect, retry, or fallback instrumentation      |
+| REQ-ANALYST-23 | shared 6wv.4, 5, 10   | Redacted attempt/outcome log audit                    |
+| REQ-ANALYST-24 | 1, 4-8                | Outcome/reason parity across every boundary           |
+| REQ-ANALYST-25 | 8                     | Complete web state and interaction suite              |
+| REQ-ANALYST-26 | 7                     | CLI process, human, NDJSON, and signal suite          |
+| REQ-ANALYST-27 | 1, 6-8                | Shared schemas and passive-client boundary audit      |
+| REQ-ANALYST-28 | 2, 5, 10              | Deterministic/model isolation instrumentation         |
+| REQ-ANALYST-29 | 8, 10                 | Keyboard, focus, announcement, motion gates           |
+| REQ-ANALYST-30 | 8, 10                 | Viewport, keyboard, targets, literal zoom gates       |
+| REQ-ANALYST-31 | 5-10                  | Mutation-surface audit and future-contract review     |
+| REQ-ANALYST-32 | 4-5, 7-10             | Persistence and durable-truth leakage scans           |
+| REQ-ANALYST-33 | prerequisites, 1-5    | Exact owner-note tasks and shared 6wv.4 gate          |
 
 ## AI Validation coverage
 
 | Source validation group                                   | Plan evidence             |
 | --------------------------------------------------------- | ------------------------- |
-| 1: representative open-ended analytical jobs              | Steps 2-5, 9              |
-| 2: unsupported/prohibited/empty/insufficient distinctions | Steps 1, 4-5, 7-9         |
-| 3: conflicting proxies and source meanings                | Steps 3-5, 9              |
-| 4: citation faults, semantic entailment, payload fields   | Steps 1-5, 9              |
-| 5: exact calculations, ordering, confounders              | Steps 2, 4, 9             |
-| 6: prompt injection across all untrusted sources          | Steps 3-5, 9              |
-| 7: pi-agent lifecycle, tools, hooks, trust boundary       | Shared 6wv.4, Steps 5, 9  |
+| 1: representative open-ended analytical jobs              | Steps 2-5                 |
+| 2: unsupported/prohibited/empty/insufficient distinctions | Steps 1, 4-5, 7-8         |
+| 3: conflicting proxies and source meanings                | Steps 3-5                 |
+| 4: citation faults and payload fields                     | Steps 1-5                 |
+| 5: exact calculations, ordering, confounders              | Steps 2, 4                |
+| 6: prompt injection across all untrusted sources          | Steps 3-5                 |
+| 7: pi-agent lifecycle, tools, hooks, trust boundary       | Shared 6wv.4, Step 5      |
 | 8: complete provider and internal failure matrix          | Steps 5-8, 10             |
-| 9: mandatory uncertainty and partial limitations          | Steps 2-5, 9              |
+| 9: mandatory uncertainty and partial limitations          | Steps 2-5                 |
 | 10: follow-up, attestation, note/source changes and races | Steps 2-5, 10             |
 | 11: concurrent conversation and capability isolation      | Steps 4-6, 10             |
 | 12: lifecycle loss and no persistence                     | Steps 4, 7-8, 10          |
@@ -811,6 +790,6 @@ capture as part of this plan.
 | 21: complete CLI behavior and no history                  | Step 7                    |
 | 22: source immutability and deterministic independence    | Steps 2, 5, 10            |
 | 23: no current note capture or mutation route             | Steps 5-10                |
-| 24: versioned blinded evaluation and thresholds           | Step 9                    |
+| 24: retired evaluation corpus and thresholds              | Retired; not required     |
 | 25: repository quality gates                              | Step 10                   |
-| 26: fresh explainability review                           | Step 10                   |
+| 26: fresh explainability feedback                         | Optional; not a gate      |

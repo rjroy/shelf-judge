@@ -42,9 +42,13 @@ The owner approved these first-release decisions on 2026-08-30:
 4. Set no fixed application token or monetary cap. Control cost through explicit
    initiation, bounded evidence, disclosed round-trip ceilings, no automatic
    charged retries or fallback, and exact provider usage reporting when available.
+5. On 2026-09-07, the owner approved output-first scope: the owner alone judges
+   usefulness. Formal semantic/usefulness scores, corpus quotas, independent
+   reviews, authorship attestations, and baseline comparisons are non-blocking
+   diagnostics and cannot establish usefulness or truth.
 
 Changing one of these choices requires updating the specification, examples,
-technical contracts, evaluation fixtures, and this plan together.
+technical contracts, applicable diagnostic fixtures, and this plan together.
 
 ## Current system boundaries
 
@@ -542,50 +546,29 @@ staleness, purge, and clients remain feature-owned.
 - No overflow, clipping, hover-only evidence, undersized target, mobile input zoom,
   inaccessible disclosure, or unreachable cancellation remains.
 
-## Step 11: Build the versioned evaluation corpus and adversarial gates
+## Step 11: Produce inspectable Reflection output
 
 **Files:**
 
-- New versioned Reflection fixtures and evaluator under daemon test/evaluation
-  directories
-- Shared grounded-analysis adversarial harness from Step 2
-- Recorded blinded review and adjudication evidence
+- Existing explicit CLI refresh and Optional reflections web path
+- Existing validated answer/abstention result, scope, citation, and status contracts
+- Existing diagnostic tooling, if used, as non-blocking developer assets
 
 **Changes:**
 
-1. Create at least 20 independently authored fixtures per question, including at
-   least 12 answerable and 8 abstention fixtures. Cover every applicable abstention
-   reason at least once per question and twice across the corpus.
-2. Include copied/empty notes, single-note claims, contradictory testimony, stale
-   metadata, vetoes, prediction, dispersion, co-occurrence, collaborator teams,
-   sparse adjacent evidence, prompt injection, and paraphrase traps. For each
-   question's answerable fixtures, at least one third contain a material
-   counterexample or confounder, at least one third contain sparse or incomplete
-   adjacent evidence that does not defeat the answer, and at least one third
-   contain a plausible paraphrase trap; fixtures may satisfy multiple groups.
-3. Record expected scope, required/prohibited claims, counterexamples, outcome, and
-   rationale before generation.
-4. Compare generated Reflection output with deterministic-card-plus-note baselines
-   through randomized blinded review. Reviewers lock outcome and all `0` through
-   `3` rubric scores before labels are revealed. Preserve two independent reviews.
-   Require a third blinded reviewer for any dimension differing by more than one
-   point, any answered-versus-abstain disagreement, or any disagreement that
-   changes a release threshold. Preserve all original scores and rationales plus
-   the stated adjudication; do not silently replace either original review.
-5. Keep credentialed provider corpus generation outside deterministic CI while
-   retaining versioned inputs, provider/model identity, outputs, and review results.
-
-**Release thresholds:**
-
-- Zero unsupported critical claims, privacy leaks, unauthorized fields,
-  unreported material counterexamples, or capability failures.
-- Among answerable fixtures, at least 90 percent score acceptable or better for
-  grounding, scope honesty, and citation inspectability overall and at least 80
-  percent do so for each question.
-- Among answerable fixtures, Reflection additional usefulness exceeds its paired
-  baseline in at least 70 percent overall and 60 percent for each question; ties do
-  not count. Unanswerable fixtures pass only through the specified correct
-  abstention behavior and never dilute an answerable-fixture denominator.
+1. Use the existing explicit CLI refresh or Optional reflections web path to make a
+   configured-provider attempt available to the owner.
+2. Surface the actual resulting state: a validated `answered` result, or an honest
+   categorized abstention or unavailable outcome. An abstention does not demonstrate
+   the answered pathway.
+3. For a validated result, make its scope, evidence identity, citations, and status
+   inspectable through the existing client contract. Preserve deterministic schema,
+   grounding, privacy, capability-isolation, persistence, recovery, and abstention
+   protections.
+4. The owner evaluates whether output is useful. No corpus quota, independent review,
+   authorship attestation, blinded baseline, rubric score, or automated semantic
+   evaluation is a release blocker. Existing diagnostic tooling may remain
+   non-blocking and must not claim to prove usefulness or truth.
 
 ## Step 12: Complete persisted-flow, privacy, documentation, and release validation
 
@@ -623,12 +606,10 @@ staleness, purge, and clients remain feature-owned.
    failures. Every changed file must pass.
 7. Run tests in aggregate and varied order to detect leaked registries, abort
    signals, capabilities, fixture state, clocks, and mutation queues.
-8. Ask fresh reviewers to explain each question's usefulness and abstention,
-   testimony boundaries, evidence authorization, stale versus purge behavior,
-   provider/cost disclosure, transaction recovery, and deterministic independence.
-9. Trace every requirement and AI Validation group to passing executable or
-   recorded release evidence. Mark the plan `executed` and specification
-   `implemented` only after every gate passes.
+8. Trace deterministic requirements and the delivered output state to passing
+   executable or recorded evidence. Do not treat subjective usefulness, truth, or
+   semantic scoring as automatically proven. Mark the plan `executed` and
+   specification `implemented` only after the remaining technical gates pass.
 
 ## Dependency order and implementation task boundaries
 
@@ -645,8 +626,8 @@ staleness, purge, and clients remain feature-owned.
    model results containing note excerpts may persist.
 7. Step 7 waits for Steps 2 through 6. Step 8 follows orchestration contracts.
 8. Steps 9 and 10 may proceed in parallel after Step 8 stabilizes.
-9. Step 11 may develop fixtures earlier but is a release blocker after the real
-   structured provider boundary exists. Step 12 is terminal.
+9. Step 11 establishes output readiness after the real structured provider boundary
+   exists. Step 12 is terminal and retains its dependency on that readiness.
 
 Do not add a second provider stack, make Reflection cache part of Profile or
 collection source data, expose dynamic Analyst retrieval tools to Reflection,
@@ -655,47 +636,47 @@ conversation behavior as part of this plan.
 
 ## Requirement coverage
 
-| Requirement    | Implementation steps | Primary validation                                      |
-| -------------- | -------------------- | ------------------------------------------------------- |
-| REQ-REFLECT-1  | 1, 3, 7, 11          | Serialized questions and per-question corpus            |
-| REQ-REFLECT-2  | 3, 7, 11             | Useful-answer policy and blinded baseline comparison    |
-| REQ-REFLECT-3  | 1, 7, 11             | Independent abstention and no-answer release tests      |
-| REQ-REFLECT-4  | 1, 3, 4              | Immutable closed evidence package and payload audit     |
-| REQ-REFLECT-5  | 1, 3, 7, 11          | Source-class and multi-game citation validation         |
-| REQ-REFLECT-6  | 1, 4, 11             | Testimony labeling and hostile-note tests               |
-| REQ-REFLECT-7  | 3, 7, 11             | Prohibited-inference corpus fixtures                    |
-| REQ-REFLECT-8  | 3, 4, 7, 11          | Complete counterexample/confounder gates                |
-| REQ-REFLECT-9  | 3, 4, 7              | Paging and exhaustive-scope validation                  |
-| REQ-REFLECT-10 | 1, 2, 7              | Strict submission/citation/destination rejection        |
-| REQ-REFLECT-11 | 2, 11                | Structural versus semantic evaluation separation        |
-| REQ-REFLECT-12 | 5, 8, 12             | Deterministic-operation model-call instrumentation      |
-| REQ-REFLECT-13 | 2, 7-10              | Explicit exact-provider refresh acknowledgement         |
-| REQ-REFLECT-14 | 1, 2, 9, 10          | Web/CLI disclosure parity tests                         |
-| REQ-REFLECT-15 | 1, 5-10              | Default settings, disable cancellation, and deletion    |
-| REQ-REFLECT-16 | 2, 7-10              | Sequential batch and round-trip instrumentation         |
-| REQ-REFLECT-17 | 1, 5, 7              | Cache schema, dependency, snapshot, and leakage tests   |
-| REQ-REFLECT-18 | 3, 5                 | Read-time fingerprint staleness matrix                  |
-| REQ-REFLECT-19 | 5, 9, 10             | Collapsed stale captured-citation presentation          |
-| REQ-REFLECT-20 | 4, 6, 12             | Journal recovery, purge, deletion, and race tests       |
-| REQ-REFLECT-21 | 5-10                 | Prior-cache preservation and distinct attempt outcomes  |
-| REQ-REFLECT-22 | 5, 6, 8-10           | Disable/delete isolation and confirmation tests         |
-| REQ-REFLECT-23 | 1, 2                 | Architecture supersession and shared pi-agent tests     |
-| REQ-REFLECT-24 | 1, 2, 7-10           | Bound-session auth and categorized reason parity        |
-| REQ-REFLECT-25 | 2, 7, 9-11           | Cost-control and exact usage evidence                   |
-| REQ-REFLECT-26 | 2, 7-10              | Abort, disconnect, no reconnect, and cache preservation |
-| REQ-REFLECT-27 | 2, 5-8, 12           | Reconstructable redacted boundary-log audit             |
-| REQ-REFLECT-28 | 8, 10, 12            | Profile hierarchy and complete-state browser tests      |
-| REQ-REFLECT-29 | 8, 9, 12             | CLI process, human, JSON, NDJSON, and failure tests     |
-| REQ-REFLECT-30 | 1, 8-10              | Shared-schema parity and client-boundary audit          |
-| REQ-REFLECT-31 | 10, 12               | Keyboard, focus, announcement, and reduced-motion gates |
-| REQ-REFLECT-32 | 10, 12               | Responsive and literal-zoom Chromium matrix             |
-| REQ-REFLECT-33 | 1, 2, 4, 6           | Owner-note dependencies and one shared foundation gate  |
+| Requirement    | Implementation steps | Primary validation                                       |
+| -------------- | -------------------- | -------------------------------------------------------- |
+| REQ-REFLECT-1  | 1, 3, 7, 11          | Serialized questions and configured-provider output      |
+| REQ-REFLECT-2  | 3, 7, 11             | Answer-boundary and abstention validation                |
+| REQ-REFLECT-3  | 1, 7, 11             | Independent abstention and output-state evidence         |
+| REQ-REFLECT-4  | 1, 3, 4              | Immutable closed evidence package and payload audit      |
+| REQ-REFLECT-5  | 1, 3, 7, 11          | Source-class and multi-game citation validation          |
+| REQ-REFLECT-6  | 1, 4, 11             | Testimony labeling and hostile-note tests                |
+| REQ-REFLECT-7  | 3, 7, 11             | Prohibited-inference corpus fixtures                     |
+| REQ-REFLECT-8  | 3, 4, 7, 11          | Complete counterexample/confounder gates                 |
+| REQ-REFLECT-9  | 3, 4, 7              | Paging and exhaustive-scope validation                   |
+| REQ-REFLECT-10 | 1, 2, 7              | Strict submission/citation/destination rejection         |
+| REQ-REFLECT-11 | 2, 11                | Structural validation and owner-only subjective judgment |
+| REQ-REFLECT-12 | 5, 8, 12             | Deterministic-operation model-call instrumentation       |
+| REQ-REFLECT-13 | 2, 7-10              | Explicit exact-provider refresh acknowledgement          |
+| REQ-REFLECT-14 | 1, 2, 9, 10          | Web/CLI disclosure parity tests                          |
+| REQ-REFLECT-15 | 1, 5-10              | Default settings, disable cancellation, and deletion     |
+| REQ-REFLECT-16 | 2, 7-10              | Sequential batch and round-trip instrumentation          |
+| REQ-REFLECT-17 | 1, 5, 7              | Cache schema, dependency, snapshot, and leakage tests    |
+| REQ-REFLECT-18 | 3, 5                 | Read-time fingerprint staleness matrix                   |
+| REQ-REFLECT-19 | 5, 9, 10             | Collapsed stale captured-citation presentation           |
+| REQ-REFLECT-20 | 4, 6, 12             | Journal recovery, purge, deletion, and race tests        |
+| REQ-REFLECT-21 | 5-10                 | Prior-cache preservation and distinct attempt outcomes   |
+| REQ-REFLECT-22 | 5, 6, 8-10           | Disable/delete isolation and confirmation tests          |
+| REQ-REFLECT-23 | 1, 2                 | Architecture supersession and shared pi-agent tests      |
+| REQ-REFLECT-24 | 1, 2, 7-10           | Bound-session auth and categorized reason parity         |
+| REQ-REFLECT-25 | 2, 7, 9-11           | Cost-control and exact usage evidence                    |
+| REQ-REFLECT-26 | 2, 7-10              | Abort, disconnect, no reconnect, and cache preservation  |
+| REQ-REFLECT-27 | 2, 5-8, 12           | Reconstructable redacted boundary-log audit              |
+| REQ-REFLECT-28 | 8, 10, 12            | Profile hierarchy and complete-state browser tests       |
+| REQ-REFLECT-29 | 8, 9, 12             | CLI process, human, JSON, NDJSON, and failure tests      |
+| REQ-REFLECT-30 | 1, 8-10              | Shared-schema parity and client-boundary audit           |
+| REQ-REFLECT-31 | 10, 12               | Keyboard, focus, announcement, and reduced-motion gates  |
+| REQ-REFLECT-32 | 10, 12               | Responsive and literal-zoom Chromium matrix              |
+| REQ-REFLECT-33 | 1, 2, 4, 6           | Owner-note dependencies and one shared foundation gate   |
 
 ## AI Validation coverage
 
 | Source validation group                                     | Plan evidence    |
 | ----------------------------------------------------------- | ---------------- |
-| 1-5: corpus, per-question policy, usefulness                | Steps 3, 7, 11   |
+| 1-5: output state, per-question policy, answer boundaries   | Steps 3, 7, 11   |
 | 6-8: citations, exact values, payload manifest              | Steps 1-4, 7, 11 |
 | 9-10: prompt injection and real pi-agent lifecycle          | Steps 2, 4, 11   |
 | 11-13: failures, deterministic independence, refresh/cancel | Steps 2, 7-9, 12 |
@@ -707,4 +688,4 @@ conversation behavior as part of this plan.
 | 19: web accessibility and state behavior                    | Step 10          |
 | 20: responsive and 200 percent zoom                         | Steps 10, 12     |
 | 21: repository quality gates                                | Step 12          |
-| 22: fresh explainability review                             | Step 12          |
+| 22: optional technical explainability review (non-blocking) | Step 12          |

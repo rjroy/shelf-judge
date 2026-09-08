@@ -1,4 +1,12 @@
-# Reflection evaluation validation report
+# Reflection evaluation validation report (historical, nonbinding)
+
+> **Superseded for release scope on 2026-09-07.** The owner alone judges whether
+> delivered Reflection output is useful. The corpus quotas, blinded-review,
+> independent-review, authorship-attestation, baseline-comparison, and score
+> thresholds below are retained only to describe diagnostic tooling. They do not
+> block output delivery or release and do not prove usefulness or truth. Binding
+> safeguards remain the deterministic schema, citation, privacy, capability,
+> persistence, recovery, and technical checks in the Reflection spec and plan.
 
 Corpus version: `2026-09-06.2`
 
@@ -20,18 +28,17 @@ answerable-only denominators, 90/80 grounding-scope-citation thresholds, and
 70/60 strict usefulness-over-baseline thresholds. Any critical failure fails
 release immediately.
 
-## Release status: pending, fail closed
+## Historical diagnostic status: pending, fail closed
 
 No credentialed provider output, randomized blinded review, independent fixture
 authorship attestation, or human adjudication is checked into this repository.
-The evaluator therefore reports a failed pending release rather than treating
-fixtures or deterministic tests as semantic evaluation evidence. A release
-operator must version the real provider/model identity, paired outputs, two
-independent reviews with rationales and locked labels, and required third-review
-adjudications. Until then, the 90/80 grounding, scope, and citation gates and
-the 70/60 usefulness gates cannot pass.
+The evaluator therefore reports pending diagnostic evidence rather than treating
+fixtures or deterministic tests as semantic evaluation evidence. If an operator
+chooses to run this historical diagnostic, its old artifact shape expects the
+listed identity, paired outputs, reviews, and adjudications. Those inputs and its
+90/80 and 70/60 thresholds are not release requirements.
 
-## Operator workflow
+## Historical diagnostic workflow
 
 The evaluator consumes an operator-supplied JSON artifact and does not call a
 provider. This keeps credentialed generation outside CI. Runtime validation
@@ -58,9 +65,9 @@ an operator's claimed evidence. Those are operator attestation boundaries.
 
 The command rejects malformed JSON, unknown fields, missing paired-review data,
 missing output provider/model identity, invalid timestamps, and a corpus-version
-mismatch before release evaluation.
-It exits `0` only for a passing release, `2` for valid-but-pending evidence,
-and `1` for invalid evidence or a failed release. It does not collect output,
+mismatch before diagnostic evaluation.
+It exits `0` only for a passing diagnostic, `2` for valid-but-pending evidence,
+and `1` for invalid evidence or a failed diagnostic. It does not collect output,
 randomize labels, or obtain human reviews: no configured provider/authentication
 or data-collection interface is present, so blind collection remains an
 external operator prerequisite rather than an implemented runner.
