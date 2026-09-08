@@ -15,7 +15,9 @@ export interface AnalystTranscriptValidator {
 
 export function createAnalystTranscriptValidator(options: {
   attestationService: AnalystAttestationService;
-  provider: { providerId: string; modelId: string };
+  /** Static identities remain supported for service callers without a mutable provider. */
+  provider?: { providerId: string; modelId: string };
+  getProvider?: () => { providerId: string; modelId: string };
   compareNoteDependencies?: AnalystNoteDependencyComparator;
 }): AnalystTranscriptValidator {
   return Object.freeze({
@@ -23,14 +25,16 @@ export function createAnalystTranscriptValidator(options: {
       const request = AnalystTurnRequestSchema.safeParse(input);
       if (!request.success) return { valid: false as const, outcome: "invalid-transcript" };
       const transcript = request.data;
+      const provider = options.getProvider?.() ?? options.provider;
+      if (provider === undefined) throw new Error("Analyst transcript provider identity is required");
       const assistantMessages = transcript.messages.filter((message) => message.role === "analyst");
       for (const [assistantIndex, message] of assistantMessages.entries()) {
         const authentic = options.attestationService.verifies(
           {
             conversationId: transcript.conversationId,
             turnIndex: assistantIndex,
-            providerId: options.provider.providerId,
-            modelId: options.provider.modelId,
+            providerId: provider.providerId,
+            modelId: provider.modelId,
             content: message.content,
             outcome: message.outcome,
             noteDependencies: message.noteDependencies,

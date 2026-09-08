@@ -20,6 +20,7 @@
     "evaluate:reflections": "bun packages/daemon/tests/evaluation/reflection-evaluation-operator.ts",
     "generate:reflection-smoke": "bun packages/daemon/tests/evaluation/reflection-evaluation-generation-operator.ts",
     "generate:reflection-corpus": "bun packages/daemon/tests/evaluation/reflection-corpus-generation-operator.ts",
+    "smoke:analyst-provider": "bun packages/daemon/tests/evaluation/analyst-provider-smoke.ts",
     "build": "bun run --filter @shelf-judge/web build",
     "test:browser:install": "bun run --cwd packages/web test:browser:install",
     "typecheck:browser": "bun run --cwd packages/web typecheck:browser",

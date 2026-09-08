@@ -50,6 +50,12 @@ import {
 } from "./services/reflection-refresh-service.js";
 import { createReflectionResultValidator } from "./services/reflection-result-validator.js";
 import type { ReflectionRuntime } from "./services/reflection-runtime.js";
+import { createAnalystRoutes } from "./routes/analyst.js";
+import { createAnalystProjectionSnapshotService } from "./services/analyst-evidence-projections.js";
+import { createAnalystEvidenceService } from "./services/analyst-evidence-service.js";
+import { createAnalystAttestationService } from "./services/analyst-attestation-service.js";
+import { createAnalystTranscriptValidator } from "./services/analyst-transcript-validator.js";
+import { createAnalystTurnService } from "./services/analyst-turn-service.js";
 
 export interface AppDeps {
   storageService: StorageService;
@@ -66,7 +72,7 @@ export interface AppDeps {
   reflectionRuntime: ReflectionRuntime;
   groundedFeatureAnalyzers?: readonly GroundedFeatureAnalyzer<unknown>[];
   bggClient?: BggClient;
-  onShutdown?: () => void;
+  onShutdown?: () => void | Promise<void>;
 }
 
 export interface AppResult {
@@ -191,6 +197,41 @@ export function createApp(deps: AppDeps): AppResult {
       };
     },
   });
+  const analystAttestationService = createAnalystAttestationService();
+  const analystProjectionSnapshotService = createAnalystProjectionSnapshotService({
+    storageService,
+    displayedFitnessService,
+  });
+  const analystEvidenceService = createAnalystEvidenceService({
+    storageService,
+    projectionSnapshotService: analystProjectionSnapshotService,
+    ownerGameNoteService,
+    ownerNoteAuthorizationScope: {
+      // The route accepts no caller-selected note scope. Until a request-specific
+      // authorization policy is available, this keeps note retrieval closed.
+      gameIds: [],
+      allowCollectionSynthesis: false,
+      allowLocalTextSearch: false,
+    },
+  });
+  const analystRouteModule = createAnalystRoutes({
+    getConfigurationStatus: () => groundedAnalysisProvider.configurationStatus,
+    transcriptValidator: createAnalystTranscriptValidator({
+      attestationService: analystAttestationService,
+      getProvider: () =>
+        groundedAnalysisProvider.configurationStatus.status === "configured"
+          ? groundedAnalysisProvider.configurationStatus.identity
+          : { providerId: "unavailable", modelId: "unavailable" },
+      compareNoteDependencies: (dependencies) =>
+        analystEvidenceService.compareNoteDependencies(dependencies),
+    }),
+    evidenceService: analystEvidenceService,
+    turnService: createAnalystTurnService({
+      provider: groundedAnalysisProvider,
+      evidenceService: analystEvidenceService,
+    }),
+    attestationService: analystAttestationService,
+  });
 
   // Collect all operations
   const allOperations: OperationDefinition[] = [
@@ -208,12 +249,16 @@ export function createApp(deps: AppDeps): AppResult {
     ...collectionRouteModule.operations,
     ...groundedAnalysisRouteModule.operations,
     ...reflectionRouteModule.operations,
+    ...analystRouteModule.operations,
   ];
 
   const helpRouteModule = createHelpRoutes({ operations: allOperations });
   const configRouteModule = createConfigRoutes({ storageService });
   const shutdownRouteModule = createShutdownRoutes({
-    onShutdown: onShutdown ?? (() => process.exit(0)),
+    async onShutdown() {
+      await analystRouteModule.cancelActive();
+      await (onShutdown ?? (() => process.exit(0)))();
+    },
   });
 
   allOperations.push(
@@ -238,6 +283,7 @@ export function createApp(deps: AppDeps): AppResult {
   app.route("/api", collectionRouteModule.routes);
   app.route("/api", groundedAnalysisRouteModule.routes);
   app.route("/api", reflectionRouteModule.routes);
+  app.route("/api", analystRouteModule.routes);
   app.route("/api", helpRouteModule.routes);
   app.route("/api", configRouteModule.routes);
   app.route("/api", shutdownRouteModule.routes);

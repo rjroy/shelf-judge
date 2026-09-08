@@ -115,6 +115,24 @@ describe("grounded evidence, citation, and destination registries", () => {
     ).toBe(false);
   });
 
+  test("does not freeze regular expressions retained by destination schemas", () => {
+    const destinationSchema = z
+      .object({
+        operationId: z.literal("shelf.feature-a.get"),
+        parameters: z.object({ itemId: z.string().regex(/^item-\d+$/) }).strict(),
+      })
+      .strict();
+    const destinations = createGroundedDestinationRegistry({ destinationSchema });
+
+    expect(destinations.validate({ operationId: "shelf.feature-a.get", parameters: { itemId: "item-1" } })).toEqual({
+      operationId: "shelf.feature-a.get",
+      parameters: { itemId: "item-1" },
+    });
+    expect(
+      destinationSchema.safeParse({ operationId: "shelf.feature-a.get", parameters: { itemId: "invalid" } }).success,
+    ).toBe(false);
+  });
+
   test("snapshots authorization and rejects unknown registry entry fields", () => {
     const payloadSchema = z.object({ value: z.number() }).strict();
     const evidence: Record<string, z.ZodType<unknown>> = { "feature-a": payloadSchema };

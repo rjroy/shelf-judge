@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { RouteModule, OperationDefinition } from "../operations.js";
 
 export interface ShutdownRoutesDeps {
-  onShutdown: () => void;
+  onShutdown: () => void | Promise<void>;
 }
 
 export function createShutdownRoutes(deps: ShutdownRoutesDeps): RouteModule {
@@ -10,7 +10,9 @@ export function createShutdownRoutes(deps: ShutdownRoutesDeps): RouteModule {
 
   routes.post("/shutdown", (c) => {
     // Schedule shutdown after response is sent
-    setTimeout(() => deps.onShutdown(), 100);
+    setTimeout(() => {
+      void deps.onShutdown();
+    }, 100);
     return c.json({ shutting_down: true });
   });
 

@@ -95,6 +95,9 @@ function assertSnapshotSafeAuthorizationSchema(
 
 function freezeReachable(value: unknown): void {
   if ((typeof value !== "object" && typeof value !== "function") || value === null) return;
+  // Zod mutates RegExp.lastIndex during validation. A regex is immutable as a
+  // schema definition, but freezing its mutable runtime state breaks parsing.
+  if (value instanceof RegExp) return;
   if (frozenAuthorizationValues.has(value)) return;
   frozenAuthorizationValues.add(value);
 

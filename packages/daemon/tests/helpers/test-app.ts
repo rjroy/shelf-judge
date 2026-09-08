@@ -79,6 +79,7 @@ export interface TestAppOptions<TFileOps extends FileOps = MockFileOps> {
   intentionService?: IntentionService;
   ownerGameNoteService?: OwnerGameNoteService;
   groundedAnalysisProvider?: GroundedAnalysisProvider;
+  onShutdown?: () => void | Promise<void>;
 }
 
 export function createTestPurchaseUtilizationService(
@@ -204,6 +205,7 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     groundedAnalysisProvider,
     reflectionRuntime,
     bggClient,
+    onShutdown: options?.onShutdown,
   });
 
   return {
