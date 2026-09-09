@@ -5,7 +5,11 @@ import {
   createAnalystEvidenceService,
 } from "../../src/services/analyst-evidence-service.js";
 import { createAnalystCompletionService } from "../../src/services/analyst-completion-service.js";
-import type { AnalystProjectionSnapshot } from "../../src/services/analyst-evidence-projections.js";
+import { profileSourceCoordinatorFor } from "../../src/services/profile-source-coordinator.js";
+import type {
+  AnalystEvidenceSource,
+  AnalystProjectionSnapshot,
+} from "../../src/services/analyst-evidence-projections.js";
 import { createMockFileOps } from "../helpers/mock-file-ops.js";
 import { createTestApp } from "../helpers/test-app.js";
 
@@ -74,6 +78,365 @@ function ownerNoteScope(gameIds: readonly string[], collection = false, search =
 }
 
 describe("Analyst evidence retrieval", () => {
+  test("ranks compact local fitness deterministically, pages coverage, and preserves source versions", async () => {
+    const games: ReadonlyArray<{
+      gameId: string;
+      displayName: string;
+      displayedFitness: number | null;
+    }> = [
+      { gameId: "a", displayName: "Alpha", displayedFitness: 8 },
+      { gameId: "b", displayName: "Beta", displayedFitness: 8 },
+      { gameId: "c", displayName: "Gamma", displayedFitness: null },
+    ];
+    const sources: AnalystEvidenceSource[] = games.flatMap(
+      ({ gameId, displayName, displayedFitness }) => [
+        {
+          evidenceClass: "game-identity-ownership" as const,
+          sourceId: `game:${gameId}:identity`,
+          sourceVersion: `identity-${gameId}`,
+          citationId: `identity-${gameId}`,
+          payload: { gameId, displayName, bggId: null, ownershipState: "owned" as const },
+          canonicalSummary: "Current game identity and ownership state",
+          destination: { operationId: "shelf.game.get" as const, parameters: { gameId } },
+        },
+        {
+          evidenceClass: "current-scoring" as const,
+          sourceId: `game:${gameId}:scoring`,
+          sourceVersion: `score-${gameId}`,
+          citationId: `score-${gameId}`,
+          payload: {
+            gameId,
+            displayedFitness,
+            validatedBreakdown: [
+              {
+                axisId: "fun",
+                axisName: "Fun",
+                weight: 1,
+                contribution: displayedFitness,
+                source: "personal" as const,
+                derivedField: null,
+                sourceValue: 8,
+                scoringRawValue: 8,
+                effectiveRating: 8,
+                preferenceShape: "higher-is-better" as const,
+                curveAffected: false,
+                unit: null,
+                provenance: null,
+                configurationSummary: null,
+                overridden: false,
+                overrideValue: null,
+                predictionConfidence: null,
+                referenceGames: null,
+              },
+            ],
+            veto: null,
+            predictionStatus: null,
+            sourceState: "available" as const,
+          },
+          canonicalSummary: "Current validated scoring evidence",
+          destination: { operationId: "shelf.game.get" as const, parameters: { gameId } },
+        },
+      ],
+    );
+    const localSnapshot: AnalystProjectionSnapshot = {
+      ...snapshot,
+      sources,
+      page: () => snapshot.page(),
+    };
+    const service = createAnalystEvidenceService({
+      storageService: {},
+      projectionSnapshotService: { capture: () => Promise.resolve(localSnapshot) },
+    });
+    const first = await service.top(localSnapshot, {
+      snapshotFingerprint: fingerprint,
+      rankBy: "fitness",
+      limit: 2,
+    });
+    expect(first.entries.map(({ gameId }) => gameId)).toEqual(["a", "b"]);
+    expect(first.scope).toEqual({
+      totalGameCount: 3,
+      matchingGameCount: 3,
+      examinedGameCount: 2,
+      exhaustive: false,
+    });
+    expect(first.truncated).toBe(true);
+    expect(first.entries[0]?.citations.map(({ sourceVersion }) => sourceVersion)).toEqual([
+      "identity-a",
+      "score-a",
+    ]);
+    expect(JSON.stringify(first)).not.toContain("description");
+    expect(JSON.stringify(first)).not.toContain("note");
+    const second = await service.top(localSnapshot, {
+      snapshotFingerprint: fingerprint,
+      rankBy: "fitness",
+      cursor: first.nextCursor,
+    });
+    expect(second.entries.map(({ gameId, fitness }) => [gameId, fitness])).toEqual([["c", null]]);
+    expect(second.scope).toMatchObject({ examinedGameCount: 3, exhaustive: true });
+  });
+
+  test("rejects oversized full envelopes and shares turn budgets with retrieve", async () => {
+    const budgetSnapshot: AnalystProjectionSnapshot = {
+      ...snapshot,
+      sources: [
+        snapshot.sources[0],
+        {
+          evidenceClass: "current-scoring",
+          sourceId: "game:a:scoring",
+          sourceVersion: "score-a",
+          citationId: "score-a",
+          payload: {
+            gameId: "a",
+            displayedFitness: 1,
+            validatedBreakdown: [],
+            veto: null,
+            predictionStatus: null,
+            sourceState: "available",
+          },
+          canonicalSummary: "Current validated scoring evidence",
+          destination: { operationId: "shelf.game.get", parameters: { gameId: "a" } },
+        },
+      ],
+    };
+    const service = createAnalystEvidenceService({
+      storageService: {},
+      projectionSnapshotService: { capture: () => Promise.resolve(budgetSnapshot) },
+      evidenceBudget: { maxCallsPerTurn: 2, maxBytesPerTurn: 1 },
+    });
+    const request = { snapshotFingerprint: fingerprint, rankBy: "fitness" };
+    await expect(service.top(budgetSnapshot, request)).rejects.toThrow("byte budget");
+    const shared = createAnalystEvidenceService({
+      storageService: {},
+      projectionSnapshotService: { capture: () => Promise.resolve(budgetSnapshot) },
+      evidenceBudget: { maxCallsPerTurn: 1, maxBytesPerTurn: 64 * 1024 },
+    });
+    await shared.top(budgetSnapshot, request);
+    await expect(
+      shared.retrieve(budgetSnapshot, {
+        snapshotFingerprint: fingerprint,
+        evidenceClasses: ["game-identity-ownership"],
+      }),
+    ).rejects.toThrow("call budget");
+  });
+
+  test("does not commit rejected top-page coverage or cursors before a smaller retry", async () => {
+    const rankedSnapshot: AnalystProjectionSnapshot = {
+      ...snapshot,
+      sources: [
+        ...snapshot.sources,
+        ...["a", "b"].map((gameId, index) => ({
+          evidenceClass: "current-scoring" as const,
+          sourceId: `game:${gameId}:scoring`,
+          sourceVersion: `score-${gameId}`,
+          citationId: `score-${gameId}`,
+          payload: {
+            gameId,
+            displayedFitness: 2 - index,
+            validatedBreakdown: [],
+            veto: null,
+            predictionStatus: null,
+            sourceState: "available" as const,
+          },
+          canonicalSummary: "Current validated scoring evidence",
+          destination: { operationId: "shelf.game.get" as const, parameters: { gameId } },
+        })),
+      ],
+    };
+    const request = { snapshotFingerprint: fingerprint, rankBy: "fitness" as const };
+    const measure = async (limit: number) => {
+      const service = createAnalystEvidenceService({
+        storageService: {},
+        projectionSnapshotService: { capture: () => Promise.resolve(rankedSnapshot) },
+      });
+      return new TextEncoder().encode(
+        JSON.stringify(await service.top(rankedSnapshot, { ...request, limit })),
+      ).byteLength;
+    };
+    const maxBytesPerTurn = (await measure(2)) - 1;
+    const service = createAnalystEvidenceService({
+      storageService: {},
+      projectionSnapshotService: { capture: () => Promise.resolve(rankedSnapshot) },
+      evidenceBudget: { maxCallsPerTurn: 2, maxBytesPerTurn },
+    });
+
+    await expect(service.top(rankedSnapshot, { ...request, limit: 2 })).rejects.toThrow(
+      "byte budget",
+    );
+    const first = await service.top(rankedSnapshot, { ...request, limit: 1 });
+    expect(first.scope).toMatchObject({ examinedGameCount: 1, exhaustive: false });
+    expect(first.nextCursor).not.toBeNull();
+  });
+
+  test("does not commit rejected retrieval-page coverage or cursors before a smaller retry", async () => {
+    const request = {
+      snapshotFingerprint: fingerprint,
+      evidenceClasses: ["game-identity-ownership"] as const,
+    };
+    const measure = async (limit: number) => {
+      const service = createAnalystEvidenceService({
+        storageService: {},
+        projectionSnapshotService: { capture: () => Promise.resolve(snapshot) },
+      });
+      return new TextEncoder().encode(
+        JSON.stringify(await service.retrieve(snapshot, { ...request, limit })),
+      ).byteLength;
+    };
+    const maxBytesPerTurn = (await measure(2)) - 1;
+    const service = createAnalystEvidenceService({
+      storageService: {},
+      projectionSnapshotService: { capture: () => Promise.resolve(snapshot) },
+      evidenceBudget: { maxCallsPerTurn: 2, maxBytesPerTurn },
+    });
+
+    await expect(service.retrieve(snapshot, { ...request, limit: 2 })).rejects.toThrow(
+      "byte budget",
+    );
+    const first = await service.retrieve(snapshot, { ...request, limit: 1 });
+    expect(first.scope).toMatchObject({ examinedSourceCount: 1, exhaustive: false });
+    expect(first.nextCursor).not.toBeNull();
+  });
+
+  test("excludes previously owned games and rejects stale authenticated top evidence", async () => {
+    let current: AnalystProjectionSnapshot;
+    const sources = [
+      {
+        ...snapshot.sources[0],
+        sourceVersion: "identity-current",
+        citationId: "identity-current",
+      },
+      {
+        evidenceClass: "current-scoring" as const,
+        sourceId: "game:a:scoring",
+        sourceVersion: "score-current",
+        citationId: "score-current",
+        payload: {
+          gameId: "a",
+          displayedFitness: 5,
+          validatedBreakdown: [],
+          veto: null,
+          predictionStatus: null,
+          sourceState: "available" as const,
+        },
+        canonicalSummary: "Current validated scoring evidence",
+        destination: { operationId: "shelf.game.get" as const, parameters: { gameId: "a" } },
+      },
+      {
+        ...snapshot.sources[1],
+        payload: {
+          gameId: "b",
+          displayName: "Former game",
+          bggId: 2,
+          ownershipState: "previously-owned" as const,
+        },
+      },
+      {
+        evidenceClass: "current-scoring" as const,
+        sourceId: "game:b:scoring",
+        sourceVersion: "score-former",
+        citationId: "score-former",
+        payload: {
+          gameId: "b",
+          displayedFitness: 10,
+          validatedBreakdown: [],
+          veto: null,
+          predictionStatus: null,
+          sourceState: "available" as const,
+        },
+        canonicalSummary: "Current validated scoring evidence",
+        destination: { operationId: "shelf.game.get" as const, parameters: { gameId: "b" } },
+      },
+    ];
+    current = { ...snapshot, sources };
+    const service = createAnalystEvidenceService({
+      storageService: {},
+      projectionSnapshotService: { capture: () => Promise.resolve(current) },
+    });
+    const result = await service.top(current, {
+      snapshotFingerprint: fingerprint,
+      rankBy: "fitness",
+    });
+    expect(result.entries.map(({ gameId }) => gameId)).toEqual(["a"]);
+    expect(result.scope).toMatchObject({ totalGameCount: 1, matchingGameCount: 1 });
+    current = {
+      ...current,
+      sources: current.sources.map((source) =>
+        source.sourceId === "game:a:scoring"
+          ? { ...source, sourceVersion: "score-revised" }
+          : source,
+      ),
+    };
+    await expect(
+      service.withTopEvidence(result, (value) => Promise.resolve(value)),
+    ).rejects.toBeInstanceOf(AnalystEvidenceSourceChangedError);
+  });
+
+  test("serializes mutations behind authenticated top evidence validation and handoff", async () => {
+    const storageService = {};
+    let current: AnalystProjectionSnapshot = {
+      ...snapshot,
+      sources: [
+        snapshot.sources[0],
+        {
+          evidenceClass: "current-scoring" as const,
+          sourceId: "game:a:scoring",
+          sourceVersion: "score-current",
+          citationId: "score-current",
+          payload: {
+            gameId: "a",
+            displayedFitness: 5,
+            validatedBreakdown: [],
+            veto: null,
+            predictionStatus: null,
+            sourceState: "available" as const,
+          },
+          canonicalSummary: "Current validated scoring evidence",
+          destination: { operationId: "shelf.game.get" as const, parameters: { gameId: "a" } },
+        },
+      ],
+    };
+    const service = createAnalystEvidenceService({
+      storageService,
+      projectionSnapshotService: { capture: () => Promise.resolve(current) },
+    });
+    const result = await service.top(current, {
+      snapshotFingerprint: fingerprint,
+      rankBy: "fitness",
+    });
+    let beginHandoff!: () => void;
+    const handoffBegun = new Promise<void>((resolve) => {
+      beginHandoff = resolve;
+    });
+    let releaseHandoff!: () => void;
+    const release = new Promise<void>((resolve) => {
+      releaseHandoff = resolve;
+    });
+    const handoff = service.withTopEvidence(result, async () => {
+      beginHandoff();
+      await release;
+      return "delivered";
+    });
+    await handoffBegun;
+    let mutationCompleted = false;
+    const mutation = profileSourceCoordinatorFor(storageService).runExclusive(() => {
+      mutationCompleted = true;
+      current = {
+        ...current,
+        sources: current.sources.map((source) =>
+          source.sourceId === "game:a:scoring"
+            ? { ...source, sourceVersion: "score-revised" }
+            : source,
+        ),
+      };
+      return Promise.resolve();
+    });
+    await Promise.resolve();
+    expect(mutationCompleted).toBe(false);
+    releaseHandoff();
+    await expect(handoff).resolves.toBe("delivered");
+    await mutation;
+    expect(mutationCompleted).toBe(true);
+  });
+
   test("registers only returned evidence and binds pages to the captured revision", async () => {
     const service = createAnalystEvidenceService({
       storageService: {},

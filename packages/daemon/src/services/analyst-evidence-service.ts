@@ -3,8 +3,11 @@ import {
   AnalystCitationInspectResultSchema,
   AnalystCitationSchema,
   AnalystNoteDependencySchema,
+  AnalystTopRequestSchema,
+  AnalystTopResultSchema,
   type AnalystCitation,
   type AnalystEvidenceClass,
+  type AnalystTopResult,
 } from "@shelf-judge/shared";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
@@ -137,6 +140,16 @@ export class AnalystEvidenceSourceChangedError extends Error {
 }
 export interface AnalystEvidenceService {
   capture(): Promise<AnalystProjectionSnapshot>;
+  /**
+   * Model-selected local ranking by current-scoring displayedFitness. Numeric
+   * fitness ranks descending; missing fitness ranks last; ties break by game ID.
+   */
+  top(snapshot: AnalystProjectionSnapshot, request: unknown): Promise<AnalystTopResult>;
+  /** Authenticates and refresh-checks an emitted top page before provider handoff. */
+  withTopEvidence<Value>(
+    result: AnalystTopResult,
+    operation: (result: AnalystTopResult) => Promise<Value>,
+  ): Promise<Value>;
   retrieve(
     snapshot: AnalystProjectionSnapshot,
     request: unknown,
@@ -210,6 +223,10 @@ export function createAnalystEvidenceService(deps: {
   ownerNoteAuthorizationScope?: AnalystOwnerNoteAuthorizationScope;
   /** Injectable only to make opaque citation authorization deterministic in tests. */
   citationSecret?: Uint8Array;
+  /** Shared turn-local response budget. Future model-loop integration supplies the turn boundary. */
+  evidenceBudget?: { readonly maxCallsPerTurn?: number; readonly maxBytesPerTurn?: number };
+  /** @deprecated Use evidenceBudget; retained for callers created before shared budgeting. */
+  topBudget?: { readonly maxCallsPerTurn?: number; readonly maxBytesPerTurn?: number };
 }): AnalystEvidenceService {
   const coordinator = profileSourceCoordinatorFor(deps.storageService);
   const citationSecret = deps.citationSecret ?? randomBytes(32);
@@ -221,11 +238,21 @@ export function createAnalystEvidenceService(deps: {
       noteReads: Map<string, OwnerGameNoteRead>;
       noteDependencies: Map<string, number>;
       noteLoad: Promise<void>;
+      evidenceCalls: number;
+      evidenceBytes: number;
     }
   >();
   const packages = new WeakMap<
     AnalystRetrievedEvidence,
     { readonly retrieved: AnalystRetrievedEvidence; readonly snapshot: AnalystProjectionSnapshot }
+  >();
+  const topPackages = new WeakMap<
+    AnalystTopResult,
+    {
+      readonly result: AnalystTopResult;
+      readonly snapshot: AnalystProjectionSnapshot;
+      readonly sources: ReadonlyMap<string, string>;
+    }
   >();
 
   function turnFor(snapshot: AnalystProjectionSnapshot) {
@@ -237,6 +264,8 @@ export function createAnalystEvidenceService(deps: {
       noteReads: new Map<string, OwnerGameNoteRead>(),
       noteDependencies: new Map<string, number>(),
       noteLoad: Promise.resolve(),
+      evidenceCalls: 0,
+      evidenceBytes: 0,
     };
     turns.set(snapshot, created);
     return created;
@@ -382,8 +411,155 @@ export function createAnalystEvidenceService(deps: {
     });
   }
 
+  function citationFor(entry: AnalystEvidenceSource): AnalystCitation {
+    return AnalystCitationSchema.parse({
+      citationId: entry.citationId,
+      sourceId: entry.sourceId,
+      sourceVersion: entry.sourceVersion,
+      evidenceClass: entry.evidenceClass,
+      testimony: false,
+      ...(entry.observedAt === undefined ? {} : { observedAt: entry.observedAt }),
+      canonicalSummary: entry.canonicalSummary,
+      destination: entry.destination,
+    });
+  }
+
+  function encodedBytes(value: unknown): number {
+    return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+  }
+
+  function consumeTurnBudget(turn: ReturnType<typeof turnFor>, response: unknown): void {
+    const budget = deps.evidenceBudget ?? deps.topBudget;
+    const maxCalls = budget?.maxCallsPerTurn ?? 16;
+    const maxBytes = budget?.maxBytesPerTurn ?? 64 * 1024;
+    const bytes = encodedBytes(response);
+    if (turn.evidenceCalls >= maxCalls)
+      throw new Error("Analyst evidence turn call budget is exhausted");
+    if (bytes > maxBytes - turn.evidenceBytes)
+      throw new Error("Analyst evidence turn byte budget is exhausted");
+    turn.evidenceCalls += 1;
+    turn.evidenceBytes += bytes;
+  }
+
+  async function currentTopSources(
+    snapshot: AnalystProjectionSnapshot,
+    expected: ReadonlyMap<string, string>,
+  ): Promise<boolean> {
+    const current = await deps.projectionSnapshotService.capture();
+    if (current.snapshotFingerprint !== snapshot.snapshotFingerprint) return false;
+    const versions = new Map(
+      current.sources.map((source) => [source.sourceId, source.sourceVersion]),
+    );
+    return [...expected].every(
+      ([sourceId, sourceVersion]) => versions.get(sourceId) === sourceVersion,
+    );
+  }
+
   return Object.freeze({
     capture: () => coordinator.runExclusive(() => deps.projectionSnapshotService.capture()),
+    async top(
+      snapshot: AnalystProjectionSnapshot,
+      requestInput: unknown,
+    ): Promise<AnalystTopResult> {
+      await Promise.resolve();
+      const request = AnalystTopRequestSchema.parse(requestInput);
+      if (request.snapshotFingerprint !== snapshot.snapshotFingerprint)
+        throw new Error("Analyst top request belongs to a different snapshot");
+      if (request.cursor && request.cursor.snapshotFingerprint !== snapshot.snapshotFingerprint)
+        throw new Error("Analyst top cursor belongs to a different snapshot");
+      const turn = turnFor(snapshot);
+      const identityByGame = new Map<string, AnalystEvidenceSource>();
+      const scoringByGame = new Map<string, AnalystEvidenceSource>();
+      for (const source of snapshot.sources) {
+        const gameId = sourceGameId(source);
+        if (gameId === undefined) continue;
+        if (source.evidenceClass === "game-identity-ownership") identityByGame.set(gameId, source);
+        if (source.evidenceClass === "current-scoring") scoringByGame.set(gameId, source);
+      }
+      const ranked = [...identityByGame]
+        .flatMap(([gameId, identity]) => {
+          const scoring = scoringByGame.get(gameId);
+          if (scoring === undefined) return [];
+          const identityPayload = ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST.evidence[
+            "game-identity-ownership"
+          ].parse(identity.payload);
+          if (identityPayload.ownershipState !== "owned") return [];
+          const scoringPayload = ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST.evidence[
+            "current-scoring"
+          ].parse(scoring.payload);
+          return [
+            {
+              gameId,
+              name: identityPayload.displayName,
+              fitness: scoringPayload.displayedFitness,
+              breakdown: scoringPayload.validatedBreakdown.map(
+                ({ axisId, axisName, contribution }) => ({
+                  axisId,
+                  axisName,
+                  contribution,
+                }),
+              ),
+              citations: [citationFor(identity), citationFor(scoring)],
+            },
+          ];
+        })
+        .sort(
+          (left, right) =>
+            (right.fitness === null ? Number.NEGATIVE_INFINITY : right.fitness) -
+              (left.fitness === null ? Number.NEGATIVE_INFINITY : left.fitness) ||
+            compareText(left.gameId, right.gameId),
+        );
+      const scopeKey = canonicalSha256({ tool: "top", rankBy: request.rankBy });
+      const continuation = request.cursor ? turn.cursors.get(request.cursor.token) : undefined;
+      if (request.cursor && (!continuation || continuation.scopeKey !== scopeKey))
+        throw new Error("Analyst top cursor is invalid for this scope");
+      const offset = continuation?.offset ?? 0;
+      const requested = request.limit ?? 25;
+      const entries = ranked.slice(offset, offset + requested);
+      const nextOffset = offset + entries.length;
+      let nextCursor: AnalystTopResult["nextCursor"] = null;
+      if (nextOffset < ranked.length) {
+        const token = crypto.randomUUID();
+        nextCursor = { snapshotFingerprint: snapshot.snapshotFingerprint, token };
+      }
+      const examined = new Set(turn.examined.get(scopeKey));
+      for (const entry of entries) examined.add(entry.gameId);
+      const result = freeze(
+        AnalystTopResultSchema.parse({
+          snapshotFingerprint: snapshot.snapshotFingerprint,
+          entries,
+          scope: {
+            totalGameCount: ranked.length,
+            matchingGameCount: ranked.length,
+            examinedGameCount: examined.size,
+            exhaustive: examined.size === ranked.length,
+          },
+          nextCursor,
+          truncated: nextCursor !== null,
+        }),
+      );
+      consumeTurnBudget(turn, result);
+      turn.examined.set(scopeKey, examined);
+      if (nextCursor !== null) turn.cursors.set(nextCursor.token, { scopeKey, offset: nextOffset });
+      const sources = new Map<string, string>();
+      for (const entry of entries)
+        for (const citation of entry.citations)
+          sources.set(citation.sourceId, citation.sourceVersion);
+      topPackages.set(result, { result, snapshot, sources });
+      return result;
+    },
+    async withTopEvidence<Value>(
+      result: AnalystTopResult,
+      operation: (result: AnalystTopResult) => Promise<Value>,
+    ): Promise<Value> {
+      const packageRecord = topPackages.get(result);
+      if (packageRecord === undefined) throw new AnalystEvidenceSourceChangedError();
+      return coordinator.runExclusive(async () => {
+        if (!(await currentTopSources(packageRecord.snapshot, packageRecord.sources)))
+          throw new AnalystEvidenceSourceChangedError();
+        return operation(packageRecord.result);
+      });
+    },
     async retrieve(
       snapshot: AnalystProjectionSnapshot,
       requestInput: unknown,
@@ -494,13 +670,11 @@ export function createAnalystEvidenceService(deps: {
       }
       const evidence = registry.complete();
       // Coverage is turn-local observed evidence, never a caller-provided offset.
-      const examined = turn.examined.get(scopeKey) ?? new Set<string>();
+      const examined = new Set(turn.examined.get(scopeKey));
       for (const entry of returned) examined.add(entry.citationId);
-      turn.examined.set(scopeKey, examined);
       let nextCursor: AnalystRetrievedEvidence["nextCursor"] = null;
       if (nextOffset < matching.length) {
         const token = crypto.randomUUID();
-        turn.cursors.set(token, { scopeKey, offset: nextOffset });
         nextCursor = { snapshotFingerprint: snapshot.snapshotFingerprint, token };
       }
       const validation = await revalidate(snapshot);
@@ -518,6 +692,9 @@ export function createAnalystEvidenceService(deps: {
         },
         nextCursor,
       });
+      consumeTurnBudget(turn, retrieved);
+      turn.examined.set(scopeKey, examined);
+      if (nextCursor !== null) turn.cursors.set(nextCursor.token, { scopeKey, offset: nextOffset });
       packages.set(retrieved, { retrieved, snapshot });
       return retrieved;
     },

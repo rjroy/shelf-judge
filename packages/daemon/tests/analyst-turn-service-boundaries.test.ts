@@ -59,6 +59,8 @@ function unavailableProvider(
 function evidenceService(overrides: Partial<AnalystEvidenceService>): AnalystEvidenceService {
   return {
     capture: () => Promise.resolve(snapshot),
+    top: () => Promise.reject(new Error("top was not configured")),
+    withTopEvidence: () => Promise.reject(new Error("top evidence was not configured")),
     retrieve: () => Promise.reject(new Error("retrieve was not configured")),
     compareNoteDependencies: () => Promise.resolve("current"),
     withCurrentNoteDependencies: (_dependencies, operation) => operation(),

@@ -310,6 +310,60 @@ export const AnalystCitationSchema = z
       });
     }
   });
+/**
+ * A model-selected local ranking. `fitness` is the current-scoring
+ * displayedFitness scalar, not an owner rating; unavailable scores rank after
+ * numeric scores. Equal values (including unavailable values) break by game ID.
+ */
+export const AnalystTopRequestSchema = z
+  .object({
+    snapshotFingerprint: IdSchema,
+    rankBy: z.literal("fitness"),
+    limit: PositiveSafeIntegerSchema.max(100).optional(),
+    cursor: z
+      .object({ snapshotFingerprint: IdSchema, token: z.string().uuid() })
+      .strict()
+      .nullable()
+      .optional(),
+  })
+  .strict();
+export const AnalystTopEntrySchema = z
+  .object({
+    gameId: IdSchema,
+    name: z.string(),
+    fitness: z.number().nullable(),
+    breakdown: z.array(
+      z
+        .object({
+          axisId: IdSchema,
+          axisName: z.string().min(1),
+          contribution: z.number().nullable(),
+        })
+        .strict(),
+    ),
+    citations: z.array(AnalystCitationSchema).length(2),
+  })
+  .strict();
+export const AnalystTopScopeSchema = z
+  .object({
+    totalGameCount: SafeCountSchema,
+    matchingGameCount: SafeCountSchema,
+    examinedGameCount: SafeCountSchema,
+    exhaustive: z.boolean(),
+  })
+  .strict();
+export const AnalystTopResultSchema = z
+  .object({
+    snapshotFingerprint: IdSchema,
+    entries: z.array(AnalystTopEntrySchema),
+    scope: AnalystTopScopeSchema,
+    nextCursor: z
+      .object({ snapshotFingerprint: IdSchema, token: z.string().uuid() })
+      .strict()
+      .nullable(),
+    truncated: z.boolean(),
+  })
+  .strict();
 export const AnalystAnswerBlockSchema = z
   .object({
     text: z.string().min(1),
@@ -525,6 +579,8 @@ export type AnalystAbstentionReason = (typeof ANALYST_ABSTENTION_REASONS)[number
 export type AnalystUnavailableReason = (typeof ANALYST_UNAVAILABLE_REASONS)[number];
 export type AnalystTurnRequest = z.infer<typeof AnalystTurnRequestSchema>;
 export type AnalystCitation = z.infer<typeof AnalystCitationSchema>;
+export type AnalystTopRequest = z.infer<typeof AnalystTopRequestSchema>;
+export type AnalystTopResult = z.infer<typeof AnalystTopResultSchema>;
 export type AnalystAnswerBlock = z.infer<typeof AnalystAnswerBlockSchema>;
 export type AnalystFinal = z.infer<typeof AnalystFinalSchema>;
 export type AnalystStreamEvent = z.infer<typeof AnalystStreamEventSchema>;
