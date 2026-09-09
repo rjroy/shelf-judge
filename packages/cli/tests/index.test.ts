@@ -251,3 +251,22 @@ describe("profile reflection command parsing", () => {
     },
   );
 });
+
+describe("Collection Analyst command parsing", () => {
+  test.each([
+    [
+      ["analyst", "ask", "Which", "games", "are", "owned?", "--acknowledge-disclosure"],
+      "analyst ask",
+      ["Which", "games", "are", "owned?", "--acknowledge-disclosure"],
+    ],
+    [["analyst", "chat"], "analyst chat", []],
+  ] as Array<[string[], string, string[]]>)(
+    "keeps Analyst arguments command-local",
+    (tokens, commandPath, positional) => {
+      expect(parseArgs(["bun", "shelf-judge", ...tokens])).toMatchObject({
+        commandPath,
+        positional,
+      });
+    },
+  );
+});

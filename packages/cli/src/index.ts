@@ -47,6 +47,7 @@ import {
 } from "./commands/tournament.js";
 import { profileCommand } from "./commands/profile.js";
 import { profileReflectionsCommand } from "./commands/profile-reflections.js";
+import { analystAsk, analystChat } from "./commands/analyst.js";
 import { predictGame, predictBggGame, predictReadiness } from "./commands/predict.js";
 import { nicheIgnored, nicheIgnore, nicheUnignore } from "./commands/niche.js";
 import {
@@ -137,6 +138,8 @@ const COMMANDS: Record<string, number> = {
   "profile reflections enable": 3,
   "profile reflections disable": 3,
   "profile reflections delete": 3,
+  "analyst ask": 2,
+  "analyst chat": 2,
   "import bgg-collection": 2,
   "config get": 2,
   "config set": 2,
@@ -631,6 +634,12 @@ async function main(): Promise<void> {
     case "profile reflections disable":
     case "profile reflections delete":
       output = await profileReflectionsCommand(client, parsed.commandPath, args, opts);
+      break;
+    case "analyst ask":
+      await analystAsk(client, args);
+      break;
+    case "analyst chat":
+      await analystChat(client);
       break;
     case "start":
       output = await daemonStart(client, args, opts);

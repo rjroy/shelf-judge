@@ -20,6 +20,18 @@ interface LocalCommandHelp {
 // One API operation can intentionally back multiple CLI commands. Keep those
 // CLI-only aliases here instead of advertising duplicate daemon operations.
 const LOCAL_OPERATION_COMMANDS: Record<string, LocalCommandHelp[]> = {
+  "shelf.analyst.turn.stream": [
+    {
+      name: "ask",
+      usage: "shelf-judge analyst ask <question> [--acknowledge-disclosure]",
+      description: "Ask one disclosed Collection Analyst question without saving history",
+    },
+    {
+      name: "chat",
+      usage: "shelf-judge analyst chat",
+      description: "Start an acknowledged ephemeral Collection Analyst conversation",
+    },
+  ],
   "shelf.profile.reflections.get": [
     {
       name: "reflections",

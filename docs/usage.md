@@ -12,6 +12,7 @@ Shelf Judge is a board game collection curation tool. It scores every game in yo
 - [Game Detail Page](#game-detail-page)
 - [Tournament](#tournament)
 - [Collection Profile](#collection-profile)
+- [Collection Analyst CLI](#collection-analyst-cli)
 - [Optional Reflections](#optional-reflections)
 - [Redundancy](#redundancy)
 - [Shelf Configuration and Capacity](#shelf-configuration-and-capacity)
@@ -339,6 +340,25 @@ Noninteractive and JSON refreshes require `--acknowledge-disclosure`. The CLI
 prints the batch ID and cancellation capability before work begins. Avoid placing
 the capability in shell history when possible; `Ctrl-C` in the initiating process
 uses the same cancellation operation.
+
+## Collection Analyst CLI
+
+The Collection Analyst has two read-only CLI workflows. Both use the daemon's
+Analyst configuration, stream, and cancellation contracts. Shelf Judge does
+not save either conversation or write collection data.
+
+```text
+shelf-judge analyst ask <question> [--acknowledge-disclosure]
+shelf-judge analyst chat
+```
+
+`ask` sends one question. In an interactive terminal it displays the configured
+provider and model plus the disclosure and asks for acknowledgement unless
+`--acknowledge-disclosure` is supplied. `chat` displays the same disclosure
+before starting and retains turns only while that process runs. Type `/exit` or
+`/quit` to leave the chat. `Ctrl-C` cancels the active turn using its exact
+conversation capability; provider processing of content already sent follows
+the provider's policy.
 
 ---
 
