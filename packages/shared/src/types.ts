@@ -678,6 +678,7 @@ export interface ImportComplete {
 
 export interface AppConfig {
   bggAuthToken: string | null;
+  groundedAnalysis: GroundedProviderIdentity | null;
   profileEntityPolicy: CollectionProfileEntityPolicy;
   username: string | null;
 }
@@ -1397,3 +1398,4 @@ export interface ShelfCapacityResult {
   unfittableGames: UnfittableEntry[];
   overflowGames: OverflowEntry[];
 }
+import type { GroundedProviderIdentity } from "./grounded-analysis.js";

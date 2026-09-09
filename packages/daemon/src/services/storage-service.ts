@@ -18,6 +18,7 @@ import {
   CollectionProfileEntityPolicySchema,
   CURRENT_COLLECTION_SCHEMA_VERSION,
   DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
+  GroundedProviderIdentitySchema,
   createProfileDataSchema,
   PredictionSettingsSchema,
   RedundancySettingsSchema,
@@ -210,6 +211,7 @@ function createDefaultTournament(): TournamentData {
 function defaultConfig(): AppConfig {
   return {
     bggAuthToken: null,
+    groundedAnalysis: null,
     profileEntityPolicy: structuredClone(DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY),
     username: null,
   };
@@ -223,6 +225,10 @@ function parseConfig(value: unknown): AppConfig {
       typeof config.bggAuthToken === "string" || config.bggAuthToken === null
         ? config.bggAuthToken
         : null,
+    groundedAnalysis:
+      config.groundedAnalysis === undefined
+        ? null
+        : GroundedProviderIdentitySchema.nullable().parse(config.groundedAnalysis),
     profileEntityPolicy: CollectionProfileEntityPolicySchema.parse(
       config.profileEntityPolicy ?? DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
     ),

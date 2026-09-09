@@ -46,12 +46,11 @@ checks artifact structure and output provider/model provenance, but cannot
 authenticate human reviewers, independent fixture authorship, or the truth of
 an operator's claimed evidence. Those are operator attestation boundaries.
 
-1. Configure and authenticate a real provider outside this command. The daemon
-   requires `SHELF_JUDGE_GROUNDED_PROVIDER_ID`,
-   `SHELF_JUDGE_GROUNDED_MODEL_ID`, and
-   `SHELF_JUDGE_GROUNDED_EXTENSION_IDS` (a JSON array) before it can generate
-   Reflection output. Provider-specific credentials are also required but are
-   not defined or available in this repository.
+1. Configure and authenticate a real provider outside this command. Set the
+   complete shared identity with `shelf-judge config set grounded-analysis
+   '<JSON identity>'`, then restart the daemon before generating Reflection
+   output. Provider-specific credentials may still be required by the selected
+   provider, but are not defined or available in this repository.
 2. Generate and retain paired Reflection and deterministic-card-plus-note
    baseline outputs for corpus version `2026-09-06.2`. Conduct randomized
    blinded human review, preserving provider/model identity, two locked

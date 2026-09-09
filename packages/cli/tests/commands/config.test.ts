@@ -4,6 +4,7 @@ import { createMockClient } from "../helpers/mock-client.js";
 
 const configData = {
   bggAuthToken: "***configured***",
+  groundedAnalysis: { providerId: "local", modelId: "model", extensionIds: [] },
 };
 
 describe("config get", () => {
@@ -21,6 +22,8 @@ describe("config get", () => {
     expect(output).toContain("Value");
     expect(output).toContain("bgg-token");
     expect(output).toContain("***configured***");
+    expect(output).toContain("grounded-analysis.provider");
+    expect(output).toContain("local");
   });
 
   test("--json outputs parseable config object", async () => {
@@ -52,5 +55,26 @@ describe("config set", () => {
       bggAuthToken: string;
     };
     expect(parsed.bggAuthToken).toBe("***configured***");
+  });
+
+  test("sets and clears the complete grounded analysis identity atomically", async () => {
+    const identity = '{"providerId":"local","modelId":"model","extensionIds":[]}';
+    expect(await configSet(client, ["grounded-analysis", identity], { json: false })).toContain(
+      "restart the daemon",
+    );
+    expect(await configSet(client, ["grounded-analysis", "null"], { json: false })).toContain(
+      "Updated grounded-analysis",
+    );
+  });
+
+  test("rejects invalid grounded analysis JSON before calling the daemon", async () => {
+    let error: unknown;
+    try {
+      await configSet(client, ["grounded-analysis", "not-json"], { json: false });
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("Invalid grounded-analysis JSON");
   });
 });

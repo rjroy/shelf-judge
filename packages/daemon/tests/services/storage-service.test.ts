@@ -552,6 +552,7 @@ describe("StorageService.loadConfig", () => {
     const config = await service.loadConfig();
 
     expect(config.bggAuthToken).toBeNull();
+    expect(config.groundedAnalysis).toBeNull();
     expect(config.profileEntityPolicy).toEqual({
       mechanic: { overviewLimit: 3, minimumSupportedGames: 3 },
       designer: { overviewLimit: 3, minimumSupportedGames: 3 },
@@ -580,6 +581,18 @@ describe("StorageService.loadConfig", () => {
     expect(JSON.parse(fileOps.files.get(CONFIG_PATH) ?? "null")).not.toHaveProperty("dataDir");
   });
 
+  test("loads legacy configs without a grounded provider and rejects invalid persisted identities", async () => {
+    const { service } = makeService({
+      [CONFIG_PATH]: JSON.stringify({
+        bggAuthToken: null,
+        groundedAnalysis: { providerId: " provider", modelId: "model", extensionIds: [] },
+      }),
+    });
+
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+    await expect(service.loadConfig()).rejects.toThrow();
+  });
+
   test("rejects invalid profile entity policy values", async () => {
     const { service } = makeService({
       [CONFIG_PATH]: JSON.stringify({
@@ -603,7 +616,8 @@ describe("StorageService.saveConfig", () => {
 
     await service.saveConfig({
       bggAuthToken: "tok",
-      username: null,
+        username: null,
+        groundedAnalysis: null,
       profileEntityPolicy: {
         mechanic: { overviewLimit: 1, minimumSupportedGames: 2 },
         designer: { overviewLimit: 2, minimumSupportedGames: 3 },
@@ -625,6 +639,22 @@ describe("StorageService.saveConfig", () => {
       artist: { overviewLimit: 3, minimumSupportedGames: 4 },
     });
     expect(persisted).not.toHaveProperty("dataDir");
+  });
+
+  test("persists a valid grounded provider identity", async () => {
+    const { service } = makeService();
+    const config = await service.loadConfig();
+
+    await service.saveConfig({
+      ...config,
+      groundedAnalysis: { providerId: "local-provider", modelId: "local-model", extensionIds: [] },
+    });
+
+    expect((await service.loadConfig()).groundedAnalysis).toEqual({
+      providerId: "local-provider",
+      modelId: "local-model",
+      extensionIds: [],
+    });
   });
 });
 

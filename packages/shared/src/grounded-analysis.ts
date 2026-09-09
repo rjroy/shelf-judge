@@ -195,8 +195,8 @@ export const CancellationCapabilitySchema = z.string().regex(/^[0-9a-f]{64}$/);
 
 export const GroundedProviderIdentitySchema = z
   .object({
-    providerId: IdSchema,
-    modelId: IdSchema,
+    providerId: IdSchema.refine((value) => value.trim() === value, "Provider ID must not be padded"),
+    modelId: IdSchema.refine((value) => value.trim() === value, "Model ID must not be padded"),
     extensionIds: z.array(IdSchema),
   })
   .strict()

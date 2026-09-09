@@ -18,7 +18,7 @@ The fitness score is always honest about how it was derived. No score appears wi
 
 ## Architecture
 
-Shelf Judge runs locally. There is no server, no cloud sync, no account.
+Shelf Judge runs locally with a daemon and web UI. No hosted Shelf Judge service, cloud sync, or account is required. Optional AI workflows send authorized questions and evidence, including relevant owner notes, to the configured model provider.
 
 ```
 packages/
@@ -36,6 +36,32 @@ The daemon owns all data. The web UI and CLI are both clients of the daemon API.
 - A BGG application token for BGG-dependent features (search, import, community data). The app works without one for manual entry and personal-only scoring.
 
 ## Getting Started
+
+### Optional AI provider setup
+
+Reflections and Analyst share one optional provider identity. Configure it through Shelf Judge's persisted `config.json`, not environment variables. Core collection features continue to work when it is absent, and provider calls only occur in the explicit AI workflows you invoke.
+
+For a built-in Ollama provider, an example identity is:
+
+```json
+{
+  "groundedAnalysis": {
+    "providerId": "ollama",
+    "modelId": "qwen3.6:27b",
+    "extensionIds": []
+  }
+}
+```
+
+Ollama must be running locally with the chosen model installed; use `ollama list` to check installed models. `qwen3.6:27b` is an example, not a default. The built-in Ollama provider connects to `http://127.0.0.1:11434/v1`; that URL is not a provider ID. Keep `extensionIds` as `[]` for built-in behavior. Listed extension IDs load trusted executable extensions, so only allow extensions you trust. Provider credentials are not part of this identity. Add the setting to `~/.shelf-judge/config.json` without overwriting other settings. `SHELF_JUDGE_CONFIG` overrides that file path; otherwise `SHELF_JUDGE_DIR` overrides its parent directory.
+
+With the daemon running, configure the identity atomically:
+
+```sh
+shelf-judge config set grounded-analysis '{"providerId":"ollama","modelId":"qwen3.6:27b","extensionIds":[]}'
+```
+
+For a CLI-managed daemon, apply the change with `shelf-judge stop` followed by `shelf-judge start`. For development, stop the running development process, edit the existing `config.json`, and restart with `bun run dev`. Do not start a duplicate daemon. Provider changes do not reload live, so status remains that of the active daemon until restart. Set `groundedAnalysis` to `null`, or run `shelf-judge config set grounded-analysis 'null'`, to disable AI on the next restart. See the [Reflection](docs/usage.md#optional-reflections) and [Analyst](docs/usage.md#collection-analyst-cli) usage instructions.
 
 ```bash
 # Install dependencies

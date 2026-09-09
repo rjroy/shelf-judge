@@ -14,8 +14,7 @@ import { createCollectionMutationService } from "./services/collection-mutation-
 import { createDisplayedFitnessService } from "./services/displayed-fitness-service.js";
 import { createIntentionService } from "./services/intention-service.js";
 import { createOwnerGameNoteService } from "./services/owner-game-note-service.js";
-import { createGroundedAnalysisProvider } from "./services/grounded-analysis/provider.js";
-import { createProviderSessionExtensions } from "./services/grounded-analysis/provider-extension-factories.js";
+import { loadStartupGroundedAnalysis } from "./services/grounded-analysis/startup-provider.js";
 import { toErrorMessage } from "@shelf-judge/shared";
 import { createReflectionRuntime } from "./services/reflection-runtime.js";
 
@@ -31,17 +30,9 @@ async function main() {
     fileOps,
   });
 
-  const appConfig = await storageService.loadConfig();
-  const groundedAnalysisProvider = createGroundedAnalysisProvider({
-    configuration: envConfig.groundedAnalysis,
-    piSessionFactory: {
-      cwd: process.cwd(),
-      ...(envConfig.groundedAnalysis.status === "configured"
-        ? {
-            ...createProviderSessionExtensions(envConfig.groundedAnalysis),
-          }
-        : {}),
-    },
+  const { appConfig, provider: groundedAnalysisProvider } = await loadStartupGroundedAnalysis({
+    storageService,
+    cwd: process.cwd(),
   });
 
   // Run versioned collection migration and artifact invalidation before routes can fire.

@@ -297,11 +297,11 @@ Use **Refresh reflections** (or an individual question's refresh action) and
 acknowledge the disclosure before any Reflection evidence leaves the local
 application boundary.
 
-The daemon operator must configure a grounded provider ID, model ID, and JSON
-extension allowlist in the daemon launch environment. Missing or invalid model
-configuration leaves the deterministic Profile available and reports
-`model-configuration` for Reflection operations. Shelf Judge does not silently
-select a provider or model.
+Configure the shared grounded-analysis provider ID, model ID, and JSON extension
+allowlist in `config.json`, then restart the daemon to load the changed setting.
+Missing or invalid model configuration leaves the deterministic Profile available
+and reports `model-configuration` for Reflection operations. Shelf Judge does
+not silently select a provider or model.
 
 Before a refresh, the web UI and CLI identify the provider and model, relevant
 owner notes and deterministic evidence categories to be sent, local retention,
@@ -372,13 +372,14 @@ before starting and retains turns only while that process runs. Type `/exit` or
 conversation capability; provider processing of content already sent follows
 the provider's policy.
 
-The daemon operator must configure the provider ID, model ID, and allowlisted
-provider extensions at startup. Shelf Judge has no implicit provider fallback:
-missing configuration, extension binding, authentication, refusal, rate limit,
-outage, context exhaustion, transport, and validation failures remain distinct
-unavailable states. Usage and cost are shown only when provider-reported; Shelf
-Judge does not estimate them. A failed or cancelled turn can be retried only by
-an explicit new request. Shell history can retain a CLI question.
+Configure the shared provider ID, model ID, and allowlisted provider extensions
+in `config.json`, then restart the daemon to load the changed setting. Shelf
+Judge has no implicit provider fallback: missing configuration, extension
+binding, authentication, refusal, rate limit, outage, context exhaustion,
+transport, and validation failures remain distinct unavailable states. Usage and
+cost are shown only when provider-reported; Shelf Judge does not estimate them.
+A failed or cancelled turn can be retried only by an explicit new request. Shell
+history can retain a CLI question.
 
 ---
 
@@ -479,3 +480,14 @@ shelf-judge game note clear <game-id> --expected-version <n> [--command-id <uuid
 ```
 
 `--text` is the only note-text input. It can be visible in shell history and process arguments; stdin, file input, and editor launching are not supported. A mutation retry must use the same `--command-id` and canonical request payload as the original request so Shelf Judge can replay the accepted result. Reusing a command ID with a different payload is rejected.
+# Configuration
+
+`config.json` stores shared application settings, including the optional identity used by both Reflections and Analyst. It is not configured with application environment variables. Use `shelf-judge config get` to inspect its status and `shelf-judge config set grounded-analysis '<JSON identity>'` to update the complete provider, model, and extension allowlist atomically. Pass `null` as the JSON value to clear it. Restart the daemon to apply a changed identity.
+
+Example:
+
+```sh
+shelf-judge config set grounded-analysis '{"providerId":"ollama","modelId":"qwen3.6:27b","extensionIds":[]}'
+```
+
+The Ollama endpoint (`http://127.0.0.1:11434/v1`) and model above are examples only, not defaults; the endpoint is separate from the `ollama` provider ID. Empty extensions are appropriate for the built-in provider. Extension IDs load trusted executable extensions, so keep `[]` unless you trust the extension. Provider credentials are not stored in this identity. Config and data path overrides control where `config.json` is stored.

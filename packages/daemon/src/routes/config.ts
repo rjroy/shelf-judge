@@ -1,5 +1,9 @@
 import { Hono } from "hono";
-import { CollectionProfileEntityPolicySchema, toErrorMessage } from "@shelf-judge/shared";
+import {
+  CollectionProfileEntityPolicySchema,
+  GroundedProviderIdentitySchema,
+  toErrorMessage,
+} from "@shelf-judge/shared";
 import { z } from "zod";
 import type { StorageService } from "../services/storage-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
@@ -10,6 +14,7 @@ export interface ConfigRoutesDeps {
 
 const UpdateConfigSchema = z.object({
   bggAuthToken: z.string().nullable().optional(),
+  groundedAnalysis: GroundedProviderIdentitySchema.nullable().optional(),
   profileEntityPolicy: CollectionProfileEntityPolicySchema.optional(),
   username: z.string().optional(),
 });
@@ -51,6 +56,9 @@ export function createConfigRoutes(deps: ConfigRoutesDeps): RouteModule {
 
       if (parsed.data.bggAuthToken !== undefined) {
         config.bggAuthToken = parsed.data.bggAuthToken;
+      }
+      if (parsed.data.groundedAnalysis !== undefined) {
+        config.groundedAnalysis = parsed.data.groundedAnalysis;
       }
       if (parsed.data.username !== undefined) {
         config.username = parsed.data.username;

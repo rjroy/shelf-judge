@@ -5,6 +5,11 @@ import { formatTable, printOutput } from "../output.js";
 
 interface ConfigData {
   bggAuthToken: string | null;
+  groundedAnalysis: {
+    providerId: string;
+    modelId: string;
+    extensionIds: string[];
+  } | null;
 }
 
 export async function configGet(
@@ -21,7 +26,17 @@ export async function configGet(
 
   if (opts.json) return printOutput(data, opts);
 
-  return formatTable(["Key", "Value"], [["bgg-token", data.bggAuthToken ?? "(not set)"]]);
+  const groundedAnalysis = data.groundedAnalysis;
+  return formatTable(
+    ["Key", "Value"],
+    [
+      ["bgg-token", data.bggAuthToken ?? "(not set)"],
+      ["grounded-analysis", groundedAnalysis ? "configured (restart daemon to apply changes)" : "(not set)"],
+      ["grounded-analysis.provider", groundedAnalysis?.providerId ?? "(not set)"],
+      ["grounded-analysis.model", groundedAnalysis?.modelId ?? "(not set)"],
+      ["grounded-analysis.extensions", groundedAnalysis?.extensionIds.join(", ") || "(none)"],
+    ],
+  );
 }
 
 export async function configSet(
@@ -39,6 +54,18 @@ export async function configSet(
   const bodyMap: Record<string, Record<string, unknown>> = {
     "bgg-token": { bggAuthToken: value },
   };
+  if (key === "grounded-analysis") {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      if (parsed !== null && (typeof parsed !== "object" || Array.isArray(parsed))) {
+        throw new Error("must be an identity object or null");
+      }
+      bodyMap[key] = { groundedAnalysis: parsed };
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "invalid JSON";
+      throw new Error(`Invalid grounded-analysis JSON: ${detail}`);
+    }
+  }
 
   const body = bodyMap[key];
   if (!body) {
@@ -54,5 +81,5 @@ export async function configSet(
 
   if (opts.json) return printOutput(data, opts);
 
-  return `Updated ${key}`;
+  return `Updated ${key}${key === "grounded-analysis" ? "; restart the daemon to apply changes" : ""}`;
 }
