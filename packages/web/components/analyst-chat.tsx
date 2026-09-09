@@ -9,6 +9,7 @@ import {
   type AnalystTurnRequest,
 } from "@shelf-judge/shared";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { generateBrowserUuid } from "@/lib/browser-uuid";
 
 type Configuration = {
   readonly configuration: { readonly identity: { readonly providerId: string; readonly modelId: string } };
@@ -18,7 +19,7 @@ type Message = AnalystTurnRequest["messages"][number] & { citations?: AnalystCit
 type LiveState = "idle" | "loading" | "streaming" | "cancelled" | "failed";
 
 function id(): string {
-  return crypto.randomUUID();
+  return generateBrowserUuid();
 }
 
 function conversationCapability(): string {

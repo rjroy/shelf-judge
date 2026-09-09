@@ -9,13 +9,14 @@ import {
   type ReflectionQuestionId,
 } from "@shelf-judge/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { generateBrowserUuid } from "@/lib/browser-uuid";
 import { ReflectionCard } from "./reflection-card";
 import { ReflectionDisclosure } from "./reflection-disclosure";
 
 const REFLECTIONS_PATH = "/api/daemon/profile/reflections";
 
 function requestId(): string {
-  return crypto.randomUUID();
+  return generateBrowserUuid();
 }
 
 function cancellationCapability(): string {

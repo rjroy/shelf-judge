@@ -30,6 +30,41 @@ test("Collection Analyst discloses sending, streams a first question and follow-
   expect(await page.evaluate(async () => ({ local: Object.keys(localStorage), session: Object.keys(sessionStorage), cookies: document.cookie, indexedDb: await indexedDB.databases() }))).toEqual({ local: [], session: [], cookies: "", indexedDb: [] });
 });
 
+test("Collection Analyst works without randomUUID while retaining cryptographic capabilities", async ({ page }) => {
+  const turnBodies: Array<{ conversationId: string; requestId: string; conversationCapability: string }> = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.endsWith("/analyst/turns/stream")) {
+      turnBodies.push(request.postDataJSON() as (typeof turnBodies)[number]);
+    }
+  });
+  await page.addInitScript(() => {
+    Object.defineProperty(crypto, "randomUUID", { configurable: true, value: undefined });
+  });
+  await page.goto("/analyst");
+  await expect(page.getByText("Ask a first question")).toBeVisible();
+  expect(await page.evaluate(() => [typeof crypto.randomUUID, typeof crypto.getRandomValues])).toEqual([
+    "undefined",
+    "function",
+  ]);
+
+  for (const question of ["Which game should I play?", "What is the follow-up?"]) {
+    await page.getByLabel("Your question").fill(question);
+    await page.getByRole("button", { name: "Ask Analyst" }).click();
+    await page.getByRole("button", { name: "Acknowledge and send" }).click();
+    await expect(page.getByText("Validated answer complete.")).toBeVisible();
+  }
+  await page.getByRole("button", { name: "New conversation" }).click();
+  await page.getByRole("button", { name: "Start new conversation" }).click();
+  await expect(page.getByText("Nothing was saved.")).toBeVisible();
+
+  expect(turnBodies).toHaveLength(2);
+  for (const body of turnBodies) {
+    expect(body.conversationId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(body.requestId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(body.conversationCapability).toMatch(/^[0-9a-f]{64}$/);
+  }
+});
+
 test("Collection Analyst can stop an active stream and retry without accepting a stale result", async ({ page }) => {
   await page.goto("/analyst");
   await page.getByLabel("Your question").fill("cancel me");

@@ -36,6 +36,25 @@ export default tseslint.config(
     },
   },
   {
+    files: ["packages/web/**/*.{ts,tsx}"],
+    ignores: ["packages/web/lib/browser-uuid.ts", "packages/web/tests/**", "packages/web/e2e/**"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "CallExpression[callee.type='MemberExpression'][callee.property.name='randomUUID']",
+          message:
+            "Browser UUIDs must use generateBrowserUuid() so non-secure HTTP contexts remain supported.",
+        },
+        {
+          selector: "CallExpression[callee.type='MemberExpression'][callee.computed=true][callee.property.value='randomUUID']",
+          message:
+            "Browser UUIDs must use generateBrowserUuid() so non-secure HTTP contexts remain supported.",
+        },
+      ],
+    },
+  },
+  {
     ignores: ["**/node_modules/", "**/dist/", "**/.next/", "**/.next-e2e/", "**/tmp/"],
   },
 );
