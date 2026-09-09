@@ -343,9 +343,21 @@ uses the same cancellation operation.
 
 ## Collection Analyst CLI
 
-The Collection Analyst has two read-only CLI workflows. Both use the daemon's
-Analyst configuration, stream, and cancellation contracts. Shelf Judge does
-not save either conversation or write collection data.
+The Collection Analyst is a read-only, explicitly started web page and two CLI
+workflows. It answers free-form collection questions only from authorized current
+evidence. It cannot edit collection data, notes, intentions, ratings, shelves,
+or provider configuration. Shelf Judge does not save either conversation or
+write collection data.
+
+Open **Collection Analyst** from the application navigation to ask a question.
+Before each new conversation's first send, the page identifies the configured
+provider and model, explains that the question, bounded prior transcript, and
+relevant collection evidence (including relevant owner testimony) may be sent
+to that provider, and explains local ephemerality, the provider-policy boundary,
+the absence of fixed application token or monetary caps, and cancellation.
+Reloading or starting a new conversation discards the visible transcript.
+Stopping a response aborts local streaming and asks the daemon to cancel; content
+already sent may have been processed or charged by the provider.
 
 ```text
 shelf-judge analyst ask <question> [--acknowledge-disclosure]
@@ -359,6 +371,14 @@ before starting and retains turns only while that process runs. Type `/exit` or
 `/quit` to leave the chat. `Ctrl-C` cancels the active turn using its exact
 conversation capability; provider processing of content already sent follows
 the provider's policy.
+
+The daemon operator must configure the provider ID, model ID, and allowlisted
+provider extensions at startup. Shelf Judge has no implicit provider fallback:
+missing configuration, extension binding, authentication, refusal, rate limit,
+outage, context exhaustion, transport, and validation failures remain distinct
+unavailable states. Usage and cost are shown only when provider-reported; Shelf
+Judge does not estimate them. A failed or cancelled turn can be retried only by
+an explicit new request. Shell history can retain a CLI question.
 
 ---
 

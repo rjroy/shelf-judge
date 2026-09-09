@@ -21,6 +21,12 @@ function id(): string {
   return crypto.randomUUID();
 }
 
+function conversationCapability(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -128,8 +134,14 @@ export function AnalystChat() {
   const [state, setState] = useState<LiveState>("loading");
   const [showDisclosure, setShowDisclosure] = useState(false);
   const [resetConfirmation, setResetConfirmation] = useState(false);
-  const active = useRef<{ conversationId: string; capability: string; requestId: string } | null>(null);
-  const conversation = useRef({ conversationId: id(), capability: id() });
+  const composer = useRef<HTMLTextAreaElement>(null);
+  const active = useRef<{
+    conversationId: string;
+    capability: string;
+    requestId: string;
+    controller: AbortController;
+  } | null>(null);
+  const conversation = useRef({ conversationId: id(), capability: conversationCapability() });
 
   useEffect(() => {
     fetch("/api/daemon/analyst/configuration")
@@ -138,17 +150,22 @@ export function AnalystChat() {
       .catch(() => { setState("failed"); setLive("Analyst configuration is unavailable. Try again later."); });
   }, []);
 
+  useEffect(() => {
+    if (state === "cancelled") composer.current?.focus();
+  }, [state]);
+
   const submit = async (content: string, priorMessages = messages) => {
     if (!configuration || !content.trim() || active.current) return;
     const requestId = id();
-    const request = { ...conversation.current, requestId };
+    const controller = new AbortController();
+    const request = { ...conversation.current, requestId, controller };
     active.current = request;
     const owner = { role: "owner" as const, content: content.trim() };
     const transcript = [...priorMessages, owner];
     setMessages(transcript);
     setQuestion(""); setState("streaming"); setLive("Sending your question…");
     try {
-      const response = await fetch("/api/daemon/analyst/turns/stream", { method: "POST", headers: { "Content-Type": "application/json", Accept: "text/event-stream" }, body: JSON.stringify({
+      const response = await fetch("/api/daemon/analyst/turns/stream", { method: "POST", headers: { "Content-Type": "application/json", Accept: "text/event-stream" }, signal: controller.signal, body: JSON.stringify({
         conversationId: request.conversationId, conversationCapability: request.capability, requestId, turnIndex: priorMessages.filter((message) => message.role === "analyst").length,
         disclosure: { providerId: configuration.configuration.identity.providerId, modelId: configuration.configuration.identity.modelId, acknowledged: true }, messages: transcript,
       }) });
@@ -163,14 +180,18 @@ export function AnalystChat() {
         } else if (event.type === "cancelled") { active.current = null; setState("cancelled"); setLive("The Analyst request was cancelled."); }
         else if (event.type === "failed") { setState("failed"); setLive(`The Analyst is unavailable: ${event.reason}.`); }
       });
-    } catch (error) { if (active.current?.requestId === requestId) { setState("failed"); setLive(error instanceof Error ? error.message : "The Analyst request failed."); } }
+    } catch (error) { if (active.current?.requestId === requestId && !controller.signal.aborted) { setState("failed"); setLive(error instanceof Error ? error.message : "The Analyst request failed."); } }
     finally { if (active.current?.requestId === requestId) active.current = null; }
   };
 
-  const cancel = async () => {
+  const cancel = () => {
     const request = active.current; if (!request) return;
     setLive("Cancelling the Analyst request…");
-    await fetch("/api/daemon/analyst/turns/cancel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: request.conversationId, conversationCapability: request.capability, requestId: request.requestId }) }).catch(() => undefined);
+    void fetch("/api/daemon/analyst/turns/cancel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: request.conversationId, conversationCapability: request.capability, requestId: request.requestId }) }).catch(() => undefined);
+    request.controller.abort();
+    active.current = null;
+    setState("cancelled");
+    setLive("The Analyst request was cancelled.");
   };
   const inspect = async (citation: AnalystCitation) => {
     const response = await fetch("/api/daemon/analyst/citations/inspect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ citation }) });
@@ -183,14 +204,14 @@ export function AnalystChat() {
     setMessages(priorMessages);
     void submit(pendingQuestion, priorMessages);
   };
-  const reset = () => { conversation.current = { conversationId: id(), capability: id() }; active.current = null; setMessages([]); setPendingQuestion(null); setResetConfirmation(false); setState("idle"); setLive("New ephemeral conversation started. Nothing was saved."); };
+  const reset = () => { conversation.current = { conversationId: id(), capability: conversationCapability() }; active.current = null; setMessages([]); setPendingQuestion(null); setResetConfirmation(false); setState("idle"); setLive("New ephemeral conversation started. Nothing was saved."); };
 
   return <><main className="page-content analyst-page" inert={showDisclosure || resetConfirmation}><header className="page-header"><div><h1>Collection Analyst</h1><p>Ask read-only questions about your collection.</p></div><button type="button" onClick={() => setResetConfirmation(true)} disabled={state === "streaming"}>New conversation</button></header>
     <p className="analyst-disclosure-summary">Analyst conversations are ephemeral and are not saved by Shelf Judge.</p>
     <section className="analyst-transcript" aria-label="Analyst conversation">{messages.length === 0 ? <p>Ask a first question to start an ephemeral conversation.</p> : messages.map((message, index) => <article key={`${message.role}-${index}`} className={`analyst-message analyst-message-${message.role}`}><h2>{message.role === "owner" ? "You" : "Collection Analyst"}</h2><p>{message.content}</p>{message.role === "analyst" && message.citations?.length ? <ul aria-label="Citations">{message.citations.map((citation) => <li key={citation.citationId}><button type="button" onClick={() => void inspect(citation)}>{citation.testimony ? "Owner testimony" : "Evidence"}: {citation.canonicalSummary}</button></li>)}</ul> : null}</article>)}</section>
     <p className="analyst-live" role="status" aria-live="polite">{live}</p>
     {state === "streaming" ? <button type="button" onClick={() => void cancel()}>Stop response</button> : state === "failed" || state === "cancelled" ? <button type="button" onClick={retry} disabled={!pendingQuestion}>Retry question</button> : null}
-    <form className="analyst-question" onSubmit={(event) => { event.preventDefault(); if (!question.trim()) return; setPendingQuestion(question.trim()); setShowDisclosure(true); }}><label htmlFor="analyst-question">Your question</label><textarea id="analyst-question" value={question} onChange={(event) => setQuestion(event.target.value)} disabled={state === "loading" || state === "streaming"} required /><button type="submit" className="primary-button" disabled={state === "loading" || state === "streaming"}>Ask Analyst</button></form>
+    <form className="analyst-question" onSubmit={(event) => { event.preventDefault(); if (!question.trim()) return; setPendingQuestion(question.trim()); setShowDisclosure(true); }}><label htmlFor="analyst-question">Your question</label><textarea ref={composer} id="analyst-question" value={question} onChange={(event) => setQuestion(event.target.value)} disabled={state === "loading" || state === "streaming"} required /><button type="submit" className="primary-button" disabled={state === "loading" || state === "streaming"}>Ask Analyst</button></form>
   </main>
     {showDisclosure && configuration ? <Disclosure configuration={configuration} onClose={() => setShowDisclosure(false)} onAcknowledge={() => { setShowDisclosure(false); if (pendingQuestion) void submit(pendingQuestion); }} /> : null}
     {resetConfirmation ? <Modal titleId="analyst-reset-title" onClose={() => setResetConfirmation(false)}><h2 id="analyst-reset-title">Start a new conversation?</h2><p>This removes the current conversation from this page. Shelf Judge does not save Analyst conversations.</p><div className="analyst-actions"><button type="button" onClick={() => setResetConfirmation(false)}>Keep conversation</button><button type="button" className="primary-button" onClick={reset}>Start new conversation</button></div></Modal> : null}
