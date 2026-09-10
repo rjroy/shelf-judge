@@ -659,6 +659,157 @@ describe("Analyst evidence retrieval", () => {
     expect(serialized).not.toContain("forbidden-receipt");
   });
 
+  test("reads explicitly selected games with per-item states, consent, and source versions", async () => {
+    const threeGameSnapshot: AnalystProjectionSnapshot = {
+      ...snapshot,
+      sources: [
+        ...snapshot.sources,
+        {
+          ...snapshot.sources[0],
+          sourceId: "game:c:identity",
+          sourceVersion: "three",
+          citationId: "c",
+          payload: { ...alphaPayload, gameId: "c", displayName: "Gamma" },
+        },
+      ],
+    };
+    const reads: string[] = [];
+    const states: Record<string, NoteState> = {
+      a: { state: "missing", version: 0, updatedAt: null },
+      b: { state: "cleared", version: 3, updatedAt: "2026-09-06T12:00:00.000Z" },
+      c: {
+        state: "present",
+        version: 4,
+        updatedAt: "2026-09-06T12:00:00.000Z",
+        text: "FULLY-AUTHORIZED",
+      },
+    };
+    const service = createAnalystEvidenceService({
+      storageService: {},
+      projectionSnapshotService: { capture: () => Promise.resolve(threeGameSnapshot) },
+      ownerGameNoteService: noteService(states, reads),
+      ownerNoteAuthorizationScope: ownerNoteScope(["a", "b", "c"]),
+    });
+
+    const identityOnly = await service.readGames(threeGameSnapshot, ["c"], {
+      fields: ["game-identity-ownership"],
+    });
+    expect(reads).toEqual([]);
+    expect(JSON.stringify(identityOnly)).not.toContain("FULLY-AUTHORIZED");
+
+    const result = await service.readGames(threeGameSnapshot, ["a", "b", "missing"], {
+      fields: ["owner-game-note"],
+    });
+    expect(result.items).toMatchObject([
+      {
+        gameId: "a",
+        state: "found",
+        citations: [{ sourceId: "a", sourceVersion: "0" }],
+        fields: [{ field: "owner-game-note", state: "missing", covered: true, source: { sourceVersion: "0" } }],
+      },
+      {
+        gameId: "b",
+        state: "found",
+        citations: [{ sourceId: "b", sourceVersion: "3" }],
+        fields: [{ field: "owner-game-note", state: "cleared", covered: true, source: { sourceVersion: "3" } }],
+      },
+      {
+        gameId: "missing",
+        state: "not-found",
+        citations: [],
+        fields: [{ field: "owner-game-note", state: "not-found", covered: true, source: null }],
+      },
+    ]);
+    expect(result.evidence.entries.map(({ payload }) => payload)).toEqual([
+      { gameId: "a", noteVersion: 0, state: "missing", text: null },
+      { gameId: "b", noteVersion: 3, state: "cleared", text: null },
+    ]);
+    expect(result).toMatchObject({ truncated: false, scope: { matchingSourceCount: 2 } });
+
+    const full = await service.readGames(threeGameSnapshot, ["c"], {
+      fields: ["owner-game-note"],
+    });
+    expect(JSON.stringify(full)).toContain("FULLY-AUTHORIZED");
+    await expect(
+      service.readGames(threeGameSnapshot, ["a", "a"], {
+        fields: ["game-identity-ownership"],
+      }),
+    ).rejects.toThrow("unique");
+    await expect(
+      service.readGames(threeGameSnapshot, [], { fields: ["game-identity-ownership"] }),
+    ).rejects.toThrow();
+    await expect(
+      service.readGames(threeGameSnapshot, ["a"], { fields: [] }),
+    ).rejects.toThrow();
+  });
+
+  test("rejects unauthorized, oversized, and source-changed explicit game reads", async () => {
+    const states: Record<string, NoteState> = {
+      a: { state: "present", version: 1, updatedAt: "2026-09-06T12:00:00.000Z", text: "PRIVATE" },
+      b: { state: "present", version: 1, updatedAt: "2026-09-06T12:00:00.000Z", text: "OTHER" },
+    };
+    const unauthorized = createAnalystEvidenceService({
+      storageService: {},
+      projectionSnapshotService: { capture: () => Promise.resolve(snapshot) },
+      ownerGameNoteService: noteService(states, []),
+      ownerNoteAuthorizationScope: ownerNoteScope(["a"]),
+    });
+    await expect(
+      unauthorized.readGames(snapshot, ["b"], { fields: ["owner-game-note"] }),
+    ).rejects.toThrow("not authorized");
+    await expect(
+      unauthorized.readGames(snapshot, Array.from({ length: 11 }, (_, index) => `g-${index}`), {
+        fields: ["game-identity-ownership"],
+      }),
+    ).rejects.toThrow();
+
+    let version = 1;
+    const changing = createAnalystEvidenceService({
+      storageService: {},
+      projectionSnapshotService: { capture: () => Promise.resolve(snapshot) },
+      ownerGameNoteService: {
+        get(gameId: unknown) {
+          version += 1;
+          return Promise.resolve({
+            gameId: String(gameId),
+            note: {
+              state: "present" as const,
+              version,
+              updatedAt: "2026-09-06T12:00:00.000Z",
+              text: "CHANGED",
+            },
+          });
+        },
+      },
+      ownerNoteAuthorizationScope: ownerNoteScope(["a"]),
+    });
+    await expect(
+      changing.readGames(snapshot, ["a"], { fields: ["owner-game-note"] }),
+    ).rejects.toBeInstanceOf(AnalystEvidenceSourceChangedError);
+
+    const oversized = createAnalystEvidenceService({
+      storageService: {},
+      projectionSnapshotService: { capture: () => Promise.resolve(snapshot) },
+      ownerGameNoteService: noteService(
+        {
+          a: {
+            state: "present",
+            version: 1,
+            updatedAt: "2026-09-06T12:00:00.000Z",
+            text: "x".repeat(4_000),
+          },
+        },
+        [],
+      ),
+      ownerNoteAuthorizationScope: ownerNoteScope(["a"]),
+      evidenceBudget: { maxBytesPerTurn: 64 * 1024 },
+      readGamesBudget: { maxBytes: 1_000 },
+    });
+    await expect(
+      oversized.readGames(snapshot, ["a"], { fields: ["owner-game-note"] }),
+    ).rejects.toThrow("response exceeds byte limit");
+  });
+
   test("searches bounded current note text locally and tracks matching and uncited dependencies", async () => {
     const reads: string[] = [];
     const states: Record<string, NoteState> = {

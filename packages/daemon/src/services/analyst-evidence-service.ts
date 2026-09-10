@@ -5,11 +5,16 @@ import {
   AnalystGrepRequestSchema,
   AnalystGrepResultSchema,
   AnalystNoteDependencySchema,
+  AnalystReadGamesRequestSchema,
+  AnalystReadGamesResultSchema,
+  AnalystReadGamesFieldSchema,
   AnalystTopRequestSchema,
   AnalystTopResultSchema,
   type AnalystCitation,
   type AnalystEvidenceClass,
   type AnalystGrepResult,
+  type AnalystReadGamesField,
+  type AnalystReadGamesItem,
   type AnalystTopResult,
 } from "@shelf-judge/shared";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
@@ -112,6 +117,10 @@ export interface AnalystRetrievedEvidence {
   readonly scope: AnalystEvidenceScope;
   readonly nextCursor: { readonly snapshotFingerprint: string; readonly token: string } | null;
 }
+export interface AnalystReadGamesEvidence extends AnalystRetrievedEvidence {
+  readonly items: readonly AnalystReadGamesItem[];
+  readonly truncated: false;
+}
 /** Daemon-authored turn scope. Retrieval arguments can only narrow this scope. */
 export interface AnalystOwnerNoteAuthorizationScope {
   readonly gameIds: readonly string[];
@@ -158,6 +167,12 @@ export interface AnalystEvidenceService {
     snapshot: AnalystProjectionSnapshot,
     request: unknown,
   ): Promise<AnalystRetrievedEvidence>;
+  /** Reads only explicitly named games and evidence fields from the captured local snapshot. */
+  readGames?(
+    snapshot: AnalystProjectionSnapshot,
+    ids: readonly string[],
+    options: { readonly fields: readonly AnalystReadGamesField[] },
+  ): Promise<AnalystReadGamesEvidence>;
   /** Searches the explicitly scoped local corpus without returning non-matching source payloads. */
   grep(snapshot: AnalystProjectionSnapshot, request: unknown): Promise<AnalystGrepResult>;
   compareNoteDependencies(
@@ -272,9 +287,17 @@ export function createAnalystEvidenceService(deps: {
   citationSecret?: Uint8Array;
   /** Shared turn-local response budget. Future model-loop integration supplies the turn boundary. */
   evidenceBudget?: { readonly maxCallsPerTurn?: number; readonly maxBytesPerTurn?: number };
+  /** Explicit readGames response cap, including its per-item coverage wrapper. */
+  readGamesBudget?: { readonly maxBytes?: number };
   /** @deprecated Use evidenceBudget; retained for callers created before shared budgeting. */
   topBudget?: { readonly maxCallsPerTurn?: number; readonly maxBytesPerTurn?: number };
-}): AnalystEvidenceService {
+}): AnalystEvidenceService & {
+  readGames(
+    snapshot: AnalystProjectionSnapshot,
+    ids: readonly string[],
+    options: { readonly fields: readonly AnalystReadGamesField[] },
+  ): Promise<AnalystReadGamesEvidence>;
+} {
   const coordinator = profileSourceCoordinatorFor(deps.storageService);
   const citationSecret = deps.citationSecret ?? randomBytes(32);
   const turns = new WeakMap<
@@ -881,6 +904,132 @@ export function createAnalystEvidenceService(deps: {
       if (nextCursor !== null) turn.cursors.set(nextCursor.token, { scopeKey, offset: nextOffset });
       packages.set(retrieved, { retrieved, snapshot });
       return retrieved;
+    },
+    async readGames(
+      snapshot: AnalystProjectionSnapshot,
+      ids: readonly string[],
+      options: { readonly fields: readonly AnalystReadGamesField[] },
+    ): Promise<AnalystReadGamesEvidence> {
+      const request = AnalystReadGamesRequestSchema.parse({
+        snapshotFingerprint: snapshot.snapshotFingerprint,
+        gameIds: ids,
+        fields: options.fields,
+      });
+      const foundGameIds = new Set(
+        snapshot.sources
+          .filter((source) => source.evidenceClass === "game-identity-ownership")
+          .map(sourceGameId)
+          .filter((gameId): gameId is string => gameId !== undefined),
+      );
+      if (request.fields.includes("owner-game-note")) {
+        const authorization = deps.ownerNoteAuthorizationScope;
+        if (authorization === undefined)
+          throw new Error("Owner-note retrieval is not authorized");
+        const authorizedGameIds = new Set(authorization.gameIds);
+        if (
+          request.gameIds.some(
+            (gameId) => foundGameIds.has(gameId) && !authorizedGameIds.has(gameId),
+          )
+        )
+          throw new Error("Analyst readGames note scope is not authorized");
+      }
+      const retrieved = await this.retrieve(snapshot, {
+        snapshotFingerprint: request.snapshotFingerprint,
+        gameIds: request.gameIds,
+        evidenceClasses: request.fields,
+        // The bounded request shape permits at most sixty sources, so a page
+        // cursor would indicate malformed local projections rather than an
+        // incomplete response that could be silently dropped.
+        limit: 100,
+      });
+      if (retrieved.nextCursor !== null)
+        throw new Error("Analyst readGames response exceeds operation bounds; narrow the request");
+      const gameIdBySource = new Map(
+        snapshot.sources
+          .map((source) => [source.sourceId, sourceGameId(source)] as const)
+          .filter((entry): entry is readonly [string, string] => entry[1] !== undefined),
+      );
+      const citationsByGameId = new Map<string, AnalystCitation[]>();
+      for (const citation of retrieved.citations) {
+        const gameId =
+          citation.evidenceClass === "owner-game-note"
+            ? citation.sourceId
+            : gameIdBySource.get(citation.sourceId);
+        if (gameId === undefined) continue;
+        const citations = citationsByGameId.get(gameId) ?? [];
+        citations.push(citation);
+        citationsByGameId.set(gameId, citations);
+      }
+      const citationBySource = new Map(
+        retrieved.citations.map((citation) => [
+          `${citation.evidenceClass}\u0000${citation.sourceId}`,
+          citation,
+        ]),
+      );
+      const sourceByFieldAndGame = new Map(
+        snapshot.sources
+          .flatMap((source) => {
+            const field = AnalystReadGamesFieldSchema.safeParse(source.evidenceClass);
+            const gameId = sourceGameId(source);
+            return !field.success || !request.fields.includes(field.data) || gameId === undefined
+              ? []
+              : [[`${field.data}\u0000${gameId}`, source] as const];
+          }),
+      );
+      const result = AnalystReadGamesResultSchema.parse({
+        snapshotFingerprint: snapshot.snapshotFingerprint,
+        items: request.gameIds.map((gameId) => ({
+          gameId,
+          state: foundGameIds.has(gameId) ? "found" : "not-found",
+          citations: citationsByGameId.get(gameId) ?? [],
+          fields: request.fields.map((field) => {
+            if (!foundGameIds.has(gameId))
+              return { field, state: "not-found", covered: true, source: null };
+            const citation = citationBySource.get(`${field}\u0000${gameId}`);
+            const source = sourceByFieldAndGame.get(`${field}\u0000${gameId}`);
+            if (field === "owner-game-note" && citation !== undefined) {
+              const entry = retrieved.evidence.resolve(citation.citationId);
+              const noteState =
+                entry?.payload !== null &&
+                typeof entry?.payload === "object" &&
+                "state" in entry.payload &&
+                typeof entry.payload.state === "string"
+                  ? entry.payload.state
+                  : "missing";
+              return {
+                field,
+                state: noteState === "cleared" ? "cleared" : noteState === "missing" ? "missing" : "available",
+                covered: true,
+                source: {
+                  citationId: citation.citationId,
+                  sourceId: citation.sourceId,
+                  sourceVersion: citation.sourceVersion,
+                },
+              };
+            }
+            if (source === undefined || citation === undefined)
+              return { field, state: "missing", covered: true, source: null };
+            return {
+              field,
+              state: "available",
+              covered: true,
+              source: {
+                citationId: citation.citationId,
+                sourceId: citation.sourceId,
+                sourceVersion: citation.sourceVersion,
+              },
+            };
+          }),
+        })),
+        scope: retrieved.scope,
+        truncated: false,
+      });
+      const read = freeze({ ...retrieved, items: result.items, truncated: result.truncated });
+      const maxBytes = deps.readGamesBudget?.maxBytes ?? 48 * 1024;
+      if (encodedBytes(read) > maxBytes)
+        throw new Error("Analyst readGames response exceeds byte limit; narrow the request");
+      packages.set(read, { retrieved: read, snapshot });
+      return read;
     },
     compareNoteDependencies,
     withCurrentNoteDependencies,

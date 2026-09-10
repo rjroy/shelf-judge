@@ -452,6 +452,76 @@ export const AnalystGrepResultSchema = z
     truncated: z.boolean(),
   })
   .strict();
+
+/** Explicit, bounded fields available through the local game evidence reader. */
+export const AnalystReadGamesFieldSchema = z.enum([
+  "game-identity-ownership",
+  "current-scoring",
+  "imported-metadata",
+  "play-acquisition",
+  "collection-structure",
+  "owner-game-note",
+]);
+export const AnalystReadGamesRequestSchema = z
+  .object({
+    snapshotFingerprint: IdSchema,
+    gameIds: z.array(IdSchema).min(1).max(10),
+    fields: z.array(AnalystReadGamesFieldSchema).min(1),
+  })
+  .strict()
+  .superRefine(({ gameIds, fields }, context) => {
+    if (new Set(gameIds).size !== gameIds.length)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["gameIds"],
+        message: "Read game IDs must be unique",
+      });
+    if (new Set(fields).size !== fields.length)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["fields"],
+        message: "Read fields must be unique",
+      });
+  });
+export const AnalystReadGamesItemSchema = z
+  .object({
+    gameId: IdSchema,
+    state: z.enum(["found", "not-found"]),
+    citations: z.array(AnalystCitationSchema),
+    fields: z.array(
+      z
+        .object({
+          field: AnalystReadGamesFieldSchema,
+          state: z.enum(["available", "missing", "cleared", "not-found"]),
+          covered: z.boolean(),
+          source: z
+            .object({
+              citationId: IdSchema,
+              sourceId: IdSchema,
+              sourceVersion: z.string().min(1),
+            })
+            .strict()
+            .nullable(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+export const AnalystReadGamesResultSchema = z
+  .object({
+    snapshotFingerprint: IdSchema,
+    items: z.array(AnalystReadGamesItemSchema),
+    scope: z
+      .object({
+        totalSourceCount: SafeCountSchema,
+        matchingSourceCount: SafeCountSchema,
+        examinedSourceCount: SafeCountSchema,
+        exhaustive: z.boolean(),
+      })
+      .strict(),
+    truncated: z.literal(false),
+  })
+  .strict();
 export const AnalystAnswerBlockSchema = z
   .object({
     text: z.string().min(1),
@@ -629,6 +699,10 @@ export const AnalystCancelResultSchema = createGroundedOperationResultSchema([
 ]);
 
 export const AnalystStreamEventSchema = analystStream.EventSchema;
+
+export type AnalystReadGamesItem = z.infer<typeof AnalystReadGamesItemSchema>;
+export type AnalystReadGamesResult = z.infer<typeof AnalystReadGamesResultSchema>;
+export type AnalystReadGamesField = z.infer<typeof AnalystReadGamesFieldSchema>;
 export const AnalystStreamEventHistorySchema = createGroundedStreamHistorySchema(
   AnalystStreamEventSchema,
 ).superRefine((events, context) => {
