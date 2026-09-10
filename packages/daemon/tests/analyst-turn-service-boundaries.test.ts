@@ -62,6 +62,7 @@ function evidenceService(overrides: Partial<AnalystEvidenceService>): AnalystEvi
     top: () => Promise.reject(new Error("top was not configured")),
     withTopEvidence: () => Promise.reject(new Error("top evidence was not configured")),
     retrieve: () => Promise.reject(new Error("retrieve was not configured")),
+    grep: () => Promise.reject(new Error("grep was not configured")),
     compareNoteDependencies: () => Promise.resolve("current"),
     withCurrentNoteDependencies: (_dependencies, operation) => operation(),
     withRetrievedEvidence: (retrieved, operation) => operation(retrieved),

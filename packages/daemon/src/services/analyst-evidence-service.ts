@@ -2,11 +2,14 @@ import {
   AnalystCitationInspectRequestSchema,
   AnalystCitationInspectResultSchema,
   AnalystCitationSchema,
+  AnalystGrepRequestSchema,
+  AnalystGrepResultSchema,
   AnalystNoteDependencySchema,
   AnalystTopRequestSchema,
   AnalystTopResultSchema,
   type AnalystCitation,
   type AnalystEvidenceClass,
+  type AnalystGrepResult,
   type AnalystTopResult,
 } from "@shelf-judge/shared";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
@@ -99,6 +102,7 @@ export interface AnalystEvidenceScope {
   readonly examinedSourceCount: number;
   readonly exhaustive: boolean;
 }
+/** A locally-executed, compact text match with source identity for citation and invalidation. */
 export interface AnalystRetrievedEvidence {
   readonly snapshotFingerprint: string;
   readonly evidence: GroundedEvidenceSnapshot;
@@ -154,6 +158,8 @@ export interface AnalystEvidenceService {
     snapshot: AnalystProjectionSnapshot,
     request: unknown,
   ): Promise<AnalystRetrievedEvidence>;
+  /** Searches the explicitly scoped local corpus without returning non-matching source payloads. */
+  grep(snapshot: AnalystProjectionSnapshot, request: unknown): Promise<AnalystGrepResult>;
   compareNoteDependencies(
     dependencies: readonly AnalystNoteDependency[],
   ): Promise<"current" | "stale">;
@@ -210,6 +216,47 @@ function compareText(left: string, right: string): number {
 
 function searchable(value: string): string {
   return value.normalize("NFKC").toLocaleLowerCase("en");
+}
+
+function compactMatchSnippet(value: string, pattern: string): string | undefined {
+  const normalized = value.normalize("NFKC");
+  const characters = [...normalized];
+  const foldedCharacterIndexes: number[] = [];
+  const offsets: { start: number; end: number }[] = [];
+  let offset = 0;
+  for (const [characterIndex, character] of characters.entries()) {
+    const start = offset;
+    offset += character.length;
+    offsets.push({ start, end: offset });
+    // Lowercase the full source below for contextual rules (for example Greek
+    // final sigma). Per-character fold lengths still map folded positions to
+    // original characters because that contextual substitution preserves length.
+    const foldedCharacter = searchable(character);
+    for (let index = 0; index < foldedCharacter.length; index += 1)
+      foldedCharacterIndexes.push(characterIndex);
+  }
+  const folded = searchable(normalized);
+  if (foldedCharacterIndexes.length !== folded.length) return undefined;
+  const matchIndex = folded.indexOf(pattern);
+  if (matchIndex < 0) return undefined;
+  const matchStart = foldedCharacterIndexes[matchIndex];
+  const matchEnd = foldedCharacterIndexes[matchIndex + pattern.length - 1];
+  if (matchStart === undefined || matchEnd === undefined) return undefined;
+  let start = matchStart;
+  let end = matchEnd + 1;
+  while (start > 0 && offsets[matchStart].start - offsets[start - 1].start <= 120) start -= 1;
+  while (end < offsets.length && offsets[end].end - offsets[matchEnd].end <= 120) end += 1;
+  while (true) {
+    const snippetLength =
+      offsets[end - 1].end - offsets[start].start + Number(start > 0) + Number(end < offsets.length);
+    if (snippetLength <= 280) break;
+    const leftContext = offsets[matchStart].start - offsets[start].start;
+    const rightContext = offsets[end - 1].end - offsets[matchEnd].end;
+    if (leftContext >= rightContext && start < matchStart) start += 1;
+    else if (end > matchEnd + 1) end -= 1;
+    else break;
+  }
+  return `${start > 0 ? "…" : ""}${normalized.slice(offsets[start].start, offsets[end - 1].end)}${end < offsets.length ? "…" : ""}`;
 }
 
 /**
@@ -546,6 +593,143 @@ export function createAnalystEvidenceService(deps: {
         for (const citation of entry.citations)
           sources.set(citation.sourceId, citation.sourceVersion);
       topPackages.set(result, { result, snapshot, sources });
+      return result;
+    },
+    async grep(snapshot: AnalystProjectionSnapshot, requestInput: unknown): Promise<AnalystGrepResult> {
+      const request = AnalystGrepRequestSchema.parse(requestInput);
+      if (request.snapshotFingerprint !== snapshot.snapshotFingerprint)
+        throw new Error("Analyst grep request belongs to a different snapshot");
+      if (request.cursor && request.cursor.snapshotFingerprint !== snapshot.snapshotFingerprint)
+        throw new Error("Analyst grep cursor belongs to a different snapshot");
+      const ownedGameIds = new Set(
+        snapshot.sources
+          .filter((source) => source.evidenceClass === "game-identity-ownership")
+          .flatMap((source) => {
+            const payload = ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST.evidence[
+              "game-identity-ownership"
+            ].parse(source.payload);
+            return payload.ownershipState === "owned" ? [payload.gameId] : [];
+          }),
+      );
+      if (request.gameIds.some((gameId) => !ownedGameIds.has(gameId)))
+        throw new Error("Analyst grep scope must contain only owned games");
+      const fields = new Set(request.allowedFields);
+      const requestedGameIds = new Set(request.gameIds);
+      const pattern = searchable(request.pattern);
+      const turn = turnFor(snapshot);
+      type Candidate = {
+        readonly gameId: string;
+        readonly field: "note" | "metadata.mechanic" | "metadata.category" | "metadata.description";
+        readonly text: string;
+        readonly source: AnalystEvidenceSource;
+      };
+      const candidates: Candidate[] = [];
+      const examinedSourceKeys = new Set<string>();
+      const examinedSourceKey = (source: AnalystEvidenceSource) =>
+        `${source.evidenceClass}\u0000${source.sourceId}\u0000${source.sourceVersion}`;
+      for (const source of snapshot.sources) {
+        if (source.evidenceClass !== "imported-metadata") continue;
+        const metadata = ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST.evidence["imported-metadata"].parse(
+          source.payload,
+        );
+        if (!requestedGameIds.has(metadata.gameId)) continue;
+        examinedSourceKeys.add(examinedSourceKey(source));
+        if (fields.has("metadata.mechanics"))
+          for (const mechanic of metadata.mechanics)
+            candidates.push({
+              gameId: metadata.gameId,
+              field: "metadata.mechanic",
+              text: mechanic.name,
+              source,
+            });
+        if (fields.has("metadata.categories"))
+          for (const category of metadata.categories)
+            candidates.push({
+              gameId: metadata.gameId,
+              field: "metadata.category",
+              text: category.name,
+              source,
+            });
+        if (fields.has("metadata.description") && metadata.description !== null)
+          candidates.push({
+            gameId: metadata.gameId,
+            field: "metadata.description",
+            text: metadata.description,
+            source,
+          });
+      }
+      if (fields.has("notes")) {
+        const authorization = deps.ownerNoteAuthorizationScope;
+        if (authorization === undefined || !authorization.allowLocalTextSearch)
+          throw new Error("Owner-note text search is not authorized");
+        const authorizedGameIds = new Set(authorization.gameIds);
+        if (request.gameIds.some((gameId) => !authorizedGameIds.has(gameId)))
+          throw new Error("Analyst grep note scope is not authorized");
+        for (const read of await loadNotes(snapshot, request.gameIds)) {
+          const source = noteSource(read);
+          examinedSourceKeys.add(examinedSourceKey(source));
+          if (read.note.state !== "present") continue;
+          candidates.push({
+            gameId: read.gameId,
+            field: "note",
+            text: read.note.text,
+            source,
+          });
+        }
+      }
+      const matches = candidates.flatMap(({ gameId, field, text, source }) => {
+        const snippet = compactMatchSnippet(text, pattern);
+        return snippet === undefined
+          ? []
+          : [
+              {
+                gameId,
+                field,
+                snippet,
+                sourceId: source.sourceId,
+                sourceVersion: source.sourceVersion,
+                citationId: source.citationId,
+                evidenceClass: source.evidenceClass,
+              },
+            ];
+      });
+      const scopeKey = canonicalSha256({
+        tool: "grep",
+        pattern,
+        allowedFields: [...fields].sort(),
+        gameIds: [...requestedGameIds].sort(),
+      });
+      const continuation = request.cursor ? turn.cursors.get(request.cursor.token) : undefined;
+      if (request.cursor && (!continuation || continuation.scopeKey !== scopeKey))
+        throw new Error("Analyst grep cursor is invalid for this scope");
+      const offset = continuation?.offset ?? 0;
+      const returned = matches.slice(offset, offset + (request.limit ?? 25));
+      const nextOffset = offset + returned.length;
+      const nextCursor =
+        nextOffset < matches.length
+          ? { snapshotFingerprint: snapshot.snapshotFingerprint, token: crypto.randomUUID() }
+          : null;
+      const result = freeze(
+        AnalystGrepResultSchema.parse({
+          snapshotFingerprint: snapshot.snapshotFingerprint,
+          matches: returned,
+          scope: {
+            totalSourceCount: examinedSourceKeys.size,
+            matchingSourceCount: new Set(
+              matches.map(
+                ({ evidenceClass, sourceId, sourceVersion }) =>
+                  `${evidenceClass}\u0000${sourceId}\u0000${sourceVersion}`,
+              ),
+            ).size,
+            examinedSourceCount: examinedSourceKeys.size,
+            exhaustive: true,
+          },
+          nextCursor,
+          truncated: nextCursor !== null,
+        }),
+      );
+      consumeTurnBudget(turn, result);
+      if (nextCursor !== null) turn.cursors.set(nextCursor.token, { scopeKey, offset: nextOffset });
       return result;
     },
     async withTopEvidence<Value>(

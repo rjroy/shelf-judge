@@ -77,6 +77,48 @@ function ownerNoteScope(gameIds: readonly string[], collection = false, search =
   return { gameIds, allowCollectionSynthesis: collection, allowLocalTextSearch: search };
 }
 
+function grepSnapshot(alphaDescription?: string): AnalystProjectionSnapshot {
+  const metadata = (
+    gameId: string,
+    name: string,
+    mechanics: string[],
+    categories: string[],
+    description = `${name} has Match prose that must remain local unless matched.`,
+  ) => ({
+    evidenceClass: "imported-metadata" as const,
+    sourceId: `game:${gameId}:metadata`,
+    sourceVersion: `metadata-${gameId}`,
+    citationId: `metadata-${gameId}`,
+    payload: {
+      gameId,
+      name,
+      description,
+      categories: categories.map((entry, index) => ({ id: index + 1, name: entry })),
+      mechanics: mechanics.map((entry, index) => ({ id: index + 10, name: entry })),
+      families: [],
+      subdomains: [],
+      designers: [],
+      artists: [],
+      playerCounts: { min: null, max: null, best: null },
+      playTime: null,
+      weight: null,
+      completeness: { designer: "complete" as const, artist: "complete" as const, mechanic: "complete" as const },
+      sourceTime: null,
+      refreshWarnings: [],
+    },
+    canonicalSummary: "Current validated imported metadata",
+    destination: { operationId: "shelf.game.get" as const, parameters: { gameId } },
+  });
+  return {
+    ...snapshot,
+    sources: [
+      ...snapshot.sources,
+      metadata("a", "Alpha", ["Match mechanic", "Drafting"], ["Match category"], alphaDescription),
+      metadata("b", "Beta", ["Match mechanic"], ["Match category"]),
+    ],
+  };
+}
+
 describe("Analyst evidence retrieval", () => {
   test("ranks compact local fitness deterministically, pages coverage, and preserves source versions", async () => {
     const games: ReadonlyArray<{
@@ -1074,5 +1116,154 @@ describe("Analyst evidence retrieval", () => {
       }),
     ).rejects.toThrow("identity is invalid");
     expect(reads).toHaveLength(readsBeforeForgery);
+  });
+
+  test("greps explicitly owned BGG fields locally with compact field-specific provenance", async () => {
+    const localSnapshot = grepSnapshot();
+    const reads: string[] = [];
+    const service = createAnalystEvidenceService({
+      storageService: {},
+      projectionSnapshotService: { capture: () => Promise.resolve(localSnapshot) },
+      ownerGameNoteService: noteService(
+        {
+          a: { state: "present", version: 1, updatedAt: "2026-09-06T12:00:00.000Z", text: "PRIVATE MATCH note" },
+          b: { state: "present", version: 1, updatedAt: "2026-09-06T12:00:00.000Z", text: "PRIVATE" },
+        },
+        reads,
+      ),
+      ownerNoteAuthorizationScope: ownerNoteScope(["a", "b"], true, true),
+    });
+
+    const result = await service.grep(localSnapshot, {
+      snapshotFingerprint: fingerprint,
+      pattern: "draft",
+      allowedFields: ["metadata.mechanics"],
+      gameIds: ["a"],
+    });
+
+    expect(result.matches).toEqual([
+      {
+        gameId: "a",
+        field: "metadata.mechanic",
+        snippet: "Drafting",
+        sourceId: "game:a:metadata",
+        sourceVersion: "metadata-a",
+        citationId: "metadata-a",
+        evidenceClass: "imported-metadata",
+      },
+    ]);
+    expect(result.scope).toEqual({
+      totalSourceCount: 1,
+      matchingSourceCount: 1,
+      examinedSourceCount: 1,
+      exhaustive: true,
+    });
+    expect(reads).toEqual([]);
+    expect(JSON.stringify(result)).not.toContain("PRIVATE");
+    expect(JSON.stringify(result)).not.toContain("Match prose");
+  });
+
+  test("greps authorized notes only, rejects broadened scopes and treats hostile regex as literal text", async () => {
+    const localSnapshot = grepSnapshot();
+    const reads: string[] = [];
+    const service = createAnalystEvidenceService({
+      storageService: {},
+      projectionSnapshotService: { capture: () => Promise.resolve(localSnapshot) },
+      ownerGameNoteService: noteService(
+        {
+          a: { state: "present", version: 2, updatedAt: "2026-09-06T12:00:00.000Z", text: "MATCH owner note" },
+          b: { state: "present", version: 3, updatedAt: "2026-09-06T12:00:00.000Z", text: "UNAUTHORIZED MATCH" },
+        },
+        reads,
+      ),
+      ownerNoteAuthorizationScope: ownerNoteScope(["a"], false, true),
+    });
+    const request = {
+      snapshotFingerprint: fingerprint,
+      pattern: "match",
+      allowedFields: ["notes"] as const,
+      gameIds: ["a"],
+    };
+    const result = await service.grep(localSnapshot, request);
+    expect(result.matches[0]).toMatchObject({
+      gameId: "a",
+      field: "note",
+      sourceId: "a",
+      sourceVersion: "2",
+      evidenceClass: "owner-game-note",
+    });
+    expect(JSON.stringify(result)).not.toContain("UNAUTHORIZED");
+    await expect(service.grep(localSnapshot, { ...request, gameIds: ["b"] })).rejects.toThrow(
+      "note scope is not authorized",
+    );
+    await expect(
+      service.grep(localSnapshot, { ...request, pattern: "^(a+)+$" }),
+    ).resolves.toMatchObject({ matches: [] });
+    for (const invalid of ["", "line\nbreak", "x".repeat(129)])
+      await expect(service.grep(localSnapshot, { ...request, pattern: invalid })).rejects.toThrow();
+    expect(reads).toContain("a");
+    expect(reads).not.toContain("b");
+  });
+
+  test("pages bounded grep output without overstating local coverage or bypassing byte budgets", async () => {
+    const localSnapshot = grepSnapshot();
+    const request = {
+      snapshotFingerprint: fingerprint,
+      pattern: "match",
+      allowedFields: ["metadata.mechanics", "metadata.categories", "metadata.description"] as const,
+      gameIds: ["a", "b"],
+    };
+    const service = createAnalystEvidenceService({
+      storageService: {},
+      projectionSnapshotService: { capture: () => Promise.resolve(localSnapshot) },
+    });
+    const first = await service.grep(localSnapshot, { ...request, limit: 1 });
+    expect(first).toMatchObject({ truncated: true, scope: { totalSourceCount: 2, matchingSourceCount: 2, examinedSourceCount: 2, exhaustive: true } });
+    expect(first.matches).toHaveLength(1);
+    const second = await service.grep(localSnapshot, { ...request, limit: 5, cursor: first.nextCursor });
+    expect(second).toMatchObject({ truncated: false, nextCursor: null });
+    expect(second.matches).toHaveLength(5);
+    await expect(
+      service.grep(localSnapshot, { ...request, allowedFields: [], cursor: first.nextCursor }),
+    ).rejects.toThrow();
+    await expect(
+      service.grep(localSnapshot, { ...request, gameIds: ["missing"] }),
+    ).rejects.toThrow("only owned games");
+
+    const measured = await createAnalystEvidenceService({
+      storageService: {},
+      projectionSnapshotService: { capture: () => Promise.resolve(localSnapshot) },
+    }).grep(localSnapshot, { ...request, limit: 1 });
+    const budgeted = createAnalystEvidenceService({
+      storageService: {},
+      projectionSnapshotService: { capture: () => Promise.resolve(localSnapshot) },
+      evidenceBudget: { maxBytesPerTurn: new TextEncoder().encode(JSON.stringify(measured)).byteLength - 1 },
+    });
+    await expect(budgeted.grep(localSnapshot, { ...request, limit: 1 })).rejects.toThrow("byte budget");
+  });
+
+  test("bounds snippets while preserving matches across Unicode case folding", async () => {
+    const longPattern = "x".repeat(41);
+    const withLongDescription = grepSnapshot(`${"a".repeat(120)}${longPattern}${"b".repeat(120)}`);
+    const service = createAnalystEvidenceService({
+      storageService: {},
+      projectionSnapshotService: { capture: () => Promise.resolve(withLongDescription) },
+    });
+    const request = {
+      snapshotFingerprint: fingerprint,
+      allowedFields: ["metadata.description"] as const,
+      gameIds: ["a"],
+    };
+    const long = await service.grep(withLongDescription, { ...request, pattern: longPattern });
+    expect(long.matches[0]?.snippet).toContain(longPattern);
+    expect(long.matches[0]?.snippet.length).toBeLessThanOrEqual(280);
+
+    const withTurkishDescription = grepSnapshot(`${"İ".repeat(200)}x`);
+    const turkish = await service.grep(withTurkishDescription, { ...request, pattern: "x" });
+    expect(turkish.matches[0]?.snippet).toContain("x");
+    expect(turkish.matches[0]?.snippet.length).toBeLessThanOrEqual(280);
+
+    const greek = await service.grep(grepSnapshot("ΟΣ"), { ...request, pattern: "ος" });
+    expect(greek.matches[0]?.snippet).toBe("ΟΣ");
   });
 });

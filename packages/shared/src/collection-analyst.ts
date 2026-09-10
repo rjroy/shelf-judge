@@ -364,6 +364,94 @@ export const AnalystTopResultSchema = z
     truncated: z.boolean(),
   })
   .strict();
+/**
+ * Grep patterns are literal, case-insensitive Unicode text, not regular
+ * expressions. This keeps local search deterministic and immune to regex
+ * backtracking while still allowing punctuation to be searched.
+ */
+export const AnalystGrepRequestSchema = z
+  .object({
+    snapshotFingerprint: IdSchema,
+    pattern: z
+      .string()
+      .min(1)
+      .max(128)
+      .refine(
+        (value) =>
+          !Array.from(value).some((character) => {
+            const codePoint = character.codePointAt(0) ?? 0;
+            return codePoint < 32 || codePoint === 127;
+          }),
+        { message: "Grep pattern must not contain control characters" },
+      ),
+    allowedFields: z
+      .array(
+        z.enum([
+          "notes",
+          "metadata.mechanics",
+          "metadata.categories",
+          "metadata.description",
+        ]),
+      )
+      .min(1),
+    gameIds: z.array(IdSchema).min(1).max(100),
+    cursor: z
+      .object({ snapshotFingerprint: IdSchema, token: z.string().uuid() })
+      .strict()
+      .nullable()
+      .optional(),
+    limit: PositiveSafeIntegerSchema.max(50).optional(),
+  })
+  .strict()
+  .superRefine(({ allowedFields, gameIds }, context) => {
+    if (new Set(allowedFields).size !== allowedFields.length)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["allowedFields"],
+        message: "Grep allowed fields must be unique",
+      });
+    if (new Set(gameIds).size !== gameIds.length)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["gameIds"],
+        message: "Grep game IDs must be unique",
+      });
+  });
+export const AnalystGrepMatchSchema = z
+  .object({
+    gameId: IdSchema,
+    field: z.enum([
+      "note",
+      "metadata.mechanic",
+      "metadata.category",
+      "metadata.description",
+    ]),
+    snippet: z.string().min(1).max(280),
+    sourceId: IdSchema,
+    sourceVersion: z.string().min(1),
+    citationId: IdSchema,
+    evidenceClass: z.enum(["owner-game-note", "imported-metadata"]),
+  })
+  .strict();
+export const AnalystGrepResultSchema = z
+  .object({
+    snapshotFingerprint: IdSchema,
+    matches: z.array(AnalystGrepMatchSchema),
+    scope: z
+      .object({
+        totalSourceCount: SafeCountSchema,
+        matchingSourceCount: SafeCountSchema,
+        examinedSourceCount: SafeCountSchema,
+        exhaustive: z.boolean(),
+      })
+      .strict(),
+    nextCursor: z
+      .object({ snapshotFingerprint: IdSchema, token: z.string().uuid() })
+      .strict()
+      .nullable(),
+    truncated: z.boolean(),
+  })
+  .strict();
 export const AnalystAnswerBlockSchema = z
   .object({
     text: z.string().min(1),
@@ -581,6 +669,8 @@ export type AnalystTurnRequest = z.infer<typeof AnalystTurnRequestSchema>;
 export type AnalystCitation = z.infer<typeof AnalystCitationSchema>;
 export type AnalystTopRequest = z.infer<typeof AnalystTopRequestSchema>;
 export type AnalystTopResult = z.infer<typeof AnalystTopResultSchema>;
+export type AnalystGrepMatch = z.infer<typeof AnalystGrepMatchSchema>;
+export type AnalystGrepResult = z.infer<typeof AnalystGrepResultSchema>;
 export type AnalystAnswerBlock = z.infer<typeof AnalystAnswerBlockSchema>;
 export type AnalystFinal = z.infer<typeof AnalystFinalSchema>;
 export type AnalystStreamEvent = z.infer<typeof AnalystStreamEventSchema>;
