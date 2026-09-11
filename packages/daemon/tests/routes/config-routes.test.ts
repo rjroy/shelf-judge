@@ -28,7 +28,7 @@ describe("config routes grounded analysis", () => {
     const response = await configRequest(app, "GET");
 
     expect(response.status).toBe(200);
-    expect((await response.json() as { groundedAnalysis: unknown }).groundedAnalysis).toBeNull();
+    expect(((await response.json()) as { groundedAnalysis: unknown }).groundedAnalysis).toBeNull();
   });
 
   test("PUT stores a valid identity while preserving unrelated settings", async () => {
@@ -56,7 +56,7 @@ describe("config routes grounded analysis", () => {
     const response = await configRequest(app, "PUT", { groundedAnalysis: null });
 
     expect(response.status).toBe(200);
-    expect((await response.json() as { groundedAnalysis: unknown }).groundedAnalysis).toBeNull();
+    expect(((await response.json()) as { groundedAnalysis: unknown }).groundedAnalysis).toBeNull();
     expect((await storageService.loadConfig()).groundedAnalysis).toBeNull();
   });
 

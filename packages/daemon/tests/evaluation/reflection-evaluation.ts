@@ -352,7 +352,10 @@ function syntheticEvidencePackage(
   questionId: ReflectionEvaluationQuestionId,
   fixtureId: string,
   scenario: (typeof scenarios)[number][0],
-): { readonly evidencePackage: ReflectionEvidencePackage; readonly state: ReflectionEvaluationFixture["syntheticState"] } {
+): {
+  readonly evidencePackage: ReflectionEvidencePackage;
+  readonly state: ReflectionEvaluationFixture["syntheticState"];
+} {
   const sourceVersion = "synthetic-v1";
   const incomplete = scenario === "incomplete-page";
   const cleared = scenario === "cleared-note";
@@ -360,7 +363,8 @@ function syntheticEvidencePackage(
   const singleNote = scenario === "single-note";
   const hasVeto = scenario === "setup-friction" || scenario === "veto-qualified";
   const hasPrediction = scenario === "predicted-score" || scenario === "group-trade-off";
-  const incompleteMetadata = scenario === "sparse-metadata" || scenario === "current-metadata-limit";
+  const incompleteMetadata =
+    scenario === "sparse-metadata" || scenario === "current-metadata-limit";
   const noteTexts =
     cleared || notApplicable
       ? []
@@ -390,7 +394,13 @@ function syntheticEvidencePackage(
               : singleNote || incomplete
                 ? [`Game A: ${scenario}`]
                 : testimonyForScenario(scenario);
-  const gameCount = notApplicable ? 2 : hasVeto || scenario === "injection-inert" ? 3 : scenario === "planning-exception" ? 4 : 2;
+  const gameCount = notApplicable
+    ? 2
+    : hasVeto || scenario === "injection-inert"
+      ? 3
+      : scenario === "planning-exception"
+        ? 4
+        : 2;
   const noteEntries = noteTexts.map((text, index) => ({
     citationId: `synthetic:${fixtureId}:note:${index + 1}`,
     sourceId: `synthetic-game-${index + 1}`,
@@ -424,12 +434,25 @@ function syntheticEvidencePackage(
       vetoed: hasVeto && index === 2,
       vetoedBy:
         hasVeto && index === 2
-          ? { axisId: "player-count", axisName: "Player count", threshold: 3, direction: "below" as const, rawValue: 2 }
+          ? {
+              axisId: "player-count",
+              axisName: "Player count",
+              threshold: 3,
+              direction: "below" as const,
+              rawValue: 2,
+            }
           : null,
       hypotheticalScore: null,
       prediction:
         hasPrediction && index === 1
-          ? { readinessStage: 2, confidence: "moderate" as const, predictedAxisCount: 2, actualAxisCount: 1, referenceGameCount: 3, coveragePercent: 67 }
+          ? {
+              readinessStage: 2,
+              confidence: "moderate" as const,
+              predictedAxisCount: 2,
+              actualAxisCount: 1,
+              referenceGameCount: 3,
+              coveragePercent: 67,
+            }
           : null,
       breakdown: [],
     },
@@ -454,13 +477,31 @@ function syntheticEvidencePackage(
       subdomains: [],
       entityMetadata: {
         mechanic: {
-          state: incompleteMetadata && index === 1 ? "refresh-needed" as const : "complete" as const,
-          entities: incompleteMetadata && index === 1 ? [] : [{ id: 1001, name: "Synthetic Mechanic" }],
+          state:
+            incompleteMetadata && index === 1 ? ("refresh-needed" as const) : ("complete" as const),
+          entities:
+            incompleteMetadata && index === 1 ? [] : [{ id: 1001, name: "Synthetic Mechanic" }],
           observedAt: incompleteMetadata && index === 1 ? null : "2026-09-07T00:00:00.000Z",
-          refreshWarning: incompleteMetadata && index === 1 ? { attemptedAt: "2026-09-07T00:00:00.000Z", message: "Synthetic metadata refresh required" } : null,
+          refreshWarning:
+            incompleteMetadata && index === 1
+              ? {
+                  attemptedAt: "2026-09-07T00:00:00.000Z",
+                  message: "Synthetic metadata refresh required",
+                }
+              : null,
         },
-        designer: { state: "complete" as const, entities: [], observedAt: "2026-09-07T00:00:00.000Z", refreshWarning: null },
-        artist: { state: "complete" as const, entities: [], observedAt: "2026-09-07T00:00:00.000Z", refreshWarning: null },
+        designer: {
+          state: "complete" as const,
+          entities: [],
+          observedAt: "2026-09-07T00:00:00.000Z",
+          refreshWarning: null,
+        },
+        artist: {
+          state: "complete" as const,
+          entities: [],
+          observedAt: "2026-09-07T00:00:00.000Z",
+          refreshWarning: null,
+        },
       },
     },
   }));
@@ -475,10 +516,13 @@ function syntheticEvidencePackage(
             evidenceClass: "profile-evidence" as const,
             payload: {
               candidateId,
-              entityClass: scenario === "collaborator-qualified" ? "artist" as const : "mechanic" as const,
+              entityClass:
+                scenario === "collaborator-qualified" ? ("artist" as const) : ("mechanic" as const),
               entityId: scenario === "collaborator-qualified" ? 3003 : 1001,
-              name: scenario === "collaborator-qualified" ? "Synthetic Artist" : "Synthetic Mechanic",
-              support: scenario === "no-supported-entity" ? "limited" as const : "supported" as const,
+              name:
+                scenario === "collaborator-qualified" ? "Synthetic Artist" : "Synthetic Mechanic",
+              support:
+                scenario === "no-supported-entity" ? ("limited" as const) : ("supported" as const),
               associatedGameCount: notApplicable ? 0 : gameCount,
               meanCurrentFitness: scenario === "broad-dispersion" ? 6 : 7,
               adjustedMeanCurrentFitness: scenario === "broad-dispersion" ? 6 : 7,
@@ -486,13 +530,22 @@ function syntheticEvidencePackage(
               range: scenario === "broad-dispersion" ? { min: 2, max: 9 } : { min: 6.5, max: 7.5 },
               comparator: { gameCount, meanCurrentFitness: 6.5, games: [] },
               metadataReadiness: {
-                state: incompleteMetadata ? "partial" as const : "complete" as const,
+                state: incompleteMetadata ? ("partial" as const) : ("complete" as const),
                 ownedGameCount: gameCount,
                 completeGameCount: incompleteMetadata ? gameCount - 1 : gameCount,
                 refreshNeededGameCount: incompleteMetadata ? 1 : 0,
                 unrefreshableGameCount: 0,
               },
-              refreshWarnings: incompleteMetadata ? [{ gameId: "synthetic-game-2", gameName: "Synthetic Game 2", attemptedAt: "2026-09-07T00:00:00.000Z", message: "Synthetic metadata refresh required" }] : [],
+              refreshWarnings: incompleteMetadata
+                ? [
+                    {
+                      gameId: "synthetic-game-2",
+                      gameName: "Synthetic Game 2",
+                      attemptedAt: "2026-09-07T00:00:00.000Z",
+                      message: "Synthetic metadata refresh required",
+                    },
+                  ]
+                : [],
               differenceFromComparator: 0.5,
               games: Array.from({ length: notApplicable ? 0 : gameCount }, (_value, index) => ({
                 gameId: `synthetic-game-${index + 1}`,
@@ -500,13 +553,47 @@ function syntheticEvidencePackage(
                 currentFitness: 7,
                 vetoed: false,
               })),
-              exclusions: notApplicable || incompleteMetadata ? [{ gameId: "synthetic-excluded-game", gameName: "Synthetic Excluded Game", reason: incompleteMetadata ? "refresh-needed-metadata" as const : "missing-or-invalid-fitness" as const, associationKnown: false, associatedWithCandidate: false }] : [],
-              confounders: scenario === "cooccurrence-qualified" || scenario === "planning-exception" || scenario === "collaborator-qualified" ? [{ entityId: scenario === "collaborator-qualified" ? 3003 : 2002, name: scenario === "collaborator-qualified" ? "Synthetic Collaborator" : "Synthetic Co-occurring Mechanic", cooccurringGameCount: 2, gameIds: ["synthetic-game-1", "synthetic-game-2"] }] : [],
+              exclusions:
+                notApplicable || incompleteMetadata
+                  ? [
+                      {
+                        gameId: "synthetic-excluded-game",
+                        gameName: "Synthetic Excluded Game",
+                        reason: incompleteMetadata
+                          ? ("refresh-needed-metadata" as const)
+                          : ("missing-or-invalid-fitness" as const),
+                        associationKnown: false,
+                        associatedWithCandidate: false,
+                      },
+                    ]
+                  : [],
+              confounders:
+                scenario === "cooccurrence-qualified" ||
+                scenario === "planning-exception" ||
+                scenario === "collaborator-qualified"
+                  ? [
+                      {
+                        entityId: scenario === "collaborator-qualified" ? 3003 : 2002,
+                        name:
+                          scenario === "collaborator-qualified"
+                            ? "Synthetic Collaborator"
+                            : "Synthetic Co-occurring Mechanic",
+                        cooccurringGameCount: 2,
+                        gameIds: ["synthetic-game-1", "synthetic-game-2"],
+                      },
+                    ]
+                  : [],
             },
           },
         ]
       : [];
-  const entries = [...noteEntries, ...identityEntries, ...scoringEntries, ...metadataEntries, ...profileEntries];
+  const entries = [
+    ...noteEntries,
+    ...identityEntries,
+    ...scoringEntries,
+    ...metadataEntries,
+    ...profileEntries,
+  ];
   const registry = createGroundedEvidenceRegistry({
     manifest: REFLECTION_EVIDENCE_MANIFEST,
     evidenceIdentitySchema: syntheticEvidenceEntryIdentitySchema,
@@ -539,40 +626,40 @@ function syntheticEvidencePackage(
   const eligibleGameCount = notApplicable ? 0 : gameCount;
   return {
     evidencePackage: Object.freeze({
-    evidenceIdentity: ReflectionEvidenceIdentitySchema.parse({
-      manifestVersion: REFLECTION_MANIFEST_VERSION,
-      questionId,
-      questionVersion: policy.questionVersion,
-      collectionId: `synthetic-${fixtureId}`,
-      collectionSchemaVersion: 1,
-      collectionRevision: 1,
-      profileContractVersion: 1,
-      profileAlgorithmVersion: 1,
-      providerId: "synthetic-diagnostic",
-      modelId: "synthetic-diagnostic-v1",
-    }),
-    snapshotFingerprint: `synthetic-${fixtureId}-snapshot`,
-    scope: ReflectionScopeSchema.parse({
-      examinedPresentNoteCount: noteTexts.length,
-      totalPresentNoteCount: incomplete ? 2 : noteTexts.length,
-      examinedGameCount: incomplete ? 1 : eligibleGameCount,
-      relevantEligibleGameCount: eligibleGameCount,
-      excludedGameCount: notApplicable ? gameCount : 0,
-      exhaustiveNotes: !incomplete,
-      ...(questionId === "pattern-exceptions" ? { patternCandidateIds: [candidateId] } : {}),
-    }),
-    evidence,
-    citations: Object.freeze(citations),
-    dependencies: Object.freeze(
-      noteTexts.map((_note, index) =>
-        ReflectionDependencySchema.parse({
-          category: "note",
-          gameId: `synthetic-game-${index + 1}`,
-          noteVersion: 1,
-        }),
+      evidenceIdentity: ReflectionEvidenceIdentitySchema.parse({
+        manifestVersion: REFLECTION_MANIFEST_VERSION,
+        questionId,
+        questionVersion: policy.questionVersion,
+        collectionId: `synthetic-${fixtureId}`,
+        collectionSchemaVersion: 1,
+        collectionRevision: 1,
+        profileContractVersion: 1,
+        profileAlgorithmVersion: 1,
+        providerId: "synthetic-diagnostic",
+        modelId: "synthetic-diagnostic-v1",
+      }),
+      snapshotFingerprint: `synthetic-${fixtureId}-snapshot`,
+      scope: ReflectionScopeSchema.parse({
+        examinedPresentNoteCount: noteTexts.length,
+        totalPresentNoteCount: incomplete ? 2 : noteTexts.length,
+        examinedGameCount: incomplete ? 1 : eligibleGameCount,
+        relevantEligibleGameCount: eligibleGameCount,
+        excludedGameCount: notApplicable ? gameCount : 0,
+        exhaustiveNotes: !incomplete,
+        ...(questionId === "pattern-exceptions" ? { patternCandidateIds: [candidateId] } : {}),
+      }),
+      evidence,
+      citations: Object.freeze(citations),
+      dependencies: Object.freeze(
+        noteTexts.map((_note, index) =>
+          ReflectionDependencySchema.parse({
+            category: "note",
+            gameId: `synthetic-game-${index + 1}`,
+            noteVersion: 1,
+          }),
+        ),
       ),
-    ),
-    assembledAt: syntheticAssembledAt,
+      assembledAt: syntheticAssembledAt,
     }),
     state: {
       scenario,
@@ -590,20 +677,62 @@ function syntheticEvidencePackage(
 
 function testimonyForScenario(scenario: (typeof scenarios)[number][0]): readonly string[] {
   const testimony: Record<(typeof scenarios)[number][0], readonly string[]> = {
-    "setup-friction": ["Game A: Quick setup makes this easy to bring out.", "Game B: I value getting to play without setup friction."],
-    "planning-exception": [], "group-trade-off": [],
-    "sparse-metadata": ["Game A: We enjoy the quick setup.", "Game B: Fast setup helps this get played."],
-    "predicted-score": ["Game A: Quick setup matters to me.", "Game B: I keep returning to games that start quickly."],
-    "broad-dispersion": ["Game A: I like the worker placement decisions.", "Game B: Worker placement planning is satisfying."],
-    "veto-qualified": ["Game A: Quick setup helps us play this.", "Game B: I appreciate being ready to play quickly."],
-    "cooccurrence-qualified": ["Game A: The worker placement choices work for me.", "Game B: I enjoy the worker placement planning."],
-    "collaborator-qualified": ["Game A: The art makes this inviting to play.", "Game B: I enjoy this artist's presentation."],
-    "current-metadata-limit": ["Game A: Quick setup is a real strength here.", "Game B: I prefer games that get started quickly."],
-    "injection-inert": [], "beyond-card": ["Game A: I like this mechanic for the planning it creates.", "Game B: The same mechanic works because of its tactical tension."],
-    "incomplete-page": [], "wrong-version": ["Game A: The current note says setup speed matters to me.", "Game B: I value a game that starts quickly."],
-    "contradictory-notes": [], "unauthorized-field": ["Game A: Quick setup keeps this accessible.", "Game B: I value getting into the game quickly."],
-    "cleared-note": [], "no-supported-entity": ["Game A: I like this game for its pacing.", "Game B: The interaction is what I enjoy here."],
-    "not-applicable": [], "single-note": [],
+    "setup-friction": [
+      "Game A: Quick setup makes this easy to bring out.",
+      "Game B: I value getting to play without setup friction.",
+    ],
+    "planning-exception": [],
+    "group-trade-off": [],
+    "sparse-metadata": [
+      "Game A: We enjoy the quick setup.",
+      "Game B: Fast setup helps this get played.",
+    ],
+    "predicted-score": [
+      "Game A: Quick setup matters to me.",
+      "Game B: I keep returning to games that start quickly.",
+    ],
+    "broad-dispersion": [
+      "Game A: I like the worker placement decisions.",
+      "Game B: Worker placement planning is satisfying.",
+    ],
+    "veto-qualified": [
+      "Game A: Quick setup helps us play this.",
+      "Game B: I appreciate being ready to play quickly.",
+    ],
+    "cooccurrence-qualified": [
+      "Game A: The worker placement choices work for me.",
+      "Game B: I enjoy the worker placement planning.",
+    ],
+    "collaborator-qualified": [
+      "Game A: The art makes this inviting to play.",
+      "Game B: I enjoy this artist's presentation.",
+    ],
+    "current-metadata-limit": [
+      "Game A: Quick setup is a real strength here.",
+      "Game B: I prefer games that get started quickly.",
+    ],
+    "injection-inert": [],
+    "beyond-card": [
+      "Game A: I like this mechanic for the planning it creates.",
+      "Game B: The same mechanic works because of its tactical tension.",
+    ],
+    "incomplete-page": [],
+    "wrong-version": [
+      "Game A: The current note says setup speed matters to me.",
+      "Game B: I value a game that starts quickly.",
+    ],
+    "contradictory-notes": [],
+    "unauthorized-field": [
+      "Game A: Quick setup keeps this accessible.",
+      "Game B: I value getting into the game quickly.",
+    ],
+    "cleared-note": [],
+    "no-supported-entity": [
+      "Game A: I like this game for its pacing.",
+      "Game B: The interaction is what I enjoy here.",
+    ],
+    "not-applicable": [],
+    "single-note": [],
   };
   return testimony[scenario];
 }
@@ -627,7 +756,12 @@ function makeFixture(
     ...(answered ? {} : { abstentionReason: fixtureAbstentionReason(questionId, index) }),
     evidence: {
       notes,
-      deterministic: ["current identity", "current scoring", "current imported metadata", "bounded Profile evidence"],
+      deterministic: [
+        "current identity",
+        "current scoring",
+        "current imported metadata",
+        "bounded Profile evidence",
+      ],
       scope: `Fixture ${name}: ${packageState.state.presentNoteCount} present notes and ${packageState.state.eligibleGameCount} eligible games; scope ${packageState.state.completeScope ? "complete" : "incomplete"}.`,
       adversarial,
     },

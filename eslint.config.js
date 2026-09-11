@@ -42,12 +42,14 @@ export default tseslint.config(
       "no-restricted-syntax": [
         "error",
         {
-          selector: "CallExpression[callee.type='MemberExpression'][callee.property.name='randomUUID']",
+          selector:
+            "CallExpression[callee.type='MemberExpression'][callee.property.name='randomUUID']",
           message:
             "Browser UUIDs must use generateBrowserUuid() so non-secure HTTP contexts remain supported.",
         },
         {
-          selector: "CallExpression[callee.type='MemberExpression'][callee.computed=true][callee.property.value='randomUUID']",
+          selector:
+            "CallExpression[callee.type='MemberExpression'][callee.computed=true][callee.property.value='randomUUID']",
           message:
             "Browser UUIDs must use generateBrowserUuid() so non-secure HTTP contexts remain supported.",
         },
@@ -55,6 +57,6 @@ export default tseslint.config(
     },
   },
   {
-    ignores: ["**/node_modules/", "**/dist/", "**/.next/", "**/.next-e2e/", "**/tmp/"],
+    ignores: ["**/node_modules/", "**/dist/", "**/.next/", "**/.next-e2e*/", "**/tmp/"],
   },
 );

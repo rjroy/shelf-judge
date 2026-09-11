@@ -3,6 +3,7 @@ import { webPort, webUrl } from "./e2e/web-url";
 
 const fixturePort = process.env.SHELF_JUDGE_E2E_FIXTURE_PORT ?? "3111";
 const socketPath = process.env.SHELF_JUDGE_E2E_SOCKET ?? "/tmp/shelf-judge-playwright.sock";
+const nextDistDir = process.env.SHELF_JUDGE_E2E_NEXT_DIST_DIR ?? ".next-e2e";
 const fixtureUrl = `http://127.0.0.1:${fixturePort}`;
 
 export default defineConfig({
@@ -43,7 +44,7 @@ export default defineConfig({
     {
       command: `bun run dev --hostname 127.0.0.1 --port ${webPort}`,
       url: webUrl,
-      env: { SHELF_JUDGE_SOCKET: socketPath, SHELF_JUDGE_NEXT_DIST_DIR: ".next-e2e" },
+      env: { SHELF_JUDGE_SOCKET: socketPath, SHELF_JUDGE_NEXT_DIST_DIR: nextDistDir },
       reuseExistingServer: false,
     },
   ],

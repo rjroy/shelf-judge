@@ -26,7 +26,8 @@ export function createAnalystTranscriptValidator(options: {
       if (!request.success) return { valid: false as const, outcome: "invalid-transcript" };
       const transcript = request.data;
       const provider = options.getProvider?.() ?? options.provider;
-      if (provider === undefined) throw new Error("Analyst transcript provider identity is required");
+      if (provider === undefined)
+        throw new Error("Analyst transcript provider identity is required");
       const assistantMessages = transcript.messages.filter((message) => message.role === "analyst");
       for (const [assistantIndex, message] of assistantMessages.entries()) {
         const authentic = options.attestationService.verifies(

@@ -48,7 +48,7 @@ an operator's claimed evidence. Those are operator attestation boundaries.
 
 1. Configure and authenticate a real provider outside this command. Set the
    complete shared identity with `shelf-judge config set grounded-analysis
-   '<JSON identity>'`, then restart the daemon before generating Reflection
+'<JSON identity>'`, then restart the daemon before generating Reflection
    output. Provider-specific credentials may still be required by the selected
    provider, but are not defined or available in this repository.
 2. Generate and retain paired Reflection and deterministic-card-plus-note

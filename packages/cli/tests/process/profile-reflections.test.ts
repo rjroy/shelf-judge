@@ -244,11 +244,8 @@ test.each(["success", "malformed", "failed"] as const)(
 test("Reflection refresh process settles cancellation before reporting SIGINT cancellation", async () => {
   const directory = await mkdtemp(join(tmpdir(), "shelf-judge-reflection-signal-"));
   const socketPath = join(directory, "daemon.sock");
-  const { server, cancellationReceived, cancellationResponseSent, refreshReceived } = startReflectionServer(
-    socketPath,
-    "pending",
-    { cancelResponseDelayMs: 100 },
-  );
+  const { server, cancellationReceived, cancellationResponseSent, refreshReceived } =
+    startReflectionServer(socketPath, "pending", { cancelResponseDelayMs: 100 });
   try {
     const child = runRefresh(socketPath);
     await waitFor(refreshReceived, "Reflection refresh did not reach the SSE server");

@@ -62,11 +62,12 @@ describe("grounded-analysis startup configuration", () => {
   test.each([
     ["blank provider", { providerId: "", modelId: "local-model", extensionIds: [] }],
     ["padded model", { providerId: "local-provider", modelId: " local-model", extensionIds: [] }],
-    ["duplicate allowlist", { providerId: "local-provider", modelId: "local-model", extensionIds: ["x", "x"] }],
+    [
+      "duplicate allowlist",
+      { providerId: "local-provider", modelId: "local-model", extensionIds: ["x", "x"] },
+    ],
   ])("represents %s persisted identity nonfatally", (_name, identity) => {
-    expect(
-      resolveGroundedProviderConfiguration(identity),
-    ).toEqual({
+    expect(resolveGroundedProviderConfiguration(identity)).toEqual({
       status: "unavailable",
       reason: "model-configuration",
       safeDetail: "invalid:grounded-analysis-configuration",
@@ -98,12 +99,13 @@ describe("grounded-analysis startup configuration", () => {
       modelId: "local-model",
       extensionIds: [],
     });
-    expect(resolveGroundedProviderConfiguration((await storage.loadConfig()).groundedAnalysis ?? null))
-      .toMatchObject({
-        status: "configured",
-        providerId: "local-provider",
-        modelId: "local-model",
-      });
+    expect(
+      resolveGroundedProviderConfiguration((await storage.loadConfig()).groundedAnalysis ?? null),
+    ).toMatchObject({
+      status: "configured",
+      providerId: "local-provider",
+      modelId: "local-model",
+    });
   });
 
   test("constructs the shared startup provider from the saved config identity", async () => {

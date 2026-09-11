@@ -255,9 +255,9 @@ describe("profile reflection command parsing", () => {
 describe("Collection Analyst command parsing", () => {
   test.each([
     [
-      ["analyst", "ask", "Which", "games", "are", "owned?", "--acknowledge-disclosure"],
+      ["analyst", "ask", "--question", "Which games are owned?", "--acknowledge-disclosure"],
       "analyst ask",
-      ["Which", "games", "are", "owned?", "--acknowledge-disclosure"],
+      ["--question", "Which games are owned?", "--acknowledge-disclosure"],
     ],
     [["analyst", "chat"], "analyst chat", []],
   ] as Array<[string[], string, string[]]>)(
@@ -269,4 +269,14 @@ describe("Collection Analyst command parsing", () => {
       });
     },
   );
+
+  test("extracts the root JSON flag from Analyst command arguments", () => {
+    expect(parseArgs(["bun", "shelf-judge", "analyst", "ask", "Question", "--json"])).toMatchObject(
+      {
+        commandPath: "analyst ask",
+        positional: ["Question"],
+        json: true,
+      },
+    );
+  });
 });

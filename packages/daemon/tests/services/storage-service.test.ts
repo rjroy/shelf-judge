@@ -616,8 +616,8 @@ describe("StorageService.saveConfig", () => {
 
     await service.saveConfig({
       bggAuthToken: "tok",
-        username: null,
-        groundedAnalysis: null,
+      username: null,
+      groundedAnalysis: null,
       profileEntityPolicy: {
         mechanic: { overviewLimit: 1, minimumSupportedGames: 2 },
         designer: { overviewLimit: 2, minimumSupportedGames: 3 },

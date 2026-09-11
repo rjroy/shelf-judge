@@ -11,21 +11,27 @@ async function messagesFor(source: string, filePath: string): Promise<string[]> 
   return result?.messages.map((message) => message.message) ?? [];
 }
 
-test("web production code cannot call crypto.randomUUID directly", { timeout: 30_000 }, async () => {
-  for (const source of [
-    "crypto.randomUUID();",
-    "window.crypto.randomUUID();",
-    "globalThis.crypto?.randomUUID();",
-    'crypto["randomUUID"]();',
-  ]) {
-    const messages = await messagesFor(source, "packages/web/components/analyst-chat.tsx");
-    expect(messages).toContain(
-      "Browser UUIDs must use generateBrowserUuid() so non-secure HTTP contexts remain supported.",
-    );
-  }
-});
+test(
+  "web production code cannot call crypto.randomUUID directly",
+  { timeout: 30_000 },
+  async () => {
+    for (const source of [
+      "crypto.randomUUID();",
+      "window.crypto.randomUUID();",
+      "globalThis.crypto?.randomUUID();",
+      'crypto["randomUUID"]();',
+    ]) {
+      const messages = await messagesFor(source, "packages/web/components/analyst-chat.tsx");
+      expect(messages).toContain(
+        "Browser UUIDs must use generateBrowserUuid() so non-secure HTTP contexts remain supported.",
+      );
+    }
+  },
+);
 
 test("the UUID helper and Node server boundaries remain allowed", { timeout: 30_000 }, async () => {
   expect(await messagesFor("crypto.randomUUID();", "packages/web/lib/browser-uuid.ts")).toEqual([]);
-  expect(await messagesFor("crypto.randomUUID();", "packages/daemon/src/services/file-ops.ts")).toEqual([]);
+  expect(
+    await messagesFor("crypto.randomUUID();", "packages/daemon/src/services/file-ops.ts"),
+  ).toEqual([]);
 });

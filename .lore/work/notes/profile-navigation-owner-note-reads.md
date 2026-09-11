@@ -169,8 +169,7 @@ c0b9eef133044d43deee1866105aa57f55a0cafecd3d9ec53b9c07cf1705a022  packages/web/e
 The populated-cache fixture observes the `shelf` category stale immediately
 after an explicit reflection refresh without a following mutation. This is now
 tracked as P2 bug `shelf-judge-t42`; its reproduction reference is
-`packages/daemon/tests/services/reflection-model-tools.test.ts` around line
-195. It is a discovery related to `shelf-judge-etg` and `shelf-judge-rcr`, not
+`packages/daemon/tests/services/reflection-model-tools.test.ts` around line 195. It is a discovery related to `shelf-judge-etg` and `shelf-judge-rcr`, not
 evidence that the navigation patch introduced it or that it causally blocks
 `shelf-judge-rcr`.
 

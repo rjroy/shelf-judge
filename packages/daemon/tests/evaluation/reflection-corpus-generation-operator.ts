@@ -557,11 +557,11 @@ export async function runReflectionCorpusGenerationOperator(
       await (deps.fetchTags ?? defaultFetchTags)(),
     );
     const metadata = {
-        artifactVersion: 5 as const,
+      artifactVersion: 5 as const,
       purpose: "synthetic-unreviewed-diagnostic-corpus" as const,
-        productionFidelity: "synthetic-typed-production-contracts" as const,
+      productionFidelity: "synthetic-typed-production-contracts" as const,
       limitation:
-          "Synthetic fixtures use typed, manifest-validated diagnostic evidence packages; they are not production snapshots or release evidence." as const,
+        "Synthetic fixtures use typed, manifest-validated diagnostic evidence packages; they are not production snapshots or release evidence." as const,
       corpusVersion: reflectionEvaluationCorpusVersion,
       corpusHash: hash(reflectionEvaluationCorpus),
       promptHash: promptHash(),

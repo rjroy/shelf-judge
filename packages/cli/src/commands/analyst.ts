@@ -5,7 +5,7 @@ import {
   type AnalystTurnRequest,
 } from "@shelf-judge/shared";
 import * as readline from "node:readline/promises";
-import { stdin, stdout } from "node:process";
+import { stderr, stdin, stdout } from "node:process";
 import type { DaemonClient, SSEEvent } from "../client.js";
 
 type AnalystMessage = AnalystTurnRequest["messages"][number];
@@ -23,7 +23,12 @@ interface AnalystConfiguration {
 
 export interface AnalystIo {
   write(message: string): void;
+  writeError(message: string): void;
   prompt(message: string): Promise<string>;
+}
+
+export interface AnalystOutputOptions {
+  readonly json: boolean;
 }
 
 function terminal(event: SSEEvent): boolean {
@@ -52,8 +57,9 @@ async function configuration(client: DaemonClient): Promise<AnalystConfiguration
 function createConsoleIo(): AnalystIo {
   return {
     write: (message) => stdout.write(`${message}\n`),
+    writeError: (message) => stderr.write(`${message}\n`),
     async prompt(message) {
-      const input = readline.createInterface({ input: stdin, output: stdout });
+      const input = readline.createInterface({ input: stdin, output: stderr });
       try {
         return await input.question(message);
       } finally {
@@ -69,11 +75,19 @@ function capability(): string {
 }
 
 async function acknowledge(configuration: AnalystConfiguration, io: AnalystIo): Promise<boolean> {
-  io.write(`Your question and relevant collection evidence are sent to ${configuration.providerId} / ${configuration.modelId}.`);
-  io.write(`Evidence classes sent when relevant: ${configuration.evidenceClasses.join(", ")}.`);
-  io.write(`Relevant owner notes may be transmitted: ${configuration.relevantOwnerNotesMayBeTransmitted ? "yes" : "no"}.`);
-  io.write(`${configuration.localRetention} Provider processing and retention follow its policy.`);
-  io.write(`This application has no token or monetary cap. ${configuration.cancellation}`);
+  io.writeError(
+    `Your question and relevant collection evidence are sent to ${configuration.providerId} / ${configuration.modelId}.`,
+  );
+  io.writeError(
+    `Evidence classes sent when relevant: ${configuration.evidenceClasses.join(", ")}.`,
+  );
+  io.writeError(
+    `Relevant owner notes may be transmitted: ${configuration.relevantOwnerNotesMayBeTransmitted ? "yes" : "no"}.`,
+  );
+  io.writeError(
+    `${configuration.localRetention} Provider processing and retention follow its policy.`,
+  );
+  io.writeError(`This application has no token or monetary cap. ${configuration.cancellation}`);
   return (await io.prompt("Type yes to acknowledge and continue: ")).trim().toLowerCase() === "yes";
 }
 
@@ -94,6 +108,7 @@ async function streamTurn(
   conversation: { readonly conversationId: string; readonly capability: string },
   messages: [AnalystMessage, ...AnalystMessage[]],
   io: AnalystIo,
+  options: AnalystOutputOptions,
 ): Promise<AnalystMessage | undefined> {
   const requestId = crypto.randomUUID();
   const controller = new AbortController();
@@ -115,7 +130,8 @@ async function streamTurn(
         requestId: request.requestId,
       })
       .then((response) => {
-        if (!response.ok) throw new Error(`Cancellation request failed with status ${response.status}`);
+        if (!response.ok)
+          throw new Error(`Cancellation request failed with status ${response.status}`);
       })
       .catch(() => {
         io.write(
@@ -132,7 +148,11 @@ async function streamTurn(
       (raw) => {
         const event = AnalystStreamEventSchema.parse(JSON.parse(raw.data));
         if (event.requestId !== requestId) return;
-        if (event.type === "validated-block") io.write(event.block.text);
+        if (options.json) {
+          io.write(JSON.stringify(event));
+        } else if (event.type === "validated-block") {
+          io.write(event.block.text);
+        }
         if (event.type === "completed") {
           const result = AnalystFinalSchema.parse(event.result);
           completed = {
@@ -143,8 +163,10 @@ async function streamTurn(
             validationAttestation: event.validationAttestation,
           };
         }
-        if (event.type === "cancelled") io.write("The Analyst request was cancelled.");
-        if (event.type === "failed") io.write(`The Analyst is unavailable: ${event.reason}.`);
+        if (!options.json && event.type === "cancelled")
+          io.write("The Analyst request was cancelled.");
+        if (!options.json && event.type === "failed")
+          io.write(`The Analyst is unavailable: ${event.reason}.`);
       },
       {
         signal: controller.signal,
@@ -167,20 +189,45 @@ export async function analystAsk(
   client: DaemonClient,
   args: string[],
   io?: AnalystIo,
+  options: AnalystOutputOptions = { json: false },
 ): Promise<void> {
   const terminal = io ?? createConsoleIo();
-  const acknowledged = args.includes("--acknowledge-disclosure");
-  const question = args.filter((argument) => argument !== "--acknowledge-disclosure").join(" ").trim();
-  if (!question) throw new Error("Usage: shelf-judge analyst ask <question> --acknowledge-disclosure");
-  const config = await configuration(client);
-  if (!acknowledged && io === undefined && (!stdin.isTTY || !stdout.isTTY)) {
-    throw new Error("Disclosure was not acknowledged; use --acknowledge-disclosure for noninteractive use");
+  let acknowledged = false;
+  let question: string | undefined;
+  const positionalQuestion: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === "--acknowledge-disclosure") {
+      acknowledged = true;
+    } else if (argument === "--question" && question === undefined) {
+      question = args[index + 1];
+      index += 1;
+    } else if (!argument.startsWith("--")) {
+      positionalQuestion.push(argument);
+    } else {
+      throw new Error("Usage: shelf-judge analyst ask --question <text> --acknowledge-disclosure");
+    }
   }
+  if (question !== undefined && positionalQuestion.length > 0) {
+    throw new Error("Use either --question <text> or positional question text, not both");
+  }
+  question ??= positionalQuestion.join(" ");
+  if (!question.trim()) {
+    throw new Error("Usage: shelf-judge analyst ask --question <text> --acknowledge-disclosure");
+  }
+  if (!acknowledged && (options.json || (io === undefined && (!stdin.isTTY || !stdout.isTTY)))) {
+    throw new Error(
+      "Disclosure was not acknowledged; use --acknowledge-disclosure for JSON or noninteractive use",
+    );
+  }
+  const config = await configuration(client);
   if (!acknowledged && !(await acknowledge(config, terminal))) {
-    terminal.write("Analyst request not sent.");
+    terminal.writeError("Analyst request not sent.");
     return;
   }
-  const messages: [AnalystMessage, ...AnalystMessage[]] = [{ role: "owner", content: question }];
+  const messages: [AnalystMessage, ...AnalystMessage[]] = [
+    { role: "owner", content: question.trim() },
+  ];
   if (exceedsTranscriptLimits(messages, config)) {
     throw new Error("Question exceeds the configured transcript limit; shorten it and try again");
   }
@@ -190,25 +237,30 @@ export async function analystAsk(
     { conversationId: crypto.randomUUID(), capability: capability() },
     messages,
     terminal,
+    options,
   );
 }
 
-export async function analystChat(client: DaemonClient, io?: AnalystIo): Promise<void> {
+export async function analystChat(
+  client: DaemonClient,
+  io?: AnalystIo,
+  options: AnalystOutputOptions = { json: false },
+): Promise<void> {
   if (io === undefined && (!stdin.isTTY || !stdout.isTTY)) {
     throw new Error("Analyst chat requires an interactive terminal");
   }
   const terminal = io ?? createConsoleIo();
   const config = await configuration(client);
   if (!(await acknowledge(config, terminal))) {
-    terminal.write("Analyst chat not started.");
+    terminal.writeError("Analyst chat not started.");
     return;
   }
-  terminal.write("Ephemeral Analyst chat. Type /exit to leave; nothing is saved.");
+  terminal.writeError("Ephemeral Analyst chat. Type /exit to leave; nothing is saved.");
   const conversation = { conversationId: crypto.randomUUID(), capability: capability() };
   let messages: [AnalystMessage, ...AnalystMessage[]] | undefined;
   while (true) {
     if (messages !== undefined && exceedsTranscriptLimits(messages, config)) {
-      terminal.write(
+      terminal.writeError(
         "This chat reached the configured transcript limit. Start a new chat to continue; nothing was saved.",
       );
       return;
@@ -221,12 +273,12 @@ export async function analystChat(client: DaemonClient, io?: AnalystIo): Promise
         ? [{ role: "owner", content: question }]
         : [...messages, { role: "owner", content: question }];
     if (exceedsTranscriptLimits(messages, config)) {
-      terminal.write(
+      terminal.writeError(
         "This question would exceed the configured transcript limit. Start a new chat to continue; nothing was saved.",
       );
       return;
     }
-    const answer = await streamTurn(client, config, conversation, messages, terminal);
+    const answer = await streamTurn(client, config, conversation, messages, terminal, options);
     if (answer !== undefined) messages = [...messages, answer];
   }
 }

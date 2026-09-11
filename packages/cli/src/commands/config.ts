@@ -31,7 +31,10 @@ export async function configGet(
     ["Key", "Value"],
     [
       ["bgg-token", data.bggAuthToken ?? "(not set)"],
-      ["grounded-analysis", groundedAnalysis ? "configured (restart daemon to apply changes)" : "(not set)"],
+      [
+        "grounded-analysis",
+        groundedAnalysis ? "configured (restart daemon to apply changes)" : "(not set)",
+      ],
       ["grounded-analysis.provider", groundedAnalysis?.providerId ?? "(not set)"],
       ["grounded-analysis.model", groundedAnalysis?.modelId ?? "(not set)"],
       ["grounded-analysis.extensions", groundedAnalysis?.extensionIds.join(", ") || "(none)"],

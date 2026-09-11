@@ -636,10 +636,10 @@ async function main(): Promise<void> {
       output = await profileReflectionsCommand(client, parsed.commandPath, args, opts);
       break;
     case "analyst ask":
-      await analystAsk(client, args);
+      await analystAsk(client, args, undefined, opts);
       break;
     case "analyst chat":
-      await analystChat(client);
+      await analystChat(client, undefined, opts);
       break;
     case "start":
       output = await daemonStart(client, args, opts);

@@ -21,11 +21,14 @@ test("prefers the platform UUID implementation when available", () => {
 
 test("uses cryptographic UUIDv4 bytes when randomUUID is unavailable", () => {
   const restoreUuid = replaceCryptoMethod("randomUUID", undefined);
-  const restoreValues = replaceCryptoMethod("getRandomValues", <T extends ArrayBufferView | null>(array: T): T => {
-    if (!(array instanceof Uint8Array)) throw new Error("Expected UUID bytes");
-    array.fill(0);
-    return array;
-  });
+  const restoreValues = replaceCryptoMethod(
+    "getRandomValues",
+    <T extends ArrayBufferView | null>(array: T): T => {
+      if (!(array instanceof Uint8Array)) throw new Error("Expected UUID bytes");
+      array.fill(0);
+      return array;
+    },
+  );
   try {
     expect(generateBrowserUuid()).toBe("00000000-0000-4000-8000-000000000000");
   } finally {

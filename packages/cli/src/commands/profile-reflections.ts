@@ -325,10 +325,7 @@ export async function profileReflectionsCommand(
     cancelling = true;
     abortController.abort();
     const cancellationAbortController = new AbortController();
-    const cancellationTimeout = setTimeout(
-      () => cancellationAbortController.abort(),
-      5_000,
-    );
+    const cancellationTimeout = setTimeout(() => cancellationAbortController.abort(), 5_000);
     cancellationRequest = client
       .post(
         `${REFLECTION_PATH}/cancel`,

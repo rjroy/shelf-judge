@@ -97,7 +97,9 @@ test("one Profile navigation crosses the proxy once per Profile surface without 
 test("optional reflections refresh without randomUUID while retaining a cryptographic cancellation capability", async ({
   page,
 }) => {
-  let refreshBody: { batchId: string; requestId: string; cancellationCapability: string } | undefined;
+  let refreshBody:
+    | { batchId: string; requestId: string; cancellationCapability: string }
+    | undefined;
   page.on("request", (request) => {
     if (new URL(request.url()).pathname.endsWith("/profile/reflections/refresh")) {
       refreshBody = request.postDataJSON() as typeof refreshBody;
@@ -107,17 +109,20 @@ test("optional reflections refresh without randomUUID while retaining a cryptogr
     Object.defineProperty(crypto, "randomUUID", { configurable: true, value: undefined });
   });
   await page.goto("/");
-  expect(await page.evaluate(() => [typeof crypto.randomUUID, typeof crypto.getRandomValues])).toEqual([
-    "undefined",
-    "function",
-  ]);
+  expect(
+    await page.evaluate(() => [typeof crypto.randomUUID, typeof crypto.getRandomValues]),
+  ).toEqual(["undefined", "function"]);
   const reflections = page.locator(".optional-reflections");
   await reflections.getByRole("button", { name: "Refresh reflections" }).click();
   await reflections.getByRole("button", { name: "Acknowledge and refresh" }).click();
   await expect(reflections.locator(".reflection-live")).toContainText("Refreshing");
   expect(refreshBody).toBeDefined();
-  expect(refreshBody?.batchId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-  expect(refreshBody?.requestId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  expect(refreshBody?.batchId).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  );
+  expect(refreshBody?.requestId).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  );
   expect(refreshBody?.cancellationCapability).toMatch(/^[0-9a-f]{64}$/);
 });
 

@@ -360,13 +360,16 @@ Stopping a response aborts local streaming and asks the daemon to cancel; conten
 already sent may have been processed or charged by the provider.
 
 ```text
-shelf-judge analyst ask <question> [--acknowledge-disclosure]
-shelf-judge analyst chat
+shelf-judge analyst ask --question <text> [--acknowledge-disclosure] [--json]
+shelf-judge analyst chat [--json]
 ```
 
 `ask` sends one question. In an interactive terminal it displays the configured
 provider and model plus the disclosure and asks for acknowledgement unless
-`--acknowledge-disclosure` is supplied. `chat` displays the same disclosure
+`--acknowledge-disclosure` is supplied. JSON mode always requires that explicit
+flag and writes only NDJSON stream events to standard output; disclosure and
+prompts use standard error. The positional question form remains a compatible
+alias for `--question <text>`. `chat` displays the same disclosure
 before starting and retains turns only while that process runs. Type `/exit` or
 `/quit` to leave the chat. `Ctrl-C` cancels the active turn using its exact
 conversation capability; provider processing of content already sent follows
@@ -480,6 +483,7 @@ shelf-judge game note clear <game-id> --expected-version <n> [--command-id <uuid
 ```
 
 `--text` is the only note-text input. It can be visible in shell history and process arguments; stdin, file input, and editor launching are not supported. A mutation retry must use the same `--command-id` and canonical request payload as the original request so Shelf Judge can replay the accepted result. Reusing a command ID with a different payload is rejected.
+
 # Configuration
 
 `config.json` stores shared application settings, including the optional identity used by both Reflections and Analyst. It is not configured with application environment variables. Use `shelf-judge config get` to inspect its status and `shelf-judge config set grounded-analysis '<JSON identity>'` to update the complete provider, model, and extension allowlist atomically. Pass `null` as the JSON value to clear it. Restart the daemon to apply a changed identity.

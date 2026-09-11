@@ -23,12 +23,12 @@ const LOCAL_OPERATION_COMMANDS: Record<string, LocalCommandHelp[]> = {
   "shelf.analyst.turn.stream": [
     {
       name: "ask",
-      usage: "shelf-judge analyst ask <question> [--acknowledge-disclosure]",
+      usage: "shelf-judge analyst ask --question <text> [--acknowledge-disclosure] [--json]",
       description: "Ask one disclosed Collection Analyst question without saving history",
     },
     {
       name: "chat",
-      usage: "shelf-judge analyst chat",
+      usage: "shelf-judge analyst chat [--json]",
       description: "Start an acknowledged ephemeral Collection Analyst conversation",
     },
   ],

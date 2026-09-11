@@ -25,14 +25,17 @@ const configuration = {
   },
 };
 
-function io(answers: string[] = []): { io: AnalystIo; output: string[] } {
+function io(answers: string[] = []): { io: AnalystIo; output: string[]; errors: string[] } {
   const output: string[] = [];
+  const errors: string[] = [];
   return {
     io: {
       write: (message) => output.push(message),
+      writeError: (message) => errors.push(message),
       prompt: () => Promise.resolve(answers.shift() ?? "/exit"),
     },
     output,
+    errors,
   };
 }
 
@@ -68,6 +71,20 @@ function cancelled(body: { conversationId: string; requestId: string }) {
     terminal: true,
     conversationId: body.conversationId,
     requestId: body.requestId,
+  };
+}
+
+function failed(body: { conversationId: string; requestId: string }) {
+  return {
+    version: 1,
+    operationId: "analyst:operation-1",
+    sequence: 1,
+    occurredAt: timestamp,
+    type: "failed",
+    terminal: true,
+    conversationId: body.conversationId,
+    requestId: body.requestId,
+    reason: "provider-outage",
   };
 }
 
@@ -128,12 +145,134 @@ describe("Collection Analyst CLI commands", () => {
       },
     });
 
-    await analystAsk(client, ["Question"], output.io);
+    await analystAsk(client, ["--question", "Question"], output.io);
 
-    expect(output.output).toContain(
+    expect(output.errors).toContain(
       `Evidence classes sent when relevant: ${ANALYST_EVIDENCE_CLASSES.join(", ")}.`,
     );
-    expect(output.output).toContain("Relevant owner notes may be transmitted: yes.");
+    expect(output.errors).toContain("Relevant owner notes may be transmitted: yes.");
+  });
+
+  test("emits each validated daemon event as NDJSON without human stdout", async () => {
+    const client = createMockClient({
+      routes: {
+        "GET /api/analyst/configuration": {
+          response: { ok: true, status: 200, data: configuration },
+        },
+      },
+      sseRoutes: {
+        "/api/analyst/turns/stream": {
+          events: (body) => [
+            {
+              event: "completed",
+              data: JSON.stringify(
+                completion(body as { conversationId: string; requestId: string }),
+              ),
+            },
+          ],
+        },
+      },
+    });
+    const output = io();
+
+    await analystAsk(client, ["--question", "Question", "--acknowledge-disclosure"], output.io, {
+      json: true,
+    });
+
+    expect(output.output).toHaveLength(1);
+    expect(JSON.parse(output.output[0])).toMatchObject({
+      type: "completed",
+      result: { outcome: "abstained", reason: "insufficient-evidence" },
+    });
+    expect(output.errors).toEqual([]);
+  });
+
+  test("requires explicit acknowledgement for JSON before a turn request", async () => {
+    let turnRequested = false;
+    const client = createMockClient({
+      routes: {
+        "GET /api/analyst/configuration": {
+          response: { ok: true, status: 200, data: configuration },
+        },
+      },
+      sseRoutes: {
+        "/api/analyst/turns/stream": {
+          events: () => {
+            turnRequested = true;
+            return [];
+          },
+        },
+      },
+    });
+
+    let error: unknown;
+    try {
+      await analystAsk(client, ["--question", "Question"], io().io, { json: true });
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("use --acknowledge-disclosure for JSON");
+    expect(turnRequested).toBeFalse();
+  });
+
+  test("emits failed daemon events as NDJSON without a human failure line", async () => {
+    const client = createMockClient({
+      routes: {
+        "GET /api/analyst/configuration": {
+          response: { ok: true, status: 200, data: configuration },
+        },
+      },
+      sseRoutes: {
+        "/api/analyst/turns/stream": {
+          events: (body) => [
+            {
+              event: "failed",
+              data: JSON.stringify(failed(body as { conversationId: string; requestId: string })),
+            },
+          ],
+        },
+      },
+    });
+    const output = io();
+
+    await analystAsk(client, ["Question", "--acknowledge-disclosure"], output.io, { json: true });
+
+    expect(output.output).toHaveLength(1);
+    expect(JSON.parse(output.output[0])).toMatchObject({
+      type: "failed",
+      reason: "provider-outage",
+    });
+    expect(output.output[0]).not.toContain("The Analyst is unavailable");
+  });
+
+  test("emits chat stream events as NDJSON while keeping disclosure on stderr", async () => {
+    const client = createMockClient({
+      routes: {
+        "GET /api/analyst/configuration": {
+          response: { ok: true, status: 200, data: configuration },
+        },
+      },
+      sseRoutes: {
+        "/api/analyst/turns/stream": {
+          events: (body) => [
+            {
+              event: "completed",
+              data: JSON.stringify(
+                completion(body as { conversationId: string; requestId: string }),
+              ),
+            },
+          ],
+        },
+      },
+    });
+    const output = io(["yes", "Question", "/exit"]);
+
+    await analystChat(client, output.io, { json: true });
+
+    expect(output.output).toHaveLength(1);
+    expect(JSON.parse(output.output[0])).toMatchObject({ type: "completed" });
+    expect(output.errors.join("\n")).toContain("Evidence classes sent when relevant");
   });
 
   test("keeps interactive turns in process memory and sends prior validated answers", async () => {
@@ -167,7 +306,7 @@ describe("Collection Analyst CLI commands", () => {
         { role: "owner", content: "Second question" },
       ],
     });
-    expect(output.output.join("\n")).toContain("nothing is saved");
+    expect(output.errors.join("\n")).toContain("nothing is saved");
   });
 
   test("ends rather than truncating a chat that would exceed daemon transcript limits", async () => {
@@ -203,7 +342,7 @@ describe("Collection Analyst CLI commands", () => {
     await analystChat(client, output.io);
 
     expect(requests).toHaveLength(1);
-    expect(output.output.join("\n")).toContain("would exceed the configured transcript limit");
+    expect(output.errors.join("\n")).toContain("would exceed the configured transcript limit");
   });
 
   test("rejects an oversized one-shot question before sending it", async () => {
@@ -220,7 +359,7 @@ describe("Collection Analyst CLI commands", () => {
     });
     let error: unknown;
     try {
-      await analystAsk(client, ["long", "--acknowledge-disclosure"], io().io);
+      await analystAsk(client, ["--question", "long", "--acknowledge-disclosure"], io().io);
     } catch (caught) {
       error = caught;
     }
@@ -263,7 +402,11 @@ describe("Collection Analyst CLI commands", () => {
       onEvent({ event: "cancelled", data: JSON.stringify(cancelled(request)) });
     };
     const output = io();
-    const asking = analystAsk(client, ["Question", "--acknowledge-disclosure"], output.io);
+    const asking = analystAsk(
+      client,
+      ["--question", "Question", "--acknowledge-disclosure"],
+      output.io,
+    );
 
     await Bun.sleep(0);
     process.emit("SIGINT");
@@ -295,7 +438,11 @@ describe("Collection Analyst CLI commands", () => {
       onEvent({ event: "cancelled", data: JSON.stringify(cancelled(request)) });
     };
     const output = io();
-    const asking = analystAsk(client, ["Question", "--acknowledge-disclosure"], output.io);
+    const asking = analystAsk(
+      client,
+      ["--question", "Question", "--acknowledge-disclosure"],
+      output.io,
+    );
 
     await Bun.sleep(0);
     process.emit("SIGINT");
@@ -320,7 +467,7 @@ describe("Collection Analyst CLI commands", () => {
 
     let error: unknown;
     try {
-      await analystAsk(client, ["Question", "--acknowledge-disclosure"], io().io);
+      await analystAsk(client, ["--question", "Question", "--acknowledge-disclosure"], io().io);
     } catch (caught) {
       error = caught;
     }

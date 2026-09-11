@@ -239,7 +239,10 @@ export function createReflectionStateService(
       // process, but do run it when the durable state changed underneath that attempt.
       let shouldRecover = liveAttemptIds.size === 0 || initialized === null;
       if (!shouldRecover && initialized !== null) {
-        const [context, persistedState] = await Promise.all([initialized, deps.storage.loadState()]);
+        const [context, persistedState] = await Promise.all([
+          initialized,
+          deps.storage.loadState(),
+        ]);
         shouldRecover =
           deps.storage.stateIdentity(context.state) !== deps.storage.stateIdentity(persistedState);
       }

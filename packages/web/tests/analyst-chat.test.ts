@@ -25,7 +25,7 @@ describe("Collection Analyst chat", () => {
   test("keeps state ephemeral, guards stale stream events, retries safely, and confirms reset", () => {
     expect(source).not.toMatch(/localStorage|sessionStorage|indexedDB|document\.cookie/);
     expect(source).toContain("active.current?.requestId !== event.requestId");
-    expect(source).toContain("messages.at(-1)?.role === \"owner\"");
+    expect(source).toContain('messages.at(-1)?.role === "owner"');
     expect(source).toContain("Start a new conversation?");
     expect(source).toContain("Nothing was saved");
   });
@@ -36,7 +36,7 @@ describe("Collection Analyst chat", () => {
     expect(source).toContain('htmlFor="analyst-question"');
     expect(source).toContain('role="dialog"');
     expect(source).toContain("inert={showDisclosure || resetConfirmation}");
-    expect(source).toContain("event.key !== \"Tab\"");
-    expect(source).toContain('ref={composer}');
+    expect(source).toContain('event.key !== "Tab"');
+    expect(source).toContain("ref={composer}");
   });
 });

@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const tailscaleHostname = process.env.TAILSCALE_HOSTNAME || "gsai.raptor-piranha.ts.net";
-const e2eDistDir = process.env.SHELF_JUDGE_NEXT_DIST_DIR === ".next-e2e";
+const e2eDistDir = process.env.SHELF_JUDGE_NEXT_DIST_DIR?.startsWith(".next-e2e") ?? false;
 
 const nextConfig: NextConfig = {
   // Playwright uses an isolated, ignored output directory so it never contends with a developer's dev server.
