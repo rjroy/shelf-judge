@@ -138,12 +138,12 @@ export interface ReflectionEvidenceService {
     provider: GroundedProviderIdentity,
     options?: { readonly signal?: AbortSignal },
   ): Promise<readonly ReflectionEvidencePackage[]>;
-  start?(
+  start(
     questionId: ReflectionQuestionId,
     provider: GroundedProviderIdentity,
     options?: { readonly signal?: AbortSignal },
   ): Promise<ReflectionEvidenceTurn>;
-  finish?(turn: ReflectionEvidenceTurn): Promise<ReflectionEvidencePackage>;
+  finish(turn: ReflectionEvidenceTurn): Promise<ReflectionEvidencePackage>;
   revalidate(
     evidencePackage: ReflectionEvidencePackage,
     provider: GroundedProviderIdentity,

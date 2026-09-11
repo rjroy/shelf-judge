@@ -54,8 +54,8 @@ const service = createAnalystTurnService({
 const result = await service
   .run({
     systemPrompt: [
-      "You are a collection analyst. Use only evidence returned by retrieve_analyst_evidence.",
-      "First retrieve game-identity-ownership evidence with limit 1.",
+      "You are a collection analyst. Use only evidence returned by collection tools.",
+      'First call readGames with gameIds ["smoke-game-a"] and fields ["game-identity-ownership"].',
       "Then call submit_grounded_analysis exactly once with a submission matching its schema.",
       "The submission tool argument must be an object with a submission property whose value is a JSON object, not a JSON-encoded string.",
       "Copy the returned citation object exactly, and reference its citationId in your answer block.",

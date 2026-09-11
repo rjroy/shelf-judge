@@ -2,6 +2,10 @@ import { describe, expect, test } from "bun:test";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { ReflectionGetResultSchema } from "@shelf-judge/shared";
 import type { GroundedAnalysisProvider } from "../../src/services/grounded-analysis/provider.js";
+import { createGroundedAnalysisProvider } from "../../src/services/grounded-analysis/provider.js";
+import { createOllamaProviderExtension } from "../../src/services/grounded-analysis/ollama-provider-extension.js";
+import { createPiGroundedAnalysisSessionFactory } from "../../src/services/grounded-analysis/session-factory.js";
+import { GROUNDED_SUBMISSION_TOOL_NAME } from "../../src/services/grounded-analysis/structured-submission.js";
 import { createTestApp } from "../helpers/test-app.js";
 
 const NOW = "2026-09-10T12:00:00.000Z";
@@ -192,9 +196,9 @@ describe("Reflection model collection tools", () => {
     expect(projectionCollectionLoads).toBe(1);
     expect(noteReads).toEqual(readsBeforeCachedState);
     expect(providerCalls).toHaveLength(1);
-    expect(cachedQuestions.find(({ questionId }) => questionId === "repeated-values")?.cache.state).not.toBe(
-      "none",
-    );
+    expect(
+      cachedQuestions.find(({ questionId }) => questionId === "repeated-values")?.cache.state,
+    ).not.toBe("none");
     console.info(
       "[profile-navigation-fixture]",
       JSON.stringify({
@@ -208,5 +212,123 @@ describe("Reflection model collection tools", () => {
         providerCalls: providerCalls.length,
       }),
     );
+  });
+
+  test("persists an explicit Reflection refresh after its real evidence result returns through the provider loop", async () => {
+    let requests = 0;
+    let returnedCitationId: string | undefined;
+    const response = (name: string, argumentsValue: object) =>
+      [
+        `data: ${JSON.stringify({
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: `call-${requests}`,
+                    type: "function",
+                    function: { name, arguments: JSON.stringify(argumentsValue) },
+                  },
+                ],
+              },
+              finish_reason: null,
+            },
+          ],
+        })}\n\n`,
+        `data: ${JSON.stringify({
+          choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+        })}\n\n`,
+        "data: [DONE]\n\n",
+      ].join("");
+    const server = Bun.serve({
+      port: 0,
+      async fetch(networkRequest) {
+        requests += 1;
+        const payload = await networkRequest.text();
+        if (requests === 1) {
+          expect(payload).toContain('"top"');
+          return new Response(response("top", { rankBy: "fitness", limit: 1 }), {
+            headers: { "content-type": "text/event-stream" },
+          });
+        }
+        const match = /\\"citationId\\":\\"([^\\]+)\\"/.exec(payload);
+        if (match?.[1] === undefined)
+          throw new Error("Expected the Reflection tool result citation");
+        returnedCitationId = match[1];
+        return new Response(
+          response(GROUNDED_SUBMISSION_TOOL_NAME, {
+            submission: {
+              result: {
+                outcome: "abstained",
+                reason: "incomplete-scope",
+                explanation: "The selected collection evidence is insufficient for a pattern.",
+                supportingBlocks: [
+                  {
+                    text: "The selected collection evidence was reviewed.",
+                    citationIds: [returnedCitationId],
+                  },
+                ],
+                noteExcerpts: [],
+              },
+            },
+          }),
+          { headers: { "content-type": "text/event-stream" } },
+        );
+      },
+    });
+    try {
+      const provider = createGroundedAnalysisProvider({
+        configuration: {
+          status: "configured",
+          providerId: "ollama",
+          modelId: "ollama-test",
+          extensionIds: ["ollama-test"],
+        },
+        sessionFactory: createPiGroundedAnalysisSessionFactory({
+          cwd: process.cwd(),
+          extensionIds: [],
+          extensionFactories: [
+            createOllamaProviderExtension("ollama-test", 123, `http://127.0.0.1:${server.port}/v1`),
+          ],
+        }),
+      });
+      const context = createTestApp({ now: () => NOW, groundedAnalysisProvider: provider });
+      await context.gameService.addGame({ name: "Reflection evidence game" });
+      await context.reflectionRuntime.recover();
+
+      const refresh = await context.app.request(
+        request("/api/profile/reflections/refresh", {
+          batchId: "32000000-0000-4000-8000-000000000301",
+          requestId: "32000000-0000-4000-8000-000000000302",
+          cancellationCapability: CAPABILITY,
+          questionId: "repeated-values",
+          disclosure: {
+            version: 1,
+            providerId: "ollama",
+            modelId: "ollama-test",
+            acknowledged: true,
+          },
+        }),
+      );
+
+      expect(refresh.status).toBe(200);
+      expect(await refresh.text()).toContain("event: question-completed");
+      expect(requests).toBe(2);
+      expect(returnedCitationId).toBeDefined();
+      const persisted = await context.reflectionRuntime.storage.loadState();
+      const question = persisted.questions.find(
+        ({ questionId }) => questionId === "repeated-values",
+      );
+      expect(question?.cache).not.toBeNull();
+      expect(question?.cache).toMatchObject({
+        outcome: "abstained",
+        supportingBlocks: [{ citationIds: [returnedCitationId] }],
+        citations: [{ citationId: returnedCitationId }],
+      });
+    } finally {
+      await server.stop(true);
+    }
   });
 });

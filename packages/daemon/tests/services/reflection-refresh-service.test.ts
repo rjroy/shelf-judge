@@ -17,7 +17,10 @@ import type {
   GroundedAnalysisRequest,
   GroundedAnalysisResult,
 } from "../../src/services/grounded-analysis/provider.js";
-import type { ReflectionEvidencePackage } from "../../src/services/reflection-evidence-service.js";
+import type {
+  ReflectionEvidencePackage,
+  ReflectionEvidenceTurn,
+} from "../../src/services/reflection-evidence-service.js";
 import {
   createReflectionRefreshService,
   ReflectionRefreshAdmissionError,
@@ -188,6 +191,15 @@ function harness(options?: {
       assemble(questionId) {
         options?.onAssemble?.(questionId);
         return Promise.resolve(packageFor(questionId));
+      },
+      start(questionId) {
+        options?.onAssemble?.(questionId);
+        // This service double never executes provider tools. Tool execution is
+        // covered by the real-session integration tests.
+        return Promise.resolve({ initial: packageFor(questionId) } as ReflectionEvidenceTurn);
+      },
+      finish(turn) {
+        return Promise.resolve(turn.initial);
       },
       revalidate: () => Promise.resolve({ valid: true }),
     },

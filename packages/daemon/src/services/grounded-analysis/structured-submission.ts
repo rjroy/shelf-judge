@@ -3,7 +3,6 @@ import { Type, type TSchema } from "typebox";
 import { z } from "zod";
 
 export const GROUNDED_SUBMISSION_TOOL_NAME = "submit_grounded_analysis";
-export const ANALYST_EVIDENCE_RETRIEVAL_TOOL_NAME = "retrieve_analyst_evidence";
 export const COLLECTION_TOP_TOOL_NAME = "top";
 export const COLLECTION_GREP_TOOL_NAME = "grep";
 export const COLLECTION_READ_GAMES_TOOL_NAME = "readGames";
@@ -106,18 +105,7 @@ export function createGroundedSubmissionOnlyToolManifest(feature: string) {
   });
 }
 
-export function createAnalystToolManifest() {
-  return Object.freeze({
-    feature: "collection-analyst",
-    toolNames: Object.freeze([ANALYST_EVIDENCE_RETRIEVAL_TOOL_NAME, GROUNDED_SUBMISSION_TOOL_NAME]),
-  });
-}
-
-/**
- * The model-directed collection tools available to an Analyst turn. The
- * legacy retrieval-only manifest remains available above for existing callers
- * during the migration to individual collection tools.
- */
+/** The model-directed collection tools available to an Analyst turn. */
 export function createCollectionAnalystToolManifest() {
   return Object.freeze({
     feature: "collection-analyst",

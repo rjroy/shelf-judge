@@ -41,17 +41,12 @@ import {
   type PiGroundedAnalysisSessionFactoryOptions,
 } from "./session-factory.js";
 import {
-  ANALYST_EVIDENCE_RETRIEVAL_TOOL_NAME,
   COLLECTION_EVIDENCE_WITH_SUBMISSION_TOOL_NAMES,
   createGroundedStructuredSubmission,
   GROUNDED_SUBMISSION_TOOL_NAME,
 } from "./structured-submission.js";
 
 const GROUNDED_SUBMISSION_ONLY_TOOL_NAMES = Object.freeze([GROUNDED_SUBMISSION_TOOL_NAME] as const);
-const ANALYST_TOOL_NAMES = Object.freeze([
-  ANALYST_EVIDENCE_RETRIEVAL_TOOL_NAME,
-  GROUNDED_SUBMISSION_TOOL_NAME,
-] as const);
 const COLLECTION_EVIDENCE_TOOL_NAMES = COLLECTION_EVIDENCE_WITH_SUBMISSION_TOOL_NAMES;
 
 type SubmissionDiagnostics = GroundedSubmissionDiagnostics;
@@ -239,9 +234,6 @@ export function createGroundedAnalysisProvider(
       allowedTools.toolNames.every(
         (toolName, index) => toolName === GROUNDED_SUBMISSION_ONLY_TOOL_NAMES[index],
       );
-    const legacyAnalystTools =
-      allowedTools.toolNames.length === ANALYST_TOOL_NAMES.length &&
-      ANALYST_TOOL_NAMES.every((toolName) => allowedTools.toolNames.includes(toolName));
     const collectionEvidenceTools =
       allowedTools.toolNames.length === COLLECTION_EVIDENCE_TOOL_NAMES.length &&
       COLLECTION_EVIDENCE_TOOL_NAMES.every((toolName) => allowedTools.toolNames.includes(toolName));
@@ -254,7 +246,7 @@ export function createGroundedAnalysisProvider(
       allowedTools.toolNames.length !== registeredToolNames.length ||
       allowedTools.toolNames.some((toolName) => !registeredToolNames.includes(toolName)) ||
       (feature === "collection-analyst"
-        ? !(legacyAnalystTools || supportsCollectionEvidence)
+        ? !supportsCollectionEvidence
         : feature === "profile-reflection"
           ? !(submissionOnly || supportsCollectionEvidence)
           : !submissionOnly)

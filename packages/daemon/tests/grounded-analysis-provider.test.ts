@@ -37,7 +37,6 @@ import {
   COLLECTION_EVIDENCE_WITH_SUBMISSION_TOOL_NAMES,
   createCollectionAnalystToolManifest,
   createGroundedSubmissionOnlyToolManifest,
-  createAnalystToolManifest,
   createProfileReflectionToolManifest,
   GROUNDED_SUBMISSION_TOOL_NAME,
 } from "../src/services/grounded-analysis/structured-submission.js";
@@ -105,6 +104,34 @@ function assistantMessage(
     stopReason,
     timestamp: Date.now(),
   };
+}
+
+function collectionTestTools(top: ReturnType<typeof defineTool>) {
+  const noArguments = Type.Object({}, { additionalProperties: false });
+  return [
+    top,
+    defineTool({
+      name: "grep",
+      label: "Search collection evidence",
+      description: "Unused test collection search",
+      parameters: noArguments,
+      execute: () => Promise.resolve({ content: [], details: undefined }),
+    }),
+    defineTool({
+      name: "readGames",
+      label: "Read selected games",
+      description: "Unused test collection read",
+      parameters: noArguments,
+      execute: () => Promise.resolve({ content: [], details: undefined }),
+    }),
+    defineTool({
+      name: "summarize",
+      label: "Summarize collection",
+      description: "Unused test collection summary",
+      parameters: noArguments,
+      execute: () => Promise.resolve({ content: [], details: undefined }),
+    }),
+  ];
 }
 
 function localProviderExtension(controls: LocalProviderControls): ExtensionFactory {
@@ -199,7 +226,7 @@ function localProviderExtension(controls: LocalProviderControls): ExtensionFacto
                       controls.mode === "analyst-unknown-citation" ||
                       controls.mode === "analyst-multi-page"
                       ? "readGames"
-                      : "retrieve_analyst_evidence"
+                      : "top"
                     : "unrelated_tool"
                   : "submit_grounded_analysis",
               arguments: {
@@ -215,7 +242,7 @@ function localProviderExtension(controls: LocalProviderControls): ExtensionFacto
                             : ["game-a"],
                         fields: ["game-identity-ownership"],
                       }
-                    : { page: 1 }
+                    : { rankBy: "fitness" }
                   : {
                       submission: {
                         ...(controls.mode === "analyst-retrieve-then-submit" ||
@@ -528,6 +555,143 @@ describe("grounded-analysis provider lifecycle", () => {
     }
   });
 
+  test("runs the Analyst service's real evidence handler through the provider loop before accepting its citation", async () => {
+    const evidenceMarker = "analyst-evidence-selected";
+    let requests = 0;
+    const response = (name: string, argumentsValue: object) =>
+      [
+        `data: ${JSON.stringify({
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: `call-${requests}`,
+                    type: "function",
+                    function: { name, arguments: JSON.stringify(argumentsValue) },
+                  },
+                ],
+              },
+              finish_reason: null,
+            },
+          ],
+        })}\n\n`,
+        `data: ${JSON.stringify({
+          choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+        })}\n\n`,
+        "data: [DONE]\n\n",
+      ].join("");
+    const server = Bun.serve({
+      port: 0,
+      async fetch(networkRequest) {
+        requests += 1;
+        const payload = await networkRequest.text();
+        if (requests === 1) {
+          expect(payload).toContain('"readGames"');
+          return new Response(
+            response("readGames", {
+              gameIds: ["game-a"],
+              fields: ["game-identity-ownership"],
+            }),
+            {
+              headers: { "content-type": "text/event-stream" },
+            },
+          );
+        }
+        expect(payload).toContain('\\"citation-a\\"');
+        return new Response(
+          response(GROUNDED_SUBMISSION_TOOL_NAME, {
+            submission: {
+              outcome: "answered",
+              blocks: [{ text: evidenceMarker, citationIds: ["citation-a"] }],
+              citations: [
+                {
+                  citationId: "citation-a",
+                  sourceId: "game-a",
+                  sourceVersion: "1",
+                  evidenceClass: "game-identity-ownership",
+                  canonicalSummary: "Current game identity",
+                  testimony: false,
+                  destination: {
+                    operationId: "shelf.game.get",
+                    parameters: { gameId: "game-a" },
+                  },
+                },
+              ],
+              usage: { state: "unavailable" },
+            },
+          }),
+          { headers: { "content-type": "text/event-stream" } },
+        );
+      },
+    });
+    const snapshot: AnalystProjectionSnapshot = {
+      collectionId: "collection",
+      collectionRevision: 1,
+      snapshotFingerprint: "analyst-snapshot",
+      sources: [
+        {
+          evidenceClass: "game-identity-ownership",
+          sourceId: "game-a",
+          sourceVersion: "1",
+          citationId: "citation-a",
+          payload: {
+            gameId: "game-a",
+            displayName: "Game A",
+            bggId: null,
+            ownershipState: "owned",
+          },
+          canonicalSummary: "Current game identity",
+          destination: { operationId: "shelf.game.get", parameters: { gameId: "game-a" } },
+        },
+      ],
+      page: () => ({ sources: [], nextCursor: null, totalSourceCount: 1 }),
+    };
+    try {
+      const provider = createGroundedAnalysisProvider({
+        configuration: {
+          status: "configured",
+          providerId: "ollama",
+          modelId: "ollama-test",
+          extensionIds: ["ollama-test"],
+        },
+        sessionFactory: createPiGroundedAnalysisSessionFactory({
+          cwd: process.cwd(),
+          extensionIds: [],
+          extensionFactories: [
+            createOllamaProviderExtension("ollama-test", 123, `http://127.0.0.1:${server.port}/v1`),
+          ],
+        }),
+      });
+      const result = await createAnalystTurnService({
+        provider,
+        evidenceService: createAnalystEvidenceService({
+          storageService: {},
+          projectionSnapshotService: { capture: () => Promise.resolve(snapshot) },
+        }),
+        log: () => undefined,
+      }).run({
+        systemPrompt: "EXACT POLICY",
+        prompt: "EXACT EVIDENCE",
+        signal: new AbortController().signal,
+        audit: { ...request().audit, feature: "collection-analyst" },
+      });
+
+      expect(result).toMatchObject({
+        output: {
+          blocks: [{ text: evidenceMarker, citationIds: ["citation-a"] }],
+          citations: [{ citationId: "citation-a" }],
+        },
+        usage: { inferenceRoundTrips: 2 },
+      });
+      expect(requests).toBe(2);
+    } finally {
+      await server.stop(true);
+    }
+  });
+
   test("rejects an oversized serialized outbound payload before contacting the provider", async () => {
     let requests = 0;
     const server = Bun.serve({
@@ -812,10 +976,10 @@ describe("grounded-analysis provider lifecycle", () => {
   test("executes an authorized Analyst retrieval before structured submission", async () => {
     const controls: LocalProviderControls = { transmissions: [], mode: "retrieve-then-submit" };
     const retrieval = defineTool({
-      name: "retrieve_analyst_evidence",
-      label: "Retrieve evidence",
-      description: "Read-only test retrieval",
-      parameters: Type.Object({ page: Type.Integer() }, { additionalProperties: false }),
+      name: "top",
+      label: "Rank collection games",
+      description: "Read-only test collection ranking",
+      parameters: Type.Object({ rankBy: Type.Literal("fitness") }, { additionalProperties: false }),
       execute() {
         return Promise.resolve({
           content: [{ type: "text", text: '{"citations":[]}' }],
@@ -827,8 +991,8 @@ describe("grounded-analysis provider lifecycle", () => {
     const result = await configuredProvider(controls).analyze({
       ...request(),
       audit: { ...request().audit, feature: "collection-analyst" },
-      allowedTools: createAnalystToolManifest(),
-      retrievalTools: [retrieval],
+      allowedTools: createCollectionAnalystToolManifest(),
+      retrievalTools: collectionTestTools(retrieval),
     });
 
     expect(result).toMatchObject({ output: { answer: "grounded" } });
@@ -1148,10 +1312,10 @@ describe("grounded-analysis provider lifecycle", () => {
       mode: "retrieve-three-then-submit",
     };
     const retrieval = defineTool({
-      name: "retrieve_analyst_evidence",
-      label: "Retrieve evidence",
-      description: "Read-only test retrieval",
-      parameters: Type.Object({ page: Type.Integer() }, { additionalProperties: false }),
+      name: "top",
+      label: "Rank collection games",
+      description: "Read-only test collection ranking",
+      parameters: Type.Object({ rankBy: Type.Literal("fitness") }, { additionalProperties: false }),
       execute() {
         return Promise.resolve({ content: [{ type: "text", text: "page" }], details: undefined });
       },
@@ -1159,8 +1323,8 @@ describe("grounded-analysis provider lifecycle", () => {
     const analyst = await configuredProvider(controls).analyze({
       ...request(),
       audit: { ...request().audit, feature: "collection-analyst" },
-      allowedTools: createAnalystToolManifest(),
-      retrievalTools: [retrieval],
+      allowedTools: createCollectionAnalystToolManifest(),
+      retrievalTools: collectionTestTools(retrieval),
     });
     expect(analyst).toMatchObject({ output: { answer: "grounded" } });
     expect(controls.transmissions).toHaveLength(4);
@@ -1172,10 +1336,10 @@ describe("grounded-analysis provider lifecycle", () => {
   test("exhausts the Analyst feature ceiling when retrieval never submits", async () => {
     const controls: LocalProviderControls = { transmissions: [], mode: "retrieve-until-exhausted" };
     const retrieval = defineTool({
-      name: "retrieve_analyst_evidence",
-      label: "Retrieve evidence",
-      description: "Read-only test retrieval",
-      parameters: Type.Object({ page: Type.Integer() }, { additionalProperties: false }),
+      name: "top",
+      label: "Rank collection games",
+      description: "Read-only test collection ranking",
+      parameters: Type.Object({ rankBy: Type.Literal("fitness") }, { additionalProperties: false }),
       execute() {
         return Promise.resolve({ content: [{ type: "text", text: "page" }], details: undefined });
       },
@@ -1184,8 +1348,8 @@ describe("grounded-analysis provider lifecycle", () => {
       configuredProvider(controls).analyze({
         ...request(),
         audit: { ...request().audit, feature: "collection-analyst" },
-        allowedTools: createAnalystToolManifest(),
-        retrievalTools: [retrieval],
+        allowedTools: createCollectionAnalystToolManifest(),
+        retrievalTools: collectionTestTools(retrieval),
       }),
     );
     expect(failure).toMatchObject({ safeDetail: "missing-structured-submission" });

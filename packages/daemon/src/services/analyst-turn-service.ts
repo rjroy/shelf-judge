@@ -1,7 +1,4 @@
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { defineTool } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
-import type { AnalystFinal, AnalystReadGamesField } from "@shelf-judge/shared";
+import type { AnalystFinal } from "@shelf-judge/shared";
 import { z } from "zod";
 import type {
   AnalystEvidenceService,
@@ -16,74 +13,9 @@ import {
   validateAnalystResult,
   type AnalystValidationDiagnostic,
 } from "./analyst-result-validator.js";
-import {
-  COLLECTION_GREP_TOOL_NAME,
-  COLLECTION_READ_GAMES_TOOL_NAME,
-  COLLECTION_SUMMARIZE_TOOL_NAME,
-  COLLECTION_TOP_TOOL_NAME,
-  createCollectionAnalystToolManifest,
-} from "./grounded-analysis/structured-submission.js";
+import { createCollectionAnalystToolManifest } from "./grounded-analysis/structured-submission.js";
 import type { GroundedModelAuditContext } from "./grounded-analysis/model-logger.js";
-
-const CursorParameters = Type.Object(
-  { token: Type.String({ format: "uuid" }) },
-  { additionalProperties: false },
-);
-const TopParameters = Type.Object(
-  {
-    rankBy: Type.Literal("fitness"),
-    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
-    cursor: Type.Optional(Type.Union([Type.Null(), CursorParameters])),
-  },
-  { additionalProperties: false },
-);
-const GrepParameters = Type.Object(
-  {
-    pattern: Type.String({ minLength: 1, maxLength: 128 }),
-    allowedFields: Type.Array(
-      Type.Union([
-        Type.Literal("notes"),
-        Type.Literal("metadata.mechanics"),
-        Type.Literal("metadata.categories"),
-        Type.Literal("metadata.description"),
-      ]),
-      { minItems: 1, maxItems: 4 },
-    ),
-    gameIds: Type.Array(Type.String({ minLength: 1 }), { minItems: 1, maxItems: 100 }),
-    cursor: Type.Optional(Type.Union([Type.Null(), CursorParameters])),
-    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
-  },
-  { additionalProperties: false },
-);
-const ReadGamesParameters = Type.Object(
-  {
-    gameIds: Type.Array(Type.String({ minLength: 1 }), { minItems: 1, maxItems: 10 }),
-    fields: Type.Array(
-      Type.Union([
-        Type.Literal("game-identity-ownership"),
-        Type.Literal("current-scoring"),
-        Type.Literal("imported-metadata"),
-        Type.Literal("play-acquisition"),
-        Type.Literal("collection-structure"),
-        Type.Literal("owner-game-note"),
-      ]),
-      { minItems: 1, maxItems: 6 },
-    ),
-  },
-  { additionalProperties: false },
-);
-const SummarizeParameters = Type.Object(
-  {
-    groupBy: Type.Union([Type.Literal("metadata.mechanics"), Type.Literal("metadata.categories")]),
-    measures: Type.Array(Type.Union([Type.Literal("gameCount"), Type.Literal("averageFitness")]), {
-      minItems: 1,
-      maxItems: 2,
-    }),
-    cursor: Type.Optional(Type.Union([Type.Null(), CursorParameters])),
-    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
-  },
-  { additionalProperties: false },
-);
+import { createCollectionTools } from "./grounded-analysis/collection-tools.js";
 
 // Tool responses re-enter the model context on a later round. The evidence
 // service has the authoritative shared operation budget; this is an additional
@@ -157,12 +89,6 @@ function modelVisible(value: unknown): unknown {
   );
 }
 
-function toolArguments(value: unknown): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value))
-    throw new Error("Analyst tool arguments must be an object");
-  return Object.fromEntries(Object.entries(value));
-}
-
 // This transport schema deliberately contains no shared contract schema instances:
 // the provider snapshots its tool schema, while AnalystFinalSchema remains mutable
 // for the authoritative post-submission validation below.
@@ -208,67 +134,7 @@ function analystTools(
   signal: AbortSignal,
   audit: GroundedModelAuditContext,
   log: AnalystTurnLogSink,
-): readonly ToolDefinition[] {
-  let serializedBytes = 0;
-  let toolIndex = 0;
-  const createTool = (
-    name: string,
-    label: string,
-    description: string,
-    parameters: ToolDefinition["parameters"],
-    operation: (parameters: Record<string, unknown>) => Promise<unknown>,
-  ): ToolDefinition =>
-    defineTool({
-      name,
-      label,
-      description,
-      parameters,
-      async execute(_toolCallId, parameters) {
-        const started = Date.now();
-        const callIndex = toolIndex++;
-        logStage(log, audit, name, "attempt", { callIndex });
-        throwIfAborted(signal);
-        let result: unknown;
-        try {
-          result = await abortable(operation(toolArguments(parameters)), signal);
-        } catch (error) {
-          logStage(log, audit, name, "failed", {
-            durationMs: Date.now() - started,
-            failure: signal.aborted ? "cancelled" : "evidence-operation-failed",
-          });
-          throw error;
-        }
-        throwIfAborted(signal);
-        const serialized = JSON.stringify(modelVisible(result));
-        const bytes = new TextEncoder().encode(serialized).byteLength;
-        if (
-          bytes > ANALYST_TOOL_RESULT_MAX_BYTES ||
-          serializedBytes + bytes > ANALYST_TOOL_TURN_MAX_BYTES
-        ) {
-          logStage(log, audit, name, "rejected", {
-            durationMs: Date.now() - started,
-            bytes,
-            rejection: "context-limit",
-            callIndex,
-          });
-          return {
-            content: [{ type: "text", text: TOOL_CONTEXT_LIMIT_MESSAGE }],
-            details: undefined,
-          };
-        }
-        throwIfAborted(signal);
-        serializedBytes += bytes;
-        logStage(log, audit, name, "success", {
-          durationMs: Date.now() - started,
-          bytes,
-          callIndex,
-        });
-        return {
-          content: [{ type: "text", text: serialized }],
-          details: undefined,
-        };
-      },
-    });
+): ReturnType<typeof createCollectionTools> {
   const request = (parameters: Record<string, unknown>) => ({
     ...parameters,
     snapshotFingerprint: snapshot.snapshotFingerprint,
@@ -276,46 +142,30 @@ function analystTools(
       ? {}
       : { cursor: { snapshotFingerprint: snapshot.snapshotFingerprint, ...parameters.cursor } }),
   });
-  return Object.freeze([
-    createTool(
-      COLLECTION_TOP_TOOL_NAME,
-      "Rank collection games",
-      "Rank owned games by fitness. Each returned entry includes compact identity and scoring evidence that may be cited directly.",
-      TopParameters,
-      (parameters) => evidenceService.top(snapshot, request(parameters)),
-    ),
-    createTool(
-      COLLECTION_GREP_TOOL_NAME,
-      "Search collection evidence",
-      "Search selected game fields. Matches are discovery-only and are not authorized evidence: call readGames for the matching field before citing its content.",
-      GrepParameters,
-      (parameters) => evidenceService.grep(snapshot, request(parameters)),
-    ),
-    createTool(
-      COLLECTION_READ_GAMES_TOOL_NAME,
-      "Read selected games",
-      "Read bounded evidence fields for explicitly named games.",
-      ReadGamesParameters,
-      (parameters) => {
+  return createCollectionTools({
+    signal,
+    resultMaxBytes: ANALYST_TOOL_RESULT_MAX_BYTES,
+    turnMaxBytes: ANALYST_TOOL_TURN_MAX_BYTES,
+    contextLimitMessage: TOOL_CONTEXT_LIMIT_MESSAGE,
+    redact: modelVisible,
+    onStage: ({ name, outcome, ...details }) => logStage(log, audit, name, outcome, details),
+    operations: {
+      top: (parameters) => evidenceService.top(snapshot, request(parameters)),
+      grep: (parameters) => evidenceService.grep(snapshot, request(parameters)),
+      readGames: (parameters) => {
         if (evidenceService.readGames === undefined)
           throw new Error("Analyst readGames is not configured");
-        return evidenceService.readGames(snapshot, parameters.gameIds as readonly string[], {
-          fields: parameters.fields as readonly AnalystReadGamesField[],
+        return evidenceService.readGames(snapshot, parameters.gameIds, {
+          fields: parameters.fields,
         });
       },
-    ),
-    createTool(
-      COLLECTION_SUMMARIZE_TOOL_NAME,
-      "Summarize collection",
-      "Emit a deterministic aggregate over collection metadata.",
-      SummarizeParameters,
-      (parameters) => {
+      summarize: (parameters) => {
         if (evidenceService.summarize === undefined)
           throw new Error("Analyst summarize is not configured");
         return evidenceService.summarize(snapshot, request(parameters));
       },
-    ),
-  ]);
+    },
+  });
 }
 
 /**

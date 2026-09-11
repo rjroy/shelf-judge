@@ -229,13 +229,34 @@ describe("Analyst turn service boundaries", () => {
     expect(String(error)).toContain("Analyst context limit was reached");
     expect(String(error)).not.toContain(secret);
     expect(JSON.stringify(logs)).not.toContain(secret);
-    const serializedLogs = logs.join("\n");
-    expect(serializedLogs).toContain('"stage":"top","outcome":"attempt","callIndex":0');
-    expect(serializedLogs).toContain('"stage":"top","outcome":"attempt","callIndex":1');
-    expect(serializedLogs).toContain('"stage":"top","outcome":"attempt","callIndex":2');
-    expect(serializedLogs).toContain('"outcome":"rejected","durationMs":');
-    expect(serializedLogs).toContain('"callIndex":2');
-    expect(serializedLogs).toContain('"rejection":"context-limit"');
-    expect(serializedLogs).toContain('"stage":"provider","outcome":"failed"');
+    const parsedLogs = logs.map((record): Record<string, unknown> => {
+      const parsed: unknown = JSON.parse(record);
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
+        throw new Error("Expected a structured Analyst log record");
+      return Object.fromEntries(Object.entries(parsed));
+    });
+    for (const callIndex of [0, 1, 2]) {
+      expect(
+        parsedLogs.some(
+          (record) =>
+            record.stage === "top" &&
+            record.outcome === "attempt" &&
+            record.callIndex === callIndex,
+        ),
+      ).toBe(true);
+    }
+    expect(
+      parsedLogs.some(
+        (record) =>
+          record.stage === "top" &&
+          record.outcome === "rejected" &&
+          record.callIndex === 2 &&
+          record.rejection === "context-limit" &&
+          typeof record.durationMs === "number",
+      ),
+    ).toBe(true);
+    expect(
+      parsedLogs.some((record) => record.stage === "provider" && record.outcome === "failed"),
+    ).toBe(true);
   });
 });

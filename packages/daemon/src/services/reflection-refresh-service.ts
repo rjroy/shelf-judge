@@ -12,20 +12,12 @@ import {
   type ReflectionUnavailableReason,
 } from "@shelf-judge/shared";
 import { z } from "zod";
-import { defineTool } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
 import type { ReflectionEvidenceTurn } from "./reflection-evidence-service.js";
 import { createActiveGroundedOperationRegistry } from "./grounded-analysis/active-operation-registry.js";
 import { GroundedAnalysisError } from "./grounded-analysis/failure-mapping.js";
 import type { GroundedAnalysisProvider } from "./grounded-analysis/provider.js";
-import {
-  COLLECTION_GREP_TOOL_NAME,
-  COLLECTION_READ_GAMES_TOOL_NAME,
-  COLLECTION_SUMMARIZE_TOOL_NAME,
-  COLLECTION_TOP_TOOL_NAME,
-  createProfileReflectionToolManifest,
-  createGroundedSubmissionOnlyToolManifest,
-} from "./grounded-analysis/structured-submission.js";
+import { createProfileReflectionToolManifest } from "./grounded-analysis/structured-submission.js";
+import { createCollectionTools } from "./grounded-analysis/collection-tools.js";
 import { createLogger, type Logger } from "./logger.js";
 import { canonicalSha256 } from "./profile-source-coordinator.js";
 import type {
@@ -112,150 +104,10 @@ export function abortRace<Value>(promise: Promise<Value>, signal: AbortSignal): 
   });
 }
 
-const CursorParameters = Type.Object(
-  { token: Type.String({ format: "uuid" }) },
-  { additionalProperties: false },
-);
-const ReflectionToolParameters = {
-  top: Type.Object(
-    {
-      rankBy: Type.Literal("fitness"),
-      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
-      cursor: Type.Optional(Type.Union([Type.Null(), CursorParameters])),
-    },
-    { additionalProperties: false },
-  ),
-  grep: Type.Object(
-    {
-      pattern: Type.String({ minLength: 1, maxLength: 128 }),
-      allowedFields: Type.Array(
-        Type.Union([
-          Type.Literal("notes"),
-          Type.Literal("metadata.mechanics"),
-          Type.Literal("metadata.categories"),
-          Type.Literal("metadata.description"),
-        ]),
-        { minItems: 1, maxItems: 4 },
-      ),
-      gameIds: Type.Array(Type.String({ minLength: 1 }), { minItems: 1, maxItems: 100 }),
-      cursor: Type.Optional(Type.Union([Type.Null(), CursorParameters])),
-      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
-    },
-    { additionalProperties: false },
-  ),
-  readGames: Type.Object(
-    {
-      gameIds: Type.Array(Type.String({ minLength: 1 }), { minItems: 1, maxItems: 10 }),
-      fields: Type.Array(
-        Type.Union([
-          Type.Literal("game-identity-ownership"),
-          Type.Literal("current-scoring"),
-          Type.Literal("imported-metadata"),
-          Type.Literal("play-acquisition"),
-          Type.Literal("collection-structure"),
-          Type.Literal("owner-game-note"),
-        ]),
-        { minItems: 1, maxItems: 6 },
-      ),
-    },
-    { additionalProperties: false },
-  ),
-  summarize: Type.Object(
-    {
-      groupBy: Type.Union([
-        Type.Literal("metadata.mechanics"),
-        Type.Literal("metadata.categories"),
-      ]),
-      measures: Type.Array(
-        Type.Union([Type.Literal("gameCount"), Type.Literal("averageFitness")]),
-        { minItems: 1, maxItems: 2 },
-      ),
-      cursor: Type.Optional(Type.Union([Type.Null(), CursorParameters])),
-      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
-    },
-    { additionalProperties: false },
-  ),
-};
-
-const ReflectionToolArguments = {
-  top: z
-    .object({
-      rankBy: z.literal("fitness"),
-      limit: z.number().int().min(1).max(100).optional(),
-      cursor: z.object({ token: z.string().uuid() }).nullable().optional(),
-    })
-    .strict(),
-  grep: z
-    .object({
-      pattern: z.string().min(1).max(128),
-      allowedFields: z
-        .array(
-          z.enum(["notes", "metadata.mechanics", "metadata.categories", "metadata.description"]),
-        )
-        .min(1)
-        .max(4),
-      gameIds: z.array(z.string().min(1)).min(1).max(100),
-      cursor: z.object({ token: z.string().uuid() }).nullable().optional(),
-      limit: z.number().int().min(1).max(50).optional(),
-    })
-    .strict(),
-  readGames: z
-    .object({
-      gameIds: z.array(z.string().min(1)).min(1).max(10),
-      fields: z
-        .array(
-          z.enum([
-            "game-identity-ownership",
-            "current-scoring",
-            "imported-metadata",
-            "play-acquisition",
-            "collection-structure",
-            "owner-game-note",
-          ]),
-        )
-        .min(1)
-        .max(6),
-    })
-    .strict(),
-  summarize: z
-    .object({
-      groupBy: z.enum(["metadata.mechanics", "metadata.categories"]),
-      measures: z
-        .array(z.enum(["gameCount", "averageFitness"]))
-        .min(1)
-        .max(2),
-      cursor: z.object({ token: z.string().uuid() }).nullable().optional(),
-      limit: z.number().int().min(1).max(50).optional(),
-    })
-    .strict(),
-};
-
 const REFLECTION_TOOL_RESULT_MAX_BYTES = 64 * 1024;
 const REFLECTION_TOOL_TURN_MAX_BYTES = 192 * 1024;
 const TOOL_CONTEXT_LIMIT_MESSAGE =
   "Evidence response is unavailable because the Reflection context limit was reached.";
-
-function abortError(): DOMException {
-  return new DOMException("The operation was aborted", "AbortError");
-}
-function abortable<Value>(operation: Promise<Value>, signal: AbortSignal): Promise<Value> {
-  if (signal.aborted) throw abortError();
-  return new Promise((resolve, reject) => {
-    const abort = () => reject(abortError());
-    signal.addEventListener("abort", abort, { once: true });
-    operation.then(
-      (value) => {
-        signal.removeEventListener("abort", abort);
-        if (signal.aborted) reject(abortError());
-        else resolve(value);
-      },
-      (error: unknown) => {
-        signal.removeEventListener("abort", abort);
-        reject(error instanceof Error ? error : new Error("Reflection evidence operation failed"));
-      },
-    );
-  });
-}
 
 function providerView(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(providerView);
@@ -270,7 +122,6 @@ function providerView(value: unknown): unknown {
 }
 
 function reflectionTools(turn: ReflectionEvidenceTurn, signal: AbortSignal) {
-  let serializedBytes = 0;
   const request = (parameters: Record<string, unknown>) => ({
     ...parameters,
     snapshotFingerprint: turn.analystSnapshot.snapshotFingerprint,
@@ -283,73 +134,29 @@ function reflectionTools(turn: ReflectionEvidenceTurn, signal: AbortSignal) {
           },
         }),
   });
-  const execute =
-    <Parameters>(
-      schema: z.ZodType<Parameters>,
-      operation: (parameters: Parameters) => Promise<unknown>,
-    ) =>
-    async (_toolCallId: string, parameters: unknown) => {
-      if (signal.aborted) throw abortError();
-      const result = await abortable(operation(schema.parse(parameters)), signal);
-      signal.throwIfAborted();
-      const serialized = JSON.stringify(providerView(result));
-      const bytes = new TextEncoder().encode(serialized).byteLength;
-      if (
-        bytes > REFLECTION_TOOL_RESULT_MAX_BYTES ||
-        serializedBytes + bytes > REFLECTION_TOOL_TURN_MAX_BYTES
-      )
-        return {
-          content: [{ type: "text" as const, text: TOOL_CONTEXT_LIMIT_MESSAGE }],
-          details: undefined,
-        };
-      serializedBytes += bytes;
-      return { content: [{ type: "text" as const, text: serialized }], details: undefined };
-    };
-  return [
-    defineTool({
-      name: COLLECTION_TOP_TOOL_NAME,
-      label: "Rank collection games",
-      description: "Rank owned games by fitness.",
-      parameters: ReflectionToolParameters.top,
-      execute: execute(ReflectionToolArguments.top, (parameters) =>
-        turn.analystEvidence.top(turn.analystSnapshot, request(parameters)),
-      ),
-    }),
-    defineTool({
-      name: COLLECTION_GREP_TOOL_NAME,
-      label: "Search collection evidence",
-      description:
-        "Search collection fields. Results are discovery-only: use readGames for citeable evidence.",
-      parameters: ReflectionToolParameters.grep,
-      execute: execute(ReflectionToolArguments.grep, (parameters) =>
-        turn.analystEvidence.grep(turn.analystSnapshot, request(parameters)),
-      ),
-    }),
-    defineTool({
-      name: COLLECTION_READ_GAMES_TOOL_NAME,
-      label: "Read selected games",
-      description: "Read bounded evidence fields for explicitly named games.",
-      parameters: ReflectionToolParameters.readGames,
-      execute: execute(ReflectionToolArguments.readGames, (parameters) => {
+  return createCollectionTools({
+    signal,
+    resultMaxBytes: REFLECTION_TOOL_RESULT_MAX_BYTES,
+    turnMaxBytes: REFLECTION_TOOL_TURN_MAX_BYTES,
+    contextLimitMessage: TOOL_CONTEXT_LIMIT_MESSAGE,
+    redact: providerView,
+    operations: {
+      top: (parameters) => turn.analystEvidence.top(turn.analystSnapshot, request(parameters)),
+      grep: (parameters) => turn.analystEvidence.grep(turn.analystSnapshot, request(parameters)),
+      readGames: (parameters) => {
         if (turn.analystEvidence.readGames === undefined)
           throw new Error("Reflection readGames is not configured");
         return turn.analystEvidence.readGames(turn.analystSnapshot, parameters.gameIds, {
           fields: parameters.fields,
         });
-      }),
-    }),
-    defineTool({
-      name: COLLECTION_SUMMARIZE_TOOL_NAME,
-      label: "Summarize collection",
-      description: "Emit a deterministic aggregate over collection metadata.",
-      parameters: ReflectionToolParameters.summarize,
-      execute: execute(ReflectionToolArguments.summarize, (parameters) => {
+      },
+      summarize: (parameters) => {
         if (turn.analystEvidence.summarize === undefined)
           throw new Error("Reflection summarize is not configured");
         return turn.analystEvidence.summarize(turn.analystSnapshot, request(parameters));
-      }),
-    }),
-  ];
+      },
+    },
+  });
 }
 
 class ReflectionRefreshFailure extends Error {
@@ -592,23 +399,17 @@ export function createReflectionRefreshService(
             status: "started",
             examinedItemCount: 0,
           });
-          let evidenceTurn: ReflectionEvidenceTurn | undefined;
+          let evidenceTurn: ReflectionEvidenceTurn;
           let evidencePackage: ReflectionEvidencePackage;
           try {
             const evidenceProvider = configuredProvider(deps.provider);
             if (!acknowledgementMatches(request, evidenceProvider)) {
               throw new GroundedAnalysisError("model-configuration", "acknowledged-model-changed");
             }
-            if (deps.evidence.start === undefined) {
-              evidencePackage = await deps.evidence.assemble(questionId, evidenceProvider, {
-                signal: operation.signal,
-              });
-            } else {
-              evidenceTurn = await deps.evidence.start(questionId, evidenceProvider, {
-                signal: operation.signal,
-              });
-              evidencePackage = evidenceTurn.initial;
-            }
+            evidenceTurn = await deps.evidence.start(questionId, evidenceProvider, {
+              signal: operation.signal,
+            });
+            evidencePackage = evidenceTurn.initial;
           } catch (error) {
             if (operation.signal.aborted) throw new GroundedAnalysisError("cancelled", "cancelled");
             throw new ReflectionRefreshFailure("evidence-load", "reflection-evidence-load-failed", {
@@ -676,21 +477,12 @@ export function createReflectionRefreshService(
               evidenceClassCounts: counts,
               evidenceIdentityHash,
             },
-            allowedTools:
-              evidenceTurn === undefined
-                ? createGroundedSubmissionOnlyToolManifest(FEATURE_ID)
-                : createProfileReflectionToolManifest(),
-            ...(evidenceTurn === undefined
-              ? {}
-              : { retrievalTools: reflectionTools(evidenceTurn, operation.signal) }),
+            allowedTools: createProfileReflectionToolManifest(),
+            retrievalTools: reflectionTools(evidenceTurn, operation.signal),
           });
           activeUsage = analyzed.usage;
           try {
-            if (evidenceTurn !== undefined && deps.evidence.finish !== undefined)
-              evidencePackage = await abortRace(
-                deps.evidence.finish(evidenceTurn),
-                operation.signal,
-              );
+            evidencePackage = await abortRace(deps.evidence.finish(evidenceTurn), operation.signal);
           } catch (error) {
             if (operation.signal.aborted) throw new GroundedAnalysisError("cancelled", "cancelled");
             throw new ReflectionRefreshFailure(
