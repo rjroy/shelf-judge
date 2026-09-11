@@ -113,7 +113,7 @@ describe("Analyst daemon routes", () => {
     const configuration: unknown = await response.json();
 
     expect(response.status).toBe(200);
-    expect(configuration).toMatchObject({ contractVersion: 1, manifestVersion: 1 });
+    expect(configuration).toMatchObject({ contractVersion: 1, manifestVersion: 2 });
     expect(JSON.stringify(configuration)).not.toContain("credential");
 
     const invalid = await jsonRequest(
@@ -580,7 +580,10 @@ describe("Analyst daemon routes", () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
-          turnRequest({ conversationId: `occupied-${index}`, requestId: `occupied-request-${index}` }),
+          turnRequest({
+            conversationId: `occupied-${index}`,
+            requestId: `occupied-request-${index}`,
+          }),
         ),
       });
       expect(eventTypes(await response.text()).at(-1)).toBe("completed");

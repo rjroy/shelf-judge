@@ -15,7 +15,7 @@ import {
 } from "./derived-axis-registry";
 
 export const ANALYST_CONTRACT_VERSION = 1 as const;
-export const ANALYST_MANIFEST_VERSION = 1 as const;
+export const ANALYST_MANIFEST_VERSION = 2 as const;
 
 export const ANALYST_EVIDENCE_CLASSES = [
   "game-identity-ownership",
@@ -23,6 +23,7 @@ export const ANALYST_EVIDENCE_CLASSES = [
   "imported-metadata",
   "play-acquisition",
   "collection-structure",
+  "collection-summary",
   "profile-evidence",
   "owner-game-note",
 ] as const;
@@ -95,6 +96,13 @@ export const ANALYST_EVIDENCE_MANIFEST = {
       sourceIdentity: "game ID and collection revision",
       observationTime: "none",
       canonicalSummary: "Current collection structure evidence",
+    },
+    {
+      id: "collection-summary",
+      fields: ["snapshotFingerprint", "groupBy", "measures", "group", "sourceCount"],
+      sourceIdentity: "summary scope, selected group, and complete contributing source versions",
+      observationTime: "none",
+      canonicalSummary: "Current deterministic collection summary evidence",
     },
     {
       id: "profile-evidence",
@@ -195,6 +203,7 @@ export const AnalystConfigurationSchema = z
           z.literal("imported-metadata"),
           z.literal("play-acquisition"),
           z.literal("collection-structure"),
+          z.literal("collection-summary"),
           z.literal("profile-evidence"),
           z.literal("owner-game-note"),
         ]),
@@ -385,14 +394,7 @@ export const AnalystGrepRequestSchema = z
         { message: "Grep pattern must not contain control characters" },
       ),
     allowedFields: z
-      .array(
-        z.enum([
-          "notes",
-          "metadata.mechanics",
-          "metadata.categories",
-          "metadata.description",
-        ]),
-      )
+      .array(z.enum(["notes", "metadata.mechanics", "metadata.categories", "metadata.description"]))
       .min(1),
     gameIds: z.array(IdSchema).min(1).max(100),
     cursor: z
@@ -420,12 +422,7 @@ export const AnalystGrepRequestSchema = z
 export const AnalystGrepMatchSchema = z
   .object({
     gameId: IdSchema,
-    field: z.enum([
-      "note",
-      "metadata.mechanic",
-      "metadata.category",
-      "metadata.description",
-    ]),
+    field: z.enum(["note", "metadata.mechanic", "metadata.category", "metadata.description"]),
     snippet: z.string().min(1).max(280),
     sourceId: IdSchema,
     sourceVersion: z.string().min(1),
@@ -520,6 +517,74 @@ export const AnalystReadGamesResultSchema = z
       })
       .strict(),
     truncated: z.literal(false),
+  })
+  .strict();
+
+/**
+ * Purpose-limited collection aggregation. A game belongs to every distinct
+ * normalized value in its selected multi-valued metadata field; it is never
+ * assigned to a synthetic "missing" group.
+ */
+export const AnalystSummarizeRequestSchema = z
+  .object({
+    snapshotFingerprint: IdSchema,
+    groupBy: z.enum(["metadata.mechanics", "metadata.categories"]),
+    measures: z
+      .array(z.enum(["gameCount", "averageFitness"]))
+      .min(1)
+      .max(2),
+    cursor: z
+      .object({ snapshotFingerprint: IdSchema, token: z.string().uuid() })
+      .strict()
+      .nullable()
+      .optional(),
+    limit: PositiveSafeIntegerSchema.max(50).optional(),
+  })
+  .strict()
+  .superRefine(({ measures }, context) => {
+    if (new Set(measures).size !== measures.length)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["measures"],
+        message: "Summarize measures must be unique",
+      });
+  });
+export const AnalystSummaryEntrySchema = z
+  .object({
+    group: z.object({ id: SafeCountSchema, name: z.string().min(1) }).strict(),
+    gameCount: SafeCountSchema.optional(),
+    averageFitness: z.number().finite().nullable().optional(),
+    fitnessGameCount: SafeCountSchema,
+    citation: AnalystCitationSchema,
+  })
+  .strict();
+export const AnalystSummarizeResultSchema = z
+  .object({
+    snapshotFingerprint: IdSchema,
+    groupBy: z.enum(["metadata.mechanics", "metadata.categories"]),
+    measures: z
+      .array(z.enum(["gameCount", "averageFitness"]))
+      .min(1)
+      .max(2),
+    entries: z.array(AnalystSummaryEntrySchema),
+    scope: z
+      .object({
+        totalGameCount: SafeCountSchema,
+        metadataSourceGameCount: SafeCountSchema,
+        groupValueGameCount: SafeCountSchema,
+        missingGroupValueGameCount: SafeCountSchema,
+        fitnessGameCount: SafeCountSchema,
+        missingFitnessGameCount: SafeCountSchema,
+        examinedGameCount: SafeCountSchema,
+        exhaustive: z.boolean(),
+      })
+      .strict(),
+    citation: AnalystCitationSchema,
+    nextCursor: z
+      .object({ snapshotFingerprint: IdSchema, token: z.string().uuid() })
+      .strict()
+      .nullable(),
+    truncated: z.boolean(),
   })
   .strict();
 export const AnalystAnswerBlockSchema = z
@@ -703,6 +768,7 @@ export const AnalystStreamEventSchema = analystStream.EventSchema;
 export type AnalystReadGamesItem = z.infer<typeof AnalystReadGamesItemSchema>;
 export type AnalystReadGamesResult = z.infer<typeof AnalystReadGamesResultSchema>;
 export type AnalystReadGamesField = z.infer<typeof AnalystReadGamesFieldSchema>;
+export type AnalystSummarizeResult = z.infer<typeof AnalystSummarizeResultSchema>;
 export const AnalystStreamEventHistorySchema = createGroundedStreamHistorySchema(
   AnalystStreamEventSchema,
 ).superRefine((events, context) => {

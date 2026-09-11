@@ -77,11 +77,12 @@ describe("Collection Analyst closed manifest", () => {
       "imported-metadata",
       "play-acquisition",
       "collection-structure",
+      "collection-summary",
       "profile-evidence",
       "owner-game-note",
     ]);
     expect(ANALYST_EVIDENCE_MANIFEST).toEqual({
-      version: 1,
+      version: 2,
       classes: [
         {
           id: "game-identity-ownership",
@@ -148,6 +149,14 @@ describe("Collection Analyst closed manifest", () => {
           sourceIdentity: "game ID and collection revision",
           observationTime: "none",
           canonicalSummary: "Current collection structure evidence",
+        },
+        {
+          id: "collection-summary",
+          fields: ["snapshotFingerprint", "groupBy", "measures", "group", "sourceCount"],
+          sourceIdentity:
+            "summary scope, selected group, and complete contributing source versions",
+          observationTime: "none",
+          canonicalSummary: "Current deterministic collection summary evidence",
         },
         {
           id: "profile-evidence",
@@ -384,7 +393,7 @@ describe("Collection Analyst requests and results", () => {
     expect(AnalystConfigurationGetRequestSchema.safeParse({ unknown: true }).success).toBe(false);
     const configuration = {
       contractVersion: 1,
-      manifestVersion: 1,
+      manifestVersion: 2,
       configuration: {
         status: "configured",
         identity: { providerId: "provider", modelId: "model", extensionIds: [] },
@@ -403,7 +412,7 @@ describe("Collection Analyst requests and results", () => {
     };
     expect(AnalystConfigurationSchema.safeParse(configuration).success).toBe(true);
     expect(
-      AnalystConfigurationSchema.safeParse({ ...configuration, manifestVersion: 2 }).success,
+      AnalystConfigurationSchema.safeParse({ ...configuration, manifestVersion: 3 }).success,
     ).toBe(false);
     for (const outcome of [
       "accepted",
@@ -496,7 +505,7 @@ describe("Collection Analyst strict variant regressions", () => {
     expect(AnalystFinalSchema.safeParse({ ...final(), blocks: [] }).success).toBe(false);
     const configuration = {
       contractVersion: 1,
-      manifestVersion: 1,
+      manifestVersion: 2,
       configuration: {
         status: "configured" as const,
         identity: { providerId: "provider", modelId: "model", extensionIds: [] },

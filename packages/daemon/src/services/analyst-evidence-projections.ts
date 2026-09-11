@@ -360,6 +360,21 @@ export const ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST = Object.freeze({
         redundancy: RedundancySchema.nullable(),
       })
       .strict(),
+    "collection-summary": z
+      .object({
+        snapshotFingerprint: IdSchema,
+        groupBy: z.enum(["metadata.mechanics", "metadata.categories"]),
+        measures: z
+          .array(z.enum(["gameCount", "averageFitness"]))
+          .min(1)
+          .max(2),
+        group: z
+          .object({ id: z.number().int().safe(), name: z.string().min(1) })
+          .strict()
+          .nullable(),
+        sourceCount: z.number().int().safe().min(0),
+      })
+      .strict(),
     "profile-evidence": ProfileEvidenceSchema,
   }),
 });
@@ -377,7 +392,7 @@ export interface AnalystEvidenceSource {
   readonly canonicalSummary: string;
   readonly observedAt?: string;
   readonly destination: {
-    readonly operationId: "shelf.game.get" | "shelf.profile.get";
+    readonly operationId: "shelf.game.get" | "shelf.profile.get" | "shelf.collection.get";
     readonly parameters: { readonly gameId?: string };
   };
 }

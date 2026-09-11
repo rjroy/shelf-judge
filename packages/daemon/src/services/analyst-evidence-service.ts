@@ -8,6 +8,8 @@ import {
   AnalystReadGamesRequestSchema,
   AnalystReadGamesResultSchema,
   AnalystReadGamesFieldSchema,
+  AnalystSummarizeRequestSchema,
+  AnalystSummarizeResultSchema,
   AnalystTopRequestSchema,
   AnalystTopResultSchema,
   type AnalystCitation,
@@ -15,6 +17,7 @@ import {
   type AnalystGrepResult,
   type AnalystReadGamesField,
   type AnalystReadGamesItem,
+  type AnalystSummarizeResult,
   type AnalystTopResult,
 } from "@shelf-judge/shared";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
@@ -158,10 +161,20 @@ export interface AnalystEvidenceService {
    * fitness ranks descending; missing fitness ranks last; ties break by game ID.
    */
   top(snapshot: AnalystProjectionSnapshot, request: unknown): Promise<AnalystTopResult>;
+  /** Deterministically aggregates owned games by selected imported metadata. */
+  summarize?(
+    snapshot: AnalystProjectionSnapshot,
+    request: unknown,
+  ): Promise<AnalystSummarizeResult>;
   /** Authenticates and refresh-checks an emitted top page before provider handoff. */
   withTopEvidence<Value>(
     result: AnalystTopResult,
     operation: (result: AnalystTopResult) => Promise<Value>,
+  ): Promise<Value>;
+  /** Authenticates and refresh-checks an emitted summary page before provider handoff. */
+  withSummaryEvidence?<Value>(
+    result: AnalystSummarizeResult,
+    operation: (result: AnalystSummarizeResult) => Promise<Value>,
   ): Promise<Value>;
   retrieve(
     snapshot: AnalystProjectionSnapshot,
@@ -263,7 +276,10 @@ function compactMatchSnippet(value: string, pattern: string): string | undefined
   while (end < offsets.length && offsets[end].end - offsets[matchEnd].end <= 120) end += 1;
   while (true) {
     const snippetLength =
-      offsets[end - 1].end - offsets[start].start + Number(start > 0) + Number(end < offsets.length);
+      offsets[end - 1].end -
+      offsets[start].start +
+      Number(start > 0) +
+      Number(end < offsets.length);
     if (snippetLength <= 280) break;
     const leftContext = offsets[matchStart].start - offsets[start].start;
     const rightContext = offsets[end - 1].end - offsets[matchEnd].end;
@@ -289,6 +305,8 @@ export function createAnalystEvidenceService(deps: {
   evidenceBudget?: { readonly maxCallsPerTurn?: number; readonly maxBytesPerTurn?: number };
   /** Explicit readGames response cap, including its per-item coverage wrapper. */
   readGamesBudget?: { readonly maxBytes?: number };
+  /** Explicit summarize response cap, including source-set coverage metadata. */
+  summarizeBudget?: { readonly maxBytes?: number };
   /** @deprecated Use evidenceBudget; retained for callers created before shared budgeting. */
   topBudget?: { readonly maxCallsPerTurn?: number; readonly maxBytesPerTurn?: number };
 }): AnalystEvidenceService & {
@@ -297,6 +315,11 @@ export function createAnalystEvidenceService(deps: {
     ids: readonly string[],
     options: { readonly fields: readonly AnalystReadGamesField[] },
   ): Promise<AnalystReadGamesEvidence>;
+  summarize(snapshot: AnalystProjectionSnapshot, request: unknown): Promise<AnalystSummarizeResult>;
+  withSummaryEvidence<Value>(
+    result: AnalystSummarizeResult,
+    operation: (result: AnalystSummarizeResult) => Promise<Value>,
+  ): Promise<Value>;
 } {
   const coordinator = profileSourceCoordinatorFor(deps.storageService);
   const citationSecret = deps.citationSecret ?? randomBytes(32);
@@ -320,6 +343,22 @@ export function createAnalystEvidenceService(deps: {
     AnalystTopResult,
     {
       readonly result: AnalystTopResult;
+      readonly snapshot: AnalystProjectionSnapshot;
+      readonly sources: ReadonlyMap<string, string>;
+    }
+  >();
+  const summaryPackages = new WeakMap<
+    AnalystSummarizeResult,
+    {
+      readonly result: AnalystSummarizeResult;
+      readonly snapshot: AnalystProjectionSnapshot;
+      readonly sources: ReadonlyMap<string, string>;
+    }
+  >();
+  const summaryCitations = new Map<
+    string,
+    {
+      readonly source: AnalystEvidenceSource;
       readonly snapshot: AnalystProjectionSnapshot;
       readonly sources: ReadonlyMap<string, string>;
     }
@@ -511,6 +550,51 @@ export function createAnalystEvidenceService(deps: {
     turn.evidenceBytes += bytes;
   }
 
+  function summarySourceSet(
+    sourceId: string,
+    sources: readonly AnalystEvidenceSource[],
+  ): { readonly sourceId: string; readonly sourceVersion: string; readonly sourceCount: number } {
+    const versions = sources
+      .map(({ sourceId: inputSourceId, sourceVersion }) => ({
+        sourceId: inputSourceId,
+        sourceVersion,
+      }))
+      .sort(
+        (left, right) =>
+          compareText(left.sourceId, right.sourceId) ||
+          compareText(left.sourceVersion, right.sourceVersion),
+      );
+    return { sourceId, sourceVersion: canonicalSha256(versions), sourceCount: versions.length };
+  }
+
+  function summaryAggregateSource(input: {
+    readonly snapshot: AnalystProjectionSnapshot;
+    readonly groupBy: "metadata.mechanics" | "metadata.categories";
+    readonly measures: readonly ("gameCount" | "averageFitness")[];
+    readonly group: { readonly id: number; readonly name: string } | null;
+    readonly sources: readonly AnalystEvidenceSource[];
+  }): AnalystEvidenceSource {
+    const sourceSet = summarySourceSet(
+      `analyst:collection-summary:${input.groupBy}:${[...input.measures].sort().join(",")}:${input.group?.id ?? "scope"}`,
+      input.sources,
+    );
+    return freeze({
+      evidenceClass: "collection-summary" as const,
+      sourceId: sourceSet.sourceId,
+      sourceVersion: sourceSet.sourceVersion,
+      citationId: `analyst:collection-summary:${canonicalSha256(sourceSet).slice(0, 32)}`,
+      payload: {
+        snapshotFingerprint: input.snapshot.snapshotFingerprint,
+        groupBy: input.groupBy,
+        measures: [...input.measures].sort(),
+        group: input.group,
+        sourceCount: sourceSet.sourceCount,
+      },
+      canonicalSummary: "Current deterministic collection summary evidence",
+      destination: { operationId: "shelf.collection.get" as const, parameters: {} },
+    });
+  }
+
   async function currentTopSources(
     snapshot: AnalystProjectionSnapshot,
     expected: ReadonlyMap<string, string>,
@@ -618,7 +702,232 @@ export function createAnalystEvidenceService(deps: {
       topPackages.set(result, { result, snapshot, sources });
       return result;
     },
-    async grep(snapshot: AnalystProjectionSnapshot, requestInput: unknown): Promise<AnalystGrepResult> {
+    async summarize(
+      snapshot: AnalystProjectionSnapshot,
+      requestInput: unknown,
+    ): Promise<AnalystSummarizeResult> {
+      await Promise.resolve();
+      const request = AnalystSummarizeRequestSchema.parse(requestInput);
+      if (request.snapshotFingerprint !== snapshot.snapshotFingerprint)
+        throw new Error("Analyst summarize request belongs to a different snapshot");
+      if (request.cursor && request.cursor.snapshotFingerprint !== snapshot.snapshotFingerprint)
+        throw new Error("Analyst summarize cursor belongs to a different snapshot");
+
+      const identities = new Map<string, AnalystEvidenceSource>();
+      const metadataByGame = new Map<string, AnalystEvidenceSource>();
+      const scoringByGame = new Map<string, AnalystEvidenceSource>();
+      for (const source of snapshot.sources) {
+        const gameId = sourceGameId(source);
+        if (gameId === undefined) continue;
+        if (source.evidenceClass === "game-identity-ownership") identities.set(gameId, source);
+        if (source.evidenceClass === "imported-metadata") metadataByGame.set(gameId, source);
+        if (source.evidenceClass === "current-scoring") scoringByGame.set(gameId, source);
+      }
+      const ownedGameIds = [...identities]
+        .flatMap(([gameId, source]) =>
+          ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST.evidence["game-identity-ownership"].parse(
+            source.payload,
+          ).ownershipState === "owned"
+            ? [gameId]
+            : [],
+        )
+        .sort(compareText);
+      const ownedGameIdSet = new Set(ownedGameIds);
+      const metadataGameIds = ownedGameIds.filter((gameId) => metadataByGame.has(gameId));
+      const fitnessByGame = new Map<string, number>();
+      for (const gameId of ownedGameIds) {
+        const scoring = scoringByGame.get(gameId);
+        if (scoring === undefined) continue;
+        const fitness = ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST.evidence["current-scoring"].parse(
+          scoring.payload,
+        ).displayedFitness;
+        if (fitness !== null && Number.isFinite(fitness)) fitnessByGame.set(gameId, fitness);
+      }
+      type Group = {
+        readonly id: number;
+        readonly name: string;
+        readonly gameIds: Set<string>;
+      };
+      const groups = new Map<number, Group>();
+      const metadataField = request.groupBy === "metadata.mechanics" ? "mechanics" : "categories";
+      const groupValueGameIds = new Set<string>();
+      for (const gameId of metadataGameIds) {
+        const metadata = ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST.evidence[
+          "imported-metadata"
+        ].parse(metadataByGame.get(gameId)?.payload);
+        // IDs distinguish BGG tags with coincident display names. Repeated tag IDs
+        // on a malformed source still contribute a game only once to that group.
+        const tags = new Map(metadata[metadataField].map((value) => [value.id, value]));
+        if (tags.size > 0) groupValueGameIds.add(gameId);
+        for (const tag of tags.values()) {
+          const group = groups.get(tag.id) ?? {
+            id: tag.id,
+            name: tag.name,
+            gameIds: new Set<string>(),
+          };
+          group.gameIds.add(gameId);
+          groups.set(tag.id, group);
+        }
+      }
+      const includesCount = request.measures.includes("gameCount");
+      const includesAverage = request.measures.includes("averageFitness");
+      const summarized = [...groups.values()]
+        .map((group) => {
+          const gameIds = [...group.gameIds].sort(compareText);
+          const fitnessValues = gameIds.flatMap((gameId) => {
+            const fitness = fitnessByGame.get(gameId);
+            return fitness === undefined ? [] : [fitness];
+          });
+          const contributingSources = gameIds.flatMap((gameId) => {
+            const identity = identities.get(gameId);
+            const metadata = metadataByGame.get(gameId);
+            const scoring =
+              includesAverage && fitnessByGame.has(gameId) ? scoringByGame.get(gameId) : undefined;
+            return [identity, metadata, scoring].filter(
+              (source): source is AnalystEvidenceSource => source !== undefined,
+            );
+          });
+          const aggregateSource = summaryAggregateSource({
+            snapshot,
+            groupBy: request.groupBy,
+            measures: request.measures,
+            group: { id: group.id, name: group.name },
+            sources: contributingSources,
+          });
+          return {
+            group: { id: group.id, name: group.name },
+            ...(includesCount ? { gameCount: gameIds.length } : {}),
+            ...(includesAverage
+              ? {
+                  averageFitness:
+                    fitnessValues.length === 0
+                      ? null
+                      : fitnessValues.reduce((sum, value) => sum + value, 0) / fitnessValues.length,
+                }
+              : {}),
+            fitnessGameCount: fitnessValues.length,
+            citation: citationFor(aggregateSource),
+            aggregateSource,
+          };
+        })
+        .sort(
+          (left, right) =>
+            (right.gameCount ?? left.fitnessGameCount) -
+              (left.gameCount ?? right.fitnessGameCount) ||
+            compareText(left.group.name, right.group.name) ||
+            left.group.id - right.group.id,
+        );
+      const scopeKey = canonicalSha256({
+        tool: "summarize",
+        groupBy: request.groupBy,
+        measures: [...request.measures].sort(),
+      });
+      const turn = turnFor(snapshot);
+      const continuation = request.cursor ? turn.cursors.get(request.cursor.token) : undefined;
+      if (request.cursor && (!continuation || continuation.scopeKey !== scopeKey))
+        throw new Error("Analyst summarize cursor is invalid for this scope");
+      const offset = continuation?.offset ?? 0;
+      const allSources = [...ownedGameIdSet].flatMap((gameId) =>
+        [identities.get(gameId), metadataByGame.get(gameId), scoringByGame.get(gameId)].filter(
+          (source): source is AnalystEvidenceSource => source !== undefined,
+        ),
+      );
+      const scope = {
+        totalGameCount: ownedGameIds.length,
+        metadataSourceGameCount: metadataGameIds.length,
+        groupValueGameCount: groupValueGameIds.size,
+        missingGroupValueGameCount: ownedGameIds.length - groupValueGameIds.size,
+        fitnessGameCount: fitnessByGame.size,
+        missingFitnessGameCount: ownedGameIds.length - fitnessByGame.size,
+        examinedGameCount: ownedGameIds.length,
+        exhaustive: true,
+      };
+      const scopeSource = summaryAggregateSource({
+        snapshot,
+        groupBy: request.groupBy,
+        measures: request.measures,
+        group: null,
+        sources: allSources,
+      });
+      const requested = request.limit ?? 25;
+      const configuredMaxBytes = deps.summarizeBudget?.maxBytes ?? 48 * 1024;
+      const remainingTurnBytes =
+        (deps.evidenceBudget ?? deps.topBudget)?.maxBytesPerTurn ?? 64 * 1024;
+      const maxBytes = Math.min(configuredMaxBytes, remainingTurnBytes - turn.evidenceBytes);
+      const provisionalCursor = {
+        snapshotFingerprint: snapshot.snapshotFingerprint,
+        token: crypto.randomUUID(),
+      };
+      const createResult = (entries: typeof summarized, hasMore: boolean) =>
+        AnalystSummarizeResultSchema.parse({
+          snapshotFingerprint: snapshot.snapshotFingerprint,
+          groupBy: request.groupBy,
+          measures: request.measures,
+          entries: entries.map(
+            ({ group, gameCount, averageFitness, fitnessGameCount, citation }) => ({
+              group,
+              ...(gameCount === undefined ? {} : { gameCount }),
+              ...(averageFitness === undefined ? {} : { averageFitness }),
+              fitnessGameCount,
+              citation,
+            }),
+          ),
+          scope,
+          citation: citationFor(scopeSource),
+          nextCursor: hasMore ? provisionalCursor : null,
+          truncated: hasMore,
+        });
+      let entryCount = Math.min(requested, summarized.length - offset);
+      let result = createResult(
+        summarized.slice(offset, offset + entryCount),
+        offset + entryCount < summarized.length,
+      );
+      while (entryCount > 0 && encodedBytes(result) > maxBytes) {
+        entryCount -= 1;
+        result = createResult(
+          summarized.slice(offset, offset + entryCount),
+          offset + entryCount < summarized.length,
+        );
+      }
+      if (encodedBytes(result) > maxBytes || (entryCount === 0 && offset < summarized.length))
+        throw new Error("Analyst summarize minimum response exceeds byte limit");
+      const nextOffset = offset + entryCount;
+      const nextCursor =
+        nextOffset < summarized.length
+          ? { snapshotFingerprint: snapshot.snapshotFingerprint, token: crypto.randomUUID() }
+          : null;
+      result = AnalystSummarizeResultSchema.parse({
+        ...result,
+        nextCursor,
+        truncated: nextCursor !== null,
+      });
+      const frozenResult = freeze(result);
+      consumeTurnBudget(turn, frozenResult);
+      if (nextCursor !== null) turn.cursors.set(nextCursor.token, { scopeKey, offset: nextOffset });
+      const sources = new Map<string, string>();
+      for (const gameId of ownedGameIdSet)
+        for (const source of [
+          identities.get(gameId),
+          metadataByGame.get(gameId),
+          scoringByGame.get(gameId),
+        ])
+          if (source !== undefined) sources.set(source.sourceId, source.sourceVersion);
+      summaryPackages.set(frozenResult, { result: frozenResult, snapshot, sources });
+      for (const entry of summarized) {
+        const aggregateSource = entry.aggregateSource;
+        summaryCitations.set(aggregateSource.citationId, {
+          source: aggregateSource,
+          snapshot,
+          sources,
+        });
+      }
+      summaryCitations.set(scopeSource.citationId, { source: scopeSource, snapshot, sources });
+      return frozenResult;
+    },
+    async grep(
+      snapshot: AnalystProjectionSnapshot,
+      requestInput: unknown,
+    ): Promise<AnalystGrepResult> {
       const request = AnalystGrepRequestSchema.parse(requestInput);
       if (request.snapshotFingerprint !== snapshot.snapshotFingerprint)
         throw new Error("Analyst grep request belongs to a different snapshot");
@@ -652,9 +961,9 @@ export function createAnalystEvidenceService(deps: {
         `${source.evidenceClass}\u0000${source.sourceId}\u0000${source.sourceVersion}`;
       for (const source of snapshot.sources) {
         if (source.evidenceClass !== "imported-metadata") continue;
-        const metadata = ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST.evidence["imported-metadata"].parse(
-          source.payload,
-        );
+        const metadata = ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST.evidence[
+          "imported-metadata"
+        ].parse(source.payload);
         if (!requestedGameIds.has(metadata.gameId)) continue;
         examinedSourceKeys.add(examinedSourceKey(source));
         if (fields.has("metadata.mechanics"))
@@ -760,6 +1069,18 @@ export function createAnalystEvidenceService(deps: {
       operation: (result: AnalystTopResult) => Promise<Value>,
     ): Promise<Value> {
       const packageRecord = topPackages.get(result);
+      if (packageRecord === undefined) throw new AnalystEvidenceSourceChangedError();
+      return coordinator.runExclusive(async () => {
+        if (!(await currentTopSources(packageRecord.snapshot, packageRecord.sources)))
+          throw new AnalystEvidenceSourceChangedError();
+        return operation(packageRecord.result);
+      });
+    },
+    async withSummaryEvidence<Value>(
+      result: AnalystSummarizeResult,
+      operation: (result: AnalystSummarizeResult) => Promise<Value>,
+    ): Promise<Value> {
+      const packageRecord = summaryPackages.get(result);
       if (packageRecord === undefined) throw new AnalystEvidenceSourceChangedError();
       return coordinator.runExclusive(async () => {
         if (!(await currentTopSources(packageRecord.snapshot, packageRecord.sources)))
@@ -923,8 +1244,7 @@ export function createAnalystEvidenceService(deps: {
       );
       if (request.fields.includes("owner-game-note")) {
         const authorization = deps.ownerNoteAuthorizationScope;
-        if (authorization === undefined)
-          throw new Error("Owner-note retrieval is not authorized");
+        if (authorization === undefined) throw new Error("Owner-note retrieval is not authorized");
         const authorizedGameIds = new Set(authorization.gameIds);
         if (
           request.gameIds.some(
@@ -967,14 +1287,13 @@ export function createAnalystEvidenceService(deps: {
         ]),
       );
       const sourceByFieldAndGame = new Map(
-        snapshot.sources
-          .flatMap((source) => {
-            const field = AnalystReadGamesFieldSchema.safeParse(source.evidenceClass);
-            const gameId = sourceGameId(source);
-            return !field.success || !request.fields.includes(field.data) || gameId === undefined
-              ? []
-              : [[`${field.data}\u0000${gameId}`, source] as const];
-          }),
+        snapshot.sources.flatMap((source) => {
+          const field = AnalystReadGamesFieldSchema.safeParse(source.evidenceClass);
+          const gameId = sourceGameId(source);
+          return !field.success || !request.fields.includes(field.data) || gameId === undefined
+            ? []
+            : [[`${field.data}\u0000${gameId}`, source] as const];
+        }),
       );
       const result = AnalystReadGamesResultSchema.parse({
         snapshotFingerprint: snapshot.snapshotFingerprint,
@@ -998,7 +1317,12 @@ export function createAnalystEvidenceService(deps: {
                   : "missing";
               return {
                 field,
-                state: noteState === "cleared" ? "cleared" : noteState === "missing" ? "missing" : "available",
+                state:
+                  noteState === "cleared"
+                    ? "cleared"
+                    : noteState === "missing"
+                      ? "missing"
+                      : "available",
                 covered: true,
                 source: {
                   citationId: citation.citationId,
@@ -1078,9 +1402,27 @@ export function createAnalystEvidenceService(deps: {
     revalidate,
     async inspectCitation(requestInput: unknown): Promise<AnalystCitationInspection> {
       const ownerGameNoteService = deps.ownerGameNoteService;
+      const { citation } = AnalystCitationInspectRequestSchema.parse(requestInput);
+      if (citation.evidenceClass === "collection-summary") {
+        const record = summaryCitations.get(citation.citationId);
+        if (
+          record === undefined ||
+          record.source.sourceId !== citation.sourceId ||
+          record.source.sourceVersion !== citation.sourceVersion
+        )
+          throw new Error("Collection-summary citation identity is invalid");
+        const state = (await currentTopSources(record.snapshot, record.sources))
+          ? "current"
+          : "superseded";
+        return freeze(
+          AnalystCitationInspectResultSchema.parse({
+            state,
+            destination: record.source.destination,
+          }),
+        );
+      }
       if (ownerGameNoteService === undefined)
         throw new Error("Owner note inspection is not configured");
-      const { citation } = AnalystCitationInspectRequestSchema.parse(requestInput);
       if (citation.evidenceClass !== "owner-game-note") {
         throw new Error("Only owner-note citations are inspectable by this service");
       }

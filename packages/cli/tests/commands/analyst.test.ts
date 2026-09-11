@@ -6,7 +6,7 @@ import { createMockClient } from "../helpers/mock-client.js";
 const timestamp = "2026-09-08T00:00:00.000Z";
 const configuration = {
   contractVersion: 1,
-  manifestVersion: 1,
+  manifestVersion: 2,
   configuration: {
     status: "configured",
     identity: { providerId: "provider", modelId: "model", extensionIds: [] },
@@ -18,7 +18,8 @@ const configuration = {
     providerProcessingAndRetentionFollowProviderPolicy: true,
     applicationTokenCap: null,
     applicationMonetaryCap: null,
-    cancellation: "Cancel the active request with its exact conversation capability and request ID.",
+    cancellation:
+      "Cancel the active request with its exact conversation capability and request ID.",
     maximumTranscriptMessages: 32,
     maximumTranscriptCharacters: 48_000,
   },
@@ -81,7 +82,9 @@ describe("Collection Analyst CLI commands", () => {
       | undefined;
     const client = createMockClient({
       routes: {
-        "GET /api/analyst/configuration": { response: { ok: true, status: 200, data: configuration } },
+        "GET /api/analyst/configuration": {
+          response: { ok: true, status: 200, data: configuration },
+        },
       },
       sseRoutes: {
         "/api/analyst/turns/stream": {
@@ -101,7 +104,11 @@ describe("Collection Analyst CLI commands", () => {
     });
     const output = io();
 
-    await analystAsk(client, ["Which", "games", "are", "owned?", "--acknowledge-disclosure"], output.io);
+    await analystAsk(
+      client,
+      ["Which", "games", "are", "owned?", "--acknowledge-disclosure"],
+      output.io,
+    );
 
     expect(request).toMatchObject({
       disclosure: { providerId: "provider", modelId: "model", acknowledged: true },
@@ -115,7 +122,9 @@ describe("Collection Analyst CLI commands", () => {
     const output = io(["no"]);
     const client = createMockClient({
       routes: {
-        "GET /api/analyst/configuration": { response: { ok: true, status: 200, data: configuration } },
+        "GET /api/analyst/configuration": {
+          response: { ok: true, status: 200, data: configuration },
+        },
       },
     });
 
@@ -131,7 +140,9 @@ describe("Collection Analyst CLI commands", () => {
     const requests: unknown[] = [];
     const client = createMockClient({
       routes: {
-        "GET /api/analyst/configuration": { response: { ok: true, status: 200, data: configuration } },
+        "GET /api/analyst/configuration": {
+          response: { ok: true, status: 200, data: configuration },
+        },
       },
       sseRoutes: {
         "/api/analyst/turns/stream": {
@@ -175,7 +186,14 @@ describe("Collection Analyst CLI commands", () => {
         "/api/analyst/turns/stream": {
           events: (body) => {
             requests.push(body);
-            return [{ event: "completed", data: JSON.stringify(completion(body as { conversationId: string; requestId: string })) }];
+            return [
+              {
+                event: "completed",
+                data: JSON.stringify(
+                  completion(body as { conversationId: string; requestId: string }),
+                ),
+              },
+            ];
           },
         },
       },
@@ -217,7 +235,9 @@ describe("Collection Analyst CLI commands", () => {
     let signal: AbortSignal | undefined;
     const client = createMockClient({
       routes: {
-        "GET /api/analyst/configuration": { response: { ok: true, status: 200, data: configuration } },
+        "GET /api/analyst/configuration": {
+          response: { ok: true, status: 200, data: configuration },
+        },
         "POST /api/analyst/turns/cancel": {
           response: (body) => {
             cancellation = body as {
@@ -231,7 +251,11 @@ describe("Collection Analyst CLI commands", () => {
       },
     });
     client.postSSE = async (_path, body, onEvent, options) => {
-      const request = body as { conversationId: string; conversationCapability: string; requestId: string };
+      const request = body as {
+        conversationId: string;
+        conversationCapability: string;
+        requestId: string;
+      };
       signal = options?.signal;
       await new Promise<void>((resolve) =>
         signal?.addEventListener("abort", () => resolve(), { once: true }),
@@ -256,7 +280,9 @@ describe("Collection Analyst CLI commands", () => {
     let signal: AbortSignal | undefined;
     const client = createMockClient({
       routes: {
-        "GET /api/analyst/configuration": { response: { ok: true, status: 200, data: configuration } },
+        "GET /api/analyst/configuration": {
+          response: { ok: true, status: 200, data: configuration },
+        },
       },
     });
     client.post = () => Promise.reject(new Error("cancel unavailable"));
@@ -285,7 +311,9 @@ describe("Collection Analyst CLI commands", () => {
   test("propagates daemon stream errors instead of reporting a successful answer", async () => {
     const client = createMockClient({
       routes: {
-        "GET /api/analyst/configuration": { response: { ok: true, status: 200, data: configuration } },
+        "GET /api/analyst/configuration": {
+          response: { ok: true, status: 200, data: configuration },
+        },
       },
     });
     client.postSSE = () => Promise.reject(new Error("stream failed"));
@@ -302,6 +330,8 @@ describe("Collection Analyst CLI commands", () => {
 
   test("does not add durable browser or collection storage to the CLI workflow", async () => {
     const source = await Bun.file(new URL("../../src/commands/analyst.ts", import.meta.url)).text();
-    expect(source).not.toMatch(/localStorage|sessionStorage|indexedDB|document\.cookie|writeFile|storageService/);
+    expect(source).not.toMatch(
+      /localStorage|sessionStorage|indexedDB|document\.cookie|writeFile|storageService/,
+    );
   });
 });

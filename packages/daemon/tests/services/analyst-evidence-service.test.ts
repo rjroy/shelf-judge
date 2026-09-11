@@ -102,7 +102,11 @@ function grepSnapshot(alphaDescription?: string): AnalystProjectionSnapshot {
       playerCounts: { min: null, max: null, best: null },
       playTime: null,
       weight: null,
-      completeness: { designer: "complete" as const, artist: "complete" as const, mechanic: "complete" as const },
+      completeness: {
+        designer: "complete" as const,
+        artist: "complete" as const,
+        mechanic: "complete" as const,
+      },
       sourceTime: null,
       refreshWarnings: [],
     },
@@ -705,13 +709,27 @@ describe("Analyst evidence retrieval", () => {
         gameId: "a",
         state: "found",
         citations: [{ sourceId: "a", sourceVersion: "0" }],
-        fields: [{ field: "owner-game-note", state: "missing", covered: true, source: { sourceVersion: "0" } }],
+        fields: [
+          {
+            field: "owner-game-note",
+            state: "missing",
+            covered: true,
+            source: { sourceVersion: "0" },
+          },
+        ],
       },
       {
         gameId: "b",
         state: "found",
         citations: [{ sourceId: "b", sourceVersion: "3" }],
-        fields: [{ field: "owner-game-note", state: "cleared", covered: true, source: { sourceVersion: "3" } }],
+        fields: [
+          {
+            field: "owner-game-note",
+            state: "cleared",
+            covered: true,
+            source: { sourceVersion: "3" },
+          },
+        ],
       },
       {
         gameId: "missing",
@@ -738,9 +756,7 @@ describe("Analyst evidence retrieval", () => {
     await expect(
       service.readGames(threeGameSnapshot, [], { fields: ["game-identity-ownership"] }),
     ).rejects.toThrow();
-    await expect(
-      service.readGames(threeGameSnapshot, ["a"], { fields: [] }),
-    ).rejects.toThrow();
+    await expect(service.readGames(threeGameSnapshot, ["a"], { fields: [] })).rejects.toThrow();
   });
 
   test("rejects unauthorized, oversized, and source-changed explicit game reads", async () => {
@@ -758,9 +774,13 @@ describe("Analyst evidence retrieval", () => {
       unauthorized.readGames(snapshot, ["b"], { fields: ["owner-game-note"] }),
     ).rejects.toThrow("not authorized");
     await expect(
-      unauthorized.readGames(snapshot, Array.from({ length: 11 }, (_, index) => `g-${index}`), {
-        fields: ["game-identity-ownership"],
-      }),
+      unauthorized.readGames(
+        snapshot,
+        Array.from({ length: 11 }, (_, index) => `g-${index}`),
+        {
+          fields: ["game-identity-ownership"],
+        },
+      ),
     ).rejects.toThrow();
 
     let version = 1;
@@ -1277,8 +1297,18 @@ describe("Analyst evidence retrieval", () => {
       projectionSnapshotService: { capture: () => Promise.resolve(localSnapshot) },
       ownerGameNoteService: noteService(
         {
-          a: { state: "present", version: 1, updatedAt: "2026-09-06T12:00:00.000Z", text: "PRIVATE MATCH note" },
-          b: { state: "present", version: 1, updatedAt: "2026-09-06T12:00:00.000Z", text: "PRIVATE" },
+          a: {
+            state: "present",
+            version: 1,
+            updatedAt: "2026-09-06T12:00:00.000Z",
+            text: "PRIVATE MATCH note",
+          },
+          b: {
+            state: "present",
+            version: 1,
+            updatedAt: "2026-09-06T12:00:00.000Z",
+            text: "PRIVATE",
+          },
         },
         reads,
       ),
@@ -1322,8 +1352,18 @@ describe("Analyst evidence retrieval", () => {
       projectionSnapshotService: { capture: () => Promise.resolve(localSnapshot) },
       ownerGameNoteService: noteService(
         {
-          a: { state: "present", version: 2, updatedAt: "2026-09-06T12:00:00.000Z", text: "MATCH owner note" },
-          b: { state: "present", version: 3, updatedAt: "2026-09-06T12:00:00.000Z", text: "UNAUTHORIZED MATCH" },
+          a: {
+            state: "present",
+            version: 2,
+            updatedAt: "2026-09-06T12:00:00.000Z",
+            text: "MATCH owner note",
+          },
+          b: {
+            state: "present",
+            version: 3,
+            updatedAt: "2026-09-06T12:00:00.000Z",
+            text: "UNAUTHORIZED MATCH",
+          },
         },
         reads,
       ),
@@ -1369,17 +1409,29 @@ describe("Analyst evidence retrieval", () => {
       projectionSnapshotService: { capture: () => Promise.resolve(localSnapshot) },
     });
     const first = await service.grep(localSnapshot, { ...request, limit: 1 });
-    expect(first).toMatchObject({ truncated: true, scope: { totalSourceCount: 2, matchingSourceCount: 2, examinedSourceCount: 2, exhaustive: true } });
+    expect(first).toMatchObject({
+      truncated: true,
+      scope: {
+        totalSourceCount: 2,
+        matchingSourceCount: 2,
+        examinedSourceCount: 2,
+        exhaustive: true,
+      },
+    });
     expect(first.matches).toHaveLength(1);
-    const second = await service.grep(localSnapshot, { ...request, limit: 5, cursor: first.nextCursor });
+    const second = await service.grep(localSnapshot, {
+      ...request,
+      limit: 5,
+      cursor: first.nextCursor,
+    });
     expect(second).toMatchObject({ truncated: false, nextCursor: null });
     expect(second.matches).toHaveLength(5);
     await expect(
       service.grep(localSnapshot, { ...request, allowedFields: [], cursor: first.nextCursor }),
     ).rejects.toThrow();
-    await expect(
-      service.grep(localSnapshot, { ...request, gameIds: ["missing"] }),
-    ).rejects.toThrow("only owned games");
+    await expect(service.grep(localSnapshot, { ...request, gameIds: ["missing"] })).rejects.toThrow(
+      "only owned games",
+    );
 
     const measured = await createAnalystEvidenceService({
       storageService: {},
@@ -1388,9 +1440,13 @@ describe("Analyst evidence retrieval", () => {
     const budgeted = createAnalystEvidenceService({
       storageService: {},
       projectionSnapshotService: { capture: () => Promise.resolve(localSnapshot) },
-      evidenceBudget: { maxBytesPerTurn: new TextEncoder().encode(JSON.stringify(measured)).byteLength - 1 },
+      evidenceBudget: {
+        maxBytesPerTurn: new TextEncoder().encode(JSON.stringify(measured)).byteLength - 1,
+      },
     });
-    await expect(budgeted.grep(localSnapshot, { ...request, limit: 1 })).rejects.toThrow("byte budget");
+    await expect(budgeted.grep(localSnapshot, { ...request, limit: 1 })).rejects.toThrow(
+      "byte budget",
+    );
   });
 
   test("bounds snippets while preserving matches across Unicode case folding", async () => {
@@ -1416,5 +1472,259 @@ describe("Analyst evidence retrieval", () => {
 
     const greek = await service.grep(grepSnapshot("ΟΣ"), { ...request, pattern: "ος" });
     expect(greek.matches[0]?.snippet).toBe("ΟΣ");
+  });
+
+  test("summarizes complete owned scope with explicit missing and overlapping metadata semantics", async () => {
+    const base = grepSnapshot("PROSE-MUST-NOT-LEAK");
+    const scoring = (gameId: string, displayedFitness: number | null): AnalystEvidenceSource => ({
+      evidenceClass: "current-scoring",
+      sourceId: `game:${gameId}:scoring`,
+      sourceVersion: `score-${gameId}`,
+      citationId: `score-${gameId}`,
+      payload: {
+        gameId,
+        displayedFitness,
+        validatedBreakdown: [],
+        veto: null,
+        predictionStatus: null,
+        sourceState: "available",
+      },
+      canonicalSummary: "Current validated scoring evidence",
+      destination: { operationId: "shelf.game.get", parameters: { gameId } },
+    });
+    const localSnapshot: AnalystProjectionSnapshot = {
+      ...base,
+      sources: [
+        ...base.sources,
+        {
+          ...snapshot.sources[0],
+          sourceId: "game:c:identity",
+          sourceVersion: "identity-c",
+          citationId: "identity-c",
+          payload: { ...alphaPayload, gameId: "c", displayName: "Gamma" },
+        },
+        {
+          ...snapshot.sources[0],
+          sourceId: "game:d:identity",
+          sourceVersion: "identity-d",
+          citationId: "identity-d",
+          payload: {
+            ...alphaPayload,
+            gameId: "d",
+            displayName: "Former",
+            ownershipState: "previously-owned",
+          },
+        },
+        {
+          ...snapshot.sources[0],
+          sourceId: "game:e:identity",
+          sourceVersion: "identity-e",
+          citationId: "identity-e",
+          payload: { ...alphaPayload, gameId: "e", displayName: "Empty mechanics" },
+        },
+        {
+          evidenceClass: "imported-metadata",
+          sourceId: "game:e:metadata",
+          sourceVersion: "metadata-e",
+          citationId: "metadata-e",
+          payload: {
+            gameId: "e",
+            name: "Empty mechanics",
+            description: null,
+            categories: [],
+            mechanics: [],
+            families: [],
+            subdomains: [],
+            designers: [],
+            artists: [],
+            playerCounts: { min: null, max: null, best: null },
+            playTime: null,
+            weight: null,
+            completeness: { designer: "complete", artist: "complete", mechanic: "complete" },
+            sourceTime: null,
+            refreshWarnings: [],
+          },
+          canonicalSummary: "Current validated imported metadata",
+          destination: { operationId: "shelf.game.get", parameters: { gameId: "e" } },
+        },
+        scoring("a", 8),
+        scoring("b", null),
+        scoring("c", 4),
+        scoring("d", 10),
+      ],
+    };
+    const service = createAnalystEvidenceService({
+      storageService: {},
+      projectionSnapshotService: { capture: () => Promise.resolve(localSnapshot) },
+    });
+    const request = {
+      snapshotFingerprint: fingerprint,
+      groupBy: "metadata.mechanics" as const,
+      measures: ["gameCount", "averageFitness"] as const,
+    };
+    const first = await service.summarize(localSnapshot, { ...request, limit: 1 });
+    expect(first.entries[0]).toMatchObject({
+      group: { id: 10, name: "Match mechanic" },
+      gameCount: 2,
+      averageFitness: 8,
+      fitnessGameCount: 1,
+    });
+    expect(first.entries[0]?.citation).toMatchObject({
+      evidenceClass: "collection-summary",
+      destination: { operationId: "shelf.collection.get", parameters: {} },
+    });
+    expect(first.scope).toEqual({
+      totalGameCount: 4,
+      metadataSourceGameCount: 3,
+      groupValueGameCount: 2,
+      missingGroupValueGameCount: 2,
+      fitnessGameCount: 2,
+      missingFitnessGameCount: 2,
+      examinedGameCount: 4,
+      exhaustive: true,
+    });
+    expect(first).toMatchObject({
+      truncated: true,
+      nextCursor: { snapshotFingerprint: fingerprint },
+    });
+    expect(JSON.stringify(first)).not.toContain("PROSE-MUST-NOT-LEAK");
+    expect(JSON.stringify(first)).not.toContain("description");
+    const second = await service.summarize(localSnapshot, {
+      ...request,
+      cursor: first.nextCursor,
+    });
+    expect(second.entries[0]).toMatchObject({
+      group: { id: 11, name: "Drafting" },
+      gameCount: 1,
+      averageFitness: 8,
+      fitnessGameCount: 1,
+    });
+    expect(second.entries[0]?.citation).toMatchObject({
+      evidenceClass: "collection-summary",
+      destination: { operationId: "shelf.collection.get", parameters: {} },
+    });
+    expect(second).toMatchObject({ truncated: false, nextCursor: null });
+    await expect(
+      service.summarize(localSnapshot, {
+        ...request,
+        groupBy: "metadata.categories",
+        cursor: first.nextCursor,
+      }),
+    ).rejects.toThrow("invalid for this scope");
+  });
+
+  test("pages summary entries to the byte cap and rejects a cap that cannot carry one group", async () => {
+    const localSnapshot = grepSnapshot();
+    const request = {
+      snapshotFingerprint: fingerprint,
+      groupBy: "metadata.mechanics" as const,
+      measures: ["gameCount"] as const,
+    };
+    const measured = await createAnalystEvidenceService({
+      storageService: {},
+      projectionSnapshotService: { capture: () => Promise.resolve(localSnapshot) },
+    }).summarize(localSnapshot, { ...request, limit: 1 });
+    const maxBytes = new TextEncoder().encode(JSON.stringify(measured)).byteLength;
+    const service = createAnalystEvidenceService({
+      storageService: {},
+      projectionSnapshotService: { capture: () => Promise.resolve(localSnapshot) },
+      summarizeBudget: { maxBytes },
+    });
+    const page = await service.summarize(localSnapshot, { ...request, limit: 2 });
+    expect(page.entries).toHaveLength(1);
+    expect(page).toMatchObject({
+      truncated: true,
+      nextCursor: { snapshotFingerprint: fingerprint },
+    });
+    expect(new TextEncoder().encode(JSON.stringify(page)).byteLength).toBeLessThanOrEqual(maxBytes);
+    const tooSmall = createAnalystEvidenceService({
+      storageService: {},
+      projectionSnapshotService: { capture: () => Promise.resolve(localSnapshot) },
+      summarizeBudget: { maxBytes: maxBytes - 1 },
+    });
+    await expect(tooSmall.summarize(localSnapshot, { ...request, limit: 1 })).rejects.toThrow(
+      "minimum response exceeds byte limit",
+    );
+  });
+
+  test("shares summarize budgets and invalidates an aggregate when any input source changes", async () => {
+    let current = grepSnapshot();
+    current = {
+      ...current,
+      sources: [
+        ...current.sources,
+        {
+          evidenceClass: "current-scoring",
+          sourceId: "game:a:scoring",
+          sourceVersion: "score-a",
+          citationId: "score-a",
+          payload: {
+            gameId: "a",
+            displayedFitness: 5,
+            validatedBreakdown: [],
+            veto: null,
+            predictionStatus: null,
+            sourceState: "available",
+          },
+          canonicalSummary: "Current validated scoring evidence",
+          destination: { operationId: "shelf.game.get", parameters: { gameId: "a" } },
+        },
+      ],
+    };
+    const request = {
+      snapshotFingerprint: fingerprint,
+      groupBy: "metadata.categories" as const,
+      measures: ["gameCount"] as const,
+    };
+    const service = createAnalystEvidenceService({
+      storageService: {},
+      projectionSnapshotService: { capture: () => Promise.resolve(current) },
+      evidenceBudget: { maxCallsPerTurn: 1, maxBytesPerTurn: 64 * 1024 },
+    });
+    const result = await service.summarize(current, request);
+    const citation = result.citation;
+    expect(
+      await service.inspectCitation({
+        citation: {
+          citationId: citation.citationId,
+          sourceId: citation.sourceId,
+          sourceVersion: citation.sourceVersion,
+          evidenceClass: citation.evidenceClass,
+        },
+      }),
+    ).toEqual({
+      state: "current",
+      destination: { operationId: "shelf.collection.get", parameters: {} },
+    });
+    await expect(
+      service.withSummaryEvidence(result, (value) => Promise.resolve(value)),
+    ).resolves.toBe(result);
+    await expect(
+      service.top(current, { snapshotFingerprint: fingerprint, rankBy: "fitness" }),
+    ).rejects.toThrow("call budget");
+    current = {
+      ...current,
+      sources: current.sources.map((source) =>
+        source.sourceId === "game:b:identity"
+          ? { ...source, sourceVersion: "identity-b-revised" }
+          : source,
+      ),
+    };
+    await expect(
+      service.inspectCitation({
+        citation: {
+          citationId: citation.citationId,
+          sourceId: citation.sourceId,
+          sourceVersion: citation.sourceVersion,
+          evidenceClass: citation.evidenceClass,
+        },
+      }),
+    ).resolves.toEqual({
+      state: "superseded",
+      destination: { operationId: "shelf.collection.get", parameters: {} },
+    });
+    await expect(
+      service.withSummaryEvidence(result, (value) => Promise.resolve(value)),
+    ).rejects.toBeInstanceOf(AnalystEvidenceSourceChangedError);
   });
 });

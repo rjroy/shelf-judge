@@ -587,7 +587,7 @@ function reflectionResult(questionId: ReflectionQuestionId, outcome: "answered" 
       ...(questionId === "pattern-exceptions" ? { patternCandidateIds: [] } : {}),
     },
     evidenceIdentity: {
-      manifestVersion: 1,
+      manifestVersion: 2,
       questionId,
       questionVersion: 1,
       collectionId: "fixture-collection",
@@ -911,13 +911,21 @@ function json(value: unknown, status = 200): Response {
 function analystConfiguration() {
   return AnalystConfigurationSchema.parse({
     contractVersion: 1,
-    manifestVersion: 1,
+    manifestVersion: 2,
     configuration: {
       status: "configured",
       identity: { providerId: "fixture-provider", modelId: "fixture-model", extensionIds: [] },
     },
     disclosure: {
-      evidenceClasses: ["game-identity-ownership", "current-scoring", "imported-metadata", "play-acquisition", "collection-structure", "profile-evidence", "owner-game-note"],
+      evidenceClasses: [
+        "game-identity-ownership",
+        "current-scoring",
+        "imported-metadata",
+        "play-acquisition",
+        "collection-structure",
+        "profile-evidence",
+        "owner-game-note",
+      ],
       relevantOwnerNotesMayBeTransmitted: true,
       localRetention: "Shelf Judge does not persist Analyst conversations.",
       providerProcessingAndRetentionFollowProviderPolicy: true,
@@ -1268,25 +1276,129 @@ async function handle(request: Request): Promise<Response> {
     return json(analystConfiguration());
   }
   if (path === "/api/analyst/citations/inspect" && request.method === "POST") {
-    return json({ state: "current", destination: { operationId: "shelf.game.get", parameters: { gameId: "game-1" } } });
+    return json({
+      state: "current",
+      destination: { operationId: "shelf.game.get", parameters: { gameId: "game-1" } },
+    });
   }
   if (path === "/api/analyst/turns/cancel" && request.method === "POST") {
     return json({ outcome: "accepted", requestId: (await body(request)).requestId });
   }
   if (path === "/api/analyst/turns/stream" && request.method === "POST") {
     const requestBody = await body(request);
-    const requestId = typeof requestBody.requestId === "string" ? requestBody.requestId : "invalid-request";
-    const conversationId = typeof requestBody.conversationId === "string" ? requestBody.conversationId : "invalid-conversation";
+    const requestId =
+      typeof requestBody.requestId === "string" ? requestBody.requestId : "invalid-request";
+    const conversationId =
+      typeof requestBody.conversationId === "string"
+        ? requestBody.conversationId
+        : "invalid-conversation";
     const now = "2026-09-08T10:00:00.000Z";
-    const event = (sequence: number, value: Record<string, unknown>) => `data: ${JSON.stringify({ version: 1, operationId: "fixture-analyst-operation", sequence, occurredAt: now, ...value })}\n\n`;
-    const citation = { citationId: "score-1", sourceId: "game-1", sourceVersion: "1", evidenceClass: "current-scoring", canonicalSummary: "Current fitness score", testimony: false, destination: { operationId: "shelf.game.get", parameters: { gameId: "game-1" } } };
-    const result = { outcome: "answered", blocks: [{ text: "Atlas Equal is supported by current validated collection evidence.", citationIds: ["score-1"] }], citations: [citation], usage: { state: "unavailable" } };
-    if (JSON.stringify(requestBody).includes("cancel me") && !analystCancelledConversations.has(conversationId)) {
+    const event = (sequence: number, value: Record<string, unknown>) =>
+      `data: ${JSON.stringify({ version: 1, operationId: "fixture-analyst-operation", sequence, occurredAt: now, ...value })}\n\n`;
+    const citation = {
+      citationId: "score-1",
+      sourceId: "game-1",
+      sourceVersion: "1",
+      evidenceClass: "current-scoring",
+      canonicalSummary: "Current fitness score",
+      testimony: false,
+      destination: { operationId: "shelf.game.get", parameters: { gameId: "game-1" } },
+    };
+    const result = {
+      outcome: "answered",
+      blocks: [
+        {
+          text: "Atlas Equal is supported by current validated collection evidence.",
+          citationIds: ["score-1"],
+        },
+      ],
+      citations: [citation],
+      usage: { state: "unavailable" },
+    };
+    if (
+      JSON.stringify(requestBody).includes("cancel me") &&
+      !analystCancelledConversations.has(conversationId)
+    ) {
       analystCancelledConversations.add(conversationId);
       const encoder = new TextEncoder();
-      return new Response(new ReadableStream({ start(controller) { controller.enqueue(encoder.encode(event(0, { type: "accepted", terminal: false, conversationId, requestId, turnIndex: 0 }))); setTimeout(() => { try { controller.enqueue(encoder.encode(event(1, { type: "cancelled", terminal: true, conversationId, requestId }))); } catch { return; } }, 150); setTimeout(() => { try { controller.enqueue(encoder.encode(event(2, { type: "completed", terminal: true, conversationId, requestId, result, noteDependencies: [{ gameId: "game-1", noteVersion: 1 }], validationAttestation: "stale-fixture-attestation" }))); controller.close(); } catch { return; } }, 500); } }), { headers: { "Content-Type": "text/event-stream" } });
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                event(0, {
+                  type: "accepted",
+                  terminal: false,
+                  conversationId,
+                  requestId,
+                  turnIndex: 0,
+                }),
+              ),
+            );
+            setTimeout(() => {
+              try {
+                controller.enqueue(
+                  encoder.encode(
+                    event(1, { type: "cancelled", terminal: true, conversationId, requestId }),
+                  ),
+                );
+              } catch {
+                return;
+              }
+            }, 150);
+            setTimeout(() => {
+              try {
+                controller.enqueue(
+                  encoder.encode(
+                    event(2, {
+                      type: "completed",
+                      terminal: true,
+                      conversationId,
+                      requestId,
+                      result,
+                      noteDependencies: [{ gameId: "game-1", noteVersion: 1 }],
+                      validationAttestation: "stale-fixture-attestation",
+                    }),
+                  ),
+                );
+                controller.close();
+              } catch {
+                return;
+              }
+            }, 500);
+          },
+        }),
+        { headers: { "Content-Type": "text/event-stream" } },
+      );
     }
-    return new Response(event(0, { type: "accepted", terminal: false, conversationId, requestId, turnIndex: 0 }) + event(1, { type: "evidence-status", terminal: false, conversationId, requestId, status: "started", examinedItemCount: 0 }) + event(2, { type: "model-status", terminal: false, conversationId, requestId, status: "validating" }) + event(3, { type: "completed", terminal: true, conversationId, requestId, result, noteDependencies: [{ gameId: "game-1", noteVersion: 1 }], validationAttestation: "fixture-attestation" }), { headers: { "Content-Type": "text/event-stream" } });
+    return new Response(
+      event(0, { type: "accepted", terminal: false, conversationId, requestId, turnIndex: 0 }) +
+        event(1, {
+          type: "evidence-status",
+          terminal: false,
+          conversationId,
+          requestId,
+          status: "started",
+          examinedItemCount: 0,
+        }) +
+        event(2, {
+          type: "model-status",
+          terminal: false,
+          conversationId,
+          requestId,
+          status: "validating",
+        }) +
+        event(3, {
+          type: "completed",
+          terminal: true,
+          conversationId,
+          requestId,
+          result,
+          noteDependencies: [{ gameId: "game-1", noteVersion: 1 }],
+          validationAttestation: "fixture-attestation",
+        }),
+      { headers: { "Content-Type": "text/event-stream" } },
+    );
   }
 
   if (path === "/api/profile/reflections" && request.method === "GET") {

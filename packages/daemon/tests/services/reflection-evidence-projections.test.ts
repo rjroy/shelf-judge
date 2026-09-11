@@ -395,6 +395,10 @@ describe("Reflection deterministic evidence projections", () => {
       },
       { id: "collection-structure", fields: ["gameId", "shelfAssignment", "redundancy"] },
       {
+        id: "collection-summary",
+        fields: ["snapshotFingerprint", "groupBy", "measures", "group", "sourceCount"],
+      },
+      {
         id: "profile-evidence",
         fields: [
           "entityClass",
