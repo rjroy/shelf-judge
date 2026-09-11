@@ -7,6 +7,7 @@ import {
   type Page,
 } from "@playwright/test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { webUrl } from "./web-url";
 
 const CONTEXT_PREFIX = "shelf-judge-collection-navigation:v1:";
 const TTL_MS = 7 * 24 * 60 * 60 * 1_000;
@@ -14,7 +15,6 @@ const CONTEXT_KEY = "10000000-0000-4000-8000-000000000001";
 const DEFAULT_ORDER = ["game-1", "game-2", "game-3", "game-7", "game-6"];
 const LONG_NEXT_NAME =
   "Zephyr Mutable Target With Another Exceptionally Long Name for Full Accessible Labels";
-const webUrl = `http://127.0.0.1:${process.env.SHELF_JUDGE_E2E_WEB_PORT ?? "3100"}`;
 
 interface NetworkEvidence {
   externalRequests: string[];

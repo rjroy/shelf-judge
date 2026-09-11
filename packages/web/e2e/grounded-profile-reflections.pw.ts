@@ -1,7 +1,6 @@
 import { chromium, expect, test, type BrowserContext } from "@playwright/test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-
-const webUrl = `http://127.0.0.1:${process.env.SHELF_JUDGE_E2E_WEB_PORT ?? "3100"}`;
+import { webUrl } from "./web-url";
 
 async function reset(page: import("@playwright/test").Page): Promise<void> {
   const response = await page.request.post("/api/daemon/test/reset", {

@@ -936,6 +936,7 @@ function analystConfiguration() {
         "imported-metadata",
         "play-acquisition",
         "collection-structure",
+        "collection-summary",
         "profile-evidence",
         "owner-game-note",
       ],

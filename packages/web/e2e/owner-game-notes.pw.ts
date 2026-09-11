@@ -9,12 +9,12 @@ import {
 } from "@playwright/test";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { webUrl } from "./web-url";
 
 const gameId = "game-4";
 const gamePath = `/games/${gameId}`;
 const hostilePrefix =
   '<img src=x onerror="window.__ownerNoteExecuted=true"><script>alert(1)</script>';
-const webUrl = `http://127.0.0.1:${process.env.SHELF_JUDGE_E2E_WEB_PORT ?? "3100"}`;
 
 interface NetworkEvidence {
   externalRequests: string[];

@@ -1,9 +1,9 @@
 import { expect, test as base, type Browser, type Locator, type Page } from "@playwright/test";
+import { webUrl } from "./web-url";
 
 const EXPECTED_CHROMIUM_VERSION = "151.0.7922.34";
 const EXPECTED_CHROMIUM_REVISION = "chromium-1234";
 const featureRoots = [".profile-page", ".intention-panel", ".intention-history"];
-const webUrl = `http://127.0.0.1:${process.env.SHELF_JUDGE_E2E_WEB_PORT ?? "3100"}`;
 
 interface NetworkEvidence {
   externalRequests: string[];
