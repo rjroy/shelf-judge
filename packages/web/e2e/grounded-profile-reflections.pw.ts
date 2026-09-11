@@ -46,6 +46,55 @@ test("optional reflections are nested after deterministic identity evidence and 
   await expect.poll(() => requests).toContain("/api/daemon/profile/reflections");
 });
 
+test("one Profile navigation crosses the proxy once per Profile surface without passive note or refresh work", async ({
+  page,
+}) => {
+  const requests: string[] = [];
+  const requestStartedAt = new Map<import("@playwright/test").Request, number>();
+  const responseDurationsMs: Record<string, number[]> = {};
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (!path.startsWith("/api/daemon/")) return;
+    requests.push(path);
+    requestStartedAt.set(request, performance.now());
+  });
+  page.on("response", (response) => {
+    const startedAt = requestStartedAt.get(response.request());
+    if (startedAt === undefined) return;
+    const path = new URL(response.url()).pathname;
+    const durations = responseDurationsMs[path] ?? [];
+    durations.push(performance.now() - startedAt);
+    responseDurationsMs[path] = durations;
+  });
+
+  const navigationStartedAt = performance.now();
+  await page.goto("/");
+  await expect(page.locator(".optional-reflections")).toBeVisible();
+  await expect.poll(() => requests).toContain("/api/daemon/profile/reflections");
+  const navigationDurationMs = performance.now() - navigationStartedAt;
+
+  const telemetryResponse = await page.request.get("/api/daemon/test/profile-navigation-telemetry");
+  expect(telemetryResponse.ok()).toBe(true);
+  const telemetry: unknown = await telemetryResponse.json();
+  expect(telemetry).toEqual({
+    profileGets: 1,
+    reflectionsGets: 1,
+    ownerNoteGets: 0,
+    reflectionRefreshes: 0,
+  });
+  expect(requests.filter((path) => path === "/api/daemon/profile/reflections")).toHaveLength(1);
+  expect(responseDurationsMs["/api/daemon/profile/reflections"]?.[0]).toBeGreaterThanOrEqual(0);
+  console.info(
+    "[profile-navigation-browser-fixture]",
+    JSON.stringify({
+      navigationDurationMs,
+      browserRequests: requests,
+      responseDurationsMs,
+      daemonTelemetry: telemetry,
+    }),
+  );
+});
+
 test("optional reflections refresh without randomUUID while retaining a cryptographic cancellation capability", async ({
   page,
 }) => {

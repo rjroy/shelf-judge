@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { ReflectionGetResultSchema } from "@shelf-judge/shared";
 import type { GroundedAnalysisProvider } from "../../src/services/grounded-analysis/provider.js";
 import { createTestApp } from "../helpers/test-app.js";
 
@@ -132,8 +133,30 @@ describe("Reflection model collection tools", () => {
     expect(noteReads).toEqual([]);
     expect(providerCalls).toEqual([]);
 
+    const originalLoadCollection = context.storageService.loadCollection.bind(
+      context.storageService,
+    );
+    let projectionCollectionLoads = 0;
+    context.storageService.loadCollection = async () => {
+      projectionCollectionLoads += 1;
+      return originalLoadCollection();
+    };
+
+    projectionCollectionLoads = 0;
+    const rootStartedAt = performance.now();
+    const rootProfile = await context.app.request(request("/api/profile"));
+    const rootProfileDurationMs = performance.now() - rootStartedAt;
+    const rootProfileCollectionLoads = projectionCollectionLoads;
+    expect(rootProfile.status).toBe(200);
+    expect(noteReads).toEqual([]);
+    expect(providerCalls).toEqual([]);
+
+    projectionCollectionLoads = 0;
+    const firstReflectionsStartedAt = performance.now();
     const state = await context.app.request(request("/api/profile/reflections"));
+    const firstReflectionsDurationMs = performance.now() - firstReflectionsStartedAt;
     expect(state.status).toBe(200);
+    expect(projectionCollectionLoads).toBe(1);
     expect(noteReads).toEqual([]);
     expect(providerCalls).toEqual([]);
 
@@ -158,5 +181,32 @@ describe("Reflection model collection tools", () => {
     expect(refreshEvents).toContain("event: question-completed");
     expect(providerCalls).toHaveLength(1);
     expect([...new Set(noteReads)].sort()).toEqual([...selectedGameIds].sort());
+
+    projectionCollectionLoads = 0;
+    const readsBeforeCachedState = [...noteReads];
+    const cachedReflectionsStartedAt = performance.now();
+    const cachedState = await context.app.request(request("/api/profile/reflections"));
+    const cachedReflectionsDurationMs = performance.now() - cachedReflectionsStartedAt;
+    expect(cachedState.status).toBe(200);
+    const cachedQuestions = ReflectionGetResultSchema.parse(await cachedState.json()).questions;
+    expect(projectionCollectionLoads).toBe(1);
+    expect(noteReads).toEqual(readsBeforeCachedState);
+    expect(providerCalls).toHaveLength(1);
+    expect(cachedQuestions.find(({ questionId }) => questionId === "repeated-values")?.cache.state).not.toBe(
+      "none",
+    );
+    console.info(
+      "[profile-navigation-fixture]",
+      JSON.stringify({
+        rootProfileDurationMs,
+        firstReflectionsDurationMs,
+        cachedReflectionsDurationMs,
+        rootProfileCollectionLoads,
+        firstReflectionsCollectionLoads: 1,
+        cachedReflectionsCollectionLoads: projectionCollectionLoads,
+        passiveOwnerNoteReads: noteReads.length - readsBeforeCachedState.length,
+        providerCalls: providerCalls.length,
+      }),
+    );
   });
 });

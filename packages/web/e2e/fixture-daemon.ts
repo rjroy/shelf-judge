@@ -507,6 +507,18 @@ let activeReflectionBatch: { batchId: string; questionIds: ReflectionQuestionId[
 let reflectionFixtureMode: "normal" | "malformed" | "configuration-race" = "normal";
 let reflectionCurrentGameName: string | null = null;
 const analystCancelledConversations = new Set<string>();
+let profileNavigationTelemetry = createProfileNavigationTelemetry();
+
+interface ProfileNavigationTelemetry {
+  profileGets: number;
+  reflectionsGets: number;
+  ownerNoteGets: number;
+  reflectionRefreshes: number;
+}
+
+function createProfileNavigationTelemetry(): ProfileNavigationTelemetry {
+  return { profileGets: 0, reflectionsGets: 0, ownerNoteGets: 0, reflectionRefreshes: 0 };
+}
 
 function isReflectionQuestionId(value: unknown): value is ReflectionQuestionId {
   return (
@@ -846,6 +858,7 @@ function reset(next: Scenario): void {
   activeReflectionBatch = null;
   reflectionFixtureMode = "normal";
   reflectionCurrentGameName = null;
+  profileNavigationTelemetry = createProfileNavigationTelemetry();
   analystCancelledConversations.clear();
   persistOwnerNoteState();
   if (next === "manual-values") {
@@ -1112,6 +1125,19 @@ async function handle(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
 
+  if (request.method === "GET" && path === "/api/profile") {
+    profileNavigationTelemetry.profileGets += 1;
+  }
+  if (request.method === "GET" && path === "/api/profile/reflections") {
+    profileNavigationTelemetry.reflectionsGets += 1;
+  }
+  if (request.method === "GET" && /^\/api\/games\/[^/]+\/note$/.test(path)) {
+    profileNavigationTelemetry.ownerNoteGets += 1;
+  }
+  if (request.method === "POST" && path === "/api/profile/reflections/refresh") {
+    profileNavigationTelemetry.reflectionRefreshes += 1;
+  }
+
   if (path === "/api/test/reset" && request.method === "POST") {
     const requested = (await body(request)).scenario;
     if (
@@ -1129,6 +1155,10 @@ async function handle(request: Request): Promise<Response> {
     }
     reset(requested);
     return json({ scenario });
+  }
+
+  if (path === "/api/test/profile-navigation-telemetry" && request.method === "GET") {
+    return json(profileNavigationTelemetry);
   }
 
   if (path === "/api/test/owner-note-state") {

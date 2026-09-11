@@ -133,6 +133,11 @@ export interface ReflectionEvidenceService {
     provider: GroundedProviderIdentity,
     options?: { readonly signal?: AbortSignal },
   ): Promise<ReflectionEvidencePackage>;
+  assembleAll?(
+    questionIds: readonly ReflectionQuestionId[],
+    provider: GroundedProviderIdentity,
+    options?: { readonly signal?: AbortSignal },
+  ): Promise<readonly ReflectionEvidencePackage[]>;
   start?(
     questionId: ReflectionQuestionId,
     provider: GroundedProviderIdentity,
@@ -399,9 +404,10 @@ export function createReflectionEvidenceService(
   async function capture(
     questionId: ReflectionQuestionId,
     signal?: AbortSignal,
+    snapshotInput?: ReflectionProjectionSnapshot,
   ): Promise<CapturedQuestionSources> {
     signal?.throwIfAborted();
-    const snapshot = await deps.projectionSnapshotService.capture();
+    const snapshot = snapshotInput ?? (await deps.projectionSnapshotService.capture());
     signal?.throwIfAborted();
     const projection = snapshot.projections[questionId];
     if (projection.questionId !== questionId) {
@@ -420,10 +426,11 @@ export function createReflectionEvidenceService(
     questionId: ReflectionQuestionId,
     providerInput: GroundedProviderIdentity,
     options?: { readonly signal?: AbortSignal },
+    snapshot?: ReflectionProjectionSnapshot,
   ): Promise<ReflectionEvidencePackage> {
     const provider = cloneAndFreeze(GroundedProviderIdentitySchema.parse(providerInput));
     return coordinator.runExclusive(async () => {
-      const captured = await capture(questionId, options?.signal);
+      const captured = await capture(questionId, options?.signal, snapshot);
       const registry = createGroundedEvidenceRegistry({
         manifest: REFLECTION_EVIDENCE_MANIFEST,
         evidenceIdentitySchema: ReflectionEvidenceEntryIdentitySchema,
@@ -489,6 +496,19 @@ export function createReflectionEvidenceService(
         assembledAt,
       });
     });
+  }
+
+  async function assembleAll(
+    questionIds: readonly ReflectionQuestionId[],
+    provider: GroundedProviderIdentity,
+    options?: { readonly signal?: AbortSignal },
+  ): Promise<readonly ReflectionEvidencePackage[]> {
+    options?.signal?.throwIfAborted();
+    const snapshot = await deps.projectionSnapshotService.capture();
+    options?.signal?.throwIfAborted();
+    return Promise.all(
+      questionIds.map((questionId) => assemble(questionId, provider, options, snapshot)),
+    );
   }
 
   async function revalidate(
@@ -652,5 +672,5 @@ export function createReflectionEvidenceService(
     });
   }
 
-  return Object.freeze({ assemble, start, finish, revalidate });
+  return Object.freeze({ assemble, assembleAll, start, finish, revalidate });
 }

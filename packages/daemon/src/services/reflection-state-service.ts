@@ -27,6 +27,12 @@ export interface ReflectionCurrentSources {
   modelId: string;
   manifestVersion?: number;
   questionVersions?: Partial<Record<ReflectionQuestionId, number>>;
+  /**
+   * Passive source capture deliberately does not read private notes. When false,
+   * note dependencies are maintained by the note-mutation invalidation lifecycle
+   * instead of being compared against an incomplete current-source snapshot.
+   */
+  noteDependenciesChecked?: boolean;
   dependenciesByQuestion: Record<ReflectionQuestionId, readonly ReflectionDependency[]>;
 }
 
@@ -153,12 +159,14 @@ function changedCategories(
     result.dependencies.map((item) => [dependencyKey(item), item]),
   );
   for (const dependency of result.dependencies) {
+    if (dependency.category === "note" && current.noteDependenciesChecked === false) continue;
     const replacement = currentDependencies.get(dependencyKey(dependency));
     if (replacement === undefined || JSON.stringify(replacement) !== JSON.stringify(dependency)) {
       changed.add(dependency.category);
     }
   }
   for (const dependency of currentDependencies.values()) {
+    if (dependency.category === "note" && current.noteDependenciesChecked === false) continue;
     if (!recordedDependencies.has(dependencyKey(dependency))) changed.add(dependency.category);
   }
   return REFLECTION_EVIDENCE_CATEGORIES.filter((category) => changed.has(category));
@@ -168,6 +176,7 @@ function noteDependencyChanged(
   result: ReflectionCompleted,
   current: ReflectionCurrentSources,
 ): boolean {
+  if (current.noteDependenciesChecked === false) return false;
   const currentNotes = new Map(
     current.dependenciesByQuestion[result.evidenceIdentity.questionId]
       .filter((dependency) => dependency.category === "note")

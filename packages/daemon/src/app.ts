@@ -183,11 +183,27 @@ export function createApp(deps: AppDeps): AppResult {
         groundedAnalysisProvider.configurationStatus.status === "configured"
           ? groundedAnalysisProvider.configurationStatus.identity
           : { providerId: "unavailable", modelId: "unavailable", extensionIds: [] };
-      const [repeatedValues, patternExceptions, recurringTradeOffs] = await Promise.all([
-        reflectionEvidenceService.assemble("repeated-values", provider),
-        reflectionEvidenceService.assemble("pattern-exceptions", provider),
-        reflectionEvidenceService.assemble("recurring-trade-offs", provider),
-      ]);
+      const questionIds = [
+        "repeated-values",
+        "pattern-exceptions",
+        "recurring-trade-offs",
+      ] as const;
+      const assembledPackages =
+        reflectionEvidenceService.assembleAll === undefined
+          ? await Promise.all(
+              questionIds.map((questionId) =>
+                reflectionEvidenceService.assemble(questionId, provider),
+              ),
+            )
+          : await reflectionEvidenceService.assembleAll(questionIds, provider);
+      const [repeatedValues, patternExceptions, recurringTradeOffs] = assembledPackages;
+      if (
+        repeatedValues === undefined ||
+        patternExceptions === undefined ||
+        recurringTradeOffs === undefined
+      ) {
+        throw new Error("Reflection source assembly returned an incomplete question set");
+      }
       const packages = [repeatedValues, patternExceptions, recurringTradeOffs] as const;
       const identity = repeatedValues.evidenceIdentity;
       return {
@@ -199,6 +215,9 @@ export function createApp(deps: AppDeps): AppResult {
         providerId: provider.providerId,
         modelId: provider.modelId,
         manifestVersion: REFLECTION_MANIFEST_VERSION,
+        // Passive Profile reads never fetch private owner notes. Note writes purge
+        // dependent caches through the owner-note invalidation lifecycle.
+        noteDependenciesChecked: false,
         questionVersions: Object.fromEntries(
           packages.map(({ evidenceIdentity }) => [
             evidenceIdentity.questionId,
