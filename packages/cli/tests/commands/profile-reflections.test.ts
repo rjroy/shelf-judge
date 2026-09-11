@@ -542,6 +542,39 @@ describe("profile reflections command", () => {
     expect(cancellation.capability).toMatch(/^[0-9a-f]{64}$/);
   });
 
+  test("reports cancellation when the cancellation request fails", async () => {
+    const client = createMockClient({
+      routes: {
+        "GET /api/profile/reflections": {
+          response: { ok: true, status: 200, data: reflectionState },
+        },
+      },
+    });
+    client.post = () => Promise.reject(new Error("daemon unavailable"));
+    client.postSSE = async (_path, body, onEvent, options) => {
+      const request = body as {
+        batchId: string;
+        requestId: string;
+        cancellationCapability: string;
+      };
+      onEvent({ event: "accepted", data: JSON.stringify(acceptance(request)) });
+      await new Promise<void>((_resolve, reject) =>
+        options?.signal?.addEventListener("abort", () => reject(new Error("stream aborted")), {
+          once: true,
+        }),
+      );
+    };
+    const refresh = profileReflectionsCommand(
+      client,
+      "profile reflections refresh",
+      ["--question", "repeated-values", "--acknowledge-disclosure"],
+      { json: true },
+    );
+    await Bun.sleep(0);
+    process.emit("SIGINT");
+    expect(await rejectionOf(refresh)).toMatchObject({ details: { error: { code: "cancelled" } } });
+  });
+
   test("prints a validated terminal failure but never reports it as completion", async () => {
     const client = createMockClient({
       routes: {

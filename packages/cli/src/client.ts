@@ -13,6 +13,10 @@ export interface DaemonClientOptions {
   fetchFn?: typeof fetch;
 }
 
+export interface DaemonRequestOptions {
+  signal?: AbortSignal;
+}
+
 export interface DaemonResponse<T = unknown> {
   ok: boolean;
   status: number;
@@ -21,7 +25,11 @@ export interface DaemonResponse<T = unknown> {
 
 export interface DaemonClient {
   get<T = unknown>(path: string): Promise<DaemonResponse<T>>;
-  post<T = unknown>(path: string, body?: unknown): Promise<DaemonResponse<T>>;
+  post<T = unknown>(
+    path: string,
+    body?: unknown,
+    options?: DaemonRequestOptions,
+  ): Promise<DaemonResponse<T>>;
   put<T = unknown>(path: string, body?: unknown): Promise<DaemonResponse<T>>;
   patch<T = unknown>(path: string, body?: unknown): Promise<DaemonResponse<T>>;
   del<T = unknown>(path: string, body?: unknown): Promise<DaemonResponse<T>>;
@@ -56,6 +64,7 @@ export function createDaemonClient(options: DaemonClientOptions = {}): DaemonCli
     method: string,
     path: string,
     body?: unknown,
+    requestOptions: DaemonRequestOptions = {},
   ): Promise<DaemonResponse<T>> {
     const url = `http://localhost${path}`;
     const init: RequestInit = {
@@ -68,6 +77,7 @@ export function createDaemonClient(options: DaemonClientOptions = {}): DaemonCli
 
     const response = await fetchFn(url, {
       ...init,
+      signal: requestOptions.signal,
       // Bun-specific Unix socket option
       unix: socketPath,
     } as RequestInit);
@@ -212,7 +222,8 @@ export function createDaemonClient(options: DaemonClientOptions = {}): DaemonCli
 
   return {
     get: <T>(path: string) => request<T>("GET", path),
-    post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),
+    post: <T>(path: string, body?: unknown, options?: DaemonRequestOptions) =>
+      request<T>("POST", path, body, options),
     put: <T>(path: string, body?: unknown) => request<T>("PUT", path, body),
     patch: <T>(path: string, body?: unknown) => request<T>("PATCH", path, body),
     del: <T>(path: string, body?: unknown) => request<T>("DELETE", path, body),

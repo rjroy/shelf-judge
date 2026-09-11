@@ -317,13 +317,29 @@ export async function profileReflectionsCommand(
   const abortController = new AbortController();
   const refreshRequestId = requestId();
   let cancelling = false;
+  let cancellationRequest: Promise<void> | undefined;
   let terminalSeen = false;
   let accepted = false;
   const onSignal = () => {
     if (cancelling) return;
     cancelling = true;
     abortController.abort();
-    void client.post(`${REFLECTION_PATH}/cancel`, { batchId, capability });
+    const cancellationAbortController = new AbortController();
+    const cancellationTimeout = setTimeout(
+      () => cancellationAbortController.abort(),
+      5_000,
+    );
+    cancellationRequest = client
+      .post(
+        `${REFLECTION_PATH}/cancel`,
+        { batchId, capability },
+        { signal: cancellationAbortController.signal },
+      )
+      .then(
+        () => undefined,
+        () => undefined,
+      )
+      .finally(() => clearTimeout(cancellationTimeout));
   };
   process.once("SIGINT", onSignal);
   const events: ReflectionStreamEvent[] = [];
@@ -374,10 +390,13 @@ export async function profileReflectionsCommand(
       { signal: abortController.signal },
     );
   } catch (error) {
-    if (cancelling) throw new ReflectionCliError("cancelled", "Reflection refresh cancelled");
-    throw error;
+    if (!cancelling) throw error;
   } finally {
     process.removeListener("SIGINT", onSignal);
+  }
+  if (cancelling) {
+    await cancellationRequest;
+    throw new ReflectionCliError("cancelled", "Reflection refresh cancelled");
   }
   if (!accepted || events.length === 0)
     throw new ReflectionCliError("incomplete-stream", "Reflection stream ended without an event");

@@ -60,8 +60,10 @@ function streamEvent(type: string, payload: Record<string, unknown>): string {
 function startReflectionServer(
   socketPath: string,
   mode: "success" | "malformed" | "failed" | "pending",
+  { cancelResponseDelayMs = 0 }: { cancelResponseDelayMs?: number } = {},
 ) {
   let cancellationReceived = false;
+  let cancellationResponseSent = false;
   let refreshReceived = false;
   const server = Bun.serve({
     unix: socketPath,
@@ -71,6 +73,8 @@ function startReflectionServer(
         return Response.json(reflectionState);
       if (path === "/api/profile/reflections/cancel") {
         cancellationReceived = true;
+        await Bun.sleep(cancelResponseDelayMs);
+        cancellationResponseSent = true;
         return Response.json({ outcome: "accepted", requestId: "batch" });
       }
       if (path !== "/api/profile/reflections/refresh")
@@ -124,6 +128,7 @@ function startReflectionServer(
   return {
     server,
     cancellationReceived: () => cancellationReceived,
+    cancellationResponseSent: () => cancellationResponseSent,
     refreshReceived: () => refreshReceived,
   };
 }
@@ -236,12 +241,13 @@ test.each(["success", "malformed", "failed"] as const)(
   },
 );
 
-test("Reflection refresh process maps SIGINT to cancellation and sends the capability", async () => {
+test("Reflection refresh process settles cancellation before reporting SIGINT cancellation", async () => {
   const directory = await mkdtemp(join(tmpdir(), "shelf-judge-reflection-signal-"));
   const socketPath = join(directory, "daemon.sock");
-  const { server, cancellationReceived, refreshReceived } = startReflectionServer(
+  const { server, cancellationReceived, cancellationResponseSent, refreshReceived } = startReflectionServer(
     socketPath,
     "pending",
+    { cancelResponseDelayMs: 100 },
   );
   try {
     const child = runRefresh(socketPath);
@@ -257,6 +263,7 @@ test("Reflection refresh process maps SIGINT to cancellation and sends the capab
     expect(JSON.parse(stderr)).toMatchObject({ error: { code: "cancelled" } });
     expect(stdout).toContain('"type":"accepted"');
     expect(cancellationReceived()).toBeTrue();
+    expect(cancellationResponseSent()).toBeTrue();
   } finally {
     await server.stop(true);
     await rm(directory, { recursive: true, force: true });
