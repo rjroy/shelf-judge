@@ -695,8 +695,7 @@ function gameSources(
       structure,
       `${game.name}: current shelf and redundancy evidence`,
       destination,
-      [dependency("shelf", `game:${game.id}:structure`, structure, shelves.updatedAt)],
-      shelves.updatedAt,
+      [dependency("shelf", `game:${game.id}:structure`, structure)],
     ),
   ];
 }

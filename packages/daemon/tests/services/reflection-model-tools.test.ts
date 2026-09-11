@@ -198,7 +198,7 @@ describe("Reflection model collection tools", () => {
     expect(providerCalls).toHaveLength(1);
     expect(
       cachedQuestions.find(({ questionId }) => questionId === "repeated-values")?.cache.state,
-    ).not.toBe("none");
+    ).toBe("current");
     console.info(
       "[profile-navigation-fixture]",
       JSON.stringify({
