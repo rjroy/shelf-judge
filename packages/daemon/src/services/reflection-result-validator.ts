@@ -283,13 +283,6 @@ export function createReflectionResultValidator(): ReflectionResultValidator {
       if (input.evidencePackage.evidenceIdentity.questionId !== input.questionId) {
         throw new Error("Reflection evidence package does not match the selected question");
       }
-      if (
-        input.evidencePackage.scope.exhaustiveNotes !== true ||
-        input.evidencePackage.scope.examinedPresentNoteCount !==
-          input.evidencePackage.scope.totalPresentNoteCount
-      ) {
-        throw new Error("Reflection validation requires complete note scope");
-      }
       if (input.questionId === "pattern-exceptions") {
         validateCompletePatternScope(input.evidencePackage);
       }

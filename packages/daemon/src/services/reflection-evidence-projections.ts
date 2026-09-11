@@ -307,8 +307,19 @@ const ReflectionEvidenceIdentitySchema = z
       "imported-metadata",
       "play-acquisition",
       "collection-structure",
+      "collection-summary",
       "profile-evidence",
     ]),
+  })
+  .strict();
+
+const CollectionSummarySchema = z
+  .object({
+    snapshotFingerprint: IdSchema,
+    groupBy: z.enum(["metadata.mechanics", "metadata.categories"]),
+    measures: z.array(z.enum(["gameCount", "averageFitness"])).min(1),
+    group: z.object({ id: z.number().int(), name: z.string() }).strict().nullable(),
+    sourceCount: z.number().int().nonnegative(),
   })
   .strict();
 
@@ -321,6 +332,7 @@ export const REFLECTION_DETERMINISTIC_EVIDENCE_MANIFEST = Object.freeze({
     "imported-metadata": MetadataSchema,
     "play-acquisition": PlayAcquisitionSchema,
     "collection-structure": StructureSchema,
+    "collection-summary": CollectionSummarySchema,
     "profile-evidence": ProfileEvidenceSchema,
   }),
 });

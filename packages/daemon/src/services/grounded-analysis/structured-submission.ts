@@ -4,6 +4,22 @@ import { z } from "zod";
 
 export const GROUNDED_SUBMISSION_TOOL_NAME = "submit_grounded_analysis";
 export const ANALYST_EVIDENCE_RETRIEVAL_TOOL_NAME = "retrieve_analyst_evidence";
+export const COLLECTION_TOP_TOOL_NAME = "top";
+export const COLLECTION_GREP_TOOL_NAME = "grep";
+export const COLLECTION_READ_GAMES_TOOL_NAME = "readGames";
+export const COLLECTION_SUMMARIZE_TOOL_NAME = "summarize";
+
+export const COLLECTION_EVIDENCE_TOOL_NAMES = Object.freeze([
+  COLLECTION_TOP_TOOL_NAME,
+  COLLECTION_GREP_TOOL_NAME,
+  COLLECTION_READ_GAMES_TOOL_NAME,
+  COLLECTION_SUMMARIZE_TOOL_NAME,
+] as const);
+
+export const COLLECTION_EVIDENCE_WITH_SUBMISSION_TOOL_NAMES = Object.freeze([
+  ...COLLECTION_EVIDENCE_TOOL_NAMES,
+  GROUNDED_SUBMISSION_TOOL_NAME,
+] as const);
 
 export class GroundedStructuredSubmissionValidationError extends Error {
   readonly issues: readonly z.ZodIssue[];
@@ -94,6 +110,26 @@ export function createAnalystToolManifest() {
   return Object.freeze({
     feature: "collection-analyst",
     toolNames: Object.freeze([ANALYST_EVIDENCE_RETRIEVAL_TOOL_NAME, GROUNDED_SUBMISSION_TOOL_NAME]),
+  });
+}
+
+/**
+ * The model-directed collection tools available to an Analyst turn. The
+ * legacy retrieval-only manifest remains available above for existing callers
+ * during the migration to individual collection tools.
+ */
+export function createCollectionAnalystToolManifest() {
+  return Object.freeze({
+    feature: "collection-analyst",
+    toolNames: COLLECTION_EVIDENCE_WITH_SUBMISSION_TOOL_NAMES,
+  });
+}
+
+/** The same bounded collection tools are available to a profile reflection. */
+export function createProfileReflectionToolManifest() {
+  return Object.freeze({
+    feature: "profile-reflection",
+    toolNames: COLLECTION_EVIDENCE_WITH_SUBMISSION_TOOL_NAMES,
   });
 }
 

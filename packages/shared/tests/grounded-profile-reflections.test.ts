@@ -96,7 +96,7 @@ function completed(
       ...(questionId === "pattern-exceptions" ? { patternCandidateIds: ["mechanic:1"] } : {}),
     },
     evidenceIdentity: {
-      manifestVersion: 1,
+      manifestVersion: 2,
       questionId,
       questionVersion: 1,
       collectionId: "collection",
@@ -193,6 +193,7 @@ describe("serialized Reflection questions", () => {
       "imported-metadata",
       "play-acquisition",
       "collection-structure",
+      "collection-summary",
     ] as const;
     expect(REFLECTION_QUESTION_POLICIES).toEqual({
       "repeated-values": {
@@ -210,6 +211,7 @@ describe("serialized Reflection questions", () => {
           "imported-metadata",
           "play-acquisition",
           "collection-structure",
+          "collection-summary",
           "profile-evidence",
         ],
         minimumIndependentNotes: 2,

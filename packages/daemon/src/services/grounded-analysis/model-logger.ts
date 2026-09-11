@@ -88,6 +88,8 @@ export const GroundedModelOutcomeLogSchema = BaseModelLogSchema.extend({
   usage: z.union([GroundedProviderUsageSchema, GroundedUsageUnavailableSchema]),
   validation: z.enum(["accepted", "rejected", "not-reached"]),
   cacheTransition: z.enum(["none", "written", "invalidated"]),
+  modelInputBytes: z.number().int().safe().min(0),
+  modelInputRequests: z.number().int().safe().min(0),
   submissionDiagnostics: z.union([
     z
       .object({

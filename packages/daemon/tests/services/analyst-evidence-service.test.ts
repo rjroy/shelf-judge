@@ -221,6 +221,89 @@ describe("Analyst evidence retrieval", () => {
     expect(second.scope).toMatchObject({ examinedGameCount: 3, exhaustive: true });
   });
 
+  test("accumulates direct top and summary evidence while retaining non-matching note dependencies", async () => {
+    const reads: string[] = [];
+    const localSnapshot: AnalystProjectionSnapshot = {
+      ...grepSnapshot(),
+      sources: [
+        ...grepSnapshot().sources,
+        {
+          evidenceClass: "current-scoring",
+          sourceId: "game:a:scoring",
+          sourceVersion: "score-a",
+          citationId: "score-a",
+          payload: {
+            gameId: "a",
+            displayedFitness: 8,
+            validatedBreakdown: [],
+            veto: null,
+            predictionStatus: null,
+            sourceState: "available",
+          },
+          canonicalSummary: "Current validated scoring evidence",
+          destination: { operationId: "shelf.game.get", parameters: { gameId: "a" } },
+        },
+      ],
+    };
+    const service = createAnalystEvidenceService({
+      storageService: {},
+      projectionSnapshotService: { capture: () => Promise.resolve(localSnapshot) },
+      ownerGameNoteService: noteService(
+        {
+          a: { state: "present", version: 1, updatedAt: "2025-01-01T00:00:00.000Z", text: "alpha" },
+          b: { state: "present", version: 2, updatedAt: "2025-01-01T00:00:00.000Z", text: "beta" },
+        },
+        reads,
+      ),
+      ownerNoteAuthorizationScope: ownerNoteScope(["a", "b"], false, true),
+    });
+    await service.top(localSnapshot, { snapshotFingerprint: fingerprint, rankBy: "fitness" });
+    const summary = await service.summarize(localSnapshot, {
+      snapshotFingerprint: fingerprint,
+      groupBy: "metadata.mechanics",
+      measures: ["gameCount"],
+    });
+    await service.grep(localSnapshot, {
+      snapshotFingerprint: fingerprint,
+      gameIds: ["b"],
+      allowedFields: ["metadata.description"],
+      pattern: "match",
+    });
+    await service.grep(localSnapshot, {
+      snapshotFingerprint: fingerprint,
+      gameIds: ["b"],
+      allowedFields: ["notes"],
+      pattern: "absent",
+    });
+    await service.readGames(localSnapshot, ["a"], { fields: ["imported-metadata"] });
+    await service.readGames(localSnapshot, ["a"], { fields: ["imported-metadata"] });
+
+    const accumulated = await service.accumulatedEvidence(localSnapshot);
+    expect(accumulated.citations.map(({ citationId }) => citationId).sort()).toEqual(
+      [
+        summary.citation.citationId,
+        ...summary.entries.map(({ citation }) => citation.citationId),
+        "a",
+        "score-a",
+        "metadata-a",
+      ].sort(),
+    );
+    expect(accumulated.citations.map(({ sourceId }) => sourceId)).not.toContain("game:b:metadata");
+    expect(accumulated.citations.map(({ sourceId }) => sourceId)).toContain("game:a:identity");
+    expect(accumulated.citations.map(({ sourceId }) => sourceId)).toContain("game:a:scoring");
+    expect(
+      accumulated.evidence.resolve(summary.entries[0]?.citation.citationId ?? "missing")?.payload,
+    ).toMatchObject({
+      gameCount: 2,
+      fitnessGameCount: 1,
+    });
+    expect(accumulated.noteDependencies).toEqual([{ gameId: "b", noteVersion: 2 }]);
+    expect(reads.every((gameId) => gameId === "b")).toBe(true);
+    await expect(
+      service.withRetrievedEvidence(accumulated, () => Promise.resolve("authenticated")),
+    ).resolves.toBe("authenticated");
+  });
+
   test("rejects oversized full envelopes and shares turn budgets with retrieve", async () => {
     const budgetSnapshot: AnalystProjectionSnapshot = {
       ...snapshot,

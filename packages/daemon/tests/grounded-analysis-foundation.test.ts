@@ -124,12 +124,20 @@ describe("grounded evidence, citation, and destination registries", () => {
       .strict();
     const destinations = createGroundedDestinationRegistry({ destinationSchema });
 
-    expect(destinations.validate({ operationId: "shelf.feature-a.get", parameters: { itemId: "item-1" } })).toEqual({
+    expect(
+      destinations.validate({
+        operationId: "shelf.feature-a.get",
+        parameters: { itemId: "item-1" },
+      }),
+    ).toEqual({
       operationId: "shelf.feature-a.get",
       parameters: { itemId: "item-1" },
     });
     expect(
-      destinationSchema.safeParse({ operationId: "shelf.feature-a.get", parameters: { itemId: "invalid" } }).success,
+      destinationSchema.safeParse({
+        operationId: "shelf.feature-a.get",
+        parameters: { itemId: "invalid" },
+      }).success,
     ).toBe(false);
   });
 
@@ -773,6 +781,8 @@ describe("grounded model logger", () => {
       usage: { state: "unavailable" },
       validation: "accepted",
       cacheTransition: "written",
+      modelInputBytes: 0,
+      modelInputRequests: 0,
       submissionDiagnostics: { state: "unavailable" },
     });
     expect(records).toHaveLength(2);
@@ -821,6 +831,8 @@ describe("grounded model logger", () => {
       usage: { state: "unavailable" },
       validation: "accepted",
       cacheTransition: "none",
+      modelInputBytes: 0,
+      modelInputRequests: 0,
       submissionDiagnostics: { state: "unavailable" },
     };
     expect(() => logger.outcome(outcome)).toThrow("requires a prior attempt");

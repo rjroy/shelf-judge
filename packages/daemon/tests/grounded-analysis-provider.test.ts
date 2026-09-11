@@ -33,8 +33,12 @@ import {
   createOllamaRequestPayloadHook,
 } from "../src/services/grounded-analysis/ollama-provider-extension.js";
 import {
+  COLLECTION_EVIDENCE_TOOL_NAMES,
+  COLLECTION_EVIDENCE_WITH_SUBMISSION_TOOL_NAMES,
+  createCollectionAnalystToolManifest,
   createGroundedSubmissionOnlyToolManifest,
   createAnalystToolManifest,
+  createProfileReflectionToolManifest,
   GROUNDED_SUBMISSION_TOOL_NAME,
 } from "../src/services/grounded-analysis/structured-submission.js";
 
@@ -190,7 +194,12 @@ function localProviderExtension(controls: LocalProviderControls): ExtensionFacto
               name:
                 (controls.mode === "unrelated-tool-then-valid" && roundTrip === 1) || retrievalRound
                   ? retrievalRound
-                    ? "retrieve_analyst_evidence"
+                    ? controls.mode === "analyst-retrieve-then-submit" ||
+                      controls.mode === "analyst-invalid-schema" ||
+                      controls.mode === "analyst-unknown-citation" ||
+                      controls.mode === "analyst-multi-page"
+                      ? "readGames"
+                      : "retrieve_analyst_evidence"
                     : "unrelated_tool"
                   : "submit_grounded_analysis",
               arguments: {
@@ -200,25 +209,11 @@ function localProviderExtension(controls: LocalProviderControls): ExtensionFacto
                     controls.mode === "analyst-unknown-citation" ||
                     controls.mode === "analyst-multi-page"
                     ? {
-                        evidenceClasses: ["game-identity-ownership"],
-                        limit: 1,
-                        ...(controls.mode === "analyst-multi-page" && roundTrip === 2
-                          ? {
-                              cursor: z
-                                .object({ nextCursor: z.unknown() })
-                                .parse(
-                                  JSON.parse(
-                                    String(
-                                      (
-                                        context.messages.findLast(
-                                          (message) => message.role === "toolResult",
-                                        )?.content[0] as { text?: string } | undefined
-                                      )?.text,
-                                    ),
-                                  ),
-                                ).nextCursor,
-                            }
-                          : {}),
+                        gameIds:
+                          controls.mode === "analyst-multi-page" && roundTrip === 2
+                            ? ["game-b"]
+                            : ["game-a"],
+                        fields: ["game-identity-ownership"],
                       }
                     : { page: 1 }
                   : {
@@ -409,6 +404,46 @@ async function captureFailure(promise: Promise<unknown>): Promise<GroundedAnalys
 }
 
 describe("grounded-analysis provider lifecycle", () => {
+  test("publishes the exact model-directed collection manifests for Analyst and Reflection", () => {
+    expect(COLLECTION_EVIDENCE_TOOL_NAMES).toEqual(["top", "grep", "readGames", "summarize"]);
+    expect(COLLECTION_EVIDENCE_WITH_SUBMISSION_TOOL_NAMES).toEqual([
+      "top",
+      "grep",
+      "readGames",
+      "summarize",
+      GROUNDED_SUBMISSION_TOOL_NAME,
+    ]);
+    expect(createCollectionAnalystToolManifest()).toEqual({
+      feature: "collection-analyst",
+      toolNames: COLLECTION_EVIDENCE_WITH_SUBMISSION_TOOL_NAMES,
+    });
+    expect(createProfileReflectionToolManifest()).toEqual({
+      feature: "profile-reflection",
+      toolNames: COLLECTION_EVIDENCE_WITH_SUBMISSION_TOOL_NAMES,
+    });
+  });
+
+  test("accepts the exact collection tool set for profile reflection", async () => {
+    const collectionTools = COLLECTION_EVIDENCE_TOOL_NAMES.map((name) =>
+      defineTool({
+        name,
+        label: name,
+        description: "Read-only collection evidence",
+        parameters: Type.Object({}, { additionalProperties: false }),
+        execute: () => Promise.resolve({ content: [], details: undefined }),
+      }),
+    );
+
+    const result = await configuredProvider({ transmissions: [] }).analyze({
+      ...request(),
+      audit: { ...request().audit, feature: "profile-reflection" },
+      allowedTools: createProfileReflectionToolManifest(),
+      retrievalTools: collectionTools,
+    });
+
+    expect(result).toMatchObject({ output: { answer: "grounded" } });
+  });
+
   test("serializes Ollama's documented token budget and thinking disable controls", async () => {
     let requestPayload: unknown;
     const server = Bun.serve({
@@ -493,6 +528,227 @@ describe("grounded-analysis provider lifecycle", () => {
     }
   });
 
+  test("rejects an oversized serialized outbound payload before contacting the provider", async () => {
+    let requests = 0;
+    const server = Bun.serve({
+      port: 0,
+      fetch() {
+        requests += 1;
+        return new Response("must not be called", { status: 500 });
+      },
+    });
+    try {
+      const modelLogs: GroundedModelLogRecord[] = [];
+      const provider = createGroundedAnalysisProvider({
+        configuration: {
+          status: "configured",
+          providerId: "ollama",
+          modelId: "ollama-test",
+          extensionIds: ["ollama-test"],
+        },
+        modelInputBudget: { maxBytes: 1 },
+        sessionFactory: createPiGroundedAnalysisSessionFactory({
+          cwd: process.cwd(),
+          extensionIds: [],
+          extensionFactories: [
+            createOllamaProviderExtension("ollama-test", 123, `http://127.0.0.1:${server.port}/v1`),
+          ],
+        }),
+        modelLogger: createGroundedModelLogger({ write: (record) => modelLogs.push(record) }),
+      });
+
+      const failure = await captureFailure(provider.analyze(request()));
+
+      expect(failure).toMatchObject({
+        reason: "context-exhaustion",
+        safeDetail: "model-input-budget-exceeded",
+      });
+      expect(requests).toBe(0);
+      expect(modelLogs.at(-1)).toMatchObject({ modelInputBytes: 0, modelInputRequests: 0 });
+      expect(JSON.stringify(modelLogs)).not.toContain("EXACT EVIDENCE");
+    } finally {
+      await server.stop(true);
+    }
+  });
+
+  test.each([
+    {
+      feature: "collection-analyst" as const,
+      allowedTools: createCollectionAnalystToolManifest(),
+    },
+    {
+      feature: "profile-reflection" as const,
+      allowedTools: createProfileReflectionToolManifest(),
+    },
+  ])(
+    "applies the production aggregate outbound-payload cap for $feature",
+    async ({ feature, allowedTools }) => {
+      let requests = 0;
+      const server = Bun.serve({
+        port: 0,
+        fetch() {
+          requests += 1;
+          return new Response("must not be called", { status: 500 });
+        },
+      });
+      const collectionTools = COLLECTION_EVIDENCE_TOOL_NAMES.map((name) =>
+        defineTool({
+          name,
+          label: name,
+          description: "Read-only collection evidence",
+          parameters: Type.Object({}, { additionalProperties: false }),
+          execute: () =>
+            Promise.resolve({
+              content: [{ type: "text", text: "tool response" }],
+              details: undefined,
+            }),
+        }),
+      );
+      try {
+        const failure = await captureFailure(
+          createGroundedAnalysisProvider({
+            configuration: {
+              status: "configured",
+              providerId: "ollama",
+              modelId: "ollama-test",
+              extensionIds: ["ollama-test"],
+            },
+            sessionFactory: createPiGroundedAnalysisSessionFactory({
+              cwd: process.cwd(),
+              extensionIds: [],
+              extensionFactories: [
+                createOllamaProviderExtension(
+                  "ollama-test",
+                  123,
+                  `http://127.0.0.1:${server.port}/v1`,
+                ),
+              ],
+              onPayload: (payload) => {
+                if (typeof payload !== "object" || payload === null)
+                  throw new Error("Expected an object provider payload");
+                return {
+                  ...payload,
+                  shelfJudgeBudgetRegressionPadding: "x".repeat(1024 * 1024),
+                };
+              },
+            }),
+          }).analyze({
+            ...request(),
+            audit: { ...request().audit, feature },
+            allowedTools,
+            retrievalTools: collectionTools,
+          }),
+        );
+
+        expect(failure).toMatchObject({
+          reason: "context-exhaustion",
+          safeDetail: "model-input-budget-exceeded",
+        });
+        expect(requests).toBe(0);
+      } finally {
+        await server.stop(true);
+      }
+    },
+  );
+
+  test("enforces cumulative serialized input bytes when a tool response repeats full context", async () => {
+    let requests = 0;
+    const toolResponse = (name: string, argumentsValue: object) =>
+      [
+        `data: ${JSON.stringify({
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: `call-${requests}`,
+                    type: "function",
+                    function: { name, arguments: JSON.stringify(argumentsValue) },
+                  },
+                ],
+              },
+              finish_reason: null,
+            },
+          ],
+        })}\n\n`,
+        `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] })}\n\n`,
+        "data: [DONE]\n\n",
+      ].join("");
+    const server = Bun.serve({
+      port: 0,
+      fetch() {
+        requests += 1;
+        const firstTurn = requests % 2 === 1;
+        return new Response(
+          toolResponse(
+            firstTurn ? "top" : GROUNDED_SUBMISSION_TOOL_NAME,
+            firstTurn ? {} : { submission: { answer: "grounded" } },
+          ),
+          { headers: { "content-type": "text/event-stream" } },
+        );
+      },
+    });
+    const collectionTools = COLLECTION_EVIDENCE_TOOL_NAMES.map((name) =>
+      defineTool({
+        name,
+        label: name,
+        description: "Read-only collection evidence",
+        parameters: Type.Object({}, { additionalProperties: false }),
+        execute: () =>
+          Promise.resolve({
+            content: [{ type: "text", text: "tool response" }],
+            details: undefined,
+          }),
+      }),
+    );
+    const configuration = {
+      status: "configured" as const,
+      providerId: "ollama",
+      modelId: "ollama-test",
+      extensionIds: ["ollama-test"],
+    };
+    const createSessionFactory = (onPayload?: SimpleStreamOptions["onPayload"]) =>
+      createPiGroundedAnalysisSessionFactory({
+        cwd: process.cwd(),
+        extensionIds: [],
+        extensionFactories: [
+          createOllamaProviderExtension("ollama-test", 123, `http://127.0.0.1:${server.port}/v1`),
+        ],
+        onPayload,
+      });
+    const analysisRequest = {
+      ...request(),
+      audit: { ...request().audit, feature: "collection-analyst" },
+      allowedTools: createCollectionAnalystToolManifest(),
+      retrievalTools: collectionTools,
+    };
+    try {
+      const firstPayloadBytes: number[] = [];
+      await createGroundedAnalysisProvider({
+        configuration,
+        sessionFactory: createSessionFactory((payload) => {
+          firstPayloadBytes.push(new TextEncoder().encode(JSON.stringify(payload)).byteLength);
+        }),
+      }).analyze(analysisRequest);
+      expect(firstPayloadBytes).toHaveLength(2);
+      expect(firstPayloadBytes[1]).toBeGreaterThan(firstPayloadBytes[0] ?? 0);
+
+      const failure = await captureFailure(
+        createGroundedAnalysisProvider({
+          configuration,
+          modelInputBudget: { maxBytes: firstPayloadBytes[0] ?? 1 },
+          sessionFactory: createSessionFactory(),
+        }).analyze(analysisRequest),
+      );
+      expect(failure).toMatchObject({ safeDetail: "model-input-budget-exceeded" });
+      expect(requests).toBe(3);
+    } finally {
+      await server.stop(true);
+    }
+  });
+
   test("uses the bound session registry, structured submission, and exact usage", async () => {
     const controls: LocalProviderControls = { transmissions: [], modelLogs: [] };
     const lifecycle: string[] = [];
@@ -545,6 +801,8 @@ describe("grounded-analysis provider lifecycle", () => {
           assistantNonemptyTextPresent: false,
           assistantTextTurns: 0,
         },
+        modelInputBytes: expect.any(Number) as number,
+        modelInputRequests: 1,
       },
     ]);
     expect(JSON.stringify(controls.modelLogs)).not.toContain("EXACT POLICY");
@@ -749,7 +1007,7 @@ describe("grounded-analysis provider lifecycle", () => {
     }
   });
 
-  test("follows an opaque cursor through real evidence pages to a validated Analyst result", async () => {
+  test("follows model-selected explicit game reads to a validated Analyst result", async () => {
     const sources: AnalystProjectionSnapshot["sources"] = ["a", "b"].map((suffix) => ({
       evidenceClass: "game-identity-ownership",
       sourceId: `game-${suffix}`,
@@ -781,9 +1039,9 @@ describe("grounded-analysis provider lifecycle", () => {
     });
     const evidenceService: AnalystEvidenceService = {
       ...baseEvidence,
-      retrieve: async (captured, retrievalRequest) => {
-        requests.push(structuredClone(retrievalRequest));
-        return baseEvidence.retrieve(captured, retrievalRequest);
+      readGames: async (captured, gameIds, options) => {
+        requests.push(structuredClone({ gameIds, fields: options.fields }));
+        return baseEvidence.readGames(captured, gameIds, options);
       },
     };
     const result = await createAnalystTurnService({
@@ -798,13 +1056,13 @@ describe("grounded-analysis provider lifecycle", () => {
 
     expect(result).toMatchObject({
       output: { citations: [{ citationId: "citation-b" }] },
-      retrieved: [{ scope: { exhaustive: false } }, { scope: { exhaustive: true } }],
+      retrieved: [{ scope: { matchingSourceCount: 2, exhaustive: true } }],
     });
     expect(requests).toHaveLength(2);
-    const secondRequest = requests[1] as { cursor?: { token?: string } };
-    expect(secondRequest.cursor?.token).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
-    );
+    expect(requests).toEqual([
+      { gameIds: ["game-a"], fields: ["game-identity-ownership"] },
+      { gameIds: ["game-b"], fields: ["game-identity-ownership"] },
+    ]);
   });
 
   test("returns handoff-failed when the final evidence handoff throws unexpectedly", () => {

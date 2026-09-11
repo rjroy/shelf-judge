@@ -373,6 +373,9 @@ export const ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST = Object.freeze({
           .strict()
           .nullable(),
         sourceCount: z.number().int().safe().min(0),
+        gameCount: z.number().int().safe().min(0).optional(),
+        averageFitness: z.number().finite().nullable().optional(),
+        fitnessGameCount: z.number().int().safe().min(0),
       })
       .strict(),
     "profile-evidence": ProfileEvidenceSchema,

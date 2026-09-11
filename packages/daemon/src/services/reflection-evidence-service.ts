@@ -20,9 +20,10 @@ import { createGroundedCitationRegistry } from "./grounded-analysis/citation-reg
 import {
   createGroundedEvidenceRegistry,
   type GroundedEvidenceSnapshot,
-  type GroundedExaminedSource,
 } from "./grounded-analysis/evidence-registry.js";
-import type { OwnerGameNoteService } from "./owner-game-note-service.js";
+import type { AnalystEvidenceService } from "./analyst-evidence-service.js";
+import type { AnalystProjectionSnapshot } from "./analyst-evidence-projections.js";
+import { ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST } from "./analyst-evidence-projections.js";
 import {
   canonicalJson,
   canonicalSha256,
@@ -53,6 +54,7 @@ const ReflectionEvidenceEntryIdentitySchema = z
       "imported-metadata",
       "play-acquisition",
       "collection-structure",
+      "collection-summary",
       "profile-evidence",
     ]),
   })
@@ -85,6 +87,7 @@ const ReflectionRegistryCitationSchema = z.union([
         "imported-metadata",
         "play-acquisition",
         "collection-structure",
+        "collection-summary",
         "profile-evidence",
       ]),
       testimony: z.literal(false),
@@ -130,11 +133,23 @@ export interface ReflectionEvidenceService {
     provider: GroundedProviderIdentity,
     options?: { readonly signal?: AbortSignal },
   ): Promise<ReflectionEvidencePackage>;
+  start?(
+    questionId: ReflectionQuestionId,
+    provider: GroundedProviderIdentity,
+    options?: { readonly signal?: AbortSignal },
+  ): Promise<ReflectionEvidenceTurn>;
+  finish?(turn: ReflectionEvidenceTurn): Promise<ReflectionEvidencePackage>;
   revalidate(
     evidencePackage: ReflectionEvidencePackage,
     provider: GroundedProviderIdentity,
     options?: { readonly signal?: AbortSignal },
   ): Promise<ReflectionEvidenceRevalidationResult>;
+}
+
+export interface ReflectionEvidenceTurn {
+  readonly initial: ReflectionEvidencePackage;
+  readonly analystEvidence: AnalystEvidenceService;
+  readonly analystSnapshot: AnalystProjectionSnapshot;
 }
 
 export interface ReflectionEvidenceServiceDeps {
@@ -145,7 +160,12 @@ export interface ReflectionEvidenceServiceDeps {
    */
   storageService: object;
   projectionSnapshotService: ReflectionProjectionSnapshotService;
-  ownerGameNoteService: Pick<OwnerGameNoteService, "get">;
+  ownerGameNoteService: {
+    get(
+      gameId: string,
+    ): Promise<{ readonly gameId: string; readonly note: { readonly version: number } }>;
+  };
+  createAnalystEvidenceTurn?: (authorizedGameIds: readonly string[]) => AnalystEvidenceService;
   pageSize?: number;
   now?: () => string;
 }
@@ -154,16 +174,6 @@ interface CapturedQuestionSources {
   readonly snapshot: ReflectionProjectionSnapshot;
   readonly projection: ReflectionQuestionProjection;
   readonly gameIds: readonly string[];
-  readonly notes: readonly OwnerGameNoteRead[];
-}
-
-type OwnerGameNoteRead = Awaited<ReturnType<OwnerGameNoteService["get"]>>;
-type PresentOwnerGameNoteRead = OwnerGameNoteRead & {
-  readonly note: Extract<OwnerGameNoteRead["note"], { readonly state: "present" }>;
-};
-
-function isPresentOwnerGameNoteRead(read: OwnerGameNoteRead): read is PresentOwnerGameNoteRead {
-  return read.note.state === "present";
 }
 
 function cloneAndFreeze<Value>(value: Value): Value {
@@ -216,6 +226,128 @@ function completeDependencies(
   );
 }
 
+function analystPayloadForReflection(evidenceClass: string, payload: unknown): unknown {
+  switch (evidenceClass) {
+    case "game-identity-ownership": {
+      const source = ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST.evidence[evidenceClass].parse(payload);
+      return {
+        gameId: source.gameId,
+        name: source.displayName,
+        bggId: source.bggId,
+        ownership: source.ownershipState,
+      };
+    }
+    case "current-scoring": {
+      const source = ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST.evidence[evidenceClass].parse(payload);
+      return {
+        gameId: source.gameId,
+        state: source.sourceState,
+        score: source.displayedFitness,
+        ratedAxisCount: source.validatedBreakdown.filter(
+          ({ effectiveRating }) => effectiveRating !== null,
+        ).length,
+        totalAxisCount: source.validatedBreakdown.length,
+        vetoed: source.veto !== null,
+        vetoedBy: source.veto,
+        hypotheticalScore: null,
+        prediction: source.predictionStatus,
+        breakdown: source.validatedBreakdown.map(
+          ({
+            axisId,
+            axisName,
+            weight,
+            contribution,
+            source: sourceKind,
+            sourceValue,
+            scoringRawValue,
+            effectiveRating,
+            overridden,
+            overrideValue,
+            predictionConfidence,
+          }) => ({
+            axisId,
+            axisName,
+            weight,
+            contribution,
+            source: sourceKind,
+            sourceValue,
+            scoringRawValue,
+            effectiveRating,
+            overridden,
+            overrideValue,
+            predictionConfidence,
+          }),
+        ),
+      };
+    }
+    case "imported-metadata": {
+      const source = ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST.evidence[evidenceClass].parse(payload);
+      const entityMetadata = (
+        state: "complete" | "refresh-needed" | "unrefreshable",
+        entities: readonly { readonly id: number; readonly name: string }[],
+      ) => ({ state, entities, observedAt: source.sourceTime, refreshWarning: null });
+      return {
+        gameId: source.gameId,
+        importedAt: source.sourceTime,
+        yearPublished: null,
+        minPlayers: source.playerCounts.min,
+        maxPlayers: source.playerCounts.max,
+        bestPlayers: source.playerCounts.best,
+        playingTimeMinutes: source.playTime,
+        weight: source.weight,
+        categories: source.categories,
+        mechanics: source.mechanics,
+        families: source.families,
+        subdomains: source.subdomains,
+        entityMetadata: {
+          mechanic: entityMetadata(source.completeness.mechanic, source.mechanics),
+          designer: entityMetadata(source.completeness.designer, source.designers),
+          artist: entityMetadata(source.completeness.artist, source.artists),
+        },
+      };
+    }
+    case "play-acquisition": {
+      const source = ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST.evidence[evidenceClass].parse(payload);
+      return {
+        gameId: source.gameId,
+        playCount: source.playCount,
+        acquisition:
+          source.acquisitionPrice === null
+            ? { state: "unknown" }
+            : { state: "purchase", amount: source.acquisitionPrice },
+        utilization: source.purchaseUtilization,
+      };
+    }
+    case "collection-structure": {
+      const source = ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST.evidence[evidenceClass].parse(payload);
+      return {
+        gameId: source.gameId,
+        shelf:
+          source.shelfAssignment !== null && "shelfId" in source.shelfAssignment
+            ? source.shelfAssignment
+            : null,
+        danglingShelfId:
+          source.shelfAssignment !== null && "danglingShelfId" in source.shelfAssignment
+            ? source.shelfAssignment.danglingShelfId
+            : null,
+        redundancy: source.redundancy,
+      };
+    }
+    case "collection-summary": {
+      const source = ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST.evidence[evidenceClass].parse(payload);
+      return {
+        snapshotFingerprint: source.snapshotFingerprint,
+        groupBy: source.groupBy,
+        measures: source.measures,
+        group: source.group,
+        sourceCount: source.sourceCount,
+      };
+    }
+    default:
+      throw new Error(`Analyst evidence class is not supported by Reflection: ${evidenceClass}`);
+  }
+}
+
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
@@ -246,13 +378,6 @@ function providerDependency(provider: GroundedProviderIdentity): ReflectionDepen
     sourceId: "grounded-analysis-provider",
     fingerprint: canonicalSha256(provider),
   });
-}
-
-function packageNoteGameIds(evidencePackage: ReflectionEvidencePackage): string[] {
-  return evidencePackage.dependencies
-    .filter((dependency) => dependency.category === "note")
-    .map(({ gameId }) => gameId)
-    .sort(compareText);
 }
 
 export function createReflectionEvidenceService(
@@ -288,15 +413,7 @@ export function createReflectionEvidenceService(
       );
     }
     const gameIds = walkPages(projection, pageSize);
-    const notes: OwnerGameNoteRead[] = [];
-    for (const gameId of gameIds) {
-      signal?.throwIfAborted();
-      const note = await deps.ownerGameNoteService.get(gameId);
-      signal?.throwIfAborted();
-      if (note.gameId !== gameId) throw new Error("Owner note read returned a different game");
-      notes.push(note);
-    }
-    return { snapshot, projection, gameIds, notes };
+    return { snapshot, projection, gameIds };
   }
 
   async function assemble(
@@ -307,48 +424,17 @@ export function createReflectionEvidenceService(
     const provider = cloneAndFreeze(GroundedProviderIdentitySchema.parse(providerInput));
     return coordinator.runExclusive(async () => {
       const captured = await capture(questionId, options?.signal);
-      const presentNotes = captured.notes.filter(isPresentOwnerGameNoteRead);
-      const noteSources: GroundedExaminedSource[] = presentNotes.map(({ gameId, note }) => ({
-        evidenceClass: "owner-game-note",
-        sourceId: gameId,
-        sourceVersion: String(note.version),
-      }));
       const registry = createGroundedEvidenceRegistry({
         manifest: REFLECTION_EVIDENCE_MANIFEST,
         evidenceIdentitySchema: ReflectionEvidenceEntryIdentitySchema,
-        expectedSources: [...captured.projection.evidence.examinedSources, ...noteSources],
+        expectedSources: captured.projection.evidence.examinedSources,
       });
 
       for (const source of captured.projection.evidence.examinedSources)
         registry.recordExamined(source);
       for (const entry of captured.projection.evidence.entries) registry.add(entry);
-      for (const { gameId, note } of presentNotes) {
-        const identity = {
-          evidenceClass: "owner-game-note" as const,
-          sourceId: gameId,
-          sourceVersion: String(note.version),
-        };
-        registry.recordExamined(identity);
-        registry.add({
-          ...identity,
-          citationId: `reflection:owner-game-note:${gameId}:${note.version}`,
-          payload: { gameId, text: note.text },
-        });
-      }
       const evidence = registry.complete();
 
-      const noteCitations: ReflectionCitation[] = presentNotes.map(({ gameId, note }) =>
-        ReflectionCitationSchema.parse({
-          citationId: `reflection:owner-game-note:${gameId}:${note.version}`,
-          sourceId: gameId,
-          sourceVersion: String(note.version),
-          evidenceClass: "owner-game-note",
-          testimony: true,
-          observedAt: note.updatedAt,
-          canonicalSummary: note.text,
-          destination: { operationId: "shelf.game.get", parameters: { gameId } },
-        }),
-      );
       const citationRegistry = createGroundedCitationRegistry({
         // Shared Reflection parsing above enforces note-version refinements. The
         // registry receives the equivalent structural schema required by its
@@ -356,19 +442,12 @@ export function createReflectionEvidenceService(
         citationSchema: ReflectionRegistryCitationSchema,
         evidence,
       });
-      const allCitations = [...captured.projection.citations, ...noteCitations];
+      const allCitations = captured.projection.citations;
       for (const citation of allCitations) citationRegistry.add(citation);
       const citations = citationRegistry.complete(allCitations.map(({ citationId }) => citationId));
 
       const dependencies = completeDependencies([
         ...captured.projection.dependencies,
-        ...captured.notes.map(({ gameId, note }) =>
-          ReflectionDependencySchema.parse({
-            category: "note",
-            gameId,
-            noteVersion: note.version,
-          }),
-        ),
         providerDependency(provider),
       ]);
       const policy = REFLECTION_QUESTION_POLICIES[questionId];
@@ -388,12 +467,12 @@ export function createReflectionEvidenceService(
       );
       const scope = cloneAndFreeze(
         ReflectionScopeSchema.parse({
-          examinedPresentNoteCount: presentNotes.length,
-          totalPresentNoteCount: presentNotes.length,
-          examinedGameCount: captured.gameIds.length,
+          examinedPresentNoteCount: 0,
+          totalPresentNoteCount: null,
+          examinedGameCount: 0,
           relevantEligibleGameCount: captured.gameIds.length,
           excludedGameCount: captured.projection.excludedGameCount,
-          exhaustiveNotes: true,
+          exhaustiveNotes: false,
           ...(questionId === "pattern-exceptions"
             ? { patternCandidateIds: captured.projection.patternCandidateIds }
             : {}),
@@ -460,8 +539,6 @@ export function createReflectionEvidenceService(
         return { valid: false, reason: "deterministic-source-changed" };
       }
       if (
-        !sameStrings(captured.gameIds, packageNoteGameIds(evidencePackage)) ||
-        captured.gameIds.length !== evidencePackage.scope.examinedGameCount ||
         captured.gameIds.length !== evidencePackage.scope.relevantEligibleGameCount ||
         captured.projection.excludedGameCount !== evidencePackage.scope.excludedGameCount ||
         !sameStrings(
@@ -471,24 +548,109 @@ export function createReflectionEvidenceService(
       ) {
         return { valid: false, reason: "question-scope-changed" };
       }
-      const noteVersions = new Map(
-        evidencePackage.dependencies
-          .filter((dependency) => dependency.category === "note")
-          .map((dependency) => [dependency.gameId, dependency.noteVersion]),
-      );
-      if (
-        captured.notes.some(({ gameId, note }) => noteVersions.get(gameId) !== note.version) ||
-        captured.notes.filter(({ note }) => note.state === "present").length !==
-          evidencePackage.scope.examinedPresentNoteCount ||
-        evidencePackage.scope.examinedPresentNoteCount !==
-          evidencePackage.scope.totalPresentNoteCount ||
-        evidencePackage.scope.exhaustiveNotes !== true
-      ) {
-        return { valid: false, reason: "note-source-changed" };
+      for (const dependency of evidencePackage.dependencies) {
+        if (dependency.category !== "note") continue;
+        const current = await deps.ownerGameNoteService.get(dependency.gameId);
+        if (current.gameId !== dependency.gameId || current.note.version !== dependency.noteVersion)
+          return { valid: false, reason: "note-source-changed" };
       }
       return { valid: true };
     });
   }
 
-  return Object.freeze({ assemble, revalidate });
+  async function start(
+    questionId: ReflectionQuestionId,
+    provider: GroundedProviderIdentity,
+    options?: { readonly signal?: AbortSignal },
+  ): Promise<ReflectionEvidenceTurn> {
+    const createTurn = deps.createAnalystEvidenceTurn;
+    if (createTurn === undefined) throw new Error("Reflection collection tools are not configured");
+    const initial = await assemble(questionId, provider, options);
+    options?.signal?.throwIfAborted();
+    const authorizedGameIds = await coordinator.runExclusive(async () =>
+      capture(questionId, options?.signal),
+    );
+    if (
+      authorizedGameIds.snapshot.collectionRevision !== initial.evidenceIdentity.collectionRevision
+    )
+      throw new Error("Reflection source changed while creating the tool turn");
+    const analystEvidence = createTurn(authorizedGameIds.gameIds);
+    const analystSnapshot = await analystEvidence.capture();
+    if (analystSnapshot.collectionRevision !== initial.evidenceIdentity.collectionRevision) {
+      throw new Error("Reflection and Analyst snapshots have different collection revisions");
+    }
+    return Object.freeze({ initial, analystEvidence, analystSnapshot });
+  }
+
+  async function finish(turn: ReflectionEvidenceTurn): Promise<ReflectionEvidencePackage> {
+    const accumulated = await turn.analystEvidence.accumulatedEvidence(turn.analystSnapshot);
+    const base = turn.initial;
+    const deliveredEntries = accumulated.evidence.entries.flatMap((entry) => {
+      if (entry.evidenceClass !== "owner-game-note") {
+        const payload = analystPayloadForReflection(entry.evidenceClass, entry.payload);
+        return [{ ...entry, payload }];
+      }
+      const payload = z
+        .object({ gameId: z.string().min(1), state: z.literal("present"), text: z.string().min(1) })
+        .passthrough()
+        .safeParse(entry.payload);
+      return payload.success
+        ? [{ ...entry, payload: { gameId: payload.data.gameId, text: payload.data.text } }]
+        : [];
+    });
+    const completedEntries = deliveredEntries;
+    const deliveredCitationIds = new Set(deliveredEntries.map(({ citationId }) => citationId));
+    const sources = completedEntries.map(({ evidenceClass, sourceId, sourceVersion }) => ({
+      evidenceClass,
+      sourceId,
+      sourceVersion,
+    }));
+    const registry = createGroundedEvidenceRegistry({
+      manifest: REFLECTION_EVIDENCE_MANIFEST,
+      evidenceIdentitySchema: ReflectionEvidenceEntryIdentitySchema,
+      expectedSources: sources,
+    });
+    for (const source of sources) registry.recordExamined(source);
+    for (const entry of completedEntries) registry.add(entry);
+    const evidence = registry.complete();
+    const citationRegistry = createGroundedCitationRegistry({
+      citationSchema: ReflectionRegistryCitationSchema,
+      evidence,
+    });
+    const citations: ReflectionCitation[] = [];
+    for (const citation of accumulated.citations)
+      if (deliveredCitationIds.has(citation.citationId))
+        citations.push(ReflectionCitationSchema.parse(citation));
+    for (const citation of citations) citationRegistry.add(citation);
+    const completeCitations = citationRegistry.complete(
+      citations.map(({ citationId }) => citationId),
+    );
+    const dependencies = completeDependencies([
+      ...base.dependencies,
+      ...accumulated.noteDependencies.map(({ gameId, noteVersion }) =>
+        ReflectionDependencySchema.parse({ category: "note", gameId, noteVersion }),
+      ),
+    ]);
+    return Object.freeze({
+      ...base,
+      evidence,
+      citations: completeCitations,
+      dependencies,
+      scope: ReflectionScopeSchema.parse({
+        ...base.scope,
+        examinedPresentNoteCount: accumulated.citations.filter(
+          ({ evidenceClass, testimony }) => evidenceClass === "owner-game-note" && testimony,
+        ).length,
+        totalPresentNoteCount: null,
+        examinedGameCount: new Set(
+          accumulated.citations
+            .filter(({ evidenceClass }) => evidenceClass === "owner-game-note")
+            .map(({ sourceId }) => sourceId),
+        ).size,
+        exhaustiveNotes: false,
+      }),
+    });
+  }
+
+  return Object.freeze({ assemble, start, finish, revalidate });
 }

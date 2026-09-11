@@ -37,10 +37,12 @@ import {
   type GroundedAnalysisSessionFactory,
   GroundedSessionRunError,
   type GroundedSessionRunResult,
+  type GroundedModelInputBudget,
   type PiGroundedAnalysisSessionFactoryOptions,
 } from "./session-factory.js";
 import {
   ANALYST_EVIDENCE_RETRIEVAL_TOOL_NAME,
+  COLLECTION_EVIDENCE_WITH_SUBMISSION_TOOL_NAMES,
   createGroundedStructuredSubmission,
   GROUNDED_SUBMISSION_TOOL_NAME,
 } from "./structured-submission.js";
@@ -50,6 +52,7 @@ const ANALYST_TOOL_NAMES = Object.freeze([
   ANALYST_EVIDENCE_RETRIEVAL_TOOL_NAME,
   GROUNDED_SUBMISSION_TOOL_NAME,
 ] as const);
+const COLLECTION_EVIDENCE_TOOL_NAMES = COLLECTION_EVIDENCE_WITH_SUBMISSION_TOOL_NAMES;
 
 type SubmissionDiagnostics = GroundedSubmissionDiagnostics;
 
@@ -69,6 +72,11 @@ export interface GroundedAnalysisResult<Output> {
   usage: GroundedProviderUsage | GroundedUsageUnavailable;
 }
 
+interface PerformedGroundedAnalysisResult<Output> extends GroundedAnalysisResult<Output> {
+  modelInputBytes: number;
+  modelInputRequests: number;
+}
+
 export interface GroundedAnalysisProvider {
   readonly configurationStatus: GroundedProviderConfigurationStatus;
   analyze<Output>(
@@ -83,7 +91,18 @@ export interface GroundedAnalysisProviderOptions {
   modelLogger?: GroundedModelLogger;
   now?: () => string;
   nowMs?: () => number;
+  /** Optional aggregate provider-payload budget, measured after payload hooks serialize each request. */
+  modelInputBudget?: GroundedModelInputBudget;
 }
+
+/**
+ * Limits the complete serialized provider context across the four allowed model turns.
+ * This is roughly 5.3 times the 192 KiB per-tool-response allowance: enough for a
+ * prompt, repeated tool context, and submission overhead, while bounding runaway
+ * context accumulation to 1 MiB.
+ */
+export const COLLECTION_EVIDENCE_DEFAULT_MODEL_INPUT_BUDGET: GroundedModelInputBudget =
+  Object.freeze({ maxBytes: 1024 * 1024 });
 
 function canonicalDecimal(value: number): string | undefined {
   if (!Number.isFinite(value) || value < 0) return undefined;
@@ -206,7 +225,7 @@ export function createGroundedAnalysisProvider(
     allowedTools: GroundedAllowedToolManifest,
     feature: string,
     recordSubmissionDiagnostics: (diagnostics: SubmissionDiagnostics) => void,
-  ): Promise<GroundedAnalysisResult<Output>> {
+  ): Promise<PerformedGroundedAnalysisResult<Output>> {
     if (!configured || !sessionFactory) {
       throw new GroundedAnalysisError("model-configuration", "grounded-analysis-not-configured");
     }
@@ -220,15 +239,25 @@ export function createGroundedAnalysisProvider(
       allowedTools.toolNames.every(
         (toolName, index) => toolName === GROUNDED_SUBMISSION_ONLY_TOOL_NAMES[index],
       );
-    const analystTools =
+    const legacyAnalystTools =
       allowedTools.toolNames.length === ANALYST_TOOL_NAMES.length &&
       ANALYST_TOOL_NAMES.every((toolName) => allowedTools.toolNames.includes(toolName));
+    const collectionEvidenceTools =
+      allowedTools.toolNames.length === COLLECTION_EVIDENCE_TOOL_NAMES.length &&
+      COLLECTION_EVIDENCE_TOOL_NAMES.every((toolName) => allowedTools.toolNames.includes(toolName));
+    const supportsCollectionEvidence =
+      (feature === "collection-analyst" || feature === "profile-reflection") &&
+      collectionEvidenceTools;
     if (
       allowedTools.feature !== feature ||
       new Set(registeredToolNames).size !== registeredToolNames.length ||
       allowedTools.toolNames.length !== registeredToolNames.length ||
       allowedTools.toolNames.some((toolName) => !registeredToolNames.includes(toolName)) ||
-      (feature === "collection-analyst" ? !analystTools : !submissionOnly)
+      (feature === "collection-analyst"
+        ? !(legacyAnalystTools || supportsCollectionEvidence)
+        : feature === "profile-reflection"
+          ? !(submissionOnly || supportsCollectionEvidence)
+          : !submissionOnly)
     ) {
       throw new GroundedCapabilityError("unsupported-feature-tool-manifest");
     }
@@ -267,9 +296,12 @@ export function createGroundedAnalysisProvider(
         submission,
         retrievalTools,
         maxInferenceRoundTrips:
-          feature === "collection-analyst"
+          feature === "collection-analyst" || supportsCollectionEvidence
             ? ANALYST_MAX_INFERENCE_ROUND_TRIPS
             : GROUNDED_MAX_INFERENCE_ROUND_TRIPS,
+        modelInputBudget: supportsCollectionEvidence
+          ? (options.modelInputBudget ?? COLLECTION_EVIDENCE_DEFAULT_MODEL_INPUT_BUDGET)
+          : options.modelInputBudget,
       });
       await session.bindExtensions();
       const capabilities = session.getCapabilities(allowedTools.toolNames);
@@ -302,7 +334,12 @@ export function createGroundedAnalysisProvider(
           usage,
         });
       }
-      return { output, usage };
+      return {
+        output,
+        usage,
+        modelInputBytes: runResult.modelInputBytes ?? 0,
+        modelInputRequests: runResult.modelInputRequests ?? 0,
+      };
     } finally {
       session?.dispose();
     }
@@ -354,6 +391,12 @@ export function createGroundedAnalysisProvider(
             outcome: failure.reason === "cancelled" ? "cancelled" : "failed",
             durationMs: Math.max(0, Math.round(nowMs() - startedAt)),
             usage: runUsage,
+            modelInputBytes:
+              error instanceof GroundedSessionRunError ? (error.runResult.modelInputBytes ?? 0) : 0,
+            modelInputRequests:
+              error instanceof GroundedSessionRunError
+                ? (error.runResult.modelInputRequests ?? 0)
+                : 0,
             validation: failure.reason === "output-validation" ? "rejected" : "not-reached",
             cacheTransition: "none",
             submissionDiagnostics,
@@ -369,11 +412,13 @@ export function createGroundedAnalysisProvider(
         outcome: "completed",
         durationMs: Math.max(0, Math.round(nowMs() - startedAt)),
         usage: result.result.usage,
+        modelInputBytes: result.result.modelInputBytes,
+        modelInputRequests: result.result.modelInputRequests,
         validation: "accepted",
         cacheTransition: "none",
         submissionDiagnostics: result.submissionDiagnostics,
       });
-      return result.result;
+      return { output: result.result.output, usage: result.result.usage };
     },
   };
   return Object.freeze(provider);

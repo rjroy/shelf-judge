@@ -127,7 +127,7 @@ function completed(questionId: ReflectionQuestionId) {
       ...(questionId === "pattern-exceptions" ? { patternCandidateIds: [] } : {}),
     },
     evidenceIdentity: {
-      manifestVersion: 1,
+      manifestVersion: 2,
       questionId,
       questionVersion: 1,
       collectionId: "collection-1",
@@ -189,7 +189,7 @@ function answered(questionId: ReflectionQuestionId = "repeated-values") {
       ...(questionId === "pattern-exceptions" ? { patternCandidateIds: ["mechanic:1"] } : {}),
     },
     evidenceIdentity: {
-      manifestVersion: 1,
+      manifestVersion: 2,
       questionId,
       questionVersion: 1,
       collectionId: "collection-1",
@@ -1023,7 +1023,11 @@ describe("Profile Reflection operation discovery", () => {
       ...eventExamples,
     ];
     for (const example of eventParityFixtures) {
-      expect(ReflectionStreamEventSchema.safeParse(example).success).toBe(true);
+      const parsed = ReflectionStreamEventSchema.safeParse(example);
+      if (!parsed.success)
+        throw new Error(
+          `Invalid Reflection stream example: ${JSON.stringify({ example, issues: parsed.error.issues })}`,
+        );
       expect(matchesDiscoverySchema(refresh.events.body, example)).toBe(true);
     }
     expect(

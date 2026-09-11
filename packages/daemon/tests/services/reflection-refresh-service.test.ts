@@ -34,7 +34,7 @@ const identity = { providerId: "provider-1", modelId: "model-1", extensionIds: [
 function packageFor(questionId: ReflectionQuestionId): ReflectionEvidencePackage {
   const evidence = Object.freeze({
     manifestId: "profile-reflection",
-    manifestVersion: "1",
+    manifestVersion: "2",
     evidenceClasses: Object.freeze([]),
     examinedSources: Object.freeze([]),
     entries: Object.freeze([]),
@@ -43,7 +43,7 @@ function packageFor(questionId: ReflectionQuestionId): ReflectionEvidencePackage
   });
   return Object.freeze({
     evidenceIdentity: ReflectionEvidenceIdentitySchema.parse({
-      manifestVersion: 1,
+      manifestVersion: 2,
       questionId,
       questionVersion: 1,
       collectionId: "collection-1",
@@ -274,7 +274,7 @@ describe("ReflectionRefreshService", () => {
       recordType: "reflection-refresh-attempt",
       questionId: "repeated-values",
       modelOperationLimit: 1,
-      maximumProviderRoundTrips: 2,
+      maximumProviderRoundTrips: 4,
     });
   });
 

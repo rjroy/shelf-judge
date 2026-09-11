@@ -111,7 +111,7 @@ function completed(
       ...(questionId === "pattern-exceptions" ? { patternCandidateIds: [] } : {}),
     },
     evidenceIdentity: {
-      manifestVersion: 1,
+      manifestVersion: 2,
       questionId,
       questionVersion: 1,
       collectionId: "collection-1",

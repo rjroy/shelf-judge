@@ -152,7 +152,16 @@ describe("Collection Analyst closed manifest", () => {
         },
         {
           id: "collection-summary",
-          fields: ["snapshotFingerprint", "groupBy", "measures", "group", "sourceCount"],
+          fields: [
+            "snapshotFingerprint",
+            "groupBy",
+            "measures",
+            "group",
+            "sourceCount",
+            "gameCount",
+            "averageFitness",
+            "fitnessGameCount",
+          ],
           sourceIdentity:
             "summary scope, selected group, and complete contributing source versions",
           observationTime: "none",

@@ -92,7 +92,7 @@ function evidencePackage(questionId: ReflectionQuestionId): ReflectionEvidencePa
   const byCitation = new Map(entries.map((entry) => [entry.citationId, entry]));
   const evidence: GroundedEvidenceSnapshot = Object.freeze({
     manifestId: "profile-reflection",
-    manifestVersion: "1",
+    manifestVersion: "2",
     evidenceClasses: Object.freeze([...new Set(entries.map(({ evidenceClass }) => evidenceClass))]),
     examinedSources: Object.freeze(
       entries.map(({ sourceId, sourceVersion, evidenceClass }) => ({
@@ -113,7 +113,7 @@ function evidencePackage(questionId: ReflectionQuestionId): ReflectionEvidencePa
   });
   return Object.freeze({
     evidenceIdentity: ReflectionEvidenceIdentitySchema.parse({
-      manifestVersion: 1,
+      manifestVersion: 2,
       questionId,
       questionVersion: 1,
       collectionId: "collection-1",

@@ -143,6 +143,10 @@ export function createApp(deps: AppDeps): AppResult {
   const groundedAnalysisTransportController = createGroundedAnalysisTransportController({
     analyzers: createGroundedFeatureAnalyzerRegistry(deps.groundedFeatureAnalyzers ?? []),
   });
+  const analystProjectionSnapshotService = createAnalystProjectionSnapshotService({
+    storageService,
+    displayedFitnessService,
+  });
   const reflectionProjectionSnapshotService = createReflectionProjectionSnapshotService({
     storageService,
     displayedFitnessService,
@@ -151,6 +155,18 @@ export function createApp(deps: AppDeps): AppResult {
     storageService,
     projectionSnapshotService: reflectionProjectionSnapshotService,
     ownerGameNoteService,
+    createAnalystEvidenceTurn(authorizedGameIds) {
+      return createAnalystEvidenceService({
+        storageService,
+        projectionSnapshotService: analystProjectionSnapshotService,
+        ownerGameNoteService,
+        ownerNoteAuthorizationScope: {
+          gameIds: authorizedGameIds,
+          allowCollectionSynthesis: true,
+          allowLocalTextSearch: true,
+        },
+      });
+    },
   });
   const reflectionRefreshService = createReflectionRefreshService({
     provider: groundedAnalysisProvider,
@@ -198,10 +214,6 @@ export function createApp(deps: AppDeps): AppResult {
     },
   });
   const analystAttestationService = createAnalystAttestationService();
-  const analystProjectionSnapshotService = createAnalystProjectionSnapshotService({
-    storageService,
-    displayedFitnessService,
-  });
   const analystEvidenceService = createAnalystEvidenceService({
     storageService,
     projectionSnapshotService: analystProjectionSnapshotService,

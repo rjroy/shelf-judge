@@ -13,7 +13,7 @@ import { addUniqueCitationIssues, createGroundedEvidenceSchemas } from "./ground
 import { createGroundedStreamHistorySchema, createGroundedStreamSchemas } from "./grounded-stream";
 
 export const REFLECTION_CONTRACT_VERSION = 1 as const;
-export const REFLECTION_MANIFEST_VERSION = 1 as const;
+export const REFLECTION_MANIFEST_VERSION = 2 as const;
 export const REFLECTION_SETTINGS_VERSION = 1 as const;
 
 export const REFLECTION_QUESTION_IDS = [
@@ -74,6 +74,7 @@ export const REFLECTION_EVIDENCE_CLASSES = [
   "imported-metadata",
   "play-acquisition",
   "collection-structure",
+  "collection-summary",
   "profile-evidence",
 ] as const;
 
@@ -149,6 +150,7 @@ const reflectionEvidence = createGroundedEvidenceSchemas({
   destinations: {
     "shelf.game.get": z.object({ gameId: IdSchema }).strict(),
     "shelf.profile.get": z.object({}).strict(),
+    "shelf.collection.get": z.object({}).strict(),
     "shelf.game.bgg.refresh": z.object({ gameId: IdSchema }).strict(),
     "shelf.game.plays.set": z.object({ gameId: IdSchema }).strict(),
     "shelf.game.rating.set": z.object({ gameId: IdSchema }).strict(),
@@ -192,6 +194,7 @@ const REFLECTION_GAME_EVIDENCE_CLASSES = [
   "imported-metadata",
   "play-acquisition",
   "collection-structure",
+  "collection-summary",
 ] as const satisfies readonly (typeof REFLECTION_EVIDENCE_CLASSES)[number][];
 
 export const REFLECTION_QUESTION_POLICIES = {
@@ -306,7 +309,9 @@ export const ReflectionCitationSchema = z.union([
 export const ReflectionScopeSchema = z
   .object({
     examinedPresentNoteCount: SafeCountSchema,
-    totalPresentNoteCount: SafeCountSchema,
+    // Lazy initial assembly has not read note bodies, so this count is unknown
+    // rather than an observed zero.
+    totalPresentNoteCount: SafeCountSchema.nullable(),
     examinedGameCount: SafeCountSchema,
     relevantEligibleGameCount: SafeCountSchema,
     excludedGameCount: SafeCountSchema,
@@ -315,7 +320,10 @@ export const ReflectionScopeSchema = z
   })
   .strict()
   .superRefine((scope, context) => {
-    if (scope.examinedPresentNoteCount > scope.totalPresentNoteCount) {
+    if (
+      scope.totalPresentNoteCount !== null &&
+      scope.examinedPresentNoteCount > scope.totalPresentNoteCount
+    ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["examinedPresentNoteCount"],
@@ -331,7 +339,8 @@ export const ReflectionScopeSchema = z
     }
     if (
       scope.exhaustiveNotes !==
-      (scope.examinedPresentNoteCount === scope.totalPresentNoteCount)
+      (scope.totalPresentNoteCount !== null &&
+        scope.examinedPresentNoteCount === scope.totalPresentNoteCount)
     ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,

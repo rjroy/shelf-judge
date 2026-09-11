@@ -1,9 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type {
-  AnalystEvidenceService,
-  AnalystRetrievedEvidence,
-} from "../src/services/analyst-evidence-service.js";
+import type { AnalystEvidenceService } from "../src/services/analyst-evidence-service.js";
+import type { AnalystTopResult } from "@shelf-judge/shared";
 import type { AnalystProjectionSnapshot } from "../src/services/analyst-evidence-projections.js";
 import { createAnalystTurnService } from "../src/services/analyst-turn-service.js";
 import type {
@@ -61,6 +59,7 @@ function evidenceService(overrides: Partial<AnalystEvidenceService>): AnalystEvi
     capture: () => Promise.resolve(snapshot),
     top: () => Promise.reject(new Error("top was not configured")),
     withTopEvidence: () => Promise.reject(new Error("top evidence was not configured")),
+    accumulatedEvidence: () => Promise.reject(new Error("accumulated evidence was not configured")),
     retrieve: () => Promise.reject(new Error("retrieve was not configured")),
     grep: () => Promise.reject(new Error("grep was not configured")),
     compareNoteDependencies: () => Promise.resolve("current"),
@@ -93,6 +92,32 @@ function request(signal: AbortSignal) {
 }
 
 describe("Analyst turn service boundaries", () => {
+  test("registers only the four model-directed collection tools and the submission tool", async () => {
+    const service = createAnalystTurnService({
+      provider: unavailableProvider((analysisRequest) => {
+        expect(analysisRequest.allowedTools.toolNames).toEqual([
+          "top",
+          "grep",
+          "readGames",
+          "summarize",
+          "submit_grounded_analysis",
+        ]);
+        expect(analysisRequest.retrievalTools?.map(({ name }) => name)).toEqual([
+          "top",
+          "grep",
+          "readGames",
+          "summarize",
+        ]);
+        return Promise.reject(new Error("stop after manifest inspection"));
+      }),
+      evidenceService: evidenceService({}),
+    });
+
+    expect(await failure(service.run(request(new AbortController().signal)))).toMatchObject({
+      message: "stop after manifest inspection",
+    });
+  });
+
   test("cancels while a non-abortable snapshot capture is pending", async () => {
     const capture = deferred<AnalystProjectionSnapshot>();
     const controller = new AbortController();
@@ -107,27 +132,21 @@ describe("Analyst turn service boundaries", () => {
     capture.resolve(snapshot);
   });
 
-  test("cancels while a non-abortable evidence retrieval is pending", async () => {
-    const retrieval = deferred<AnalystRetrievedEvidence>();
+  test("cancels while a non-abortable top operation is pending", async () => {
+    const top = deferred<AnalystTopResult>();
     const started = deferred<void>();
     const controller = new AbortController();
     const service = createAnalystTurnService({
       provider: unavailableProvider(async (analysisRequest) => {
-        const tool = analysisRequest.retrievalTools?.[0];
-        if (tool === undefined) throw new Error("retrieval tool missing");
-        await tool.execute(
-          "retrieval",
-          { evidenceClasses: ["game-identity-ownership"] },
-          undefined,
-          undefined,
-          unusedContext,
-        );
+        const tool = analysisRequest.retrievalTools?.find(({ name }) => name === "top");
+        if (tool === undefined) throw new Error("top tool missing");
+        await tool.execute("top", { rankBy: "fitness" }, undefined, undefined, unusedContext);
         throw new Error("provider must not receive retrieval data after cancellation");
       }),
       evidenceService: evidenceService({
-        retrieve: () => {
+        top: () => {
           started.resolve();
-          return retrieval.promise;
+          return top.promise;
         },
       }),
     });
@@ -142,62 +161,64 @@ describe("Analyst turn service boundaries", () => {
     const secret = "OWNER-NOTE-SECRET".repeat(8_000);
     const logs: string[] = [];
     let retrievalCalls = 0;
-    const retrieved: AnalystRetrievedEvidence = {
+    const top: AnalystTopResult = {
       snapshotFingerprint: snapshot.snapshotFingerprint,
-      evidence: {
-        manifestId: "test",
-        manifestVersion: "1",
-        evidenceClasses: [],
-        examinedSources: [],
-        entries: [],
-        hasSource: () => false,
-        resolve: () => undefined,
-      },
-      citations: [
+      entries: [
         {
-          citationId: "citation",
-          sourceId: "game",
-          sourceVersion: "1",
-          evidenceClass: "owner-game-note",
-          canonicalSummary: secret,
-          testimony: true,
-          destination: { operationId: "shelf.game.get", parameters: { gameId: "game" } },
+          gameId: "game",
+          name: "Game",
+          fitness: 1,
+          breakdown: [],
+          citations: [
+            {
+              citationId: "identity",
+              sourceId: "game",
+              sourceVersion: "1",
+              evidenceClass: "game-identity-ownership",
+              canonicalSummary: secret,
+              testimony: false,
+              destination: { operationId: "shelf.game.get", parameters: { gameId: "game" } },
+            },
+            {
+              citationId: "score",
+              sourceId: "score",
+              sourceVersion: "1",
+              evidenceClass: "current-scoring",
+              canonicalSummary: "Current score",
+              testimony: false,
+              destination: { operationId: "shelf.game.get", parameters: { gameId: "game" } },
+            },
+          ],
         },
       ],
-      noteDependencies: [],
       scope: {
-        totalSourceCount: 1,
-        matchingSourceCount: 1,
-        examinedSourceCount: 1,
+        totalGameCount: 1,
+        matchingGameCount: 1,
+        examinedGameCount: 1,
         exhaustive: true,
       },
       nextCursor: null,
+      truncated: false,
     };
     const service = createAnalystTurnService({
       provider: unavailableProvider(async (analysisRequest) => {
-        const tool = analysisRequest.retrievalTools?.[0];
-        if (tool === undefined) throw new Error("retrieval tool missing");
+        const tool = analysisRequest.retrievalTools?.find(({ name }) => name === "top");
+        if (tool === undefined) throw new Error("top tool missing");
         const results = await Promise.all(
           ["retrieval-0", "retrieval-1", "retrieval-2"].map((toolCallId) =>
-            tool.execute(
-              toolCallId,
-              { evidenceClasses: ["owner-game-note"] },
-              undefined,
-              undefined,
-              unusedContext,
-            ),
+            tool.execute(toolCallId, { rankBy: "fitness" }, undefined, undefined, unusedContext),
           ),
         );
         throw new Error(JSON.stringify(results));
       }),
       evidenceService: evidenceService({
-        retrieve: (_captured, retrievalRequest) => {
-          expect(retrievalRequest).toMatchObject({
+        top: (_captured, topRequest) => {
+          expect(topRequest).toMatchObject({
             snapshotFingerprint: snapshot.snapshotFingerprint,
           });
           return Promise.resolve({
-            ...retrieved,
-            scope: { ...retrieved.scope, matchingSourceCount: ++retrievalCalls },
+            ...top,
+            scope: { ...top.scope, matchingGameCount: ++retrievalCalls },
           });
         },
       }),
@@ -209,11 +230,11 @@ describe("Analyst turn service boundaries", () => {
     expect(String(error)).not.toContain(secret);
     expect(JSON.stringify(logs)).not.toContain(secret);
     const serializedLogs = logs.join("\n");
-    expect(serializedLogs).toContain('"stage":"retrieval","outcome":"attempt","pageIndex":0');
-    expect(serializedLogs).toContain('"stage":"retrieval","outcome":"attempt","pageIndex":1');
-    expect(serializedLogs).toContain('"stage":"retrieval","outcome":"attempt","pageIndex":2');
+    expect(serializedLogs).toContain('"stage":"top","outcome":"attempt","callIndex":0');
+    expect(serializedLogs).toContain('"stage":"top","outcome":"attempt","callIndex":1');
+    expect(serializedLogs).toContain('"stage":"top","outcome":"attempt","callIndex":2');
     expect(serializedLogs).toContain('"outcome":"rejected","durationMs":');
-    expect(serializedLogs).toContain('"pageIndex":2,"sourceCount":3');
+    expect(serializedLogs).toContain('"callIndex":2');
     expect(serializedLogs).toContain('"rejection":"context-limit"');
     expect(serializedLogs).toContain('"stage":"provider","outcome":"failed"');
   });

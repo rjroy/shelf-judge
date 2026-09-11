@@ -56,7 +56,7 @@ function completed(
       ...(questionId === "pattern-exceptions" ? { patternCandidateIds: [] } : {}),
     },
     evidenceIdentity: {
-      manifestVersion: 1,
+      manifestVersion: 2,
       questionId,
       questionVersion: 1,
       collectionId: "collection",
@@ -440,7 +440,6 @@ describe("Reflection state service", () => {
       "scoring",
       "metadata",
       "profile",
-      "question-policy",
       "provider-configuration",
       "collection",
     ]);
@@ -502,9 +501,9 @@ describe("Reflection state service", () => {
 
     const fence = await service.startAttempt("repeated-values", "same-process");
     expect((await service.read(current()))[0].attempt.state).toBe("refreshing");
-    expect(await service.completeAttempt(fence, completed("repeated-values"), () => current())).not.toBe(
-      false,
-    );
+    expect(
+      await service.completeAttempt(fence, completed("repeated-values"), () => current()),
+    ).not.toBe(false);
 
     expect(recoveryCalls).toBe(1);
     expect((await storage.loadState()).questions[0]).toMatchObject({

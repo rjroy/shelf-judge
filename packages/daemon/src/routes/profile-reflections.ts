@@ -383,7 +383,7 @@ export function createProfileReflectionRoutes(deps: ProfileReflectionRoutesDeps)
       exhaustiveNotes: true,
     },
     evidenceIdentity: {
-      manifestVersion: 1,
+      manifestVersion: 2,
       questionId: "repeated-values",
       questionVersion: 1,
       collectionId: "example-collection",

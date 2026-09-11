@@ -33,6 +33,9 @@ export interface GroundedAssistantUsage {
 
 export interface GroundedSessionRunResult {
   inferenceRoundTrips: number;
+  /** UTF-8 JSON bytes in the actual provider payloads sent for this run. */
+  modelInputBytes?: number;
+  modelInputRequests?: number;
   assistantText: readonly string[];
   usages: readonly GroundedAssistantUsage[];
   assistantStopReasons?: readonly (
@@ -47,6 +50,17 @@ export interface GroundedSessionRunResult {
 
 export const GROUNDED_MAX_INFERENCE_ROUND_TRIPS = 2;
 export const ANALYST_MAX_INFERENCE_ROUND_TRIPS = 4;
+
+export interface GroundedModelInputBudget {
+  /** Aggregate UTF-8 JSON bytes allowed across all outbound provider requests. */
+  readonly maxBytes: number;
+}
+
+function assertModelInputBudget(budget: GroundedModelInputBudget | undefined): void {
+  if (budget !== undefined && (!Number.isSafeInteger(budget.maxBytes) || budget.maxBytes < 1)) {
+    throw new Error("Grounded model input budget must be a positive safe integer");
+  }
+}
 
 function assertFeatureInferenceRoundTripLimit(limit: number): void {
   if (limit !== GROUNDED_MAX_INFERENCE_ROUND_TRIPS && limit !== ANALYST_MAX_INFERENCE_ROUND_TRIPS) {
@@ -79,6 +93,7 @@ export interface GroundedAnalysisSessionFactory {
     submission: GroundedStructuredSubmission<Output>;
     retrievalTools?: readonly ToolDefinition[];
     maxInferenceRoundTrips?: number;
+    modelInputBudget?: GroundedModelInputBudget;
   }): Promise<GroundedAnalysisSession>;
 }
 
@@ -140,6 +155,7 @@ function createBoundSession(
   exactPromptHandler: (...args: unknown[]) => unknown,
   submission: GroundedStructuredSubmission<unknown>,
   maxInferenceRoundTrips: number,
+  modelInput: { bytes: number; requests: number },
 ): GroundedAnalysisSession {
   let extensionsBound = false;
   let resolvedModel: Model<Api> | undefined;
@@ -207,6 +223,8 @@ function createBoundSession(
 
       const runResult = {
         inferenceRoundTrips: assistantMessages.length,
+        modelInputBytes: modelInput.bytes,
+        modelInputRequests: modelInput.requests,
         assistantText: assistantMessages.flatMap((message) =>
           message.content
             .filter(
@@ -259,8 +277,10 @@ export function createPiGroundedAnalysisSessionFactory(
       submission,
       retrievalTools = [],
       maxInferenceRoundTrips = GROUNDED_MAX_INFERENCE_ROUND_TRIPS,
+      modelInputBudget,
     }) {
       assertFeatureInferenceRoundTripLimit(maxInferenceRoundTrips);
+      assertModelInputBudget(modelInputBudget);
       const settingsManager = SettingsManager.inMemory({
         packages: [],
         extensions: [],
@@ -305,6 +325,7 @@ export function createPiGroundedAnalysisSessionFactory(
         noTools: "builtin",
         customTools: [...retrievalTools, submission.tool],
       });
+      const modelInput = { bytes: 0, requests: 0 };
       if (options.onPayload) {
         const existingOnPayload = session.agent.onPayload;
         session.agent.onPayload = async (payload, model) => {
@@ -312,6 +333,24 @@ export function createPiGroundedAnalysisSessionFactory(
           return options.onPayload?.(existingPayload ?? payload, model);
         };
       }
+      const existingOnPayload = session.agent.onPayload;
+      session.agent.onPayload = async (payload, model) => {
+        const outboundPayload = (await existingOnPayload?.(payload, model)) ?? payload;
+        const serialized = JSON.stringify(outboundPayload);
+        if (serialized === undefined) {
+          throw new GroundedAnalysisError("internal", "model-input-serialization-failed");
+        }
+        const bytes = new TextEncoder().encode(serialized).byteLength;
+        if (
+          modelInputBudget !== undefined &&
+          modelInput.bytes + bytes > modelInputBudget.maxBytes
+        ) {
+          throw new GroundedAnalysisError("context-exhaustion", "model-input-budget-exceeded");
+        }
+        modelInput.bytes += bytes;
+        modelInput.requests += 1;
+        return outboundPayload;
+      };
       return createBoundSession(
         session,
         extensionsResult,
@@ -319,6 +358,7 @@ export function createPiGroundedAnalysisSessionFactory(
         exactPromptHandler,
         submission,
         maxInferenceRoundTrips,
+        modelInput,
       );
     },
   };

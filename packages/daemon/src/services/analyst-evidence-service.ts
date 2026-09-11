@@ -99,6 +99,7 @@ const EvidenceIdentitySchema = z
       "imported-metadata",
       "play-acquisition",
       "collection-structure",
+      "collection-summary",
       "profile-evidence",
     ]),
   })
@@ -186,6 +187,8 @@ export interface AnalystEvidenceService {
     ids: readonly string[],
     options: { readonly fields: readonly AnalystReadGamesField[] },
   ): Promise<AnalystReadGamesEvidence>;
+  /** Returns the daemon-authenticated union of evidence emitted by tools in this snapshot turn. */
+  accumulatedEvidence(snapshot: AnalystProjectionSnapshot): Promise<AnalystRetrievedEvidence>;
   /** Searches the explicitly scoped local corpus without returning non-matching source payloads. */
   grep(snapshot: AnalystProjectionSnapshot, request: unknown): Promise<AnalystGrepResult>;
   compareNoteDependencies(
@@ -315,6 +318,7 @@ export function createAnalystEvidenceService(deps: {
     ids: readonly string[],
     options: { readonly fields: readonly AnalystReadGamesField[] },
   ): Promise<AnalystReadGamesEvidence>;
+  accumulatedEvidence(snapshot: AnalystProjectionSnapshot): Promise<AnalystRetrievedEvidence>;
   summarize(snapshot: AnalystProjectionSnapshot, request: unknown): Promise<AnalystSummarizeResult>;
   withSummaryEvidence<Value>(
     result: AnalystSummarizeResult,
@@ -330,6 +334,7 @@ export function createAnalystEvidenceService(deps: {
       examined: Map<string, Set<string>>;
       noteReads: Map<string, OwnerGameNoteRead>;
       noteDependencies: Map<string, number>;
+      emittedSources: Map<string, AnalystEvidenceSource>;
       noteLoad: Promise<void>;
       evidenceCalls: number;
       evidenceBytes: number;
@@ -372,12 +377,20 @@ export function createAnalystEvidenceService(deps: {
       examined: new Map<string, Set<string>>(),
       noteReads: new Map<string, OwnerGameNoteRead>(),
       noteDependencies: new Map<string, number>(),
+      emittedSources: new Map<string, AnalystEvidenceSource>(),
       noteLoad: Promise.resolve(),
       evidenceCalls: 0,
       evidenceBytes: 0,
     };
     turns.set(snapshot, created);
     return created;
+  }
+
+  function recordEmittedSources(
+    turn: ReturnType<typeof turnFor>,
+    sources: Iterable<AnalystEvidenceSource>,
+  ): void {
+    for (const source of sources) turn.emittedSources.set(source.citationId, source);
   }
 
   function noteCitationId(gameId: string, noteVersion: number): string {
@@ -573,6 +586,11 @@ export function createAnalystEvidenceService(deps: {
     readonly measures: readonly ("gameCount" | "averageFitness")[];
     readonly group: { readonly id: number; readonly name: string } | null;
     readonly sources: readonly AnalystEvidenceSource[];
+    readonly statistics: {
+      readonly gameCount?: number;
+      readonly averageFitness?: number | null;
+      readonly fitnessGameCount: number;
+    };
   }): AnalystEvidenceSource {
     const sourceSet = summarySourceSet(
       `analyst:collection-summary:${input.groupBy}:${[...input.measures].sort().join(",")}:${input.group?.id ?? "scope"}`,
@@ -589,6 +607,7 @@ export function createAnalystEvidenceService(deps: {
         measures: [...input.measures].sort(),
         group: input.group,
         sourceCount: sourceSet.sourceCount,
+        ...input.statistics,
       },
       canonicalSummary: "Current deterministic collection summary evidence",
       destination: { operationId: "shelf.collection.get" as const, parameters: {} },
@@ -700,6 +719,17 @@ export function createAnalystEvidenceService(deps: {
         for (const citation of entry.citations)
           sources.set(citation.sourceId, citation.sourceVersion);
       topPackages.set(result, { result, snapshot, sources });
+      recordEmittedSources(
+        turn,
+        entries.flatMap(({ citations }) =>
+          citations.flatMap(({ citationId }) => {
+            const source = snapshot.sources.find(
+              (candidate) => candidate.citationId === citationId,
+            );
+            return source === undefined ? [] : [source];
+          }),
+        ),
+      );
       return result;
     },
     async summarize(
@@ -793,6 +823,19 @@ export function createAnalystEvidenceService(deps: {
             measures: request.measures,
             group: { id: group.id, name: group.name },
             sources: contributingSources,
+            statistics: {
+              ...(includesCount ? { gameCount: gameIds.length } : {}),
+              ...(includesAverage
+                ? {
+                    averageFitness:
+                      fitnessValues.length === 0
+                        ? null
+                        : fitnessValues.reduce((sum, value) => sum + value, 0) /
+                          fitnessValues.length,
+                  }
+                : {}),
+              fitnessGameCount: fitnessValues.length,
+            },
           });
           return {
             group: { id: group.id, name: group.name },
@@ -848,6 +891,19 @@ export function createAnalystEvidenceService(deps: {
         measures: request.measures,
         group: null,
         sources: allSources,
+        statistics: {
+          ...(includesCount ? { gameCount: ownedGameIds.length } : {}),
+          ...(includesAverage
+            ? {
+                averageFitness:
+                  fitnessByGame.size === 0
+                    ? null
+                    : [...fitnessByGame.values()].reduce((sum, value) => sum + value) /
+                      fitnessByGame.size,
+              }
+            : {}),
+          fitnessGameCount: fitnessByGame.size,
+        },
       });
       const requested = request.limit ?? 25;
       const configuredMaxBytes = deps.summarizeBudget?.maxBytes ?? 48 * 1024;
@@ -912,6 +968,12 @@ export function createAnalystEvidenceService(deps: {
           scoringByGame.get(gameId),
         ])
           if (source !== undefined) sources.set(source.sourceId, source.sourceVersion);
+      recordEmittedSources(turn, [
+        scopeSource,
+        ...summarized
+          .slice(offset, offset + entryCount)
+          .map(({ aggregateSource }) => aggregateSource),
+      ]);
       summaryPackages.set(frozenResult, { result: frozenResult, snapshot, sources });
       for (const entry of summarized) {
         const aggregateSource = entry.aggregateSource;
@@ -1223,6 +1285,71 @@ export function createAnalystEvidenceService(deps: {
       consumeTurnBudget(turn, retrieved);
       turn.examined.set(scopeKey, examined);
       if (nextCursor !== null) turn.cursors.set(nextCursor.token, { scopeKey, offset: nextOffset });
+      recordEmittedSources(turn, returned);
+      packages.set(retrieved, { retrieved, snapshot });
+      return retrieved;
+    },
+    async accumulatedEvidence(
+      snapshot: AnalystProjectionSnapshot,
+    ): Promise<AnalystRetrievedEvidence> {
+      const turn = turnFor(snapshot);
+      const sources = [...turn.emittedSources.values()];
+      const evidenceClasses = [...new Set(sources.map((source) => source.evidenceClass))];
+      const registry = createGroundedEvidenceRegistry({
+        manifest: {
+          manifestId: ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST.manifestId,
+          manifestVersion: ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST.manifestVersion,
+          evidence: Object.fromEntries(
+            evidenceClasses.map((evidenceClass) => [
+              evidenceClass,
+              ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST.evidence[evidenceClass],
+            ]),
+          ),
+        },
+        evidenceIdentitySchema: EvidenceIdentitySchema,
+        expectedSources: sources.map(({ evidenceClass, sourceId, sourceVersion }) => ({
+          evidenceClass,
+          sourceId,
+          sourceVersion,
+        })),
+      });
+      const citations = sources.map((source) => {
+        const identity = {
+          evidenceClass: source.evidenceClass,
+          sourceId: source.sourceId,
+          sourceVersion: source.sourceVersion,
+        };
+        registry.recordExamined(identity);
+        registry.add({ ...identity, citationId: source.citationId, payload: source.payload });
+        return AnalystCitationSchema.parse({
+          ...identity,
+          citationId: source.citationId,
+          testimony:
+            source.evidenceClass === "owner-game-note" &&
+            source.payload !== null &&
+            typeof source.payload === "object" &&
+            "state" in source.payload &&
+            source.payload.state === "present",
+          ...(source.observedAt === undefined ? {} : { observedAt: source.observedAt }),
+          canonicalSummary: source.canonicalSummary,
+          destination: source.destination,
+        });
+      });
+      if ((await revalidate(snapshot)).valid === false)
+        throw new AnalystEvidenceSourceChangedError();
+      const retrieved = freeze({
+        snapshotFingerprint: snapshot.snapshotFingerprint,
+        evidence: registry.complete(),
+        citations,
+        noteDependencies: noteDependenciesFor(turn),
+        scope: {
+          totalSourceCount: sources.length,
+          matchingSourceCount: sources.length,
+          examinedSourceCount: sources.length,
+          exhaustive: true,
+        },
+        nextCursor: null,
+      });
       packages.set(retrieved, { retrieved, snapshot });
       return retrieved;
     },

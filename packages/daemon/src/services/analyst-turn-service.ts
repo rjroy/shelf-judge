@@ -1,7 +1,7 @@
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import type { AnalystCitation, AnalystFinal } from "@shelf-judge/shared";
+import type { AnalystFinal, AnalystReadGamesField } from "@shelf-judge/shared";
 import { z } from "zod";
 import type {
   AnalystEvidenceService,
@@ -12,45 +12,86 @@ import type {
   GroundedAnalysisProvider,
   GroundedAnalysisResult,
 } from "./grounded-analysis/provider.js";
-import type { GroundedEvidenceSnapshot } from "./grounded-analysis/evidence-registry.js";
 import {
   validateAnalystResult,
   type AnalystValidationDiagnostic,
 } from "./analyst-result-validator.js";
 import {
-  ANALYST_EVIDENCE_RETRIEVAL_TOOL_NAME,
-  createAnalystToolManifest,
+  COLLECTION_GREP_TOOL_NAME,
+  COLLECTION_READ_GAMES_TOOL_NAME,
+  COLLECTION_SUMMARIZE_TOOL_NAME,
+  COLLECTION_TOP_TOOL_NAME,
+  createCollectionAnalystToolManifest,
 } from "./grounded-analysis/structured-submission.js";
 import type { GroundedModelAuditContext } from "./grounded-analysis/model-logger.js";
 
-const RetrievalParameters = Type.Object(
+const CursorParameters = Type.Object(
+  { token: Type.String({ format: "uuid" }) },
+  { additionalProperties: false },
+);
+const TopParameters = Type.Object(
   {
-    evidenceClasses: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
-    gameIds: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
-    noteSearch: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
-    cursor: Type.Optional(
-      Type.Union([
-        Type.Null(),
-        Type.Object(
-          {
-            snapshotFingerprint: Type.String({ minLength: 1 }),
-            token: Type.String({ format: "uuid" }),
-          },
-          { additionalProperties: false },
-        ),
-      ]),
-    ),
+    rankBy: Type.Literal("fitness"),
     limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+    cursor: Type.Optional(Type.Union([Type.Null(), CursorParameters])),
+  },
+  { additionalProperties: false },
+);
+const GrepParameters = Type.Object(
+  {
+    pattern: Type.String({ minLength: 1, maxLength: 128 }),
+    allowedFields: Type.Array(
+      Type.Union([
+        Type.Literal("notes"),
+        Type.Literal("metadata.mechanics"),
+        Type.Literal("metadata.categories"),
+        Type.Literal("metadata.description"),
+      ]),
+      { minItems: 1, maxItems: 4 },
+    ),
+    gameIds: Type.Array(Type.String({ minLength: 1 }), { minItems: 1, maxItems: 100 }),
+    cursor: Type.Optional(Type.Union([Type.Null(), CursorParameters])),
+    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
+  },
+  { additionalProperties: false },
+);
+const ReadGamesParameters = Type.Object(
+  {
+    gameIds: Type.Array(Type.String({ minLength: 1 }), { minItems: 1, maxItems: 10 }),
+    fields: Type.Array(
+      Type.Union([
+        Type.Literal("game-identity-ownership"),
+        Type.Literal("current-scoring"),
+        Type.Literal("imported-metadata"),
+        Type.Literal("play-acquisition"),
+        Type.Literal("collection-structure"),
+        Type.Literal("owner-game-note"),
+      ]),
+      { minItems: 1, maxItems: 6 },
+    ),
+  },
+  { additionalProperties: false },
+);
+const SummarizeParameters = Type.Object(
+  {
+    groupBy: Type.Union([Type.Literal("metadata.mechanics"), Type.Literal("metadata.categories")]),
+    measures: Type.Array(Type.Union([Type.Literal("gameCount"), Type.Literal("averageFitness")]), {
+      minItems: 1,
+      maxItems: 2,
+    }),
+    cursor: Type.Optional(Type.Union([Type.Null(), CursorParameters])),
+    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
   },
   { additionalProperties: false },
 );
 
-// Retrieval responses become model context on the next inference round. Keep an
-// Analyst-specific ceiling in addition to the provider's round-trip ceiling.
-const ANALYST_RETRIEVAL_RESULT_MAX_BYTES = 64 * 1024;
-const ANALYST_RETRIEVAL_TURN_MAX_BYTES = 192 * 1024;
-const RETRIEVAL_CONTEXT_LIMIT_MESSAGE =
-  "Evidence retrieval is unavailable because the Analyst context limit was reached.";
+// Tool responses re-enter the model context on a later round. The evidence
+// service has the authoritative shared operation budget; this is an additional
+// transport ceiling so a single response cannot consume the model context.
+const ANALYST_TOOL_RESULT_MAX_BYTES = 64 * 1024;
+const ANALYST_TOOL_TURN_MAX_BYTES = 192 * 1024;
+const TOOL_CONTEXT_LIMIT_MESSAGE =
+  "Evidence response is unavailable because the Analyst context limit was reached.";
 
 type AnalystTurnLog = Readonly<Record<string, unknown>>;
 type AnalystTurnLogSink = (record: AnalystTurnLog) => void;
@@ -106,13 +147,20 @@ function abortable<Value>(operation: Promise<Value>, signal: AbortSignal): Promi
   });
 }
 
-function serializedRetrievalResult(retrieved: AnalystRetrievedEvidence): string {
-  return JSON.stringify({
-    evidence: retrieved.evidence,
-    citations: retrieved.citations,
-    nextCursor: retrieved.nextCursor,
-    scope: retrieved.scope,
-  });
+function modelVisible(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(modelVisible);
+  if (typeof value !== "object" || value === null) return value;
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([key, child]) =>
+      key === "snapshotFingerprint" ? [] : [[key, modelVisible(child)]],
+    ),
+  );
+}
+
+function toolArguments(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    throw new Error("Analyst tool arguments must be an object");
+  return Object.fromEntries(Object.entries(value));
 }
 
 // This transport schema deliberately contains no shared contract schema instances:
@@ -154,131 +202,126 @@ const AnalystSubmissionSchema = z
   })
   .strict();
 
-function combinedEvidence(pages: readonly AnalystRetrievedEvidence[]): GroundedEvidenceSnapshot {
-  const entries = pages.flatMap((page) => page.evidence.entries);
-  const citations = new Map(entries.map((entry) => [entry.citationId, entry]));
-  if (citations.size !== entries.length) throw new Error("Analyst evidence pages overlap");
-  const examinedSources = pages.flatMap((page) => page.evidence.examinedSources);
-  const sources = new Set(
-    examinedSources.map(({ evidenceClass, sourceId, sourceVersion }) =>
-      [evidenceClass, sourceId, sourceVersion].join("\u0000"),
-    ),
-  );
-  if (sources.size !== examinedSources.length) throw new Error("Analyst evidence pages overlap");
-  return Object.freeze({
-    manifestId: "collection-analyst-retrieved-pages",
-    manifestVersion: "1",
-    evidenceClasses: Object.freeze(
-      [...new Set(pages.flatMap((page) => page.evidence.evidenceClasses))].sort(),
-    ),
-    examinedSources: Object.freeze([...examinedSources]),
-    entries: Object.freeze([...entries]),
-    hasSource(source: GroundedEvidenceSnapshot["examinedSources"][number]) {
-      return sources.has(
-        [source.evidenceClass, source.sourceId, source.sourceVersion].join("\u0000"),
-      );
-    },
-    resolve(citationId: string) {
-      return citations.get(citationId);
-    },
-  });
-}
-
-function combinedCitations(pages: readonly AnalystRetrievedEvidence[]): readonly AnalystCitation[] {
-  const citations = pages.flatMap((page) => page.citations);
-  if (new Set(citations.map(({ citationId }) => citationId)).size !== citations.length)
-    throw new Error("Analyst citation pages overlap");
-  return Object.freeze(citations);
-}
-
-function retrievalTool(
+function analystTools(
   evidenceService: AnalystEvidenceService,
   snapshot: Awaited<ReturnType<AnalystEvidenceService["capture"]>>,
   signal: AbortSignal,
-  onRetrieved: (retrieved: AnalystRetrievedEvidence) => void,
   audit: GroundedModelAuditContext,
   log: AnalystTurnLogSink,
-): ToolDefinition {
+): readonly ToolDefinition[] {
   let serializedBytes = 0;
-  let retrievalIndex = 0;
-  return defineTool({
-    name: ANALYST_EVIDENCE_RETRIEVAL_TOOL_NAME,
-    label: "Retrieve collection evidence",
-    description: "Read one authorized, paginated page of collection evidence for this turn.",
-    parameters: RetrievalParameters,
-    async execute(_toolCallId, parameters) {
-      const started = Date.now();
-      const pageIndex = retrievalIndex++;
-      logStage(log, audit, "retrieval", "attempt", {
-        pageIndex,
-        cursorPresent: parameters.cursor !== undefined && parameters.cursor !== null,
-      });
-      throwIfAborted(signal);
-      let retrieved: AnalystRetrievedEvidence;
-      try {
-        retrieved = await abortable(
-          evidenceService.retrieve(snapshot, {
-            ...parameters,
-            snapshotFingerprint: snapshot.snapshotFingerprint,
-          }),
-          signal,
-        );
-      } catch (error) {
-        logStage(log, audit, "retrieval", "failed", {
-          durationMs: Date.now() - started,
-          failure: signal.aborted ? "cancelled" : "retrieve-failed",
-        });
-        throw error;
-      }
-      throwIfAborted(signal);
-      const serialized = serializedRetrievalResult(retrieved);
-      const bytes = new TextEncoder().encode(serialized).byteLength;
-      if (
-        bytes > ANALYST_RETRIEVAL_RESULT_MAX_BYTES ||
-        serializedBytes + bytes > ANALYST_RETRIEVAL_TURN_MAX_BYTES
-      ) {
-        logStage(log, audit, "retrieval", "rejected", {
+  let toolIndex = 0;
+  const createTool = (
+    name: string,
+    label: string,
+    description: string,
+    parameters: ToolDefinition["parameters"],
+    operation: (parameters: Record<string, unknown>) => Promise<unknown>,
+  ): ToolDefinition =>
+    defineTool({
+      name,
+      label,
+      description,
+      parameters,
+      async execute(_toolCallId, parameters) {
+        const started = Date.now();
+        const callIndex = toolIndex++;
+        logStage(log, audit, name, "attempt", { callIndex });
+        throwIfAborted(signal);
+        let result: unknown;
+        try {
+          result = await abortable(operation(toolArguments(parameters)), signal);
+        } catch (error) {
+          logStage(log, audit, name, "failed", {
+            durationMs: Date.now() - started,
+            failure: signal.aborted ? "cancelled" : "evidence-operation-failed",
+          });
+          throw error;
+        }
+        throwIfAborted(signal);
+        const serialized = JSON.stringify(modelVisible(result));
+        const bytes = new TextEncoder().encode(serialized).byteLength;
+        if (
+          bytes > ANALYST_TOOL_RESULT_MAX_BYTES ||
+          serializedBytes + bytes > ANALYST_TOOL_TURN_MAX_BYTES
+        ) {
+          logStage(log, audit, name, "rejected", {
+            durationMs: Date.now() - started,
+            bytes,
+            rejection: "context-limit",
+            callIndex,
+          });
+          return {
+            content: [{ type: "text", text: TOOL_CONTEXT_LIMIT_MESSAGE }],
+            details: undefined,
+          };
+        }
+        throwIfAborted(signal);
+        serializedBytes += bytes;
+        logStage(log, audit, name, "success", {
           durationMs: Date.now() - started,
           bytes,
-          rejection: "context-limit",
-          pageIndex,
-          sourceCount: retrieved.scope.matchingSourceCount,
-          citationCount: retrieved.citations.length,
-          cursorPresent: retrieved.nextCursor !== null,
+          callIndex,
         });
         return {
-          content: [{ type: "text", text: RETRIEVAL_CONTEXT_LIMIT_MESSAGE }],
+          content: [{ type: "text", text: serialized }],
           details: undefined,
         };
-      }
-      throwIfAborted(signal);
-      serializedBytes += bytes;
-      onRetrieved(retrieved);
-      logStage(log, audit, "retrieval", "success", {
-        durationMs: Date.now() - started,
-        bytes,
-        pageIndex,
-        sourceCount: retrieved.scope.matchingSourceCount,
-        citationCount: retrieved.citations.length,
-        cursorPresent: retrieved.nextCursor !== null,
-      });
-      return {
-        content: [
-          {
-            type: "text",
-            text: serialized,
-          },
-        ],
-        details: undefined,
-      };
-    },
+      },
+    });
+  const request = (parameters: Record<string, unknown>) => ({
+    ...parameters,
+    snapshotFingerprint: snapshot.snapshotFingerprint,
+    ...(parameters.cursor === undefined || parameters.cursor === null
+      ? {}
+      : { cursor: { snapshotFingerprint: snapshot.snapshotFingerprint, ...parameters.cursor } }),
   });
+  return Object.freeze([
+    createTool(
+      COLLECTION_TOP_TOOL_NAME,
+      "Rank collection games",
+      "Rank owned games by fitness. Each returned entry includes compact identity and scoring evidence that may be cited directly.",
+      TopParameters,
+      (parameters) => evidenceService.top(snapshot, request(parameters)),
+    ),
+    createTool(
+      COLLECTION_GREP_TOOL_NAME,
+      "Search collection evidence",
+      "Search selected game fields. Matches are discovery-only and are not authorized evidence: call readGames for the matching field before citing its content.",
+      GrepParameters,
+      (parameters) => evidenceService.grep(snapshot, request(parameters)),
+    ),
+    createTool(
+      COLLECTION_READ_GAMES_TOOL_NAME,
+      "Read selected games",
+      "Read bounded evidence fields for explicitly named games.",
+      ReadGamesParameters,
+      (parameters) => {
+        if (evidenceService.readGames === undefined)
+          throw new Error("Analyst readGames is not configured");
+        return evidenceService.readGames(snapshot, parameters.gameIds as readonly string[], {
+          fields: parameters.fields as readonly AnalystReadGamesField[],
+        });
+      },
+    ),
+    createTool(
+      COLLECTION_SUMMARIZE_TOOL_NAME,
+      "Summarize collection",
+      "Emit a deterministic aggregate over collection metadata.",
+      SummarizeParameters,
+      (parameters) => {
+        if (evidenceService.summarize === undefined)
+          throw new Error("Analyst summarize is not configured");
+        return evidenceService.summarize(snapshot, request(parameters));
+      },
+    ),
+  ]);
 }
 
 /**
- * The Analyst-only provider seam. It owns the sole model-visible retrieval tool;
- * the evidence service retains authorization, pagination, citation construction,
- * and dependency revalidation.
+ * The Analyst-only provider seam. It exposes only bounded, model-directed
+ * collection operations while the evidence service retains authorization,
+ * citation construction, and dependency revalidation.
  */
 export function createAnalystTurnService(deps: {
   provider: GroundedAnalysisProvider;
@@ -318,26 +361,20 @@ export function createAnalystTurnService(deps: {
       }
       logStage(log, input.audit, "capture", "success", { durationMs: Date.now() - captureStarted });
       throwIfAborted(input.signal);
-      const retrieved: AnalystRetrievedEvidence[] = [];
       logStage(log, input.audit, "provider", "attempt");
       let result: GroundedAnalysisResult<z.infer<typeof AnalystSubmissionSchema>>;
       try {
         result = await deps.provider.analyze({
           ...input,
           submissionSchema: AnalystSubmissionSchema,
-          allowedTools: createAnalystToolManifest(),
-          retrievalTools: [
-            retrievalTool(
-              deps.evidenceService,
-              snapshot,
-              input.signal,
-              (page) => {
-                retrieved.push(page);
-              },
-              input.audit,
-              log,
-            ),
-          ],
+          allowedTools: createCollectionAnalystToolManifest(),
+          retrievalTools: analystTools(
+            deps.evidenceService,
+            snapshot,
+            input.signal,
+            input.audit,
+            log,
+          ),
         });
       } catch (error) {
         logStage(log, input.audit, "provider", "failed", {
@@ -345,16 +382,29 @@ export function createAnalystTurnService(deps: {
         });
         throw error;
       }
-      logStage(log, input.audit, "provider", "success", { retrievedPageCount: retrieved.length });
+      logStage(log, input.audit, "provider", "success");
       throwIfAborted(input.signal);
-      const pages = Object.freeze([...retrieved]);
       const submission = { ...result.output, usage: result.usage };
+      let accumulated: AnalystRetrievedEvidence;
+      try {
+        accumulated = await abortable(
+          deps.evidenceService.accumulatedEvidence(snapshot),
+          input.signal,
+        );
+      } catch (error) {
+        throwIfAborted(input.signal);
+        const sourceChanged = error instanceof AnalystEvidenceSourceChangedError;
+        logStage(log, input.audit, "evidence-handoff", "failed", {
+          failure: sourceChanged ? "source-changed" : "accumulation-failed",
+        });
+        return { valid: false, reason: sourceChanged ? "source-changed" : "handoff-failed" };
+      }
       const validate = () => {
-        logStage(log, input.audit, "validation", "attempt", { retrievedPageCount: pages.length });
+        logStage(log, input.audit, "validation", "attempt");
         const validated = validateAnalystResult({
           submission,
-          evidence: combinedEvidence(pages),
-          registeredCitations: combinedCitations(pages),
+          evidence: accumulated.evidence,
+          registeredCitations: accumulated.citations,
           mandatoryUncertaintyCitationIds: input.mandatoryUncertaintyCitationIds,
         });
         logStage(
@@ -366,21 +416,13 @@ export function createAnalystTurnService(deps: {
         );
         return validated;
       };
-      if (pages.length === 0) {
-        const validated = validate();
-        return validated.valid && validated.result
-          ? Object.freeze({ output: validated.result, usage: result.usage, retrieved: pages })
-          : { valid: false, reason: "invalid-submission", diagnostic: validated.diagnostic };
-      }
-      const latest = pages.at(-1);
-      if (latest === undefined) throw new Error("Expected an Analyst evidence page");
       try {
         throwIfAborted(input.signal);
         logStage(log, input.audit, "evidence-handoff", "attempt", {
-          retrievedPageCount: pages.length,
+          evidenceSourceCount: accumulated.scope.matchingSourceCount,
         });
         const validated = await abortable(
-          deps.evidenceService.handoff(snapshot, latest, () => {
+          deps.evidenceService.handoff(snapshot, accumulated, () => {
             throwIfAborted(input.signal);
             return Promise.resolve(validate());
           }),
@@ -395,7 +437,11 @@ export function createAnalystTurnService(deps: {
           validated.valid ? {} : { diagnostic: validated.diagnostic },
         );
         return validated.valid && validated.result
-          ? Object.freeze({ output: validated.result, usage: result.usage, retrieved: pages })
+          ? Object.freeze({
+              output: validated.result,
+              usage: result.usage,
+              retrieved: [accumulated],
+            })
           : { valid: false, reason: "invalid-submission", diagnostic: validated.diagnostic };
       } catch (error) {
         throwIfAborted(input.signal);
