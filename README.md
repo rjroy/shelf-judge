@@ -53,7 +53,20 @@ For a built-in Ollama provider, an example identity is:
 }
 ```
 
-Ollama must be running locally with the chosen model installed; use `ollama list` to check installed models. `qwen3.6:27b` is an example, not a default. The built-in Ollama provider connects to `http://127.0.0.1:11434/v1`; that URL is not a provider ID. Keep `extensionIds` as `[]` for built-in behavior. Listed extension IDs load trusted executable extensions, so only allow extensions you trust. Provider credentials are not part of this identity. Add the setting to `~/.shelf-judge/config.json` without overwriting other settings. `SHELF_JUDGE_CONFIG` overrides that file path; otherwise `SHELF_JUDGE_DIR` overrides its parent directory.
+Start Ollama before installing the example model. If Ollama is already managed as a service, leave that service running and skip this command. Otherwise, run it in a separate terminal and leave that terminal open:
+
+```sh
+ollama serve
+```
+
+In your original terminal, install and verify the model before starting or restarting Shelf Judge:
+
+```sh
+ollama pull qwen3.6:27b
+ollama list
+```
+
+`qwen3.6:27b` is an example, not a default. The built-in Ollama provider connects to `http://127.0.0.1:11434/v1`; that URL is not a provider ID. Keep `extensionIds` as `[]` for built-in behavior. Listed extension IDs load trusted executable extensions, so only allow extensions you trust. Provider credentials are not part of this identity. Add the setting to `~/.shelf-judge/config.json` without overwriting other settings. `SHELF_JUDGE_CONFIG` overrides that file path; otherwise `SHELF_JUDGE_DIR` overrides its parent directory.
 
 With the daemon running, configure the identity atomically:
 
@@ -61,7 +74,9 @@ With the daemon running, configure the identity atomically:
 shelf-judge config set grounded-analysis '{"providerId":"ollama","modelId":"qwen3.6:27b","extensionIds":[]}'
 ```
 
-For a CLI-managed daemon, apply the change with `shelf-judge stop` followed by `shelf-judge start`. For development, stop the running development process, edit the existing `config.json`, and restart with `bun run dev`. Do not start a duplicate daemon. Provider changes do not reload live, so status remains that of the active daemon until restart. Set `groundedAnalysis` to `null`, or run `shelf-judge config set grounded-analysis 'null'`, to disable AI on the next restart. See the [Reflection](docs/usage.md#optional-reflections) and [Analyst](docs/usage.md#collection-analyst-cli) usage instructions.
+For a CLI-managed daemon, apply the change with `shelf-judge stop` followed by `shelf-judge start`. For development, stop the running development process, edit the existing `config.json`, and restart with `bun run dev`. Do not start a duplicate daemon. Provider changes do not reload live, so status remains that of the active daemon until restart. Set `groundedAnalysis` to `null`, or run `shelf-judge config set grounded-analysis 'null'`, to disable AI on the next restart.
+
+The provider is used only by the optional [Reflections](docs/usage.md#optional-reflections) and [Collection Analyst](docs/usage.md#collection-analyst-cli) workflows after their disclosures are acknowledged. Those workflows can send the question and relevant collection evidence, including relevant owner notes, to the configured provider. Local Ollama keeps that provider endpoint on this machine; another provider's processing and retention follow that provider's policy.
 
 ```bash
 # Install dependencies
