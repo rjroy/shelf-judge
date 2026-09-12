@@ -40,6 +40,7 @@ import {
   createProfileReflectionToolManifest,
   GROUNDED_SUBMISSION_TOOL_NAME,
 } from "../src/services/grounded-analysis/structured-submission.js";
+import { createGroundedToolLifecycleDiagnostics } from "../src/services/grounded-analysis/tool-lifecycle.js";
 
 const providerId = "shelf-judge-local";
 const modelId = "deterministic-v1";
@@ -997,6 +998,166 @@ describe("grounded-analysis provider lifecycle", () => {
 
     expect(result).toMatchObject({ output: { answer: "grounded" } });
     expect(controls.transmissions).toHaveLength(2);
+  });
+
+  test("records correlated retrieval and submission lifecycle outcomes without payloads", async () => {
+    const controls: LocalProviderControls = {
+      transmissions: [],
+      mode: "retrieve-then-submit",
+      modelLogs: [],
+    };
+    const lifecycle = createGroundedToolLifecycleDiagnostics();
+    const retrieval = defineTool({
+      name: "top",
+      label: "Rank collection games",
+      description: "Read-only test collection ranking",
+      parameters: Type.Object({ rankBy: Type.Literal("fitness") }, { additionalProperties: false }),
+      execute() {
+        const callIndex = lifecycle.dispatch("top", "retrieval");
+        lifecycle.handling("top", "retrieval", callIndex, "accepted");
+        return Promise.resolve({
+          content: [{ type: "text", text: "private collection data" }],
+          details: undefined,
+        });
+      },
+    });
+
+    await configuredProvider(controls).analyze({
+      ...request(),
+      audit: { ...request().audit, feature: "collection-analyst" },
+      allowedTools: createCollectionAnalystToolManifest(),
+      retrievalTools: collectionTestTools(retrieval),
+      toolLifecycle: lifecycle,
+    });
+
+    const outcome = controls.modelLogs?.at(-1);
+    expect(outcome).toMatchObject({
+      recordType: "grounded-model-outcome",
+      operationId: "operation-1",
+      batchId: "batch-1",
+      requestId: "request-1",
+      terminalReason: "accepted",
+      submissionDiagnostics: {
+        toolLifecycle: [
+          { toolName: "top", toolKind: "retrieval", phase: "dispatch", outcome: "attempted" },
+          { toolName: "top", toolKind: "retrieval", phase: "handling", outcome: "accepted" },
+          {
+            toolName: "submit_grounded_analysis",
+            toolKind: "submission",
+            phase: "dispatch",
+            outcome: "attempted",
+          },
+          {
+            toolName: "submit_grounded_analysis",
+            toolKind: "submission",
+            phase: "handling",
+            outcome: "accepted",
+          },
+        ],
+      },
+    });
+    expect(JSON.stringify(outcome)).not.toContain("private collection data");
+  });
+
+  test("records tool-use stops without inventing a submission attempt", async () => {
+    const controls: LocalProviderControls = {
+      transmissions: [],
+      mode: "retrieve-until-exhausted",
+      modelLogs: [],
+    };
+    const lifecycle = createGroundedToolLifecycleDiagnostics();
+    const retrieval = defineTool({
+      name: "top",
+      label: "Rank collection games",
+      description: "Read-only test collection ranking",
+      parameters: Type.Object({ rankBy: Type.Literal("fitness") }, { additionalProperties: false }),
+      execute() {
+        const callIndex = lifecycle.dispatch("top", "retrieval");
+        lifecycle.handling("top", "retrieval", callIndex, "accepted");
+        return Promise.resolve({
+          content: [{ type: "text", text: "private collection data" }],
+          details: undefined,
+        });
+      },
+    });
+
+    const failure = await captureFailure(
+      configuredProvider(controls).analyze({
+        ...request(),
+        audit: { ...request().audit, feature: "collection-analyst" },
+        allowedTools: createCollectionAnalystToolManifest(),
+        retrievalTools: collectionTestTools(retrieval),
+        toolLifecycle: lifecycle,
+      }),
+    );
+    expect(failure).toMatchObject({ reason: "output-validation" });
+    expect(controls.modelLogs?.at(-1)).toMatchObject({
+      terminalReason: "output-validation",
+      submissionDiagnostics: {
+        toolCallAttempts: 0,
+        acceptedResultPresent: false,
+        assistantStopReasons: ["tool-use", "tool-use", "tool-use", "tool-use"],
+        toolLifecycle: [
+          {
+            toolName: "top",
+            toolKind: "retrieval",
+            phase: "dispatch",
+            outcome: "attempted",
+            callIndex: 0,
+          },
+          {
+            toolName: "top",
+            toolKind: "retrieval",
+            phase: "handling",
+            outcome: "accepted",
+            callIndex: 0,
+          },
+          {
+            toolName: "top",
+            toolKind: "retrieval",
+            phase: "dispatch",
+            outcome: "attempted",
+            callIndex: 1,
+          },
+          {
+            toolName: "top",
+            toolKind: "retrieval",
+            phase: "handling",
+            outcome: "accepted",
+            callIndex: 1,
+          },
+          {
+            toolName: "top",
+            toolKind: "retrieval",
+            phase: "dispatch",
+            outcome: "attempted",
+            callIndex: 2,
+          },
+          {
+            toolName: "top",
+            toolKind: "retrieval",
+            phase: "handling",
+            outcome: "accepted",
+            callIndex: 2,
+          },
+          {
+            toolName: "top",
+            toolKind: "retrieval",
+            phase: "dispatch",
+            outcome: "attempted",
+            callIndex: 3,
+          },
+          {
+            toolName: "top",
+            toolKind: "retrieval",
+            phase: "handling",
+            outcome: "accepted",
+            callIndex: 3,
+          },
+        ],
+      },
+    });
+    expect(JSON.stringify(controls.modelLogs)).not.toContain("private collection data");
   });
 
   test("orchestrates an authorized Analyst evidence page through citation validation and handoff", async () => {

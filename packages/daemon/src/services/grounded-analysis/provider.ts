@@ -45,6 +45,10 @@ import {
   createGroundedStructuredSubmission,
   GROUNDED_SUBMISSION_TOOL_NAME,
 } from "./structured-submission.js";
+import {
+  createGroundedToolLifecycleDiagnostics,
+  type GroundedToolLifecycleDiagnostics,
+} from "./tool-lifecycle.js";
 
 const GROUNDED_SUBMISSION_ONLY_TOOL_NAMES = Object.freeze([GROUNDED_SUBMISSION_TOOL_NAME] as const);
 const COLLECTION_EVIDENCE_TOOL_NAMES = COLLECTION_EVIDENCE_WITH_SUBMISSION_TOOL_NAMES;
@@ -60,6 +64,8 @@ export interface GroundedAnalysisRequest<Output> {
   allowedTools: GroundedAllowedToolManifest;
   /** Daemon-created tools whose names must exactly match the feature manifest. */
   retrievalTools?: readonly ToolDefinition[];
+  /** Internal, privacy-safe lifecycle recorder shared with daemon-created retrieval tools. */
+  toolLifecycle?: GroundedToolLifecycleDiagnostics;
 }
 
 export interface GroundedAnalysisResult<Output> {
@@ -255,7 +261,8 @@ export function createGroundedAnalysisProvider(
     }
 
     const submissionSchema = freezeGroundedSchema(request.submissionSchema);
-    const submission = createGroundedStructuredSubmission(submissionSchema);
+    const toolLifecycle = request.toolLifecycle ?? createGroundedToolLifecycleDiagnostics();
+    const submission = createGroundedStructuredSubmission(submissionSchema, toolLifecycle);
     const recordAttemptState = (runResult?: GroundedSessionRunResult) => {
       const attemptState = submission.getAttemptState();
       const validationIssues = attemptState.validationIssues.map(({ code, path }) => ({
@@ -276,7 +283,11 @@ export function createGroundedAnalysisProvider(
                 (text) => text.trim().length > 0,
               ),
               assistantTextTurns: runResult.assistantText.length,
-              assistantStopReasons: [...(runResult.assistantStopReasons ?? [])].slice(0, 2),
+              assistantStopReasons: [...(runResult.assistantStopReasons ?? [])].slice(
+                0,
+                ANALYST_MAX_INFERENCE_ROUND_TRIPS,
+              ),
+              toolLifecycle: [...toolLifecycle.snapshot()],
             }),
       });
     };
@@ -390,6 +401,7 @@ export function createGroundedAnalysisProvider(
                 ? (error.runResult.modelInputRequests ?? 0)
                 : 0,
             validation: failure.reason === "output-validation" ? "rejected" : "not-reached",
+            terminalReason: failure.reason,
             cacheTransition: "none",
             submissionDiagnostics,
             failureCategory: failure.reason,
@@ -407,6 +419,7 @@ export function createGroundedAnalysisProvider(
         modelInputBytes: result.result.modelInputBytes,
         modelInputRequests: result.result.modelInputRequests,
         validation: "accepted",
+        terminalReason: "accepted",
         cacheTransition: "none",
         submissionDiagnostics: result.submissionDiagnostics,
       });

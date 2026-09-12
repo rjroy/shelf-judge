@@ -31,6 +31,15 @@ const SubmissionArgumentShapeSchema = z
     outcome: z.enum(["missing", "answered", "abstained", "other-string", "non-string"]),
   })
   .strict();
+const ToolLifecycleEventSchema = z
+  .object({
+    toolName: SafeIdentifierSchema,
+    toolKind: z.enum(["submission", "retrieval"]),
+    phase: z.enum(["dispatch", "handling"]),
+    outcome: z.enum(["attempted", "accepted", "rejected", "failed"]),
+    callIndex: z.number().int().safe().min(0),
+  })
+  .strict();
 
 function requireUniqueEvidenceClasses(
   value: { evidenceClassCounts: readonly { evidenceClass: string }[] },
@@ -87,6 +96,20 @@ export const GroundedModelOutcomeLogSchema = BaseModelLogSchema.extend({
   durationMs: z.number().int().safe().min(0),
   usage: z.union([GroundedProviderUsageSchema, GroundedUsageUnavailableSchema]),
   validation: z.enum(["accepted", "rejected", "not-reached"]),
+  terminalReason: z.enum([
+    "accepted",
+    "cancelled",
+    "model-configuration",
+    "extension-binding",
+    "authentication",
+    "provider-refusal",
+    "rate-limit",
+    "provider-outage",
+    "context-exhaustion",
+    "output-validation",
+    "transport",
+    "internal",
+  ]),
   cacheTransition: z.enum(["none", "written", "invalidated"]),
   modelInputBytes: z.number().int().safe().min(0),
   modelInputRequests: z.number().int().safe().min(0),
@@ -103,8 +126,9 @@ export const GroundedModelOutcomeLogSchema = BaseModelLogSchema.extend({
         argumentShapes: z.array(SubmissionArgumentShapeSchema).max(2).optional(),
         assistantStopReasons: z
           .array(z.enum(["stop", "length", "tool-use", "error", "aborted", "other"]))
-          .max(2)
+          .max(4)
           .optional(),
+        toolLifecycle: z.array(ToolLifecycleEventSchema).max(16).optional(),
       })
       .strict(),
     z.object({ state: z.literal("unavailable") }).strict(),

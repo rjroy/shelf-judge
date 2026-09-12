@@ -34,6 +34,13 @@ export type GroundedSubmissionDiagnostics =
         outcome: "missing" | "answered" | "abstained" | "other-string" | "non-string";
       }[];
       assistantStopReasons?: ("stop" | "length" | "tool-use" | "error" | "aborted" | "other")[];
+      toolLifecycle?: {
+        toolName: string;
+        toolKind: "submission" | "retrieval";
+        phase: "dispatch" | "handling";
+        outcome: "attempted" | "accepted" | "rejected" | "failed";
+        callIndex: number;
+      }[];
     };
 
 export class GroundedAnalysisError extends Error {

@@ -7,6 +7,7 @@ import {
 } from "../src/services/grounded-analysis/structured-submission.js";
 import { mapGroundedAnalysisFailure } from "../src/services/grounded-analysis/failure-mapping.js";
 import { ReflectionModelSubmissionSchema } from "../src/services/reflection-result-validator.js";
+import { createGroundedToolLifecycleDiagnostics } from "../src/services/grounded-analysis/tool-lifecycle.js";
 
 const schema = z
   .object({
@@ -158,4 +159,58 @@ test("structured submission failures remain output-validation failures", () => {
     reason: "output-validation",
     safeDetail: "invalid-structured-submission",
   });
+});
+
+test("structured submission records privacy-safe dispatch and validation outcomes", async () => {
+  const lifecycle = createGroundedToolLifecycleDiagnostics();
+  const rejected = createGroundedStructuredSubmission(schema, lifecycle);
+  const rejectedExecute = rejected.tool.execute.bind(rejected.tool);
+  expect(() => {
+    Reflect.apply(rejectedExecute, undefined, [
+      "call",
+      { submission: { result: { outcome: "answered", leaked: "private reflection text" } } },
+    ]);
+  }).toThrow(GroundedStructuredSubmissionValidationError);
+
+  const acceptedLifecycle = createGroundedToolLifecycleDiagnostics();
+  const accepted = createGroundedStructuredSubmission(schema, acceptedLifecycle);
+  const acceptedExecute = accepted.tool.execute.bind(accepted.tool);
+  await Reflect.apply(acceptedExecute, undefined, [
+    "call",
+    { submission: { result: { outcome: "answered", text: "ok" } } },
+  ]);
+
+  expect(lifecycle.snapshot()).toEqual([
+    {
+      toolName: "submit_grounded_analysis",
+      toolKind: "submission",
+      phase: "dispatch",
+      outcome: "attempted",
+      callIndex: 0,
+    },
+    {
+      toolName: "submit_grounded_analysis",
+      toolKind: "submission",
+      phase: "handling",
+      outcome: "rejected",
+      callIndex: 0,
+    },
+  ]);
+  expect(acceptedLifecycle.snapshot()).toEqual([
+    {
+      toolName: "submit_grounded_analysis",
+      toolKind: "submission",
+      phase: "dispatch",
+      outcome: "attempted",
+      callIndex: 0,
+    },
+    {
+      toolName: "submit_grounded_analysis",
+      toolKind: "submission",
+      phase: "handling",
+      outcome: "accepted",
+      callIndex: 0,
+    },
+  ]);
+  expect(JSON.stringify(lifecycle.snapshot())).not.toContain("private reflection text");
 });

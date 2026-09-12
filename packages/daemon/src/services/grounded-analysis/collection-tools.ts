@@ -7,6 +7,7 @@ import {
   COLLECTION_SUMMARIZE_TOOL_NAME,
   COLLECTION_TOP_TOOL_NAME,
 } from "./structured-submission.js";
+import type { GroundedToolLifecycleDiagnostics } from "./tool-lifecycle.js";
 
 const cursorParameters = Type.Object(
   { token: Type.String({ format: "uuid" }) },
@@ -150,6 +151,7 @@ export interface CollectionToolFactoryOptions {
   readonly turnMaxBytes: number;
   readonly redact: (value: unknown) => unknown;
   readonly onStage?: (stage: CollectionToolStage) => void;
+  readonly toolLifecycle?: GroundedToolLifecycleDiagnostics;
   readonly operations: {
     readonly top: (parameters: ToolArguments<"top">) => Promise<unknown>;
     readonly grep: (parameters: ToolArguments<"grep">) => Promise<unknown>;
@@ -200,6 +202,7 @@ export function createCollectionTools(
       async execute(_toolCallId, parameters) {
         const started = Date.now();
         const callIndex = toolIndex++;
+        const lifecycleCallIndex = options.toolLifecycle?.dispatch(name, "retrieval");
         options.onStage?.({ name, outcome: "attempt", callIndex, durationMs: 0 });
         try {
           const result = await (() => {
@@ -230,6 +233,8 @@ export function createCollectionTools(
           const serialized = JSON.stringify(options.redact(result));
           const bytes = new TextEncoder().encode(serialized).byteLength;
           if (bytes > options.resultMaxBytes || serializedBytes + bytes > options.turnMaxBytes) {
+            if (lifecycleCallIndex !== undefined)
+              options.toolLifecycle?.handling(name, "retrieval", lifecycleCallIndex, "rejected");
             options.onStage?.({
               name,
               outcome: "rejected",
@@ -244,6 +249,8 @@ export function createCollectionTools(
             };
           }
           serializedBytes += bytes;
+          if (lifecycleCallIndex !== undefined)
+            options.toolLifecycle?.handling(name, "retrieval", lifecycleCallIndex, "accepted");
           options.onStage?.({
             name,
             outcome: "success",
@@ -253,6 +260,8 @@ export function createCollectionTools(
           });
           return { content: [{ type: "text", text: serialized }], details: undefined };
         } catch (error) {
+          if (lifecycleCallIndex !== undefined)
+            options.toolLifecycle?.handling(name, "retrieval", lifecycleCallIndex, "failed");
           options.onStage?.({
             name,
             outcome: "failed",

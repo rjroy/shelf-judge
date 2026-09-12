@@ -1,6 +1,7 @@
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type, type TSchema } from "typebox";
 import { z } from "zod";
+import type { GroundedToolLifecycleDiagnostics } from "./tool-lifecycle.js";
 
 export const GROUNDED_SUBMISSION_TOOL_NAME = "submit_grounded_analysis";
 export const COLLECTION_TOP_TOOL_NAME = "top";
@@ -233,6 +234,7 @@ function safeValidationIssues(
 
 export function createGroundedStructuredSubmission<Output>(
   schema: z.ZodType<Output>,
+  toolLifecycle?: GroundedToolLifecycleDiagnostics,
 ): GroundedStructuredSubmission<Output> {
   let result: Output | undefined;
   let toolCallAttempts = 0;
@@ -240,6 +242,7 @@ export function createGroundedStructuredSubmission<Output>(
   let validationIssues: readonly GroundedStructuredSubmissionIssue[] = [];
   const argumentShapes: GroundedStructuredSubmissionArgumentShape[] = [];
   let preparedInvocationPending = false;
+  let preparedInvocationCallIndex: number | undefined;
   const tool = defineTool({
     name: GROUNDED_SUBMISSION_TOOL_NAME,
     label: "Submit grounded analysis",
@@ -250,14 +253,23 @@ export function createGroundedStructuredSubmission<Output>(
       { additionalProperties: false },
     ),
     prepareArguments(parameters) {
+      const callIndex = toolLifecycle?.dispatch(GROUNDED_SUBMISSION_TOOL_NAME, "submission");
       toolCallAttempts += 1;
       if (argumentShapes.length < 2) argumentShapes.push(argumentShape(parameters));
       try {
         if (result !== undefined) throw new Error("A grounded result was already submitted");
         const prepared = prepareGroundedStructuredSubmission(schema, parameters);
         preparedInvocationPending = true;
+        preparedInvocationCallIndex = callIndex;
         return prepared;
       } catch (error) {
+        if (callIndex !== undefined)
+          toolLifecycle?.handling(
+            GROUNDED_SUBMISSION_TOOL_NAME,
+            "submission",
+            callIndex,
+            "rejected",
+          );
         rejectedAttempts += 1;
         if (error instanceof GroundedStructuredSubmissionValidationError) {
           validationIssues = safeValidationIssues(schema, error.issues);
@@ -266,14 +278,25 @@ export function createGroundedStructuredSubmission<Output>(
       }
     },
     execute(_toolCallId, parameters) {
+      const callIndex = preparedInvocationPending
+        ? preparedInvocationCallIndex
+        : toolLifecycle?.dispatch(GROUNDED_SUBMISSION_TOOL_NAME, "submission");
       if (!preparedInvocationPending) toolCallAttempts += 1;
       if (!preparedInvocationPending && argumentShapes.length < 2)
         argumentShapes.push(argumentShape(parameters));
       preparedInvocationPending = false;
+      preparedInvocationCallIndex = undefined;
       try {
         if (result !== undefined) throw new Error("A grounded result was already submitted");
         result = parseGroundedStructuredSubmission(schema, parameters.submission);
       } catch (error) {
+        if (callIndex !== undefined)
+          toolLifecycle?.handling(
+            GROUNDED_SUBMISSION_TOOL_NAME,
+            "submission",
+            callIndex,
+            "rejected",
+          );
         rejectedAttempts += 1;
         if (error instanceof GroundedStructuredSubmissionValidationError) {
           validationIssues = safeValidationIssues(schema, error.issues);
@@ -282,6 +305,8 @@ export function createGroundedStructuredSubmission<Output>(
           throw new GroundedStructuredSubmissionValidationError(error.issues);
         throw error;
       }
+      if (callIndex !== undefined)
+        toolLifecycle?.handling(GROUNDED_SUBMISSION_TOOL_NAME, "submission", callIndex, "accepted");
       return Promise.resolve({
         content: [{ type: "text", text: "Grounded result accepted." }],
         details: undefined,

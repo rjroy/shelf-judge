@@ -16,6 +16,7 @@ import {
 import { createCollectionAnalystToolManifest } from "./grounded-analysis/structured-submission.js";
 import type { GroundedModelAuditContext } from "./grounded-analysis/model-logger.js";
 import { createCollectionTools } from "./grounded-analysis/collection-tools.js";
+import { createGroundedToolLifecycleDiagnostics } from "./grounded-analysis/tool-lifecycle.js";
 
 // Tool responses re-enter the model context on a later round. The evidence
 // service has the authoritative shared operation budget; this is an additional
@@ -134,6 +135,7 @@ function analystTools(
   signal: AbortSignal,
   audit: GroundedModelAuditContext,
   log: AnalystTurnLogSink,
+  toolLifecycle: ReturnType<typeof createGroundedToolLifecycleDiagnostics>,
 ): ReturnType<typeof createCollectionTools> {
   const request = (parameters: Record<string, unknown>) => ({
     ...parameters,
@@ -149,6 +151,7 @@ function analystTools(
     contextLimitMessage: TOOL_CONTEXT_LIMIT_MESSAGE,
     redact: modelVisible,
     onStage: ({ name, outcome, ...details }) => logStage(log, audit, name, outcome, details),
+    toolLifecycle,
     operations: {
       top: (parameters) => evidenceService.top(snapshot, request(parameters)),
       grep: (parameters) => evidenceService.grep(snapshot, request(parameters)),
@@ -212,6 +215,7 @@ export function createAnalystTurnService(deps: {
       logStage(log, input.audit, "capture", "success", { durationMs: Date.now() - captureStarted });
       throwIfAborted(input.signal);
       logStage(log, input.audit, "provider", "attempt");
+      const toolLifecycle = createGroundedToolLifecycleDiagnostics();
       let result: GroundedAnalysisResult<z.infer<typeof AnalystSubmissionSchema>>;
       try {
         result = await deps.provider.analyze({
@@ -224,7 +228,9 @@ export function createAnalystTurnService(deps: {
             input.signal,
             input.audit,
             log,
+            toolLifecycle,
           ),
+          toolLifecycle,
         });
       } catch (error) {
         logStage(log, input.audit, "provider", "failed", {

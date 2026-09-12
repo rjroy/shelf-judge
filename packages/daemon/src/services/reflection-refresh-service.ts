@@ -18,6 +18,7 @@ import { GroundedAnalysisError } from "./grounded-analysis/failure-mapping.js";
 import type { GroundedAnalysisProvider } from "./grounded-analysis/provider.js";
 import { createProfileReflectionToolManifest } from "./grounded-analysis/structured-submission.js";
 import { createCollectionTools } from "./grounded-analysis/collection-tools.js";
+import { createGroundedToolLifecycleDiagnostics } from "./grounded-analysis/tool-lifecycle.js";
 import { createLogger, type Logger } from "./logger.js";
 import { canonicalSha256 } from "./profile-source-coordinator.js";
 import type {
@@ -121,7 +122,11 @@ function providerView(value: unknown): unknown {
   );
 }
 
-function reflectionTools(turn: ReflectionEvidenceTurn, signal: AbortSignal) {
+function reflectionTools(
+  turn: ReflectionEvidenceTurn,
+  signal: AbortSignal,
+  toolLifecycle: ReturnType<typeof createGroundedToolLifecycleDiagnostics>,
+) {
   const request = (parameters: Record<string, unknown>) => ({
     ...parameters,
     snapshotFingerprint: turn.analystSnapshot.snapshotFingerprint,
@@ -140,6 +145,7 @@ function reflectionTools(turn: ReflectionEvidenceTurn, signal: AbortSignal) {
     turnMaxBytes: REFLECTION_TOOL_TURN_MAX_BYTES,
     contextLimitMessage: TOOL_CONTEXT_LIMIT_MESSAGE,
     redact: providerView,
+    toolLifecycle,
     operations: {
       top: (parameters) => turn.analystEvidence.top(turn.analystSnapshot, request(parameters)),
       grep: (parameters) => turn.analystEvidence.grep(turn.analystSnapshot, request(parameters)),
@@ -462,6 +468,7 @@ export function createReflectionRefreshService(
             modelOperationLimit: 1,
             maximumProviderRoundTrips: 4,
           });
+          const toolLifecycle = createGroundedToolLifecycleDiagnostics();
           const analyzed = await deps.provider.analyze({
             ...prompts,
             submissionSchema: ReflectionModelSubmissionSchema,
@@ -478,7 +485,8 @@ export function createReflectionRefreshService(
               evidenceIdentityHash,
             },
             allowedTools: createProfileReflectionToolManifest(),
-            retrievalTools: reflectionTools(evidenceTurn, operation.signal),
+            retrievalTools: reflectionTools(evidenceTurn, operation.signal, toolLifecycle),
+            toolLifecycle,
           });
           activeUsage = analyzed.usage;
           try {
