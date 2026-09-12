@@ -280,14 +280,16 @@ describe("ReflectionRefreshService", () => {
       ),
     ).toEqual([...REFLECTION_QUESTION_IDS]);
     expect(ReflectionStreamEventHistorySchema.safeParse(state.events).success).toBe(true);
-    expect(state.logs).toHaveLength(6);
+    expect(state.logs).toHaveLength(13);
     expect(JSON.stringify(state.logs)).not.toContain(CAPABILITY);
-    expect(state.logs[0]).toMatchObject({
-      recordType: "reflection-refresh-attempt",
-      questionId: "repeated-values",
-      modelOperationLimit: 1,
-      maximumProviderRoundTrips: 4,
-    });
+    expect(state.logs).toContainEqual(
+      expect.objectContaining({
+        recordType: "reflection-refresh-attempt",
+        questionId: "repeated-values",
+        modelOperationLimit: 1,
+        maximumProviderRoundTrips: 4,
+      }),
+    );
   });
 
   test("refreshes one selected question and rejects disclosure mismatch before evidence", async () => {
@@ -582,12 +584,14 @@ describe("ReflectionRefreshService", () => {
           reason: "persistence",
           safeDetail: "reflection-compensation-persistence-failed",
         });
-        expect(state.logs.at(-1)).toMatchObject({
-          recordType: "reflection-refresh-outcome",
-          outcome: "failed",
-          failureCategory: "persistence",
-          cacheTransition: "written",
-        });
+        expect(state.logs).toContainEqual(
+          expect.objectContaining({
+            recordType: "reflection-refresh-outcome",
+            outcome: "failed",
+            failureCategory: "persistence",
+            cacheTransition: "written",
+          }),
+        );
         expect(JSON.stringify(state.logs)).not.toContain("Prior cache sentinel");
       }
     }
@@ -635,10 +639,9 @@ describe("ReflectionRefreshService", () => {
           ? { type: "cancelled" }
           : { type: "failed", reason: "transport" },
       );
-      expect(state.logs.at(-1)).toMatchObject({
-        cacheTransition: "none",
-        failureCategory: interruption,
-      });
+      expect(state.logs).toContainEqual(
+        expect.objectContaining({ cacheTransition: "none", failureCategory: interruption }),
+      );
     }
   });
 
@@ -678,10 +681,9 @@ describe("ReflectionRefreshService", () => {
       expect(await running).toBe(interruption === "cancelled" ? "cancelled" : "failed");
       expect(durableCache).toBeNull();
       expect(state.analyzed).toEqual(["repeated-values"]);
-      expect(state.logs.at(-1)).toMatchObject({
-        cacheTransition: "invalidated",
-        failureCategory: interruption,
-      });
+      expect(state.logs).toContainEqual(
+        expect.objectContaining({ cacheTransition: "invalidated", failureCategory: interruption }),
+      );
       expect(JSON.stringify(state.logs)).not.toContain("Purged prior sentinel");
     }
   });
@@ -849,5 +851,40 @@ describe("ReflectionRefreshService", () => {
       reason: "output-validation",
       safeDetail: "invalid-reflection-output",
     });
+    expect(state.logs).toContainEqual(
+      expect.objectContaining({
+        recordType: "reflection-refresh-terminal-emission",
+        terminalType: "failed",
+        delivery: "emitted",
+        failureCategory: "output-validation",
+        questionId: "repeated-values",
+      }),
+    );
+  });
+
+  test("records a safe missed terminal diagnostic when a disconnected transport rejects emission", async () => {
+    const state = harness({ validationError: new Error("PRIVATE_REFLECTION_CONTENT") });
+    const events: ReflectionStreamEvent[] = [];
+    expect(
+      await state.service.run({
+        ...runInput(events, { ...request(), questionId: "repeated-values" }),
+        emit: (event) => {
+          if (event.terminal) throw new Error("transport disconnected");
+          events.push(event);
+        },
+      }),
+    ).toBe("failed");
+    expect(state.logs).toContainEqual(
+      expect.objectContaining({
+        recordType: "reflection-refresh-terminal-emission",
+        terminalType: "failed",
+        delivery: "missed",
+        failureCategory: "output-validation",
+        questionId: "repeated-values",
+      }),
+    );
+    const serialized = JSON.stringify(state.logs);
+    expect(serialized).not.toContain("PRIVATE_REFLECTION_CONTENT");
+    expect(serialized).not.toContain(CAPABILITY);
   });
 });

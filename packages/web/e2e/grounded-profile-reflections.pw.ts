@@ -279,6 +279,73 @@ test("a second refresh cannot replace the active cancellation capability", async
   expect(refreshRequests).toHaveLength(1);
 });
 
+test("terminal, missing-terminal, and stream-error refresh paths leave no card refreshing", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const reflections = page.locator(".optional-reflections");
+  const refreshPath = "**/api/daemon/profile/reflections/refresh";
+  const event = (sequence: number, type: string, terminal: boolean, payload: object) =>
+    `event: ${type}\ndata: ${JSON.stringify({
+      version: 1,
+      operationId: "diagnostic-operation",
+      sequence,
+      occurredAt: "2026-09-01T12:00:00.000Z",
+      type,
+      terminal,
+      batchId: "diagnostic-batch",
+      ...payload,
+    })}\n\n`;
+  const accepted = event(0, "accepted", false, {
+    requestId: "diagnostic-request",
+    cancellationCapability: "a".repeat(64),
+    questionIds: ["repeated-values"],
+  });
+  const started = event(1, "question-started", false, {
+    questionId: "repeated-values",
+    questionVersion: 1,
+  });
+
+  await page.route(refreshPath, (route) =>
+    route.fulfill({
+      contentType: "text/event-stream",
+      body:
+        accepted +
+        started +
+        event(2, "question-completed", true, {
+          questionId: "repeated-values",
+          outcome: "abstained",
+          batchComplete: true,
+        }),
+    }),
+  );
+  await reflections.getByRole("button", { name: "Refresh reflections" }).click();
+  await reflections.getByRole("button", { name: "Acknowledge and refresh" }).click();
+  await expect(reflections.locator(".reflection-live")).not.toContainText("ended before");
+  await expect(reflections.getByRole("button", { name: "Refresh reflections" })).toBeEnabled();
+
+  await page.unroute(refreshPath);
+  let reflectionGets = 0;
+  await page.route("**/api/daemon/profile/reflections", (route) => {
+    reflectionGets += 1;
+    return reflectionGets === 1 ? route.continue() : route.abort("failed");
+  });
+  await page.route(refreshPath, (route) =>
+    route.fulfill({ contentType: "text/event-stream", body: accepted + started }),
+  );
+  await reflections.getByRole("button", { name: "Refresh reflections" }).click();
+  await reflections.getByRole("button", { name: "Acknowledge and refresh" }).click();
+  await expect(reflections.locator(".reflection-live")).toContainText("ended before a terminal");
+  await expect(reflections.getByRole("button", { name: "Cancel refresh" })).toHaveCount(0);
+
+  await page.unroute(refreshPath);
+  await page.route(refreshPath, (route) => route.abort("failed"));
+  await reflections.getByRole("button", { name: "Refresh reflections" }).click();
+  await reflections.getByRole("button", { name: "Acknowledge and refresh" }).click();
+  await expect(reflections).toContainText("Optional reflections are unavailable");
+  await expect(reflections.getByRole("button", { name: "Cancel refresh" })).toHaveCount(0);
+});
+
 test("native Chromium 200 percent page zoom records reflection width evidence", async ({
   browser,
 }, testInfo) => {

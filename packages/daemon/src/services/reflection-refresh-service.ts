@@ -94,6 +94,14 @@ interface ReflectionRefreshAudit {
   readonly evidenceIdentityHash: string;
 }
 
+interface ReflectionRefreshCorrelation {
+  readonly operationIdHash: string;
+  readonly batchIdHash: string;
+  readonly requestIdHash: string;
+  readonly attemptIdHash: string;
+  readonly questionId: ReflectionQuestionId;
+}
+
 const FEATURE_ID = "profile-reflection";
 
 export function abortRace<Value>(promise: Promise<Value>, signal: AbortSignal): Promise<Value> {
@@ -354,6 +362,7 @@ export function createReflectionRefreshService(
       let activeQuestion: ReflectionQuestionId | undefined;
       let terminalReservation: ReturnType<ActiveOperationRegistry["reserveTerminal"]>;
       let activeAudit: ReflectionRefreshAudit | undefined;
+      let activeCorrelation: ReflectionRefreshCorrelation | undefined;
       let activeUsage: GroundedProviderUsage | GroundedUsageUnavailable = {
         state: "unavailable",
       };
@@ -385,6 +394,21 @@ export function createReflectionRefreshService(
           activeQuestion = questionId;
           try {
             fence = await deps.state.startAttempt(questionId, request.batchId);
+            activeCorrelation = {
+              operationIdHash: canonicalSha256(input.operationId),
+              batchIdHash: canonicalSha256(request.batchId),
+              requestIdHash: canonicalSha256(request.requestId),
+              attemptIdHash: canonicalSha256(fence.attemptId),
+              questionId,
+            };
+            logger.log({
+              recordType: "reflection-refresh-state-transition",
+              occurredAt: now(),
+              ...activeCorrelation,
+              from: "idle",
+              to: "refreshing",
+              trigger: "refresh-request",
+            });
           } catch (error) {
             throw new ReflectionRefreshFailure("persistence", "reflection-attempt-start-failed", {
               cause: error,
@@ -450,11 +474,7 @@ export function createReflectionRefreshService(
             snapshotFingerprint: evidencePackage.snapshotFingerprint,
           });
           activeAudit = {
-            operationIdHash: canonicalSha256(input.operationId),
-            batchIdHash: canonicalSha256(request.batchId),
-            requestIdHash: canonicalSha256(request.requestId),
-            attemptIdHash: canonicalSha256(fence.attemptId),
-            questionId,
+            ...activeCorrelation,
             questionVersion: REFLECTION_QUESTION_POLICIES[questionId].questionVersion,
             providerId: provider.providerId,
             modelId: provider.modelId,
@@ -585,6 +605,16 @@ export function createReflectionRefreshService(
             );
           }
           activeCacheTransition = "written";
+          if (activeCorrelation !== undefined) {
+            logger.log({
+              recordType: "reflection-refresh-state-transition",
+              occurredAt: now(),
+              ...activeCorrelation,
+              from: "refreshing",
+              to: "idle",
+              trigger: "validated-result-persisted",
+            });
+          }
           if (!batchComplete) {
             const interruption = operations.pendingInterruption(terminalReservation);
             if (interruption !== undefined) {
@@ -655,6 +685,17 @@ export function createReflectionRefreshService(
               outcome: result.outcome,
               batchComplete: true,
             });
+            logger.log({
+              recordType: "reflection-refresh-terminal-emission",
+              occurredAt: now(),
+              ...(activeCorrelation ?? {
+                operationIdHash: canonicalSha256(input.operationId),
+                batchIdHash: canonicalSha256(request.batchId),
+                requestIdHash: canonicalSha256(request.requestId),
+              }),
+              terminalType: "question-completed",
+              delivery: "emitted",
+            });
             if (
               terminalReservation === undefined ||
               !operations.commitTerminal(terminalReservation, "completed")
@@ -708,8 +749,21 @@ export function createReflectionRefreshService(
         }
         if (fence !== undefined) {
           try {
-            if (failure.reason === "cancelled") await deps.state.cancelAttempt(fence);
-            else await deps.state.failAttempt(fence, failure.reason, failure.safeDetail);
+            const persisted =
+              failure.reason === "cancelled"
+                ? await deps.state.cancelAttempt(fence)
+                : await deps.state.failAttempt(fence, failure.reason, failure.safeDetail);
+            if (persisted && activeCorrelation !== undefined) {
+              logger.log({
+                recordType: "reflection-refresh-state-transition",
+                occurredAt: now(),
+                ...activeCorrelation,
+                from: "refreshing",
+                to: failure.reason === "cancelled" ? "cancelled" : "unavailable",
+                trigger: failure.reason,
+                ...(failure.reason === "cancelled" ? {} : { failureCategory: failure.reason }),
+              });
+            }
           } catch {
             // The authoritative terminal outcome must survive a secondary persistence failure.
           }
@@ -734,7 +788,29 @@ export function createReflectionRefreshService(
               batchId: request.batchId,
               ...(activeQuestion === undefined ? {} : { questionId: activeQuestion }),
             });
+            logger.log({
+              recordType: "reflection-refresh-terminal-emission",
+              occurredAt: now(),
+              ...(activeCorrelation ?? {
+                operationIdHash: canonicalSha256(input.operationId),
+                batchIdHash: canonicalSha256(request.batchId),
+                requestIdHash: canonicalSha256(request.requestId),
+              }),
+              terminalType: "cancelled",
+              delivery: "emitted",
+            });
           } catch {
+            logger.log({
+              recordType: "reflection-refresh-terminal-emission",
+              occurredAt: now(),
+              ...(activeCorrelation ?? {
+                operationIdHash: canonicalSha256(input.operationId),
+                batchIdHash: canonicalSha256(request.batchId),
+                requestIdHash: canonicalSha256(request.requestId),
+              }),
+              terminalType: "cancelled",
+              delivery: "missed",
+            });
             // A disconnected transport cannot receive its terminal event.
           }
           return "cancelled";
@@ -761,7 +837,31 @@ export function createReflectionRefreshService(
             reason: failure.reason,
             ...(failure.safeDetail === undefined ? {} : { safeDetail: failure.safeDetail }),
           });
+          logger.log({
+            recordType: "reflection-refresh-terminal-emission",
+            occurredAt: now(),
+            ...(activeCorrelation ?? {
+              operationIdHash: canonicalSha256(input.operationId),
+              batchIdHash: canonicalSha256(request.batchId),
+              requestIdHash: canonicalSha256(request.requestId),
+            }),
+            terminalType: "failed",
+            delivery: "emitted",
+            failureCategory: failure.reason,
+          });
         } catch {
+          logger.log({
+            recordType: "reflection-refresh-terminal-emission",
+            occurredAt: now(),
+            ...(activeCorrelation ?? {
+              operationIdHash: canonicalSha256(input.operationId),
+              batchIdHash: canonicalSha256(request.batchId),
+              requestIdHash: canonicalSha256(request.requestId),
+            }),
+            terminalType: "failed",
+            delivery: "missed",
+            failureCategory: failure.reason,
+          });
           // A disconnected transport cannot receive its terminal event.
         }
         return "failed";

@@ -15,6 +15,20 @@ import { ReflectionDisclosure } from "./reflection-disclosure";
 
 const REFLECTIONS_PATH = "/api/daemon/profile/reflections";
 
+type ReflectionClientDiagnostic = {
+  readonly batchId: string;
+  readonly requestId: string;
+  readonly transition: string;
+  readonly trigger: string;
+  readonly questionId?: ReflectionQuestionId;
+  readonly reason?: string;
+};
+
+function logReflectionDiagnostic(diagnostic: ReflectionClientDiagnostic): void {
+  // Deliberately limited to correlation and lifecycle metadata: never stream content or credentials.
+  console.info("[reflection-refresh]", diagnostic);
+}
+
 function requestId(): string {
   return generateBrowserUuid();
 }
@@ -49,7 +63,8 @@ export function OptionalReflections() {
   const [disclosureOpen, setDisclosureOpen] = useState(false);
   const [message, setMessage] = useState<string>();
   const active = useRef<
-    { batchId: string; capability: string; controller: AbortController } | undefined
+    | { batchId: string; requestId: string; capability: string; controller: AbortController }
+    | undefined
   >(undefined);
   const disclosureTrigger = useRef<HTMLElement | null>(null);
   const restoreDisclosureFocus = useCallback(() => {
@@ -134,9 +149,17 @@ export function OptionalReflections() {
     }
     restoreDisclosureFocus();
     const batchId = requestId();
+    const refreshRequestId = requestId();
     const capability = cancellationCapability();
     const controller = new AbortController();
-    active.current = { batchId, capability, controller };
+    active.current = { batchId, requestId: refreshRequestId, capability, controller };
+    logReflectionDiagnostic({
+      batchId,
+      requestId: refreshRequestId,
+      transition: "idle->refreshing",
+      trigger: "refresh-confirmed",
+      ...(pendingQuestion === undefined ? {} : { questionId: pendingQuestion }),
+    });
     setMessage("Refreshing reflections.");
     updateStates((state) =>
       state.enabled && (pendingQuestion === undefined || state.questionId === pendingQuestion)
@@ -153,7 +176,7 @@ export function OptionalReflections() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           batchId,
-          requestId: requestId(),
+          requestId: refreshRequestId,
           cancellationCapability: capability,
           ...(pendingQuestion === undefined ? {} : { questionId: pendingQuestion }),
           disclosure: {
@@ -200,6 +223,16 @@ export function OptionalReflections() {
             );
           }
           if (event.type === "question-completed") {
+            if (event.terminal) {
+              terminalOutcome = true;
+              logReflectionDiagnostic({
+                batchId,
+                requestId: refreshRequestId,
+                transition: "refreshing->idle",
+                trigger: "terminal-event-received",
+                questionId: event.questionId,
+              });
+            }
             updateStates((state) =>
               state.questionId === event.questionId
                 ? { ...state, attempt: { state: "idle" } }
@@ -208,6 +241,13 @@ export function OptionalReflections() {
           }
           if (event.type === "cancelled") {
             terminalOutcome = true;
+            logReflectionDiagnostic({
+              batchId,
+              requestId: refreshRequestId,
+              transition: "refreshing->cancelled",
+              trigger: "terminal-event-received",
+              ...(event.questionId === undefined ? {} : { questionId: event.questionId }),
+            });
             updateStates((state) =>
               event.questionId === undefined || state.questionId === event.questionId
                 ? { ...state, attempt: { state: "cancelled", occurredAt: event.occurredAt } }
@@ -217,6 +257,14 @@ export function OptionalReflections() {
           }
           if (event.type === "failed") {
             terminalOutcome = true;
+            logReflectionDiagnostic({
+              batchId,
+              requestId: refreshRequestId,
+              transition: "refreshing->unavailable",
+              trigger: "terminal-event-received",
+              ...(event.questionId === undefined ? {} : { questionId: event.questionId }),
+              reason: event.reason,
+            });
             updateStates((state) =>
               event.questionId === undefined || state.questionId === event.questionId
                 ? {
@@ -234,10 +282,55 @@ export function OptionalReflections() {
           }
         }
       }
-      if (!terminalOutcome) setMessage("Reflection refresh finished.");
-    } catch (error) {
-      if (!controller.signal.aborted)
-        setMessage(error instanceof Error ? error.message : "Reflection refresh failed.");
+      if (!terminalOutcome) {
+        logReflectionDiagnostic({
+          batchId,
+          requestId: refreshRequestId,
+          transition: "refreshing->unavailable",
+          trigger: "terminal-event-missed",
+          ...(pendingQuestion === undefined ? {} : { questionId: pendingQuestion }),
+          reason: "transport",
+        });
+        updateStates((state) =>
+          state.attempt.state === "refreshing"
+            ? {
+                ...state,
+                attempt: {
+                  state: "unavailable",
+                  reason: "transport",
+                  safeDetail: "terminal-event-missed",
+                  occurredAt: new Date().toISOString(),
+                },
+              }
+            : state,
+        );
+        setMessage("Reflection refresh ended before a terminal status was received.");
+      }
+    } catch {
+      if (!controller.signal.aborted) {
+        logReflectionDiagnostic({
+          batchId,
+          requestId: refreshRequestId,
+          transition: "refreshing->unavailable",
+          trigger: "stream-error",
+          ...(pendingQuestion === undefined ? {} : { questionId: pendingQuestion }),
+          reason: "transport",
+        });
+        updateStates((state) =>
+          state.attempt.state === "refreshing"
+            ? {
+                ...state,
+                attempt: {
+                  state: "unavailable",
+                  reason: "transport",
+                  safeDetail: "refresh-stream-error",
+                  occurredAt: new Date().toISOString(),
+                },
+              }
+            : state,
+        );
+        setMessage("Reflection refresh failed before a terminal status was received.");
+      }
     } finally {
       if (active.current?.batchId === batchId) active.current = undefined;
       setPendingQuestion(undefined);
