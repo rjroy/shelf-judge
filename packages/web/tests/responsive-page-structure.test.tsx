@@ -1,24 +1,33 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { GameDetailHero, GameDetailMain, GameDetailPanels } from "@/app/games/[id]/page";
+import { GameDetailHero, GameDetailMain } from "@/app/games/[id]/page";
 
 describe("responsive page structure", () => {
   test("keeps game detail content in the production responsive shell", () => {
     const html = renderToStaticMarkup(
-      <GameDetailMain>
+      <GameDetailMain
+        editors={{
+          assessment: <table className="breakdown-table" />,
+          ratings: <form className="rating-form" />,
+          utilization: null,
+          acquisition: null,
+          intention: null,
+          playMetadata: null,
+          notes: null,
+          relatedBggIds: null,
+          ownership: null,
+          boxDimensions: null,
+          shelfAssignment: null,
+        }}
+      >
         <GameDetailHero>Responsive Game</GameDetailHero>
-        <GameDetailPanels
-          left={<table className="breakdown-table" />}
-          right={<form className="rating-form" />}
-        />
       </GameDetailMain>,
     );
 
-    expect(html).toContain('class="main-scroll"');
+    expect(html).toContain('class="main-scroll game-detail-main game-detail-chapters"');
     expect(html).toContain('class="game-hero"');
-    expect(html).toContain('class="detail-panels"');
-    expect(html).toContain('class="panel-left"');
-    expect(html).toContain('class="panel-right"');
+    expect(html).toContain('class="game-detail-chapter game-detail-assessment"');
+    expect(html).toContain('class="game-detail-chapter game-detail-ratings"');
     expect(html).toContain('class="breakdown-table"');
     expect(html).toContain('class="rating-form"');
   });
@@ -27,7 +36,7 @@ describe("responsive page structure", () => {
     const css = await Bun.file(new URL("../app/globals.css", import.meta.url)).text();
 
     expect(css).toMatch(
-      /@media \(max-width: 900px\)[\s\S]*?\.detail-panels \{\s*grid-template-columns: 1fr;/,
+      /@media \(max-width: 900px\)[\s\S]*?\.game-detail-main\.game-detail-chapters \{[\s\S]*?flex-direction: column;/,
     );
     expect(css).toMatch(
       /@media \(max-width: 600px\)[\s\S]*?\.game-hero \{[\s\S]*?flex-wrap: wrap;/,

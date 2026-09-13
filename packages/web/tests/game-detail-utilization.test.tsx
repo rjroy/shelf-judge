@@ -8,8 +8,10 @@ describe("game detail utilization integration", () => {
     const page = await Bun.file("packages/web/app/games/[id]/page.tsx").text();
     expect(api).toContain("/api/games/${id}?includePredicted=true");
     expect(page).not.toContain("predictGame");
-    expect(page.indexOf("<PurchaseUtilizationPanel")).toBeLessThan(
-      page.indexOf("<GameDetailPanels"),
+    expect(page).toContain("utilization: (");
+    expect(page).toContain("<GameDetailMain editors={layoutSections}>");
+    expect(page).toMatch(
+      /<section className="game-detail-chapter game-detail-utilization">\s*\{editors\.utilization\}/,
     );
   });
 
@@ -38,7 +40,7 @@ describe("game detail utilization integration", () => {
   test("defines responsive result hierarchy for mobile and desktop", async () => {
     const css = await Bun.file("packages/web/app/globals.css").text();
     expect(css).toMatch(
-      /\.utilization-primary-values \{[\s\S]*?grid-template-columns: repeat\(3, 1fr\)/,
+      /\.utilization-primary-values \{[\s\S]*?grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/,
     );
     expect(css).toMatch(
       /@media \(max-width: 600px\)[\s\S]*?\.utilization-primary-values,[\s\S]*?grid-template-columns: 1fr/,

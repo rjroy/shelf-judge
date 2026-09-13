@@ -1053,6 +1053,55 @@ body {
 
 /* ===== Game Detail ===== */
 
+/* Type-grouped niche cards keep the detail page's compact ledger rhythm. */
+.niche-panel--grouped {
+  container-type: inline-size;
+  display: grid;
+  gap: 12px;
+}
+
+.niche-panel--grouped .niche-type-sections {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.niche-panel--grouped .niche-type-section {
+  border-top: 2px solid var(--border-strong);
+  padding-top: 10px;
+}
+
+.niche-panel--grouped .niche-type-heading {
+  margin: 0 0 8px;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.niche-panel--grouped .niche-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.niche-panel--grouped .niche-card {
+  min-width: 0;
+  padding: 12px;
+  border-color: var(--niche-border);
+  border-radius: 4px;
+}
+
+.niche-panel--grouped .niche-neighbor-link {
+  overflow-wrap: anywhere;
+}
+
+@container (max-width: 700px) {
+  .niche-panel--grouped .niche-type-sections {
+    grid-template-columns: 1fr;
+  }
+}
+
 .breadcrumb {
   display: flex;
   align-items: center;
@@ -1231,6 +1280,111 @@ body {
   margin-bottom: 24px;
 }
 
+/* Game detail chapters keep independent editors in the reading flow. */
+.game-detail-main.game-detail-chapters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-areas:
+    "content content"
+    "assessment ratings"
+    "utilization acquisition"
+    "intention play-metadata"
+    "notes related-bgg-ids"
+    "ownership box-dimensions"
+    "shelf-assignment shelf-assignment";
+  gap: 22px;
+  padding: 0 var(--content-padding) var(--content-padding);
+  align-items: start;
+}
+
+.game-detail-chapters > .game-detail-content {
+  grid-area: content;
+  min-width: 0;
+}
+
+.game-detail-chapters > .game-detail-content > .game-hero {
+  margin-inline: 0;
+}
+
+.game-detail-chapter {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-surface);
+}
+
+.game-detail-assessment {
+  grid-area: assessment;
+}
+.game-detail-ratings {
+  grid-area: ratings;
+}
+.game-detail-utilization {
+  grid-area: utilization;
+}
+.game-detail-acquisition {
+  grid-area: acquisition;
+}
+.game-detail-intention {
+  grid-area: intention;
+}
+.game-detail-play-metadata {
+  grid-area: play-metadata;
+}
+.game-detail-notes {
+  grid-area: notes;
+}
+.game-detail-related-bgg-ids {
+  grid-area: related-bgg-ids;
+}
+.game-detail-ownership {
+  grid-area: ownership;
+}
+.game-detail-box-dimensions {
+  grid-area: box-dimensions;
+}
+.game-detail-shelf-assignment {
+  grid-area: shelf-assignment;
+}
+
+.game-detail-chapter .panel-section-title,
+.game-detail-chapter h2 {
+  margin-top: 0;
+}
+
+.game-detail-utilization .purchase-utilization-panel,
+.game-detail-intention .intention-panel,
+.game-detail-notes .owner-note-panel {
+  margin: 0;
+}
+
+.game-detail-main .bgg-data-section {
+  display: block;
+  max-height: 10rem;
+  overflow: auto;
+}
+
+@media (max-width: 900px) {
+  .game-detail-main {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .game-detail-main.game-detail-chapters {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding-inline: 16px;
+  }
+
+  .game-detail-chapters > .game-detail-content,
+  .game-detail-chapters > .game-detail-chapter {
+    width: 100%;
+  }
+}
+
 .score-hero-label {
   font-size: var(--text-xs);
   font-weight: 600;
@@ -1260,23 +1414,6 @@ body {
   color: var(--text-muted);
   margin-top: 6px;
   text-align: right;
-}
-
-.detail-panels {
-  display: grid;
-  grid-template-columns: 1fr 380px;
-  gap: 0;
-  min-height: 0;
-}
-
-.panel-left {
-  padding: 28px var(--content-padding);
-  border-right: 1px solid var(--border);
-}
-
-.panel-right {
-  padding: 28px var(--content-padding);
-  background: var(--bg-surface);
 }
 
 .panel-section-title {
@@ -4272,16 +4409,6 @@ body {
     display: none;
   }
 
-  /* --- Game detail: panels stack on tablet --- */
-  .detail-panels {
-    grid-template-columns: 1fr;
-  }
-
-  .panel-left {
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-  }
-
   /* --- Tournament: comparison cards stack on tablet --- */
   .comparison-cards {
     grid-template-columns: 1fr;
@@ -6568,6 +6695,73 @@ body {
   padding-right: var(--content-padding);
 }
 
+.niche-ignored-section {
+  container-type: inline-size;
+  margin-top: 1.5rem;
+}
+
+.niche-ignored-heading {
+  margin: 0 0 0.625rem;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.niche-ignored-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.1875rem 1.25rem;
+  max-height: 13rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-inline-end: 0.5rem;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.niche-ignored-tag {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-inline-size: 0;
+  padding: 0.5rem 0 0.5rem 0.625rem;
+  border-inline-start: 1px solid color-mix(in srgb, var(--text-muted) 42%, transparent);
+}
+
+.niche-ignored-tag > span {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.niche-ignored-section .niche-type-badge {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.niche-ignored-tag button {
+  flex: 0 0 auto;
+  min-block-size: 2.75rem;
+  padding-inline: 0.625rem;
+}
+
+.niche-ignored-list:focus-visible {
+  outline: 2px solid var(--text-muted);
+  outline-offset: 2px;
+}
+
+@container (min-width: 40rem) {
+  .niche-ignored-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container (min-width: 60rem) {
+  .niche-ignored-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 /* Search preview: Niche Impact (REQ-NICHE-26, REQ-NICHE-27) */
 .preview-niche-impact {
   border-top: 1px solid var(--border);
@@ -8259,26 +8453,26 @@ body {
 
 /* Purchase utilization */
 .purchase-utilization-panel {
+  display: grid;
+  gap: 10px;
   margin: 24px var(--content-padding) 0;
+  padding: 16px;
   border: 1px solid var(--border-strong);
   border-radius: 8px;
   background: var(--bg-surface);
-  overflow: hidden;
 }
 .utilization-outcome {
-  padding: 22px 24px;
-  border-left: 5px solid var(--text-muted);
-  background: var(--bg-subtle);
+  padding: 0;
 }
 .outcome-met .utilization-outcome {
-  border-left-color: var(--success);
+  color: var(--success);
 }
-.outcome-not-met .utilization-outcome {
-  border-left-color: var(--score-mid);
+.outcome-met .utilization-outcome h2 {
+  color: var(--success);
 }
 .utilization-kicker {
   display: block;
-  margin-bottom: 4px;
+  margin: 0 0 4px;
   color: var(--text-muted);
   font-size: var(--text-xs);
   font-weight: 600;
@@ -8305,30 +8499,32 @@ body {
 .utilization-supporting-values {
   display: grid;
   margin: 0;
+  gap: 0;
+  border: 0;
 }
 .utilization-primary-values {
-  grid-template-columns: repeat(3, 1fr);
-  border-bottom: 1px solid var(--border);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 .utilization-supporting-values {
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 .utilization-special-explanation {
   margin: 0;
-  padding: 14px 20px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-subtle);
+  padding: 0;
   color: var(--text-secondary);
   font-size: var(--text-sm);
   line-height: 1.5;
 }
 .utilization-row {
   min-width: 0;
-  padding: 16px 18px;
-  border-right: 1px solid var(--border);
+  padding: 0 14px;
+  border: 0;
+}
+.utilization-row:first-child {
+  padding-left: 0;
 }
 .utilization-row:last-child {
-  border-right: 0;
+  padding-right: 0;
 }
 .utilization-row dt {
   color: var(--text-muted);
@@ -8339,6 +8535,7 @@ body {
   margin: 6px 0 0;
   color: var(--text-primary);
   font-size: var(--text-base);
+  font-variant-numeric: tabular-nums;
 }
 .utilization-reasons {
   display: block;
@@ -8349,9 +8546,8 @@ body {
 }
 .utilization-evidence,
 .utilization-assumptions {
-  margin: 0 20px;
-  padding: 14px 4px;
-  border-top: 1px solid var(--border);
+  margin: 0;
+  padding: 12px 0 0;
 }
 .utilization-evidence summary {
   cursor: pointer;
@@ -8372,7 +8568,7 @@ body {
   color: var(--text-muted);
 }
 .utilization-assumptions {
-  padding-bottom: 18px;
+  display: none;
 }
 
 .acquisition-form {
