@@ -9436,3 +9436,30 @@ body {
     gap: 0.2rem;
   }
 }
+
+/* Derived and override source values stay available without crowding the score table. */
+.breakdown-name-cell .breakdown-derived-details {
+  margin-top: 3px;
+}
+
+.breakdown-name-cell .breakdown-derived-details summary {
+  width: fit-content;
+  cursor: pointer;
+  color: #a09a90;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.breakdown-name-cell .breakdown-derived-details[open] summary {
+  color: #e8e4dc;
+}
+
+.breakdown-name-cell .breakdown-derived-details .breakdown-detail-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  margin-top: 3px;
+  color: #a09a90;
+  font-size: 11px;
+  line-height: 1.35;
+}
