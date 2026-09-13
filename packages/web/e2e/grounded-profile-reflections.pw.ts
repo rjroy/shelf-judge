@@ -178,12 +178,17 @@ test("answered and abstained results render as distinct daemon-owned outcomes", 
   await page.goto("/");
   const reflections = page.locator(".optional-reflections");
   await expect(reflections).toContainText("Quick setup recurs in owner testimony");
-  await expect(
-    reflections.getByRole("link", { name: /Owner testimony: Owner note for Atlas Equal/ }),
-  ).toHaveAttribute("href", "/games/game-1");
-  await expect(
-    reflections.getByRole("link", { name: /Deterministic evidence: Current fitness score/ }),
-  ).toHaveAttribute("href", "/games/game-1");
+  await expect(reflections.getByRole("list", { name: "Evidence used" })).toBeVisible();
+  await expect(reflections).not.toContainText("Captured source");
+  await expect(reflections).not.toContainText("Current fitness score");
+  await expect(reflections.getByRole("link", { name: "Atlas Equal" }).first()).toHaveAttribute(
+    "href",
+    "/games/game-1",
+  );
+  await expect(reflections.getByRole("link", { name: "Atlas Equal" }).last()).toHaveAttribute(
+    "href",
+    "/games/game-1",
+  );
   page.once("dialog", (dialog) => dialog.accept());
   await reflections.getByRole("button", { name: "Delete all reflections" }).click();
   await expect(reflections).not.toContainText("Quick setup recurs in owner testimony");
@@ -208,12 +213,11 @@ test("stale output remains collapsed and exposes captured citation snapshots onl
   await expect(card).not.toContainText("Quick setup recurs in owner testimony");
   await card.getByRole("button", { name: "Show previous stale reflection" }).click();
   await expect(card).toContainText("Quick setup recurs in owner testimony");
-  await expect(
-    card.getByRole("link", { name: /Owner testimony: Owner note for Atlas Equal/ }),
-  ).toHaveAttribute("href", "#reflection-citation-note-1");
-  await expect(card.locator("#reflection-citation-note-1")).toContainText(
-    "Captured evidence snapshot",
+  await expect(card.getByRole("link", { name: "Atlas Equal" }).first()).toHaveAttribute(
+    "href",
+    "#reflection-citation-note-1",
   );
+  await expect(card.locator("#reflection-citation-note-1")).toContainText("Captured snapshot");
   await expect(card.locator("#reflection-citation-note-1")).toContainText(
     "Owner note for Atlas Equal",
   );

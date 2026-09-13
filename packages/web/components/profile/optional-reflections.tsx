@@ -11,6 +11,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { generateBrowserUuid } from "@/lib/browser-uuid";
 import { ReflectionCard } from "./reflection-card";
+import { gameTitlesFromGamesPayload } from "./reflection-evidence-presentation";
 import { ReflectionDisclosure } from "./reflection-disclosure";
 
 const REFLECTIONS_PATH = "/api/daemon/profile/reflections";
@@ -58,6 +59,7 @@ async function reflectionJson(path: string, init?: RequestInit): Promise<unknown
 
 export function OptionalReflections() {
   const [data, setData] = useState<ReflectionGetResult | null>(null);
+  const [gameTitles, setGameTitles] = useState<ReadonlyMap<string, string>>(new Map());
   const [loadState, setLoadState] = useState<"loading" | "unavailable">("loading");
   const [pendingQuestion, setPendingQuestion] = useState<ReflectionQuestionId | undefined>();
   const [disclosureOpen, setDisclosureOpen] = useState(false);
@@ -98,6 +100,16 @@ export function OptionalReflections() {
         "Optional reflections are unavailable. Your deterministic Profile remains available.",
       );
     }
+  }, []);
+
+  useEffect(() => {
+    void fetch("/api/daemon/games?ownership=all")
+      .then(async (response) => {
+        if (!response.ok) return;
+        const payload: unknown = await response.json();
+        setGameTitles(gameTitlesFromGamesPayload(payload));
+      })
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -422,6 +434,7 @@ export function OptionalReflections() {
                 <ReflectionCard
                   key={state.questionId}
                   state={state}
+                  gameTitles={gameTitles}
                   wording={question.wording}
                   onRefresh={(questionId) => {
                     setPendingQuestion(questionId);

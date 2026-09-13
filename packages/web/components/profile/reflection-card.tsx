@@ -2,62 +2,57 @@
 
 import { useState } from "react";
 import type { ReflectionQuestionState } from "@shelf-judge/shared";
+import { presentReflectionEvidence } from "./reflection-evidence-presentation";
 
-function citationHref(operationId: string, parameters: Record<string, string>): string | undefined {
-  const gameId = parameters.gameId;
-  if (operationId === "shelf.profile.get") return "/";
-  if (
-    gameId !== undefined &&
-    [
-      "shelf.game.get",
-      "shelf.game.bgg.refresh",
-      "shelf.game.plays.set",
-      "shelf.game.rating.set",
-    ].includes(operationId)
-  ) {
-    return `/games/${encodeURIComponent(gameId)}`;
-  }
-  return undefined;
-}
-
-function CitationList({ state }: { state: ReflectionQuestionState }) {
+function CitationList({
+  state,
+  gameTitles,
+}: {
+  state: ReflectionQuestionState;
+  gameTitles: ReadonlyMap<string, string>;
+}) {
   if (state.cache.state === "none") return null;
   const stale = state.cache.state === "stale";
   return (
-    <ul className="reflection-citations" aria-label="Reflection citations">
-      {state.cache.result.citations.map((citation) => (
-        <li key={citation.citationId}>
-          {(() => {
-            const href = citationHref(
-              citation.destination.operationId,
-              citation.destination.parameters,
-            );
-            const label = `${citation.testimony ? "Owner testimony" : "Deterministic evidence"}: ${citation.canonicalSummary}`;
-            if (stale) {
-              return (
-                <>
-                  <a href={`#reflection-citation-${citation.citationId}`}>{label}</a>
-                  <details id={`reflection-citation-${citation.citationId}`}>
-                    <summary>Captured evidence snapshot</summary>
-                    <p>{citation.canonicalSummary}</p>
-                    <p>Source version: {citation.sourceVersion}</p>
-                    {citation.observedAt === undefined ? null : (
-                      <p>Observed: {citation.observedAt}</p>
-                    )}
-                  </details>
-                </>
-              );
-            }
-            return href === undefined ? <span>{label}</span> : <a href={href}>{label}</a>;
-          })()}
-        </li>
-      ))}
+    <ul className="reflection-citations" aria-label="Evidence used">
+      {presentReflectionEvidence(state.cache.result.citations, stale, gameTitles).map(
+        ({ citation, gameTitle, href, label, traces }) => (
+          <li key={citation.citationId}>
+            {label}:{" "}
+            {stale ? (
+              <>
+                <a href={`#reflection-citation-${citation.citationId}`}>
+                  <em>{gameTitle ?? citation.canonicalSummary}</em>
+                </a>
+                <details id={`reflection-citation-${citation.citationId}`}>
+                  <summary>Captured snapshot</summary>
+                  <p>{citation.canonicalSummary}</p>
+                  {traces.map((trace) => (
+                    <div key={trace.citationId}>
+                      <p>Citation ID: {trace.citationId}</p>
+                      <p>Source version: {trace.sourceVersion}</p>
+                      {trace.observedAt === undefined ? null : <p>Observed: {trace.observedAt}</p>}
+                    </div>
+                  ))}
+                </details>
+              </>
+            ) : href === undefined ? (
+              <em>{gameTitle ?? citation.canonicalSummary}</em>
+            ) : (
+              <a href={href}>
+                <em>{gameTitle ?? citation.canonicalSummary}</em>
+              </a>
+            )}
+          </li>
+        ),
+      )}
     </ul>
   );
 }
 
 export function ReflectionCard({
   state,
+  gameTitles,
   wording,
   onRefresh,
   onToggle,
@@ -65,6 +60,7 @@ export function ReflectionCard({
   refreshDisabled,
 }: {
   state: ReflectionQuestionState;
+  gameTitles: ReadonlyMap<string, string>;
   wording: string;
   onRefresh: (questionId: ReflectionQuestionState["questionId"]) => void;
   onToggle: (questionId: ReflectionQuestionState["questionId"], enabled: boolean) => void;
@@ -127,7 +123,7 @@ export function ReflectionCard({
             Scope: {result.scope.examinedPresentNoteCount} of {result.scope.totalPresentNoteCount}{" "}
             present notes examined across {result.scope.examinedGameCount} games.
           </p>
-          <CitationList state={state} />
+          <CitationList state={state} gameTitles={gameTitles} />
         </div>
       )}
       {cache.state === "none" && state.attempt.state === "idle" && (
