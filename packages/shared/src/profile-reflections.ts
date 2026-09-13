@@ -177,15 +177,7 @@ export const ReflectionDisclosureSchema = GroundedReflectionDisclosureSchema.ref
     path: ["relevantOwnerNotesMayBeTransmitted"],
     message: "Reflection disclosure must state that relevant owner notes may be transmitted",
   },
-).superRefine((disclosure, context) => {
-  if (disclosure.maximumProviderRoundTrips !== disclosure.modelOperationCount * 2) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["maximumProviderRoundTrips"],
-      message: "Reflection disclosure must allow exactly two provider round trips per operation",
-    });
-  }
-});
+);
 
 const REFLECTION_GAME_EVIDENCE_CLASSES = [
   "owner-game-note",
@@ -360,15 +352,7 @@ export const ReflectionScopeSchema = z
     }
   });
 
-type ReflectionReportedUsage = z.infer<typeof GroundedProviderUsageSchema> & {
-  inferenceRoundTrips: 1 | 2;
-};
-
-export const ReflectionProviderUsageSchema = GroundedProviderUsageSchema.refine(
-  (usage): usage is ReflectionReportedUsage =>
-    usage.inferenceRoundTrips === 1 || usage.inferenceRoundTrips === 2,
-  { path: ["inferenceRoundTrips"], message: "Reflection usage permits one or two round trips" },
-);
+export const ReflectionProviderUsageSchema = GroundedProviderUsageSchema;
 
 export const ReflectionBlockSchema = z
   .object({
@@ -430,47 +414,18 @@ export const ReflectionCompletedSchema = z
       });
     }
     for (const { block, path } of blocks) {
+      if (result.outcome === "answered" && block.citationIds.length === 0) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [...path],
+          message: "Every answered block requires at least one citation ID",
+        });
+      }
       if (block.citationIds.some((citationId) => !citationIds.has(citationId))) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
           path: [...path],
           message: "Every block citation must resolve within the result",
-        });
-      }
-      if (result.outcome === "answered") {
-        const blockCitations = result.citations.filter(({ citationId }) =>
-          block.citationIds.includes(citationId),
-        );
-        if (!blockCitations.some(({ testimony }) => testimony)) {
-          context.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: [...path],
-            message: "A substantive block requires owner testimony",
-          });
-        }
-        if (!blockCitations.some(({ testimony }) => !testimony)) {
-          context.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: [...path],
-            message: "A substantive block requires computed or imported evidence",
-          });
-        }
-      }
-    }
-    if (result.outcome === "answered") {
-      const centralCitationIds = new Set(result.centralSynthesis.citationIds);
-      const citedOwnerSources = new Set(
-        result.citations
-          .filter((citation) => citation.testimony && centralCitationIds.has(citation.citationId))
-          .map(({ sourceId }) => sourceId),
-      );
-      const minimumIndependentNotes =
-        REFLECTION_QUESTION_POLICIES[result.evidenceIdentity.questionId].minimumIndependentNotes;
-      if (citedOwnerSources.size < minimumIndependentNotes) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["centralSynthesis", "citationIds"],
-          message: `Central synthesis requires testimony from at least ${minimumIndependentNotes} distinct games`,
         });
       }
     }

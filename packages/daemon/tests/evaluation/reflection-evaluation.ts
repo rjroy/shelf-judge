@@ -602,6 +602,7 @@ function syntheticEvidencePackage(
       sourceVersion: version,
       evidenceClass,
     })),
+    citationMetadataSchema: ReflectionCitationSchema,
   });
   for (const entry of entries) {
     registry.recordExamined({
@@ -609,7 +610,17 @@ function syntheticEvidencePackage(
       sourceVersion: entry.sourceVersion,
       evidenceClass: entry.evidenceClass,
     });
-    registry.add(entry);
+    registry.add({
+      ...entry,
+      citationMetadata: syntheticCitation(
+        entry.citationId,
+        entry.sourceId,
+        entry.sourceVersion,
+        entry.evidenceClass,
+        entry.evidenceClass === "owner-game-note" ? entry.payload.text : entry.sourceId,
+        "gameId" in entry.payload ? entry.payload.gameId : undefined,
+      ),
+    });
   }
   const evidence = registry.complete();
   const citations = entries.map((entry) =>

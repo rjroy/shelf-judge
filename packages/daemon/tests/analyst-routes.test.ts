@@ -3,7 +3,6 @@ import { createTestApp, jsonRequest } from "./helpers/test-app.js";
 import type {
   GroundedAnalysisProvider,
   GroundedAnalysisRequest,
-  GroundedAnalysisResult,
 } from "../src/services/grounded-analysis/provider.js";
 import { createAnalystRoutes } from "../src/routes/analyst.js";
 import { createAnalystAttestationService } from "../src/services/analyst-attestation-service.js";
@@ -36,27 +35,17 @@ function deferred<Value>() {
 }
 
 function configuredProvider(
-  analyze?: <Output>(
-    request: GroundedAnalysisRequest<Output>,
-  ) => Promise<GroundedAnalysisResult<Output>>,
+  analyze?: (request: Parameters<NonNullable<GroundedAnalysisProvider["analyzeFreeform"]>>[0]) => Promise<{ output: string; usage: { state: "unavailable" } }>,
 ): GroundedAnalysisProvider {
   return {
     configurationStatus: {
       status: "configured",
       identity: { providerId: "provider", modelId: "model", extensionIds: [] },
     },
-    async analyze<Output>(request: GroundedAnalysisRequest<Output>) {
+    analyze: () => Promise.reject(new Error("structured analysis is not configured")),
+    async analyzeFreeform(request) {
       if (analyze !== undefined) return analyze(request);
-      return {
-        output: request.submissionSchema.parse({
-          outcome: "abstained",
-          reason: "insufficient-evidence",
-          blocks: [{ text: "I need authorized evidence.", citationIds: [] }],
-          citations: [],
-          usage: { state: "unavailable" },
-        }),
-        usage: { state: "unavailable" },
-      };
+      return { output: "I need authorized evidence.", usage: { state: "unavailable" } };
     },
   };
 }
@@ -76,15 +65,10 @@ function events(body: string): Array<Record<string, unknown>> {
     .map((line) => JSON.parse(line.slice("data: ".length)) as Record<string, unknown>);
 }
 
-function completedProviderOutput<Output>(request: GroundedAnalysisRequest<Output>) {
+function completedProviderOutput(_request: Parameters<NonNullable<GroundedAnalysisProvider["analyzeFreeform"]>>[0]) {
+  void _request;
   return {
-    output: request.submissionSchema.parse({
-      outcome: "abstained",
-      reason: "insufficient-evidence",
-      blocks: [{ text: "I need authorized evidence.", citationIds: [] }],
-      citations: [],
-      usage: { state: "unavailable" },
-    }),
+    output: "I need authorized evidence.",
     usage: { state: "unavailable" as const },
   };
 }
@@ -159,7 +143,14 @@ describe("Analyst daemon routes", () => {
   });
 
   test("streams one configured turn as SSE and NDJSON with one committed terminal event", async () => {
-    const context = createTestApp({ groundedAnalysisProvider: configuredProvider() });
+    const context = createTestApp({
+      groundedAnalysisProvider: configuredProvider((request) => {
+        expect(request.systemPrompt).toBe(
+          "You are Shelf Judge's Collection Analyst. Use the available read-only collection discovery tools as needed, then provide a conversational final answer.",
+        );
+        return completedProviderOutput(request);
+      }),
+    });
     const sse = await jsonRequest(context.app, "POST", "/api/analyst/turns/stream", turnRequest());
     const sseBody = await sse.text();
     expect(sse.headers.get("content-type")).toContain("text/event-stream");
@@ -196,7 +187,7 @@ describe("Analyst daemon routes", () => {
     const started = deferred<void>();
     const context = createTestApp({
       groundedAnalysisProvider: configuredProvider(
-        async <Output>(request: GroundedAnalysisRequest<Output>) => {
+        async (request) => {
           started.resolve();
           await new Promise<void>((_resolve, reject) =>
             request.signal.addEventListener(
@@ -243,7 +234,7 @@ describe("Analyst daemon routes", () => {
     let calls = 0;
     const context = createTestApp({
       groundedAnalysisProvider: configuredProvider(
-        async <Output>(request: GroundedAnalysisRequest<Output>) => {
+        async (request) => {
           calls += 1;
           if (calls > 1) return completedProviderOutput(request);
           started.resolve();
@@ -285,7 +276,7 @@ describe("Analyst daemon routes", () => {
     const releaseProvider = deferred<void>();
     const context = createTestApp({
       groundedAnalysisProvider: configuredProvider(
-        async <Output>(request: GroundedAnalysisRequest<Output>) => {
+        async (request) => {
           started.resolve();
           await releaseProvider.promise;
           return completedProviderOutput(request);
@@ -317,7 +308,7 @@ describe("Analyst daemon routes", () => {
     const context = createTestApp({
       onShutdown: () => shutdown.resolve(),
       groundedAnalysisProvider: configuredProvider(
-        async <Output>(request: GroundedAnalysisRequest<Output>) => {
+        async (request) => {
           started.resolve();
           await new Promise<void>((_resolve, reject) =>
             request.signal.addEventListener(

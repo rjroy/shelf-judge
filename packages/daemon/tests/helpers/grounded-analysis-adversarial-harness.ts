@@ -414,6 +414,10 @@ function expectFailureReason(error: GroundedAnalysisError, reason: GroundedAnaly
   expect(error.reason).toBe(reason);
 }
 
+function modelLifecycleLogs(logs: readonly GroundedModelLogRecord[]) {
+  return logs.filter((log) => log.recordType !== "grounded-model-trace");
+}
+
 export function runGroundedAnalysisAdversarialHarness<Output, ForeignOutput>(options: {
   feature: GroundedAdversarialFeature<Output>;
   foreignFeature: GroundedAdversarialFeature<ForeignOutput>;
@@ -589,7 +593,7 @@ export function runGroundedAnalysisAdversarialHarness<Output, ForeignOutput>(opt
       expect(JSON.stringify(analyzer.publication.completedEvent(analysisResult))).not.toContain(
         foreignFeature.feature,
       );
-      expect(capture.logs).toMatchObject([
+      expect(modelLifecycleLogs(capture.logs)).toMatchObject([
         {
           feature: feature.feature,
           evidenceManifestId: feature.manifest.manifestId,
@@ -654,7 +658,7 @@ export function runGroundedAnalysisAdversarialHarness<Output, ForeignOutput>(opt
       expect(foreignCapture.prompts).toEqual([]);
       expect(publicStream).toContain(feature.terminalEventOutcomes.completed[0]?.type);
       expect(publicStream).not.toContain(foreignFeature.feature);
-      expect(capture.logs).toMatchObject([
+      expect(modelLifecycleLogs(capture.logs)).toMatchObject([
         {
           feature: feature.feature,
           evidenceManifestId: feature.manifest.manifestId,
@@ -707,8 +711,8 @@ export function runGroundedAnalysisAdversarialHarness<Output, ForeignOutput>(opt
 
       await analyzer.analyze(request);
 
-      expect(capture.logs).toHaveLength(2);
-      for (const log of capture.logs) {
+      expect(modelLifecycleLogs(capture.logs)).toHaveLength(2);
+      for (const log of modelLifecycleLogs(capture.logs)) {
         expect(log).toMatchObject({
           feature: feature.feature,
           evidenceManifestId: feature.manifest.manifestId,
@@ -869,7 +873,7 @@ export function runGroundedAnalysisAdversarialHarness<Output, ForeignOutput>(opt
       expect(JSON.stringify(publicOutput)).not.toContain(foreignFeature.feature);
       expect(JSON.stringify(capture.operationDiscoveries)).not.toContain(capability);
       expect(capture.operationDiscoveries).not.toEqual([]);
-      expect(capture.logs).toHaveLength(2);
+      expect(modelLifecycleLogs(capture.logs)).toHaveLength(2);
       expect(capture.transportLogs).toHaveLength(2);
       expect(capture.artifactWrites).toEqual([]);
       expect(transport.discover()).toEqual([]);
@@ -1188,7 +1192,7 @@ export function runGroundedAnalysisAdversarialHarness<Output, ForeignOutput>(opt
       expectFailureReason(failure, "transport");
       expect(capture.prompts).toEqual([canonicalProviderPrompt(feature)]);
       expect(capture.disposals).toBe(1);
-      expect(capture.logs).toMatchObject([
+      expect(modelLifecycleLogs(capture.logs)).toMatchObject([
         { recordType: "grounded-model-attempt", feature: feature.feature },
         {
           recordType: "grounded-model-outcome",
@@ -1236,7 +1240,7 @@ export function runGroundedAnalysisAdversarialHarness<Output, ForeignOutput>(opt
       feature.redactionPolicy.assertPayloadCapture(capture);
       expect(capture.lifecycle).toEqual(["extension-bind", "model-resolve", "model-set", "prompt"]);
       expect(capture.disposals).toBe(1);
-      expect(capture.logs).toMatchObject([
+      expect(modelLifecycleLogs(capture.logs)).toMatchObject([
         { recordType: "grounded-model-attempt", feature: feature.feature },
         {
           recordType: "grounded-model-outcome",

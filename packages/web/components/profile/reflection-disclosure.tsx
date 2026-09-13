@@ -19,7 +19,6 @@ export function ReflectionDisclosure({
   const configured = configuration.status === "configured";
   const provider = configured ? configuration.identity.providerId : "Unavailable";
   const model = configured ? configuration.identity.modelId : "Unavailable";
-  const roundTrips = questionCount * 2;
   useEffect(() => {
     cancelButton.current?.focus();
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -68,8 +67,8 @@ export function ReflectionDisclosure({
       </p>
       <p>
         Shelf Judge retains validated reflection output and safe citation snapshots locally. It has
-        no fixed token or monetary cap. This batch has {questionCount} model operation
-        {questionCount === 1 ? "" : "s"} and at most {roundTrips} provider inference round trips.
+        no fixed inference round-trip, token, or monetary cap. This batch has {questionCount} model
+        operation{questionCount === 1 ? "" : "s"}.
       </p>
       <p>
         You can cancel after transmission. Transmitted content may already have been processed and

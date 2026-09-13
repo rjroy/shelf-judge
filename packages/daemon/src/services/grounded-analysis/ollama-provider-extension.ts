@@ -1,5 +1,9 @@
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { SimpleStreamOptions } from "@earendil-works/pi-ai";
+import {
+  createDiagnosticOpenAiCompletionsStream,
+  type NativeTransportDiagnosticSink,
+} from "./transport-diagnostics.js";
 
 export const OLLAMA_GROUNDED_MAX_TOKENS = 1024;
 
@@ -25,6 +29,7 @@ export function createOllamaProviderExtension(
   modelId: string,
   maxTokens = OLLAMA_GROUNDED_MAX_TOKENS,
   baseUrl = "http://127.0.0.1:11434/v1",
+  transportDiagnosticSink?: NativeTransportDiagnosticSink,
 ): ExtensionFactory {
   return (pi) => {
     pi.registerProvider("ollama", {
@@ -32,6 +37,7 @@ export function createOllamaProviderExtension(
       baseUrl,
       apiKey: "ollama",
       api: "openai-completions",
+      streamSimple: createDiagnosticOpenAiCompletionsStream(transportDiagnosticSink),
       models: [
         {
           id: modelId,

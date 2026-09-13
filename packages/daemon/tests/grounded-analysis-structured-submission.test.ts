@@ -96,12 +96,12 @@ test("structured submission remains fail-closed with privacy-safe diagnostics", 
 test("structured submission retains bounded schema-path validation diagnostics", () => {
   const submission = createGroundedStructuredSubmission(schema);
   const execute = submission.tool.execute.bind(submission.tool);
-  expect(() => {
+  expect(
     Reflect.apply(execute, undefined, [
       "call",
       { submission: { result: { outcome: "answered", leaked: "private fixture evidence" } } },
-    ]);
-  }).toThrow(GroundedStructuredSubmissionValidationError);
+    ]),
+  ).rejects.toThrow(GroundedStructuredSubmissionValidationError);
   expect(submission.getAttemptState().validationIssues).toEqual([
     { code: "invalid_type", path: ["result", "text"] },
     { code: "unrecognized_keys", path: ["result"] },
@@ -119,7 +119,7 @@ test("structured submission retains bounded schema-path validation diagnostics",
 test("structured submission records only safe discriminator shape for rejected arguments", () => {
   const submission = createGroundedStructuredSubmission(ReflectionModelSubmissionSchema);
   const execute = submission.tool.execute.bind(submission.tool);
-  expect(() => {
+  expect(
     Reflect.apply(execute, undefined, [
       "call",
       {
@@ -130,8 +130,8 @@ test("structured submission records only safe discriminator shape for rejected a
           },
         },
       },
-    ]);
-  }).toThrow(GroundedStructuredSubmissionValidationError);
+    ]),
+  ).rejects.toThrow(GroundedStructuredSubmissionValidationError);
   expect(submission.getAttemptState().argumentShapes).toEqual([
     {
       topLevel: "object",
@@ -161,21 +161,21 @@ test("structured submission failures remain output-validation failures", () => {
   });
 });
 
-test("structured submission records privacy-safe dispatch and validation outcomes", async () => {
+test("structured submission records privacy-safe dispatch and validation outcomes", () => {
   const lifecycle = createGroundedToolLifecycleDiagnostics();
   const rejected = createGroundedStructuredSubmission(schema, lifecycle);
   const rejectedExecute = rejected.tool.execute.bind(rejected.tool);
-  expect(() => {
+  expect(
     Reflect.apply(rejectedExecute, undefined, [
       "call",
       { submission: { result: { outcome: "answered", leaked: "private reflection text" } } },
-    ]);
-  }).toThrow(GroundedStructuredSubmissionValidationError);
+    ]),
+  ).rejects.toThrow(GroundedStructuredSubmissionValidationError);
 
   const acceptedLifecycle = createGroundedToolLifecycleDiagnostics();
   const accepted = createGroundedStructuredSubmission(schema, acceptedLifecycle);
   const acceptedExecute = accepted.tool.execute.bind(accepted.tool);
-  await Reflect.apply(acceptedExecute, undefined, [
+  Reflect.apply(acceptedExecute, undefined, [
     "call",
     { submission: { result: { outcome: "answered", text: "ok" } } },
   ]);

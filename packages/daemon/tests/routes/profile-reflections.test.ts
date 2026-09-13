@@ -76,6 +76,14 @@ interface ReflectionHelpNode {
 
 const RUNTIME_VALIDATION_EXTENSION = "x-shelf-judge-runtime-validation";
 
+function deferred<Value>() {
+  let resolve: (value: Value) => void = () => {};
+  const promise = new Promise<Value>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
+
 function collectSchemaResources(value: unknown): Record<string, unknown>[] {
   if (typeof value !== "object" || value === null) return [];
   if (Array.isArray(value)) return value.flatMap(collectSchemaResources);
@@ -328,7 +336,6 @@ function harness(options?: {
     refresh: options?.refresh ?? makeRefresh(),
     loadCurrentSources: options?.loadCurrentSources ?? (() => Promise.resolve(SOURCES)),
     createOperationId: () => "operation-1",
-    createTransportId: () => "transport-1",
   });
   const app = new Hono();
   app.route("/api", module.routes);
@@ -576,6 +583,28 @@ describe("Profile Reflection routes", () => {
     expect(text).toContain("event: accepted");
     expect(text).toContain("event: question-completed");
     expect(text).not.toContain("private");
+  });
+
+  test("detaches a cancelled response without invoking explicit refresh cancellation", async () => {
+    const completion = deferred<"completed" | "cancelled" | "failed">();
+    let cancelCalls = 0;
+    const refresh = makeRefresh(async (input) => {
+      await input.emit(acceptedEvent(input));
+      return completion.promise;
+    });
+    refresh.cancel = () => {
+      cancelCalls += 1;
+      return true;
+    };
+    const response = await jsonRequest(
+      harness({ refresh }).app,
+      "POST",
+      "/api/profile/reflections/refresh",
+      refreshRequest(),
+    );
+    await response.body?.cancel();
+    completion.resolve("completed");
+    expect(cancelCalls).toBe(0);
   });
 
   test("rejects returned stream identity mismatch before serialization", async () => {
@@ -1316,7 +1345,7 @@ describe("Profile Reflection operation discovery", () => {
     const citationResult = malformedCitation.result as ReturnType<typeof answered>;
     citationResult.citations[0] = { ...citationResult.citations[0], testimony: false } as never;
     invalidEvents.push(malformedCitation);
-    for (const inferenceRoundTrips of [0, 3]) {
+    for (const inferenceRoundTrips of [0]) {
       invalidEvents.push(
         eventExampleForParity("provider-usage", {
           questionId: "repeated-values",
@@ -1324,6 +1353,14 @@ describe("Profile Reflection operation discovery", () => {
         }),
       );
     }
+    expect(
+      ReflectionStreamEventSchema.safeParse(
+        eventExampleForParity("provider-usage", {
+          questionId: "repeated-values",
+          usage: { state: "reported", inferenceRoundTrips: 26 },
+        }),
+      ).success,
+    ).toBe(true);
     invalidEvents.push({
       ...eventExampleForParity("model-status", {
         questionId: "repeated-values",

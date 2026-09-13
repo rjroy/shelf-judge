@@ -485,20 +485,20 @@ describe("Reflection result and evidence contracts", () => {
     insufficientTestimony.supportingBlocks[0].citationIds = ["citation-note", "citation-score"];
     if (insufficientTestimony.outcome !== "answered") throw new Error("Expected answered fixture");
     insufficientTestimony.centralSynthesis.citationIds = ["citation-note", "citation-score"];
-    expect(ReflectionCompletedSchema.safeParse(insufficientTestimony).success).toBe(false);
+    expect(ReflectionCompletedSchema.safeParse(insufficientTestimony).success).toBe(true);
 
     const secondNoteOnlyInSupport = completed();
     if (secondNoteOnlyInSupport.outcome !== "answered")
       throw new Error("Expected answered fixture");
     secondNoteOnlyInSupport.centralSynthesis.citationIds = ["citation-note", "citation-score"];
-    expect(ReflectionCompletedSchema.safeParse(secondNoteOnlyInSupport).success).toBe(false);
+    expect(ReflectionCompletedSchema.safeParse(secondNoteOnlyInSupport).success).toBe(true);
 
     const missingDeterministicClass = completed();
     missingDeterministicClass.supportingBlocks[0].citationIds = [
       "citation-note",
       "citation-note-2",
     ];
-    expect(ReflectionCompletedSchema.safeParse(missingDeterministicClass).success).toBe(false);
+    expect(ReflectionCompletedSchema.safeParse(missingDeterministicClass).success).toBe(true);
 
     const uncitedCentralSynthesis = completed();
     if (uncitedCentralSynthesis.outcome !== "answered")
@@ -561,9 +561,9 @@ describe("Reflection result and evidence contracts", () => {
         .success,
     ).toBe(false);
     expect(
-      ReflectionProviderUsageSchema.safeParse({ state: "reported", inferenceRoundTrips: 3 })
+      ReflectionProviderUsageSchema.safeParse({ state: "reported", inferenceRoundTrips: 26 })
         .success,
-    ).toBe(false);
+    ).toBe(true);
     for (const amount of ["-1", "+1", "01", ".5", "1."]) {
       expect(
         ReflectionProviderUsageSchema.safeParse({
@@ -719,10 +719,12 @@ describe("Reflection state, disclosure, operations, and streams", () => {
       applicationTokenCap: null,
       applicationMonetaryCap: null,
       modelOperationCount: 3,
-      maximumProviderRoundTrips: 6,
       cancellation: "Stop the active batch",
     };
     expect(ReflectionDisclosureSchema.safeParse(disclosure).success).toBe(true);
+    expect(
+      ReflectionDisclosureSchema.safeParse({ ...disclosure, maximumProviderRoundTrips: 6 }).success,
+    ).toBe(false);
     expect(
       ReflectionDisclosureSchema.safeParse({
         ...disclosure,

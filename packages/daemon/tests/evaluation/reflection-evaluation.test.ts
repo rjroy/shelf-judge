@@ -354,7 +354,7 @@ test("production validation accepts all fixture packages and rejects unknown cit
   ).toThrow("Unknown Reflection citation");
 });
 
-test("production validation rejects a citation whose source version is not canonical", () => {
+test("production validation derives citation identity from the authoritative evidence entry", () => {
   const fixture = reflectionEvaluationCorpus.find(
     ({ questionId, expectedOutcome }) =>
       questionId === "repeated-values" && expectedOutcome === "answered",
@@ -383,33 +383,40 @@ test("production validation rejects a citation whose source version is not canon
       citation.citationId === note.citationId ? { ...citation, sourceVersion: "99" } : citation,
     ),
   };
-  expect(() =>
-    createReflectionResultValidator().validate({
-      questionId: fixture.questionId,
-      submission: {
-        result: {
-          outcome: "answered",
-          centralSynthesis: {
+  const result = createReflectionResultValidator().validate({
+    questionId: fixture.questionId,
+    submission: {
+      result: {
+        outcome: "answered",
+        centralSynthesis: {
+          text: notes.map((entry) => `"${syntheticNoteText(entry.payload)}"`).join(" "),
+          citationIds: [...notes, ...identities].map(({ citationId }) => citationId),
+        },
+        supportingBlocks: [
+          {
             text: notes.map((entry) => `"${syntheticNoteText(entry.payload)}"`).join(" "),
             citationIds: [...notes, ...identities].map(({ citationId }) => citationId),
           },
-          supportingBlocks: [
-            {
-              text: notes.map((entry) => `"${syntheticNoteText(entry.payload)}"`).join(" "),
-              citationIds: [...notes, ...identities].map(({ citationId }) => citationId),
-            },
-          ],
-          noteExcerpts: notes.map((entry) => ({
-            citationId: entry.citationId,
-            excerpt: syntheticNoteText(entry.payload),
-          })),
-        },
+        ],
+        noteExcerpts: notes.map((entry) => ({
+          citationId: entry.citationId,
+          excerpt: syntheticNoteText(entry.payload),
+        })),
       },
-      evidencePackage: altered,
-      usage: { state: "unavailable" },
-      generatedAt: "2026-09-07T12:00:00.000Z",
-    }),
-  ).toThrow("does not match canonical evidence");
+    },
+    evidencePackage: altered,
+    usage: { state: "unavailable" },
+    generatedAt: "2026-09-07T12:00:00.000Z",
+  });
+  expect(result.citations.find(({ citationId }) => citationId === note.citationId)).toMatchObject({
+    sourceId: note.sourceId,
+    sourceVersion: note.sourceVersion,
+    evidenceClass: note.evidenceClass,
+    testimony: true,
+  });
+  expect(
+    result.citations.find(({ citationId }) => citationId === note.citationId)?.sourceVersion,
+  ).not.toBe("99");
 });
 
 test("named adversarial fixtures preserve incomplete known totals and reject stale testimony and command receipts", () => {
@@ -465,7 +472,7 @@ test("named adversarial fixtures preserve incomplete known totals and reject sta
       usage: { state: "unavailable" },
       generatedAt: "2026-09-07T12:00:00.000Z",
     }),
-  ).toThrow("does not match canonical evidence");
+  ).toThrow("Unknown Reflection citation");
   const hostile = fixture("unauthorized-field");
   expect(() =>
     validator.validate({

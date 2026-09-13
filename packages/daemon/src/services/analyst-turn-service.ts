@@ -1,5 +1,4 @@
 import type { AnalystFinal } from "@shelf-judge/shared";
-import { z } from "zod";
 import type {
   AnalystEvidenceService,
   AnalystRetrievedEvidence,
@@ -9,22 +8,11 @@ import type {
   GroundedAnalysisProvider,
   GroundedAnalysisResult,
 } from "./grounded-analysis/provider.js";
-import {
-  validateAnalystResult,
-  type AnalystValidationDiagnostic,
-} from "./analyst-result-validator.js";
 import { createCollectionAnalystToolManifest } from "./grounded-analysis/structured-submission.js";
 import type { GroundedModelAuditContext } from "./grounded-analysis/model-logger.js";
 import { createCollectionTools } from "./grounded-analysis/collection-tools.js";
 import { createGroundedToolLifecycleDiagnostics } from "./grounded-analysis/tool-lifecycle.js";
-
-// Tool responses re-enter the model context on a later round. The evidence
-// service has the authoritative shared operation budget; this is an additional
-// transport ceiling so a single response cannot consume the model context.
-const ANALYST_TOOL_RESULT_MAX_BYTES = 64 * 1024;
-const ANALYST_TOOL_TURN_MAX_BYTES = 192 * 1024;
-const TOOL_CONTEXT_LIMIT_MESSAGE =
-  "Evidence response is unavailable because the Analyst context limit was reached.";
+import { canonicalSha256 } from "./profile-source-coordinator.js";
 
 type AnalystTurnLog = Readonly<Record<string, unknown>>;
 type AnalystTurnLogSink = (record: AnalystTurnLog) => void;
@@ -90,44 +78,9 @@ function modelVisible(value: unknown): unknown {
   );
 }
 
-// This transport schema deliberately contains no shared contract schema instances:
-// the provider snapshots its tool schema, while AnalystFinalSchema remains mutable
-// for the authoritative post-submission validation below.
-const AnalystSubmissionSchema = z
-  .object({
-    outcome: z.enum(["answered", "partial", "abstained"]),
-    blocks: z
-      .array(
-        z
-          .object({
-            text: z.string().min(1),
-            citationIds: z.array(z.string().min(1)),
-            uncertainty: z.string().min(1).optional(),
-          })
-          .strict(),
-      )
-      .min(1),
-    citations: z.array(
-      z
-        .object({
-          citationId: z.string().min(1),
-          sourceId: z.string().min(1),
-          sourceVersion: z.string().min(1),
-          evidenceClass: z.string().min(1),
-          observedAt: z.string().optional(),
-          canonicalSummary: z.string().min(1),
-          testimony: z.boolean(),
-          destination: z.object({
-            operationId: z.string().min(1),
-            parameters: z.object({}).passthrough(),
-          }),
-        })
-        .strict(),
-    ),
-    usage: z.object({ state: z.enum(["reported", "unavailable"]) }).passthrough(),
-    reason: z.string().min(1).optional(),
-  })
-  .strict();
+function freeformFinal(text: string, usage: GroundedAnalysisResult<string>["usage"]): AnalystFinal {
+  return { outcome: "answered", blocks: [{ text, citationIds: [] }], citations: [], usage };
+}
 
 function analystTools(
   evidenceService: AnalystEvidenceService,
@@ -146,9 +99,6 @@ function analystTools(
   });
   return createCollectionTools({
     signal,
-    resultMaxBytes: ANALYST_TOOL_RESULT_MAX_BYTES,
-    turnMaxBytes: ANALYST_TOOL_TURN_MAX_BYTES,
-    contextLimitMessage: TOOL_CONTEXT_LIMIT_MESSAGE,
     redact: modelVisible,
     onStage: ({ name, outcome, ...details }) => logStage(log, audit, name, outcome, details),
     toolLifecycle,
@@ -188,19 +138,19 @@ export function createAnalystTurnService(deps: {
       prompt: string;
       signal: AbortSignal;
       audit: GroundedModelAuditContext;
-      mandatoryUncertaintyCitationIds?: ReadonlySet<string>;
     }): Promise<
       | (GroundedAnalysisResult<AnalystFinal> & {
           readonly retrieved: readonly AnalystRetrievedEvidence[];
         })
       | {
           readonly valid: false;
-          readonly reason: "invalid-submission" | "source-changed" | "handoff-failed";
-          readonly diagnostic?: AnalystValidationDiagnostic;
+          readonly reason: "source-changed" | "handoff-failed";
+          /** Kept as an empty compatibility seam while free-form turns have no semantic validator. */
+          readonly diagnostic?: undefined;
         }
     > {
       throwIfAborted(input.signal);
-      const captureStarted = Date.now();
+       const captureStarted = Date.now();
       logStage(log, input.audit, "capture", "attempt");
       let snapshot: Awaited<ReturnType<AnalystEvidenceService["capture"]>>;
       try {
@@ -212,35 +162,37 @@ export function createAnalystTurnService(deps: {
         });
         throw error;
       }
-      logStage(log, input.audit, "capture", "success", { durationMs: Date.now() - captureStarted });
+       const audit = { ...input.audit, evidenceIdentityHash: canonicalSha256({ snapshotFingerprint: snapshot.snapshotFingerprint }) };
+       logStage(log, audit, "capture", "success", { durationMs: Date.now() - captureStarted });
       throwIfAborted(input.signal);
-      logStage(log, input.audit, "provider", "attempt");
+       logStage(log, audit, "provider", "attempt");
       const toolLifecycle = createGroundedToolLifecycleDiagnostics();
-      let result: GroundedAnalysisResult<z.infer<typeof AnalystSubmissionSchema>>;
+       let result: GroundedAnalysisResult<string>;
       try {
-        result = await deps.provider.analyze({
-          ...input,
-          submissionSchema: AnalystSubmissionSchema,
+         if (deps.provider.analyzeFreeform === undefined)
+           throw new Error("Collection Analyst provider does not support free-form execution");
+         result = await deps.provider.analyzeFreeform({
+           ...input,
+           audit,
           allowedTools: createCollectionAnalystToolManifest(),
           retrievalTools: analystTools(
             deps.evidenceService,
             snapshot,
             input.signal,
-            input.audit,
+             audit,
             log,
             toolLifecycle,
           ),
           toolLifecycle,
         });
       } catch (error) {
-        logStage(log, input.audit, "provider", "failed", {
+         logStage(log, audit, "provider", "failed", {
           failure: input.signal.aborted ? "cancelled" : "provider-failed",
         });
         throw error;
       }
-      logStage(log, input.audit, "provider", "success");
+       logStage(log, audit, "provider", "success");
       throwIfAborted(input.signal);
-      const submission = { ...result.output, usage: result.usage };
       let accumulated: AnalystRetrievedEvidence;
       try {
         accumulated = await abortable(
@@ -250,59 +202,41 @@ export function createAnalystTurnService(deps: {
       } catch (error) {
         throwIfAborted(input.signal);
         const sourceChanged = error instanceof AnalystEvidenceSourceChangedError;
-        logStage(log, input.audit, "evidence-handoff", "failed", {
+         logStage(log, audit, "evidence-handoff", "failed", {
           failure: sourceChanged ? "source-changed" : "accumulation-failed",
         });
         return { valid: false, reason: sourceChanged ? "source-changed" : "handoff-failed" };
       }
-      const validate = () => {
-        logStage(log, input.audit, "validation", "attempt");
-        const validated = validateAnalystResult({
-          submission,
-          evidence: accumulated.evidence,
-          registeredCitations: accumulated.citations,
-          mandatoryUncertaintyCitationIds: input.mandatoryUncertaintyCitationIds,
-        });
-        logStage(
-          log,
-          input.audit,
-          "validation",
-          validated.valid ? "success" : "rejected",
-          validated.valid ? {} : { diagnostic: validated.diagnostic },
-        );
-        return validated;
-      };
-      try {
+       try {
         throwIfAborted(input.signal);
-        logStage(log, input.audit, "evidence-handoff", "attempt", {
+         logStage(log, audit, "evidence-handoff", "attempt", {
           evidenceSourceCount: accumulated.scope.matchingSourceCount,
         });
         const validated = await abortable(
-          deps.evidenceService.handoff(snapshot, accumulated, () => {
-            throwIfAborted(input.signal);
-            return Promise.resolve(validate());
+           deps.evidenceService.handoff(snapshot, accumulated, () => {
+             throwIfAborted(input.signal);
+             return Promise.resolve({ valid: true, result: result.output });
           }),
           input.signal,
         );
         throwIfAborted(input.signal);
         logStage(
           log,
-          input.audit,
+           audit,
           "evidence-handoff",
-          validated.valid ? "success" : "rejected",
-          validated.valid ? {} : { diagnostic: validated.diagnostic },
+           validated.valid ? "success" : "rejected",
         );
         return validated.valid && validated.result
           ? Object.freeze({
-              output: validated.result,
+               output: freeformFinal(validated.result, result.usage),
               usage: result.usage,
               retrieved: [accumulated],
             })
-          : { valid: false, reason: "invalid-submission", diagnostic: validated.diagnostic };
+           : { valid: false, reason: "handoff-failed" };
       } catch (error) {
         throwIfAborted(input.signal);
         const sourceChanged = error instanceof AnalystEvidenceSourceChangedError;
-        logStage(log, input.audit, "evidence-handoff", "failed", {
+         logStage(log, audit, "evidence-handoff", "failed", {
           failure: sourceChanged ? "source-changed" : "handoff-failed",
         });
         return { valid: false, reason: sourceChanged ? "source-changed" : "handoff-failed" };

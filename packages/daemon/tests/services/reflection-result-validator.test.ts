@@ -89,7 +89,11 @@ function evidencePackage(questionId: ReflectionQuestionId): ReflectionEvidencePa
             },
     }),
   );
-  const byCitation = new Map(entries.map((entry) => [entry.citationId, entry]));
+  const entriesWithMetadata = entries.map((entry) => ({
+    ...entry,
+    citationMetadata: citations.find((citation) => citation.citationId === entry.citationId),
+  }));
+  const byCitation = new Map(entriesWithMetadata.map((entry) => [entry.citationId, entry]));
   const evidence: GroundedEvidenceSnapshot = Object.freeze({
     manifestId: "profile-reflection",
     manifestVersion: "2",
@@ -101,7 +105,7 @@ function evidencePackage(questionId: ReflectionQuestionId): ReflectionEvidencePa
         evidenceClass,
       })),
     ),
-    entries: Object.freeze(entries),
+    entries: Object.freeze(entriesWithMetadata),
     hasSource: ({ sourceId, sourceVersion, evidenceClass }: GroundedExaminedSource) =>
       entries.some(
         (entry) =>
@@ -241,7 +245,7 @@ describe("ReflectionResultValidator", () => {
     ).toBe(false);
   });
 
-  test("rejects unknown citations, unrelated deterministic support, and invalid usage ceilings", () => {
+  test("rejects unknown IDs and preserves usage without inventing semantic evidence gates", () => {
     const source = evidencePackage("repeated-values");
     const unknown = answeredSubmission("repeated-values");
     unknown.result.centralSynthesis.citationIds = ["note-1", "note-2", "unknown"];
@@ -257,33 +261,49 @@ describe("ReflectionResultValidator", () => {
 
     const unrelated = answeredSubmission("repeated-values");
     unrelated.result.centralSynthesis.citationIds = ["note-1", "note-2", "identity-1"];
-    expect(() =>
-      validator.validate({
-        questionId: "repeated-values",
-        submission: unrelated,
-        evidencePackage: source,
-        usage: { state: "unavailable" },
-        generatedAt: GENERATED_AT,
-      }),
-    ).toThrow("same game");
+    expect(
+      validator
+        .validate({
+          questionId: "repeated-values",
+          submission: unrelated,
+          evidencePackage: source,
+          usage: { state: "unavailable" },
+          generatedAt: GENERATED_AT,
+        })
+        .citations.map(({ citationId }) => citationId),
+    ).toEqual(["note-1", "note-2", "identity-1", "identity-2"]);
 
-    expect(() =>
+    expect(
       validator.validate({
         questionId: "repeated-values",
         submission: answeredSubmission("repeated-values"),
         evidencePackage: source,
         usage: { state: "reported", inferenceRoundTrips: 3 },
         generatedAt: GENERATED_AT,
-      }),
-    ).toThrow();
+      }).usage,
+    ).toEqual({ state: "reported", inferenceRoundTrips: 3 });
   });
 
-  test("rejects note excerpts that are not visibly quoted by a citing block", () => {
+  test("requires exact current owner excerpts without policing prose style", () => {
     const submission = answeredSubmission("repeated-values");
     submission.result.centralSynthesis.text = "A paraphrase without the cited testimony.";
     const supportingBlock = submission.result.supportingBlocks[0];
     if (supportingBlock === undefined) throw new Error("invalid test fixture");
     supportingBlock.text = "Another paraphrase.";
+    expect(
+      validator.validate({
+        questionId: "repeated-values",
+        submission,
+        evidencePackage: evidencePackage("repeated-values"),
+        usage: { state: "unavailable" },
+        generatedAt: GENERATED_AT,
+      }).outcome,
+    ).toBe("answered");
+
+    submission.result.noteExcerpts[0] = {
+      citationId: "note-1",
+      excerpt: "not present in the current owner note",
+    };
     expect(() =>
       validator.validate({
         questionId: "repeated-values",
@@ -292,66 +312,35 @@ describe("ReflectionResultValidator", () => {
         usage: { state: "unavailable" },
         generatedAt: GENERATED_AT,
       }),
-    ).toThrow("quoted by a citing block");
+    ).toThrow("exact current testimony");
   });
 
-  test("requires a complete selected pattern candidate that supports every cited note", () => {
+  test("hydrates pattern answers from cited registry IDs without a second pattern pipeline", () => {
     const source = evidencePackage("pattern-exceptions");
     const submission = answeredSubmission("pattern-exceptions");
     submission.result.centralSynthesis.citationIds =
       submission.result.centralSynthesis.citationIds.filter(
         (citationId) => citationId !== "profile-1",
       );
-    expect(() =>
+    expect(
       validator.validate({
         questionId: "pattern-exceptions",
         submission,
         evidencePackage: source,
         usage: { state: "unavailable" },
         generatedAt: GENERATED_AT,
-      }),
-    ).toThrow("authorized candidate");
-  });
-
-  test("rejects unsupported or incomplete pattern candidates", () => {
-    const unsupported = evidencePackage("pattern-exceptions");
-    const profile = unsupported.evidence.entries.find(
-      ({ citationId }) => citationId === "profile-1",
-    );
-    if (profile === undefined || typeof profile.payload !== "object" || profile.payload === null) {
-      throw new Error("invalid test fixture");
-    }
-    (profile.payload as Record<string, unknown>).support = "limited";
-    expect(() =>
-      validator.validate({
-        questionId: "pattern-exceptions",
-        submission: answeredSubmission("pattern-exceptions"),
-        evidencePackage: unsupported,
-        usage: { state: "unavailable" },
-        generatedAt: GENERATED_AT,
-      }),
-    ).toThrow("authorized candidate");
-
-    const incomplete = evidencePackage("pattern-exceptions");
-    const incompleteProfile = incomplete.evidence.entries.find(
-      ({ citationId }) => citationId === "profile-1",
-    );
-    if (
-      incompleteProfile === undefined ||
-      typeof incompleteProfile.payload !== "object" ||
-      incompleteProfile.payload === null
-    ) {
-      throw new Error("invalid test fixture");
-    }
-    delete (incompleteProfile.payload as Record<string, unknown>).confounders;
-    expect(() =>
-      validator.validate({
-        questionId: "pattern-exceptions",
-        submission: answeredSubmission("pattern-exceptions"),
-        evidencePackage: incomplete,
-        usage: { state: "unavailable" },
-        generatedAt: GENERATED_AT,
-      }),
-    ).toThrow("incomplete");
+      }).outcome,
+    ).toBe("answered");
+    expect(
+      validator
+        .validate({
+          questionId: "pattern-exceptions",
+          submission: answeredSubmission("pattern-exceptions"),
+          evidencePackage: source,
+          usage: { state: "unavailable" },
+          generatedAt: GENERATED_AT,
+        })
+        .citations.map(({ citationId }) => citationId),
+    ).toContain("profile-1");
   });
 });

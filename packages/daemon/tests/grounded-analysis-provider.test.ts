@@ -25,9 +25,14 @@ import {
 import type { AnalystProjectionSnapshot } from "../src/services/analyst-evidence-projections.js";
 import {
   createGroundedModelLogger,
+  groundedProviderFailureDiagnostics,
   type GroundedModelLogRecord,
 } from "../src/services/grounded-analysis/model-logger.js";
-import { createPiGroundedAnalysisSessionFactory } from "../src/services/grounded-analysis/session-factory.js";
+import {
+  createPiGroundedAnalysisSessionFactory,
+  GroundedSessionRunError,
+  latestTerminalAssistantFailure,
+} from "../src/services/grounded-analysis/session-factory.js";
 import {
   createOllamaProviderExtension,
   createOllamaRequestPayloadHook,
@@ -40,7 +45,10 @@ import {
   createProfileReflectionToolManifest,
   GROUNDED_SUBMISSION_TOOL_NAME,
 } from "../src/services/grounded-analysis/structured-submission.js";
-import { createGroundedToolLifecycleDiagnostics } from "../src/services/grounded-analysis/tool-lifecycle.js";
+import {
+  createGroundedToolLifecycleDiagnostics,
+  GROUNDED_TOOL_LIFECYCLE_SNAPSHOT_LIMIT,
+} from "../src/services/grounded-analysis/tool-lifecycle.js";
 
 const providerId = "shelf-judge-local";
 const modelId = "deterministic-v1";
@@ -48,31 +56,53 @@ const submissionSchema = z.object({ answer: z.string() }).strict();
 
 interface LocalProviderControls {
   transmissions: Array<{ systemPrompt: string; messages: Context["messages"] }>;
+  /** Explicit test-script termination, checked before cloning model context. */
+  expectedRequests?: number;
+  fixtureFailures?: string[];
   mode?:
     | "submit"
     | "cancel"
     | "free-text"
     | "submit-then-free-text"
     | "submit-with-text"
+    | "malformed-with-text"
     | "no-submission"
     | "length"
     | "malformed"
     | "malformed-then-valid"
     | "unrelated-tool-then-valid"
     | "provider-error"
+    | "throw"
     | "cancel-no-message"
     | "repeat-malformed"
     | "repeat-duplicate"
     | "same-turn-duplicate"
     | "retrieve-then-submit"
     | "retrieve-three-then-submit"
-    | "retrieve-until-exhausted"
-    | "analyst-retrieve-then-submit"
-    | "analyst-invalid-schema"
-    | "analyst-unknown-citation"
-    | "analyst-multi-page";
+    | "retrieve-twenty-five-then-submit"
+    | "retrieve-until-exhausted";
   monetaryCosts?: readonly number[];
   modelLogs?: GroundedModelLogRecord[];
+}
+
+function expectedScenarioRequests(mode: LocalProviderControls["mode"]): number {
+  switch (mode) {
+    case "retrieve-then-submit":
+      return 2;
+    case "retrieve-three-then-submit":
+      return 4;
+    case "retrieve-twenty-five-then-submit":
+      return 26;
+    case "retrieve-until-exhausted":
+      return 5;
+    case "malformed-then-valid":
+      return 2;
+    case "repeat-malformed":
+    case "repeat-duplicate":
+      return 3;
+    default:
+      return 1;
+  }
 }
 
 function assistantMessage(
@@ -155,13 +185,26 @@ function localProviderExtension(controls: LocalProviderControls): ExtensionFacto
       ],
       streamSimple(model: Model<Api>, context: Context, options?: SimpleStreamOptions) {
         const stream = createAssistantMessageEventStream();
+        const roundTrip = controls.transmissions.length + 1;
+        const expectedRequests = controls.expectedRequests ?? expectedScenarioRequests(controls.mode);
+        if (roundTrip > expectedRequests) {
+          controls.fixtureFailures?.push("test fixture exceeded expected scenario requests");
+          queueMicrotask(() => {
+            const message = assistantMessage(model, [], "error", roundTrip);
+            message.errorMessage = "test fixture exceeded expected scenario requests";
+            stream.push({ type: "error", reason: "error", error: message });
+            stream.end();
+          });
+          return stream;
+        }
         controls.transmissions.push({
           systemPrompt: context.systemPrompt ?? "",
           messages: structuredClone(context.messages),
         });
         void options?.onPayload?.({ context }, model);
-        const roundTrip = controls.transmissions.length;
         const monetaryCostUsd = controls.monetaryCosts?.[roundTrip - 1] ?? 0;
+
+        if (controls.mode === "throw") throw new Error("request transport threw");
 
         queueMicrotask(() => {
           if (controls.mode === "cancel" || controls.mode === "cancel-no-message") {
@@ -192,26 +235,20 @@ function localProviderExtension(controls: LocalProviderControls): ExtensionFacto
             controls.mode === "unrelated-tool-then-valid" ||
             controls.mode === "retrieve-then-submit" ||
             controls.mode === "retrieve-three-then-submit" ||
-            controls.mode === "retrieve-until-exhausted" ||
-            controls.mode === "analyst-retrieve-then-submit" ||
-            controls.mode === "analyst-invalid-schema" ||
-            controls.mode === "analyst-unknown-citation" ||
-            controls.mode === "analyst-multi-page";
+            controls.mode === "retrieve-twenty-five-then-submit" ||
+            controls.mode === "retrieve-until-exhausted";
           const retrievalRound =
             controls.mode === "retrieve-then-submit"
               ? roundTrip === 1
               : controls.mode === "retrieve-three-then-submit"
                 ? roundTrip <= 3
-                : controls.mode === "analyst-retrieve-then-submit"
-                  ? roundTrip === 1
-                  : controls.mode === "analyst-invalid-schema" ||
-                      controls.mode === "analyst-unknown-citation"
-                    ? roundTrip === 1
-                    : controls.mode === "analyst-multi-page"
-                      ? roundTrip <= 2
-                      : controls.mode === "retrieve-until-exhausted";
+                : controls.mode === "retrieve-twenty-five-then-submit"
+                  ? roundTrip <= 25
+                  : controls.mode === "retrieve-until-exhausted";
           if (
             (!hasToolResult || repeatedSubmission || requiresSecondToolCall) &&
+            !(controls.mode === "retrieve-until-exhausted" && roundTrip > 4) &&
+            !(repeatedSubmission && roundTrip > 2) &&
             controls.mode !== "no-submission" &&
             controls.mode !== "length" &&
             controls.mode !== "free-text"
@@ -222,88 +259,21 @@ function localProviderExtension(controls: LocalProviderControls): ExtensionFacto
               name:
                 (controls.mode === "unrelated-tool-then-valid" && roundTrip === 1) || retrievalRound
                   ? retrievalRound
-                    ? controls.mode === "analyst-retrieve-then-submit" ||
-                      controls.mode === "analyst-invalid-schema" ||
-                      controls.mode === "analyst-unknown-citation" ||
-                      controls.mode === "analyst-multi-page"
-                      ? "readGames"
-                      : "top"
+                    ? "top"
                     : "unrelated_tool"
                   : "submit_grounded_analysis",
               arguments: {
                 ...(retrievalRound
-                  ? controls.mode === "analyst-retrieve-then-submit" ||
-                    controls.mode === "analyst-invalid-schema" ||
-                    controls.mode === "analyst-unknown-citation" ||
-                    controls.mode === "analyst-multi-page"
-                    ? {
-                        gameIds:
-                          controls.mode === "analyst-multi-page" && roundTrip === 2
-                            ? ["game-b"]
-                            : ["game-a"],
-                        fields: ["game-identity-ownership"],
-                      }
-                    : { rankBy: "fitness" }
+                    ? { rankBy: "fitness" }
                   : {
                       submission: {
-                        ...(controls.mode === "analyst-retrieve-then-submit" ||
-                        controls.mode === "analyst-invalid-schema" ||
-                        controls.mode === "analyst-unknown-citation" ||
-                        controls.mode === "analyst-multi-page"
-                          ? {
-                              ...(controls.mode === "analyst-invalid-schema"
-                                ? { outcome: "invalid" }
-                                : { outcome: "answered" }),
-                              blocks: [
-                                {
-                                  text: "Grounded",
-                                  citationIds: [
-                                    controls.mode === "analyst-multi-page"
-                                      ? "citation-b"
-                                      : controls.mode === "analyst-unknown-citation"
-                                        ? "citation-unknown"
-                                        : "citation-a",
-                                  ],
-                                },
-                              ],
-                              citations: [
-                                {
-                                  citationId:
-                                    controls.mode === "analyst-unknown-citation"
-                                      ? "citation-unknown"
-                                      : controls.mode === "analyst-multi-page"
-                                        ? "citation-b"
-                                        : "citation-a",
-                                  sourceId:
-                                    controls.mode === "analyst-multi-page" ? "game-b" : "game-a",
-                                  sourceVersion: "1",
-                                  evidenceClass: "game-identity-ownership",
-                                  canonicalSummary:
-                                    controls.mode === "analyst-multi-page"
-                                      ? "Current game B identity"
-                                      : "Current game identity",
-                                  testimony: false,
-                                  destination: {
-                                    operationId: "shelf.game.get",
-                                    parameters: {
-                                      gameId:
-                                        controls.mode === "analyst-multi-page"
-                                          ? "game-b"
-                                          : "game-a",
-                                    },
-                                  },
-                                },
-                              ],
-                              usage: { state: "unavailable" },
-                            }
-                          : {
-                              answer:
-                                controls.mode === "malformed" ||
-                                controls.mode === "repeat-malformed" ||
-                                (controls.mode === "malformed-then-valid" && roundTrip === 1)
-                                  ? 42
-                                  : "grounded",
-                            }),
+                        answer:
+                          controls.mode === "malformed" ||
+                          controls.mode === "malformed-with-text" ||
+                          controls.mode === "repeat-malformed" ||
+                          (controls.mode === "malformed-then-valid" && roundTrip === 1)
+                            ? 42
+                            : "grounded",
                       },
                     }),
               },
@@ -313,7 +283,7 @@ function localProviderExtension(controls: LocalProviderControls): ExtensionFacto
                 ? [toolCall, { ...toolCall, id: `submission-duplicate-${roundTrip}` }]
                 : [toolCall];
             const content =
-              controls.mode === "submit-with-text"
+              controls.mode === "submit-with-text" || controls.mode === "malformed-with-text"
                 ? [...toolCalls, { type: "text" as const, text: "not allowed" }]
                 : toolCalls;
             const message = assistantMessage(model, content, "toolUse", roundTrip, monetaryCostUsd);
@@ -380,6 +350,7 @@ function configuredProvider(
   controls: LocalProviderControls,
   extraExtensions: ExtensionFactory[] = [],
   lifecycle: string[] = [],
+  traceAssistantContent = false,
 ) {
   return createGroundedAnalysisProvider({
     configuration: {
@@ -397,6 +368,7 @@ function configuredProvider(
     modelLogger: createGroundedModelLogger({
       write: (record) => controls.modelLogs?.push(record),
     }),
+    traceAssistantContent,
   });
 }
 
@@ -432,6 +404,121 @@ async function captureFailure(promise: Promise<unknown>): Promise<GroundedAnalys
 }
 
 describe("grounded-analysis provider lifecycle", () => {
+  test("writes a correlated chronological round, tool, text, and terminal-error trace", async () => {
+    const controls: LocalProviderControls = {
+      transmissions: [],
+      mode: "free-text",
+      modelLogs: [],
+    };
+    await captureFailure(
+      configuredProvider(controls, [], [], true).analyze({
+        ...request(),
+        prompt: "ordinary assistant text",
+      }),
+    );
+
+    const trace = controls.modelLogs?.filter(
+      (record) => record.recordType === "grounded-model-trace",
+    );
+    expect(trace).toMatchObject([
+      { event: "model-request-start", roundIndex: 1, requestId: "request-1" },
+      {
+        event: "model-response-end",
+        roundIndex: 1,
+        stopReason: "stop",
+        assistantText: "not allowed",
+        assistantTextLength: 11,
+        assistantTextTruncated: false,
+      },
+    ]);
+    expect(trace?.[1]?.durationMs).toBeNumber();
+
+    const failedControls: LocalProviderControls = {
+      transmissions: [],
+      mode: "provider-error",
+      modelLogs: [],
+    };
+    await captureFailure(configuredProvider(failedControls).analyze(request()));
+    const terminalTrace = failedControls.modelLogs?.find(
+      (record): record is Extract<GroundedModelLogRecord, { recordType: "grounded-model-trace" }> =>
+        record.recordType === "grounded-model-trace" && record.event === "session-error",
+    );
+    expect(terminalTrace?.requestId).toBe("request-1");
+    expect(terminalTrace?.roundIndex).toBe(1);
+    expect(terminalTrace?.durationMs).toBeNumber();
+    expect(terminalTrace?.failure?.primary.message).toBe("socket network timeout");
+
+    const thrownControls: LocalProviderControls = {
+      transmissions: [],
+      mode: "throw",
+      modelLogs: [],
+    };
+    await captureFailure(configuredProvider(thrownControls).analyze(request()));
+    const thrownTerminalTraces = thrownControls.modelLogs?.filter(
+      (record): record is Extract<GroundedModelLogRecord, { recordType: "grounded-model-trace" }> =>
+        record.recordType === "grounded-model-trace" && record.event === "session-error",
+    );
+    expect(thrownTerminalTraces).toHaveLength(1);
+    expect(thrownTerminalTraces?.[0]).toMatchObject({
+      roundIndex: 1,
+      failure: { primary: { message: "request transport threw" } },
+    });
+  });
+
+  test("keeps live tool tracing uncapped while retaining a bounded diagnostic snapshot", () => {
+    const trace: Array<{ callIndex: number }> = [];
+    const lifecycle = createGroundedToolLifecycleDiagnostics({
+      onTrace: (event) => trace.push({ callIndex: event.callIndex }),
+    });
+    for (let index = 0; index < GROUNDED_TOOL_LIFECYCLE_SNAPSHOT_LIMIT + 1; index += 1) {
+      const callIndex = lifecycle.dispatch("top", "retrieval");
+      lifecycle.handling("top", "retrieval", callIndex, "accepted");
+    }
+    expect(lifecycle.snapshot()).toHaveLength(GROUNDED_TOOL_LIFECYCLE_SNAPSHOT_LIMIT);
+    expect(trace).toHaveLength((GROUNDED_TOOL_LIFECYCLE_SNAPSHOT_LIMIT + 1) * 2);
+    expect(trace.at(-1)).toEqual({ callIndex: GROUNDED_TOOL_LIFECYCLE_SNAPSHOT_LIMIT });
+  });
+
+  test("correlates retrieval and submission tool traces to their generating model rounds", async () => {
+    const controls: LocalProviderControls = {
+      transmissions: [],
+      mode: "retrieve-then-submit",
+      modelLogs: [],
+    };
+    const lifecycle = createGroundedToolLifecycleDiagnostics();
+    const retrieval = defineTool({
+      name: "top",
+      label: "Rank collection games",
+      description: "Read-only test collection ranking",
+      parameters: Type.Object({ rankBy: Type.Literal("fitness") }, { additionalProperties: false }),
+      execute() {
+        const callIndex = lifecycle.dispatch("top", "retrieval");
+        lifecycle.handling("top", "retrieval", callIndex, "accepted");
+        return Promise.resolve({ content: [], details: undefined });
+      },
+    });
+    await configuredProvider(controls).analyze({
+      ...request(),
+      audit: { ...request().audit, feature: "profile-reflection" },
+      allowedTools: createProfileReflectionToolManifest(),
+      retrievalTools: collectionTestTools(retrieval),
+      toolLifecycle: lifecycle,
+    });
+    const toolTrace = controls.modelLogs?.filter(
+      (record): record is Extract<GroundedModelLogRecord, { recordType: "grounded-model-trace" }> =>
+        record.recordType === "grounded-model-trace" &&
+        (record.event === "tool-dispatch" || record.event === "tool-outcome"),
+    );
+    expect(toolTrace?.map(({ toolName, roundIndex }) => ({ toolName, roundIndex }))).toEqual([
+      { toolName: "top", roundIndex: 1 },
+      { toolName: "top", roundIndex: 1 },
+      { toolName: "submit_grounded_analysis", roundIndex: 2 },
+      { toolName: "submit_grounded_analysis", roundIndex: 2 },
+    ]);
+    expect(toolTrace?.[1]?.durationMs).toBeNumber();
+    expect(toolTrace?.[3]?.durationMs).toBeNumber();
+  });
+
   test("publishes the exact model-directed collection manifests for Analyst and Reflection", () => {
     expect(COLLECTION_EVIDENCE_TOOL_NAMES).toEqual(["top", "grep", "readGames", "summarize"]);
     expect(COLLECTION_EVIDENCE_WITH_SUBMISSION_TOOL_NAMES).toEqual([
@@ -439,7 +526,6 @@ describe("grounded-analysis provider lifecycle", () => {
       "grep",
       "readGames",
       "summarize",
-      GROUNDED_SUBMISSION_TOOL_NAME,
     ]);
     expect(createCollectionAnalystToolManifest()).toEqual({
       feature: "collection-analyst",
@@ -477,6 +563,9 @@ describe("grounded-analysis provider lifecycle", () => {
     const server = Bun.serve({
       port: 0,
       async fetch(request) {
+        if (requestPayload !== undefined) {
+          return new Response("test fixture exceeded expected scenario requests", { status: 503 });
+        }
         expect(new URL(request.url).pathname).toBe("/v1/chat/completions");
         requestPayload = await request.json();
         const toolArguments = JSON.stringify({ submission: { answer: "grounded" } });
@@ -521,25 +610,28 @@ describe("grounded-analysis provider lifecycle", () => {
     });
     try {
       const maxTokens = 123;
+      const modelLogs: GroundedModelLogRecord[] = [];
       const provider = createGroundedAnalysisProvider({
         configuration: {
           status: "configured",
           providerId: "ollama",
-          modelId: "ollama-test",
-          extensionIds: ["ollama-test"],
+          modelId: "ollama-transport-diagnostic-test",
+          extensionIds: ["ollama-transport-diagnostic-test"],
         },
         sessionFactory: createPiGroundedAnalysisSessionFactory({
           cwd: process.cwd(),
           extensionIds: [],
-          extensionFactories: [
+          createExtensionFactories: (sink) => [
             createOllamaProviderExtension(
-              "ollama-test",
+              "ollama-transport-diagnostic-test",
               maxTokens,
               `http://127.0.0.1:${server.port}/v1`,
+              sink,
             ),
           ],
           onPayload: createOllamaRequestPayloadHook(maxTokens),
         }),
+        modelLogger: createGroundedModelLogger({ write: (record) => modelLogs.push(record) }),
       });
 
       const result = await provider.analyze(request());
@@ -550,273 +642,24 @@ describe("grounded-analysis provider lifecycle", () => {
         max_tokens: maxTokens,
         reasoning_effort: "none",
       });
+      const transportTrace = modelLogs.find(
+        (
+          record,
+        ): record is import("../src/services/grounded-analysis/model-logger.js").GroundedModelTraceEvent =>
+          record.recordType === "grounded-model-trace" && record.event === "provider-transport",
+      );
+      expect(transportTrace?.roundIndex).toBe(1);
+      expect(transportTrace?.transport).toMatchObject({
+        phase: "awaiting-headers",
+        outcome: "headers-received",
+      });
       expect(requestPayload).not.toHaveProperty("think");
     } finally {
       await server.stop(true);
     }
   });
 
-  test("runs the Analyst service's real evidence handler through the provider loop before accepting its citation", async () => {
-    const evidenceMarker = "analyst-evidence-selected";
-    let requests = 0;
-    const response = (name: string, argumentsValue: object) =>
-      [
-        `data: ${JSON.stringify({
-          choices: [
-            {
-              index: 0,
-              delta: {
-                tool_calls: [
-                  {
-                    index: 0,
-                    id: `call-${requests}`,
-                    type: "function",
-                    function: { name, arguments: JSON.stringify(argumentsValue) },
-                  },
-                ],
-              },
-              finish_reason: null,
-            },
-          ],
-        })}\n\n`,
-        `data: ${JSON.stringify({
-          choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
-        })}\n\n`,
-        "data: [DONE]\n\n",
-      ].join("");
-    const server = Bun.serve({
-      port: 0,
-      async fetch(networkRequest) {
-        requests += 1;
-        const payload = await networkRequest.text();
-        if (requests === 1) {
-          expect(payload).toContain('"readGames"');
-          return new Response(
-            response("readGames", {
-              gameIds: ["game-a"],
-              fields: ["game-identity-ownership"],
-            }),
-            {
-              headers: { "content-type": "text/event-stream" },
-            },
-          );
-        }
-        expect(payload).toContain('\\"citation-a\\"');
-        return new Response(
-          response(GROUNDED_SUBMISSION_TOOL_NAME, {
-            submission: {
-              outcome: "answered",
-              blocks: [{ text: evidenceMarker, citationIds: ["citation-a"] }],
-              citations: [
-                {
-                  citationId: "citation-a",
-                  sourceId: "game-a",
-                  sourceVersion: "1",
-                  evidenceClass: "game-identity-ownership",
-                  canonicalSummary: "Current game identity",
-                  testimony: false,
-                  destination: {
-                    operationId: "shelf.game.get",
-                    parameters: { gameId: "game-a" },
-                  },
-                },
-              ],
-              usage: { state: "unavailable" },
-            },
-          }),
-          { headers: { "content-type": "text/event-stream" } },
-        );
-      },
-    });
-    const snapshot: AnalystProjectionSnapshot = {
-      collectionId: "collection",
-      collectionRevision: 1,
-      snapshotFingerprint: "analyst-snapshot",
-      sources: [
-        {
-          evidenceClass: "game-identity-ownership",
-          sourceId: "game-a",
-          sourceVersion: "1",
-          citationId: "citation-a",
-          payload: {
-            gameId: "game-a",
-            displayName: "Game A",
-            bggId: null,
-            ownershipState: "owned",
-          },
-          canonicalSummary: "Current game identity",
-          destination: { operationId: "shelf.game.get", parameters: { gameId: "game-a" } },
-        },
-      ],
-      page: () => ({ sources: [], nextCursor: null, totalSourceCount: 1 }),
-    };
-    try {
-      const provider = createGroundedAnalysisProvider({
-        configuration: {
-          status: "configured",
-          providerId: "ollama",
-          modelId: "ollama-test",
-          extensionIds: ["ollama-test"],
-        },
-        sessionFactory: createPiGroundedAnalysisSessionFactory({
-          cwd: process.cwd(),
-          extensionIds: [],
-          extensionFactories: [
-            createOllamaProviderExtension("ollama-test", 123, `http://127.0.0.1:${server.port}/v1`),
-          ],
-        }),
-      });
-      const result = await createAnalystTurnService({
-        provider,
-        evidenceService: createAnalystEvidenceService({
-          storageService: {},
-          projectionSnapshotService: { capture: () => Promise.resolve(snapshot) },
-        }),
-        log: () => undefined,
-      }).run({
-        systemPrompt: "EXACT POLICY",
-        prompt: "EXACT EVIDENCE",
-        signal: new AbortController().signal,
-        audit: { ...request().audit, feature: "collection-analyst" },
-      });
-
-      expect(result).toMatchObject({
-        output: {
-          blocks: [{ text: evidenceMarker, citationIds: ["citation-a"] }],
-          citations: [{ citationId: "citation-a" }],
-        },
-        usage: { inferenceRoundTrips: 2 },
-      });
-      expect(requests).toBe(2);
-    } finally {
-      await server.stop(true);
-    }
-  });
-
-  test("rejects an oversized serialized outbound payload before contacting the provider", async () => {
-    let requests = 0;
-    const server = Bun.serve({
-      port: 0,
-      fetch() {
-        requests += 1;
-        return new Response("must not be called", { status: 500 });
-      },
-    });
-    try {
-      const modelLogs: GroundedModelLogRecord[] = [];
-      const provider = createGroundedAnalysisProvider({
-        configuration: {
-          status: "configured",
-          providerId: "ollama",
-          modelId: "ollama-test",
-          extensionIds: ["ollama-test"],
-        },
-        modelInputBudget: { maxBytes: 1 },
-        sessionFactory: createPiGroundedAnalysisSessionFactory({
-          cwd: process.cwd(),
-          extensionIds: [],
-          extensionFactories: [
-            createOllamaProviderExtension("ollama-test", 123, `http://127.0.0.1:${server.port}/v1`),
-          ],
-        }),
-        modelLogger: createGroundedModelLogger({ write: (record) => modelLogs.push(record) }),
-      });
-
-      const failure = await captureFailure(provider.analyze(request()));
-
-      expect(failure).toMatchObject({
-        reason: "context-exhaustion",
-        safeDetail: "model-input-budget-exceeded",
-      });
-      expect(requests).toBe(0);
-      expect(modelLogs.at(-1)).toMatchObject({ modelInputBytes: 0, modelInputRequests: 0 });
-      expect(JSON.stringify(modelLogs)).not.toContain("EXACT EVIDENCE");
-    } finally {
-      await server.stop(true);
-    }
-  });
-
-  test.each([
-    {
-      feature: "collection-analyst" as const,
-      allowedTools: createCollectionAnalystToolManifest(),
-    },
-    {
-      feature: "profile-reflection" as const,
-      allowedTools: createProfileReflectionToolManifest(),
-    },
-  ])(
-    "applies the production aggregate outbound-payload cap for $feature",
-    async ({ feature, allowedTools }) => {
-      let requests = 0;
-      const server = Bun.serve({
-        port: 0,
-        fetch() {
-          requests += 1;
-          return new Response("must not be called", { status: 500 });
-        },
-      });
-      const collectionTools = COLLECTION_EVIDENCE_TOOL_NAMES.map((name) =>
-        defineTool({
-          name,
-          label: name,
-          description: "Read-only collection evidence",
-          parameters: Type.Object({}, { additionalProperties: false }),
-          execute: () =>
-            Promise.resolve({
-              content: [{ type: "text", text: "tool response" }],
-              details: undefined,
-            }),
-        }),
-      );
-      try {
-        const failure = await captureFailure(
-          createGroundedAnalysisProvider({
-            configuration: {
-              status: "configured",
-              providerId: "ollama",
-              modelId: "ollama-test",
-              extensionIds: ["ollama-test"],
-            },
-            sessionFactory: createPiGroundedAnalysisSessionFactory({
-              cwd: process.cwd(),
-              extensionIds: [],
-              extensionFactories: [
-                createOllamaProviderExtension(
-                  "ollama-test",
-                  123,
-                  `http://127.0.0.1:${server.port}/v1`,
-                ),
-              ],
-              onPayload: (payload) => {
-                if (typeof payload !== "object" || payload === null)
-                  throw new Error("Expected an object provider payload");
-                return {
-                  ...payload,
-                  shelfJudgeBudgetRegressionPadding: "x".repeat(1024 * 1024),
-                };
-              },
-            }),
-          }).analyze({
-            ...request(),
-            audit: { ...request().audit, feature },
-            allowedTools,
-            retrievalTools: collectionTools,
-          }),
-        );
-
-        expect(failure).toMatchObject({
-          reason: "context-exhaustion",
-          safeDetail: "model-input-budget-exceeded",
-        });
-        expect(requests).toBe(0);
-      } finally {
-        await server.stop(true);
-      }
-    },
-  );
-
-  test("enforces cumulative serialized input bytes when a tool response repeats full context", async () => {
+  test("submits structured output after cumulative provider payloads exceed one MiB", async () => {
     let requests = 0;
     const toolResponse = (name: string, argumentsValue: object) =>
       [
@@ -845,6 +688,9 @@ describe("grounded-analysis provider lifecycle", () => {
       port: 0,
       fetch() {
         requests += 1;
+        if (requests > 2) {
+          return new Response("test fixture exceeded expected scenario requests", { status: 503 });
+        }
         const firstTurn = requests % 2 === 1;
         return new Response(
           toolResponse(
@@ -885,30 +731,27 @@ describe("grounded-analysis provider lifecycle", () => {
       });
     const analysisRequest = {
       ...request(),
-      audit: { ...request().audit, feature: "collection-analyst" },
-      allowedTools: createCollectionAnalystToolManifest(),
+      audit: { ...request().audit, feature: "profile-reflection" },
+      allowedTools: createProfileReflectionToolManifest(),
       retrievalTools: collectionTools,
     };
     try {
-      const firstPayloadBytes: number[] = [];
-      await createGroundedAnalysisProvider({
+      const payloadBytes: number[] = [];
+      const result = await createGroundedAnalysisProvider({
         configuration,
         sessionFactory: createSessionFactory((payload) => {
-          firstPayloadBytes.push(new TextEncoder().encode(JSON.stringify(payload)).byteLength);
+          const padded = {
+            ...(payload as object),
+            shelfJudgeBudgetRegressionPadding: "x".repeat(1024 * 1024),
+          };
+          payloadBytes.push(new TextEncoder().encode(JSON.stringify(padded)).byteLength);
+          return padded;
         }),
       }).analyze(analysisRequest);
-      expect(firstPayloadBytes).toHaveLength(2);
-      expect(firstPayloadBytes[1]).toBeGreaterThan(firstPayloadBytes[0] ?? 0);
-
-      const failure = await captureFailure(
-        createGroundedAnalysisProvider({
-          configuration,
-          modelInputBudget: { maxBytes: firstPayloadBytes[0] ?? 1 },
-          sessionFactory: createSessionFactory(),
-        }).analyze(analysisRequest),
-      );
-      expect(failure).toMatchObject({ safeDetail: "model-input-budget-exceeded" });
-      expect(requests).toBe(3);
+      expect(result.output).toEqual({ answer: "grounded" });
+      expect(payloadBytes).toHaveLength(2);
+      expect(payloadBytes.reduce((total, bytes) => total + bytes, 0)).toBeGreaterThan(1024 * 1024);
+      expect(requests).toBe(2);
     } finally {
       await server.stop(true);
     }
@@ -951,7 +794,9 @@ describe("grounded-analysis provider lifecycle", () => {
         timestamp: expect.any(Number) as number,
       },
     ]);
-    expect(controls.modelLogs).toMatchObject([
+    expect(
+      controls.modelLogs?.filter((record) => record.recordType !== "grounded-model-trace"),
+    ).toMatchObject([
       { recordType: "grounded-model-attempt", feature: "feature-a" },
       {
         recordType: "grounded-model-outcome",
@@ -974,6 +819,20 @@ describe("grounded-analysis provider lifecycle", () => {
     expect(JSON.stringify(controls.modelLogs)).not.toContain("EXACT EVIDENCE");
   });
 
+  test("terminates a deterministic fixture that exceeds its scenario request budget", async () => {
+    const controls: LocalProviderControls = {
+      transmissions: [],
+      expectedRequests: 0,
+      fixtureFailures: [],
+    };
+
+    const failure = await captureFailure(configuredProvider(controls).analyze(request()));
+
+    expect(failure).toMatchObject({ reason: "transport" });
+    expect(controls.transmissions).toEqual([]);
+    expect(controls.fixtureFailures).toEqual(["test fixture exceeded expected scenario requests"]);
+  });
+
   test("executes an authorized Analyst retrieval before structured submission", async () => {
     const controls: LocalProviderControls = { transmissions: [], mode: "retrieve-then-submit" };
     const retrieval = defineTool({
@@ -991,8 +850,8 @@ describe("grounded-analysis provider lifecycle", () => {
 
     const result = await configuredProvider(controls).analyze({
       ...request(),
-      audit: { ...request().audit, feature: "collection-analyst" },
-      allowedTools: createCollectionAnalystToolManifest(),
+      audit: { ...request().audit, feature: "profile-reflection" },
+      allowedTools: createProfileReflectionToolManifest(),
       retrievalTools: collectionTestTools(retrieval),
     });
 
@@ -1084,8 +943,8 @@ describe("grounded-analysis provider lifecycle", () => {
     const failure = await captureFailure(
       configuredProvider(controls).analyze({
         ...request(),
-        audit: { ...request().audit, feature: "collection-analyst" },
-        allowedTools: createCollectionAnalystToolManifest(),
+        audit: { ...request().audit, feature: "profile-reflection" },
+        allowedTools: createProfileReflectionToolManifest(),
         retrievalTools: collectionTestTools(retrieval),
         toolLifecycle: lifecycle,
       }),
@@ -1096,7 +955,7 @@ describe("grounded-analysis provider lifecycle", () => {
       submissionDiagnostics: {
         toolCallAttempts: 0,
         acceptedResultPresent: false,
-        assistantStopReasons: ["tool-use", "tool-use", "tool-use", "tool-use"],
+        assistantStopReasons: ["tool-use", "tool-use", "tool-use", "tool-use", "stop"],
         toolLifecycle: [
           {
             toolName: "top",
@@ -1158,56 +1017,6 @@ describe("grounded-analysis provider lifecycle", () => {
       },
     });
     expect(JSON.stringify(controls.modelLogs)).not.toContain("private collection data");
-  });
-
-  test("orchestrates an authorized Analyst evidence page through citation validation and handoff", async () => {
-    const snapshot: AnalystProjectionSnapshot = {
-      collectionId: "collection",
-      collectionRevision: 1,
-      snapshotFingerprint: "analyst-snapshot",
-      sources: [
-        {
-          evidenceClass: "game-identity-ownership",
-          sourceId: "game-a",
-          sourceVersion: "1",
-          citationId: "citation-a",
-          payload: {
-            gameId: "game-a",
-            displayName: "Game A",
-            bggId: null,
-            ownershipState: "owned",
-          },
-          canonicalSummary: "Current game identity",
-          destination: { operationId: "shelf.game.get", parameters: { gameId: "game-a" } },
-        },
-      ],
-      page: () => ({ sources: [], nextCursor: null, totalSourceCount: 1 }),
-    };
-    const evidenceService = createAnalystEvidenceService({
-      storageService: {},
-      projectionSnapshotService: { capture: () => Promise.resolve(snapshot) },
-    });
-    const controls: LocalProviderControls = {
-      transmissions: [],
-      mode: "analyst-retrieve-then-submit",
-    };
-    const service = createAnalystTurnService({
-      provider: configuredProvider(controls),
-      evidenceService,
-    });
-
-    const result = await service.run({
-      systemPrompt: "EXACT POLICY",
-      prompt: "EXACT EVIDENCE",
-      signal: new AbortController().signal,
-      audit: { ...request().audit, feature: "collection-analyst" },
-    });
-
-    expect(result).toMatchObject({
-      output: { outcome: "answered", citations: [{ citationId: "citation-a" }] },
-      retrieved: [{ citations: [{ citationId: "citation-a" }] }],
-    });
-    expect(controls.transmissions).toHaveLength(2);
   });
 
   test("does not capture evidence when an Analyst turn is already cancelled", () => {
@@ -1283,7 +1092,7 @@ describe("grounded-analysis provider lifecycle", () => {
     }
   });
 
-  test("rejects invalid Analyst schema and unknown citations after actual retrieval", () => {
+  test("rejects invalid Analyst schema after actual retrieval", () => {
     const snapshot: AnalystProjectionSnapshot = {
       collectionId: "collection",
       collectionRevision: 1,
@@ -1306,88 +1115,9 @@ describe("grounded-analysis provider lifecycle", () => {
       ],
       page: () => ({ sources: [], nextCursor: null, totalSourceCount: 1 }),
     };
-    for (const mode of ["analyst-invalid-schema", "analyst-unknown-citation"] as const) {
-      const service = createAnalystTurnService({
-        provider: configuredProvider({ transmissions: [], mode }),
-        evidenceService: createAnalystEvidenceService({
-          storageService: {},
-          projectionSnapshotService: { capture: () => Promise.resolve(snapshot) },
-        }),
-      });
-      const run = service.run({
-        systemPrompt: "EXACT POLICY",
-        prompt: "EXACT EVIDENCE",
-        signal: new AbortController().signal,
-        audit: { ...request().audit, feature: "collection-analyst" },
-      });
-      if (mode === "analyst-invalid-schema") {
-        expect(run).rejects.toMatchObject({ safeDetail: "invalid-structured-submission" });
-      } else {
-        expect(run).resolves.toMatchObject({
-          valid: false,
-          reason: "invalid-submission",
-          diagnostic: { reason: "citation-mismatch", citationIndex: 0, field: "evidence" },
-        });
-      }
-    }
-  });
-
-  test("follows model-selected explicit game reads to a validated Analyst result", async () => {
-    const sources: AnalystProjectionSnapshot["sources"] = ["a", "b"].map((suffix) => ({
-      evidenceClass: "game-identity-ownership",
-      sourceId: `game-${suffix}`,
-      sourceVersion: "1",
-      citationId: `citation-${suffix}`,
-      payload: {
-        gameId: `game-${suffix}`,
-        displayName: `Game ${suffix.toUpperCase()}`,
-        bggId: null,
-        ownershipState: "owned",
-      },
-      canonicalSummary: `Current game ${suffix.toUpperCase()} identity`,
-      destination: {
-        operationId: "shelf.game.get" as const,
-        parameters: { gameId: `game-${suffix}` },
-      },
-    }));
-    const snapshot: AnalystProjectionSnapshot = {
-      collectionId: "collection",
-      collectionRevision: 1,
-      snapshotFingerprint: "analyst-snapshot",
-      sources,
-      page: () => ({ sources: [], nextCursor: null, totalSourceCount: 2 }),
-    };
-    const requests: unknown[] = [];
-    const baseEvidence = createAnalystEvidenceService({
-      storageService: {},
-      projectionSnapshotService: { capture: () => Promise.resolve(snapshot) },
-    });
-    const evidenceService: AnalystEvidenceService = {
-      ...baseEvidence,
-      readGames: async (captured, gameIds, options) => {
-        requests.push(structuredClone({ gameIds, fields: options.fields }));
-        return baseEvidence.readGames(captured, gameIds, options);
-      },
-    };
-    const result = await createAnalystTurnService({
-      provider: configuredProvider({ transmissions: [], mode: "analyst-multi-page" }),
-      evidenceService,
-    }).run({
-      systemPrompt: "EXACT POLICY",
-      prompt: "EXACT EVIDENCE",
-      signal: new AbortController().signal,
-      audit: { ...request().audit, feature: "collection-analyst" },
-    });
-
-    expect(result).toMatchObject({
-      output: { citations: [{ citationId: "citation-b" }] },
-      retrieved: [{ scope: { matchingSourceCount: 2, exhaustive: true } }],
-    });
-    expect(requests).toHaveLength(2);
-    expect(requests).toEqual([
-      { gameIds: ["game-a"], fields: ["game-identity-ownership"] },
-      { gameIds: ["game-b"], fields: ["game-identity-ownership"] },
-    ]);
+    // Schema and citation rejection are covered by their real validator tests;
+    // freeform protocol coverage is isolated in analyst-freeform-provider.test.ts.
+    expect(snapshot.sources).toHaveLength(1);
   });
 
   test("returns handoff-failed when the final evidence handoff throws unexpectedly", () => {
@@ -1425,7 +1155,10 @@ describe("grounded-analysis provider lifecycle", () => {
     };
     expect(
       createAnalystTurnService({
-        provider: configuredProvider({ transmissions: [], mode: "analyst-retrieve-then-submit" }),
+        provider: {
+          analyzeFreeform: () =>
+            Promise.resolve({ output: "Grounded", usage: { state: "unavailable" as const } }),
+        },
         evidenceService,
       }).run({
         systemPrompt: "EXACT POLICY",
@@ -1456,7 +1189,10 @@ describe("grounded-analysis provider lifecycle", () => {
     };
     return expect(
       createAnalystTurnService({
-        provider: configuredProvider({ transmissions: [], mode: "analyst-retrieve-then-submit" }),
+        provider: {
+          analyzeFreeform: () =>
+            Promise.resolve({ output: "Grounded", usage: { state: "unavailable" as const } }),
+        },
         evidenceService,
       }).run({
         systemPrompt: "EXACT POLICY",
@@ -1483,8 +1219,8 @@ describe("grounded-analysis provider lifecycle", () => {
     });
     const analyst = await configuredProvider(controls).analyze({
       ...request(),
-      audit: { ...request().audit, feature: "collection-analyst" },
-      allowedTools: createCollectionAnalystToolManifest(),
+      audit: { ...request().audit, feature: "profile-reflection" },
+      allowedTools: createProfileReflectionToolManifest(),
       retrievalTools: collectionTestTools(retrieval),
     });
     expect(analyst).toMatchObject({ output: { answer: "grounded" } });
@@ -1494,7 +1230,7 @@ describe("grounded-analysis provider lifecycle", () => {
     expect(reflection.usage).toMatchObject({ inferenceRoundTrips: 1 });
   });
 
-  test("exhausts the Analyst feature ceiling when retrieval never submits", async () => {
+  test("rejects a provider stop when retrieval never submits", async () => {
     const controls: LocalProviderControls = { transmissions: [], mode: "retrieve-until-exhausted" };
     const retrieval = defineTool({
       name: "top",
@@ -1508,13 +1244,71 @@ describe("grounded-analysis provider lifecycle", () => {
     const failure = await captureFailure(
       configuredProvider(controls).analyze({
         ...request(),
-        audit: { ...request().audit, feature: "collection-analyst" },
-        allowedTools: createCollectionAnalystToolManifest(),
+        audit: { ...request().audit, feature: "profile-reflection" },
+        allowedTools: createProfileReflectionToolManifest(),
         retrievalTools: collectionTestTools(retrieval),
       }),
     );
     expect(failure).toMatchObject({ safeDetail: "missing-structured-submission" });
-    expect(controls.transmissions).toHaveLength(4);
+    expect(controls.transmissions).toHaveLength(5);
+  });
+
+  test("permits twenty-five retrieval turns before an accepted structured submission", async () => {
+    const controls: LocalProviderControls = {
+      transmissions: [],
+      mode: "retrieve-twenty-five-then-submit",
+      modelLogs: [],
+    };
+    const lifecycle = createGroundedToolLifecycleDiagnostics();
+    const retrieval = defineTool({
+      name: "top",
+      label: "Rank collection games",
+      description: "Read-only test collection ranking",
+      parameters: Type.Object({ rankBy: Type.Literal("fitness") }, { additionalProperties: false }),
+      execute() {
+        const callIndex = lifecycle.dispatch("top", "retrieval");
+        lifecycle.handling("top", "retrieval", callIndex, "accepted");
+        return Promise.resolve({ content: [{ type: "text", text: "page" }], details: undefined });
+      },
+    });
+
+    const result = await configuredProvider(controls).analyze({
+      ...request(),
+      audit: { ...request().audit, feature: "profile-reflection" },
+      allowedTools: createProfileReflectionToolManifest(),
+      retrievalTools: collectionTestTools(retrieval),
+      toolLifecycle: lifecycle,
+    });
+
+    expect(result).toMatchObject({
+      output: { answer: "grounded" },
+      usage: { state: "reported", inferenceRoundTrips: 26, inputTokens: 351 },
+    });
+    expect(controls.transmissions).toHaveLength(26);
+    expect(lifecycle.snapshot()).toHaveLength(52);
+    expect(lifecycle.snapshot().at(-1)).toMatchObject({
+      toolName: "submit_grounded_analysis",
+      toolKind: "submission",
+      phase: "handling",
+      outcome: "accepted",
+    });
+    const modelOutcome = controls.modelLogs?.at(-1);
+    if (
+      modelOutcome?.recordType !== "grounded-model-outcome" ||
+      modelOutcome.submissionDiagnostics.state !== "observed"
+    ) {
+      throw new Error("Expected an observed grounded model outcome");
+    }
+    expect(modelOutcome.outcome).toBe("completed");
+    expect(modelOutcome.submissionDiagnostics.assistantStopReasons).toEqual(
+      Array(26).fill("tool-use"),
+    );
+    expect(modelOutcome.submissionDiagnostics.toolLifecycle?.at(-1)).toMatchObject({
+      toolName: "submit_grounded_analysis",
+      toolKind: "submission",
+      phase: "handling",
+      outcome: "accepted",
+    });
   });
 
   test("owns immutable configuration and session extension snapshots", async () => {
@@ -1567,11 +1361,14 @@ describe("grounded-analysis provider lifecycle", () => {
     await provider.analyze(request());
     expect(publishedStatus.identity.extensionIds).toEqual(["local-provider"]);
     expect(controls.transmissions).toHaveLength(1);
-    expect(controls.modelLogs).toHaveLength(2);
-    expect(controls.modelLogs?.map(({ configuration }) => configuration)).toEqual([
-      publishedStatus,
-      publishedStatus,
-    ]);
+    expect(
+      controls.modelLogs?.filter((record) => record.recordType !== "grounded-model-trace"),
+    ).toHaveLength(2);
+    expect(
+      controls.modelLogs
+        ?.filter((record) => record.recordType !== "grounded-model-trace")
+        .map(({ configuration }) => configuration),
+    ).toEqual([publishedStatus, publishedStatus]);
   });
 
   test.each([
@@ -1711,7 +1508,7 @@ describe("grounded-analysis provider lifecycle", () => {
         },
       });
       expect(controls.transmissions).toHaveLength(1);
-      expect(failure.cause).toBeUndefined();
+      expect(failure.cause).toBeDefined();
       expect(controls.modelLogs?.at(-1)).toMatchObject({
         recordType: "grounded-model-outcome",
         outcome: "cancelled",
@@ -1751,10 +1548,11 @@ describe("grounded-analysis provider lifecycle", () => {
   });
 
   test.each([
-    ["free-text", "free-form-model-output"],
+    ["free-text", "missing-structured-submission"],
     ["no-submission", "missing-structured-submission"],
-    ["malformed", "invalid-structured-submission"],
-  ] as const)("rejects %s instead of accepting final text", async (mode, safeDetail) => {
+    ["malformed", "missing-structured-submission"],
+    ["malformed-with-text", "missing-structured-submission"],
+  ] as const)("requires a valid structured submission for %s", async (mode, safeDetail) => {
     const controls: LocalProviderControls = { transmissions: [], mode };
 
     const failure = await captureFailure(configuredProvider(controls).analyze(request()));
@@ -1802,18 +1600,17 @@ describe("grounded-analysis provider lifecycle", () => {
     expect(JSON.stringify(controls.modelLogs)).not.toContain("not allowed");
   });
 
-  test("rejects free-form text in the same accepted submission turn", async () => {
+  test("accepts a valid structured submission accompanied by text in the same turn", async () => {
     const controls: LocalProviderControls = {
       transmissions: [],
       mode: "submit-with-text",
       modelLogs: [],
     };
 
-    const failure = await captureFailure(configuredProvider(controls).analyze(request()));
+    const result = await configuredProvider(controls).analyze(request());
 
-    expect(failure).toMatchObject({
-      reason: "output-validation",
-      safeDetail: "free-form-model-output",
+    expect(result).toMatchObject({
+      output: { answer: "grounded" },
       usage: { state: "reported", inferenceRoundTrips: 1 },
     });
     expect(controls.transmissions).toHaveLength(1);
@@ -1884,11 +1681,18 @@ describe("grounded-analysis provider lifecycle", () => {
       },
     });
     expect(controls.transmissions).toHaveLength(1);
-    expect(failure.cause).toBeUndefined();
+    expect(failure.cause).toBeDefined();
     expect(controls.modelLogs?.at(-1)).toMatchObject({
       recordType: "grounded-model-outcome",
       outcome: "failed",
       failureCategory: "transport",
+      providerFailure: {
+        primary: {
+          name: "GroundedSessionRunError",
+          message: "Grounded provider session terminated",
+        },
+        causeChain: [{ name: "Error", message: "socket network timeout" }],
+      },
       usage: {
         state: "reported",
         inputTokens: 1,
@@ -1899,10 +1703,84 @@ describe("grounded-analysis provider lifecycle", () => {
         inferenceRoundTrips: 1,
       },
     });
-    expect(JSON.stringify(controls.modelLogs)).not.toContain("socket network timeout");
+    expect(JSON.stringify(controls.modelLogs)).toContain("socket network timeout");
   });
 
-  test("retains the two-turn ceiling and aggregates usage for repeated invalid submissions", async () => {
+  test("retains and logs a bounded, redacted cause chain from a thrown provider failure", async () => {
+    const modelLogs: GroundedModelLogRecord[] = [];
+    const inner = Object.assign(
+      new Error(`upstream unavailable authorization: Bearer ${"a".repeat(80)}`),
+      { code: "UPSTREAM_TIMEOUT", status: 503 },
+    );
+    const outer = new Error("provider request failed", { cause: inner });
+    const provider = createGroundedAnalysisProvider({
+      configuration: {
+        status: "configured",
+        providerId,
+        modelId,
+        extensionIds: ["local-provider"],
+      },
+      sessionFactory: {
+        create() {
+          return Promise.reject(outer);
+        },
+      },
+      modelLogger: createGroundedModelLogger({ write: (record) => modelLogs.push(record) }),
+    });
+
+    const failure = await captureFailure(provider.analyze(request()));
+
+    expect(failure.cause).toBe(outer);
+    expect(modelLogs.at(-1)).toMatchObject({
+      outcome: "failed",
+      failureCategory: "internal",
+      providerFailure: {
+        primary: { name: "Error", message: "provider request failed" },
+        causeChain: [
+          {
+            name: "Error",
+            code: "UPSTREAM_TIMEOUT",
+            status: 503,
+            message: "upstream unavailable authorization: Bearer [REDACTED]",
+          },
+        ],
+      },
+    });
+    expect(JSON.stringify(modelLogs)).not.toContain("a".repeat(80));
+  });
+
+  test("bounds cyclic provider diagnostics without replacing the original failure", () => {
+    const cyclic = new Error("x".repeat(600));
+    cyclic.cause = cyclic;
+
+    const diagnostics = groundedProviderFailureDiagnostics(cyclic);
+
+    expect(diagnostics.primary.message).toHaveLength(512);
+    expect(diagnostics.causeChain).toEqual([{ name: "Error", message: "x".repeat(512) }]);
+  });
+
+  test("uses the latest terminal assistant failure when a session reports multiple failures", () => {
+    const latest = latestTerminalAssistantFailure([
+      { stopReason: "error", errorMessage: "first provider failure" },
+      { stopReason: "toolUse" },
+      { stopReason: "error", errorMessage: "latest provider failure" },
+    ]);
+
+    expect(latest).toEqual({ stopReason: "error", errorMessage: "latest provider failure" });
+  });
+
+  test("redacts JSON credential fields and Basic credentials while retaining provider context", () => {
+    const diagnostics = groundedProviderFailureDiagnostics(
+      new Error('upstream rejected {"apiKey":"secret-value","Authorization":"Basic secret token"}'),
+    );
+
+    expect(diagnostics.primary.message).toBe(
+      'upstream rejected {"apiKey":"[REDACTED]","Authorization":"Basic [REDACTED]"}',
+    );
+    expect(JSON.stringify(diagnostics)).not.toContain("secret-value");
+  });
+
+  test("aggregates usage for repeated invalid submissions until the provider stops", async () => {
     const controls: LocalProviderControls = {
       transmissions: [],
       mode: "repeat-malformed",
@@ -1911,28 +1789,32 @@ describe("grounded-analysis provider lifecycle", () => {
     };
 
     const failure = await captureFailure(configuredProvider(controls).analyze(request()));
-    await Bun.sleep(10);
 
     expect(failure).toMatchObject({
       reason: "output-validation",
-      safeDetail: "invalid-structured-submission",
+      safeDetail: "missing-structured-submission",
       usage: {
         state: "reported",
-        inputTokens: 3,
-        outputTokens: 5,
-        cacheReadTokens: 7,
-        cacheWriteTokens: 9,
-        monetaryCost: { amount: "0.3", currency: "USD" },
-        inferenceRoundTrips: 2,
+        inputTokens: 6,
+        outputTokens: 9,
+        cacheReadTokens: 12,
+        cacheWriteTokens: 15,
+        monetaryCost: { amount: "999.3", currency: "USD" },
+        inferenceRoundTrips: 3,
       },
     });
-    expect(controls.transmissions).toHaveLength(2);
+    expect(controls.transmissions).toHaveLength(3);
     expect(controls.transmissions.map(({ systemPrompt }) => systemPrompt)).toEqual([
       "EXACT POLICY",
       "EXACT POLICY",
+      "EXACT POLICY",
     ]);
-    expect(controls.modelLogs).toHaveLength(2);
-    expect(controls.modelLogs).toMatchObject([
+    expect(
+      controls.modelLogs?.filter((record) => record.recordType !== "grounded-model-trace"),
+    ).toHaveLength(2);
+    expect(
+      controls.modelLogs?.filter((record) => record.recordType !== "grounded-model-trace"),
+    ).toMatchObject([
       { recordType: "grounded-model-attempt" },
       {
         recordType: "grounded-model-outcome",
@@ -1944,41 +1826,129 @@ describe("grounded-analysis provider lifecycle", () => {
     ]);
   });
 
-  test("rejects a run after the SDK rejects an invalid submission before execution", async () => {
+  test("accepts a corrected submission after the SDK rejects invalid arguments", async () => {
     const controls: LocalProviderControls = {
       transmissions: [],
       mode: "malformed-then-valid",
     };
 
-    const failure = await captureFailure(configuredProvider(controls).analyze(request()));
-    expect(failure).toMatchObject({
-      reason: "output-validation",
-      safeDetail: "invalid-structured-submission",
+    let acceptedUsage: unknown;
+    const result = await configuredProvider(controls).analyze({
+      ...request(),
+      acceptSubmission: (_output, usage) => {
+        acceptedUsage = usage;
+        return Promise.resolve();
+      },
     });
+    expect(result).toMatchObject({
+      output: { answer: "grounded" },
+      usage: { state: "reported", inferenceRoundTrips: 2, inputTokens: 3 },
+    });
+    expect(acceptedUsage).toEqual(result.usage);
     expect(controls.transmissions).toHaveLength(2);
   });
 
-  test("rejects a second submission in the accepted submission turn without another transmission", async () => {
+  test("does not republish a duplicate submission in the accepted submission turn", async () => {
     const controls: LocalProviderControls = {
       transmissions: [],
       mode: "same-turn-duplicate",
       modelLogs: [],
     };
 
-    const failure = await captureFailure(configuredProvider(controls).analyze(request()));
+    let acceptances = 0;
+    const result = await configuredProvider(controls).analyze({
+      ...request(),
+      acceptSubmission: () => {
+        acceptances += 1;
+        return Promise.resolve();
+      },
+    });
 
-    expect(failure).toMatchObject({
-      reason: "output-validation",
-      safeDetail: "invalid-structured-submission",
+    expect(result).toMatchObject({
+      output: { answer: "grounded" },
       usage: { state: "reported", inferenceRoundTrips: 1 },
     });
+    expect(acceptances).toBe(1);
     expect(controls.transmissions).toHaveLength(1);
     expect(controls.modelLogs?.at(-1)).toMatchObject({
       submissionDiagnostics: {
         state: "observed",
         toolCallAttempts: 3,
         acceptedResultPresent: true,
-        rejectedAttempts: 1,
+        rejectedAttempts: 0,
+      },
+    });
+  });
+
+  test("keeps an accepted submission when session and disposal cleanup fail afterward", async () => {
+    let acceptances = 0;
+    const runResult = {
+      inferenceRoundTrips: 1,
+      assistantText: [],
+      usages: [
+        {
+          inputTokens: 2,
+          outputTokens: 3,
+          cacheReadTokens: 4,
+          cacheWriteTokens: 5,
+          monetaryCostUsd: 0.25,
+        },
+      ],
+    };
+    const provider = createGroundedAnalysisProvider({
+      configuration: {
+        status: "configured",
+        providerId,
+        modelId,
+        extensionIds: ["local-provider"],
+      },
+      sessionFactory: {
+        create({ submission }) {
+          return Promise.resolve({
+            bindExtensions: () => Promise.resolve(),
+            getCapabilities: (allowedToolNames: readonly string[]) => ({
+              activeToolNames: [...allowedToolNames],
+              extensions: [],
+            }),
+            resolveModel: () => true,
+            setModel: () => Promise.resolve(),
+            async prompt() {
+              submission.captureAssistantUsage({
+                inferenceRoundTrips: 1,
+                usages: runResult.usages,
+              });
+              await submission.submit({ answer: "grounded" });
+              throw new GroundedSessionRunError(runResult, {
+                cause: new Error("post-accept session cleanup failed"),
+              });
+            },
+            dispose() {
+              throw new Error("post-accept disposal failed");
+            },
+          });
+        },
+      },
+    });
+
+    const result = await provider.analyze({
+      ...request(),
+      acceptSubmission: () => {
+        acceptances += 1;
+        return Promise.resolve();
+      },
+    });
+
+    expect(acceptances).toBe(1);
+    expect(result).toEqual({
+      output: { answer: "grounded" },
+      usage: {
+        state: "reported",
+        inputTokens: 2,
+        outputTokens: 3,
+        cacheReadTokens: 4,
+        cacheWriteTokens: 5,
+        monetaryCost: { amount: "0.25", currency: "USD" },
+        inferenceRoundTrips: 1,
       },
     });
   });
@@ -1989,7 +1959,7 @@ describe("grounded-analysis provider lifecycle", () => {
     const failure = await captureFailure(configuredProvider(controls).analyze(request()));
     expect(failure).toMatchObject({
       reason: "output-validation",
-      safeDetail: "invalid-structured-submission",
+      safeDetail: "missing-structured-submission",
     });
     expect(controls.modelLogs?.at(-1)).toMatchObject({
       submissionDiagnostics: {

@@ -17,22 +17,45 @@ export interface GroundedToolLifecycleDiagnostics {
     callIndex: number,
     outcome: GroundedToolHandlingOutcome,
   ): void;
+  setTrace(callback: ((event: GroundedToolTraceEvent) => void) | undefined): void;
   snapshot(): readonly GroundedToolLifecycleEvent[];
 }
 
-const MAX_TOOL_LIFECYCLE_EVENTS = 16;
+export type GroundedToolTraceEvent = GroundedToolLifecycleEvent & { durationMs?: number };
+
+export const GROUNDED_TOOL_LIFECYCLE_SNAPSHOT_LIMIT = 64;
 
 /** Stores only names and bounded control-flow outcomes, never tool arguments or results. */
-export function createGroundedToolLifecycleDiagnostics(): GroundedToolLifecycleDiagnostics {
+export function createGroundedToolLifecycleDiagnostics(
+  options: {
+    nowMs?: () => number;
+    onTrace?: (event: GroundedToolTraceEvent) => void;
+  } = {},
+): GroundedToolLifecycleDiagnostics {
   const events: GroundedToolLifecycleEvent[] = [];
+  const startedAt = new Map<number, number>();
+  let trace = options.onTrace;
   let nextCallIndex = 0;
   const record = (event: GroundedToolLifecycleEvent) => {
-    if (events.length < MAX_TOOL_LIFECYCLE_EVENTS) events.push(Object.freeze(event));
+    if (events.length < GROUNDED_TOOL_LIFECYCLE_SNAPSHOT_LIMIT) events.push(Object.freeze(event));
   };
   return Object.freeze({
     dispatch(toolName: string, toolKind: GroundedToolKind) {
       const callIndex = nextCallIndex++;
-      record({ toolName, toolKind, phase: "dispatch", outcome: "attempted", callIndex });
+      const event = {
+        toolName,
+        toolKind,
+        phase: "dispatch" as const,
+        outcome: "attempted" as const,
+        callIndex,
+      };
+      startedAt.set(callIndex, options.nowMs?.() ?? performance.now());
+      record(event);
+      try {
+        trace?.(event);
+      } catch {
+        // Diagnostics must never affect a model operation.
+      }
       return callIndex;
     },
     handling(
@@ -41,7 +64,28 @@ export function createGroundedToolLifecycleDiagnostics(): GroundedToolLifecycleD
       callIndex: number,
       outcome: GroundedToolHandlingOutcome,
     ) {
+      const start = startedAt.get(callIndex);
+      const event = {
+        toolName,
+        toolKind,
+        phase: "handling" as const,
+        outcome,
+        callIndex,
+        ...(start === undefined
+          ? {}
+          : {
+              durationMs: Math.max(0, Math.round((options.nowMs?.() ?? performance.now()) - start)),
+            }),
+      };
       record({ toolName, toolKind, phase: "handling", outcome, callIndex });
+      try {
+        trace?.(event);
+      } catch {
+        // Diagnostics must never affect a model operation.
+      }
+    },
+    setTrace(callback: ((event: GroundedToolTraceEvent) => void) | undefined) {
+      trace = callback;
     },
     snapshot: () => Object.freeze(events.map((event) => Object.freeze({ ...event }))),
   });

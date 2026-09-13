@@ -18,6 +18,7 @@ const EvidenceEntryEnvelopeSchema = z
     sourceVersion: z.string().min(1),
     evidenceClass: z.string().min(1),
     payload: z.unknown(),
+    citationMetadata: z.unknown().optional(),
   })
   .strict();
 
@@ -26,6 +27,7 @@ export type GroundedExaminedSource = z.infer<typeof ExaminedSourceSchema>;
 export interface GroundedEvidenceEntry<Payload = unknown> extends GroundedExaminedSource {
   citationId: string;
   payload: Payload;
+  citationMetadata?: unknown;
 }
 
 export interface GroundedEvidenceSnapshot {
@@ -71,6 +73,7 @@ export function createGroundedEvidenceRegistry(options: {
     sourceVersion: string;
     evidenceClass: string;
   }>;
+  citationMetadataSchema?: z.ZodType<unknown>;
   expectedSources: readonly GroundedExaminedSource[];
 }) {
   const evidenceIdentitySchema = snapshotGroundedAuthorizationSchema(
@@ -141,7 +144,16 @@ export function createGroundedEvidenceRegistry(options: {
       if (!payloadSchema)
         throw new Error("Evidence class is not authorized by this feature manifest");
       const payload = payloadSchema.parse(envelope.payload);
-      const entry = cloneAndFreeze({ ...identity, payload });
+      const citationMetadata =
+        envelope.citationMetadata === undefined
+          ? undefined
+          : (options.citationMetadataSchema?.parse(envelope.citationMetadata) ??
+            envelope.citationMetadata);
+      const entry = cloneAndFreeze({
+        ...identity,
+        payload,
+        ...(citationMetadata === undefined ? {} : { citationMetadata }),
+      });
       entries.set(identity.citationId, entry);
     },
     complete(): GroundedEvidenceSnapshot {

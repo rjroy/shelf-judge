@@ -286,7 +286,7 @@ export async function profileReflectionsCommand(
     `Provider: ${providerId}; model: ${modelId}.`,
     "Relevant owner notes and deterministic collection evidence leave this application boundary.",
     "Provider processing and retention follow its configuration and policy. Shelf Judge retains validated local results and citation snapshots.",
-    `This refresh can make ${targetCount} model operation(s) and at most ${targetCount * 2} provider inference round trips. Shelf Judge has no fixed token or monetary cap.`,
+    `This refresh can make ${targetCount} model operation(s). Shelf Judge has no fixed inference round-trip, token, or monetary cap.`,
     "Cancel with Ctrl-C; already transmitted content may have been processed and may have incurred cost.",
   ].join("\n");
   const interactive = process.stdin.isTTY && process.stdout.isTTY;

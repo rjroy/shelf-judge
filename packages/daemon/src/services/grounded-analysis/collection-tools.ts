@@ -140,15 +140,11 @@ export interface CollectionToolStage {
   readonly callIndex: number;
   readonly durationMs: number;
   readonly bytes?: number;
-  readonly rejection?: "context-limit";
   readonly failure?: "cancelled" | "evidence-operation-failed";
 }
 
 export interface CollectionToolFactoryOptions {
   readonly signal: AbortSignal;
-  readonly contextLimitMessage: string;
-  readonly resultMaxBytes: number;
-  readonly turnMaxBytes: number;
   readonly redact: (value: unknown) => unknown;
   readonly onStage?: (stage: CollectionToolStage) => void;
   readonly toolLifecycle?: GroundedToolLifecycleDiagnostics;
@@ -187,7 +183,6 @@ function abortable<Value>(operation: Promise<Value>, signal: AbortSignal): Promi
 export function createCollectionTools(
   options: CollectionToolFactoryOptions,
 ): readonly ToolDefinition[] {
-  let serializedBytes = 0;
   let toolIndex = 0;
   const createTool = <Name extends ToolName>(
     name: Name,
@@ -232,23 +227,6 @@ export function createCollectionTools(
           options.signal.throwIfAborted();
           const serialized = JSON.stringify(options.redact(result));
           const bytes = new TextEncoder().encode(serialized).byteLength;
-          if (bytes > options.resultMaxBytes || serializedBytes + bytes > options.turnMaxBytes) {
-            if (lifecycleCallIndex !== undefined)
-              options.toolLifecycle?.handling(name, "retrieval", lifecycleCallIndex, "rejected");
-            options.onStage?.({
-              name,
-              outcome: "rejected",
-              callIndex,
-              durationMs: Date.now() - started,
-              bytes,
-              rejection: "context-limit",
-            });
-            return {
-              content: [{ type: "text", text: options.contextLimitMessage }],
-              details: undefined,
-            };
-          }
-          serializedBytes += bytes;
           if (lifecycleCallIndex !== undefined)
             options.toolLifecycle?.handling(name, "retrieval", lifecycleCallIndex, "accepted");
           options.onStage?.({

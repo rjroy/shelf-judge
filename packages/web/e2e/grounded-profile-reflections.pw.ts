@@ -134,7 +134,7 @@ test("disclosure focus, delayed typed progress, cancellation, settings, deletion
   await reflections.getByRole("button", { name: "Refresh reflections" }).click();
   const dialog = reflections.getByRole("dialog");
   await expect(dialog).toContainText("fixture-provider");
-  await expect(dialog).toContainText("at most 6 provider inference round trips");
+  await expect(dialog).toContainText("no fixed inference round-trip, token, or monetary cap");
   await expect(dialog.getByRole("button", { name: "Leave without sending" })).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(dialog.getByRole("button", { name: "Acknowledge and refresh" })).toBeFocused();
@@ -279,7 +279,7 @@ test("a second refresh cannot replace the active cancellation capability", async
   expect(refreshRequests).toHaveLength(1);
 });
 
-test("terminal, missing-terminal, and stream-error refresh paths leave no card refreshing", async ({
+test("terminal, daemon-owned missing-terminal recovery, and stream-error refresh paths", async ({
   page,
 }) => {
   await page.goto("/");
@@ -335,7 +335,12 @@ test("terminal, missing-terminal, and stream-error refresh paths leave no card r
   );
   await reflections.getByRole("button", { name: "Refresh reflections" }).click();
   await reflections.getByRole("button", { name: "Acknowledge and refresh" }).click();
-  await expect(reflections.locator(".reflection-live")).toContainText("ended before a terminal");
+  await expect(reflections.locator(".reflection-live")).toContainText(
+    "Refresh continues in the background. Checking its status.",
+  );
+  // The closed stream triggers an immediate authoritative state read; a recovered idle state
+  // legitimately stops the periodic poll rather than manufacturing a terminal event.
+  await expect.poll(() => reflectionGets).toBeGreaterThanOrEqual(1);
   await expect(reflections.getByRole("button", { name: "Cancel refresh" })).toHaveCount(0);
 
   await page.unroute(refreshPath);
@@ -343,7 +348,8 @@ test("terminal, missing-terminal, and stream-error refresh paths leave no card r
   await reflections.getByRole("button", { name: "Refresh reflections" }).click();
   await reflections.getByRole("button", { name: "Acknowledge and refresh" }).click();
   await expect(reflections).toContainText("Optional reflections are unavailable");
-  await expect(reflections.getByRole("button", { name: "Cancel refresh" })).toHaveCount(0);
+  // The earlier daemon-owned refresh remains cancellable while its authoritative status read fails.
+  await expect(reflections.getByRole("button", { name: "Cancel refresh" })).toHaveCount(3);
 });
 
 test("native Chromium 200 percent page zoom records reflection width evidence", async ({

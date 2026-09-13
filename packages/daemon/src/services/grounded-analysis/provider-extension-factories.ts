@@ -1,5 +1,6 @@
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { SimpleStreamOptions } from "@earendil-works/pi-ai";
+import type { NativeTransportDiagnosticSink } from "./transport-diagnostics.js";
 import {
   createOllamaProviderExtension,
   createOllamaRequestPayloadHook,
@@ -13,6 +14,9 @@ export interface ProviderExtensionConfiguration {
 
 export interface ProviderSessionExtensions {
   readonly extensionFactories: readonly ExtensionFactory[];
+  readonly createExtensionFactories?: (
+    sink: NativeTransportDiagnosticSink,
+  ) => readonly ExtensionFactory[];
   readonly onPayload?: SimpleStreamOptions["onPayload"];
 }
 
@@ -26,8 +30,14 @@ export function createProviderSessionExtensions(
   if (configuration.providerId !== "ollama") return { extensionFactories: [] };
 
   return {
-    extensionFactories: [
-      createOllamaProviderExtension(configuration.modelId, OLLAMA_GROUNDED_MAX_TOKENS),
+    extensionFactories: [],
+    createExtensionFactories: (sink) => [
+      createOllamaProviderExtension(
+        configuration.modelId,
+        OLLAMA_GROUNDED_MAX_TOKENS,
+        undefined,
+        sink,
+      ),
     ],
     onPayload: createOllamaRequestPayloadHook(OLLAMA_GROUNDED_MAX_TOKENS),
   };

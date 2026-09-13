@@ -69,18 +69,23 @@ describe("Reflection model collection tools", () => {
           undefined,
           unusedContext,
         );
-        return {
-          output: request.submissionSchema.parse({
-            result: {
-              outcome: "abstained",
-              reason: "incomplete-scope",
-              explanation: "The selected evidence does not establish a pattern.",
-              supportingBlocks: [],
-              noteExcerpts: [],
-            },
-          }),
-          usage: { state: "reported", inferenceRoundTrips: 1, inputTokens: 1, outputTokens: 1 },
+        const output = request.submissionSchema.parse({
+          result: {
+            outcome: "abstained",
+            reason: "incomplete-scope",
+            explanation: "The selected evidence does not establish a pattern.",
+            supportingBlocks: [],
+            noteExcerpts: [],
+          },
+        });
+        const usage = {
+          state: "reported" as const,
+          inferenceRoundTrips: 1,
+          inputTokens: 1,
+          outputTokens: 1,
         };
+        await request.acceptSubmission?.(output, usage);
+        return { output, usage };
       },
     };
     const context = createTestApp({ now: () => NOW, groundedAnalysisProvider: provider });
@@ -214,121 +219,167 @@ describe("Reflection model collection tools", () => {
     );
   });
 
-  test("persists an explicit Reflection refresh after its real evidence result returns through the provider loop", async () => {
-    let requests = 0;
-    let returnedCitationId: string | undefined;
-    const response = (name: string, argumentsValue: object) =>
-      [
-        `data: ${JSON.stringify({
-          choices: [
-            {
-              index: 0,
-              delta: {
-                tool_calls: [
-                  {
-                    index: 0,
-                    id: `call-${requests}`,
-                    type: "function",
-                    function: { name, arguments: JSON.stringify(argumentsValue) },
-                  },
-                ],
+  test.each([
+    { outcome: "answered" as const, expectedRequests: 2, expectedRoundTrips: 2 },
+    { outcome: "abstained" as const, expectedRequests: 3, expectedRoundTrips: 3 },
+  ])(
+    "persists an $outcome Reflection from real discovery and submission tools",
+    async ({ outcome, expectedRequests, expectedRoundTrips }) => {
+      let requests = 0;
+      let returnedCitationId: string | undefined;
+      const response = (name: string, argumentsValue: object, narration?: string) =>
+        [
+          `data: ${JSON.stringify({
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  ...(narration === undefined ? {} : { content: narration }),
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: `call-${requests}`,
+                      type: "function",
+                      function: { name, arguments: JSON.stringify(argumentsValue) },
+                    },
+                  ],
+                },
+                finish_reason: null,
               },
-              finish_reason: null,
-            },
-          ],
-        })}\n\n`,
-        `data: ${JSON.stringify({
-          choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
-        })}\n\n`,
-        "data: [DONE]\n\n",
-      ].join("");
-    const server = Bun.serve({
-      port: 0,
-      async fetch(networkRequest) {
-        requests += 1;
-        const payload = await networkRequest.text();
-        if (requests === 1) {
-          expect(payload).toContain('"top"');
-          return new Response(response("top", { rankBy: "fitness", limit: 1 }), {
+            ],
+          })}\n\n`,
+          `data: ${JSON.stringify({
+            choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+          })}\n\n`,
+          "data: [DONE]\n\n",
+        ].join("");
+      const server = Bun.serve({
+        port: 0,
+        async fetch(networkRequest) {
+          requests += 1;
+          const payload = await networkRequest.text();
+          if (requests === 1) {
+            expect(payload).toContain('"top"');
+            expect(payload).toContain("any accompanying assistant narration is ignored");
+            expect(payload).toContain("submit_grounded_analysis");
+            return new Response(
+              response("top", { rankBy: "fitness", limit: 1 }, "Reviewing evidence."),
+              { headers: { "content-type": "text/event-stream" } },
+            );
+          }
+          const match = /\\"citationId\\":\\"([^\\]+)\\"/.exec(payload);
+          if (match?.[1] === undefined)
+            throw new Error("Expected the Reflection tool result citation");
+          returnedCitationId = match[1];
+          const submission =
+            outcome === "abstained" && requests === 2
+              ? {
+                  result: {
+                    outcome: "abstained",
+                    reason: "no-owner-testimony",
+                    explanation: "The selected evidence contains no owner testimony.",
+                    supportingBlocks: [
+                      { text: "Invalid first reference.", citationIds: ["unknown-citation"] },
+                    ],
+                    noteExcerpts: [],
+                  },
+                }
+              : outcome === "answered"
+                ? {
+                    result: {
+                      outcome: "answered",
+                      centralSynthesis: {
+                        text: "The selected game is the strongest current example.",
+                        citationIds: [returnedCitationId],
+                      },
+                      supportingBlocks: [
+                        {
+                          text: "The canonical collection record supports the answer.",
+                          citationIds: [returnedCitationId],
+                        },
+                      ],
+                      noteExcerpts: [],
+                    },
+                  }
+                : {
+                    result: {
+                      outcome: "abstained",
+                      reason: "no-owner-testimony",
+                      explanation: "The selected evidence contains no owner testimony.",
+                      supportingBlocks: [
+                        {
+                          text: "The selected collection evidence was reviewed.",
+                          citationIds: [returnedCitationId],
+                        },
+                      ],
+                      noteExcerpts: [],
+                    },
+                  };
+          return new Response(response(GROUNDED_SUBMISSION_TOOL_NAME, { submission }), {
             headers: { "content-type": "text/event-stream" },
           });
-        }
-        const match = /\\"citationId\\":\\"([^\\]+)\\"/.exec(payload);
-        if (match?.[1] === undefined)
-          throw new Error("Expected the Reflection tool result citation");
-        returnedCitationId = match[1];
-        return new Response(
-          response(GROUNDED_SUBMISSION_TOOL_NAME, {
-            submission: {
-              result: {
-                outcome: "abstained",
-                reason: "incomplete-scope",
-                explanation: "The selected collection evidence is insufficient for a pattern.",
-                supportingBlocks: [
-                  {
-                    text: "The selected collection evidence was reviewed.",
-                    citationIds: [returnedCitationId],
-                  },
-                ],
-                noteExcerpts: [],
-              },
-            },
-          }),
-          { headers: { "content-type": "text/event-stream" } },
-        );
-      },
-    });
-    try {
-      const provider = createGroundedAnalysisProvider({
-        configuration: {
-          status: "configured",
-          providerId: "ollama",
-          modelId: "ollama-test",
-          extensionIds: ["ollama-test"],
         },
-        sessionFactory: createPiGroundedAnalysisSessionFactory({
-          cwd: process.cwd(),
-          extensionIds: [],
-          extensionFactories: [
-            createOllamaProviderExtension("ollama-test", 123, `http://127.0.0.1:${server.port}/v1`),
-          ],
-        }),
       });
-      const context = createTestApp({ now: () => NOW, groundedAnalysisProvider: provider });
-      await context.gameService.addGame({ name: "Reflection evidence game" });
-      await context.reflectionRuntime.recover();
-
-      const refresh = await context.app.request(
-        request("/api/profile/reflections/refresh", {
-          batchId: "32000000-0000-4000-8000-000000000301",
-          requestId: "32000000-0000-4000-8000-000000000302",
-          cancellationCapability: CAPABILITY,
-          questionId: "repeated-values",
-          disclosure: {
-            version: 1,
+      try {
+        const provider = createGroundedAnalysisProvider({
+          configuration: {
+            status: "configured",
             providerId: "ollama",
             modelId: "ollama-test",
-            acknowledged: true,
+            extensionIds: ["ollama-test"],
           },
-        }),
-      );
+          sessionFactory: createPiGroundedAnalysisSessionFactory({
+            cwd: process.cwd(),
+            extensionIds: [],
+            extensionFactories: [
+              createOllamaProviderExtension(
+                "ollama-test",
+                123,
+                `http://127.0.0.1:${server.port}/v1`,
+              ),
+            ],
+          }),
+        });
+        const context = createTestApp({ now: () => NOW, groundedAnalysisProvider: provider });
+        await context.gameService.addGame({ name: "Reflection evidence game" });
+        await context.reflectionRuntime.recover();
 
-      expect(refresh.status).toBe(200);
-      expect(await refresh.text()).toContain("event: question-completed");
-      expect(requests).toBe(2);
-      expect(returnedCitationId).toBeDefined();
-      const persisted = await context.reflectionRuntime.storage.loadState();
-      const question = persisted.questions.find(
-        ({ questionId }) => questionId === "repeated-values",
-      );
-      expect(question?.cache).not.toBeNull();
-      expect(question?.cache).toMatchObject({
-        outcome: "abstained",
-        supportingBlocks: [{ citationIds: [returnedCitationId] }],
-        citations: [{ citationId: returnedCitationId }],
-      });
-    } finally {
-      await server.stop(true);
-    }
-  });
+        const refresh = await context.app.request(
+          request("/api/profile/reflections/refresh", {
+            batchId: "32000000-0000-4000-8000-000000000301",
+            requestId: "32000000-0000-4000-8000-000000000302",
+            cancellationCapability: CAPABILITY,
+            questionId: "repeated-values",
+            disclosure: {
+              version: 1,
+              providerId: "ollama",
+              modelId: "ollama-test",
+              acknowledged: true,
+            },
+          }),
+        );
+
+        expect(refresh.status).toBe(200);
+        expect(await refresh.text()).toContain("event: question-completed");
+        expect(requests).toBe(expectedRequests);
+        expect(returnedCitationId).toBeDefined();
+        const persisted = await context.reflectionRuntime.storage.loadState();
+        const question = persisted.questions.find(
+          ({ questionId }) => questionId === "repeated-values",
+        );
+        expect(question?.cache).not.toBeNull();
+        expect(question?.cache).toMatchObject({
+          outcome,
+          supportingBlocks: [{ citationIds: [returnedCitationId] }],
+          citations: [{ citationId: returnedCitationId }],
+          usage: { state: "reported", inferenceRoundTrips: expectedRoundTrips },
+        });
+        if (outcome === "abstained") {
+          expect(question?.cache).toMatchObject({ reason: "no-owner-testimony" });
+        }
+      } finally {
+        await server.stop(true);
+      }
+    },
+  );
 });

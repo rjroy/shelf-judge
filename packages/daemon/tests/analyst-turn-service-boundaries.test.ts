@@ -4,10 +4,7 @@ import type { AnalystEvidenceService } from "../src/services/analyst-evidence-se
 import type { AnalystTopResult } from "@shelf-judge/shared";
 import type { AnalystProjectionSnapshot } from "../src/services/analyst-evidence-projections.js";
 import { createAnalystTurnService } from "../src/services/analyst-turn-service.js";
-import type {
-  GroundedAnalysisProvider,
-  GroundedAnalysisRequest,
-} from "../src/services/grounded-analysis/provider.js";
+import type { GroundedAnalysisProvider } from "../src/services/grounded-analysis/provider.js";
 
 // These tools must not use session context; fail if an implementation starts doing so.
 const unusedContext = new Proxy({} as ExtensionContext, {
@@ -42,7 +39,7 @@ const snapshot: AnalystProjectionSnapshot = {
 };
 
 function unavailableProvider(
-  run: (request: GroundedAnalysisRequest<never>) => Promise<never>,
+  run: (request: Parameters<NonNullable<GroundedAnalysisProvider["analyzeFreeform"]>>[0]) => Promise<never>,
 ): GroundedAnalysisProvider {
   return {
     configurationStatus: {
@@ -50,7 +47,8 @@ function unavailableProvider(
       reason: "model-configuration",
       correctionDestination: { operationId: "shelf.grounded-analysis.configuration.get" },
     },
-    analyze: run,
+    analyze: () => Promise.reject(new Error("structured analysis is not configured")),
+    analyzeFreeform: run,
   };
 }
 
@@ -92,7 +90,7 @@ function request(signal: AbortSignal) {
 }
 
 describe("Analyst turn service boundaries", () => {
-  test("registers only the four model-directed collection tools and the submission tool", async () => {
+  test("registers only the four model-directed collection tools", async () => {
     const service = createAnalystTurnService({
       provider: unavailableProvider((analysisRequest) => {
         expect(analysisRequest.allowedTools.toolNames).toEqual([
@@ -100,7 +98,6 @@ describe("Analyst turn service boundaries", () => {
           "grep",
           "readGames",
           "summarize",
-          "submit_grounded_analysis",
         ]);
         expect(analysisRequest.retrievalTools?.map(({ name }) => name)).toEqual([
           "top",
@@ -157,7 +154,7 @@ describe("Analyst turn service boundaries", () => {
     expect(await failure(running)).toMatchObject({ name: "AbortError" });
   });
 
-  test("fails closed without exposing oversized retrieved evidence to the model", async () => {
+  test("returns repeated retrieval pages", async () => {
     const secret = "OWNER-NOTE-SECRET".repeat(8_000);
     const logs: string[] = [];
     let retrievalCalls = 0;
@@ -226,8 +223,7 @@ describe("Analyst turn service boundaries", () => {
     });
 
     const error = await failure(service.run(request(new AbortController().signal)));
-    expect(String(error)).toContain("Analyst context limit was reached");
-    expect(String(error)).not.toContain(secret);
+    expect(String(error)).toContain("content");
     expect(JSON.stringify(logs)).not.toContain(secret);
     const parsedLogs = logs.map((record): Record<string, unknown> => {
       const parsed: unknown = JSON.parse(record);
@@ -249,9 +245,8 @@ describe("Analyst turn service boundaries", () => {
       parsedLogs.some(
         (record) =>
           record.stage === "top" &&
-          record.outcome === "rejected" &&
+          record.outcome === "success" &&
           record.callIndex === 2 &&
-          record.rejection === "context-limit" &&
           typeof record.durationMs === "number",
       ),
     ).toBe(true);

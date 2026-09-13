@@ -150,7 +150,7 @@ function assertIgnoredArtifactPath(artifactPath: string): string {
 function smokePrompt(fixture: ReflectionEvaluationFixture): string {
   return [
     "This is an isolated evaluation fixture, not a user database record.",
-    "Call submit_grounded_analysis exactly once. Do not produce free-form text.",
+    "Call submit_grounded_analysis exactly once for the final result. Any accompanying assistant narration is ignored.",
     "Its arguments must be exactly this shape, replacing only the explanation text:",
     '{"submission":{"result":{"outcome":"abstained","reason":"no-material-synthesis","explanation":"This isolated fixture is not released as a Reflection.","supportingBlocks":[],"noteExcerpts":[]}}}',
     "Do not add citations, blocks, markdown, fields, or a second tool call.",
@@ -186,7 +186,7 @@ export async function runReflectionGenerationOperator(
     });
     const analyzed = await provider.analyze({
       systemPrompt:
-        "You are a constrained Reflection evaluator. The submit_grounded_analysis tool is the only output channel.",
+        "You are a constrained Reflection evaluator. Submit the final result with submit_grounded_analysis; accompanying assistant narration is ignored.",
       prompt: smokePrompt(fixture),
       submissionSchema: ReflectionModelSubmissionSchema,
       signal: new AbortController().signal,

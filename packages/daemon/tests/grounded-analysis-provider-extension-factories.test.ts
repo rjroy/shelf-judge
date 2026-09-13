@@ -21,7 +21,8 @@ describe("createProviderSessionExtensions", () => {
       providerId: "ollama",
       modelId: "qwen3.6:27B",
     });
-    expect(options.extensionFactories).toHaveLength(1);
+    expect(options.extensionFactories).toHaveLength(0);
+    expect(options.createExtensionFactories).toBeDefined();
     expect(options.onPayload?.({ model: "qwen3.6:27B" }, ollamaModel)).toEqual({
       model: "qwen3.6:27B",
       max_tokens: 1024,

@@ -1,6 +1,6 @@
 import {
   REFLECTION_QUESTION_ABSTENTION_REASONS,
-  REFLECTION_QUESTION_POLICIES,
+  ReflectionCitationSchema,
   ReflectionCompletedSchema,
   ReflectionProviderUsageSchema,
   type GroundedProviderUsage,
@@ -12,6 +12,7 @@ import {
 } from "@shelf-judge/shared";
 import { z } from "zod";
 import type { GroundedEvidenceEntry } from "./grounded-analysis/evidence-registry.js";
+import { GroundedStructuredSubmissionValidationError } from "./grounded-analysis/submission-validation-error.js";
 import type { ReflectionEvidencePackage } from "./reflection-evidence-service.js";
 
 const ReflectionModelBlockSchema = z
@@ -49,37 +50,58 @@ const ReflectionModelNoteExcerptsSchema = z
     }
   });
 
+const ReflectionAnsweredModelBlockSchema = ReflectionModelBlockSchema.refine(
+  ({ citationIds }) => citationIds.length > 0,
+  { message: "Every answered block requires at least one citation ID", path: ["citationIds"] },
+);
+
 const AnsweredSubmissionSchema = z
   .object({
     outcome: z.literal("answered"),
-    centralSynthesis: ReflectionModelBlockSchema,
-    supportingBlocks: z.array(ReflectionModelBlockSchema).min(1).max(3),
+    centralSynthesis: ReflectionAnsweredModelBlockSchema,
+    supportingBlocks: z.array(ReflectionAnsweredModelBlockSchema).min(1).max(3),
     noteExcerpts: ReflectionModelNoteExcerptsSchema,
   })
   .strict();
-const AbstainedSubmissionSchema = z
-  .object({
-    outcome: z.literal("abstained"),
-    reason: z.enum([
-      "no-owner-testimony",
-      "insufficient-independent-testimony",
-      "no-supported-pattern",
-      "no-material-synthesis",
-      "conflicting-evidence",
-      "incomplete-scope",
-      "question-not-applicable",
-    ]),
-    explanation: z.string().min(1),
-    supportingBlocks: z.array(ReflectionModelBlockSchema).max(3),
-    noteExcerpts: ReflectionModelNoteExcerptsSchema,
-  })
-  .strict();
+const ALL_ABSTENTION_REASONS = [
+  "no-owner-testimony",
+  "insufficient-independent-testimony",
+  "no-supported-pattern",
+  "no-material-synthesis",
+  "conflicting-evidence",
+  "incomplete-scope",
+  "question-not-applicable",
+] as const;
 
-export const ReflectionModelSubmissionSchema = z
-  .object({
-    result: z.discriminatedUnion("outcome", [AnsweredSubmissionSchema, AbstainedSubmissionSchema]),
-  })
-  .strict();
+function abstainedSubmissionSchema(questionId?: ReflectionQuestionId) {
+  const reasons: readonly [string, ...string[]] =
+    questionId === undefined
+      ? ALL_ABSTENTION_REASONS
+      : REFLECTION_QUESTION_ABSTENTION_REASONS[questionId];
+  return z
+    .object({
+      outcome: z.literal("abstained"),
+      reason: z.enum(reasons),
+      explanation: z.string().min(1),
+      supportingBlocks: z.array(ReflectionModelBlockSchema).max(3),
+      noteExcerpts: ReflectionModelNoteExcerptsSchema,
+    })
+    .strict();
+}
+
+export function createReflectionSubmissionSchema(questionId?: ReflectionQuestionId) {
+  return z
+    .object({
+      result: z.discriminatedUnion("outcome", [
+        AnsweredSubmissionSchema,
+        abstainedSubmissionSchema(questionId),
+      ]),
+    })
+    .strict();
+}
+
+/** Broad schema retained for final validation before the question policy defense-in-depth check. */
+export const ReflectionModelSubmissionSchema = createReflectionSubmissionSchema();
 
 export type ReflectionModelSubmission = z.infer<typeof ReflectionModelSubmissionSchema>;
 
@@ -112,108 +134,23 @@ function citedEntries(
 ): readonly GroundedEvidenceEntry[] {
   return block.citationIds.map((citationId) => {
     const entry = evidencePackage.evidence.resolve(citationId);
-    if (entry === undefined) throw new Error(`Unknown Reflection citation: ${citationId}`);
+    if (entry === undefined) {
+      throw submissionValidationError(`Unknown Reflection citation: ${citationId}`, [
+        "result",
+        "citationIds",
+      ]);
+    }
     return entry;
   });
 }
 
-function payloadGameIds(entry: GroundedEvidenceEntry): ReadonlySet<string> {
-  if (typeof entry.payload !== "object" || entry.payload === null) return new Set();
-  const payload = entry.payload as Record<string, unknown>;
-  const ids = new Set<string>();
-  if (typeof payload.gameId === "string") ids.add(payload.gameId);
-  if (Array.isArray(payload.games)) {
-    for (const game of payload.games) {
-      if (typeof game !== "object" || game === null) continue;
-      const gameId = (game as Record<string, unknown>).gameId;
-      if (typeof gameId === "string") ids.add(gameId);
-    }
-  }
-  return ids;
-}
-
-function validateAnsweredBlock(
-  block: ReflectionBlock,
-  evidencePackage: ReflectionEvidencePackage,
-): void {
-  const entries = citedEntries(block, evidencePackage);
-  const noteGameIds = entries
-    .filter(({ evidenceClass }) => evidenceClass === "owner-game-note")
-    .map(({ sourceId }) => sourceId);
-  const deterministicEntries = entries.filter(
-    ({ evidenceClass }) => evidenceClass !== "owner-game-note",
-  );
-  if (noteGameIds.length === 0 || deterministicEntries.length === 0) {
-    throw new Error(
-      "Every answered Reflection block requires testimony and deterministic evidence",
-    );
-  }
-  const supportedGameIds = new Set(
-    deterministicEntries.flatMap((entry) => [...payloadGameIds(entry)]),
-  );
-  if (noteGameIds.some((gameId) => !supportedGameIds.has(gameId))) {
-    throw new Error("Every cited note requires deterministic evidence for the same game");
-  }
-}
-
-function validatePatternAnswer(
-  centralSynthesis: ReflectionBlock,
-  evidencePackage: ReflectionEvidencePackage,
-): void {
-  const candidateIds = evidencePackage.scope.patternCandidateIds;
-  if (candidateIds === undefined) throw new Error("Pattern evidence requires complete candidates");
-  const entries = citedEntries(centralSynthesis, evidencePackage);
-  const profileEntries = entries.filter(
-    ({ evidenceClass }) => evidenceClass === "profile-evidence",
-  );
-  const noteGameIds = entries
-    .filter(({ evidenceClass }) => evidenceClass === "owner-game-note")
-    .map(({ sourceId }) => sourceId);
-  const hasSupportingCandidate = profileEntries.some((entry) => {
-    if (typeof entry.payload !== "object" || entry.payload === null) return false;
-    const payload = entry.payload as Record<string, unknown>;
-    const candidateId = payload.candidateId;
-    if (typeof candidateId !== "string" || !candidateIds.includes(candidateId)) return false;
-    if (payload.support !== "supported") return false;
-    const supportingGames = payloadGameIds(entry);
-    return noteGameIds.every((gameId) => supportingGames.has(gameId));
-  });
-  if (!hasSupportingCandidate) {
-    throw new Error(
-      "Pattern synthesis requires one authorized candidate supporting every cited note",
-    );
-  }
-}
-
-function validateCompletePatternScope(evidencePackage: ReflectionEvidencePackage): void {
-  const candidateIds = evidencePackage.scope.patternCandidateIds;
-  if (candidateIds === undefined) throw new Error("Pattern evidence requires complete candidates");
-  const profileCandidates = new Map<string, number>();
-  for (const entry of evidencePackage.evidence.entries) {
-    if (entry.evidenceClass !== "profile-evidence") continue;
-    if (typeof entry.payload !== "object" || entry.payload === null) {
-      throw new Error("Pattern candidate evidence is malformed");
-    }
-    const payload = entry.payload as Record<string, unknown>;
-    const candidateId = payload.candidateId;
-    if (
-      typeof candidateId !== "string" ||
-      !Array.isArray(payload.games) ||
-      !Array.isArray(payload.exclusions) ||
-      !Array.isArray(payload.confounders) ||
-      typeof payload.comparator !== "object" ||
-      payload.comparator === null
-    ) {
-      throw new Error("Pattern candidate evidence is incomplete");
-    }
-    profileCandidates.set(candidateId, (profileCandidates.get(candidateId) ?? 0) + 1);
-  }
-  if (
-    candidateIds.some((candidateId) => profileCandidates.get(candidateId) !== 1) ||
-    [...profileCandidates.keys()].some((candidateId) => !candidateIds.includes(candidateId))
-  ) {
-    throw new Error("Pattern evidence does not cover the complete candidate scope");
-  }
+function submissionValidationError(
+  message: string,
+  path: readonly (string | number)[],
+): GroundedStructuredSubmissionValidationError {
+  return new GroundedStructuredSubmissionValidationError([
+    { code: z.ZodIssueCode.custom, message, path: [...path] },
+  ]);
 }
 
 function canonicalCitations(
@@ -222,25 +159,21 @@ function canonicalCitations(
   noteExcerpts: readonly { citationId: string; excerpt: string }[],
 ): readonly ReflectionCitation[] {
   const requested = new Set(blocks.flatMap(({ citationIds }) => citationIds));
-  const byId = new Map(
-    evidencePackage.citations.map((citation) => [citation.citationId, citation]),
-  );
   const excerptsByCitation = new Map(
     noteExcerpts.map(({ citationId, excerpt }) => [citationId, excerpt]),
   );
   for (const citationId of requested) {
-    const citation = byId.get(citationId);
     const entry = evidencePackage.evidence.resolve(citationId);
-    if (
-      citation === undefined ||
-      entry === undefined ||
-      citation.sourceId !== entry.sourceId ||
-      citation.sourceVersion !== entry.sourceVersion ||
-      citation.evidenceClass !== entry.evidenceClass
-    ) {
-      throw new Error(`Reflection citation does not match canonical evidence: ${citationId}`);
+    if (entry === undefined) {
+      throw submissionValidationError(`Unknown Reflection citation: ${citationId}`, [
+        "result",
+        "citationIds",
+      ]);
     }
-    if (citation.evidenceClass === "owner-game-note") {
+    if (entry.citationMetadata === undefined) {
+      throw new Error(`Reflection citation metadata is unavailable: ${citationId}`);
+    }
+    if (entry.evidenceClass === "owner-game-note") {
       const excerpt = excerptsByCitation.get(citationId);
       const payload = entry.payload;
       const noteText =
@@ -248,32 +181,44 @@ function canonicalCitations(
           ? (payload as Record<string, unknown>).text
           : undefined;
       if (excerpt === undefined || typeof noteText !== "string" || !noteText.includes(excerpt)) {
-        throw new Error(`Reflection note excerpt is not exact current testimony: ${citationId}`);
-      }
-      if (
-        !blocks.some(
-          (block) => block.citationIds.includes(citationId) && block.text.includes(`"${excerpt}"`),
-        )
-      ) {
-        throw new Error(
-          `Reflection note excerpt must be visibly quoted by a citing block: ${citationId}`,
+        throw submissionValidationError(
+          `Reflection note excerpt is not exact current testimony: ${citationId}`,
+          ["result", "noteExcerpts"],
         );
       }
     } else if (excerptsByCitation.has(citationId)) {
-      throw new Error(`Deterministic citations cannot have note excerpts: ${citationId}`);
+      throw submissionValidationError(
+        `Deterministic citations cannot have note excerpts: ${citationId}`,
+        ["result", "noteExcerpts"],
+      );
     }
   }
   for (const citationId of excerptsByCitation.keys()) {
     if (!requested.has(citationId))
-      throw new Error(`Uncited Reflection note excerpt: ${citationId}`);
+      throw submissionValidationError(`Uncited Reflection note excerpt: ${citationId}`, [
+        "result",
+        "noteExcerpts",
+      ]);
   }
-  return evidencePackage.citations
-    .filter(({ citationId }) => requested.has(citationId))
-    .map((citation) =>
-      citation.evidenceClass === "owner-game-note"
-        ? { ...citation, canonicalSummary: excerptsByCitation.get(citation.citationId) as string }
-        : citation,
-    );
+  return evidencePackage.evidence.entries.flatMap((entry) => {
+    if (!requested.has(entry.citationId)) return [];
+    if (entry.citationMetadata === undefined)
+      throw new Error(`Reflection citation metadata is unavailable: ${entry.citationId}`);
+    const citation = ReflectionCitationSchema.parse(entry.citationMetadata);
+    return [
+      ReflectionCitationSchema.parse({
+        ...citation,
+        citationId: entry.citationId,
+        sourceId: entry.sourceId,
+        sourceVersion: entry.sourceVersion,
+        evidenceClass: entry.evidenceClass,
+        testimony: entry.evidenceClass === "owner-game-note",
+        ...(entry.evidenceClass === "owner-game-note"
+          ? { canonicalSummary: excerptsByCitation.get(entry.citationId) as string }
+          : {}),
+      }),
+    ];
+  });
 }
 
 export function createReflectionResultValidator(): ReflectionResultValidator {
@@ -283,16 +228,16 @@ export function createReflectionResultValidator(): ReflectionResultValidator {
       if (input.evidencePackage.evidenceIdentity.questionId !== input.questionId) {
         throw new Error("Reflection evidence package does not match the selected question");
       }
-      if (input.questionId === "pattern-exceptions") {
-        validateCompletePatternScope(input.evidencePackage);
-      }
       if (
         submission.outcome === "abstained" &&
         !REFLECTION_QUESTION_ABSTENTION_REASONS[input.questionId].some(
           (reason) => reason === submission.reason,
         )
       ) {
-        throw new Error("Abstention reason is not authorized for the selected question");
+        throw submissionValidationError(
+          "Abstention reason is not authorized for the selected question",
+          ["result", "reason"],
+        );
       }
 
       const blocks =
@@ -300,22 +245,7 @@ export function createReflectionResultValidator(): ReflectionResultValidator {
           ? [submission.centralSynthesis, ...submission.supportingBlocks]
           : submission.supportingBlocks;
       if (submission.outcome === "answered") {
-        for (const block of blocks) validateAnsweredBlock(block, input.evidencePackage);
-        const centralEntries = citedEntries(submission.centralSynthesis, input.evidencePackage);
-        const independentNotes = new Set(
-          centralEntries
-            .filter(({ evidenceClass }) => evidenceClass === "owner-game-note")
-            .map(({ sourceId }) => sourceId),
-        );
-        if (
-          independentNotes.size <
-          REFLECTION_QUESTION_POLICIES[input.questionId].minimumIndependentNotes
-        ) {
-          throw new Error("Central synthesis has insufficient independent testimony");
-        }
-        if (input.questionId === "pattern-exceptions") {
-          validatePatternAnswer(submission.centralSynthesis, input.evidencePackage);
-        }
+        for (const block of blocks) citedEntries(block, input.evidencePackage);
       }
 
       const usage =

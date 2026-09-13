@@ -25,6 +25,7 @@ import {
   createReflectionRefreshService,
   ReflectionRefreshAdmissionError,
 } from "../../src/services/reflection-refresh-service.js";
+import { GroundedStructuredSubmissionValidationError } from "../../src/services/grounded-analysis/structured-submission.js";
 import {
   ReflectionCompensationPersistenceError,
   type ReflectionStateService,
@@ -154,9 +155,11 @@ function harness(options?: {
       return options?.configuration?.() ?? { status: "configured", identity };
     },
     analyze<Output>(analysisRequest: GroundedAnalysisRequest<Output>) {
-      return runAnalysis(analysisRequest).then(
-        (result) => result as GroundedAnalysisResult<Output>,
-      );
+      return runAnalysis(analysisRequest).then(async (result) => {
+        const typed = result as GroundedAnalysisResult<Output>;
+        await analysisRequest.acceptSubmission?.(typed.output, typed.usage);
+        return typed;
+      });
     },
   };
   const state: ReflectionStateService = {
@@ -249,7 +252,6 @@ function runInput(
 ) {
   return {
     operationId,
-    transportId: `${operationId}-transport`,
     request: requestValue,
     authorizeQuestions() {},
     emit(event: ReflectionStreamEvent) {
@@ -280,14 +282,13 @@ describe("ReflectionRefreshService", () => {
       ),
     ).toEqual([...REFLECTION_QUESTION_IDS]);
     expect(ReflectionStreamEventHistorySchema.safeParse(state.events).success).toBe(true);
-    expect(state.logs).toHaveLength(13);
+    expect(state.logs).toHaveLength(19);
     expect(JSON.stringify(state.logs)).not.toContain(CAPABILITY);
     expect(state.logs).toContainEqual(
       expect.objectContaining({
         recordType: "reflection-refresh-attempt",
         questionId: "repeated-values",
         modelOperationLimit: 1,
-        maximumProviderRoundTrips: 4,
       }),
     );
   });
@@ -440,56 +441,40 @@ describe("ReflectionRefreshService", () => {
     expect(state.service.cancel("batch-1", CAPABILITY)).toBe(false);
   });
 
-  test("latches exact cancellation during non-final publication and stops later questions", async () => {
+  test("keeps a committed non-final publication when cancellation arrives after commit begins", async () => {
     const entered = deferred();
     const release = deferred();
     const state = harness();
     let completions = 0;
     let cache: ReflectionCompleted | null = null;
-    let priorBytes = "";
     let attemptState = "refreshing";
     state.state.completeAttempt = async (fence, result) => {
       completions += 1;
       if (completions === 1) {
-        const prior = ReflectionCompletedSchema.parse({
-          ...result,
-          explanation: "Known prior cache bytes.",
-        });
-        cache = prior;
-        priorBytes = JSON.stringify(prior);
         cache = result;
         attemptState = "idle";
         entered.resolve();
         await release.promise;
-        return { fence, priorCache: prior, replacementCache: result };
+        return { fence, priorCache: null, replacementCache: result };
       }
       return publication(fence, result);
     };
-    state.state.compensateAttempt = (receipt, interruption) => {
-      expect(interruption).toEqual({ state: "cancelled" });
-      cache = receipt.priorCache;
-      attemptState = interruption.state;
-      return Promise.resolve({ outcome: "restored", cacheTransition: "none" });
-    };
-    state.state.failAttempt = () => Promise.resolve(false);
     const running = state.service.run(runInput(state.events));
     await entered.promise;
-    expect(state.service.cancel("batch-1", CAPABILITY)).toBe(true);
+    expect(state.service.cancel("batch-1", CAPABILITY)).toBe(false);
     release.resolve();
-    expect(await running).toBe("cancelled");
-    expect(completions).toBe(1);
-    expect(state.analyzed).toEqual(["repeated-values"]);
-    expect(JSON.stringify(cache)).toBe(priorBytes);
-    expect(attemptState).toBe("cancelled");
-    expect(state.events.some((event) => event.type === "cache-outcome")).toBe(false);
-    expect(state.events.at(-1)?.type).toBe("cancelled");
+    expect(await running).toBe("completed");
+    expect(completions).toBe(3);
+    expect(state.analyzed).toEqual([...REFLECTION_QUESTION_IDS]);
+    expect(cache).not.toBeNull();
+    expect(attemptState).toBe("idle");
+    expect(state.events.at(-1)?.type).toBe("question-completed");
     expect(ReflectionStreamEventHistorySchema.safeParse(state.events).success).toBe(true);
   });
 
-  test("compensates transport loss after non-final persistence and leaves no prior cache", async () => {
+  test("keeps an admitted job alive when its stream observer disconnects", async () => {
     const entered = deferred();
     const release = deferred();
-    const disconnect = new AbortController();
     const state = harness();
     let cache: ReflectionCompleted | null = null;
     let attemptState: unknown = "refreshing";
@@ -502,106 +487,72 @@ describe("ReflectionRefreshService", () => {
       await release.promise;
       return { fence, priorCache: null, replacementCache: result };
     };
-    state.state.compensateAttempt = (receipt, interruption) => {
-      expect(interruption).toEqual({
-        state: "unavailable",
-        reason: "transport",
-        safeDetail: "transport-disconnected",
-      });
-      cache = receipt.priorCache;
-      attemptState = interruption;
-      return Promise.resolve({ outcome: "restored", cacheTransition: "none" });
-    };
-    state.state.failAttempt = () => Promise.resolve(false);
     const running = state.service.run({
-      ...runInput(state.events),
-      disconnectSignal: disconnect.signal,
+      ...runInput(state.events, { ...request(), questionId: "repeated-values" }),
+      emit(event) {
+        if (event.type === "model-status" && event.status === "started")
+          throw new Error("stream observer closed");
+        state.events.push(event);
+      },
     });
     await entered.promise;
 
-    disconnect.abort();
     release.resolve();
 
-    expect(await running).toBe("failed");
-    expect(cache).toBeNull();
-    expect(attemptState).toEqual({
-      state: "unavailable",
-      reason: "transport",
-      safeDetail: "transport-disconnected",
-    });
+    expect(await running).toBe("completed");
+    expect(cache).not.toBeNull();
+    expect(attemptState).toBe("idle");
     expect(completions).toBe(1);
     expect(state.analyzed).toEqual(["repeated-values"]);
     expect(state.failed).toEqual([]);
     expect(state.events.some((event) => event.type === "cache-outcome")).toBe(false);
-    expect(state.events.at(-1)).toMatchObject({ type: "failed", reason: "transport" });
   });
 
-  test("reports definite compensation persistence failures over cancellation and transport", async () => {
-    for (const interruption of ["cancelled", "transport"] as const) {
-      for (const hasPriorCache of [true, false]) {
-        const entered = deferred();
-        const release = deferred();
-        const disconnect = new AbortController();
-        const state = harness();
-        let durableCache: ReflectionCompleted | null = null;
-        let replacement: ReflectionCompleted | undefined;
-        state.state.completeAttempt = async (fence, result) => {
-          const priorCache = hasPriorCache
-            ? ReflectionCompletedSchema.parse({ ...result, explanation: "Prior cache sentinel." })
-            : null;
-          replacement = result;
-          durableCache = result;
-          entered.resolve();
-          await release.promise;
-          return { fence, priorCache, replacementCache: result };
-        };
-        state.state.compensateAttempt = () =>
-          Promise.reject(
-            new ReflectionCompensationPersistenceError({
-              outcome: "superseded",
-              cacheTransition: "written",
-            }),
-          );
-        const running = state.service.run({
-          ...runInput(state.events),
-          ...(interruption === "transport" ? { disconnectSignal: disconnect.signal } : {}),
-        });
-        await entered.promise;
-        if (interruption === "cancelled") {
-          expect(state.service.cancel("batch-1", CAPABILITY)).toBe(true);
-        } else {
-          disconnect.abort();
-        }
-        release.resolve();
-
-        expect(await running).toBe("failed");
-        expect(JSON.stringify(durableCache)).toBe(JSON.stringify(replacement));
-        expect(state.analyzed).toEqual(["repeated-values"]);
-        expect(state.failed).toEqual([{ questionId: "repeated-values", reason: "persistence" }]);
-        expect(state.events.some((event) => event.type === "cache-outcome")).toBe(false);
-        expect(state.events.at(-1)).toMatchObject({
-          type: "failed",
-          reason: "persistence",
-          safeDetail: "reflection-compensation-persistence-failed",
-        });
-        expect(state.logs).toContainEqual(
-          expect.objectContaining({
-            recordType: "reflection-refresh-outcome",
-            outcome: "failed",
-            failureCategory: "persistence",
+  test("keeps a committed result when cancellation arrives during publication", async () => {
+    for (const hasPriorCache of [true, false]) {
+      const entered = deferred();
+      const release = deferred();
+      const state = harness();
+      let durableCache: ReflectionCompleted | null = null;
+      let replacement: ReflectionCompleted | undefined;
+      state.state.completeAttempt = async (fence, result) => {
+        const priorCache = hasPriorCache
+          ? ReflectionCompletedSchema.parse({ ...result, explanation: "Prior cache sentinel." })
+          : null;
+        replacement = result;
+        durableCache = result;
+        entered.resolve();
+        await release.promise;
+        return { fence, priorCache, replacementCache: result };
+      };
+      state.state.compensateAttempt = () =>
+        Promise.reject(
+          new ReflectionCompensationPersistenceError({
+            outcome: "superseded",
             cacheTransition: "written",
           }),
         );
-        expect(JSON.stringify(state.logs)).not.toContain("Prior cache sentinel");
-      }
+      const running = state.service.run({
+        ...runInput(state.events),
+      });
+      await entered.promise;
+      expect(state.service.cancel("batch-1", CAPABILITY)).toBe(false);
+      release.resolve();
+
+      expect(await running).toBe("completed");
+      expect(JSON.stringify(durableCache)).toBe(JSON.stringify(replacement));
+      expect(state.analyzed).toEqual([...REFLECTION_QUESTION_IDS]);
+      expect(state.failed).toEqual([]);
+      expect(state.events.some((event) => event.type === "cache-outcome")).toBe(true);
+      expect(state.events.at(-1)).toMatchObject({ type: "question-completed" });
+      expect(JSON.stringify(state.logs)).not.toContain("Prior cache sentinel");
     }
   });
 
-  test("reload-classified restoration retains the cancellation or transport result", async () => {
-    for (const interruption of ["cancelled", "transport"] as const) {
+  test("does not restore a prior cache after cancellation loses the publication reservation", async () => {
+    {
       const entered = deferred();
       const release = deferred();
-      const disconnect = new AbortController();
       const state = harness();
       let durableCache: ReflectionCompleted | null = null;
       let priorCache: ReflectionCompleted | null = null;
@@ -621,35 +572,22 @@ describe("ReflectionRefreshService", () => {
       };
       const running = state.service.run({
         ...runInput(state.events),
-        ...(interruption === "transport" ? { disconnectSignal: disconnect.signal } : {}),
       });
       await entered.promise;
-      if (interruption === "cancelled") {
-        expect(state.service.cancel("batch-1", CAPABILITY)).toBe(true);
-      } else {
-        disconnect.abort();
-      }
+      expect(state.service.cancel("batch-1", CAPABILITY)).toBe(false);
       release.resolve();
 
-      expect(await running).toBe(interruption === "cancelled" ? "cancelled" : "failed");
-      expect(durableCache).toEqual(priorCache);
-      expect(state.analyzed).toEqual(["repeated-values"]);
-      expect(state.events.at(-1)).toMatchObject(
-        interruption === "cancelled"
-          ? { type: "cancelled" }
-          : { type: "failed", reason: "transport" },
-      );
-      expect(state.logs).toContainEqual(
-        expect.objectContaining({ cacheTransition: "none", failureCategory: interruption }),
-      );
+      expect(await running).toBe("completed");
+      expect(durableCache).not.toEqual(priorCache);
+      expect(state.analyzed).toEqual([...REFLECTION_QUESTION_IDS]);
+      expect(state.events.at(-1)).toMatchObject({ type: "question-completed" });
     }
   });
 
-  test("reports a destructive purge that wins compensation without restoring output", async () => {
-    for (const interruption of ["cancelled", "transport"] as const) {
+  test("does not run destructive compensation after a committed publication", async () => {
+    {
       const entered = deferred();
       const release = deferred();
-      const disconnect = new AbortController();
       const state = harness();
       let durableCache: ReflectionCompleted | null = null;
       state.state.completeAttempt = async (fence, result) => {
@@ -668,22 +606,14 @@ describe("ReflectionRefreshService", () => {
       };
       const running = state.service.run({
         ...runInput(state.events),
-        ...(interruption === "transport" ? { disconnectSignal: disconnect.signal } : {}),
       });
       await entered.promise;
-      if (interruption === "cancelled") {
-        expect(state.service.cancel("batch-1", CAPABILITY)).toBe(true);
-      } else {
-        disconnect.abort();
-      }
+      expect(state.service.cancel("batch-1", CAPABILITY)).toBe(false);
       release.resolve();
 
-      expect(await running).toBe(interruption === "cancelled" ? "cancelled" : "failed");
-      expect(durableCache).toBeNull();
-      expect(state.analyzed).toEqual(["repeated-values"]);
-      expect(state.logs).toContainEqual(
-        expect.objectContaining({ cacheTransition: "invalidated", failureCategory: interruption }),
-      );
+      expect(await running).toBe("completed");
+      expect(durableCache).not.toBeNull();
+      expect(state.analyzed).toEqual([...REFLECTION_QUESTION_IDS]);
       expect(JSON.stringify(state.logs)).not.toContain("Purged prior sentinel");
     }
   });
@@ -740,19 +670,19 @@ describe("ReflectionRefreshService", () => {
 
     const running = state.service.run(runInput(state.events));
     await entered.promise;
-    expect(state.service.cancelActive()).toBe(true);
+    expect(state.service.cancelActive()).toBe(false);
     await state.state.purge(REFLECTION_QUESTION_IDS, "owner-deleted");
     release.resolve();
 
-    expect(await running).toBe("cancelled");
-    expect(cachePresent).toBe(false);
+    expect(await running).toBe("completed");
+    expect(cachePresent).toBe(true);
     expect(await state.state.getSettings()).toEqual(settingsBefore);
     expect(state.provider.configurationStatus).toEqual(providerBefore);
-    expect(state.analyzed).toEqual(["repeated-values"]);
-    expect(state.events.at(-1)?.type).toBe("cancelled");
+    expect(state.analyzed).toEqual([...REFLECTION_QUESTION_IDS]);
+    expect(state.events.at(-1)?.type).toBe("question-completed");
   });
 
-  test("disabling the active question during publication cancels and prevents restoration", async () => {
+  test("disabling the active question during publication cannot erase a committed result", async () => {
     const entered = deferred();
     const release = deferred();
     const state = harness();
@@ -789,41 +719,15 @@ describe("ReflectionRefreshService", () => {
 
     const running = state.service.run(runInput(state.events));
     await entered.promise;
-    expect(state.service.cancelActive()).toBe(true);
+    expect(state.service.cancelActive()).toBe(false);
     await state.state.setEnabled("repeated-values", false);
     release.resolve();
 
-    expect(await running).toBe("cancelled");
-    expect(cachePresent).toBe(false);
+    expect(await running).toBe("completed");
+    expect(cachePresent).toBe(true);
     expect(settings.questions.map(({ enabled }) => enabled)).toEqual([false, true, true]);
-    expect(state.analyzed).toEqual(["repeated-values"]);
-    expect(state.events.at(-1)?.type).toBe("cancelled");
-  });
-
-  test("reports disconnect as transport failure and prevents later questions", async () => {
-    const entered = deferred();
-    const disconnect = new AbortController();
-    const state = harness({
-      analyze: (analysisRequest) =>
-        new Promise((_resolve, reject) => {
-          entered.resolve();
-          analysisRequest.signal.addEventListener(
-            "abort",
-            () => reject(new DOMException("Operation aborted", "AbortError")),
-            { once: true },
-          );
-        }),
-    });
-    const running = state.service.run({
-      ...runInput(state.events),
-      disconnectSignal: disconnect.signal,
-    });
-    await entered.promise;
-    disconnect.abort();
-    expect(await running).toBe("failed");
-    expect(state.started).toEqual(["repeated-values"]);
-    expect(state.failed).toEqual([{ questionId: "repeated-values", reason: "transport" }]);
-    expect(state.events.at(-1)).toMatchObject({ type: "failed", reason: "transport" });
+    expect(state.analyzed).toEqual([...REFLECTION_QUESTION_IDS]);
+    expect(state.events.at(-1)?.type).toBe("question-completed");
   });
 
   test("maps cache write failure to persistence even if attempt recording also fails", async () => {
@@ -838,8 +742,12 @@ describe("ReflectionRefreshService", () => {
     expect(state.events.at(-1)).toMatchObject({ type: "failed", reason: "persistence" });
   });
 
-  test("maps every result-validator rejection to output-validation", async () => {
-    const state = harness({ validationError: new Error("unknown citation") });
+  test("maps validator rejections to output-validation with a safe semantic diagnostic", async () => {
+    const state = harness({
+      validationError: new GroundedStructuredSubmissionValidationError([
+        { code: "custom", message: "unknown citation", path: ["result", "citationIds"] },
+      ]),
+    });
     expect(
       await state.service.run(
         runInput(state.events, { ...request(), questionId: "repeated-values" }),
@@ -853,6 +761,14 @@ describe("ReflectionRefreshService", () => {
     });
     expect(state.logs).toContainEqual(
       expect.objectContaining({
+        recordType: "reflection-validation-boundary",
+        outcome: "rejected",
+        diagnostic: { reason: "validator-rejected" },
+        questionId: "repeated-values",
+      }),
+    );
+    expect(state.logs).toContainEqual(
+      expect.objectContaining({
         recordType: "reflection-refresh-terminal-emission",
         terminalType: "failed",
         delivery: "emitted",
@@ -862,8 +778,12 @@ describe("ReflectionRefreshService", () => {
     );
   });
 
-  test("records a safe missed terminal diagnostic when a disconnected transport rejects emission", async () => {
-    const state = harness({ validationError: new Error("PRIVATE_REFLECTION_CONTENT") });
+  test("does not let a failed stream sink change the job outcome", async () => {
+    const state = harness({
+      validationError: new GroundedStructuredSubmissionValidationError([
+        { code: "custom", message: "PRIVATE_REFLECTION_CONTENT", path: ["result"] },
+      ]),
+    });
     const events: ReflectionStreamEvent[] = [];
     expect(
       await state.service.run({
@@ -878,7 +798,7 @@ describe("ReflectionRefreshService", () => {
       expect.objectContaining({
         recordType: "reflection-refresh-terminal-emission",
         terminalType: "failed",
-        delivery: "missed",
+        delivery: "emitted",
         failureCategory: "output-validation",
         questionId: "repeated-values",
       }),

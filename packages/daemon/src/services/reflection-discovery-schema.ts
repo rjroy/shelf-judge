@@ -94,11 +94,6 @@ const projections = new Map<z.ZodTypeAny, Projection>([
       ]),
   ],
   [
-    ReflectionProviderUsageSchema,
-    (schema) =>
-      withConstraints(schema, [{ properties: { inferenceRoundTrips: { enum: [1, 2] } } }]),
-  ],
-  [
     ReflectionScopeSchema,
     (schema) =>
       withConstraints(schema, [

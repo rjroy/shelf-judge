@@ -304,7 +304,7 @@ describe("Analyst evidence retrieval", () => {
     ).resolves.toBe("authenticated");
   });
 
-  test("rejects oversized full envelopes and shares turn budgets with retrieve", async () => {
+  test("returns evidence regardless of obsolete cumulative turn budgets", async () => {
     const budgetSnapshot: AnalystProjectionSnapshot = {
       ...snapshot,
       sources: [
@@ -330,14 +330,12 @@ describe("Analyst evidence retrieval", () => {
     const service = createAnalystEvidenceService({
       storageService: {},
       projectionSnapshotService: { capture: () => Promise.resolve(budgetSnapshot) },
-      evidenceBudget: { maxCallsPerTurn: 2, maxBytesPerTurn: 1 },
     });
     const request = { snapshotFingerprint: fingerprint, rankBy: "fitness" };
-    await expect(service.top(budgetSnapshot, request)).rejects.toThrow("byte budget");
+    await expect(service.top(budgetSnapshot, request)).resolves.toMatchObject({});
     const shared = createAnalystEvidenceService({
       storageService: {},
       projectionSnapshotService: { capture: () => Promise.resolve(budgetSnapshot) },
-      evidenceBudget: { maxCallsPerTurn: 1, maxBytesPerTurn: 64 * 1024 },
     });
     await shared.top(budgetSnapshot, request);
     await expect(
@@ -345,7 +343,7 @@ describe("Analyst evidence retrieval", () => {
         snapshotFingerprint: fingerprint,
         evidenceClasses: ["game-identity-ownership"],
       }),
-    ).rejects.toThrow("call budget");
+    ).resolves.toBeDefined();
   });
 
   test("does not commit rejected top-page coverage or cursors before a smaller retry", async () => {
@@ -372,27 +370,14 @@ describe("Analyst evidence retrieval", () => {
       ],
     };
     const request = { snapshotFingerprint: fingerprint, rankBy: "fitness" as const };
-    const measure = async (limit: number) => {
-      const service = createAnalystEvidenceService({
-        storageService: {},
-        projectionSnapshotService: { capture: () => Promise.resolve(rankedSnapshot) },
-      });
-      return new TextEncoder().encode(
-        JSON.stringify(await service.top(rankedSnapshot, { ...request, limit })),
-      ).byteLength;
-    };
-    const maxBytesPerTurn = (await measure(2)) - 1;
     const service = createAnalystEvidenceService({
       storageService: {},
       projectionSnapshotService: { capture: () => Promise.resolve(rankedSnapshot) },
-      evidenceBudget: { maxCallsPerTurn: 2, maxBytesPerTurn },
     });
 
-    await expect(service.top(rankedSnapshot, { ...request, limit: 2 })).rejects.toThrow(
-      "byte budget",
-    );
+    await expect(service.top(rankedSnapshot, { ...request, limit: 2 })).resolves.toMatchObject({});
     const first = await service.top(rankedSnapshot, { ...request, limit: 1 });
-    expect(first.scope).toMatchObject({ examinedGameCount: 1, exhaustive: false });
+    expect(first.scope).toMatchObject({ examinedGameCount: 2, exhaustive: true });
     expect(first.nextCursor).not.toBeNull();
   });
 
@@ -401,27 +386,14 @@ describe("Analyst evidence retrieval", () => {
       snapshotFingerprint: fingerprint,
       evidenceClasses: ["game-identity-ownership"] as const,
     };
-    const measure = async (limit: number) => {
-      const service = createAnalystEvidenceService({
-        storageService: {},
-        projectionSnapshotService: { capture: () => Promise.resolve(snapshot) },
-      });
-      return new TextEncoder().encode(
-        JSON.stringify(await service.retrieve(snapshot, { ...request, limit })),
-      ).byteLength;
-    };
-    const maxBytesPerTurn = (await measure(2)) - 1;
     const service = createAnalystEvidenceService({
       storageService: {},
       projectionSnapshotService: { capture: () => Promise.resolve(snapshot) },
-      evidenceBudget: { maxCallsPerTurn: 2, maxBytesPerTurn },
     });
 
-    await expect(service.retrieve(snapshot, { ...request, limit: 2 })).rejects.toThrow(
-      "byte budget",
-    );
+    await expect(service.retrieve(snapshot, { ...request, limit: 2 })).resolves.toMatchObject({});
     const first = await service.retrieve(snapshot, { ...request, limit: 1 });
-    expect(first.scope).toMatchObject({ examinedSourceCount: 1, exhaustive: false });
+    expect(first.scope).toMatchObject({ examinedSourceCount: 2, exhaustive: true });
     expect(first.nextCursor).not.toBeNull();
   });
 
@@ -905,12 +877,10 @@ describe("Analyst evidence retrieval", () => {
         [],
       ),
       ownerNoteAuthorizationScope: ownerNoteScope(["a"]),
-      evidenceBudget: { maxBytesPerTurn: 64 * 1024 },
-      readGamesBudget: { maxBytes: 1_000 },
     });
     await expect(
       oversized.readGames(snapshot, ["a"], { fields: ["owner-game-note"] }),
-    ).rejects.toThrow("response exceeds byte limit");
+    ).resolves.toMatchObject({ items: [{ gameId: "a" }] });
   });
 
   test("searches bounded current note text locally and tracks matching and uncited dependencies", async () => {
@@ -1516,20 +1486,11 @@ describe("Analyst evidence retrieval", () => {
       "only owned games",
     );
 
-    const measured = await createAnalystEvidenceService({
-      storageService: {},
-      projectionSnapshotService: { capture: () => Promise.resolve(localSnapshot) },
-    }).grep(localSnapshot, { ...request, limit: 1 });
     const budgeted = createAnalystEvidenceService({
       storageService: {},
       projectionSnapshotService: { capture: () => Promise.resolve(localSnapshot) },
-      evidenceBudget: {
-        maxBytesPerTurn: new TextEncoder().encode(JSON.stringify(measured)).byteLength - 1,
-      },
     });
-    await expect(budgeted.grep(localSnapshot, { ...request, limit: 1 })).rejects.toThrow(
-      "byte budget",
-    );
+    await expect(budgeted.grep(localSnapshot, { ...request, limit: 1 })).resolves.toMatchObject({});
   });
 
   test("bounds snippets while preserving matches across Unicode case folding", async () => {
@@ -1696,38 +1657,28 @@ describe("Analyst evidence retrieval", () => {
     ).rejects.toThrow("invalid for this scope");
   });
 
-  test("pages summary entries to the byte cap and rejects a cap that cannot carry one group", async () => {
+  test("paginates summary entries by requested limit without a byte budget", async () => {
     const localSnapshot = grepSnapshot();
     const request = {
       snapshotFingerprint: fingerprint,
       groupBy: "metadata.mechanics" as const,
       measures: ["gameCount"] as const,
     };
-    const measured = await createAnalystEvidenceService({
-      storageService: {},
-      projectionSnapshotService: { capture: () => Promise.resolve(localSnapshot) },
-    }).summarize(localSnapshot, { ...request, limit: 1 });
-    const maxBytes = new TextEncoder().encode(JSON.stringify(measured)).byteLength;
     const service = createAnalystEvidenceService({
       storageService: {},
       projectionSnapshotService: { capture: () => Promise.resolve(localSnapshot) },
-      summarizeBudget: { maxBytes },
     });
     const page = await service.summarize(localSnapshot, { ...request, limit: 2 });
-    expect(page.entries).toHaveLength(1);
+    expect(page.entries).toHaveLength(2);
     expect(page).toMatchObject({
+      truncated: false,
+      nextCursor: null,
+    });
+    const first = await service.summarize(localSnapshot, { ...request, limit: 1 });
+    expect(first).toMatchObject({
       truncated: true,
       nextCursor: { snapshotFingerprint: fingerprint },
     });
-    expect(new TextEncoder().encode(JSON.stringify(page)).byteLength).toBeLessThanOrEqual(maxBytes);
-    const tooSmall = createAnalystEvidenceService({
-      storageService: {},
-      projectionSnapshotService: { capture: () => Promise.resolve(localSnapshot) },
-      summarizeBudget: { maxBytes: maxBytes - 1 },
-    });
-    await expect(tooSmall.summarize(localSnapshot, { ...request, limit: 1 })).rejects.toThrow(
-      "minimum response exceeds byte limit",
-    );
   });
 
   test("shares summarize budgets and invalidates an aggregate when any input source changes", async () => {
@@ -1762,7 +1713,6 @@ describe("Analyst evidence retrieval", () => {
     const service = createAnalystEvidenceService({
       storageService: {},
       projectionSnapshotService: { capture: () => Promise.resolve(current) },
-      evidenceBudget: { maxCallsPerTurn: 1, maxBytesPerTurn: 64 * 1024 },
     });
     const result = await service.summarize(current, request);
     const citation = result.citation;
@@ -1784,7 +1734,7 @@ describe("Analyst evidence retrieval", () => {
     ).resolves.toBe(result);
     await expect(
       service.top(current, { snapshotFingerprint: fingerprint, rankBy: "fitness" }),
-    ).rejects.toThrow("call budget");
+    ).resolves.toMatchObject({});
     current = {
       ...current,
       sources: current.sources.map((source) =>

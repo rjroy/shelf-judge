@@ -304,14 +304,6 @@ export function createAnalystEvidenceService(deps: {
   ownerNoteAuthorizationScope?: AnalystOwnerNoteAuthorizationScope;
   /** Injectable only to make opaque citation authorization deterministic in tests. */
   citationSecret?: Uint8Array;
-  /** Shared turn-local response budget. Future model-loop integration supplies the turn boundary. */
-  evidenceBudget?: { readonly maxCallsPerTurn?: number; readonly maxBytesPerTurn?: number };
-  /** Explicit readGames response cap, including its per-item coverage wrapper. */
-  readGamesBudget?: { readonly maxBytes?: number };
-  /** Explicit summarize response cap, including source-set coverage metadata. */
-  summarizeBudget?: { readonly maxBytes?: number };
-  /** @deprecated Use evidenceBudget; retained for callers created before shared budgeting. */
-  topBudget?: { readonly maxCallsPerTurn?: number; readonly maxBytesPerTurn?: number };
 }): AnalystEvidenceService & {
   readGames(
     snapshot: AnalystProjectionSnapshot,
@@ -336,8 +328,6 @@ export function createAnalystEvidenceService(deps: {
       noteDependencies: Map<string, number>;
       emittedSources: Map<string, AnalystEvidenceSource>;
       noteLoad: Promise<void>;
-      evidenceCalls: number;
-      evidenceBytes: number;
     }
   >();
   const packages = new WeakMap<
@@ -379,8 +369,6 @@ export function createAnalystEvidenceService(deps: {
       noteDependencies: new Map<string, number>(),
       emittedSources: new Map<string, AnalystEvidenceSource>(),
       noteLoad: Promise.resolve(),
-      evidenceCalls: 0,
-      evidenceBytes: 0,
     };
     turns.set(snapshot, created);
     return created;
@@ -546,23 +534,6 @@ export function createAnalystEvidenceService(deps: {
     });
   }
 
-  function encodedBytes(value: unknown): number {
-    return new TextEncoder().encode(JSON.stringify(value)).byteLength;
-  }
-
-  function consumeTurnBudget(turn: ReturnType<typeof turnFor>, response: unknown): void {
-    const budget = deps.evidenceBudget ?? deps.topBudget;
-    const maxCalls = budget?.maxCallsPerTurn ?? 16;
-    const maxBytes = budget?.maxBytesPerTurn ?? 64 * 1024;
-    const bytes = encodedBytes(response);
-    if (turn.evidenceCalls >= maxCalls)
-      throw new Error("Analyst evidence turn call budget is exhausted");
-    if (bytes > maxBytes - turn.evidenceBytes)
-      throw new Error("Analyst evidence turn byte budget is exhausted");
-    turn.evidenceCalls += 1;
-    turn.evidenceBytes += bytes;
-  }
-
   function summarySourceSet(
     sourceId: string,
     sources: readonly AnalystEvidenceSource[],
@@ -711,7 +682,6 @@ export function createAnalystEvidenceService(deps: {
           truncated: nextCursor !== null,
         }),
       );
-      consumeTurnBudget(turn, result);
       turn.examined.set(scopeKey, examined);
       if (nextCursor !== null) turn.cursors.set(nextCursor.token, { scopeKey, offset: nextOffset });
       const sources = new Map<string, string>();
@@ -906,10 +876,6 @@ export function createAnalystEvidenceService(deps: {
         },
       });
       const requested = request.limit ?? 25;
-      const configuredMaxBytes = deps.summarizeBudget?.maxBytes ?? 48 * 1024;
-      const remainingTurnBytes =
-        (deps.evidenceBudget ?? deps.topBudget)?.maxBytesPerTurn ?? 64 * 1024;
-      const maxBytes = Math.min(configuredMaxBytes, remainingTurnBytes - turn.evidenceBytes);
       const provisionalCursor = {
         snapshotFingerprint: snapshot.snapshotFingerprint,
         token: crypto.randomUUID(),
@@ -933,20 +899,11 @@ export function createAnalystEvidenceService(deps: {
           nextCursor: hasMore ? provisionalCursor : null,
           truncated: hasMore,
         });
-      let entryCount = Math.min(requested, summarized.length - offset);
+      const entryCount = Math.min(requested, summarized.length - offset);
       let result = createResult(
         summarized.slice(offset, offset + entryCount),
         offset + entryCount < summarized.length,
       );
-      while (entryCount > 0 && encodedBytes(result) > maxBytes) {
-        entryCount -= 1;
-        result = createResult(
-          summarized.slice(offset, offset + entryCount),
-          offset + entryCount < summarized.length,
-        );
-      }
-      if (encodedBytes(result) > maxBytes || (entryCount === 0 && offset < summarized.length))
-        throw new Error("Analyst summarize minimum response exceeds byte limit");
       const nextOffset = offset + entryCount;
       const nextCursor =
         nextOffset < summarized.length
@@ -958,7 +915,6 @@ export function createAnalystEvidenceService(deps: {
         truncated: nextCursor !== null,
       });
       const frozenResult = freeze(result);
-      consumeTurnBudget(turn, frozenResult);
       if (nextCursor !== null) turn.cursors.set(nextCursor.token, { scopeKey, offset: nextOffset });
       const sources = new Map<string, string>();
       for (const gameId of ownedGameIdSet)
@@ -1122,7 +1078,6 @@ export function createAnalystEvidenceService(deps: {
           truncated: nextCursor !== null,
         }),
       );
-      consumeTurnBudget(turn, result);
       if (nextCursor !== null) turn.cursors.set(nextCursor.token, { scopeKey, offset: nextOffset });
       return result;
     },
@@ -1229,6 +1184,7 @@ export function createAnalystEvidenceService(deps: {
       const registry = createGroundedEvidenceRegistry({
         manifest,
         evidenceIdentitySchema: EvidenceIdentitySchema,
+        citationMetadataSchema: AnalystCitationSchema,
         expectedSources,
       });
       const citations: AnalystCitation[] = [];
@@ -1282,7 +1238,6 @@ export function createAnalystEvidenceService(deps: {
         },
         nextCursor,
       });
-      consumeTurnBudget(turn, retrieved);
       turn.examined.set(scopeKey, examined);
       if (nextCursor !== null) turn.cursors.set(nextCursor.token, { scopeKey, offset: nextOffset });
       recordEmittedSources(turn, returned);
@@ -1320,8 +1275,7 @@ export function createAnalystEvidenceService(deps: {
           sourceVersion: source.sourceVersion,
         };
         registry.recordExamined(identity);
-        registry.add({ ...identity, citationId: source.citationId, payload: source.payload });
-        return AnalystCitationSchema.parse({
+        const citation = AnalystCitationSchema.parse({
           ...identity,
           citationId: source.citationId,
           testimony:
@@ -1334,6 +1288,13 @@ export function createAnalystEvidenceService(deps: {
           canonicalSummary: source.canonicalSummary,
           destination: source.destination,
         });
+        registry.add({
+          ...identity,
+          citationId: source.citationId,
+          payload: source.payload,
+          citationMetadata: citation,
+        });
+        return citation;
       });
       if ((await revalidate(snapshot)).valid === false)
         throw new AnalystEvidenceSourceChangedError();
@@ -1476,9 +1437,6 @@ export function createAnalystEvidenceService(deps: {
         truncated: false,
       });
       const read = freeze({ ...retrieved, items: result.items, truncated: result.truncated });
-      const maxBytes = deps.readGamesBudget?.maxBytes ?? 48 * 1024;
-      if (encodedBytes(read) > maxBytes)
-        throw new Error("Analyst readGames response exceeds byte limit; narrow the request");
       packages.set(read, { retrieved: read, snapshot });
       return read;
     },

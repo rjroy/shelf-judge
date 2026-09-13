@@ -14,6 +14,7 @@ import type { GroundedSessionCapabilities } from "./capability-inspection.js";
 import { GroundedAnalysisError } from "./failure-mapping.js";
 import type { GroundedStructuredSubmission } from "./structured-submission.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { NativeTransportDiagnostic } from "./transport-diagnostics.js";
 
 export type GroundedSessionLifecycleStage =
   | "resource-reload"
@@ -46,26 +47,9 @@ export interface GroundedSessionRunResult {
     | "aborted"
     | "other"
   )[];
-}
-
-export const GROUNDED_MAX_INFERENCE_ROUND_TRIPS = 2;
-export const ANALYST_MAX_INFERENCE_ROUND_TRIPS = 4;
-
-export interface GroundedModelInputBudget {
-  /** Aggregate UTF-8 JSON bytes allowed across all outbound provider requests. */
-  readonly maxBytes: number;
-}
-
-function assertModelInputBudget(budget: GroundedModelInputBudget | undefined): void {
-  if (budget !== undefined && (!Number.isSafeInteger(budget.maxBytes) || budget.maxBytes < 1)) {
-    throw new Error("Grounded model input budget must be a positive safe integer");
-  }
-}
-
-function assertFeatureInferenceRoundTripLimit(limit: number): void {
-  if (limit !== GROUNDED_MAX_INFERENCE_ROUND_TRIPS && limit !== ANALYST_MAX_INFERENCE_ROUND_TRIPS) {
-    throw new Error("Grounded inference round-trip limit is not feature-authorized");
-  }
+  /** Text from the terminal assistant turn, never narration from an earlier tool turn. */
+  finalAssistantText?: string;
+  finalStopReason?: "stop" | "length" | "tool-use" | "error" | "aborted" | "other";
 }
 
 export class GroundedSessionRunError extends Error {
@@ -92,8 +76,15 @@ export interface GroundedAnalysisSessionFactory {
     systemPrompt: string;
     submission: GroundedStructuredSubmission<Output>;
     retrievalTools?: readonly ToolDefinition[];
-    maxInferenceRoundTrips?: number;
-    modelInputBudget?: GroundedModelInputBudget;
+    trace?: PiGroundedAnalysisSessionFactoryOptions["onTrace"];
+    traceAssistantContent?: boolean;
+  }): Promise<GroundedAnalysisSession>;
+  createFreeform?(input: {
+    systemPrompt: string;
+    submission?: undefined;
+    retrievalTools?: readonly ToolDefinition[];
+    trace?: PiGroundedAnalysisSessionFactoryOptions["onTrace"];
+    traceAssistantContent?: boolean;
   }): Promise<GroundedAnalysisSession>;
 }
 
@@ -102,8 +93,29 @@ export interface PiGroundedAnalysisSessionFactoryOptions {
   extensionIds: readonly string[];
   agentDir?: string;
   extensionFactories?: readonly ExtensionFactory[];
+  createExtensionFactories?: (
+    sink: (diagnostic: NativeTransportDiagnostic) => void,
+  ) => readonly ExtensionFactory[];
   onPayload?: SimpleStreamOptions["onPayload"];
   onLifecycleStage?: (stage: GroundedSessionLifecycleStage) => void;
+  onTrace?: (event: {
+    event: "model-request-start" | "model-response-end" | "provider-transport" | "session-error";
+    roundIndex?: number;
+    requestPayloadBytes?: number;
+    cumulativePayloadBytes?: number;
+    messageCount?: number;
+    toolCount?: number;
+    durationMs?: number;
+    stopReason?: "stop" | "length" | "tool-use" | "error" | "aborted" | "other";
+    assistantText?: string;
+    assistantTextLength?: number;
+    assistantTextTruncated?: boolean;
+    error?: unknown;
+    failure?: import("./model-logger.js").GroundedProviderFailureDiagnostics;
+    transport?: Omit<NativeTransportDiagnostic, "durationMs" | "error">;
+  }) => void;
+  traceAssistantContent?: boolean;
+  nowMs?: () => number;
 }
 
 function isAssistantMessage(
@@ -132,6 +144,20 @@ function safeStopReason(
   return "other";
 }
 
+function payloadArrayLength(payload: unknown, key: "messages" | "tools"): number | undefined {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return undefined;
+  const value = (payload as Record<string, unknown>)[key];
+  return Array.isArray(value) ? value.length : undefined;
+}
+
+export function latestTerminalAssistantFailure<Message extends { stopReason?: string }>(
+  messages: readonly Message[],
+): Message | undefined {
+  return messages.findLast(
+    (message) => message.stopReason === "error" || message.stopReason === "aborted",
+  );
+}
+
 function extensionCapabilities(
   extensionsResult: LoadExtensionsResult,
   exactPromptHandler: (...args: unknown[]) => unknown,
@@ -153,9 +179,11 @@ function createBoundSession(
   extensionsResult: LoadExtensionsResult,
   lifecycle: (stage: GroundedSessionLifecycleStage) => void,
   exactPromptHandler: (...args: unknown[]) => unknown,
-  submission: GroundedStructuredSubmission<unknown>,
-  maxInferenceRoundTrips: number,
-  modelInput: { bytes: number; requests: number },
+  submission: GroundedStructuredSubmission<unknown> | undefined,
+  modelInput: { bytes: number; requests: number; requestStartedAt: Map<number, number> },
+  trace: PiGroundedAnalysisSessionFactoryOptions["onTrace"],
+  traceAssistantContent: boolean,
+  nowMs: () => number,
 ): GroundedAnalysisSession {
   let extensionsBound = false;
   let resolvedModel: Model<Api> | undefined;
@@ -198,13 +226,54 @@ function createBoundSession(
       const unsubscribe = session.subscribe((event) => {
         if (event.type === "message_end" && isAssistantMessage(event.message)) {
           assistantMessages.push(event.message);
+            submission?.captureAssistantUsage({
+              inferenceRoundTrips: assistantMessages.length,
+              usages: assistantMessages.map(({ usage }) => ({
+                inputTokens: usage.input,
+                outputTokens: usage.output,
+                cacheReadTokens: usage.cacheRead,
+                cacheWriteTokens: usage.cacheWrite,
+                monetaryCostUsd: usage.cost.total,
+              })),
+            });
+          const roundIndex = assistantMessages.length;
+          const text = event.message.content
+            .filter(
+              (
+                content,
+              ): content is Extract<(typeof event.message.content)[number], { type: "text" }> =>
+                content.type === "text",
+            )
+            .map(({ text }) => text)
+            .join("");
+          const startedAt = modelInput.requestStartedAt.get(roundIndex);
+          try {
+            trace?.({
+              event: "model-response-end",
+              roundIndex,
+              ...(startedAt === undefined
+                ? {}
+                : { durationMs: Math.max(0, Math.round(nowMs() - startedAt)) }),
+              stopReason: safeStopReason(event.message.stopReason),
+              ...(traceAssistantContent && text.length > 0
+                ? {
+                    assistantText: text.slice(0, 16_384),
+                    assistantTextLength: text.length,
+                    assistantTextTruncated: text.length > 16_384,
+                  }
+                : {}),
+            });
+          } catch {
+            // Diagnostics must never affect a model operation.
+          }
         }
       });
       const previousShouldStopAfterTurn = session.agent.shouldStopAfterTurn;
       session.agent.shouldStopAfterTurn = async (context, activeSignal) => {
         if (await previousShouldStopAfterTurn?.(context, activeSignal)) return true;
-        if (submission.getAttemptState().acceptedResultPresent) return true;
-        return assistantMessages.length >= maxInferenceRoundTrips;
+        if (submission?.getAttemptState().acceptedResultPresent) return true;
+        if (submission?.getOperationalFailure() !== undefined) return true;
+        return false;
       };
       const abort = () => void session.abort();
       signal.addEventListener("abort", abort, { once: true });
@@ -221,6 +290,11 @@ function createBoundSession(
         unsubscribe();
       }
 
+      const terminalMessage = assistantMessages.at(-1);
+      const terminalText = terminalMessage?.content
+        .filter((content): content is Extract<(typeof terminalMessage.content)[number], { type: "text" }> => content.type === "text")
+        .map(({ text }) => text)
+        .join("");
       const runResult = {
         inferenceRoundTrips: assistantMessages.length,
         modelInputBytes: modelInput.bytes,
@@ -241,10 +315,10 @@ function createBoundSession(
           monetaryCostUsd: usage.cost.total,
         })),
         assistantStopReasons: assistantMessages.map(({ stopReason }) => safeStopReason(stopReason)),
+        ...(terminalText === undefined ? {} : { finalAssistantText: terminalText }),
+        ...(terminalMessage === undefined ? {} : { finalStopReason: safeStopReason(terminalMessage.stopReason) }),
       };
-      const failedMessage = assistantMessages.find(
-        (message) => message.stopReason === "error" || message.stopReason === "aborted",
-      );
+      const failedMessage = latestTerminalAssistantFailure(assistantMessages);
       if (promptFailure !== undefined || failedMessage) {
         const cause =
           failedMessage?.stopReason === "aborted"
@@ -252,6 +326,21 @@ function createBoundSession(
             : failedMessage?.errorMessage
               ? new Error(failedMessage.errorMessage)
               : promptFailure;
+        const roundIndex = modelInput.requests === 0 ? undefined : modelInput.requests;
+        const startedAt =
+          roundIndex === undefined ? undefined : modelInput.requestStartedAt.get(roundIndex);
+        try {
+          trace?.({
+            event: "session-error",
+            ...(roundIndex === undefined ? {} : { roundIndex }),
+            ...(startedAt === undefined
+              ? {}
+              : { durationMs: Math.max(0, Math.round(nowMs() - startedAt)) }),
+            error: cause,
+          });
+        } catch {
+          // Diagnostics must never affect a model operation.
+        }
         throw new GroundedSessionRunError(runResult, { cause });
       }
 
@@ -271,16 +360,14 @@ export function createPiGroundedAnalysisSessionFactory(
   const agentDir = options.agentDir ?? getAgentDir();
   const extensionIds = Object.freeze([...options.extensionIds]);
   const extensionFactories = Object.freeze([...(options.extensionFactories ?? [])]);
-  return {
-    async create({
-      systemPrompt,
-      submission,
-      retrievalTools = [],
-      maxInferenceRoundTrips = GROUNDED_MAX_INFERENCE_ROUND_TRIPS,
-      modelInputBudget,
-    }) {
-      assertFeatureInferenceRoundTripLimit(maxInferenceRoundTrips);
-      assertModelInputBudget(modelInputBudget);
+  const create = async ({ systemPrompt, submission, retrievalTools = [], trace, traceAssistantContent }: {
+      systemPrompt: string;
+      submission?: GroundedStructuredSubmission<unknown>;
+      retrievalTools?: readonly ToolDefinition[];
+      trace?: PiGroundedAnalysisSessionFactoryOptions["onTrace"];
+      traceAssistantContent?: boolean;
+    }) => {
+      const effectiveTrace = trace ?? options.onTrace;
       const settingsManager = SettingsManager.inMemory({
         packages: [],
         extensions: [],
@@ -291,12 +378,30 @@ export function createPiGroundedAnalysisSessionFactory(
       const exactPromptExtension: ExtensionFactory = (pi) => {
         pi.on("before_agent_start", exactPromptHandler);
       };
+      const modelInput = { bytes: 0, requests: 0, requestStartedAt: new Map<number, number>() };
       const loader = new DefaultResourceLoader({
         cwd,
         agentDir,
         settingsManager,
         additionalExtensionPaths: [...extensionIds],
-        extensionFactories: [exactPromptExtension, ...extensionFactories],
+        extensionFactories: [
+          exactPromptExtension,
+          ...extensionFactories,
+          ...(options.createExtensionFactories?.((diagnostic) => {
+            try {
+              const { durationMs, error, ...transport } = diagnostic;
+              effectiveTrace?.({
+                event: "provider-transport",
+                roundIndex: modelInput.requests || undefined,
+                durationMs,
+                ...(error === undefined ? {} : { failure: error }),
+                transport,
+              });
+            } catch {
+              // Diagnostics must not change inference, cancellation, or submission behavior.
+            }
+          }) ?? []),
+        ],
         noExtensions: true,
         noSkills: true,
         noPromptTemplates: true,
@@ -323,9 +428,8 @@ export function createPiGroundedAnalysisSessionFactory(
         sessionManager: SessionManager.inMemory(cwd),
         settingsManager,
         noTools: "builtin",
-        customTools: [...retrievalTools, submission.tool],
+        customTools: [...retrievalTools, ...(submission === undefined ? [] : [submission.tool])],
       });
-      const modelInput = { bytes: 0, requests: 0 };
       if (options.onPayload) {
         const existingOnPayload = session.agent.onPayload;
         session.agent.onPayload = async (payload, model) => {
@@ -341,14 +445,28 @@ export function createPiGroundedAnalysisSessionFactory(
           throw new GroundedAnalysisError("internal", "model-input-serialization-failed");
         }
         const bytes = new TextEncoder().encode(serialized).byteLength;
-        if (
-          modelInputBudget !== undefined &&
-          modelInput.bytes + bytes > modelInputBudget.maxBytes
-        ) {
-          throw new GroundedAnalysisError("context-exhaustion", "model-input-budget-exceeded");
-        }
         modelInput.bytes += bytes;
         modelInput.requests += 1;
+        modelInput.requestStartedAt.set(
+          modelInput.requests,
+          options.nowMs?.() ?? performance.now(),
+        );
+        try {
+          effectiveTrace?.({
+            event: "model-request-start",
+            roundIndex: modelInput.requests,
+            requestPayloadBytes: bytes,
+            cumulativePayloadBytes: modelInput.bytes,
+            ...(payloadArrayLength(outboundPayload, "messages") === undefined
+              ? {}
+              : { messageCount: payloadArrayLength(outboundPayload, "messages") }),
+            ...(payloadArrayLength(outboundPayload, "tools") === undefined
+              ? {}
+              : { toolCount: payloadArrayLength(outboundPayload, "tools") }),
+          });
+        } catch {
+          // Diagnostics must never affect a model operation.
+        }
         return outboundPayload;
       };
       return createBoundSession(
@@ -357,9 +475,11 @@ export function createPiGroundedAnalysisSessionFactory(
         lifecycle,
         exactPromptHandler,
         submission,
-        maxInferenceRoundTrips,
         modelInput,
+        effectiveTrace,
+        traceAssistantContent ?? options.traceAssistantContent ?? false,
+        options.nowMs ?? (() => performance.now()),
       );
-    },
-  };
+    };
+  return { create, createFreeform: create };
 }

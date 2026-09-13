@@ -102,19 +102,13 @@ export function OptionalReflections() {
 
   useEffect(() => {
     void load();
-    return () => {
-      const current = active.current;
-      if (current !== undefined) {
-        navigator.sendBeacon(
-          `${REFLECTIONS_PATH}/cancel`,
-          new Blob([JSON.stringify({ batchId: current.batchId, capability: current.capability })], {
-            type: "application/json",
-          }),
-        );
-        current.controller.abort();
-      }
-    };
   }, [load]);
+
+  useEffect(() => {
+    if (!(data?.questions.some(({ attempt }) => attempt.state === "refreshing") ?? false)) return;
+    const timer = window.setInterval(() => void load(), 2_000);
+    return () => window.clearInterval(timer);
+  }, [data?.questions, load]);
 
   const cancel = useCallback(async () => {
     const current = active.current;
@@ -286,50 +280,24 @@ export function OptionalReflections() {
         logReflectionDiagnostic({
           batchId,
           requestId: refreshRequestId,
-          transition: "refreshing->unavailable",
+          transition: "refreshing->observing",
           trigger: "terminal-event-missed",
           ...(pendingQuestion === undefined ? {} : { questionId: pendingQuestion }),
           reason: "transport",
         });
-        updateStates((state) =>
-          state.attempt.state === "refreshing"
-            ? {
-                ...state,
-                attempt: {
-                  state: "unavailable",
-                  reason: "transport",
-                  safeDetail: "terminal-event-missed",
-                  occurredAt: new Date().toISOString(),
-                },
-              }
-            : state,
-        );
-        setMessage("Reflection refresh ended before a terminal status was received.");
+        setMessage("Refresh continues in the background. Checking its status.");
       }
     } catch {
       if (!controller.signal.aborted) {
         logReflectionDiagnostic({
           batchId,
           requestId: refreshRequestId,
-          transition: "refreshing->unavailable",
+          transition: "refreshing->observing",
           trigger: "stream-error",
           ...(pendingQuestion === undefined ? {} : { questionId: pendingQuestion }),
           reason: "transport",
         });
-        updateStates((state) =>
-          state.attempt.state === "refreshing"
-            ? {
-                ...state,
-                attempt: {
-                  state: "unavailable",
-                  reason: "transport",
-                  safeDetail: "refresh-stream-error",
-                  occurredAt: new Date().toISOString(),
-                },
-              }
-            : state,
-        );
-        setMessage("Reflection refresh failed before a terminal status was received.");
+        setMessage("Refresh continues in the background. Checking its status.");
       }
     } finally {
       if (active.current?.batchId === batchId) active.current = undefined;

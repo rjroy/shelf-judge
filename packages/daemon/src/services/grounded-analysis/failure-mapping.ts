@@ -118,11 +118,6 @@ export function mapGroundedAnalysisFailure(
   if (error instanceof GroundedCapabilityError) {
     return new GroundedAnalysisError("extension-binding", error.safeDetail, { cause: error });
   }
-  if (/\bmodel-input-budget-exceeded\b/.test(evidence.text)) {
-    return new GroundedAnalysisError("context-exhaustion", "model-input-budget-exceeded", {
-      cause: error,
-    });
-  }
   if (/\binvalid structured submission\b/.test(evidence.text)) {
     return new GroundedAnalysisError("output-validation", "invalid-structured-submission", {
       cause: error,

@@ -156,13 +156,11 @@ export interface ProfileReflectionRoutesDeps {
   readonly refresh: ReflectionRefreshService;
   readonly loadCurrentSources: () => Promise<ReflectionCurrentSources>;
   readonly createOperationId?: () => string;
-  readonly createTransportId?: () => string;
 }
 
 export function createProfileReflectionRoutes(deps: ProfileReflectionRoutesDeps): RouteModule {
   const configuration = structuredClone(deps.configurationStatus);
   const createOperationId = deps.createOperationId ?? (() => crypto.randomUUID());
-  const createTransportId = deps.createTransportId ?? (() => crypto.randomUUID());
   const routes = new Hono();
 
   routes.get("/profile/reflections", async (context) => {
@@ -265,7 +263,6 @@ export function createProfileReflectionRoutes(deps: ProfileReflectionRoutesDeps)
       );
 
     const operationId = createOperationId();
-    const transportId = createTransportId();
     let acceptedResolve: (() => void) | undefined;
     let acceptedReject: ((error: unknown) => void) | undefined;
     const accepted = new Promise<void>((resolve, reject) => {
@@ -281,18 +278,15 @@ export function createProfileReflectionRoutes(deps: ProfileReflectionRoutesDeps)
         streamController = controller;
       },
       cancel() {
-        deps.refresh.cancel(parsed.data.batchId, parsed.data.cancellationCapability);
+        // The stream is an observer. Cancellation requires the explicit capability endpoint.
+        streamController = undefined;
       },
     });
-    const abortController = new AbortController();
-    context.req.raw.signal.addEventListener("abort", () => abortController.abort(), { once: true });
 
     try {
       const running = deps.refresh.run({
         operationId,
-        transportId,
         request: parsed.data,
-        disconnectSignal: abortController.signal,
         authorizeQuestions(questionIds) {
           if (expectedQuestionIds !== undefined) {
             throw new Error("Reflection questions were authorized more than once");
@@ -313,14 +307,25 @@ export function createProfileReflectionRoutes(deps: ProfileReflectionRoutesDeps)
           const candidateHistory = [...history, event];
           if (event.terminal) ReflectionStreamEventHistorySchema.parse(candidateHistory);
           history.push(event);
-          streamController?.enqueue(
-            encoder.encode(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`),
-          );
           if (event.type === "accepted") acceptedResolve?.();
+          try {
+            streamController?.enqueue(
+              encoder.encode(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`),
+            );
+          } catch {
+            // A closed response remains detached while the daemon-owned job continues.
+            streamController = undefined;
+          }
         },
       });
       void running.then(
-        () => streamController?.close(),
+        () => {
+          try {
+            streamController?.close();
+          } catch {
+            streamController = undefined;
+          }
+        },
         (error) => {
           acceptedReject?.(error);
           streamController?.error(error);

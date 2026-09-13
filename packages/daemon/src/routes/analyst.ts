@@ -32,7 +32,7 @@ import {
 const INVALID_REQUEST_ID = "invalid-request";
 const OPERATION_PREFIX = "shelf.analyst";
 const SYSTEM_PROMPT =
-  "You are Shelf Judge's Collection Analyst. Use only authorized evidence tools and submit structured results.";
+  "You are Shelf Judge's Collection Analyst. Use the available read-only collection discovery tools as needed, then provide a conversational final answer.";
 const MAX_RETAINED_CONVERSATION_IDENTITIES = 1_024;
 
 const operationResultSchema = {

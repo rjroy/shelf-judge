@@ -305,9 +305,8 @@ not silently select a provider or model.
 
 Before a refresh, the web UI and CLI identify the provider and model, relevant
 owner notes and deterministic evidence categories to be sent, local retention,
-the provider-policy boundary, the lack of a fixed application token or monetary
-cap, the number of model operations and maximum provider round trips, and how to
-cancel. Provider processing and retention follow that provider's configuration
+the provider-policy boundary, the lack of a fixed application inference-round-trip,
+token, or monetary cap, the number of model operations, and how to cancel. Provider processing and retention follow that provider's configuration
 and policy. Cancellation stops subsequent local work, but content already sent
 may have been processed and may have incurred cost.
 
@@ -316,6 +315,17 @@ Disabling deletes its cached Reflection and does not change source collection
 data. **Delete all reflections** removes all cached output but preserves source
 data, settings, and provider configuration. Results can be answered or honestly
 abstained; an abstention is a valid outcome, not an error.
+
+During a refresh, the model retrieves collection evidence through the supplied
+tools and submits the final Reflection through the structured submission tool;
+ordinary model narration is not a saved Reflection. Shelf Judge validates the
+submission, resolves its citations from the retrieved evidence registry, checks
+that the source and provider are still current, and then saves the result once.
+The saved result uses the cumulative assistant-turn usage recorded before the
+submission tool runs. Cancellation can stop work before publication begins; once
+publication has been reserved, a late cancellation cannot remove the committed
+result. Closing the live update stream likewise does not cancel an admitted
+refresh.
 
 Non-note source changes make a cached result stale. Stale prose remains hidden
 until you explicitly show it and its citations resolve to captured evidence
@@ -495,3 +505,17 @@ shelf-judge config set grounded-analysis '{"providerId":"ollama","modelId":"qwen
 ```
 
 The Ollama endpoint (`http://127.0.0.1:11434/v1`) and model above are examples only, not defaults; the endpoint is separate from the `ollama` provider ID. Empty extensions are appropriate for the built-in provider. Extension IDs load trusted executable extensions, so keep `[]` unless you trust the extension. Provider credentials are not stored in this identity. Config and data path overrides control where `config.json` is stored.
+
+# Grounded model trace logging
+
+Grounded Analysis writes correlated `grounded-model-trace` records alongside its attempt and outcome logs. Filter on `operationId`, `batchId`, and `requestId` to follow each model request, tool dispatch/outcome, duration, and terminal provider error in order. Tool arguments, tool results, system prompts, request payloads, and credentials are never logged.
+
+Assistant text is intentionally opt-in because it can include user material. Set `SHELF_JUDGE_MODEL_TRACE_CONTENT=true` to include up to 16,384 characters per ordinary assistant response, with its original length and truncation marker. The default is metadata-only.
+
+To start the development environment with assistant response text in the logs:
+
+```bash
+SHELF_JUDGE_MODEL_TRACE_CONTENT=true bun run dev
+```
+
+Example: `grounded-model-trace event=model-request-start roundIndex=1` → `tool-dispatch toolName=readGames callIndex=0` → `tool-outcome durationMs=4` → `model-response-end stopReason=tool-use durationMs=91` → the correlated `grounded-model-outcome`.

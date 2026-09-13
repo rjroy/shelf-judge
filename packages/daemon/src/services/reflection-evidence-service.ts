@@ -628,6 +628,7 @@ export function createReflectionEvidenceService(
     const registry = createGroundedEvidenceRegistry({
       manifest: REFLECTION_EVIDENCE_MANIFEST,
       evidenceIdentitySchema: ReflectionEvidenceEntryIdentitySchema,
+      citationMetadataSchema: ReflectionCitationSchema,
       expectedSources: sources,
     });
     for (const source of sources) registry.recordExamined(source);

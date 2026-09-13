@@ -289,28 +289,18 @@ export function createGroundedDisclosureSchema<
       applicationTokenCap: z.null(),
       applicationMonetaryCap: z.null(),
       modelOperationCount: PositiveSafeIntegerSchema,
-      maximumProviderRoundTrips: PositiveSafeIntegerSchema,
       cancellation: z.string().min(1),
     })
     .strict()
-    .superRefine(
-      ({ evidenceClasses: values, modelOperationCount, maximumProviderRoundTrips }, context) => {
-        if (new Set(values).size !== values.length) {
-          context.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ["evidenceClasses"],
-            message: "Disclosure evidence classes must be unique",
-          });
-        }
-        if (maximumProviderRoundTrips < modelOperationCount) {
-          context.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ["maximumProviderRoundTrips"],
-            message: "Maximum provider round trips cannot be lower than model operations",
-          });
-        }
-      },
-    );
+    .superRefine(({ evidenceClasses: values }, context) => {
+      if (new Set(values).size !== values.length) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["evidenceClasses"],
+          message: "Disclosure evidence classes must be unique",
+        });
+      }
+    });
 }
 
 export function createGroundedUnavailableReasonSchema<

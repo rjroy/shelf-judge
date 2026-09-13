@@ -2,6 +2,9 @@ import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent
 import { Type, type TSchema } from "typebox";
 import { z } from "zod";
 import type { GroundedToolLifecycleDiagnostics } from "./tool-lifecycle.js";
+import { GroundedStructuredSubmissionValidationError } from "./submission-validation-error.js";
+
+export { GroundedStructuredSubmissionValidationError } from "./submission-validation-error.js";
 
 export const GROUNDED_SUBMISSION_TOOL_NAME = "submit_grounded_analysis";
 export const COLLECTION_TOP_TOOL_NAME = "top";
@@ -20,20 +23,6 @@ export const COLLECTION_EVIDENCE_WITH_SUBMISSION_TOOL_NAMES = Object.freeze([
   ...COLLECTION_EVIDENCE_TOOL_NAMES,
   GROUNDED_SUBMISSION_TOOL_NAME,
 ] as const);
-
-export class GroundedStructuredSubmissionValidationError extends Error {
-  readonly issues: readonly z.ZodIssue[];
-
-  constructor(issues: readonly z.ZodIssue[]) {
-    super(
-      `Invalid structured submission: ${issues
-        .map((issue) => `${issue.code}@${issue.path.join(".") || "root"}`)
-        .join(", ")}`,
-    );
-    this.name = "GroundedStructuredSubmissionValidationError";
-    this.issues = issues;
-  }
-}
 
 export function parseGroundedStructuredSubmission<Output>(
   schema: z.ZodType<Output>,
@@ -110,7 +99,7 @@ export function createGroundedSubmissionOnlyToolManifest(feature: string) {
 export function createCollectionAnalystToolManifest() {
   return Object.freeze({
     feature: "collection-analyst",
-    toolNames: COLLECTION_EVIDENCE_WITH_SUBMISSION_TOOL_NAMES,
+    toolNames: Object.freeze(["top", "grep", "readGames", "summarize"]),
   });
 }
 
@@ -124,7 +113,10 @@ export function createProfileReflectionToolManifest() {
 
 export interface GroundedStructuredSubmission<Output> {
   tool: ToolDefinition;
+  submit(submission: unknown): Promise<void>;
+  captureAssistantUsage(usage: GroundedSubmissionUsageSnapshot): void;
   getResult(): Output | undefined;
+  getOperationalFailure(): unknown;
   getAttemptState(): Readonly<{
     toolCallAttempts: number;
     rejectedAttempts: number;
@@ -133,6 +125,26 @@ export interface GroundedStructuredSubmission<Output> {
     argumentShapes: readonly GroundedStructuredSubmissionArgumentShape[];
   }>;
 }
+
+/** Usage reported by one completed assistant message. */
+export interface GroundedSubmissionAssistantUsage {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens: number;
+  readonly cacheWriteTokens: number;
+  readonly monetaryCostUsd: number;
+}
+
+/** Cumulative usage through the assistant message that requested submission. */
+export interface GroundedSubmissionUsageSnapshot {
+  readonly inferenceRoundTrips: number;
+  readonly usages: readonly GroundedSubmissionAssistantUsage[];
+}
+
+export type GroundedSubmissionAcceptor<Output> = (
+  output: Output,
+  usage: GroundedSubmissionUsageSnapshot,
+) => Promise<void>;
 
 export interface GroundedStructuredSubmissionIssue {
   readonly code: z.ZodIssueCode;
@@ -235,6 +247,7 @@ function safeValidationIssues(
 export function createGroundedStructuredSubmission<Output>(
   schema: z.ZodType<Output>,
   toolLifecycle?: GroundedToolLifecycleDiagnostics,
+  accept?: GroundedSubmissionAcceptor<Output>,
 ): GroundedStructuredSubmission<Output> {
   let result: Output | undefined;
   let toolCallAttempts = 0;
@@ -243,6 +256,35 @@ export function createGroundedStructuredSubmission<Output>(
   const argumentShapes: GroundedStructuredSubmissionArgumentShape[] = [];
   let preparedInvocationPending = false;
   let preparedInvocationCallIndex: number | undefined;
+  let assistantUsage: GroundedSubmissionUsageSnapshot | undefined;
+  let operationalFailure: unknown;
+  let acceptancePending: Promise<void> | undefined;
+  function acceptParsedSubmission(parsed: Output): Promise<void> | undefined {
+    if (result !== undefined) return;
+    if (accept === undefined) {
+      result = parsed;
+      return;
+    }
+    if (assistantUsage === undefined) throw new Error("Submission assistant usage was unavailable");
+    const existingAcceptance = acceptancePending;
+    if (existingAcceptance !== undefined) {
+      return existingAcceptance.then(() => {
+        if (result === undefined) throw new Error("Grounded result acceptance did not complete");
+      });
+    }
+    const acceptance = accept(parsed, assistantUsage);
+    acceptancePending = acceptance;
+    return acceptance.then(
+      () => {
+        result = parsed;
+      },
+      (error: unknown) => {
+        if (acceptancePending === acceptance) acceptancePending = undefined;
+        throw error;
+      },
+    );
+  }
+
   const tool = defineTool({
     name: GROUNDED_SUBMISSION_TOOL_NAME,
     label: "Submit grounded analysis",
@@ -277,7 +319,7 @@ export function createGroundedStructuredSubmission<Output>(
         throw error;
       }
     },
-    execute(_toolCallId, parameters) {
+    async execute(_toolCallId, parameters) {
       const callIndex = preparedInvocationPending
         ? preparedInvocationCallIndex
         : toolLifecycle?.dispatch(GROUNDED_SUBMISSION_TOOL_NAME, "submission");
@@ -287,36 +329,70 @@ export function createGroundedStructuredSubmission<Output>(
       preparedInvocationPending = false;
       preparedInvocationCallIndex = undefined;
       try {
-        if (result !== undefined) throw new Error("A grounded result was already submitted");
-        result = parseGroundedStructuredSubmission(schema, parameters.submission);
+        if (result !== undefined) {
+          if (callIndex !== undefined)
+            toolLifecycle?.handling(
+              GROUNDED_SUBMISSION_TOOL_NAME,
+              "submission",
+              callIndex,
+              "accepted",
+            );
+          return {
+            content: [{ type: "text", text: "Grounded result was already accepted." }],
+            details: undefined,
+          };
+        }
+        const acceptance = acceptParsedSubmission(
+          parseGroundedStructuredSubmission(schema, parameters.submission),
+        );
+        if (acceptance !== undefined) await acceptance;
       } catch (error) {
+        const validationError =
+          error instanceof GroundedStructuredSubmissionValidationError
+            ? error
+            : error instanceof z.ZodError
+              ? new GroundedStructuredSubmissionValidationError(error.issues)
+              : undefined;
         if (callIndex !== undefined)
           toolLifecycle?.handling(
             GROUNDED_SUBMISSION_TOOL_NAME,
             "submission",
             callIndex,
-            "rejected",
+            validationError === undefined ? "failed" : "rejected",
           );
-        rejectedAttempts += 1;
-        if (error instanceof GroundedStructuredSubmissionValidationError) {
-          validationIssues = safeValidationIssues(schema, error.issues);
+        if (validationError !== undefined) {
+          rejectedAttempts += 1;
+          validationIssues = safeValidationIssues(schema, validationError.issues);
+          throw validationError;
         }
-        if (error instanceof z.ZodError)
-          throw new GroundedStructuredSubmissionValidationError(error.issues);
+        operationalFailure = error;
         throw error;
       }
       if (callIndex !== undefined)
         toolLifecycle?.handling(GROUNDED_SUBMISSION_TOOL_NAME, "submission", callIndex, "accepted");
-      return Promise.resolve({
+      return {
         content: [{ type: "text", text: "Grounded result accepted." }],
         details: undefined,
-      });
+      };
     },
   });
 
   return {
     tool,
+    submit: async (submission) => {
+      const acceptance = acceptParsedSubmission(
+        parseGroundedStructuredSubmission(schema, submission),
+      );
+      if (acceptance !== undefined) await acceptance;
+    },
+    captureAssistantUsage: (usage) => {
+      assistantUsage = Object.freeze({
+        inferenceRoundTrips: usage.inferenceRoundTrips,
+        usages: Object.freeze(usage.usages.map((entry) => Object.freeze({ ...entry }))),
+      });
+    },
     getResult: () => result,
+    getOperationalFailure: () => operationalFailure,
     getAttemptState: () =>
       Object.freeze({
         toolCallAttempts,
