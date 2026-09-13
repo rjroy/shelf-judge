@@ -3,7 +3,7 @@ import {
   CollectionSchema,
   createInitialEntityMetadata,
   type Collection,
-  type Game,
+  type DurableGame,
   type IntentionMutationResult,
 } from "@shelf-judge/shared";
 import { createCollectionMutationService } from "../../src/services/collection-mutation-service.js";
@@ -26,7 +26,7 @@ const commandIds = {
   later: "10000000-0000-4000-8000-000000000003",
 };
 
-function game(overrides: Partial<Game> = {}): Game {
+function game(overrides: Partial<DurableGame> = {}): DurableGame {
   return {
     id: "game-1",
     bggId: null,
@@ -57,6 +57,7 @@ function game(overrides: Partial<Game> = {}): Game {
     ownership: "owned",
     boxDimensions: null,
     manualShelfId: null,
+    ownerNote: { state: "missing", version: 0, updatedAt: null },
     ratings: {},
     createdAt: observedAt,
     updatedAt: observedAt,
@@ -66,7 +67,7 @@ function game(overrides: Partial<Game> = {}): Game {
 
 function collection(sourceGame = game()): Collection {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     revision: 0,
     id: "collection",
     name: "Collection",
@@ -378,6 +379,47 @@ describe("durable intention lifecycle", () => {
     });
     expect(state.snapshot().intentions).toHaveLength(1);
     expect(state.snapshot().commandReceipts).toHaveLength(1);
+  });
+
+  test("rejects a note-owned command ID without accessing intention receipt fields", async () => {
+    const source = collection();
+    source.revision = 1;
+    source.commandReceipts.push({
+      receiptType: "owner-game-note",
+      commandId: commandIds.create,
+      operation: "clear",
+      gameId: "game-1",
+      expectedVersion: 0,
+      requestFingerprint: "a".repeat(64),
+      accepted: {
+        commandId: commandIds.create,
+        gameId: "game-1",
+        operation: "clear",
+        state: "missing",
+        version: 0,
+        updatedAt: null,
+        collectionRevision: 1,
+        alreadyClear: true,
+      },
+    });
+    const state = harness({ source });
+    const before = state.snapshot();
+
+    expect(
+      await state.makeService().execute({
+        type: "create",
+        commandId: commandIds.create,
+        gameId: "game-1",
+        kind: "first-play",
+        expectedActiveIntention: "absent",
+      }),
+    ).toEqual({
+      ok: false,
+      commandId: commandIds.create,
+      error: { code: "command-reuse", commandId: commandIds.create },
+    });
+    expect(state.snapshot()).toEqual(before);
+    expect(state.saves()).toBe(0);
   });
 
   test("a persistence failure leaves no receipt or intention and retry creates exactly one", async () => {

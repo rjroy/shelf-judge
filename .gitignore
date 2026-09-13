@@ -2,6 +2,7 @@ node_modules/
 dist/
 *.tsbuildinfo
 .next/
+packages/web/.next-*/
 playwright-report/
 test-results/
 .shelf-judge/

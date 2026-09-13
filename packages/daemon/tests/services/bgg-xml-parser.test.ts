@@ -524,6 +524,24 @@ describe("BGG XML Parser", () => {
   });
 
   describe("parseCollectionResponse", () => {
+    test("excludes collection comments and private-note-like prose", () => {
+      const sentinel = "EXTERNAL PRIVATE PROSE MUST NOT BECOME AN OWNER NOTE";
+      const [item] = parseCollectionResponse(`<items><item objectid="1">
+        <name>Test</name><yearpublished>2020</yearpublished><numplays>4</numplays>
+        <comment>${sentinel}</comment><privatecomment>${sentinel}</privatecomment>
+        <wishlistcomment>${sentinel}</wishlistcomment>
+      </item></items>`);
+
+      expect(item).toMatchObject({
+        bggId: 1,
+        name: "Test",
+        yearPublished: 2020,
+        numplays: 4,
+      });
+      expect(item?.playCountObservation?.fieldsReturned).toEqual(["numPlays"]);
+      expect(JSON.stringify(item)).not.toContain(sentinel);
+    });
+
     test("attaches the producing collection observation to play counts", () => {
       const observedAt = "2026-08-26T12:00:00.000Z";
       const xml = `<items><item objectid="1"><name>Test</name><numplays>4</numplays></item></items>`;

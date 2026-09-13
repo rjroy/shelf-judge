@@ -13,6 +13,10 @@ import { createLogger } from "./services/logger.js";
 import { createCollectionMutationService } from "./services/collection-mutation-service.js";
 import { createDisplayedFitnessService } from "./services/displayed-fitness-service.js";
 import { createIntentionService } from "./services/intention-service.js";
+import { createOwnerGameNoteService } from "./services/owner-game-note-service.js";
+import { loadStartupGroundedAnalysis } from "./services/grounded-analysis/startup-provider.js";
+import { toErrorMessage } from "@shelf-judge/shared";
+import { createReflectionRuntime } from "./services/reflection-runtime.js";
 
 const logger = createLogger("daemon");
 
@@ -26,12 +30,35 @@ async function main() {
     fileOps,
   });
 
-  const appConfig = await storageService.loadConfig();
+  const { appConfig, provider: groundedAnalysisProvider } = await loadStartupGroundedAnalysis({
+    storageService,
+    cwd: process.cwd(),
+  });
 
   // Run versioned collection migration and artifact invalidation before routes can fire.
   // The first request therefore sees only a validated current collection and clean caches.
   await storageService.loadCollection();
   const collectionMutationService = createCollectionMutationService({ storageService });
+  const reflectionRuntime = createReflectionRuntime({
+    dataDir: envConfig.dataDir,
+    fileOps,
+    storageService,
+    providerIdentity:
+      groundedAnalysisProvider.configurationStatus.status === "configured"
+        ? groundedAnalysisProvider.configurationStatus.identity
+        : null,
+  });
+  logger.log("reflection recovery started", { trigger: "startup" });
+  try {
+    await reflectionRuntime.recover();
+    logger.log("reflection recovery completed", { trigger: "startup" });
+  } catch (error) {
+    logger.error("reflection recovery failed", {
+      trigger: "startup",
+      error: toErrorMessage(error),
+    });
+    throw error;
+  }
 
   const fitnessService = createFitnessService();
 
@@ -41,14 +68,30 @@ async function main() {
 
   const axisService = createAxisService({ storageService, collectionMutationService });
   const tournamentService = createTournamentService({ storageService });
+  logger.log("tournament reconciliation started", { trigger: "startup" });
+  try {
+    const result = await tournamentService.reconcileWithCollection();
+    logger.log("tournament reconciliation completed", { trigger: "startup", ...result });
+  } catch (error) {
+    logger.error("tournament reconciliation failed", {
+      trigger: "startup",
+      error: toErrorMessage(error),
+    });
+    throw error;
+  }
   const gameService = createGameService({
     storageService,
     collectionMutationService,
     fitnessService,
     bggClient,
     onGameDeleted: (gameId) => tournamentService.onGameDeleted(gameId),
+    deletionLifecycle: reflectionRuntime.gameDeletionLifecycle,
   });
   const intentionService = createIntentionService({ collectionMutationService });
+  const ownerGameNoteService = createOwnerGameNoteService({
+    collectionMutationService,
+    invalidationLifecycle: reflectionRuntime.noteInvalidationLifecycle,
+  });
 
   const predictionService = createPredictionService({
     storageService,
@@ -82,6 +125,9 @@ async function main() {
     predictionService,
     displayedFitnessService,
     intentionService,
+    ownerGameNoteService,
+    groundedAnalysisProvider,
+    reflectionRuntime,
     bggClient,
     onShutdown() {
       logger.log("Shutting down via API...");
@@ -99,6 +145,9 @@ async function main() {
   logger.log(`shelf-judge daemon listening on ${envConfig.socketPath}`);
   logger.log(
     `BGG integration: ${bggClient.isConfigured() ? "configured" : "not configured (set bgg-token to enable)"}`,
+  );
+  logger.log(
+    `Grounded analysis: ${groundedAnalysisProvider.configurationStatus.status === "configured" ? "configured" : "not configured"}`,
   );
 
   function shutdown() {

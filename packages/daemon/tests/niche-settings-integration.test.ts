@@ -3,12 +3,12 @@ import { Hono } from "hono";
 import { createGameRoutes } from "../src/routes/games";
 import { createPredictionRoutes } from "../src/routes/prediction";
 import type {
-  Game,
   GameWithScore,
   FitnessResult,
   BggGameData,
   NicheSettings,
   Collection,
+  DurableGame,
 } from "@shelf-judge/shared";
 import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import { DEFAULT_REDUNDANCY_SETTINGS } from "../src/services/redundancy-engine";
@@ -42,8 +42,8 @@ function makeBggData(
   };
 }
 
-function makeGame(id: string, name: string, bggData: BggGameData | null): Game {
-  const bggId = bggData ? 1 : null;
+function makeGame(id: string, name: string, bggData: BggGameData | null): DurableGame {
+  const bggId = bggData ? 12345 : null;
   return {
     id,
     bggId,
@@ -74,6 +74,7 @@ function makeGame(id: string, name: string, bggData: BggGameData | null): Game {
     ownership: "owned",
     boxDimensions: null,
     manualShelfId: null,
+    ownerNote: { state: "missing", version: 0, updatedAt: null },
     ratings: {},
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:00Z",
@@ -97,8 +98,8 @@ function makeScore(score: number): FitnessResult {
 // Three games sharing "Deck Building" mechanic (forms a niche of size 3).
 // Two of those also share "Card Game" category (forms a niche of size 2).
 // One game has unique "Worker Placement" mechanic (no niche, <2 members).
-const mech = (name: string) => ({ id: Math.random(), name });
-const cat = (name: string) => ({ id: Math.random(), name });
+const mech = (name: string) => ({ id: name.length, name });
+const cat = (name: string) => ({ id: name.length, name });
 
 const gameA = makeGame(
   "a",
@@ -125,7 +126,7 @@ const allGamesWithScores: GameWithScore[] = [
 // --- Mock factories ---
 
 const defaultCollection: Collection = {
-  schemaVersion: 5,
+  schemaVersion: 6,
   revision: 0,
   id: "collection-1",
   name: "Test",
@@ -145,6 +146,19 @@ function createMockStorageService(nicheSettings: NicheSettings): Partial<Storage
     // Redundancy defaults to disabled, so loadCollection won't be called, but must exist
     loadRedundancySettings: () => Promise.resolve({ ...DEFAULT_REDUNDANCY_SETTINGS }),
     loadCollection: () => Promise.resolve(structuredClone(defaultCollection)),
+    loadTournament: () =>
+      Promise.resolve({
+        settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
+        sessions: [],
+        gameStats: {},
+      }),
+    loadPredictionSettings: () =>
+      Promise.resolve({
+        stageThresholds: [5, 15, 30],
+        defaultK: 5,
+        minSimilarityThreshold: 0.2,
+        tournamentStabilityBoost: 0.2,
+      }),
   };
 }
 
@@ -156,12 +170,15 @@ function createMockGameService(): Partial<GameService> {
       return Promise.resolve(structuredClone(gws));
     },
     listGames: () => Promise.resolve(structuredClone(allGamesWithScores)),
+    listGamesFromSnapshot: () => structuredClone(allGamesWithScores),
   };
 }
 
 function createMockPredictionService(): Partial<PredictionService> {
   return {
     listGamesWithPredictions: () => Promise.resolve(structuredClone(allGamesWithScores)),
+    listGamesWithPredictionsFromSnapshot: () =>
+      Promise.resolve(structuredClone(allGamesWithScores)),
     predictBggGame: () => {
       // Return a new candidate game that shares "Deck Building" mechanic
       const candidateGame = makeGame(

@@ -88,6 +88,56 @@ describe("Game Routes", () => {
     ctx = createTestApp();
   });
 
+  test("rejects same-game results that do not correspond to the requested mutation", async () => {
+    const game = (await ctx.gameService.addGame({ name: "Wrong command result" })).game;
+    const gameService = {
+      ...ctx.gameService,
+      rateGame: () => Promise.resolve({ game, score: null }),
+      setManualValues: () => Promise.resolve(game),
+      setOwnership: () => Promise.resolve({ game, linkedIntentionTransition: null }),
+      setAdditionalBggIds: () => Promise.resolve(game),
+      setBoxDimensions: () => Promise.resolve(game),
+      setManualShelf: () => Promise.resolve(game),
+    };
+    const purchaseUtilizationService = {
+      ...createPurchaseUtilizationService({ storageService: ctx.storageService }),
+      setAcquisition: () => Promise.resolve(game),
+    };
+    const intentionService = {
+      ...ctx.intentionService,
+      setPlayCount: () =>
+        Promise.resolve({ ok: true as const, game, linkedIntentionTransition: null }),
+    };
+    const routeModule = createGameRoutes({
+      gameService,
+      storageService: ctx.storageService,
+      purchaseUtilizationService,
+      intentionService,
+    });
+    const app = new Hono();
+    app.route("/api", routeModule.routes);
+
+    const requests = [
+      ["PUT", `/api/games/${game.id}/acquisition`, { state: "gift" }],
+      ["PUT", `/api/games/${game.id}/ratings`, { ratings: { axis: 8 } }],
+      ["PUT", `/api/games/${game.id}/manual-values`, { playingTime: 60 }],
+      ["PUT", `/api/games/${game.id}/plays`, { playCount: 3 }],
+      ["PUT", `/api/games/${game.id}/additional-bgg-ids`, { bggIds: [2] }],
+      ["PUT", `/api/games/${game.id}/dimensions`, { width: 10, height: 10, depth: 3 }],
+      ["PUT", `/api/games/${game.id}/shelf-assignment`, { shelfId: "shelf-1" }],
+      ["PATCH", `/api/games/${game.id}/ownership`, { ownership: "previously-owned" }],
+    ] as const;
+
+    for (const [method, path, body] of requests) {
+      const response = await jsonRequest(app, method, path, body);
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({
+        error: "Internal server error",
+        code: "internal_error",
+      });
+    }
+  });
+
   test("PUT /api/games/:id/additional-bgg-ids replaces related entries", async () => {
     const game = (await ctx.gameService.addGame({ name: "Base Game", bggId: 10 })).game;
 
@@ -279,8 +329,10 @@ describe("Game Routes", () => {
       const detail = (await (
         await jsonRequest(ctx.app, "GET", `/api/games/${game.id}`)
       ).json()) as GameDetailWithPurchaseUtilization;
+      const { ownerNote, ...publicDetailGame } = detail.game;
+      void ownerNote;
       const sharedDetail: GameWithPurchaseUtilization = {
-        game: detail.game,
+        game: publicDetailGame,
         score: detail.score,
         bggDataStale: detail.bggDataStale,
         nichePosition: detail.nichePosition,
@@ -288,6 +340,129 @@ describe("Game Routes", () => {
         purchaseUtilization: detail.purchaseUtilization,
       };
       expect(list).toContainEqual(sharedDetail);
+    });
+
+    test("assembles note, fitness, utilization, and intentions from one v6 collection revision", async () => {
+      const added = (await ctx.gameService.addGame({ name: "Coherent Detail" })).game;
+      const current = await ctx.storageService.loadCollection();
+      const snapshotUpdatedAt = "2026-08-31T12:30:00.000Z";
+      const snapshot = {
+        ...current,
+        revision: 42,
+        entertainmentBenchmark: {
+          state: "configured" as const,
+          amount: { hundredths: 1800, source: "manual" as const, confirmedAt: snapshotUpdatedAt },
+        },
+        games: current.games.map((game) =>
+          game.id === added.id
+            ? {
+                ...game,
+                updatedAt: snapshotUpdatedAt,
+                ownerNote: {
+                  state: "present" as const,
+                  version: 3,
+                  updatedAt: snapshotUpdatedAt,
+                  text: "Revision 42 owner testimony",
+                },
+                acquisition: {
+                  state: "purchase" as const,
+                  amount: {
+                    hundredths: 3600,
+                    source: "manual" as const,
+                    confirmedAt: snapshotUpdatedAt,
+                  },
+                },
+                numPlays: 2,
+                playCountEvidence: {
+                  status: "valid" as const,
+                  value: 2,
+                  source: "manual" as const,
+                  observedAt: snapshotUpdatedAt,
+                },
+                ratings: { "snapshot-axis": 8 },
+              }
+            : game,
+        ),
+        intentions: [
+          {
+            intentionId: "snapshot-intention",
+            gameId: added.id,
+            kind: "replay" as const,
+            baseline: {
+              playCount: 2,
+              evidenceSource: "manual" as const,
+              observedAt: snapshotUpdatedAt,
+            },
+            createdAt: snapshotUpdatedAt,
+            version: 1,
+            resolution: null,
+          },
+        ],
+      };
+      let collectionLoads = 0;
+      const storageService = {
+        ...ctx.storageService,
+        loadCollection: () => {
+          collectionLoads += 1;
+          if (collectionLoads > 1) throw new Error("detail performed a second collection load");
+          return Promise.resolve(structuredClone(snapshot));
+        },
+      };
+      const scoredSnapshots: Array<{ revision: number; collectionId: string }> = [];
+      const gameService = {
+        ...ctx.gameService,
+        listGamesFromSnapshot: (
+          collection: Parameters<NonNullable<typeof ctx.gameService.listGamesFromSnapshot>>[0],
+        ) => {
+          scoredSnapshots.push({ revision: collection.revision, collectionId: collection.id });
+          return collection.games.map((game) => ({
+            game,
+            score: {
+              score: game.ratings["snapshot-axis"] ?? null,
+              ratedAxisCount: 1,
+              totalAxisCount: 1,
+              breakdown: [],
+              vetoed: false,
+              vetoedBy: null,
+              hypotheticalScore: null,
+              predictionMeta: null,
+              redundancyAdjustment: null,
+            },
+          }));
+        },
+      };
+      const routeModule = createGameRoutes({
+        gameService,
+        storageService,
+        intentionService: ctx.intentionService,
+        purchaseUtilizationService: createPurchaseUtilizationService({ storageService }),
+      });
+      const app = new Hono();
+      app.route("/api", routeModule.routes);
+
+      const response = await app.request(`/api/games/${added.id}`);
+      expect(response.status).toBe(200);
+      const detail = (await response.json()) as GameDetailWithPurchaseUtilization;
+      expect(collectionLoads).toBe(1);
+      expect(scoredSnapshots).toEqual([{ revision: 42, collectionId: snapshot.id }]);
+      expect(detail.game.updatedAt).toBe(snapshotUpdatedAt);
+      expect(detail.game.ownerNote).toEqual({
+        state: "present",
+        version: 3,
+        updatedAt: snapshotUpdatedAt,
+        text: "Revision 42 owner testimony",
+      });
+      expect(detail.score?.score).toBe(8);
+      expect(detail.purchaseUtilization.evidence).toMatchObject({
+        acquisition: { state: "purchase", amount: { hundredths: 3600 } },
+        entertainmentBenchmark: { state: "configured", amount: { hundredths: 1800 } },
+        playCount: { status: "valid", value: 2, observedAt: snapshotUpdatedAt },
+      });
+      expect(detail.intentions.activeIntention).toMatchObject({
+        intentionId: "snapshot-intention",
+        gameId: added.id,
+        baseline: { playCount: 2, observedAt: snapshotUpdatedAt },
+      });
     });
 
     test("previously owned detail is enriched but remains outside niche and redundancy universes", async () => {
@@ -352,10 +527,13 @@ describe("Game Routes", () => {
         code: "game_not_found",
       });
 
+      const { game } = await ctx.gameService.addGame({ name: "Internal Error" });
       const routeModule = createGameRoutes({
         gameService: {
           ...ctx.gameService,
-          listGames: () => Promise.reject(new Error("private assembly failure")),
+          listGamesFromSnapshot: () => {
+            throw new Error("private assembly failure");
+          },
         },
         storageService: ctx.storageService,
         purchaseUtilizationService: createPurchaseUtilizationService({
@@ -364,7 +542,7 @@ describe("Game Routes", () => {
       });
       const app = new Hono();
       app.route("/api", routeModule.routes);
-      const failed = await app.request("/api/games/anything");
+      const failed = await app.request(`/api/games/${game.id}`);
       expect(await expectPublishedError(operation, failed)).toEqual({
         error: "Internal server error",
         code: "internal_error",

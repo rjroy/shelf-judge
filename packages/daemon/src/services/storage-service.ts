@@ -18,6 +18,7 @@ import {
   CollectionProfileEntityPolicySchema,
   CURRENT_COLLECTION_SCHEMA_VERSION,
   DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
+  GroundedProviderIdentitySchema,
   createProfileDataSchema,
   PredictionSettingsSchema,
   RedundancySettingsSchema,
@@ -144,7 +145,10 @@ function storedInvalidEvidence(value: unknown, present: boolean): InvalidEvidenc
 export function decodeStoredCollection(raw: unknown, logger: Logger): StoredCollectionDecodeResult {
   if (
     !isRecord(raw) ||
-    (raw.schemaVersion !== 3 && raw.schemaVersion !== 4 && raw.schemaVersion !== 5)
+    (raw.schemaVersion !== 3 &&
+      raw.schemaVersion !== 4 &&
+      raw.schemaVersion !== 5 &&
+      raw.schemaVersion !== CURRENT_COLLECTION_SCHEMA_VERSION)
   ) {
     return { data: raw, normalized: false };
   }
@@ -207,6 +211,7 @@ function createDefaultTournament(): TournamentData {
 function defaultConfig(): AppConfig {
   return {
     bggAuthToken: null,
+    groundedAnalysis: null,
     profileEntityPolicy: structuredClone(DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY),
     username: null,
   };
@@ -220,6 +225,10 @@ function parseConfig(value: unknown): AppConfig {
       typeof config.bggAuthToken === "string" || config.bggAuthToken === null
         ? config.bggAuthToken
         : null,
+    groundedAnalysis:
+      config.groundedAnalysis === undefined
+        ? null
+        : GroundedProviderIdentitySchema.nullable().parse(config.groundedAnalysis),
     profileEntityPolicy: CollectionProfileEntityPolicySchema.parse(
       config.profileEntityPolicy ?? DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
     ),
@@ -370,7 +379,8 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
         logger.log(
           `collection migration checked sourceVersion=${migration.sourceVersion} targetVersion=${CURRENT_COLLECTION_SCHEMA_VERSION} axes=${migration.data.axes.length} games=${migration.data.games.length} converted=${migration.convertedAxisCount} disabled=${migration.disabledAxisCount}`,
         );
-        const normalizedCurrent = decoded.normalized && migration.sourceVersion === 5;
+        const normalizedCurrent =
+          decoded.normalized && migration.sourceVersion === CURRENT_COLLECTION_SCHEMA_VERSION;
         const candidate = normalizedCurrent
           ? {
               ...migration.data,

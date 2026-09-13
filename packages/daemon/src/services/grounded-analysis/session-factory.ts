@@ -1,0 +1,485 @@
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import {
+  createAgentSession,
+  DefaultResourceLoader,
+  getAgentDir,
+  SessionManager,
+  SettingsManager,
+  type AgentSession,
+  type ExtensionFactory,
+  type LoadExtensionsResult,
+} from "@earendil-works/pi-coding-agent";
+import type { Api, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
+import type { GroundedSessionCapabilities } from "./capability-inspection.js";
+import { GroundedAnalysisError } from "./failure-mapping.js";
+import type { GroundedStructuredSubmission } from "./structured-submission.js";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { NativeTransportDiagnostic } from "./transport-diagnostics.js";
+
+export type GroundedSessionLifecycleStage =
+  | "resource-reload"
+  | "session-create"
+  | "extension-bind"
+  | "model-resolve"
+  | "model-set"
+  | "prompt";
+
+export interface GroundedAssistantUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  monetaryCostUsd: number;
+}
+
+export interface GroundedSessionRunResult {
+  inferenceRoundTrips: number;
+  /** UTF-8 JSON bytes in the actual provider payloads sent for this run. */
+  modelInputBytes?: number;
+  modelInputRequests?: number;
+  assistantText: readonly string[];
+  usages: readonly GroundedAssistantUsage[];
+  assistantStopReasons?: readonly (
+    | "stop"
+    | "length"
+    | "tool-use"
+    | "error"
+    | "aborted"
+    | "other"
+  )[];
+  /** Text from the terminal assistant turn, never narration from an earlier tool turn. */
+  finalAssistantText?: string;
+  finalStopReason?: "stop" | "length" | "tool-use" | "error" | "aborted" | "other";
+}
+
+export class GroundedSessionRunError extends Error {
+  constructor(
+    readonly runResult: GroundedSessionRunResult,
+    options?: ErrorOptions,
+  ) {
+    super("Grounded provider session terminated", options);
+    this.name = "GroundedSessionRunError";
+  }
+}
+
+export interface GroundedAnalysisSession {
+  bindExtensions(): Promise<void>;
+  getCapabilities(allowedToolNames: readonly string[]): GroundedSessionCapabilities;
+  resolveModel(providerId: string, modelId: string): boolean;
+  setModel(): Promise<void>;
+  prompt(prompt: string, signal: AbortSignal): Promise<GroundedSessionRunResult>;
+  dispose(): void;
+}
+
+export interface GroundedAnalysisSessionFactory {
+  create<Output>(input: {
+    systemPrompt: string;
+    submission: GroundedStructuredSubmission<Output>;
+    retrievalTools?: readonly ToolDefinition[];
+    trace?: PiGroundedAnalysisSessionFactoryOptions["onTrace"];
+    traceAssistantContent?: boolean;
+  }): Promise<GroundedAnalysisSession>;
+  createFreeform?(input: {
+    systemPrompt: string;
+    submission?: undefined;
+    retrievalTools?: readonly ToolDefinition[];
+    trace?: PiGroundedAnalysisSessionFactoryOptions["onTrace"];
+    traceAssistantContent?: boolean;
+  }): Promise<GroundedAnalysisSession>;
+}
+
+export interface PiGroundedAnalysisSessionFactoryOptions {
+  cwd: string;
+  extensionIds: readonly string[];
+  agentDir?: string;
+  extensionFactories?: readonly ExtensionFactory[];
+  createExtensionFactories?: (
+    sink: (diagnostic: NativeTransportDiagnostic) => void,
+  ) => readonly ExtensionFactory[];
+  onPayload?: SimpleStreamOptions["onPayload"];
+  onLifecycleStage?: (stage: GroundedSessionLifecycleStage) => void;
+  onTrace?: (event: {
+    event: "model-request-start" | "model-response-end" | "provider-transport" | "session-error";
+    roundIndex?: number;
+    requestPayloadBytes?: number;
+    cumulativePayloadBytes?: number;
+    messageCount?: number;
+    toolCount?: number;
+    durationMs?: number;
+    stopReason?: "stop" | "length" | "tool-use" | "error" | "aborted" | "other";
+    assistantText?: string;
+    assistantTextLength?: number;
+    assistantTextTruncated?: boolean;
+    error?: unknown;
+    failure?: import("./model-logger.js").GroundedProviderFailureDiagnostics;
+    transport?: Omit<NativeTransportDiagnostic, "durationMs" | "error">;
+  }) => void;
+  traceAssistantContent?: boolean;
+  nowMs?: () => number;
+}
+
+function isAssistantMessage(
+  message: AgentMessage,
+): message is Extract<AgentMessage, { role: "assistant" }> {
+  return message.role === "assistant";
+}
+
+function safeStopReason(
+  stopReason: string | undefined,
+): "stop" | "length" | "tool-use" | "error" | "aborted" | "other" {
+  if (
+    stopReason === "stop" ||
+    stopReason === "length" ||
+    stopReason === "error" ||
+    stopReason === "aborted"
+  )
+    return stopReason;
+  if (
+    stopReason === "tool_use" ||
+    stopReason === "tool-use" ||
+    stopReason === "tool_calls" ||
+    stopReason === "toolUse"
+  )
+    return "tool-use";
+  return "other";
+}
+
+function payloadArrayLength(payload: unknown, key: "messages" | "tools"): number | undefined {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return undefined;
+  const value = (payload as Record<string, unknown>)[key];
+  return Array.isArray(value) ? value.length : undefined;
+}
+
+export function latestTerminalAssistantFailure<Message extends { stopReason?: string }>(
+  messages: readonly Message[],
+): Message | undefined {
+  return messages.findLast(
+    (message) => message.stopReason === "error" || message.stopReason === "aborted",
+  );
+}
+
+function extensionCapabilities(
+  extensionsResult: LoadExtensionsResult,
+  exactPromptHandler: (...args: unknown[]) => unknown,
+) {
+  return extensionsResult.extensions.map((extension) => ({
+    extensionId: extension.path,
+    toolNames: [...extension.tools.keys()].sort(),
+    hookNames: [...extension.handlers.entries()]
+      .filter(([, handlers]) => handlers.some((handler) => handler !== exactPromptHandler))
+      .map(([hookName]) => hookName)
+      .sort(),
+    hasContextTransformer:
+      extension.handlers.get("context")?.some((handler) => handler !== exactPromptHandler) ?? false,
+  }));
+}
+
+function createBoundSession(
+  session: AgentSession,
+  extensionsResult: LoadExtensionsResult,
+  lifecycle: (stage: GroundedSessionLifecycleStage) => void,
+  exactPromptHandler: (...args: unknown[]) => unknown,
+  submission: GroundedStructuredSubmission<unknown> | undefined,
+  modelInput: { bytes: number; requests: number; requestStartedAt: Map<number, number> },
+  trace: PiGroundedAnalysisSessionFactoryOptions["onTrace"],
+  traceAssistantContent: boolean,
+  nowMs: () => number,
+): GroundedAnalysisSession {
+  let extensionsBound = false;
+  let resolvedModel: Model<Api> | undefined;
+
+  return {
+    async bindExtensions() {
+      lifecycle("extension-bind");
+      try {
+        await session.bindExtensions({});
+      } catch (error) {
+        throw new GroundedAnalysisError("extension-binding", "configured-extension-bind-failed", {
+          cause: error,
+        });
+      }
+      extensionsBound = true;
+    },
+    getCapabilities(allowedToolNames) {
+      if (!extensionsBound)
+        throw new Error("Extensions must be bound before capability inspection");
+      session.setActiveToolsByName([...allowedToolNames]);
+      return {
+        activeToolNames: session.getActiveToolNames(),
+        extensions: extensionCapabilities(extensionsResult, exactPromptHandler),
+      };
+    },
+    resolveModel(providerId, modelId) {
+      if (!extensionsBound) throw new Error("Extensions must be bound before model resolution");
+      lifecycle("model-resolve");
+      resolvedModel = session.modelRuntime.getModel(providerId, modelId);
+      return resolvedModel !== undefined;
+    },
+    async setModel() {
+      if (!resolvedModel) throw new Error("Configured model has not been resolved");
+      lifecycle("model-set");
+      await session.setModel(resolvedModel);
+    },
+    async prompt(prompt, signal) {
+      if (signal.aborted) throw new DOMException("The operation was aborted", "AbortError");
+      const assistantMessages: Array<Extract<AgentMessage, { role: "assistant" }>> = [];
+      const unsubscribe = session.subscribe((event) => {
+        if (event.type === "message_end" && isAssistantMessage(event.message)) {
+          assistantMessages.push(event.message);
+            submission?.captureAssistantUsage({
+              inferenceRoundTrips: assistantMessages.length,
+              usages: assistantMessages.map(({ usage }) => ({
+                inputTokens: usage.input,
+                outputTokens: usage.output,
+                cacheReadTokens: usage.cacheRead,
+                cacheWriteTokens: usage.cacheWrite,
+                monetaryCostUsd: usage.cost.total,
+              })),
+            });
+          const roundIndex = assistantMessages.length;
+          const text = event.message.content
+            .filter(
+              (
+                content,
+              ): content is Extract<(typeof event.message.content)[number], { type: "text" }> =>
+                content.type === "text",
+            )
+            .map(({ text }) => text)
+            .join("");
+          const startedAt = modelInput.requestStartedAt.get(roundIndex);
+          try {
+            trace?.({
+              event: "model-response-end",
+              roundIndex,
+              ...(startedAt === undefined
+                ? {}
+                : { durationMs: Math.max(0, Math.round(nowMs() - startedAt)) }),
+              stopReason: safeStopReason(event.message.stopReason),
+              ...(traceAssistantContent && text.length > 0
+                ? {
+                    assistantText: text.slice(0, 16_384),
+                    assistantTextLength: text.length,
+                    assistantTextTruncated: text.length > 16_384,
+                  }
+                : {}),
+            });
+          } catch {
+            // Diagnostics must never affect a model operation.
+          }
+        }
+      });
+      const previousShouldStopAfterTurn = session.agent.shouldStopAfterTurn;
+      session.agent.shouldStopAfterTurn = async (context, activeSignal) => {
+        if (await previousShouldStopAfterTurn?.(context, activeSignal)) return true;
+        if (submission?.getAttemptState().acceptedResultPresent) return true;
+        if (submission?.getOperationalFailure() !== undefined) return true;
+        return false;
+      };
+      const abort = () => void session.abort();
+      signal.addEventListener("abort", abort, { once: true });
+      lifecycle("prompt");
+      let promptFailure: unknown;
+      try {
+        await session.prompt(prompt, { expandPromptTemplates: false });
+        if (signal.aborted) throw new DOMException("The operation was aborted", "AbortError");
+      } catch (error) {
+        promptFailure = error;
+      } finally {
+        session.agent.shouldStopAfterTurn = previousShouldStopAfterTurn;
+        signal.removeEventListener("abort", abort);
+        unsubscribe();
+      }
+
+      const terminalMessage = assistantMessages.at(-1);
+      const terminalText = terminalMessage?.content
+        .filter((content): content is Extract<(typeof terminalMessage.content)[number], { type: "text" }> => content.type === "text")
+        .map(({ text }) => text)
+        .join("");
+      const runResult = {
+        inferenceRoundTrips: assistantMessages.length,
+        modelInputBytes: modelInput.bytes,
+        modelInputRequests: modelInput.requests,
+        assistantText: assistantMessages.flatMap((message) =>
+          message.content
+            .filter(
+              (content): content is Extract<(typeof message.content)[number], { type: "text" }> =>
+                content.type === "text",
+            )
+            .map(({ text }) => text),
+        ),
+        usages: assistantMessages.map(({ usage }) => ({
+          inputTokens: usage.input,
+          outputTokens: usage.output,
+          cacheReadTokens: usage.cacheRead,
+          cacheWriteTokens: usage.cacheWrite,
+          monetaryCostUsd: usage.cost.total,
+        })),
+        assistantStopReasons: assistantMessages.map(({ stopReason }) => safeStopReason(stopReason)),
+        ...(terminalText === undefined ? {} : { finalAssistantText: terminalText }),
+        ...(terminalMessage === undefined ? {} : { finalStopReason: safeStopReason(terminalMessage.stopReason) }),
+      };
+      const failedMessage = latestTerminalAssistantFailure(assistantMessages);
+      if (promptFailure !== undefined || failedMessage) {
+        const cause =
+          failedMessage?.stopReason === "aborted"
+            ? new DOMException("The operation was aborted", "AbortError")
+            : failedMessage?.errorMessage
+              ? new Error(failedMessage.errorMessage)
+              : promptFailure;
+        const roundIndex = modelInput.requests === 0 ? undefined : modelInput.requests;
+        const startedAt =
+          roundIndex === undefined ? undefined : modelInput.requestStartedAt.get(roundIndex);
+        try {
+          trace?.({
+            event: "session-error",
+            ...(roundIndex === undefined ? {} : { roundIndex }),
+            ...(startedAt === undefined
+              ? {}
+              : { durationMs: Math.max(0, Math.round(nowMs() - startedAt)) }),
+            error: cause,
+          });
+        } catch {
+          // Diagnostics must never affect a model operation.
+        }
+        throw new GroundedSessionRunError(runResult, { cause });
+      }
+
+      return runResult;
+    },
+    dispose() {
+      session.dispose();
+    },
+  };
+}
+
+export function createPiGroundedAnalysisSessionFactory(
+  options: PiGroundedAnalysisSessionFactoryOptions,
+): GroundedAnalysisSessionFactory {
+  const lifecycle = options.onLifecycleStage ?? (() => undefined);
+  const cwd = options.cwd;
+  const agentDir = options.agentDir ?? getAgentDir();
+  const extensionIds = Object.freeze([...options.extensionIds]);
+  const extensionFactories = Object.freeze([...(options.extensionFactories ?? [])]);
+  const create = async ({ systemPrompt, submission, retrievalTools = [], trace, traceAssistantContent }: {
+      systemPrompt: string;
+      submission?: GroundedStructuredSubmission<unknown>;
+      retrievalTools?: readonly ToolDefinition[];
+      trace?: PiGroundedAnalysisSessionFactoryOptions["onTrace"];
+      traceAssistantContent?: boolean;
+    }) => {
+      const effectiveTrace = trace ?? options.onTrace;
+      const settingsManager = SettingsManager.inMemory({
+        packages: [],
+        extensions: [],
+        retry: { enabled: false, maxRetries: 0, provider: { maxRetries: 0 } },
+        compaction: { enabled: false },
+      });
+      const exactPromptHandler = () => ({ systemPrompt });
+      const exactPromptExtension: ExtensionFactory = (pi) => {
+        pi.on("before_agent_start", exactPromptHandler);
+      };
+      const modelInput = { bytes: 0, requests: 0, requestStartedAt: new Map<number, number>() };
+      const loader = new DefaultResourceLoader({
+        cwd,
+        agentDir,
+        settingsManager,
+        additionalExtensionPaths: [...extensionIds],
+        extensionFactories: [
+          exactPromptExtension,
+          ...extensionFactories,
+          ...(options.createExtensionFactories?.((diagnostic) => {
+            try {
+              const { durationMs, error, ...transport } = diagnostic;
+              effectiveTrace?.({
+                event: "provider-transport",
+                roundIndex: modelInput.requests || undefined,
+                durationMs,
+                ...(error === undefined ? {} : { failure: error }),
+                transport,
+              });
+            } catch {
+              // Diagnostics must not change inference, cancellation, or submission behavior.
+            }
+          }) ?? []),
+        ],
+        noExtensions: true,
+        noSkills: true,
+        noPromptTemplates: true,
+        noThemes: true,
+        noContextFiles: true,
+      });
+      lifecycle("resource-reload");
+      try {
+        await loader.reload();
+      } catch (error) {
+        throw new GroundedAnalysisError("extension-binding", "configured-extension-load-failed", {
+          cause: error,
+        });
+      }
+      const extensionsResult = loader.getExtensions();
+      if (extensionsResult.errors.length > 0) {
+        throw new GroundedAnalysisError("extension-binding", "configured-extension-load-failed");
+      }
+
+      lifecycle("session-create");
+      const { session } = await createAgentSession({
+        cwd,
+        resourceLoader: loader,
+        sessionManager: SessionManager.inMemory(cwd),
+        settingsManager,
+        noTools: "builtin",
+        customTools: [...retrievalTools, ...(submission === undefined ? [] : [submission.tool])],
+      });
+      if (options.onPayload) {
+        const existingOnPayload = session.agent.onPayload;
+        session.agent.onPayload = async (payload, model) => {
+          const existingPayload = await existingOnPayload?.(payload, model);
+          return options.onPayload?.(existingPayload ?? payload, model);
+        };
+      }
+      const existingOnPayload = session.agent.onPayload;
+      session.agent.onPayload = async (payload, model) => {
+        const outboundPayload = (await existingOnPayload?.(payload, model)) ?? payload;
+        const serialized = JSON.stringify(outboundPayload);
+        if (serialized === undefined) {
+          throw new GroundedAnalysisError("internal", "model-input-serialization-failed");
+        }
+        const bytes = new TextEncoder().encode(serialized).byteLength;
+        modelInput.bytes += bytes;
+        modelInput.requests += 1;
+        modelInput.requestStartedAt.set(
+          modelInput.requests,
+          options.nowMs?.() ?? performance.now(),
+        );
+        try {
+          effectiveTrace?.({
+            event: "model-request-start",
+            roundIndex: modelInput.requests,
+            requestPayloadBytes: bytes,
+            cumulativePayloadBytes: modelInput.bytes,
+            ...(payloadArrayLength(outboundPayload, "messages") === undefined
+              ? {}
+              : { messageCount: payloadArrayLength(outboundPayload, "messages") }),
+            ...(payloadArrayLength(outboundPayload, "tools") === undefined
+              ? {}
+              : { toolCount: payloadArrayLength(outboundPayload, "tools") }),
+          });
+        } catch {
+          // Diagnostics must never affect a model operation.
+        }
+        return outboundPayload;
+      };
+      return createBoundSession(
+        session,
+        extensionsResult,
+        lifecycle,
+        exactPromptHandler,
+        submission,
+        modelInput,
+        effectiveTrace,
+        traceAssistantContent ?? options.traceAssistantContent ?? false,
+        options.nowMs ?? (() => performance.now()),
+      );
+    };
+  return { create, createFreeform: create };
+}

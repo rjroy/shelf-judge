@@ -172,3 +172,111 @@ describe("intention and play command parsing", () => {
     });
   });
 });
+
+describe("owner-note command parsing", () => {
+  test.each([
+    [["game", "note", "get", "game-1", "--json"], "game note get", ["game-1"]],
+    [
+      [
+        "game",
+        "note",
+        "set",
+        "game-1",
+        "--expected-version",
+        "0",
+        "--text",
+        "first line\nsecond line",
+      ],
+      "game note set",
+      ["game-1", "--expected-version", "0", "--text", "first line\nsecond line"],
+    ],
+    [
+      ["game", "note", "clear", "game-1", "--expected-version", "2", "--command-id", "id"],
+      "game note clear",
+      ["game-1", "--expected-version", "2", "--command-id", "id"],
+    ],
+    [
+      ["game", "note", "set", "game-1", "--expected-version", "0", "--text", "--json", "--json"],
+      "game note set",
+      ["game-1", "--expected-version", "0", "--text", "--json"],
+    ],
+    [
+      ["game", "note", "set", "game-1", "--expected-version", "0", "--text", "--text", "--json"],
+      "game note set",
+      ["game-1", "--expected-version", "0", "--text", "--text"],
+    ],
+  ] as Array<[string[], string, string[]]>)(
+    "keeps command-local note flags intact",
+    (tokens, commandPath, positional) => {
+      expect(parseArgs(["bun", "shelf-judge", ...tokens])).toMatchObject({
+        commandPath,
+        positional,
+        json: tokens.includes("--json"),
+      });
+    },
+  );
+});
+
+describe("profile reflection command parsing", () => {
+  test.each([
+    [["profile", "reflections"], "profile reflections", []],
+    [
+      ["profile", "reflections", "refresh", "--question", "repeated-values"],
+      "profile reflections refresh",
+      ["--question", "repeated-values"],
+    ],
+    [
+      ["profile", "reflections", "cancel", "batch-1", "--capability", "a".repeat(64)],
+      "profile reflections cancel",
+      ["batch-1", "--capability", "a".repeat(64)],
+    ],
+    [
+      ["profile", "reflections", "enable", "pattern-exceptions"],
+      "profile reflections enable",
+      ["pattern-exceptions"],
+    ],
+    [
+      ["profile", "reflections", "disable", "recurring-trade-offs"],
+      "profile reflections disable",
+      ["recurring-trade-offs"],
+    ],
+    [["profile", "reflections", "delete"], "profile reflections delete", []],
+  ] as Array<[string[], string, string[]]>)(
+    "keeps reflection options command-local",
+    (tokens, commandPath, positional) => {
+      expect(parseArgs(["bun", "shelf-judge", ...tokens])).toMatchObject({
+        commandPath,
+        positional,
+      });
+    },
+  );
+});
+
+describe("Collection Analyst command parsing", () => {
+  test.each([
+    [
+      ["analyst", "ask", "--question", "Which games are owned?", "--acknowledge-disclosure"],
+      "analyst ask",
+      ["--question", "Which games are owned?", "--acknowledge-disclosure"],
+    ],
+    [["analyst", "chat"], "analyst chat", []],
+  ] as Array<[string[], string, string[]]>)(
+    "keeps Analyst arguments command-local",
+    (tokens, commandPath, positional) => {
+      expect(parseArgs(["bun", "shelf-judge", ...tokens])).toMatchObject({
+        commandPath,
+        positional,
+      });
+    },
+  );
+
+  test("extracts the root JSON flag from Analyst command arguments", () => {
+    expect(parseArgs(["bun", "shelf-judge", "analyst", "ask", "Question", "--json"])).toMatchObject(
+      {
+        commandPath: "analyst ask",
+        positional: ["Question"],
+        json: true,
+      },
+    );
+  });
+});

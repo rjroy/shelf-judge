@@ -29,6 +29,40 @@ describe("profile source identity", () => {
 });
 
 describe("ProfileService", () => {
+  test("omits note-only source differences from Profile output and profile.json", async () => {
+    const ctx = createTestApp();
+    await ctx.gameService.addGame({ name: "Note-isolated source" });
+    const baseline = await ctx.profileService.getProfile();
+    const loadCollection = ctx.storageService.loadCollection.bind(ctx.storageService);
+    const sentinel = "PROFILE-NOTE-SENTINEL-1d4.4";
+    ctx.storageService.loadCollection = async () => {
+      const collection = await loadCollection();
+      return {
+        ...collection,
+        games: collection.games.map((game) => ({
+          ...game,
+          ownerNote: {
+            state: "present" as const,
+            version: 1,
+            updatedAt: "2026-08-31T12:00:00.000Z",
+            text: sentinel,
+          },
+        })),
+      };
+    };
+
+    const withNote = await createProfileService({
+      storageService: ctx.storageService,
+      displayedFitnessService: ctx.displayedFitnessService,
+    }).getProfile();
+    const persisted = ctx.fileOps.files.get("/test/data/profile.json");
+
+    expect(withNote).toEqual(baseline);
+    expect(persisted).toBeDefined();
+    expect(persisted).not.toContain("ownerNote");
+    expect(persisted).not.toContain(sentinel);
+  });
+
   test("reuses only an exact current source identity and recomputes for all four sources", async () => {
     const ctx = createTestApp();
     let clock = 0;

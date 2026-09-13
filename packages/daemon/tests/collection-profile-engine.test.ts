@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type {
   BggGameData,
   Collection,
+  CollectionProfileCollectionSource,
   CollectionProfileEntityPolicy,
   FitnessResult,
   EnabledAxis,
@@ -396,9 +397,9 @@ function makeUsefulFitness(
 function makeUsefulCollection(
   games: Game[],
   intentions: Collection["intentions"] = [],
-): Collection {
+): CollectionProfileCollectionSource {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     revision: 1,
     id: "collection",
     name: "Collection",

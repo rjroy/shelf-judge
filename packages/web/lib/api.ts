@@ -29,11 +29,19 @@ import type {
   PlayEvidenceMutationResult,
   OwnershipMutationResult,
   GameDetailWithPurchaseUtilization,
+  OwnerGameNoteReadResult,
 } from "@shelf-judge/shared";
 import {
   GameDetailWithPurchaseUtilizationSchema,
+  AddGameResultSchema,
+  GameListResponseSchema,
+  GameWithScoreSchema,
+  OwnerGameNoteReadResultSchema,
   OwnershipMutationResultSchema,
   PlayEvidenceMutationResultSchema,
+  PredictedGameResponseSchema,
+  PublicGameMutationResultSchema,
+  TournamentNextPairResponseSchema,
 } from "@shelf-judge/shared";
 import { daemonRequest, daemonJson } from "./daemon";
 
@@ -45,21 +53,36 @@ export async function listGames(opts?: {
   if (opts?.includeNiches) params.set("includeNiches", "true");
   if (opts?.ownership) params.set("ownership", opts.ownership);
   const qs = params.toString();
-  return daemonJson(`/api/games${qs ? `?${qs}` : ""}`);
+  return GameListResponseSchema.parse(await daemonJson(`/api/games${qs ? `?${qs}` : ""}`));
 }
 
 export async function getGame(
   id: string,
   load: () => Promise<unknown> = () => daemonJson(`/api/games/${id}?includePredicted=true`),
 ): Promise<GameDetailWithPurchaseUtilization> {
-  return GameDetailWithPurchaseUtilizationSchema.parse(await load());
+  const result = GameDetailWithPurchaseUtilizationSchema.parse(await load());
+  if (result.game.id !== id) throw new Error("Daemon returned detail for a different game.");
+  return result;
+}
+
+export async function getOwnerGameNote(
+  id: string,
+  load: () => Promise<unknown> = () => daemonJson(`/api/games/${id}/note`),
+): Promise<OwnerGameNoteReadResult> {
+  const result = OwnerGameNoteReadResultSchema.parse(await load());
+  if (result.gameId !== id) throw new Error("Daemon returned a note for a different game.");
+  return result;
 }
 
 export async function setGameAcquisition(
   id: string,
   body: AcquisitionMutationRequest,
 ): Promise<{ game: Game }> {
-  return daemonJson(`/api/games/${id}/acquisition`, { method: "PUT", body });
+  const result = PublicGameMutationResultSchema.parse(
+    await daemonJson(`/api/games/${id}/acquisition`, { method: "PUT", body }),
+  );
+  if (result.game.id !== id) throw new Error("Daemon returned a game for a different request.");
+  return result;
 }
 
 export async function getEntertainmentBenchmark(): Promise<{
@@ -97,17 +120,21 @@ export async function addGame(
     };
     throw new Error(data.error ?? `Failed to add game: ${res.status}`);
   }
-  return res.json() as Promise<AddGameResult>;
+  return AddGameResultSchema.parse(await res.json());
 }
 
 export async function rateGame(
   id: string,
   ratings: Record<string, number | null>,
 ): Promise<GameWithScore> {
-  return daemonJson(`/api/games/${id}/ratings`, {
-    method: "PUT",
-    body: { ratings },
-  });
+  const result = GameWithScoreSchema.parse(
+    await daemonJson(`/api/games/${id}/ratings`, {
+      method: "PUT",
+      body: { ratings },
+    }),
+  );
+  if (result.game.id !== id) throw new Error("Daemon returned a game for a different request.");
+  return result;
 }
 
 export async function removeGame(id: string): Promise<void> {
@@ -124,24 +151,34 @@ export async function setGameOwnership(
       body: { ownership },
     }),
 ): Promise<OwnershipMutationResult> {
-  return OwnershipMutationResultSchema.parse(await load());
+  const result = OwnershipMutationResultSchema.parse(await load());
+  if (result.game.id !== id || result.game.ownership !== ownership) {
+    throw new Error("Daemon returned a game for a different ownership request.");
+  }
+  return result;
 }
 
 export async function setGameDimensions(
   id: string,
   dimensions: { width: number; height: number; depth: number } | { clear: true },
 ): Promise<{ game: Game }> {
-  return daemonJson(`/api/games/${id}/dimensions`, {
-    method: "PUT",
-    body: dimensions,
-  });
+  const result = PublicGameMutationResultSchema.parse(
+    await daemonJson(`/api/games/${id}/dimensions`, {
+      method: "PUT",
+      body: dimensions,
+    }),
+  );
+  if (result.game.id !== id) throw new Error("Daemon returned a game for a different request.");
+  return result;
 }
 
 export async function refreshBggData(
   id: string,
   load: () => Promise<unknown> = () => daemonJson(`/api/games/${id}/refresh`, { method: "POST" }),
 ): Promise<PlayEvidenceMutationResult> {
-  return PlayEvidenceMutationResultSchema.parse(await load());
+  const result = PlayEvidenceMutationResultSchema.parse(await load());
+  if (result.game.id !== id) throw new Error("Daemon returned a game for a different refresh.");
+  return result;
 }
 
 export async function refreshAllBggData(): Promise<{ refreshed: number; errors: string[] }> {
@@ -269,7 +306,9 @@ export async function getNextPair(sessionId: string): Promise<{
   gameAStats?: TournamentGameStatsDisplay;
   gameBStats?: TournamentGameStatsDisplay;
 }> {
-  return daemonJson(`/api/tournament/sessions/${sessionId}/next`);
+  return TournamentNextPairResponseSchema.parse(
+    await daemonJson(`/api/tournament/sessions/${sessionId}/next`),
+  );
 }
 
 export async function submitComparison(
@@ -312,11 +351,13 @@ export async function listTournamentSessions(): Promise<TournamentSession[]> {
 import type { PredictionReadiness, PredictedGameResponse } from "@shelf-judge/shared";
 
 export async function predictGame(id: string): Promise<PredictedGameResponse> {
-  return daemonJson(`/api/predictions/${id}`);
+  const result = PredictedGameResponseSchema.parse(await daemonJson(`/api/predictions/${id}`));
+  if (result.game.id !== id) throw new Error("Daemon returned a game for a different prediction.");
+  return result;
 }
 
 export async function predictBggGame(bggId: number): Promise<PredictedGameResponse> {
-  return daemonJson(`/api/predictions/bgg/${bggId}`);
+  return PredictedGameResponseSchema.parse(await daemonJson(`/api/predictions/bgg/${bggId}`));
 }
 
 export async function getReadiness(): Promise<PredictionReadiness> {
@@ -324,7 +365,9 @@ export async function getReadiness(): Promise<PredictionReadiness> {
 }
 
 export async function listGamesWithPredictions(): Promise<GameWithPurchaseUtilization[]> {
-  return daemonJson("/api/games?includePredicted=true&&ownership=all");
+  return GameListResponseSchema.parse(
+    await daemonJson("/api/games?includePredicted=true&&ownership=all"),
+  );
 }
 
 // Niche settings API functions
@@ -415,10 +458,14 @@ export async function setGameShelfAssignment(
   gameId: string,
   shelfId: string | null,
 ): Promise<{ game: import("@shelf-judge/shared").Game }> {
-  return daemonJson(`/api/games/${gameId}/shelf-assignment`, {
-    method: "PUT",
-    body: { shelfId },
-  });
+  const result = PublicGameMutationResultSchema.parse(
+    await daemonJson(`/api/games/${gameId}/shelf-assignment`, {
+      method: "PUT",
+      body: { shelfId },
+    }),
+  );
+  if (result.game.id !== gameId) throw new Error("Daemon returned a game for a different request.");
+  return result;
 }
 
 // Redundancy settings API functions

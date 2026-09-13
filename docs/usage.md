@@ -12,6 +12,8 @@ Shelf Judge is a board game collection curation tool. It scores every game in yo
 - [Game Detail Page](#game-detail-page)
 - [Tournament](#tournament)
 - [Collection Profile](#collection-profile)
+- [Collection Analyst CLI](#collection-analyst-cli)
+- [Optional Reflections](#optional-reflections)
 - [Redundancy](#redundancy)
 - [Shelf Configuration and Capacity](#shelf-configuration-and-capacity)
 - [Import from BoardGameGeek](#import-from-boardgamegeek)
@@ -274,16 +276,123 @@ Shelf Judge compares exact values before converting them for display. Two adjust
 Omitting `order` is the canonical `bestFit` URL. The explorer accepts `order=rating`, `order=bestFit`, and an empty `order` only as compatibility inputs, then redirects to the same URL without `order`. Generated links never create the legacy `order=rating` form. Shelf Judge does not apply an external prevalence correction for common mechanics or prolific creators because no stable external corpus and opportunity model are part of this feature.
 
 **Persistence and recomputation:**
-The persisted profile contract is version 9, the profile algorithm is version 11, and the durable collection schema remains version 5. `profile.json` is a disposable local cache, not a compatibility boundary. A cache is reused only when its collection ID, collection schema version, revision, complete Tournament hash, prediction-settings hash, redundancy-settings hash, and serialized entity policy match the current inputs. Invalid, non-finite, older-contract, older-algorithm, or policy-mismatched artifacts are deleted and recreated on the next profile read. A failed recomputation returns an unavailable result with the profile retry operation instead of serving stale data.
+The persisted profile contract is version 9, the profile algorithm is version 11, and the durable collection schema is version 6. `profile.json` is a disposable local cache, not a compatibility boundary or a source of owner notes. A cache is reused only when its collection ID, collection schema version, revision, complete Tournament hash, prediction-settings hash, redundancy-settings hash, and serialized entity policy match the current inputs. Invalid, non-finite, older-contract, older-algorithm, or policy-mismatched artifacts are deleted and recreated on the next profile read. A failed recomputation returns an unavailable result with the profile retry operation instead of serving stale data.
 
-**Version 5 upgrade:**
-Back up the data directory before upgrading. Shelf Judge automatically migrates an older collection when it first loads, then recreates disposable profile data from the migrated collection and current Tournament and scoring settings. After Shelf Judge successfully writes collection schema version 5, downgrading to a release that only understands an older collection schema is unsupported.
+**Version 5 upgrade and recovery:**
+When it first loads a version-5 collection, Shelf Judge atomically writes a complete version-6 collection. Every existing game receives a `missing` owner-note state with version `0` and no update time or text. The migration does not derive note text from BGG, ratings, wishlist data, or other existing fields. If the migration fails, the prior valid collection remains loadable for a later attempt. After Shelf Judge writes version 6, a release that understands only version 5 cannot safely read the collection, so downgrade is unsupported.
+
+Before upgrading, stop the daemon and copy the complete data directory. To recover, keep the daemon stopped, replace the complete data directory with that copy, then restart the daemon so normal validation and migration can run. This is the only supported manual recovery procedure and preserves both owner notes and their replay receipts. Do not back up or restore individual JSON files, and do not treat `profile.json` or another derived artifact as a note backup.
 
 **Limitations:**
 
 - Entity associations describe this collection only. Shelf Judge does not claim causation, statistical significance, population inference, probability, or creator responsibility.
 - Games with predicted fitness or incomplete entity metadata are excluded with an explicit reason rather than estimated.
 - The profile describes current collection evidence. It does not advise what to buy, sell, keep, or remove.
+
+## Optional Reflections
+
+Optional reflections are a separate, model-assisted subsection of the first
+Profile question. They never run when the Profile loads, recomputes, or changes.
+Use **Refresh reflections** (or an individual question's refresh action) and
+acknowledge the disclosure before any Reflection evidence leaves the local
+application boundary.
+
+Configure the shared grounded-analysis provider ID, model ID, and JSON extension
+allowlist in `config.json`, then restart the daemon to load the changed setting.
+Missing or invalid model configuration leaves the deterministic Profile available
+and reports `model-configuration` for Reflection operations. Shelf Judge does
+not silently select a provider or model.
+
+Before a refresh, the web UI and CLI identify the provider and model, relevant
+owner notes and deterministic evidence categories to be sent, local retention,
+the provider-policy boundary, the lack of a fixed application inference-round-trip,
+token, or monetary cap, the number of model operations, and how to cancel. Provider processing and retention follow that provider's configuration
+and policy. Cancellation stops subsequent local work, but content already sent
+may have been processed and may have incurred cost.
+
+Each enabled question can be refreshed, disabled, or re-enabled independently.
+Disabling deletes its cached Reflection and does not change source collection
+data. **Delete all reflections** removes all cached output but preserves source
+data, settings, and provider configuration. Results can be answered or honestly
+abstained; an abstention is a valid outcome, not an error.
+
+During a refresh, the model retrieves collection evidence through the supplied
+tools and submits the final Reflection through the structured submission tool;
+ordinary model narration is not a saved Reflection. Shelf Judge validates the
+submission, resolves its citations from the retrieved evidence registry, checks
+that the source and provider are still current, and then saves the result once.
+The saved result uses the cumulative assistant-turn usage recorded before the
+submission tool runs. Cancellation can stop work before publication begins; once
+publication has been reserved, a late cancellation cannot remove the committed
+result. Closing the live update stream likewise does not cancel an admitted
+refresh.
+
+Non-note source changes make a cached result stale. Stale prose remains hidden
+until you explicitly show it and its citations resolve to captured evidence
+snapshots. Changing or clearing an examined note, or permanently deleting an
+examined game, instead purges dependent Reflection output and retained note
+excerpts immediately. Reflections are derived local artifacts, not backups of
+notes. Neither local deletion nor provider processing provides a secure-erasure
+guarantee for process memory, filesystem history, backups, or provider systems.
+
+The CLI equivalents are:
+
+```text
+shelf-judge profile reflections [--json]
+shelf-judge profile reflections refresh [--question <id>] [--json] [--acknowledge-disclosure]
+shelf-judge profile reflections cancel <batch-id> --capability <token> [--json]
+shelf-judge profile reflections enable <question-id> [--json]
+shelf-judge profile reflections disable <question-id> [--json]
+shelf-judge profile reflections delete [--json]
+```
+
+Noninteractive and JSON refreshes require `--acknowledge-disclosure`. The CLI
+prints the batch ID and cancellation capability before work begins. Avoid placing
+the capability in shell history when possible; `Ctrl-C` in the initiating process
+uses the same cancellation operation.
+
+## Collection Analyst CLI
+
+The Collection Analyst is a read-only, explicitly started web page and two CLI
+workflows. It answers free-form collection questions only from authorized current
+evidence. It cannot edit collection data, notes, intentions, ratings, shelves,
+or provider configuration. Shelf Judge does not save either conversation or
+write collection data.
+
+Open **Collection Analyst** from the application navigation to ask a question.
+Before each new conversation's first send, the page identifies the configured
+provider and model, explains that the question, bounded prior transcript, and
+relevant collection evidence (including relevant owner testimony) may be sent
+to that provider, and explains local ephemerality, the provider-policy boundary,
+the absence of fixed application token or monetary caps, and cancellation.
+Reloading or starting a new conversation discards the visible transcript.
+Stopping a response aborts local streaming and asks the daemon to cancel; content
+already sent may have been processed or charged by the provider.
+
+```text
+shelf-judge analyst ask --question <text> [--acknowledge-disclosure] [--json]
+shelf-judge analyst chat [--json]
+```
+
+`ask` sends one question. In an interactive terminal it displays the configured
+provider and model plus the disclosure and asks for acknowledgement unless
+`--acknowledge-disclosure` is supplied. JSON mode always requires that explicit
+flag and writes only NDJSON stream events to standard output; disclosure and
+prompts use standard error. The positional question form remains a compatible
+alias for `--question <text>`. `chat` displays the same disclosure
+before starting and retains turns only while that process runs. Type `/exit` or
+`/quit` to leave the chat. `Ctrl-C` cancels the active turn using its exact
+conversation capability; provider processing of content already sent follows
+the provider's policy.
+
+Configure the shared provider ID, model ID, and allowlisted provider extensions
+in `config.json`, then restart the daemon to load the changed setting. Shelf
+Judge has no implicit provider fallback: missing configuration, extension
+binding, authentication, refusal, rate limit, outage, context exhaustion,
+transport, and validation failures remain distinct unavailable states. Usage and
+cost are shown only when provider-reported; Shelf Judge does not estimate them.
+A failed or cancelled turn can be retried only by an explicit new request. Shell
+history can retain a CLI question.
 
 ---
 
@@ -367,4 +476,46 @@ After importing, rate your games on your personal axes to get fitness scores. BG
 
 All data is stored locally in `~/.shelf-judge/data/` by default. `resolveDataDir` is the canonical data-directory resolver: `SHELF_JUDGE_DATA_DIR` overrides the data directory, while `SHELF_JUDGE_DIR` changes the base used by the default data, socket, and config paths. The settings in `config.json` do not change the data directory. `SHELF_JUDGE_SOCKET` and `SHELF_JUDGE_CONFIG` independently override the Unix socket and settings file paths.
 
-There is no cloud sync, no account, and no external service required beyond BGG for metadata. BGG data is cached and refreshed on demand (cache is valid for 7 days).
+There is no cloud sync or account. Owner notes and note-command replay receipts are stored in the collection, so a raw backup of the complete data directory includes them. Shelf Judge has no first-class collection export or restore command. BGG import and BGG-oriented export do not read or write owner notes, including BGG comments, descriptions, and private notes.
+
+Owner notes are available to local clients that can access the daemon. This release does not add user authentication, encryption, or secure erasure. Shelf Judge retains only the current note state, not a note history. Clearing removes the current note text but retains the cleared state, version, and command receipts. Permanent game deletion removes the game and its associated note receipts. Neither operation can erase prior filesystem copies, process memory, or owner-created backups. Replay receipts contain metadata and a request fingerprint, not prior note text; a fingerprint is not a secure-erasure or resistance-to-guessing guarantee.
+
+Owner-note reads, saves, and clears operate locally and do not make network or model calls. Profile reads and recomputation do not automatically make model calls or transmit note text outside the local Shelf Judge boundary. BGG metadata operations do make BGG network requests, but do not transmit owner-note text. Separate Reflection workflows may use an explicitly configured provider, so they are not evidence that every application feature is offline.
+
+### Owner-note CLI
+
+The owner-note commands use this canonical syntax:
+
+```text
+shelf-judge game note get <game-id> [--json]
+shelf-judge game note set <game-id> --expected-version <n> --text <text> [--command-id <uuid>] [--json]
+shelf-judge game note clear <game-id> --expected-version <n> [--command-id <uuid>] [--json]
+```
+
+`--text` is the only note-text input. It can be visible in shell history and process arguments; stdin, file input, and editor launching are not supported. A mutation retry must use the same `--command-id` and canonical request payload as the original request so Shelf Judge can replay the accepted result. Reusing a command ID with a different payload is rejected.
+
+# Configuration
+
+`config.json` stores shared application settings, including the optional identity used by both Reflections and Analyst. It is not configured with application environment variables. Use `shelf-judge config get` to inspect its status and `shelf-judge config set grounded-analysis '<JSON identity>'` to update the complete provider, model, and extension allowlist atomically. Pass `null` as the JSON value to clear it. Restart the daemon to apply a changed identity.
+
+Example:
+
+```sh
+shelf-judge config set grounded-analysis '{"providerId":"ollama","modelId":"qwen3.6:27b","extensionIds":[]}'
+```
+
+The Ollama endpoint (`http://127.0.0.1:11434/v1`) and model above are examples only, not defaults; the endpoint is separate from the `ollama` provider ID. Empty extensions are appropriate for the built-in provider. Extension IDs load trusted executable extensions, so keep `[]` unless you trust the extension. Provider credentials are not stored in this identity. Config and data path overrides control where `config.json` is stored.
+
+# Grounded model trace logging
+
+Grounded Analysis writes correlated `grounded-model-trace` records alongside its attempt and outcome logs. Filter on `operationId`, `batchId`, and `requestId` to follow each model request, tool dispatch/outcome, duration, and terminal provider error in order. Tool arguments, tool results, system prompts, request payloads, and credentials are never logged.
+
+Assistant text is intentionally opt-in because it can include user material. Set `SHELF_JUDGE_MODEL_TRACE_CONTENT=true` to include up to 16,384 characters per ordinary assistant response, with its original length and truncation marker. The default is metadata-only.
+
+To start the development environment with assistant response text in the logs:
+
+```bash
+SHELF_JUDGE_MODEL_TRACE_CONTENT=true bun run dev
+```
+
+Example: `grounded-model-trace event=model-request-start roundIndex=1` → `tool-dispatch toolName=readGames callIndex=0` → `tool-outcome durationMs=4` → `model-response-end stopReason=tool-use durationMs=91` → the correlated `grounded-model-outcome`.

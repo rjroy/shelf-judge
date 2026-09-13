@@ -6,6 +6,7 @@ import {
 import { createLogger, type Logger } from "./logger.js";
 import type { CollectionPersistence, CollectionReader } from "./storage-service.js";
 import { profileSourceCoordinatorFor } from "./profile-source-coordinator.js";
+import { canonicalSha256 } from "./profile-source-coordinator.js";
 
 export interface CollectionMutationContext {
   operation: string;
@@ -14,12 +15,31 @@ export interface CollectionMutationContext {
   intentionIds?: readonly string[];
 }
 
+export interface CollectionDurableIdentity {
+  collectionId: string;
+  schemaVersion: number;
+  revision: number;
+  contentHash: string;
+}
+
+export function collectionDurableIdentity(collection: Collection): CollectionDurableIdentity {
+  const normalized = CollectionSchema.parse(collection);
+  return {
+    collectionId: normalized.id,
+    schemaVersion: normalized.schemaVersion,
+    revision: normalized.revision,
+    contentHash: canonicalSha256(normalized),
+  };
+}
+
 export type CollectionMutationDecision<Value> =
   | {
       changed: true;
       value: Value;
+      beforePersistence?: () => Promise<void> | void;
       onPersistenceFailure?: (error: unknown) => Promise<void> | void;
       onPersistenceSuccess?: () => Promise<void> | void;
+      classifyPersistenceOutcome?: boolean;
     }
   | { changed: false; value: Value };
 
@@ -32,7 +52,7 @@ export interface CollectionRevisionStrategy<Source = Collection> {
   advance(collection: Source, current: Source): Source;
 }
 
-export const schemaV4RevisionStrategy: CollectionRevisionStrategy<CollectionProfileCollectionSource> =
+export const collectionRevisionStrategy: CollectionRevisionStrategy<CollectionProfileCollectionSource> =
   {
     identity(collection) {
       return {
@@ -89,7 +109,7 @@ export function createCollectionMutationService(
 ): CollectionMutationService {
   const existing = coordinators.get(deps.storageService);
   if (existing) return existing;
-  const revisionStrategy = deps.revisionStrategy ?? schemaV4RevisionStrategy;
+  const revisionStrategy = deps.revisionStrategy ?? collectionRevisionStrategy;
   const logger = deps.logger ?? createLogger("collection-mutation");
   const profileSourceCoordinator = profileSourceCoordinatorFor(deps.storageService);
   let operations: Promise<void> = Promise.resolve();
@@ -191,7 +211,23 @@ export function createCollectionMutationService(
         }
 
         const after = revisionStrategy.identity(accepted);
+        if (decision.beforePersistence) {
+          logger.log("collection mutation pre-persistence attempt", { ...fields, after });
+          try {
+            await decision.beforePersistence();
+            logger.log("collection mutation pre-persistence completed", { ...fields, after });
+          } catch (error) {
+            logger.error("collection mutation pre-persistence failed", {
+              ...fields,
+              after,
+              outcome: "pre-persistence-failed",
+            });
+            await compensate({ ...fields, after }, decision.onPersistenceFailure, error);
+            throw error;
+          }
+        }
         logger.log("collection mutation persistence attempt", { ...fields, after });
+        let persistenceResponseFailed = false;
         try {
           await deps.storageService.saveCollection(accepted);
         } catch (error) {
@@ -200,10 +236,36 @@ export function createCollectionMutationService(
             after,
             outcome: "persistence-failed",
           });
-          await compensate({ ...fields, after }, decision.onPersistenceFailure, error);
-          throw error;
+          if (decision.classifyPersistenceOutcome !== true) {
+            await compensate({ ...fields, after }, decision.onPersistenceFailure, error);
+            throw error;
+          }
+          persistenceResponseFailed = true;
+          let durable: Collection | null = null;
+          try {
+            durable = await deps.storageService.loadCollection();
+          } catch {
+            // The lifecycle performs fail-closed recovery when durable identity is unavailable.
+          }
+          if (
+            durable === null ||
+            collectionDurableIdentity(durable).contentHash !==
+              collectionDurableIdentity(accepted).contentHash
+          ) {
+            await compensate({ ...fields, after }, decision.onPersistenceFailure, error);
+            throw error;
+          }
+          logger.warn("collection mutation persistence response lost after durable commit", {
+            ...fields,
+            after,
+            outcome: "committed-response-lost",
+          });
         }
-        logger.log("collection mutation persistence completed", { ...fields, after });
+        logger.log("collection mutation persistence completed", {
+          ...fields,
+          after,
+          responseRecovered: persistenceResponseFailed,
+        });
         if (decision.onPersistenceSuccess) {
           logger.log("collection mutation post-commit attempt", { ...fields, after });
           try {

@@ -7,6 +7,7 @@ import type {
   CollectionProfileEntityPolicy,
 } from "@shelf-judge/shared";
 import { EntityCard } from "./entity-card";
+import { OptionalReflections } from "./optional-reflections";
 
 const entityClasses: CollectionProfileEntityClass[] = ["mechanic", "designer", "artist"];
 
@@ -124,6 +125,7 @@ export function IdentitySection({
         <Link href="/profile/axes">Inspect axis distributions as diagnostics</Link>. These verify
         rating coverage and spread; they are not identity claims.
       </p>
+      <OptionalReflections />
     </section>
   );
 }

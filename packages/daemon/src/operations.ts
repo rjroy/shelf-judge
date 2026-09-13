@@ -41,7 +41,14 @@ export interface OperationDefinition {
   invocation: { method: string; path: string };
   requestSchema?: ZodType;
   request?: { body: { [key: string]: OperationJsonValue } };
-  response?: { body: { [key: string]: OperationJsonValue } };
+  response?: {
+    body: { [key: string]: OperationJsonValue };
+    examples?: OperationJsonValue[];
+    events?: {
+      body: { [key: string]: OperationJsonValue };
+      examples: OperationJsonValue[];
+    };
+  };
   hierarchy: { root: string; feature: string };
   parameters?: OperationParameter[];
   errors?: OperationErrorDefinition[];
@@ -61,7 +68,7 @@ export interface OperationTreeNode {
   idempotent?: boolean;
   parameters?: OperationParameter[];
   request?: { body: { [key: string]: OperationJsonValue } };
-  response?: { body: { [key: string]: OperationJsonValue } };
+  response?: OperationDefinition["response"];
   errors?: OperationErrorDefinition[];
   children?: Record<string, OperationTreeNode>;
 }

@@ -31,8 +31,16 @@ export interface TournamentService {
   listSessions(): Promise<TournamentSession[]>;
   normalizeFitness(): Promise<{ normalized: number }>;
   onGameDeleted(gameId: string): Promise<void>;
+  reconcileWithCollection(): Promise<TournamentReconciliationResult>;
   getSettings(): Promise<TournamentSettings>;
   updateSettings(patch: Partial<TournamentSettings>): Promise<TournamentSettings>;
+}
+
+export interface TournamentReconciliationResult {
+  changed: boolean;
+  gameStatsRemoved: number;
+  activeSessionGameIdsRemoved: number;
+  sessionsCompleted: number;
 }
 
 export interface TournamentServiceDeps {
@@ -93,6 +101,46 @@ function applyFilters(
   }
 
   return result;
+}
+
+function removeUnavailableGames(
+  data: TournamentData,
+  availableGameIds: ReadonlySet<string>,
+): TournamentReconciliationResult {
+  let gameStatsRemoved = 0;
+  let activeSessionGameIdsRemoved = 0;
+  let sessionsCompleted = 0;
+
+  for (const gameId of Object.keys(data.gameStats)) {
+    if (!availableGameIds.has(gameId)) {
+      delete data.gameStats[gameId];
+      gameStatsRemoved++;
+    }
+  }
+
+  for (const session of data.sessions) {
+    if (session.status !== "active") continue;
+
+    const retainedGameIds = session.gameIds.filter((gameId) => availableGameIds.has(gameId));
+    const removedCount = session.gameIds.length - retainedGameIds.length;
+    if (removedCount === 0) continue;
+
+    session.gameIds = retainedGameIds;
+    session.updatedAt = new Date().toISOString();
+    activeSessionGameIdsRemoved += removedCount;
+    if (session.gameIds.length < 4) {
+      session.status = "completed";
+      session.comparisons = [];
+      sessionsCompleted++;
+    }
+  }
+
+  return {
+    changed: gameStatsRemoved > 0 || activeSessionGameIdsRemoved > 0,
+    gameStatsRemoved,
+    activeSessionGameIdsRemoved,
+    sessionsCompleted,
+  };
 }
 
 /**
@@ -462,26 +510,23 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
 
     async onGameDeleted(gameId: string): Promise<void> {
       const data = await storageService.loadTournament();
-
-      // Remove cached ELO (REQ-TOURN-8: comparisons retained)
-      delete data.gameStats[gameId];
-
-      // Check active session (REQ-TOURN-15a)
-      const active = data.sessions.find((s) => s.status === "active");
-      if (active) {
-        const idx = active.gameIds.indexOf(gameId);
-        if (idx !== -1) {
-          active.gameIds.splice(idx, 1);
-          active.updatedAt = new Date().toISOString();
-          // Auto-complete if fewer than 4 games remain
-          if (active.gameIds.length < 4) {
-            active.status = "completed";
-            active.comparisons = [];
-          }
-        }
-      }
-
+      const availableGameIds = new Set([
+        ...Object.keys(data.gameStats),
+        ...data.sessions.flatMap((session) => session.gameIds),
+      ]);
+      availableGameIds.delete(gameId);
+      removeUnavailableGames(data, availableGameIds);
       await storageService.saveTournament(data);
+    },
+
+    async reconcileWithCollection(): Promise<TournamentReconciliationResult> {
+      const collection = await storageService.loadCollection();
+      const data = await storageService.loadTournament();
+      const result = removeUnavailableGames(data, new Set(collection.games.map((game) => game.id)));
+      if (result.changed) {
+        await storageService.saveTournament(data);
+      }
+      return result;
     },
 
     async getSettings(): Promise<TournamentSettings> {
@@ -510,6 +555,7 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
     submitComparison: serialize(service.submitComparison.bind(service)),
     normalizeFitness: serialize(service.normalizeFitness.bind(service)),
     onGameDeleted: serialize(service.onGameDeleted.bind(service)),
+    reconcileWithCollection: serialize(service.reconcileWithCollection.bind(service)),
     updateSettings: serialize(service.updateSettings.bind(service)),
   };
 }

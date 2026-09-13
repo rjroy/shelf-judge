@@ -63,6 +63,24 @@ const mockTree = {
           description: "Set play evidence",
           invocation: { method: "PUT", path: "/api/games/:id/plays" },
         },
+        "note-get": {
+          operationId: "shelf.game.note.get",
+          name: "get",
+          description: "Read current note state",
+          invocation: { method: "GET", path: "/api/games/:id/note" },
+        },
+        "note-set": {
+          operationId: "shelf.game.note.set",
+          name: "set",
+          description: "Set current note state without examples",
+          invocation: { method: "PUT", path: "/api/games/:id/note" },
+        },
+        "note-clear": {
+          operationId: "shelf.game.note.clear",
+          name: "clear",
+          description: "Clear current note state",
+          invocation: { method: "DELETE", path: "/api/games/:id/note" },
+        },
       },
     },
     collection: {
@@ -197,6 +215,23 @@ describe("help command", () => {
     expect(result).toContain("shelf-judge game plays set <game-id> <count>");
     expect(result).toContain("without changing play count");
     expect(result).not.toMatch(/narrat|urgenc|source\s+profile/i);
+  });
+
+  test("help game discovers note commands and documents the --text exposure boundary", async () => {
+    const client = createMockClient({
+      routes: {
+        "GET /api/help/game": { response: { ok: true, status: 200, data: mockTree } },
+      },
+    });
+    const result = await helpCommand(client, ["game"], { json: false });
+    expect(result).toContain("shelf-judge game note get <game-id> [--json]");
+    expect(result).toContain(
+      "shelf-judge game note set <game-id> --expected-version <n> --text <text>",
+    );
+    expect(result).toContain("shelf-judge game note clear <game-id> --expected-version <n>");
+    expect(result).toContain("shell history and process arguments");
+    expect(result).toContain("Stdin, file input, and editor launching are not supported");
+    expect(result).not.toContain("Keep for larger groups");
   });
 
   test("documents purchase utilization commands and semantics without collection sorts", async () => {

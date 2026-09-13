@@ -588,7 +588,9 @@ describe("game intention and play routes", () => {
     );
     expect(completed.status).toBe(200);
     const receipts = (await context.storageService.loadCollection()).commandReceipts;
-    expect(receipts.map(({ request }) => request)).toEqual([
+    expect(
+      receipts.filter((receipt) => "request" in receipt).map(({ request }) => request),
+    ).toEqual([
       {
         type: "create",
         commandId: createCommandId,

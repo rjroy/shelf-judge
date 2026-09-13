@@ -182,6 +182,19 @@ export interface Game {
   updatedAt: string; // ISO 8601
 }
 
+export type OwnerGameNote =
+  | { state: "missing"; version: 0; updatedAt: null }
+  | { state: "present"; version: number; updatedAt: string; text: string }
+  | { state: "cleared"; version: number; updatedAt: string };
+
+export interface DurableGame extends Game {
+  ownerNote: OwnerGameNote;
+}
+
+export interface GameDetailGame extends Game {
+  ownerNote: OwnerGameNote;
+}
+
 export type DerivedFieldId = "communityRating" | "weight" | "playerCountFit" | "playingTime";
 
 export type EmptyDerivedAxisConfiguration = Record<string, never>;
@@ -246,7 +259,7 @@ export interface DisabledLegacyAxis extends Omit<AxisBase, "enabled"> {
 export type Axis = PersonalAxis | TournamentAxis | DerivedAxis | DisabledLegacyAxis;
 export type AxisSource = Axis["source"];
 export type EnabledAxis = PersonalAxis | TournamentAxis | DerivedAxis;
-export interface Collection {
+export interface CollectionV5 {
   schemaVersion: 5;
   revision: number;
   id: string;
@@ -259,6 +272,17 @@ export interface Collection {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface CollectionV6 extends Omit<
+  CollectionV5,
+  "schemaVersion" | "games" | "commandReceipts"
+> {
+  schemaVersion: 6;
+  games: DurableGame[];
+  commandReceipts: CommandReceipt[];
+}
+
+export type Collection = CollectionV6;
 
 // Fitness score types from .lore/designs/mvp-fitness-model.md
 
@@ -448,6 +472,17 @@ export interface TournamentGameStatsDisplay {
   recentComparisons: RecentComparison[]; // Read from cached TournamentGameStats.recentComparisons, enriched with game names at read time
 }
 
+export type TournamentNextPairResponse =
+  | { done: true }
+  | {
+      gameA: Game;
+      gameB: Game;
+      gameAFitness: number | null;
+      gameBFitness: number | null;
+      gameAStats: TournamentGameStatsDisplay;
+      gameBStats: TournamentGameStatsDisplay;
+    };
+
 // API response types (shared between daemon, web, and CLI)
 
 export interface GameWithScore {
@@ -612,6 +647,10 @@ export interface AddGameResult {
   warning?: string;
 }
 
+export interface PublicGameMutationResult {
+  game: Game;
+}
+
 export interface BggSearchResult {
   bggId: number;
   name: string;
@@ -639,6 +678,7 @@ export interface ImportComplete {
 
 export interface AppConfig {
   bggAuthToken: string | null;
+  groundedAnalysis: GroundedProviderIdentity | null;
   profileEntityPolicy: CollectionProfileEntityPolicy;
   username: string | null;
 }
@@ -772,7 +812,9 @@ export interface OwnershipMutationResult {
 
 export type CollectionProfileGameSource = Game;
 
-export type CollectionProfileCollectionSource = Collection;
+export interface CollectionProfileCollectionSource extends Omit<Collection, "games"> {
+  games: Game[];
+}
 
 export type CreateIntentionCommand = {
   type: "create";
@@ -841,6 +883,65 @@ export interface IntentionCommandReceipt {
   request: IntentionCommand;
   result: AcceptedIntentionMutation;
 }
+
+export type OwnerGameNoteOperation = "set" | "clear";
+
+export interface OwnerGameNoteReadResult {
+  gameId: string;
+  note: OwnerGameNote;
+}
+
+export interface OwnerGameNoteSetRequest {
+  commandId: string;
+  expectedVersion: number;
+  text: string;
+}
+
+export interface OwnerGameNoteClearRequest {
+  commandId: string;
+  expectedVersion: number;
+}
+
+export interface OwnerGameNoteAcceptedMetadata {
+  commandId: string;
+  gameId: string;
+  operation: OwnerGameNoteOperation;
+  state: OwnerGameNote["state"];
+  version: number;
+  updatedAt: string | null;
+  collectionRevision: number;
+  replayed: boolean;
+  alreadyClear: boolean;
+}
+
+export type OwnerGameNoteMutationError =
+  | { code: "validation"; issues: { field: string; message: string }[] }
+  | { code: "game-not-found"; gameId: string }
+  | {
+      code: "stale-version";
+      gameId: string;
+      expectedVersion: number;
+      current: OwnerGameNote;
+    }
+  | { code: "command-reuse"; commandId: string }
+  | { code: "version-overflow"; target: "note" | "collection" }
+  | { code: "persistence-failure"; operation: string; message: string };
+
+export type OwnerGameNoteMutationResult =
+  | { ok: true; accepted: OwnerGameNoteAcceptedMetadata }
+  | { ok: false; commandId: string; error: OwnerGameNoteMutationError };
+
+export interface OwnerGameNoteCommandReceipt {
+  receiptType: "owner-game-note";
+  commandId: string;
+  operation: OwnerGameNoteOperation;
+  gameId: string;
+  expectedVersion: number;
+  requestFingerprint: string;
+  accepted: Omit<OwnerGameNoteAcceptedMetadata, "replayed">;
+}
+
+export type CommandReceipt = IntentionCommandReceipt | OwnerGameNoteCommandReceipt;
 
 export type CollectionMutationResult<Value> =
   | { outcome: "accepted"; changed: true; value: Value }
@@ -969,9 +1070,17 @@ export interface GameIntentionDetail {
   resolvedHistory: ResolvedPlayIntentionHistory;
 }
 
-export interface GameDetailWithPurchaseUtilization extends GameWithPurchaseUtilization {
+export interface GameDetailWithPurchaseUtilization extends Omit<
+  GameWithPurchaseUtilization,
+  "game"
+> {
+  game: GameDetailGame;
   intentions: GameIntentionDetail;
 }
+
+export type OwnerGameNoteDetailWithPurchaseUtilization = GameDetailWithPurchaseUtilization;
+
+export type CollectionProfileCollectionSourceV6 = CollectionProfileCollectionSource;
 
 export interface CollectionProfile {
   status: "available";
@@ -998,7 +1107,7 @@ export type CollectionProfileResult = CollectionProfile | CollectionProfileUnava
 
 export interface ProfileSourceIdentity {
   collectionId: string;
-  collectionSchemaVersion: 5;
+  collectionSchemaVersion: 6;
   collectionRevision: number;
   tournamentHash: string;
   predictionSettingsHash: string;
@@ -1289,3 +1398,4 @@ export interface ShelfCapacityResult {
   unfittableGames: UnfittableEntry[];
   overflowGames: OverflowEntry[];
 }
+import type { GroundedProviderIdentity } from "./grounded-analysis.js";

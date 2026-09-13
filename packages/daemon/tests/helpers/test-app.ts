@@ -30,7 +30,21 @@ import {
   createIntentionService,
   type IntentionService,
 } from "../../src/services/intention-service.js";
+import {
+  createOwnerGameNoteService,
+  type OwnerGameNoteService,
+} from "../../src/services/owner-game-note-service.js";
 import type { FileOps } from "../../src/services/file-ops.js";
+import {
+  createGroundedAnalysisProvider,
+  type GroundedAnalysisProvider,
+} from "../../src/services/grounded-analysis/provider.js";
+import type { GroundedProviderStartupConfiguration } from "../../src/services/grounded-analysis/provider-configuration.js";
+import type { GroundedAnalysisTransportController } from "../../src/services/grounded-analysis/transport-controller.js";
+import {
+  createReflectionRuntime,
+  type ReflectionRuntime,
+} from "../../src/services/reflection-runtime.js";
 
 type MockFileOps = ReturnType<typeof createMockFileOps>;
 
@@ -47,7 +61,11 @@ export interface TestAppContext<TFileOps extends FileOps = MockFileOps> {
   predictionService: PredictionService;
   displayedFitnessService: DisplayedFitnessService;
   intentionService: IntentionService;
+  ownerGameNoteService: OwnerGameNoteService;
   bggClient: BggClient | undefined;
+  groundedAnalysisProvider: GroundedAnalysisProvider;
+  groundedAnalysisTransportController: GroundedAnalysisTransportController;
+  reflectionRuntime: ReflectionRuntime;
   fileOps: TFileOps;
 }
 
@@ -59,6 +77,9 @@ export interface TestAppOptions<TFileOps extends FileOps = MockFileOps> {
   now?: () => string;
   createIntentionId?: () => string;
   intentionService?: IntentionService;
+  ownerGameNoteService?: OwnerGameNoteService;
+  groundedAnalysisProvider?: GroundedAnalysisProvider;
+  onShutdown?: () => void | Promise<void>;
 }
 
 export function createTestPurchaseUtilizationService(
@@ -67,7 +88,7 @@ export function createTestPurchaseUtilizationService(
   const fallbackStorage = {
     loadCollection: () =>
       Promise.resolve({
-        schemaVersion: 5 as const,
+        schemaVersion: 6 as const,
         revision: 0,
         id: "test-collection",
         name: "Test Collection",
@@ -104,6 +125,16 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     fileOps,
   });
   const collectionMutationService = createCollectionMutationService({ storageService });
+  const reflectionRuntime = createReflectionRuntime({
+    dataDir,
+    fileOps,
+    storageService,
+    now: options?.now,
+    providerIdentity:
+      options?.groundedAnalysisProvider?.configurationStatus.status === "configured"
+        ? options.groundedAnalysisProvider.configurationStatus.identity
+        : null,
+  });
   const fitnessService = createFitnessService();
   const bggClient = options?.bggClient;
 
@@ -116,6 +147,7 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     bggClient,
     now: options?.now,
     onGameDeleted: (gameId) => tournamentService.onGameDeleted(gameId),
+    deletionLifecycle: reflectionRuntime.gameDeletionLifecycle,
   });
 
   const predictionService = createPredictionService({
@@ -136,12 +168,30 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
       now: options?.now,
       createId: options?.createIntentionId,
     });
+  const ownerGameNoteService =
+    options?.ownerGameNoteService ??
+    createOwnerGameNoteService({
+      collectionMutationService,
+      now: options?.now,
+      invalidationLifecycle: reflectionRuntime.noteInvalidationLifecycle,
+    });
   const profileService = createProfileService({
     storageService,
     displayedFitnessService,
   });
+  const unavailableGroundedConfiguration: GroundedProviderStartupConfiguration = {
+    status: "unavailable",
+    reason: "model-configuration",
+    safeDetail: "test-not-configured",
+    correctionDestination: {
+      operationId: "shelf.grounded-analysis.configuration.get",
+    },
+  };
+  const groundedAnalysisProvider =
+    options?.groundedAnalysisProvider ??
+    createGroundedAnalysisProvider({ configuration: unavailableGroundedConfiguration });
 
-  const { app, operations } = createApp({
+  const { app, operations, groundedAnalysisTransportController } = createApp({
     storageService,
     collectionMutationService,
     axisService,
@@ -151,7 +201,11 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     predictionService,
     displayedFitnessService,
     intentionService,
+    ownerGameNoteService,
+    groundedAnalysisProvider,
+    reflectionRuntime,
     bggClient,
+    onShutdown: options?.onShutdown,
   });
 
   return {
@@ -167,7 +221,11 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     predictionService,
     displayedFitnessService,
     intentionService,
+    ownerGameNoteService,
     bggClient,
+    groundedAnalysisProvider,
+    groundedAnalysisTransportController,
+    reflectionRuntime,
     fileOps,
   };
 }

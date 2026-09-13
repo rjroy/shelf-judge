@@ -7,6 +7,7 @@ import {
   type Page,
 } from "@playwright/test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { webUrl } from "./web-url";
 
 const CONTEXT_PREFIX = "shelf-judge-collection-navigation:v1:";
 const TTL_MS = 7 * 24 * 60 * 60 * 1_000;
@@ -535,7 +536,7 @@ test.describe("detail persistence and fallback", () => {
     await waitForHydratedRows(page, DEFAULT_ORDER);
     const contextualUrl = await page.locator("#collection-game-game-2").getAttribute("href");
     if (contextualUrl === null) throw new Error("Expected contextual URL");
-    const isolated = await browser.newContext({ baseURL: "http://127.0.0.1:3100" });
+    const isolated = await browser.newContext({ baseURL: webUrl });
     const isolatedEvidence: NetworkEvidence = { externalRequests: [] };
     await guardNetwork(isolated, isolatedEvidence);
     try {
@@ -918,7 +919,7 @@ test("literal Chromium 200 percent zoom preserves detail navigation", async ({
       executablePath: browser.browserType().executablePath(),
       headless: true,
       viewport: null,
-      baseURL: "http://127.0.0.1:3100",
+      baseURL: webUrl,
       colorScheme: "light",
       args: ["--window-size=1440,900", "--window-position=0,0"],
     });

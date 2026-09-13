@@ -27,6 +27,9 @@ function createInMemoryFileOps(files: Record<string, string>): FileOps {
       return Promise.resolve(filePath in files);
     },
     async mkdir(): Promise<void> {},
+    listFiles(): Promise<string[]> {
+      return Promise.resolve([]);
+    },
     unlink(filePath: string): Promise<void> {
       delete files[filePath];
       return Promise.resolve();

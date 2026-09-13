@@ -7,6 +7,7 @@ import {
   CodedAxisValidationError,
   toErrorMessage,
   type Game,
+  type DurableGame,
   type OwnershipStatus,
   type AddGameInput,
   type Axis,
@@ -17,6 +18,7 @@ import {
   type BoxDimensions,
   type Collection,
   type TournamentData,
+  type CollectionProfileCollectionSource,
   type BggRequestObservation,
   type FieldEvidence,
   type PlayerRangeEvidence,
@@ -26,7 +28,9 @@ import {
 } from "@shelf-judge/shared";
 import type { CollectionPersistence, StorageService } from "./storage-service.js";
 import {
+  collectionDurableIdentity,
   collectionMutationServiceFor,
+  type CollectionDurableIdentity,
   type CollectionMutationService,
 } from "./collection-mutation-service.js";
 import { profileSourceCoordinatorFor } from "./profile-source-coordinator.js";
@@ -69,6 +73,10 @@ export interface GameService {
   addGame(input: AddGameInput): Promise<AddGameResult>;
   getGame(id: string): Promise<GameWithScore>;
   listGames(): Promise<GameWithScore[]>;
+  listGamesFromSnapshot?(
+    collection: CollectionProfileCollectionSource,
+    tournamentData: TournamentData,
+  ): GameWithScore[];
   rateGame(id: string, ratings: Record<string, number | null>): Promise<GameWithScore>;
   removeGame(id: string): Promise<void>;
   searchGames(query: string): Promise<BggSearchResult[]>;
@@ -100,12 +108,25 @@ export class GameHistoryConflictError extends Error {
   }
 }
 
+export interface PermanentGameDeletionContext {
+  gameId: string;
+  priorSourceIdentity: CollectionDurableIdentity;
+  targetSourceIdentity: CollectionDurableIdentity;
+}
+
+export interface PermanentGameDeletionLifecycle {
+  beforePersistence(context: PermanentGameDeletionContext): Promise<void> | void;
+  onPersistenceFailure(context: PermanentGameDeletionContext, error: unknown): Promise<void> | void;
+  onPersistenceSuccess(context: PermanentGameDeletionContext): Promise<void> | void;
+}
+
 type GameStorage = Pick<StorageService, "loadCollection" | "loadTournament" | "loadShelfConfig">;
 
 export type GameServiceDeps = {
   fitnessService: FitnessService;
   bggClient?: BggClient;
   onGameDeleted?: (gameId: string) => Promise<void>;
+  deletionLifecycle?: PermanentGameDeletionLifecycle;
   now?: () => string;
   logger?: Logger;
 } & (
@@ -214,7 +235,7 @@ function playerRangeEvidence(result: BggGameResult): PlayerRangeEvidence | null 
 }
 
 function applyBggResult(
-  game: Game,
+  game: DurableGame,
   result: BggGameResult,
   logger: Logger,
   retainPollOnRefreshOmission: boolean,
@@ -423,7 +444,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
           : null;
       const partialRange =
         initialRange === null && (parsed.minPlayers !== null || parsed.maxPlayers !== null);
-      const game: Game = {
+      const game: DurableGame = {
         id: uuidv4(),
         bggId: parsed.bggId ?? null,
         additionalBggIds: [],
@@ -498,6 +519,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
         ratings: {},
         createdAt,
         updatedAt: createdAt,
+        ownerNote: { state: "missing", version: 0, updatedAt: null },
       };
 
       // Fetch BGG data if bggId is provided and client is available
@@ -574,6 +596,22 @@ export function createGameService(deps: GameServiceDeps): GameService {
         return 0;
       });
 
+      return results;
+    },
+
+    listGamesFromSnapshot(collection, tournamentData): GameWithScore[] {
+      const results = collection.games.map((game) => ({
+        game,
+        score: computeScore(game, collection.axes, tournamentData),
+        bggDataStale: isBggDataStale(game),
+      }));
+      results.sort((left, right) => {
+        if (left.score !== null && right.score !== null)
+          return right.score.score - left.score.score;
+        if (left.score !== null) return -1;
+        if (right.score !== null) return 1;
+        return 0;
+      });
       return results;
     },
 
@@ -662,12 +700,53 @@ export function createGameService(deps: GameServiceDeps): GameService {
               .filter((intention) => intention.gameId === id)
               .map((intention) => intention.intentionId);
             if (intentionIds.length > 0) throw new GameHistoryConflictError(id, intentionIds);
+            const priorSourceIdentity = collectionDurableIdentity(collection);
+            collection.commandReceipts = collection.commandReceipts.filter(
+              (receipt) =>
+                !(
+                  "receiptType" in receipt &&
+                  receipt.receiptType === "owner-game-note" &&
+                  receipt.gameId === id
+                ),
+            );
             collection.games.splice(index, 1);
             collection.updatedAt = now();
-            return { changed: true, value: undefined };
+            const lifecycleContext: PermanentGameDeletionContext = {
+              gameId: id,
+              priorSourceIdentity,
+              targetSourceIdentity: collectionDurableIdentity({
+                ...collection,
+                revision: collection.revision + 1,
+              }),
+            };
+            return {
+              changed: true,
+              value: undefined,
+              beforePersistence: deps.deletionLifecycle
+                ? () => deps.deletionLifecycle?.beforePersistence(lifecycleContext)
+                : undefined,
+              onPersistenceFailure: deps.deletionLifecycle
+                ? (error: unknown) =>
+                    deps.deletionLifecycle?.onPersistenceFailure(lifecycleContext, error)
+                : undefined,
+              onPersistenceSuccess: deps.deletionLifecycle
+                ? () => deps.deletionLifecycle?.onPersistenceSuccess(lifecycleContext)
+                : undefined,
+              classifyPersistenceOutcome: deps.deletionLifecycle !== undefined,
+            };
           },
         );
-        await deps.onGameDeleted?.(id);
+        if (deps.onGameDeleted !== undefined) {
+          try {
+            await deps.onGameDeleted(id);
+          } catch (error) {
+            logger.error("post-deletion cleanup failed", {
+              gameId: id,
+              outcome: "source-deletion-persisted",
+              error: toErrorMessage(error),
+            });
+          }
+        }
       });
     },
 
@@ -973,7 +1052,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
       const successGenerationsAtStart = new Map(successGenerations);
       const collection = await storageService.loadCollection();
       const bggGames = collection.games.filter(
-        (game): game is Game & { bggId: number } => game.bggId !== null,
+        (game): game is DurableGame & { bggId: number } => game.bggId !== null,
       );
       const requestedGames = new Map(
         bggGames.map((game) => [
@@ -1195,7 +1274,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
       let imported = 0;
       let skipped = 0;
       const errors: string[] = [];
-      const candidates: Game[] = [];
+      const candidates: DurableGame[] = [];
       const total = collectionItems.length;
 
       const newItems = collectionItems.filter((item) => !existingBggIds.has(item.bggId));
@@ -1290,7 +1369,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
                           },
                         };
               const bestPlayerCount = strictSafeBestPlayerCount(result.bggData.bestPlayerCount);
-              const game: Game = {
+              const game: DurableGame = {
                 id: uuidv4(),
                 bggId,
                 additionalBggIds: [],
@@ -1344,6 +1423,7 @@ export function createGameService(deps: GameServiceDeps): GameService {
                 ratings: {},
                 createdAt,
                 updatedAt: createdAt,
+                ownerNote: { state: "missing", version: 0, updatedAt: null },
               };
 
               candidates.push(game);
@@ -1398,14 +1478,14 @@ export function createGameService(deps: GameServiceDeps): GameService {
           (latest) => {
             const existingIds = new Set(
               latest.games
-                .filter((game): game is Game & { bggId: number } => game.bggId !== null)
+                .filter((game): game is DurableGame & { bggId: number } => game.bggId !== null)
                 .map((game) => game.bggId),
             );
-            const accepted: Array<Game & { bggId: number }> = [];
+            const accepted: Array<DurableGame & { bggId: number }> = [];
             for (const game of candidates) {
               if (game.bggId === null || existingIds.has(game.bggId)) continue;
               existingIds.add(game.bggId);
-              accepted.push(game as Game & { bggId: number });
+              accepted.push(game as DurableGame & { bggId: number });
             }
             if (accepted.length === 0) return { changed: false, value: 0 };
             latest.games.push(...accepted.map((game) => structuredClone(game)));

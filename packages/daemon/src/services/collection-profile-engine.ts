@@ -1,7 +1,7 @@
 // Pure computation for the approved collection profile. No I/O or service dependencies.
 
 import type {
-  Collection,
+  CollectionProfileCollectionSource,
   CollectionProfile,
   CollectionProfileAttentionItem,
   CollectionProfileClassExclusion,
@@ -21,7 +21,7 @@ import {
 import { computeCollectionProfileAxisDistributions } from "./collection-profile-axis-distributions.js";
 
 export interface CollectionProfileInput {
-  collection: Collection;
+  collection: CollectionProfileCollectionSource;
   fitnessResults: ReadonlyMap<string, FitnessResult>;
   computedAt: string;
   entityPolicy?: CollectionProfileEntityPolicy;
@@ -365,7 +365,7 @@ function attentionPlayEvidence(game: Game): CollectionProfileAttentionItem["curr
 
 function attentionItem(
   game: Game,
-  intention: Collection["intentions"][number],
+  intention: CollectionProfileCollectionSource["intentions"][number],
 ): CollectionProfileAttentionItem {
   const currentPlayEvidence = attentionPlayEvidence(game);
   return {

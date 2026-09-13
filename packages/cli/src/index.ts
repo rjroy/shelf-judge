@@ -20,6 +20,9 @@ import {
   gameIntentionSet,
   gameIntentionResolve,
   gamePlaysSet,
+  gameNoteGet,
+  gameNoteSet,
+  gameNoteClear,
 } from "./commands/game.js";
 import { collectionBenchmark } from "./commands/collection.js";
 import {
@@ -43,6 +46,8 @@ import {
   tournamentStats,
 } from "./commands/tournament.js";
 import { profileCommand } from "./commands/profile.js";
+import { profileReflectionsCommand } from "./commands/profile-reflections.js";
+import { analystAsk, analystChat } from "./commands/analyst.js";
 import { predictGame, predictBggGame, predictReadiness } from "./commands/predict.js";
 import { nicheIgnored, nicheIgnore, nicheUnignore } from "./commands/niche.js";
 import {
@@ -88,6 +93,9 @@ const COMMANDS: Record<string, number> = {
   "game intention complete": 3,
   "game intention retire": 3,
   "game plays set": 3,
+  "game note get": 3,
+  "game note set": 3,
+  "game note clear": 3,
   "collection benchmark": 2,
   "axis list": 2,
   "axis templates": 2,
@@ -124,6 +132,14 @@ const COMMANDS: Record<string, number> = {
   "shelf remove-shelf": 2,
   "shelf status": 2,
   "shelf capacity": 2,
+  "profile reflections": 2,
+  "profile reflections refresh": 3,
+  "profile reflections cancel": 3,
+  "profile reflections enable": 3,
+  "profile reflections disable": 3,
+  "profile reflections delete": 3,
+  "analyst ask": 2,
+  "analyst chat": 2,
   "import bgg-collection": 2,
   "config get": 2,
   "config set": 2,
@@ -142,6 +158,9 @@ const EXACT_POSITIONAL_COMMANDS = new Set([
   "game intention complete",
   "game intention retire",
   "game plays set",
+  "game note get",
+  "game note set",
+  "game note clear",
 ]);
 
 interface ParsedArgs {
@@ -214,14 +233,19 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let template: string | undefined;
   let targetPlayerCount: number | undefined;
   let maximumScoringTime: number | undefined;
+  let expectingNoteTextValue = false;
 
   for (let i = 0; i < raw.length; i++) {
     const arg = raw[i];
 
-    if (arg === "--json") {
+    if (exactPositionalCommand && expectingNoteTextValue) {
+      tokens.push(arg);
+      expectingNoteTextValue = false;
+    } else if (arg === "--json") {
       json = true;
     } else if (exactPositionalCommand) {
       tokens.push(arg);
+      expectingNoteTextValue = arg === "--text";
     } else if (arg === "--bgg-id") {
       bggId = Number(raw[++i]);
     } else if (arg === "--name") {
@@ -354,7 +378,7 @@ async function main(): Promise<void> {
   const opts = { json: parsed.json };
   const args = parsed.positional;
 
-  let output: string;
+  let output: string | undefined;
 
   switch (parsed.commandPath) {
     case "game search":
@@ -410,6 +434,15 @@ async function main(): Promise<void> {
       break;
     case "game plays set":
       output = await gamePlaysSet(client, args, opts);
+      break;
+    case "game note get":
+      output = await gameNoteGet(client, args, opts);
+      break;
+    case "game note set":
+      output = await gameNoteSet(client, args, opts);
+      break;
+    case "game note clear":
+      output = await gameNoteClear(client, args, opts);
       break;
     case "collection benchmark":
       output = await collectionBenchmark(client, args, opts);
@@ -594,6 +627,20 @@ async function main(): Promise<void> {
     case "profile":
       output = await profileCommand(client, args, opts);
       break;
+    case "profile reflections":
+    case "profile reflections refresh":
+    case "profile reflections cancel":
+    case "profile reflections enable":
+    case "profile reflections disable":
+    case "profile reflections delete":
+      output = await profileReflectionsCommand(client, parsed.commandPath, args, opts);
+      break;
+    case "analyst ask":
+      await analystAsk(client, args, undefined, opts);
+      break;
+    case "analyst chat":
+      await analystChat(client, undefined, opts);
+      break;
     case "start":
       output = await daemonStart(client, args, opts);
       break;
@@ -609,12 +656,17 @@ async function main(): Promise<void> {
       process.exit(1);
   }
 
-  console.log(output);
+  if (output !== undefined) console.log(output);
 }
 
 if (import.meta.main) {
   main().catch((err) => {
-    console.error(formatCliError(err));
+    const formatted = formatCliError(err);
+    console.error(
+      process.argv.includes("--json") && !(err instanceof Error && "details" in err)
+        ? JSON.stringify({ error: { code: "command-failed", message: formatted } })
+        : formatted,
+    );
     process.exit(1);
   });
 }

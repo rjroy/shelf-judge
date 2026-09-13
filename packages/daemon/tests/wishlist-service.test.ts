@@ -124,7 +124,7 @@ function createMockStorage(
 ): StorageService {
   let stored = structuredClone(wishlist);
   const coll: Collection = {
-    schemaVersion: 5,
+    schemaVersion: 6,
     revision: 0,
     id: "coll-1",
     name: "Test",
@@ -301,7 +301,9 @@ describe("wishlist service", () => {
   test("add rejects bggId already in collection", async () => {
     const collGame = makeGame(100, "Test Game");
     collGame.id = "game-1"; // real collection game ID
-    storage = createMockStorage([], { games: [collGame] });
+    storage = createMockStorage([], {
+      games: [{ ...collGame, ownerNote: { state: "missing", version: 0, updatedAt: null } }],
+    });
     const svc = createWishlistService({ storageService: storage, predictionService, gameService });
 
     // eslint-disable-next-line @typescript-eslint/await-thenable -- Bun's expect().rejects is thenable

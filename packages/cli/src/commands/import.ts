@@ -4,6 +4,9 @@ import type { DaemonClient } from "../client.js";
 import type { OutputOptions } from "../output.js";
 import { printOutput } from "../output.js";
 
+const MISSING_IMPORT_COMPLETION =
+  "Import stream ended without a completion event. The daemon may have disconnected. Check that the daemon is still running with: shelf-judge help";
+
 export async function importBggCollection(
   client: DaemonClient,
   args: string[],
@@ -17,19 +20,27 @@ export async function importBggCollection(
   let result: ImportComplete | null = null;
   const progressLines: string[] = [];
 
-  await client.postSSE("/api/import/bgg", { username }, (event) => {
-    if (event.event === "progress") {
-      const progress = JSON.parse(event.data) as ImportProgress;
-      if (!opts.json) {
-        const line = `Importing ${progress.imported}/${progress.total}: ${progress.current}`;
-        // Overwrite current line in terminal for live progress
-        process.stderr.write(`\r${line}${"".padEnd(20)}`);
+  await client.postSSE(
+    "/api/import/bgg",
+    { username },
+    (event) => {
+      if (event.event === "progress") {
+        const progress = JSON.parse(event.data) as ImportProgress;
+        if (!opts.json) {
+          const line = `Importing ${progress.imported}/${progress.total}: ${progress.current}`;
+          // Overwrite current line in terminal for live progress
+          process.stderr.write(`\r${line}${"".padEnd(20)}`);
+        }
+        progressLines.push(event.data);
+      } else if (event.event === "complete") {
+        result = JSON.parse(event.data) as ImportComplete;
       }
-      progressLines.push(event.data);
-    } else if (event.event === "complete") {
-      result = JSON.parse(event.data) as ImportComplete;
-    }
-  });
+    },
+    {
+      isTerminal: (event) => event.event === "complete",
+      missingTerminalMessage: MISSING_IMPORT_COMPLETION,
+    },
+  );
 
   if (!opts.json && progressLines.length > 0) {
     // Clear the progress line
@@ -37,9 +48,7 @@ export async function importBggCollection(
   }
 
   if (!result) {
-    throw new Error(
-      "Import stream ended without a completion event. The daemon may have disconnected. Check that the daemon is still running with: shelf-judge help",
-    );
+    throw new Error(MISSING_IMPORT_COMPLETION);
   }
 
   const summary = result as ImportComplete;

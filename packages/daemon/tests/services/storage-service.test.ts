@@ -4,8 +4,8 @@ import type {
   Collection,
   ProfileData,
   WishlistEntry,
-  Game,
   JsonValue,
+  DurableGame,
 } from "@shelf-judge/shared";
 import {
   createFreshCollectionDerivedAxes,
@@ -37,7 +37,7 @@ function makeService(initialFiles?: Record<string, string>) {
 
 function currentCollection(overrides: Partial<Collection> = {}): Collection {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     revision: 0,
     id: "col-1",
     name: "Test",
@@ -52,7 +52,7 @@ function currentCollection(overrides: Partial<Collection> = {}): Collection {
   };
 }
 
-function currentGame(overrides: Partial<Game> = {}): Game {
+function currentGame(overrides: Partial<DurableGame> = {}): DurableGame {
   const bggId = overrides.bggId ?? null;
   return {
     id: "game-1",
@@ -82,6 +82,7 @@ function currentGame(overrides: Partial<Game> = {}): Game {
     ownership: "owned",
     boxDimensions: null,
     manualShelfId: null,
+    ownerNote: { state: "missing", version: 0, updatedAt: null },
     ratings: {},
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -98,7 +99,7 @@ describe("StorageService.loadCollection", () => {
     const collection = await service.loadCollection();
 
     expect(collection.name).toBe("My Collection");
-    expect(collection.schemaVersion).toBe(5);
+    expect(collection.schemaVersion).toBe(6);
     expect(collection.axes).toHaveLength(3);
     expect(collection.games).toHaveLength(0);
 
@@ -262,6 +263,7 @@ describe("StorageService.loadCollection", () => {
       delete rawGame.entityMetadata;
       delete rawGame.latestPlayCountCheck;
       delete rawGame.manualValues;
+      delete rawGame.ownerNote;
       const rawCollection: Record<string, unknown> = {
         ...currentCollection(),
         schemaVersion: 3,
@@ -303,11 +305,12 @@ describe("StorageService.loadCollection", () => {
   });
 
   test("distinguishes absent fields and does not rewrap normalized invalid values", async () => {
-    const rawGame: Partial<Game> = currentGame();
+    const rawGame: Partial<DurableGame> = currentGame();
     delete rawGame.acquisition;
     delete rawGame.entityMetadata;
     delete rawGame.latestPlayCountCheck;
     delete rawGame.manualValues;
+    delete rawGame.ownerNote;
     const rawCollection: Record<string, unknown> = {
       ...currentCollection({ games: [] }),
       schemaVersion: 3,
@@ -329,6 +332,7 @@ describe("StorageService.loadCollection", () => {
     delete normalizedInvalidGame.entityMetadata;
     delete normalizedInvalidGame.latestPlayCountCheck;
     delete normalizedInvalidGame.manualValues;
+    delete normalizedInvalidGame.ownerNote;
     const { service } = makeService({
       [COLLECTION_PATH]: JSON.stringify({
         ...rawCollection,
@@ -548,6 +552,7 @@ describe("StorageService.loadConfig", () => {
     const config = await service.loadConfig();
 
     expect(config.bggAuthToken).toBeNull();
+    expect(config.groundedAnalysis).toBeNull();
     expect(config.profileEntityPolicy).toEqual({
       mechanic: { overviewLimit: 3, minimumSupportedGames: 3 },
       designer: { overviewLimit: 3, minimumSupportedGames: 3 },
@@ -576,6 +581,18 @@ describe("StorageService.loadConfig", () => {
     expect(JSON.parse(fileOps.files.get(CONFIG_PATH) ?? "null")).not.toHaveProperty("dataDir");
   });
 
+  test("loads legacy configs without a grounded provider and rejects invalid persisted identities", async () => {
+    const { service } = makeService({
+      [CONFIG_PATH]: JSON.stringify({
+        bggAuthToken: null,
+        groundedAnalysis: { providerId: " provider", modelId: "model", extensionIds: [] },
+      }),
+    });
+
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+    await expect(service.loadConfig()).rejects.toThrow();
+  });
+
   test("rejects invalid profile entity policy values", async () => {
     const { service } = makeService({
       [CONFIG_PATH]: JSON.stringify({
@@ -600,6 +617,7 @@ describe("StorageService.saveConfig", () => {
     await service.saveConfig({
       bggAuthToken: "tok",
       username: null,
+      groundedAnalysis: null,
       profileEntityPolicy: {
         mechanic: { overviewLimit: 1, minimumSupportedGames: 2 },
         designer: { overviewLimit: 2, minimumSupportedGames: 3 },
@@ -621,6 +639,22 @@ describe("StorageService.saveConfig", () => {
       artist: { overviewLimit: 3, minimumSupportedGames: 4 },
     });
     expect(persisted).not.toHaveProperty("dataDir");
+  });
+
+  test("persists a valid grounded provider identity", async () => {
+    const { service } = makeService();
+    const config = await service.loadConfig();
+
+    await service.saveConfig({
+      ...config,
+      groundedAnalysis: { providerId: "local-provider", modelId: "local-model", extensionIds: [] },
+    });
+
+    expect((await service.loadConfig()).groundedAnalysis).toEqual({
+      providerId: "local-provider",
+      modelId: "local-model",
+      extensionIds: [],
+    });
   });
 });
 

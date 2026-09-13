@@ -15,6 +15,7 @@ import {
 } from "../services/feature-vector.js";
 import type { FeatureVector } from "../services/feature-vector.js";
 import { deriveDisplayStats } from "../services/tournament-service.js";
+import { projectPredictedGameResponse } from "../services/game-projection.js";
 
 export interface PredictionRoutesDeps {
   predictionService: PredictionService;
@@ -127,7 +128,17 @@ export function createPredictionRoutes(deps: PredictionRoutesDeps): RouteModule 
         }
       }
 
-      return c.json({ ...result, nicheImpact, redundancyPreview });
+      const response = projectPredictedGameResponse({
+        game: result.game,
+        score: result.score,
+        predictionUnavailable: result.predictionUnavailable,
+        nicheImpact,
+        redundancyPreview,
+      });
+      if (response.game.bggId !== bggId) {
+        return c.json({ error: "Internal server error" }, 500);
+      }
+      return c.json(response);
     } catch (err) {
       const message = toErrorMessage(err);
       if (message.includes("No game found with BGG ID")) {
@@ -148,7 +159,14 @@ export function createPredictionRoutes(deps: PredictionRoutesDeps): RouteModule 
     const gameId = c.req.param("gameId");
     try {
       const result = await predictionService.predictGame(gameId);
-      return c.json(result);
+      const response = projectPredictedGameResponse({
+        game: result.game,
+        score: result.score,
+        predictionUnavailable: result.predictionUnavailable,
+        redundancyPreview: null,
+      });
+      if (response.game.id !== gameId) return c.json({ error: "Internal server error" }, 500);
+      return c.json(response);
     } catch (err) {
       const message = toErrorMessage(err);
       if (message.includes("not found")) {

@@ -4,11 +4,11 @@
 import type { DaemonClient, DaemonResponse, SSEEvent } from "../../src/client.js";
 
 interface MockRoute {
-  response: DaemonResponse;
+  response: DaemonResponse | ((body: unknown) => DaemonResponse);
 }
 
 interface MockSSERoute {
-  events: SSEEvent[];
+  events: SSEEvent[] | ((body: unknown) => SSEEvent[]);
 }
 
 export interface MockClientConfig {
@@ -27,7 +27,7 @@ export function createMockClient(config: MockClientConfig = {}): DaemonClient {
     return routes[`${method} ${path}`] ?? routes[path];
   }
 
-  function request<T>(method: string, path: string): Promise<DaemonResponse<T>> {
+  function request<T>(method: string, path: string, body?: unknown): Promise<DaemonResponse<T>> {
     const route = findRoute(method, path);
     if (!route) {
       return Promise.resolve({
@@ -36,19 +36,21 @@ export function createMockClient(config: MockClientConfig = {}): DaemonClient {
         data: { error: `No mock for ${method} ${path}` } as T,
       });
     }
-    return Promise.resolve(route.response as DaemonResponse<T>);
+    const response = typeof route.response === "function" ? route.response(body) : route.response;
+    return Promise.resolve(response as DaemonResponse<T>);
   }
 
   return {
     get: <T>(path: string) => request<T>("GET", path),
-    post: <T>(path: string) => request<T>("POST", path),
-    put: <T>(path: string) => request<T>("PUT", path),
-    patch: <T>(path: string) => request<T>("PATCH", path),
-    del: <T>(path: string) => request<T>("DELETE", path),
-    postSSE(path: string, _body: unknown, onEvent: (event: SSEEvent) => void): Promise<void> {
+    post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),
+    put: <T>(path: string, body?: unknown) => request<T>("PUT", path, body),
+    patch: <T>(path: string, body?: unknown) => request<T>("PATCH", path, body),
+    del: <T>(path: string, body?: unknown) => request<T>("DELETE", path, body),
+    postSSE(path: string, body: unknown, onEvent: (event: SSEEvent) => void): Promise<void> {
       const route = sseRoutes[path];
       if (!route) throw new Error(`No SSE mock for ${path}`);
-      for (const event of route.events) {
+      const events = typeof route.events === "function" ? route.events(body) : route.events;
+      for (const event of events) {
         onEvent(event);
       }
       return Promise.resolve();

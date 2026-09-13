@@ -11,11 +11,14 @@ import type { MockFileOps } from "../helpers/mock-file-ops.js";
 import type { Game } from "@shelf-judge/shared";
 import { collectionMutationServiceFor } from "../../src/services/collection-mutation-service.js";
 import { createIntentionService } from "../../src/services/intention-service.js";
+import { createOwnerGameNoteService } from "../../src/services/owner-game-note-service.js";
+import { createPurchaseUtilizationService } from "../../src/services/purchase-utilization-service.js";
 
 let fileOps: MockFileOps;
 let storageService: StorageService;
 let gameService: GameService;
 let axisService: AxisService;
+let noteCommand = 0;
 
 beforeEach(() => {
   fileOps = createMockFileOps();
@@ -27,7 +30,20 @@ beforeEach(() => {
   const fitnessService = createFitnessService();
   gameService = createGameService({ storageService, fitnessService });
   axisService = createAxisService({ storageService });
+  noteCommand = 0;
 });
+
+async function authorNote(gameId: string, text: string): Promise<void> {
+  noteCommand += 1;
+  const result = await createOwnerGameNoteService({
+    collectionMutationService: collectionMutationServiceFor(storageService),
+  }).set(gameId, {
+    commandId: `45000000-0000-4000-8000-${String(noteCommand).padStart(12, "0")}`,
+    expectedVersion: 0,
+    text,
+  });
+  if (!result.ok) throw new Error(result.error.code);
+}
 
 describe("GameService", () => {
   describe("addGame", () => {
@@ -355,10 +371,76 @@ describe("GameService", () => {
       await expect(gameService.removeGame("nonexistent")).rejects.toThrow("Game not found");
     });
 
+    test("atomically deletes a present note and all of its receipts without affecting other games", async () => {
+      const { game: doomed } = await gameService.addGame({ name: "Doomed" });
+      const { game: retained } = await gameService.addGame({ name: "Retained" });
+      await authorNote(doomed.id, "delete this private note");
+      await authorNote(retained.id, "retain this private note");
+
+      await gameService.removeGame(doomed.id);
+
+      const collection = await storageService.loadCollection();
+      expect(collection.games.map(({ id }) => id)).toEqual([retained.id]);
+      expect(collection.games[0]?.ownerNote).toMatchObject({
+        state: "present",
+        text: "retain this private note",
+      });
+      expect(collection.commandReceipts).toHaveLength(1);
+      expect(collection.commandReceipts[0]).toMatchObject({
+        receiptType: "owner-game-note",
+        gameId: retained.id,
+      });
+    });
+
+    test("preserves the game, note, receipts, and revision when deletion persistence fails", async () => {
+      const { game } = await gameService.addGame({ name: "Doomed" });
+      await authorNote(game.id, "must survive failed deletion");
+      const before = await storageService.loadCollection();
+      const saveCollection = storageService.saveCollection.bind(storageService);
+      storageService.saveCollection = () => Promise.reject(new Error("disk unavailable"));
+
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(gameService.removeGame(game.id)).rejects.toThrow("disk unavailable");
+      storageService.saveCollection = saveCollection;
+
+      expect(await storageService.loadCollection()).toEqual(before);
+    });
+
+    test("does not report a committed deletion as failed when post-deletion cleanup fails", async () => {
+      const entries: unknown[][] = [];
+      const service = createGameService({
+        storageService,
+        fitnessService: createFitnessService(),
+        onGameDeleted: () => Promise.reject(new Error("tournament persistence failed")),
+        logger: {
+          log: (...args) => entries.push(args),
+          warn: (...args) => entries.push(args),
+          error: (...args) => entries.push(args),
+        },
+      });
+      const { game } = await service.addGame({ name: "Doomed" });
+      await authorNote(game.id, "delete with source data");
+
+      await service.removeGame(game.id);
+
+      const collection = await storageService.loadCollection();
+      expect(collection.games).toEqual([]);
+      expect(collection.commandReceipts).toEqual([]);
+      expect(entries).toContainEqual([
+        "post-deletion cleanup failed",
+        {
+          gameId: game.id,
+          outcome: "source-deletion-persisted",
+          error: "tournament persistence failed",
+        },
+      ]);
+    });
+
     test.each(["active", "resolved"] as const)(
       "coordinated service rejects deletion with %s history and preserves the whole collection",
       async (state) => {
         const { game } = await gameService.addGame({ name: "Historical", numPlays: 0 });
+        await authorNote(game.id, "history and note must both survive");
         const intentions = createIntentionService({
           collectionMutationService: collectionMutationServiceFor(storageService),
           createId: () => "history-intention",
@@ -389,6 +471,82 @@ describe("GameService", () => {
           expect(error).toBeInstanceOf(GameHistoryConflictError);
         }
         expect(await storageService.loadCollection()).toEqual(before);
+      },
+    );
+  });
+
+  describe("owner note preservation", () => {
+    test.each([
+      ["manual owned", null, "owned"],
+      ["BGG-linked previously owned", 266192, "previously-owned"],
+    ] as const)(
+      "preserves note bytes through unrelated mutations and restart for %s",
+      async (_label, bggId, initialOwnership) => {
+        const axis = await axisService.createAxis({ name: "Fun", weight: 50, source: "personal" });
+        const { game } = await gameService.addGame({ name: "Preserved", bggId });
+        if (initialOwnership === "previously-owned") {
+          await gameService.setOwnership(game.id, initialOwnership);
+        }
+        const noteText = "  exact note\nwith <external-looking> prose  ";
+        await authorNote(game.id, noteText);
+        const original = (await storageService.loadCollection()).games.find(
+          (candidate) => candidate.id === game.id,
+        )?.ownerNote;
+
+        await gameService.rateGame(game.id, { [axis.id]: 8 });
+        await gameService.setManualValues(game.id, { playingTime: 47, playerCount: 3 });
+        await createPurchaseUtilizationService({ storageService }).setAcquisition(game.id, {
+          state: "purchase",
+          amount: "42.00",
+        });
+        await gameService.setBoxDimensions(game.id, { width: 10, height: 8, depth: 2 });
+        if (bggId !== null) await gameService.setAdditionalBggIds(game.id, [bggId + 1]);
+        await gameService.setOwnership(game.id, "owned");
+        await storageService.saveShelfConfig({
+          units: [
+            {
+              id: "unit-notes",
+              name: "Note preservation shelf",
+              shelves: [
+                {
+                  id: "shelf-notes",
+                  name: "Notes",
+                  dimensionless: true,
+                  width: null,
+                  height: null,
+                  depth: null,
+                },
+              ],
+            },
+          ],
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        });
+        await gameService.setManualShelf(game.id, "shelf-notes");
+        await gameService.setOwnership(game.id, "previously-owned");
+        await gameService.setOwnership(game.id, "owned");
+        await gameService.getGame(game.id);
+        const playResult = await createIntentionService({
+          collectionMutationService: collectionMutationServiceFor(storageService),
+          now: () => "2099-01-01T00:00:00.000Z",
+        }).setPlayCount(game.id, 4);
+        expect(playResult.ok).toBe(true);
+
+        const restartedStorage = createStorageService({
+          dataDir: "/data",
+          configPath: "/config/config.json",
+          fileOps,
+        });
+        const restarted = createGameService({
+          storageService: restartedStorage,
+          fitnessService: createFitnessService(),
+        });
+        await restarted.getGame(game.id);
+        const persisted = (await restartedStorage.loadCollection()).games.find(
+          (candidate) => candidate.id === game.id,
+        );
+        expect(persisted?.ownerNote).toEqual(original);
+        expect(persisted?.ownerNote).toMatchObject({ state: "present", text: noteText });
       },
     );
   });

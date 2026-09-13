@@ -1,0 +1,152 @@
+{
+  "schemaVersion": 5,
+  "revision": 7,
+  "id": "collection-v5-owner-notes",
+  "name": "Prose-rich v5 collection",
+  "axes": [
+    {
+      "id": "axis-personal",
+      "name": "Table appeal",
+      "description": "A personal axis description that must not become a note.",
+      "weight": 75,
+      "enabled": true,
+      "source": "personal",
+      "createdAt": "2026-08-28T10:00:00.000Z",
+      "updatedAt": "2026-08-28T10:00:00.000Z"
+    }
+  ],
+  "games": [
+    {
+      "id": "game-v5-prose",
+      "bggId": 123,
+      "additionalBggIds": [456],
+      "name": "A Game With Existing Prose",
+      "yearPublished": 2020,
+      "minPlayers": 2,
+      "maxPlayers": 4,
+      "bestPlayers": 3,
+      "playingTime": 90,
+      "imageUrl": null,
+      "bggData": {
+        "communityRating": 7.8,
+        "bayesAverage": 7.3,
+        "weight": 3.1,
+        "numWeightVotes": 25,
+        "description": "BGG description text is source data, not owner-authored testimony.",
+        "mechanics": [{ "id": 1, "name": "Deck Building" }],
+        "categories": [{ "id": 2, "name": "Strategy" }],
+        "families": [],
+        "subdomains": [],
+        "bestPlayerCount": 3,
+        "fetchedAt": "2026-08-28T10:00:00.000Z"
+      },
+      "numPlays": 0,
+      "acquisition": { "state": "unknown" },
+      "playCountEvidence": {
+        "status": "valid",
+        "value": 0,
+        "source": "manual",
+        "observedAt": "2026-08-28T10:00:00.000Z"
+      },
+      "durationEvidence": {
+        "status": "valid",
+        "value": 90,
+        "source": "bgg-thing",
+        "observedAt": "2026-08-28T10:00:00.000Z"
+      },
+      "playerRangeEvidence": {
+        "status": "valid",
+        "value": { "minPlayers": 2, "maxPlayers": 4 },
+        "source": "bgg-thing",
+        "observedAt": "2026-08-28T10:00:00.000Z"
+      },
+      "suggestedPlayerPoll": {
+        "status": "valid",
+        "state": "absent",
+        "buckets": [],
+        "source": "bgg-thing",
+        "observedAt": "2026-08-28T10:00:00.000Z"
+      },
+      "bestPlayersInvalidEvidence": null,
+      "manualValues": { "playingTime": null, "playerCount": null },
+      "entityMetadata": {
+        "mechanic": {
+          "state": "complete",
+          "entities": [{ "id": 1, "name": "Deck Building" }],
+          "observedAt": "2026-08-28T10:00:00.000Z",
+          "refreshFailure": null,
+          "correctionDestination": null
+        },
+        "designer": {
+          "state": "complete",
+          "entities": [{ "id": 3, "name": "Existing Designer" }],
+          "observedAt": "2026-08-28T10:00:00.000Z",
+          "refreshFailure": null,
+          "correctionDestination": null
+        },
+        "artist": {
+          "state": "complete",
+          "entities": [{ "id": 4, "name": "Existing Artist" }],
+          "observedAt": "2026-08-28T10:00:00.000Z",
+          "refreshFailure": null,
+          "correctionDestination": null
+        }
+      },
+      "latestPlayCountCheck": null,
+      "ownership": "owned",
+      "boxDimensions": null,
+      "manualShelfId": null,
+      "ratings": { "axis-personal": 9 },
+      "createdAt": "2026-08-28T10:00:00.000Z",
+      "updatedAt": "2026-08-28T10:01:00.000Z"
+    }
+  ],
+  "intentions": [
+    {
+      "intentionId": "intention-v5",
+      "gameId": "game-v5-prose",
+      "kind": "first-play",
+      "baseline": {
+        "playCount": 0,
+        "evidenceSource": "manual",
+        "observedAt": "2026-08-28T10:00:00.000Z"
+      },
+      "createdAt": "2026-08-28T10:02:00.000Z",
+      "version": 1,
+      "resolution": null
+    }
+  ],
+  "commandReceipts": [
+    {
+      "commandId": "33000000-0000-4000-8000-000000000001",
+      "request": {
+        "type": "create",
+        "commandId": "33000000-0000-4000-8000-000000000001",
+        "gameId": "game-v5-prose",
+        "kind": "first-play",
+        "expectedActiveIntention": "absent"
+      },
+      "result": {
+        "ok": true,
+        "commandId": "33000000-0000-4000-8000-000000000001",
+        "intention": {
+          "intentionId": "intention-v5",
+          "gameId": "game-v5-prose",
+          "kind": "first-play",
+          "baseline": {
+            "playCount": 0,
+            "evidenceSource": "manual",
+            "observedAt": "2026-08-28T10:00:00.000Z"
+          },
+          "createdAt": "2026-08-28T10:02:00.000Z",
+          "version": 1,
+          "resolution": null
+        },
+        "linkedOwnershipTransition": null
+      }
+    }
+  ],
+  "entertainmentBenchmark": null,
+  "createdAt": "2026-08-28T10:00:00.000Z",
+  "updatedAt": "2026-08-28T10:02:00.000Z"
+}

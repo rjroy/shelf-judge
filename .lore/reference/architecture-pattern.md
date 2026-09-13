@@ -11,16 +11,22 @@ The daemon is the application. Everything else is a client.
 
 Web, CLI, and agents don't make decisions or hold state. They relay user intent to the daemon and render what comes back. If the daemon stops, there is no application. If a client stops, nothing is lost.
 
-## Hard Constraint: Claude Agent SDK Only
+## Hard Constraint: One Daemon-Owned pi-agent Boundary
 
-All AI functionality uses `@anthropic-ai/claude-agent-sdk`. No other AI or LLM library is permitted. This means:
+All AI functionality uses one daemon-owned integration built on
+`@earendil-works/pi-coding-agent` and `@earendil-works/pi-agent-core`. Routes,
+feature services, web, and CLI do not call providers or create independent model
+stacks.
 
-- **No `@anthropic-ai/sdk`** (the raw API client). The raw SDK bills per-token. The Agent SDK routes through Claude Code's OAuth, which means no separate API key and no per-token cost.
-- **No other LLM libraries** (OpenAI, LangChain, LlamaIndex, etc.). One SDK, one model provider, one integration surface.
+The operator explicitly configures the provider, model, and allowlisted provider
+extensions. There is no implicit model default. The integration binds allowlisted
+extensions before resolving the model through the bound session registry and
+rejects unapproved model-visible tools or hooks before supplying application data.
+Provider authentication remains the selected provider's responsibility.
 
-This is a cost and architecture constraint, not a preference. The Agent SDK gives us Claude Code integration and OAuth for free. The raw API does not.
-
-The "One Entry Point for SDK Calls" section below describes how SDK usage is structured within the codebase.
+This rule replaced the prior Claude-Agent-SDK-only constraint by owner decision on
+2026-08-30 so Grounded Profile Reflections and Collection Analyst Chat can share
+one provider-neutral integration surface.
 
 ## Three Clients, One App
 
@@ -88,44 +94,29 @@ type RouteModule = {
 
 Tests provide mock deps. The app can start with a fallback if production setup fails.
 
-### One Entry Point for SDK Calls
+### One Entry Point for Model Calls
 
-All LLM interaction flows through a single session runner that wraps `@anthropic-ai/claude-agent-sdk`. No direct SDK calls from routes, services, or domain logic.
+All model interaction flows through one grounded-analysis session boundary. No
+direct pi-agent or provider calls are permitted from routes, feature services,
+domain logic, web, or CLI.
 
-The runner owns tool resolution, prompt assembly, model selection, and MCP server composition. Callers describe what they need. The runner decides how to talk to the SDK.
+The boundary owns extension binding, bound-registry model resolution, capability
+inspection, prompt and evidence submission, schema-backed completion, cancellation,
+usage capture, failure categorization, and redacted logging. Feature callers supply
+an authorized evidence manifest, policy, and strict submission schema.
 
-This isn't about abstraction for its own sake. When SDK calls scatter across the codebase, every caller reinvents error handling, streaming, and tool resolution. One entry point means one place to fix, observe, and evolve. It also enforces the constraint that all AI interaction goes through the Agent SDK (see "Hard Constraint" above).
+This is not abstraction for its own sake. A single boundary prevents each feature
+from inventing provider configuration, error handling, streaming, privacy, and tool
+authorization behavior.
 
 ### Tool Definitions as DI Factories
 
-Custom tools follow the same factory pattern as routes and services: `createXToolDef(deps) → ToolDefinition`. Each tool factory receives only the callbacks and services it needs. Pure logic is extracted from the tool handler and exported separately for direct testing.
-
-```typescript
-// Pure logic, tested without MCP overhead
-export function rollDice(input: RollDiceInput, random: () => number): RollDiceOutput { ... }
-
-// Factory wraps pure logic in the SDK's tool() wrapper
-export function createDiceToolDef(deps?: { random?: () => number }) {
-  return tool("roll_dice", "...", InputSchema, async (args) => {
-    const result = rollDice(args, deps?.random ?? Math.random);
-    return { content: [{ type: "text", text: JSON.stringify(result) }] };
-  });
-}
-```
-
-The session runner composes tool definitions into an MCP server using `createSdkMcpServer()` and passes it to the Agent SDK query. This is how custom tools get surfaced to the AI without scattering SDK integration across tool files.
-
-```typescript
-const corvranServer = createSdkMcpServer({
-  name: "corvran",
-  tools: [diceToolDef, moodToolDef, compactToolDef],
-});
-
-return queryFn({
-  prompt: playerMessage,
-  options: { mcpServers: { corvran: corvranServer }, ... },
-});
-```
+Model-visible tools follow the same factory pattern as routes and services. Each
+factory receives only the narrow callbacks it needs, validates strict input and
+output schemas, and exports pure logic for direct testing. The grounded-analysis
+boundary inspects the final session capability set before transmitting application
+data. Feature policy, not extension registration or model output, determines which
+tools are available.
 
 ## Operations Registry and CLI Discovery
 
@@ -179,7 +170,7 @@ Humans can inspect and edit state files directly. This is a feature, not a limit
 DI factories are the primary testing seam. Every external dependency is injectable:
 
 - **`fileOps`**: A single interface wrapping all filesystem operations (`readFile`, `writeFile`, `readDir`, `fileExists`, `stat`, etc.). Tests provide in-memory implementations. This is the dominant DI seam in practice: most services need filesystem access, and a single interface keeps the injection surface narrow.
-- **`queryFn`**: Mock LLM responses (return test event generators that yield the message types your code handles).
+- **Grounded-analysis session/provider seams**: Inject deterministic local sessions and provider events for exhaustive tests, while retaining focused real-library lifecycle tests for extension binding and model resolution.
 - **Service interfaces**: Services like `adventureService`, `historyService`, `compactionService` are injected into route factories. Tests can stub individual service methods without replacing the filesystem layer.
 - Hono's `app.request()` test client with injected deps for integration-level route testing.
 - `fs.mkdtemp()` for temp directories, env vars for path isolation when testing against real filesystems.

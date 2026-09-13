@@ -4,8 +4,8 @@ import type {
   Acquisition,
   EntertainmentBenchmark,
   FitnessResult,
-  Game,
   GameWithScore,
+  DurableGame,
 } from "@shelf-judge/shared";
 import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import {
@@ -18,7 +18,7 @@ import type { StorageService } from "../../src/services/storage-service.js";
 const initialTime = "2026-01-01T00:00:00.000Z";
 const changedTime = "2026-02-02T00:00:00.000Z";
 
-function game(overrides: Partial<Game> = {}): Game {
+function game(overrides: Partial<DurableGame> = {}): DurableGame {
   const bggId = overrides.bggId ?? null;
   return {
     id: "game-1",
@@ -63,6 +63,7 @@ function game(overrides: Partial<Game> = {}): Game {
     ownership: "owned",
     boxDimensions: null,
     manualShelfId: null,
+    ownerNote: { state: "missing", version: 0, updatedAt: null },
     ratings: {},
     createdAt: initialTime,
     updatedAt: initialTime,
@@ -74,7 +75,7 @@ function game(overrides: Partial<Game> = {}): Game {
 
 function collection(overrides: Partial<Collection> = {}): Collection {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     revision: 0,
     id: "collection-1",
     name: "Test",

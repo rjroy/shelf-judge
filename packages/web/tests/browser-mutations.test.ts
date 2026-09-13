@@ -3,12 +3,15 @@ import type { Game, PlayIntention } from "@shelf-judge/shared";
 import { canonicalIntentionMutationCases } from "../../shared/tests/fixtures/intention-mutation";
 import {
   changeOwnership,
+  clearOwnerGameNote,
   correctPlayCount,
   createIntention,
+  getOwnerGameNote,
   refreshGameBgg,
   removeGameFromCollection,
   resolveIntention,
   setAdditionalBggIds,
+  setOwnerGameNote,
 } from "@/lib/browser-mutations";
 
 function jsonResponse(body: object, status = 200): Response {
@@ -90,6 +93,136 @@ async function rejection(action: () => Promise<unknown>): Promise<unknown> {
 }
 
 describe("browser mutation boundaries", () => {
+  test("reads and mutates owner notes with strict request and response coherence", async () => {
+    const commandId = "44000000-0000-4000-8000-000000000001";
+    const read = await getOwnerGameNote("game-1", () =>
+      Promise.resolve(
+        jsonResponse({ gameId: "game-1", note: { state: "missing", version: 0, updatedAt: null } }),
+      ),
+    );
+    expect(read.note.state).toBe("missing");
+
+    const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    const result = await setOwnerGameNote(
+      "game-1",
+      { commandId, expectedVersion: 0, text: "Line one\r\nLine two" },
+      (input, init) => {
+        requests.push({ input, init });
+        return Promise.resolve(
+          jsonResponse({
+            ok: true,
+            accepted: {
+              commandId,
+              gameId: "game-1",
+              operation: "set",
+              state: "present",
+              version: 1,
+              updatedAt: "2026-08-30T12:00:00.000Z",
+              collectionRevision: 2,
+              replayed: false,
+              alreadyClear: false,
+            },
+          }),
+        );
+      },
+    );
+    expect(result.ok).toBe(true);
+    expect(requests[0]?.input).toBe("/api/daemon/games/game-1/note");
+    expect(requests[0]?.init?.method).toBe("PUT");
+    expect(requestBody(requests[0]?.init)).toEqual({
+      commandId,
+      expectedVersion: 0,
+      text: "Line one\nLine two",
+    });
+
+    const clear = await clearOwnerGameNote("game-1", { commandId, expectedVersion: 1 }, () =>
+      Promise.resolve(
+        jsonResponse(
+          {
+            ok: false,
+            commandId,
+            error: {
+              code: "stale-version",
+              gameId: "game-1",
+              expectedVersion: 1,
+              current: {
+                state: "present",
+                version: 2,
+                updatedAt: "2026-08-30T12:05:00.000Z",
+                text: "Current",
+              },
+            },
+          },
+          409,
+        ),
+      ),
+    );
+    expect(clear.ok).toBe(false);
+  });
+
+  test("rejects malformed, wrong-status, and cross-request owner note responses", async () => {
+    const commandId = "44000000-0000-4000-8000-000000000001";
+    const wrongRead = await rejection(() =>
+      getOwnerGameNote("game-1", () =>
+        Promise.resolve(
+          jsonResponse({
+            gameId: "game-2",
+            note: { state: "missing", version: 0, updatedAt: null },
+          }),
+        ),
+      ),
+    );
+    expect(wrongRead).toBeInstanceOf(Error);
+    expect((wrongRead as Error).message).toContain("different owner note read");
+
+    const malformed = await rejection(() =>
+      setOwnerGameNote("game-1", { commandId, expectedVersion: 0, text: "Draft" }, () =>
+        Promise.resolve(jsonResponse({ ok: true })),
+      ),
+    );
+    expect(malformed).toBeInstanceOf(Error);
+
+    const wrongStatus = await rejection(() =>
+      setOwnerGameNote("game-1", { commandId, expectedVersion: 0, text: "Draft" }, () =>
+        Promise.resolve(
+          jsonResponse(
+            {
+              ok: false,
+              commandId,
+              error: { code: "game-not-found", gameId: "game-1" },
+            },
+            200,
+          ),
+        ),
+      ),
+    );
+    expect(wrongStatus).toBeInstanceOf(Error);
+    expect((wrongStatus as Error).message).toContain("incoherent owner note status");
+
+    const wrongRequest = await rejection(() =>
+      setOwnerGameNote("game-1", { commandId, expectedVersion: 0, text: "Draft" }, () =>
+        Promise.resolve(
+          jsonResponse({
+            ok: true,
+            accepted: {
+              commandId,
+              gameId: "game-2",
+              operation: "set",
+              state: "present",
+              version: 1,
+              updatedAt: "2026-08-30T12:00:00.000Z",
+              collectionRevision: 2,
+              replayed: false,
+              alreadyClear: false,
+            },
+          }),
+        ),
+      ),
+    );
+    expect(wrongRequest).toBeInstanceOf(Error);
+    expect((wrongRequest as Error).message).toContain("different owner note request");
+  });
+
   test("creates a replay intention when randomUUID is unavailable", async () => {
     const originalCryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
     Object.defineProperty(globalThis, "crypto", {

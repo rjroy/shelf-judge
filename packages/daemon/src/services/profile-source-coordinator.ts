@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type {
-  Collection,
+  CollectionProfileCollectionSource,
   PredictionSettings,
   ProfileSourceIdentity,
   RedundancySettings,
@@ -9,7 +9,7 @@ import type {
 } from "@shelf-judge/shared";
 
 export interface ProfileSources {
-  collection: Collection;
+  collection: CollectionProfileCollectionSource;
   tournament: TournamentData;
   predictionSettings: PredictionSettings;
   redundancySettings: RedundancySettings;

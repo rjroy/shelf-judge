@@ -12,7 +12,7 @@ import type { BggClient } from "../../src/services/bgg-client.js";
 import type { MockFileOps } from "../helpers/mock-file-ops.js";
 import { parseThingItems } from "../../src/services/bgg-xml-parser.js";
 import type { BggGameResult } from "../../src/services/bgg-client.js";
-import { GameSchema, type BggSearchResult, type Collection } from "@shelf-judge/shared";
+import { DurableGameSchema, type BggSearchResult, type Collection } from "@shelf-judge/shared";
 import { collectionMutationServiceFor } from "../../src/services/collection-mutation-service.js";
 import {
   createIntentionService,
@@ -344,9 +344,9 @@ describe("GameService BGG Integration", () => {
         source: "bgg-collection",
         observedAt,
       });
-      expect(GameSchema.safeParse((await storageService.loadCollection()).games[0]).success).toBe(
-        true,
-      );
+      expect(
+        DurableGameSchema.safeParse((await storageService.loadCollection()).games[0]).success,
+      ).toBe(true);
       expect((await service.refreshBggData(game.id)).game).toMatchObject({
         numPlays: 7,
         playCountEvidence: { status: "valid", value: 7, observedAt: correctedAt },
@@ -373,7 +373,7 @@ describe("GameService BGG Integration", () => {
         state: "unusable",
         buckets: unsafe.suggestedPlayerPoll?.buckets,
       });
-      expect(GameSchema.safeParse(game).success).toBe(true);
+      expect(DurableGameSchema.safeParse(game).success).toBe(true);
     });
   });
 
@@ -411,6 +411,36 @@ describe("GameService BGG Integration", () => {
   });
 
   describe("refreshBggData", () => {
+    test("preserves an owner note byte-for-byte while replacing BGG data", async () => {
+      const seed = createGameService({
+        storageService,
+        fitnessService: createFitnessService(),
+      });
+      const { game } = await seed.addGame({ name: "Original", bggId: 266192 });
+      const collection = await storageService.loadCollection();
+      const stored = collection.games.find(({ id }) => id === game.id);
+      if (stored === undefined) throw new Error("Expected stored game");
+      stored.ownerNote = {
+        state: "present",
+        version: 3,
+        updatedAt: "2026-08-25T09:00:00.000Z",
+        text: "  owner text\n<comment>not BGG prose</comment>  ",
+      };
+      await storageService.saveCollection(collection);
+      const originalNote = structuredClone(stored.ownerNote);
+      const parsed = parseThingItems(await readFixture("thing-wingspan-266192.xml"), observedAt)[0];
+      if (parsed === undefined) throw new Error("Expected Wingspan thing fixture");
+      const service = createGameService({
+        storageService,
+        fitnessService: createFitnessService(),
+        bggClient: clientForResults([parsed]),
+      });
+
+      await service.refreshBggData(game.id);
+
+      expect((await storageService.loadCollection()).games[0]?.ownerNote).toEqual(originalNote);
+    });
+
     test("replaces the primary collection count with deduplicated related-entry plays", async () => {
       const seedService = createGameService({
         storageService,
@@ -810,7 +840,10 @@ describe("GameService BGG Integration", () => {
       expect(refreshed.entityMetadata.mechanic.entities).toEqual([
         { id: 266192, name: "Mechanic 266192" },
       ]);
-      expect(persisted).toEqual(refreshed);
+      expect(persisted).toEqual({
+        ...refreshed,
+        ownerNote: { state: "missing", version: 0, updatedAt: null },
+      });
     });
 
     test("persists valid thing metadata without ambiguous secondary play evidence", async () => {
@@ -864,7 +897,10 @@ describe("GameService BGG Integration", () => {
           ({ refreshFailure }) => refreshFailure === null,
         ),
       ).toBe(true);
-      expect(persisted).toEqual(refreshed);
+      expect(persisted).toEqual({
+        ...refreshed,
+        ownerNote: { state: "missing", version: 0, updatedAt: null },
+      });
       const collectionOutcome = clientLogs.find(
         ([message]) => message === "collection fetch outcome",
       )?.[1];
@@ -1196,9 +1232,9 @@ describe("GameService BGG Integration", () => {
         source: "bgg-collection",
         observedAt,
       });
-      expect(GameSchema.safeParse((await storageService.loadCollection()).games[0]).success).toBe(
-        true,
-      );
+      expect(
+        DurableGameSchema.safeParse((await storageService.loadCollection()).games[0]).success,
+      ).toBe(true);
       expect((await service.refreshBggData(game.id)).game).toMatchObject({
         numPlays: 9,
         playCountEvidence: { status: "valid", value: 9, observedAt: correctedAt },
@@ -1601,7 +1637,7 @@ describe("GameService BGG Integration", () => {
         state: "unusable",
         buckets: unsafe.suggestedPlayerPoll?.buckets,
       });
-      expect(GameSchema.safeParse(refreshed).success).toBe(true);
+      expect(DurableGameSchema.safeParse(refreshed).success).toBe(true);
     });
 
     test("does not change old poll evidence when refresh fails", async () => {
@@ -2330,6 +2366,50 @@ describe("GameService BGG Integration", () => {
   });
 
   describe("importBggCollection observations", () => {
+    test("starts new imports missing and preserves skipped existing notes", async () => {
+      const seed = createGameService({
+        storageService,
+        fitnessService: createFitnessService(),
+      });
+      const { game: existing } = await seed.addGame({ name: "Existing", bggId: 1 });
+      const collection = await storageService.loadCollection();
+      const stored = collection.games.find(({ id }) => id === existing.id);
+      if (stored === undefined) throw new Error("Expected existing game");
+      stored.ownerNote = {
+        state: "cleared",
+        version: 2,
+        updatedAt: "2026-08-25T09:00:00.000Z",
+      };
+      await storageService.saveCollection(collection);
+      const originalNote = structuredClone(stored.ownerNote);
+      const parsed = parseThingItems(await readFixture("thing-wingspan-266192.xml"), observedAt)[0];
+      if (parsed === undefined) throw new Error("Expected Wingspan thing fixture");
+      const service = createGameService({
+        storageService,
+        fitnessService: createFitnessService(),
+        bggClient: clientForResults(
+          [parsed],
+          [
+            { bggId: 1, name: "Existing", yearPublished: 2020, numplays: 1 },
+            { bggId: 266192, name: "Wingspan", yearPublished: 2019, numplays: 12 },
+          ],
+        ),
+      });
+
+      expect(await service.importBggCollection()).toMatchObject({
+        imported: 1,
+        skipped: 1,
+        errors: [],
+      });
+      const persisted = await storageService.loadCollection();
+      expect(persisted.games.find(({ id }) => id === existing.id)?.ownerNote).toEqual(originalNote);
+      expect(persisted.games.find(({ bggId }) => bggId === 266192)?.ownerNote).toEqual({
+        state: "missing",
+        version: 0,
+        updatedAt: null,
+      });
+    });
+
     test("persists all entity classes from each imported thing response", async () => {
       const parsed = parseThingItems(await readFixture("thing-wingspan-266192.xml"), observedAt)[0];
       if (parsed === undefined) throw new Error("Expected Wingspan thing fixture");
@@ -2413,7 +2493,7 @@ describe("GameService BGG Integration", () => {
         source: "bgg-collection",
         observedAt,
       });
-      expect(GameSchema.safeParse(imported).success).toBe(true);
+      expect(DurableGameSchema.safeParse(imported).success).toBe(true);
       expect((await service.refreshBggData(imported.id)).game).toMatchObject({
         numPlays: 11,
         playCountEvidence: { status: "valid", value: 11, observedAt: correctedAt },
@@ -2444,7 +2524,7 @@ describe("GameService BGG Integration", () => {
         state: "unusable",
         buckets: unsafe.suggestedPlayerPoll?.buckets,
       });
-      expect(GameSchema.safeParse(imported).success).toBe(true);
+      expect(DurableGameSchema.safeParse(imported).success).toBe(true);
     });
 
     test("uses complete secondary plays and retains initial plays for absent or partial responses", async () => {

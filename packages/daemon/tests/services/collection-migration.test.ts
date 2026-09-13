@@ -3,6 +3,7 @@ import {
   AxisSchema,
   CURRENT_COLLECTION_SCHEMA_VERSION,
   CollectionSchema,
+  CollectionSchemaV5,
 } from "@shelf-judge/shared";
 import {
   COLLECTION_MIGRATION_STEPS,
@@ -294,7 +295,7 @@ describe("migrateCollection", () => {
     const result = migrateCollection(raw, dependencies);
 
     expect(result).toMatchObject({ migrated: true, sourceVersion: 1 });
-    expect(result.data.schemaVersion).toBe(5);
+    expect(result.data.schemaVersion).toBe(6);
     expect(result.data.axes).toEqual(expectedAxes);
     expect(result.data.games.map(({ bestPlayers }) => bestPlayers)).toEqual([3, 4, null]);
     expect(result.data.games[0]?.bestPlayersInvalidEvidence).toBeNull();
@@ -596,7 +597,7 @@ describe("migrateCollection", () => {
     ]);
   });
 
-  test("chains v0 through v5, inserts Tournament once, and is byte-stable at v5", () => {
+  test("chains v0 through v6, inserts Tournament once, and is byte-stable at v6", () => {
     expect(
       COLLECTION_MIGRATION_STEPS.map(({ fromVersion, toVersion }) => ({ fromVersion, toVersion })),
     ).toEqual([
@@ -605,6 +606,7 @@ describe("migrateCollection", () => {
       { fromVersion: 2, toVersion: 3 },
       { fromVersion: 3, toVersion: 4 },
       { fromVersion: 4, toVersion: 5 },
+      { fromVersion: 5, toVersion: 6 },
     ]);
     const first = migrateCollection(historicalCollection(), dependencies);
     expect(first.data.axes.filter((axis) => axis.source === "tournament")).toHaveLength(1);
@@ -612,6 +614,72 @@ describe("migrateCollection", () => {
     const second = migrateCollection(first.data, dependencies);
     expect(second.migrated).toBe(false);
     expect(JSON.stringify(second.data)).toBe(JSON.stringify(first.data));
+  });
+
+  test("migrates v5 directly by adding only honest missing notes", () => {
+    const current = migrateCollection(historicalCollection(), dependencies).data;
+    const v5 = {
+      ...current,
+      schemaVersion: 5 as const,
+      games: current.games.map(({ ownerNote, ...game }, index) => {
+        void ownerNote;
+        return index === 0
+          ? {
+              ...game,
+              bggData: {
+                communityRating: 7.5,
+                bayesAverage: 7,
+                weight: 2.5,
+                numWeightVotes: 10,
+                description: "BGG prose must remain source evidence, never an owner note.",
+                mechanics: [],
+                categories: [],
+                families: [],
+                subdomains: [],
+                bestPlayerCount: 3,
+                fetchedAt: NOW,
+              },
+            }
+          : game;
+      }),
+    };
+
+    const result = migrateCollection(v5, dependencies);
+
+    expect(result).toMatchObject({ migrated: true, sourceVersion: 5 });
+    expect(result.data.games.map(({ ownerNote }) => ownerNote)).toEqual(
+      v5.games.map(() => ({ state: "missing", version: 0, updatedAt: null })),
+    );
+    expect(
+      result.data.games.map(({ ownerNote, ...game }) => {
+        void ownerNote;
+        return game;
+      }),
+    ).toEqual(v5.games);
+    expect(result.data.intentions).toEqual(v5.intentions);
+    expect(result.data.commandReceipts).toEqual(v5.commandReceipts);
+  });
+
+  test("preserves every validated field in the prose-rich v5 owner-note fixture", async () => {
+    const fixture: unknown = await Bun.file(
+      new URL("../fixtures/collection-schema-v5-owner-notes.json", import.meta.url),
+    ).json();
+    const validatedV5 = CollectionSchemaV5.parse(fixture);
+
+    const result = migrateCollection(fixture, dependencies);
+
+    expect(result).toMatchObject({ migrated: true, sourceVersion: 5 });
+    expect(
+      result.data.games.map(({ ownerNote, ...game }) => {
+        expect(ownerNote).toEqual({ state: "missing", version: 0, updatedAt: null });
+        return game;
+      }),
+    ).toEqual(validatedV5.games);
+    expect(result.data.intentions).toEqual(validatedV5.intentions);
+    expect(result.data.commandReceipts).toEqual(validatedV5.commandReceipts);
+    expect(JSON.stringify(result.data.games.map(({ ownerNote }) => ownerNote))).not.toContain(
+      "BGG description",
+    );
   });
 
   test("v4 to v5 adds empty manual values and drops only irrecoverable affected score overrides", () => {
@@ -635,8 +703,9 @@ describe("migrateCollection", () => {
       derivedField: "playerCountFit",
       configuration: { targetPlayerCount: 4 },
     } as const;
-    const games = current.games.map(({ manualValues, ...game }) => {
+    const games = current.games.map(({ manualValues, ownerNote, ...game }) => {
       void manualValues;
+      void ownerNote;
       return {
         ...game,
         ratings: {
@@ -665,8 +734,8 @@ describe("migrateCollection", () => {
     const current = migrateCollection(historicalCollection(), dependencies).data;
     expect(CollectionSchema.parse(migrateCollection(current, dependencies).data)).toEqual(current);
     expect(() => migrateCollection({ ...current, unexpected: true }, dependencies)).toThrow();
-    expect(() => migrateCollection({ ...current, schemaVersion: 6 }, dependencies)).toThrow(
-      "Unsupported collection schema version 6; current version is 5",
+    expect(() => migrateCollection({ ...current, schemaVersion: 7 }, dependencies)).toThrow(
+      "Unsupported collection schema version 7; current version is 6",
     );
     expect(() =>
       migrateCollection(
@@ -688,7 +757,7 @@ describe("migrateCollection", () => {
 
     expect(result).toMatchObject({ migrated: true, sourceVersion: 3 });
     expect(result.data).toMatchObject({
-      schemaVersion: 5,
+      schemaVersion: 6,
       revision: 0,
       intentions: [],
       commandReceipts: [],

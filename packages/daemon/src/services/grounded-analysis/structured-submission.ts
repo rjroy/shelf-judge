@@ -1,0 +1,405 @@
+import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { Type, type TSchema } from "typebox";
+import { z } from "zod";
+import type { GroundedToolLifecycleDiagnostics } from "./tool-lifecycle.js";
+import { GroundedStructuredSubmissionValidationError } from "./submission-validation-error.js";
+
+export { GroundedStructuredSubmissionValidationError } from "./submission-validation-error.js";
+
+export const GROUNDED_SUBMISSION_TOOL_NAME = "submit_grounded_analysis";
+export const COLLECTION_TOP_TOOL_NAME = "top";
+export const COLLECTION_GREP_TOOL_NAME = "grep";
+export const COLLECTION_READ_GAMES_TOOL_NAME = "readGames";
+export const COLLECTION_SUMMARIZE_TOOL_NAME = "summarize";
+
+export const COLLECTION_EVIDENCE_TOOL_NAMES = Object.freeze([
+  COLLECTION_TOP_TOOL_NAME,
+  COLLECTION_GREP_TOOL_NAME,
+  COLLECTION_READ_GAMES_TOOL_NAME,
+  COLLECTION_SUMMARIZE_TOOL_NAME,
+] as const);
+
+export const COLLECTION_EVIDENCE_WITH_SUBMISSION_TOOL_NAMES = Object.freeze([
+  ...COLLECTION_EVIDENCE_TOOL_NAMES,
+  GROUNDED_SUBMISSION_TOOL_NAME,
+] as const);
+
+export function parseGroundedStructuredSubmission<Output>(
+  schema: z.ZodType<Output>,
+  submission: unknown,
+): Output {
+  const parsed = schema.safeParse(submission);
+  if (!parsed.success) throw new GroundedStructuredSubmissionValidationError(parsed.error.issues);
+  return parsed.data;
+}
+
+function prepareGroundedStructuredSubmission<Output>(
+  schema: z.ZodType<Output>,
+  parameters: unknown,
+): { submission: Output } {
+  const outerParameters = z.object({ submission: z.unknown() }).strict().safeParse(parameters);
+  if (!outerParameters.success)
+    throw new GroundedStructuredSubmissionValidationError(outerParameters.error.issues);
+  return { submission: parseGroundedStructuredSubmission(schema, outerParameters.data.submission) };
+}
+
+function zodToToolSchema(schema: z.ZodTypeAny): TSchema {
+  if (schema instanceof z.ZodString) {
+    const checks = schema._def.checks;
+    const minLength = checks.find((check) => check.kind === "min")?.value;
+    const maxLength = checks.find((check) => check.kind === "max")?.value;
+    return Type.String({
+      ...(minLength === undefined ? {} : { minLength }),
+      ...(maxLength === undefined ? {} : { maxLength }),
+    });
+  }
+  if (schema instanceof z.ZodNumber) return Type.Number();
+  if (schema instanceof z.ZodBoolean) return Type.Boolean();
+  if (schema instanceof z.ZodLiteral && typeof schema.value === "string") {
+    return Type.Unsafe({ type: "string", enum: [schema.value] });
+  }
+  if (schema instanceof z.ZodLiteral) return Type.Literal(schema.value);
+  if (schema instanceof z.ZodEnum)
+    return Type.Unsafe({ type: "string", enum: [...(schema.options as readonly string[])] });
+  if (schema instanceof z.ZodArray) {
+    const { minLength, maxLength } = schema._def;
+    return Type.Array(zodToToolSchema(schema.element as z.ZodTypeAny), {
+      ...(minLength === null ? {} : { minItems: minLength.value }),
+      ...(maxLength === null ? {} : { maxItems: maxLength.value }),
+    });
+  }
+  if (schema instanceof z.ZodOptional)
+    return Type.Optional(zodToToolSchema(schema.unwrap() as z.ZodTypeAny));
+  if (schema instanceof z.ZodEffects) return zodToToolSchema(schema.innerType() as z.ZodTypeAny);
+  if (schema instanceof z.ZodObject) {
+    const properties: Record<string, TSchema> = {};
+    for (const [key, value] of Object.entries(schema.shape as Record<string, z.ZodTypeAny>)) {
+      properties[key] = zodToToolSchema(value);
+    }
+    return Type.Object(properties, {
+      additionalProperties: schema._def.unknownKeys === "passthrough",
+    });
+  }
+  if (schema instanceof z.ZodUnion || schema instanceof z.ZodDiscriminatedUnion) {
+    return Type.Union(
+      (schema.options as readonly z.ZodTypeAny[]).map((option) => zodToToolSchema(option)),
+    );
+  }
+  throw new Error("Unsupported Zod submission schema");
+}
+
+export function createGroundedSubmissionOnlyToolManifest(feature: string) {
+  return Object.freeze({
+    feature,
+    toolNames: Object.freeze([GROUNDED_SUBMISSION_TOOL_NAME] as const),
+  });
+}
+
+/** The model-directed collection tools available to an Analyst turn. */
+export function createCollectionAnalystToolManifest() {
+  return Object.freeze({
+    feature: "collection-analyst",
+    toolNames: Object.freeze(["top", "grep", "readGames", "summarize"]),
+  });
+}
+
+/** The same bounded collection tools are available to a profile reflection. */
+export function createProfileReflectionToolManifest() {
+  return Object.freeze({
+    feature: "profile-reflection",
+    toolNames: COLLECTION_EVIDENCE_WITH_SUBMISSION_TOOL_NAMES,
+  });
+}
+
+export interface GroundedStructuredSubmission<Output> {
+  tool: ToolDefinition;
+  submit(submission: unknown): Promise<void>;
+  captureAssistantUsage(usage: GroundedSubmissionUsageSnapshot): void;
+  getResult(): Output | undefined;
+  getOperationalFailure(): unknown;
+  getAttemptState(): Readonly<{
+    toolCallAttempts: number;
+    rejectedAttempts: number;
+    acceptedResultPresent: boolean;
+    validationIssues: readonly GroundedStructuredSubmissionIssue[];
+    argumentShapes: readonly GroundedStructuredSubmissionArgumentShape[];
+  }>;
+}
+
+/** Usage reported by one completed assistant message. */
+export interface GroundedSubmissionAssistantUsage {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens: number;
+  readonly cacheWriteTokens: number;
+  readonly monetaryCostUsd: number;
+}
+
+/** Cumulative usage through the assistant message that requested submission. */
+export interface GroundedSubmissionUsageSnapshot {
+  readonly inferenceRoundTrips: number;
+  readonly usages: readonly GroundedSubmissionAssistantUsage[];
+}
+
+export type GroundedSubmissionAcceptor<Output> = (
+  output: Output,
+  usage: GroundedSubmissionUsageSnapshot,
+) => Promise<void>;
+
+export interface GroundedStructuredSubmissionIssue {
+  readonly code: z.ZodIssueCode;
+  readonly path: (string | number)[];
+}
+
+export interface GroundedStructuredSubmissionArgumentShape {
+  readonly topLevel: "object" | "non-object";
+  readonly submission: "missing" | "object" | "non-object";
+  readonly result: "missing" | "object" | "non-object";
+  readonly outcome: "missing" | "answered" | "abstained" | "other-string" | "non-string";
+}
+
+const MAX_SAFE_VALIDATION_ISSUES = 8;
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function argumentShape(parameters: unknown): GroundedStructuredSubmissionArgumentShape {
+  const topLevel = objectValue(parameters);
+  if (topLevel === undefined)
+    return {
+      topLevel: "non-object",
+      submission: "missing",
+      result: "missing",
+      outcome: "missing",
+    };
+  const submissionValue = topLevel.submission;
+  const submission = objectValue(submissionValue);
+  if (submission === undefined)
+    return {
+      topLevel: "object",
+      submission: submissionValue === undefined ? "missing" : "non-object",
+      result: "missing",
+      outcome: "missing",
+    };
+  const resultValue = submission.result;
+  const result = objectValue(resultValue);
+  if (result === undefined)
+    return {
+      topLevel: "object",
+      submission: "object",
+      result: resultValue === undefined ? "missing" : "non-object",
+      outcome: "missing",
+    };
+  const outcome = result.outcome;
+  return {
+    topLevel: "object",
+    submission: "object",
+    result: "object",
+    outcome:
+      outcome === undefined
+        ? "missing"
+        : outcome === "answered" || outcome === "abstained"
+          ? outcome
+          : typeof outcome === "string"
+            ? "other-string"
+            : "non-string",
+  };
+}
+
+function schemaKeys(schema: z.ZodTypeAny, keys = new Set<string>()): ReadonlySet<string> {
+  if (schema instanceof z.ZodObject) {
+    for (const [key, value] of Object.entries(schema.shape as Record<string, z.ZodTypeAny>)) {
+      keys.add(key);
+      schemaKeys(value, keys);
+    }
+  } else if (schema instanceof z.ZodArray) {
+    schemaKeys(schema.element as z.ZodTypeAny, keys);
+  } else if (schema instanceof z.ZodOptional || schema instanceof z.ZodEffects) {
+    schemaKeys(
+      schema instanceof z.ZodOptional
+        ? (schema.unwrap() as z.ZodTypeAny)
+        : (schema.innerType() as z.ZodTypeAny),
+      keys,
+    );
+  } else if (schema instanceof z.ZodUnion || schema instanceof z.ZodDiscriminatedUnion) {
+    for (const option of schema.options as readonly z.ZodTypeAny[]) schemaKeys(option, keys);
+  }
+  return keys;
+}
+
+function safeValidationIssues(
+  schema: z.ZodTypeAny,
+  issues: readonly z.ZodIssue[],
+): readonly GroundedStructuredSubmissionIssue[] {
+  const keys = schemaKeys(schema);
+  return issues.slice(0, MAX_SAFE_VALIDATION_ISSUES).map(({ code, path }) => ({
+    code,
+    path: path.filter(
+      (segment): segment is string | number =>
+        typeof segment === "number" || (typeof segment === "string" && keys.has(segment)),
+    ),
+  }));
+}
+
+export function createGroundedStructuredSubmission<Output>(
+  schema: z.ZodType<Output>,
+  toolLifecycle?: GroundedToolLifecycleDiagnostics,
+  accept?: GroundedSubmissionAcceptor<Output>,
+): GroundedStructuredSubmission<Output> {
+  let result: Output | undefined;
+  let toolCallAttempts = 0;
+  let rejectedAttempts = 0;
+  let validationIssues: readonly GroundedStructuredSubmissionIssue[] = [];
+  const argumentShapes: GroundedStructuredSubmissionArgumentShape[] = [];
+  let preparedInvocationPending = false;
+  let preparedInvocationCallIndex: number | undefined;
+  let assistantUsage: GroundedSubmissionUsageSnapshot | undefined;
+  let operationalFailure: unknown;
+  let acceptancePending: Promise<void> | undefined;
+  function acceptParsedSubmission(parsed: Output): Promise<void> | undefined {
+    if (result !== undefined) return;
+    if (accept === undefined) {
+      result = parsed;
+      return;
+    }
+    if (assistantUsage === undefined) throw new Error("Submission assistant usage was unavailable");
+    const existingAcceptance = acceptancePending;
+    if (existingAcceptance !== undefined) {
+      return existingAcceptance.then(() => {
+        if (result === undefined) throw new Error("Grounded result acceptance did not complete");
+      });
+    }
+    const acceptance = accept(parsed, assistantUsage);
+    acceptancePending = acceptance;
+    return acceptance.then(
+      () => {
+        result = parsed;
+      },
+      (error: unknown) => {
+        if (acceptancePending === acceptance) acceptancePending = undefined;
+        throw error;
+      },
+    );
+  }
+
+  const tool = defineTool({
+    name: GROUNDED_SUBMISSION_TOOL_NAME,
+    label: "Submit grounded analysis",
+    description:
+      "Submit the complete grounded-analysis result. This is the only valid output path.",
+    parameters: Type.Object(
+      { submission: zodToToolSchema(schema) },
+      { additionalProperties: false },
+    ),
+    prepareArguments(parameters) {
+      const callIndex = toolLifecycle?.dispatch(GROUNDED_SUBMISSION_TOOL_NAME, "submission");
+      toolCallAttempts += 1;
+      if (argumentShapes.length < 2) argumentShapes.push(argumentShape(parameters));
+      try {
+        if (result !== undefined) throw new Error("A grounded result was already submitted");
+        const prepared = prepareGroundedStructuredSubmission(schema, parameters);
+        preparedInvocationPending = true;
+        preparedInvocationCallIndex = callIndex;
+        return prepared;
+      } catch (error) {
+        if (callIndex !== undefined)
+          toolLifecycle?.handling(
+            GROUNDED_SUBMISSION_TOOL_NAME,
+            "submission",
+            callIndex,
+            "rejected",
+          );
+        rejectedAttempts += 1;
+        if (error instanceof GroundedStructuredSubmissionValidationError) {
+          validationIssues = safeValidationIssues(schema, error.issues);
+        }
+        throw error;
+      }
+    },
+    async execute(_toolCallId, parameters) {
+      const callIndex = preparedInvocationPending
+        ? preparedInvocationCallIndex
+        : toolLifecycle?.dispatch(GROUNDED_SUBMISSION_TOOL_NAME, "submission");
+      if (!preparedInvocationPending) toolCallAttempts += 1;
+      if (!preparedInvocationPending && argumentShapes.length < 2)
+        argumentShapes.push(argumentShape(parameters));
+      preparedInvocationPending = false;
+      preparedInvocationCallIndex = undefined;
+      try {
+        if (result !== undefined) {
+          if (callIndex !== undefined)
+            toolLifecycle?.handling(
+              GROUNDED_SUBMISSION_TOOL_NAME,
+              "submission",
+              callIndex,
+              "accepted",
+            );
+          return {
+            content: [{ type: "text", text: "Grounded result was already accepted." }],
+            details: undefined,
+          };
+        }
+        const acceptance = acceptParsedSubmission(
+          parseGroundedStructuredSubmission(schema, parameters.submission),
+        );
+        if (acceptance !== undefined) await acceptance;
+      } catch (error) {
+        const validationError =
+          error instanceof GroundedStructuredSubmissionValidationError
+            ? error
+            : error instanceof z.ZodError
+              ? new GroundedStructuredSubmissionValidationError(error.issues)
+              : undefined;
+        if (callIndex !== undefined)
+          toolLifecycle?.handling(
+            GROUNDED_SUBMISSION_TOOL_NAME,
+            "submission",
+            callIndex,
+            validationError === undefined ? "failed" : "rejected",
+          );
+        if (validationError !== undefined) {
+          rejectedAttempts += 1;
+          validationIssues = safeValidationIssues(schema, validationError.issues);
+          throw validationError;
+        }
+        operationalFailure = error;
+        throw error;
+      }
+      if (callIndex !== undefined)
+        toolLifecycle?.handling(GROUNDED_SUBMISSION_TOOL_NAME, "submission", callIndex, "accepted");
+      return {
+        content: [{ type: "text", text: "Grounded result accepted." }],
+        details: undefined,
+      };
+    },
+  });
+
+  return {
+    tool,
+    submit: async (submission) => {
+      const acceptance = acceptParsedSubmission(
+        parseGroundedStructuredSubmission(schema, submission),
+      );
+      if (acceptance !== undefined) await acceptance;
+    },
+    captureAssistantUsage: (usage) => {
+      assistantUsage = Object.freeze({
+        inferenceRoundTrips: usage.inferenceRoundTrips,
+        usages: Object.freeze(usage.usages.map((entry) => Object.freeze({ ...entry }))),
+      });
+    },
+    getResult: () => result,
+    getOperationalFailure: () => operationalFailure,
+    getAttemptState: () =>
+      Object.freeze({
+        toolCallAttempts,
+        rejectedAttempts,
+        acceptedResultPresent: result !== undefined,
+        validationIssues,
+        argumentShapes,
+      }),
+  };
+}

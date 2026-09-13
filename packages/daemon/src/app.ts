@@ -9,6 +9,7 @@ import { createScoreRoutes } from "./routes/scores.js";
 import { createImportRoutes } from "./routes/import.js";
 import { createHelpRoutes } from "./routes/help.js";
 import { createConfigRoutes } from "./routes/config.js";
+import { createGroundedAnalysisRoutes } from "./routes/grounded-analysis.js";
 import { createShutdownRoutes } from "./routes/shutdown.js";
 import { createTournamentRoutes } from "./routes/tournament.js";
 import { createProfileRoutes } from "./routes/profile.js";
@@ -29,6 +30,32 @@ import { createPurchaseUtilizationService } from "./services/purchase-utilizatio
 import type { CollectionMutationService } from "./services/collection-mutation-service.js";
 import type { DisplayedFitnessService } from "./services/displayed-fitness-service.js";
 import type { IntentionService } from "./services/intention-service.js";
+import type { OwnerGameNoteService } from "./services/owner-game-note-service.js";
+import type { GroundedAnalysisProvider } from "./services/grounded-analysis/provider.js";
+import {
+  createGroundedAnalysisTransportController,
+  type GroundedAnalysisTransportController,
+} from "./services/grounded-analysis/transport-controller.js";
+import {
+  createGroundedFeatureAnalyzerRegistry,
+  type GroundedFeatureAnalyzer,
+} from "./services/grounded-analysis/feature-policy.js";
+import { REFLECTION_MANIFEST_VERSION } from "@shelf-judge/shared";
+import { createProfileReflectionRoutes } from "./routes/profile-reflections.js";
+import { createReflectionEvidenceService } from "./services/reflection-evidence-service.js";
+import { createReflectionProjectionSnapshotService } from "./services/reflection-evidence-projections.js";
+import {
+  createReflectionRefreshService,
+  type ReflectionRefreshService,
+} from "./services/reflection-refresh-service.js";
+import { createReflectionResultValidator } from "./services/reflection-result-validator.js";
+import type { ReflectionRuntime } from "./services/reflection-runtime.js";
+import { createAnalystRoutes } from "./routes/analyst.js";
+import { createAnalystProjectionSnapshotService } from "./services/analyst-evidence-projections.js";
+import { createAnalystEvidenceService } from "./services/analyst-evidence-service.js";
+import { createAnalystAttestationService } from "./services/analyst-attestation-service.js";
+import { createAnalystTranscriptValidator } from "./services/analyst-transcript-validator.js";
+import { createAnalystTurnService } from "./services/analyst-turn-service.js";
 
 export interface AppDeps {
   storageService: StorageService;
@@ -40,13 +67,20 @@ export interface AppDeps {
   predictionService: PredictionService;
   displayedFitnessService: DisplayedFitnessService;
   intentionService: IntentionService;
+  ownerGameNoteService: OwnerGameNoteService;
+  groundedAnalysisProvider: GroundedAnalysisProvider;
+  reflectionRuntime: ReflectionRuntime;
+  groundedFeatureAnalyzers?: readonly GroundedFeatureAnalyzer<unknown>[];
   bggClient?: BggClient;
-  onShutdown?: () => void;
+  onShutdown?: () => void | Promise<void>;
 }
 
 export interface AppResult {
   app: Hono;
   operations: OperationDefinition[];
+  groundedAnalysisProvider: GroundedAnalysisProvider;
+  groundedAnalysisTransportController: GroundedAnalysisTransportController;
+  reflectionRefreshService: ReflectionRefreshService;
 }
 
 export function createApp(deps: AppDeps): AppResult {
@@ -60,6 +94,9 @@ export function createApp(deps: AppDeps): AppResult {
     predictionService,
     displayedFitnessService,
     intentionService,
+    ownerGameNoteService,
+    groundedAnalysisProvider,
+    reflectionRuntime,
     bggClient,
     onShutdown,
   } = deps;
@@ -85,6 +122,7 @@ export function createApp(deps: AppDeps): AppResult {
     purchaseUtilizationService,
     displayedFitnessService,
     intentionService,
+    ownerGameNoteService,
   });
   const collectionRouteModule = createCollectionRoutes({ purchaseUtilizationService });
   const axisRouteModule = createAxisRoutes({ axisService });
@@ -99,6 +137,132 @@ export function createApp(deps: AppDeps): AppResult {
   const capacityService = createCapacityService({ storageService, gameService });
   const shelfRouteModule = createShelfRoutes({ shelfService, capacityService });
   const wishlistRouteModule = createWishlistRoutes({ wishlistService });
+  const groundedAnalysisRouteModule = createGroundedAnalysisRoutes({
+    configurationStatus: groundedAnalysisProvider.configurationStatus,
+  });
+  const groundedAnalysisTransportController = createGroundedAnalysisTransportController({
+    analyzers: createGroundedFeatureAnalyzerRegistry(deps.groundedFeatureAnalyzers ?? []),
+  });
+  const analystProjectionSnapshotService = createAnalystProjectionSnapshotService({
+    storageService,
+    displayedFitnessService,
+  });
+  const reflectionProjectionSnapshotService = createReflectionProjectionSnapshotService({
+    storageService,
+    displayedFitnessService,
+  });
+  const reflectionEvidenceService = createReflectionEvidenceService({
+    storageService,
+    projectionSnapshotService: reflectionProjectionSnapshotService,
+    ownerGameNoteService,
+    createAnalystEvidenceTurn(authorizedGameIds) {
+      return createAnalystEvidenceService({
+        storageService,
+        projectionSnapshotService: analystProjectionSnapshotService,
+        ownerGameNoteService,
+        ownerNoteAuthorizationScope: {
+          gameIds: authorizedGameIds,
+          allowCollectionSynthesis: true,
+          allowLocalTextSearch: true,
+        },
+      });
+    },
+  });
+  const reflectionRefreshService = createReflectionRefreshService({
+    provider: groundedAnalysisProvider,
+    evidence: reflectionEvidenceService,
+    state: reflectionRuntime.state,
+    validator: createReflectionResultValidator(),
+  });
+  const reflectionRouteModule = createProfileReflectionRoutes({
+    configurationStatus: groundedAnalysisProvider.configurationStatus,
+    state: reflectionRuntime.state,
+    refresh: reflectionRefreshService,
+    async loadCurrentSources() {
+      const provider =
+        groundedAnalysisProvider.configurationStatus.status === "configured"
+          ? groundedAnalysisProvider.configurationStatus.identity
+          : { providerId: "unavailable", modelId: "unavailable", extensionIds: [] };
+      const questionIds = [
+        "repeated-values",
+        "pattern-exceptions",
+        "recurring-trade-offs",
+      ] as const;
+      const assembledPackages =
+        reflectionEvidenceService.assembleAll === undefined
+          ? await Promise.all(
+              questionIds.map((questionId) =>
+                reflectionEvidenceService.assemble(questionId, provider),
+              ),
+            )
+          : await reflectionEvidenceService.assembleAll(questionIds, provider);
+      const [repeatedValues, patternExceptions, recurringTradeOffs] = assembledPackages;
+      if (
+        repeatedValues === undefined ||
+        patternExceptions === undefined ||
+        recurringTradeOffs === undefined
+      ) {
+        throw new Error("Reflection source assembly returned an incomplete question set");
+      }
+      const packages = [repeatedValues, patternExceptions, recurringTradeOffs] as const;
+      const identity = repeatedValues.evidenceIdentity;
+      return {
+        collectionId: identity.collectionId,
+        collectionSchemaVersion: identity.collectionSchemaVersion,
+        collectionRevision: identity.collectionRevision,
+        profileContractVersion: identity.profileContractVersion,
+        profileAlgorithmVersion: identity.profileAlgorithmVersion,
+        providerId: provider.providerId,
+        modelId: provider.modelId,
+        manifestVersion: REFLECTION_MANIFEST_VERSION,
+        // Passive Profile reads never fetch private owner notes. Note writes purge
+        // dependent caches through the owner-note invalidation lifecycle.
+        noteDependenciesChecked: false,
+        questionVersions: Object.fromEntries(
+          packages.map(({ evidenceIdentity }) => [
+            evidenceIdentity.questionId,
+            evidenceIdentity.questionVersion,
+          ]),
+        ),
+        dependenciesByQuestion: {
+          "repeated-values": repeatedValues.dependencies,
+          "pattern-exceptions": patternExceptions.dependencies,
+          "recurring-trade-offs": recurringTradeOffs.dependencies,
+        },
+      };
+    },
+  });
+  const analystAttestationService = createAnalystAttestationService();
+  const analystEvidenceService = createAnalystEvidenceService({
+    storageService,
+    projectionSnapshotService: analystProjectionSnapshotService,
+    ownerGameNoteService,
+    ownerNoteAuthorizationScope: {
+      // The route accepts no caller-selected note scope. Until a request-specific
+      // authorization policy is available, this keeps note retrieval closed.
+      gameIds: [],
+      allowCollectionSynthesis: false,
+      allowLocalTextSearch: false,
+    },
+  });
+  const analystRouteModule = createAnalystRoutes({
+    getConfigurationStatus: () => groundedAnalysisProvider.configurationStatus,
+    transcriptValidator: createAnalystTranscriptValidator({
+      attestationService: analystAttestationService,
+      getProvider: () =>
+        groundedAnalysisProvider.configurationStatus.status === "configured"
+          ? groundedAnalysisProvider.configurationStatus.identity
+          : { providerId: "unavailable", modelId: "unavailable" },
+      compareNoteDependencies: (dependencies) =>
+        analystEvidenceService.compareNoteDependencies(dependencies),
+    }),
+    evidenceService: analystEvidenceService,
+    turnService: createAnalystTurnService({
+      provider: groundedAnalysisProvider,
+      evidenceService: analystEvidenceService,
+    }),
+    attestationService: analystAttestationService,
+  });
 
   // Collect all operations
   const allOperations: OperationDefinition[] = [
@@ -114,12 +278,18 @@ export function createApp(deps: AppDeps): AppResult {
     ...wishlistRouteModule.operations,
     ...shelfRouteModule.operations,
     ...collectionRouteModule.operations,
+    ...groundedAnalysisRouteModule.operations,
+    ...reflectionRouteModule.operations,
+    ...analystRouteModule.operations,
   ];
 
   const helpRouteModule = createHelpRoutes({ operations: allOperations });
   const configRouteModule = createConfigRoutes({ storageService });
   const shutdownRouteModule = createShutdownRoutes({
-    onShutdown: onShutdown ?? (() => process.exit(0)),
+    async onShutdown() {
+      await analystRouteModule.cancelActive();
+      await (onShutdown ?? (() => process.exit(0)))();
+    },
   });
 
   allOperations.push(
@@ -142,9 +312,18 @@ export function createApp(deps: AppDeps): AppResult {
   app.route("/api", wishlistRouteModule.routes);
   app.route("/api", shelfRouteModule.routes);
   app.route("/api", collectionRouteModule.routes);
+  app.route("/api", groundedAnalysisRouteModule.routes);
+  app.route("/api", reflectionRouteModule.routes);
+  app.route("/api", analystRouteModule.routes);
   app.route("/api", helpRouteModule.routes);
   app.route("/api", configRouteModule.routes);
   app.route("/api", shutdownRouteModule.routes);
 
-  return { app, operations: allOperations };
+  return {
+    app,
+    operations: allOperations,
+    groundedAnalysisProvider,
+    groundedAnalysisTransportController,
+    reflectionRefreshService,
+  };
 }
