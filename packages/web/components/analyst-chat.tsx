@@ -9,6 +9,7 @@ import {
   type AnalystTurnRequest,
 } from "@shelf-judge/shared";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
 import { generateBrowserUuid } from "@/lib/browser-uuid";
 
 type Configuration = {
@@ -19,6 +20,10 @@ type Configuration = {
 };
 type Message = AnalystTurnRequest["messages"][number] & { citations?: AnalystCitation[] };
 type LiveState = "idle" | "loading" | "streaming" | "cancelled" | "failed";
+
+const markdownComponents = {
+  a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />,
+} satisfies Components;
 
 function id(): string {
   return generateBrowserUuid();
@@ -370,7 +375,13 @@ export function AnalystChat() {
                 className={`analyst-message analyst-message-${message.role}`}
               >
                 <h2>{message.role === "owner" ? "You" : "Collection Analyst"}</h2>
-                <p>{message.content}</p>
+                {message.role === "analyst" ? (
+                  <div className="analyst-markdown">
+                    <ReactMarkdown components={markdownComponents}>{message.content}</ReactMarkdown>
+                  </div>
+                ) : (
+                  <p>{message.content}</p>
+                )}
                 {message.role === "analyst" && message.citations?.length ? (
                   <ul aria-label="Citations">
                     {message.citations.map((citation) => (

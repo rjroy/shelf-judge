@@ -1339,7 +1339,9 @@ async function handle(request: Request): Promise<Response> {
       outcome: "answered",
       blocks: [
         {
-          text: "Atlas Equal is supported by current validated collection evidence.",
+          text: JSON.stringify(requestBody).includes("**owner literal**")
+            ? "**bold**\n\n1. First\n2. Second"
+            : "Atlas Equal is supported by current validated collection evidence.",
           citationIds: ["score-1"],
         },
       ],

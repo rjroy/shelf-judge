@@ -8861,16 +8861,110 @@ body {
   margin: 1rem 0;
 }
 .analyst-message {
-  border: 1px solid var(--border, #d1d5db);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
   border-radius: 8px;
+  color: var(--text-primary);
   padding: 1rem;
 }
 .analyst-message-owner {
-  background: var(--surface-muted, #f3f4f6);
+  background: var(--bg-muted);
 }
 .analyst-message h2 {
   font-size: 1rem;
   margin: 0 0 0.5rem;
+}
+.analyst-markdown {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.analyst-markdown strong {
+  font-weight: 700;
+}
+.analyst-markdown em {
+  font-style: italic;
+}
+.analyst-markdown > :first-child {
+  margin-top: 0;
+}
+.analyst-markdown > :last-child {
+  margin-bottom: 0;
+}
+.analyst-markdown p,
+.analyst-markdown ul,
+.analyst-markdown ol,
+.analyst-markdown blockquote,
+.analyst-markdown pre {
+  margin: 0.75rem 0;
+}
+.analyst-markdown h1,
+.analyst-markdown h2,
+.analyst-markdown h3,
+.analyst-markdown h4,
+.analyst-markdown h5,
+.analyst-markdown h6 {
+  color: var(--text-primary);
+  margin: 1rem 0 0.5rem;
+}
+.analyst-message .analyst-markdown h2 {
+  font-size: 1.25rem;
+}
+.analyst-markdown h1 {
+  font-size: 1.5rem;
+}
+.analyst-markdown h3 {
+  font-size: 1.125rem;
+}
+.analyst-markdown h4,
+.analyst-markdown h5,
+.analyst-markdown h6 {
+  font-size: 1rem;
+}
+.analyst-markdown ul,
+.analyst-markdown ol {
+  padding-left: 1.5rem;
+}
+.analyst-markdown ul {
+  list-style: disc;
+}
+.analyst-markdown ol {
+  list-style: decimal;
+}
+.analyst-markdown li + li {
+  margin-top: 0.25rem;
+}
+.analyst-markdown a {
+  color: var(--action);
+  overflow-wrap: anywhere;
+}
+.analyst-markdown code {
+  background: var(--bg-muted);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+  padding: 0.1em 0.25em;
+}
+.analyst-markdown pre {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 0.75rem;
+}
+.analyst-markdown pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.analyst-markdown blockquote {
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-secondary);
+  margin-left: 0;
+  padding-left: 0.75rem;
 }
 .analyst-live {
   min-height: 1.5rem;
@@ -8895,8 +8989,9 @@ body {
   z-index: 20;
 }
 .analyst-dialog {
-  background: var(--surface, white);
+  background: var(--bg-surface);
   border-radius: 8px;
+  color: var(--text-primary);
   max-width: 38rem;
   padding: 1.5rem;
 }

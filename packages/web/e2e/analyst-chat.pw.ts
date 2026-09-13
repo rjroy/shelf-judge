@@ -53,6 +53,20 @@ test("Collection Analyst discloses sending, streams a first question and follow-
   ).toEqual({ local: [], session: [], cookies: "", indexedDb: [] });
 });
 
+test("Collection Analyst renders response Markdown while preserving owner plaintext", async ({ page }) => {
+  await page.goto("/analyst");
+  await page.getByLabel("Your question").fill("**owner literal**");
+  await page.getByRole("button", { name: "Ask Analyst" }).click();
+  await page.getByRole("button", { name: "Acknowledge and send" }).click();
+
+  const transcript = page.getByLabel("Analyst conversation");
+  await expect(transcript.locator("strong", { hasText: "bold" })).toBeVisible();
+  await expect(transcript.locator("strong", { hasText: "bold" })).toHaveCSS("font-weight", "700");
+  await expect(transcript.getByRole("listitem").filter({ hasText: "First" })).toBeVisible();
+  await expect(transcript.getByRole("listitem").filter({ hasText: "Second" })).toBeVisible();
+  await expect(transcript.getByText("**owner literal**", { exact: true })).toBeVisible();
+});
+
 test("Collection Analyst works without randomUUID while retaining cryptographic capabilities", async ({
   page,
 }) => {
