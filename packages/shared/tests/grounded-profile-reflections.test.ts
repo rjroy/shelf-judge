@@ -19,6 +19,7 @@ import {
   ReflectionDestinationSchema,
   ReflectionDisclosureSchema,
   ReflectionDeleteRequestSchema,
+  ReflectionEvidenceIdentitySchema,
   ReflectionGetRequestSchema,
   ReflectionGetResultSchema,
   ReflectionOperationResultSchema,
@@ -128,20 +129,20 @@ function completed(
 }
 
 describe("serialized Reflection questions", () => {
-  test("locks exactly three version-one questions in fixed order and default settings", () => {
+  test("locks exactly three questions in fixed order and default settings", () => {
     expect(REFLECTION_QUESTIONS).toEqual([
       {
         id: "repeated-values",
-        version: 1,
+        version: 2,
         wording: "What qualities do I repeatedly value in my games?",
         userJob:
-          "Articulate a criterion the owner has expressed across games but has not represented as a structured axis or deterministic Profile card.",
+          "Identify recurring qualities associated with games the owner evaluates highly, using ratings, scoring, metadata, and optional notes to interpret a pattern rather than merely list results.",
         requiredEvidence:
-          "Present notes from at least two distinct games that independently express the same bounded quality, plus current evidence for each cited game's identity and at least one of current fitness, score breakdown, play evidence, imported metadata, ownership, or supported Profile association.",
+          "Relevant current evidence across games. Explicit personal axis ratings directly support a preference for the rated quality; calculated displayed fitness, normalized tournament Elo, and predictions can suggest a preference pattern but are computed or predicted signals, not stated motives. Notes are optional explanatory context that can strengthen or qualify the synthesis. Cite each game's identity and the evidence used.",
         usefulAnswerTest:
-          "The answer names the repeated criterion in language no stronger than the notes, explains how current evidence supports or limits it, and includes a material counterexample or says that no material counterexample appears in the retrieved scope. It must not merely concatenate or summarize notes.",
+          "Explain the recurring pattern and its evidence and limitations rather than just listing scores. Distinguish personal ratings as evaluations from calculated fitness, tournament, or predicted scores as indirect signals, and do not claim any source proves a stated motive. Qualify mixed evidence.",
         abstentionRule:
-          "Abstain when fewer than two independent present notes support one criterion; the apparent repetition depends on copied, boilerplate, or semantically empty text; current evidence cannot connect the testimony to the collection; a counterexample materially defeats the synthesis; or the result would only restate an existing axis, ranking, or note.",
+          "Abstain only if retrieved relevant evidence is insufficient for a meaningful, supported pattern; missing notes alone are not a reason.",
         enabledByDefault: true,
       },
       {
@@ -197,9 +198,9 @@ describe("serialized Reflection questions", () => {
     ] as const;
     expect(REFLECTION_QUESTION_POLICIES).toEqual({
       "repeated-values": {
-        questionVersion: 1,
+        questionVersion: 2,
         authorizedEvidenceClasses: gameEvidence,
-        minimumIndependentNotes: 2,
+        minimumIndependentNotes: 0,
         requiresCompletePatternCandidates: false,
       },
       "pattern-exceptions": {
@@ -247,6 +248,74 @@ describe("serialized Reflection questions", () => {
     }
     const authorizedPatternResult = completed("pattern-exceptions", "answered", "profile-evidence");
     expect(ReflectionCompletedSchema.safeParse(authorizedPatternResult).success).toBe(true);
+  });
+
+  test("accepts a repeated-values result supported only by scoring evidence", () => {
+    const scoreOnlyResult = {
+      ...completed("repeated-values", "answered", "current-scoring"),
+      citations: [deterministicCitation],
+      centralSynthesis: {
+        text: "The ratings favor games with direct player interaction.",
+        citationIds: ["citation-score"],
+      },
+      supportingBlocks: [
+        {
+          text: "This is an inference from rating and scoring evidence, not a stated motive.",
+          citationIds: ["citation-score"],
+        },
+      ],
+      noteExcerpts: [],
+      scope: {
+        examinedPresentNoteCount: 0,
+        totalPresentNoteCount: 0,
+        examinedGameCount: 1,
+        relevantEligibleGameCount: 1,
+        excludedGameCount: 0,
+        exhaustiveNotes: true,
+      },
+      evidenceIdentity: {
+        manifestVersion: 2,
+        questionId: "repeated-values",
+        questionVersion: 2,
+        collectionId: "collection",
+        collectionSchemaVersion: 6,
+        collectionRevision: 2,
+        profileContractVersion: 9,
+        profileAlgorithmVersion: 11,
+        providerId: "provider",
+        modelId: "model",
+      },
+      dependencies: [{ category: "scoring" as const, sourceId: "game-1", fingerprint: "score-1" }],
+    };
+
+    expect(ReflectionCompletedSchema.safeParse(scoreOnlyResult).success).toBe(true);
+  });
+
+  test("accepts historical and current repeated-values cache identities", () => {
+    const identity = completed("repeated-values").evidenceIdentity;
+
+    expect(
+      ReflectionEvidenceIdentitySchema.safeParse({ ...identity, questionVersion: 1 }).success,
+    ).toBe(true);
+    expect(
+      ReflectionEvidenceIdentitySchema.safeParse({ ...identity, questionVersion: 2 }).success,
+    ).toBe(true);
+  });
+
+  test("accepts a version-two repeated-values question-started event", () => {
+    expect(
+      ReflectionStreamEventSchema.safeParse({
+        version: 1,
+        operationId: "reflection-refresh",
+        sequence: 1,
+        occurredAt: time,
+        type: "question-started",
+        terminal: false,
+        batchId: "batch",
+        questionId: "repeated-values",
+        questionVersion: 2,
+      }).success,
+    ).toBe(true);
   });
 });
 

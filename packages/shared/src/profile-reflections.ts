@@ -25,16 +25,16 @@ export const REFLECTION_QUESTION_IDS = [
 export const REFLECTION_QUESTIONS = [
   {
     id: "repeated-values",
-    version: 1,
+    version: 2,
     wording: "What qualities do I repeatedly value in my games?",
     userJob:
-      "Articulate a criterion the owner has expressed across games but has not represented as a structured axis or deterministic Profile card.",
+      "Identify recurring qualities associated with games the owner evaluates highly, using ratings, scoring, metadata, and optional notes to interpret a pattern rather than merely list results.",
     requiredEvidence:
-      "Present notes from at least two distinct games that independently express the same bounded quality, plus current evidence for each cited game's identity and at least one of current fitness, score breakdown, play evidence, imported metadata, ownership, or supported Profile association.",
+      "Relevant current evidence across games. Explicit personal axis ratings directly support a preference for the rated quality; calculated displayed fitness, normalized tournament Elo, and predictions can suggest a preference pattern but are computed or predicted signals, not stated motives. Notes are optional explanatory context that can strengthen or qualify the synthesis. Cite each game's identity and the evidence used.",
     usefulAnswerTest:
-      "The answer names the repeated criterion in language no stronger than the notes, explains how current evidence supports or limits it, and includes a material counterexample or says that no material counterexample appears in the retrieved scope. It must not merely concatenate or summarize notes.",
+      "Explain the recurring pattern and its evidence and limitations rather than just listing scores. Distinguish personal ratings as evaluations from calculated fitness, tournament, or predicted scores as indirect signals, and do not claim any source proves a stated motive. Qualify mixed evidence.",
     abstentionRule:
-      "Abstain when fewer than two independent present notes support one criterion; the apparent repetition depends on copied, boilerplate, or semantically empty text; current evidence cannot connect the testimony to the collection; a counterexample materially defeats the synthesis; or the result would only restate an existing axis, ranking, or note.",
+      "Abstain only if retrieved relevant evidence is insufficient for a meaningful, supported pattern; missing notes alone are not a reason.",
     enabledByDefault: true,
   },
   {
@@ -191,9 +191,9 @@ const REFLECTION_GAME_EVIDENCE_CLASSES = [
 
 export const REFLECTION_QUESTION_POLICIES = {
   "repeated-values": {
-    questionVersion: 1,
+    questionVersion: 2,
     authorizedEvidenceClasses: REFLECTION_GAME_EVIDENCE_CLASSES,
-    minimumIndependentNotes: 2,
+    minimumIndependentNotes: 0,
     requiresCompletePatternCandidates: false,
   },
   "pattern-exceptions": {
@@ -232,7 +232,7 @@ export const ReflectionEvidenceIdentitySchema = z
   .object({
     manifestVersion: z.literal(REFLECTION_MANIFEST_VERSION),
     questionId: QuestionIdSchema,
-    questionVersion: z.literal(1),
+    questionVersion: PositiveSafeIntegerSchema,
     collectionId: IdSchema,
     collectionSchemaVersion: PositiveSafeIntegerSchema,
     collectionRevision: SafeCountSchema,
@@ -685,7 +685,11 @@ const reflectionStream = createGroundedStreamSchemas([
   {
     type: "question-started",
     terminal: false,
-    payload: { batchId: IdSchema, questionId: QuestionIdSchema, questionVersion: z.literal(1) },
+    payload: {
+      batchId: IdSchema,
+      questionId: QuestionIdSchema,
+      questionVersion: PositiveSafeIntegerSchema,
+    },
   },
   {
     type: "evidence-retrieval",

@@ -390,7 +390,7 @@ export function createProfileReflectionRoutes(deps: ProfileReflectionRoutesDeps)
     evidenceIdentity: {
       manifestVersion: 2,
       questionId: "repeated-values",
-      questionVersion: 1,
+      questionVersion: 2,
       collectionId: "example-collection",
       collectionSchemaVersion: 6,
       collectionRevision: 0,
@@ -421,7 +421,7 @@ export function createProfileReflectionRoutes(deps: ProfileReflectionRoutesDeps)
   const streamEventExamples: OperationJsonValue[] = [
     eventExample(1, "question-started", false, {
       questionId: "repeated-values",
-      questionVersion: 1,
+      questionVersion: 2,
     }),
     eventExample(2, "evidence-retrieval", false, {
       questionId: "repeated-values",

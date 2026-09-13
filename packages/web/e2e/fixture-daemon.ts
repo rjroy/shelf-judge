@@ -601,7 +601,7 @@ function reflectionResult(questionId: ReflectionQuestionId, outcome: "answered" 
     evidenceIdentity: {
       manifestVersion: 2,
       questionId,
-      questionVersion: 1,
+      questionVersion: REFLECTION_QUESTION_POLICIES[questionId].questionVersion,
       collectionId: "fixture-collection",
       collectionSchemaVersion: 6,
       collectionRevision: 1,
@@ -1561,7 +1561,7 @@ async function handle(request: Request): Promise<Response> {
       terminal: false,
       batchId: requestBody.batchId,
       questionId: questionIds[0],
-      questionVersion: 1,
+      questionVersion: REFLECTION_QUESTION_POLICIES[questionIds[0]].questionVersion,
     };
     const evidenceStarted = {
       version: 1,
@@ -1911,3 +1911,4 @@ function shutdown(): void {
 
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+import { REFLECTION_QUESTION_POLICIES } from "@shelf-judge/shared";

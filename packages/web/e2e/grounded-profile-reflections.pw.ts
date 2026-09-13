@@ -1,5 +1,6 @@
 import { chromium, expect, test, type BrowserContext } from "@playwright/test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { REFLECTION_QUESTION_POLICIES } from "@shelf-judge/shared";
 import { webUrl } from "./web-url";
 
 async function reset(page: import("@playwright/test").Page): Promise<void> {
@@ -303,7 +304,7 @@ test("terminal, daemon-owned missing-terminal recovery, and stream-error refresh
   });
   const started = event(1, "question-started", false, {
     questionId: "repeated-values",
-    questionVersion: 1,
+    questionVersion: REFLECTION_QUESTION_POLICIES["repeated-values"].questionVersion,
   });
 
   await page.route(refreshPath, (route) =>
