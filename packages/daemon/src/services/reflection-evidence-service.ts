@@ -69,6 +69,13 @@ const RegistryCitationBaseFields = {
   observedAt: TimestampSchema.optional(),
   canonicalSummary: z.string().min(1),
   destination: ReflectionDestinationSchema,
+  sourceDisplayContext: z
+    .union([
+      z.object({ kind: z.literal("game"), gameTitle: z.string().min(1) }).strict(),
+      z.object({ kind: z.literal("profile"), label: z.literal("Collection profile") }).strict(),
+      z.object({ kind: z.literal("collection"), label: z.literal("Collection") }).strict(),
+    ])
+    .optional(),
 };
 const ReflectionRegistryCitationSchema = z.union([
   z
@@ -638,10 +645,42 @@ export function createReflectionEvidenceService(
       citationSchema: ReflectionRegistryCitationSchema,
       evidence,
     });
+    const gameTitles = new Map(
+      turn.analystSnapshot.sources.flatMap((source) => {
+        if (source.evidenceClass !== "game-identity-ownership") return [];
+        const payload = source.payload;
+        if (
+          typeof payload !== "object" ||
+          payload === null ||
+          !("gameId" in payload) ||
+          !("displayName" in payload) ||
+          typeof payload.gameId !== "string" ||
+          typeof payload.displayName !== "string"
+        )
+          return [];
+        return [[payload.gameId, payload.displayName] as const];
+      }),
+    );
     const citations: ReflectionCitation[] = [];
     for (const citation of accumulated.citations)
       if (deliveredCitationIds.has(citation.citationId))
-        citations.push(ReflectionCitationSchema.parse(citation));
+        citations.push(
+          ReflectionCitationSchema.parse({
+            ...citation,
+            ...(citation.destination.operationId === "shelf.profile.get"
+              ? { sourceDisplayContext: { kind: "profile", label: "Collection profile" } }
+              : citation.destination.operationId === "shelf.collection.get"
+                ? { sourceDisplayContext: { kind: "collection", label: "Collection" } }
+                : citation.destination.parameters.gameId === undefined
+                  ? {}
+                  : (() => {
+                      const gameTitle = gameTitles.get(citation.destination.parameters.gameId);
+                      return gameTitle === undefined
+                        ? {}
+                        : { sourceDisplayContext: { kind: "game", gameTitle } };
+                    })()),
+          }),
+        );
     for (const citation of citations) citationRegistry.add(citation);
     const completeCitations = citationRegistry.complete(
       citations.map(({ citationId }) => citationId),

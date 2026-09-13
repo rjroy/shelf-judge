@@ -598,6 +598,7 @@ function source(
   payload: unknown,
   summary: string,
   destination: ReflectionCitation["destination"],
+  sourceDisplayContext: NonNullable<ReflectionCitation["sourceDisplayContext"]>,
   dependencies: ReflectionDependency[],
   observedAt?: string | null,
 ): ProjectedSource {
@@ -618,6 +619,7 @@ function source(
       ...(observedAt == null ? {} : { observedAt }),
       canonicalSummary: summary,
       destination,
+      sourceDisplayContext,
     }),
     dependencies,
   };
@@ -630,6 +632,7 @@ function gameSources(
   shelves: ShelfConfiguration,
 ): ProjectedSource[] {
   const destination = { operationId: "shelf.game.get" as const, parameters: { gameId: game.id } };
+  const sourceDisplayContext = { kind: "game" as const, gameTitle: game.name };
   const identity = {
     gameId: game.id,
     name: game.name,
@@ -651,6 +654,7 @@ function gameSources(
       identity,
       `${game.name} (${game.ownership})`,
       destination,
+      sourceDisplayContext,
       [dependency("ownership", `game:${game.id}:ownership`, identity)],
     ),
     source(
@@ -659,6 +663,7 @@ function gameSources(
       scoring,
       `${game.name}: current fitness ${displayed.score?.score ?? "unavailable"}`,
       destination,
+      sourceDisplayContext,
       [dependency("scoring", `game:${game.id}:scoring`, scoring)],
     ),
     source(
@@ -667,6 +672,7 @@ function gameSources(
       metadata,
       `${game.name}: current imported metadata`,
       destination,
+      sourceDisplayContext,
       [dependency("metadata", `game:${game.id}:metadata`, metadata, metadata.importedAt)],
       metadata.importedAt,
     ),
@@ -676,6 +682,7 @@ function gameSources(
       playAcquisition,
       `${game.name}: current play and acquisition evidence`,
       destination,
+      sourceDisplayContext,
       [
         dependency(
           "play",
@@ -695,6 +702,7 @@ function gameSources(
       structure,
       `${game.name}: current shelf and redundancy evidence`,
       destination,
+      sourceDisplayContext,
       [dependency("shelf", `game:${game.id}:structure`, structure)],
     ),
   ];
@@ -788,6 +796,7 @@ function patternSources(
         payload,
         `${entityClass} ${entity.name}: ${entity.support} association across ${entity.associatedGameCount} games`,
         { operationId: "shelf.profile.get", parameters: {} },
+        { kind: "profile", label: "Collection profile" },
         [dependency("profile", `profile:${candidateId}`, payload)],
       );
     });

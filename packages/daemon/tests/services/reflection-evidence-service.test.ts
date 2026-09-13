@@ -426,6 +426,13 @@ describe("ReflectionEvidenceService", () => {
 
     const turn = await service.start?.("repeated-values", provider);
     if (turn === undefined) throw new Error("Reflection tool turn is not configured");
+    expect(
+      turn.initial.citations.find(
+        ({ destination }) =>
+          destination.operationId === "shelf.game.get" &&
+          destination.parameters.gameId === firstGameId,
+      )?.sourceDisplayContext,
+    ).toEqual({ kind: "game", gameTitle: "Lazy reflection game 001" });
     expect(turn.initial.scope).toMatchObject({
       totalPresentNoteCount: null,
       examinedPresentNoteCount: 0,
@@ -444,6 +451,13 @@ describe("ReflectionEvidenceService", () => {
     expect(read.items).toHaveLength(2);
     const completed = await service.finish?.(turn);
     if (completed === undefined) throw new Error("Reflection tool turn cannot finish");
+    expect(completed.citations).toHaveLength(2);
+    expect(completed.citations.map(({ sourceDisplayContext }) => sourceDisplayContext)).toEqual(
+      expect.arrayContaining([
+        { kind: "game", gameTitle: "Lazy reflection game 001" },
+        { kind: "game", gameTitle: "Lazy reflection game 002" },
+      ]),
+    );
 
     expect(completed.scope).toMatchObject({
       totalPresentNoteCount: null,

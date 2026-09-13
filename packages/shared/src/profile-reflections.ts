@@ -272,6 +272,13 @@ const CitationBaseFields = {
   observedAt: TimestampSchema.optional(),
   canonicalSummary: z.string().min(1),
   destination: ReflectionDestinationSchema,
+  sourceDisplayContext: z
+    .union([
+      z.object({ kind: z.literal("game"), gameTitle: z.string().min(1) }).strict(),
+      z.object({ kind: z.literal("profile"), label: z.literal("Collection profile") }).strict(),
+      z.object({ kind: z.literal("collection"), label: z.literal("Collection") }).strict(),
+    ])
+    .optional(),
 };
 const OwnerNoteCitationSchema = z
   .object({
