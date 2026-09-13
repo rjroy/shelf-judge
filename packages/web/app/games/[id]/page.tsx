@@ -381,31 +381,33 @@ export default async function GameDetailPage({
           {tournamentStats && tournamentStats.comparisonCount > 0 && (
             <>
               <div className="tournament-breakdown-panel">
-                <div className="panel-section-title">Tournament Breakdown</div>
-                <div className="tournament-breakdown-grid">
-                  <div className="tournament-stat">
-                    <div className="tournament-stat-value">{tournamentStats.comparisonCount}</div>
-                    <div className="tournament-stat-label">Comparisons</div>
-                  </div>
-                  <div className="tournament-stat">
-                    <div className="tournament-stat-value">
-                      {tournamentStats.wins}W / {tournamentStats.losses}L
+                <div className="tournament-breakdown-stats">
+                  <div className="panel-section-title">Tournament Breakdown</div>
+                  <div className="tournament-breakdown-grid">
+                    <div className="tournament-stat">
+                      <div className="tournament-stat-value">{tournamentStats.comparisonCount}</div>
+                      <div className="tournament-stat-label">Comparisons</div>
                     </div>
-                    <div className="tournament-stat-label">Record</div>
-                  </div>
-                  <div className="tournament-stat">
-                    <div className="tournament-stat-value">
-                      {Math.round(tournamentStats.eloRating)}
+                    <div className="tournament-stat">
+                      <div className="tournament-stat-value">
+                        {tournamentStats.wins}W / {tournamentStats.losses}L
+                      </div>
+                      <div className="tournament-stat-label">Record</div>
                     </div>
-                    <div className="tournament-stat-label">Raw ELO</div>
-                  </div>
-                  <div className="tournament-stat">
-                    <div className="tournament-stat-value">
-                      {tournamentStats.normalizedScore !== null
-                        ? tournamentStats.normalizedScore.toFixed(1)
-                        : "-"}
+                    <div className="tournament-stat">
+                      <div className="tournament-stat-value">
+                        {Math.round(tournamentStats.eloRating)}
+                      </div>
+                      <div className="tournament-stat-label">Raw ELO</div>
                     </div>
-                    <div className="tournament-stat-label">Normalized</div>
+                    <div className="tournament-stat">
+                      <div className="tournament-stat-value">
+                        {tournamentStats.normalizedScore !== null
+                          ? tournamentStats.normalizedScore.toFixed(1)
+                          : "-"}
+                      </div>
+                      <div className="tournament-stat-label">Normalized</div>
+                    </div>
                   </div>
                 </div>
                 {tournamentStats.recentComparisons.length > 0 && (

@@ -101,8 +101,9 @@ describe("Score breakdown reference game links", () => {
 describe("Tournament recent comparison links", () => {
   test("opponent links use correct href pattern in source", async () => {
     const file = await Bun.file("packages/web/app/games/[id]/page.tsx").text();
-    expect(file).toContain("href={`/games/${c.opponentGameId}`}");
+    expect(file).toContain("href={`/games/${comparison.opponentGameId}`}");
     expect(file).toContain('className="game-link"');
+    expect(file).toContain("comparison.opponentGameName ?? comparison.opponentGameId.slice(0, 8)");
   });
 
   test("no pre-validation of opponent game existence (REQ-GLINK-8)", async () => {
@@ -234,10 +235,10 @@ describe("Game detail contextual navigation boundary", () => {
   test("keeps unrelated detail links context-free and delegates target availability", async () => {
     const source = await Bun.file("packages/web/app/games/[id]/page.tsx").text();
     for (const href of [
-      "href={`/games/${c.opponentGameId}`}",
+      "href={`/games/${comparison.opponentGameId}`}",
       "href={`/games/${niche.champion.gameId}`}",
       "href={`/games/${neighbor.gameId}`}",
-      "href={`/games/${n.gameId}`}",
+      "href={`/games/${neighbor.gameId}`}",
     ]) {
       expect(source).toContain(href);
     }
