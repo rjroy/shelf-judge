@@ -16,6 +16,12 @@ import type { OutputOptions } from "../output.js";
 const QUESTION_IDS = new Set<string>(REFLECTION_QUESTION_IDS);
 const REFLECTION_PATH = "/api/profile/reflections";
 
+interface Terminal {
+  stdin: NodeJS.ReadableStream & { isTTY?: boolean };
+  stdout: NodeJS.WritableStream & { isTTY?: boolean };
+  stderr: NodeJS.WritableStream;
+}
+
 class ReflectionCliError extends StructuredCliError {
   constructor(code: string, message: string) {
     super({ error: { code, message } });
@@ -70,9 +76,9 @@ function requireAccepted(value: unknown, expectedRequestId: string) {
   return result;
 }
 
-async function confirm(prompt: string): Promise<boolean> {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
-  const readline = createInterface({ input: process.stdin, output: process.stderr });
+async function confirm(prompt: string, terminal: Terminal): Promise<boolean> {
+  if (!terminal.stdin.isTTY || !terminal.stdout.isTTY) return false;
+  const readline = createInterface({ input: terminal.stdin, output: terminal.stderr });
   try {
     return (await readline.question(`${prompt} [y/N] `)).trim().toLowerCase() === "y";
   } finally {
@@ -160,6 +166,7 @@ export async function profileReflectionsCommand(
   commandPath: string,
   args: string[],
   opts: OutputOptions,
+  terminal: Terminal = process,
 ): Promise<string | undefined> {
   if (commandPath === "profile reflections") {
     if (args.length > 0) usage("Usage: shelf-judge profile reflections [--json]");
@@ -230,7 +237,7 @@ export async function profileReflectionsCommand(
     const confirmed = args.length === 1 && args[0] === "--confirm";
     if (args.length > 0 && !confirmed)
       usage("Usage: shelf-judge profile reflections delete [--confirm] [--json]");
-    if (!confirmed && !(await confirm("Delete all cached reflections?"))) {
+    if (!confirmed && !(await confirm("Delete all cached reflections?", terminal))) {
       throw new ReflectionCliError(
         "confirmation-required",
         "Reflection deletion was not confirmed; use --confirm for noninteractive use",
@@ -289,10 +296,10 @@ export async function profileReflectionsCommand(
     `This refresh can make ${targetCount} model operation(s). Shelf Judge has no fixed inference round-trip, token, or monetary cap.`,
     "Cancel with Ctrl-C; already transmitted content may have been processed and may have incurred cost.",
   ].join("\n");
-  const interactive = process.stdin.isTTY && process.stdout.isTTY;
+  const interactive = terminal.stdin.isTTY && terminal.stdout.isTTY;
   if (interactive) {
-    console.error(disclosure);
-    if (!(await confirm("Transmit this evidence and refresh reflections?"))) {
+    terminal.stderr.write(`${disclosure}\n`);
+    if (!(await confirm("Transmit this evidence and refresh reflections?", terminal))) {
       throw new ReflectionCliError(
         "disclosure-required",
         "Disclosure was not acknowledged; use --acknowledge-disclosure for noninteractive use",
@@ -397,12 +404,15 @@ export async function profileReflectionsCommand(
   }
   if (!accepted || events.length === 0)
     throw new ReflectionCliError("incomplete-stream", "Reflection stream ended without an event");
-  const terminal = events.at(-1);
-  if (terminal?.type === "cancelled")
+  const terminalEvent = events.at(-1);
+  if (terminalEvent?.type === "cancelled")
     throw new ReflectionCliError("cancelled", "Reflection refresh cancelled");
-  if (terminal?.type === "failed")
-    throw new ReflectionCliError("unavailable", `Reflection refresh failed: ${terminal.reason}`);
-  if (terminal?.type !== "question-completed" || !terminal.batchComplete) {
+  if (terminalEvent?.type === "failed")
+    throw new ReflectionCliError(
+      "unavailable",
+      `Reflection refresh failed: ${terminalEvent.reason}`,
+    );
+  if (terminalEvent?.type !== "question-completed" || !terminalEvent.batchComplete) {
     throw new ReflectionCliError(
       "incomplete-stream",
       "Reflection stream ended without completed results",

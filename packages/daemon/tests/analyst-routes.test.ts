@@ -148,7 +148,7 @@ describe("Analyst daemon routes", () => {
         expect(request.systemPrompt).toBe(
           "You are Shelf Judge's Collection Analyst. Use the available read-only collection discovery tools as needed, then provide a conversational final answer.",
         );
-        return completedProviderOutput(request);
+        return Promise.resolve(completedProviderOutput(request));
       }),
     });
     const sse = await jsonRequest(context.app, "POST", "/api/analyst/turns/stream", turnRequest());

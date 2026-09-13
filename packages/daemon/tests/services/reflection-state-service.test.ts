@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  REFLECTION_QUESTION_POLICIES,
   ReflectionCompletedSchema,
   type ReflectionCompleted,
   type ReflectionDependency,
@@ -58,7 +59,7 @@ function completed(
     evidenceIdentity: {
       manifestVersion: 2,
       questionId,
-      questionVersion: 1,
+      questionVersion: REFLECTION_QUESTION_POLICIES[questionId].questionVersion,
       collectionId: "collection",
       collectionSchemaVersion: 6,
       collectionRevision: 2,

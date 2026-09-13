@@ -70,26 +70,30 @@ function scriptedOpenAiServer(script: readonly ScriptStep[]) {
       const step = script[cursor];
       cursor += 1;
       if (step === undefined) {
-        if (failures.length === 0) {
-          failures.push(`step ${cursor}: unexpected request after script completion`);
-          requestFacts.push({ pathname: new URL(request.url).pathname, toolNames: [] });
-        }
+        failures.push(`step ${cursor}: unexpected request after script completion`);
+        requestFacts.push({ pathname: new URL(request.url).pathname, toolNames: [] });
         return new Response("script mismatch", { status: 400 });
       }
       const body = await request.text();
       const toolNames = [...body.matchAll(/"name":"([^"]+)"/g)].map((match) => match[1] ?? "");
       requestFacts.push({ pathname: new URL(request.url).pathname, toolNames });
-      const mismatch =
-        [
-          ...(step.expected.tools ?? []).filter((name) => !toolNames.includes(name)).map((name) => `missing tool ${name}`),
-          ...(step.expected.contains ?? []).filter((value) => !body.includes(value)).map((value) => `missing ${value}`),
-          ...(step.expected.excludes ?? []).filter((value) => body.includes(value)).map((value) => `unexpected ${value}`),
-        ][0];
+      const mismatch = [
+        ...(step.expected.tools ?? [])
+          .filter((name) => !toolNames.includes(name))
+          .map((name) => `missing tool ${name}`),
+        ...(step.expected.contains ?? [])
+          .filter((value) => !body.includes(value))
+          .map((value) => `missing ${value}`),
+        ...(step.expected.excludes ?? [])
+          .filter((value) => body.includes(value))
+          .map((value) => `unexpected ${value}`),
+      ][0];
       if (mismatch !== undefined) {
         failures.push(`step ${cursor}: ${mismatch}`);
         return new Response("script mismatch", { status: 400 });
       }
-      const response = typeof step.response === "string" ? { status: 200, body: step.response } : step.response;
+      const response =
+        typeof step.response === "string" ? { status: 200, body: step.response } : step.response;
       return new Response(response.body, {
         status: response.status,
         headers: { "content-type": "text/event-stream" },
@@ -118,11 +122,25 @@ function snapshot(): AnalystProjectionSnapshot {
     sourceId: `game-${suffix}`,
     sourceVersion: "1",
     citationId: `citation-${suffix}`,
-    payload: { gameId: `game-${suffix}`, displayName: `Game ${suffix.toUpperCase()}`, bggId: null, ownershipState: "owned" },
+    payload: {
+      gameId: `game-${suffix}`,
+      displayName: `Game ${suffix.toUpperCase()}`,
+      bggId: null,
+      ownershipState: "owned",
+    },
     canonicalSummary: `Current game ${suffix.toUpperCase()} identity`,
-    destination: { operationId: "shelf.game.get" as const, parameters: { gameId: `game-${suffix}` } },
+    destination: {
+      operationId: "shelf.game.get" as const,
+      parameters: { gameId: `game-${suffix}` },
+    },
   });
-  return { collectionId: "collection", collectionRevision: 1, snapshotFingerprint: "analyst-snapshot", sources: [source("a"), source("b")], page: () => ({ sources: [], nextCursor: null, totalSourceCount: 2 }) };
+  return {
+    collectionId: "collection",
+    collectionRevision: 1,
+    snapshotFingerprint: "analyst-snapshot",
+    sources: [source("a"), source("b")],
+    page: () => ({ sources: [], nextCursor: null, totalSourceCount: 2 }),
+  };
 }
 
 async function runAnalyst(
@@ -135,18 +153,33 @@ async function runAnalyst(
   activeSignals.add(controller);
   try {
     const provider = createGroundedAnalysisProvider({
-      configuration: { status: "configured", providerId: "ollama", modelId: "analyst-scripted-test", extensionIds: ["analyst-scripted-test"] },
+      configuration: {
+        status: "configured",
+        providerId: "ollama",
+        modelId: "analyst-scripted-test",
+        extensionIds: ["analyst-scripted-test"],
+      },
       sessionFactory: createPiGroundedAnalysisSessionFactory({
         cwd: process.cwd(),
         extensionIds: [],
-        extensionFactories: [createOllamaProviderExtension("analyst-scripted-test", 123, fixture.baseUrl)],
+        extensionFactories: [
+          createOllamaProviderExtension("analyst-scripted-test", 123, fixture.baseUrl),
+        ],
       }),
     });
     const result = await createAnalystTurnService({
       provider,
-      evidenceService: createAnalystEvidenceService({ storageService: {}, projectionSnapshotService: { capture: () => Promise.resolve(snapshot()) } }),
+      evidenceService: createAnalystEvidenceService({
+        storageService: {},
+        projectionSnapshotService: { capture: () => Promise.resolve(snapshot()) },
+      }),
       log: () => undefined,
-    }).run({ systemPrompt: "EXACT POLICY", prompt: "EXACT EVIDENCE", signal: controller.signal, audit });
+    }).run({
+      systemPrompt: "EXACT POLICY",
+      prompt: "EXACT EVIDENCE",
+      signal: controller.signal,
+      audit,
+    });
     return { result, requestFacts: fixture.requestFacts };
   } finally {
     try {
@@ -164,52 +197,123 @@ async function runAnalyst(
 describe("Analyst freeform provider protocol", () => {
   test("retrieves evidence then accepts a plain terminal answer without the submission tool", async () => {
     const { result, requestFacts } = await runAnalyst([
-      { expected: { tools: ["readGames"] }, response: toolCall("readGames", { gameIds: ["game-a"], fields: ["game-identity-ownership"] }, "read-a") },
-      { expected: { excludes: ["submit_grounded_analysis"], contains: ["Game A"] }, response: finalText("analyst-evidence-selected") },
+      {
+        expected: { tools: ["readGames"] },
+        response: toolCall(
+          "readGames",
+          { gameIds: ["game-a"], fields: ["game-identity-ownership"] },
+          "read-a",
+        ),
+      },
+      {
+        expected: { excludes: ["submit_grounded_analysis"], contains: ["Game A"] },
+        response: finalText("analyst-evidence-selected"),
+      },
     ]);
-    expect(result).toMatchObject({ output: { blocks: [{ text: "analyst-evidence-selected", citationIds: [] }], citations: [] }, usage: { inferenceRoundTrips: 2 } });
+    expect(result).toMatchObject({
+      output: { blocks: [{ text: "analyst-evidence-selected", citationIds: [] }], citations: [] },
+      usage: { inferenceRoundTrips: 2 },
+    });
     expect(requestFacts).toHaveLength(2);
   });
 
   test("accepts a direct plain terminal answer without retrieval", async () => {
-    const { result } = await runAnalyst([{ expected: { tools: ["readGames"], excludes: ["submit_grounded_analysis"] }, response: finalText("direct-answer") }]);
-    expect(result).toMatchObject({ output: { blocks: [{ text: "direct-answer", citationIds: [] }], citations: [] } });
+    const { result } = await runAnalyst([
+      {
+        expected: { tools: ["readGames"], excludes: ["submit_grounded_analysis"] },
+        response: finalText("direct-answer"),
+      },
+    ]);
+    expect(result).toMatchObject({
+      output: { blocks: [{ text: "direct-answer", citationIds: [] }], citations: [] },
+    });
   });
 
   test("follows two explicit game reads before the terminal answer", async () => {
     const { result } = await runAnalyst([
-      { expected: { tools: ["readGames"] }, response: toolCall("readGames", { gameIds: ["game-a"], fields: ["game-identity-ownership"] }, "read-a") },
-      { expected: { contains: ["Game A"] }, response: toolCall("readGames", { gameIds: ["game-b"], fields: ["game-identity-ownership"] }, "read-b") },
-      { expected: { contains: ["Game B"], excludes: ["submit_grounded_analysis"] }, response: finalText("multipage-answer") },
+      {
+        expected: { tools: ["readGames"] },
+        response: toolCall(
+          "readGames",
+          { gameIds: ["game-a"], fields: ["game-identity-ownership"] },
+          "read-a",
+        ),
+      },
+      {
+        expected: { contains: ["Game A"] },
+        response: toolCall(
+          "readGames",
+          { gameIds: ["game-b"], fields: ["game-identity-ownership"] },
+          "read-b",
+        ),
+      },
+      {
+        expected: { contains: ["Game B"], excludes: ["submit_grounded_analysis"] },
+        response: finalText("multipage-answer"),
+      },
     ]);
-    expect(result).toMatchObject({ output: { blocks: [{ text: "multipage-answer" }] }, retrieved: [{ scope: { matchingSourceCount: 2, exhaustive: true } }] });
+    expect(result).toMatchObject({
+      output: { blocks: [{ text: "multipage-answer" }] },
+      retrieved: [{ scope: { matchingSourceCount: 2, exhaustive: true } }],
+    });
   });
 
-  test("returns one finite transport failure for a terminal server error", async () => {
-    await expect(runAnalyst([{ expected: {}, response: { status: 400, body: "terminal script error" } }])).rejects.toMatchObject({ reason: "transport" });
+  test("returns one finite mapped failure for a terminal HTTP 400", async () => {
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- Bun's expect().rejects is thenable
+    await expect(
+      runAnalyst([{ expected: {}, response: { status: 400, body: "terminal script error" } }]),
+    ).rejects.toMatchObject({ reason: "internal", safeDetail: "grounded-analysis-failed" });
   });
 
-  test("turns an unexpected third request into one terminal transport failure", async () => {
+  test("maps an unexpected third request to one terminal internal failure", async () => {
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- Bun's expect().rejects is thenable
     await expect(
       runAnalyst(
         [
-          { expected: { tools: ["readGames"] }, response: toolCall("readGames", { gameIds: ["game-a"], fields: ["game-identity-ownership"] }, "read-a") },
-          { expected: { contains: ["Game A"] }, response: toolCall("readGames", { gameIds: ["game-b"], fields: ["game-identity-ownership"] }, "read-b") },
+          {
+            expected: { tools: ["readGames"] },
+            response: toolCall(
+              "readGames",
+              { gameIds: ["game-a"], fields: ["game-identity-ownership"] },
+              "read-a",
+            ),
+          },
+          {
+            expected: { contains: ["Game A"] },
+            response: toolCall(
+              "readGames",
+              { gameIds: ["game-b"], fields: ["game-identity-ownership"] },
+              "read-b",
+            ),
+          },
         ],
         (fixture) => {
           expect(fixture.failures).toEqual(["step 3: unexpected request after script completion"]);
           expect(fixture.requestFacts).toHaveLength(3);
         },
       ),
-    ).rejects.toMatchObject({ reason: "transport" });
+    ).rejects.toMatchObject({ reason: "internal", safeDetail: "grounded-analysis-failed" });
   });
 
   test("rejects an empty terminal answer as no freeform response", async () => {
-    await expect(runAnalyst([{ expected: { excludes: ["submit_grounded_analysis"] }, response: finalText("") }])).rejects.toMatchObject({ reason: "output-validation" });
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- Bun's expect().rejects is thenable
+    await expect(
+      runAnalyst([
+        { expected: { excludes: ["submit_grounded_analysis"] }, response: finalText("") },
+      ]),
+    ).rejects.toMatchObject({ reason: "output-validation" });
   });
 
   test("normalizes a length-limited terminal narrative as the final freeform response", async () => {
-    const { result } = await runAnalyst([{ expected: { excludes: ["submit_grounded_analysis"] }, response: finalText("partial narrative", "length") }]);
-    expect(result).toMatchObject({ output: { blocks: [{ text: "partial narrative", citationIds: [] }] }, usage: { inferenceRoundTrips: 1 } });
+    const { result } = await runAnalyst([
+      {
+        expected: { excludes: ["submit_grounded_analysis"] },
+        response: finalText("partial narrative", "length"),
+      },
+    ]);
+    expect(result).toMatchObject({
+      output: { blocks: [{ text: "partial narrative", citationIds: [] }] },
+      usage: { inferenceRoundTrips: 1 },
+    });
   });
 });

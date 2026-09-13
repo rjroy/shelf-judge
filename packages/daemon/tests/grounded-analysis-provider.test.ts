@@ -96,6 +96,9 @@ function expectedScenarioRequests(mode: LocalProviderControls["mode"]): number {
     case "retrieve-until-exhausted":
       return 5;
     case "malformed-then-valid":
+    case "malformed":
+    case "malformed-with-text":
+    case "unrelated-tool-then-valid":
       return 2;
     case "repeat-malformed":
     case "repeat-duplicate":
@@ -186,7 +189,8 @@ function localProviderExtension(controls: LocalProviderControls): ExtensionFacto
       streamSimple(model: Model<Api>, context: Context, options?: SimpleStreamOptions) {
         const stream = createAssistantMessageEventStream();
         const roundTrip = controls.transmissions.length + 1;
-        const expectedRequests = controls.expectedRequests ?? expectedScenarioRequests(controls.mode);
+        const expectedRequests =
+          controls.expectedRequests ?? expectedScenarioRequests(controls.mode);
         if (roundTrip > expectedRequests) {
           controls.fixtureFailures?.push("test fixture exceeded expected scenario requests");
           queueMicrotask(() => {
@@ -264,7 +268,7 @@ function localProviderExtension(controls: LocalProviderControls): ExtensionFacto
                   : "submit_grounded_analysis",
               arguments: {
                 ...(retrievalRound
-                    ? { rankBy: "fitness" }
+                  ? { rankBy: "fitness" }
                   : {
                       submission: {
                         answer:
@@ -526,10 +530,11 @@ describe("grounded-analysis provider lifecycle", () => {
       "grep",
       "readGames",
       "summarize",
+      "submit_grounded_analysis",
     ]);
     expect(createCollectionAnalystToolManifest()).toEqual({
       feature: "collection-analyst",
-      toolNames: COLLECTION_EVIDENCE_WITH_SUBMISSION_TOOL_NAMES,
+      toolNames: COLLECTION_EVIDENCE_TOOL_NAMES,
     });
     expect(createProfileReflectionToolManifest()).toEqual({
       feature: "profile-reflection",
@@ -828,7 +833,10 @@ describe("grounded-analysis provider lifecycle", () => {
 
     const failure = await captureFailure(configuredProvider(controls).analyze(request()));
 
-    expect(failure).toMatchObject({ reason: "transport" });
+    expect(failure).toMatchObject({
+      reason: "internal",
+      safeDetail: "grounded-analysis-failed",
+    });
     expect(controls.transmissions).toEqual([]);
     expect(controls.fixtureFailures).toEqual(["test fixture exceeded expected scenario requests"]);
   });
@@ -859,7 +867,7 @@ describe("grounded-analysis provider lifecycle", () => {
     expect(controls.transmissions).toHaveLength(2);
   });
 
-  test("records correlated retrieval and submission lifecycle outcomes without payloads", async () => {
+  test("records correlated Reflection retrieval and submission lifecycle outcomes without payloads", async () => {
     const controls: LocalProviderControls = {
       transmissions: [],
       mode: "retrieve-then-submit",
@@ -883,8 +891,8 @@ describe("grounded-analysis provider lifecycle", () => {
 
     await configuredProvider(controls).analyze({
       ...request(),
-      audit: { ...request().audit, feature: "collection-analyst" },
-      allowedTools: createCollectionAnalystToolManifest(),
+      audit: { ...request().audit, feature: "profile-reflection" },
+      allowedTools: createProfileReflectionToolManifest(),
       retrievalTools: collectionTestTools(retrieval),
       toolLifecycle: lifecycle,
     });
@@ -1156,6 +1164,7 @@ describe("grounded-analysis provider lifecycle", () => {
     expect(
       createAnalystTurnService({
         provider: {
+          ...configuredProvider({ transmissions: [] }),
           analyzeFreeform: () =>
             Promise.resolve({ output: "Grounded", usage: { state: "unavailable" as const } }),
         },
@@ -1190,6 +1199,7 @@ describe("grounded-analysis provider lifecycle", () => {
     return expect(
       createAnalystTurnService({
         provider: {
+          ...configuredProvider({ transmissions: [] }),
           analyzeFreeform: () =>
             Promise.resolve({ output: "Grounded", usage: { state: "unavailable" as const } }),
         },

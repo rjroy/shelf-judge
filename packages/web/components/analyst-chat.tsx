@@ -22,7 +22,10 @@ type Message = AnalystTurnRequest["messages"][number] & { citations?: AnalystCit
 type LiveState = "idle" | "loading" | "streaming" | "cancelled" | "failed";
 
 const markdownComponents = {
-  a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />,
+  a: ({ node, ...props }) => {
+    void node;
+    return <a {...props} target="_blank" rel="noopener noreferrer" />;
+  },
 } satisfies Components;
 
 function id(): string {

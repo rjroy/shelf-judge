@@ -264,7 +264,6 @@ describe("serialized Reflection questions", () => {
           citationIds: ["citation-score"],
         },
       ],
-      noteExcerpts: [],
       scope: {
         examinedPresentNoteCount: 0,
         totalPresentNoteCount: 0,

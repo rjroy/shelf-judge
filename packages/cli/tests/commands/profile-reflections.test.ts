@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { PassThrough } from "node:stream";
 import {
   REFLECTION_ABSTENTION_REASONS,
   REFLECTION_UNAVAILABLE_REASONS,
@@ -23,6 +24,11 @@ async function rejectionOf(operation: Promise<unknown>): Promise<unknown> {
 function eventType(line: string): string {
   return ReflectionStreamEventSchema.parse(JSON.parse(line)).type;
 }
+
+function nonInteractiveTerminal() {
+  return { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough() };
+}
+
 const reflectionState = {
   contractVersion: 1,
   configuration: {
@@ -437,9 +443,64 @@ describe("profile reflections command", () => {
           "profile reflections refresh",
           ["--question", "repeated-values"],
           { json: true },
+          nonInteractiveTerminal(),
         ),
       ),
     ).toMatchObject({ details: { error: { code: "disclosure-required" } } });
+  });
+
+  test("requests disclosure consent from an injected interactive terminal", async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    Object.defineProperty(stdin, "isTTY", { value: true });
+    Object.defineProperty(stdout, "isTTY", { value: true });
+    let prompt = "";
+    stderr.on("data", (chunk: Buffer) => {
+      prompt += chunk.toString();
+    });
+    stdin.end("y\n");
+
+    const client = createMockClient({
+      routes: {
+        "GET /api/profile/reflections": {
+          response: { ok: true, status: 200, data: reflectionState },
+        },
+      },
+      sseRoutes: {
+        "/api/profile/reflections/refresh": {
+          events: (body) => {
+            const request = body as {
+              batchId: string;
+              requestId: string;
+              cancellationCapability: string;
+            };
+            return [
+              { event: "accepted", data: JSON.stringify(acceptance(request)) },
+              { event: "question-completed", data: JSON.stringify(completion(request)) },
+            ];
+          },
+        },
+      },
+    });
+    const write = console.log;
+    console.log = () => undefined;
+    try {
+      expect(
+        await profileReflectionsCommand(
+          client,
+          "profile reflections refresh",
+          ["--question", "repeated-values"],
+          { json: true },
+          { stdin, stdout, stderr },
+        ),
+      ).toBeUndefined();
+    } finally {
+      console.log = write;
+    }
+    expect(prompt).toContain("Transmit this evidence and refresh reflections? [y/N]");
+    expect(prompt).toContain("Provider: provider; model: model.");
+    expect(prompt).toContain("Relevant owner notes and deterministic collection evidence");
   });
 
   test("writes validated JSON stream events as they arrive and returns no buffered output", async () => {
@@ -475,6 +536,7 @@ describe("profile reflections command", () => {
           "profile reflections refresh",
           ["--question", "repeated-values", "--acknowledge-disclosure"],
           { json: true },
+          nonInteractiveTerminal(),
         ),
       ).toBeUndefined();
     } finally {
@@ -531,6 +593,7 @@ describe("profile reflections command", () => {
       "profile reflections refresh",
       ["--question", "repeated-values", "--acknowledge-disclosure"],
       { json: true },
+      nonInteractiveTerminal(),
     );
     await Bun.sleep(0);
     process.emit("SIGINT");
@@ -569,6 +632,7 @@ describe("profile reflections command", () => {
       "profile reflections refresh",
       ["--question", "repeated-values", "--acknowledge-disclosure"],
       { json: true },
+      nonInteractiveTerminal(),
     );
     await Bun.sleep(0);
     process.emit("SIGINT");
@@ -621,6 +685,7 @@ describe("profile reflections command", () => {
             "profile reflections refresh",
             ["--acknowledge-disclosure"],
             { json: true },
+            nonInteractiveTerminal(),
           ),
         ),
       ).toMatchObject({ details: { error: { code: "unavailable" } } });
@@ -656,6 +721,7 @@ describe("profile reflections command", () => {
           {
             json: true,
           },
+          nonInteractiveTerminal(),
         ),
       ),
     ).toMatchObject({ details: { error: { code: "invalid-daemon-response" } } });
