@@ -4,7 +4,7 @@ date: 2026-04-06
 status: parked
 tags: [deferred, feature, bgg, auth]
 modules: [daemon]
-origin: .lore/reference/specs/mvp.md
+origin: .lore/work/specs/mvp.md
 ---
 
 # BGG user authentication

@@ -6,7 +6,7 @@ tags: [brainstorm, tournament, pairwise, data-model, ux]
 modules: [daemon, web, cli, shared]
 related:
   - .lore/work/issues/one-pass-bracket-mode.md
-  - .lore/reference/specs/tournament/tournament-ranking.md
+  - .lore/work/specs/tournament/tournament-ranking.md
   - .lore/reference/specs/tournament/reduce-tournament-overhead.md
   - .lore/work/brainstorm/fitness-model-options.md
   - .lore/reference/vision.md
@@ -18,7 +18,7 @@ related:
 
 **Vision status:** Active. Four-step alignment analysis applied to each proposal.
 
-**Context scanned:** `.lore/reference/vision.md`, `.lore/work/issues/one-pass-bracket-mode.md`, `.lore/reference/specs/tournament/tournament-ranking.md`, `.lore/reference/specs/tournament/reduce-tournament-overhead.md`, `.lore/work/brainstorm/fitness-model-options.md`, `.lore/work/brainstorm/collection-profiling.md`, `packages/daemon/src/services/tournament-service.ts`, `packages/daemon/src/services/elo-engine.ts`, `packages/web/app/tournament/page.tsx`, `packages/web/app/tournament/session/page.tsx`, tournament-related issues and retros.
+**Context scanned:** `.lore/reference/vision.md`, `.lore/work/issues/one-pass-bracket-mode.md`, `.lore/work/specs/tournament/tournament-ranking.md`, `.lore/reference/specs/tournament/reduce-tournament-overhead.md`, `.lore/work/brainstorm/fitness-model-options.md`, `.lore/work/brainstorm/collection-profiling.md`, `packages/daemon/src/services/tournament-service.ts`, `packages/daemon/src/services/elo-engine.ts`, `packages/web/app/tournament/page.tsx`, `packages/web/app/tournament/session/page.tsx`, tournament-related issues and retros.
 
 **Recent brainstorm check:** No prior brainstorm addresses tractability of tournaments at scale. `fitness-model-options.md` (resolved) covered the choice of tournament as a fitness signal and flagged "requires many comparisons to converge" as a weakness but did not propose a structural fix. `collection-profiling.md` (resolved) consumes tournament history for divergence analysis; it assumes history exists but does not shape how it accumulates.
 

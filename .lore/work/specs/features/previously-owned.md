@@ -2,6 +2,7 @@
 title: "Previously Owned"
 date: 2026-04-12
 status: implemented
+authority: pending-reconciliation
 tags: [spec, ownership, data-model, redundancy, niche, collection, lifecycle]
 modules: [shared, daemon, web, cli]
 req-prefix: PREV
@@ -9,7 +10,7 @@ related:
   - .lore/work/brainstorm/previously-owned-state.md
   - .lore/work/issues/previously-owned-state.md
   - .lore/reference/vision.md
-  - .lore/reference/specs/mvp.md
+  - .lore/work/specs/mvp.md
   - .lore/reference/specs/features/wishlist.md
   - .lore/reference/specs/fitness/redundancy-scoring.md
   - .lore/reference/specs/fitness/niche-champion-display.md
@@ -17,6 +18,13 @@ related:
 ---
 
 # Spec: Previously Owned
+
+> **Reconciliation status:** Pending reconciliation. This mixed-era spec retains
+> surviving requirements and is not wholly superseded, but it is not reference
+> authority. Its profiling-inclusion behavior conflicts with the newer
+> owned-only useful-profile contract. Preserve the ownership lifecycle and other
+> requirements while that conflict is reconciled; do not resolve it from this
+> document alone.
 
 ## Overview
 
@@ -262,7 +270,7 @@ If every game in the collection is marked as previously-owned, the default colle
 
 - [Brainstorm: Previously Owned and Game Ownership State](.lore/work/brainstorm/previously-owned-state.md): The source brainstorm. This spec implements Proposal 3 (Narrow Fix) and Proposal 5 (Collection Views).
 - [Vision](.lore/reference/vision.md): Principle 5 ("The shelf has a carrying capacity") is the core motivation. Redundancy and niche should reflect the physical shelf. Principle 2 ("One number, honestly derived") requires that the exclusion be visible and explained.
-- [Spec: MVP](.lore/reference/specs/mvp.md): REQ-MVP-8 defines the existing removal behavior (permanent delete). This spec adds a softer alternative that preserves data.
+- [Spec: MVP](.lore/work/specs/mvp.md): Reconciliation input whose REQ-MVP-8 defines the existing removal behavior (permanent delete). This spec adds a softer alternative that preserves data.
 - [Design: MVP Data Model](.lore/reference/designs/mvp-data-model.md): The `Game` interface that gains the `ownership` field.
 - [Spec: Wishlist](.lore/reference/specs/features/wishlist.md): REQ-WISH-6 (no wishlisting collected games) and REQ-WISH-28 (non-owned games don't affect collection computations) establish the principle this spec extends.
 - [Spec: Redundancy Scoring](.lore/reference/specs/fitness/redundancy-scoring.md): The `computeRedundancyAdjustments` function that needs pre-filtered input.

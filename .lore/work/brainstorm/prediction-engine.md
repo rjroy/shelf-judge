@@ -7,7 +7,7 @@ tags: [brainstorm, prediction, fitness, similarity, bgg]
 related:
   - .lore/work/issues/deferred-prediction-engine.md
   - .lore/reference/designs/mvp-fitness-model.md
-  - .lore/reference/specs/fitness/utility-curves.md
+  - .lore/work/specs/fitness/utility-curves.md
   - .lore/work/brainstorm/fitness-model-options.md
   - .lore/work/issues/deferred-collection-profiling.md
   - .lore/work/issues/deferred-redundancy-scoring.md
@@ -24,7 +24,7 @@ related:
 
 - `.lore/reference/vision.md` (5 principles, 3 anti-goals, tension table)
 - `.lore/reference/designs/mvp-fitness-model.md` (weighted average scorecard, implemented)
-- `.lore/reference/specs/fitness/utility-curves.md` (preference shapes, veto, native scales, implemented)
+- `.lore/work/specs/fitness/utility-curves.md` (preference shapes and veto; pending reconciliation)
 - `.lore/work/brainstorm/fitness-model-options.md` (5 approaches, hybrid conclusion)
 - `.lore/work/issues/deferred-prediction-engine.md`, `deferred-collection-profiling.md`, `deferred-redundancy-scoring.md`
 - `packages/shared/src/types.ts` (current types: Game, BggGameData, Axis, FitnessResult, TournamentData)

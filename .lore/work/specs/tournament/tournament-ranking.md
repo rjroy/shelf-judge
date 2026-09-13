@@ -2,11 +2,12 @@
 title: "Tournament-based ELO ranking"
 date: 2026-04-06
 status: implemented
+authority: pending-reconciliation
 tags: [spec, fitness, ranking, tournament, elo, pairwise]
 modules: [daemon, web, cli, shared]
 related:
   - .lore/reference/vision.md
-  - .lore/reference/specs/mvp.md
+  - .lore/work/specs/mvp.md
   - .lore/work/brainstorm/fitness-model-options.md
   - .lore/reference/designs/mvp-fitness-model.md
   - .lore/reference/designs/mvp-data-model.md
@@ -16,6 +17,14 @@ req-prefix: TOURN
 ---
 
 # Spec: Tournament-Based ELO Ranking
+
+> **Reconciliation status:** Pending reconciliation. This mixed-era spec retains
+> surviving requirements and is not wholly superseded, but it is not reference
+> authority. Peer-score framing, recalculation guarantees, and divergence
+> behavior are superseded. For current authority, use
+> `.lore/reference/specs/tournament/elo-axis-source.md` and
+> `.lore/reference/specs/tournament/reduce-tournament-overhead.md`; preserve
+> session, pairing, ELO, and filter requirements pending reconciliation.
 
 ## Overview
 
@@ -211,7 +220,7 @@ These are genuine unknowns that should be resolved through use:
 
 - [Vision](.lore/reference/vision.md): Transparency principle (Principle 2) requires both scores to show their derivation. Principle 4 ("data serves judgment") means the tournament rank informs but doesn't decide.
 - [Fitness Brainstorm](.lore/work/brainstorm/fitness-model-options.md): Explored pairwise tournament as Approach 2. Hybrid conclusion (tournament + axes) is the long-term direction this spec implements.
-- [MVP Spec](.lore/reference/specs/mvp.md): Deferred tournament ranking at line 92. Exit point at line 105 (`[STUB: tournament-ranking]`).
+- [MVP Spec](.lore/work/specs/mvp.md): Reconciliation input with deferred tournament ranking at line 92. Exit point at line 105 (`[STUB: tournament-ranking]`).
 - [MVP Fitness Model](.lore/reference/designs/mvp-fitness-model.md): Documents the axis scorecard system this feature sits alongside, not within.
 - [MVP Data Model](.lore/reference/designs/mvp-data-model.md): Defines Game, Axis, Collection structures. Tournament data extends but does not modify these.
 - [Deferred Issue](.lore/work/issues/deferred-tournament-ranking.md): Origin of this work. Issue can be closed when this spec is approved.

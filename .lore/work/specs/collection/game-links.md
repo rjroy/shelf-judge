@@ -2,6 +2,7 @@
 title: "Game links"
 date: 2026-04-11
 status: implemented
+authority: pending-reconciliation
 tags: [spec, web-ui, navigation, links]
 modules: [web-ui]
 related:
@@ -12,6 +13,13 @@ req-prefix: GLINK
 ---
 
 # Spec: Game Links
+
+> **Reconciliation status:** Pending reconciliation. This mixed-era spec retains
+> surviving requirements and is not wholly superseded, but it is not reference
+> authority. Profile divergence and outlier surfaces described here no longer
+> exist. Consult
+> `.lore/reference/specs/current/game-view-next-previous-navigation.md` for the
+> current navigation authority; preserve applicable remaining link requirements.
 
 ## Overview
 

@@ -2,6 +2,7 @@
 title: "Shelf Judge MVP"
 date: 2026-04-04
 status: implemented
+authority: pending-reconciliation
 tags: [spec, mvp, fitness, scoring, bgg]
 modules: [daemon, web-ui, cli]
 related:
@@ -19,6 +20,13 @@ req-prefix: MVP
 ---
 
 # Spec: Shelf Judge MVP
+
+> **Reconciliation status:** Pending reconciliation. This mixed-era spec retains
+> surviving requirements and is not wholly superseded, but it is not reference
+> authority. Its deferred list and original BGG-axis model are outdated. Consult
+> the active MVP design references and
+> `.lore/reference/specs/current/derived-bgg-axes.md` before making product or
+> implementation decisions.
 
 ## Overview
 

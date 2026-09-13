@@ -5,7 +5,7 @@ status: executed
 tags: [plan, fitness, scoring, axes, utility-curves]
 modules: [shared, daemon, web, cli]
 related:
-  - .lore/reference/specs/fitness/utility-curves.md
+  - .lore/work/specs/fitness/utility-curves.md
   - .lore/reference/designs/mvp-fitness-model.md
   - .lore/reference/designs/mvp-data-model.md
   - .lore/work/brainstorm/fitness-model-options.md
@@ -16,7 +16,7 @@ related:
 
 ## Spec Reference
 
-**Spec**: `.lore/reference/specs/fitness/utility-curves.md`
+**Reconciliation input**: `.lore/work/specs/fitness/utility-curves.md`
 **Fitness model**: `.lore/reference/designs/mvp-fitness-model.md`
 **Data model**: `.lore/reference/designs/mvp-data-model.md`
 
@@ -577,7 +577,7 @@ Veto: "Wife will play it" scored 3 (threshold: below 4)
 1. Run `bun run test` across all packages. All tests must pass.
 2. Run `bun run typecheck`. Clean output required.
 3. Run `bun run lint`. Clean output required.
-4. Launch a sub-agent to read the spec at `.lore/reference/specs/fitness/utility-curves.md` and verify each of the 28 requirements against the implementation. The agent checks:
+4. Launch a sub-agent to read the reconciliation input at `.lore/work/specs/fitness/utility-curves.md` and verify each of the 28 requirements against the implementation. The agent checks:
    - Each REQ-CURVE-N is implemented in the code.
    - Automated success criteria from the spec are covered by tests.
    - Manual verification scenarios are achievable (describe how to demo each one).

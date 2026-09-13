@@ -5,7 +5,7 @@ status: implemented
 tags: [tournament, filtering, bgg]
 modules: [shared, daemon, web]
 related:
-  - .lore/reference/specs/tournament/tournament-ranking.md
+  - .lore/work/specs/tournament/tournament-ranking.md
 req-prefix: BGG-TAG
 ---
 
@@ -69,7 +69,7 @@ The tournament session `bggTag` filter currently requires an exact case-insensit
 
 ## Context
 
-- `.lore/reference/specs/tournament/tournament-ranking.md` — parent spec for tournament sessions and filter types.
+- `.lore/work/specs/tournament/tournament-ranking.md` — reconciliation input for tournament sessions and filter types.
 - `.lore/work/plans/tournament-ranking.md` — defines `SessionFilterType` and the original exact-match `bggTag` semantics.
 - Current implementations to be unified:
   - `packages/daemon/src/services/tournament-service.ts` (authoritative filter)

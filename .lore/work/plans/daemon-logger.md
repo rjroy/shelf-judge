@@ -6,7 +6,7 @@ tags: [plan, observability, logging, cleanup]
 modules: [daemon-services, bgg-client]
 related:
   [
-    .lore/reference/specs/infra/daemon-logger.md,
+    .lore/work/specs/infra/daemon-logger.md,
     .lore/work/issues/daemon-logger-factory.md,
     .lore/work/retros/bgg-import-double-request.md,
   ]
@@ -16,7 +16,7 @@ related:
 
 ## Spec Reference
 
-**Spec**: `.lore/reference/specs/infra/daemon-logger.md`
+**Reconciliation input**: `.lore/work/specs/infra/daemon-logger.md`
 
 Requirements addressed:
 
@@ -164,7 +164,7 @@ File-by-file details:
 1. Run `rg 'console\.(log|warn|error)' packages/daemon/src/` and verify zero results. This is the spec's explicit success criterion. Also run against `packages/daemon/tests/` to confirm no test file is suppressing or asserting on raw `console.*` calls that would mask missed replacements.
 2. Run `bun run test` and verify all existing tests pass. No behavior change is expected since the logger output is visually identical.
 3. Run `bun run typecheck` and `bun run lint` to catch any import or style issues.
-4. Launch a fresh-context sub-agent to review the implementation against the spec. The sub-agent reads `.lore/reference/specs/infra/daemon-logger.md` and all modified files, checking each REQ-LOG-\* requirement.
+4. Launch a fresh-context sub-agent to review the implementation against the reconciliation input. The sub-agent reads `.lore/work/specs/infra/daemon-logger.md` and all modified files, checking each REQ-LOG-\* requirement.
 
 ## Delegation Guide
 

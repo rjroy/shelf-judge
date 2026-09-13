@@ -46,7 +46,8 @@ Design docs, specs, plans, and research live in `.lore/`. Check active reference
 material before asking about architectural decisions or domain context. Key files:
 
 - `.lore/reference/vision.md` - Project principles and anti-goals
-- `.lore/reference/specs/mvp.md` - MVP requirements (24 items)
+- `.lore/work/specs/mvp.md` - Mixed-era MVP requirements pending reconciliation;
+  consult the active design references before treating any requirement as authority
 - `.lore/reference/designs/mvp-web-ui.md` - Behavioral web UI requirements
 - `.lore/reference/designs/` - Active data model, fitness algorithm, API surface, BGG integration, CLI, and web UI references
 

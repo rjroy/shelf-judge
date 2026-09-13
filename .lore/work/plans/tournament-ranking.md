@@ -5,7 +5,7 @@ status: executed
 tags: [plan, tournament, elo, ranking, pairwise]
 modules: [shared, daemon, web, cli]
 related:
-  - .lore/reference/specs/tournament/tournament-ranking.md
+  - .lore/work/specs/tournament/tournament-ranking.md
   - .lore/reference/designs/mvp-data-model.md
   - .lore/reference/designs/mvp-api-surface.md
   - .lore/work/mockups/ (tournament-*.html)
@@ -15,7 +15,7 @@ related:
 
 ## Spec Reference
 
-**Spec**: `.lore/reference/specs/tournament/tournament-ranking.md`
+**Reconciliation input**: `.lore/work/specs/tournament/tournament-ranking.md`
 **Visual mockups**: `.lore/work/mockups/ (tournament-*.html)` (4 HTML mockups: session start, filter builder, filter preview, active comparison)
 
 Requirements addressed:
@@ -618,7 +618,7 @@ Extend `parseArgs` to handle `--filter` flags (collect into `filterFlags: string
 1. Run `bun run test` across all packages. All tests must pass.
 2. Run `bun run typecheck`. Clean output required.
 3. Run `bun run lint`. Clean output required.
-4. Launch a sub-agent to read the spec at `.lore/reference/specs/tournament/tournament-ranking.md` and verify each of the 20 requirements against the implementation. The agent checks:
+4. Launch a sub-agent to read the reconciliation input at `.lore/work/specs/tournament/tournament-ranking.md` and verify each of the 20 requirements against the implementation. The agent checks:
    - Each REQ-TOURN-N is implemented in the code.
    - Automated success criteria from the spec are covered by tests.
    - Manual verification scenarios are achievable (describe how to demo each one).

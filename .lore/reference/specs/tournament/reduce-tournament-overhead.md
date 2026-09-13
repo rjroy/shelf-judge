@@ -6,7 +6,7 @@ tags: [spec, tournament, storage, performance, data-model, migration]
 modules: [shared, daemon]
 related:
   - .lore/work/issues/reduce-tournament-overhead.md
-  - .lore/reference/specs/tournament/tournament-ranking.md
+  - .lore/work/specs/tournament/tournament-ranking.md
   - .lore/reference/designs/mvp-data-model.md
   - .lore/work/brainstorm/collection-profiling.md
   - .lore/work/retros/tournament-stats-record-shape-mismatch.md
@@ -152,7 +152,7 @@ Sessions serve two purposes: grouping comparisons during active play (pair dedup
 
 ## Superseded Requirements
 
-This spec supersedes the following requirements from `.lore/reference/specs/tournament/tournament-ranking.md`:
+This spec supersedes the following requirements from `.lore/work/specs/tournament/tournament-ranking.md`:
 
 | Requirement                                     | Status               | Reason                                                                                                 |
 | ----------------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------ |
@@ -165,7 +165,7 @@ REQ-TOURN-1 (Comparison entity) and REQ-TOURN-3 (tournament.json structure) are 
 ## Context
 
 - [Vision](.lore/reference/vision.md): Transparency principle (Principle 2) is preserved. The display still shows wins, losses, recent opponents, and raw ELO alongside the normalized score. What changes is the source: cached fields instead of full-history derivation.
-- [Tournament Spec](.lore/reference/specs/tournament/tournament-ranking.md): The parent spec. This spec modifies its data model and removes the recalculate guarantee.
+- [Tournament Spec](.lore/work/specs/tournament/tournament-ranking.md): Reconciliation input. This spec modifies its data model and removes the recalculate guarantee.
 - [Collection Profiling Brainstorm](.lore/work/brainstorm/collection-profiling.md): Proposal 3 (Tournament/Fitness Divergence) reads comparison history for divergence analysis. This spec's rolling window preserves recent comparison patterns. Aggregate divergence (ELO vs axis score gap) is computed from cached stats, not raw history, which already works today via REQ-TOURN-18.
 - [Tournament Stats Shape Mismatch Retro](.lore/work/retros/tournament-stats-record-shape-mismatch.md): Warns that changes to tournament data shape require grepping every client helper. This spec keeps the API response shape unchanged, but the removal of `recalculate` must be caught in both web and CLI.
 - [MVP Data Model Design](.lore/reference/designs/mvp-data-model.md): No migration framework exists. The migration approach here (format-detection on load, idempotent) follows the project's established pattern.

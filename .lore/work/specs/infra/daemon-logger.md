@@ -2,6 +2,7 @@
 title: Structured logger factory for daemon services
 date: 2026-04-06
 status: implemented
+authority: pending-reconciliation
 tags: [observability, logging, cleanup, daemon]
 modules: [daemon-services, bgg-client]
 related:
@@ -10,6 +11,12 @@ req-prefix: LOG
 ---
 
 # Spec: Structured Logger Factory
+
+> **Reconciliation status:** Pending reconciliation. This mixed-era spec retains
+> surviving requirements and is not wholly superseded, but it is not reference
+> authority. Its console-call counts are stale, and remaining `console.warn`
+> usage may be an implementation bug rather than supersession. Preserve the
+> logger-factory requirements while reconciling them against the daemon code.
 
 ## Overview
 

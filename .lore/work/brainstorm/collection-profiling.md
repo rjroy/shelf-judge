@@ -8,7 +8,7 @@ related:
   - .lore/work/issues/deferred-collection-profiling.md
   - .lore/work/issues/deferred-llm-integration.md
   - .lore/work/issues/deferred-prediction-engine.md
-  - .lore/reference/specs/fitness/utility-curves.md
+  - .lore/work/specs/fitness/utility-curves.md
   - .lore/reference/designs/mvp-data-model.md
   - .lore/reference/designs/mvp-fitness-model.md
   - .lore/archive/research/claude-agent-sdk.md
@@ -23,7 +23,7 @@ related:
 
 **Vision status:** Active. Four-step alignment analysis applied to each proposal.
 
-**Context scanned:** `.lore/reference/vision.md`, all `.lore/work/issues/` (open and resolved), `.lore/work/brainstorm/` (fitness-model-options, collection-filter-sort), `.lore/reference/specs/fitness/utility-curves.md`, `.lore/reference/designs/mvp-data-model.md`, `.lore/reference/designs/mvp-fitness-model.md`, `.lore/archive/research/claude-agent-sdk.md`, `packages/shared/src/types.ts`, `packages/daemon/src/services/fitness-service.ts`, recent git history.
+**Context scanned:** `.lore/reference/vision.md`, all `.lore/work/issues/` (open and resolved), `.lore/work/brainstorm/` (fitness-model-options, collection-filter-sort), `.lore/work/specs/fitness/utility-curves.md`, `.lore/reference/designs/mvp-data-model.md`, `.lore/reference/designs/mvp-fitness-model.md`, `.lore/archive/research/claude-agent-sdk.md`, `packages/shared/src/types.ts`, `packages/daemon/src/services/fitness-service.ts`, recent git history.
 
 **Recent brainstorm check:** Two prior brainstorms exist. `fitness-model-options.md` (resolved) explored Approach 3 (Collection Profile + Attribute Similarity) and Approach 5 (LLM-Mediated Synthesis), both adjacent to this territory. Neither was selected as the primary fitness model, but both contain observations that apply here. `collection-filter-sort.md` (resolved) is unrelated. No prior brainstorm addresses collection profiling directly.
 

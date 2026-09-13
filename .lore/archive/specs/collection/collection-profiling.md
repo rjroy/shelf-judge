@@ -10,8 +10,8 @@ related:
   - .lore/work/notes/trusted-collection-insights-consumers.md
   - .lore/work/notes/trusted-collection-insights-validation.md
   - .lore/reference/specs/tournament/elo-axis-source.md
-  - .lore/reference/specs/tournament/tournament-ranking.md
-  - .lore/reference/specs/fitness/utility-curves.md
+  - .lore/work/specs/tournament/tournament-ranking.md
+  - .lore/work/specs/fitness/utility-curves.md
   - .lore/reference/specs/current/derived-bgg-axes.md
   - .lore/reference/vision.md
 ---

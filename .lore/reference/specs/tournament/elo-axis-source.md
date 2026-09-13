@@ -5,7 +5,7 @@ status: approved
 tags: [spec, fitness, tournament, axis, elo, scoring]
 modules: [shared, daemon, web, cli]
 related:
-  - .lore/reference/specs/tournament/tournament-ranking.md
+  - .lore/work/specs/tournament/tournament-ranking.md
   - .lore/reference/designs/mvp-fitness-model.md
   - .lore/reference/designs/mvp-data-model.md
   - .lore/reference/specs/fitness/prediction-engine.md
@@ -122,7 +122,7 @@ This supersedes the "ELO and axis fitness are independent peer scores" decision 
 
 ## Context
 
-- [Tournament Ranking Spec](.lore/reference/specs/tournament/tournament-ranking.md): Source of REQ-TOURN-9 (normalization), REQ-TOURN-10 (display), REQ-TOURN-17 (sorting), and REQ-TOURN-18 (divergence flag, superseded).
+- [Tournament Ranking Spec](.lore/work/specs/tournament/tournament-ranking.md): Reconciliation input for REQ-TOURN-9 (normalization), REQ-TOURN-10 (display), REQ-TOURN-17 (sorting), and REQ-TOURN-18 (divergence flag, superseded).
 - [MVP Fitness Model](.lore/reference/designs/mvp-fitness-model.md): Defines the weighted-average composition over axes that this spec extends.
 - [MVP Data Model](.lore/reference/designs/mvp-data-model.md): Defines the `Axis` and `FitnessBreakdownEntry` types whose source enums are extended here.
 - [Prediction Engine Spec](.lore/reference/specs/fitness/prediction-engine.md): Touched here in three ways. (1) REQ-PRED-16/17/28 (revealed preference tension) are superseded. (2) The "no prediction for tournament" constraint at line 234 is superseded so the tournament axis can be predicted like any other axis. (3) REQ-PRED-15 (tournament stability factor in similarity weighting) and REQ-PRED-18 (silent inactivity) are unaffected.

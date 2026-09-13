@@ -7,9 +7,9 @@ modules: [daemon, shared, web, cli]
 related:
   - .lore/work/brainstorm/prediction-engine.md
   - .lore/work/brainstorm/collection-profiling.md
-  - .lore/reference/specs/mvp.md
-  - .lore/reference/specs/fitness/utility-curves.md
-  - .lore/reference/specs/tournament/tournament-ranking.md
+  - .lore/work/specs/mvp.md
+  - .lore/work/specs/fitness/utility-curves.md
+  - .lore/work/specs/tournament/tournament-ranking.md
   - .lore/reference/designs/mvp-fitness-model.md
   - .lore/work/issues/deferred-prediction-engine.md
   - .lore/work/issues/deferred-collection-profiling.md
@@ -254,8 +254,8 @@ This satisfies the MVP exit point `[STUB: prediction-engine]` ("user wants score
 - `.lore/work/brainstorm/collection-profiling.md` (shares feature vector infrastructure)
 - `.lore/archive/specs/collection/collection-profiling.md` (implemented, shares feature-vector.ts)
 - `.lore/reference/designs/mvp-fitness-model.md` (current FitnessResult types being extended)
-- `.lore/reference/specs/fitness/utility-curves.md` (curves make BGG-derived prediction exact)
-- `.lore/reference/specs/tournament/tournament-ranking.md` (tournament data as prediction input)
+- `.lore/work/specs/fitness/utility-curves.md` (reconciliation input for curves)
+- `.lore/work/specs/tournament/tournament-ranking.md` (reconciliation input for tournament data)
 
 **Implementation artifacts:**
 

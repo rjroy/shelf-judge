@@ -8,9 +8,9 @@ related:
   - .lore/work/research/game-view-next-previous-navigation.md
   - .lore/work/brainstorm/game-view-next-previous-navigation.md
   - .lore/reference/specs/collection/collection-filter-sort.md
-  - .lore/reference/specs/collection/game-links.md
+  - .lore/work/specs/collection/game-links.md
   - .lore/reference/specs/current/collection-purchase-utilization.md
-  - .lore/reference/specs/features/previously-owned.md
+  - .lore/work/specs/features/previously-owned.md
 req-prefix: GAME-NAV
 ---
 

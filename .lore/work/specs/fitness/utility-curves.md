@@ -2,6 +2,7 @@
 title: "Utility Curves for Axis Scoring"
 date: 2026-04-06
 status: implemented
+authority: pending-reconciliation
 tags: [spec, fitness, scoring, axes, utility-curves, ux]
 modules: [daemon, shared, web, cli]
 req-prefix: CURVE
@@ -10,11 +11,17 @@ related:
   - .lore/reference/designs/mvp-fitness-model.md
   - .lore/reference/designs/mvp-data-model.md
   - .lore/work/brainstorm/fitness-model-options.md
-  - .lore/reference/specs/mvp.md
+  - .lore/work/specs/mvp.md
   - .lore/reference/vision.md
 ---
 
 # Spec: Utility Curves for Axis Scoring
+
+> **Reconciliation status:** Pending reconciliation. This mixed-era spec retains
+> surviving requirements and is not wholly superseded, but it is not reference
+> authority. Its `source: "bgg"` model is outdated; use
+> `.lore/reference/specs/current/derived-bgg-axes.md` for the current derived
+> axis authority. Preserve curve and veto requirements pending reconciliation.
 
 ## Overview
 

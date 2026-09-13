@@ -5,7 +5,7 @@ status: executed
 tags: [plan, ownership, data-model, redundancy, niche, collection, lifecycle]
 modules: [shared, daemon, web, cli]
 related:
-  - .lore/reference/specs/features/previously-owned.md
+  - .lore/work/specs/features/previously-owned.md
   - .lore/work/brainstorm/previously-owned-state.md
   - .lore/work/plans/wishlist.md
   - .lore/reference/designs/mvp-data-model.md
@@ -18,7 +18,7 @@ related:
 
 ## Goal
 
-Implement the previously-owned feature specified in `.lore/reference/specs/features/previously-owned.md` (REQ-PREV-1 through REQ-PREV-32). A game marked as previously owned keeps all its data (ratings, BGG data, tournament history) but stops affecting redundancy and niche computations. The shelf reflects what's physically there; preferences reflect everything the user has played.
+Implement the previously-owned feature documented in `.lore/work/specs/features/previously-owned.md` (REQ-PREV-1 through REQ-PREV-32), pending reconciliation. A game marked as previously owned keeps all its data (ratings, BGG data, tournament history) but stops affecting redundancy and niche computations. The shelf reflects what's physically there; preferences reflect everything the user has played.
 
 The feature spans four layers: shared types (the `ownership` field), daemon API (new endpoint + query parameter filtering + call-site filtering for redundancy/niche), web UI (collection toggle, game detail status actions, visual distinction), and CLI (new command + flag).
 
@@ -295,7 +295,7 @@ JSON output: full updated `Game` object.
 
 Launch a fresh-context sub-agent that:
 
-1. Reads the spec (`.lore/reference/specs/features/previously-owned.md`) and this plan
+1. Reads the reconciliation input (`.lore/work/specs/features/previously-owned.md`) and this plan
 2. Reviews the implementation across all packages
 3. Verifies the new PATCH endpoint is implemented and tested
 4. Verifies both web client helpers (Phase 3) and CLI commands (Phase 6) cover the new endpoint (client/daemon divergence lesson)

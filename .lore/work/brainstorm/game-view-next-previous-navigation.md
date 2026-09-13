@@ -8,7 +8,7 @@ related:
   - .lore/work/research/game-view-next-previous-navigation.md
   - .lore/work/brainstorm/collection-filter-sort.md
   - .lore/reference/specs/collection/collection-filter-sort.md
-  - .lore/reference/specs/collection/game-links.md
+  - .lore/work/specs/collection/game-links.md
 ---
 
 # Next and previous navigation from game detail

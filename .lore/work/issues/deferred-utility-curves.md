@@ -4,7 +4,7 @@ date: 2026-04-06
 status: resolved
 tags: [deferred, feature, fitness, scoring, axes]
 modules: [daemon]
-origin: .lore/reference/specs/mvp.md
+origin: .lore/work/specs/mvp.md
 stub: "[STUB: utility-curves]"
 ---
 
@@ -30,4 +30,4 @@ Utility curves increase configuration burden. Each axis would need a curve type 
 
 ## Resolution
 
-Specified in `.lore/reference/specs/fitness/utility-curves.md` (2026-04-06). The spec defines three preference shapes (higher-is-better, lower-is-better, sweet spot), tolerance levels with quantitative anchors, asymmetric lean, and veto thresholds. Additive weighted average is preserved; curves transform ratings before they enter the sum.
+Documented in `.lore/work/specs/fitness/utility-curves.md` (2026-04-06), pending reconciliation. It defines three preference shapes (higher-is-better, lower-is-better, sweet spot), tolerance levels with quantitative anchors, asymmetric lean, and veto thresholds. Additive weighted average is preserved; curves transform ratings before they enter the sum.

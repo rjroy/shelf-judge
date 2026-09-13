@@ -6,7 +6,7 @@ tags: [fitness, axes, bgg, player-count, play-time]
 modules: [shared, daemon, web, cli]
 related:
   [
-    .lore/reference/specs/fitness/utility-curves.md,
+    .lore/work/specs/fitness/utility-curves.md,
     .lore/archive/specs/collection/collection-profiling.md,
     .lore/archive/research/bgg-api.md,
   ]

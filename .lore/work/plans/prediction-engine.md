@@ -10,8 +10,8 @@ related:
   - .lore/archive/specs/collection/collection-profiling.md
   - .lore/archive/research/outlier-distance-metric.md
   - .lore/reference/designs/mvp-fitness-model.md
-  - .lore/reference/specs/fitness/utility-curves.md
-  - .lore/reference/specs/tournament/tournament-ranking.md
+  - .lore/work/specs/fitness/utility-curves.md
+  - .lore/work/specs/tournament/tournament-ranking.md
   - .lore/work/mockups/prediction-engine.html
 ---
 

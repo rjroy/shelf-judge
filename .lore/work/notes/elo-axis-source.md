@@ -68,7 +68,7 @@ Nine phases. Two non-trivial divergences from the literal plan, both recorded be
 - Deleted: the CLI `[divergence]` block and the orphaned CSS. Added regression test in `score.test.ts` with a constructed (gap > 2.0, non-provisional) input that asserts `[divergence]` does not appear.
 - Preserved: `profile-engine.ts:237-270` `computeDivergence` (collection-profile divergence, separate concept). The `Profile Divergence` block on `games/[id]/page.tsx:291-321` reads from this preserved path and was correctly left alone.
 - Plan-anticipated daemon delta function: did not exist. Plan-cited copy strings ("higher fit"/"lower fit"/"axis ratings suggest"): did not exist.
-- Phase 8 doc-strike checklist: strike "Trigger divergence flag by rating a game highly on axes but consistently losing in comparisons" from `.lore/reference/specs/tournament/tournament-ranking.md`.
+- Phase 8 doc-strike checklist: strike "Trigger divergence flag by rating a game highly on axes but consistently losing in comparisons" from `.lore/work/specs/tournament/tournament-ranking.md`.
 - Manual verification not performed (CLI live run, browser eyeball). Tests cover the regression target.
 - Tests: 1231 pass / 1 skip / 0 fail. Typecheck clean.
 

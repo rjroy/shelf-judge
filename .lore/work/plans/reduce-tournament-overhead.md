@@ -6,7 +6,7 @@ tags: [plan, tournament, storage, performance, data-model, migration]
 modules: [shared, daemon, cli]
 related:
   - .lore/reference/specs/tournament/reduce-tournament-overhead.md
-  - .lore/reference/specs/tournament/tournament-ranking.md
+  - .lore/work/specs/tournament/tournament-ranking.md
   - .lore/reference/designs/mvp-data-model.md
   - .lore/work/retros/tournament-stats-record-shape-mismatch.md
 ---
@@ -16,7 +16,7 @@ related:
 ## Spec Reference
 
 **Spec**: `.lore/reference/specs/tournament/reduce-tournament-overhead.md`
-**Parent spec**: `.lore/reference/specs/tournament/tournament-ranking.md`
+**Reconciliation input**: `.lore/work/specs/tournament/tournament-ranking.md`
 **Data model**: `.lore/reference/designs/mvp-data-model.md`
 
 Requirements addressed:

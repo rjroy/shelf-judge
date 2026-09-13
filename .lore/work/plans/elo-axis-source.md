@@ -6,7 +6,7 @@ tags: [plan, fitness, tournament, axis, elo]
 modules: [shared, daemon, web, cli]
 related:
   - .lore/reference/specs/tournament/elo-axis-source.md
-  - .lore/reference/specs/tournament/tournament-ranking.md
+  - .lore/work/specs/tournament/tournament-ranking.md
   - .lore/reference/specs/fitness/prediction-engine.md
   - .lore/reference/designs/mvp-fitness-model.md
   - .lore/reference/designs/mvp-data-model.md
@@ -308,11 +308,11 @@ What to do:
 
 **Files**:
 
-- `.lore/reference/specs/tournament/tournament-ranking.md`
+- `.lore/work/specs/tournament/tournament-ranking.md`
 - `.lore/reference/specs/fitness/prediction-engine.md`
 - `.lore/reference/designs/mvp-data-model.md` (reconcile source enum)
 - `.lore/reference/designs/mvp-fitness-model.md` (reconcile source enum)
-- `.lore/reference/specs/fitness/utility-curves.md` (note tournament native scale, if applicable)
+- `.lore/work/specs/fitness/utility-curves.md` (pending reconciliation; note tournament native scale, if applicable)
 
 **Addresses**: REQ-TAXIS-15, REQ-TAXIS-17 (doc half), and the strike items from Steps 5/6
 **Expertise**: none

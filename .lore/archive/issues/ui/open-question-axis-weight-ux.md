@@ -4,7 +4,7 @@ date: 2026-04-06
 status: declined
 tags: [ux, axes, web-ui]
 modules: [web, daemon]
-origin: .lore/reference/specs/mvp.md
+origin: .lore/work/specs/mvp.md
 ---
 
 # Axis weight UX: raw numbers vs normalized sliders

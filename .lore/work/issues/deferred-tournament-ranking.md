@@ -4,7 +4,7 @@ date: 2026-04-06
 status: resolved
 tags: [deferred, feature, fitness, ranking, tournament]
 modules: [daemon, web, cli]
-origin: .lore/reference/specs/mvp.md
+origin: .lore/work/specs/mvp.md
 stub: "[STUB: tournament-ranking]"
 ---
 

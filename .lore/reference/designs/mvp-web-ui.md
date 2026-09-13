@@ -5,7 +5,7 @@ status: implemented
 tags: [design, web-ui, frontend, mvp]
 modules: [web-ui]
 related:
-  - .lore/reference/specs/mvp.md
+  - .lore/work/specs/mvp.md
   - .lore/reference/designs/mvp-api-surface.md
 ---
 

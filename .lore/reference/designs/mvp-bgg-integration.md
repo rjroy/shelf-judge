@@ -5,7 +5,7 @@ status: implemented
 tags: [design, bgg, api, integration, mvp]
 modules: [daemon]
 related:
-  - .lore/reference/specs/mvp.md
+  - .lore/work/specs/mvp.md
   - .lore/archive/research/bgg-api.md
 ---
 

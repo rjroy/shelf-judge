@@ -8,7 +8,7 @@ req-prefix: WISH
 related:
   - .lore/work/issues/wishlist.md
   - .lore/reference/vision.md
-  - .lore/reference/specs/mvp.md
+  - .lore/work/specs/mvp.md
   - .lore/reference/specs/fitness/prediction-engine.md
   - .lore/reference/specs/fitness/niche-champion-display.md
   - .lore/reference/designs/mvp-data-model.md

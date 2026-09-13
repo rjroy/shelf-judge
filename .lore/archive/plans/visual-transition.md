@@ -8,7 +8,7 @@ related:
   - .lore/archive/designs/visual-direction.md
   - .lore/reference/designs/mvp-web-ui.md
   - .lore/work/plans/mvp.md
-  - .lore/reference/specs/mvp.md
+  - .lore/work/specs/mvp.md
 ---
 
 # Plan: Visual Transition

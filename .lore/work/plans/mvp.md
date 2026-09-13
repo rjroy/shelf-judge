@@ -3,7 +3,7 @@ title: "MVP Implementation Plan"
 date: 2026-04-05
 status: executed
 tags: [plan, mvp, implementation]
-spec: .lore/reference/specs/mvp.md
+spec: .lore/work/specs/mvp.md
 related:
   - .lore/reference/designs/mvp-data-model.md
   - .lore/reference/designs/mvp-fitness-model.md

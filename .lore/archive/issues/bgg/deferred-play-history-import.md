@@ -4,7 +4,7 @@ date: 2026-04-06
 status: declined
 tags: [deferred, feature, bgg]
 modules: [daemon]
-origin: .lore/reference/specs/mvp.md
+origin: .lore/work/specs/mvp.md
 ---
 
 # Play history import from BGG

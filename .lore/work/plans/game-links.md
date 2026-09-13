@@ -5,7 +5,7 @@ status: executed
 tags: [plan, web-ui, navigation, links]
 modules: [web]
 related:
-  - .lore/reference/specs/collection/game-links.md
+  - .lore/work/specs/collection/game-links.md
   - .lore/work/issues/game-links.md
   - .lore/reference/designs/mvp-web-ui.md
 ---
@@ -14,7 +14,7 @@ related:
 
 ## Spec Reference
 
-**Spec**: `.lore/reference/specs/collection/game-links.md`
+**Reconciliation input**: `.lore/work/specs/collection/game-links.md`
 
 Requirements addressed:
 
@@ -201,7 +201,7 @@ Verify: link color is consistent across all four, hover underline works, layout 
 
 ### Step 8: Validate Against Spec
 
-Launch a sub-agent that reads the spec at `.lore/reference/specs/collection/game-links.md`, reviews the implementation, and checks every requirement (REQ-GLINK-1 through REQ-GLINK-8) and every success criterion in the Success Criteria section. This includes the negative requirements: tournament session cards must remain unchanged (game names are not links), search result game names must remain unchanged, and game detail breadcrumb/hero title must remain unchanged. Flag any requirement or criterion not met.
+Launch a sub-agent that reads the reconciliation input at `.lore/work/specs/collection/game-links.md`, reviews the implementation, and checks every requirement (REQ-GLINK-1 through REQ-GLINK-8) and every success criterion in the Success Criteria section. This includes the negative requirements: tournament session cards must remain unchanged (game names are not links), search result game names must remain unchanged, and game detail breadcrumb/hero title must remain unchanged. Flag any requirement or criterion not met.
 
 ## Delegation Guide
 

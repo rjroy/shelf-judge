@@ -6,7 +6,7 @@ tags: [plan, fitness, derived-axes, bgg, migration, feature-vectors]
 modules: [shared, daemon, web, cli]
 related:
   - .lore/reference/specs/current/derived-bgg-axes.md
-  - .lore/reference/specs/fitness/utility-curves.md
+  - .lore/work/specs/fitness/utility-curves.md
   - .lore/archive/specs/collection/collection-profiling.md
   - .lore/reference/specs/fitness/prediction-engine.md
   - .lore/reference/specs/fitness/redundancy-scoring.md

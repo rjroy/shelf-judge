@@ -4,7 +4,7 @@ date: 2026-04-06
 status: resolved
 tags: [feature, fitness, scoring]
 modules: [daemon]
-origin: .lore/reference/specs/mvp.md
+origin: .lore/work/specs/mvp.md
 stub: "[STUB: redundancy-scoring]"
 ---
 

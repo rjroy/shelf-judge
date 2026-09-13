@@ -7,8 +7,8 @@ modules: [web-ui]
 related:
   - .lore/work/brainstorm/collection-filter-sort.md
   - .lore/reference/specs/collection/collection-filter-sort.md
-  - .lore/reference/specs/collection/game-links.md
-  - .lore/reference/specs/features/previously-owned.md
+  - .lore/work/specs/collection/game-links.md
+  - .lore/work/specs/features/previously-owned.md
   - .lore/reference/specs/current/collection-purchase-utilization.md
   - .lore/reference/specs/current/useful-collection-profile.md
 ---
@@ -53,7 +53,7 @@ These comparators are part of what the user sees. Navigation following collectio
 
 ### Collection Scope And Ownership
 
-`.lore/reference/specs/features/previously-owned.md` (`implemented`) establishes:
+`.lore/work/specs/features/previously-owned.md` (pending reconciliation) documents:
 
 - The default collection view contains owned games.
 - `?ownership=all` adds previously owned games to the displayed list.
@@ -66,7 +66,7 @@ The older previously-owned spec says those games contribute to profiling. `.lore
 
 ### Game Detail Links And Routing
 
-`.lore/reference/specs/collection/game-links.md` (`implemented`) establishes:
+`.lore/work/specs/collection/game-links.md` (pending reconciliation) documents:
 
 - The stable detail route is `/games/{id}`.
 - Internal destinations use Next.js `Link` semantics.

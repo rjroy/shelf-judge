@@ -8,7 +8,7 @@ related:
   - .lore/reference/specs/current/collection-purchase-utilization.md
   - .lore/reference/specs/current/derived-bgg-axes.md
   - .lore/archive/specs/collection/collection-profiling.md
-  - .lore/reference/specs/features/previously-owned.md
+  - .lore/work/specs/features/previously-owned.md
 ---
 
 # Implementation plan: collection purchase utilization
