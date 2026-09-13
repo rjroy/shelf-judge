@@ -5,10 +5,10 @@ status: approved
 tags: [collection, profile, reflections, llm, grounding]
 modules: [shared, daemon, cli, web]
 related:
-  - .lore/work/specs/useful-collection-profile.md
-  - .lore/work/specs/owner-game-notes.md
+  - .lore/reference/specs/current/useful-collection-profile.md
+  - .lore/reference/specs/current/owner-game-notes.md
   - .lore/work/specs/collection-analyst-chat.md
-  - .lore/work/design/profile-evidence-explorer.md
+  - .lore/reference/designs/current/profile-evidence-explorer.md
 req-prefix: REFLECT
 ---
 

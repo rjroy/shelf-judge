@@ -8,10 +8,10 @@ related:
   - .lore/work/specs/collection-analyst-chat.md
   - .lore/work/specs/grounded-profile-reflections.md
   - .lore/work/plans/grounded-profile-reflections.md
-  - .lore/work/specs/owner-game-notes.md
+  - .lore/reference/specs/current/owner-game-notes.md
   - .lore/work/plans/owner-game-notes.md
-  - .lore/work/specs/useful-collection-profile.md
-  - .lore/work/design/profile-evidence-explorer.md
+  - .lore/reference/specs/current/useful-collection-profile.md
+  - .lore/reference/designs/current/profile-evidence-explorer.md
   - .lore/reference/architecture-pattern.md
 ---
 

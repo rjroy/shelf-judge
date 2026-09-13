@@ -3,7 +3,7 @@ title: "Implementation notes: trusted collection insights consumers"
 date: 2026-08-27
 status: complete
 tags: [implementation, notes, trusted-insights, profile]
-source: .lore/specs/collection/collection-profiling.md
+source: .lore/archive/specs/collection/collection-profiling.md
 modules: [shared, daemon, cli, web]
 ---
 

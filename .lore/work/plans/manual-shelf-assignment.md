@@ -6,8 +6,8 @@ tags: [plan, shelf-layout, manual-assignment, capacity, bin-packing]
 modules: [shared, daemon, web, cli]
 related:
   - .lore/work/specs/manual-shelf-assignment.md
-  - .lore/specs/features/shelf-capacity.md
-  - .lore/designs/similarity-weighted-bin-packing.md
+  - .lore/reference/specs/features/shelf-capacity.md
+  - .lore/reference/designs/similarity-weighted-bin-packing.md
 ---
 
 # Implementation plan: manual shelf assignment
@@ -121,7 +121,7 @@ Implementation ends after code, tests, and behavioral validation. Spec approval 
 
 - `packages/daemon/src/services/bin-packing.ts`
 - `packages/daemon/tests/bin-packing.test.ts`
-- `.lore/designs/similarity-weighted-bin-packing.md` after behavior is verified
+- `.lore/reference/designs/similarity-weighted-bin-packing.md` after behavior is verified
 
 **Changes:**
 

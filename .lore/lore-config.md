@@ -1,11 +1,9 @@
 ---
 status: active
 custom_directories:
-  art: [current]
-  generated: [current]
-  mockups: [current]
-  commissions: [pending, active, completed, abandoned]
-  meetings: [open, closed, deferred]
+  work: [active, open, approved, draft, complete, executed, implemented, resolved, parked]
+  reference: [active, implemented, approved, current]
+  archive: [archived, superseded, declined]
 
 filename_exemptions:
   - "^commission-.+-\\d{8}-\\d{6}\\.md$"
@@ -33,9 +31,9 @@ Issues in this project use three statuses beyond the schema defaults:
 
 ## Custom directories
 
-- `art/` - Static visual assets (logos, etc.)
-- `generated/` - AI-generated images
-- `mockups/` - HTML mockup files for visual direction and UI prototyping
+  - `work/` - Unconfirmed work and historical working records, including active work, plans, research, retrospectives, and supporting prototypes.
+  - `reference/` - Durable active product truth, including current specifications, designs, architecture, and their supporting assets.
+  - `archive/` - Explicitly archived, superseded, or declined material.
 
 ## Filename exemptions
 

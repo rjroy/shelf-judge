@@ -780,7 +780,7 @@ Snapshot scope: exact output of `git status --porcelain=v1 --untracked-files=all
 | ` M`   | `.gitignore`                                                              | `ee11cec01a9a85170072fc7e8d19ad7033e3a4fc`   | `b38c5299875d014b75de95e475427ca617bf5c98c1f55c0c24ef69225574feab` |
 | ` M`   | `.lore/work/notes/useful-collection-profile.md`                           | `ded572348d4e3fde857731c1a687a18b0f84b883`   | `ce3955566ad451ae9beb68b9914a4267c71a93f8a7418709482b331671b0fdfb` |
 | ` M`   | `.lore/work/plans/useful-collection-profile.md`                           | `69f2c56ae776d6cfcd60e510327fce1f95f142c2`   | `2198cbfd8a14f6946ebb7d3a66795970ae697ec6cef1d35367a081706a5ef64c` |
-| ` M`   | `.lore/work/specs/useful-collection-profile.md`                           | `c353711a00a92da8895c1d130f360fb3121e4d6f`   | `674b41388bfac7c7f0a022ad06b440ada263075eaf3c4781f225e53a8ef2ad64` |
+| ` M`   | `.lore/reference/specs/current/useful-collection-profile.md`                           | `c353711a00a92da8895c1d130f360fb3121e4d6f`   | `674b41388bfac7c7f0a022ad06b440ada263075eaf3c4781f225e53a8ef2ad64` |
 | ` M`   | `bun.lock`                                                                | `9549de5ec9b009ef5d625e53f568cf70aa340352`   | `071987ce130f9109bf945e295c6de5742a376081fbe0a09687257d9021f94f22` |
 | ` M`   | `package.json`                                                            | `0cc16db36c8560faf28d93d5275368b2d5d8fbf2`   | `bcc273abf502e77896b652b59d81117af93bbf688087cf5d69467987e33229d9` |
 | ` M`   | `packages/cli/src/client.ts`                                              | `961bbb46c61c2e6684a8ce21c3c20e51fefa968c`   | `fca3dc64178b7bc38e72339d7597ef4b5b1d2f862a6f53d5c5661a5bbb097f12` |

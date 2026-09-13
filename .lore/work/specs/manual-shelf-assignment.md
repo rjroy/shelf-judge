@@ -5,9 +5,9 @@ status: draft
 tags: [shelf-layout, manual-assignment, capacity, bin-packing]
 modules: [shared, daemon, web, cli]
 related:
-  - .lore/specs/features/shelf-capacity.md
-  - .lore/designs/similarity-weighted-bin-packing.md
-  - .lore/brainstorms/shelf-layout-designer.md
+  - .lore/reference/specs/features/shelf-capacity.md
+  - .lore/reference/designs/similarity-weighted-bin-packing.md
+  - .lore/work/brainstorm/shelf-layout-designer.md
 req-prefix: SHELF-ASSIGN
 ---
 

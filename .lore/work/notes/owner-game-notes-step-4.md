@@ -5,7 +5,7 @@ status: complete
 tags: [implementation, owner-game-notes, daemon, replay, concurrency]
 source: .lore/work/plans/owner-game-notes.md
 modules: [shared, daemon]
-related: [.lore/work/specs/owner-game-notes.md]
+related: [.lore/reference/specs/current/owner-game-notes.md]
 ---
 
 # Implementation notes: owner game notes step 4

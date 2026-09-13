@@ -7,8 +7,8 @@ source: .lore/work/plans/adjusted-fit-profile-ranking.md
 modules: [shared, daemon, cli, web]
 related:
   - .lore/work/research/profile-appreciation-scoring.md
-  - .lore/work/specs/useful-collection-profile.md
-  - .lore/work/design/profile-evidence-explorer.md
+  - .lore/reference/specs/current/useful-collection-profile.md
+  - .lore/reference/designs/current/profile-evidence-explorer.md
 ---
 
 # Implementation notes: adjusted-fit profile ranking
@@ -109,9 +109,9 @@ The manifest below records the final `git status --short` snapshot. For every ch
 ```text
  M .beads/interactions.jsonl
  M .beads/issues.jsonl
- M .lore/work/design/profile-evidence-explorer.md
+ M .lore/reference/designs/current/profile-evidence-explorer.md
  M .lore/work/plans/adjusted-fit-profile-ranking.md
- M .lore/work/specs/useful-collection-profile.md
+ M .lore/reference/specs/current/useful-collection-profile.md
  M docs/screenshots/profile.png
  M docs/usage.md
  M packages/cli/tests/client.test.ts
@@ -144,9 +144,9 @@ The manifest below records the final `git status --short` snapshot. For every ch
 | ------------------------------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------------ |
 | `.beads/interactions.jsonl`                                               | `450d1d3afa80f035fef86a0b016b54b60321a000` | `7ce0feb5d701c19299d9e195c1de5cecf6e11d2cbb61e4ba85e9880babd59e26` |
 | `.beads/issues.jsonl`                                                     | `5aff881f21d8fd4c3e39bb2224bf2768a829ce61` | `1490dd3ef7d4c03ad35b6eaed42f6f5ac64d52949a31f1f01b1c88bcd0dde61f` |
-| `.lore/work/design/profile-evidence-explorer.md`                          | `6937e8c46b0cd8aa458aeb9b60cea6e0a81e3740` | `4dd9b6405189ae0ac17f2502835478d98bbc1ab8b291322c6252248ff292a3d9` |
+| `.lore/reference/designs/current/profile-evidence-explorer.md`                          | `6937e8c46b0cd8aa458aeb9b60cea6e0a81e3740` | `4dd9b6405189ae0ac17f2502835478d98bbc1ab8b291322c6252248ff292a3d9` |
 | `.lore/work/plans/adjusted-fit-profile-ranking.md`                        | `dfca7d80d473833baa9bc71dfa0605926c4e685c` | `72c6ee1a0d45421c5cfbf5c43fc651a0680cf633c3d489cfa0e2323f78b8b92d` |
-| `.lore/work/specs/useful-collection-profile.md`                           | `a7a56fa12fa007fa207c472b643fa76d541e3a0c` | `8d0fbe7db8c20982589bc29d9b576f6478cb5d689b7f183f306da55f752101c3` |
+| `.lore/reference/specs/current/useful-collection-profile.md`                           | `a7a56fa12fa007fa207c472b643fa76d541e3a0c` | `8d0fbe7db8c20982589bc29d9b576f6478cb5d689b7f183f306da55f752101c3` |
 | `docs/screenshots/profile.png`                                            | `127e3483be55392045066c8ab61354a6afd77ffd` | `58d6433f2e477e58a2d0acbb364a8dc7cec95a66623aac85343cdd75c7ef12c2` |
 | `docs/usage.md`                                                           | `abd42de3abe296850afcfcebc603558b372ee3db` | `e78141b0374ff0bbd04bbd52803bdf203d7e96102520a844bd99c98bb99cf35f` |
 | `packages/cli/tests/client.test.ts`                                       | `2c18967df1e9b53b40808ef396cbad8d958e4201` | `ab0454edd7c565647a013a7a221f540135da690944d14bab0ec715890a1646a0` |

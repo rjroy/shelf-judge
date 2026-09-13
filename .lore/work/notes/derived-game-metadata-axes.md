@@ -5,7 +5,7 @@ status: completed
 tags: [implementation, notes, derived-axes, regression]
 source: .lore/work/plans/derived-game-metadata-axes.md
 modules: [shared, daemon, web, cli]
-related: [.lore/work/specs/derived-bgg-axes.md]
+related: [.lore/reference/specs/current/derived-bgg-axes.md]
 ---
 
 # Implementation notes: derived game-metadata axes

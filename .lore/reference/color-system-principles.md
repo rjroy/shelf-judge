@@ -3,13 +3,14 @@ title: Color System Principles
 status: current
 tags: [design, reference, portable, css, color]
 date: 2026-04-11
-related:
-  - .lore/designs/shelf-judge-color-system.md
 ---
 
 # Color System Principles
 
 A reference for how to design and maintain a CSS custom property color system that stays coherent as a project grows.
+
+This is portable guidance. It does not select Shelf Judge's palette, typography,
+token names, or visual direction; those choices belong to the redesign.
 
 ---
 

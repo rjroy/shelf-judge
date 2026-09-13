@@ -6,7 +6,7 @@ tags: [implementation, owner-game-notes, playwright, accessibility, responsive, 
 source: .lore/work/plans/owner-game-notes.md
 modules: [web]
 related:
-  [.lore/work/specs/owner-game-notes.md, .lore/work/retros/game-view-next-previous-navigation.md]
+  [.lore/reference/specs/current/owner-game-notes.md, .lore/work/retros/game-view-next-previous-navigation.md]
 ---
 
 # Implementation notes: owner game notes step 9

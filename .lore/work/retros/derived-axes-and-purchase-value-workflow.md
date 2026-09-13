@@ -6,10 +6,10 @@ tags: [workflow, specification, code-review, beads, subagents, validation]
 modules: [shared, daemon, web, cli]
 related:
   [
-    .lore/work/specs/derived-bgg-axes.md,
+    .lore/reference/specs/current/derived-bgg-axes.md,
     .lore/work/plans/derived-game-metadata-axes.md,
     .lore/work/notes/derived-game-metadata-axes.md,
-    .lore/work/specs/collection-purchase-utilization.md,
+    .lore/reference/specs/current/collection-purchase-utilization.md,
   ]
 ---
 

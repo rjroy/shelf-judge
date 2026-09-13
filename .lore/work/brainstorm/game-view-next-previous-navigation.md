@@ -6,9 +6,9 @@ tags: [navigation, game-detail, collection, sorting, filtering]
 modules: [web-ui]
 related:
   - .lore/work/research/game-view-next-previous-navigation.md
-  - .lore/brainstorms/collection-filter-sort.md
-  - .lore/specs/collection/collection-filter-sort.md
-  - .lore/specs/collection/game-links.md
+  - .lore/work/brainstorm/collection-filter-sort.md
+  - .lore/reference/specs/collection/collection-filter-sort.md
+  - .lore/reference/specs/collection/game-links.md
 ---
 
 # Next and previous navigation from game detail

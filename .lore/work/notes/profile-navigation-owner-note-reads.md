@@ -7,7 +7,7 @@ source: shelf-judge-etg
 modules: [web, daemon, reflections]
 related:
   [
-    .lore/work/specs/owner-game-notes.md,
+    .lore/reference/specs/current/owner-game-notes.md,
     .lore/work/grounded-profile-reflections-final-validation.md,
     .lore/work/validation/collection-analyst-chat.md,
   ]

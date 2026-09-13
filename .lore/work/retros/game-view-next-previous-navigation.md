@@ -16,8 +16,8 @@ tags:
   ]
 modules: [web-ui]
 related:
-  - .lore/work/specs/game-view-next-previous-navigation.md
-  - .lore/work/design/game-view-next-previous-navigation.md
+  - .lore/reference/specs/current/game-view-next-previous-navigation.md
+  - .lore/reference/designs/current/game-view-next-previous-navigation.md
   - .lore/work/plans/game-view-next-previous-navigation.md
   - .lore/work/notes/game-view-next-previous-navigation.md
 ---

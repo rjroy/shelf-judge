@@ -26,7 +26,7 @@ related:
 | Obligation                                   | Source                                                                               | Evidence target                                                  |
 | -------------------------------------------- | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
 | Full browser regression and formatting gates | Plan Step 10.7                                                                       | Isolated `test:browser`; `format:check`                          |
-| Model boundary and closed evidence flow      | [model-directed evidence tool flow](../designs/model-directed-evidence-tool-flow.md) | Existing deterministic suites; conditional provider smoke record |
+| Model boundary and closed evidence flow      | [model-directed evidence tool flow](model-directed-evidence-tool-flow.md) | Existing deterministic suites; conditional provider smoke record |
 | Owner-note lifecycle and deletion races      | [owner-note final validation](owner-game-notes-final-validation.md)                  | Completed dependency evidence                                    |
 | CLI one-shot command syntax                  | Spec REQ-ANALYST-26 and Plan Step 7.1                                                | CLI command and parser tests                                     |
 

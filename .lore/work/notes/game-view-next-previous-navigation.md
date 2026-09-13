@@ -6,8 +6,8 @@ tags: [implementation, navigation, game-detail, collection]
 source: .lore/work/plans/game-view-next-previous-navigation.md
 modules: [web-ui]
 related:
-  - .lore/work/specs/game-view-next-previous-navigation.md
-  - .lore/work/design/game-view-next-previous-navigation.md
+  - .lore/reference/specs/current/game-view-next-previous-navigation.md
+  - .lore/reference/designs/current/game-view-next-previous-navigation.md
 ---
 
 # Implementation notes: Collection-scoped game detail navigation
@@ -113,7 +113,7 @@ Captured immediately after terminal acceptance and before lifecycle-only status 
 | `.beads/interactions.jsonl`                                     | ` M`      | `369ae3f415e0b74bcda761072007ee0c20fcb672` | `d0d68fafeeb95db2e02bc1d3024deaccc41387a5660dc4db29e7d5efd6e91d05` |
 | `.beads/issues.jsonl`                                           | ` M`      | `a2f6e18ad7b37714e3fc5ee57fe80232eb49b12b` | `22681e803f0535fafd4232beea478f3b386696ecadbb5c8a4a6624883070840f` |
 | `.lore/work/brainstorm/game-view-next-previous-navigation.md`   | ` M`      | `4a00947ef01339e1e86ffef19e366f5408c0bff8` | `9b4f7df16d8d15dcf5ecf255be6d69481e33133807db101a69ec47975ac4855d` |
-| `.lore/work/design/game-view-next-previous-navigation.md`       | ` M`      | `89887dfd62ad1bf978cb330898bacd6372394647` | `d837c9f74570c9e14de6d5676fdcdeda45c012c506aac41a5ff6daf61bafb28a` |
+| `.lore/reference/designs/current/game-view-next-previous-navigation.md`       | ` M`      | `89887dfd62ad1bf978cb330898bacd6372394647` | `d837c9f74570c9e14de6d5676fdcdeda45c012c506aac41a5ff6daf61bafb28a` |
 | `packages/web/app/collection/page.tsx`                          | ` M`      | `4684831bee7992b8b2d59ee198540204d00d6801` | `d0d388ffe9a3ed4dce6fe25c678f530a610ce7a405f2ed96421f9e228d5f4de3` |
 | `packages/web/app/games/[id]/page.tsx`                          | ` M`      | `c3a37a2f5e6da64d940655bca1120473c6589a89` | `abf011b3e6baf685c2fdf55015a097698c4a0624f4aefcb9c188795ee6d83c1f` |
 | `packages/web/app/globals.css`                                  | ` M`      | `385a5e1eab6bddd6dd3903a49fb450490fd5a0ed` | `afc7602a5a4467d295e8f6e97e33daa520063727fcabd772073f760bfc64dba4` |
