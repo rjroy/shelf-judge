@@ -3,16 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import type { PredictionReadiness } from "@shelf-judge/shared";
 import { useTheme } from "./theme-provider";
 import type { Theme } from "@/lib/theme";
-
-const STAGE_LABELS: Record<number, string> = {
-  0: "Not Ready",
-  1: "Basic",
-  2: "Moderate",
-  3: "Strong",
-};
 
 const navGroups = [
   {
@@ -260,29 +252,6 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 export function Sidebar() {
   const pathname = usePathname();
   const { open, close } = useSidebar();
-  const [readiness, setReadiness] = useState<PredictionReadiness | null>(null);
-
-  useEffect(() => {
-    fetch("/api/daemon/predictions/readiness")
-      .then((res) => {
-        if (!res.ok) return null;
-        return res.json() as Promise<PredictionReadiness>;
-      })
-      .then((data) => setReadiness(data))
-      .catch(() => {
-        // Readiness not available
-      });
-  }, []);
-
-  const progressPercent =
-    readiness && readiness.nextStageAt > 0
-      ? Math.min(100, Math.round((readiness.ratedGameCount / readiness.nextStageAt) * 100))
-      : readiness?.stage === 3
-        ? 100
-        : 0;
-
-  const moreNeeded =
-    readiness && readiness.stage < 3 ? readiness.nextStageAt - readiness.ratedGameCount : 0;
 
   return (
     <aside className={`sidebar${open ? " sidebar-open" : ""}`}>
@@ -326,30 +295,6 @@ export function Sidebar() {
           </div>
         ))}
       </nav>
-
-      {/* Prediction readiness widget */}
-      {readiness && (
-        <Link href="/readiness" style={{ textDecoration: "none" }}>
-          <div className="readiness-widget">
-            <div className="readiness-widget-label">Predictions</div>
-            <div className="readiness-widget-stage">
-              Stage {readiness.stage} &mdash; {STAGE_LABELS[readiness.stage]}
-            </div>
-            <div className="readiness-progress">
-              <div className="readiness-progress-fill" style={{ width: `${progressPercent}%` }} />
-            </div>
-            <div className="readiness-widget-count">
-              {readiness.ratedGameCount} rated
-              {moreNeeded > 0 && (
-                <>
-                  {" "}
-                  &middot; {moreNeeded} more for Stage {readiness.stage + 1}
-                </>
-              )}
-            </div>
-          </div>
-        </Link>
-      )}
 
       <div className="sidebar-footer">
         <span>Shelf Judge v0.1</span>

@@ -21,10 +21,12 @@ export function EntityCard({
         <strong>{entity.name}</strong>
         <span className="profile-status-label">Supported association</span>
       </div>
-      <p>
+      <p className="profile-fit">
         <strong>Adjusted fit</strong> {score(entity.adjustedMeanCurrentFitness)}
       </p>
-      <p>For games in this collection associated with this {entityClass}:</p>
+      <p className="profile-association">
+        For games in this collection associated with this {entityClass}:
+      </p>
       <dl className="profile-facts">
         <div>
           <dt>Raw mean</dt>
@@ -39,8 +41,11 @@ export function EntityCard({
           <dd>{entity.associatedGameCount}</dd>
         </div>
       </dl>
-      <Link href={`/profile/entities?class=${entityClass}&entity=${entity.entityId}`}>
-        Inspect complete evidence for {entity.name}
+      <Link
+        aria-label={`Inspect complete evidence for ${entity.name}`}
+        href={`/profile/entities?class=${entityClass}&entity=${entity.entityId}`}
+      >
+        Inspect evidence
       </Link>
     </article>
   );

@@ -4799,6 +4799,37 @@ body {
   padding: clamp(18px, 4vw, 40px) var(--content-padding);
 }
 
+/* Identity leads; attention cards scan across the full page. */
+.profile-page--attention-grid {
+  --profile-gap: 1.75rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: var(--profile-gap);
+  min-height: 0;
+}
+
+.profile-page--attention-grid > section {
+  min-width: 0;
+}
+
+.profile-page--attention-grid .attention-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
+  column-gap: var(--profile-gap);
+}
+
+@media (max-width: 760px) {
+  .profile-page--attention-grid {
+    gap: 1.25rem;
+  }
+
+  .profile-page--attention-grid .attention-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .profile-page a {
   color: var(--action);
   overflow-wrap: anywhere;
@@ -5811,51 +5842,6 @@ body {
   padding: 8px 12px;
   border-radius: 6px;
   overflow-x: auto;
-}
-
-/* Readiness widget (sidebar) */
-.readiness-widget {
-  margin: 0 12px 12px;
-  padding: 12px;
-  background: color-mix(in srgb, var(--predict-accent) 15%, transparent);
-  border: 1px solid color-mix(in srgb, var(--predict-accent) 30%, transparent);
-  border-radius: 8px;
-}
-
-.readiness-widget-label {
-  font-size: 9px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--predict-border);
-  margin-bottom: 6px;
-}
-
-.readiness-widget-stage {
-  font-size: var(--text-xs);
-  font-weight: 600;
-  color: var(--nav-text);
-  margin-bottom: 6px;
-}
-
-.readiness-progress {
-  height: 4px;
-  background: var(--sidebar-track-bg);
-  border-radius: 2px;
-  overflow: hidden;
-  margin-bottom: 4px;
-}
-
-.readiness-progress-fill {
-  height: 100%;
-  background: var(--predict-accent);
-  border-radius: 2px;
-  transition: width 0.3s;
-}
-
-.readiness-widget-count {
-  font-size: 10px;
-  color: color-mix(in srgb, var(--nav-text) 50%, transparent);
 }
 
 /* Prediction hint in rating form */
@@ -8853,19 +8839,36 @@ body {
   }
 }
 .analyst-page {
-  max-width: 900px;
+  max-width: 980px;
+  padding-block: 32px;
+}
+.analyst-page .page-header {
+  align-items: start;
+  display: grid;
+  gap: 20px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.analyst-page .page-header h1 {
+  margin-bottom: 4px;
+}
+.analyst-disclosure-summary {
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  margin: 20px 0;
+  padding: 8px 16px;
 }
 .analyst-transcript {
+  border-block: 1px solid var(--border);
   display: grid;
-  gap: 1rem;
-  margin: 1rem 0;
+  gap: 0;
+  margin: 0;
 }
 .analyst-message {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
   color: var(--text-primary);
-  padding: 1rem;
+  padding: 16px 0;
+}
+.analyst-message + .analyst-message {
+  border-top: 1px solid var(--border);
 }
 .analyst-message-owner {
   background: var(--bg-muted);
@@ -8971,12 +8974,28 @@ body {
 }
 .analyst-question {
   display: grid;
-  gap: 0.5rem;
-  margin-top: 1rem;
+  gap: 8px 16px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding-top: 20px;
+}
+.analyst-question label {
+  grid-column: 1 / -1;
 }
 .analyst-question textarea {
-  min-height: 7rem;
+  min-height: 96px;
   padding: 0.75rem;
+}
+.analyst-question button {
+  align-self: end;
+  min-height: 44px;
+}
+@media (max-width: 640px) {
+  .analyst-question {
+    grid-template-columns: 1fr;
+  }
+  .analyst-question button {
+    justify-self: start;
+  }
 }
 .analyst-dialog-backdrop {
   align-items: center;
@@ -9000,4 +9019,201 @@ body {
   flex-wrap: wrap;
   gap: 0.75rem;
   justify-content: flex-end;
+}
+/* Compact progressive disclosure for collection identity evidence. */
+.profile-class.profile-class--disclosure {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border, #ddd8d0);
+  border-radius: 8px;
+  background: var(--bg-surface, #fefcf9);
+}
+
+.profile-class--disclosure .profile-class-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.profile-class--disclosure h3,
+.profile-class--disclosure p {
+  margin: 0;
+}
+
+.profile-class--disclosure .profile-status-label,
+.profile-class--disclosure .profile-warning {
+  color: var(--score-color, #d4882e);
+}
+
+.profile-class--disclosure summary,
+.profile-class--disclosure a {
+  color: var(--action, #1c3d5e);
+}
+
+.profile-class--disclosure .profile-readiness,
+.profile-class--disclosure .profile-method,
+.profile-class--disclosure .profile-warning {
+  margin-top: 8px;
+  color: var(--text-secondary, #6b6560);
+  font-size: 13px;
+}
+
+.profile-class--disclosure .profile-warning {
+  color: var(--score-color, #d4882e);
+}
+
+.profile-class--disclosure .profile-entity-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.profile-class--disclosure .profile-entity-grid > * {
+  min-width: 0;
+  padding: 7px 9px;
+}
+
+.profile-class--disclosure .profile-entity-grid,
+.profile-class--disclosure .profile-entity-grid * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .profile-class--disclosure .profile-class-heading {
+    flex-wrap: wrap;
+  }
+
+  .profile-class--disclosure .profile-entity-grid {
+    grid-template-columns: 1fr;
+  }
+}
+/* Accepted compact entity evidence treatment. */
+.profile-class--disclosure .profile-entity-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px 12px;
+  padding: 8px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.profile-class--disclosure .profile-entity-summary .profile-entity-summary-heading {
+  display: contents;
+}
+
+.profile-class--disclosure .profile-entity-summary .profile-status-label,
+.profile-class--disclosure .profile-entity-summary .profile-fit {
+  color: var(--score-color);
+}
+
+.profile-class--disclosure .profile-entity-summary .profile-fit {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.profile-class--disclosure .profile-entity-summary .profile-association {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.profile-class--disclosure .profile-entity-summary .profile-facts {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0;
+}
+
+.profile-class--disclosure .profile-entity-summary .profile-facts > div {
+  display: flex;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.profile-class--disclosure .profile-entity-summary .profile-facts dt {
+  color: var(--text-secondary);
+}
+
+.profile-class--disclosure .profile-entity-summary .profile-facts dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.profile-class--disclosure .profile-entity-summary a {
+  grid-column: 1 / -1;
+  color: var(--action);
+}
+
+/* Accepted identity hierarchy treatment: high emphasis and tight entity density. */
+.profile-class.profile-class--disclosure.profile-class--hierarchy {
+  display: grid;
+  gap: 0.9rem;
+  padding: 0.9rem 0;
+  border-block: 1px solid color-mix(in srgb, var(--action) 32%, transparent);
+}
+
+.profile-class--disclosure.profile-class--hierarchy .profile-class-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.35rem 1rem;
+  align-items: center;
+  padding-left: 0.7rem;
+  border-left: 1px solid var(--action);
+}
+
+.profile-class--disclosure.profile-class--hierarchy .profile-class-heading h3 {
+  color: var(--text-primary);
+  font-size: 1.18rem;
+  letter-spacing: -0.025em;
+}
+
+.profile-class--disclosure.profile-class--hierarchy .profile-class-heading > .profile-status-label {
+  color: var(--action);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.profile-class--disclosure.profile-class--hierarchy .profile-entity-grid {
+  gap: 0.4rem;
+}
+
+.profile-class--disclosure.profile-class--hierarchy .profile-class-empty {
+  margin: 0;
+  padding-block: 0.3rem;
+  color: var(--text-muted);
+  max-width: 60ch;
+}
+
+.profile-class--disclosure.profile-class--hierarchy details {
+  order: 3;
+}
+
+.profile-class--disclosure.profile-class--hierarchy summary {
+  color: var(--text-muted);
+  font-size: 0.84rem;
+}
+
+.profile-class--disclosure.profile-class--hierarchy > a {
+  order: 2;
+  color: var(--action);
+  font-weight: 650;
+  text-underline-offset: 0.22em;
+}
+
+@media (max-width: 42rem) {
+  .profile-class--disclosure.profile-class--hierarchy .profile-class-heading {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
 }

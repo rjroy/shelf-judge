@@ -1,0 +1,403 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-13T00:00:00.000Z",
+  "title": "Design System: Shelf Judge Web",
+  "extensions": {
+    "colorMeta": {
+      "bg-base": {
+        "role": "neutral",
+        "displayName": "Warm Parchment",
+        "canonical": "#f4f1ec",
+        "tonalRamp": [
+          "oklch(20% 0.01 70)",
+          "oklch(30% 0.01 70)",
+          "oklch(40% 0.01 70)",
+          "oklch(50% 0.01 70)",
+          "oklch(60% 0.01 70)",
+          "oklch(70% 0.01 70)",
+          "oklch(80% 0.01 70)",
+          "oklch(95% 0.01 70)"
+        ]
+      },
+      "bg-surface": {
+        "role": "neutral",
+        "displayName": "Paper Surface",
+        "canonical": "#fefcf9",
+        "tonalRamp": [
+          "oklch(20% 0.01 70)",
+          "oklch(30% 0.01 70)",
+          "oklch(40% 0.01 70)",
+          "oklch(50% 0.01 70)",
+          "oklch(60% 0.01 70)",
+          "oklch(70% 0.01 70)",
+          "oklch(80% 0.01 70)",
+          "oklch(99% 0.005 70)"
+        ]
+      },
+      "bg-elevated": {
+        "role": "neutral",
+        "displayName": "Elevated Paper",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "oklch(20% 0 0)",
+          "oklch(30% 0 0)",
+          "oklch(40% 0 0)",
+          "oklch(50% 0 0)",
+          "oklch(60% 0 0)",
+          "oklch(70% 0 0)",
+          "oklch(80% 0 0)",
+          "oklch(100% 0 0)"
+        ]
+      },
+      "bg-subtle": {
+        "role": "neutral",
+        "displayName": "Subtle Parchment",
+        "canonical": "#f9f7f4",
+        "tonalRamp": [
+          "oklch(20% 0.01 70)",
+          "oklch(30% 0.01 70)",
+          "oklch(40% 0.01 70)",
+          "oklch(50% 0.01 70)",
+          "oklch(60% 0.01 70)",
+          "oklch(70% 0.01 70)",
+          "oklch(80% 0.01 70)",
+          "oklch(97% 0.01 70)"
+        ]
+      },
+      "text-primary": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "#1a1714",
+        "tonalRamp": [
+          "oklch(15% 0.01 70)",
+          "oklch(25% 0.01 70)",
+          "oklch(35% 0.01 70)",
+          "oklch(45% 0.01 70)",
+          "oklch(55% 0.01 70)",
+          "oklch(65% 0.01 70)",
+          "oklch(75% 0.01 70)",
+          "oklch(95% 0.01 70)"
+        ]
+      },
+      "text-secondary": {
+        "role": "neutral",
+        "displayName": "Soft Ink",
+        "canonical": "#6b6560",
+        "tonalRamp": [
+          "oklch(15% 0.01 70)",
+          "oklch(25% 0.01 70)",
+          "oklch(35% 0.01 70)",
+          "oklch(45% 0.01 70)",
+          "oklch(55% 0.01 70)",
+          "oklch(65% 0.01 70)",
+          "oklch(75% 0.01 70)",
+          "oklch(95% 0.01 70)"
+        ]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Soft Rule",
+        "canonical": "#ddd8d0",
+        "tonalRamp": [
+          "oklch(20% 0.01 70)",
+          "oklch(30% 0.01 70)",
+          "oklch(40% 0.01 70)",
+          "oklch(50% 0.01 70)",
+          "oklch(60% 0.01 70)",
+          "oklch(70% 0.01 70)",
+          "oklch(80% 0.01 70)",
+          "oklch(95% 0.01 70)"
+        ]
+      },
+      "border-strong": {
+        "role": "neutral",
+        "displayName": "Strong Rule",
+        "canonical": "#c4bfb8",
+        "tonalRamp": [
+          "oklch(20% 0.01 70)",
+          "oklch(30% 0.01 70)",
+          "oklch(40% 0.01 70)",
+          "oklch(50% 0.01 70)",
+          "oklch(60% 0.01 70)",
+          "oklch(70% 0.01 70)",
+          "oklch(80% 0.01 70)",
+          "oklch(95% 0.01 70)"
+        ]
+      },
+      "action": {
+        "role": "primary",
+        "displayName": "Action Navy",
+        "canonical": "#1c3d5e",
+        "tonalRamp": [
+          "oklch(15% 0.05 250)",
+          "oklch(25% 0.06 250)",
+          "oklch(35% 0.07 250)",
+          "oklch(45% 0.08 250)",
+          "oklch(55% 0.09 250)",
+          "oklch(65% 0.08 250)",
+          "oklch(75% 0.06 250)",
+          "oklch(95% 0.01 250)"
+        ]
+      },
+      "action-hover": {
+        "role": "primary",
+        "displayName": "Action Navy Hover",
+        "canonical": "#2a5580",
+        "tonalRamp": [
+          "oklch(15% 0.05 250)",
+          "oklch(25% 0.06 250)",
+          "oklch(35% 0.07 250)",
+          "oklch(45% 0.08 250)",
+          "oklch(55% 0.09 250)",
+          "oklch(65% 0.08 250)",
+          "oklch(75% 0.06 250)",
+          "oklch(95% 0.01 250)"
+        ]
+      },
+      "score": {
+        "role": "primary",
+        "displayName": "Precious Amber",
+        "canonical": "#b86c1a",
+        "tonalRamp": [
+          "oklch(15% 0.04 60)",
+          "oklch(25% 0.07 60)",
+          "oklch(35% 0.1 60)",
+          "oklch(45% 0.12 60)",
+          "oklch(55% 0.13 60)",
+          "oklch(65% 0.12 60)",
+          "oklch(75% 0.09 60)",
+          "oklch(95% 0.02 60)"
+        ]
+      },
+      "score-high": {
+        "role": "secondary",
+        "displayName": "Healthy Green",
+        "canonical": "#2d7a4a",
+        "tonalRamp": [
+          "oklch(15% 0.04 150)",
+          "oklch(25% 0.06 150)",
+          "oklch(35% 0.08 150)",
+          "oklch(45% 0.1 150)",
+          "oklch(55% 0.11 150)",
+          "oklch(65% 0.1 150)",
+          "oklch(75% 0.07 150)",
+          "oklch(95% 0.01 150)"
+        ]
+      },
+      "score-mid": {
+        "role": "secondary",
+        "displayName": "Caution Olive",
+        "canonical": "#846a1d",
+        "tonalRamp": [
+          "oklch(15% 0.03 85)",
+          "oklch(25% 0.05 85)",
+          "oklch(35% 0.07 85)",
+          "oklch(45% 0.09 85)",
+          "oklch(55% 0.1 85)",
+          "oklch(65% 0.09 85)",
+          "oklch(75% 0.07 85)",
+          "oklch(95% 0.01 85)"
+        ]
+      },
+      "score-low": {
+        "role": "secondary",
+        "displayName": "Alert Red",
+        "canonical": "#b84040",
+        "tonalRamp": [
+          "oklch(15% 0.04 25)",
+          "oklch(25% 0.07 25)",
+          "oklch(35% 0.1 25)",
+          "oklch(45% 0.13 25)",
+          "oklch(55% 0.15 25)",
+          "oklch(65% 0.13 25)",
+          "oklch(75% 0.1 25)",
+          "oklch(95% 0.01 25)"
+        ]
+      },
+      "bgg-accent": {
+        "role": "secondary",
+        "displayName": "BoardGameGeek Blue",
+        "canonical": "#2e5f8a",
+        "tonalRamp": [
+          "oklch(15% 0.04 245)",
+          "oklch(25% 0.06 245)",
+          "oklch(35% 0.08 245)",
+          "oklch(45% 0.1 245)",
+          "oklch(55% 0.1 245)",
+          "oklch(65% 0.08 245)",
+          "oklch(75% 0.06 245)",
+          "oklch(95% 0.01 245)"
+        ]
+      },
+      "override-accent": {
+        "role": "tertiary",
+        "displayName": "Override Violet",
+        "canonical": "#5c3d99",
+        "tonalRamp": [
+          "oklch(15% 0.05 300)",
+          "oklch(25% 0.07 300)",
+          "oklch(35% 0.1 300)",
+          "oklch(45% 0.12 300)",
+          "oklch(55% 0.12 300)",
+          "oklch(65% 0.1 300)",
+          "oklch(75% 0.07 300)",
+          "oklch(95% 0.01 300)"
+        ]
+      },
+      "nav-bg": {
+        "role": "neutral",
+        "displayName": "Navigation Ink",
+        "canonical": "#1a1714",
+        "tonalRamp": [
+          "oklch(15% 0.01 70)",
+          "oklch(25% 0.01 70)",
+          "oklch(35% 0.01 70)",
+          "oklch(45% 0.01 70)",
+          "oklch(55% 0.01 70)",
+          "oklch(65% 0.01 70)",
+          "oklch(75% 0.01 70)",
+          "oklch(95% 0.01 70)"
+        ]
+      },
+      "nav-text": {
+        "role": "neutral",
+        "displayName": "Navigation Paper",
+        "canonical": "#e8e4dc",
+        "tonalRamp": [
+          "oklch(20% 0.01 70)",
+          "oklch(30% 0.01 70)",
+          "oklch(40% 0.01 70)",
+          "oklch(50% 0.01 70)",
+          "oklch(60% 0.01 70)",
+          "oklch(70% 0.01 70)",
+          "oklch(80% 0.01 70)",
+          "oklch(95% 0.01 70)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "body": {
+        "displayName": "Application Body",
+        "purpose": "Default collection-management copy and game names."
+      },
+      "title": {
+        "displayName": "Game and Page Title",
+        "purpose": "Page headings and game titles."
+      },
+      "label": {
+        "displayName": "Dense Data Label",
+        "purpose": "Uppercase metadata, table headers, and navigation grouping."
+      }
+    },
+    "shadows": [
+      {
+        "name": "menu-elevation",
+        "value": "0 8px 32px rgb(0 0 0 / 0.14), 0 2px 8px rgb(0 0 0 / 0.08)",
+        "purpose": "Menus and popovers above the flat surface system."
+      }
+    ],
+    "motion": [
+      {
+        "name": "fast-state",
+        "value": "0.1s",
+        "purpose": "Navigation, row, border, and button background state changes."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "mobile",
+        "value": "600px",
+        "purpose": "Compact field sizing and mobile navigation behavior."
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Primary commit action for a form or task.",
+      "html": "<button class=\"ds-btn-primary\">Save changes</button>",
+      "css": ".ds-btn-primary { padding: 7px 14px; border: 0; border-radius: 5px; background: var(--action); color: var(--on-action); font: 500 13px Inter, sans-serif; cursor: pointer; transition: background 0.1s; } .ds-btn-primary:hover { background: var(--action-hover); } .ds-btn-primary:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; } .ds-btn-primary:active { opacity: 0.9; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "A bordered secondary action beside a primary commit action.",
+      "html": "<button class=\"ds-btn-secondary\">Cancel</button>",
+      "css": ".ds-btn-secondary { padding: 7px 14px; border: 1px solid var(--border-strong); border-radius: 5px; background: transparent; color: var(--text-secondary); font: 500 13px Inter, sans-serif; cursor: pointer; transition: background 0.1s; } .ds-btn-secondary:hover { background: var(--bg-base); } .ds-btn-secondary:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "A compact field for collection configuration and numeric entry.",
+      "html": "<label class=\"ds-field\"><span>Axis name</span><input class=\"ds-input\" value=\"Replayability\" /></label>",
+      "css": ".ds-field { display: grid; gap: 6px; color: var(--text-secondary); font: 600 11px Inter, sans-serif; letter-spacing: 0.04em; text-transform: uppercase; } .ds-input { width: 100%; padding: 8px 12px; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--bg-elevated); color: var(--text-primary); font: 13px Inter, sans-serif; letter-spacing: normal; text-transform: none; } .ds-input:focus { outline: 2px solid var(--action); outline-offset: 1px; }"
+    },
+    {
+      "name": "Sidebar Navigation Item",
+      "kind": "nav",
+      "refersTo": "nav-active",
+      "description": "The persistent dark-rail navigation and selected route treatment.",
+      "html": "<nav class=\"ds-nav\"><span class=\"ds-nav-label\">Library</span><a class=\"ds-nav-item ds-nav-item-active\" href=\"#\"><svg viewBox=\"0 0 16 16\" aria-hidden=\"true\"><path d=\"M2 2h12v12H2zM5 5h6v1H5zm0 3h6v1H5z\"/></svg>Collection</a><a class=\"ds-nav-item\" href=\"#\">Wishlist</a></nav>",
+      "css": ".ds-nav { width: 200px; padding: 16px 0; background: var(--nav-bg); font-family: Inter, sans-serif; } .ds-nav-label { display: block; margin: 12px 0 6px; padding: 0 20px; color: color-mix(in srgb, var(--nav-text) 35%, transparent); font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; } .ds-nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 20px; border-left: 3px solid transparent; color: color-mix(in srgb, var(--nav-text) 65%, transparent); font-size: 13px; text-decoration: none; transition: all 0.1s; } .ds-nav-item svg { width: 16px; height: 16px; fill: currentColor; } .ds-nav-item:hover { background: color-mix(in srgb, var(--nav-text) 6%, transparent); color: var(--nav-text); } .ds-nav-item:focus-visible { outline: 2px solid var(--score-color); outline-offset: -2px; } .ds-nav-item-active { border-left-color: var(--nav-active); background: color-mix(in srgb, var(--score-color) 12%, transparent); color: var(--nav-text); font-weight: 500; }"
+    },
+    {
+      "name": "Axis Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "A compact bordered container for a collection scoring axis.",
+      "html": "<article class=\"ds-card\"><div><strong>Replayability</strong><p>How likely the game is to return to the table.</p></div><span class=\"ds-weight\">25%</span></article>",
+      "css": ".ds-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-surface); color: var(--text-primary); font: 13px Inter, sans-serif; transition: border-color 0.1s; } .ds-card:hover { border-color: var(--border-strong); } .ds-card:focus-within { outline: 2px solid var(--action); outline-offset: 1px; } .ds-card p { margin: 3px 0 0; color: var(--text-muted); font-size: 11px; } .ds-weight { color: var(--text-primary); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }"
+    },
+    {
+      "name": "Score Indicator",
+      "kind": "custom",
+      "refersTo": "score-high",
+      "description": "A scan-friendly fitness score with a semantic tier dot.",
+      "html": "<span class=\"ds-score\"><i></i><strong>8.4</strong></span>",
+      "css": ".ds-score { display: inline-flex; align-items: center; gap: 8px; font-family: Inter, sans-serif; } .ds-score i { width: 8px; height: 8px; border-radius: 50%; background: var(--score-high); } .ds-score strong { color: var(--score-high); font-size: 18px; font-variant-numeric: tabular-nums; } .ds-score:focus-visible { outline: 2px solid var(--bgg-accent); outline-offset: 3px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Warm Ledger",
+    "overview": "Shelf Judge is an Operate-mode workspace for judging a board game collection. It favors quiet, durable clarity: warm paper-like surfaces, charcoal navigation, compact data rows, and a small number of semantically meaningful accents. The visual system makes the collection and its scores legible rather than competing with them. The interface maintains an editorial restraint while serving dense administrative tasks. Borders, tonal surface changes, alignment, and tabular numerals establish hierarchy; color communicates action, score tiers, source provenance, and status. Light and dark themes preserve those role relationships rather than merely inverting colors.",
+    "keyCharacteristics": [
+      "Warm neutral surfaces with a dark, persistent navigation rail.",
+      "Compact, scan-friendly typography and measured spacing.",
+      "Semantic accents reserved for actions, scores, sources, and states.",
+      "Flat surfaces organized by borders and tonal layering, with one elevated menu shadow."
+    ],
+    "rules": [
+      {
+        "name": "The Semantic Accent Rule",
+        "body": "Use an accent to communicate a domain meaning, not to decorate a neutral surface. Preserve the source-specific blue and violet language, and the green, olive, and red score scale.",
+        "section": "colors"
+      },
+      {
+        "name": "The Numbers-Align Rule",
+        "body": "Scores, weights, ranks, dates, and table values use tabular numerals and align to their comparison edge.",
+        "section": "typography"
+      },
+      {
+        "name": "The Rule-First Depth Rule",
+        "body": "Establish hierarchy with the surface and border vocabulary before adding elevation; reserve shadows for overlays that must clearly float.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do preserve warm neutrals as the dominant surface language in both themes.",
+      "Do use compact uppercase labels to structure dense data, and tabular numerals to compare it.",
+      "Do retain semantic color boundaries for score tiers, BGG data, and personal overrides.",
+      "Do use borders and tonal surfaces to group information before reaching for shadows."
+    ],
+    "donts": [
+      "Don't use action navy, amber, BGG blue, or override violet as arbitrary decoration.",
+      "Don't replace the dark navigation rail with a light card-like navigation treatment.",
+      "Don't introduce oversized rounding, oversized display typography, or expansive white space that weakens collection scanning.",
+      "Don't remove visible keyboard focus treatments or rely on color alone for a score or state."
+    ]
+  }
+}

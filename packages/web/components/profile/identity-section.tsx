@@ -44,23 +44,15 @@ function ClassOverview({
   const entities = overviewEntities(result);
   const headingId = `profile-${result.entityClass}-heading`;
   return (
-    <section className="profile-class" aria-labelledby={headingId} data-result={result.result}>
+    <section
+      className="profile-class profile-class--disclosure profile-class--hierarchy"
+      aria-labelledby={headingId}
+      data-result={result.result}
+    >
       <div className="profile-class-heading">
         <h3 id={headingId}>{classLabels[result.entityClass]}</h3>
         <span className="profile-status-label">{resultLabels[result.result]}</span>
       </div>
-      <p className="profile-readiness" data-readiness={result.metadataReadiness.state}>
-        Metadata: {result.metadataReadiness.state}. {result.metadataReadiness.completeGameCount} of{" "}
-        {result.metadataReadiness.ownedGameCount} owned games have complete metadata;{" "}
-        {result.metadataReadiness.refreshNeededGameCount} need refresh and{" "}
-        {result.metadataReadiness.unrefreshableGameCount} cannot be refreshed.
-      </p>
-      {(result.result === "supported" || result.result === "limited") && (
-        <p>
-          The class minimum of {minimumSupportedGames} associated games is both the support
-          threshold and the comparator weight used for adjusted fit.
-        </p>
-      )}
       {entities.length > 0 ? (
         <div className="profile-entity-grid">
           {entities.map((entity) => (
@@ -74,12 +66,27 @@ function ClassOverview({
             : resultLabels[result.result] + "."}
         </p>
       )}
-      {(result.exclusions.length > 0 || result.refreshWarnings.length > 0) && (
-        <p className="profile-warning">
-          Evidence details include {result.exclusions.length} exclusions and{" "}
-          {result.refreshWarnings.length} refresh warnings.
+      <details>
+        <summary>Metadata and evidence details</summary>
+        <p className="profile-readiness" data-readiness={result.metadataReadiness.state}>
+          Metadata: {result.metadataReadiness.state}. {result.metadataReadiness.completeGameCount}{" "}
+          of {result.metadataReadiness.ownedGameCount} owned games have complete metadata;{" "}
+          {result.metadataReadiness.refreshNeededGameCount} need refresh and{" "}
+          {result.metadataReadiness.unrefreshableGameCount} cannot be refreshed.
         </p>
-      )}
+        {(result.result === "supported" || result.result === "limited") && (
+          <p className="profile-method">
+            The class minimum of {minimumSupportedGames} associated games is both the support
+            threshold and the comparator weight used for adjusted fit.
+          </p>
+        )}
+        {(result.exclusions.length > 0 || result.refreshWarnings.length > 0) && (
+          <p className="profile-warning">
+            Evidence details include {result.exclusions.length} exclusions and{" "}
+            {result.refreshWarnings.length} refresh warnings.
+          </p>
+        )}
+      </details>
       <Link href={`/profile/entities?class=${result.entityClass}`}>
         View all {classLabels[result.entityClass].toLowerCase()} and evidence
       </Link>
