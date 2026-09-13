@@ -452,12 +452,17 @@ describe("ReflectionEvidenceService", () => {
     const completed = await service.finish?.(turn);
     if (completed === undefined) throw new Error("Reflection tool turn cannot finish");
     expect(completed.citations).toHaveLength(2);
-    expect(completed.citations.map(({ sourceDisplayContext }) => sourceDisplayContext)).toEqual(
-      expect.arrayContaining([
-        { kind: "game", gameTitle: "Lazy reflection game 001" },
-        { kind: "game", gameTitle: "Lazy reflection game 002" },
-      ]),
+    const sourceDisplayContexts = completed.citations.map(
+      ({ sourceDisplayContext }) => sourceDisplayContext,
     );
+    expect(sourceDisplayContexts).toContainEqual({
+      kind: "game",
+      gameTitle: "Lazy reflection game 001",
+    });
+    expect(sourceDisplayContexts).toContainEqual({
+      kind: "game",
+      gameTitle: "Lazy reflection game 002",
+    });
 
     expect(completed.scope).toMatchObject({
       totalPresentNoteCount: null,

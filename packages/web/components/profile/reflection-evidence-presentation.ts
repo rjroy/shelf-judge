@@ -121,17 +121,18 @@ export function gameTitlesFromGamesPayload(payload: unknown): ReadonlyMap<string
   return new Map(
     candidates.flatMap((candidate) => {
       if (typeof candidate !== "object" || candidate === null || !("game" in candidate)) return [];
-      const game = candidate.game;
+      const game = (candidate as Record<string, unknown>).game;
       if (
         typeof game !== "object" ||
         game === null ||
         !("id" in game) ||
         !("name" in game) ||
-        typeof game.id !== "string" ||
-        typeof game.name !== "string"
+        typeof (game as Record<string, unknown>).id !== "string" ||
+        typeof (game as Record<string, unknown>).name !== "string"
       )
         return [];
-      return [[game.id, game.name] as const];
+      const { id, name } = game as { readonly id: string; readonly name: string };
+      return [[id, name] as const];
     }),
   );
 }
