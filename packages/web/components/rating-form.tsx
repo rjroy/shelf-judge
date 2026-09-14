@@ -277,7 +277,7 @@ export function RatingFormContent({
                   {axisLabel && (
                     <div
                       className="rating-label-hint"
-                      style={{ fontSize: "0.75em", color: "#888" }}
+                      style={{ fontSize: "0.75em", color: "var(--text-muted)" }}
                     >
                       {axisLabel}
                     </div>
@@ -372,7 +372,7 @@ export function RatingFormContent({
                       <span className="value">
                         {effectiveRating ?? "\u2014"}
                         {effectiveRating !== null && getRatingLabel(effectiveRating) && (
-                          <span style={{ fontSize: "0.85em", color: "#888", marginLeft: "0.4em" }}>
+                          <span style={{ fontSize: "0.85em", color: "var(--text-muted)", marginLeft: "0.4em" }}>
                             {getRatingLabel(effectiveRating)}
                           </span>
                         )}

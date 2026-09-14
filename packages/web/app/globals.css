@@ -9307,9 +9307,8 @@ body {
   margin: 0;
 }
 
-.profile-class--disclosure .profile-status-label,
-.profile-class--disclosure .profile-warning {
-  color: var(--score-color, #d4882e);
+.profile-class--disclosure .profile-status-label {
+  color: var(--warning-text);
 }
 
 .profile-class--disclosure summary,
@@ -9318,15 +9317,16 @@ body {
 }
 
 .profile-class--disclosure .profile-readiness,
-.profile-class--disclosure .profile-method,
-.profile-class--disclosure .profile-warning {
+.profile-class--disclosure .profile-method {
   margin-top: 8px;
   color: var(--text-secondary, #6b6560);
   font-size: 13px;
 }
 
 .profile-class--disclosure .profile-warning {
-  color: var(--score-color, #d4882e);
+  margin-top: 8px;
+  color: var(--warning-text);
+  font-size: 13px;
 }
 
 .profile-class--disclosure .profile-entity-grid {
@@ -9372,9 +9372,8 @@ body {
   display: contents;
 }
 
-.profile-class--disclosure .profile-entity-summary .profile-status-label,
 .profile-class--disclosure .profile-entity-summary .profile-fit {
-  color: var(--score-color);
+  color: var(--score-mid);
 }
 
 .profile-class--disclosure .profile-entity-summary .profile-fit {

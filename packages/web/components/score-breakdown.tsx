@@ -234,7 +234,7 @@ function BreakdownRow({
           {entry.effectiveRating !== null ? (
             <div>
               <div>{entry.effectiveRating}</div>
-              <div style={{ fontSize: "0.75em", color: "#888", lineHeight: 1.2 }}>
+              <div style={{ fontSize: "0.75em", color: "var(--text-muted)", lineHeight: 1.2 }}>
                 {getRatingLabel(entry.effectiveRating)}
               </div>
             </div>
