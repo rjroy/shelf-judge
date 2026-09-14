@@ -157,3 +157,48 @@ test("shelf expansion is keyboard-operable without nesting rename actions", asyn
   await expect(page.locator(".shelf-rename-input")).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("shelf-controls.png") });
 });
+
+test("shelf summary and controls remain visible and operable on narrow screens", async ({
+  page,
+}) => {
+  await page.route("**/api/daemon/shelf/config", (route) =>
+    route.fulfill({
+      json: {
+        units: [
+          {
+            id: "unit-1",
+            name: "Living room",
+            shelves: [
+              {
+                id: "shelf-1",
+                name: "Top shelf",
+                dimensionless: true,
+                width: null,
+                height: null,
+                depth: null,
+              },
+            ],
+          },
+        ],
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    }),
+  );
+  await page.goto("/shelves");
+
+  expect(await page.locator("html").evaluate((element) => element.scrollWidth)).toBe(
+    await page.evaluate(() => window.innerWidth),
+  );
+  await expect(page.getByText("dimensionless shelves", { exact: true })).toBeVisible();
+
+  const badge = page.locator(".shelf-badge-dimensionless");
+  const edit = page.getByRole("button", { name: "Edit", exact: true });
+  const duplicate = page.getByTitle("Duplicate shelf");
+  await expect(badge).toBeInViewport();
+  await expect(edit).toBeInViewport();
+  await expect(duplicate).toBeInViewport();
+
+  await edit.click();
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeVisible();
+});

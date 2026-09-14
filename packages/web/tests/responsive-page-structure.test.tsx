@@ -47,5 +47,11 @@ describe("responsive page structure", () => {
     expect(css).toMatch(
       /@media \(max-width: 640px\)[\s\S]*?\.template-picker \{\s*grid-template-columns: 1fr;/,
     );
+    expect(css).toMatch(
+      /@media \(max-width: 700px\)[\s\S]*?\.shelf-summary-bar \{[\s\S]*?grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/,
+    );
+    expect(css).toMatch(
+      /@media \(max-width: 700px\)[\s\S]*?\.shelf-row-actions \{[\s\S]*?flex-basis: 100%;/,
+    );
   });
 });
