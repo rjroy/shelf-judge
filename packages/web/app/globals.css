@@ -1287,6 +1287,9 @@ body {
   grid-template-areas:
     "content content"
     "assessment ratings"
+    "redundancy redundancy"
+    "niche-position niche-position"
+    "tournament tournament"
     "utilization acquisition"
     "intention play-metadata"
     "notes related-bgg-ids"
@@ -1319,6 +1322,15 @@ body {
 }
 .game-detail-ratings {
   grid-area: ratings;
+}
+.game-detail-redundancy {
+  grid-area: redundancy;
+}
+.game-detail-niche-position {
+  grid-area: niche-position;
+}
+.game-detail-tournament {
+  grid-area: tournament;
 }
 .game-detail-utilization {
   grid-area: utilization;
@@ -1353,6 +1365,27 @@ body {
   margin-top: 0;
 }
 
+.game-detail-chapter .niche-panel,
+.game-detail-chapter .redundancy-panel,
+.game-detail-tournament .tournament-breakdown-panel {
+  background: transparent;
+  border-bottom: 0;
+  padding: 0;
+}
+
+.niche-ignored-section {
+  margin-top: 16px;
+}
+
+.niche-ignored-heading {
+  cursor: pointer;
+}
+
+.niche-ignored-heading:focus-visible {
+  outline: 3px solid var(--bgg-accent);
+  outline-offset: 3px;
+}
+
 .game-detail-utilization .purchase-utilization-panel,
 .game-detail-intention .intention-panel,
 .game-detail-notes .owner-note-panel {
@@ -1380,6 +1413,7 @@ body {
   }
 
   .game-detail-chapters > .game-detail-content,
+  .game-detail-chapters > .game-detail-chapter,
   .game-detail-chapters > .game-detail-chapter {
     width: 100%;
   }

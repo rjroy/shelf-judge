@@ -32,6 +32,58 @@ describe("responsive page structure", () => {
     expect(html).toContain('class="rating-form"');
   });
 
+  test("places independent collection and tournament cards after score and ratings", () => {
+    const html = renderToStaticMarkup(
+      <GameDetailMain
+        editors={{
+          assessment: <div>Score Breakdown</div>,
+          ratings: <div>Your Ratings</div>,
+          collectionInsights: (
+            <>
+              <section className="game-detail-chapter game-detail-redundancy">Redundancy</section>
+              <section className="game-detail-chapter game-detail-niche-position">
+                Niche Position
+              </section>
+            </>
+          ),
+          tournament: (
+            <section className="game-detail-chapter game-detail-tournament">
+              Tournament record
+            </section>
+          ),
+          utilization: null,
+          acquisition: null,
+          intention: null,
+          playMetadata: null,
+          notes: null,
+          relatedBggIds: null,
+          ownership: null,
+          boxDimensions: null,
+          shelfAssignment: null,
+        }}
+      >
+        <GameDetailHero>Core detail</GameDetailHero>
+      </GameDetailMain>,
+    );
+
+    expect(html.indexOf("Score Breakdown")).toBeLessThan(html.indexOf("Your Ratings"));
+    expect(html.indexOf("Your Ratings")).toBeLessThan(html.indexOf("Redundancy"));
+    expect(html.indexOf("Redundancy")).toBeLessThan(html.indexOf("Niche Position"));
+    expect(html.indexOf("Niche Position")).toBeLessThan(html.indexOf("Tournament record"));
+    expect(html).toContain('class="game-detail-chapter game-detail-niche-position"');
+    expect(html).toContain('class="game-detail-chapter game-detail-tournament"');
+  });
+
+  test("uses a native collapsed disclosure for hidden niches", async () => {
+    const page = await Bun.file(new URL("../app/games/[id]/page.tsx", import.meta.url)).text();
+    const css = await Bun.file(new URL("../app/globals.css", import.meta.url)).text();
+
+    expect(page).toContain('<details className="niche-ignored-section">');
+    expect(page).toContain("Hidden niches ({ignoredTags.length})");
+    expect(page).toContain("<NicheRestoreButton");
+    expect(css).toContain(".niche-ignored-heading:focus-visible");
+  });
+
   test("defines stacking and mobile reductions for the rendered page structures", async () => {
     const css = await Bun.file(new URL("../app/globals.css", import.meta.url)).text();
 

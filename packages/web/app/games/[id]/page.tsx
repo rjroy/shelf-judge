@@ -181,6 +181,40 @@ export default async function GameDetailPage({
     ),
     intention: <IntentionControls game={game} detail={data.intentions} />,
     notes: <OwnerGameNoteEditor gameId={game.id} />,
+    collectionInsights:
+      !isPreviouslyOwned &&
+      (score?.redundancyAdjustment ||
+        score?.vetoed ||
+        (nichePosition && (nichePosition.niches.length > 0 || ignoredTags.length > 0))) ? (
+        <>
+          {score?.redundancyAdjustment && (
+            <section className="game-detail-chapter game-detail-redundancy">
+              <RedundancyPanel score={score} adjustment={score.redundancyAdjustment} />
+            </section>
+          )}
+          {(score?.vetoed ||
+            (nichePosition && (nichePosition.niches.length > 0 || ignoredTags.length > 0))) && (
+            <section className="game-detail-chapter game-detail-niche-position">
+              {score?.vetoed ? (
+                <>
+                  <div className="panel-section-title">Niche Position</div>
+                  <div className="niche-vetoed-note">
+                    This game is vetoed and excluded from niche rankings.
+                  </div>
+                </>
+              ) : (
+                nichePosition && (
+                  <NichePositionPanel nichePosition={nichePosition} ignoredTags={ignoredTags} />
+                )
+              )}
+            </section>
+          )}
+        </>
+      ) : null,
+    tournament:
+      tournamentStats && tournamentStats.comparisonCount > 0 ? (
+        <TournamentBreakdown tournamentStats={tournamentStats} />
+      ) : null,
   };
   const detailParams = await searchParams;
   const collectionContext =
@@ -377,85 +411,6 @@ export default async function GameDetailPage({
               </div>
             </div>
           )}
-
-          {tournamentStats && tournamentStats.comparisonCount > 0 && (
-            <>
-              <div className="tournament-breakdown-panel">
-                <div className="tournament-breakdown-stats">
-                  <div className="panel-section-title">Tournament Breakdown</div>
-                  <div className="tournament-breakdown-grid">
-                    <div className="tournament-stat">
-                      <div className="tournament-stat-value">{tournamentStats.comparisonCount}</div>
-                      <div className="tournament-stat-label">Comparisons</div>
-                    </div>
-                    <div className="tournament-stat">
-                      <div className="tournament-stat-value">
-                        {tournamentStats.wins}W / {tournamentStats.losses}L
-                      </div>
-                      <div className="tournament-stat-label">Record</div>
-                    </div>
-                    <div className="tournament-stat">
-                      <div className="tournament-stat-value">
-                        {Math.round(tournamentStats.eloRating)}
-                      </div>
-                      <div className="tournament-stat-label">Raw ELO</div>
-                    </div>
-                    <div className="tournament-stat">
-                      <div className="tournament-stat-value">
-                        {tournamentStats.normalizedScore !== null
-                          ? tournamentStats.normalizedScore.toFixed(1)
-                          : "-"}
-                      </div>
-                      <div className="tournament-stat-label">Normalized</div>
-                    </div>
-                  </div>
-                </div>
-                {tournamentStats.recentComparisons.length > 0 && (
-                  <div className="tournament-recent">
-                    <div className="tournament-recent-title">Last 5 comparisons</div>
-                    {tournamentStats.recentComparisons.slice(0, 5).map((comparison, index) => (
-                      <div
-                        key={index}
-                        className={`tournament-recent-row ${comparison.won ? "win" : "loss"}`}
-                      >
-                        <span className="tournament-result-badge">
-                          {comparison.won ? "W" : "L"}
-                        </span>
-                        <span className="tournament-opponent-id">
-                          vs{" "}
-                          <Link href={`/games/${comparison.opponentGameId}`} className="game-link">
-                            {comparison.opponentGameName ?? comparison.opponentGameId.slice(0, 8)}
-                          </Link>
-                        </span>
-                        <span className="tournament-recent-date">
-                          {new Date(comparison.createdAt).toLocaleDateString()}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-
-          {!isPreviouslyOwned && score?.redundancyAdjustment && (
-            <RedundancyPanel score={score} adjustment={score.redundancyAdjustment} />
-          )}
-
-          {!isPreviouslyOwned &&
-            (score?.vetoed ? (
-              <div className="niche-panel">
-                <div className="panel-section-title">Niche Position</div>
-                <div className="niche-vetoed-note">
-                  This game is vetoed and excluded from niche rankings.
-                </div>
-              </div>
-            ) : (
-              nichePosition &&
-              (nichePosition.niches.length > 0 || ignoredTags.length > 0) && (
-                <NichePositionPanel nichePosition={nichePosition} ignoredTags={ignoredTags} />
-              )
-            ))}
         </GameDetailMain>
       </OwnerGameNoteStateProvider>
     </>
@@ -464,6 +419,8 @@ export default async function GameDetailPage({
 
 type GameDetailEditorSlots = {
   ratings: ReactNode;
+  collectionInsights?: ReactNode;
+  tournament?: ReactNode;
   ownership: ReactNode;
   acquisition: ReactNode;
   playMetadata: ReactNode;
@@ -488,6 +445,8 @@ export function GameDetailMain({
       <div className="game-detail-content">{children}</div>
       <section className="game-detail-chapter game-detail-assessment">{editors.assessment}</section>
       <section className="game-detail-chapter game-detail-ratings">{editors.ratings}</section>
+      {editors.collectionInsights}
+      {editors.tournament}
       <section className="game-detail-chapter game-detail-utilization">
         {editors.utilization}
       </section>
@@ -555,6 +514,64 @@ function NichePositionPanel({
         <NicheIgnoredSection ignoredTags={ignoredTags} />
       </div>
     </>
+  );
+}
+
+function TournamentBreakdown({ tournamentStats }: { tournamentStats: TournamentGameStatsDisplay }) {
+  return (
+    <section className="game-detail-chapter game-detail-tournament">
+      <div className="panel-section-title">Tournament Record</div>
+      <div className="tournament-breakdown-panel">
+        <div className="tournament-breakdown-stats">
+          <div className="tournament-breakdown-grid">
+            <div className="tournament-stat">
+              <div className="tournament-stat-value">{tournamentStats.comparisonCount}</div>
+              <div className="tournament-stat-label">Comparisons</div>
+            </div>
+            <div className="tournament-stat">
+              <div className="tournament-stat-value">
+                {tournamentStats.wins}W / {tournamentStats.losses}L
+              </div>
+              <div className="tournament-stat-label">Record</div>
+            </div>
+            <div className="tournament-stat">
+              <div className="tournament-stat-value">{Math.round(tournamentStats.eloRating)}</div>
+              <div className="tournament-stat-label">Raw ELO</div>
+            </div>
+            <div className="tournament-stat">
+              <div className="tournament-stat-value">
+                {tournamentStats.normalizedScore !== null
+                  ? tournamentStats.normalizedScore.toFixed(1)
+                  : "-"}
+              </div>
+              <div className="tournament-stat-label">Normalized</div>
+            </div>
+          </div>
+        </div>
+        {tournamentStats.recentComparisons.length > 0 && (
+          <div className="tournament-recent">
+            <div className="tournament-recent-title">Last 5 comparisons</div>
+            {tournamentStats.recentComparisons.slice(0, 5).map((comparison, index) => (
+              <div
+                key={index}
+                className={`tournament-recent-row ${comparison.won ? "win" : "loss"}`}
+              >
+                <span className="tournament-result-badge">{comparison.won ? "W" : "L"}</span>
+                <span className="tournament-opponent-id">
+                  vs{" "}
+                  <Link href={`/games/${comparison.opponentGameId}`} className="game-link">
+                    {comparison.opponentGameName ?? comparison.opponentGameId.slice(0, 8)}
+                  </Link>
+                </span>
+                <span className="tournament-recent-date">
+                  {new Date(comparison.createdAt).toLocaleDateString()}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -688,8 +705,8 @@ function NicheIgnoredSection({ ignoredTags }: { ignoredTags: NicheTagFilter[] })
   }
 
   return (
-    <section className="niche-ignored-section">
-      <h3 className="niche-ignored-heading">Hidden niches</h3>
+    <details className="niche-ignored-section">
+      <summary className="niche-ignored-heading">Hidden niches ({ignoredTags.length})</summary>
       <div className="niche-ignored-list" tabIndex={0} aria-label="Hidden niches">
         {ignoredTags.map((tag) => (
           <div key={`${tag.type}:${tag.name}`} className="niche-ignored-tag">
@@ -701,7 +718,7 @@ function NicheIgnoredSection({ ignoredTags }: { ignoredTags: NicheTagFilter[] })
           </div>
         ))}
       </div>
-    </section>
+    </details>
   );
 }
 
