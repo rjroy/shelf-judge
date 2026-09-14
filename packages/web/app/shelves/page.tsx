@@ -463,9 +463,26 @@ export default function ShelvesPage() {
             const expanded = expandedUnits.has(unit.id);
             return (
               <div key={unit.id} className="shelf-unit-card">
-                <div className="shelf-unit-header" onClick={() => toggleUnit(unit.id)}>
-                  <span className={`shelf-unit-expand${expanded ? " open" : ""}`}>&#9658;</span>
-                  {renamingUnit === unit.id ? (
+                <div className="shelf-unit-header">
+                  <button
+                    type="button"
+                    className={`shelf-unit-toggle${renamingUnit === unit.id ? " renaming" : ""}`}
+                    aria-label={unit.name}
+                    aria-expanded={expanded}
+                    aria-controls={expanded ? `shelf-unit-body-${unit.id}` : undefined}
+                    onClick={() => toggleUnit(unit.id)}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`shelf-unit-expand${expanded ? " open" : ""}`}
+                    >
+                      &#9658;
+                    </span>
+                    {renamingUnit !== unit.id && (
+                      <span className="shelf-unit-name">{unit.name}</span>
+                    )}
+                  </button>
+                  {renamingUnit === unit.id && (
                     <input
                       className="shelf-rename-input"
                       value={renameValue}
@@ -477,8 +494,6 @@ export default function ShelvesPage() {
                       onClick={(e) => e.stopPropagation()}
                       autoFocus
                     />
-                  ) : (
-                    <span className="shelf-unit-name">{unit.name}</span>
                   )}
                   <span className="shelf-unit-count">
                     {unit.shelves.length} {unit.shelves.length === 1 ? "shelf" : "shelves"}
@@ -518,7 +533,7 @@ export default function ShelvesPage() {
                 </div>
 
                 {expanded && (
-                  <div className="shelf-unit-body">
+                  <div className="shelf-unit-body" id={`shelf-unit-body-${unit.id}`}>
                     {unit.shelves.map((shelf, idx) => (
                       <div key={shelf.id} className="shelf-row">
                         <div className="shelf-reorder-btns">

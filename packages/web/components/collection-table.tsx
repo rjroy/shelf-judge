@@ -1032,10 +1032,18 @@ export function CollectionTable({
         {predictedGames && (
           <>
             <div className="stat-block">
-              <div className="predictions-toggle" onClick={() => setPredictionsOn((v) => !v)}>
-                <div className={`predictions-toggle-switch${usePredictions ? " active" : ""}`} />
+              <button
+                type="button"
+                className="predictions-toggle"
+                aria-pressed={usePredictions}
+                onClick={() => setPredictionsOn((v) => !v)}
+              >
+                <span
+                  aria-hidden="true"
+                  className={`predictions-toggle-switch${usePredictions ? " active" : ""}`}
+                />
                 <span className="predictions-toggle-label">Predictions</span>
-              </div>
+              </button>
               {usePredictions && (
                 <div className="stat-block inner">
                   <div className="stat-value predictions-stat">{predictedCount}</div>
@@ -1050,7 +1058,9 @@ export function CollectionTable({
         {nicheGames && (
           <>
             <div className="stat-block">
-              <div
+              <button
+                type="button"
+                aria-pressed={nichesOn}
                 className="predictions-toggle"
                 onClick={() => {
                   setNichesOn((v) => {
@@ -1059,18 +1069,25 @@ export function CollectionTable({
                   });
                 }}
               >
-                <div
+                <span
+                  aria-hidden="true"
                   className={`predictions-toggle-switch${nichesOn ? " active niche-toggle" : ""}`}
                 />
                 <span className="predictions-toggle-label">Niches</span>
-              </div>
+              </button>
               {nichesOn && (
-                <div className="predictions-toggle" onClick={() => setNicheViewMode((v) => !v)}>
-                  <div
+                <button
+                  type="button"
+                  aria-pressed={nicheViewMode}
+                  className="predictions-toggle"
+                  onClick={() => setNicheViewMode((v) => !v)}
+                >
+                  <span
+                    aria-hidden="true"
                     className={`predictions-toggle-switch${nicheViewMode ? " active niche-toggle" : ""}`}
                   />
                   <span className="predictions-toggle-label">Group</span>
-                </div>
+                </button>
               )}
             </div>
           </>
@@ -1085,26 +1102,35 @@ export function CollectionTable({
       <div className="collection-header">
         <div className="rank">#</div>
         <div className="game-thumb-col"></div>
-        <div
+        <button
+          type="button"
+          aria-pressed={sort.field === "name"}
+          aria-label={`Game: ${sort.field === "name" ? `sorted ${sort.direction === "asc" ? "ascending" : "descending"}` : "sort by name"}`}
           className={`col-label sortable${sort.field === "name" ? " sort-active" : ""}`}
           onClick={handleGameHeaderClick}
           style={{ justifyContent: "flex-start" }}
         >
           Game
           {sort.field === "name" && <span className="sort-arrow">{dirArrow}</span>}
-        </div>
+        </button>
         {!usePredictions && (
           <div className="axes-used-col col-label">{isAxisSort ? "Scores" : "Axes Rated"}</div>
         )}
         {usePredictions && <div className="axes-used-col col-label">Confidence</div>}
-        <div
+        <button
+          type="button"
+          aria-pressed={sort.field === "updatedAt"}
+          aria-label={`Last Rated: ${sort.field === "updatedAt" ? `sorted ${sort.direction === "asc" ? "ascending" : "descending"}` : "sort by last rated"}`}
           className={`last-rated-col col-label sortable${sort.field === "updatedAt" ? " sort-active" : ""}`}
           onClick={handleLastRatedHeaderClick}
         >
           Last Rated
           {sort.field === "updatedAt" && <span className="sort-arrow">{dirArrow}</span>}
-        </div>
-        <div
+        </button>
+        <button
+          type="button"
+          aria-pressed={scoreOwnsSort}
+          aria-label={`Score (${scoreSubtitle}): ${scoreOwnsSort ? `sorted ${sort.direction === "asc" ? "ascending" : "descending"}` : "reverse current sort direction"}`}
           className="score-col-label sortable"
           onClick={handleScoreHeaderClick}
           style={{ cursor: "pointer" }}
@@ -1120,7 +1146,7 @@ export function CollectionTable({
               scoreSubtitle
             )}
           </span>
-        </div>
+        </button>
       </div>
 
       {nicheViewMode && nichesOn ? (
