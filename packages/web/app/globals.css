@@ -5038,6 +5038,27 @@ body {
   outline-offset: 3px;
 }
 
+/* Shared 44px targets keep compact Warm Ledger controls usable with touch. */
+.btn,
+.btn-sm,
+.theme-toggle,
+.nav-item,
+.topbar-hamburger,
+.sidebar-close,
+.sort-select,
+.sort-dir-btn,
+.filter-toggle-btn {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.btn,
+.topbar-hamburger,
+.sidebar-close,
+.sort-dir-btn {
+  justify-content: center;
+}
+
 .profile-question {
   max-width: 1080px;
   min-width: 0;
