@@ -9714,7 +9714,7 @@ body {
 .profile-class.profile-class--disclosure.profile-class--hierarchy {
   display: grid;
   gap: 0.9rem;
-  padding: 0.9rem 0;
+  padding: 12px 0.75rem;
   border-block: 1px solid color-mix(in srgb, var(--action) 32%, transparent);
 }
 
@@ -9723,7 +9723,7 @@ body {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.35rem 1rem;
   align-items: center;
-  padding-left: 0.7rem;
+  padding-left: 0;
   border-left: 1px solid var(--action);
 }
 
