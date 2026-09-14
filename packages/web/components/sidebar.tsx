@@ -165,29 +165,29 @@ function MonitorIcon() {
   );
 }
 
-function ThemeToggle({ variant }: { variant: "sidebar" | "mobile" }) {
+function ThemeToggle({ variant }: { variant: "sidebar-header" | "mobile" }) {
   const { theme, setTheme } = useTheme();
 
+  const nextTheme = THEME_CYCLE[(THEME_CYCLE.indexOf(theme) + 1) % THEME_CYCLE.length];
+
   const cycle = () => {
-    const idx = THEME_CYCLE.indexOf(theme);
-    setTheme(THEME_CYCLE[(idx + 1) % THEME_CYCLE.length]);
+    setTheme(nextTheme);
   };
 
   const icon = theme === "light" ? <SunIcon /> : theme === "dark" ? <MoonIcon /> : <MonitorIcon />;
   const className =
-    variant === "sidebar"
-      ? "theme-toggle theme-toggle-sidebar"
+    variant === "sidebar-header"
+      ? "theme-toggle theme-toggle-sidebar-header"
       : "theme-toggle theme-toggle-mobile";
 
   return (
     <button
       className={className}
       onClick={cycle}
-      aria-label={`Theme: ${THEME_LABELS[theme]}`}
-      title={`Theme: ${THEME_LABELS[theme]}`}
+      aria-label={`Switch theme from ${THEME_LABELS[theme]} to ${THEME_LABELS[nextTheme]}`}
+      title={`Switch to ${THEME_LABELS[nextTheme]} theme`}
     >
       {icon}
-      {variant === "sidebar" && <span className="theme-toggle-label">{THEME_LABELS[theme]}</span>}
     </button>
   );
 }
@@ -252,6 +252,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 export function Sidebar() {
   const pathname = usePathname();
   const { open, close } = useSidebar();
+  const [settingsExpanded, setSettingsExpanded] = useState(true);
 
   return (
     <aside className={`sidebar${open ? " sidebar-open" : ""}`}>
@@ -274,31 +275,51 @@ export function Sidebar() {
             <rect x="14" y="4" width="5" height="14" rx="1" fill="var(--nav-text)" opacity="0.6" />
           </svg>
           <span className="brand-name">Shelf Judge</span>
+          <ThemeToggle variant="sidebar-header" />
         </div>
         <div className="brand-sub">Board Game Collection</div>
       </div>
 
       <nav className="nav-section">
-        {navGroups.map((group) => (
-          <div key={group.label}>
-            <div className="nav-label">{group.label}</div>
-            {group.items.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`nav-item${isActive(pathname, item.href) ? " active" : ""}`}
+        {navGroups.map((group) => {
+          const items = group.items.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`nav-item${isActive(pathname, item.href) ? " active" : ""}`}
+            >
+              {item.icon}
+              {item.name}
+            </Link>
+          ));
+
+          if (group.label === "Settings") {
+            return (
+              <details
+                key={group.label}
+                className="nav-disclosure"
+                open={settingsExpanded}
+                onToggle={(event) => setSettingsExpanded(event.currentTarget.open)}
               >
-                {item.icon}
-                {item.name}
-              </Link>
-            ))}
-          </div>
-        ))}
+                <summary className="nav-label nav-disclosure-label">
+                  Settings <span aria-hidden="true">{settingsExpanded ? "⌄" : "›"}</span>
+                </summary>
+                <div id="settings-nav-items">{items}</div>
+              </details>
+            );
+          }
+
+          return (
+            <div key={group.label}>
+              <div className="nav-label">{group.label}</div>
+              {items}
+            </div>
+          );
+        })}
       </nav>
 
       <div className="sidebar-footer">
         <span>Shelf Judge v0.1</span>
-        <ThemeToggle variant="sidebar" />
       </div>
     </aside>
   );
