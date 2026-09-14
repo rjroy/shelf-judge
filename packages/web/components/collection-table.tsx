@@ -1337,7 +1337,14 @@ function GameRow({
       <div className="rank">{rank !== null ? rank : "\u2014"}</div>
       <div className="game-thumb-col">
         {game.imageUrl ? (
-          <img src={game.imageUrl} alt="" className="game-thumb" />
+          <img
+            src={game.imageUrl}
+            alt=""
+            className="game-thumb"
+            loading="lazy"
+            width={40}
+            height={40}
+          />
         ) : (
           <div className="game-thumb-placeholder" />
         )}

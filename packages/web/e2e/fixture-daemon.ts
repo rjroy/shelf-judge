@@ -100,6 +100,7 @@ interface ManualValuesFixtureState {
 }
 
 interface CollectionFixtureState {
+  thumbnails: boolean;
   deletedIds: Set<string>;
   previouslyOwnedIds: Set<string>;
   empty: boolean;
@@ -457,6 +458,17 @@ function collectionEntries(
   } = {},
 ): GameWithPurchaseUtilization[] {
   if (collectionState.empty) return [];
+  if (collectionState.thumbnails) {
+    const definition = collectionDefinitions[0];
+    if (definition === undefined) throw new Error("Expected collection fixture definition");
+    return Array.from({ length: 100 }, (_, index) => {
+      const entry = collectionEntry(definition, { predicted: false, niches: false });
+      entry.game.id = `thumbnail-${index}`;
+      entry.game.name = `Thumbnail ${String(index).padStart(3, "0")}`;
+      entry.game.imageUrl = `/test-thumbnails/${index}.svg`;
+      return entry;
+    });
+  }
   return collectionDefinitions
     .filter(({ id }) => !collectionState.deletedIds.has(id))
     .map((definition) =>
@@ -642,6 +654,7 @@ function reflectionResult(questionId: ReflectionQuestionId, outcome: "answered" 
 
 function createCollectionState(): CollectionFixtureState {
   return {
+    thumbnails: false,
     deletedIds: new Set(),
     previouslyOwnedIds: new Set(),
     empty: false,
@@ -1284,6 +1297,7 @@ async function handle(request: Request): Promise<Response> {
       );
     }
     for (const field of [
+      "thumbnails",
       "empty",
       "axesAvailable",
       "tournamentAvailable",
