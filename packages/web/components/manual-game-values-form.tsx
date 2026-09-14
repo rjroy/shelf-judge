@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useReducer, useRef, useTransition } from "react";
+import { useEffect, useId, useReducer, useRef, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { ManualGameValues } from "@shelf-judge/shared";
 
@@ -274,50 +274,56 @@ function ManualValueControl({
         : state.status === "refreshing"
           ? `Refreshing ${fieldName}...`
           : null;
+  const inputId = `${statusId}-input`;
 
   return (
     <div className="manual-game-value-control">
-      <label>
+      <label className="manual-game-value-label" htmlFor={inputId}>
         {label}
-        <input
-          aria-label={label}
-          aria-describedby={statusId}
-          type="number"
-          min={1}
-          step={1}
-          value={state.draft}
-          placeholder={placeholder}
-          disabled={pending}
-          onChange={(event) => onChange(event.target.value)}
-        />
       </label>
-      <button
-        type="button"
-        className="btn btn-secondary"
+      <input
+        id={inputId}
+        className="manual-game-value-input"
+        aria-label={label}
         aria-describedby={statusId}
-        disabled={formPending || state.draft === state.baseline || value === undefined}
-        onClick={() => value !== undefined && void onSave(value)}
-      >
-        {state.status === "saving" ? `Saving ${fieldName}...` : `Save ${fieldName}`}
-      </button>
-      <button
-        type="button"
-        aria-describedby={statusId}
-        disabled={formPending || state.baseline === ""}
-        onClick={() => void onClear()}
-      >
-        {state.status === "clearing" ? `Clearing ${fieldName}...` : `Clear ${fieldName}`}
-      </button>
+        type="number"
+        min={1}
+        step={1}
+        value={state.draft}
+        placeholder={placeholder}
+        disabled={pending}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      <div className="manual-game-value-actions">
+        <button
+          type="button"
+          className="btn btn-secondary"
+          aria-describedby={statusId}
+          disabled={formPending || state.draft === state.baseline || value === undefined}
+          onClick={() => value !== undefined && void onSave(value)}
+        >
+          {state.status === "saving" ? `Saving ${fieldName}...` : `Save ${fieldName}`}
+        </button>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          aria-describedby={statusId}
+          disabled={formPending || state.baseline === ""}
+          onClick={() => void onClear()}
+        >
+          {state.status === "clearing" ? `Clearing ${fieldName}...` : `Clear ${fieldName}`}
+        </button>
+      </div>
       {state.error ? (
-        <div id={statusId} className="error-banner" role="alert">
+        <div id={statusId} className="manual-game-value-status error-banner" role="alert">
           {state.error}
         </div>
       ) : status ? (
-        <div id={statusId} role="status" aria-live="polite">
+        <div id={statusId} className="manual-game-value-status" role="status" aria-live="polite">
           {status}
         </div>
       ) : (
-        <div id={statusId} />
+        <div id={statusId} className="manual-game-value-status" />
       )}
     </div>
   );
@@ -335,6 +341,7 @@ export function ManualGameValuesFormView({
   onSavePlayerCount,
   onClearPlayerCount,
 }: ManualGameValuesFormViewProps) {
+  const formId = useId();
   const formPending = playingTime.status !== "idle" || playerCount.status !== "idle";
 
   return (
@@ -345,7 +352,7 @@ export function ManualGameValuesFormView({
         fieldName="Play Time"
         state={playingTime}
         placeholder={sourcePlayingTime === null ? "No BGG value" : String(sourcePlayingTime)}
-        statusId="playing-time-status"
+        statusId={`${formId}-playing-time-status`}
         formPending={formPending}
         onChange={onPlayingTimeChange}
         onSave={onSavePlayingTime}
@@ -356,7 +363,7 @@ export function ManualGameValuesFormView({
         fieldName="Player Count"
         state={playerCount}
         placeholder={sourcePlayerCount === null ? "No BGG value" : String(sourcePlayerCount)}
-        statusId="player-count-status"
+        statusId={`${formId}-player-count-status`}
         formPending={formPending}
         onChange={onPlayerCountChange}
         onSave={onSavePlayerCount}

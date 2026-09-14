@@ -1343,12 +1343,57 @@ body {
 }
 .game-detail-play-metadata {
   grid-area: play-metadata;
+  display: grid;
+  gap: 12px;
+  container-type: inline-size;
 }
+
+.game-detail-play-metadata .panel-section-title {
+  margin-bottom: 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+}
+
 .game-detail-notes {
   grid-area: notes;
 }
 .game-detail-related-bgg-ids {
   grid-area: related-bgg-ids;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-surface);
+}
+
+.game-detail-related-bgg-ids .panel-section-title {
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.game-detail-related-bgg-ids .text-muted {
+  color: var(--text-muted);
+}
+
+.game-detail-related-bgg-ids .form-group {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.game-detail-related-bgg-ids input {
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.game-detail-related-bgg-ids input::placeholder {
+  color: var(--text-muted);
+}
+
+.game-detail-related-bgg-ids input:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
 }
 .game-detail-ownership {
   grid-area: ownership;
@@ -1573,6 +1618,19 @@ body {
   gap: 6px;
 }
 
+.complexity-inline-facts {
+  display: grid;
+  gap: 6px;
+}
+
+.complexity-facts-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
 .rating-field-header {
   display: flex;
   align-items: center;
@@ -1681,6 +1739,145 @@ body {
   font-size: var(--text-xs);
   color: var(--text-muted);
   line-height: 1.35;
+}
+
+/* Play Details uses one grid contract for both editable values. */
+.manual-game-values-form {
+  display: grid;
+  grid-template-columns: minmax(9.5rem, 1fr) minmax(7rem, 8rem) max-content max-content;
+  column-gap: 8px;
+  row-gap: 12px;
+  container-type: inline-size;
+}
+
+.manual-game-values-form > .panel-section-title,
+.manual-game-values-form > .derived-rating-facts {
+  grid-column: 1 / -1;
+}
+
+.manual-game-value-control {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  column-gap: inherit;
+  row-gap: 6px;
+  min-width: 0;
+}
+
+.manual-game-value-label {
+  grid-column: 1;
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.manual-game-value-input {
+  grid-column: 2;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.manual-game-value-input::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+.manual-game-value-input:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
+
+.manual-game-value-input:disabled {
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  border-color: var(--border);
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.manual-game-value-actions {
+  display: contents;
+}
+
+.manual-game-value-actions button {
+  min-height: 44px;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.manual-game-value-actions button:first-child {
+  grid-column: 3;
+}
+
+.manual-game-value-actions button:last-child {
+  grid-column: 4;
+}
+
+.manual-game-value-status {
+  grid-column: 2 / -1;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.manual-game-value-status:empty {
+  display: none;
+}
+
+@container (max-width: 540px) {
+  .manual-game-values-form {
+    grid-template-columns: minmax(0, 1fr) max-content;
+  }
+
+  .manual-game-value-control {
+    grid-template-rows: auto auto auto;
+  }
+
+  .manual-game-value-label {
+    grid-column: 1 / -1;
+  }
+
+  .manual-game-value-input {
+    grid-column: 1;
+  }
+
+  .manual-game-value-actions button:first-child {
+    grid-column: 2;
+  }
+
+  .manual-game-value-actions button:last-child,
+  .manual-game-value-status {
+    grid-column: 1 / -1;
+  }
+}
+
+@container (max-width: 400px) {
+  .manual-game-values-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .manual-game-value-control {
+    grid-template-rows: repeat(4, auto);
+  }
+
+  .manual-game-value-label,
+  .manual-game-value-input,
+  .manual-game-value-actions button:first-child,
+  .manual-game-value-actions button:last-child,
+  .manual-game-value-status {
+    grid-column: 1;
+  }
 }
 
 .breakdown-derived-details {

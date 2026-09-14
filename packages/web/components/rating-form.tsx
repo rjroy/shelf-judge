@@ -297,6 +297,104 @@ export function RatingFormContent({
               const hasOverride = ratings[axis.id] !== undefined && ratings[axis.id] !== "";
               const resolution = resolvedByAxis.get(axis.id);
               const effectiveRating = resolution?.effectiveRating ?? null;
+              const ratingControl = hasOverride ? (
+                <>
+                  <div className="bgg-auto-value overridden">
+                    <span>Stored override (1-10): {ratings[axis.id]}</span>
+                    <span className="value">{ratings[axis.id]}</span>
+                    <button
+                      type="button"
+                      className="override-link"
+                      onClick={() => {
+                        dispatch({ type: "remove", axisId: axis.id });
+                      }}
+                    >
+                      Clear override &rsaquo;
+                    </button>
+                  </div>
+                  <div className="rating-input-row">
+                    <input
+                      type="range"
+                      className="rating-slider override-slider"
+                      min={1}
+                      max={10}
+                      value={ratings[axis.id] || "5"}
+                      onChange={(e) => handleChange(axis.id, e.target.value)}
+                    />
+                    <input
+                      type="number"
+                      className="rating-value-input override-value-input"
+                      min={1}
+                      max={10}
+                      value={ratings[axis.id] ?? ""}
+                      onChange={(e) => handleChange(axis.id, e.target.value)}
+                    />
+                  </div>
+                </>
+              ) : (
+                <div className="bgg-auto-value">
+                  <span>
+                    {effectiveRating === null
+                      ? "No effective rating from metadata"
+                      : "Effective rating (1-10)"}
+                  </span>
+                  <span className="value">
+                    {effectiveRating ?? "\u2014"}
+                    {effectiveRating !== null && getRatingLabel(effectiveRating) && (
+                      <span
+                        style={{
+                          fontSize: "0.85em",
+                          color: "var(--text-muted)",
+                          marginLeft: "0.4em",
+                        }}
+                      >
+                        {getRatingLabel(effectiveRating)}
+                      </span>
+                    )}
+                  </span>
+                  <button
+                    type="button"
+                    className="override-link"
+                    onClick={() =>
+                      handleChange(axis.id, String(derivedOverrideDraft(effectiveRating)))
+                    }
+                  >
+                    Override &rsaquo;
+                  </button>
+                </div>
+              );
+
+              const publishedFact =
+                resolution?.sourceValue === null || resolution === undefined
+                  ? "Source metadata unavailable"
+                  : `Published value: ${resolution.sourceValue} ${resolution.unit ?? ""}`;
+              const scoringFact =
+                resolution &&
+                resolution.scoringRawValue !== null &&
+                resolution.sourceValue !== null &&
+                resolution.scoringRawValue !== resolution.sourceValue
+                  ? `Scoring input: ${resolution.scoringRawValue} ${resolution.unit ?? ""}`
+                  : null;
+
+              if (axis.name === "Complexity") {
+                return (
+                  <div key={axis.id} className="rating-field complexity-inline-facts">
+                    <div className="rating-field-header">
+                      <div className="rating-field-name">
+                        {axis.name}
+                        <span className="source-badge source-bgg bgg-badge-inline">Derived</span>
+                      </div>
+                      <div className="rating-field-weight">Weight: {axis.weight}</div>
+                    </div>
+                    <div className="complexity-facts-row">
+                      <span>{publishedFact}</span>
+                      {scoringFact && <span>{scoringFact}</span>}
+                    </div>
+                    {ratingControl}
+                  </div>
+                );
+              }
+
               return (
                 <div key={axis.id} className="rating-field">
                   <div className="rating-field-header">
@@ -328,66 +426,7 @@ export function RatingFormContent({
                       <span>{resolution.configurationSummary}</span>
                     )}
                   </div>
-                  {hasOverride ? (
-                    <>
-                      <div className="bgg-auto-value overridden">
-                        <span>Stored override (1-10): {ratings[axis.id]}</span>
-                        <span className="value">{ratings[axis.id]}</span>
-                        <button
-                          type="button"
-                          className="override-link"
-                          onClick={() => {
-                            dispatch({ type: "remove", axisId: axis.id });
-                          }}
-                        >
-                          Clear override &rsaquo;
-                        </button>
-                      </div>
-                      <div className="rating-input-row">
-                        <input
-                          type="range"
-                          className="rating-slider override-slider"
-                          min={1}
-                          max={10}
-                          value={ratings[axis.id] || "5"}
-                          onChange={(e) => handleChange(axis.id, e.target.value)}
-                        />
-                        <input
-                          type="number"
-                          className="rating-value-input override-value-input"
-                          min={1}
-                          max={10}
-                          value={ratings[axis.id] ?? ""}
-                          onChange={(e) => handleChange(axis.id, e.target.value)}
-                        />
-                      </div>
-                    </>
-                  ) : (
-                    <div className="bgg-auto-value">
-                      <span>
-                        {effectiveRating === null
-                          ? "No effective rating from metadata"
-                          : "Effective rating (1-10)"}
-                      </span>
-                      <span className="value">
-                        {effectiveRating ?? "\u2014"}
-                        {effectiveRating !== null && getRatingLabel(effectiveRating) && (
-                          <span style={{ fontSize: "0.85em", color: "var(--text-muted)", marginLeft: "0.4em" }}>
-                            {getRatingLabel(effectiveRating)}
-                          </span>
-                        )}
-                      </span>
-                      <button
-                        type="button"
-                        className="override-link"
-                        onClick={() =>
-                          handleChange(axis.id, String(derivedOverrideDraft(effectiveRating)))
-                        }
-                      >
-                        Override &rsaquo;
-                      </button>
-                    </div>
-                  )}
+                  {ratingControl}
                 </div>
               );
             })}

@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   createManualGameValueFieldState,
@@ -27,8 +28,21 @@ describe("ManualGameValuesForm", () => {
     expect(html).toContain("Clear Play Time");
     expect(html).toContain("Save Player Count");
     expect(html).toContain("Clear Player Count");
-    expect(html).toContain('aria-describedby="playing-time-status"');
-    expect(html).toContain('aria-describedby="player-count-status"');
+    expect(html).toContain('class="manual-game-value-control"');
+    expect(html).toContain('class="manual-game-value-label"');
+    expect(html).toContain('class="manual-game-value-input"');
+    expect(html).toContain('class="manual-game-value-actions"');
+    expect(html).toContain('class="manual-game-value-status"');
+    expect(html).toContain('class="btn btn-secondary"');
+    expect(html).toMatch(/<label class="manual-game-value-label" for="[^"]+-input">/);
+    expect(html).toMatch(/aria-describedby="[^\"]+-playing-time-status"/);
+    expect(html).toMatch(/aria-describedby="[^\"]+-player-count-status"/);
+    expect(html).toMatch(
+      /id="[^\"]+-playing-time-status" class="manual-game-value-status"><\/div>/,
+    );
+    expect(html).toMatch(
+      /id="[^\"]+-player-count-status" class="manual-game-value-status"><\/div>/,
+    );
     expect(html).toContain("BGG play time: 60");
     expect(html).toContain("BGG player count: 2");
   });
@@ -80,5 +94,20 @@ describe("ManualGameValuesForm", () => {
       status: "idle",
       error: "Clear failed",
     });
+  });
+
+  test("uses shared parent tracks and keeps idle status regions out of the layout", () => {
+    const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+
+    expect(css).toContain(".manual-game-values-form {");
+    expect(css).toContain(
+      "grid-template-columns: minmax(9.5rem, 1fr) minmax(7rem, 8rem) max-content max-content;",
+    );
+    expect(css).toContain(".manual-game-value-control {");
+    expect(css).toContain("grid-template-columns: subgrid;");
+    expect(css).toContain(".manual-game-value-actions {\n  display: contents;");
+    expect(css).toContain(".manual-game-value-status:empty {\n  display: none;");
+    expect(css).toContain("@container (max-width: 540px)");
+    expect(css).toContain("@container (max-width: 400px)");
   });
 });
