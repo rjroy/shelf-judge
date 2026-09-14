@@ -5,19 +5,19 @@ status: executed
 tags: [plan, collection, game-detail, notes, privacy, concurrency]
 modules: [shared, daemon, cli, web]
 related:
-  - .lore/work/specs/owner-game-notes.md
-  - .lore/work/specs/useful-collection-profile.md
+  - .lore/reference/specs/current/owner-game-notes.md
+  - .lore/reference/specs/current/useful-collection-profile.md
   - .lore/work/specs/grounded-profile-reflections.md
   - .lore/work/specs/collection-analyst-chat.md
-  - .lore/work/design/manual-game-value-edit-lifecycle.md
-  - .lore/work/specs/game-view-next-previous-navigation.md
+  - .lore/reference/designs/current/manual-game-value-edit-lifecycle.md
+  - .lore/reference/specs/current/game-view-next-previous-navigation.md
 ---
 
 # Implementation plan: owner game notes
 
 ## Goal
 
-Implement the approved Owner Game Notes contract in `.lore/work/specs/owner-game-notes.md`: one durable, current-state-only, owner-authored plain-text note per game, with explicit web and CLI editing, note-local optimistic concurrency, and durable command replay. Notes remain local source data and do not become ratings, intentions, profile claims, generated content, or implicit model evidence.
+Implement the approved Owner Game Notes contract in `.lore/reference/specs/current/owner-game-notes.md`: one durable, current-state-only, owner-authored plain-text note per game, with explicit web and CLI editing, note-local optimistic concurrency, and durable command replay. Notes remain local source data and do not become ratings, intentions, profile claims, generated content, or implicit model evidence.
 
 This plan advances `collection.json` from schema version 5 to 6, separates durable games from note-free public projections, extends the global command-receipt namespace without retaining superseded note text, and preserves current Collection and Profile behavior. Plan approval and implementation remain separate decisions.
 

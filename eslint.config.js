@@ -57,6 +57,6 @@ export default tseslint.config(
     },
   },
   {
-    ignores: ["**/node_modules/", "**/dist/", "**/.next/", "**/.next-e2e*/", "**/tmp/"],
+    ignores: ["**/node_modules/", "**/dist/", "**/.next/", "**/.next-*/", "**/tmp/"],
   },
 );

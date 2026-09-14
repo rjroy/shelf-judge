@@ -5,21 +5,21 @@ status: executed
 tags: [plan, fitness, derived-axes, bgg, migration, feature-vectors]
 modules: [shared, daemon, web, cli]
 related:
-  - .lore/work/specs/derived-bgg-axes.md
-  - .lore/specs/fitness/utility-curves.md
-  - .lore/specs/collection/collection-profiling.md
-  - .lore/specs/fitness/prediction-engine.md
-  - .lore/specs/fitness/redundancy-scoring.md
-  - .lore/specs/features/wishlist.md
-  - .lore/specs/features/shelf-capacity.md
-  - .lore/specs/tournament/elo-axis-source.md
+  - .lore/reference/specs/current/derived-bgg-axes.md
+  - .lore/work/specs/fitness/utility-curves.md
+  - .lore/archive/specs/collection/collection-profiling.md
+  - .lore/reference/specs/fitness/prediction-engine.md
+  - .lore/reference/specs/fitness/redundancy-scoring.md
+  - .lore/reference/specs/features/wishlist.md
+  - .lore/reference/specs/features/shelf-capacity.md
+  - .lore/reference/specs/tournament/elo-axis-source.md
 ---
 
 # Implementation plan: derived game-metadata axes
 
 ## Goal
 
-Implement `.lore/work/specs/derived-bgg-axes.md` (REQ-DERIVED-1 through REQ-DERIVED-22): replace the BGG-specific axis contract with a registry-backed derived-axis model, add optional Player Count Fit and Play Time templates, migrate existing collections safely, expose registry discovery to web and CLI clients, and preserve canonical prediction and similarity vectors.
+Implement `.lore/reference/specs/current/derived-bgg-axes.md` (REQ-DERIVED-1 through REQ-DERIVED-22): replace the BGG-specific axis contract with a registry-backed derived-axis model, add optional Player Count Fit and Play Time templates, migrate existing collections safely, expose registry discovery to web and CLI clients, and preserve canonical prediction and similarity vectors.
 
 Implementation ends after code, migration fixtures, client behavior, and all spec validation gates pass. Plan approval and implementation execution remain separate decisions.
 

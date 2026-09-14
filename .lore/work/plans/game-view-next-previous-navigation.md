@@ -5,8 +5,8 @@ status: executed
 tags: [plan, navigation, game-detail, collection, testing]
 modules: [web-ui]
 related:
-  - .lore/work/specs/game-view-next-previous-navigation.md
-  - .lore/work/design/game-view-next-previous-navigation.md
+  - .lore/reference/specs/current/game-view-next-previous-navigation.md
+  - .lore/reference/designs/current/game-view-next-previous-navigation.md
   - .lore/work/brainstorm/game-view-next-previous-navigation.md
   - .lore/work/research/game-view-next-previous-navigation.md
 ---
@@ -15,7 +15,7 @@ related:
 
 ## Goal And Sources
 
-Implement the approved behavior in `.lore/work/specs/game-view-next-previous-navigation.md` using the architecture in `.lore/work/design/game-view-next-previous-navigation.md`.
+Implement the approved behavior in `.lore/reference/specs/current/game-view-next-previous-navigation.md` using the architecture in `.lore/reference/designs/current/game-view-next-previous-navigation.md`.
 
 The implementation remains web-only. Collection produces immutable snapshots from the exact flat rows it renders. Game detail consumes optional browser context without fetching or reconstructing the collection. Direct routes and all non-Collection game links remain context-free.
 

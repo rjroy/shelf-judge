@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import { setAdditionalBggIds } from "@/lib/browser-mutations";
 
@@ -11,6 +11,7 @@ export function AdditionalBggIdsForm({
   gameId: string;
   additionalBggIds: number[];
 }) {
+  const inputId = useId();
   const router = useRouter();
   const [value, setValue] = useState(additionalBggIds.join(", "));
   const [saving, setSaving] = useState(false);
@@ -48,9 +49,9 @@ export function AdditionalBggIdsForm({
         game. Separate IDs with commas.
       </p>
       <div className="form-group">
-        <label htmlFor="additional-bgg-ids">Additional BGG IDs</label>
+        <label htmlFor={inputId}>Additional BGG IDs</label>
         <input
-          id="additional-bgg-ids"
+          id={inputId}
           inputMode="numeric"
           value={value}
           onChange={(event) => setValue(event.target.value)}

@@ -6,7 +6,7 @@ tags: [validation, owner-game-notes, migration, privacy, browser]
 source: .lore/work/plans/owner-game-notes.md
 related:
   [
-    .lore/work/specs/owner-game-notes.md,
+    .lore/reference/specs/current/owner-game-notes.md,
     .lore/work/notes/owner-game-notes-step-4.md,
     .lore/work/notes/owner-game-notes-step-9.md,
   ]

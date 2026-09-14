@@ -5,12 +5,12 @@ status: active
 tags: [navigation, game-detail, collection, sorting, filtering]
 modules: [web-ui]
 related:
-  - .lore/brainstorms/collection-filter-sort.md
-  - .lore/specs/collection/collection-filter-sort.md
-  - .lore/specs/collection/game-links.md
-  - .lore/specs/features/previously-owned.md
-  - .lore/work/specs/collection-purchase-utilization.md
-  - .lore/work/specs/useful-collection-profile.md
+  - .lore/work/brainstorm/collection-filter-sort.md
+  - .lore/reference/specs/collection/collection-filter-sort.md
+  - .lore/work/specs/collection/game-links.md
+  - .lore/work/specs/features/previously-owned.md
+  - .lore/reference/specs/current/collection-purchase-utilization.md
+  - .lore/reference/specs/current/useful-collection-profile.md
 ---
 
 # Prior lore for game-view next and previous navigation
@@ -27,7 +27,7 @@ related:
 
 ### Collection Filtering And Sorting
 
-`.lore/brainstorms/collection-filter-sort.md` (`resolved`) and `.lore/specs/collection/collection-filter-sort.md` (`implemented`) establish:
+`.lore/work/brainstorm/collection-filter-sort.md` (`resolved`) and `.lore/reference/specs/collection/collection-filter-sort.md` (`implemented`) establish:
 
 - Filtering and sorting happen in the browser for a personal collection of tens to low hundreds of games.
 - Filters combine with AND logic and are applied before sorting.
@@ -42,7 +42,7 @@ The implemented collection now also supports prediction-enriched rows, niche dat
 
 ### Deterministic Purchase-Utilization Sorts
 
-`.lore/work/specs/collection-purchase-utilization.md` (`implemented`) tightens ordering for value remaining and estimated additional plays:
+`.lore/reference/specs/current/collection-purchase-utilization.md` (`implemented`) tightens ordering for value remaining and estimated additional plays:
 
 - Value remaining sorts by the displayed rounded-hundredths key, not hidden precision.
 - Estimated plays distinguishes finite, unreachable, unavailable, and not-applicable categories.
@@ -53,7 +53,7 @@ These comparators are part of what the user sees. Navigation following collectio
 
 ### Collection Scope And Ownership
 
-`.lore/specs/features/previously-owned.md` (`implemented`) establishes:
+`.lore/work/specs/features/previously-owned.md` (pending reconciliation) documents:
 
 - The default collection view contains owned games.
 - `?ownership=all` adds previously owned games to the displayed list.
@@ -62,11 +62,11 @@ These comparators are part of what the user sees. Navigation following collectio
 
 The current collection also uses `?dimensions=missing`. Both URL-owned scopes must be considered if previous and next claim to follow the visible collection.
 
-The older previously-owned spec says those games contribute to profiling. `.lore/work/specs/useful-collection-profile.md` (`implemented`) supersedes that point for current collection identity, which uses currently owned games. This conflict does not change collection-list navigation, but the newer ownership meaning should be used when describing scope.
+The older previously-owned spec says those games contribute to profiling. `.lore/reference/specs/current/useful-collection-profile.md` (`implemented`) supersedes that point for current collection identity, which uses currently owned games. This conflict does not change collection-list navigation, but the newer ownership meaning should be used when describing scope.
 
 ### Game Detail Links And Routing
 
-`.lore/specs/collection/game-links.md` (`implemented`) establishes:
+`.lore/work/specs/collection/game-links.md` (pending reconciliation) documents:
 
 - The stable detail route is `/games/{id}`.
 - Internal destinations use Next.js `Link` semantics.
@@ -86,7 +86,7 @@ Prior responsive plans and the newer profile explorer work establish useful cons
 - The game detail composition must work at phone, tablet, desktop, and 200% zoom without horizontal overflow.
 - The existing topbar already contains the collection breadcrumb and game actions, so control placement needs an explicit mobile decision.
 
-The draft `.lore/work/design/profile-evidence-explorer.md` offers a non-binding precedent for returning to a selected result, fragment targeting, focus restoration, and explaining when a selected item falls outside current filters. It is a useful option, not an approved game-detail contract.
+The draft `.lore/reference/designs/current/profile-evidence-explorer.md` offers a non-binding precedent for returning to a selected result, fragment targeting, focus restoration, and explaining when a selected item falls outside current filters. It is a useful option, not an approved game-detail contract.
 
 ## Current Implementation Constraints
 

@@ -5,17 +5,17 @@ status: executed
 tags: [plan, collection, purchase-utilization, exact-arithmetic, provenance]
 modules: [shared, daemon, web, cli]
 related:
-  - .lore/work/specs/collection-purchase-utilization.md
-  - .lore/work/specs/derived-bgg-axes.md
-  - .lore/specs/collection/collection-profiling.md
-  - .lore/specs/features/previously-owned.md
+  - .lore/reference/specs/current/collection-purchase-utilization.md
+  - .lore/reference/specs/current/derived-bgg-axes.md
+  - .lore/archive/specs/collection/collection-profiling.md
+  - .lore/work/specs/features/previously-owned.md
 ---
 
 # Implementation plan: collection purchase utilization
 
 ## Goal
 
-Implement `.lore/work/specs/collection-purchase-utilization.md` (REQ-UTIL-1 through REQ-UTIL-36): optionally record each game's lifetime landed cost, configure one collection entertainment benchmark, calculate an explainable per-game purchase-value result from current fitness and modeled use, expose equivalent web and CLI results and editing, and add the two approved user-selected web collection sorts.
+Implement `.lore/reference/specs/current/collection-purchase-utilization.md` (REQ-UTIL-1 through REQ-UTIL-36): optionally record each game's lifetime landed cost, configure one collection entertainment benchmark, calculate an explainable per-game purchase-value result from current fitness and modeled use, expose equivalent web and CLI results and editing, and add the two approved user-selected web collection sorts.
 
 The source spec remains approved after the owner-directed revision to one implicit personal currency. This plan does not include collection aggregation, automatic ranking or judgment, notability, profile or fitness integration, or collection-brief work. Plan approval and implementation execution remain separate decisions.
 

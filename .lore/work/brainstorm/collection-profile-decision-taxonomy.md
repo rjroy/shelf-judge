@@ -5,9 +5,9 @@ status: resolved
 tags: [collection, profile, identity, attention, decision-support]
 modules: [profile]
 related:
-  - .lore/specs/collection/collection-profiling.md
+  - .lore/archive/specs/collection/collection-profiling.md
   - .lore/work/notes/trusted-collection-insights-validation.md
-  - .lore/work/specs/collection-purchase-utilization.md
+  - .lore/reference/specs/current/collection-purchase-utilization.md
 ---
 
 # Collection Profile Questions and Decision Taxonomy

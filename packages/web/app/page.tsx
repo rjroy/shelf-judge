@@ -42,7 +42,7 @@ export function ProfileOverviewContent({ state }: { state: ProfileOverviewState 
       <div className="topbar">
         <h1 className="topbar-title">Collection Profile</h1>
       </div>
-      <main className="main-scroll profile-page">
+      <main className="main-scroll profile-page profile-page--attention-grid">
         {unavailable !== null ? (
           <>
             <section className="profile-question" aria-labelledby="identity-question">

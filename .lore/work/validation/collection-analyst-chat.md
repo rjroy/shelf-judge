@@ -151,7 +151,7 @@ stderr, so they cannot contaminate the machine-readable stream.
 - [Collection Analyst requirements](../specs/collection-analyst-chat.md#requirements)
   map to the [Step 10 release gates](../plans/collection-analyst-chat.md#step-10-complete-persisted-flow-privacy-documentation-and-release-validation).
 - The shared model-boundary, capability, redaction, and deterministic evidence
-  obligations map to [model-directed evidence tool flow](../designs/model-directed-evidence-tool-flow.md).
+  obligations map to [model-directed evidence tool flow](../notes/model-directed-evidence-tool-flow.md).
 - Owner-note deletion, retention, and race obligations map to
   [owner-note final validation](../notes/owner-game-notes-final-validation.md).
 - Browser blocker resolution and the previously accepted port-isolation evidence

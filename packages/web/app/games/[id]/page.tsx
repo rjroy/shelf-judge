@@ -99,6 +99,123 @@ export default async function GameDetailPage({
   const { game, score, displayScore, purchaseUtilization, nichePosition } = data;
   const isPreviouslyOwned = game.ownership === "previously-owned";
   const hasPredictions = score?.predictionMeta !== null && score?.predictionMeta !== undefined;
+  const editorSections = {
+    ratings: (
+      <>
+        <div className="panel-section-title">Your Ratings</div>
+        <RatingForm
+          gameId={game.id}
+          axes={axes}
+          currentRatings={game.ratings}
+          score={score}
+          predictionScore={hasPredictions ? score : null}
+        />
+      </>
+    ),
+    ownership: (
+      <OwnershipActions gameId={game.id} gameName={game.name} ownership={game.ownership} />
+    ),
+    acquisition: <AcquisitionForm gameId={game.id} acquisition={game.acquisition} />,
+    playMetadata: (
+      <ManualGameValuesForm
+        gameId={game.id}
+        values={game.manualValues}
+        sourcePlayingTime={
+          game.durationEvidence.status === "valid" ? game.durationEvidence.value : null
+        }
+        sourcePlayerCount={game.bestPlayers}
+      />
+    ),
+    relatedBggIds:
+      game.bggId !== null ? (
+        <AdditionalBggIdsForm gameId={game.id} additionalBggIds={game.additionalBggIds ?? []} />
+      ) : null,
+    boxDimensions: <BoxDimensionsForm gameId={game.id} currentDimensions={game.boxDimensions} />,
+    shelfAssignment: (
+      <ShelfAssignmentForm
+        gameId={game.id}
+        currentShelfId={game.manualShelfId}
+        options={shelfOptions}
+        hasDimensions={game.boxDimensions !== null}
+        isPreviouslyOwned={isPreviouslyOwned}
+      />
+    ),
+  };
+  const layoutSections: GameDetailEditorSlots = {
+    ...editorSections,
+    assessment: (
+      <>
+        <div className="panel-section-title">
+          Score Breakdown
+          {score && !score.vetoed && (
+            <span className="badge">
+              How {hasPredictions ? "~" : ""}
+              {displayScore} was calculated
+            </span>
+          )}
+        </div>
+        <ScoreBreakdown
+          score={score}
+          displayScore={displayScore}
+          isPreviouslyOwned={isPreviouslyOwned}
+        />
+        <div className="calc-explanation">
+          <strong>How this is calculated:</strong> weighted average of all rated axes. Formula:{" "}
+          <code>sum(rating &times; weight) / sum(weight)</code>. Axes without ratings are excluded
+          from both the numerator and denominator.
+          {hasPredictions && (
+            <>
+              {" "}
+              Predicted axes use similarity-weighted ratings from your most similar rated games.
+              Insufficient-confidence axes are excluded.
+            </>
+          )}
+        </div>
+      </>
+    ),
+    utilization: (
+      <PurchaseUtilizationPanel
+        result={purchaseUtilization}
+        isPreviouslyOwned={isPreviouslyOwned}
+      />
+    ),
+    intention: <IntentionControls game={game} detail={data.intentions} />,
+    notes: <OwnerGameNoteEditor gameId={game.id} />,
+    collectionInsights:
+      !isPreviouslyOwned &&
+      (score?.redundancyAdjustment ||
+        score?.vetoed ||
+        (nichePosition && (nichePosition.niches.length > 0 || ignoredTags.length > 0))) ? (
+        <>
+          {score?.redundancyAdjustment && (
+            <section className="game-detail-chapter game-detail-redundancy">
+              <RedundancyPanel score={score} adjustment={score.redundancyAdjustment} />
+            </section>
+          )}
+          {(score?.vetoed ||
+            (nichePosition && (nichePosition.niches.length > 0 || ignoredTags.length > 0))) && (
+            <section className="game-detail-chapter game-detail-niche-position">
+              {score?.vetoed ? (
+                <>
+                  <div className="panel-section-title">Niche Position</div>
+                  <div className="niche-vetoed-note">
+                    This game is vetoed and excluded from niche rankings.
+                  </div>
+                </>
+              ) : (
+                nichePosition && (
+                  <NichePositionPanel nichePosition={nichePosition} ignoredTags={ignoredTags} />
+                )
+              )}
+            </section>
+          )}
+        </>
+      ) : null,
+    tournament:
+      tournamentStats && tournamentStats.comparisonCount > 0 ? (
+        <TournamentBreakdown tournamentStats={tournamentStats} />
+      ) : null,
+  };
   const detailParams = await searchParams;
   const collectionContext =
     typeof detailParams.collectionContext === "string" ? detailParams.collectionContext : undefined;
@@ -117,7 +234,7 @@ export default async function GameDetailPage({
       </GameDetailCollectionNavigation>
 
       <OwnerGameNoteStateProvider key={game.id} initialNote={game.ownerNote}>
-        <GameDetailMain>
+        <GameDetailMain editors={layoutSections}>
           {/* Game hero section */}
           <GameDetailHero>
             <div className="game-cover">
@@ -294,182 +411,71 @@ export default async function GameDetailPage({
               </div>
             </div>
           )}
-
-          <PurchaseUtilizationPanel
-            result={purchaseUtilization}
-            isPreviouslyOwned={isPreviouslyOwned}
-          />
-
-          <IntentionControls game={game} detail={data.intentions} />
-
-          <OwnerGameNoteEditor gameId={game.id} />
-
-          {tournamentStats && tournamentStats.comparisonCount > 0 && (
-            <div className="tournament-breakdown-panel">
-              <div className="panel-section-title">Tournament Breakdown</div>
-              <div className="tournament-breakdown-grid">
-                <div className="tournament-stat">
-                  <div className="tournament-stat-value">{tournamentStats.comparisonCount}</div>
-                  <div className="tournament-stat-label">Comparisons</div>
-                </div>
-                <div className="tournament-stat">
-                  <div className="tournament-stat-value">
-                    {tournamentStats.wins}W / {tournamentStats.losses}L
-                  </div>
-                  <div className="tournament-stat-label">Record</div>
-                </div>
-                <div className="tournament-stat">
-                  <div className="tournament-stat-value">
-                    {Math.round(tournamentStats.eloRating)}
-                  </div>
-                  <div className="tournament-stat-label">Raw ELO</div>
-                </div>
-                <div className="tournament-stat">
-                  <div className="tournament-stat-value">
-                    {tournamentStats.normalizedScore !== null
-                      ? tournamentStats.normalizedScore.toFixed(1)
-                      : "-"}
-                  </div>
-                  <div className="tournament-stat-label">Normalized</div>
-                </div>
-              </div>
-              {tournamentStats.recentComparisons.length > 0 && (
-                <div className="tournament-recent">
-                  <div className="tournament-recent-title">Last 5 comparisons</div>
-                  {tournamentStats.recentComparisons.slice(0, 5).map((c, i) => (
-                    <div key={i} className={`tournament-recent-row ${c.won ? "win" : "loss"}`}>
-                      <span className="tournament-result-badge">{c.won ? "W" : "L"}</span>
-                      <span className="tournament-opponent-id">
-                        vs{" "}
-                        <Link href={`/games/${c.opponentGameId}`} className="game-link">
-                          {c.opponentGameName ?? c.opponentGameId.slice(0, 8)}
-                        </Link>
-                      </span>
-                      <span className="tournament-recent-date">
-                        {new Date(c.createdAt).toLocaleDateString()}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Redundancy panel (REQ-REDUN-31, REQ-REDUN-32, REQ-REDUN-33) */}
-          {!isPreviouslyOwned && score?.redundancyAdjustment && (
-            <RedundancyPanel score={score} adjustment={score.redundancyAdjustment} />
-          )}
-
-          {/* Niche Position panel (REQ-NICHE-18, REQ-NICHE-19) */}
-          {!isPreviouslyOwned &&
-            (score?.vetoed ? (
-              <div className="niche-panel">
-                <div className="panel-section-title">Niche Position</div>
-                <div className="niche-vetoed-note">
-                  This game is vetoed and excluded from niche rankings.
-                </div>
-              </div>
-            ) : (
-              nichePosition &&
-              (nichePosition.niches.length > 0 || ignoredTags.length > 0) && (
-                <NichePositionPanel nichePosition={nichePosition} ignoredTags={ignoredTags} />
-              )
-            ))}
-
-          {/* Two-panel layout */}
-          <GameDetailPanels
-            left={
-              <>
-                <div className="panel-section-title">
-                  Score Breakdown
-                  {score && !score.vetoed && (
-                    <span className="badge">
-                      How {hasPredictions ? "~" : ""}
-                      {displayScore} was calculated
-                    </span>
-                  )}
-                </div>
-                <ScoreBreakdown
-                  score={score}
-                  displayScore={displayScore}
-                  isPreviouslyOwned={isPreviouslyOwned}
-                />
-                <div className="calc-explanation">
-                  <strong>How this is calculated:</strong> weighted average of all rated axes.
-                  Formula: <code>sum(rating &times; weight) / sum(weight)</code>. Axes without
-                  ratings are excluded from both the numerator and denominator.
-                  {hasPredictions && (
-                    <>
-                      {" "}
-                      Predicted axes use similarity-weighted ratings from your most similar rated
-                      games. Insufficient-confidence axes are excluded.
-                    </>
-                  )}
-                </div>
-              </>
-            }
-            right={
-              <>
-                <div className="panel-section-title">Your Ratings</div>
-                <RatingForm
-                  gameId={game.id}
-                  axes={axes}
-                  currentRatings={game.ratings}
-                  score={score}
-                  predictionScore={hasPredictions ? score : null}
-                />
-                <OwnershipActions
-                  gameId={game.id}
-                  gameName={game.name}
-                  ownership={game.ownership}
-                />
-                <AcquisitionForm gameId={game.id} acquisition={game.acquisition} />
-                <ManualGameValuesForm
-                  gameId={game.id}
-                  values={game.manualValues}
-                  sourcePlayingTime={
-                    game.durationEvidence.status === "valid" ? game.durationEvidence.value : null
-                  }
-                  sourcePlayerCount={game.bestPlayers}
-                />
-                {game.bggId !== null && (
-                  <AdditionalBggIdsForm
-                    gameId={game.id}
-                    additionalBggIds={game.additionalBggIds ?? []}
-                  />
-                )}
-                <BoxDimensionsForm gameId={game.id} currentDimensions={game.boxDimensions} />
-                <ShelfAssignmentForm
-                  gameId={game.id}
-                  currentShelfId={game.manualShelfId}
-                  options={shelfOptions}
-                  hasDimensions={game.boxDimensions !== null}
-                  isPreviouslyOwned={isPreviouslyOwned}
-                />
-              </>
-            }
-          />
         </GameDetailMain>
       </OwnerGameNoteStateProvider>
     </>
   );
 }
 
-export function GameDetailMain({ children }: { children: ReactNode }) {
-  return <div className="main-scroll">{children}</div>;
+type GameDetailEditorSlots = {
+  ratings: ReactNode;
+  collectionInsights?: ReactNode;
+  tournament?: ReactNode;
+  ownership: ReactNode;
+  acquisition: ReactNode;
+  playMetadata: ReactNode;
+  relatedBggIds: ReactNode;
+  boxDimensions: ReactNode;
+  shelfAssignment: ReactNode;
+  assessment: ReactNode;
+  utilization: ReactNode;
+  intention: ReactNode;
+  notes: ReactNode;
+};
+
+export function GameDetailMain({
+  children,
+  editors,
+}: {
+  children: ReactNode;
+  editors: GameDetailEditorSlots;
+}) {
+  return (
+    <main className="main-scroll game-detail-main game-detail-chapters">
+      <div className="game-detail-content">{children}</div>
+      <section className="game-detail-chapter game-detail-assessment">{editors.assessment}</section>
+      <section className="game-detail-chapter game-detail-ratings">{editors.ratings}</section>
+      {editors.collectionInsights}
+      {editors.tournament}
+      <section className="game-detail-chapter game-detail-utilization">
+        {editors.utilization}
+      </section>
+      <section className="game-detail-chapter game-detail-acquisition">
+        {editors.acquisition}
+      </section>
+      <section className="game-detail-chapter game-detail-intention">{editors.intention}</section>
+      <section className="game-detail-chapter game-detail-play-metadata">
+        {editors.playMetadata}
+      </section>
+      <section className="game-detail-chapter game-detail-notes">{editors.notes}</section>
+      {editors.relatedBggIds && (
+        <section className="game-detail-chapter game-detail-related-bgg-ids">
+          {editors.relatedBggIds}
+        </section>
+      )}
+      <section className="game-detail-chapter game-detail-ownership">{editors.ownership}</section>
+      <section className="game-detail-chapter game-detail-box-dimensions">
+        {editors.boxDimensions}
+      </section>
+      <section className="game-detail-chapter game-detail-shelf-assignment">
+        {editors.shelfAssignment}
+      </section>
+    </main>
+  );
 }
 
 export function GameDetailHero({ children }: { children: ReactNode }) {
-  return <div className="game-hero">{children}</div>;
-}
-
-export function GameDetailPanels({ left, right }: { left: ReactNode; right: ReactNode }) {
-  return (
-    <div className="detail-panels">
-      <div className="panel-left">{left}</div>
-      <div className="panel-right">{right}</div>
-    </div>
-  );
+  return <section className="game-hero">{children}</section>;
 }
 
 function NichePositionPanel({
@@ -479,31 +485,93 @@ function NichePositionPanel({
   nichePosition: NichePosition;
   ignoredTags: NicheTagFilter[];
 }) {
+  const nichesByType = nichePosition.niches.reduce<Record<string, NicheEntry[]>>(
+    (groups, niche) => {
+      (groups[niche.type] ??= []).push(niche);
+      return groups;
+    },
+    {},
+  );
+
   return (
-    <div className="niche-panel">
-      <div className="panel-section-title">Niche Position</div>
-      {nichePosition.niches.length > 0 && (
-        <div className="niche-grid">
-          {nichePosition.niches.map((niche) => (
-            <NicheEntryCard key={`${niche.type}:${niche.name}`} niche={niche} />
-          ))}
-        </div>
-      )}
-      {ignoredTags.length > 0 && (
-        <div className="niche-ignored-section">
-          <div className="niche-ignored-title">Ignored Niches</div>
-          <div className="niche-ignored-chips">
-            {ignoredTags.map((tag) => (
-              <span key={`${tag.type}:${tag.name}`} className="niche-ignored-chip">
-                <span className="niche-ignored-chip-name">{tag.name}</span>
-                <span className={`niche-type-badge niche-type-${tag.type}`}>{tag.type}</span>
-                <NicheRestoreButton type={tag.type} name={tag.name} />
-              </span>
+    <>
+      <div className="niche-panel niche-panel--grouped">
+        <div className="panel-section-title">Niche Position</div>
+        {nichePosition.niches.length > 0 && (
+          <div className="niche-type-sections">
+            {Object.entries(nichesByType).map(([type, niches]) => (
+              <section key={type} className="niche-type-section">
+                <h3 className="niche-type-heading">{type}</h3>
+                <div className="niche-grid">
+                  {niches.map((niche) => (
+                    <NicheEntryCard key={`${niche.type}:${niche.name}`} niche={niche} />
+                  ))}
+                </div>
+              </section>
             ))}
           </div>
+        )}
+        <NicheIgnoredSection ignoredTags={ignoredTags} />
+      </div>
+    </>
+  );
+}
+
+function TournamentBreakdown({ tournamentStats }: { tournamentStats: TournamentGameStatsDisplay }) {
+  return (
+    <section className="game-detail-chapter game-detail-tournament">
+      <div className="panel-section-title">Tournament Record</div>
+      <div className="tournament-breakdown-panel">
+        <div className="tournament-breakdown-stats">
+          <div className="tournament-breakdown-grid">
+            <div className="tournament-stat">
+              <div className="tournament-stat-value">{tournamentStats.comparisonCount}</div>
+              <div className="tournament-stat-label">Comparisons</div>
+            </div>
+            <div className="tournament-stat">
+              <div className="tournament-stat-value">
+                {tournamentStats.wins}W / {tournamentStats.losses}L
+              </div>
+              <div className="tournament-stat-label">Record</div>
+            </div>
+            <div className="tournament-stat">
+              <div className="tournament-stat-value">{Math.round(tournamentStats.eloRating)}</div>
+              <div className="tournament-stat-label">Raw ELO</div>
+            </div>
+            <div className="tournament-stat">
+              <div className="tournament-stat-value">
+                {tournamentStats.normalizedScore !== null
+                  ? tournamentStats.normalizedScore.toFixed(1)
+                  : "-"}
+              </div>
+              <div className="tournament-stat-label">Normalized</div>
+            </div>
+          </div>
         </div>
-      )}
-    </div>
+        {tournamentStats.recentComparisons.length > 0 && (
+          <div className="tournament-recent">
+            <div className="tournament-recent-title">Last 5 comparisons</div>
+            {tournamentStats.recentComparisons.slice(0, 5).map((comparison, index) => (
+              <div
+                key={index}
+                className={`tournament-recent-row ${comparison.won ? "win" : "loss"}`}
+              >
+                <span className="tournament-result-badge">{comparison.won ? "W" : "L"}</span>
+                <span className="tournament-opponent-id">
+                  vs{" "}
+                  <Link href={`/games/${comparison.opponentGameId}`} className="game-link">
+                    {comparison.opponentGameName ?? comparison.opponentGameId.slice(0, 8)}
+                  </Link>
+                </span>
+                <span className="tournament-recent-date">
+                  {new Date(comparison.createdAt).toLocaleDateString()}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -577,7 +645,6 @@ function RedundancyPanel({
   score: FitnessResult;
   adjustment: RedundancyAdjustment;
 }) {
-  // Infer mode from data: if score.score differs from originalScore, integrated mode is active
   const isIntegrated = score.score !== adjustment.originalScore;
   const zeroPenalty = adjustment.penalty === 0;
 
@@ -612,16 +679,18 @@ function RedundancyPanel({
       {adjustment.nicheNeighbors.length > 0 && (
         <div className="redundancy-neighbors">
           <div className="redundancy-neighbors-title">Similar games</div>
-          {adjustment.nicheNeighbors.map((n) => (
-            <div key={n.gameId} className="redundancy-neighbor-row">
-              <Link href={`/games/${n.gameId}`} className="redundancy-neighbor-link">
-                {n.gameName}
+          {adjustment.nicheNeighbors.map((neighbor) => (
+            <div key={neighbor.gameId} className="redundancy-neighbor-row">
+              <Link href={`/games/${neighbor.gameId}`} className="redundancy-neighbor-link">
+                {neighbor.gameName}
               </Link>
-              {n.isPredicted && <span className="niche-predicted-indicator">~</span>}
+              {neighbor.isPredicted && <span className="niche-predicted-indicator">~</span>}
               <span className="redundancy-neighbor-sim">
-                {(n.similarity * 100).toFixed(0)}% similar
+                {(neighbor.similarity * 100).toFixed(0)}% similar
               </span>
-              <span className="redundancy-neighbor-score">({n.fitnessScore.toFixed(1)})</span>
+              <span className="redundancy-neighbor-score">
+                ({neighbor.fitnessScore.toFixed(1)})
+              </span>
             </div>
           ))}
         </div>
@@ -630,10 +699,33 @@ function RedundancyPanel({
   );
 }
 
+function NicheIgnoredSection({ ignoredTags }: { ignoredTags: NicheTagFilter[] }) {
+  if (ignoredTags.length === 0) {
+    return null;
+  }
+
+  return (
+    <details className="niche-ignored-section">
+      <summary className="niche-ignored-heading">Hidden niches ({ignoredTags.length})</summary>
+      <div className="niche-ignored-list" tabIndex={0} aria-label="Hidden niches">
+        {ignoredTags.map((tag) => (
+          <div key={`${tag.type}:${tag.name}`} className="niche-ignored-tag">
+            <span>
+              {tag.name}{" "}
+              <span className={`niche-type-badge niche-type-${tag.type}`}>{tag.type}</span>
+            </span>
+            <NicheRestoreButton type={tag.type} name={tag.name} />
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 function ordinalSuffix(n: number): string {
-  const s = ["th", "st", "nd", "rd"];
-  const v = n % 100;
-  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+  const suffixes = ["th", "st", "nd", "rd"];
+  const remainder = n % 100;
+  return n + (suffixes[(remainder - 20) % 10] || suffixes[remainder] || suffixes[0]);
 }
 
 function formatRelativeDate(dateStr: string): string {

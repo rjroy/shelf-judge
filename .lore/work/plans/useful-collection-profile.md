@@ -5,18 +5,18 @@ status: executed
 tags: [plan, collection, profile, identity, attention, intentions]
 modules: [shared, daemon, cli, web]
 related:
-  - .lore/work/specs/useful-collection-profile.md
+  - .lore/reference/specs/current/useful-collection-profile.md
   - .lore/work/brainstorm/collection-profile-decision-taxonomy.md
-  - .lore/specs/collection/collection-profiling.md
+  - .lore/archive/specs/collection/collection-profiling.md
   - .lore/work/notes/trusted-collection-insights-consumers.md
-  - .lore/work/specs/collection-purchase-utilization.md
+  - .lore/reference/specs/current/collection-purchase-utilization.md
 ---
 
 # Implementation plan: useful collection profile
 
 ## Goal
 
-Replace the current metrics-first Profile Overview with the two approved answers in `.lore/work/specs/useful-collection-profile.md`:
+Replace the current metrics-first Profile Overview with the two approved answers in `.lore/reference/specs/current/useful-collection-profile.md`:
 
 1. What does my collection reveal about me?
 2. What deserves my attention or a decision now?

@@ -179,7 +179,6 @@ export function PurchaseUtilizationPanel({
           </p>
         )}
       </header>
-
       <dl className="utilization-primary-values">
         <ComponentRow component={components.valueMultiplier} />
         <ComponentRow component={components.valueRemaining} />
@@ -210,7 +209,6 @@ export function PurchaseUtilizationPanel({
         <ComponentRow component={components.fitnessAdjustedHourlyBenchmark} />
         <ComponentRow component={components.modeledPlayerCount} />
       </dl>
-
       {evidenceRows.length > 0 && (
         <details className="utilization-evidence">
           <summary>Inputs and evidence</summary>

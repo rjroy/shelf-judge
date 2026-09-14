@@ -23,6 +23,19 @@ bd close <id>         # Complete work
 bd dolt push          # Push beads data to remote
 ```
 
+## Lore authority
+
+Treat `.lore/reference/` as current authority. The following mixed-era specs
+are pending reconciliation: `.lore/work/specs/mvp.md`,
+`.lore/work/specs/tournament/tournament-ranking.md`,
+`.lore/work/specs/features/previously-owned.md`,
+`.lore/work/specs/collection/game-links.md`,
+`.lore/work/specs/fitness/utility-curves.md`, and
+`.lore/work/specs/infra/daemon-logger.md`. Preserve their discoverability, but
+follow each file's authority notice and named current references rather than
+treating them as a blanket contract. Other files in `.lore/work/specs/` may be
+new or draft work; use their own status and authority notices.
+
 ## Non-Interactive Shell Commands
 
 **ALWAYS use non-interactive flags** with file operations to avoid hanging on confirmation prompts.

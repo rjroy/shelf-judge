@@ -7,7 +7,7 @@ modules: [shared, daemon, cli, web]
 related:
   - .lore/work/specs/grounded-profile-reflections.md
   - .lore/work/specs/collection-analyst-chat.md
-  - .lore/work/specs/owner-game-notes.md
+  - .lore/reference/specs/current/owner-game-notes.md
   - .lore/reference/architecture-pattern.md
 source: .lore/work/plans/grounded-profile-reflections.md
 ---

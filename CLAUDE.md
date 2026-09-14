@@ -42,11 +42,32 @@ bun run format:check # Verify formatting without writing
 
 ## Documentation
 
-Design docs, specs, plans, and research live in `.lore/`. Check there before asking about architectural decisions or domain context. Key files:
+Design docs, specs, plans, and research live in `.lore/`. Check active reference
+material before asking about architectural decisions or domain context. Key files:
 
-- `.lore/vision.md` - Project principles and anti-goals
-- `.lore/specs/mvp.md` - MVP requirements (24 items)
-- `.lore/designs/` - Data model, fitness algorithm, API surface, BGG integration, CLI, web UI
+- `.lore/reference/vision.md` - Project principles and anti-goals
+- `.lore/work/specs/mvp.md` - Mixed-era MVP requirements pending reconciliation;
+  consult the active design references before treating any requirement as authority
+- `.lore/reference/designs/mvp-web-ui.md` - Behavioral web UI requirements
+- `.lore/reference/designs/` - Active data model, fitness algorithm, API surface, BGG integration, CLI, and web UI references
+
+### Visual redesign status
+
+Shelf Judge's visual design is being redone. Do not treat the archived visual
+direction, palette, typography, token system, transition plan, mockups, or icon
+as design constraints. They live under `.lore/archive/` as historical context:
+
+- `.lore/archive/designs/visual-direction.md`
+- `.lore/archive/designs/shelf-judge-color-system.md`
+- `.lore/archive/plans/visual-transition.md`
+- `.lore/archive/mockups/`
+- `.lore/archive/art/icon.webp`
+
+New visual work may choose a new palette, type system, layout, component
+language, icon, and theming approach. Preserve product behavior and information
+requirements from `.lore/reference/designs/mvp-web-ui.md` and the project vision;
+do not preserve retired visual styling merely because it exists in the app or
+historical documentation.
 
 ## Critical Lessons
 

@@ -6,8 +6,8 @@ tags: [plan, collection-profile, adjusted-fit, ranking, exact-arithmetic]
 modules: [shared, daemon, cli, web]
 related:
   - .lore/work/research/profile-appreciation-scoring.md
-  - .lore/work/specs/useful-collection-profile.md
-  - .lore/work/design/profile-evidence-explorer.md
+  - .lore/reference/specs/current/useful-collection-profile.md
+  - .lore/reference/designs/current/profile-evidence-explorer.md
   - .lore/work/plans/useful-collection-profile.md
 ---
 
@@ -23,7 +23,7 @@ This plan is the review artifact for Beads issue `shelf-judge-d4v`. The scoring 
 
 ## Approved amendment to the current specification
 
-The implemented `.lore/work/specs/useful-collection-profile.md` remains the baseline except where its raw-mean ranking language conflicts with the approved research. Implementation must reconcile the active specification before declaring the feature complete:
+The implemented `.lore/reference/specs/current/useful-collection-profile.md` remains the baseline except where its raw-mean ranking language conflicts with the approved research. Implementation must reconcile the active specification before declaring the feature complete:
 
 - Extend REQ-USEFUL-PROF-6 with `adjustedMeanCurrentFitness` while retaining all raw aggregates and evidence.
 - Amend REQ-USEFUL-PROF-8 so support requires the class's serialized `minimumSupportedGames`, currently three by default; preserve limited-drilldown behavior below that configured threshold.
@@ -89,8 +89,8 @@ Every ordering contains every entity ID exactly once. `overviewEntityIds` is the
 
 **Files:**
 
-- `.lore/work/specs/useful-collection-profile.md`
-- `.lore/work/design/profile-evidence-explorer.md`
+- `.lore/reference/specs/current/useful-collection-profile.md`
+- `.lore/reference/designs/current/profile-evidence-explorer.md`
 
 **Changes:**
 
@@ -300,8 +300,8 @@ Every ordering contains every entity ID exactly once. `overviewEntityIds` is the
 **Files:**
 
 - `docs/usage.md`
-- `.lore/work/specs/useful-collection-profile.md`
-- `.lore/work/design/profile-evidence-explorer.md`
+- `.lore/reference/specs/current/useful-collection-profile.md`
+- `.lore/reference/designs/current/profile-evidence-explorer.md`
 - All changed implementation and test files from prior steps
 
 **Changes:**

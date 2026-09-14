@@ -42,6 +42,15 @@ const playerCountAxis: Axis = {
   configuration: { targetPlayerCount: 4 },
 };
 
+const complexityAxis: Axis = {
+  ...derivedAxis,
+  id: "complexity-axis",
+  name: "Complexity",
+  description: "BoardGameGeek community complexity rating",
+  derivedField: "weight",
+  configuration: {},
+};
+
 const disabledLegacyAxis: Axis = {
   id: "legacy-axis",
   name: "Old Play Time",
@@ -58,7 +67,7 @@ const disabledLegacyAxis: Axis = {
 
 function derivedScore(
   axis: Axis,
-  derivedField: "playerCountFit" | "playingTime",
+  derivedField: "playerCountFit" | "playingTime" | "weight",
   sourceValue: number | null,
   effectiveRating: number | null,
 ): FitnessResult {
@@ -82,7 +91,7 @@ function derivedScore(
         derivedField,
         sourceValue,
         scoringRawValue: sourceValue,
-        unit: derivedField === "playingTime" ? "minutes" : "fit score",
+        unit: derivedField === "playingTime" ? "minutes" : "complexity",
         provenance: `Published ${derivedField}`,
         preferenceShape: "higher-is-better",
         curveAffected: false,
@@ -260,5 +269,28 @@ describe("RatingForm controller", () => {
 
   test("renders metadata fallback when no derived score is available", () => {
     expect(renderForm()).not.toContain("Source metadata unavailable");
+  });
+
+  test("keeps Complexity facts concise without provenance or configuration details", () => {
+    const complexityScore = derivedScore(complexityAxis, "weight", 2.7, 7);
+    const html = renderForm({
+      axes: [complexityAxis],
+      score: {
+        ...complexityScore,
+        breakdown: [
+          {
+            ...complexityScore.breakdown[0],
+            provenance: "BoardGameGeek community complexity rating",
+            configurationSummary: "No configuration",
+          },
+        ],
+      },
+    });
+
+    expect(html).toContain("Published value: 2.7 complexity");
+    expect(html).toContain("Effective rating (1-10)");
+    expect(html).toContain("Override");
+    expect(html).not.toContain("BoardGameGeek community complexity rating");
+    expect(html).not.toContain("No configuration");
   });
 });
