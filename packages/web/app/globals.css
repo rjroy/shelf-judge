@@ -86,12 +86,6 @@
   --conf-insufficient: var(--text-muted);
   --conf-insufficient-bg: var(--row-hover);
 
-  /* ── Previously Owned ───────────────────────────────────── */
-  --prev-owned-bg: #f0ede6;
-  --prev-owned-badge-bg: #ede9e1;
-  --prev-owned-badge-border: #c4bfb8;
-  --prev-owned-badge-text: #706a62;
-
   /* ── Niche (single-accent domain) ───────────────────────── */
   --niche-accent: #6b4c8a;
   --niche-bg: color-mix(in hsl, var(--niche-accent), white 93%);
@@ -282,12 +276,6 @@
   --nav-bg: #121110;
   --nav-text: #e8e4dc;
 
-  /* ── Previously Owned ───────────────────────────────────── */
-  --prev-owned-bg: #222019;
-  --prev-owned-badge-bg: #2e2b24;
-  --prev-owned-badge-border: #524e48;
-  --prev-owned-badge-text: #908a80;
-
   /* ── Filter spec (single-accent domain) ──────────────────── */
   --filter-spec: #5d9054;
   --filter-spec-bg: color-mix(in hsl, var(--filter-spec), var(--bg-base) 85%);
@@ -419,6 +407,18 @@ body {
 .label-caps {
   text-transform: uppercase;
   letter-spacing: 0.06em;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* ===== Sidebar ===== */
