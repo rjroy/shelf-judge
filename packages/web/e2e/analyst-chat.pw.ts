@@ -53,7 +53,9 @@ test("Collection Analyst discloses sending, streams a first question and follow-
   ).toEqual({ local: [], session: [], cookies: "", indexedDb: [] });
 });
 
-test("Collection Analyst renders response Markdown while preserving owner plaintext", async ({ page }) => {
+test("Collection Analyst renders response Markdown while preserving owner plaintext", async ({
+  page,
+}) => {
   await page.goto("/analyst");
   await page.getByLabel("Your question").fill("**owner literal**");
   await page.getByRole("button", { name: "Ask Analyst" }).click();

@@ -39,7 +39,9 @@ const snapshot: AnalystProjectionSnapshot = {
 };
 
 function unavailableProvider(
-  run: (request: Parameters<NonNullable<GroundedAnalysisProvider["analyzeFreeform"]>>[0]) => Promise<never>,
+  run: (
+    request: Parameters<NonNullable<GroundedAnalysisProvider["analyzeFreeform"]>>[0],
+  ) => Promise<never>,
 ): GroundedAnalysisProvider {
   return {
     configurationStatus: {

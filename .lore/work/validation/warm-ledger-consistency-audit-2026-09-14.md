@@ -81,9 +81,16 @@ did not attempt a broad application redesign or token migration.
     projects. Initial deferred image requests ranged from 39 to 56 of 100,
     confirming distant images were not all requested eagerly.
   - Independent-review full gates: lint passed; `bun test` passed with 2,995
-    passing tests, 1 skip, and 0 failures; build passed. Root
-    `format:check` still fails only on 24 pre-existing unrelated files.
-    Changed-file Prettier and `git diff --check` passed.
+    passing tests, 1 skip, and 0 failures; build passed. A later formatting
+    cleanup resolved the 24 files reported by root `format:check`; the root
+    check now passes. Changed-file Prettier and `git diff --check` passed.
+  - Full branch verification completed on 2026-09-14: `bun run format:check`,
+    `bun run lint`, `bun run typecheck`, `bun run typecheck:browser`,
+    `bun test` (2,995 pass, 1 skip, 0 fail), `bun run build`, and
+    `git diff --check` all passed. A whitespace-insensitive comparison of the
+    outstanding formatting candidates confirmed their changes are formatting
+    only; the non-whitespace changes remain limited to the separately reviewed
+    implementation and audit updates.
 
 ## Detector evidence
 

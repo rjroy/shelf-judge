@@ -89,7 +89,9 @@ export interface GroundedAnalysisProvider {
   analyze<Output>(
     request: GroundedAnalysisRequest<Output>,
   ): Promise<GroundedAnalysisResult<Output>>;
-  analyzeFreeform?(request: Omit<GroundedAnalysisRequest<never>, "submissionSchema">): Promise<GroundedAnalysisResult<string>>;
+  analyzeFreeform?(
+    request: Omit<GroundedAnalysisRequest<never>, "submissionSchema">,
+  ): Promise<GroundedAnalysisResult<string>>;
 }
 
 export interface GroundedAnalysisProviderOptions {
@@ -269,7 +271,9 @@ export function createGroundedAnalysisProvider(
   };
 
   async function performAnalysis<Output>(
-    request: GroundedAnalysisRequest<Output> | Omit<GroundedAnalysisRequest<never>, "submissionSchema">,
+    request:
+      | GroundedAnalysisRequest<Output>
+      | Omit<GroundedAnalysisRequest<never>, "submissionSchema">,
     allowedTools: GroundedAllowedToolManifest,
     feature: string,
     recordSubmissionDiagnostics: (diagnostics: SubmissionDiagnostics) => void,
@@ -297,14 +301,17 @@ export function createGroundedAnalysisProvider(
       allowedTools.toolNames.length === freeformCollectionTools.length &&
       freeformCollectionTools.every((toolName) => allowedTools.toolNames.includes(toolName));
     const supportsCollectionEvidence =
-      (feature === "collection-analyst" || feature === "profile-reflection") && collectionEvidenceTools;
+      (feature === "collection-analyst" || feature === "profile-reflection") &&
+      collectionEvidenceTools;
     if (
       allowedTools.feature !== feature ||
       new Set(registeredToolNames).size !== registeredToolNames.length ||
       allowedTools.toolNames.length !== registeredToolNames.length ||
       allowedTools.toolNames.some((toolName) => !registeredToolNames.includes(toolName)) ||
-       (feature === "collection-analyst"
-         ? freeform ? !supportsFreeformCollection : !supportsCollectionEvidence
+      (feature === "collection-analyst"
+        ? freeform
+          ? !supportsFreeformCollection
+          : !supportsCollectionEvidence
         : feature === "profile-reflection"
           ? !(submissionOnly || supportsCollectionEvidence)
           : !submissionOnly)
@@ -312,7 +319,8 @@ export function createGroundedAnalysisProvider(
       throw new GroundedCapabilityError("unsupported-feature-tool-manifest");
     }
 
-    const submissionSchema = "submissionSchema" in request ? freezeGroundedSchema(request.submissionSchema) : undefined;
+    const submissionSchema =
+      "submissionSchema" in request ? freezeGroundedSchema(request.submissionSchema) : undefined;
     let activeRoundIndex: number | undefined;
     const toolLifecycle =
       request.toolLifecycle ??
@@ -339,14 +347,18 @@ export function createGroundedAnalysisProvider(
         assistantText: [],
         usages: usage.usages,
       });
-    const acceptSubmission = "submissionSchema" in request ? request.acceptSubmission?.bind(request) : undefined;
-    const submission = submissionSchema === undefined ? undefined : createGroundedStructuredSubmission<Output>(
-      submissionSchema,
-      toolLifecycle,
-      acceptSubmission === undefined
+    const acceptSubmission =
+      "submissionSchema" in request ? request.acceptSubmission?.bind(request) : undefined;
+    const submission =
+      submissionSchema === undefined
         ? undefined
-        : (output, usage) => acceptSubmission(output, submissionUsage(usage)),
-    );
+        : createGroundedStructuredSubmission<Output>(
+            submissionSchema,
+            toolLifecycle,
+            acceptSubmission === undefined
+              ? undefined
+              : (output, usage) => acceptSubmission(output, submissionUsage(usage)),
+          );
     const recordAttemptState = (runResult?: GroundedSessionRunResult) => {
       const attemptState = submission?.getAttemptState();
       if (attemptState === undefined) return;
@@ -385,7 +397,9 @@ export function createGroundedAnalysisProvider(
       const sessionInput = {
         systemPrompt: request.systemPrompt,
         retrievalTools,
-        trace: (event: Parameters<NonNullable<PiGroundedAnalysisSessionFactoryOptions["onTrace"]>>[0]) => {
+        trace: (
+          event: Parameters<NonNullable<PiGroundedAnalysisSessionFactoryOptions["onTrace"]>>[0],
+        ) => {
           if (event.event === "model-response-end") activeRoundIndex = event.roundIndex;
           safelyTrace(request.audit, event);
         },
@@ -396,7 +410,8 @@ export function createGroundedAnalysisProvider(
           throw new GroundedAnalysisError("internal", "freeform-session-factory-not-configured");
         session = await sessionFactory.createFreeform(sessionInput);
       } else {
-        if (submission === undefined) throw new GroundedAnalysisError("internal", "structured-submission-required");
+        if (submission === undefined)
+          throw new GroundedAnalysisError("internal", "structured-submission-required");
         session = await sessionFactory.create({ ...sessionInput, submission });
       }
       await session.bindExtensions();
@@ -427,9 +442,21 @@ export function createGroundedAnalysisProvider(
       recordAttemptState(runResult);
       if (freeform) {
         const finalText = runResult.finalAssistantText;
-        if (finalText === undefined || finalText.trim().length === 0 || runResult.finalStopReason === "error" || runResult.finalStopReason === "aborted")
-          throw new GroundedAnalysisError("output-validation", "missing-freeform-final-response", { usage });
-        return { output: finalText as Output, usage, modelInputBytes: runResult.modelInputBytes ?? 0, modelInputRequests: runResult.modelInputRequests ?? 0 };
+        if (
+          finalText === undefined ||
+          finalText.trim().length === 0 ||
+          runResult.finalStopReason === "error" ||
+          runResult.finalStopReason === "aborted"
+        )
+          throw new GroundedAnalysisError("output-validation", "missing-freeform-final-response", {
+            usage,
+          });
+        return {
+          output: finalText as Output,
+          usage,
+          modelInputBytes: runResult.modelInputBytes ?? 0,
+          modelInputRequests: runResult.modelInputRequests ?? 0,
+        };
       }
       const output = submission?.getResult();
       if (output === undefined) {
@@ -539,12 +566,50 @@ export function createGroundedAnalysisProvider(
       modelLogger.attempt({ ...logBase, recordType: "grounded-model-attempt", occurredAt: now() });
       try {
         const result = await performAnalysis(request, allowedTools, audit.feature, () => undefined);
-        modelLogger.outcome({ ...logBase, recordType: "grounded-model-outcome", occurredAt: now(), outcome: "completed", durationMs: Math.max(0, Math.round(nowMs() - startedAt)), usage: result.usage, modelInputBytes: result.modelInputBytes, modelInputRequests: result.modelInputRequests, validation: "not-reached", terminalReason: "accepted", cacheTransition: "none", submissionDiagnostics: { state: "unavailable" } });
+        modelLogger.outcome({
+          ...logBase,
+          recordType: "grounded-model-outcome",
+          occurredAt: now(),
+          outcome: "completed",
+          durationMs: Math.max(0, Math.round(nowMs() - startedAt)),
+          usage: result.usage,
+          modelInputBytes: result.modelInputBytes,
+          modelInputRequests: result.modelInputRequests,
+          validation: "not-reached",
+          terminalReason: "accepted",
+          cacheTransition: "none",
+          submissionDiagnostics: { state: "unavailable" },
+        });
         return { output: result.output, usage: result.usage };
       } catch (error) {
-        const usage = error instanceof GroundedSessionRunError ? aggregateUsage(error.runResult) : GroundedUsageUnavailableSchema.parse({ state: "unavailable" });
-        const mapped = mapGroundedAnalysisFailure(error instanceof GroundedSessionRunError ? error.cause : error, request.signal);
-        modelLogger.outcome({ ...logBase, recordType: "grounded-model-outcome", occurredAt: now(), outcome: mapped.reason === "cancelled" ? "cancelled" : "failed", durationMs: Math.max(0, Math.round(nowMs() - startedAt)), usage, modelInputBytes: error instanceof GroundedSessionRunError ? (error.runResult.modelInputBytes ?? 0) : 0, modelInputRequests: error instanceof GroundedSessionRunError ? (error.runResult.modelInputRequests ?? 0) : 0, validation: "not-reached", terminalReason: mapped.reason, cacheTransition: "none", submissionDiagnostics: { state: "unavailable" }, failureCategory: mapped.reason, providerFailure: groundedProviderFailureDiagnostics(error) });
+        const usage =
+          error instanceof GroundedSessionRunError
+            ? aggregateUsage(error.runResult)
+            : GroundedUsageUnavailableSchema.parse({ state: "unavailable" });
+        const mapped = mapGroundedAnalysisFailure(
+          error instanceof GroundedSessionRunError ? error.cause : error,
+          request.signal,
+        );
+        modelLogger.outcome({
+          ...logBase,
+          recordType: "grounded-model-outcome",
+          occurredAt: now(),
+          outcome: mapped.reason === "cancelled" ? "cancelled" : "failed",
+          durationMs: Math.max(0, Math.round(nowMs() - startedAt)),
+          usage,
+          modelInputBytes:
+            error instanceof GroundedSessionRunError ? (error.runResult.modelInputBytes ?? 0) : 0,
+          modelInputRequests:
+            error instanceof GroundedSessionRunError
+              ? (error.runResult.modelInputRequests ?? 0)
+              : 0,
+          validation: "not-reached",
+          terminalReason: mapped.reason,
+          cacheTransition: "none",
+          submissionDiagnostics: { state: "unavailable" },
+          failureCategory: mapped.reason,
+          providerFailure: groundedProviderFailureDiagnostics(error),
+        });
         throw new GroundedAnalysisError(mapped.reason, mapped.safeDetail, { usage, cause: error });
       }
     },

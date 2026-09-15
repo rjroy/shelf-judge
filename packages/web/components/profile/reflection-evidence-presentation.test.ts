@@ -79,10 +79,7 @@ describe("reflection evidence presentation", () => {
         fitness: null,
       }),
     };
-    const payload = [
-      { game: { id: "invalid" } },
-      enrichedRow,
-    ];
+    const payload = [{ game: { id: "invalid" } }, enrichedRow];
 
     expect(GameWithScoreSchema.safeParse(baseRow).success).toBe(true);
     expect(GameWithScoreSchema.safeParse(enrichedRow).success).toBe(false);

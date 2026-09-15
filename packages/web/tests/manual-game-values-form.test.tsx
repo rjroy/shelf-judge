@@ -37,12 +37,8 @@ describe("ManualGameValuesForm", () => {
     expect(html).toMatch(/<label class="manual-game-value-label" for="[^"]+-input">/);
     expect(html).toMatch(/aria-describedby="[^"]+-playing-time-status"/);
     expect(html).toMatch(/aria-describedby="[^"]+-player-count-status"/);
-    expect(html).toMatch(
-      /id="[^"]+-playing-time-status" class="manual-game-value-status"><\/div>/,
-    );
-    expect(html).toMatch(
-      /id="[^"]+-player-count-status" class="manual-game-value-status"><\/div>/,
-    );
+    expect(html).toMatch(/id="[^"]+-playing-time-status" class="manual-game-value-status"><\/div>/);
+    expect(html).toMatch(/id="[^"]+-player-count-status" class="manual-game-value-status"><\/div>/);
     expect(html).toContain("BGG play time: 60");
     expect(html).toContain("BGG player count: 2");
   });
