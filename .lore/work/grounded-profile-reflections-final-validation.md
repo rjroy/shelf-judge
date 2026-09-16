@@ -20,11 +20,13 @@ not score usefulness, truth, semantic entailment, authorship, independent
 review, corpus size, or baseline comparisons. The owner judges whether a
 delivered reflection is useful.
 
-Configured-provider readiness from Step 11 is recorded separately from
-synthetic diagnostics. In particular,
-`.shelf-judge/reflection-evaluation/ollama-diagnostic-followup-6wv.13.1.json`
-declares itself synthetic and not a production evidence package, so it is not
-used as output-readiness evidence.
+Configured-provider readiness from Step 11 is recorded separately from synthetic
+diagnostics. The retired diagnostic artifact and evaluation tooling were removed
+after validation. Their only retained rationale is the explicit archival
+supersession notice in
+[`reflection-evaluation-closure.md`](../archive/plans/reflection-evaluation-closure.md):
+they were never production evidence and do not establish output readiness,
+usefulness, or truth.
 
 ## Execution record
 
@@ -79,7 +81,7 @@ scenarios exclude the 200-percent layout-equivalent project; and responsive
 tests run in every project. The resulting skip counts are 17 mobile, 20 tablet,
 3 desktop, and 20 layout-equivalent, totaling 60. All 188 cases were discovered.
 
-Exact current root-format failures:
+Historical root-format failures at the time of this validation:
 
 ```text
 packages/daemon/src/services/reflection-state-service.ts
@@ -88,6 +90,10 @@ packages/daemon/tests/evaluation/reflection-evaluation.test.ts
 packages/daemon/tests/evaluation/reflection-evaluation.ts
 packages/daemon/tests/services/reflection-state-service.test.ts
 ```
+
+The three `packages/daemon/tests/evaluation/` entries above were retired and
+removed after this validation. They are preserved here solely to explain the
+then-current format result, not as runnable paths or evaluation requirements.
 
 ## Configured-provider readiness
 
@@ -125,9 +131,9 @@ an entire requirement. Non-browser anchors ran in the passing targeted or
 aggregate gates recorded above. Browser anchors executed in the passing full
 browser suite.
 
-- REQ-REFLECT-1: `packages/daemon/tests/evaluation/reflection-evaluation.test.ts`,
-  `versioned corpus has concrete pre-generation evidence and policy for every
-question`, plus the durable three-question Step 11 inspection above.
+- REQ-REFLECT-1: `packages/daemon/tests/services/reflection-submission-schema.test.ts`
+  and `packages/daemon/tests/services/reflection-evidence-service.test.ts`, plus
+  the durable three-question Step 11 inspection above.
 - REQ-REFLECT-2: `packages/daemon/tests/services/reflection-result-validator.test.ts`,
   `requires a complete selected pattern candidate that supports every cited note`.
 - REQ-REFLECT-3: `packages/web/e2e/grounded-profile-reflections.pw.ts`, `answered and
@@ -141,8 +147,9 @@ ceilings`.
 - REQ-REFLECT-6: `packages/daemon/tests/services/reflection-evidence-service.test.ts`,
   `preserves hostile prose as inert data without broadening fields, destinations,
 or policy`.
-- REQ-REFLECT-7: `packages/daemon/tests/evaluation/reflection-evaluation.test.ts`,
-  `fixture packages faithfully represent advertised scope and evidence conditions`.
+- REQ-REFLECT-7: `packages/daemon/tests/services/reflection-model-tools.test.ts`
+  and `packages/daemon/tests/services/reflection-evidence-service.test.ts`, which
+  cover the bounded model-tool boundary and inert untrusted testimony.
 - REQ-REFLECT-8:
   `packages/daemon/tests/services/reflection-evidence-projections.test.ts`,
   `preserves candidate order and projects complete confounders, exclusions, and
