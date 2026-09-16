@@ -118,6 +118,37 @@ design judgment; follow-up `shelf-judge-66b` tracks that triage.
     semantic token system in a dedicated theming task.
   - **Suggested command:** `/impeccable colorize`, then `/impeccable polish`.
 
+## Follow-up triage: shelf-judge-66b (2026-09-15)
+
+This follow-up treats the detector as a mechanical prompt, not as a directive to
+flatten the established Warm Ledger language. The detector evidence above is the
+source record for all findings that were intentionally excluded from the
+consistency pass.
+
+| Finding | Disposition | Evidence and rationale |
+| --- | --- | --- |
+| Neutral analyst blockquote side rule (`globals.css:9526`) | Fixed | Reduced from 3px to a 1px `--border-strong` rule. It continues to separate quoted analysis under the Design System's rule-first depth vocabulary without becoming decorative emphasis. |
+| Semantic/status side rules for stale reflections, curve-affected rows, niche champions, assignment conflicts, and benchmark examples (`globals.css:185`, `:3079`, `:6850`, `:8515`, `:9015`) | Fixed | Reduced from 3–4px to 1px while preserving their existing semantic colors and the scan cue each surface already uses. This removes the detector's thick side-tab treatment without flattening score, warning, or action meaning. |
+| Four `transition: width` declarations | Fixed | The progress fills at `globals.css:2419`, `:3920`, `:6499`, and `:8559` animate a layout property for cosmetic feedback. Warm Ledger does not require that motion, so the declarations are removed rather than introducing transform wrappers or altering the existing data-bar geometry. |
+| Legacy literal color, typography-step, and radius advisories | Retained as migration work | The existing tokens intentionally include audited exception values with comments, and the stylesheet spans unrelated implemented surfaces. A broad token migration is not a safe P3 follow-up. The existing application-wide cleanup finding above remains the appropriate scoped work item. |
+
+The disposition preserves the incumbent Operate-mode system: semantic color
+remains reserved for domain meaning, borders provide flat hierarchy, and this
+follow-up avoids visual redesign or unrelated stylesheet normalization.
+
+### Validation limits
+
+On 2026-09-15, the scoped detector command completed successfully after these
+changes with no side-tab or `transition: width` findings. It still reported the
+pre-existing advisory-only legacy literal color, typography-step, and radius
+findings described above. `bun run typecheck:browser` and `git diff --check`
+completed successfully. The prior `bun run build` completed successfully before
+this follow-up's final border refinements. Browser tests were started earlier
+but interrupted by the tool runtime; they are not confirmed and were not
+rerun, because the workspace has a live Playwright fixture that this follow-up
+must not start, stop, or otherwise modify. No browser or visual-server
+inspection was performed for the same reason.
+
 ## Positive findings
 
 - Browser coverage is unusually concrete: it checks actual computed contrast,

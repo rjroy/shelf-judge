@@ -182,7 +182,7 @@
 }
 
 .reflection-stale {
-  border-inline-start: 4px solid #8a5a00;
+  border-inline-start: 1px solid #8a5a00;
   padding-inline-start: 0.75rem;
 }
 
@@ -2420,7 +2420,6 @@ body {
   height: 100%;
   background: var(--bgg-accent);
   border-radius: 4px;
-  transition: width 0.3s ease;
 }
 
 .games-log-header {
@@ -3077,7 +3076,7 @@ body {
 
 /* Curve-affected row indicator */
 .curve-affected-row td:first-child {
-  border-left: 3px solid var(--score-color);
+  border-left: 1px solid var(--score-color);
 }
 
 .curve-indicator {
@@ -3921,7 +3920,6 @@ body {
   height: 100%;
   background: var(--action);
   border-radius: 2px;
-  transition: width 0.3s;
 }
 
 .session-footer-note {
@@ -6500,7 +6498,6 @@ body {
   height: 100%;
   background: var(--predict-accent);
   border-radius: 4px;
-  transition: width 0.3s;
 }
 
 .readiness-stage-banner-count {
@@ -6850,7 +6847,7 @@ body {
 
 /* Collection: niche champion highlight in grouped view */
 .niche-champion-row {
-  border-left: 3px solid var(--niche-champion);
+  border-left: 1px solid var(--niche-champion);
 }
 
 /* Collection: niche toggle active color */
@@ -8512,7 +8509,7 @@ body {
 }
 
 .assignment-conflicts-section {
-  border-left: 3px solid var(--warning);
+  border-left: 1px solid var(--warning);
 }
 
 .assignment-conflict-unit {
@@ -8559,7 +8556,6 @@ body {
 .util-bar-fill {
   height: 100%;
   border-radius: 3px;
-  transition: width 0.3s;
 }
 .util-bar-fill.high {
   background: var(--score-high);
@@ -9016,7 +9012,7 @@ body {
   gap: 3px;
   margin: 18px 0;
   padding: 14px 16px;
-  border-left: 3px solid var(--action);
+  border-left: 1px solid var(--action);
   background: var(--bg-subtle);
   color: var(--text-secondary);
   font-size: var(--text-sm);
@@ -9527,7 +9523,7 @@ body {
   word-break: break-word;
 }
 .analyst-markdown blockquote {
-  border-left: 3px solid var(--border-strong);
+  border-left: 1px solid var(--border-strong);
   color: var(--text-secondary);
   margin-left: 0;
   padding-left: 0.75rem;
