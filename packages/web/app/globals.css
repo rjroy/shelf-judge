@@ -9802,3 +9802,49 @@ body {
   font-size: 11px;
   line-height: 1.35;
 }
+
+/* Analyst reading layout: accepted live variant 7455994c. */
+.analyst-page {
+  box-sizing: border-box;
+  width: min(100%, 820px);
+  margin-inline: auto;
+  padding-inline: clamp(20px, 3vw, 36px);
+}
+
+@media (max-width: 640px) {
+  .analyst-page {
+    width: 100%;
+    padding-inline: 16px;
+  }
+}
+
+.analyst-textarea--surface {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 96px;
+  padding: 12px;
+  color: var(--text-primary);
+  font: inherit;
+  line-height: 1.5;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  caret-color: var(--action);
+  resize: vertical;
+}
+
+.analyst-textarea--surface::placeholder {
+  color: var(--text-muted);
+}
+
+.analyst-textarea--surface:focus-visible {
+  border-color: var(--action);
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+
+.analyst-textarea--surface:disabled {
+  color: var(--text-muted);
+  background: var(--bg-subtle);
+  cursor: not-allowed;
+}

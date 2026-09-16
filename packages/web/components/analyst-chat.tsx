@@ -425,6 +425,7 @@ export function AnalystChat() {
           <label htmlFor="analyst-question">Your question</label>
           <textarea
             ref={composer}
+            className="analyst-textarea--surface"
             id="analyst-question"
             value={question}
             onChange={(event) => setQuestion(event.target.value)}
