@@ -34,7 +34,7 @@ function AttentionItem({ item }: { item: CollectionProfileAttentionItem }) {
           {evidenceActionLabel(item)}
         </Link>
       </div>
-      <details>
+      <details open>
         <summary>Evidence and available responses</summary>
         <p className="profile-status-label">Active play intention</p>
         <section className="attention-evidence" aria-labelledby={evidenceId}>

@@ -52,6 +52,17 @@ export interface OwnerGameNoteInvalidationLifecycle {
 
 export interface OwnerGameNoteService {
   get(gameId: unknown): Promise<OwnerGameNoteReadResult>;
+  getStates?(
+    gameIds: readonly string[],
+  ): Promise<
+    readonly {
+      readonly gameId: string;
+      readonly note: {
+        readonly state: "missing" | "cleared" | "present";
+        readonly version: number;
+      };
+    }[]
+  >;
   set(gameId: unknown, request: unknown): Promise<OwnerGameNoteMutationResult>;
   clear(gameId: unknown, request: unknown): Promise<OwnerGameNoteMutationResult>;
 }
@@ -158,6 +169,35 @@ export function createOwnerGameNoteService(deps: OwnerGameNoteServiceDeps): Owne
       });
       throw error;
     }
+  }
+
+  async function getStates(
+    gameIds: readonly string[],
+  ): Promise<
+    readonly {
+      readonly gameId: string;
+      readonly note: {
+        readonly state: "missing" | "cleared" | "present";
+        readonly version: number;
+      };
+    }[]
+  > {
+    const uniqueGameIds = [...new Set(z.array(GameIdSchema).parse(gameIds))];
+    const { value } = await deps.collectionMutationService.mutate(
+      { operation: "shelf.game.note.states.get", trigger: "owner-read", gameIds: uniqueGameIds },
+      (candidate) => ({
+        changed: false,
+        value: uniqueGameIds.map((gameId) => {
+          const game = candidate.games.find(({ id }) => id === gameId);
+          if (game === undefined) throw new NotFoundError(`Game not found: ${gameId}`);
+          return {
+            gameId,
+            note: { state: game.ownerNote.state, version: game.ownerNote.version },
+          };
+        }),
+      }),
+    );
+    return value;
   }
 
   async function mutate(
@@ -454,6 +494,7 @@ export function createOwnerGameNoteService(deps: OwnerGameNoteServiceDeps): Owne
 
   return {
     get,
+    getStates,
     set: (gameId, request) => mutate("set", gameId, request),
     clear: (gameId, request) => mutate("clear", gameId, request),
   };

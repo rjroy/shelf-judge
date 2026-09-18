@@ -190,6 +190,15 @@ export interface ReflectionEvidenceServiceDeps {
         readonly version: number;
       };
     }>;
+    getStates?(gameIds: readonly string[]): Promise<
+      readonly {
+        readonly gameId: string;
+        readonly note: {
+          readonly state: "missing" | "cleared" | "present";
+          readonly version: number;
+        };
+      }[]
+    >;
   };
   createAnalystEvidenceTurn?: (authorizedGameIds: readonly string[]) => AnalystEvidenceService;
   pageSize?: number;
@@ -589,9 +598,21 @@ export function createReflectionEvidenceService(
       ) {
         return { valid: false, reason: "question-scope-changed" };
       }
-      for (const dependency of evidencePackage.dependencies) {
-        if (dependency.category !== "note") continue;
-        const current = await deps.ownerGameNoteService.get(dependency.gameId);
+      const noteDependencies = evidencePackage.dependencies.filter(
+        (dependency): dependency is Extract<(typeof evidencePackage.dependencies)[number], { category: "note" }> =>
+          dependency.category === "note",
+      );
+      const currentNotes = deps.ownerGameNoteService.getStates === undefined
+        ? await Promise.all(
+            noteDependencies.map((dependency) => deps.ownerGameNoteService.get(dependency.gameId)),
+          )
+        : await deps.ownerGameNoteService.getStates(
+            noteDependencies.map((dependency) => dependency.gameId),
+          );
+      const currentByGameId = new Map(currentNotes.map((current) => [current.gameId, current]));
+      for (const dependency of noteDependencies) {
+        const current = currentByGameId.get(dependency.gameId);
+        if (current === undefined) return { valid: false, reason: "note-source-changed" };
         if (current.gameId !== dependency.gameId || current.note.version !== dependency.noteVersion)
           return { valid: false, reason: "note-source-changed" };
       }
@@ -630,19 +651,18 @@ export function createReflectionEvidenceService(
     const accumulated = await turn.analystEvidence.accumulatedEvidence(turn.analystSnapshot);
     const base = turn.initial;
     const examinedNoteGameIds = new Set(accumulated.noteDependencies.map(({ gameId }) => gameId));
+    const noteGameIds = base.citations.flatMap(({ evidenceClass, destination }) => {
+      const parameters = destination.parameters;
+      return evidenceClass === "game-identity-ownership" &&
+        "gameId" in parameters &&
+        typeof parameters.gameId === "string"
+        ? [parameters.gameId]
+        : [];
+    });
     const noteStates = options?.verifyNotePresence
-      ? await Promise.all(
-          base.citations.flatMap(({ evidenceClass, destination }) => {
-            const parameters = destination.parameters;
-            if (
-              evidenceClass !== "game-identity-ownership" ||
-              !("gameId" in parameters) ||
-              typeof parameters.gameId !== "string"
-            )
-              return [];
-            return [deps.ownerGameNoteService.get(parameters.gameId)];
-          }),
-        )
+      ? deps.ownerGameNoteService.getStates === undefined
+        ? await Promise.all(noteGameIds.map((gameId) => deps.ownerGameNoteService.get(gameId)))
+        : await deps.ownerGameNoteService.getStates(noteGameIds)
       : [];
     const noteGuidance =
       options?.verifyNotePresence === true
