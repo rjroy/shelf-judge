@@ -261,6 +261,9 @@ export function createReflectionResultValidator(): ReflectionResultValidator {
         dependencies: input.evidencePackage.dependencies,
         generatedAt: input.generatedAt,
         usage,
+        ...(modelResult.outcome === "abstained"
+          ? { noteGuidance: input.evidencePackage.noteGuidance }
+          : {}),
       });
       return cloneAndFreeze(result);
     },

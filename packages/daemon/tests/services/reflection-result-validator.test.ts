@@ -149,6 +149,10 @@ function evidencePackage(questionId: ReflectionQuestionId): ReflectionEvidencePa
         fingerprint: "collection-v4",
       }),
     ]),
+    noteGuidance: {
+      missingNotes: [{ gameId: "game-3", gameTitle: "Game 3" }],
+      unexaminedPresentNoteCount: 2,
+    },
     assembledAt: GENERATED_AT,
   });
 }
@@ -214,6 +218,11 @@ describe("ReflectionResultValidator", () => {
         generatedAt: GENERATED_AT,
       });
       expect(abstained.outcome).toBe("abstained");
+      if (abstained.outcome !== "abstained") throw new Error("Expected abstention");
+      expect(abstained.noteGuidance).toEqual({
+        missingNotes: [{ gameId: "game-3", gameTitle: "Game 3" }],
+        unexaminedPresentNoteCount: 2,
+      });
     },
   );
 
