@@ -111,7 +111,10 @@ test("preserves a dirty clear draft on failure and exposes associated accessible
   await playingTime.fill("125");
   await controlFixture(page, { blockNextMutation: true, failNextMutation: true });
   await clearPlayingTime.click();
-  const pendingStatus = page.locator("#playing-time-status");
+  const statusId = await playingTime.getAttribute("aria-describedby");
+  if (statusId === null) throw new Error("Play Time control must describe its status");
+  const escapedStatusId = await page.evaluate((id) => CSS.escape(id), statusId);
+  const pendingStatus = page.locator(`#${escapedStatusId}`);
   await expect(pendingStatus).toHaveRole("status");
   await expect(pendingStatus).toHaveAttribute("aria-live", "polite");
   await expect(pendingStatus).toHaveText("Clearing Play Time...");
@@ -121,8 +124,8 @@ test("preserves a dirty clear draft on failure and exposes associated accessible
   await controlFixture(page, { releaseMutation: true });
   await expect(pendingStatus).toHaveRole("alert");
   await expect(pendingStatus).toHaveText("Injected manual value failure");
-  await expect(playingTime).toHaveAttribute("aria-describedby", "playing-time-status");
-  await expect(clearPlayingTime).toHaveAttribute("aria-describedby", "playing-time-status");
+  await expect(playingTime).toHaveAttribute("aria-describedby", statusId);
+  await expect(clearPlayingTime).toHaveAttribute("aria-describedby", statusId);
   await expect(playingTime).toHaveValue("125");
   await expect(playingTime).toBeEnabled();
   await expect(clearPlayingTime).toBeEnabled();

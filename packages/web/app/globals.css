@@ -86,12 +86,6 @@
   --conf-insufficient: var(--text-muted);
   --conf-insufficient-bg: var(--row-hover);
 
-  /* ── Previously Owned ───────────────────────────────────── */
-  --prev-owned-bg: #f0ede6;
-  --prev-owned-badge-bg: #ede9e1;
-  --prev-owned-badge-border: #c4bfb8;
-  --prev-owned-badge-text: #706a62;
-
   /* ── Niche (single-accent domain) ───────────────────────── */
   --niche-accent: #6b4c8a;
   --niche-bg: color-mix(in hsl, var(--niche-accent), white 93%);
@@ -188,7 +182,7 @@
 }
 
 .reflection-stale {
-  border-inline-start: 4px solid #8a5a00;
+  border-inline-start: 1px solid #8a5a00;
   padding-inline-start: 0.75rem;
 }
 
@@ -281,12 +275,6 @@
   /* ── Navigation ───────────────────────────────────────────── */
   --nav-bg: #121110;
   --nav-text: #e8e4dc;
-
-  /* ── Previously Owned ───────────────────────────────────── */
-  --prev-owned-bg: #222019;
-  --prev-owned-badge-bg: #2e2b24;
-  --prev-owned-badge-border: #524e48;
-  --prev-owned-badge-text: #908a80;
 
   /* ── Filter spec (single-accent domain) ──────────────────── */
   --filter-spec: #5d9054;
@@ -419,6 +407,18 @@ body {
 .label-caps {
   text-transform: uppercase;
   letter-spacing: 0.06em;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* ===== Sidebar ===== */
@@ -2420,7 +2420,6 @@ body {
   height: 100%;
   background: var(--bgg-accent);
   border-radius: 4px;
-  transition: width 0.3s ease;
 }
 
 .games-log-header {
@@ -3077,7 +3076,7 @@ body {
 
 /* Curve-affected row indicator */
 .curve-affected-row td:first-child {
-  border-left: 3px solid var(--score-color);
+  border-left: 1px solid var(--score-color);
 }
 
 .curve-indicator {
@@ -3921,7 +3920,6 @@ body {
   height: 100%;
   background: var(--action);
   border-radius: 2px;
-  transition: width 0.3s;
 }
 
 .session-footer-note {
@@ -6500,7 +6498,6 @@ body {
   height: 100%;
   background: var(--predict-accent);
   border-radius: 4px;
-  transition: width 0.3s;
 }
 
 .readiness-stage-banner-count {
@@ -6850,7 +6847,7 @@ body {
 
 /* Collection: niche champion highlight in grouped view */
 .niche-champion-row {
-  border-left: 3px solid var(--niche-champion);
+  border-left: 1px solid var(--niche-champion);
 }
 
 /* Collection: niche toggle active color */
@@ -8512,7 +8509,7 @@ body {
 }
 
 .assignment-conflicts-section {
-  border-left: 3px solid var(--warning);
+  border-left: 1px solid var(--warning);
 }
 
 .assignment-conflict-unit {
@@ -8559,7 +8556,6 @@ body {
 .util-bar-fill {
   height: 100%;
   border-radius: 3px;
-  transition: width 0.3s;
 }
 .util-bar-fill.high {
   background: var(--score-high);
@@ -9016,7 +9012,7 @@ body {
   gap: 3px;
   margin: 18px 0;
   padding: 14px 16px;
-  border-left: 3px solid var(--action);
+  border-left: 1px solid var(--action);
   background: var(--bg-subtle);
   color: var(--text-secondary);
   font-size: var(--text-sm);
@@ -9527,7 +9523,7 @@ body {
   word-break: break-word;
 }
 .analyst-markdown blockquote {
-  border-left: 3px solid var(--border-strong);
+  border-left: 1px solid var(--border-strong);
   color: var(--text-secondary);
   margin-left: 0;
   padding-left: 0.75rem;
@@ -9805,4 +9801,50 @@ body {
   color: #a09a90;
   font-size: 11px;
   line-height: 1.35;
+}
+
+/* Analyst reading layout: accepted live variant 7455994c. */
+.analyst-page {
+  box-sizing: border-box;
+  width: min(100%, 820px);
+  margin-inline: auto;
+  padding-inline: clamp(20px, 3vw, 36px);
+}
+
+@media (max-width: 640px) {
+  .analyst-page {
+    width: 100%;
+    padding-inline: 16px;
+  }
+}
+
+.analyst-textarea--surface {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 96px;
+  padding: 12px;
+  color: var(--text-primary);
+  font: inherit;
+  line-height: 1.5;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  caret-color: var(--action);
+  resize: vertical;
+}
+
+.analyst-textarea--surface::placeholder {
+  color: var(--text-muted);
+}
+
+.analyst-textarea--surface:focus-visible {
+  border-color: var(--action);
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+
+.analyst-textarea--surface:disabled {
+  color: var(--text-muted);
+  background: var(--bg-subtle);
+  cursor: not-allowed;
 }

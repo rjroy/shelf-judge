@@ -1,8 +1,13 @@
 import { defineConfig } from "@playwright/test";
+import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { webPort, webUrl } from "./e2e/web-url";
 
 const fixturePort = process.env.SHELF_JUDGE_E2E_FIXTURE_PORT ?? "3111";
-const socketPath = process.env.SHELF_JUDGE_E2E_SOCKET ?? "/tmp/shelf-judge-playwright.sock";
+const socketPath =
+  process.env.SHELF_JUDGE_E2E_SOCKET ??
+  join(tmpdir(), `shelf-judge-playwright-${randomUUID()}.sock`);
 const nextDistDir = process.env.SHELF_JUDGE_E2E_NEXT_DIST_DIR ?? ".next-e2e";
 const fixtureUrl = `http://127.0.0.1:${fixturePort}`;
 

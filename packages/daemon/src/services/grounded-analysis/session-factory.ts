@@ -226,16 +226,16 @@ function createBoundSession(
       const unsubscribe = session.subscribe((event) => {
         if (event.type === "message_end" && isAssistantMessage(event.message)) {
           assistantMessages.push(event.message);
-            submission?.captureAssistantUsage({
-              inferenceRoundTrips: assistantMessages.length,
-              usages: assistantMessages.map(({ usage }) => ({
-                inputTokens: usage.input,
-                outputTokens: usage.output,
-                cacheReadTokens: usage.cacheRead,
-                cacheWriteTokens: usage.cacheWrite,
-                monetaryCostUsd: usage.cost.total,
-              })),
-            });
+          submission?.captureAssistantUsage({
+            inferenceRoundTrips: assistantMessages.length,
+            usages: assistantMessages.map(({ usage }) => ({
+              inputTokens: usage.input,
+              outputTokens: usage.output,
+              cacheReadTokens: usage.cacheRead,
+              cacheWriteTokens: usage.cacheWrite,
+              monetaryCostUsd: usage.cost.total,
+            })),
+          });
           const roundIndex = assistantMessages.length;
           const text = event.message.content
             .filter(
@@ -292,7 +292,12 @@ function createBoundSession(
 
       const terminalMessage = assistantMessages.at(-1);
       const terminalText = terminalMessage?.content
-        .filter((content): content is Extract<(typeof terminalMessage.content)[number], { type: "text" }> => content.type === "text")
+        .filter(
+          (
+            content,
+          ): content is Extract<(typeof terminalMessage.content)[number], { type: "text" }> =>
+            content.type === "text",
+        )
         .map(({ text }) => text)
         .join("");
       const runResult = {
@@ -316,7 +321,9 @@ function createBoundSession(
         })),
         assistantStopReasons: assistantMessages.map(({ stopReason }) => safeStopReason(stopReason)),
         ...(terminalText === undefined ? {} : { finalAssistantText: terminalText }),
-        ...(terminalMessage === undefined ? {} : { finalStopReason: safeStopReason(terminalMessage.stopReason) }),
+        ...(terminalMessage === undefined
+          ? {}
+          : { finalStopReason: safeStopReason(terminalMessage.stopReason) }),
       };
       const failedMessage = latestTerminalAssistantFailure(assistantMessages);
       if (promptFailure !== undefined || failedMessage) {
@@ -360,126 +367,129 @@ export function createPiGroundedAnalysisSessionFactory(
   const agentDir = options.agentDir ?? getAgentDir();
   const extensionIds = Object.freeze([...options.extensionIds]);
   const extensionFactories = Object.freeze([...(options.extensionFactories ?? [])]);
-  const create = async ({ systemPrompt, submission, retrievalTools = [], trace, traceAssistantContent }: {
-      systemPrompt: string;
-      submission?: GroundedStructuredSubmission<unknown>;
-      retrievalTools?: readonly ToolDefinition[];
-      trace?: PiGroundedAnalysisSessionFactoryOptions["onTrace"];
-      traceAssistantContent?: boolean;
-    }) => {
-      const effectiveTrace = trace ?? options.onTrace;
-      const settingsManager = SettingsManager.inMemory({
-        packages: [],
-        extensions: [],
-        retry: { enabled: false, maxRetries: 0, provider: { maxRetries: 0 } },
-        compaction: { enabled: false },
+  const create = async ({
+    systemPrompt,
+    submission,
+    retrievalTools = [],
+    trace,
+    traceAssistantContent,
+  }: {
+    systemPrompt: string;
+    submission?: GroundedStructuredSubmission<unknown>;
+    retrievalTools?: readonly ToolDefinition[];
+    trace?: PiGroundedAnalysisSessionFactoryOptions["onTrace"];
+    traceAssistantContent?: boolean;
+  }) => {
+    const effectiveTrace = trace ?? options.onTrace;
+    const settingsManager = SettingsManager.inMemory({
+      packages: [],
+      extensions: [],
+      retry: { enabled: false, maxRetries: 0, provider: { maxRetries: 0 } },
+      compaction: { enabled: false },
+    });
+    const exactPromptHandler = () => ({ systemPrompt });
+    const exactPromptExtension: ExtensionFactory = (pi) => {
+      pi.on("before_agent_start", exactPromptHandler);
+    };
+    const modelInput = { bytes: 0, requests: 0, requestStartedAt: new Map<number, number>() };
+    const loader = new DefaultResourceLoader({
+      cwd,
+      agentDir,
+      settingsManager,
+      additionalExtensionPaths: [...extensionIds],
+      extensionFactories: [
+        exactPromptExtension,
+        ...extensionFactories,
+        ...(options.createExtensionFactories?.((diagnostic) => {
+          try {
+            const { durationMs, error, ...transport } = diagnostic;
+            effectiveTrace?.({
+              event: "provider-transport",
+              roundIndex: modelInput.requests || undefined,
+              durationMs,
+              ...(error === undefined ? {} : { failure: error }),
+              transport,
+            });
+          } catch {
+            // Diagnostics must not change inference, cancellation, or submission behavior.
+          }
+        }) ?? []),
+      ],
+      noExtensions: true,
+      noSkills: true,
+      noPromptTemplates: true,
+      noThemes: true,
+      noContextFiles: true,
+    });
+    lifecycle("resource-reload");
+    try {
+      await loader.reload();
+    } catch (error) {
+      throw new GroundedAnalysisError("extension-binding", "configured-extension-load-failed", {
+        cause: error,
       });
-      const exactPromptHandler = () => ({ systemPrompt });
-      const exactPromptExtension: ExtensionFactory = (pi) => {
-        pi.on("before_agent_start", exactPromptHandler);
-      };
-      const modelInput = { bytes: 0, requests: 0, requestStartedAt: new Map<number, number>() };
-      const loader = new DefaultResourceLoader({
-        cwd,
-        agentDir,
-        settingsManager,
-        additionalExtensionPaths: [...extensionIds],
-        extensionFactories: [
-          exactPromptExtension,
-          ...extensionFactories,
-          ...(options.createExtensionFactories?.((diagnostic) => {
-            try {
-              const { durationMs, error, ...transport } = diagnostic;
-              effectiveTrace?.({
-                event: "provider-transport",
-                roundIndex: modelInput.requests || undefined,
-                durationMs,
-                ...(error === undefined ? {} : { failure: error }),
-                transport,
-              });
-            } catch {
-              // Diagnostics must not change inference, cancellation, or submission behavior.
-            }
-          }) ?? []),
-        ],
-        noExtensions: true,
-        noSkills: true,
-        noPromptTemplates: true,
-        noThemes: true,
-        noContextFiles: true,
-      });
-      lifecycle("resource-reload");
-      try {
-        await loader.reload();
-      } catch (error) {
-        throw new GroundedAnalysisError("extension-binding", "configured-extension-load-failed", {
-          cause: error,
-        });
-      }
-      const extensionsResult = loader.getExtensions();
-      if (extensionsResult.errors.length > 0) {
-        throw new GroundedAnalysisError("extension-binding", "configured-extension-load-failed");
-      }
+    }
+    const extensionsResult = loader.getExtensions();
+    if (extensionsResult.errors.length > 0) {
+      throw new GroundedAnalysisError("extension-binding", "configured-extension-load-failed");
+    }
 
-      lifecycle("session-create");
-      const { session } = await createAgentSession({
-        cwd,
-        resourceLoader: loader,
-        sessionManager: SessionManager.inMemory(cwd),
-        settingsManager,
-        noTools: "builtin",
-        customTools: [...retrievalTools, ...(submission === undefined ? [] : [submission.tool])],
-      });
-      if (options.onPayload) {
-        const existingOnPayload = session.agent.onPayload;
-        session.agent.onPayload = async (payload, model) => {
-          const existingPayload = await existingOnPayload?.(payload, model);
-          return options.onPayload?.(existingPayload ?? payload, model);
-        };
-      }
+    lifecycle("session-create");
+    const { session } = await createAgentSession({
+      cwd,
+      resourceLoader: loader,
+      sessionManager: SessionManager.inMemory(cwd),
+      settingsManager,
+      noTools: "builtin",
+      customTools: [...retrievalTools, ...(submission === undefined ? [] : [submission.tool])],
+    });
+    if (options.onPayload) {
       const existingOnPayload = session.agent.onPayload;
       session.agent.onPayload = async (payload, model) => {
-        const outboundPayload = (await existingOnPayload?.(payload, model)) ?? payload;
-        const serialized = JSON.stringify(outboundPayload);
-        if (serialized === undefined) {
-          throw new GroundedAnalysisError("internal", "model-input-serialization-failed");
-        }
-        const bytes = new TextEncoder().encode(serialized).byteLength;
-        modelInput.bytes += bytes;
-        modelInput.requests += 1;
-        modelInput.requestStartedAt.set(
-          modelInput.requests,
-          options.nowMs?.() ?? performance.now(),
-        );
-        try {
-          effectiveTrace?.({
-            event: "model-request-start",
-            roundIndex: modelInput.requests,
-            requestPayloadBytes: bytes,
-            cumulativePayloadBytes: modelInput.bytes,
-            ...(payloadArrayLength(outboundPayload, "messages") === undefined
-              ? {}
-              : { messageCount: payloadArrayLength(outboundPayload, "messages") }),
-            ...(payloadArrayLength(outboundPayload, "tools") === undefined
-              ? {}
-              : { toolCount: payloadArrayLength(outboundPayload, "tools") }),
-          });
-        } catch {
-          // Diagnostics must never affect a model operation.
-        }
-        return outboundPayload;
+        const existingPayload = await existingOnPayload?.(payload, model);
+        return options.onPayload?.(existingPayload ?? payload, model);
       };
-      return createBoundSession(
-        session,
-        extensionsResult,
-        lifecycle,
-        exactPromptHandler,
-        submission,
-        modelInput,
-        effectiveTrace,
-        traceAssistantContent ?? options.traceAssistantContent ?? false,
-        options.nowMs ?? (() => performance.now()),
-      );
+    }
+    const existingOnPayload = session.agent.onPayload;
+    session.agent.onPayload = async (payload, model) => {
+      const outboundPayload = (await existingOnPayload?.(payload, model)) ?? payload;
+      const serialized = JSON.stringify(outboundPayload);
+      if (serialized === undefined) {
+        throw new GroundedAnalysisError("internal", "model-input-serialization-failed");
+      }
+      const bytes = new TextEncoder().encode(serialized).byteLength;
+      modelInput.bytes += bytes;
+      modelInput.requests += 1;
+      modelInput.requestStartedAt.set(modelInput.requests, options.nowMs?.() ?? performance.now());
+      try {
+        effectiveTrace?.({
+          event: "model-request-start",
+          roundIndex: modelInput.requests,
+          requestPayloadBytes: bytes,
+          cumulativePayloadBytes: modelInput.bytes,
+          ...(payloadArrayLength(outboundPayload, "messages") === undefined
+            ? {}
+            : { messageCount: payloadArrayLength(outboundPayload, "messages") }),
+          ...(payloadArrayLength(outboundPayload, "tools") === undefined
+            ? {}
+            : { toolCount: payloadArrayLength(outboundPayload, "tools") }),
+        });
+      } catch {
+        // Diagnostics must never affect a model operation.
+      }
+      return outboundPayload;
     };
+    return createBoundSession(
+      session,
+      extensionsResult,
+      lifecycle,
+      exactPromptHandler,
+      submission,
+      modelInput,
+      effectiveTrace,
+      traceAssistantContent ?? options.traceAssistantContent ?? false,
+      options.nowMs ?? (() => performance.now()),
+    );
+  };
   return { create, createFreeform: create };
 }

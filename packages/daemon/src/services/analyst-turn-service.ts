@@ -150,7 +150,7 @@ export function createAnalystTurnService(deps: {
         }
     > {
       throwIfAborted(input.signal);
-       const captureStarted = Date.now();
+      const captureStarted = Date.now();
       logStage(log, input.audit, "capture", "attempt");
       let snapshot: Awaited<ReturnType<AnalystEvidenceService["capture"]>>;
       try {
@@ -162,36 +162,41 @@ export function createAnalystTurnService(deps: {
         });
         throw error;
       }
-       const audit = { ...input.audit, evidenceIdentityHash: canonicalSha256({ snapshotFingerprint: snapshot.snapshotFingerprint }) };
-       logStage(log, audit, "capture", "success", { durationMs: Date.now() - captureStarted });
+      const audit = {
+        ...input.audit,
+        evidenceIdentityHash: canonicalSha256({
+          snapshotFingerprint: snapshot.snapshotFingerprint,
+        }),
+      };
+      logStage(log, audit, "capture", "success", { durationMs: Date.now() - captureStarted });
       throwIfAborted(input.signal);
-       logStage(log, audit, "provider", "attempt");
+      logStage(log, audit, "provider", "attempt");
       const toolLifecycle = createGroundedToolLifecycleDiagnostics();
-       let result: GroundedAnalysisResult<string>;
+      let result: GroundedAnalysisResult<string>;
       try {
-         if (deps.provider.analyzeFreeform === undefined)
-           throw new Error("Collection Analyst provider does not support free-form execution");
-         result = await deps.provider.analyzeFreeform({
-           ...input,
-           audit,
+        if (deps.provider.analyzeFreeform === undefined)
+          throw new Error("Collection Analyst provider does not support free-form execution");
+        result = await deps.provider.analyzeFreeform({
+          ...input,
+          audit,
           allowedTools: createCollectionAnalystToolManifest(),
           retrievalTools: analystTools(
             deps.evidenceService,
             snapshot,
             input.signal,
-             audit,
+            audit,
             log,
             toolLifecycle,
           ),
           toolLifecycle,
         });
       } catch (error) {
-         logStage(log, audit, "provider", "failed", {
+        logStage(log, audit, "provider", "failed", {
           failure: input.signal.aborted ? "cancelled" : "provider-failed",
         });
         throw error;
       }
-       logStage(log, audit, "provider", "success");
+      logStage(log, audit, "provider", "success");
       throwIfAborted(input.signal);
       let accumulated: AnalystRetrievedEvidence;
       try {
@@ -202,41 +207,36 @@ export function createAnalystTurnService(deps: {
       } catch (error) {
         throwIfAborted(input.signal);
         const sourceChanged = error instanceof AnalystEvidenceSourceChangedError;
-         logStage(log, audit, "evidence-handoff", "failed", {
+        logStage(log, audit, "evidence-handoff", "failed", {
           failure: sourceChanged ? "source-changed" : "accumulation-failed",
         });
         return { valid: false, reason: sourceChanged ? "source-changed" : "handoff-failed" };
       }
-       try {
+      try {
         throwIfAborted(input.signal);
-         logStage(log, audit, "evidence-handoff", "attempt", {
+        logStage(log, audit, "evidence-handoff", "attempt", {
           evidenceSourceCount: accumulated.scope.matchingSourceCount,
         });
         const validated = await abortable(
-           deps.evidenceService.handoff(snapshot, accumulated, () => {
-             throwIfAborted(input.signal);
-             return Promise.resolve({ valid: true, result: result.output });
+          deps.evidenceService.handoff(snapshot, accumulated, () => {
+            throwIfAborted(input.signal);
+            return Promise.resolve({ valid: true, result: result.output });
           }),
           input.signal,
         );
         throwIfAborted(input.signal);
-        logStage(
-          log,
-           audit,
-          "evidence-handoff",
-           validated.valid ? "success" : "rejected",
-        );
+        logStage(log, audit, "evidence-handoff", validated.valid ? "success" : "rejected");
         return validated.valid && validated.result
           ? Object.freeze({
-               output: freeformFinal(validated.result, result.usage),
+              output: freeformFinal(validated.result, result.usage),
               usage: result.usage,
               retrieved: [accumulated],
             })
-           : { valid: false, reason: "handoff-failed" };
+          : { valid: false, reason: "handoff-failed" };
       } catch (error) {
         throwIfAborted(input.signal);
         const sourceChanged = error instanceof AnalystEvidenceSourceChangedError;
-         logStage(log, audit, "evidence-handoff", "failed", {
+        logStage(log, audit, "evidence-handoff", "failed", {
           failure: sourceChanged ? "source-changed" : "handoff-failed",
         });
         return { valid: false, reason: sourceChanged ? "source-changed" : "handoff-failed" };

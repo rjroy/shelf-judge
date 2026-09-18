@@ -29,15 +29,17 @@ import {
   type TournamentGameStatsDisplay,
 } from "@shelf-judge/shared";
 import { createHash } from "node:crypto";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { lstatSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createConnection } from "node:net";
 import {
   emptyUsefulProfileFixture,
   unavailableUsefulProfileFixture,
   warningUsefulProfileFixture,
 } from "../../shared/tests/fixtures/useful-profile";
 
-const socketPath = process.env.SHELF_JUDGE_SOCKET;
-if (socketPath === undefined) throw new Error("SHELF_JUDGE_SOCKET is required");
+const configuredSocketPath = process.env.SHELF_JUDGE_SOCKET;
+if (configuredSocketPath === undefined) throw new Error("SHELF_JUDGE_SOCKET is required");
+const socketPath: string = configuredSocketPath;
 const healthPort = Number(process.env.SHELF_JUDGE_E2E_FIXTURE_PORT ?? "3101");
 if (!Number.isSafeInteger(healthPort) || healthPort < 1 || healthPort > 65_535) {
   throw new Error("SHELF_JUDGE_E2E_FIXTURE_PORT must be a valid TCP port");
@@ -1913,6 +1915,56 @@ async function handle(request: Request): Promise<Response> {
   return json({ error: `No deterministic fixture route for ${request.method} ${path}` }, 404);
 }
 
+function errorCode(error: unknown): string | undefined {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "string"
+  ) {
+    return error.code;
+  }
+  return undefined;
+}
+
+async function removeStaleSocket(): Promise<void> {
+  try {
+    if (!lstatSync(socketPath).isSocket()) {
+      throw new Error(`Refusing to replace non-socket path: ${socketPath}`);
+    }
+  } catch (error: unknown) {
+    if (errorCode(error) === "ENOENT") return;
+    throw error;
+  }
+
+  const socket = createConnection(socketPath);
+  const probe = await new Promise<"active" | "stale">((resolve, reject) => {
+    socket.once("connect", () => resolve("active"));
+    socket.once("error", (error: unknown) => {
+      const code = errorCode(error);
+      if (code === "ECONNREFUSED" || code === "ENOENT") {
+        resolve("stale");
+        return;
+      }
+      reject(
+        error instanceof Error
+          ? error
+          : new Error(`Unable to probe Unix socket: ${socketPath}`),
+      );
+    });
+  });
+  socket.destroy();
+
+  if (probe === "active") {
+    throw new Error(`Refusing to replace active Unix socket: ${socketPath}`);
+  }
+  rmSync(socketPath);
+}
+
+// The generated Playwright socket path is unique to its invocation. If a prior
+// fixture died after creating it, clear only a socket that no longer accepts a
+// connection; never unlink a live daemon's socket.
+await removeStaleSocket();
 const socketServer = Bun.serve({ unix: socketPath, fetch: handle, idleTimeout: 0 as never });
 const healthServer = Bun.serve({
   hostname: "127.0.0.1",
@@ -1920,12 +1972,17 @@ const healthServer = Bun.serve({
   fetch: () => new Response("ok"),
 });
 
-function shutdown(): void {
+let shuttingDown = false;
+
+async function shutdown(): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
   rmSync(ownerNotePersistencePath, { force: true });
-  void socketServer.stop();
-  void healthServer.stop();
+  await socketServer.stop();
+  await healthServer.stop();
+  rmSync(socketPath, { force: true });
 }
 
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+process.once("SIGINT", () => void shutdown());
+process.once("SIGTERM", () => void shutdown());
 import { REFLECTION_QUESTION_POLICIES } from "@shelf-judge/shared";

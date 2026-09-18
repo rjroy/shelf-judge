@@ -187,41 +187,43 @@ function BreakdownRow({
     <>
       <tr className={rowClass}>
         <td className="breakdown-name-cell">
-              {entry.axisName}
-              {entry.curveAffected && (
-                <span className="curve-indicator" title="Curve applied">
-                  ~
-                </span>
-              )}
-              {isPredicted && entry.predictionConfidence && (
-                <ConfidenceBadge
-                  level={entry.predictionConfidence}
-                  clickable={entry.referenceGames !== null && entry.referenceGames.length > 0}
-                  onClick={() => setExpanded((v) => !v)}
-                />
-              )}
-              {hasFactualDetails && (
-                <details className="breakdown-derived-details">
-                  <summary>Source details</summary>
-                  <div className="breakdown-detail-list">
-                    <span>Published: {formatValue(entry.sourceValue, entry.unit)}</span>
-                    {entry.sourceValue !== entry.scoringRawValue && entry.scoringRawValue != null && (
-                      <span>Capped scoring input: {formatValue(entry.scoringRawValue, entry.unit)}</span>
-                    )}
-                    {entry.overridden && (
-                      <span className="breakdown-override-detail">
-                        {entry.overrideValue == null
-                          ? "Personal override applied"
-                          : `Personal override: ${entry.overrideValue}`}
-                      </span>
-                    )}
-                    {entry.provenance && <span>Provenance: {entry.provenance}</span>}
-                    {entry.configurationSummary && (
-                      <span>Configuration: {entry.configurationSummary}</span>
-                    )}
-                  </div>
-                </details>
-              )}
+          {entry.axisName}
+          {entry.curveAffected && (
+            <span className="curve-indicator" title="Curve applied">
+              ~
+            </span>
+          )}
+          {isPredicted && entry.predictionConfidence && (
+            <ConfidenceBadge
+              level={entry.predictionConfidence}
+              clickable={entry.referenceGames !== null && entry.referenceGames.length > 0}
+              onClick={() => setExpanded((v) => !v)}
+            />
+          )}
+          {hasFactualDetails && (
+            <details className="breakdown-derived-details">
+              <summary>Source details</summary>
+              <div className="breakdown-detail-list">
+                <span>Published: {formatValue(entry.sourceValue, entry.unit)}</span>
+                {entry.sourceValue !== entry.scoringRawValue && entry.scoringRawValue != null && (
+                  <span>
+                    Capped scoring input: {formatValue(entry.scoringRawValue, entry.unit)}
+                  </span>
+                )}
+                {entry.overridden && (
+                  <span className="breakdown-override-detail">
+                    {entry.overrideValue == null
+                      ? "Personal override applied"
+                      : `Personal override: ${entry.overrideValue}`}
+                  </span>
+                )}
+                {entry.provenance && <span>Provenance: {entry.provenance}</span>}
+                {entry.configurationSummary && (
+                  <span>Configuration: {entry.configurationSummary}</span>
+                )}
+              </div>
+            </details>
+          )}
         </td>
         <td className="right breakdown-raw">
           {entry.scoringRawValue != null ? (

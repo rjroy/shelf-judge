@@ -319,7 +319,7 @@ export function Sidebar() {
       </nav>
 
       <div className="sidebar-footer">
-        <span>Shelf Judge v0.1</span>
+        <span>Shelf Judge v1.0</span>
       </div>
     </aside>
   );

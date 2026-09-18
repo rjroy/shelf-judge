@@ -1,7 +1,7 @@
 ---
 title: "Implementation plan: collection analyst chat"
 date: 2026-08-30
-status: draft
+status: executed
 tags: [plan, collection, analyst, chat, llm, grounding, privacy]
 modules: [shared, daemon, cli, web]
 related:
@@ -16,6 +16,11 @@ related:
 ---
 
 # Implementation plan: collection analyst chat
+
+> **Lifecycle note, 2026-09-15:** Implementation and final technical validation
+> completed. This plan is retained as historical delivery evidence. Its
+> implementation-tense steps and prerequisite identifiers are not current work
+> instructions; current authority is `.lore/reference/` and delivered code.
 
 ## Goal
 

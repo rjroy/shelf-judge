@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { createAnalystTurnService } from "../../src/services/analyst-turn-service.js";
-import { createAnalystEvidenceService } from "../../src/services/analyst-evidence-service.js";
-import type { AnalystProjectionSnapshot } from "../../src/services/analyst-evidence-projections.js";
-import { createGroundedAnalysisProvider } from "../../src/services/grounded-analysis/provider.js";
-import { GroundedAnalysisError } from "../../src/services/grounded-analysis/failure-mapping.js";
+import { createAnalystTurnService } from "../src/services/analyst-turn-service.js";
+import { createAnalystEvidenceService } from "../src/services/analyst-evidence-service.js";
+import type { AnalystProjectionSnapshot } from "../src/services/analyst-evidence-projections.js";
+import { createGroundedAnalysisProvider } from "../src/services/grounded-analysis/provider.js";
+import { GroundedAnalysisError } from "../src/services/grounded-analysis/failure-mapping.js";
 import {
   createOllamaProviderExtension,
   createOllamaRequestPayloadHook,
-} from "../../src/services/grounded-analysis/ollama-provider-extension.js";
+} from "../src/services/grounded-analysis/ollama-provider-extension.js";
 
 const modelId = "qwen3.6:27b";
 // Explicit operator smoke, not part of the offline test suite. Uses synthetic data only.

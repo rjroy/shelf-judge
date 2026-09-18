@@ -765,8 +765,14 @@ export function CollectionTable({
       <div className="filter-bar">
         <div className="filter-row-1">
           <div className="search-input-wrap">
-            <span className="search-icon">{"\uD83D\uDD0D"}</span>
+            <span className="search-icon" aria-hidden="true">
+              {"\uD83D\uDD0D"}
+            </span>
+            <label className="visually-hidden" htmlFor="collection-search">
+              Search games by name
+            </label>
             <input
+              id="collection-search"
               type="text"
               className={`search-input${hasSearch ? " has-value" : ""}`}
               placeholder="Search games by name..."
@@ -778,7 +784,13 @@ export function CollectionTable({
           {/* Sort control */}
           <div className="sort-control" ref={menuRef}>
             <span className="sort-label-prefix">Sort by</span>
-            <button className="sort-select" onClick={() => setMenuOpen((v) => !v)}>
+            <button
+              type="button"
+              className="sort-select"
+              aria-expanded={menuOpen}
+              aria-controls="collection-sort-menu"
+              onClick={() => setMenuOpen((v) => !v)}
+            >
               <span className="sort-select-label">{activeDef.label}</span>
               <span className="chevron">{menuOpen ? "\u25B2" : "\u25BC"}</span>
             </button>
@@ -786,6 +798,7 @@ export function CollectionTable({
               className="sort-dir-btn"
               onClick={toggleDirection}
               title="Toggle sort direction"
+              aria-label={`Sort ${sort.direction === "asc" ? "descending" : "ascending"}`}
             >
               {dirArrow}
             </button>
@@ -793,10 +806,15 @@ export function CollectionTable({
             {menuOpen && (
               <>
                 <div className="sort-overlay-backdrop" onClick={() => setMenuOpen(false)} />
-                <div className="sort-menu">
+                <div className="sort-menu" id="collection-sort-menu">
                   <div className="sort-menu-header">
                     <span className="sort-menu-title">Sort by</span>
-                    <button className="sort-menu-close" onClick={() => setMenuOpen(false)}>
+                    <button
+                      type="button"
+                      className="sort-menu-close"
+                      aria-label="Close sort menu"
+                      onClick={() => setMenuOpen(false)}
+                    >
                       {"\u2715"}
                     </button>
                   </div>
@@ -813,6 +831,8 @@ export function CollectionTable({
                           return (
                             <button
                               key={f.id}
+                              type="button"
+                              aria-pressed={isActive}
                               className={itemClass}
                               onClick={() => handleSortSelect(f.id)}
                             >
@@ -831,6 +851,9 @@ export function CollectionTable({
 
           <button
             className={`filter-toggle-btn${activeFilterCount > 0 ? " has-filters" : ""}`}
+            type="button"
+            aria-expanded={filterPanelOpen}
+            aria-controls="collection-filter-panel"
             onClick={() => setFilterPanelOpen((v) => !v)}
           >
             Filters
@@ -842,13 +865,15 @@ export function CollectionTable({
 
         {/* Expandable filter panel (REQ-CFS-16) */}
         {filterPanelOpen && (
-          <div className="filter-panel">
+          <div className="filter-panel" id="collection-filter-panel">
             <div className="filter-group">
               <div className="filter-group-label">Status</div>
               <div className="filter-group-controls">
                 {(["all", "rated", "unrated"] as const).map((status) => (
                   <button
                     key={status}
+                    type="button"
+                    aria-pressed={filters.ratedStatus === status}
                     className={`seg-btn${filters.ratedStatus === status ? " active" : ""}`}
                     onClick={() => updateFilter("ratedStatus", status)}
                   >
@@ -863,6 +888,8 @@ export function CollectionTable({
                 {(["all", "played", "unplayed"] as const).map((status) => (
                   <button
                     key={status}
+                    type="button"
+                    aria-pressed={filters.playedStatus === status}
                     className={`seg-btn${filters.playedStatus === status ? " active" : ""}`}
                     onClick={() => updateFilter("playedStatus", status)}
                   >
@@ -891,6 +918,8 @@ export function CollectionTable({
                 <div className="filter-group-controls">
                   <button
                     className={`seg-btn${!showPreviouslyOwned ? " active" : ""}`}
+                    type="button"
+                    aria-pressed={!showPreviouslyOwned}
                     onClick={() => {
                       if (showPreviouslyOwned) toggleOwnership();
                     }}
@@ -899,6 +928,8 @@ export function CollectionTable({
                   </button>
                   <button
                     className={`seg-btn${showPreviouslyOwned ? " active" : ""}`}
+                    type="button"
+                    aria-pressed={showPreviouslyOwned}
                     onClick={() => {
                       if (!showPreviouslyOwned) toggleOwnership();
                     }}

@@ -1,7 +1,7 @@
 ---
 title: Grounded profile reflections
 date: 2026-08-30
-status: approved
+status: implemented
 tags: [collection, profile, reflections, llm, grounding]
 modules: [shared, daemon, cli, web]
 related:
@@ -13,6 +13,11 @@ req-prefix: REFLECT
 ---
 
 # Grounded Profile Reflections
+
+> **Lifecycle note, 2026-09-15:** This implemented work specification is retained
+> for requirement traceability. Current operational authority is
+> `.lore/reference/` and delivered code; historical planning prerequisites do not
+> create new work.
 
 ## Goal
 

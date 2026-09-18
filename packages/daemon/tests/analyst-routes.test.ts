@@ -35,7 +35,9 @@ function deferred<Value>() {
 }
 
 function configuredProvider(
-  analyze?: (request: Parameters<NonNullable<GroundedAnalysisProvider["analyzeFreeform"]>>[0]) => Promise<{ output: string; usage: { state: "unavailable" } }>,
+  analyze?: (
+    request: Parameters<NonNullable<GroundedAnalysisProvider["analyzeFreeform"]>>[0],
+  ) => Promise<{ output: string; usage: { state: "unavailable" } }>,
 ): GroundedAnalysisProvider {
   return {
     configurationStatus: {
@@ -65,7 +67,9 @@ function events(body: string): Array<Record<string, unknown>> {
     .map((line) => JSON.parse(line.slice("data: ".length)) as Record<string, unknown>);
 }
 
-function completedProviderOutput(_request: Parameters<NonNullable<GroundedAnalysisProvider["analyzeFreeform"]>>[0]) {
+function completedProviderOutput(
+  _request: Parameters<NonNullable<GroundedAnalysisProvider["analyzeFreeform"]>>[0],
+) {
   void _request;
   return {
     output: "I need authorized evidence.",
@@ -186,19 +190,17 @@ describe("Analyst daemon routes", () => {
   test("accepts an authorized cancellation during provider work and rejects reuse while active", async () => {
     const started = deferred<void>();
     const context = createTestApp({
-      groundedAnalysisProvider: configuredProvider(
-        async (request) => {
-          started.resolve();
-          await new Promise<void>((_resolve, reject) =>
-            request.signal.addEventListener(
-              "abort",
-              () => reject(new DOMException("cancelled", "AbortError")),
-              { once: true },
-            ),
-          );
-          throw new Error("provider should be cancelled");
-        },
-      ),
+      groundedAnalysisProvider: configuredProvider(async (request) => {
+        started.resolve();
+        await new Promise<void>((_resolve, reject) =>
+          request.signal.addEventListener(
+            "abort",
+            () => reject(new DOMException("cancelled", "AbortError")),
+            { once: true },
+          ),
+        );
+        throw new Error("provider should be cancelled");
+      }),
     });
     const stream = await context.app.request("http://localhost/api/analyst/turns/stream", {
       method: "POST",
@@ -233,24 +235,22 @@ describe("Analyst daemon routes", () => {
     const disconnected = deferred<void>();
     let calls = 0;
     const context = createTestApp({
-      groundedAnalysisProvider: configuredProvider(
-        async (request) => {
-          calls += 1;
-          if (calls > 1) return completedProviderOutput(request);
-          started.resolve();
-          await new Promise<void>((_resolve, reject) =>
-            request.signal.addEventListener(
-              "abort",
-              () => {
-                disconnected.resolve();
-                reject(new DOMException("disconnected", "AbortError"));
-              },
-              { once: true },
-            ),
-          );
-          throw new Error("provider should be disconnected");
-        },
-      ),
+      groundedAnalysisProvider: configuredProvider(async (request) => {
+        calls += 1;
+        if (calls > 1) return completedProviderOutput(request);
+        started.resolve();
+        await new Promise<void>((_resolve, reject) =>
+          request.signal.addEventListener(
+            "abort",
+            () => {
+              disconnected.resolve();
+              reject(new DOMException("disconnected", "AbortError"));
+            },
+            { once: true },
+          ),
+        );
+        throw new Error("provider should be disconnected");
+      }),
     });
     const stream = await jsonRequest(
       context.app,
@@ -275,13 +275,11 @@ describe("Analyst daemon routes", () => {
     const started = deferred<void>();
     const releaseProvider = deferred<void>();
     const context = createTestApp({
-      groundedAnalysisProvider: configuredProvider(
-        async (request) => {
-          started.resolve();
-          await releaseProvider.promise;
-          return completedProviderOutput(request);
-        },
-      ),
+      groundedAnalysisProvider: configuredProvider(async (request) => {
+        started.resolve();
+        await releaseProvider.promise;
+        return completedProviderOutput(request);
+      }),
     });
     const stream = await jsonRequest(
       context.app,
@@ -307,22 +305,20 @@ describe("Analyst daemon routes", () => {
     const shutdown = deferred<void>();
     const context = createTestApp({
       onShutdown: () => shutdown.resolve(),
-      groundedAnalysisProvider: configuredProvider(
-        async (request) => {
-          started.resolve();
-          await new Promise<void>((_resolve, reject) =>
-            request.signal.addEventListener(
-              "abort",
-              () => {
-                providerCancelled.resolve();
-                reject(new DOMException("shutdown", "AbortError"));
-              },
-              { once: true },
-            ),
-          );
-          throw new Error("provider should be cancelled during shutdown");
-        },
-      ),
+      groundedAnalysisProvider: configuredProvider(async (request) => {
+        started.resolve();
+        await new Promise<void>((_resolve, reject) =>
+          request.signal.addEventListener(
+            "abort",
+            () => {
+              providerCancelled.resolve();
+              reject(new DOMException("shutdown", "AbortError"));
+            },
+            { once: true },
+          ),
+        );
+        throw new Error("provider should be cancelled during shutdown");
+      }),
     });
     const stream = await jsonRequest(
       context.app,

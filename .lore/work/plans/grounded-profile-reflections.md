@@ -1,7 +1,7 @@
 ---
 title: "Implementation plan: grounded profile reflections"
 date: 2026-08-30
-status: approved
+status: executed
 tags: [plan, profile, reflections, grounding, llm, privacy]
 modules: [shared, daemon, cli, web]
 related:
@@ -15,6 +15,11 @@ related:
 ---
 
 # Implementation plan: grounded profile reflections
+
+> **Lifecycle note, 2026-09-15:** Implementation and final technical validation
+> completed. This plan is retained as historical delivery evidence. Its
+> implementation-tense steps and prerequisite identifiers are not current work
+> instructions; current authority is `.lore/reference/` and delivered code.
 
 ## Goal
 

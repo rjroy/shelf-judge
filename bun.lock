@@ -16,7 +16,7 @@
     },
     "packages/cli": {
       "name": "@shelf-judge/cli",
-      "version": "0.1.0",
+      "version": "1.0.0",
       "bin": {
         "shelf-judge": "src/index.ts",
         "sj": "src/index.ts",
@@ -27,7 +27,7 @@
     },
     "packages/daemon": {
       "name": "@shelf-judge/daemon",
-      "version": "0.1.0",
+      "version": "1.0.0",
       "dependencies": {
         "@earendil-works/pi-agent-core": "0.84.4",
         "@earendil-works/pi-coding-agent": "0.84.4",
@@ -45,14 +45,14 @@
     },
     "packages/shared": {
       "name": "@shelf-judge/shared",
-      "version": "0.1.0",
+      "version": "1.0.0",
       "dependencies": {
         "zod": "^3.24.0",
       },
     },
     "packages/web": {
       "name": "@shelf-judge/web",
-      "version": "0.1.0",
+      "version": "1.0.0",
       "dependencies": {
         "@shelf-judge/shared": "workspace:*",
         "next": "^16.2.4",
