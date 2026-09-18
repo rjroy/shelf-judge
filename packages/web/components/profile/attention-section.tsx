@@ -19,74 +19,13 @@ function AttentionItem({ item }: { item: CollectionProfileAttentionItem }) {
   const evidenceId = `${item.id}-evidence`;
   const current = item.currentPlayEvidence;
   return (
-    <article id={item.id} className="attention-card" aria-labelledby={headingId}>
-      <p className="profile-status-label">Active play intention</p>
+    <article
+      id={item.id}
+      className="attention-card attention-card--quiet"
+      aria-labelledby={headingId}
+    >
       <h3 id={headingId}>{item.question}</h3>
       <p>{item.whyNow}</p>
-      <section className="attention-evidence" aria-labelledby={evidenceId}>
-        <h4 id={evidenceId}>Evidence</h4>
-        <dl className="profile-facts">
-          <div>
-            <dt>Intention</dt>
-            <dd>{item.intention.kind === "first-play" ? "First play" : "Replay"}</dd>
-          </div>
-          <div>
-            <dt>Created</dt>
-            <dd>{item.intention.createdAt}</dd>
-          </div>
-          <div>
-            <dt>Baseline</dt>
-            <dd>
-              {item.intention.baseline.playCount} plays from{" "}
-              {item.intention.baseline.evidenceSource}, observed{" "}
-              {item.intention.baseline.observedAt}
-            </dd>
-          </div>
-          <div>
-            <dt>Current evidence</dt>
-            <dd>
-              {current.status === "valid"
-                ? `${current.playCount} plays from ${current.source}, observed ${current.observedAt}`
-                : `${current.status}; ${current.playCount === null ? "no valid count" : `${current.playCount} plays`}${current.source === null ? "" : ` from ${current.source}`}${current.observedAt === null ? "" : `, observed ${current.observedAt}`}`}
-            </dd>
-          </div>
-        </dl>
-        {current.status !== "valid" && (
-          <p className="profile-warning" role="status">
-            Evidence warning: {current.warning}
-          </p>
-        )}
-      </section>
-      <section className="attention-responses" aria-label="Available responses">
-        <h4>Available responses</h4>
-        <ul>
-          {item.responses.map((response) => (
-            <li key={response}>{responseLabels[response]}</li>
-          ))}
-        </ul>
-      </section>
-      <dl className="profile-facts">
-        <div>
-          <dt>Stable intention ID</dt>
-          <dd>{item.intention.intentionId}</dd>
-        </div>
-        <div>
-          <dt>Decision family</dt>
-          <dd>{item.decisionFamily}</dd>
-        </div>
-        <div>
-          <dt>Why this qualifies</dt>
-          <dd>{item.abstentionBasis}</dd>
-        </div>
-        <div>
-          <dt>Resolution</dt>
-          <dd>Active, with no recorded resolution.</dd>
-        </div>
-        <div>
-          <dt>Reopen condition</dt>
-          <dd>{item.reopenCondition}</dd>
-        </div>
-      </dl>
       <div className="profile-actions">
         <Link className="btn btn-primary" href={`/games/${item.destination.gameId}`}>
           Review intention for {item.gameName}
@@ -95,6 +34,74 @@ function AttentionItem({ item }: { item: CollectionProfileAttentionItem }) {
           {evidenceActionLabel(item)}
         </Link>
       </div>
+      <details>
+        <summary>Evidence and available responses</summary>
+        <p className="profile-status-label">Active play intention</p>
+        <section className="attention-evidence" aria-labelledby={evidenceId}>
+          <h4 id={evidenceId}>Evidence</h4>
+          <dl className="profile-facts">
+            <div>
+              <dt>Intention</dt>
+              <dd>{item.intention.kind === "first-play" ? "First play" : "Replay"}</dd>
+            </div>
+            <div>
+              <dt>Created</dt>
+              <dd>{item.intention.createdAt}</dd>
+            </div>
+            <div>
+              <dt>Baseline</dt>
+              <dd>
+                {item.intention.baseline.playCount} plays from{" "}
+                {item.intention.baseline.evidenceSource}, observed{" "}
+                {item.intention.baseline.observedAt}
+              </dd>
+            </div>
+            <div>
+              <dt>Current evidence</dt>
+              <dd>
+                {current.status === "valid"
+                  ? `${current.playCount} plays from ${current.source}, observed ${current.observedAt}`
+                  : `${current.status}; ${current.playCount === null ? "no valid count" : `${current.playCount} plays`}${current.source === null ? "" : ` from ${current.source}`}${current.observedAt === null ? "" : `, observed ${current.observedAt}`}`}
+              </dd>
+            </div>
+          </dl>
+          {current.status !== "valid" && (
+            <p className="profile-warning" role="status">
+              Evidence warning: {current.warning}
+            </p>
+          )}
+        </section>
+        <section className="attention-responses" aria-label="Available responses">
+          <h4>Available responses</h4>
+          <ul>
+            {item.responses.map((response) => (
+              <li key={response}>{responseLabels[response]}</li>
+            ))}
+          </ul>
+        </section>
+        <dl className="profile-facts">
+          <div>
+            <dt>Stable intention ID</dt>
+            <dd>{item.intention.intentionId}</dd>
+          </div>
+          <div>
+            <dt>Decision family</dt>
+            <dd>{item.decisionFamily}</dd>
+          </div>
+          <div>
+            <dt>Why this qualifies</dt>
+            <dd>{item.abstentionBasis}</dd>
+          </div>
+          <div>
+            <dt>Resolution</dt>
+            <dd>Active, with no recorded resolution.</dd>
+          </div>
+          <div>
+            <dt>Reopen condition</dt>
+            <dd>{item.reopenCondition}</dd>
+          </div>
+        </dl>
+      </details>
     </article>
   );
 }
