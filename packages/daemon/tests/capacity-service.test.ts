@@ -133,7 +133,7 @@ function createMockStorage(units: ShelfUnit[], axes?: Axis[]): StorageService {
     saveConfig: () => Promise.resolve(),
     loadTournament: () =>
       Promise.resolve({
-        settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
+        settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
         sessions: [],
         gameStats: {},
       }),

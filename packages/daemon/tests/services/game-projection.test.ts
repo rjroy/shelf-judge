@@ -53,7 +53,6 @@ describe("game projections", () => {
       settings: {
         kFactorThreshold: 15,
         normalizationHalfWidth: 400,
-        provisionalThreshold: 6,
       },
       sessions: [],
       gameStats: {},
@@ -80,7 +79,6 @@ describe("game projections", () => {
       eloRating: 1500,
       comparisonCount: 0,
       normalizedScore: null,
-      isProvisional: true,
       displayLabel: "not yet ranked",
       wins: 0,
       losses: 0,

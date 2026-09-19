@@ -93,7 +93,6 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
           storageService.loadTournament(),
         ]),
       );
-    const tournamentSettings = tournamentData.settings;
     const allGameStats: Record<string, TournamentGameStatsDisplay> = {};
     for (const gameId of Object.keys(tournamentData.gameStats)) {
       allGameStats[gameId] = deriveDisplayStats(gameId, tournamentData);
@@ -149,22 +148,11 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
       const vector = gameVectors.get(game.id);
       if (!ratings || !vector) continue;
 
-      const stats = allGameStats[game.id];
-      const comparisonCount = stats?.comparisonCount ?? 0;
-      const provisionalThreshold = tournamentSettings.provisionalThreshold;
-
-      // REQ-PRED-18: when no tournament data, stability is 1.0
-      let tournamentStability = 1.0;
-      if (comparisonCount >= provisionalThreshold) {
-        tournamentStability = 1.0 + settings.tournamentStabilityBoost;
-      }
-
       referenceGames.push({
         gameId: game.id,
         gameName: game.name,
         vector,
         ratings,
-        tournamentStability,
       });
     }
 

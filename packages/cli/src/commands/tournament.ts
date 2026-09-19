@@ -56,12 +56,11 @@ export function parseFilterFlags(flags: string[]): SessionFilter[] {
       name: "name",
       fitness: "minFitness",
       tag: "bggTag",
-      stale: "staleness",
     };
 
     const mappedType = typeMap[rawType];
     if (!mappedType) {
-      throw new Error(`Unknown filter type: "${rawType}". Valid types: name, fitness, tag, stale`);
+      throw new Error(`Unknown filter type: "${rawType}". Valid types: name, fitness, tag`);
     }
     if (!value) {
       throw new Error(`Filter "${rawType}" requires a value after the colon`);
@@ -132,21 +131,19 @@ export async function tournamentNext(
 
   const pair = data as NextPairResponse;
   const table = formatTable(
-    ["", "Name", "Fitness", "Rank", "Comparisons"],
+    ["", "Name", "Fitness", "Rank"],
     [
       [
         "A",
         pair.gameA.name,
         formatScore(pair.gameAStats.normalizedScore),
         pair.gameAStats.displayLabel,
-        String(pair.gameAStats.comparisonCount),
       ],
       [
         "B",
         pair.gameB.name,
         formatScore(pair.gameBStats.normalizedScore),
         pair.gameBStats.displayLabel,
-        String(pair.gameBStats.comparisonCount),
       ],
     ],
   );

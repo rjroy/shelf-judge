@@ -599,16 +599,23 @@ export function createReflectionEvidenceService(
         return { valid: false, reason: "question-scope-changed" };
       }
       const noteDependencies = evidencePackage.dependencies.filter(
-        (dependency): dependency is Extract<(typeof evidencePackage.dependencies)[number], { category: "note" }> =>
-          dependency.category === "note",
+        (
+          dependency,
+        ): dependency is Extract<
+          (typeof evidencePackage.dependencies)[number],
+          { category: "note" }
+        > => dependency.category === "note",
       );
-      const currentNotes = deps.ownerGameNoteService.getStates === undefined
-        ? await Promise.all(
-            noteDependencies.map((dependency) => deps.ownerGameNoteService.get(dependency.gameId)),
-          )
-        : await deps.ownerGameNoteService.getStates(
-            noteDependencies.map((dependency) => dependency.gameId),
-          );
+      const currentNotes =
+        deps.ownerGameNoteService.getStates === undefined
+          ? await Promise.all(
+              noteDependencies.map((dependency) =>
+                deps.ownerGameNoteService.get(dependency.gameId),
+              ),
+            )
+          : await deps.ownerGameNoteService.getStates(
+              noteDependencies.map((dependency) => dependency.gameId),
+            );
       const currentByGameId = new Map(currentNotes.map((current) => [current.gameId, current]));
       for (const dependency of noteDependencies) {
         const current = currentByGameId.get(dependency.gameId);

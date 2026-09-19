@@ -91,7 +91,7 @@ describe("ProfileService", () => {
     const collectionIdentity = (await ctx.storageService.loadProfile())!.sourceIdentity;
     expect(collectionIdentity.collectionRevision).toBeGreaterThan(firstIdentity.collectionRevision);
 
-    await ctx.tournamentService.updateSettings({ provisionalThreshold: 7 });
+    await ctx.tournamentService.updateSettings({ normalizationHalfWidth: 450 });
     await service.getProfile();
     const tournamentIdentity = (await ctx.storageService.loadProfile())!.sourceIdentity;
     expect(tournamentIdentity.tournamentHash).not.toBe(collectionIdentity.tournamentHash);
@@ -229,7 +229,7 @@ describe("ProfileService", () => {
         source === "collection"
           ? ctx.gameService.addGame({ name: "Concurrent source" })
           : source === "tournament"
-            ? ctx.tournamentService.updateSettings({ provisionalThreshold: 7 })
+            ? ctx.tournamentService.updateSettings({ normalizationHalfWidth: 450 })
             : source === "prediction"
               ? ctx.predictionService.updateSettings({ defaultK: 7 })
               : jsonRequest(ctx.app, "PATCH", "/api/redundancy/settings", { enabled: true });
@@ -340,9 +340,11 @@ describe("ProfileService", () => {
     const profileRead = service.getProfile();
     await saveCompletedPromise;
     let mutationFinished = false;
-    const mutation = ctx.tournamentService.updateSettings({ provisionalThreshold: 7 }).then(() => {
-      mutationFinished = true;
-    });
+    const mutation = ctx.tournamentService
+      .updateSettings({ normalizationHalfWidth: 450 })
+      .then(() => {
+        mutationFinished = true;
+      });
     await Promise.resolve();
     expect(mutationFinished).toBe(false);
 

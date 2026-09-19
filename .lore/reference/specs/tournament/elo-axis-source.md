@@ -44,7 +44,7 @@ This supersedes the "ELO and axis fitness are independent peer scores" decision 
 
 ### Value Derivation
 
-- REQ-TAXIS-6: For each game, the tournament axis value MUST be the normalized ELO display score defined by REQ-TOURN-9: `clamp(1 + 9 * (elo - min_ref) / (max_ref - min_ref), 1.0, 10.0)`. The bounds `min_ref` and `max_ref` are derived from the configurable `half_width` per REQ-TOURN-9 (`min_ref = 1500 - half_width`, `max_ref = 1500 + half_width`); they are not hardcoded constants. Provisional games (fewer than the provisional threshold of comparisons) contribute their normalized score normally; provisional status is a display qualifier, not an exclusion criterion for fitness composition.
+- REQ-TAXIS-6: For each game, the tournament axis value MUST be the normalized ELO display score defined by REQ-TOURN-9: `clamp(1 + 9 * (elo - min_ref) / (max_ref - min_ref), 1.0, 10.0)`. The bounds `min_ref` and `max_ref` are derived from the configurable `half_width` per REQ-TOURN-9 (`min_ref = 1500 - half_width`, `max_ref = 1500 + half_width`); they are not hardcoded constants. Any game with a displayable normalized score contributes it normally, without a low-comparison qualifier or threshold.
 
 - REQ-TAXIS-7: The tournament axis value for a game is `null` in two cases: (a) the game has no comparisons, or (b) fewer than 5 games in the collection have any comparisons. Both cases produce `null` for the same documented reason: the normalization formula in REQ-TOURN-9 is unreliable below the 5-game cohort floor. A `null` value is excluded from both numerator and denominator of the fitness weighted average, identical to the existing handling of unrated personal axes.
 
@@ -72,9 +72,9 @@ This supersedes the "ELO and axis fitness are independent peer scores" decision 
 
 - REQ-TAXIS-15: The "Key Decision: ELO and Axis Fitness Are Peers, Not Parent-Child" section of `tournament-ranking.md` is SUPERSEDED. The implementing change to that spec is documentation-only: a note pointing at this spec. Behaviour changes are captured here.
 
-- REQ-TAXIS-16: REQ-PRED-16, REQ-PRED-17, and REQ-PRED-28 (the "revealed preference tension" feature in the prediction engine) are SUPERSEDED. The tension surface is removed. The reasoning is the same as for REQ-TOURN-18: axis fitness and tournament rank measure different things by construction, so a flag that fires when they differ does not surface a useful signal. The Manual Verification items in `prediction-engine.md` that test the tension flag MUST also be struck. REQ-PRED-15 (tournament stability factor in similarity weighting) and REQ-PRED-18 (silent inactivity when no tournament data) are unaffected; they describe how tournament data participates in prediction confidence, which remains valid.
+- REQ-TAXIS-16: REQ-PRED-16, REQ-PRED-17, and REQ-PRED-28 (the "revealed preference tension" feature in the prediction engine) are SUPERSEDED. The tension surface is removed. The reasoning is the same as for REQ-TOURN-18: axis fitness and tournament rank measure different things by construction, so a flag that fires when they differ does not surface a useful signal. The Manual Verification items in `prediction-engine.md` that test the tension flag MUST also be struck.
 
-- REQ-TAXIS-17: The constraint at `prediction-engine.md` line 234 ("The prediction engine does not predict tournament ELO scores. Tournament data is an input to prediction weighting, not a prediction target") is SUPERSEDED. With tournament now an axis source, the prediction engine MUST be able to predict tournament axis values for games with no comparisons, on the same code path it uses for personal axes. The "input to prediction weighting" role described by REQ-PRED-15 remains; the "not a prediction target" exclusion is dropped.
+- REQ-TAXIS-17: The constraint at `prediction-engine.md` line 234 ("The prediction engine does not predict tournament ELO scores. Tournament data is an input to prediction weighting, not a prediction target") is SUPERSEDED. With tournament now an axis source, the prediction engine MUST be able to predict tournament axis values for games with no comparisons, on the same code path it uses for personal axes. The "not a prediction target" exclusion is dropped.
 
 ## Exit Points
 
@@ -87,7 +87,7 @@ This supersedes the "ELO and axis fitness are independent peer scores" decision 
 
 ## Scope Exclusions
 
-- **No changes to ELO math.** The tournament axis consumes the existing normalized display score. K-factor, reference window, provisional threshold, and recalculation rules are unchanged.
+- **No changes to ELO math.** The tournament axis consumes the existing normalized display score. K-factor and reference-window behavior are unchanged.
 - **No new editing affordances.** The user cannot delete or re-weight the tournament axis through this spec. That gap is acknowledged and stubbed for future work.
 - **No new sort modes beyond REQ-TAXIS-13.** Existing sorts continue to work; no combined-sort or ranked-divergence sort is added.
 
@@ -99,7 +99,7 @@ This supersedes the "ELO and axis fitness are independent peer scores" decision 
 - [ ] Attempting to create a second tournament-source axis is rejected
 - [ ] For a game with comparisons, the fitness breakdown contains a tournament entry whose rating equals the game's normalized ELO display score
 - [ ] For a game with no comparisons (or below the 5-game cohort floor), the tournament axis value is `null` and the entry is excluded from the fitness weighted average
-- [ ] Provisional games contribute their normalized score to fitness without distinction from non-provisional games
+- [ ] Any game with a displayable normalized score contributes it to fitness without a low-comparison qualifier
 - [ ] For a game with no comparisons in a collection where prediction is otherwise active, the prediction engine returns a predicted tournament axis value via the same API used for personal axes (verified by behaviour: a `predicted` source label appears on the tournament entry in the breakdown)
 - [ ] The standalone tournament rank display (REQ-TOURN-10) still renders correctly
 - [ ] The divergence flag from REQ-TOURN-18 (axis-fitness vs tournament-rank score delta) is removed from all client surfaces, and the function/code paths computing that delta are deleted
@@ -125,5 +125,5 @@ This supersedes the "ELO and axis fitness are independent peer scores" decision 
 - [Tournament Ranking Spec](.lore/work/specs/tournament/tournament-ranking.md): Reconciliation input for REQ-TOURN-9 (normalization), REQ-TOURN-10 (display), REQ-TOURN-17 (sorting), and REQ-TOURN-18 (divergence flag, superseded).
 - [MVP Fitness Model](.lore/reference/designs/mvp-fitness-model.md): Defines the weighted-average composition over axes that this spec extends.
 - [MVP Data Model](.lore/reference/designs/mvp-data-model.md): Defines the `Axis` and `FitnessBreakdownEntry` types whose source enums are extended here.
-- [Prediction Engine Spec](.lore/reference/specs/fitness/prediction-engine.md): Touched here in three ways. (1) REQ-PRED-16/17/28 (revealed preference tension) are superseded. (2) The "no prediction for tournament" constraint at line 234 is superseded so the tournament axis can be predicted like any other axis. (3) REQ-PRED-15 (tournament stability factor in similarity weighting) and REQ-PRED-18 (silent inactivity) are unaffected.
+- [Prediction Engine Spec](.lore/reference/specs/fitness/prediction-engine.md): Touched here in two ways. (1) REQ-PRED-16/17/28 (revealed preference tension) are superseded. (2) The former no-prediction constraint is superseded so the tournament axis can be predicted like any other axis.
 - Lore researcher noted no prior file proposes "tournament as a third axis type." This spec breaks new ground.

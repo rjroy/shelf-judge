@@ -56,7 +56,6 @@ describe("prediction routes", () => {
       expect(settings.stageThresholds).toEqual([5, 15, 30]);
       expect(settings.defaultK).toBe(5);
       expect(settings.minSimilarityThreshold).toBe(0.2);
-      expect(settings.tournamentStabilityBoost).toBe(0.2);
     });
   });
 

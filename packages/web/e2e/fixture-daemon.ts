@@ -487,7 +487,6 @@ function tournamentStats(definition: CollectionDefinition): TournamentGameStatsD
     eloRating: 1400 + value * 20,
     comparisonCount: 8,
     normalizedScore: value,
-    isProvisional: false,
     displayLabel: value.toFixed(1),
     wins: 4,
     losses: 4,
@@ -1947,9 +1946,7 @@ async function removeStaleSocket(): Promise<void> {
         return;
       }
       reject(
-        error instanceof Error
-          ? error
-          : new Error(`Unable to probe Unix socket: ${socketPath}`),
+        error instanceof Error ? error : new Error(`Unable to probe Unix socket: ${socketPath}`),
       );
     });
   });

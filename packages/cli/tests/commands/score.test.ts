@@ -387,7 +387,7 @@ describe("score get (unrated game)", () => {
 // tournament now folded into fitness, the gap is meaningless by construction.
 describe("score get (REQ-TAXIS-14: divergence flag removed)", () => {
   // Constructed to trigger the old REQ-TOURN-18 banner: gap of 3.5 (> 2.0),
-  // non-provisional, both scores defined. Should NOT print "[divergence]".
+  // Both scores are defined. Should NOT print "[divergence]".
   const divergingScore = {
     gameId: "div-1",
     gameName: "Diverging Game",
@@ -400,7 +400,6 @@ describe("score get (REQ-TAXIS-14: divergence flag removed)", () => {
     gameId: "div-1",
     eloRating: 1300,
     normalizedScore: 5.0,
-    isProvisional: false,
     comparisonCount: 12,
     wins: 4,
     losses: 8,

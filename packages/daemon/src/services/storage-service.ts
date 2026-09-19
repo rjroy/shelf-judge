@@ -129,6 +129,20 @@ function isUnknownArray(value: unknown): value is unknown[] {
   return Array.isArray(value);
 }
 
+function normalizePredictionSettings(raw: unknown): {
+  settings: PredictionSettings;
+  migrated: boolean;
+} {
+  if (!isRecord(raw) || !Object.hasOwn(raw, "tournamentStabilityBoost")) {
+    return { settings: PredictionSettingsSchema.parse(raw), migrated: false };
+  }
+
+  const settings = Object.fromEntries(
+    Object.entries(raw).filter(([key]) => key !== "tournamentStabilityBoost"),
+  );
+  return { settings: PredictionSettingsSchema.parse(settings), migrated: true };
+}
+
 function isJsonValue(value: unknown): value is JsonValue {
   if (value === null || typeof value === "string" || typeof value === "boolean") return true;
   if (typeof value === "number") return Number.isFinite(value);
@@ -202,7 +216,7 @@ export function decodeStoredCollection(raw: unknown, logger: Logger): StoredColl
 
 function createDefaultTournament(): TournamentData {
   return {
-    settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
+    settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
     sessions: [],
     gameStats: {},
   };
@@ -519,7 +533,11 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
       if (!exists) return PredictionSettingsSchema.parse({ ...DEFAULT_PREDICTION_SETTINGS });
 
       const raw = await fileOps.readFile(predictionSettingsPath);
-      return PredictionSettingsSchema.parse(JSON.parse(raw));
+      const { settings, migrated } = normalizePredictionSettings(JSON.parse(raw));
+      if (migrated) {
+        await writeAtomically(predictionSettingsPath, JSON.stringify(settings, null, 2));
+      }
+      return settings;
     },
 
     async savePredictionSettings(settings: PredictionSettings): Promise<void> {

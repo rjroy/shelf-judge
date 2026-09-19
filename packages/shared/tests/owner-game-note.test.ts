@@ -397,7 +397,6 @@ describe("strict public game projections", () => {
     eloRating: 1500,
     comparisonCount: 0,
     normalizedScore: null,
-    isProvisional: true,
     displayLabel: "not yet ranked",
     wins: 0,
     losses: 0,

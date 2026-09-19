@@ -16,7 +16,7 @@ interface TournamentStatsEntry {
   stats: TournamentGameStatsDisplay;
 }
 
-type PresetKey = "all" | "unranked" | "topRated" | "lowRated" | "needsData" | "custom";
+type PresetKey = "all" | "topRated" | "lowRated" | "custom";
 
 interface PresetDef {
   key: PresetKey;
@@ -26,10 +26,8 @@ interface PresetDef {
 
 const PRESETS: PresetDef[] = [
   { key: "all", label: "All games", filters: null },
-  { key: "unranked", label: "Unranked", filters: [{ type: "staleness", value: "6" }] },
   { key: "topRated", label: "Top rated", filters: [{ type: "minFitness", value: "7.5" }] },
   { key: "lowRated", label: "Low rated", filters: [{ type: "maxFitness", value: "4.5" }] },
-  { key: "needsData", label: "Needs more data", filters: [{ type: "staleness", value: "3" }] },
 ];
 
 function describeFilters(filters: SessionFilter[] | null): string {
@@ -45,8 +43,6 @@ function describeFilters(filters: SessionFilter[] | null): string {
           return `Fitness <= ${f.value}`;
         case "bggTag":
           return `Tag: ${f.value}`;
-        case "staleness":
-          return `< ${f.value} comparisons`;
         default:
           return f.value;
       }
@@ -54,11 +50,7 @@ function describeFilters(filters: SessionFilter[] | null): string {
     .join(", ");
 }
 
-function countMatchingGames(
-  games: GameWithScore[],
-  allStats: Record<string, TournamentGameStatsDisplay>,
-  filters: SessionFilter[] | null,
-): number {
+function countMatchingGames(games: GameWithScore[], filters: SessionFilter[] | null): number {
   if (!filters || filters.length === 0) return games.length;
   return games.filter(({ game, score }) =>
     filters.every((f) => {
@@ -74,11 +66,6 @@ function countMatchingGames(
           const categories = game.bggData?.categories ?? [];
           const tagNames = [...mechanics, ...categories].map((t) => t.name);
           return matchesBggTag(f.value, tagNames);
-        }
-        case "staleness": {
-          const stats = allStats[game.id];
-          const count = stats?.comparisonCount ?? 0;
-          return count < parseInt(f.value, 10);
         }
         default:
           return true;
@@ -141,7 +128,7 @@ export default function TournamentPage() {
         : null
       : (PRESETS.find((p) => p.key === selectedPreset)?.filters ?? null);
 
-  const gameCount = countMatchingGames(games, allStats, currentFilters);
+  const gameCount = countMatchingGames(games, currentFilters);
 
   const totalComparisons = Object.values(allStats).reduce((sum, s) => sum + s.comparisonCount, 0);
   // Each comparison is counted for both games, so divide by 2 for unique comparisons
@@ -152,10 +139,6 @@ export default function TournamentPage() {
     if (best === null) return s.normalizedScore;
     return s.normalizedScore > best ? s.normalizedScore : best;
   }, null);
-
-  const provisionalCount = Object.values(allStats).filter(
-    (s) => s.isProvisional && s.comparisonCount > 0,
-  ).length;
 
   const pastSessionCount = sessions.filter((s) => s.status === "completed").length;
 
@@ -271,8 +254,7 @@ export default function TournamentPage() {
             <div className="session-panel-header">
               <div className="session-panel-title">Choose scope</div>
               <div className="session-panel-desc">
-                Play from your full collection or narrow to a subset. Filters help focus on games
-                that need more data.
+                Play from your full collection or narrow to a subset.
               </div>
             </div>
 
@@ -280,7 +262,7 @@ export default function TournamentPage() {
               <div className="scope-label">Quick presets</div>
               <div className="scope-options">
                 {PRESETS.map((preset) => {
-                  const count = countMatchingGames(games, allStats, preset.filters);
+                  const count = countMatchingGames(games, preset.filters);
                   return (
                     <button
                       key={preset.key}
@@ -328,17 +310,12 @@ export default function TournamentPage() {
                   <option value="minFitness">Fitness above...</option>
                   <option value="maxFitness">Fitness below...</option>
                   <option value="bggTag">BGG tag...</option>
-                  <option value="staleness">Fewer than N comparisons</option>
                 </select>
                 {filterType && (
                   <input
                     className="filter-value-input"
                     type={
-                      filterType === "minFitness" ||
-                      filterType === "maxFitness" ||
-                      filterType === "staleness"
-                        ? "number"
-                        : "text"
+                      filterType === "minFitness" || filterType === "maxFitness" ? "number" : "text"
                     }
                     placeholder={
                       filterType === "name"
@@ -394,10 +371,6 @@ export default function TournamentPage() {
                 {topScore !== null ? topScore.toFixed(1) : "-"}
               </div>
               <div className="stat-card-label">Top tournament rank</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-card-value">{provisionalCount}</div>
-              <div className="stat-card-label">Provisional games</div>
             </div>
             <div className="stat-card">
               <div className="stat-card-value">{pastSessionCount}</div>

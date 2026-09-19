@@ -575,7 +575,7 @@ describe("tournament regression", () => {
       ]),
     );
     const tournament: TournamentData = {
-      settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
+      settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
       sessions: [],
       gameStats: stats,
     };

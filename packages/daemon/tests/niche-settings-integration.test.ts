@@ -148,7 +148,7 @@ function createMockStorageService(nicheSettings: NicheSettings): Partial<Storage
     loadCollection: () => Promise.resolve(structuredClone(defaultCollection)),
     loadTournament: () =>
       Promise.resolve({
-        settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
+        settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
         sessions: [],
         gameStats: {},
       }),
@@ -157,7 +157,6 @@ function createMockStorageService(nicheSettings: NicheSettings): Partial<Storage
         stageThresholds: [5, 15, 30],
         defaultK: 5,
         minSimilarityThreshold: 0.2,
-        tournamentStabilityBoost: 0.2,
       }),
   };
 }

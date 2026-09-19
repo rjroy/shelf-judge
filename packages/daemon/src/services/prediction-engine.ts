@@ -25,7 +25,6 @@ export const DEFAULT_PREDICTION_SETTINGS: PredictionSettings = {
   stageThresholds: [5, 15, 30],
   defaultK: 5,
   minSimilarityThreshold: 0.2,
-  tournamentStabilityBoost: 0.2,
 };
 
 export interface ReferenceGameCandidate {
@@ -33,13 +32,12 @@ export interface ReferenceGameCandidate {
   gameName: string;
   vector: number[];
   ratings: Record<string, number>;
-  tournamentStability: number;
 }
 
 export interface SimilarityMatch {
   gameId: string;
   gameName: string;
-  similarity: number; // effective similarity (cosine * stability)
+  similarity: number;
   rating: number; // the rating on the target axis
 }
 
@@ -58,8 +56,8 @@ export interface PredictedFitnessResult {
 
 /**
  * Find the k most similar games that have a rating on the target axis.
- * Similarity = cosineSimilarity(target, candidate) * candidate.tournamentStability.
- * Excludes candidates below minSimilarity. Returns sorted descending by effective similarity.
+ * Similarity is cosine similarity between the target and candidate vectors.
+ * Excludes candidates below minSimilarity. Returns sorted descending by similarity.
  */
 export function findKNearestForAxis(
   targetVector: number[],
@@ -74,15 +72,14 @@ export function findKNearestForAxis(
     const rating = candidate.ratings[axisId];
     if (rating === undefined) continue;
 
-    const baseSimilarity = cosineSimilarity(targetVector, candidate.vector);
-    const effectiveSimilarity = baseSimilarity * candidate.tournamentStability;
+    const similarity = cosineSimilarity(targetVector, candidate.vector);
 
-    if (effectiveSimilarity < minSimilarity) continue;
+    if (similarity < minSimilarity) continue;
 
     matches.push({
       gameId: candidate.gameId,
       gameName: candidate.gameName,
-      similarity: effectiveSimilarity,
+      similarity,
       rating,
     });
   }

@@ -104,7 +104,7 @@ The separator label is contextual: "No rating on 'Wife Will Play It'" when sorti
 
 - REQ-CFS-8: The Score column MUST display the value of the active sort metric for each game:
   - Fitness sort: fitness score (e.g., "7.9") with score-range color dot
-  - Tournament ELO sort: ELO display label (e.g., "8.3", "8.3 (provisional)", "not yet ranked")
+  - Tournament ELO sort: ELO display label (e.g., "8.3", "not yet ranked")
   - Axis sort: that axis's rating value (1-10) or "---" if unrated on that axis
   - Player count sort: player count range (e.g., "2-4")
   - Play time sort: play time in minutes (e.g., "60 min")
@@ -183,7 +183,6 @@ The following filter types are deferred. They are natural extensions but add UI 
 - Year published range
 - BGG subdomain filter
 - Axis-specific rating range ("show me games rated above 7 on complexity")
-- Tournament provisional status
 - Has BGG data / manually added
 
 These can be added incrementally by extending the filter panel. The architecture (AND-combining filter predicates in the client component) supports them without structural changes.

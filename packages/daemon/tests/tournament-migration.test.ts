@@ -5,7 +5,6 @@ import type { TournamentData } from "@shelf-judge/shared";
 const baseSettings = {
   kFactorThreshold: 15,
   normalizationHalfWidth: 400,
-  provisionalThreshold: 6,
 };
 
 function makeComparison(
@@ -25,7 +24,6 @@ describe("migrateTournamentData", () => {
       settings: {
         kFactorThreshold: 2.5,
         normalizationHalfWidth: 0,
-        provisionalThreshold: -1,
       },
       sessions: [],
       gameStats: {},
@@ -274,6 +272,48 @@ describe("migrateTournamentData", () => {
     const { data, migrated } = migrateTournamentData(alreadyMigrated);
     expect(migrated).toBe(false);
     expect(data).toEqual(alreadyMigrated as TournamentData);
+  });
+
+  test("removes legacy staleness filters from already-migrated sessions", () => {
+    const raw = {
+      settings: baseSettings,
+      sessions: [
+        {
+          id: "s1",
+          filters: [
+            { type: "staleness", value: "3" },
+            { type: "name", value: "Keep this filter" },
+          ],
+          gameIds: ["g1", "g2"],
+          comparisonCount: 1,
+          status: "completed",
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T01:00:00Z",
+          comparisons: [],
+        },
+      ],
+      gameStats: {
+        g1: {
+          eloRating: 1516,
+          comparisonCount: 1,
+          wins: 1,
+          losses: 0,
+          recentComparisons: [],
+        },
+        g2: {
+          eloRating: 1484,
+          comparisonCount: 1,
+          wins: 0,
+          losses: 1,
+          recentComparisons: [],
+        },
+      },
+    };
+
+    const { data, migrated } = migrateTournamentData(raw);
+
+    expect(migrated).toBe(true);
+    expect(data.sessions[0].filters).toEqual([{ type: "name", value: "Keep this filter" }]);
   });
 
   test("fresh tournament with no comparisons and no sessions passes through unchanged", () => {

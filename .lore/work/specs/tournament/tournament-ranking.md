@@ -58,9 +58,9 @@ Both scores appear in the game detail view. Ranked lists can be sorted by either
 
 A 200-game collection makes full round-robin impractical (~20,000 pairs). The system uses a session-based approach with adaptive pairing.
 
-**Session initiation.** The user starts a tournament session. They can scope the session to a subset of games by filter: by name search, by axis threshold ("games I rated above 6 on complexity"), by BGG tag (mechanic or category), or by recency ("games I haven't compared in 30+ days"). If no filter is applied, the session draws from the full collection. The minimum collection size for a session is 4 games.
+**Session initiation.** The user starts a tournament session. They can scope the session to a subset of games by filter: by name search, by axis threshold ("games I rated above 6 on complexity"), or by BGG tag (mechanic or category). If no filter is applied, the session draws from the full collection. The minimum collection size for a session is 4 games.
 
-**Pairing strategy.** Within a session, the system selects pairs adaptively. Games with fewer total comparisons are prioritized. Among those, games with similar current ELO ratings are preferred (comparisons between closely matched games are more informative than blowouts). The user does not control which pairs appear.
+**Pairing strategy.** Within a session, the system selects unpresented pairs with similar current ELO ratings (comparisons between closely matched games are more informative than blowouts). Ties are selected randomly. The user does not control which pairs appear.
 
 **Session length.** A session presents pairs until the user stops. There is no fixed bracket or elimination structure. Each comparison is independently valuable. The user can do 3 comparisons or 30. The system tracks how many comparisons have been completed in the session and across all sessions.
 
@@ -107,17 +107,17 @@ ELO requires knowing the result of each comparison to calculate scores correctly
 
 - REQ-TOURN-9: For display purposes, ELO ratings MUST be normalized to a 1.0-10.0 scale. When fewer than 5 games have at least one comparison, display "not yet ranked" for all games (the sample is too small for normalization to be meaningful). Once 5 or more games have comparisons, normalize using a configurable reference window centered on 1500. The window half-width defaults to 400 (producing a reference range of 1100-1900) and is configurable via daemon settings. Normalization formula: `min_ref = 1500 - half_width`, `max_ref = 1500 + half_width`, `display = clamp(1 + 9 * (elo - min_ref) / (max_ref - min_ref), 1.0, 10.0)`. This avoids the instability of min/max normalization where a single comparison could produce extreme display scores. Games with ELO outside the reference range clamp to 1.0 or 10.0. Changes to the half-width take effect immediately on display.
 
-- REQ-TOURN-10: The game detail view (web UI and CLI) MUST show both the axis fitness score and the tournament rank as independent values. When the game has no comparisons, the tournament rank displays as "not yet ranked." When the game has fewer than P comparisons, where P is the provisional threshold (default 6, configurable via daemon settings), the rank displays with a "(provisional)" qualifier. Changes to the threshold take effect immediately on display.
+- REQ-TOURN-10: The game detail view (web UI and CLI) MUST show both the axis fitness score and the tournament rank as independent values. When the game has no comparisons, or the collection has not reached the REQ-TOURN-9 cohort floor, the tournament rank displays as "not yet ranked." Otherwise it displays the normalized ELO score without a low-comparison qualifier.
 
 - REQ-TOURN-11: A tournament rank breakdown MUST be available showing: total comparisons for this game, win/loss record, the 5 most recent comparisons with opponent names and outcomes, and the raw ELO rating alongside the normalized display score. This parallels the axis fitness breakdown (REQ-MVP-5) for the tournament signal.
 
 ### Tournament Sessions
 
-- REQ-TOURN-12: Users MUST be able to start a tournament session with an optional filter. Supported filters: by game name substring, by minimum axis fitness score, by BGG mechanic or category tag, or by "stale" (games with fewer than N total comparisons, where N is user-specified and defaults to the provisional threshold from REQ-TOURN-10; this link is intentional so that a staleness-filtered session graduates games out of provisional status). Filters can be combined. The session scope is fixed at creation; adding or removing games from the collection mid-session does not change the session's game list.
+- REQ-TOURN-12: Users MUST be able to start a tournament session with an optional filter. Supported filters are game name substring, minimum or maximum axis fitness score, and BGG mechanic or category tag. Filters can be combined. The session scope is fixed at creation; adding or removing games from the collection mid-session does not change the session's game list.
 
 - REQ-TOURN-13: The minimum number of games in a session scope is 4. If a filter produces fewer than 4 games, the session is not created and the user is told why.
 
-- REQ-TOURN-14: During an active session, the system MUST present pairs using adaptive selection: prioritize games with fewer total comparisons, then prefer games with similar current ELO ratings (within 200 points). If multiple candidate pairs have equal priority, select randomly. The same pair MUST NOT be presented twice within the same session.
+- REQ-TOURN-14: During an active session, the system MUST present unpresented pairs with the smallest current ELO difference. If multiple candidate pairs have equal ELO difference, select randomly. The same pair MUST NOT be presented twice within the same session.
 
 - REQ-TOURN-15: Only one session can be active at a time. An active session persists until the user explicitly ends it or starts a new session (which completes the previous one). The user can leave and return to an active session freely; there is no separate "pause" action. Completed sessions are retained for history.
 
@@ -129,7 +129,7 @@ ELO requires knowing the result of each comparison to calculate scores correctly
 
 - REQ-TOURN-17: The collection game list MUST be sortable by tournament rank (normalized ELO) in addition to the existing axis fitness sort. Games with no comparisons sort to the bottom of tournament-ranked lists.
 
-- REQ-TOURN-18: [SUPERSEDED by REQ-TAXIS-14 in `.lore/reference/specs/tournament/elo-axis-source.md`] ~~When the axis fitness score and tournament rank for a game differ by more than 2.0 points (on the normalized 1-10 scale), and both scores are non-provisional, the game detail view MUST flag this as a divergence: "Your axis ratings suggest this game is a [higher/lower] fit than your head-to-head choices indicate." This is informational, not prescriptive. The flag is suppressed when either score is provisional or absent.~~ The divergence flag has been removed; tournament is now an axis source contributing to a single unified fitness score, so an axis-vs-tournament gap is no longer a separable concept.
+- REQ-TOURN-18: [SUPERSEDED by REQ-TAXIS-14 in `.lore/reference/specs/tournament/elo-axis-source.md`] The divergence flag has been removed; tournament is now an axis source contributing to a single unified fitness score, so an axis-vs-tournament gap is no longer a separable concept.
 
 ### API
 
@@ -166,7 +166,7 @@ ELO requires knowing the result of each comparison to calculate scores correctly
 - [ ] ELO normalization: handles edge case of all games with same ELO
 - [ ] Session with filter produces correct game subset
 - [ ] Session rejects creation when filter yields fewer than 4 games
-- [ ] Adaptive pairing prioritizes low-comparison-count games
+- [ ] Adaptive pairing selects unpresented pairs with the smallest current ELO difference
 - [ ] Same pair is not presented twice within one session
 - [ ] Starting a new session completes the previous active session
 - [ ] Deleting a game mid-session excludes it from future pair selection
@@ -195,7 +195,7 @@ ELO requires knowing the result of each comparison to calculate scores correctly
 
 - ELO math verified against hand-calculated examples (document a 5-game, 10-comparison worked example in tests)
 - Normalization edge cases tested: fewer than 5 compared games ("not yet ranked"), all equal ratings, ELO outside reference range (clamping), ELO within normal spread
-- Adaptive pairing verified: after N comparisons, games with 0 comparisons are always selected first
+- Adaptive pairing verified: unpresented pairs with the smallest current ELO difference are selected first
 - Tournament data persistence survives simulated crash (write to temp + rename pattern)
 
 ## Constraints
@@ -210,11 +210,11 @@ ELO requires knowing the result of each comparison to calculate scores correctly
 
 These are genuine unknowns that should be resolved through use:
 
-1. **K-factor tuning.** The K-factor transition threshold defaults to 15 and the provisional threshold defaults to 6 (both configurable via daemon settings). These are informed guesses for a recreational board game collection. If rankings feel too volatile or too sticky, the transition threshold can be adjusted and history replayed via recalculate (REQ-TOURN-7). Observe whether 15/6 are the right defaults after real use.
+1. **K-factor tuning.** The K-factor transition threshold defaults to 15 and is configurable via daemon settings. This is an informed guess for a recreational board game collection. If rankings feel too volatile or too sticky, the transition threshold can be adjusted. Observe whether 15 is the right default after real use.
 
 2. **Normalization reference range.** The reference window half-width defaults to 400 (range 1100-1900), configurable via daemon settings. If display scores feel compressed toward the middle of the 1-10 range, narrowing the half-width (e.g., to 200) will spread them out. If scores cluster at the extremes, widen it. Observe after real use.
 
-3. **Session filter UX.** The spec defines four filter types (name, axis fitness, BGG tag, staleness). How these are surfaced (filter builder, search syntax, preset buttons, or something else) is a design decision. The web UI and CLI design documents must resolve this before implementation. Visual mockups for the filter UX are at `.lore/work/mockups/ (tournament-*.html)`.
+3. **Session filter UX.** The spec defines name, axis-fitness, and BGG-tag filter types. How these are surfaced (filter builder, search syntax, preset buttons, or something else) is a design decision. The web UI and CLI design documents must resolve this before implementation. Visual mockups for the filter UX are at `.lore/work/mockups/ (tournament-*.html)`.
 
 ## Context
 

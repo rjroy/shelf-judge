@@ -27,9 +27,8 @@ describe("parseFilterFlags", () => {
     expect(result).toEqual([{ type: "bggTag", value: "cooperative" }]);
   });
 
-  test("parses stale filter", () => {
-    const result = parseFilterFlags(["stale:3"]);
-    expect(result).toEqual([{ type: "staleness", value: "3" }]);
+  test("rejects removed stale filter", () => {
+    expect(() => parseFilterFlags(["stale:3"])).toThrow("Unknown filter type");
   });
 
   test("parses multiple filters", () => {
@@ -126,8 +125,7 @@ const nextPairData = {
     eloRating: 1520,
     comparisonCount: 3,
     normalizedScore: 7.2,
-    isProvisional: true,
-    displayLabel: "7.2 (provisional)",
+    displayLabel: "7.2",
     wins: 2,
     losses: 1,
     recentComparisons: [],
@@ -136,8 +134,7 @@ const nextPairData = {
     eloRating: 1480,
     comparisonCount: 3,
     normalizedScore: 6.8,
-    isProvisional: true,
-    displayLabel: "6.8 (provisional)",
+    displayLabel: "6.8",
     wins: 1,
     losses: 2,
     recentComparisons: [],
@@ -208,8 +205,7 @@ const comparisonData = {
       eloRating: 1530,
       comparisonCount: 4,
       normalizedScore: 7.4,
-      isProvisional: true,
-      displayLabel: "7.4 (provisional)",
+      displayLabel: "7.4",
       wins: 3,
       losses: 1,
       recentComparisons: [],
@@ -218,8 +214,7 @@ const comparisonData = {
       eloRating: 1470,
       comparisonCount: 4,
       normalizedScore: 6.6,
-      isProvisional: true,
-      displayLabel: "6.6 (provisional)",
+      displayLabel: "6.6",
       wins: 1,
       losses: 3,
       recentComparisons: [],
@@ -313,7 +308,6 @@ const singleGameStats = {
   eloRating: 1580,
   comparisonCount: 12,
   normalizedScore: 8.1,
-  isProvisional: false,
   displayLabel: "8.1",
   wins: 8,
   losses: 4,
@@ -371,7 +365,6 @@ const allStatsData = [
       eloRating: 1580,
       comparisonCount: 12,
       normalizedScore: 8.1,
-      isProvisional: false,
       displayLabel: "8.1",
       wins: 8,
       losses: 4,
@@ -385,7 +378,6 @@ const allStatsData = [
       eloRating: 1420,
       comparisonCount: 12,
       normalizedScore: 5.9,
-      isProvisional: false,
       displayLabel: "5.9",
       wins: 4,
       losses: 8,
@@ -399,7 +391,6 @@ const allStatsData = [
       eloRating: 1500,
       comparisonCount: 0,
       normalizedScore: null,
-      isProvisional: true,
       displayLabel: "not yet ranked",
       wins: 0,
       losses: 0,

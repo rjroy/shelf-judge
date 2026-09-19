@@ -118,7 +118,6 @@ function references(axisId: string, rating = 7, count = 5): ReferenceGameCandida
     gameName: `Reference ${index}`,
     vector: [1, 0.5],
     ratings: { [axisId]: rating },
-    tournamentStability: 1,
   }));
 }
 
@@ -140,7 +139,7 @@ function compute(
 }
 
 describe("prediction primitives", () => {
-  test("finds nearest rated candidates and applies stability to ordering", () => {
+  test("finds nearest rated candidates by cosine similarity", () => {
     const matches = findKNearestForAxis(
       [1, 0.5],
       [
@@ -150,21 +149,19 @@ describe("prediction primitives", () => {
           gameName: "Stable",
           vector: [1, 0.5],
           ratings: { fun: 8 },
-          tournamentStability: 1.2,
         },
         {
           gameId: "other-axis",
           gameName: "Other",
           vector: [1, 0.5],
           ratings: { theme: 10 },
-          tournamentStability: 2,
         },
       ],
       "fun",
       5,
       0.2,
     );
-    expect(matches.map(({ gameId }) => gameId)).toEqual(["stable", "reference-0"]);
+    expect(matches.map(({ gameId }) => gameId)).toEqual(["reference-0", "stable"]);
   });
 
   test("assigns confidence from match count, similarity, and variance", () => {

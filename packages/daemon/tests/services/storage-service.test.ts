@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { z } from "zod";
 import type {
   AppConfig,
   Collection,
@@ -12,6 +13,7 @@ import {
   createInitialEntityMetadata,
   CURRENT_PROFILE_ALGORITHM_VERSION,
   CURRENT_PROFILE_CONTRACT_VERSION,
+  TournamentDataSchema,
 } from "@shelf-judge/shared";
 import { createStorageService } from "../../src/services/storage-service.js";
 import { computeCollectionProfile } from "../../src/services/collection-profile-engine.js";
@@ -658,10 +660,83 @@ describe("StorageService.saveConfig", () => {
   });
 });
 
+describe("StorageService.loadPredictionSettings", () => {
+  test("removes the obsolete tournament stability setting from persisted data", async () => {
+    const predictionSettingsPath = `${DATA_DIR}/prediction-settings.json`;
+    const { service, fileOps } = makeService({
+      [predictionSettingsPath]: JSON.stringify({
+        stageThresholds: [5, 15, 30],
+        defaultK: 5,
+        minSimilarityThreshold: 0.2,
+        tournamentStabilityBoost: 0.2,
+      }),
+    });
+
+    expect(await service.loadPredictionSettings()).toEqual({
+      stageThresholds: [5, 15, 30],
+      defaultK: 5,
+      minSimilarityThreshold: 0.2,
+    });
+    expect(JSON.parse(fileOps.files.get(predictionSettingsPath) ?? "null")).toEqual({
+      stageThresholds: [5, 15, 30],
+      defaultK: 5,
+      minSimilarityThreshold: 0.2,
+    });
+  });
+});
+
+describe("StorageService.loadTournament", () => {
+  test("rewrites legacy provisional settings and staleness filters", async () => {
+    const { service, fileOps } = makeService({
+      [TOURNAMENT_PATH]: JSON.stringify({
+        settings: {
+          kFactorThreshold: 15,
+          normalizationHalfWidth: 400,
+          provisionalThreshold: 3,
+        },
+        sessions: [
+          {
+            id: "session-1",
+            filters: [
+              { type: "staleness", value: "3" },
+              { type: "name", value: "Keep this filter" },
+            ],
+            gameIds: ["game-1", "game-2"],
+            comparisonCount: 0,
+            status: "completed",
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+            comparisons: [],
+          },
+        ],
+        gameStats: {},
+      }),
+    });
+
+    const loaded = await service.loadTournament();
+    const persistedJson: unknown = JSON.parse(
+      fileOps.files.get(TOURNAMENT_PATH) ?? "null",
+    ) as unknown;
+    const persisted = z
+      .object({
+        settings: z.object({}).passthrough(),
+        sessions: z.array(z.object({ filters: z.array(z.unknown()) }).passthrough()),
+      })
+      .passthrough()
+      .parse(persistedJson);
+
+    expect(loaded.settings).toEqual({ kFactorThreshold: 15, normalizationHalfWidth: 400 });
+    expect(loaded.sessions[0]?.filters).toEqual([{ type: "name", value: "Keep this filter" }]);
+    expect(persisted.settings).not.toHaveProperty("provisionalThreshold");
+    expect(persisted.sessions[0].filters).not.toContainEqual({ type: "staleness", value: "3" });
+    expect(TournamentDataSchema.parse(persisted)).toEqual(loaded);
+  });
+});
+
 function makeEmptyProfileData(computedAt = "2026-01-01T00:00:00.000Z"): ProfileData {
   const collection = currentCollection();
   const tournament = {
-    settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
+    settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
     sessions: [],
     gameStats: {},
   };
@@ -669,7 +744,6 @@ function makeEmptyProfileData(computedAt = "2026-01-01T00:00:00.000Z"): ProfileD
     stageThresholds: [5, 15, 30] as [number, number, number],
     defaultK: 5,
     minSimilarityThreshold: 0.2,
-    tournamentStabilityBoost: 0.2,
   };
   const redundancySettings = {
     enabled: false,

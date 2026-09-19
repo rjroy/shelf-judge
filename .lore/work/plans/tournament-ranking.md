@@ -13,6 +13,10 @@ related:
 
 # Plan: Tournament-Based ELO Ranking
 
+> **Historical plan, superseded for new work:** This executed plan is preserved as
+> an implementation record. Use `.lore/reference/specs/tournament/reduce-tournament-overhead.md`
+> and `.lore/reference/specs/tournament/elo-axis-source.md` for current requirements.
+
 ## Spec Reference
 
 **Reconciliation input**: `.lore/work/specs/tournament/tournament-ranking.md`

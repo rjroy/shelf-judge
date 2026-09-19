@@ -28,14 +28,14 @@ describe("calculateExpectedScore", () => {
 });
 
 describe("calculateNewRatings", () => {
-  test("equal ratings, A wins, both provisional (K=32)", () => {
+  test("equal ratings, A wins at initial comparison counts (K=32)", () => {
     const { newRatingA, newRatingB } = calculateNewRatings(1500, 1500, "a", 0, 0, 15);
     // Expected: 0.5. Actual: 1 (A wins). Delta = K * (1 - 0.5) = 32 * 0.5 = 16
     expect(newRatingA).toBeCloseTo(1516, 4);
     expect(newRatingB).toBeCloseTo(1484, 4);
   });
 
-  test("equal ratings, B wins, both provisional (K=32)", () => {
+  test("equal ratings, B wins at initial comparison counts (K=32)", () => {
     const { newRatingA, newRatingB } = calculateNewRatings(1500, 1500, "b", 0, 0, 15);
     expect(newRatingA).toBeCloseTo(1484, 4);
     expect(newRatingB).toBeCloseTo(1516, 4);
