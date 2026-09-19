@@ -45,7 +45,7 @@ function ClassOverview({
   const headingId = `profile-${result.entityClass}-heading`;
   return (
     <section
-      className="profile-class profile-class--disclosure profile-class--hierarchy"
+      className="profile-class profile-class--disclosure profile-class--hierarchy profile-class--bold"
       aria-labelledby={headingId}
       data-result={result.result}
     >
@@ -56,7 +56,12 @@ function ClassOverview({
       {entities.length > 0 ? (
         <div className="profile-entity-grid">
           {entities.map((entity) => (
-            <EntityCard key={entity.entityId} entity={entity} entityClass={result.entityClass} />
+            <EntityCard
+              key={entity.entityId}
+              entity={entity}
+              entityClass={result.entityClass}
+              showSupportLabel={false}
+            />
           ))}
         </div>
       ) : (

@@ -11,15 +11,17 @@ function score(value: number): string {
 export function EntityCard({
   entity,
   entityClass,
+  showSupportLabel = true,
 }: {
   entity: CollectionProfileEntityEvidence;
   entityClass: CollectionProfileEntityClass;
+  showSupportLabel?: boolean;
 }) {
   return (
     <article className="profile-entity-summary" data-support={entity.support}>
       <div className="profile-entity-summary-heading">
         <strong>{entity.name}</strong>
-        <span className="profile-status-label">Supported association</span>
+        {showSupportLabel && <span className="profile-status-label">Supported association</span>}
       </div>
       <p className="profile-fit">
         <strong>Adjusted fit</strong> {score(entity.adjustedMeanCurrentFitness)}

@@ -120,7 +120,7 @@ function WishlistCard({
 
   return (
     <div className="wishlist-card">
-      <div className="wc-main">
+      <div className="wc-main wc-main--compact-thumb">
         <div className="wc-thumb">
           {entry.thumbnailUrl ? <img src={entry.thumbnailUrl} alt={entry.name} /> : null}
         </div>

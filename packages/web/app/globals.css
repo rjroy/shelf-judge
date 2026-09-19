@@ -5450,6 +5450,123 @@ body {
   margin-top: 16px;
 }
 
+.profile-class--bold {
+  display: grid;
+  gap: 16px;
+}
+
+.profile-class--bold .profile-class-heading {
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg-subtle);
+}
+
+.profile-class--bold .profile-class-heading h3 {
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.profile-class--bold .profile-class-heading .profile-status-label {
+  color: var(--text-primary);
+  font-size: 0.75rem;
+}
+
+.profile-class--bold .profile-entity-grid {
+  margin: 0;
+  gap: 10px;
+}
+
+.profile-class--bold .profile-entity-grid > * {
+  border-color: var(--border);
+  background: var(--bg-elevated);
+}
+
+.profile-class--bold > details {
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.wc-main--compact-thumb {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px;
+  padding: 7.2px;
+}
+
+.wc-main--compact-thumb .wc-thumb {
+  width: 62px;
+}
+
+.wc-main--compact-thumb .wc-info {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.wc-main--compact-thumb .wc-score-row {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.wc-main--compact-thumb .wc-actions {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 6px;
+}
+
+.wc-main--compact-thumb .wc-actions .btn {
+  min-height: 44px;
+}
+
+@media (max-width: 460px) {
+  .wc-main--compact-thumb .wc-actions {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .wc-main--compact-thumb .wc-actions .btn-primary {
+    grid-column: 1 / -1;
+  }
+}
+
+.attention-card--quiet {
+  display: grid;
+  gap: 16px;
+  border-color: var(--border);
+}
+
+.attention-card--quiet > p {
+  margin: -9px 0 0;
+  color: var(--text-secondary);
+}
+
+.attention-card--quiet .profile-actions {
+  margin-top: 2px;
+}
+
+.attention-card--quiet details {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.attention-card--quiet summary {
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.attention-card--quiet .attention-evidence,
+.attention-card--quiet .attention-responses {
+  margin-top: 12px;
+}
+
+.attention-card--quiet .profile-facts {
+  margin: 0;
+}
+
 .profile-actions .btn,
 .profile-order-control :is(button, select),
 .profile-unavailable button {

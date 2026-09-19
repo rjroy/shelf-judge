@@ -410,7 +410,15 @@ describe("ReflectionEvidenceService", () => {
     const service = createReflectionEvidenceService({
       storageService: context.storageService,
       projectionSnapshotService: reflectionProjectionSnapshotService,
-      ownerGameNoteService: context.ownerGameNoteService,
+      ownerGameNoteService: {
+        async get(gameId) {
+          if (selected.includes(gameId)) return context.ownerGameNoteService.get(gameId);
+          return {
+            gameId,
+            note: { state: "missing" as const, version: 0, updatedAt: null },
+          };
+        },
+      },
       createAnalystEvidenceTurn: (authorizedGameIds) =>
         createAnalystEvidenceService({
           storageService: context.storageService,
@@ -449,7 +457,7 @@ describe("ReflectionEvidenceService", () => {
     });
     if (read === undefined) throw new Error("Reflection tool turn does not support readGames");
     expect(read.items).toHaveLength(2);
-    const completed = await service.finish?.(turn);
+    const completed = await service.finish?.(turn, { verifyNotePresence: true });
     if (completed === undefined) throw new Error("Reflection tool turn cannot finish");
     expect(completed.citations).toHaveLength(2);
     const sourceDisplayContexts = completed.citations.map(
@@ -471,6 +479,8 @@ describe("ReflectionEvidenceService", () => {
       relevantEligibleGameCount: 200,
       exhaustiveNotes: false,
     });
+    expect(completed.noteGuidance?.missingNotes).toHaveLength(198);
+    expect(completed.noteGuidance?.unexaminedPresentNoteCount).toBe(0);
     expect(completed.evidence.entries).toHaveLength(2);
     expect(completed.evidence.entries.map(({ sourceId }) => sourceId).sort()).toEqual(
       [...selected].sort(),

@@ -535,8 +535,11 @@ export function createReflectionRefreshService(
           }
           let finishedEvidence: Promise<ReflectionEvidencePackage> | undefined;
           let acceptedResult: ReflectionCompleted | undefined;
-          const finishEvidence = () => {
-            finishedEvidence ??= abortRace(deps.evidence.finish(evidenceTurn), operation.signal);
+          const finishEvidence = (verifyNotePresence: boolean) => {
+            finishedEvidence ??= abortRace(
+              deps.evidence.finish(evidenceTurn, { verifyNotePresence }),
+              operation.signal,
+            );
             return finishedEvidence;
           };
           await deps.provider.analyze({
@@ -560,7 +563,15 @@ export function createReflectionRefreshService(
             async acceptSubmission(submission, usage) {
               let completedEvidence: ReflectionEvidencePackage;
               try {
-                completedEvidence = await finishEvidence();
+                completedEvidence = await finishEvidence(
+                  typeof submission === "object" &&
+                    submission !== null &&
+                    "result" in submission &&
+                    typeof submission.result === "object" &&
+                    submission.result !== null &&
+                    "outcome" in submission.result &&
+                    submission.result.outcome === "abstained",
+                );
               } catch (error) {
                 if (operation.signal.aborted) {
                   throw new GroundedAnalysisError("cancelled", "cancelled", { cause: error });

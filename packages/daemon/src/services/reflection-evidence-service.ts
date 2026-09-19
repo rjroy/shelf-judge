@@ -118,6 +118,8 @@ export interface ReflectionEvidencePackage {
   readonly evidence: GroundedEvidenceSnapshot;
   readonly citations: readonly ReflectionCitation[];
   readonly dependencies: readonly ReflectionDependency[];
+  /** Absent only in legacy in-memory test packages. Persisted results remain compatible via schema optionality. */
+  readonly noteGuidance?: ReflectionNoteGuidance;
   readonly assembledAt: string;
 }
 
@@ -150,7 +152,10 @@ export interface ReflectionEvidenceService {
     provider: GroundedProviderIdentity,
     options?: { readonly signal?: AbortSignal },
   ): Promise<ReflectionEvidenceTurn>;
-  finish(turn: ReflectionEvidenceTurn): Promise<ReflectionEvidencePackage>;
+  finish(
+    turn: ReflectionEvidenceTurn,
+    options?: { readonly verifyNotePresence?: boolean },
+  ): Promise<ReflectionEvidencePackage>;
   revalidate(
     evidencePackage: ReflectionEvidencePackage,
     provider: GroundedProviderIdentity,
@@ -164,6 +169,11 @@ export interface ReflectionEvidenceTurn {
   readonly analystSnapshot: AnalystProjectionSnapshot;
 }
 
+export interface ReflectionNoteGuidance {
+  readonly missingNotes: readonly { readonly gameId: string; readonly gameTitle: string }[];
+  readonly unexaminedPresentNoteCount: number;
+}
+
 export interface ReflectionEvidenceServiceDeps {
   /**
    * The exact storage object used by the projection snapshot service and by the
@@ -173,9 +183,22 @@ export interface ReflectionEvidenceServiceDeps {
   storageService: object;
   projectionSnapshotService: ReflectionProjectionSnapshotService;
   ownerGameNoteService: {
-    get(
-      gameId: string,
-    ): Promise<{ readonly gameId: string; readonly note: { readonly version: number } }>;
+    get(gameId: string): Promise<{
+      readonly gameId: string;
+      readonly note: {
+        readonly state: "missing" | "cleared" | "present";
+        readonly version: number;
+      };
+    }>;
+    getStates?(gameIds: readonly string[]): Promise<
+      readonly {
+        readonly gameId: string;
+        readonly note: {
+          readonly state: "missing" | "cleared" | "present";
+          readonly version: number;
+        };
+      }[]
+    >;
   };
   createAnalystEvidenceTurn?: (authorizedGameIds: readonly string[]) => AnalystEvidenceService;
   pageSize?: number;
@@ -460,7 +483,7 @@ export function createReflectionEvidenceService(
       for (const citation of allCitations) citationRegistry.add(citation);
       const citations = citationRegistry.complete(allCitations.map(({ citationId }) => citationId));
 
-      const dependencies = completeDependencies([
+      const deterministicDependencies = completeDependencies([
         ...captured.projection.dependencies,
         providerDependency(provider),
       ]);
@@ -499,7 +522,7 @@ export function createReflectionEvidenceService(
         scope,
         evidence,
         citations,
-        dependencies,
+        dependencies: deterministicDependencies,
         assembledAt,
       });
     });
@@ -575,9 +598,21 @@ export function createReflectionEvidenceService(
       ) {
         return { valid: false, reason: "question-scope-changed" };
       }
-      for (const dependency of evidencePackage.dependencies) {
-        if (dependency.category !== "note") continue;
-        const current = await deps.ownerGameNoteService.get(dependency.gameId);
+      const noteDependencies = evidencePackage.dependencies.filter(
+        (dependency): dependency is Extract<(typeof evidencePackage.dependencies)[number], { category: "note" }> =>
+          dependency.category === "note",
+      );
+      const currentNotes = deps.ownerGameNoteService.getStates === undefined
+        ? await Promise.all(
+            noteDependencies.map((dependency) => deps.ownerGameNoteService.get(dependency.gameId)),
+          )
+        : await deps.ownerGameNoteService.getStates(
+            noteDependencies.map((dependency) => dependency.gameId),
+          );
+      const currentByGameId = new Map(currentNotes.map((current) => [current.gameId, current]));
+      for (const dependency of noteDependencies) {
+        const current = currentByGameId.get(dependency.gameId);
+        if (current === undefined) return { valid: false, reason: "note-source-changed" };
         if (current.gameId !== dependency.gameId || current.note.version !== dependency.noteVersion)
           return { valid: false, reason: "note-source-changed" };
       }
@@ -609,9 +644,45 @@ export function createReflectionEvidenceService(
     return Object.freeze({ initial, analystEvidence, analystSnapshot });
   }
 
-  async function finish(turn: ReflectionEvidenceTurn): Promise<ReflectionEvidencePackage> {
+  async function finish(
+    turn: ReflectionEvidenceTurn,
+    options?: { readonly verifyNotePresence?: boolean },
+  ): Promise<ReflectionEvidencePackage> {
     const accumulated = await turn.analystEvidence.accumulatedEvidence(turn.analystSnapshot);
     const base = turn.initial;
+    const examinedNoteGameIds = new Set(accumulated.noteDependencies.map(({ gameId }) => gameId));
+    const noteGameIds = base.citations.flatMap(({ evidenceClass, destination }) => {
+      const parameters = destination.parameters;
+      return evidenceClass === "game-identity-ownership" &&
+        "gameId" in parameters &&
+        typeof parameters.gameId === "string"
+        ? [parameters.gameId]
+        : [];
+    });
+    const noteStates = options?.verifyNotePresence
+      ? deps.ownerGameNoteService.getStates === undefined
+        ? await Promise.all(noteGameIds.map((gameId) => deps.ownerGameNoteService.get(gameId)))
+        : await deps.ownerGameNoteService.getStates(noteGameIds)
+      : [];
+    const noteGuidance =
+      options?.verifyNotePresence === true
+        ? cloneAndFreeze({
+            missingNotes: noteStates.flatMap(({ gameId, note }) => {
+              const title = base.citations.find(
+                (citation) =>
+                  citation.evidenceClass === "game-identity-ownership" &&
+                  "gameId" in citation.destination.parameters &&
+                  citation.destination.parameters.gameId === gameId,
+              )?.sourceDisplayContext;
+              return note.state !== "present" && title?.kind === "game"
+                ? [{ gameId, gameTitle: title.gameTitle }]
+                : [];
+            }),
+            unexaminedPresentNoteCount: noteStates.filter(
+              ({ gameId, note }) => note.state === "present" && !examinedNoteGameIds.has(gameId),
+            ).length,
+          })
+        : undefined;
     const deliveredEntries = accumulated.evidence.entries.flatMap((entry) => {
       if (entry.evidenceClass !== "owner-game-note") {
         const payload = analystPayloadForReflection(entry.evidenceClass, entry.payload);
@@ -687,6 +758,9 @@ export function createReflectionEvidenceService(
     );
     const dependencies = completeDependencies([
       ...base.dependencies,
+      ...noteStates.map(({ gameId, note }) =>
+        ReflectionDependencySchema.parse({ category: "note", gameId, noteVersion: note.version }),
+      ),
       ...accumulated.noteDependencies.map(({ gameId, noteVersion }) =>
         ReflectionDependencySchema.parse({ category: "note", gameId, noteVersion }),
       ),
@@ -696,6 +770,7 @@ export function createReflectionEvidenceService(
       evidence,
       citations: completeCitations,
       dependencies,
+      ...(noteGuidance === undefined ? {} : { noteGuidance }),
       scope: ReflectionScopeSchema.parse({
         ...base.scope,
         examinedPresentNoteCount: accumulated.citations.filter(
