@@ -24,6 +24,7 @@ interface BggXmlAttribute {
   "@_objectid"?: string;
   "@_quantity"?: string;
   "@_total"?: string;
+  "@_date"?: string;
 }
 
 interface BggXmlValueElement {
@@ -94,7 +95,7 @@ interface BggXmlCollectionDocument {
   items?: { item?: BggXmlCollectionItem[] };
 }
 
-type BggXmlPlay = BggXmlAttribute;
+type BggXmlPlay = BggXmlAttribute & { item?: BggXmlAttribute[] };
 
 interface BggXmlPlaysDocument {
   plays?: BggXmlAttribute & { play?: BggXmlPlay[] };
@@ -353,6 +354,7 @@ export interface ThingMetadata {
 export interface CollectiomItemMetadata {
   numPlays: number | null;
   observation?: BggRequestObservation;
+  playRecords?: BggPlayRecord[];
 }
 
 export function parseThingMetadata(xml: string): ThingMetadata[] {
@@ -460,7 +462,10 @@ export function parseCollectionResponse(
 
 export interface BggPlayRecord {
   id: number;
+  bggId: number;
   quantity: number;
+  dateState: "valid" | "missing" | "invalid";
+  playedOn: string | null;
 }
 
 export interface BggPlayPage {
@@ -468,7 +473,22 @@ export interface BggPlayPage {
   records: BggPlayRecord[];
 }
 
-export function parsePlaysResponse(xml: string): BggPlayPage {
+function parseDateOnly(value: string | undefined): {
+  state: BggPlayRecord["dateState"];
+  playedOn: string | null;
+} {
+  if (value === undefined || value.trim() === "") return { state: "missing", playedOn: null };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return { state: "invalid", playedOn: null };
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+    ? { state: "valid", playedOn: value }
+    : { state: "invalid", playedOn: null };
+}
+
+export function parsePlaysResponse(xml: string, requestedBggId?: number): BggPlayPage {
   const parsed = parser.parse(xml) as BggXmlPlaysDocument;
   const plays = parsed?.plays;
   const total = parseNumber(plays?.["@_total"]);
@@ -479,19 +499,30 @@ export function parsePlaysResponse(xml: string): BggPlayPage {
   const records = ensureArray(plays.play).map((play) => {
     const id = parseNumber(play["@_id"]);
     const quantity = parseNumber(play["@_quantity"] ?? "1");
+    const itemBggId = parseNumber(ensureArray(play.item)[0]?.["@_objectid"]);
+    const bggId = itemBggId ?? requestedBggId;
     if (
       id === null ||
       !Number.isSafeInteger(id) ||
       id <= 0 ||
       quantity === null ||
       !Number.isSafeInteger(quantity) ||
-      quantity <= 0
+      quantity <= 0 ||
+      bggId === undefined ||
+      !Number.isSafeInteger(bggId) ||
+      bggId <= 0
     ) {
       throw new Error(
         "Malformed BGG plays response: play ID and quantity must be positive integers",
       );
     }
-    return { id, quantity };
+    if (requestedBggId !== undefined && itemBggId !== null && itemBggId !== requestedBggId) {
+      throw new Error(
+        `Malformed BGG plays response: play ${id} belongs to BGG ID ${itemBggId}, not ${requestedBggId}`,
+      );
+    }
+    const date = parseDateOnly(play["@_date"]);
+    return { id, bggId, quantity, dateState: date.state, playedOn: date.playedOn };
   });
 
   return { total, records };

@@ -1,6 +1,10 @@
 import type { ResolvedPlayIntentionHistory } from "@shelf-judge/shared";
 
-const kindLabel = { "first-play": "First play", replay: "Replay" } as const;
+const kindLabel = {
+  "want-to-play": "Want to play",
+  "first-play": "First play (historical)",
+  replay: "Replay (historical)",
+} as const;
 const sourceLabel = {
   "observed-play-increase": "Observed play-count increase",
   "owner-confirmed": "Owner confirmed completion",
@@ -19,11 +23,16 @@ export function IntentionHistory({ history }: { history: ResolvedPlayIntentionHi
             <h3>{kindLabel[item.kind]}</h3>
             <dl className="intention-facts">
               <dt>Baseline</dt>
-              <dd>{item.baseline.playCount} recorded plays</dd>
+              <dd>
+                {item.baseline === null
+                  ? "No reliable recorded baseline"
+                  : `${item.baseline.playCount} recorded plays`}
+              </dd>
               <dt>Created</dt>
               <dd>
-                {item.createdAt}, from {item.baseline.evidenceSource} evidence observed at{" "}
-                {item.baseline.observedAt}
+                {item.baseline === null
+                  ? `${item.createdAt}; no reliable count evidence was available.`
+                  : `${item.createdAt}, from ${item.baseline.evidenceSource} evidence observed at ${item.baseline.observedAt}`}
               </dd>
               <dt>Resolution</dt>
               <dd>

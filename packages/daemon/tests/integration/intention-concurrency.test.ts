@@ -76,7 +76,7 @@ describe("intention concurrency integration", () => {
       intention: {
         intentionId: "interleaved-intention",
         gameId: createdGame.game.id,
-        kind: "first-play",
+        kind: "want-to-play",
         baseline: {
           playCount: 0,
           evidenceSource: "manual",

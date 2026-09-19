@@ -13,6 +13,7 @@ import {
   type BggCollectionItem,
   type ThingMetadata,
   type CollectiomItemMetadata,
+  type BggPlayRecord,
   type ParsedSuggestedPlayerPoll,
   type ThingItem,
 } from "./bgg-xml-parser.js";
@@ -764,25 +765,28 @@ export function createBggClient(deps: BggClientDeps): BggClient {
         sourceRequest: "bgg-plays",
         username: config.username,
       });
-      const records = new Map<number, number>();
+      const records = new Map<number, BggPlayRecord>();
       let observedAt: string | null = null;
       let pagesFetched = 0;
       try {
         for (const bggId of uniqueBggIds) {
           let page = 1;
-          let fetchedForId = 0;
+          const recordsForId = new Map<number, BggPlayRecord>();
           while (true) {
             const url = `${BGG_BASE_URL}/plays?username=${encodeURIComponent(config.username)}&id=${bggId}&type=thing&page=${page}`;
             const response = await queuedFetch(url);
             const xml = await response.text();
             observedAt = now();
-            const playPage = parsePlaysResponse(xml);
+            const playPage = parsePlaysResponse(xml, bggId);
             pagesFetched++;
-            fetchedForId += playPage.records.length;
             for (const record of playPage.records) {
-              if (!records.has(record.id)) records.set(record.id, record.quantity);
+              recordsForId.set(record.id, record);
+              if (!records.has(record.id)) records.set(record.id, record);
             }
-            if (fetchedForId >= playPage.total) break;
+            if (recordsForId.size === playPage.total) break;
+            if (recordsForId.size > playPage.total) {
+              throw new Error(`BGG plays response exceeded declared records for BGG ID ${bggId}`);
+            }
             if (playPage.records.length === 0) {
               throw new Error(`BGG plays response ended before all records for BGG ID ${bggId}`);
             }
@@ -803,7 +807,8 @@ export function createBggClient(deps: BggClientDeps): BggClient {
       }
 
       if (observedAt === null) throw new Error("BGG plays response was not observed");
-      const numPlays = [...records.values()].reduce((total, quantity) => total + quantity, 0);
+      const playRecords = [...records.values()];
+      const numPlays = playRecords.reduce((total, record) => total + record.quantity, 0);
       logger.log("plays fetch outcome", {
         bggIds: uniqueBggIds,
         sourceRequest: "bgg-plays",
@@ -822,6 +827,7 @@ export function createBggClient(deps: BggClientDeps): BggClient {
           state: "complete",
           fieldsReturned: ["numPlays"],
         },
+        playRecords,
       };
     },
 

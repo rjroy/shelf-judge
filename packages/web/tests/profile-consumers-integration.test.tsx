@@ -318,7 +318,7 @@ describe("attention presentation", () => {
     );
 
     for (const text of [
-      "Do you still intend to play Heat?",
+      "Do you still want to play Heat?",
       "You asked Shelf Judge to keep this intention visible.",
       "First play",
       "Created",
@@ -386,7 +386,7 @@ describe("attention presentation", () => {
     second.intention.intentionId = "intention-2";
     second.intention.gameId = "game-5";
     second.gameName = "Second Game";
-    second.question = "Do you still intend to play Second Game?";
+    second.question = "Do you still want to play Second Game?";
     second.destination.gameId = "game-5";
     second.evidenceDestination.gameId = "game-5";
     const items = [usefulProfileFixture.attention.items[0], second];

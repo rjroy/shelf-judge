@@ -115,7 +115,7 @@ describe("useful profile persisted flow", () => {
           artist: { overviewLimit: 3, minimumSupportedGames: 1 },
         },
       });
-      expect((await firstProcess.storageService.loadCollection()).schemaVersion).toBe(6);
+      expect((await firstProcess.storageService.loadCollection()).schemaVersion).toBe(7);
       await firstProcess.gameService.refreshBggData("bgg-game");
       const added = [];
       for (const bggId of [124, 125, 126]) {
@@ -207,7 +207,7 @@ describe("useful profile persisted flow", () => {
         {
           intentionId: "intention-first",
           gameId: "bgg-game",
-          kind: "first-play",
+          kind: "want-to-play",
           baseline: {
             playCount: 0,
             evidenceSource: "bgg-collection",
@@ -224,7 +224,7 @@ describe("useful profile persisted flow", () => {
         {
           intentionId: "intention-replay",
           gameId: replayGame.id,
-          kind: "replay",
+          kind: "want-to-play",
           baseline: {
             playCount: 2,
             evidenceSource: "bgg-collection",
@@ -241,7 +241,7 @@ describe("useful profile persisted flow", () => {
         {
           intentionId: "intention-renewed",
           gameId: replayGame.id,
-          kind: "replay",
+          kind: "want-to-play",
           baseline: {
             playCount: 2,
             evidenceSource: "bgg-collection",
@@ -377,7 +377,7 @@ describe("useful profile persisted flow", () => {
           configPath: path.join(root, "config.json"),
         });
         const migrated = await process.storageService.loadCollection();
-        expect(migrated.schemaVersion).toBe(6);
+        expect(migrated.schemaVersion).toBe(7);
         outputs.push(await readFile(collectionPath, "utf8"));
       } finally {
         await rm(root, { recursive: true, force: true });

@@ -99,8 +99,8 @@ const LOCAL_OPERATION_COMMANDS: Record<string, LocalCommandHelp[]> = {
   "shelf.game.intention.set": [
     {
       name: "intention set",
-      usage: "shelf-judge game intention set <game-id> <first-play|replay> [--command-id <uuid>]",
-      description: "Create an explicit eligible play intention",
+      usage: "shelf-judge game intention set <game-id> [--command-id <uuid>]",
+      description: "Create an explicit Want to play intention",
     },
   ],
   "shelf.game.intention.complete": [

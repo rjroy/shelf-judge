@@ -75,7 +75,7 @@ function game(overrides: Partial<DurableGame> = {}): DurableGame {
 
 function collection(overrides: Partial<Collection> = {}): Collection {
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     revision: 0,
     id: "collection-1",
     name: "Test",

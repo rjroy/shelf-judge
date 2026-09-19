@@ -44,6 +44,7 @@ export function EntityCard({
         </div>
       </dl>
       <Link
+        style={{ minHeight: 44 }}
         aria-label={`Inspect complete evidence for ${entity.name}`}
         href={`/profile/entities?class=${entityClass}&entity=${entity.entityId}`}
       >

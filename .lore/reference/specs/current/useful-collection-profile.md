@@ -108,12 +108,14 @@ The overview shows the first configured number of supported entities from each c
 
 ### Attention Means An Explicit Visible Intention
 
-The first release supports two owner-created intention kinds:
+> Superseded for primary intention creation by `shelf-judge-a8l`: a user may author a general Want to play action without count evidence. The historical first-play/replay kinds below remain compatibility and automatic-completion bookkeeping, not the primary expression of desire.
+
+The first release historically supported two owner-created intention kinds:
 
 - `first-play`: play a currently unplayed game;
 - `replay`: play a game that already has at least one recorded play.
 
-Creating an intention requires a currently owned game and a valid current play count so Shelf Judge can distinguish first play from replay and store an evidence timestamp as the baseline. A previously owned or otherwise unowned game is ineligible. An active intention appears immediately and remains visible because the owner explicitly asked Shelf Judge to remember it. Shelf Judge never infers an intention from ownership, purchase date, cost, fitness, wishlist history, play count, or game metadata.
+Historical first-play/replay creation required a currently owned game and valid current play-count evidence. That gate is no longer the primary intention contract. A previously owned or otherwise unowned game remains ineligible, and Shelf Judge never infers an intention from ownership, purchase date, cost, fitness, wishlist history, play count, or game metadata.
 
 An intention has no deadline, reminder schedule, age threshold, urgency, or overdue state. Its creation time remains available as provenance but is not used to rank it or pressure the owner.
 
@@ -288,8 +290,8 @@ Every requirement is assigned to one headline question. Delivery requirements ar
 
 ### Question 2: What Deserves My Attention Or A Decision Now?
 
-25. **REQ-USEFUL-PROF-25:** The first release must create attention items only from explicit owner-maintained `first-play` and `replay` intentions.
-26. **REQ-USEFUL-PROF-26:** Creating an intention must require a currently owned game, a valid current play count, and a matching intention kind, then store that count and its evidence time as the baseline; a game that is not currently owned must return the ineligible-game result.
+25. **REQ-USEFUL-PROF-25 (amended by shelf-judge-a8l):** Attention items come only from explicit owner-maintained Want to play intentions, including preserved historical first-play/replay intentions.
+26. **REQ-USEFUL-PROF-26 (superseded by shelf-judge-a8l for primary creation):** Historical first-play/replay creation required a currently owned game, valid current play count, and matching kind. The current primary Want to play action is not count-gated; a game that is not currently owned remains ineligible.
 27. **REQ-USEFUL-PROF-27:** Ownership, age, purchase state, fitness, low play count, outlier distance, redundancy, and BGG metadata must never create or imply a play intention.
 28. **REQ-USEFUL-PROF-28:** Every active intention must appear immediately and remain visible without a deadline, reminder schedule, age threshold, urgency score, overdue state, or time-based ordering.
 29. **REQ-USEFUL-PROF-29:** Missing, invalid, or stale current play evidence must attach an exact warning and correction destination without hiding the active intention or claiming that it remains unplayed.
@@ -297,9 +299,9 @@ Every requirement is assigned to one headline question. Delivery requirements ar
 31. **REQ-USEFUL-PROF-31:** The attention section must order active items deterministically by NFC-normalized game name in Unicode code-point order and stable game ID, without using creation time or play count.
 32. **REQ-USEFUL-PROF-32:** One active intention must create exactly one card. Other metrics must not create duplicate cards or competing decision families.
 33. **REQ-USEFUL-PROF-33:** Completing or retiring an intention must persist the resolution, actor or source, and resolution time in durable collection source data separate from the disposable profile cache.
-34. **REQ-USEFUL-PROF-34:** A later observed play-count increase above baseline must complete the active intention during the data update that observes it; reading the profile must not mutate durable intention state.
+34. **REQ-USEFUL-PROF-34:** A trustworthy later observed play-count increase above a trustworthy captured baseline must complete the active intention during the data update that observes it. An absent baseline remains absent and cannot authorize automatic completion; reading the profile must not mutate durable intention state.
 35. **REQ-USEFUL-PROF-35:** The owner must be able to mark an intention complete from personal knowledge without forcing an unsupported change to recorded play count.
-36. **REQ-USEFUL-PROF-36:** A completed or retired intention must become active again only through a new explicit intention with a new intention ID and baseline.
+36. **REQ-USEFUL-PROF-36:** A completed or retired intention must become active again only through a new explicit intention with a new intention ID and a baseline captured only when trustworthy evidence is available.
 37. **REQ-USEFUL-PROF-37:** When there is no active intention, the profile must show a successful nothing-needs-attention state and must not substitute another metric to populate the section.
 38. **REQ-USEFUL-PROF-38:** Active intentions, evidence warnings, and resolved history must use the observable fields, ordering, and destinations in this specification and remain distinguishable from an empty collection and profile failure.
 39. **REQ-USEFUL-PROF-39:** Tournament divergence, comparator-backed axis questions, outliers, narration, prediction residuals, redundancy, and purchase utilization must not appear in profile attention in this release.
@@ -333,7 +335,7 @@ The profile cache must be invalidated by changes to:
 - the configured entity policy, including any class's `minimumSupportedGames`; and
 - the profile contract or algorithm version.
 
-The current disposable profile contract is version 9 and its algorithm is version 11. The durable collection remains schema version 5. No profile cache migration is required: an older version or a profile whose serialized entity policy differs from current configuration is discarded and recomputed. A collection migration is required when durable intentions, resolutions, BGG metadata completeness, or another collection source field changes schema.
+The current disposable profile contract is version 9 and its algorithm is version 11. The durable collection is schema version 7. No profile cache migration is required: an older version or a profile whose serialized entity policy differs from current configuration is discarded and recomputed. A collection migration is required when durable intentions, resolutions, BGG metadata completeness, dated BGG play sessions, or another collection source field changes schema.
 
 Collection migration must write atomically. A failed or interrupted migration leaves the last validated source artifact unchanged and loadable. Repeating migration from the same prior version produces the same current artifact without duplicate history or further semantic changes.
 
@@ -394,7 +396,7 @@ overviewEntityIds = [20, 30]
 
 ### Intention Lifecycle
 
-One game may have at most one active intention. `intentionId` identifies one owner commitment from creation through completion or retirement. A new intention after resolution receives a new intention ID and snapshots a new play-count baseline. A monotonically increasing intention version protects every transition.
+One game may have at most one active intention. `intentionId` identifies one owner commitment from creation through completion or retirement. A new intention after resolution receives a new intention ID and snapshots a play-count baseline only when trustworthy evidence is available. A monotonically increasing intention version protects every transition.
 
 Allowed lifecycle transitions are:
 
@@ -405,9 +407,17 @@ active -> retired
 completed or retired -> new intention ID + active
 ```
 
-`first-play` requires a valid current play count of `0`; `replay` requires a valid current play count of at least `1`. A client-supplied baseline is not authoritative; the daemon snapshots validated current evidence when it accepts creation.
+The primary creation action is `Want to play` for a currently owned game and has no count-evidence prerequisite or owner-selected kind. When current evidence is valid, timestamped, and not stale, the daemon snapshots it as an automatic-completion baseline. Otherwise the baseline is absent and no count-driven completion may be inferred. First-play or replay is optional presentation context derived only from current trustworthy evidence. Historical `first-play` and `replay` intentions retain their original kind and baseline.
 
 An automatic completion records source `observed-play-increase`. Manual completion records source `owner-confirmed`. Retirement records source `owner-retired`.
+
+### Dated BGG Play Sessions And Neutral Context
+
+Schema version 7 stores validated dated BGG `/plays` records as `bggPlaySessions`, keyed uniquely by BGG `playId`, with `bggId`, `quantity`, `playedOn`, and `observedAt`. Play dates remain `YYYY-MM-DD` values without invented times; `observedAt` identifies the fetch observation, not the play time. A complete `/plays` observation replaces only the requested game's primary and additional BGG-ID scope, removes records absent from that complete response, and retains sessions outside the scope. Failed or partial retrieval never replaces stored sessions. Records without a valid play date are not stored as dated sessions. The accepted aggregate count is the sum of valid dated, deduplicated session quantities; legacy collection aggregates do not fabricate sessions.
+
+A complete `/plays` observation is accepted as the source for sessions, aggregate count evidence, last-played date, recent volume, and count-driven automatic completion only when it is newer than the current accepted count/check evidence, or replays the accepted BGG `/plays` evidence at the same observation time without a newer check. An older observation preserves both the existing sessions and newer manual or current evidence. Equal-time replay cannot replace manual evidence or clear a newer missing/invalid check merely because the last valid evidence came from BGG.
+
+`lastPlayedAt` is the latest stored valid play date. `recentPlayCount` is the sum of session quantities in the inclusive 365-day interval ending on the accepted `/plays` observation date (that date minus 364 days through that date). These summaries describe the accepted session snapshot, not the wall clock or the date of a later manual count correction. A manual correction preserves imported history but supersedes its role as current count evidence; game detail must not label those historical summaries with the manual observation time. Game detail may show factual dated context as the last dated play and this exact window when session-derived evidence is available. Otherwise it reports dated context as unavailable. This context does not infer enjoyment, urgency, neglect, or a recommendation.
 
 ### Service Boundaries
 
@@ -415,11 +425,11 @@ The shared package owns exact runtime schemas for profile output, intention comm
 
 The public mutation commands are:
 
-| Command  | Required request                                                         |
-| -------- | ------------------------------------------------------------------------ |
-| Create   | `commandId`, game ID, kind, and expected absence of an active intention. |
-| Complete | `commandId`, game ID, intention ID, and expected version.                |
-| Retire   | `commandId`, game ID, intention ID, and expected version.                |
+| Command  | Required request                                                   |
+| -------- | ------------------------------------------------------------------ |
+| Create   | `commandId`, game ID, and expected absence of an active intention. |
+| Complete | `commandId`, game ID, intention ID, and expected version.          |
+| Retire   | `commandId`, game ID, intention ID, and expected version.          |
 
 The CLI exposes these as `shelf-judge game intention set`, `complete`, and `retire`; web controls invoke equivalent daemon operations through the proxy. Exact HTTP paths belong in design, but operation discovery must expose one stable operation ID for each command.
 
@@ -452,7 +462,7 @@ Every successful mutation returns the accepted durable intention, version, and a
 5. Independently derive exact adjusted means from entity games, comparator games, and each class's serialized `minimumSupportedGames`. Verify `bestFit` uses exact adjusted mean, count, normalized name, and BGG ID in order; diagnostic `support` remains count-first; every ordering is a complete permutation; and the overview is the supported prefix of `bestFit` capped at the configured length. Cover every Adjusted-Fit Scenario, including equal displayed values with unequal exact values and a limited entity that leads the full ordering.
 6. Parse representative BGG thing responses with zero, one, and multiple designer and artist links. Verify new and refreshed games retain IDs, names, completeness, and observation time, migrated old games remain refresh-needed until real data is fetched, failed refresh preserves last-valid eligibility with a warning, and games without BGG IDs are unrefreshable without a false refresh action.
 7. Exercise the intention lifecycle from no intention through create, leave active across repeated reads and long elapsed time, complete, retire, automatic observed-play completion, ownership ending, re-ownership, and later explicit new intention. Reject creation for a game that is not currently owned. Verify IDs behave as specified and durable history survives daemon restart and profile-cache deletion.
-8. Test first-play with baseline zero and replay with a positive baseline. Reject mismatched kinds, missing or invalid creation evidence, duplicate active intentions, and stale expected versions.
+8. Create Want to play with missing, invalid, stale, and timestamp-less evidence and verify a null baseline. Derive optional first-play/replay context only from trustworthy current evidence. Preserve historical kinds, baselines, lifecycle records, and original command receipts through migration and replay. Reject duplicate active intentions and stale expected versions.
 9. Verify every active intention appears immediately and remains visible with identical neutral language and ordering after arbitrary clock advancement. Confirm no date, age, urgency, overdue, countdown, or elapsed-time field affects the result.
 10. Verify only valid current play evidence strictly greater than baseline completes the intention during the data update. Cover a corrected count below baseline followed by an increase that remains at or below baseline. Missing, invalid, stale, equal, or lower evidence must leave it visible, with a warning where applicable, and repeated profile reads must cause no durable write.
 11. Replay the same command ID and canonical payload and verify the original success result returns without duplicate intentions or resolutions. Reuse the ID with a changed payload and verify rejection; use a new ID with a stale version and verify a current-state conflict. Simulate persistence failure and verify no success is reported.

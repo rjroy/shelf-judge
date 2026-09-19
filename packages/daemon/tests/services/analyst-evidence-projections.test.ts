@@ -4,6 +4,81 @@ import { createProfileService } from "../../src/services/profile-service.js";
 import { createTestApp } from "../helpers/test-app.js";
 
 describe("AnalystProjectionSnapshotService Profile cache parity", () => {
+  test("captures baseline-free Want to play intentions as Analyst evidence", async () => {
+    const ctx = createTestApp({ now: () => "2026-09-19T10:00:00.000Z" });
+    const game = (await ctx.gameService.addGame({ name: "Unplayed without evidence" })).game;
+
+    expect(
+      await ctx.intentionService.execute({
+        type: "create",
+        commandId: "10000000-0000-4000-8000-000000000001",
+        gameId: game.id,
+        kind: "want-to-play",
+        expectedActiveIntention: "absent",
+      }),
+    ).toMatchObject({
+      ok: true,
+      intention: { kind: "want-to-play", baseline: null },
+    });
+
+    const snapshot = await createAnalystProjectionSnapshotService({
+      storageService: ctx.storageService,
+      displayedFitnessService: ctx.displayedFitnessService,
+    }).capture();
+
+    expect(
+      snapshot.sources.find((source) => source.evidenceClass === "profile-evidence")?.payload,
+    ).toMatchObject({
+      activeIntentions: [{ gameId: game.id, kind: "want-to-play", baseline: null }],
+    });
+  });
+
+  test("captures Want to play count provenance and current derived evidence", async () => {
+    const observedAt = "2026-09-19T10:00:00.000Z";
+    const ctx = createTestApp({ now: () => observedAt });
+    const game = (await ctx.gameService.addGame({ name: "Played with evidence", numPlays: 2 }))
+      .game;
+
+    expect(
+      await ctx.intentionService.execute({
+        type: "create",
+        commandId: "10000000-0000-4000-8000-000000000002",
+        gameId: game.id,
+        expectedActiveIntention: "absent",
+      }),
+    ).toMatchObject({
+      ok: true,
+      intention: {
+        kind: "want-to-play",
+        baseline: { playCount: 2, evidenceSource: "manual", observedAt },
+      },
+    });
+
+    const snapshot = await createAnalystProjectionSnapshotService({
+      storageService: ctx.storageService,
+      displayedFitnessService: ctx.displayedFitnessService,
+    }).capture();
+
+    expect(
+      snapshot.sources.find((source) => source.evidenceClass === "profile-evidence")?.payload,
+    ).toMatchObject({
+      activeIntentions: [
+        {
+          gameId: game.id,
+          kind: "want-to-play",
+          baseline: { playCount: 2, evidenceSource: "manual", observedAt },
+          currentPlayEvidence: {
+            status: "valid",
+            playCount: 2,
+            source: "manual",
+            observedAt,
+            stale: false,
+          },
+        },
+      ],
+    });
+  });
+
   test("does not rewrite a valid Profile cache", async () => {
     const ctx = createTestApp();
     await ctx.profileService.getProfile();

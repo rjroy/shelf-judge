@@ -111,7 +111,6 @@ describe("CLI process command replay", () => {
         "intention",
         "set",
         "game-1",
-        "first-play",
         "--json",
       ]);
       await daemon.exited;
@@ -140,7 +139,6 @@ describe("CLI process command replay", () => {
         "intention",
         "set",
         "game-1",
-        "first-play",
         "--command-id",
         commandId ?? "missing-command-id",
         "--json",

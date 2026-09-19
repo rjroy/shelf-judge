@@ -83,7 +83,7 @@ export {
   CollectionProfileResultSchema,
 };
 
-export const CURRENT_COLLECTION_SCHEMA_VERSION = 6 as const;
+export const CURRENT_COLLECTION_SCHEMA_VERSION = 7 as const;
 export const CURRENT_PROFILE_CONTRACT_VERSION = 9 as const;
 export const CURRENT_PROFILE_ALGORITHM_VERSION = 11 as const;
 const AmountInputSchema = z.string().superRefine((value, context) => {
@@ -822,6 +822,12 @@ export const CollectionSchemaV4 = CollectionSchemaV3.omit({ schemaVersion: true,
 export const CollectionGameV5Schema = CollectionGameV4Schema.extend({
   manualValues: ManualGameValuesSchema,
   additionalBggIds: z.array(z.number().int().safe().positive()).optional(),
+  lastPlayedAt: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullable()
+    .optional(),
+  recentPlayCount: z.number().int().safe().min(0).optional(),
 }).strict();
 
 export const GameSchema = CollectionGameV5Schema;
@@ -1056,16 +1062,77 @@ export const CollectionSchemaV6 = CollectionSchemaV6Base.superRefine((source, co
   }
 });
 
-export const CollectionSchema = CollectionSchemaV6;
+const DateOnlySchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD")
+  .superRefine((value, context) => {
+    const [year, month, day] = value.split("-").map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    if (
+      date.getUTCFullYear() !== year ||
+      date.getUTCMonth() !== month - 1 ||
+      date.getUTCDate() !== day
+    ) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "Expected a real calendar date" });
+    }
+  });
 
-export const CollectionProfileCollectionSourceV6Schema = CollectionSchemaV6Base.omit({
-  games: true,
-})
-  .extend({ games: z.array(GameSchema) })
+export const BggPlaySessionSchema = z
+  .object({
+    playId: z.number().int().safe().positive(),
+    bggId: z.number().int().safe().positive(),
+    quantity: z.number().int().safe().positive(),
+    playedOn: DateOnlySchema,
+    observedAt: z.string().datetime({ offset: true }),
+  })
+  .strict();
+
+export const CollectionSchemaV7 = CollectionSchemaV6Base.omit({ schemaVersion: true })
+  .extend({
+    schemaVersion: z.literal(7),
+    bggPlaySessions: z.array(BggPlaySessionSchema).optional(),
+  })
   .strict()
   .superRefine((source, context) => {
+    const { bggPlaySessions, ...v6Source } = source;
+    void bggPlaySessions;
+    const v6Projection = CollectionSchemaV6.safeParse({
+      ...v6Source,
+      schemaVersion: 6,
+    });
+    if (!v6Projection.success) {
+      for (const issue of v6Projection.error.issues) context.addIssue(issue);
+    }
+    const seen = new Set<number>();
+    for (const [index, session] of (source.bggPlaySessions ?? []).entries()) {
+      if (seen.has(session.playId)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["bggPlaySessions", index, "playId"],
+          message: "BGG play IDs must be unique",
+        });
+      }
+      seen.add(session.playId);
+    }
+  });
+
+export const CollectionSchema = CollectionSchemaV7;
+
+export const CollectionProfileCollectionSourceV6Schema = CollectionSchemaV6Base.omit({
+  schemaVersion: true,
+  games: true,
+})
+  .extend({
+    schemaVersion: z.literal(7),
+    games: z.array(GameSchema),
+    bggPlaySessions: z.array(BggPlaySessionSchema).optional(),
+  })
+  .strict()
+  .superRefine((source, context) => {
+    const { bggPlaySessions, ...historicalSource } = source;
+    void bggPlaySessions;
     const v5Projection = CollectionSchemaV5.safeParse({
-      ...source,
+      ...historicalSource,
       schemaVersion: 5,
       commandReceipts: source.commandReceipts.filter((receipt) => "request" in receipt),
     });
@@ -1929,6 +1996,7 @@ export const PlayEvidenceMutationResultSchema = z
       evidence.status !== "valid" ||
       evidence.observedAt === null ||
       !authoritativeFreshEvidence ||
+      transition.baseline === null ||
       evidence.value <= transition.baseline.playCount ||
       Date.parse(evidence.observedAt) <= Date.parse(transition.baseline.observedAt)
     ) {

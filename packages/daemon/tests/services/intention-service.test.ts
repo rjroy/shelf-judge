@@ -7,6 +7,7 @@ import {
   type IntentionMutationResult,
 } from "@shelf-judge/shared";
 import { createCollectionMutationService } from "../../src/services/collection-mutation-service.js";
+import { migrateCollection } from "../../src/services/collection-migration.js";
 import {
   createIntentionService,
   completeIntentionFromPlayEvidence,
@@ -67,7 +68,7 @@ function game(overrides: Partial<DurableGame> = {}): DurableGame {
 
 function collection(sourceGame = game()): Collection {
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     revision: 0,
     id: "collection",
     name: "Collection",
@@ -140,6 +141,58 @@ function accepted(result: IntentionMutationResult) {
 }
 
 describe("durable intention lifecycle", () => {
+  test.each(["first-play", "replay"] as const)(
+    "migrates legacy %s history and replays its original receipt unchanged",
+    async (kind) => {
+      const source = collection();
+      const intention = {
+        intentionId: "legacy-intention",
+        gameId: "game-1",
+        kind,
+        baseline: {
+          playCount: kind === "first-play" ? 0 : 3,
+          evidenceSource: "manual" as const,
+          observedAt,
+        },
+        createdAt: observedAt,
+        version: 1,
+        resolution: null,
+      };
+      const command = {
+        type: "create" as const,
+        commandId: commandIds.create,
+        gameId: "game-1",
+        kind,
+        expectedActiveIntention: "absent" as const,
+      };
+      const result = {
+        ok: true as const,
+        commandId: commandIds.create,
+        intention,
+        linkedOwnershipTransition: null,
+      };
+      source.intentions.push({
+        ...intention,
+        version: 2,
+        resolution: {
+          outcome: "completed",
+          source: "owner-confirmed",
+          resolvedAt: "2026-08-29T10:00:00.000Z",
+        },
+      });
+      source.commandReceipts.push({ commandId: commandIds.create, request: command, result });
+      const migrated = migrateCollection({ ...source, schemaVersion: 6 }).data;
+      expect(migrated.intentions).toEqual(source.intentions);
+      expect(migrated.commandReceipts).toEqual(source.commandReceipts);
+      expect(migrateCollection(migrated).data).toEqual(migrated);
+      const state = harness({ source: migrated });
+      expect(await state.restartService().execute(command)).toEqual(result);
+      const detail = await state.makeService().getGameDetail("game-1", "Game");
+      expect(detail.activeIntention).toBeNull();
+      expect(detail.resolvedHistory).toMatchObject([{ ...source.intentions[0], gameName: "Game" }]);
+      expect(state.saves()).toBe(0);
+    },
+  );
   test("play evidence is stale only for a strictly newer non-valid successful check", () => {
     for (const checkAt of ["2026-08-28T09:59:59.999Z", observedAt]) {
       expect(
@@ -196,7 +249,7 @@ describe("durable intention lifecycle", () => {
     expect(source.intentions[0]?.resolution).toBeNull();
   });
 
-  test("creates first-play, remains time-invariant, completes, and later creates a new ID", async () => {
+  test("creates Want to play, remains time-invariant, completes, and later creates a new ID", async () => {
     const state = harness();
     const service = state.makeService();
     const created = accepted(
@@ -252,13 +305,21 @@ describe("durable intention lifecycle", () => {
     expect(later.intention.intentionId).toBe("intention-2");
   });
 
-  test("derives first-play and replay eligibility from authoritative current evidence", async () => {
-    for (const [sourceGame, requestedKind, reason] of [
-      [game({ ownership: "previously-owned" }), "first-play", "not-owned"],
+  test("only ownership gates creation; legacy kind hints never gate or become the primary kind", async () => {
+    expect(
+      await harness({ source: collection(game({ ownership: "previously-owned" })) })
+        .makeService()
+        .execute({
+          type: "create",
+          commandId: commandIds.create,
+          gameId: "game-1",
+          expectedActiveIntention: "absent",
+        }),
+    ).toMatchObject({ ok: false, error: { code: "ineligible-game", reason: "not-owned" } });
+    for (const [sourceGame, requestedKind] of [
       [
         game({ playCountEvidence: { status: "missing", source: "manual", observedAt: null } }),
         "first-play",
-        "missing-play-evidence",
       ],
       [
         game({
@@ -270,35 +331,61 @@ describe("durable intention lifecycle", () => {
           },
         }),
         "first-play",
-        "invalid-play-evidence",
       ],
       [
         game({
           playCountEvidence: { status: "valid", value: 0, source: "manual", observedAt: null },
         }),
         "first-play",
-        "missing-observation-time",
       ],
       [
         game({
           latestPlayCountCheck: { status: "missing", observedAt: "2026-08-28T11:00:00.000Z" },
         }),
         "first-play",
-        "stale-play-evidence",
       ],
-      [game(), "replay", "kind-mismatch"],
     ] as const) {
-      const result = await harness({ source: collection(sourceGame) })
-        .makeService()
-        .execute({
+      for (const kind of [undefined, "want-to-play", requestedKind, "replay"] as const) {
+        const state = harness({ source: collection(sourceGame) });
+        const result = await state.makeService().execute({
           type: "create",
           commandId: commandIds.create,
           gameId: "game-1",
-          kind: requestedKind,
+          kind,
           expectedActiveIntention: "absent",
         });
-      expect(result).toMatchObject({ ok: false, error: { code: "ineligible-game", reason } });
+        expect(accepted(result).intention).toMatchObject({ kind: "want-to-play", baseline: null });
+        const later = "2026-08-29T10:00:00.000Z";
+        const updated = state.snapshot();
+        const source = updated.games[0];
+        if (source === undefined) throw new Error("Expected game");
+        source.numPlays = 10;
+        source.playCountEvidence = {
+          status: "valid",
+          value: 10,
+          source: "manual",
+          observedAt: later,
+        };
+        expect(completeIntentionFromPlayEvidence(updated, source, later)).toBeNull();
+        expect(updated.intentions[0]?.baseline).toBeNull();
+        expect(updated.intentions[0]?.resolution).toBeNull();
+      }
     }
+
+    const missingEvidenceState = harness({
+      source: collection(
+        game({ playCountEvidence: { status: "missing", source: "manual", observedAt: null } }),
+      ),
+    });
+    const wantToPlay = accepted(
+      await missingEvidenceState.makeService().execute({
+        type: "create",
+        commandId: commandIds.create,
+        gameId: "game-1",
+        expectedActiveIntention: "absent",
+      }),
+    );
+    expect(wantToPlay.intention).toMatchObject({ kind: "want-to-play", baseline: null });
 
     const replayState = harness({
       source: collection(
@@ -317,7 +404,7 @@ describe("durable intention lifecycle", () => {
         expectedActiveIntention: "absent",
       }),
     );
-    expect(replay.intention.baseline.playCount).toBe(3);
+    expect(replay.intention.baseline?.playCount).toBe(3);
     const duplicate = await replayState.makeService().execute({
       type: "create",
       commandId: commandIds.later,
@@ -328,7 +415,7 @@ describe("durable intention lifecycle", () => {
     expect(duplicate).toMatchObject({ ok: false, error: { code: "active-intention-conflict" } });
   });
 
-  test("rejects valid evidence without an observation time across restart without state or receipt", async () => {
+  test("persists and replays a baseline-free intention across restart", async () => {
     const state = harness({
       source: collection(
         game({
@@ -336,7 +423,6 @@ describe("durable intention lifecycle", () => {
         }),
       ),
     });
-    const before = state.snapshot();
     const command = {
       type: "create",
       commandId: commandIds.create,
@@ -345,19 +431,12 @@ describe("durable intention lifecycle", () => {
       expectedActiveIntention: "absent",
     } as const;
 
-    for (const service of [state.makeService(), state.restartService()]) {
-      expect(await service.execute(command)).toEqual({
-        ok: false,
-        commandId: commandIds.create,
-        error: {
-          code: "ineligible-game",
-          gameId: "game-1",
-          reason: "missing-observation-time",
-        },
-      });
-      expect(state.snapshot()).toEqual(before);
-    }
-    expect(state.saves()).toBe(0);
+    const result = accepted(await state.makeService().execute(command));
+    expect(result.intention).toMatchObject({ kind: "want-to-play", baseline: null });
+    expect(await state.restartService().execute(command)).toEqual(result);
+    expect(state.snapshot().intentions).toHaveLength(1);
+    expect(state.snapshot().commandReceipts).toHaveLength(1);
+    expect(state.saves()).toBe(1);
   });
 
   test("replays the original result across restart and rejects changed command payload", async () => {

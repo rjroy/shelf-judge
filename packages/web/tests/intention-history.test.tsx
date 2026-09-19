@@ -40,6 +40,14 @@ const history: ResolvedPlayIntentionHistory = [
 ];
 
 describe("IntentionHistory", () => {
+  test("renders baseline-free Want to play history without invented evidence", () => {
+    const item = { ...history[0], kind: "want-to-play" as const, baseline: null };
+    expect(ResolvedPlayIntentionHistorySchema.safeParse([item]).success).toBe(true);
+    const html = renderToStaticMarkup(<IntentionHistory history={[item]} />);
+    expect(html).toContain("Want to play");
+    expect(html).toContain("No reliable recorded baseline");
+    expect(html).not.toContain("0 recorded plays");
+  });
   test("renders accepted order and complete kind, baseline, creation, and resolution provenance", () => {
     expect(ResolvedPlayIntentionHistorySchema.safeParse(history).success).toBe(true);
     const html = renderToStaticMarkup(<IntentionHistory history={history} />);

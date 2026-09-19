@@ -147,7 +147,7 @@ const allGamesWithScores: GameWithScore[] = [
 ];
 
 const defaultCollection: Collection = {
-  schemaVersion: 6,
+  schemaVersion: 7,
   revision: 0,
   id: "collection-1",
   name: "Test",

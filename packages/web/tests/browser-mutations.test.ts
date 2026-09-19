@@ -93,6 +93,25 @@ async function rejection(action: () => Promise<unknown>): Promise<unknown> {
 }
 
 describe("browser mutation boundaries", () => {
+  test("creates Want to play without a kind or play-count baseline", async () => {
+    const commandId = "44000000-0000-4000-8000-000000000001";
+    const result = await createIntention(
+      "game-1",
+      (_input, init) => {
+        expect(requestBody(init)).toEqual({ commandId, expectedActiveIntention: "absent" });
+        return Promise.resolve(
+          jsonResponse({
+            ok: true,
+            commandId,
+            intention: intention({ kind: "want-to-play", baseline: null }),
+            linkedOwnershipTransition: null,
+          }),
+        );
+      },
+      () => commandId,
+    );
+    expect(result).toMatchObject({ ok: true, intention: { kind: "want-to-play", baseline: null } });
+  });
   test("reads and mutates owner notes with strict request and response coherence", async () => {
     const commandId = "44000000-0000-4000-8000-000000000001";
     const read = await getOwnerGameNote("game-1", () =>

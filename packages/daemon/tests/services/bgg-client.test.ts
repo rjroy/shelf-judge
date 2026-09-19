@@ -196,6 +196,15 @@ describe("BggClient", () => {
   });
 
   describe("getPlayCount", () => {
+    test("rejects duplicate-short pagination rather than authorizing a partial scope", async () => {
+      mockFetch.enqueue(200, '<plays total="2"><play id="1" quantity="1"/></plays>');
+      mockFetch.enqueue(200, '<plays total="2"><play id="1" quantity="1"/></plays>');
+      mockFetch.enqueue(200, '<plays total="2"></plays>');
+
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(client.getPlayCount([10])).rejects.toThrow("ended before all records");
+    });
+
     test("pages each entry, deduplicates play IDs, and sums quantities", async () => {
       const firstPage = Array.from(
         { length: 100 },

@@ -59,7 +59,7 @@ describe("canonical purchase utilization response parity", () => {
       updatedAt: UTILIZATION_OBSERVED_AT,
     }));
     const collection: Collection = {
-      schemaVersion: 6,
+      schemaVersion: 7,
       revision: 0,
       id: "parity-collection",
       name: "Parity",

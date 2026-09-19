@@ -373,10 +373,7 @@ function attentionItem(
     decisionFamily: "play-intention",
     intention: structuredClone(intention),
     gameName: game.name,
-    question:
-      intention.kind === "first-play"
-        ? `Do you still intend to play ${game.name}?`
-        : `Do you still intend to replay ${game.name}?`,
+    question: `Do you still want to play ${game.name}?`,
     whyNow: "You asked Shelf Judge to keep this intention visible.",
     currentPlayEvidence,
     responses: ["leave-visible", "complete", "retire", "correct-or-refresh-evidence"],

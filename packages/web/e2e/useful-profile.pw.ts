@@ -75,6 +75,17 @@ async function expectNoHorizontalOverflow(page: Page): Promise<void> {
     const elements = new Set<Element>([document.documentElement, document.body]);
     for (const selector of selectors) {
       for (const root of document.querySelectorAll(selector)) {
+        for (const descendant of root.querySelectorAll("*")) {
+          const style = getComputedStyle(descendant);
+          // Screen-reader text is intentionally clipped; local scroll regions remain usable.
+          if (
+            descendant.closest(".sr-only") === null &&
+            style.overflowX !== "auto" &&
+            style.overflowX !== "scroll"
+          ) {
+            elements.add(descendant);
+          }
+        }
         let current: Element | null = root;
         while (current !== null) {
           elements.add(current);
@@ -91,16 +102,11 @@ async function expectNoHorizontalOverflow(page: Page): Promise<void> {
             : `${element.tagName.toLowerCase()}.${Array.from(element.classList).join(".")}`,
       clientWidth: element.clientWidth,
       scrollWidth: element.scrollWidth,
-      overflowX: getComputedStyle(element).overflowX,
     }));
   }, featureRoots);
   expect(
     measurements.filter(({ scrollWidth, clientWidth }) => scrollWidth > clientWidth + 1),
   ).toEqual([]);
-  expect(
-    measurements.filter(({ overflowX }) => overflowX === "hidden" || overflowX === "clip"),
-  ).toEqual([]);
-
   const outOfBounds = await page.locator(featureRoots.join(", ")).evaluateAll((roots) => {
     const elements = roots.flatMap((root) => [root, ...Array.from(root.querySelectorAll("*"))]);
     return elements
@@ -644,7 +650,39 @@ test.describe("useful profile responsive release gate", () => {
 });
 
 test.describe("game-detail intention browser contracts", () => {
-  test("creates and completes through the Next daemon proxy", async ({
+  test("overflow guard accepts the shell and detects overflowing or clipped feature content", async ({
+    page,
+  }) => {
+    await page.setContent(
+      '<style>body { margin: 0; overflow: hidden; }</style><section class="intention-panel"><p>Recorded play context</p></section>',
+    );
+    await expectNoHorizontalOverflow(page);
+    await page.locator(".intention-panel p").evaluate((element) => {
+      element.style.width = "200vw";
+    });
+    await expect(expectNoHorizontalOverflow(page)).rejects.toThrow();
+    await page.locator(".intention-panel p").evaluate((element) => {
+      element.style.width = "40px";
+      element.style.whiteSpace = "nowrap";
+      element.style.overflow = "hidden";
+    });
+    await expect(expectNoHorizontalOverflow(page)).rejects.toThrow();
+  });
+
+  test("shows neutral dated play history with its observation-relative window", async ({
+    page,
+  }, testInfo) => {
+    await reset(page, "active");
+    await page.goto(`/games/${gameId}`);
+    await applyProjectViewport(page, testInfo.project.name);
+    const context = page.locator(".intention-dated-context");
+    await expect(context).toBeVisible();
+    await expect(context).toHaveText(
+      "Last dated play: 2026-08-26. Recent dated play volume: 3 plays in the 365 days ending 2026-08-28, the BGG /plays observation date.",
+    );
+    await expectNoHorizontalOverflow(page);
+  });
+  test("creates without count evidence and completes through the Next daemon proxy", async ({
     page,
     networkEvidence,
   }, testInfo) => {
@@ -652,13 +690,19 @@ test.describe("game-detail intention browser contracts", () => {
     await page.goto(`/games/${gameId}`);
     await applyProjectViewport(page, testInfo.project.name);
 
-    const create = page.getByRole("button", { name: "Create first-play intention" });
+    const create = page.getByRole("button", { name: "Want to play", exact: true });
     await expectHydrated(create);
     await expectVisibleFocus(page, create);
     await create.press("Enter");
     const status = page.locator(".intention-live-status");
     await expect(status).toHaveAttribute("aria-live", "polite");
-    await expect(status).toContainText("First-play intention created.");
+    await expect(status).toContainText("Want to play intention created.");
+    await expect(page.locator(".intention-active")).toContainText(
+      "No reliable recorded play-count baseline",
+    );
+    await expect(page.locator(".intention-dated-context")).toContainText(
+      "No valid dated plays are available.",
+    );
     await expect(status).toBeFocused();
 
     const complete = page.getByRole("button", { name: "Mark complete from personal knowledge" });
@@ -715,11 +759,11 @@ test.describe("game-detail intention browser contracts", () => {
     await page.reload();
     await applyProjectViewport(page, testInfo.project.name);
     await expect(page.getByText("Owner confirmed")).toBeVisible();
-    const recreate = page.getByRole("button", { name: "Create first-play intention" });
+    const recreate = page.getByRole("button", { name: "Want to play", exact: true });
     await expectHydrated(recreate);
     await recreate.press("Enter");
     await expect(page.locator(".intention-live-status")).toContainText(
-      "First-play intention created.",
+      "Want to play intention created.",
     );
     expect(networkEvidence.mutationPaths).toEqual([
       "/api/daemon/games/game-4/intention/intention-browser-1/retire",
@@ -754,7 +798,8 @@ test.describe("game-detail intention browser contracts", () => {
     await expectNoHorizontalOverflow(page);
     await expectAaContrast(page, [
       ".intention-panel",
-      ".intention-evidence",
+      ".intention-warning",
+      ".intention-dated-context",
       ".field-error",
       ".play-correction .btn-primary",
       ".play-correction .btn-secondary",

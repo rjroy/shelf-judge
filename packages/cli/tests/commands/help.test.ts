@@ -203,9 +203,7 @@ describe("help command", () => {
       },
     });
     const result = await helpCommand(client, ["game"], { json: false });
-    expect(result).toContain(
-      "shelf-judge game intention set <game-id> <first-play|replay> [--command-id <uuid>]",
-    );
+    expect(result).toContain("shelf-judge game intention set <game-id> [--command-id <uuid>]");
     expect(result).toContain(
       "shelf-judge game intention complete <game-id> <intention-id> --expected-version <n> [--command-id <uuid>]",
     );

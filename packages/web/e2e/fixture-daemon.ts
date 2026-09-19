@@ -180,7 +180,7 @@ function baseGame(): Game {
     bggData: null,
     numPlays: 0,
     acquisition: { state: "unknown" },
-    playCountEvidence: { status: "valid", value: 0, source: "manual", observedAt },
+    playCountEvidence: { status: "valid", value: 0, source: "bgg-plays", observedAt },
     durationEvidence: { status: "valid", value: 60, source: "manual", observedAt },
     playerRangeEvidence: {
       status: "valid",
@@ -619,7 +619,7 @@ function reflectionResult(questionId: ReflectionQuestionId, outcome: "answered" 
       questionId,
       questionVersion: REFLECTION_QUESTION_POLICIES[questionId].questionVersion,
       collectionId: "fixture-collection",
-      collectionSchemaVersion: 6,
+      collectionSchemaVersion: 7,
       collectionRevision: 1,
       profileContractVersion: 1,
       profileAlgorithmVersion: 1,
@@ -897,6 +897,18 @@ async function waitForManualValuesRelease(kind: "mutation" | "detail"): Promise<
 function reset(next: Scenario): void {
   scenario = next;
   game = baseGame();
+  if (next === "active") {
+    game.numPlays = 3;
+    game.lastPlayedAt = "2026-08-26";
+    game.recentPlayCount = 3;
+    game.playCountEvidence = { status: "valid", value: 3, source: "bgg-plays", observedAt };
+  }
+  if (next === "create") {
+    game.numPlays = null;
+    game.lastPlayedAt = null;
+    game.recentPlayCount = undefined;
+    game.playCountEvidence = { status: "missing", source: "manual", observedAt: null };
+  }
   history = [];
   staleOnce = next === "stale";
   active = next === "active" || next === "stale" || next === "profile" ? activeIntention() : null;
@@ -1914,6 +1926,10 @@ async function handle(request: Request): Promise<Response> {
     }
     intentionSequence += 1;
     active = activeIntention(`intention-browser-${intentionSequence}`);
+    active.kind = "want-to-play";
+    if (game.playCountEvidence.status !== "valid" || game.playCountEvidence.observedAt === null) {
+      active.baseline = null;
+    }
     return json(
       IntentionMutationResultSchema.parse({
         ok: true,

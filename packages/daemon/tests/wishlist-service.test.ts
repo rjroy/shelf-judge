@@ -124,7 +124,7 @@ function createMockStorage(
 ): StorageService {
   let stored = structuredClone(wishlist);
   const coll: Collection = {
-    schemaVersion: 6,
+    schemaVersion: 7,
     revision: 0,
     id: "coll-1",
     name: "Test",

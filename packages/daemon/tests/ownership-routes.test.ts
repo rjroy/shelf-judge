@@ -122,7 +122,7 @@ const prevOwned = makeGame("prev", "Delta", "previously-owned");
 // Mutable collection for setOwnership tests
 function makeCollection(): Collection {
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     revision: 0,
     id: "coll-1",
     name: "Test",

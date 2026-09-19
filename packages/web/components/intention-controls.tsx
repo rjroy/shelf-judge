@@ -7,7 +7,6 @@ import type {
   IntentionMutationError,
   ManualPlayCorrectionResponse,
   PlayIntention,
-  PlayIntentionKind,
   ResolvedPlayIntentionHistory,
 } from "@shelf-judge/shared";
 import { correctPlayCount, createIntention, resolveIntention } from "@/lib/browser-mutations";
@@ -194,7 +193,7 @@ export function intentionControlReducer(
         history: historyWith(state.history, intention, action.gameName),
         announcement:
           intention.resolution === null
-            ? `${intention.kind === "first-play" ? "First-play" : "Replay"} intention created.`
+            ? "Want to play intention created."
             : `Intention ${intention.resolution.outcome}.`,
         focusTarget: "status",
       };
@@ -276,16 +275,35 @@ export function isPlayEvidenceStale(game: Game): boolean {
   );
 }
 
-export function eligibleIntentionKind(game: Game): PlayIntentionKind | null {
+export function derivedPlayContext(game: Game): "first play" | "replay" | null {
   if (
     game.ownership !== "owned" ||
     game.playCountEvidence.status !== "valid" ||
     game.playCountEvidence.observedAt === null ||
     isPlayEvidenceStale(game)
-  ) {
+  )
     return null;
+  return game.playCountEvidence.value === 0 ? "first play" : "replay";
+}
+
+export function DatedPlayContext({ game }: { game: Game }) {
+  const evidence = game.playCountEvidence;
+  if (
+    evidence.status !== "valid" ||
+    evidence.source !== "bgg-plays" ||
+    evidence.observedAt === null ||
+    game.lastPlayedAt === undefined ||
+    game.lastPlayedAt === null ||
+    game.recentPlayCount === undefined
+  ) {
+    return <p className="intention-dated-context">No valid dated plays are available.</p>;
   }
-  return game.playCountEvidence.value === 0 ? "first-play" : "replay";
+  return (
+    <p className="intention-dated-context">
+      Last dated play: {game.lastPlayedAt}. Recent dated play volume: {game.recentPlayCount} plays
+      in the 365 days ending {evidence.observedAt.slice(0, 10)}, the BGG /plays observation date.
+    </p>
+  );
 }
 
 export function focusIntentionControlTarget(
@@ -374,12 +392,15 @@ export function ActiveIntentionControl({
   if (active === null) return null;
   return (
     <div className="intention-active">
-      <p className="intention-status-label">Active {active.kind} intention</p>
+      <p className="intention-status-label">Active Want to play intention</p>
       <p>
-        Baseline: {active.baseline.playCount} plays from {active.baseline.evidenceSource}, observed{" "}
-        {active.baseline.observedAt}. Intention ID {active.intentionId}, version {active.version}.
+        {active.baseline === null
+          ? "No reliable recorded play-count baseline was available, so this intention will not complete automatically from count evidence."
+          : `Baseline: ${active.baseline.playCount} plays from ${active.baseline.evidenceSource}, observed ${active.baseline.observedAt}.`}{" "}
+        Intention ID {active.intentionId}, version {active.version}.
       </p>
       <EvidenceStatus game={game} />
+      <DatedPlayContext game={game} />
       <div className="intention-actions">
         <button
           type="button"
@@ -445,7 +466,7 @@ export function IntentionControls({
       const active = state.activeIntention;
       const result =
         action === "create"
-          ? await createIntention(state.game.id, eligibleIntentionKind(state.game) ?? "first-play")
+          ? await createIntention(state.game.id)
           : active === null
             ? null
             : await resolveIntention(state.game.id, active.intentionId, active.version, action);
@@ -501,7 +522,7 @@ export function IntentionControls({
     }
   }
 
-  const kind = eligibleIntentionKind(state.game);
+  const context = derivedPlayContext(state.game);
   const active = state.activeIntention;
   const fieldIssue = state.fieldIssues.playCount;
 
@@ -514,24 +535,25 @@ export function IntentionControls({
         {active === null ? (
           <div className="intention-create">
             <EvidenceStatus game={state.game} />
-            {kind !== null ? (
+            <DatedPlayContext game={state.game} />
+            {state.game.ownership === "owned" ? (
               <button
                 type="button"
                 className="btn btn-primary"
                 disabled={state.pending}
                 onClick={() => void runIntention("create")}
               >
-                {state.pending
-                  ? "Saving..."
-                  : kind === "first-play"
-                    ? "Create first-play intention"
-                    : "Create replay intention"}
+                {state.pending ? "Saving..." : "Want to play"}
               </button>
             ) : (
               <p className="intention-ineligible">
-                {state.game.ownership !== "owned"
-                  ? "Only currently owned games can have an active play intention. Mark this game as owned before creating one."
-                  : "A valid, current play count is required before Shelf Judge can choose first play or replay."}
+                Only currently owned games can have an active play intention. Mark this game as
+                owned before creating one.
+              </p>
+            )}
+            {context !== null && (
+              <p className="intention-help">
+                Current trustworthy evidence suggests {context} context.
               </p>
             )}
           </div>

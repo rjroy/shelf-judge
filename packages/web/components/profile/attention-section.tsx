@@ -42,7 +42,11 @@ function AttentionItem({ item }: { item: CollectionProfileAttentionItem }) {
           <dl className="profile-facts">
             <div>
               <dt>Intention</dt>
-              <dd>{item.intention.kind === "first-play" ? "First play" : "Replay"}</dd>
+              <dd>
+                {item.intention.kind === "want-to-play"
+                  ? "Want to play"
+                  : `${item.intention.kind === "first-play" ? "First play" : "Replay"} (historical)`}
+              </dd>
             </div>
             <div>
               <dt>Created</dt>
@@ -51,9 +55,9 @@ function AttentionItem({ item }: { item: CollectionProfileAttentionItem }) {
             <div>
               <dt>Baseline</dt>
               <dd>
-                {item.intention.baseline.playCount} plays from{" "}
-                {item.intention.baseline.evidenceSource}, observed{" "}
-                {item.intention.baseline.observedAt}
+                {item.intention.baseline === null
+                  ? "No reliable recorded play-count baseline"
+                  : `${item.intention.baseline.playCount} plays from ${item.intention.baseline.evidenceSource}, observed ${item.intention.baseline.observedAt}`}
               </dd>
             </div>
             <div>

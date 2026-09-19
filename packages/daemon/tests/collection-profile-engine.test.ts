@@ -399,7 +399,7 @@ function makeUsefulCollection(
   intentions: Collection["intentions"] = [],
 ): CollectionProfileCollectionSource {
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     revision: 1,
     id: "collection",
     name: "Collection",
@@ -1033,7 +1033,7 @@ describe("computeCollectionProfile", () => {
 
     expect(first.attention.items.map(({ gameName }) => gameName)).toEqual(["Zed", "😀 Game"]);
     expect(first.attention.items[0]).toMatchObject({
-      question: "Do you still intend to replay Zed?",
+      question: "Do you still want to play Zed?",
       currentPlayEvidence: {
         status: "stale",
         warning: "A newer BGG check did not provide a valid play count.",

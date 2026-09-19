@@ -192,18 +192,25 @@ export const PlayIntentionSchema = z
   .object({
     intentionId: IdSchema,
     gameId: IdSchema,
-    kind: z.enum(["first-play", "replay"]),
-    baseline: PlayIntentionBaselineSchema,
+    kind: z.enum(["want-to-play", "first-play", "replay"]),
+    baseline: PlayIntentionBaselineSchema.nullable(),
     createdAt: TimestampSchema,
     version: PositiveSafeIntegerSchema,
     resolution: PlayIntentionResolutionSchema.nullable(),
   })
   .strict()
   .superRefine((intention, context) => {
+    if (intention.baseline === null && intention.resolution?.source === "observed-play-increase") {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["resolution"],
+        message: "Automatic completion requires a captured play-count baseline",
+      });
+    }
     const compatible =
-      intention.kind === "first-play"
-        ? intention.baseline.playCount === 0
-        : intention.baseline.playCount > 0;
+      intention.kind === "want-to-play" ||
+      (intention.kind === "first-play" && intention.baseline?.playCount === 0) ||
+      (intention.kind === "replay" && (intention.baseline?.playCount ?? 0) > 0);
     if (!compatible) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -221,7 +228,10 @@ export const PlayIntentionSchema = z
         message: "Resolution cannot precede intention creation",
       });
     }
-    if (Date.parse(intention.baseline.observedAt) > Date.parse(intention.createdAt)) {
+    if (
+      intention.baseline !== null &&
+      Date.parse(intention.baseline.observedAt) > Date.parse(intention.createdAt)
+    ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["baseline", "observedAt"],
@@ -243,7 +253,7 @@ const CreateIntentionCommandSchema = z
     type: z.literal("create"),
     commandId: z.string().uuid(),
     gameId: IdSchema,
-    kind: z.enum(["first-play", "replay"]),
+    kind: z.enum(["want-to-play", "first-play", "replay"]).optional(),
     expectedActiveIntention: z.literal("absent"),
   })
   .strict();
@@ -411,7 +421,7 @@ export function intentionMutationResultMatchesCommand(
     }
     if (command.type === "create") {
       return (
-        result.intention.kind === command.kind &&
+        (result.intention.kind === "want-to-play" || result.intention.kind === command.kind) &&
         result.intention.version === 1 &&
         result.intention.resolution === null
       );
@@ -486,12 +496,13 @@ export const IntentionCommandReceiptSchema = z
     }
     if (
       receipt.request.type === "create" &&
+      receipt.result.intention.kind !== "want-to-play" &&
       receipt.request.kind !== receipt.result.intention.kind
     ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["result", "intention", "kind"],
-        message: "Create receipt result must preserve the requested kind",
+        message: "Create receipt must contain Want to play or preserve the legacy requested kind",
       });
     }
     if (
@@ -637,9 +648,12 @@ export const CollectionProfileSourceRecordsSchema = z
         durable.gameId === accepted.gameId &&
         durable.kind === accepted.kind &&
         durable.createdAt === accepted.createdAt &&
-        durable.baseline.playCount === accepted.baseline.playCount &&
-        durable.baseline.evidenceSource === accepted.baseline.evidenceSource &&
-        durable.baseline.observedAt === accepted.baseline.observedAt;
+        (durable.baseline === null
+          ? accepted.baseline === null
+          : accepted.baseline !== null &&
+            durable.baseline.playCount === accepted.baseline.playCount &&
+            durable.baseline.evidenceSource === accepted.baseline.evidenceSource &&
+            durable.baseline.observedAt === accepted.baseline.observedAt);
       const resolutionMatches =
         accepted.version < durable.version ||
         JSON.stringify(accepted.resolution) === JSON.stringify(durable.resolution);
@@ -1069,10 +1083,7 @@ export const CollectionProfileAttentionItemSchema = z
   })
   .strict()
   .superRefine((item, context) => {
-    const expectedQuestion =
-      item.intention.kind === "first-play"
-        ? `Do you still intend to play ${item.gameName}?`
-        : `Do you still intend to replay ${item.gameName}?`;
+    const expectedQuestion = `Do you still want to play ${item.gameName}?`;
     if (item.intention.resolution !== null)
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -1111,6 +1122,7 @@ export const CollectionProfileAttentionItemSchema = z
       });
     if (
       item.currentPlayEvidence.status === "valid" &&
+      item.intention.baseline !== null &&
       item.currentPlayEvidence.playCount > item.intention.baseline.playCount
     )
       context.addIssue({
@@ -1125,8 +1137,8 @@ export const ResolvedPlayIntentionHistoryItemSchema = z
     intentionId: IdSchema,
     gameId: IdSchema,
     gameName: z.string().min(1),
-    kind: z.enum(["first-play", "replay"]),
-    baseline: PlayIntentionBaselineSchema,
+    kind: z.enum(["want-to-play", "first-play", "replay"]),
+    baseline: PlayIntentionBaselineSchema.nullable(),
     createdAt: TimestampSchema,
     version: PositiveSafeIntegerSchema,
     resolution: PlayIntentionResolutionSchema,

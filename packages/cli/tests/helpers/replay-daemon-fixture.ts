@@ -99,7 +99,7 @@ Bun.serve({
     const intention: PlayIntention = {
       intentionId: "process-intention-1",
       gameId: command.gameId,
-      kind: command.kind,
+      kind: command.kind ?? "want-to-play",
       baseline: {
         playCount: 0,
         evidenceSource: "manual",
