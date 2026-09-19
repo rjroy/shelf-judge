@@ -1,6 +1,9 @@
+import type { ReflectionAbstentionReason } from "@shelf-judge/shared";
+import type { ReflectionNoteGuidance } from "./reflection-evidence-service.js";
 import {
   REFLECTION_QUESTION_ABSTENTION_REASONS,
   ReflectionCitationSchema,
+  ReflectionAbstentionReasonSchema,
   ReflectionCompletedSchema,
   ReflectionProviderUsageSchema,
   type GroundedProviderUsage,
@@ -253,6 +256,14 @@ export function createReflectionResultValidator(): ReflectionResultValidator {
           ? ReflectionProviderUsageSchema.parse(input.usage)
           : input.usage;
       const { noteExcerpts, ...modelResult } = submission;
+      const abstentionGuidance =
+        modelResult.outcome === "abstained"
+          ? createAbstentionGuidance(
+              input.questionId,
+              modelResult.reason,
+              input.evidencePackage.noteGuidance,
+            )
+          : undefined;
       const result = ReflectionCompletedSchema.parse({
         ...modelResult,
         citations: canonicalCitations(blocks, input.evidencePackage, noteExcerpts),
@@ -261,11 +272,59 @@ export function createReflectionResultValidator(): ReflectionResultValidator {
         dependencies: input.evidencePackage.dependencies,
         generatedAt: input.generatedAt,
         usage,
-        ...(modelResult.outcome === "abstained"
-          ? { noteGuidance: input.evidencePackage.noteGuidance }
-          : {}),
+        ...(abstentionGuidance === undefined ? {} : { abstentionGuidance }),
       });
       return cloneAndFreeze(result);
     },
   });
+}
+
+function createAbstentionGuidance(
+  questionId: ReflectionQuestionId,
+  reason: string,
+  noteGuidance: ReflectionNoteGuidance | undefined,
+) {
+  const typedReason = ReflectionAbstentionReasonSchema.parse(reason);
+  const refreshInstruction =
+    "After editing, select Refresh this question to check the updated evidence.";
+  const noteCanBeActionable =
+    (questionId === "pattern-exceptions" || questionId === "recurring-trade-offs") &&
+    (reason === "no-owner-testimony" || reason === "insufficient-independent-testimony");
+  if (noteCanBeActionable && noteGuidance?.currentNoteState === "no-current-notes") {
+    return {
+      kind: "missing-current-testimony" as const,
+      message:
+        "No current owner testimony was available among the games considered. Notes about experiences from more than one relevant game could help only when they actually bear on this question, and do not guarantee an answer.",
+      refreshInstruction,
+    };
+  }
+  if (noteCanBeActionable && noteGuidance?.currentNoteState === "unexamined-current-notes") {
+    return {
+      kind: "existing-notes-not-examined" as const,
+      message:
+        "Current notes are present but were not examined in this attempt. Adding more notes may not help; existing testimony must bear on this question and be checked by a manual refresh.",
+      refreshInstruction,
+    };
+  }
+  const messages: Record<ReflectionAbstentionReason, string> = {
+    "no-owner-testimony":
+      "The available evidence did not include owner testimony that supports this reflection. Notes may add context, but do not guarantee an answer.",
+    "insufficient-independent-testimony":
+      "The evidence did not independently support the reflection across more than one relevant game. More notes may help only when they actually bear on this question.",
+    "no-supported-pattern":
+      "The evidence did not establish a supported collection pattern to qualify. More notes may not produce an answer.",
+    "no-material-synthesis":
+      "The evidence did not support a meaningful synthesis beyond what is already shown. More notes may not produce an answer.",
+    "conflicting-evidence":
+      "Current evidence materially conflicts, so combining it would be misleading. More notes may not resolve that conflict or produce an answer.",
+    "incomplete-scope":
+      "The relevant evidence scope was incomplete, so this reflection cannot be checked honestly. More notes may not produce an answer.",
+    "question-not-applicable":
+      "This question does not fit the current collection evidence. More notes may not make it applicable or produce an answer.",
+  };
+  return {
+    kind: "non-note-blocker" as const,
+    message: messages[typedReason],
+    refreshInstruction,
+  };
 }

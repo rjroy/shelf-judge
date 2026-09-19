@@ -400,10 +400,9 @@ export interface FitnessResult {
 export interface TournamentSettings {
   kFactorThreshold: number; // Default 15. Games with fewer comparisons use K=32, rest use K=16.
   normalizationHalfWidth: number; // Default 400. Reference range is 1500 ± this value.
-  provisionalThreshold: number; // Default 6. Games with fewer comparisons show "(provisional)".
 }
 
-export type SessionFilterType = "name" | "minFitness" | "maxFitness" | "bggTag" | "staleness";
+export type SessionFilterType = "name" | "minFitness" | "maxFitness" | "bggTag";
 
 export interface SessionFilter {
   type: SessionFilterType;
@@ -465,8 +464,7 @@ export interface TournamentGameStatsDisplay {
   eloRating: number;
   comparisonCount: number;
   normalizedScore: number | null; // null when < 5 games ranked or game has 0 comparisons
-  isProvisional: boolean; // comparisonCount < provisionalThreshold
-  displayLabel: string; // "not yet ranked" | "8.3 (provisional)" | "8.3"
+  displayLabel: string; // "not yet ranked" | "8.3"
   wins: number;
   losses: number;
   recentComparisons: RecentComparison[]; // Read from cached TournamentGameStats.recentComparisons, enriched with game names at read time
@@ -1158,7 +1156,6 @@ export interface PredictionSettings {
   stageThresholds: [number, number, number]; // [stage1, stage2, stage3] defaults [5, 15, 30]
   defaultK: number; // default 5
   minSimilarityThreshold: number; // default 0.2
-  tournamentStabilityBoost: number; // default 0.2
 }
 
 export interface PredictionUnavailable {

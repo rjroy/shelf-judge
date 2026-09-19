@@ -116,27 +116,10 @@ export function ReflectionCard({
           ) : (
             <>
               <p>Unable to provide a reflection: {result.explanation}</p>
-              {result.noteGuidance === undefined ? null : (
+              {result.abstentionGuidance === undefined ? null : (
                 <div className="reflection-note-guidance">
-                  {result.noteGuidance.missingNotes.length > 0 && (
-                    <p>
-                      Add notes for:{" "}
-                      {result.noteGuidance.missingNotes.map((game, index) => (
-                        <span key={game.gameId}>
-                          {index === 0 ? "" : ", "}
-                          <a href={`/games/${encodeURIComponent(game.gameId)}`}>{game.gameTitle}</a>
-                        </span>
-                      ))}
-                      .
-                    </p>
-                  )}
-                  {result.noteGuidance.unexaminedPresentNoteCount > 0 && (
-                    <p>
-                      {result.noteGuidance.unexaminedPresentNoteCount === 1
-                        ? "A relevant game already has a note that was not examined."
-                        : `${result.noteGuidance.unexaminedPresentNoteCount} relevant games already have notes that were not examined.`}
-                    </p>
-                  )}
+                  <p>{result.abstentionGuidance.message}</p>
+                  <p>{result.abstentionGuidance.refreshInstruction}</p>
                 </div>
               )}
             </>

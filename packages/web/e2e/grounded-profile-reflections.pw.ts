@@ -17,6 +17,7 @@ async function reflectionFixture(
     | "abstained"
     | "stale"
     | "purge-note"
+    | "abstention-guidance"
     | "malformed"
     | "configuration-race"
     | "mutate-current",
@@ -198,6 +199,37 @@ test("answered and abstained results render as distinct daemon-owned outcomes", 
   await page.reload();
   await expect(reflections).toContainText("Unable to provide a reflection");
   await expect(reflections).toContainText("No current owner testimony is available");
+});
+
+test("abstention guidance stays scoped and refreshes only the owner-selected question", async ({
+  page,
+}) => {
+  const refreshedQuestionIds: unknown[] = [];
+  page.on("request", (request) => {
+    if (!new URL(request.url()).pathname.endsWith("/profile/reflections/refresh")) return;
+    const payload = request.postDataJSON() as { questionId?: unknown } | null;
+    refreshedQuestionIds.push(payload?.questionId);
+  });
+  await reflectionFixture(page, "abstention-guidance");
+  await page.goto("/");
+  const reflections = page.locator(".optional-reflections");
+
+  await expect(reflections).toContainText("No current owner testimony was available");
+  await expect(reflections).toContainText("Current notes are present but were not examined");
+  await expect(reflections).toContainText("More notes may not produce an answer");
+  await expect(reflections).toContainText(
+    "After editing, select Refresh this question to check the updated evidence.",
+  );
+  await expect(reflections).not.toContainText("Add notes for");
+  await expect(reflections.getByRole("button", { name: "Refresh this question" })).toHaveCount(3);
+  expect(refreshedQuestionIds).toEqual([]);
+
+  const tradeOffCard = reflections.locator(".reflection-card").filter({
+    hasText: "What trade-offs recur in how I describe my games?",
+  });
+  await tradeOffCard.getByRole("button", { name: "Refresh this question" }).click();
+  await reflections.getByRole("button", { name: "Acknowledge and refresh" }).click();
+  await expect.poll(() => refreshedQuestionIds).toEqual(["recurring-trade-offs"]);
 });
 
 test("stale output remains collapsed and exposes captured citation snapshots only after disclosure", async ({

@@ -44,8 +44,6 @@ function describeSession(session: TournamentSession): string {
           return `Fitness <= ${f.value}`;
         case "bggTag":
           return `Tag: ${f.value}`;
-        case "staleness":
-          return `< ${f.value} comparisons`;
         default:
           return f.value;
       }
@@ -256,16 +254,8 @@ function TournamentSessionPageInner() {
                   <ScoreDisplay
                     label="Tournament"
                     value={pair.gameAStats?.displayLabel ?? "not yet ranked"}
-                    className={
-                      pair.gameAStats?.isProvisional || !pair.gameAStats?.comparisonCount
-                        ? "provisional"
-                        : "tournament"
-                    }
+                    className="tournament"
                   />
-                </div>
-                <div className="game-card-comparisons">
-                  {pair.gameAStats?.comparisonCount ?? 0} comparisons
-                  {pair.gameAStats?.isProvisional ? " · provisional" : ""}
                 </div>
                 <button className="pick-btn" disabled={submitting}>
                   Keep this one
@@ -301,16 +291,8 @@ function TournamentSessionPageInner() {
                   <ScoreDisplay
                     label="Tournament"
                     value={pair.gameBStats?.displayLabel ?? "not yet ranked"}
-                    className={
-                      pair.gameBStats?.isProvisional || !pair.gameBStats?.comparisonCount
-                        ? "provisional"
-                        : "tournament"
-                    }
+                    className="tournament"
                   />
-                </div>
-                <div className="game-card-comparisons">
-                  {pair.gameBStats?.comparisonCount ?? 0} comparisons
-                  {pair.gameBStats?.isProvisional ? " · provisional" : ""}
                 </div>
                 <button className="pick-btn" disabled={submitting}>
                   Keep this one
@@ -329,7 +311,6 @@ function TournamentSessionPageInner() {
                 style={{ width: `${Math.min(comparisonCount * 5, 100)}%` }}
               />
             </div>
-            <div className="session-footer-note">Comparing games with fewer comparisons first</div>
             <div className="session-footer-right">
               <button
                 className="btn btn-secondary"

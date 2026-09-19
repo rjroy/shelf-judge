@@ -52,9 +52,7 @@ export interface OwnerGameNoteInvalidationLifecycle {
 
 export interface OwnerGameNoteService {
   get(gameId: unknown): Promise<OwnerGameNoteReadResult>;
-  getStates?(
-    gameIds: readonly string[],
-  ): Promise<
+  getStates?(gameIds: readonly string[]): Promise<
     readonly {
       readonly gameId: string;
       readonly note: {
@@ -171,9 +169,7 @@ export function createOwnerGameNoteService(deps: OwnerGameNoteServiceDeps): Owne
     }
   }
 
-  async function getStates(
-    gameIds: readonly string[],
-  ): Promise<
+  async function getStates(gameIds: readonly string[]): Promise<
     readonly {
       readonly gameId: string;
       readonly note: {

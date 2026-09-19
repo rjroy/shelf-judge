@@ -389,11 +389,7 @@ export default async function GameDetailPage({
                 <div className="game-hero-score-value">
                   <div className="tournament-hero-rank">
                     <div className="score-hero-label">Tournament Rank</div>
-                    <div
-                      className={`tournament-hero-value${tournamentStats.isProvisional ? " provisional" : ""}`}
-                    >
-                      {tournamentStats.displayLabel}
-                    </div>
+                    <div className="tournament-hero-value">{tournamentStats.displayLabel}</div>
                   </div>
                 </div>
               )}

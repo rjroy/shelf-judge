@@ -127,7 +127,7 @@ function createTestApp() {
       }),
     loadTournament: () =>
       Promise.resolve({
-        settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
+        settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
         sessions: [],
         gameStats: {},
       }),
@@ -136,7 +136,6 @@ function createTestApp() {
         stageThresholds: [5, 15, 30] as [number, number, number],
         defaultK: 5,
         minSimilarityThreshold: 0.2,
-        tournamentStabilityBoost: 0.2,
       }),
     loadRedundancySettings: () =>
       Promise.resolve({

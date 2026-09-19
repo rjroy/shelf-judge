@@ -525,7 +525,7 @@ describe("AddGameSchema", () => {
 
 describe("SessionFilterSchema", () => {
   test("accepts valid filter types", () => {
-    for (const type of ["name", "minFitness", "maxFitness", "bggTag", "staleness"] as const) {
+    for (const type of ["name", "minFitness", "maxFitness", "bggTag"] as const) {
       const result = SessionFilterSchema.safeParse({ type, value: "test" });
       expect(result.success).toBe(true);
     }
@@ -533,6 +533,11 @@ describe("SessionFilterSchema", () => {
 
   test("rejects invalid filter type", () => {
     const result = SessionFilterSchema.safeParse({ type: "invalid", value: "test" });
+    expect(result.success).toBe(false);
+  });
+
+  test("rejects the removed staleness filter", () => {
+    const result = SessionFilterSchema.safeParse({ type: "staleness", value: "3" });
     expect(result.success).toBe(false);
   });
 
@@ -683,7 +688,6 @@ describe("TournamentSettingsUpdateSchema", () => {
     const result = TournamentSettingsUpdateSchema.safeParse({
       kFactorThreshold: 20,
       normalizationHalfWidth: 300,
-      provisionalThreshold: 10,
     });
     expect(result.success).toBe(true);
   });
@@ -694,12 +698,6 @@ describe("TournamentSettingsUpdateSchema", () => {
   });
 
   test("rejects settings that cannot produce a valid persisted profile", () => {
-    expect(TournamentSettingsUpdateSchema.safeParse({ provisionalThreshold: 2.5 }).success).toBe(
-      false,
-    );
-    expect(TournamentSettingsUpdateSchema.safeParse({ provisionalThreshold: -1 }).success).toBe(
-      false,
-    );
     expect(TournamentSettingsUpdateSchema.safeParse({ normalizationHalfWidth: 0 }).success).toBe(
       false,
     );
@@ -719,7 +717,6 @@ describe("TournamentSettingsSchema", () => {
     const result = TournamentSettingsSchema.safeParse({
       kFactorThreshold: 15,
       normalizationHalfWidth: 400,
-      provisionalThreshold: 6,
     });
     expect(result.success).toBe(true);
   });
@@ -729,19 +726,11 @@ describe("TournamentSettingsSchema", () => {
     expect(result.success).toBe(false);
   });
 
-  test("rejects non-integral thresholds and non-positive normalization", () => {
+  test("rejects non-positive normalization", () => {
     expect(
       TournamentSettingsSchema.safeParse({
         kFactorThreshold: 15,
         normalizationHalfWidth: 0,
-        provisionalThreshold: 6,
-      }).success,
-    ).toBe(false);
-    expect(
-      TournamentSettingsSchema.safeParse({
-        kFactorThreshold: 15,
-        normalizationHalfWidth: 400,
-        provisionalThreshold: 1.5,
       }).success,
     ).toBe(false);
   });
@@ -751,7 +740,6 @@ describe("TournamentDataSchema", () => {
   const baseSettings = {
     kFactorThreshold: 15,
     normalizationHalfWidth: 400,
-    provisionalThreshold: 6,
   };
 
   test("accepts pre-migration format (top-level comparisons, no new fields)", () => {

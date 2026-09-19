@@ -362,7 +362,6 @@ describe("Tournament Routes", () => {
       const body = (await res.json()) as TournamentSettings;
       expect(body.kFactorThreshold).toBe(15);
       expect(body.normalizationHalfWidth).toBe(400);
-      expect(body.provisionalThreshold).toBe(6);
     });
   });
 

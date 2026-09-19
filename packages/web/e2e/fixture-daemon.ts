@@ -487,7 +487,6 @@ function tournamentStats(definition: CollectionDefinition): TournamentGameStatsD
     eloRating: 1400 + value * 20,
     comparisonCount: 8,
     normalizedScore: value,
-    isProvisional: false,
     displayLabel: value.toFixed(1),
     wins: 4,
     losses: 4,
@@ -652,6 +651,40 @@ function reflectionResult(questionId: ReflectionQuestionId, outcome: "answered" 
         reason: "no-owner-testimony",
         explanation: "No current owner testimony is available for this question.",
       };
+}
+
+function guidedAbstention(
+  questionId: ReflectionQuestionId,
+  kind: "missing-current-testimony" | "existing-notes-not-examined" | "non-note-blocker",
+) {
+  const result = reflectionResult(questionId, "abstained");
+  const guidance = {
+    "missing-current-testimony": {
+      reason: "no-owner-testimony" as const,
+      message:
+        "No current owner testimony was available among the games considered. Relevant notes could help only when they bear on this question, and do not guarantee an answer.",
+    },
+    "existing-notes-not-examined": {
+      reason: "no-owner-testimony" as const,
+      message:
+        "Current notes are present but were not examined in this attempt. Adding more notes may not help.",
+    },
+    "non-note-blocker": {
+      reason: "no-material-synthesis" as const,
+      message:
+        "The evidence did not support a meaningful synthesis. More notes may not produce an answer.",
+    },
+  }[kind];
+  return {
+    ...result,
+    reason: guidance.reason,
+    abstentionGuidance: {
+      kind,
+      message: guidance.message,
+      refreshInstruction:
+        "After editing, select Refresh this question to check the updated evidence.",
+    },
+  };
 }
 
 function createCollectionState(): CollectionFixtureState {
@@ -1465,7 +1498,32 @@ async function handle(request: Request): Promise<Response> {
     const firstQuestion = reflectionState.questions[0];
     if (firstQuestion === undefined)
       throw new Error("Reflection fixture requires its first question");
-    if (mode === "answered" || mode === "abstained" || mode === "stale" || mode === "purge-note") {
+    if (mode === "abstention-guidance") {
+      const guidanceKinds: Record<
+        ReflectionQuestionId,
+        "missing-current-testimony" | "existing-notes-not-examined" | "non-note-blocker"
+      > = {
+        "repeated-values": "non-note-blocker",
+        "pattern-exceptions": "existing-notes-not-examined",
+        "recurring-trade-offs": "missing-current-testimony",
+      };
+      reflectionState = ReflectionGetResultSchema.parse({
+        ...reflectionState,
+        questions: reflectionState.questions.map((question) => ({
+          ...question,
+          cache: {
+            state: "current",
+            result: guidedAbstention(question.questionId, guidanceKinds[question.questionId]),
+          },
+          attempt: { state: "idle" },
+        })),
+      });
+    } else if (
+      mode === "answered" ||
+      mode === "abstained" ||
+      mode === "stale" ||
+      mode === "purge-note"
+    ) {
       const result = reflectionResult(
         "repeated-values",
         mode === "abstained" ? "abstained" : "answered",
@@ -1947,9 +2005,7 @@ async function removeStaleSocket(): Promise<void> {
         return;
       }
       reject(
-        error instanceof Error
-          ? error
-          : new Error(`Unable to probe Unix socket: ${socketPath}`),
+        error instanceof Error ? error : new Error(`Unable to probe Unix socket: ${socketPath}`),
       );
     });
   });

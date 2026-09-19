@@ -1756,7 +1756,6 @@ export const PredictionSettingsSchema = z
       }),
     defaultK: z.number().int().positive(),
     minSimilarityThreshold: z.number().min(0).max(1),
-    tournamentStabilityBoost: z.number().nonnegative(),
   })
   .strict();
 
@@ -2072,7 +2071,7 @@ export const AddGameSchema = z
 // Tournament schemas
 
 export const SessionFilterSchema = z.object({
-  type: z.enum(["name", "minFitness", "maxFitness", "bggTag", "staleness"]),
+  type: z.enum(["name", "minFitness", "maxFitness", "bggTag"]),
   value: z.string().min(1, "Filter value cannot be empty"),
 });
 
@@ -2095,7 +2094,6 @@ export const TournamentSettingsUpdateSchema = z
   .object({
     kFactorThreshold: z.number().int().min(1).optional(),
     normalizationHalfWidth: z.number().positive().optional(),
-    provisionalThreshold: z.number().int().min(0).optional(),
   })
   .strict();
 
@@ -2104,7 +2102,6 @@ export const TournamentSettingsUpdateSchema = z
 export const TournamentSettingsSchema = z.object({
   kFactorThreshold: z.number().int().min(1),
   normalizationHalfWidth: z.number().positive(),
-  provisionalThreshold: z.number().int().min(0),
 });
 
 const CachedRecentComparisonSchema = z.object({
@@ -2153,7 +2150,6 @@ export const TournamentGameStatsDisplaySchema = z
     eloRating: FiniteNumberSchema,
     comparisonCount: NonNegativeIntegerSchema,
     normalizedScore: FiniteNumberSchema.nullable(),
-    isProvisional: z.boolean(),
     displayLabel: z.string().min(1),
     wins: NonNegativeIntegerSchema,
     losses: NonNegativeIntegerSchema,

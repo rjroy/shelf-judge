@@ -168,7 +168,7 @@ function createStubStorage(
     loadTournament: () =>
       Promise.resolve(
         tournamentData ?? {
-          settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
+          settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
           sessions: [],
           gameStats: {},
         },
@@ -220,7 +220,6 @@ function createStubTournamentService(
         settings ?? {
           kFactorThreshold: 15,
           normalizationHalfWidth: 400,
-          provisionalThreshold: 6,
         },
       ),
     updateSettings: () => Promise.reject(new Error("not implemented")),
@@ -465,8 +464,8 @@ describe("prediction-service", () => {
       };
       const axes = [themeAxis, tournamentAxis];
 
-      // Build five rated games with comparisonCount >= 6 (above provisional
-      // threshold) so deriveDisplayStats returns a non-null normalizedScore.
+      // Build five rated games with comparisonCount >= 6 so deriveDisplayStats
+      // returns a non-null normalizedScore.
       // The cohort floor is 5, which we satisfy with five games.
       const ratedGames: DurableGame[] = [];
       const gameStats: Record<string, import("@shelf-judge/shared").TournamentGameStats> = {};
@@ -484,7 +483,7 @@ describe("prediction-service", () => {
       // Target: BGG data present, no rating, no comparisons → predict tournament axis
       const targetGame = makeGame("target", "Target Game", {});
       const tournamentData: import("@shelf-judge/shared").TournamentData = {
-        settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
+        settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
         sessions: [],
         gameStats,
       };

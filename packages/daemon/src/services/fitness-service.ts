@@ -18,7 +18,7 @@ import { checkVeto, computeHigherIsBetterEffective } from "./curve-engine";
 import { deriveDisplayStats } from "./tournament-service";
 
 const EMPTY_TOURNAMENT: TournamentData = {
-  settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
+  settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
   sessions: [],
   gameStats: {},
 };

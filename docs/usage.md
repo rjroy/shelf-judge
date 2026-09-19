@@ -197,8 +197,8 @@ Tournament is head-to-head ranking. Instead of scoring each game independently o
 
 Choose a scope first:
 
-- **Quick presets** — All games, Unranked, Top rated, Low rated, Needs more data
-- **Custom filters** — Filter by name, fitness range, BGG tag (mechanic or category), or staleness (fewer than N comparisons)
+- **Quick presets** — All games, Top rated, Low rated
+- **Custom filters** — Filter by name, fitness range, or BGG tag (mechanic or category)
 
 The game count in scope is shown next to each preset. Click **Start session** once you're ready.
 
@@ -208,7 +208,6 @@ During a session, two games are shown side by side. Click the one you prefer. Th
 
 - Total comparisons run across all sessions
 - Current top tournament rank (normalized to 10.0)
-- Games still provisional (fewer than ~5 comparisons)
 - Number of past sessions
 
 Tournament scores appear on game detail pages and are visible alongside fitness scores in the collection.

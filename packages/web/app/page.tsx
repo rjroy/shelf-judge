@@ -49,7 +49,8 @@ export function ProfileOverviewContent({ state }: { state: ProfileOverviewState 
               <h2 id="identity-question">What does my collection reveal about me?</h2>
               <div className="profile-unavailable" data-profile-state="unavailable">
                 <p className="profile-status-label">Identity unavailable</p>
-                <p>The collection identity could not be loaded or validated.</p>
+                <p>Shelf Judge cannot reach its local service right now.</p>
+                <p>Check that the Shelf Judge daemon is running, then retry.</p>
               </div>
             </section>
             <section className="profile-question" aria-labelledby="attention-question">

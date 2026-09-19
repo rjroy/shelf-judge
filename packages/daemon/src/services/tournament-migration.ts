@@ -14,7 +14,6 @@ const RECENT_COMPARISONS_CAP = 10;
 const DEFAULT_SETTINGS = {
   kFactorThreshold: 15,
   normalizationHalfWidth: 400,
-  provisionalThreshold: 6,
 } as const;
 
 interface MigrationResult {
@@ -35,20 +34,21 @@ interface MigrationResult {
  * path returns raw data without structural verification.
  */
 export function migrateTournamentData(raw: Record<string, unknown>): MigrationResult {
-  const topComparisons = raw.comparisons;
-  const { settings, repaired: settingsRepaired } = normalizeSettings(raw.settings);
+  const { data: filtersNormalized, repaired: filtersRepaired } = removeLegacyStalenessFilters(raw);
+  const topComparisons = filtersNormalized.comparisons;
+  const { settings, repaired: settingsRepaired } = normalizeSettings(filtersNormalized.settings);
 
   // If no top-level comparisons array, data is already migrated (or fresh)
   if (!Array.isArray(topComparisons)) {
     return {
-      data: { ...raw, settings } as unknown as TournamentData,
-      migrated: settingsRepaired,
+      data: { ...filtersNormalized, settings } as unknown as TournamentData,
+      migrated: settingsRepaired || filtersRepaired,
     };
   }
 
   const comparisons = topComparisons as Comparison[];
-  const sessions = (raw.sessions ?? []) as TournamentSession[];
-  const existingStats = (raw.gameStats ?? {}) as Record<string, TournamentGameStats>;
+  const sessions = (filtersNormalized.sessions ?? []) as TournamentSession[];
+  const existingStats = (filtersNormalized.gameStats ?? {}) as Record<string, TournamentGameStats>;
 
   // Build per-game win/loss counts and recent comparisons from the full history
   const winsMap = new Map<string, number>();
@@ -125,6 +125,36 @@ export function migrateTournamentData(raw: Record<string, unknown>): MigrationRe
   return { data, migrated: true };
 }
 
+function removeLegacyStalenessFilters(raw: Record<string, unknown>): {
+  data: Record<string, unknown>;
+  repaired: boolean;
+} {
+  if (!Array.isArray(raw.sessions)) return { data: raw, repaired: false };
+
+  let repaired = false;
+  const sessions = raw.sessions.map((session): unknown => {
+    if (typeof session !== "object" || session === null || Array.isArray(session)) return session;
+    const record = session as Record<string, unknown>;
+    if (!Array.isArray(record.filters)) return session;
+
+    let sessionRepaired = false;
+    const filters = record.filters.filter((filter) => {
+      const isLegacyStalenessFilter =
+        typeof filter === "object" &&
+        filter !== null &&
+        !Array.isArray(filter) &&
+        (filter as Record<string, unknown>).type === "staleness";
+      sessionRepaired ||= isLegacyStalenessFilter;
+      return !isLegacyStalenessFilter;
+    });
+
+    repaired ||= sessionRepaired;
+    return sessionRepaired ? { ...record, filters } : session;
+  });
+
+  return repaired ? { data: { ...raw, sessions }, repaired } : { data: raw, repaired };
+}
+
 function normalizeSettings(raw: unknown): {
   settings: TournamentData["settings"];
   repaired: boolean;
@@ -136,26 +166,21 @@ function normalizeSettings(raw: unknown): {
   const normalizationHalfWidth = validPositiveNumber(value.normalizationHalfWidth)
     ? value.normalizationHalfWidth
     : DEFAULT_SETTINGS.normalizationHalfWidth;
-  const provisionalThreshold = validNonNegativeInteger(value.provisionalThreshold)
-    ? value.provisionalThreshold
-    : DEFAULT_SETTINGS.provisionalThreshold;
-  const settings = { kFactorThreshold, normalizationHalfWidth, provisionalThreshold };
+  const settings = { kFactorThreshold, normalizationHalfWidth };
 
   return {
     settings,
     repaired:
       value.kFactorThreshold !== kFactorThreshold ||
       value.normalizationHalfWidth !== normalizationHalfWidth ||
-      value.provisionalThreshold !== provisionalThreshold,
+      Object.keys(value).some(
+        (key) => key !== "kFactorThreshold" && key !== "normalizationHalfWidth",
+      ),
   };
 }
 
 function validPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 1;
-}
-
-function validNonNegativeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
 function validPositiveNumber(value: unknown): value is number {

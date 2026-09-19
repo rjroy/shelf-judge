@@ -150,7 +150,7 @@ function evidencePackage(questionId: ReflectionQuestionId): ReflectionEvidencePa
       }),
     ]),
     noteGuidance: {
-      missingNotes: [{ gameId: "game-3", gameTitle: "Game 3" }],
+      currentNoteState: "unexamined-current-notes" as const,
       unexaminedPresentNoteCount: 2,
     },
     assembledAt: GENERATED_AT,
@@ -219,12 +219,58 @@ describe("ReflectionResultValidator", () => {
       });
       expect(abstained.outcome).toBe("abstained");
       if (abstained.outcome !== "abstained") throw new Error("Expected abstention");
-      expect(abstained.noteGuidance).toEqual({
-        missingNotes: [{ gameId: "game-3", gameTitle: "Game 3" }],
-        unexaminedPresentNoteCount: 2,
+      expect(abstained.abstentionGuidance).toMatchObject({
+        kind:
+          questionId === "recurring-trade-offs"
+            ? "existing-notes-not-examined"
+            : "non-note-blocker",
+        refreshInstruction:
+          "After editing, select Refresh this question to check the updated evidence.",
       });
+      expect(JSON.stringify(abstained)).not.toContain("game-3");
     },
   );
+
+  test("distinguishes missing testimony from present unexamined notes without promising success", () => {
+    const validator = createReflectionResultValidator();
+    const submission = {
+      outcome: "abstained" as const,
+      reason: "no-owner-testimony" as const,
+      explanation: "The available evidence cannot support this reflection.",
+      supportingBlocks: [],
+      noteExcerpts: [],
+    };
+    const missing = validator.validate({
+      questionId: "recurring-trade-offs",
+      submission: { result: submission },
+      evidencePackage: {
+        ...evidencePackage("recurring-trade-offs"),
+        noteGuidance: {
+          currentNoteState: "no-current-notes" as const,
+          unexaminedPresentNoteCount: 0,
+        },
+      },
+      generatedAt: GENERATED_AT,
+      usage: { state: "unavailable" },
+    });
+    const unexamined = validator.validate({
+      questionId: "recurring-trade-offs",
+      submission: { result: submission },
+      evidencePackage: evidencePackage("recurring-trade-offs"),
+      generatedAt: GENERATED_AT,
+      usage: { state: "unavailable" },
+    });
+
+    expect(missing.outcome).toBe("abstained");
+    expect(unexamined.outcome).toBe("abstained");
+    if (missing.outcome !== "abstained" || unexamined.outcome !== "abstained") {
+      throw new Error("Expected abstained results");
+    }
+    expect(missing.abstentionGuidance?.kind).toBe("missing-current-testimony");
+    expect(missing.abstentionGuidance?.message).toContain("do not guarantee an answer");
+    expect(unexamined.abstentionGuidance?.kind).toBe("existing-notes-not-examined");
+    expect(unexamined.abstentionGuidance?.message).toContain("Adding more notes may not help");
+  });
 
   test("reconstructs all protected fields from the canonical evidence package", () => {
     const source = evidencePackage("repeated-values");

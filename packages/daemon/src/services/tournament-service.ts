@@ -47,11 +47,7 @@ export interface TournamentServiceDeps {
   storageService: StorageService;
 }
 
-function applyFilters(
-  games: GameWithScore[],
-  filters: SessionFilter[],
-  data: TournamentData,
-): GameWithScore[] {
+function applyFilters(games: GameWithScore[], filters: SessionFilter[]): GameWithScore[] {
   let result = games;
 
   for (const filter of filters) {
@@ -84,16 +80,6 @@ function applyFilters(
             ...bgg.families.map((f) => f.name),
           ];
           return matchesBggTag(filter.value, tagNames);
-        });
-        break;
-      }
-
-      case "staleness": {
-        const parsed = parseInt(filter.value, 10);
-        const threshold = Number.isNaN(parsed) ? data.settings.provisionalThreshold : parsed;
-        result = result.filter((g) => {
-          const stats = data.gameStats[g.game.id];
-          return !stats || stats.comparisonCount < threshold;
         });
         break;
       }
@@ -144,7 +130,7 @@ function removeUnavailableGames(
 }
 
 /**
- * Derive display stats (normalized ELO score, provisional flag, label) for a game from
+ * Derive display stats (normalized ELO score and label) for a game from
  * tournament data. Exported so fitness-service can reuse the same cohort-floor and
  * normalization logic when composing the tournament axis into fitness scores
  * (REQ-TAXIS-6, REQ-TAXIS-7). Pure function; no I/O.
@@ -167,15 +153,11 @@ export function deriveDisplayStats(
       ? normalizeElo(eloRating, data.settings.normalizationHalfWidth)
       : null;
 
-  const isProvisional = comparisonCount < data.settings.provisionalThreshold;
-
   let displayLabel: string;
   if (comparisonCount === 0) {
     displayLabel = "not yet ranked";
   } else if (normalizedScore === null) {
     displayLabel = "not yet ranked";
-  } else if (isProvisional) {
-    displayLabel = `${normalizedScore.toFixed(1)} (provisional)`;
   } else {
     displayLabel = normalizedScore.toFixed(1);
   }
@@ -194,7 +176,6 @@ export function deriveDisplayStats(
     eloRating,
     comparisonCount,
     normalizedScore,
-    isProvisional,
     displayLabel,
     wins,
     losses,
@@ -222,7 +203,7 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
       }
 
       // Apply filters
-      const eligible = filters && filters.length > 0 ? applyFilters(games, filters, data) : games;
+      const eligible = filters && filters.length > 0 ? applyFilters(games, filters) : games;
 
       if (eligible.length < 4) {
         throw new Error(
@@ -292,45 +273,6 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
         return null;
       }
 
-      // Shuffle the available games to add some randomness.
-      for (let i = availableGameIds.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [availableGameIds[i], availableGameIds[j]] = [availableGameIds[j], availableGameIds[i]];
-      }
-
-      // Look for the game with the fewest comparisons to be gameA.
-      let selectedA: string | null = null;
-      let selectedElo = 1500;
-      for (let i = 0, lowestCount = Infinity; i < availableGameIds.length; i++) {
-        const gameId = availableGameIds[i];
-        const stats = data.gameStats[gameId];
-        const count = stats?.comparisonCount ?? 0;
-        if (count < lowestCount) {
-          selectedA = gameId;
-          lowestCount = count;
-          selectedElo = stats?.eloRating ?? 1500;
-        }
-      }
-
-      if (!selectedA) {
-        // This shouldn't happen since we check length above, but just in case...
-        session.status = "completed";
-        session.comparisons = [];
-        session.updatedAt = new Date().toISOString();
-        await storageService.saveTournament(data);
-        return null;
-      }
-
-      // Sort the remaining games by ELO proximity to selectedA, to increase chance of a meaningful comparison.
-      availableGameIds.sort((a: string, b: string) => {
-        const eloADiff = Math.abs(selectedElo - (data.gameStats[a]?.eloRating ?? 1500));
-        const eloBDiff = Math.abs(selectedElo - (data.gameStats[b]?.eloRating ?? 1500));
-        if (eloADiff !== eloBDiff) {
-          return eloADiff - eloBDiff; // games with closer ELO first
-        }
-        return 0; // if ELO difference is the same, keep original order (which is randomized)
-      });
-
       // Get pairs already seen in this session (REQ-RTO-8).
       const seenPairs = new Set<string>();
       for (const comp of session.comparisons) {
@@ -338,15 +280,30 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
         seenPairs.add(key);
       }
 
-      // Find the first pair that hasn't been seen before
-      for (let j = 0; j < availableGameIds.length; j++) {
-        const b = availableGameIds[j];
-        if (b === selectedA) continue;
+      // Prefer similarly rated games. Comparison counts remain statistical inputs only,
+      // such as ELO K-factor selection and displayed history, not pairing priority.
+      let closestPairs: { gameA: string; gameB: string }[] = [];
+      let smallestEloDifference = Infinity;
+      for (let aIndex = 0; aIndex < availableGameIds.length - 1; aIndex++) {
+        const gameA = availableGameIds[aIndex];
+        const gameAElo = data.gameStats[gameA]?.eloRating ?? 1500;
+        for (let bIndex = aIndex + 1; bIndex < availableGameIds.length; bIndex++) {
+          const gameB = availableGameIds[bIndex];
+          const key = [gameA, gameB].sort().join("|");
+          if (seenPairs.has(key)) continue;
 
-        const key = [selectedA, b].sort().join("|");
-        if (seenPairs.has(key)) continue;
+          const eloDifference = Math.abs(gameAElo - (data.gameStats[gameB]?.eloRating ?? 1500));
+          if (eloDifference < smallestEloDifference) {
+            smallestEloDifference = eloDifference;
+            closestPairs = [{ gameA, gameB }];
+          } else if (eloDifference === smallestEloDifference) {
+            closestPairs.push({ gameA, gameB });
+          }
+        }
+      }
 
-        return { gameA: selectedA, gameB: b };
+      if (closestPairs.length > 0) {
+        return closestPairs[Math.floor(Math.random() * closestPairs.length)];
       }
 
       // All pairs exhausted this session

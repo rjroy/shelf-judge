@@ -252,7 +252,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 export function Sidebar() {
   const pathname = usePathname();
   const { open, close } = useSidebar();
-  const [settingsExpanded, setSettingsExpanded] = useState(true);
+  const [settingsExpanded, setSettingsExpanded] = useState(false);
 
   return (
     <aside className={`sidebar${open ? " sidebar-open" : ""}`}>

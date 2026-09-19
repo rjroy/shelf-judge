@@ -201,7 +201,6 @@ describe("sortGames", () => {
       a: {
         normalizedScore: 7.0,
         displayLabel: "7.0",
-        isProvisional: false,
         comparisonCount: 10,
         eloRating: 1600,
         wins: 5,
@@ -211,7 +210,6 @@ describe("sortGames", () => {
       c: {
         normalizedScore: 8.5,
         displayLabel: "8.5",
-        isProvisional: false,
         comparisonCount: 10,
         eloRating: 1700,
         wins: 5,
@@ -604,7 +602,6 @@ describe("sortGames", () => {
       a: {
         normalizedScore: 3.0,
         displayLabel: "3.0",
-        isProvisional: false,
         comparisonCount: 10,
         eloRating: 1200,
         wins: 2,
@@ -614,7 +611,6 @@ describe("sortGames", () => {
       b: {
         normalizedScore: 9.5,
         displayLabel: "9.5",
-        isProvisional: false,
         comparisonCount: 10,
         eloRating: 1800,
         wins: 9,
@@ -624,7 +620,6 @@ describe("sortGames", () => {
       c: {
         normalizedScore: 6.0,
         displayLabel: "6.0",
-        isProvisional: false,
         comparisonCount: 10,
         eloRating: 1500,
         wins: 5,
@@ -660,7 +655,6 @@ describe("sortGames", () => {
       x: {
         normalizedScore: 2.0,
         displayLabel: "2.0",
-        isProvisional: false,
         comparisonCount: 10,
         eloRating: 1100,
         wins: 1,
@@ -866,7 +860,6 @@ describe("getScoreDisplay", () => {
       r: {
         normalizedScore: 7.5,
         displayLabel: "7.5",
-        isProvisional: false,
         comparisonCount: 10,
         eloRating: 1600,
         wins: 5,

@@ -316,6 +316,16 @@ test.describe("useful profile responsive release gate", () => {
     await page.goto("/");
     await applyProjectViewport(page, testInfo.project.name);
 
+    const settingsDisclosure = page.locator(".nav-disclosure");
+    await expect(settingsDisclosure).not.toHaveAttribute("open");
+    const openNavigation = page.getByRole("button", { name: "Open navigation" });
+    if (await openNavigation.isVisible()) await openNavigation.click();
+    await settingsDisclosure.locator("summary").click();
+    await expect(settingsDisclosure).toHaveAttribute("open", "");
+    await expect(settingsDisclosure.getByRole("link", { name: "General" })).toBeVisible();
+    const closeNavigation = page.getByRole("button", { name: "Close navigation" });
+    if (await closeNavigation.isVisible()) await closeNavigation.click();
+
     await expect(page.getByRole("heading", { level: 1, name: "Collection Profile" })).toBeVisible();
     await expect(page.getByRole("heading", { level: 2 })).toHaveCount(2);
     await expect(page.getByText("Worker Placement", { exact: true }).first()).toBeVisible();
@@ -338,6 +348,12 @@ test.describe("useful profile responsive release gate", () => {
       ]);
     }
     await expect(page.getByRole("link", { name: "View all mechanics and evidence" })).toBeVisible();
+    const attentionEvidence = page.locator(".attention-card details");
+    await expect(attentionEvidence).not.toHaveAttribute("open");
+    await expect(page.getByRole("heading", { name: "Evidence", exact: true })).toBeHidden();
+    await expect(page.getByRole("heading", { name: "Available responses" })).toBeHidden();
+    await attentionEvidence.getByText("Evidence and available responses", { exact: true }).click();
+    await expect(attentionEvidence).toHaveAttribute("open", "");
     await expect(page.getByRole("heading", { name: "Evidence", exact: true })).toBeVisible();
     await expect(page.getByText("Evidence warning:", { exact: false })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Available responses" })).toBeVisible();

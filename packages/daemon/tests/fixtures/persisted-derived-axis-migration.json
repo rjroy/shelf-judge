@@ -88,8 +88,7 @@
     "algorithmVersion": 4,
     "tournamentSettings": {
       "kFactorThreshold": 15,
-      "normalizationHalfWidth": 400,
-      "provisionalThreshold": 6
+      "normalizationHalfWidth": 400
     },
     "profile": {
       "axisDistributions": [],

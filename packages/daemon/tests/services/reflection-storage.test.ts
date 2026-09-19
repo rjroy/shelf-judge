@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_REFLECTION_SETTINGS,
+  ReflectionCompletedSchema,
   ReflectionSettingsSchema,
+  type ReflectionCompleted,
+  type ReflectionQuestionId,
   type ReflectionSettings,
 } from "@shelf-judge/shared";
 import {
@@ -43,6 +46,52 @@ function setup(initialFiles: Record<string, string> = {}) {
 
 function defaultSettings(): ReflectionSettings {
   return ReflectionSettingsSchema.parse(structuredClone(DEFAULT_REFLECTION_SETTINGS));
+}
+
+function completed(questionId: ReflectionQuestionId): ReflectionCompleted {
+  return ReflectionCompletedSchema.parse({
+    outcome: "abstained",
+    reason: "no-material-synthesis",
+    explanation: `No material synthesis for ${questionId}`,
+    supportingBlocks: [{ text: "Captured limitation", citationIds: ["captured-score"] }],
+    citations: [
+      {
+        citationId: "captured-score",
+        sourceId: `${questionId}-score`,
+        sourceVersion: "collection-2",
+        evidenceClass: "current-scoring",
+        testimony: false,
+        canonicalSummary: `Captured score for ${questionId}`,
+        destination: { operationId: "shelf.profile.get", parameters: {} },
+      },
+    ],
+    scope: {
+      examinedPresentNoteCount: 0,
+      totalPresentNoteCount: 0,
+      examinedGameCount: 0,
+      relevantEligibleGameCount: 0,
+      excludedGameCount: 0,
+      exhaustiveNotes: true,
+      ...(questionId === "pattern-exceptions" ? { patternCandidateIds: [] } : {}),
+    },
+    evidenceIdentity: {
+      manifestVersion: 2,
+      questionId,
+      questionVersion: 1,
+      collectionId: "collection",
+      collectionSchemaVersion: 6,
+      collectionRevision: 2,
+      profileContractVersion: 9,
+      profileAlgorithmVersion: 11,
+      providerId: "provider",
+      modelId: "model",
+    },
+    dependencies: [
+      { category: "scoring", sourceId: `${questionId}-score`, fingerprint: "score-1" },
+    ],
+    generatedAt: "2026-08-31T12:00:00.000Z",
+    usage: { state: "unavailable" },
+  });
 }
 
 describe("Reflection storage", () => {
@@ -115,6 +164,75 @@ describe("Reflection storage", () => {
       expect(fileOps.files.get(STATE_PATH)).not.toBe(rawState);
       expect(await storage.loadSettings()).toEqual(validSettings);
     }
+  });
+
+  test("migrates legacy note guidance without clearing unrelated cached reflections", async () => {
+    const initial = await setup().storage.loadState();
+    const legacyCache = {
+      ...completed("repeated-values"),
+      noteGuidance: {
+        missingNotes: [{ gameId: "game-1", gameTitle: "Game 1" }],
+        unexaminedPresentNoteCount: 0,
+      },
+    };
+    const validCache = completed("pattern-exceptions");
+    const { fileOps, storage } = setup({
+      [STATE_PATH]: JSON.stringify({
+        ...initial,
+        questions: [
+          { ...initial.questions[0], cache: legacyCache },
+          { ...initial.questions[1], cache: validCache },
+          initial.questions[2],
+        ],
+      }),
+    });
+
+    const state = await storage.loadState();
+
+    expect(state.questions[0].cache).toMatchObject({ outcome: "abstained" });
+    expect(state.questions[0].cache).not.toHaveProperty("noteGuidance");
+    expect(state.questions[1].cache).toEqual(validCache);
+    expect(fileOps.files.get(STATE_PATH)).not.toContain("noteGuidance");
+  });
+
+  test("propagates a migration rename failure without replacing the valid legacy cache", async () => {
+    const initial = await setup().storage.loadState();
+    const legacyCache = {
+      ...completed("repeated-values"),
+      noteGuidance: {
+        missingNotes: [{ gameId: "game-1", gameTitle: "Game 1" }],
+        unexaminedPresentNoteCount: 0,
+      },
+    };
+    const validCache = completed("pattern-exceptions");
+    const original = JSON.stringify({
+      ...initial,
+      questions: [
+        { ...initial.questions[0], cache: legacyCache },
+        { ...initial.questions[1], cache: validCache },
+        initial.questions[2],
+      ],
+    });
+    const { fileOps, storage } = setup({ [STATE_PATH]: original });
+    const originalRename = fileOps.rename.bind(fileOps);
+    let failMigrationRename = true;
+    fileOps.rename = (oldPath, newPath) => {
+      if (newPath === STATE_PATH && failMigrationRename) {
+        failMigrationRename = false;
+        return Promise.reject(new Error("injected migration rename failure"));
+      }
+      return originalRename(oldPath, newPath);
+    };
+
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test rejects is thenable
+    await expect(storage.loadState()).rejects.toThrow("injected migration rename failure");
+
+    expect(fileOps.files.has(STATE_PATH)).toBe(true);
+    expect(fileOps.files.get(STATE_PATH)).toBe(original);
+    // Atomic-write cleanup may unlink its temporary file, but never the durable source cache.
+    expect(
+      fileOps.calls.some(({ method, args }) => method === "unlink" && args[0] === STATE_PATH),
+    ).toBe(false);
   });
 
   test("destroys invalid settings independently and resets all questions to enabled", async () => {

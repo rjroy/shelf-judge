@@ -12,7 +12,7 @@ function createStubStorage(): StorageService & {
   saveTournamentCalls: number;
 } {
   const defaultData: TournamentData = {
-    settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
+    settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
     sessions: [],
     gameStats: {},
   };
@@ -56,7 +56,6 @@ function createStubStorage(): StorageService & {
         stageThresholds: [5, 15, 30] as [number, number, number],
         defaultK: 5,
         minSimilarityThreshold: 0.2,
-        tournamentStabilityBoost: 0.2,
       });
     },
     savePredictionSettings(): Promise<void> {
@@ -361,46 +360,6 @@ describe("TournamentService", () => {
       }
     });
 
-    test("filters by staleness (games with low comparison count)", async () => {
-      // Pre-seed some stats
-      storage.tournamentData.gameStats = {
-        g1: {
-          eloRating: 1550,
-          comparisonCount: 10,
-          wins: 5,
-          losses: 5,
-          recentComparisons: [],
-        },
-        g2: {
-          eloRating: 1500,
-          comparisonCount: 3,
-          wins: 2,
-          losses: 1,
-          recentComparisons: [],
-        },
-        g3: {
-          eloRating: 1480,
-          comparisonCount: 0,
-          wins: 0,
-          losses: 0,
-          recentComparisons: [],
-        },
-        // g4 and g5 have no stats (count=0, always match)
-      };
-
-      const session = await service.startSession([{ type: "staleness", value: "5" }], games);
-      // g1 has 10 comparisons (>= 5), excluded
-      // g2 has 3 (< 5), included
-      // g3 has 0 (< 5), included
-      // g4 no stats, included
-      // g5 no stats, included
-      expect(session.gameIds).not.toContain("g1");
-      expect(session.gameIds).toContain("g2");
-      expect(session.gameIds).toContain("g3");
-      expect(session.gameIds).toContain("g4");
-      expect(session.gameIds).toContain("g5");
-    });
-
     test("AND-combines multiple filters", async () => {
       const bggGames = [
         makeGameWithScore("g1", "Alpha Game", 8.0, { bggData: makeBggData(["Deck Building"], []) }),
@@ -473,34 +432,32 @@ describe("TournamentService", () => {
   });
 
   describe("adaptive pairing", () => {
-    test("prioritizes games with 0 comparisons", async () => {
-      // Give g1 and g2 existing stats, leave g3-g5 at 0
+    test("selects the closest ELO pair regardless of comparison counts", async () => {
+      // g1 and g2 have the closest ratings despite their higher comparison counts.
       storage.tournamentData.gameStats = {
         g1: {
-          eloRating: 1600,
+          eloRating: 1500,
           comparisonCount: 10,
           wins: 5,
           losses: 5,
           recentComparisons: [],
         },
         g2: {
-          eloRating: 1400,
+          eloRating: 1510,
           comparisonCount: 8,
           wins: 3,
           losses: 5,
           recentComparisons: [],
         },
+        g3: { eloRating: 1700, comparisonCount: 0, wins: 0, losses: 0, recentComparisons: [] },
+        g4: { eloRating: 1800, comparisonCount: 0, wins: 0, losses: 0, recentComparisons: [] },
+        g5: { eloRating: 1900, comparisonCount: 0, wins: 0, losses: 0, recentComparisons: [] },
       };
 
       const session = await service.startSession(null, games);
       const pair = await service.getNextPair(session.id);
 
-      // The pair should include games with 0 comparisons (g3, g4, or g5)
-      // because their sum (0+0=0) is lower than any pair involving g1(10) or g2(8)
-      expect(pair).not.toBeNull();
-      const pairGames = [pair!.gameA, pair!.gameB];
-      const zeroCompGames = ["g3", "g4", "g5"];
-      expect(pairGames.some((g) => zeroCompGames.includes(g))).toBe(true);
+      expect(pair).toEqual({ gameA: "g1", gameB: "g2" });
     });
 
     test("throws for non-existent session", async () => {
@@ -961,7 +918,6 @@ describe("TournamentService", () => {
       const settings = await service.getSettings();
       expect(settings.kFactorThreshold).toBe(15);
       expect(settings.normalizationHalfWidth).toBe(400);
-      expect(settings.provisionalThreshold).toBe(6);
     });
 
     test("updates settings with partial patch", async () => {

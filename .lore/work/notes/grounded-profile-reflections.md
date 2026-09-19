@@ -828,6 +828,10 @@ The corrections retain the existing refresh admission, provider invocation, exac
 
 Step 8 is implemented and locally validated. The overall note frontmatter remains `in_progress` because the complete Grounded Profile Reflections plan remains incomplete. No Beads issue was closed or otherwise updated by this implementation.
 
+### Storage Migration Persistence Correction
+
+Reflection state loading now limits destructive invalid-cache recovery to JSON parsing and durable-state validation. A failed atomic migration persistence, including a target rename failure, propagates through normal storage persistence error handling without unlinking or replacing the valid legacy artifact. The storage regression injects a one-time migration rename failure against a mixed legacy cache and proves the original bytes and file remain, the unrelated cached reflection remains in those bytes, no unlink occurs, and no empty-cache replacement is written. Successful legacy migration and malformed-state recovery coverage remain in place.
+
 ### Step 8 Terminal-Acceptance Correction: `REFLECT-CANCEL-RESERVATION-1`
 
 The active-operation registry now distinguishes ordinary/final terminal reservations from non-final publication reservations. Exact authorized cancellation during a non-final publication reservation returns accepted immediately, remains pending while the state publication owns the reservation, and atomically commits the `cancelled` lifecycle outcome when that owner releases the reservation. The release aborts the operation before the refresh loop can emit the non-final `question-completed` event or begin another evidence/model operation. A wrong capability or batch still returns unauthorized and cannot alter or latch lifecycle state.

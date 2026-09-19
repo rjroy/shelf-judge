@@ -131,7 +131,7 @@ function tournamentData(
   stats: Record<string, { eloRating: number; comparisonCount: number }>,
 ): TournamentData {
   return {
-    settings: { kFactorThreshold: 15, normalizationHalfWidth: 400, provisionalThreshold: 6 },
+    settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
     sessions: [],
     gameStats: Object.fromEntries(
       Object.entries(stats).map(([id, value]) => [
@@ -531,7 +531,7 @@ describe("fitness service current-contract regression", () => {
     expect(service.calculateScore(game(), [tournament()], data)?.score).toBe(10);
   });
 
-  test("provisional Tournament games still contribute", () => {
+  test("Tournament games with limited comparisons still contribute", () => {
     const data = tournamentData({
       "game-1": { eloRating: 1700, comparisonCount: 2 },
       "game-2": { eloRating: 1500, comparisonCount: 1 },
