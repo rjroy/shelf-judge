@@ -325,8 +325,8 @@ export default function TournamentPage() {
                 >
                   <option value="">Select filter type...</option>
                   <option value="name">Name contains...</option>
-                  <option value="minFitness">Axis fitness above...</option>
-                  <option value="maxFitness">Axis fitness below...</option>
+                  <option value="minFitness">Fitness above...</option>
+                  <option value="maxFitness">Fitness below...</option>
                   <option value="bggTag">BGG tag...</option>
                   <option value="staleness">Fewer than N comparisons</option>
                 </select>

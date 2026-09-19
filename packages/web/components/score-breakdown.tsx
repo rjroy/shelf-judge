@@ -115,7 +115,7 @@ export function ScoreBreakdown({
                 ? "Hypothetical Score"
                 : hasPredictions
                   ? "~Predicted Fitness"
-                  : "Fitness Score"}
+                  : "Fitness"}
             </td>
             <td colSpan={2} className="right">
               {score.vetoed ? (
