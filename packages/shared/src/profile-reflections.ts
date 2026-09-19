@@ -401,30 +401,17 @@ const AbstainedReflectionSchema = z
     outcome: z.literal("abstained"),
     reason: ReflectionAbstentionReasonSchema,
     explanation: z.string().min(1),
-    // This is server-derived guidance, never model-authored. Optional keeps
-    // previously persisted reflection caches readable without asserting that
-    // their note absence was verified.
-    noteGuidance: z
+    // Server-derived, reason-specific guidance. Optional preserves readable
+    // historical caches that were stored before abstention guidance existed.
+    abstentionGuidance: z
       .object({
-        missingNotes: z
-          .array(
-            z
-              .object({
-                gameId: IdSchema,
-                gameTitle: z.string().min(1),
-              })
-              .strict(),
-          )
-          .superRefine((notes, context) => {
-            if (new Set(notes.map(({ gameId }) => gameId)).size !== notes.length) {
-              context.addIssue({
-                code: z.ZodIssueCode.custom,
-                path: [],
-                message: "Missing-note guidance game IDs must be unique",
-              });
-            }
-          }),
-        unexaminedPresentNoteCount: SafeCountSchema,
+        kind: z.enum([
+          "missing-current-testimony",
+          "existing-notes-not-examined",
+          "non-note-blocker",
+        ]),
+        message: z.string().min(1),
+        refreshInstruction: z.string().min(1),
       })
       .strict()
       .optional(),

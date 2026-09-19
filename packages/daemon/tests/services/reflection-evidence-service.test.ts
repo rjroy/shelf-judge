@@ -479,8 +479,10 @@ describe("ReflectionEvidenceService", () => {
       relevantEligibleGameCount: 200,
       exhaustiveNotes: false,
     });
-    expect(completed.noteGuidance?.missingNotes).toHaveLength(198);
-    expect(completed.noteGuidance?.unexaminedPresentNoteCount).toBe(0);
+    expect(completed.noteGuidance).toEqual({
+      currentNoteState: "examined-current-notes",
+      unexaminedPresentNoteCount: 0,
+    });
     expect(completed.evidence.entries).toHaveLength(2);
     expect(completed.evidence.entries.map(({ sourceId }) => sourceId).sort()).toEqual(
       [...selected].sort(),

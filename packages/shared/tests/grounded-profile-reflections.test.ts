@@ -395,6 +395,33 @@ describe("feature-isolated grounded registries", () => {
 });
 
 describe("Reflection result and evidence contracts", () => {
+  test("accepts bounded abstention guidance and rejects the former broad note list", () => {
+    const abstained = completed("recurring-trade-offs", "abstained");
+    if (abstained.outcome !== "abstained") throw new Error("Expected abstained fixture");
+
+    expect(
+      ReflectionCompletedSchema.safeParse({
+        ...abstained,
+        abstentionGuidance: {
+          kind: "missing-current-testimony",
+          message:
+            "Only relevant testimony could help, and adding it does not guarantee an answer.",
+          refreshInstruction:
+            "After editing, select Refresh this question to check the updated evidence.",
+        },
+      }).success,
+    ).toBe(true);
+    expect(
+      ReflectionCompletedSchema.safeParse({
+        ...abstained,
+        noteGuidance: {
+          missingNotes: [{ gameId: "game-1", gameTitle: "Game 1" }],
+          unexaminedPresentNoteCount: 0,
+        },
+      }).success,
+    ).toBe(false);
+  });
+
   test("accepts answered and every question-specific abstained result", () => {
     for (const questionId of REFLECTION_QUESTION_IDS) {
       expect(ReflectionCompletedSchema.safeParse(completed(questionId)).success, questionId).toBe(

@@ -177,6 +177,42 @@ function stateIdentity(state: ReflectionDurableState): string {
   return createHash("sha256").update(JSON.stringify(state)).digest("hex");
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Version 1 caches may contain the former broad `noteGuidance` list. The
+ * shared result contract deliberately no longer accepts that UI payload, but
+ * it is safe to discard it while retaining an otherwise valid cached result.
+ */
+function discardLegacyNoteGuidance(raw: unknown): { state: unknown; migrated: boolean } {
+  if (!isRecord(raw) || !Array.isArray(raw.questions)) return { state: raw, migrated: false };
+
+  let migrated = false;
+  const rawQuestions: unknown[] = raw.questions;
+  const questions = rawQuestions.map((question) => {
+    if (!isRecord(question) || !isRecord(question.cache)) return question;
+    const cache = question.cache;
+    if (
+      cache.outcome !== "abstained" ||
+      !Object.prototype.hasOwnProperty.call(cache, "noteGuidance")
+    ) {
+      return question;
+    }
+
+    migrated = true;
+    const normalizedCache = Object.fromEntries(
+      Object.entries(cache).filter(([key]) => key !== "noteGuidance"),
+    );
+    return { ...question, cache: normalizedCache };
+  });
+
+  return migrated
+    ? { state: { ...raw, questions }, migrated: true }
+    : { state: raw, migrated: false };
+}
+
 function settingsIdentity(settings: ReflectionSettings): string {
   return createHash("sha256").update(JSON.stringify(settings)).digest("hex");
 }
@@ -266,16 +302,23 @@ export function createReflectionStorage(deps: ReflectionStorageDeps): Reflection
           return empty;
         }
         const raw = await deps.fileOps.readFile(statePath);
+        let normalized: { state: unknown; migrated: boolean };
+        let state: ReflectionDurableState;
         try {
-          const state = ReflectionDurableStateSchema.parse(JSON.parse(raw));
-          logger.log(
-            `reflection state validation completed path=${statePath} generation=${state.deletionGeneration}`,
-          );
-          return state;
+          normalized = discardLegacyNoteGuidance(JSON.parse(raw));
+          state = ReflectionDurableStateSchema.parse(normalized.state);
         } catch {
           logger.warn(`reflection state validation failed path=${statePath}`);
           return replaceInvalid(statePath, "state", createEmptyState(createGeneration));
         }
+
+        if (normalized.migrated) {
+          await persist(statePath, state, "state");
+        }
+        logger.log(
+          `reflection state validation completed path=${statePath} generation=${state.deletionGeneration}`,
+        );
+        return state;
       });
     },
 

@@ -170,7 +170,10 @@ export interface ReflectionEvidenceTurn {
 }
 
 export interface ReflectionNoteGuidance {
-  readonly missingNotes: readonly { readonly gameId: string; readonly gameTitle: string }[];
+  readonly currentNoteState:
+    | "no-current-notes"
+    | "unexamined-current-notes"
+    | "examined-current-notes";
   readonly unexaminedPresentNoteCount: number;
 }
 
@@ -671,23 +674,19 @@ export function createReflectionEvidenceService(
         ? await Promise.all(noteGameIds.map((gameId) => deps.ownerGameNoteService.get(gameId)))
         : await deps.ownerGameNoteService.getStates(noteGameIds)
       : [];
-    const noteGuidance =
+    const unexaminedPresentNoteCount = noteStates.filter(
+      ({ gameId, note }) => note.state === "present" && !examinedNoteGameIds.has(gameId),
+    ).length;
+    const noteGuidance: ReflectionNoteGuidance | undefined =
       options?.verifyNotePresence === true
         ? cloneAndFreeze({
-            missingNotes: noteStates.flatMap(({ gameId, note }) => {
-              const title = base.citations.find(
-                (citation) =>
-                  citation.evidenceClass === "game-identity-ownership" &&
-                  "gameId" in citation.destination.parameters &&
-                  citation.destination.parameters.gameId === gameId,
-              )?.sourceDisplayContext;
-              return note.state !== "present" && title?.kind === "game"
-                ? [{ gameId, gameTitle: title.gameTitle }]
-                : [];
-            }),
-            unexaminedPresentNoteCount: noteStates.filter(
-              ({ gameId, note }) => note.state === "present" && !examinedNoteGameIds.has(gameId),
-            ).length,
+            currentNoteState:
+              unexaminedPresentNoteCount > 0
+                ? "unexamined-current-notes"
+                : noteStates.some(({ note }) => note.state === "present")
+                  ? "examined-current-notes"
+                  : "no-current-notes",
+            unexaminedPresentNoteCount,
           })
         : undefined;
     const deliveredEntries = accumulated.evidence.entries.flatMap((entry) => {
