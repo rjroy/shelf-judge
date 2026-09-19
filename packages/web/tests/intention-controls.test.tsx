@@ -4,7 +4,8 @@ import type { Game, GameIntentionDetail, PlayIntention } from "@shelf-judge/shar
 import {
   ActiveIntentionControl,
   createIntentionControlState,
-  eligibleIntentionKind,
+  DatedPlayContext,
+  derivedPlayContext,
   focusIntentionControlTarget,
   IntentionFeedback,
   IntentionControls,
@@ -96,11 +97,43 @@ function intention(overrides: Partial<PlayIntention> = {}): PlayIntention {
 
 const emptyDetail: GameIntentionDetail = { activeIntention: null, resolvedHistory: [] };
 
-describe("intention create eligibility", () => {
-  test("offers first play only for valid non-stale zero and replay only for positive evidence", () => {
-    expect(eligibleIntentionKind(game())).toBe("first-play");
+describe("Want to play controls", () => {
+  test("renders neutral dated-play context only for valid session-derived evidence", () => {
+    const dated = game({
+      lastPlayedAt: "2026-08-25",
+      recentPlayCount: 4,
+      playCountEvidence: {
+        status: "valid",
+        value: 4,
+        source: "bgg-plays",
+        observedAt: "2026-08-26T12:00:00.000Z",
+      },
+    });
+    const datedHtml = renderToStaticMarkup(<DatedPlayContext game={dated} />);
+    expect(datedHtml).toContain("Last dated play: 2026-08-25.");
+    expect(datedHtml).toContain(
+      "4 plays in the 365 days ending 2026-08-26, the BGG /plays observation date.",
+    );
+    expect(datedHtml).not.toContain("neglect");
+
+    const absentHtml = renderToStaticMarkup(<DatedPlayContext game={game()} />);
+    expect(absentHtml).toContain("No valid dated plays are available.");
+    for (const playCountEvidence of [
+      { status: "valid", value: 8, source: "manual", observedAt },
+      { status: "missing", source: "bgg-plays", observedAt },
+    ] as const) {
+      const supersededHtml = renderToStaticMarkup(
+        <DatedPlayContext game={{ ...dated, playCountEvidence }} />,
+      );
+      expect(supersededHtml).not.toContain("Last dated play:");
+      expect(supersededHtml).not.toContain("365 days ending");
+    }
+  });
+
+  test("offers Want to play regardless of evidence and presents first-play or replay only as derived context", () => {
+    expect(derivedPlayContext(game())).toBe("first play");
     expect(
-      eligibleIntentionKind(
+      derivedPlayContext(
         game({
           numPlays: 4,
           playCountEvidence: { status: "valid", value: 4, source: "manual", observedAt },
@@ -111,8 +144,8 @@ describe("intention create eligibility", () => {
     const firstHtml = renderToStaticMarkup(
       <IntentionControls game={game()} detail={emptyDetail} />,
     );
-    expect(firstHtml).toContain("Create first-play intention");
-    expect(firstHtml).not.toContain("Create replay intention");
+    expect(firstHtml).toContain("Want to play");
+    expect(firstHtml).toContain("first play context");
 
     const replayHtml = renderToStaticMarkup(
       <IntentionControls
@@ -123,11 +156,11 @@ describe("intention create eligibility", () => {
         detail={emptyDetail}
       />,
     );
-    expect(replayHtml).toContain("Create replay intention");
-    expect(replayHtml).not.toContain("Create first-play intention");
+    expect(replayHtml).toContain("Want to play");
+    expect(replayHtml).toContain("replay context");
   });
 
-  test("rejects every ownership and evidence ineligibility while showing valid destinations", () => {
+  test("retains evidence diagnostics while only ownership blocks Want to play", () => {
     const cases: Game[] = [
       game({ ownership: "previously-owned" }),
       game({
@@ -150,7 +183,17 @@ describe("intention create eligibility", () => {
         latestPlayCountCheck: { status: "missing", observedAt: "2026-08-28T11:00:00.000Z" },
       }),
     ];
-    for (const candidate of cases) expect(eligibleIntentionKind(candidate)).toBeNull();
+    for (const candidate of cases) {
+      expect(derivedPlayContext(candidate)).toBeNull();
+      const candidateHtml = renderToStaticMarkup(
+        <IntentionControls game={candidate} detail={emptyDetail} />,
+      );
+      expect(candidateHtml.includes(">Want to play</button>")).toBe(
+        candidate.ownership === "owned",
+      );
+      expect(candidateHtml).not.toContain("first play context");
+      expect(candidateHtml).not.toContain("replay context");
+    }
 
     const stale = cases[4];
     expect(isPlayEvidenceStale(stale)).toBe(true);
@@ -159,7 +202,7 @@ describe("intention create eligibility", () => {
     expect(html).toContain("Latest successful check: missing at 2026-08-28T11:00:00.000Z.");
     expect(html).toContain("Correct recorded play count");
     expect(html).toContain('href="#bgg-refresh"');
-    expect(html).not.toContain("Create first-play intention");
+    expect(html).toContain("Want to play");
 
     const manualHtml = renderToStaticMarkup(
       <IntentionControls game={game({ bggId: null })} detail={emptyDetail} />,
@@ -170,6 +213,21 @@ describe("intention create eligibility", () => {
 });
 
 describe("intention reducer outcomes", () => {
+  test("announces baseline-free creation as Want to play without inventing replay context", () => {
+    const state = intentionControlReducer(createIntentionControlState(game(), emptyDetail), {
+      type: "intention-result",
+      generation: 0,
+      gameName: "Test Game",
+      result: {
+        ok: true,
+        commandId: "10000000-0000-4000-8000-000000000001",
+        intention: intention({ kind: "want-to-play", baseline: null }),
+        linkedOwnershipTransition: null,
+      },
+    });
+    expect(state.announcement).toBe("Want to play intention created.");
+    expect(state.activeIntention?.baseline).toBeNull();
+  });
   test.each([...canonicalIntentionMutationCases])(
     "renders canonical $label without inventing a transport result",
     ({ command, result }) => {

@@ -113,7 +113,7 @@ function createTestApp() {
   const storageService = {
     loadCollection: () =>
       Promise.resolve<Collection>({
-        schemaVersion: 6,
+        schemaVersion: 7,
         revision: 0,
         id: "collection-1",
         name: "Test",

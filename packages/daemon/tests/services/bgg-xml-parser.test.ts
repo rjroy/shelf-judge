@@ -13,15 +13,37 @@ describe("parsePlaysResponse", () => {
   test("parses stable play identities and quantities", () => {
     expect(
       parsePlaysResponse(
-        '<plays username="collector" total="2"><play id="101" quantity="2"/><play id="102" quantity="1"/></plays>',
+        '<plays username="collector" total="2"><play id="101" quantity="2" date="2026-01-02"/><play id="102" quantity="1" date="bad-date"/></plays>',
+        42,
       ),
     ).toEqual({
       total: 2,
       records: [
-        { id: 101, quantity: 2 },
-        { id: 102, quantity: 1 },
+        { id: 101, bggId: 42, quantity: 2, dateState: "valid", playedOn: "2026-01-02" },
+        { id: 102, bggId: 42, quantity: 1, dateState: "invalid", playedOn: null },
       ],
     });
+  });
+
+  test("preserves missing dates without inventing a timestamp", () => {
+    expect(
+      parsePlaysResponse('<plays total="1"><play id="1" quantity="1"/></plays>', 7).records[0],
+    ).toEqual({
+      id: 1,
+      bggId: 7,
+      quantity: 1,
+      dateState: "missing",
+      playedOn: null,
+    });
+  });
+
+  test("rejects a play whose reported item is outside the requested game scope", () => {
+    expect(() =>
+      parsePlaysResponse(
+        '<plays total="1"><play id="1" quantity="1" date="2026-01-01"><item objectid="8"/></play></plays>',
+        7,
+      ),
+    ).toThrow("belongs to BGG ID 8, not 7");
   });
 
   test("rejects records without a valid source identity", () => {

@@ -20,6 +20,7 @@ import {
   type TournamentData,
   type CollectionProfileCollectionSource,
   type BggRequestObservation,
+  type BggPlaySession,
   type FieldEvidence,
   type PlayerRangeEvidence,
   type PlayEvidenceMutationResult,
@@ -274,8 +275,17 @@ function applyBggResult(
     playObservation?.sourceRequest === "bgg-plays"
       ? ("bgg-plays" as const)
       : ("bgg-collection" as const);
+  const hasSessionDerivedEvidence =
+    game.lastPlayedAt !== undefined || game.recentPlayCount !== undefined;
+  const isCompletePlaysObservation =
+    playObservation?.sourceRequest === "bgg-plays" && playObservation.state === "complete";
+  const hasImportedPlayRecords = result.collectionData?.playRecords !== undefined;
   if (
     playObservation !== undefined &&
+    (!isCompletePlaysObservation || !hasImportedPlayRecords) &&
+    !hasSessionDerivedEvidence &&
+    (playObservation.sourceRequest !== "bgg-plays" ||
+      acceptsBggPlaysObservation(game, playObservation.observedAt)) &&
     (game.latestPlayCountCheck === null ||
       Date.parse(playObservation.observedAt) > Date.parse(game.latestPlayCountCheck.observedAt))
   ) {
@@ -344,6 +354,85 @@ function applyBggResult(
     collectionState: result.collectionData?.observation?.state ?? "absent",
   });
   return acceptedCurrentPlayEvidence;
+}
+
+function acceptsBggPlaysObservation(game: DurableGame, observedAt: string): boolean {
+  const incomingAt = Date.parse(observedAt);
+  const evidenceAt = game.playCountEvidence.observedAt;
+  const checkAt = game.latestPlayCountCheck?.observedAt;
+  if (checkAt !== undefined && incomingAt < Date.parse(checkAt)) return false;
+  if (evidenceAt === null) return checkAt === undefined || incomingAt > Date.parse(checkAt);
+  if (incomingAt > Date.parse(evidenceAt)) {
+    return checkAt === undefined || incomingAt > Date.parse(checkAt);
+  }
+  // Equal-time refresh may replay accepted sessions, but not a newer failed check or manual edit.
+  return incomingAt === Date.parse(evidenceAt) && game.playCountEvidence.source === "bgg-plays";
+}
+
+function applyImportedBggPlaySessions(
+  collection: Collection,
+  game: DurableGame,
+  collectionData: BggGameResult["collectionData"],
+): boolean {
+  const observation = collectionData?.observation;
+  const records = collectionData?.playRecords;
+  if (
+    observation?.sourceRequest !== "bgg-plays" ||
+    observation.state !== "complete" ||
+    records === undefined
+  ) {
+    return false;
+  }
+  if (!acceptsBggPlaysObservation(game, observation.observedAt)) return false;
+  const scope = new Set(
+    [game.bggId, ...(game.additionalBggIds ?? [])].filter((id): id is number => id !== null),
+  );
+  const imported: BggPlaySession[] = records.flatMap((record) =>
+    record.dateState === "valid" && record.playedOn !== null && scope.has(record.bggId)
+      ? [
+          {
+            playId: record.id,
+            bggId: record.bggId,
+            quantity: record.quantity,
+            playedOn: record.playedOn,
+            observedAt: observation.observedAt,
+          },
+        ]
+      : [],
+  );
+  const retained = (collection.bggPlaySessions ?? []).filter(
+    (session) => !scope.has(session.bggId),
+  );
+  collection.bggPlaySessions = [...retained, ...imported].sort(
+    (left, right) => left.playId - right.playId,
+  );
+  const sessions = collection.bggPlaySessions.filter((session) => scope.has(session.bggId));
+  const numPlays = sessions.reduce((total, session) => total + session.quantity, 0);
+  const lastPlayedAt = sessions.reduce<string | null>(
+    (latest, session) => (latest === null || session.playedOn > latest ? session.playedOn : latest),
+    null,
+  );
+  const observedDate = observation.observedAt.slice(0, 10);
+  const cutoff = new Date(`${observedDate}T00:00:00.000Z`);
+  cutoff.setUTCDate(cutoff.getUTCDate() - 364);
+  const cutoffDate = cutoff.toISOString().slice(0, 10);
+  game.lastPlayedAt = lastPlayedAt;
+  game.recentPlayCount = sessions
+    .filter((session) => session.playedOn >= cutoffDate && session.playedOn <= observedDate)
+    .reduce((total, session) => total + session.quantity, 0);
+  game.numPlays = numPlays;
+  game.playCountEvidence = {
+    status: "valid",
+    value: numPlays,
+    source: "bgg-plays",
+    observedAt: observation.observedAt,
+  };
+  game.latestPlayCountCheck = {
+    status: "valid",
+    value: numPlays,
+    observedAt: observation.observedAt,
+  };
+  return true;
 }
 
 function strictSafeBestPlayerCount(value: number | null): number | null {
@@ -932,11 +1021,23 @@ export function createGameService(deps: GameServiceDeps): GameService {
       let result: BggGameResult;
       try {
         result = await configuredBggClient().getGame(game.bggId);
-        if ((game.additionalBggIds ?? []).length > 0) {
-          result.collectionData = await configuredBggClient().getPlayCount([
+        try {
+          const plays = await configuredBggClient().getPlayCount([
             game.bggId,
             ...(game.additionalBggIds ?? []),
           ]);
+          if (
+            plays.observation?.sourceRequest === "bgg-plays" &&
+            plays.observation.state === "complete"
+          ) {
+            result.collectionData = plays;
+          }
+        } catch (error) {
+          logger.warn("BGG plays import failed; preserving persisted sessions", {
+            gameId,
+            bggId: game.bggId,
+            error: toErrorMessage(error),
+          });
         }
       } catch (error) {
         const attemptedAt = now();
@@ -1004,7 +1105,14 @@ export function createGameService(deps: GameServiceDeps): GameService {
             ) {
               throw new Error(`Newer BGG data was accepted during refresh: ${gameId}`);
             }
-            const acceptedCurrentPlayEvidence = applyBggResult(acceptedGame, result, logger, true);
+            const acceptedAggregateEvidence = applyBggResult(acceptedGame, result, logger, true);
+            const acceptedSessionEvidence = applyImportedBggPlaySessions(
+              latest,
+              acceptedGame,
+              result.collectionData,
+            );
+            const acceptedCurrentPlayEvidence =
+              acceptedAggregateEvidence || acceptedSessionEvidence;
             acceptedGame.updatedAt = now();
             const transition = acceptedCurrentPlayEvidence
               ? completeIntentionFromPlayEvidence(latest, acceptedGame, acceptedGame.updatedAt)
@@ -1085,18 +1193,25 @@ export function createGameService(deps: GameServiceDeps): GameService {
           },
         );
         for (const game of bggGames) {
-          if ((game.additionalBggIds ?? []).length === 0) continue;
           const result = bggResults.get(game.bggId);
           if (!result) continue;
           try {
-            result.collectionData = await configuredBggClient().getPlayCount([
+            const plays = await configuredBggClient().getPlayCount([
               game.bggId,
               ...(game.additionalBggIds ?? []),
             ]);
+            if (
+              plays.observation?.sourceRequest === "bgg-plays" &&
+              plays.observation.state === "complete"
+            ) {
+              result.collectionData = plays;
+            }
           } catch (error) {
-            const message = toErrorMessage(error);
-            result.collectionData = undefined;
-            errors.push(`Play import failed for "${game.name}": ${message}`);
+            logger.warn("BGG plays import failed; preserving persisted sessions", {
+              gameId: game.id,
+              bggId: game.bggId,
+              error: toErrorMessage(error),
+            });
           }
         }
       } catch (err) {
@@ -1178,7 +1293,14 @@ export function createGameService(deps: GameServiceDeps): GameService {
                   });
                   continue;
                 }
-                const acceptedCurrentPlayEvidence = applyBggResult(game, result, logger, true);
+                const acceptedAggregateEvidence = applyBggResult(game, result, logger, true);
+                const acceptedSessionEvidence = applyImportedBggPlaySessions(
+                  latest,
+                  game,
+                  result.collectionData,
+                );
+                const acceptedCurrentPlayEvidence =
+                  acceptedAggregateEvidence || acceptedSessionEvidence;
                 const transition = acceptedCurrentPlayEvidence
                   ? completeIntentionFromPlayEvidence(latest, game, changedAt)
                   : null;

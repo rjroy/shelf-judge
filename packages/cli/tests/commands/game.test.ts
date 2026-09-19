@@ -1185,7 +1185,7 @@ describe("game intentions", () => {
           command.type === "create"
             ? await gameIntentionSet(
                 client,
-                [command.gameId, command.kind, "--command-id", command.commandId],
+                [command.gameId, "--command-id", command.commandId],
                 { json: true },
                 { writeStderr: (message) => (stderr += message) },
               )
@@ -1238,14 +1238,11 @@ describe("game intentions", () => {
       return originalPost<T>(path, nextBody);
     };
 
-    const output = await gameIntentionSet(
-      client,
-      ["game/1", "first-play", "--command-id", commandIds.create],
-      { json: false },
-    );
+    const output = await gameIntentionSet(client, ["game/1", "--command-id", commandIds.create], {
+      json: false,
+    });
     expect(body).toEqual({
       commandId: commandIds.create,
-      kind: "first-play",
       expectedActiveIntention: "absent",
     });
     expect(JSON.parse(output)).toEqual(result);
@@ -1360,7 +1357,7 @@ describe("game intentions", () => {
       },
     });
     try {
-      await gameIntentionSet(client, ["game/1", "first-play", "--command-id", commandIds.create], {
+      await gameIntentionSet(client, ["game/1", "--command-id", commandIds.create], {
         json: true,
       });
       throw new Error("Expected command to fail");
@@ -1374,20 +1371,13 @@ describe("game intentions", () => {
     (
       [
         [],
-        ["game-1"],
+        ["game-1", "first-play"],
         ["game-1", "invalid-kind"],
         ["game-1", "first-play", "extra"],
-        ["game-1", "first-play", "--unknown", "value"],
-        ["game-1", "first-play", "--command-id"],
-        ["game-1", "first-play", "--command-id", "not-a-uuid"],
-        [
-          "game-1",
-          "first-play",
-          "--command-id",
-          commandIds.create,
-          "--command-id",
-          commandIds.create,
-        ],
+        ["game-1", "--unknown", "value"],
+        ["game-1", "--command-id"],
+        ["game-1", "--command-id", "not-a-uuid"],
+        ["game-1", "--command-id", commandIds.create, "--command-id", commandIds.create],
       ] as string[][]
     ).map((args) => [args] as [string[]]),
   )("set rejects malformed arguments %#", async (args) => {
@@ -1427,7 +1417,7 @@ describe("game intentions", () => {
       });
       await expectThrows(
         () =>
-          gameIntentionSet(client, ["game-1", "first-play", "--command-id", commandIds.create], {
+          gameIntentionSet(client, ["game-1", "--command-id", commandIds.create], {
             json: true,
           }),
         "Invalid intention response",

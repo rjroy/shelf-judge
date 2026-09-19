@@ -141,7 +141,7 @@ function makeGame(
 
 function makeCollection(games: DurableGame[], axes: Axis[]): Collection {
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     revision: 0,
     id: "test-col",
     name: "Test Collection",

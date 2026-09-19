@@ -392,7 +392,7 @@ export function createProfileReflectionRoutes(deps: ProfileReflectionRoutesDeps)
       questionId: "repeated-values",
       questionVersion: 2,
       collectionId: "example-collection",
-      collectionSchemaVersion: 6,
+      collectionSchemaVersion: 7,
       collectionRevision: 0,
       profileContractVersion: 1,
       profileAlgorithmVersion: 1,

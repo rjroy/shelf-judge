@@ -295,7 +295,7 @@ describe("migrateCollection", () => {
     const result = migrateCollection(raw, dependencies);
 
     expect(result).toMatchObject({ migrated: true, sourceVersion: 1 });
-    expect(result.data.schemaVersion).toBe(6);
+    expect(result.data.schemaVersion).toBe(7);
     expect(result.data.axes).toEqual(expectedAxes);
     expect(result.data.games.map(({ bestPlayers }) => bestPlayers)).toEqual([3, 4, null]);
     expect(result.data.games[0]?.bestPlayersInvalidEvidence).toBeNull();
@@ -607,9 +607,11 @@ describe("migrateCollection", () => {
       { fromVersion: 3, toVersion: 4 },
       { fromVersion: 4, toVersion: 5 },
       { fromVersion: 5, toVersion: 6 },
+      { fromVersion: 6, toVersion: 7 },
     ]);
     const first = migrateCollection(historicalCollection(), dependencies);
     expect(first.data.axes.filter((axis) => axis.source === "tournament")).toHaveLength(1);
+    expect(first.data.bggPlaySessions).toEqual([]);
 
     const second = migrateCollection(first.data, dependencies);
     expect(second.migrated).toBe(false);
@@ -619,7 +621,11 @@ describe("migrateCollection", () => {
   test("migrates v5 directly by adding only honest missing notes", () => {
     const current = migrateCollection(historicalCollection(), dependencies).data;
     const v5 = {
-      ...current,
+      ...(() => {
+        const { bggPlaySessions, ...v6 } = current;
+        void bggPlaySessions;
+        return v6;
+      })(),
       schemaVersion: 5 as const,
       games: current.games.map(({ ownerNote, ...game }, index) => {
         void ownerNote;
@@ -716,7 +722,11 @@ describe("migrateCollection", () => {
       };
     });
     const result = migrateCollection({
-      ...current,
+      ...(() => {
+        const { bggPlaySessions, ...v6 } = current;
+        void bggPlaySessions;
+        return v6;
+      })(),
       schemaVersion: 4,
       axes: [...current.axes, playingTimeAxis, playerCountAxis],
       games,
@@ -734,8 +744,8 @@ describe("migrateCollection", () => {
     const current = migrateCollection(historicalCollection(), dependencies).data;
     expect(CollectionSchema.parse(migrateCollection(current, dependencies).data)).toEqual(current);
     expect(() => migrateCollection({ ...current, unexpected: true }, dependencies)).toThrow();
-    expect(() => migrateCollection({ ...current, schemaVersion: 7 }, dependencies)).toThrow(
-      "Unsupported collection schema version 7; current version is 6",
+    expect(() => migrateCollection({ ...current, schemaVersion: 8 }, dependencies)).toThrow(
+      "Unsupported collection schema version 8; current version is 7",
     );
     expect(() =>
       migrateCollection(
@@ -757,7 +767,7 @@ describe("migrateCollection", () => {
 
     expect(result).toMatchObject({ migrated: true, sourceVersion: 3 });
     expect(result.data).toMatchObject({
-      schemaVersion: 6,
+      schemaVersion: 7,
       revision: 0,
       intentions: [],
       commandReceipts: [],

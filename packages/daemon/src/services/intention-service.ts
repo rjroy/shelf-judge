@@ -94,6 +94,7 @@ export function completeIntentionFromPlayEvidence(
   );
   if (
     active === undefined ||
+    active.baseline === null ||
     game.playCountEvidence.status !== "valid" ||
     game.playCountEvidence.observedAt === null ||
     isPlayEvidenceStale(game) ||
@@ -336,59 +337,33 @@ export function createIntentionService(deps: IntentionServiceDeps): IntentionSer
                 } satisfies IntentionMutationResult,
               };
             }
-            const reason =
-              game.ownership !== "owned"
-                ? "not-owned"
-                : game.playCountEvidence.status === "missing"
-                  ? "missing-play-evidence"
-                  : game.playCountEvidence.status === "invalid"
-                    ? "invalid-play-evidence"
-                    : game.playCountEvidence.observedAt === null
-                      ? "missing-observation-time"
-                      : isPlayEvidenceStale(game)
-                        ? "stale-play-evidence"
-                        : (game.playCountEvidence.value === 0 ? "first-play" : "replay") !==
-                            command.kind
-                          ? "kind-mismatch"
-                          : null;
-            if (reason !== null) {
+            if (game.ownership !== "owned") {
               return {
                 changed: false,
                 value: {
                   ok: false,
                   commandId: command.commandId,
-                  error: { code: "ineligible-game", gameId: game.id, reason },
+                  error: { code: "ineligible-game", gameId: game.id, reason: "not-owned" },
                 } satisfies IntentionMutationResult,
               };
             }
             const evidence = game.playCountEvidence;
-            if (evidence.status !== "valid" || evidence.observedAt === null) {
-              return {
-                changed: false,
-                value: {
-                  ok: false,
-                  commandId: command.commandId,
-                  error: {
-                    code: "ineligible-game",
-                    gameId: game.id,
-                    reason:
-                      evidence.status === "valid"
-                        ? "missing-observation-time"
-                        : "invalid-play-evidence",
-                  },
-                } satisfies IntentionMutationResult,
-              };
-            }
+            const baseline =
+              evidence.status === "valid" &&
+              evidence.observedAt !== null &&
+              !isPlayEvidenceStale(game)
+                ? {
+                    playCount: evidence.value,
+                    evidenceSource: evidence.source,
+                    observedAt: evidence.observedAt,
+                  }
+                : null;
             const createdAt = now();
             intention = {
               intentionId: createId(),
               gameId: game.id,
-              kind: command.kind,
-              baseline: {
-                playCount: evidence.value,
-                evidenceSource: evidence.source,
-                observedAt: evidence.observedAt,
-              },
+              kind: "want-to-play",
+              baseline,
               createdAt,
               version: 1,
               resolution: null,

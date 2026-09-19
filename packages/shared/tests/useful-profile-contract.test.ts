@@ -10,6 +10,8 @@ import {
   OwnershipMutationResultSchema,
   PlayEvidenceMutationResultSchema,
   PlayIntentionSchema,
+  intentionMutationResultMatchesCommand,
+  type IntentionCommand,
   CollectionProfileEntityClassResultSchema,
   createCollectionProfileEntityClassResultSchema,
   ResolvedPlayIntentionHistorySchema,
@@ -87,7 +89,7 @@ function futureSourceCollection(
   commandReceipts: unknown[] = [],
 ) {
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     id: "collection",
     name: "Collection",
     axes: [],
@@ -102,6 +104,49 @@ function futureSourceCollection(
 }
 
 describe("collection profile source contracts", () => {
+  test("accepts migrated session storage in the current profile source without leaking it into historical validation", () => {
+    const source = { ...futureSourceCollection(), bggPlaySessions: [] };
+    expect(CollectionProfileCollectionSourceSchema.safeParse(source).success).toBe(true);
+  });
+  test("validates baseline-free Want to play and matches no-kind results without accepting invented legacy context", () => {
+    const intention = { ...activeIntentionFixture, kind: "want-to-play" as const, baseline: null };
+    const command: IntentionCommand = {
+      type: "create",
+      commandId,
+      gameId: intention.gameId,
+      expectedActiveIntention: "absent",
+    };
+    const result = { ok: true as const, commandId, intention, linkedOwnershipTransition: null };
+    expect(PlayIntentionSchema.safeParse(intention).success).toBe(true);
+    expect(
+      IntentionCommandReceiptSchema.safeParse({ commandId, request: command, result }).success,
+    ).toBe(true);
+    expect(intentionMutationResultMatchesCommand(command, result)).toBe(true);
+    expect(
+      intentionMutationResultMatchesCommand(command, {
+        ...result,
+        intention: activeIntentionFixture,
+      }),
+    ).toBe(false);
+    expect(
+      IntentionCommandReceiptSchema.safeParse({
+        commandId,
+        request: command,
+        result: { ...result, intention: activeIntentionFixture },
+      }).success,
+    ).toBe(false);
+    expect(
+      PlayIntentionSchema.safeParse({
+        ...intention,
+        version: 2,
+        resolution: {
+          outcome: "completed",
+          source: "observed-play-increase",
+          resolvedAt: "2026-08-29T10:00:00.000Z",
+        },
+      }).success,
+    ).toBe(false);
+  });
   test("validates linked play-evidence transitions against the returned game", () => {
     const completedAt = "2026-08-27T12:00:00.000Z";
     const game = futureSourceGame("game-4", "owned", {
@@ -163,7 +208,7 @@ describe("collection profile source contracts", () => {
         ...game,
         playCountEvidence: {
           ...game.playCountEvidence,
-          observedAt: transition.baseline.observedAt,
+          observedAt: transition.baseline?.observedAt ?? game.playCountEvidence.observedAt,
         },
       },
       { ...game, updatedAt: "not-a-date" },
@@ -622,7 +667,10 @@ describe("collection profile source contracts", () => {
           [
             {
               ...completed,
-              baseline: { ...completed.baseline, evidenceSource: "manual" },
+              baseline:
+                completed.baseline === null
+                  ? { playCount: 0, evidenceSource: "manual", observedAt: completed.createdAt }
+                  : { ...completed.baseline, evidenceSource: "manual" },
             },
           ],
           [receipt],

@@ -189,7 +189,7 @@ export async function gameNoteSet(
     ["--expected-version", "--text", "--command-id"],
     usage,
   );
-  const [gameId] = positional;
+  const gameId = positional[0] ?? "";
   const suppliedCommandId = flags.get("--command-id");
   const expectedVersion = parseExpectedVersion(flags.get("--expected-version"), usage);
   const preliminary = OwnerGameNoteSetRequestSchema.safeParse({
@@ -266,16 +266,14 @@ export async function gameIntentionSet(
   opts: OutputOptions,
   dependencies: CommandDependencies = {},
 ): Promise<string> {
-  const usage =
-    "Usage: shelf-judge game intention set <game-id> <first-play|replay> [--command-id <uuid>]";
-  const { positional, flags } = parseFlags(args, 2, ["--command-id"], usage);
-  const [gameId, kind] = positional;
+  const usage = "Usage: shelf-judge game intention set <game-id> [--command-id <uuid>]";
+  const { positional, flags } = parseFlags(args, 1, ["--command-id"], usage);
+  const [gameId] = positional;
   const suppliedCommandId = flags.get("--command-id");
   const preliminary = IntentionCommandSchema.safeParse({
     type: "create",
     commandId: suppliedCommandId ?? "00000000-0000-4000-8000-000000000001",
     gameId,
-    kind,
     expectedActiveIntention: "absent",
   });
   if (!preliminary.success || preliminary.data.type !== "create") throw new Error(usage);
@@ -286,7 +284,6 @@ export async function gameIntentionSet(
 
   const response = await client.post(`/api/games/${encodeURIComponent(gameId)}/intention`, {
     commandId: command.commandId,
-    kind: command.kind,
     expectedActiveIntention: command.expectedActiveIntention,
   });
   return renderIntentionResult(response.data, opts);

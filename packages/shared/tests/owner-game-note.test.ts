@@ -325,7 +325,7 @@ describe("owner note receipt and collection contracts", () => {
     expect(
       CollectionSchema.safeParse({
         ...baseCollection,
-        schemaVersion: 6,
+        schemaVersion: 7,
         games: [{ ...canonicalPublicGame, ownerNote: missingOwnerNote }],
       }).success,
     ).toBe(true);
@@ -365,6 +365,7 @@ describe("owner note receipt and collection contracts", () => {
     expect(
       CollectionProfileCollectionSourceV6Schema.safeParse({
         ...v6,
+        schemaVersion: 7,
         games: [canonicalPublicGame],
       }).success,
     ).toBe(true);

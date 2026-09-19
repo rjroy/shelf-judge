@@ -182,14 +182,17 @@ const ActiveIntentionSchema = z
     intentionId: IdSchema,
     gameId: IdSchema,
     gameName: z.string(),
-    kind: z.enum(["first-play", "replay"]),
+    // Historical first-play/replay intentions remain representable, while current
+    // intentions are want-to-play and may honestly lack count provenance.
+    kind: z.enum(["want-to-play", "first-play", "replay"]),
     baseline: z
       .object({
-        playCount: z.number().int().min(0).nullable(),
-        evidenceSource: z.string().nullable(),
-        observedAt: TimestampSchema.nullable(),
+        playCount: z.number().int().min(0),
+        evidenceSource: z.string(),
+        observedAt: TimestampSchema,
       })
-      .strict(),
+      .strict()
+      .nullable(),
     createdAt: TimestampSchema,
     version: z.number().int().safe().positive(),
     currentPlayEvidence: z.union([

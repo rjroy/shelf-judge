@@ -67,12 +67,14 @@ function clientForResults(
   collectionItems: Awaited<ReturnType<BggClient["getUserCollection"]>> = [],
 ): BggClient {
   let nextResult = 0;
+  let lastResult: BggGameResult | undefined;
   return {
     isConfigured: () => true,
     searchGames: () => Promise.resolve([]),
     getGame: () => {
       const result = results[nextResult++];
       if (result === undefined) return Promise.reject(new Error("No queued BGG result"));
+      lastResult = result;
       return Promise.resolve(result);
     },
     getGames: async (ids, onBatch) => {
@@ -83,7 +85,7 @@ function clientForResults(
       return mapped;
     },
     getUserCollection: () => Promise.resolve(collectionItems),
-    getPlayCount: () => Promise.reject(new Error("No queued BGG play result")),
+    getPlayCount: () => Promise.resolve(lastResult?.collectionData ?? { numPlays: null }),
   };
 }
 
@@ -411,6 +413,361 @@ describe("GameService BGG Integration", () => {
   });
 
   describe("refreshBggData", () => {
+    test("counts exactly 365 inclusive calendar days relative to the plays observation", async () => {
+      const { game } = await createGameService({
+        storageService,
+        fitnessService: createFitnessService(),
+      }).addGame({ name: "Wingspan", bggId: 266192 });
+      const parsed = parseThingItems(await readFixture("thing-wingspan-266192.xml"), observedAt)[0];
+      if (parsed === undefined) throw new Error("Expected Wingspan thing fixture");
+      const service = createGameService({
+        storageService,
+        fitnessService: createFitnessService(),
+        bggClient: {
+          ...clientForResults([parsed]),
+          getPlayCount: () =>
+            Promise.resolve({
+              numPlays: 3,
+              playRecords: ["2025-08-26", "2025-08-27", "2026-08-26"].map((playedOn, index) => ({
+                id: index + 1,
+                bggId: 266192,
+                quantity: 1,
+                dateState: "valid" as const,
+                playedOn,
+              })),
+              observation: {
+                sourceRequest: "bgg-plays",
+                state: "complete",
+                observedAt,
+                fieldsReturned: ["numPlays"],
+              },
+            }),
+        },
+        now: () => "2026-09-19T00:00:00.000Z",
+      });
+      expect((await service.refreshBggData(game.id)).game).toMatchObject({
+        numPlays: 3,
+        lastPlayedAt: "2026-08-26",
+        recentPlayCount: 2,
+      });
+    });
+    test("persists complete dated plays idempotently, removes missing records, and derives summaries", async () => {
+      const seed = createGameService({
+        storageService,
+        fitnessService: createFitnessService(),
+        now: () => "2026-08-27T00:00:00.000Z",
+      });
+      const { game } = await seed.addGame({ name: "Wingspan", bggId: 266192 });
+      const parsed = parseThingItems(await readFixture("thing-wingspan-266192.xml"), observedAt)[0];
+      if (parsed === undefined) throw new Error("Expected Wingspan thing fixture");
+      let records = [
+        { id: 11, bggId: 266192, quantity: 2, dateState: "valid" as const, playedOn: "2026-08-25" },
+        { id: 12, bggId: 266192, quantity: 3, dateState: "valid" as const, playedOn: "2025-01-01" },
+        { id: 13, bggId: 266192, quantity: 9, dateState: "missing" as const, playedOn: null },
+      ];
+      const client: BggClient = {
+        ...clientForResults([parsed, parsed, parsed]),
+        getPlayCount: () =>
+          Promise.resolve({
+            numPlays: records.reduce((total, record) => total + record.quantity, 0),
+            playRecords: records,
+            observation: {
+              sourceRequest: "bgg-plays",
+              observedAt: "2026-08-26T12:00:00.000Z",
+              state: "complete",
+              fieldsReturned: ["numPlays"],
+            },
+          }),
+      };
+      const service = createGameService({
+        storageService,
+        fitnessService: createFitnessService(),
+        bggClient: client,
+      });
+
+      await service.refreshBggData(game.id);
+      await service.refreshBggData(game.id);
+      let stored = await storageService.loadCollection();
+      expect(stored.bggPlaySessions).toEqual([
+        {
+          playId: 11,
+          bggId: 266192,
+          quantity: 2,
+          playedOn: "2026-08-25",
+          observedAt: "2026-08-26T12:00:00.000Z",
+        },
+        {
+          playId: 12,
+          bggId: 266192,
+          quantity: 3,
+          playedOn: "2025-01-01",
+          observedAt: "2026-08-26T12:00:00.000Z",
+        },
+      ]);
+      expect(stored.games[0]).toMatchObject({
+        numPlays: 5,
+        lastPlayedAt: "2026-08-25",
+        recentPlayCount: 2,
+      });
+
+      records = [
+        { id: 11, bggId: 266192, quantity: 4, dateState: "valid", playedOn: "2026-08-25" },
+      ];
+      await service.refreshBggData(game.id);
+      stored = await storageService.loadCollection();
+      expect(stored.bggPlaySessions).toEqual([
+        {
+          playId: 11,
+          bggId: 266192,
+          quantity: 4,
+          playedOn: "2026-08-25",
+          observedAt: "2026-08-26T12:00:00.000Z",
+        },
+      ]);
+      expect(stored.games[0]).toMatchObject({
+        numPlays: 4,
+        lastPlayedAt: "2026-08-25",
+        recentPlayCount: 4,
+      });
+    });
+
+    test("leaves imported sessions untouched when plays retrieval fails or is partial", async () => {
+      const seed = createGameService({ storageService, fitnessService: createFitnessService() });
+      const { game } = await seed.addGame({ name: "Wingspan", bggId: 266192 });
+      const collection = await storageService.loadCollection();
+      collection.bggPlaySessions = [
+        { playId: 11, bggId: 266192, quantity: 1, playedOn: "2026-08-25", observedAt },
+      ];
+      await storageService.saveCollection(collection);
+      const parsed = parseThingItems(await readFixture("thing-wingspan-266192.xml"), observedAt)[0];
+      if (parsed === undefined) throw new Error("Expected Wingspan thing fixture");
+      const partialClient: BggClient = {
+        ...clientForResults([parsed]),
+        getPlayCount: () =>
+          Promise.resolve({
+            numPlays: 0,
+            observation: {
+              sourceRequest: "bgg-plays",
+              observedAt,
+              state: "partial",
+              fieldsReturned: ["numPlays"],
+            },
+          }),
+      };
+      await createGameService({
+        storageService,
+        fitnessService: createFitnessService(),
+        bggClient: partialClient,
+      }).refreshBggData(game.id);
+      expect((await storageService.loadCollection()).bggPlaySessions).toEqual(
+        collection.bggPlaySessions,
+      );
+      const failingClient: BggClient = {
+        ...clientForResults([parsed]),
+        getPlayCount: () => Promise.reject(new Error("plays unavailable")),
+      };
+      await createGameService({
+        storageService,
+        fitnessService: createFitnessService(),
+        bggClient: failingClient,
+      }).refreshBggData(game.id);
+      expect((await storageService.loadCollection()).bggPlaySessions).toEqual(
+        collection.bggPlaySessions,
+      );
+    });
+
+    test("does not let a collection aggregate replace session-derived evidence after partial plays", async () => {
+      const seed = createGameService({ storageService, fitnessService: createFitnessService() });
+      const { game } = await seed.addGame({ name: "Wingspan", bggId: 266192 });
+      const collection = await storageService.loadCollection();
+      collection.bggPlaySessions = [
+        { playId: 1, bggId: 266192, quantity: 2, playedOn: "2026-08-25", observedAt },
+      ];
+      const storedGame = collection.games.find(({ id }) => id === game.id);
+      if (storedGame === undefined) throw new Error("Expected stored game");
+      storedGame.numPlays = 2;
+      storedGame.lastPlayedAt = "2026-08-25";
+      storedGame.recentPlayCount = 2;
+      storedGame.playCountEvidence = { status: "valid", value: 2, source: "bgg-plays", observedAt };
+      await storageService.saveCollection(collection);
+      const parsed = parseThingItems(await readFixture("thing-wingspan-266192.xml"), observedAt)[0];
+      if (parsed === undefined) throw new Error("Expected Wingspan thing fixture");
+      const client: BggClient = {
+        ...clientForResults([
+          {
+            ...parsed,
+            collectionData: {
+              numPlays: 99,
+              observation: {
+                sourceRequest: "bgg-collection",
+                observedAt: "2026-08-27T00:00:00.000Z",
+                state: "complete",
+                fieldsReturned: ["numPlays"],
+              },
+            },
+          },
+        ]),
+        getPlayCount: () =>
+          Promise.resolve({
+            numPlays: 99,
+            observation: {
+              sourceRequest: "bgg-plays",
+              observedAt: "2026-08-27T00:00:00.000Z",
+              state: "partial",
+              fieldsReturned: ["numPlays"],
+            },
+          }),
+      };
+      await createGameService({
+        storageService,
+        fitnessService: createFitnessService(),
+        bggClient: client,
+      }).refreshBggData(game.id);
+      const refreshed = (await storageService.loadCollection()).games.find(
+        ({ id }) => id === game.id,
+      );
+      expect(refreshed).toMatchObject({
+        numPlays: 2,
+        lastPlayedAt: "2026-08-25",
+        recentPlayCount: 2,
+        playCountEvidence: { status: "valid", value: 2, source: "bgg-plays" },
+      });
+      expect((await storageService.loadCollection()).bggPlaySessions).toEqual(
+        collection.bggPlaySessions,
+      );
+    });
+
+    test.each(
+      (["single", "batch"] as const).flatMap((mode) =>
+        (["manual", "bgg-plays", "missing-check"] as const).flatMap((newerEvidence) =>
+          ["2026-08-26T12:00:00.000Z", "2026-08-27T00:00:00.000Z"].map((incomingAt) => ({
+            mode,
+            newerEvidence,
+            incomingAt,
+          })),
+        ),
+      ),
+    )(
+      "keeps $mode refresh coherent against $newerEvidence at $incomingAt",
+      async ({ mode, newerEvidence, incomingAt }) => {
+        let now = "2026-08-24T00:00:00.000Z";
+        const seed = createGameService({
+          storageService,
+          fitnessService: createFitnessService(),
+          now: () => now,
+        });
+        const { game } = await seed.addGame({ name: "Wingspan", bggId: 266192 });
+        const parsed = parseThingItems(
+          await readFixture("thing-wingspan-266192.xml"),
+          observedAt,
+        )[0];
+        if (parsed === undefined) throw new Error("Expected Wingspan thing fixture");
+        let playsObservedAt = now;
+        let quantity = 8;
+        const service = createGameService({
+          storageService,
+          fitnessService: createFitnessService(),
+          now: () => now,
+          bggClient: {
+            ...clientForResults([parsed, parsed, parsed]),
+            getPlayCount: () =>
+              Promise.resolve({
+                numPlays: quantity,
+                playRecords: [
+                  {
+                    id: 77,
+                    bggId: 266192,
+                    quantity,
+                    dateState: "valid",
+                    playedOn: "2026-08-23",
+                  },
+                ],
+                observation: {
+                  sourceRequest: "bgg-plays",
+                  observedAt: playsObservedAt,
+                  state: "complete",
+                  fieldsReturned: ["numPlays"],
+                },
+              }),
+          },
+        });
+        await service.refreshBggData(game.id);
+        now = "2026-08-25T00:00:00.000Z";
+        const intentions = createIntentionService({
+          collectionMutationService: collectionMutationServiceFor(storageService),
+          now: () => now,
+        });
+        expect(
+          (
+            await intentions.execute({
+              type: "create",
+              commandId: "10000000-0000-4000-8000-000000000077",
+              gameId: game.id,
+              expectedActiveIntention: "absent",
+            })
+          ).ok,
+        ).toBe(true);
+        now = "2026-08-27T00:00:00.000Z";
+        if (newerEvidence === "manual") {
+          expect((await intentions.setPlayCount(game.id, 8)).ok).toBe(true);
+        } else if (newerEvidence === "bgg-plays") {
+          playsObservedAt = now;
+          await service.refreshBggData(game.id);
+        } else {
+          const collection = await storageService.loadCollection();
+          const storedGame = collection.games.find(({ id }) => id === game.id);
+          if (storedGame === undefined) throw new Error("Expected stored game");
+          storedGame.latestPlayCountCheck = { status: "missing", observedAt: now };
+          await storageService.saveCollection(collection);
+        }
+        const before = await storageService.loadCollection();
+        playsObservedAt = incomingAt;
+        quantity = 9;
+        now = "2026-08-28T00:00:00.000Z";
+        const acceptsReplay =
+          newerEvidence === "bgg-plays" && incomingAt === "2026-08-27T00:00:00.000Z";
+        if (mode === "single") {
+          const refreshed = await service.refreshBggData(game.id);
+          if (!acceptsReplay) expect(refreshed.linkedIntentionTransition).toBeNull();
+        } else {
+          expect((await service.refreshAllBggData()).errors).toEqual([]);
+        }
+        const persisted = await storageService.loadCollection();
+        const current = persisted.games.find(({ id }) => id === game.id);
+        const previous = before.games.find(({ id }) => id === game.id);
+        if (current === undefined || previous === undefined)
+          throw new Error("Expected stored game");
+        if (acceptsReplay) {
+          expect(current).toMatchObject({
+            numPlays: 9,
+            recentPlayCount: 9,
+            playCountEvidence: { value: 9, source: "bgg-plays", observedAt: incomingAt },
+            latestPlayCountCheck: { status: "valid", value: 9, observedAt: incomingAt },
+          });
+          expect(persisted.bggPlaySessions).toEqual([
+            {
+              playId: 77,
+              bggId: 266192,
+              quantity: 9,
+              playedOn: "2026-08-23",
+              observedAt: incomingAt,
+            },
+          ]);
+          expect(persisted.intentions[0]?.resolution?.source).toBe("observed-play-increase");
+        } else {
+          expect(current).toMatchObject({
+            numPlays: previous.numPlays,
+            playCountEvidence: previous.playCountEvidence,
+            latestPlayCountCheck: previous.latestPlayCountCheck,
+            lastPlayedAt: previous.lastPlayedAt,
+            recentPlayCount: previous.recentPlayCount,
+          });
+          expect(persisted.bggPlaySessions).toEqual(before.bggPlaySessions);
+          expect(persisted.intentions).toEqual(before.intentions);
+          expect(persisted.intentions[0]?.resolution).toBeNull();
+        }
+      },
+    );
     test("preserves an owner note byte-for-byte while replacing BGG data", async () => {
       const seed = createGameService({
         storageService,
@@ -1680,8 +2037,7 @@ describe("GameService BGG Integration", () => {
         bggClient: failingClient,
       });
 
-      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
-      await expect(service.refreshBggData(game.id)).rejects.toThrow("related plays failed");
+      await service.refreshBggData(game.id);
       const stored = (await storageService.loadCollection()).games[0];
       expect(stored?.numPlays).toBe(4);
       expect(stored?.playCountEvidence).toMatchObject({
@@ -1735,7 +2091,7 @@ describe("GameService BGG Integration", () => {
       });
     });
 
-    test("reports related-entry failure without replacing batch play evidence", async () => {
+    test("warns on related-entry failure without replacing persisted sessions or batch play evidence", async () => {
       const seedService = createGameService({
         storageService,
         fitnessService: createFitnessService(),
@@ -1743,6 +2099,17 @@ describe("GameService BGG Integration", () => {
       const game = (await seedService.addGame({ name: "Wingspan", bggId: 266192, numPlays: 4 }))
         .game;
       await seedService.setAdditionalBggIds(game.id, [999001]);
+      const seededCollection = await storageService.loadCollection();
+      seededCollection.bggPlaySessions = [
+        {
+          playId: 77,
+          bggId: 266192,
+          quantity: 4,
+          playedOn: "2026-08-20",
+          observedAt,
+        },
+      ];
+      await storageService.saveCollection(seededCollection);
       const parsed = parseThingItems(await readFixture("thing-wingspan-266192.xml"), observedAt)[0];
       if (parsed === undefined) throw new Error("Expected Wingspan thing fixture");
       const client: BggClient = {
@@ -1753,12 +2120,23 @@ describe("GameService BGG Integration", () => {
         storageService,
         fitnessService: createFitnessService(),
         bggClient: client,
+        logger: {
+          log: (...args: unknown[]) => logs.push(args),
+          warn: (...args: unknown[]) => logs.push(args),
+          error: (...args: unknown[]) => logs.push(args),
+        },
       });
 
       const summary = await service.refreshAllBggData();
 
-      expect(summary.errors).toEqual(['Play import failed for "Wingspan": related plays failed']);
-      const stored = (await storageService.loadCollection()).games[0];
+      expect(summary.errors).toEqual([]);
+      expect(logs).toContainEqual([
+        "BGG plays import failed; preserving persisted sessions",
+        expect.objectContaining({ gameId: game.id, bggId: 266192, error: "related plays failed" }),
+      ]);
+      const persisted = await storageService.loadCollection();
+      expect(persisted.bggPlaySessions).toEqual(seededCollection.bggPlaySessions);
+      const stored = persisted.games[0];
       expect(stored?.numPlays).toBe(4);
       expect(stored?.playCountEvidence).toMatchObject({
         status: "valid",

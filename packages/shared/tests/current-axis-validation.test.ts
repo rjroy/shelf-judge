@@ -598,6 +598,7 @@ describe("current persisted collection validation", () => {
     games: [],
     intentions: [],
     commandReceipts: [],
+    bggPlaySessions: [],
     entertainmentBenchmark: null,
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -808,7 +809,7 @@ describe("current persisted collection validation", () => {
   });
 
   test("rejects future versions and extra persisted fields", () => {
-    expect(CollectionSchema.safeParse({ ...currentCollection, schemaVersion: 7 }).success).toBe(
+    expect(CollectionSchema.safeParse({ ...currentCollection, schemaVersion: 8 }).success).toBe(
       false,
     );
     expect(CollectionSchema.safeParse({ ...currentCollection, unexpected: true }).success).toBe(

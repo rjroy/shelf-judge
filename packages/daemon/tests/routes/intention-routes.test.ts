@@ -442,7 +442,7 @@ describe("game intention and play routes", () => {
     });
   });
 
-  test("rejects null-time valid evidence through the service and reconstructed route", async () => {
+  test("accepts null-time valid evidence through the service and reconstructed route", async () => {
     const original = createTestApp();
     const add = (await (
       await jsonRequest(original.app, "POST", "/api/games", { name: "Migrated Null Time" })
@@ -459,7 +459,6 @@ describe("game intention and play routes", () => {
     };
     await original.storageService.saveCollection(source);
     const restarted = createTestApp({ fileOps: original.fileOps });
-    const before = await restarted.storageService.loadCollection();
 
     const response = await jsonRequest(
       restarted.app,
@@ -471,17 +470,21 @@ describe("game intention and play routes", () => {
         expectedActiveIntention: "absent",
       },
     );
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({
-      ok: false,
+    expect(response.status).toBe(200);
+    const result: unknown = await response.json();
+    expect(result).toMatchObject({
+      ok: true,
       commandId: createCommandId,
-      error: {
-        code: "ineligible-game",
-        gameId: add.game.id,
-        reason: "missing-observation-time",
-      },
+      intention: { kind: "want-to-play", baseline: null },
     });
-    expect(await restarted.storageService.loadCollection()).toEqual(before);
+    const again = createTestApp({ fileOps: original.fileOps });
+    const replay = await jsonRequest(again.app, "POST", `/api/games/${add.game.id}/intention`, {
+      commandId: createCommandId,
+      kind: "first-play",
+      expectedActiveIntention: "absent",
+    });
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toEqual(result);
   });
 
   test.each([
@@ -1099,3 +1102,65 @@ describe("game intention and play routes", () => {
     expect(source.intentions[0]?.resolution).not.toBeNull();
   });
 });
+
+test.each([{ name: "Omitted count" }, { name: "Null count", numPlays: null }])(
+  "creates Want to play without count evidence: $name",
+  async (body) => {
+    let now = "2026-09-19T10:00:00.000Z";
+    const context = createTestApp({ now: () => now });
+    const added = (await (
+      await jsonRequest(context.app, "POST", "/api/games", body)
+    ).json()) as AddGameResult;
+    expect(added.game.playCountEvidence.status).toBe("missing");
+    expect(added.game.numPlays).toBeNull();
+    const response = await jsonRequest(
+      context.app,
+      "POST",
+      `/api/games/${added.game.id}/intention`,
+      {
+        commandId: "30000000-0000-4000-8000-000000000001",
+        expectedActiveIntention: "absent",
+      },
+    );
+    expect(response.status).toBe(200);
+    const accepted = IntentionMutationResultSchema.parse(await response.json());
+    expect(accepted).toMatchObject({
+      ok: true,
+      intention: { kind: "want-to-play", baseline: null },
+    });
+    const restarted = createTestApp({ fileOps: context.fileOps, now: () => now });
+    now = "2026-09-19T11:00:00.000Z";
+    const correction = await jsonRequest(
+      restarted.app,
+      "PUT",
+      `/api/games/${added.game.id}/plays`,
+      { playCount: 5 },
+    );
+    expect(correction.status).toBe(200);
+    expect(await correction.json()).toMatchObject({ ok: true, linkedIntentionTransition: null });
+    const detail = await restarted.intentionService.getGameDetail(added.game.id, added.game.name);
+    expect(detail.activeIntention).toMatchObject({
+      kind: "want-to-play",
+      baseline: null,
+      version: 1,
+      resolution: null,
+    });
+    await restarted.gameService.setOwnership(added.game.id, "previously-owned");
+    const retired = await restarted.intentionService.getGameDetail(added.game.id, added.game.name);
+    expect(retired.activeIntention).toBeNull();
+    expect(retired.resolvedHistory).toMatchObject([
+      { kind: "want-to-play", baseline: null, resolution: { outcome: "retired" } },
+    ]);
+    const replay = await jsonRequest(
+      restarted.app,
+      "POST",
+      `/api/games/${added.game.id}/intention`,
+      {
+        commandId: "30000000-0000-4000-8000-000000000001",
+        expectedActiveIntention: "absent",
+      },
+    );
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toEqual(accepted);
+  },
+);

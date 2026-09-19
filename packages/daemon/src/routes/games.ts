@@ -267,7 +267,7 @@ const ShelfAssignmentBodySchema = z.object({
 const CreateIntentionBodySchema = z
   .object({
     commandId: z.string().uuid(),
-    kind: z.enum(["first-play", "replay"]),
+    kind: z.enum(["want-to-play", "first-play", "replay"]).optional(),
     expectedActiveIntention: z.literal("absent"),
   })
   .strict();
@@ -1230,17 +1230,21 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     {
       operationId: "shelf.game.intention.set",
       name: "set",
-      description: "Create the eligible first-play or replay intention for an owned game",
+      description: "Create a Want to play intention for an owned game",
       invocation: { method: "POST", path: "/api/games/:id/intention" },
       requestSchema: CreateIntentionBodySchema,
       request: {
         body: {
           type: "object",
           additionalProperties: false,
-          required: ["commandId", "kind", "expectedActiveIntention"],
+          required: ["commandId", "expectedActiveIntention"],
           properties: {
             commandId: { type: "string", format: "uuid" },
-            kind: { type: "string", enum: ["first-play", "replay"] },
+            kind: {
+              type: "string",
+              enum: ["want-to-play", "first-play", "replay"],
+              description: "Legacy compatibility only; new intentions are Want to play.",
+            },
             expectedActiveIntention: { const: "absent" },
           },
         },

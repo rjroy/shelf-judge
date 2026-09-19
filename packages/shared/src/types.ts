@@ -165,6 +165,10 @@ export interface Game {
   imageUrl: string | null;
   bggData: BggGameData | null;
   numPlays: number | null;
+  /** Derived only from dated BGG sessions. Date-only, never an invented timestamp. */
+  lastPlayedAt?: string | null;
+  /** Quantity played in the 365 days ending at the latest successful plays observation. */
+  recentPlayCount?: number;
   acquisition: Acquisition;
   playCountEvidence: FieldEvidence<number>;
   durationEvidence: FieldEvidence<number>;
@@ -180,6 +184,18 @@ export interface Game {
   ratings: Record<string, number>; // axisId -> rating (1-10)
   createdAt: string; // ISO 8601
   updatedAt: string; // ISO 8601
+}
+
+export interface BggPlaySession {
+  /** Stable BGG /plays record identity. */
+  playId: number;
+  /** BGG thing identity reported for the play. */
+  bggId: number;
+  quantity: number;
+  /** BGG date-only value, validated as YYYY-MM-DD. */
+  playedOn: string;
+  /** When this complete /plays response was observed, distinct from playedOn. */
+  observedAt: string;
 }
 
 export type OwnerGameNote =
@@ -282,7 +298,13 @@ export interface CollectionV6 extends Omit<
   commandReceipts: CommandReceipt[];
 }
 
-export type Collection = CollectionV6;
+export interface CollectionV7 extends Omit<CollectionV6, "schemaVersion"> {
+  schemaVersion: 7;
+  /** Valid dated sessions imported from complete BGG /plays refreshes. */
+  bggPlaySessions?: BggPlaySession[];
+}
+
+export type Collection = CollectionV7;
 
 // Fitness score types from .lore/designs/mvp-fitness-model.md
 
@@ -747,7 +769,8 @@ export type LatestPlayCountCheck =
   | { status: "invalid"; observedAt: string; evidence: InvalidEvidence }
   | null;
 
-export type PlayIntentionKind = "first-play" | "replay";
+/** `first-play` and `replay` are retained for historical intentions. */
+export type PlayIntentionKind = "want-to-play" | "first-play" | "replay";
 export type PlayIntentionResolutionSource =
   | "observed-play-increase"
   | "owner-confirmed"
@@ -771,7 +794,8 @@ export interface PlayIntention {
   intentionId: string;
   gameId: string;
   kind: PlayIntentionKind;
-  baseline: PlayIntentionBaseline;
+  /** Null means no trustworthy count observation existed when the owner acted. */
+  baseline: PlayIntentionBaseline | null;
   createdAt: string;
   version: number;
   resolution: PlayIntentionResolution | null;
@@ -818,7 +842,8 @@ export type CreateIntentionCommand = {
   type: "create";
   commandId: string;
   gameId: string;
-  kind: PlayIntentionKind;
+  /** Optional for the Want to play command; retained for legacy command receipts. */
+  kind?: PlayIntentionKind;
   expectedActiveIntention: "absent";
 };
 
@@ -1055,7 +1080,7 @@ export interface ResolvedPlayIntentionHistoryItem {
   gameId: string;
   gameName: string;
   kind: PlayIntentionKind;
-  baseline: PlayIntentionBaseline;
+  baseline: PlayIntentionBaseline | null;
   createdAt: string;
   version: number;
   resolution: PlayIntentionResolution;
@@ -1105,7 +1130,7 @@ export type CollectionProfileResult = CollectionProfile | CollectionProfileUnava
 
 export interface ProfileSourceIdentity {
   collectionId: string;
-  collectionSchemaVersion: 6;
+  collectionSchemaVersion: 7;
   collectionRevision: number;
   tournamentHash: string;
   predictionSettingsHash: string;

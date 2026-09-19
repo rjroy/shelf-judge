@@ -142,17 +142,38 @@ export function clearOwnerGameNote(
   return mutateOwnerGameNote("clear", gameId, request, fetcher);
 }
 
-export async function createIntention(
+export function createIntention(gameId: string): Promise<IntentionMutationResult>;
+/** Legacy browser callers may retain their historical kind payload. */
+export function createIntention(
   gameId: string,
   kind: PlayIntentionKind,
-  fetcher: BrowserFetch = fetch,
+  fetcher?: BrowserFetch,
+  createCommandId?: () => string,
+): Promise<IntentionMutationResult>;
+export function createIntention(
+  gameId: string,
+  fetcher: BrowserFetch,
+  createCommandId?: () => string,
+): Promise<IntentionMutationResult>;
+export async function createIntention(
+  gameId: string,
+  kindOrFetcher?: PlayIntentionKind | BrowserFetch,
+  fetcherOrCreateCommandId?: BrowserFetch | (() => string),
   createCommandId: () => string = generateBrowserUuid,
 ): Promise<IntentionMutationResult> {
+  const legacy = typeof kindOrFetcher === "string";
+  const kind = legacy ? kindOrFetcher : undefined;
+  const fetcher = legacy
+    ? ((fetcherOrCreateCommandId as BrowserFetch | undefined) ?? fetch)
+    : (kindOrFetcher ?? fetch);
+  const commandIdFactory = legacy
+    ? createCommandId
+    : ((fetcherOrCreateCommandId as (() => string) | undefined) ?? createCommandId);
   const command = {
     type: "create",
-    commandId: createCommandId(),
+    commandId: commandIdFactory(),
     gameId,
-    kind,
+    ...(kind === undefined ? {} : { kind }),
     expectedActiveIntention: "absent",
   } satisfies IntentionCommand;
   const response = await fetcher(`/api/daemon/games/${gameId}/intention`, {
@@ -160,7 +181,7 @@ export async function createIntention(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       commandId: command.commandId,
-      kind,
+      ...(kind === undefined ? {} : { kind }),
       expectedActiveIntention: "absent",
     }),
   });

@@ -24,7 +24,7 @@ function createMockStorage(): StorageService & {
       updatedAt: NOW,
     } as ShelfConfiguration,
     collection: {
-      schemaVersion: 6,
+      schemaVersion: 7,
       revision: 0,
       id: "collection-1",
       name: "Test",

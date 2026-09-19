@@ -145,7 +145,7 @@ export const usefulProfileFixture: CollectionProfile = {
         decisionFamily: "play-intention",
         intention: activeIntentionFixture,
         gameName: "Heat",
-        question: "Do you still intend to play Heat?",
+        question: "Do you still want to play Heat?",
         whyNow: "You asked Shelf Judge to keep this intention visible.",
         currentPlayEvidence: {
           status: "valid",
