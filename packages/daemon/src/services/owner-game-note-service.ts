@@ -181,17 +181,20 @@ export function createOwnerGameNoteService(deps: OwnerGameNoteServiceDeps): Owne
     const uniqueGameIds = [...new Set(z.array(GameIdSchema).parse(gameIds))];
     const { value } = await deps.collectionMutationService.mutate(
       { operation: "shelf.game.note.states.get", trigger: "owner-read", gameIds: uniqueGameIds },
-      (candidate) => ({
-        changed: false,
-        value: uniqueGameIds.map((gameId) => {
-          const game = candidate.games.find(({ id }) => id === gameId);
-          if (game === undefined) throw new NotFoundError(`Game not found: ${gameId}`);
-          return {
-            gameId,
-            note: { state: game.ownerNote.state, version: game.ownerNote.version },
-          };
-        }),
-      }),
+      (candidate) => {
+        const gamesById = new Map(candidate.games.map((game) => [game.id, game]));
+        return {
+          changed: false,
+          value: uniqueGameIds.map((gameId) => {
+            const game = gamesById.get(gameId);
+            if (game === undefined) throw new NotFoundError(`Game not found: ${gameId}`);
+            return {
+              gameId,
+              note: { state: game.ownerNote.state, version: game.ownerNote.version },
+            };
+          }),
+        };
+      },
     );
     return value;
   }
