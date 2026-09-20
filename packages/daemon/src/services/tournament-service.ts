@@ -280,30 +280,49 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
         seenPairs.add(key);
       }
 
-      // Prefer similarly rated games. Comparison counts remain statistical inputs only,
-      // such as ELO K-factor selection and displayed history, not pairing priority.
-      let closestPairs: { gameA: string; gameB: string }[] = [];
-      let smallestEloDifference = Infinity;
-      for (let aIndex = 0; aIndex < availableGameIds.length - 1; aIndex++) {
-        const gameA = availableGameIds[aIndex];
-        const gameAElo = data.gameStats[gameA]?.eloRating ?? 1500;
-        for (let bIndex = aIndex + 1; bIndex < availableGameIds.length; bIndex++) {
-          const gameB = availableGameIds[bIndex];
+      // Prioritize games that have received the fewest comparisons. For a tied
+      // anchor, select the unpresented opponent with the closest ELO rating.
+      const eligibleAnchors = availableGameIds.filter((gameA) =>
+        availableGameIds.some((gameB) => {
           const key = [gameA, gameB].sort().join("|");
-          if (seenPairs.has(key)) continue;
+          return gameA !== gameB && !seenPairs.has(key);
+        }),
+      );
+      if (eligibleAnchors.length === 0) {
+        // All pairs exhausted this session.
+        session.status = "completed";
+        session.comparisons = [];
+        session.updatedAt = new Date().toISOString();
+        await storageService.saveTournament(data);
+        return null;
+      }
+      const fewestComparisons = Math.min(
+        ...eligibleAnchors.map((gameId) => data.gameStats[gameId]?.comparisonCount ?? 0),
+      );
+      const leastComparedAnchors = eligibleAnchors.filter(
+        (gameId) => (data.gameStats[gameId]?.comparisonCount ?? 0) === fewestComparisons,
+      );
+      const gameA = leastComparedAnchors[Math.floor(Math.random() * leastComparedAnchors.length)];
+      const gameAElo = data.gameStats[gameA]?.eloRating ?? 1500;
 
-          const eloDifference = Math.abs(gameAElo - (data.gameStats[gameB]?.eloRating ?? 1500));
-          if (eloDifference < smallestEloDifference) {
-            smallestEloDifference = eloDifference;
-            closestPairs = [{ gameA, gameB }];
-          } else if (eloDifference === smallestEloDifference) {
-            closestPairs.push({ gameA, gameB });
-          }
+      let closestOpponents: string[] = [];
+      let smallestEloDifference = Infinity;
+      for (const gameB of availableGameIds) {
+        const key = [gameA, gameB].sort().join("|");
+        if (gameA === gameB || seenPairs.has(key)) continue;
+
+        const eloDifference = Math.abs(gameAElo - (data.gameStats[gameB]?.eloRating ?? 1500));
+        if (eloDifference < smallestEloDifference) {
+          smallestEloDifference = eloDifference;
+          closestOpponents = [gameB];
+        } else if (eloDifference === smallestEloDifference) {
+          closestOpponents.push(gameB);
         }
       }
 
-      if (closestPairs.length > 0) {
-        return closestPairs[Math.floor(Math.random() * closestPairs.length)];
+      if (closestOpponents.length > 0) {
+        const gameB = closestOpponents[Math.floor(Math.random() * closestOpponents.length)];
+        return { gameA, gameB };
       }
 
       // All pairs exhausted this session
