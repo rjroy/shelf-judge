@@ -69,7 +69,7 @@ Sessions serve two purposes: grouping comparisons during active play (pair dedup
 
 - REQ-RTO-7: `deriveDisplayStats` (or its replacement) MUST read directly from the cached `gameStats` fields, not scan a comparisons array. The `opponentGameName` field in the display type (REQ-TOURN-11) is resolved at read time from the collection, not stored in the cache. Note: the existing comment on `TournamentGameStatsDisplay.recentComparisons` in `types.ts` reads "derived from comparison history (never cached)." This comment becomes incorrect and MUST be updated to reflect that the field is now read from the cached `TournamentGameStats.recentComparisons`.
 
-- REQ-RTO-8: `getNextPair` MUST use the active session's `comparisons` array for same-session pair deduplication, not a top-level comparisons array. Behavior is otherwise unchanged from REQ-TOURN-14.
+- REQ-RTO-8: `getNextPair` MUST use the active session's `comparisons` array for same-session pair deduplication, not a top-level comparisons array. It MUST first select from games with the lowest current comparison count that still have an unpresented opponent, then select that game's unpresented opponent with the smallest current ELO difference. Ties at either stage are random. A reversed presentation of an already submitted pair is also a repeat and MUST be excluded.
 
 - REQ-RTO-9: `recalculate` (REQ-TOURN-7) MUST be removed as an operation. The API endpoint, CLI command, and any references to it are dropped. Cached stats are authoritative.
 

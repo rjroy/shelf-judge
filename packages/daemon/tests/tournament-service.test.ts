@@ -432,8 +432,8 @@ describe("TournamentService", () => {
   });
 
   describe("adaptive pairing", () => {
-    test("selects the closest ELO pair regardless of comparison counts", async () => {
-      // g1 and g2 have the closest ratings despite their higher comparison counts.
+    test("prioritizes a minimally compared game over a closer global ELO pair", async () => {
+      // g1 and g2 are globally closest, but g3 has the fewest comparisons.
       storage.tournamentData.gameStats = {
         g1: {
           eloRating: 1500,
@@ -450,14 +450,29 @@ describe("TournamentService", () => {
           recentComparisons: [],
         },
         g3: { eloRating: 1700, comparisonCount: 0, wins: 0, losses: 0, recentComparisons: [] },
-        g4: { eloRating: 1800, comparisonCount: 0, wins: 0, losses: 0, recentComparisons: [] },
-        g5: { eloRating: 1900, comparisonCount: 0, wins: 0, losses: 0, recentComparisons: [] },
+        g4: { eloRating: 1800, comparisonCount: 1, wins: 1, losses: 0, recentComparisons: [] },
+        g5: { eloRating: 1900, comparisonCount: 1, wins: 1, losses: 0, recentComparisons: [] },
       };
 
       const session = await service.startSession(null, games);
       const pair = await service.getNextPair(session.id);
 
-      expect(pair).toEqual({ gameA: "g1", gameB: "g2" });
+      expect(pair).toEqual({ gameA: "g3", gameB: "g4" });
+    });
+
+    test("selects the closest ELO opponent after comparison-count priority", async () => {
+      storage.tournamentData.gameStats = {
+        g1: { eloRating: 1500, comparisonCount: 2, wins: 1, losses: 1, recentComparisons: [] },
+        g2: { eloRating: 1510, comparisonCount: 2, wins: 1, losses: 1, recentComparisons: [] },
+        g3: { eloRating: 1700, comparisonCount: 0, wins: 0, losses: 0, recentComparisons: [] },
+        g4: { eloRating: 1800, comparisonCount: 1, wins: 1, losses: 0, recentComparisons: [] },
+        g5: { eloRating: 1701, comparisonCount: 1, wins: 1, losses: 0, recentComparisons: [] },
+      };
+
+      const session = await service.startSession(null, games);
+      const pair = await service.getNextPair(session.id);
+
+      expect(pair).toEqual({ gameA: "g3", gameB: "g5" });
     });
 
     test("throws for non-existent session", async () => {

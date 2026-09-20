@@ -9,6 +9,7 @@ related:
   - .lore/archive/specs/collection/collection-profiling.md
   - .lore/work/notes/trusted-collection-insights-consumers.md
   - .lore/reference/specs/current/collection-purchase-utilization.md
+  - .lore/work/specs/expanded-profile-attention-opportunities.md
 req-prefix: USEFUL-PROF
 ---
 
@@ -17,6 +18,8 @@ req-prefix: USEFUL-PROF
 ## Status And Authority
 
 The owner reviewed and approved this product and behavior specification. The amended adjusted-fit requirements are implemented and passed terminal acceptance.
+
+**Authority notice:** This file remains the authority for shipped and implemented Profile behavior. [Expanded Profile Attention Opportunities](../../../work/specs/expanded-profile-attention-opportunities.md) is approved and normative for future attention behavior, covering the attention model and item contract (REQ-USEFUL-PROF-25, 30-32, and 45), neutral ordering (REQ-USEFUL-PROF-31), the empty state (REQ-USEFUL-PROF-37), purchase-utilization disposition (REQ-USEFUL-PROF-39), and cache and source expectations (REQ-USEFUL-PROF-49). This implemented reference's non-conflicting intention lifecycle, evidence-warning, ownership-transition, history, and no-reopen rules remain authoritative until implementation reconciliation. Implementation must reconcile this reference and its evidence with the approved amendment.
 
 Once approved, this specification supersedes the Profile Overview behavior in [Collection Identity and Trusted Insight Profiling](../../../archive/specs/collection/collection-profiling.md). The older document remains the record of the implemented contract before this redesign. It does not justify retaining a surface that this specification removes.
 

@@ -106,4 +106,12 @@ describe("responsive page structure", () => {
       /@media \(max-width: 700px\)[\s\S]*?\.shelf-row-actions \{[\s\S]*?flex-basis: 100%;/,
     );
   });
+
+  test("hides the sidebar theme toggle at the mobile breakpoint", async () => {
+    const css = await Bun.file(new URL("../app/globals.css", import.meta.url)).text();
+
+    expect(css).toMatch(
+      /@media \(max-width: 900px\)[\s\S]*?\.sidebar \.theme-toggle-sidebar-header \{\s*display: none;/,
+    );
+  });
 });

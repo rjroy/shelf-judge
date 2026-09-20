@@ -117,7 +117,7 @@ ELO requires knowing the result of each comparison to calculate scores correctly
 
 - REQ-TOURN-13: The minimum number of games in a session scope is 4. If a filter produces fewer than 4 games, the session is not created and the user is told why.
 
-- REQ-TOURN-14: During an active session, the system MUST present unpresented pairs with the smallest current ELO difference. If multiple candidate pairs have equal ELO difference, select randomly. The same pair MUST NOT be presented twice within the same session.
+- REQ-TOURN-14: During an active session, the system MUST first select from games with the lowest current comparison count that still have an unpresented opponent. It MUST then present that game's unpresented opponent with the smallest current ELO difference. Ties at either stage are selected randomly. The same pair MUST NOT be presented twice within the same session, including when its game order is reversed.
 
 - REQ-TOURN-15: Only one session can be active at a time. An active session persists until the user explicitly ends it or starts a new session (which completes the previous one). The user can leave and return to an active session freely; there is no separate "pause" action. Completed sessions are retained for history.
 

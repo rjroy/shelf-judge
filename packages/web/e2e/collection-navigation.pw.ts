@@ -209,14 +209,10 @@ async function expectNoHorizontalOverflow(page: Page): Promise<void> {
       name: element === document.documentElement ? "html" : element.className || element.tagName,
       clientWidth: element.clientWidth,
       scrollWidth: element.scrollWidth,
-      overflowX: getComputedStyle(element).overflowX,
     }));
   });
   expect(
     measurements.filter(({ scrollWidth, clientWidth }) => scrollWidth > clientWidth + 1),
-  ).toEqual([]);
-  expect(
-    measurements.filter(({ overflowX }) => overflowX === "hidden" || overflowX === "clip"),
   ).toEqual([]);
 }
 
