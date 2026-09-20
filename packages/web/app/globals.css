@@ -4644,6 +4644,10 @@ body {
     display: flex;
   }
 
+  .sidebar .theme-toggle-sidebar-header {
+    display: none;
+  }
+
   .sidebar {
     position: fixed;
     top: 0;
