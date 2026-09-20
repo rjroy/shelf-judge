@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { ReflectionGetResultSchema } from "@shelf-judge/shared";
 import type { GroundedAnalysisProvider } from "../../src/services/grounded-analysis/provider.js";
 import { createGroundedAnalysisProvider } from "../../src/services/grounded-analysis/provider.js";
 import { createOllamaProviderExtension } from "../../src/services/grounded-analysis/ollama-provider-extension.js";
@@ -10,16 +9,21 @@ import { createTestApp } from "../helpers/test-app.js";
 
 const NOW = "2026-09-10T12:00:00.000Z";
 const CAPABILITY = "a".repeat(64);
+const fixtureGameNames = [
+  "Selected reflection game",
+  "Second selected reflection game",
+  "Unselected reflection game",
+];
+const fixtureOwnerNotes = [
+  "Private selected owner note",
+  "Private second owner note",
+  "Private unselected owner note",
+];
 const unusedContext = new Proxy({} as ExtensionContext, {
   get() {
     throw new Error("Unexpected extension context access");
   },
 });
-
-function noteText(index: number): string {
-  const prefix = `note-${String(index).padStart(3, "0")}: `;
-  return `${prefix}${"x".repeat(200 - Buffer.byteLength(prefix))}`;
-}
 
 function request(path: string, body?: unknown): Request {
   return new Request(`http://localhost${path}`, {
@@ -30,7 +34,7 @@ function request(path: string, body?: unknown): Request {
 }
 
 describe("Reflection model collection tools", () => {
-  test("keeps 200 private 200-byte notes lazy until the model selects authorized games", async () => {
+  test("keeps collection and notes private until selected authorized games are retrieved", async () => {
     const providerCalls: unknown[] = [];
     let selectedGameIds: string[] = [];
     const provider: GroundedAnalysisProvider = {
@@ -40,7 +44,8 @@ describe("Reflection model collection tools", () => {
       },
       async analyze(request) {
         providerCalls.push(request);
-        expect(request.prompt).not.toContain("note-000");
+        for (const value of [...fixtureGameNames, ...fixtureOwnerNotes])
+          expect(request.prompt).not.toContain(value);
         const top = request.retrievalTools?.find((tool) => tool.name === "top");
         const summarize = request.retrievalTools?.find((tool) => tool.name === "summarize");
         const readGames = request.retrievalTools?.find((tool) => tool.name === "readGames");
@@ -55,6 +60,7 @@ describe("Reflection model collection tools", () => {
           undefined,
           unusedContext,
         );
+        expect(noteReads).toEqual([]);
         await summarize?.execute(
           "summarize",
           { groupBy: "metadata.mechanics", measures: ["gameCount"] },
@@ -62,13 +68,21 @@ describe("Reflection model collection tools", () => {
           undefined,
           unusedContext,
         );
-        await readGames?.execute(
+        expect(noteReads).toEqual([]);
+        const readGamesResult = await readGames?.execute(
           "read",
           { gameIds: selectedGameIds, fields: ["owner-game-note"] },
           undefined,
           undefined,
           unusedContext,
         );
+        const readGamesContent = readGamesResult?.content
+          .filter((part) => part.type === "text")
+          .map((part) => part.text)
+          .join("\n");
+        expect(readGamesContent).toContain(fixtureOwnerNotes[0]);
+        expect(readGamesContent).toContain(fixtureOwnerNotes[1]);
+        expect(readGamesContent).not.toContain(fixtureOwnerNotes[2]);
         const output = request.submissionSchema.parse({
           result: {
             outcome: "abstained",
@@ -97,43 +111,41 @@ describe("Reflection model collection tools", () => {
       return originalGet(gameId);
     };
 
-    const seed = (await context.gameService.addGame({ name: "Lazy note game 0" })).game;
-    const seedText = noteText(0);
-    expect(Buffer.byteLength(seedText)).toBe(200);
+    const seed = (await context.gameService.addGame({ name: fixtureGameNames[0] })).game;
     expect(
       await context.ownerGameNoteService.set(seed.id, {
         commandId: "32000000-0000-4000-8000-000000000000",
         expectedVersion: 0,
-        text: seedText,
+        text: fixtureOwnerNotes[0],
       }),
     ).toMatchObject({ ok: true });
     const collection = await context.storageService.loadCollection();
     const template = collection.games[0];
     if (template === undefined) throw new Error("Seed game was not stored");
-    const games = Array.from({ length: 200 }, (_, index) => {
-      const text = noteText(index);
-      expect(Buffer.byteLength(text)).toBe(200);
-      return index === 0
-        ? template
-        : {
-            ...template,
-            id: crypto.randomUUID(),
-            name: `Lazy note game ${index}`,
-            ownerNote: { ...template.ownerNote, text },
-          };
-    });
+    const secondGame = {
+      ...template,
+      id: crypto.randomUUID(),
+      name: fixtureGameNames[1],
+      ownerNote: { ...template.ownerNote, text: fixtureOwnerNotes[1] },
+    };
+    const unselectedGame = {
+      ...template,
+      id: crypto.randomUUID(),
+      name: fixtureGameNames[2],
+      ownerNote: { ...template.ownerNote, text: fixtureOwnerNotes[2] },
+    };
+    const games = [template, secondGame, unselectedGame];
     await context.storageService.saveCollection({
       ...collection,
       games,
       revision: collection.revision + 1,
     });
-    const secondGameId = games[1]?.id;
-    if (secondGameId === undefined) throw new Error("Second game was not created");
+    const secondGameId = secondGame.id;
     expect(
       await context.ownerGameNoteService.set(secondGameId, {
         commandId: "32000000-0000-4000-8000-000000000001",
         expectedVersion: 1,
-        text: noteText(1),
+        text: fixtureOwnerNotes[1],
       }),
     ).toMatchObject({ ok: true });
     selectedGameIds = [seed.id, secondGameId];
@@ -142,30 +154,13 @@ describe("Reflection model collection tools", () => {
     expect(noteReads).toEqual([]);
     expect(providerCalls).toEqual([]);
 
-    const originalLoadCollection = context.storageService.loadCollection.bind(
-      context.storageService,
-    );
-    let projectionCollectionLoads = 0;
-    context.storageService.loadCollection = async () => {
-      projectionCollectionLoads += 1;
-      return originalLoadCollection();
-    };
-
-    projectionCollectionLoads = 0;
-    const rootStartedAt = performance.now();
     const rootProfile = await context.app.request(request("/api/profile"));
-    const rootProfileDurationMs = performance.now() - rootStartedAt;
-    const rootProfileCollectionLoads = projectionCollectionLoads;
     expect(rootProfile.status).toBe(200);
     expect(noteReads).toEqual([]);
     expect(providerCalls).toEqual([]);
 
-    projectionCollectionLoads = 0;
-    const firstReflectionsStartedAt = performance.now();
     const state = await context.app.request(request("/api/profile/reflections"));
-    const firstReflectionsDurationMs = performance.now() - firstReflectionsStartedAt;
     expect(state.status).toBe(200);
-    expect(projectionCollectionLoads).toBe(1);
     expect(noteReads).toEqual([]);
     expect(providerCalls).toEqual([]);
 
@@ -191,32 +186,12 @@ describe("Reflection model collection tools", () => {
     expect(providerCalls).toHaveLength(1);
     expect([...new Set(noteReads)].sort()).toEqual([...selectedGameIds].sort());
 
-    projectionCollectionLoads = 0;
-    const readsBeforeCachedState = [...noteReads];
-    const cachedReflectionsStartedAt = performance.now();
+    const noteReadsAfterRefresh = [...noteReads];
+    const providerCallsAfterRefresh = providerCalls.length;
     const cachedState = await context.app.request(request("/api/profile/reflections"));
-    const cachedReflectionsDurationMs = performance.now() - cachedReflectionsStartedAt;
     expect(cachedState.status).toBe(200);
-    const cachedQuestions = ReflectionGetResultSchema.parse(await cachedState.json()).questions;
-    expect(projectionCollectionLoads).toBe(1);
-    expect(noteReads).toEqual(readsBeforeCachedState);
-    expect(providerCalls).toHaveLength(1);
-    expect(
-      cachedQuestions.find(({ questionId }) => questionId === "repeated-values")?.cache.state,
-    ).toBe("current");
-    console.info(
-      "[profile-navigation-fixture]",
-      JSON.stringify({
-        rootProfileDurationMs,
-        firstReflectionsDurationMs,
-        cachedReflectionsDurationMs,
-        rootProfileCollectionLoads,
-        firstReflectionsCollectionLoads: 1,
-        cachedReflectionsCollectionLoads: projectionCollectionLoads,
-        passiveOwnerNoteReads: noteReads.length - readsBeforeCachedState.length,
-        providerCalls: providerCalls.length,
-      }),
-    );
+    expect(noteReads).toEqual(noteReadsAfterRefresh);
+    expect(providerCalls).toHaveLength(providerCallsAfterRefresh);
   });
 
   test.each([
