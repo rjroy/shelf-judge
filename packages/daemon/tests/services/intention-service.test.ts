@@ -68,7 +68,9 @@ function game(overrides: Partial<DurableGame> = {}): DurableGame {
 
 function collection(sourceGame = game()): Collection {
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
+    acceptedPlaySources: createAcceptedPlaySourceData(),
+    attentionFeedback: [],
     revision: 0,
     id: "collection",
     name: "Collection",
@@ -181,7 +183,10 @@ describe("durable intention lifecycle", () => {
         },
       });
       source.commandReceipts.push({ commandId: commandIds.create, request: command, result });
-      const migrated = migrateCollection({ ...source, schemaVersion: 6 }).data;
+      const { acceptedPlaySources, attentionFeedback, ...v6Source } = source;
+      void acceptedPlaySources;
+      void attentionFeedback;
+      const migrated = migrateCollection({ ...v6Source, schemaVersion: 6 }).data;
       expect(migrated.intentions).toEqual(source.intentions);
       expect(migrated.commandReceipts).toEqual(source.commandReceipts);
       expect(migrateCollection(migrated).data).toEqual(migrated);
@@ -960,3 +965,4 @@ describe("durable intention lifecycle", () => {
     ]);
   });
 });
+import { createAcceptedPlaySourceData } from "@shelf-judge/shared";

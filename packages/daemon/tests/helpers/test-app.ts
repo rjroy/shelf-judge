@@ -88,7 +88,9 @@ export function createTestPurchaseUtilizationService(
   const fallbackStorage = {
     loadCollection: () =>
       Promise.resolve({
-        schemaVersion: 7 as const,
+        schemaVersion: 8 as const,
+        acceptedPlaySources: createAcceptedPlaySourceData(),
+        attentionFeedback: [],
         revision: 0,
         id: "test-collection",
         name: "Test Collection",
@@ -258,3 +260,4 @@ export async function jsonRequest(
   }
   return app.request(new Request(`http://localhost${path}`, init));
 }
+import { createAcceptedPlaySourceData } from "@shelf-judge/shared";

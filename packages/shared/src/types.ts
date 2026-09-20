@@ -295,7 +295,7 @@ export interface CollectionV6 extends Omit<
 > {
   schemaVersion: 6;
   games: DurableGame[];
-  commandReceipts: CommandReceipt[];
+  commandReceipts: (IntentionCommandReceipt | OwnerGameNoteCommandReceipt)[];
 }
 
 export interface CollectionV7 extends Omit<CollectionV6, "schemaVersion"> {
@@ -304,7 +304,14 @@ export interface CollectionV7 extends Omit<CollectionV6, "schemaVersion"> {
   bggPlaySessions?: BggPlaySession[];
 }
 
-export type Collection = CollectionV7;
+export interface CollectionV8 extends Omit<CollectionV7, "schemaVersion" | "commandReceipts"> {
+  schemaVersion: 8;
+  acceptedPlaySources: import("./accepted-play-sources").AcceptedPlaySourceData;
+  attentionFeedback: import("./attention-feedback").AttentionFeedbackEvent[];
+  commandReceipts: CommandReceipt[];
+}
+
+export type Collection = CollectionV8;
 
 // Fitness score types from .lore/designs/mvp-fitness-model.md
 
@@ -964,7 +971,10 @@ export interface OwnerGameNoteCommandReceipt {
   accepted: Omit<OwnerGameNoteAcceptedMetadata, "replayed">;
 }
 
-export type CommandReceipt = IntentionCommandReceipt | OwnerGameNoteCommandReceipt;
+export type CommandReceipt =
+  | IntentionCommandReceipt
+  | OwnerGameNoteCommandReceipt
+  | import("./attention-feedback").AttentionFeedbackCommandReceipt;
 
 export type CollectionMutationResult<Value> =
   | { outcome: "accepted"; changed: true; value: Value }
@@ -1058,11 +1068,16 @@ export type AttentionPlayEvidence =
 
 export interface CollectionProfileAttentionItem {
   id: string;
-  decisionFamily: "play-intention";
+  decisionFamily: import("./attention-feedback").AttentionFamily;
   intention: PlayIntention;
   gameName: string;
   question: string;
-  whyNow: "You asked Shelf Judge to keep this intention visible.";
+  whyNow:
+    | "You asked Shelf Judge to keep this intention visible."
+    | "You want to play this game, and current accepted play evidence records no plays.";
+  /** Event IDs are display-only and never qualification inputs. */
+  feedbackEventIds?: string[];
+  acceptedPlayEvidence?: import("./attention-source-evidence").AttentionAcceptedPlayEvidence;
   currentPlayEvidence: AttentionPlayEvidence;
   responses: ["leave-visible", "complete", "retire", "correct-or-refresh-evidence"];
   abstentionBasis: "Only an explicit active intention qualifies.";
@@ -1130,7 +1145,7 @@ export type CollectionProfileResult = CollectionProfile | CollectionProfileUnava
 
 export interface ProfileSourceIdentity {
   collectionId: string;
-  collectionSchemaVersion: 7;
+  collectionSchemaVersion: 8;
   collectionRevision: number;
   tournamentHash: string;
   predictionSettingsHash: string;
@@ -1138,8 +1153,8 @@ export interface ProfileSourceIdentity {
 }
 
 export interface ProfileData {
-  contractVersion: 9;
-  algorithmVersion: 11;
+  contractVersion: 10;
+  algorithmVersion: 12;
   sourceIdentity: ProfileSourceIdentity;
   profile: CollectionProfile;
   computedAt: string;

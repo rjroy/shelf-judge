@@ -163,7 +163,9 @@ function fixture() {
     game("game-4", "Heat", []),
   ];
   const collection: CollectionProfileCollectionSource = {
-    schemaVersion: 7,
+    schemaVersion: 8,
+    acceptedPlaySources: createAcceptedPlaySourceData(),
+    attentionFeedback: [],
     revision: 9,
     id: "collection-1",
     name: "Collection",
@@ -765,3 +767,4 @@ describe("Reflection deterministic evidence projections", () => {
     expect(JSON.stringify(snapshot)).not.toContain("ownerNote");
   });
 });
+import { createAcceptedPlaySourceData } from "@shelf-judge/shared";

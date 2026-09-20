@@ -124,7 +124,9 @@ function createMockStorage(
 ): StorageService {
   let stored = structuredClone(wishlist);
   const coll: Collection = {
-    schemaVersion: 7,
+    schemaVersion: 8,
+    acceptedPlaySources: createAcceptedPlaySourceData(),
+    attentionFeedback: [],
     revision: 0,
     id: "coll-1",
     name: "Test",
@@ -464,3 +466,4 @@ describe("wishlist service", () => {
     expect(list[1].predictedScore).toBeNull(); // unchanged (error)
   });
 });
+import { createAcceptedPlaySourceData } from "@shelf-judge/shared";

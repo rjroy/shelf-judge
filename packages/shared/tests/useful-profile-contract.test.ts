@@ -89,7 +89,9 @@ function futureSourceCollection(
   commandReceipts: unknown[] = [],
 ) {
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
+    acceptedPlaySources: createAcceptedPlaySourceData(),
+    attentionFeedback: [],
     id: "collection",
     name: "Collection",
     axes: [],
@@ -1301,3 +1303,4 @@ describe("collection profile attention contract", () => {
     expect(CollectionProfileResultSchema.safeParse(alreadyCompletedByEvidence).success).toBe(false);
   });
 });
+import { createAcceptedPlaySourceData } from "../src/index";

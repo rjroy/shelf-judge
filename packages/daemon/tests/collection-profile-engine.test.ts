@@ -399,7 +399,9 @@ function makeUsefulCollection(
   intentions: Collection["intentions"] = [],
 ): CollectionProfileCollectionSource {
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
+    acceptedPlaySources: createAcceptedPlaySourceData(),
+    attentionFeedback: [],
     revision: 1,
     id: "collection",
     name: "Collection",
@@ -1293,3 +1295,4 @@ describe("computeCollectionProfile", () => {
     );
   });
 });
+import { createAcceptedPlaySourceData } from "@shelf-judge/shared";

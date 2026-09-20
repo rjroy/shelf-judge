@@ -39,7 +39,9 @@ function makeService(initialFiles?: Record<string, string>) {
 
 function currentCollection(overrides: Partial<Collection> = {}): Collection {
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
+    acceptedPlaySources: createAcceptedPlaySourceData(),
+    attentionFeedback: [],
     revision: 0,
     id: "col-1",
     name: "Test",
@@ -101,7 +103,7 @@ describe("StorageService.loadCollection", () => {
     const collection = await service.loadCollection();
 
     expect(collection.name).toBe("My Collection");
-    expect(collection.schemaVersion).toBe(7);
+    expect(collection.schemaVersion).toBe(8);
     expect(collection.axes).toHaveLength(3);
     expect(collection.games).toHaveLength(0);
 
@@ -275,6 +277,8 @@ describe("StorageService.loadCollection", () => {
       delete rawCollection.revision;
       delete rawCollection.intentions;
       delete rawCollection.commandReceipts;
+      delete rawCollection.acceptedPlaySources;
+      delete rawCollection.attentionFeedback;
       const entries: string[] = [];
       const fileOps = createMockFileOps({ [COLLECTION_PATH]: JSON.stringify(rawCollection) });
       const service = createStorageService({
@@ -321,6 +325,8 @@ describe("StorageService.loadCollection", () => {
     delete rawCollection.revision;
     delete rawCollection.intentions;
     delete rawCollection.commandReceipts;
+    delete rawCollection.acceptedPlaySources;
+    delete rawCollection.attentionFeedback;
     expect(rawGame).not.toHaveProperty("acquisition");
     expect(rawCollection).not.toHaveProperty("entertainmentBenchmark");
     const normalizedInvalid = {
@@ -1066,3 +1072,4 @@ describe("StorageService — concurrent first-time load lock", () => {
     expect(collectionRenames).toHaveLength(1);
   });
 });
+import { createAcceptedPlaySourceData } from "@shelf-judge/shared";

@@ -9,6 +9,7 @@ import type { StorageService } from "../../src/services/storage-service.js";
 import type { AxisService } from "../../src/services/axis-service.js";
 import type { MockFileOps } from "../helpers/mock-file-ops.js";
 import type { Game } from "@shelf-judge/shared";
+import { createAcceptedPlaySourceData } from "@shelf-judge/shared";
 import { collectionMutationServiceFor } from "../../src/services/collection-mutation-service.js";
 import { createIntentionService } from "../../src/services/intention-service.js";
 import { createOwnerGameNoteService } from "../../src/services/owner-game-note-service.js";
@@ -351,6 +352,31 @@ describe("GameService", () => {
   });
 
   describe("removeGame", () => {
+    test("preserves permanent deletion after additive migration without removing another game's source metadata", async () => {
+      const { game: doomed } = await gameService.addGame({ name: "Doomed" });
+      const { game: retained } = await gameService.addGame({ name: "Retained" });
+      const collection = await storageService.loadCollection();
+      collection.acceptedPlaySources = createAcceptedPlaySourceData(collection.games, true);
+      collection.acceptedPlaySources.checks = collection.games.map((game) => ({
+        gameId: game.id,
+        sourceId: "owner-manual-correction",
+        sourceVersion: 1,
+        checkDefinitionId: "owner.manual-correction.v1",
+        checkId: "check-1",
+        receivedAt: "2026-09-20T10:00:00.000Z",
+        outcome: "invalid",
+        reason: "validation",
+      }));
+      await storageService.saveCollection(collection);
+
+      await gameService.removeGame(doomed.id);
+
+      const after = await storageService.loadCollection();
+      expect(after.acceptedPlaySources.legacyGameIds).toEqual([retained.id]);
+      expect(after.acceptedPlaySources.checks).toEqual([collection.acceptedPlaySources.checks[1]]);
+      expect(after.games.map((game) => game.id)).toEqual([retained.id]);
+    });
+
     test("deletes game from collection", async () => {
       const { game } = await gameService.addGame({ name: "Doomed" });
       await gameService.removeGame(game.id);

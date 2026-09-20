@@ -325,7 +325,9 @@ describe("owner note receipt and collection contracts", () => {
     expect(
       CollectionSchema.safeParse({
         ...baseCollection,
-        schemaVersion: 7,
+        schemaVersion: 8,
+        acceptedPlaySources: createAcceptedPlaySourceData(),
+        attentionFeedback: [],
         games: [{ ...canonicalPublicGame, ownerNote: missingOwnerNote }],
       }).success,
     ).toBe(true);
@@ -365,7 +367,9 @@ describe("owner note receipt and collection contracts", () => {
     expect(
       CollectionProfileCollectionSourceV6Schema.safeParse({
         ...v6,
-        schemaVersion: 7,
+        schemaVersion: 8,
+        acceptedPlaySources: createAcceptedPlaySourceData(),
+        attentionFeedback: [],
         games: [canonicalPublicGame],
       }).success,
     ).toBe(true);
@@ -473,3 +477,4 @@ describe("strict public game projections", () => {
     ).toBe(false);
   });
 });
+import { createAcceptedPlaySourceData } from "../src/index";

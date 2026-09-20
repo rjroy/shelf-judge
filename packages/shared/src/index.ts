@@ -1,3 +1,6 @@
+export * from "./accepted-play-sources";
+export * from "./attention-feedback";
+export * from "./attention-source-evidence";
 export type {
   BggTag,
   SuggestedPlayerCount,
@@ -44,6 +47,7 @@ export type {
   CollectionV5,
   CollectionV6,
   CollectionV7,
+  CollectionV8,
   BggPlaySession,
   FitnessBreakdownSource,
   FitnessBreakdownEntry,
@@ -238,6 +242,7 @@ export {
   CollectionSchemaV5,
   CollectionSchemaV6,
   CollectionSchemaV7,
+  CollectionSchemaV8,
   BggPlaySessionSchema,
   CollectionSchemaV3,
   CollectionSchemaV4,

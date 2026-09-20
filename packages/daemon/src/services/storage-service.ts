@@ -17,6 +17,7 @@ import {
   AcquisitionSchema,
   CollectionProfileEntityPolicySchema,
   CURRENT_COLLECTION_SCHEMA_VERSION,
+  createAcceptedPlaySourceData,
   DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
   GroundedProviderIdentitySchema,
   createProfileDataSchema,
@@ -110,6 +111,8 @@ function createDefaultCollection(dependencies?: CollectionMigrationDependencies)
     games: [],
     intentions: [],
     commandReceipts: [],
+    acceptedPlaySources: createAcceptedPlaySourceData(),
+    attentionFeedback: [],
     entertainmentBenchmark: null,
     createdAt: now,
     updatedAt: now,
@@ -162,6 +165,7 @@ export function decodeStoredCollection(raw: unknown, logger: Logger): StoredColl
     (raw.schemaVersion !== 3 &&
       raw.schemaVersion !== 4 &&
       raw.schemaVersion !== 5 &&
+      raw.schemaVersion !== 7 &&
       raw.schemaVersion !== CURRENT_COLLECTION_SCHEMA_VERSION)
   ) {
     return { data: raw, normalized: false };

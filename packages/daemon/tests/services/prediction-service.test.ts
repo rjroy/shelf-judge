@@ -141,7 +141,9 @@ function makeGame(
 
 function makeCollection(games: DurableGame[], axes: Axis[]): Collection {
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
+    acceptedPlaySources: createAcceptedPlaySourceData(),
+    attentionFeedback: [],
     revision: 0,
     id: "test-col",
     name: "Test Collection",
@@ -989,3 +991,4 @@ describe("prediction-service", () => {
     });
   });
 });
+import { createAcceptedPlaySourceData } from "@shelf-judge/shared";

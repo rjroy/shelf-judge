@@ -24,7 +24,9 @@ function createMockStorage(): StorageService & {
       updatedAt: NOW,
     } as ShelfConfiguration,
     collection: {
-      schemaVersion: 7,
+      schemaVersion: 8,
+      acceptedPlaySources: createAcceptedPlaySourceData(),
+      attentionFeedback: [],
       revision: 0,
       id: "collection-1",
       name: "Test",
@@ -406,3 +408,4 @@ describe("shelf routes", () => {
     });
   });
 });
+import { createAcceptedPlaySourceData } from "@shelf-judge/shared";

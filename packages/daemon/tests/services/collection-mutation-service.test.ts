@@ -15,7 +15,9 @@ const initialTime = "2026-01-01T00:00:00.000Z";
 
 function collection(): Collection {
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
+    acceptedPlaySources: createAcceptedPlaySourceData(),
+    attentionFeedback: [],
     revision: 0,
     id: "collection-1",
     name: "Private collection name",
@@ -70,7 +72,7 @@ describe("CollectionMutationService", () => {
 
     expect(collectionRevisionStrategy.identity(source)).toEqual({
       collectionId: "collection-1",
-      schemaVersion: 7,
+      schemaVersion: 8,
       revision: 7,
     });
     expect(collectionRevisionStrategy.advance(source, source).revision).toBe(8);
@@ -134,7 +136,7 @@ describe("CollectionMutationService", () => {
       outcome: "no-op",
       changed: false,
       value: "collection-1",
-      collection: { schemaVersion: 7, revision: 0, id: "collection-1", updatedAt: initialTime },
+      collection: { schemaVersion: 8, revision: 0, id: "collection-1", updatedAt: initialTime },
     });
     expect(ctx.saveCount()).toBe(0);
   });
@@ -154,7 +156,7 @@ describe("CollectionMutationService", () => {
     await expect(
       service.mutate({ operation: "axis.create", trigger: "owner" }, (candidate) => {
         candidate.name = "";
-        candidate.schemaVersion = 99 as 7;
+        candidate.schemaVersion = 99 as 8;
         return { changed: true, value: undefined };
       }),
     ).rejects.toThrow();
@@ -391,3 +393,4 @@ describe("CollectionMutationService", () => {
     expect(createCollectionMutationService({ storageService: ctx.storage })).toBe(explicit);
   });
 });
+import { createAcceptedPlaySourceData } from "@shelf-judge/shared";

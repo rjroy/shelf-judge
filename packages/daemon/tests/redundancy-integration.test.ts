@@ -147,7 +147,9 @@ const allGamesWithScores: GameWithScore[] = [
 ];
 
 const defaultCollection: Collection = {
-  schemaVersion: 7,
+  schemaVersion: 8,
+  acceptedPlaySources: createAcceptedPlaySourceData(),
+  attentionFeedback: [],
   revision: 0,
   id: "collection-1",
   name: "Test",
@@ -509,3 +511,4 @@ describe("redundancy integration: niche positions use pre-redundancy scores", ()
     }
   });
 });
+import { createAcceptedPlaySourceData } from "@shelf-judge/shared";

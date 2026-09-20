@@ -591,6 +591,8 @@ describe("legacy contracts", () => {
 describe("current persisted collection validation", () => {
   const currentCollection = {
     schemaVersion: CURRENT_COLLECTION_SCHEMA_VERSION,
+    acceptedPlaySources: createAcceptedPlaySourceData(),
+    attentionFeedback: [],
     revision: 0,
     id: "collection-1",
     name: "Current",
@@ -809,7 +811,7 @@ describe("current persisted collection validation", () => {
   });
 
   test("rejects future versions and extra persisted fields", () => {
-    expect(CollectionSchema.safeParse({ ...currentCollection, schemaVersion: 8 }).success).toBe(
+    expect(CollectionSchema.safeParse({ ...currentCollection, schemaVersion: 9 }).success).toBe(
       false,
     );
     expect(CollectionSchema.safeParse({ ...currentCollection, unexpected: true }).success).toBe(
@@ -831,3 +833,4 @@ describe("current persisted collection validation", () => {
     ).toBe(false);
   });
 });
+import { createAcceptedPlaySourceData } from "../src/index";

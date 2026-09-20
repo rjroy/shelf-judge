@@ -126,7 +126,9 @@ const allGamesWithScores: GameWithScore[] = [
 // --- Mock factories ---
 
 const defaultCollection: Collection = {
-  schemaVersion: 7,
+  schemaVersion: 8,
+  acceptedPlaySources: createAcceptedPlaySourceData(),
+  attentionFeedback: [],
   revision: 0,
   id: "collection-1",
   name: "Test",
@@ -357,3 +359,4 @@ describe("niche settings integration: GET /predictions/bgg/:bggId passthrough", 
     expect(filteredImpact).not.toContain("Deck Building");
   });
 });
+import { createAcceptedPlaySourceData } from "@shelf-judge/shared";

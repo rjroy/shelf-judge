@@ -1,7 +1,7 @@
 ---
 title: "Implementation plan: expanded profile attention opportunities"
 date: 2026-09-20
-status: draft
+status: approved
 tags: [plan, profile, attention, owner-feedback, intention-lifecycle]
 modules: [shared, daemon, cli, web]
 related:
@@ -11,9 +11,9 @@ related:
 
 # Implementation plan: expanded profile attention opportunities
 
-## Approval and scope gate
+## Approved scope
 
-This is a review artifact only. **No implementation is authorized until this plan and the approved source spec are reviewed and accepted.** The normative source is [Expanded Profile Attention Opportunities](../specs/expanded-profile-attention-opportunities.md), REQ-PROFILE-ATTN-1 through REQ-PROFILE-ATTN-19. The shipped [Useful Collection Profile](../../reference/specs/current/useful-collection-profile.md) remains authoritative for non-conflicting intention lifecycle, evidence-warning, ownership-transition, completion, history, and no-reopen behavior.
+This approved plan authorizes its bounded implementation work. It is not a separate reviewer-approval gate. The normative source is [Expanded Profile Attention Opportunities](../specs/expanded-profile-attention-opportunities.md), REQ-PROFILE-ATTN-1 through REQ-PROFILE-ATTN-19. The shipped [Useful Collection Profile](../../reference/specs/current/useful-collection-profile.md) remains authoritative for non-conflicting intention lifecycle, evidence-warning, ownership-transition, completion, history, and no-reopen behavior.
 
 Implement only these now:
 
@@ -25,9 +25,9 @@ Do not implement or silently prepare feature behavior for `incomplete-rating`, `
 
 ## Dependency flow
 
-`current-model discovery → approved conflict-representation/policy decision → source/data contract and migration → shared validation → daemon projection and commands → route/CLI transport → web rendering and controls → focused cross-boundary tests`
+`current-model discovery and conflict-representation design → source/data contract and migration → shared validation → daemon projection and commands → route/CLI transport → web rendering and controls → focused cross-boundary tests`
 
-Each arrow is a gate: clients consume daemon decisions only, and no client may independently qualify, reorder, resolve, suppress, or mutate an intention. In particular, no implementation work for exact-zero selection may proceed past the conflict decision gate below without an approved representation and resolution policy.
+Each arrow is an implementation dependency: clients consume daemon decisions only, and no client may independently qualify, reorder, resolve, suppress, or mutate an intention. Step 1's completed authorized technical design defines the representation that later steps implement.
 
 ## Contract decisions to preserve
 
@@ -39,47 +39,47 @@ Each arrow is a gate: clients consume daemon decisions only, and no client may i
 
 ## Implementation steps
 
-### 1. Discover and approve the accepted-source conflict contract
+### 1. Document the completed accepted-source conflict representation
 
-**Depends on:** approved plan and source spec; precedes every exact-zero implementation task.
+**Depends on:** approved plan and source spec; precedes later exact-zero implementation tasks. The completed technical design is documented in [Accepted-source conflict representation](../designs/accepted-source-conflict-representation.md).
 
 **Likely paths to inspect during implementation:** the current Useful Collection Profile durable collection source, play-count evidence model, evidence refresh/check records, validation schemas, projection cache inputs, and their current fixtures. The discovery must establish whether the shipped model currently records only one `playCountEvidence` plus latest-check state, or already retains accepted-source observations elsewhere.
 
-1. Produce a short, reviewable contract decision from the discovered model. It must name the authoritative persisted representation that can determine whether accepted sources disagree, which sources/checks are accepted, how observations are associated with a game and source, and the deterministic resolution policy for agreement, disagreement, missing/invalid observations, a later refresh/check, and freshness. It must also identify the exact fallback warning authority in Useful Collection Profile.
-2. Do not infer a multi-source history, source precedence, merge rule, or conflict shape from this amendment. If the current single-evidence model cannot represent accepted-source disagreement, the decision must explicitly choose and approve the minimal extension, or record that no implementation is authorized until a separate approved contract supplies it. The approved decision, not this plan, defines the representation and policy.
-3. The chosen decision must enumerate its required follow-on work before code begins: durable persistence and source-version migration; shared runtime validation; projection inputs; cache key/version inputs and invalidation; the compatibility-card fallback warning; and positive, disagreement, stale, superseded, missing, and invalid fixtures. It must preserve REQ-PROFILE-ATTN-7: every unusable zero witness selects `play-intention` with the current authority's specific warning, while a valid trusted later above-baseline witness retains the existing evidence-update completion path.
+1. The completed technical design names the authoritative persisted representation that determines whether accepted sources disagree, which sources/checks are accepted, how observations are associated with a game and source, and the deterministic resolution policy for agreement, disagreement, missing/invalid observations, a later refresh/check, and freshness. It also identifies the exact fallback warning authority in Useful Collection Profile.
+2. Do not infer a multi-source history, source precedence, merge rule, or conflict shape beyond the completed design. Where the current single-evidence model cannot represent accepted-source disagreement, implement the design's minimal extension. The approved product spec and this plan remain authority; the design documents their required representation and policy.
+3. The completed decision enumerates the required follow-on work: durable persistence and source-version migration; shared runtime validation; projection inputs; cache key/version inputs and invalidation; the compatibility-card fallback warning; and positive, disagreement, stale, superseded, missing, and invalid fixtures. It preserves REQ-PROFILE-ATTN-7: every unusable zero witness selects `play-intention` with the current authority's specific warning, while a valid trusted later above-baseline witness retains the existing evidence-update completion path.
 
-**Gate:** a reviewer has approved an authoritative conflict representation and deterministic resolution policy, including the follow-on persistence/validation/migration/projection/cache/fallback/fixture checklist. **Absent that approval, stop: do not implement exact-zero qualification, conflict rejection, or its fixtures.**
+**Outcome:** the completed authorized technical design records the deterministic representation and its persistence, validation, migration, projection, cache, fallback, and fixture implications for later steps.
 
 ### 2. Establish the bounded shared source and public contracts
 
-**Depends on:** step 1's approved conflict representation/policy.  
+**Depends on:** step 1's completed accepted-source conflict-representation design.
 **Likely paths:** `packages/shared/src/types.ts` (collection source around lines 766-802; profile attention types around 1040-1121), `packages/shared/src/collection-profile-validation.ts` (attention validation around 1031-1133), `packages/shared/src/validation.ts`, `packages/shared/src/index.ts`, `packages/shared/tests/useful-profile-contract.test.ts`, `packages/shared/tests/fixtures/useful-profile.ts`.
 
-1. Apply step 1's approved conflict representation/policy to the versioned durable collection source, including any approved accepted-source observations/conflict state and its atomic, repeatable migration. Do not introduce a different source precedence or conflict rule in a client or projection helper.
+1. Apply step 1's documented accepted-source conflict representation to the versioned durable collection source, including its accepted-source observations/conflict state and atomic, repeatable migration. Do not introduce a different source precedence or conflict rule in a client or projection helper.
 2. Extend the versioned durable collection source with a feedback-event collection. Every event has its own immutable durable `feedbackEventId`, in addition to stable card ID, presentation family, game ID, answer (`yes | no | skip`), and recorded-at timestamp. Model an optional reason as fixed category plus bounded optional free text attached to that event. Do not add an intention kind, `unplayed` flag, rating state, goal state, suppression state, provider setting, or AI data field.
 3. Extend the public Profile and owner feedback-history contracts so an attention item can expose selected family, existing underlying identity/lifecycle fields and actions, required owner relevance/action/destination/evidence-or-warning data, and applicable feedback identifiers. Define a separate owner-visible feedback history result keyed by durable event identity. History remains queryable even when its source card has resolved, retired, or changed family.
 4. Define validated daemon command/result contracts for recording feedback, viewing owner feedback history, and deleting one feedback event (including its reason) by `feedbackEventId`. Recording may require an active current card identity/game/family projection, but viewing and deletion must authorize the owner by durable event identity and must not require the card to remain active or rendered. Commands are idempotent under the project command-ID receipt pattern and feedback writes are not profile reads.
 5. Update runtime schemas and exports together. Reject unknown family/answer/reason shape, malformed timestamps/IDs/event IDs, inconsistent event game/card/family associations, unauthorized owner access, and feedback that attempts to carry suppression or provider fields.
-6. Decide and document the schema version bumps and repeatable atomic collection migrations required by the approved conflict representation and feedback-event store. Preserve all durable intention fields and resolved history byte-for-byte semantically; interrupted migration must leave the last valid source loadable. Bump the disposable profile contract/algorithm cache version rather than migrating cached projections.
+6. Apply the schema version bumps and repeatable atomic collection migrations required by the documented accepted-source conflict representation and feedback-event store. Preserve all durable intention fields and resolved history byte-for-byte semantically; interrupted migration must leave the last valid source loadable. Bump the disposable profile contract/algorithm cache version rather than migrating cached projections.
 
 **Requirements traced:** REQ-PROFILE-ATTN-2, 4-6, 8, 12-14, 19; preserves REQ-USEFUL-PROF-33 through 36, 40-45, and 49.  
-**Gate:** shared contract tests prove invalid feedback, unauthorized history access, and duplicate-card shapes reject; migration fixtures prove the approved conflict representation and empty feedback initialization, idempotence, atomic retry safety, and unchanged intention kind/baseline/version/resolution/history.
+**Gate:** shared contract tests prove invalid feedback, unauthorized history access, and duplicate-card shapes reject; migration fixtures prove the documented accepted-source conflict representation and empty feedback initialization, idempotence, atomic retry safety, and unchanged intention kind/baseline/version/resolution/history.
 
 ### 3. Implement daemon-owned presentation selection and cache invalidation
 
 **Depends on:** steps 1-2.  
 **Likely paths:** `packages/daemon/src/services/collection-profile-engine.ts` (attention projection around lines 321-413), `packages/daemon/src/services/profile-service.ts` (cache/recompute flow around lines 60-150), `packages/daemon/src/services/intention-service.ts` (lifecycle handling around lines 76-126), `packages/daemon/src/services/profile-source-coordinator.ts`, `packages/daemon/tests/collection-profile-engine.test.ts`, `packages/daemon/tests/profile-service.test.ts`, `packages/daemon/tests/profile-stale-detection.test.ts`, `packages/daemon/tests/integration/useful-profile-persisted-flow.test.ts`.
 
-1. Centralize one pure, daemon-owned selection helper used by profile recomputation. Starting from an active intention, select `play-intention` unless all of these are true: non-replay Want to play, currently owned, and a current witness that satisfies step 1's approved accepted-source conflict policy, has a valid non-negative count exactly `0`, and has the source/observation/freshness facts required by Useful Collection Profile. Replay precedence is evaluated first.
+1. Centralize one pure, daemon-owned selection helper used by profile recomputation. Starting from an active intention, select `play-intention` unless all of these are true: non-replay Want to play, currently owned, and a current witness that satisfies step 1's documented accepted-source conflict representation and policy, has a valid non-negative count exactly `0`, and has the source/observation/freshness facts required by Useful Collection Profile. Replay precedence is evaluated first.
 2. Reuse the current evidence-warning and observed-play-completion authority rather than recreating it. Evidence loss or a changed zero predicate only changes the rendered family back to `play-intention`; it cannot write durable state. A valid trusted later count above a trustworthy captured baseline continues to complete during the existing evidence update path, never profile read/recompute.
 3. Project one item per active intention, retain card ID and intention ID across family changes, and construct family-specific question/why-now wording while retaining the existing actions, authoritative destinations, evidence metadata, and warnings. Do not create rating/goal cards or second cards.
 4. Apply the three-key neutral order after family selection using NFC normalization and Unicode code-point comparison, then stable game ID, then family ID. Assert this is the only attention ordering and that it is independent of timestamps, count, feedback, ownership age, cost, fitness, or statistics.
-5. Update cache invalidation/versioning for every selection input, including all observations/conflict-resolution inputs required by step 1's approved representation: ownership, intention state/kind/baseline/version, play witness value/validity/source/observation/freshness/conflict/supersession, collection schema, and profile contract/algorithm. Cached old projections are discarded and recomputed; no durable migration is triggered by selection itself.
+5. Update cache invalidation/versioning for every selection input, including all observations/conflict-resolution inputs required by step 1's documented representation: ownership, intention state/kind/baseline/version, play witness value/validity/source/observation/freshness/conflict/supersession, collection schema, and profile contract/algorithm. Cached old projections are discarded and recomputed; no durable migration is triggered by selection itself.
 6. Keep the existing section precedence: unavailable is not empty; otherwise render active intention projections; otherwise successful empty state. Keep the two Profile questions as the only top-level sections.
 
 **Requirements traced:** REQ-PROFILE-ATTN-1-8, 11-12, 14, 18; preserves REQ-USEFUL-PROF-25, 28-32, 34-38, 48-50.  
-**Gate:** daemon fixtures, using step 1's approved representation, cover active owned non-replay exact zero, replay exact zero, first-play, general baseline-absent Want to play, nonzero, unowned, missing, invalid, stale, superseded, and accepted-source-conflicting evidence. Each asserts one card only, stable IDs, correct family and current-authority fallback warning, no read-side write, and existing above-baseline evidence-update completion.
+**Gate:** daemon fixtures, using step 1's documented representation, cover active owned non-replay exact zero, replay exact zero, first-play, general baseline-absent Want to play, nonzero, unowned, missing, invalid, stale, superseded, and accepted-source-conflicting evidence. Each asserts one card only, stable IDs, correct family and current-authority fallback warning, no read-side write, and existing above-baseline evidence-update completion.
 
 ### 4. Add durable local feedback operations at the daemon boundary
 
@@ -157,7 +157,7 @@ Each arrow is a gate: clients consume daemon decisions only, and no client may i
 
 ## Migration, cache, configuration, and separation checks
 
-- **Migration:** atomic, repeatable durable collection migrations only for the step-1-approved accepted-source conflict representation (if one is approved) and the feedback-event store. No migration of intentions, ratings, goals, suppression, provider settings, or cache artifacts. Do not start either conflict migration without the required step-1 approval.
-- **Cache:** invalidate/recompute disposable Profile data for every step-1-approved conflict-resolution input, all other presentation-selection inputs, and profile contract/algorithm version; feedback display may require refresh but must not affect eligibility/order/lifecycle. Never serve an old projection as current after an input changes.
+- **Migration:** atomic, repeatable durable collection migrations only for the step-1-documented accepted-source conflict representation and the feedback-event store. No migration of intentions, ratings, goals, suppression, provider settings, or cache artifacts. Do not start the conflict migration before the completed step-1 design is documented.
+- **Cache:** invalidate/recompute disposable Profile data for every step-1-documented conflict-resolution input, all other presentation-selection inputs, and profile contract/algorithm version; feedback display may require refresh but must not affect eligibility/order/lifecycle. Never serve an old projection as current after an input changes.
 - **Configuration:** no new family enablement setting, provider/model setting, AI extension, credential path, timer, reminder, suppression configuration, rating configuration, or goal configuration.
 - **`shelf-judge-0hr`:** preserve a clean issue boundary. Do not alter its contract, rename its work, depend on unmerged 0hr implementation, or report its tests as evidence for this plan.

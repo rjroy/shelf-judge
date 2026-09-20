@@ -59,7 +59,9 @@ describe("canonical purchase utilization response parity", () => {
       updatedAt: UTILIZATION_OBSERVED_AT,
     }));
     const collection: Collection = {
-      schemaVersion: 7,
+      schemaVersion: 8,
+      acceptedPlaySources: createAcceptedPlaySourceData(),
+      attentionFeedback: [],
       revision: 0,
       id: "parity-collection",
       name: "Parity",
@@ -172,3 +174,4 @@ describe("canonical purchase utilization response parity", () => {
     ]);
   });
 });
+import { createAcceptedPlaySourceData } from "@shelf-judge/shared";

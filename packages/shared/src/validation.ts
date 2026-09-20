@@ -27,7 +27,15 @@ import type {
   JsonValue,
 } from "./types";
 import { DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY } from "./collection-profile-entity-policy";
-import { OwnerGameNoteSchema } from "./owner-game-note";
+import { OwnerGameNoteSchema, OwnerGameNoteCommandReceiptSchema } from "./owner-game-note";
+import { AcceptedPlaySourceDataSchema } from "./accepted-play-sources";
+import {
+  AttentionFeedbackEventSchema,
+  AttentionFeedbackHistoryResultSchema,
+} from "./attention-feedback";
+export * from "./accepted-play-sources";
+export * from "./attention-feedback";
+export * from "./attention-source-evidence";
 
 import {
   CollectionProfileEntityClassSchema,
@@ -83,9 +91,9 @@ export {
   CollectionProfileResultSchema,
 };
 
-export const CURRENT_COLLECTION_SCHEMA_VERSION = 7 as const;
-export const CURRENT_PROFILE_CONTRACT_VERSION = 9 as const;
-export const CURRENT_PROFILE_ALGORITHM_VERSION = 11 as const;
+export const CURRENT_COLLECTION_SCHEMA_VERSION = 8 as const;
+export const CURRENT_PROFILE_CONTRACT_VERSION = 10 as const;
+export const CURRENT_PROFILE_ALGORITHM_VERSION = 12 as const;
 const AmountInputSchema = z.string().superRefine((value, context) => {
   try {
     parseAmountInput(value);
@@ -1001,7 +1009,9 @@ const CollectionSchemaV6Base = CollectionSchemaV3.omit({ schemaVersion: true, ga
     revision: z.number().int().safe().min(0),
     games: z.array(DurableGameSchema),
     intentions: z.array(PlayIntentionSchema),
-    commandReceipts: z.array(CommandReceiptSchema),
+    commandReceipts: z.array(
+      z.union([IntentionCommandReceiptSchema, OwnerGameNoteCommandReceiptSchema]),
+    ),
   })
   .strict();
 
@@ -1039,7 +1049,7 @@ export const CollectionSchemaV6 = CollectionSchemaV6Base.superRefine((source, co
   }
   const gamesById = new Map(source.games.map((game) => [game.id, game]));
   for (const [index, receipt] of source.commandReceipts.entries()) {
-    if ("request" in receipt) continue;
+    if ("request" in receipt || receipt.receiptType !== "owner-game-note") continue;
     const durableNote = gamesById.get(receipt.gameId)?.ownerNote;
     const accepted = receipt.accepted;
     const acceptedMatchesCurrent =
@@ -1116,21 +1126,125 @@ export const CollectionSchemaV7 = CollectionSchemaV6Base.omit({ schemaVersion: t
     }
   });
 
-export const CollectionSchema = CollectionSchemaV7;
+const AttentionSourceFields = {
+  acceptedPlaySources: AcceptedPlaySourceDataSchema,
+  attentionFeedback: z.array(AttentionFeedbackEventSchema),
+};
+
+function validateAttentionSource(
+  source: {
+    id: string;
+    revision: number;
+    games: { id: string; bggId: number | null }[];
+    intentions: {
+      intentionId: string;
+      gameId: string;
+      kind: string;
+      baseline: { playCount: number } | null;
+    }[];
+    acceptedPlaySources: z.infer<typeof AcceptedPlaySourceDataSchema>;
+    attentionFeedback: z.infer<typeof AttentionFeedbackEventSchema>[];
+    commandReceipts: z.infer<typeof CommandReceiptSchema>[];
+  },
+  context: z.RefinementCtx,
+): void {
+  const issue = (path: string[], message: string) =>
+    context.addIssue({ code: "custom", path, message });
+  const games = new Map(source.games.map((g) => [g.id, g]));
+  const streams = source.acceptedPlaySources;
+  for (const gameId of [
+    ...streams.legacyGameIds,
+    ...streams.checks.map((c) => c.gameId),
+    ...streams.observations.map((o) => o.gameId),
+    ...streams.evaluatorPolicies.map((p) => p.gameId),
+    ...streams.freshnessBoundaries.map((b) => b.gameId),
+  ]) {
+    if (!games.has(gameId))
+      issue(["acceptedPlaySources"], "Source records must reference a collection game");
+  }
+  // Policies are durable snapshots, not a claim that the game remains linked today.
+  // The evaluator must also check current linkage before using a v1 snapshot.
+  const history = AttentionFeedbackHistoryResultSchema.safeParse({
+    collectionId: source.id,
+    events: source.attentionFeedback,
+  });
+  if (!history.success)
+    for (const error of history.error.issues)
+      context.addIssue({ ...error, path: ["attentionFeedback", ...error.path] });
+  for (const event of source.attentionFeedback) {
+    const intention = source.intentions.find((i) => `attention:${i.intentionId}` === event.cardId);
+    if (
+      !intention ||
+      intention.gameId !== event.gameId ||
+      !games.has(event.gameId) ||
+      (event.family === "unplayed-owner-wanted" &&
+        (intention.kind !== "want-to-play" ||
+          intention.baseline === null ||
+          intention.baseline.playCount !== 0))
+    )
+      issue(
+        ["attentionFeedback"],
+        "Feedback must retain its original game/card/family association, including resolved intentions",
+      );
+  }
+  for (const receipt of source.commandReceipts) {
+    if (!("receiptType" in receipt) || receipt.receiptType !== "attention-feedback") continue;
+    if (receipt.collectionId !== source.id || receipt.accepted.collectionRevision > source.revision)
+      issue(
+        ["commandReceipts"],
+        "Feedback receipt must belong to this collection and an accepted revision",
+      );
+  }
+}
+
+export const CollectionSchemaV8 = CollectionSchemaV7.innerType()
+  .extend({
+    schemaVersion: z.literal(8),
+    ...AttentionSourceFields,
+    commandReceipts: z.array(CommandReceiptSchema),
+  })
+  .strict()
+  .superRefine((source, context) => {
+    const { acceptedPlaySources, attentionFeedback, ...historical } = source;
+    void acceptedPlaySources;
+    void attentionFeedback;
+    const legacy = CollectionSchemaV7.safeParse({
+      ...historical,
+      schemaVersion: 7,
+      commandReceipts: historical.commandReceipts.filter(
+        (r) => !("receiptType" in r) || r.receiptType !== "attention-feedback",
+      ),
+    });
+    if (!legacy.success) for (const issue of legacy.error.issues) context.addIssue(issue);
+    const commandIds = source.commandReceipts.map((r) => r.commandId);
+    if (new Set(commandIds).size !== commandIds.length)
+      context.addIssue({
+        code: "custom",
+        path: ["commandReceipts"],
+        message: "Command receipt IDs must be unique across operations",
+      });
+    validateAttentionSource(source, context);
+  });
+export const CollectionSchema = CollectionSchemaV8;
 
 export const CollectionProfileCollectionSourceV6Schema = CollectionSchemaV6Base.omit({
   schemaVersion: true,
   games: true,
 })
   .extend({
-    schemaVersion: z.literal(7),
+    schemaVersion: z.literal(8),
     games: z.array(GameSchema),
     bggPlaySessions: z.array(BggPlaySessionSchema).optional(),
+    ...AttentionSourceFields,
+    commandReceipts: z.array(CommandReceiptSchema),
   })
   .strict()
   .superRefine((source, context) => {
-    const { bggPlaySessions, ...historicalSource } = source;
+    const { bggPlaySessions, acceptedPlaySources, attentionFeedback, ...historicalSource } = source;
     void bggPlaySessions;
+    void acceptedPlaySources;
+    void attentionFeedback;
+    validateAttentionSource(source, context);
     const v5Projection = CollectionSchemaV5.safeParse({
       ...historicalSource,
       schemaVersion: 5,
@@ -1238,6 +1352,25 @@ export function createCollectionProfileSnapshotSchema(policy: CollectionProfileE
         });
       }
       for (const [itemIndex, item] of profile.attention.items.entries()) {
+        if (
+          (item.feedbackEventIds ?? []).some(
+            (eventId) =>
+              !source.attentionFeedback.some(
+                (event) =>
+                  event.feedbackEventId === eventId &&
+                  event.cardId === item.id &&
+                  event.gameId === item.intention.gameId &&
+                  event.family === item.decisionFamily,
+              ),
+          )
+        ) {
+          context.addIssue({
+            code: "custom",
+            path: ["profile", "attention", "items", itemIndex, "feedbackEventIds"],
+            message:
+              "Displayed feedback must match its durable card, game, and presentation family",
+          });
+        }
         const game = source.games.find(({ id }) => id === item.intention.gameId);
         if (game === undefined) continue;
         const evidence = game.playCountEvidence;

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type {
-  CollectionV7,
+  CollectionV8,
   DurableGame,
   GameDetailWithPurchaseUtilization,
   GameWithPurchaseUtilization,
@@ -169,9 +169,9 @@ describe("game projections", () => {
     const context = createTestApp();
     const game = (await context.gameService.addGame({ name: "Detail Game" })).game;
     const collection = await context.storageService.loadCollection();
-    const durable: CollectionV7 = {
+    const durable: CollectionV8 = {
       ...collection,
-      schemaVersion: 7,
+      schemaVersion: 8,
       games: [
         {
           ...game,
@@ -197,9 +197,9 @@ describe("game projections", () => {
     const context = createTestApp();
     const game = (await context.gameService.addGame({ name: "Serialized Detail" })).game;
     const collection = await context.storageService.loadCollection();
-    const durable: CollectionV7 = {
+    const durable: CollectionV8 = {
       ...collection,
-      schemaVersion: 7,
+      schemaVersion: 8,
       games: [
         {
           ...game,
