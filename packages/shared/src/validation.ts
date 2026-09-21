@@ -1251,10 +1251,26 @@ function sameAttentionDisposition(
   return false;
 }
 
-const AttentionExactValueSchema = z
-  .object({ numerator: z.string().regex(/^\d+$/), denominator: z.string().regex(/^[1-9]\d*$/) })
-  .strict();
-const AttentionUnitExactValueSchema = AttentionExactValueSchema.refine(
+const CanonicalExactRationalSchema = z
+  .object({
+    numerator: z.string().regex(/^(?:0|[1-9]\d*)$/, "Numerator must be canonical"),
+    denominator: z.string().regex(/^[1-9]\d*$/, "Denominator must be canonical"),
+  })
+  .strict()
+  .superRefine(({ numerator, denominator }, context) => {
+    const numeratorValue = BigInt(numerator);
+    const denominatorValue = BigInt(denominator);
+    if (numeratorValue === 0n && denominatorValue !== 1n) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["denominator"],
+        message: "Zero must be represented as 0/1",
+      });
+    } else if (exactUtilizationGreatestCommonDivisor(numeratorValue, denominatorValue) !== 1n) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "Exact fraction must be reduced" });
+    }
+  });
+const AttentionUnitExactValueSchema = CanonicalExactRationalSchema.refine(
   ({ numerator, denominator }) => BigInt(numerator) <= BigInt(denominator),
   "Exact attention value must be within [0, 1]",
 );
@@ -1739,9 +1755,20 @@ const PurchaseUtilizationReasonSchema = z.enum([
   "unreachable-at-current-fitness",
 ]);
 
-const ExactUtilizationValueSchema = z
+function exactUtilizationGreatestCommonDivisor(left: bigint, right: bigint): bigint {
+  let numerator = left;
+  let denominator = right;
+  while (denominator !== 0n) {
+    const remainder = numerator % denominator;
+    numerator = denominator;
+    denominator = remainder;
+  }
+  return numerator;
+}
+
+export const ExactUtilizationValueSchema = z
   .object({
-    exact: z.object({ numerator: z.string(), denominator: z.string() }).strict(),
+    exact: CanonicalExactRationalSchema,
   })
   .strict();
 

@@ -29,7 +29,7 @@ export interface CollectionProfileInput {
 
 const PROFILE_ENTITY_CLASSES: CollectionProfileEntityClass[] = ["mechanic", "designer", "artist"];
 
-function compareNormalizedCodePoints(left: string, right: string): number {
+export function compareNormalizedCodePoints(left: string, right: string): number {
   const leftPoints = Array.from(left.normalize("NFC"), (value) => value.codePointAt(0) ?? 0);
   const rightPoints = Array.from(right.normalize("NFC"), (value) => value.codePointAt(0) ?? 0);
   for (let index = 0; index < Math.min(leftPoints.length, rightPoints.length); index += 1) {

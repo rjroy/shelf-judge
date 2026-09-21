@@ -288,6 +288,7 @@ export {
   GameDetailWithPurchaseUtilizationSchema,
   OwnerGameNoteDetailWithPurchaseUtilizationSchema,
   FitnessResultResponseSchema,
+  ExactUtilizationValueSchema,
   PurchaseUtilizationResultSchema,
   NichePositionResponseSchema,
   NicheImpactResponseSchema,
