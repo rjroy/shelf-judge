@@ -126,7 +126,7 @@ const allGamesWithScores: GameWithScore[] = [
 // --- Mock factories ---
 
 const defaultCollection: Collection = {
-  schemaVersion: 7,
+  schemaVersion: 8,
   revision: 0,
   id: "collection-1",
   name: "Test",
@@ -134,6 +134,7 @@ const defaultCollection: Collection = {
   games: [gameA, gameB, gameC],
   entertainmentBenchmark: null,
   intentions: [],
+  attentionDispositions: [],
   commandReceipts: [],
   createdAt: "2026-01-01T00:00:00Z",
   updatedAt: "2026-01-01T00:00:00Z",

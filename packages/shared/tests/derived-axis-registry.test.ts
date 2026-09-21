@@ -906,7 +906,7 @@ describe("current-axis helpers", () => {
 
   test("supports the active versioned persisted collection contract", () => {
     const collection: Collection = {
-      schemaVersion: 7,
+      schemaVersion: 8,
       revision: 0,
       id: "collection",
       name: "Collection",
@@ -918,12 +918,13 @@ describe("current-axis helpers", () => {
         },
       ],
       intentions: [],
+      attentionDispositions: [],
       commandReceipts: [],
       entertainmentBenchmark: null,
       createdAt: "2026-01-01T00:00:00Z",
       updatedAt: "2026-01-01T00:00:00Z",
     };
-    expect(collection.schemaVersion).toBe(7);
+    expect(collection.schemaVersion).toBe(8);
     expect(collection.axes).toEqual([personal, tournament, derived, disabled]);
   });
 });

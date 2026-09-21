@@ -17,6 +17,8 @@ const IdSchema = z.string().min(1);
 const SafeCountSchema = z.number().int().safe().min(0);
 const PositiveSafeIntegerSchema = z.number().int().safe().positive();
 const FiniteNumberSchema = z.number().finite();
+const StableRuleIdSchema = z.string().regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/);
+const CanonicalFingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/);
 
 function valuesMatch(left: number, right: number): boolean {
   return Object.is(left, right);
@@ -559,6 +561,88 @@ export const IntentionCommandReceiptSchema = z
 export const CommandReceiptSchema = z.union([
   OwnerGameNoteCommandReceiptSchema,
   IntentionCommandReceiptSchema,
+]);
+
+export const AttentionDispositionSchema = z.union([
+  z
+    .object({
+      gameId: IdSchema,
+      kind: z.literal("snoozed"),
+      ruleId: StableRuleIdSchema,
+      ruleVersion: PositiveSafeIntegerSchema,
+      fingerprint: CanonicalFingerprintSchema,
+      responseAt: TimestampSchema,
+      expiresAt: TimestampSchema,
+      version: PositiveSafeIntegerSchema,
+    })
+    .strict()
+    .superRefine((value, context) => {
+      if (Date.parse(value.expiresAt) !== Date.parse(value.responseAt) + 30 * 24 * 60 * 60 * 1000) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["expiresAt"],
+          message: "Snooze expiry must be exactly 720 hours after the response",
+        });
+      }
+    }),
+  z
+    .object({
+      gameId: IdSchema,
+      kind: z.literal("intentional"),
+      ruleId: StableRuleIdSchema,
+      ruleVersion: PositiveSafeIntegerSchema,
+      fingerprint: CanonicalFingerprintSchema,
+      version: PositiveSafeIntegerSchema,
+    })
+    .strict(),
+]);
+
+export const AttentionCommandReceiptSchema = z
+  .object({
+    receiptType: z.literal("attention-disposition"),
+    commandId: z.string().uuid(),
+    operation: z.enum(["not-now", "intentional"]),
+    gameId: IdSchema,
+    ruleId: StableRuleIdSchema,
+    expectedVersion: SafeCountSchema,
+    requestFingerprint: CanonicalFingerprintSchema,
+    accepted: AttentionDispositionSchema,
+  })
+  .strict()
+  .superRefine((receipt, context) => {
+    if (receipt.gameId !== receipt.accepted.gameId)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["accepted", "gameId"],
+        message: "Receipt disposition must identify the requested game",
+      });
+    if ((receipt.operation === "not-now") !== (receipt.accepted.kind === "snoozed"))
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["operation"],
+        message: "Receipt operation must match the accepted disposition",
+      });
+    if (receipt.accepted.ruleId !== receipt.ruleId)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["accepted", "ruleId"],
+        message: "Receipt disposition must retain the requested rule",
+      });
+    if (
+      receipt.expectedVersion === Number.MAX_SAFE_INTEGER ||
+      receipt.accepted.version !== receipt.expectedVersion + 1
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["accepted", "version"],
+        message: "Accepted receipt version must be exactly one greater than the expected version",
+      });
+  });
+
+export const AttentionCommandReceiptUnionSchema = z.union([
+  OwnerGameNoteCommandReceiptSchema,
+  IntentionCommandReceiptSchema,
+  AttentionCommandReceiptSchema,
 ]);
 
 export const CollectionProfileGameSourceExtensionSchema = z

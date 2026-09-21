@@ -1,5 +1,6 @@
 import * as path from "node:path";
 import { v4 as uuidv4 } from "uuid";
+import { z } from "zod";
 import type {
   Collection,
   AppConfig,
@@ -109,6 +110,7 @@ function createDefaultCollection(dependencies?: CollectionMigrationDependencies)
     ],
     games: [],
     intentions: [],
+    attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
     createdAt: now,
@@ -162,6 +164,9 @@ export function decodeStoredCollection(raw: unknown, logger: Logger): StoredColl
     (raw.schemaVersion !== 3 &&
       raw.schemaVersion !== 4 &&
       raw.schemaVersion !== 5 &&
+      // V7 was current when this recovery boundary was introduced. Keep that
+      // established eligibility while it is migrated sequentially to V8.
+      raw.schemaVersion !== 7 &&
       raw.schemaVersion !== CURRENT_COLLECTION_SCHEMA_VERSION)
   ) {
     return { data: raw, normalized: false };
@@ -227,6 +232,7 @@ function defaultConfig(): AppConfig {
     bggAuthToken: null,
     groundedAnalysis: null,
     profileEntityPolicy: structuredClone(DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY),
+    profileAttentionCardLimit: 6,
     username: null,
   };
 }
@@ -234,6 +240,10 @@ function defaultConfig(): AppConfig {
 function parseConfig(value: unknown): AppConfig {
   if (typeof value !== "object" || value === null) throw new Error("Config must be an object");
   const config = value as Record<string, unknown>;
+  const profileAttentionCardLimit =
+    config.profileAttentionCardLimit === undefined
+      ? 6
+      : z.number().int().min(0).max(24).parse(config.profileAttentionCardLimit);
   return {
     bggAuthToken:
       typeof config.bggAuthToken === "string" || config.bggAuthToken === null
@@ -246,6 +256,7 @@ function parseConfig(value: unknown): AppConfig {
     profileEntityPolicy: CollectionProfileEntityPolicySchema.parse(
       config.profileEntityPolicy ?? DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
     ),
+    profileAttentionCardLimit,
     username:
       typeof config.username === "string" || config.username === null ? config.username : null,
   };

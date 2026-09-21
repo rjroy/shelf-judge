@@ -304,7 +304,73 @@ export interface CollectionV7 extends Omit<CollectionV6, "schemaVersion"> {
   bggPlaySessions?: BggPlaySession[];
 }
 
-export type Collection = CollectionV7;
+export type AttentionDisposition =
+  | {
+      gameId: string;
+      kind: "snoozed";
+      ruleId: string;
+      ruleVersion: number;
+      fingerprint: string;
+      responseAt: string;
+      expiresAt: string;
+      version: number;
+    }
+  | {
+      gameId: string;
+      kind: "intentional";
+      ruleId: string;
+      ruleVersion: number;
+      fingerprint: string;
+      version: number;
+    };
+
+export interface AttentionCommandReceipt {
+  receiptType: "attention-disposition";
+  commandId: string;
+  operation: "not-now" | "intentional";
+  gameId: string;
+  ruleId: string;
+  expectedVersion: number;
+  requestFingerprint: string;
+  accepted: AttentionDisposition;
+}
+
+export interface CollectionV8 extends Omit<CollectionV7, "schemaVersion" | "commandReceipts"> {
+  schemaVersion: 8;
+  attentionDispositions: AttentionDisposition[];
+  commandReceipts: (
+    | IntentionCommandReceipt
+    | OwnerGameNoteCommandReceipt
+    | AttentionCommandReceipt
+  )[];
+}
+
+export type Collection = CollectionV8;
+
+/** Additive internal contracts for the future disposable attention projection. */
+export type AttentionExactValue = { numerator: string; denominator: string };
+export interface AttentionRuleDefinition {
+  id: string;
+  version: number;
+  dependencyVersion: number;
+  scoringVersion: number;
+}
+export interface AttentionCandidateWinner {
+  ruleId: string;
+  ruleVersion: number;
+  signalStrength: AttentionExactValue;
+  categoryWeight: AttentionExactValue;
+  attentionScore: AttentionExactValue;
+  fingerprint: string;
+}
+export interface AttentionCandidateEvaluation {
+  gameId: string;
+  winner: AttentionCandidateWinner | null;
+  disposition: AttentionDisposition | null;
+  nextEvaluationBoundary: string | null;
+  dependencyVersion: number;
+  ruleCatalogVersion: number;
+}
 
 // Fitness score types from .lore/designs/mvp-fitness-model.md
 
@@ -700,6 +766,7 @@ export interface AppConfig {
   bggAuthToken: string | null;
   groundedAnalysis: GroundedProviderIdentity | null;
   profileEntityPolicy: CollectionProfileEntityPolicy;
+  profileAttentionCardLimit: number;
   username: string | null;
 }
 
@@ -964,7 +1031,10 @@ export interface OwnerGameNoteCommandReceipt {
   accepted: Omit<OwnerGameNoteAcceptedMetadata, "replayed">;
 }
 
-export type CommandReceipt = IntentionCommandReceipt | OwnerGameNoteCommandReceipt;
+export type CommandReceipt =
+  | IntentionCommandReceipt
+  | OwnerGameNoteCommandReceipt
+  | AttentionCommandReceipt;
 
 export type CollectionMutationResult<Value> =
   | { outcome: "accepted"; changed: true; value: Value }
@@ -1130,7 +1200,7 @@ export type CollectionProfileResult = CollectionProfile | CollectionProfileUnava
 
 export interface ProfileSourceIdentity {
   collectionId: string;
-  collectionSchemaVersion: 7;
+  collectionSchemaVersion: 8;
   collectionRevision: number;
   tournamentHash: string;
   predictionSettingsHash: string;

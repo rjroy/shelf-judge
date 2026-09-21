@@ -16,6 +16,7 @@ const UpdateConfigSchema = z.object({
   bggAuthToken: z.string().nullable().optional(),
   groundedAnalysis: GroundedProviderIdentitySchema.nullable().optional(),
   profileEntityPolicy: CollectionProfileEntityPolicySchema.optional(),
+  profileAttentionCardLimit: z.number().int().min(0).max(24).optional(),
   username: z.string().optional(),
 });
 
@@ -65,6 +66,9 @@ export function createConfigRoutes(deps: ConfigRoutesDeps): RouteModule {
       }
       if (parsed.data.profileEntityPolicy !== undefined) {
         config.profileEntityPolicy = parsed.data.profileEntityPolicy;
+      }
+      if (parsed.data.profileAttentionCardLimit !== undefined) {
+        config.profileAttentionCardLimit = parsed.data.profileAttentionCardLimit;
       }
 
       await storageService.saveConfig(config);

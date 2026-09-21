@@ -141,13 +141,14 @@ function makeGame(
 
 function makeCollection(games: DurableGame[], axes: Axis[]): Collection {
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
     revision: 0,
     id: "test-col",
     name: "Test Collection",
     axes,
     games,
     intentions: [],
+    attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
     createdAt: now,

@@ -91,13 +91,14 @@ function createMockStorage(units: ShelfUnit[], axes?: Axis[]): StorageService {
     saveShelfConfig: () => Promise.resolve(),
     loadCollection: () =>
       Promise.resolve({
-        schemaVersion: 7,
+        schemaVersion: 8,
         revision: 0,
         id: "mock",
         name: "Mock",
         games: [],
         entertainmentBenchmark: null,
         intentions: [],
+        attentionDispositions: [],
         commandReceipts: [],
         axes: axes ?? [
           {

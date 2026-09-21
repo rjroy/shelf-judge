@@ -399,13 +399,14 @@ function makeUsefulCollection(
   intentions: Collection["intentions"] = [],
 ): CollectionProfileCollectionSource {
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
     revision: 1,
     id: "collection",
     name: "Collection",
     axes: [makeAxis({ id: "fun", name: "Fun", weight: 100 })],
     games,
     intentions,
+    attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
     createdAt: "2026-08-27T00:00:00.000Z",

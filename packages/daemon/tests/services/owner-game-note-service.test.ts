@@ -85,13 +85,14 @@ function game(overrides: Partial<DurableGame> = {}): DurableGame {
 
 function collection(sourceGame = game()): Collection {
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
     revision: 0,
     id: "collection-1",
     name: "Private collection name",
     axes: [],
     games: [sourceGame],
     intentions: [],
+    attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
     createdAt: initialTime,

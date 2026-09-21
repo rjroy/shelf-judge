@@ -124,13 +124,14 @@ function createMockStorage(
 ): StorageService {
   let stored = structuredClone(wishlist);
   const coll: Collection = {
-    schemaVersion: 7,
+    schemaVersion: 8,
     revision: 0,
     id: "coll-1",
     name: "Test",
     axes: [],
     games: [],
     intentions: [],
+    attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
     createdAt: NOW,

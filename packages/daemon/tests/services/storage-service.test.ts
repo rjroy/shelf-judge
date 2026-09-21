@@ -39,13 +39,14 @@ function makeService(initialFiles?: Record<string, string>) {
 
 function currentCollection(overrides: Partial<Collection> = {}): Collection {
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
     revision: 0,
     id: "col-1",
     name: "Test",
     axes: [],
     games: [],
     intentions: [],
+    attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
     createdAt: "2026-01-01T00:00:00.000Z",
@@ -101,7 +102,7 @@ describe("StorageService.loadCollection", () => {
     const collection = await service.loadCollection();
 
     expect(collection.name).toBe("My Collection");
-    expect(collection.schemaVersion).toBe(7);
+    expect(collection.schemaVersion).toBe(8);
     expect(collection.axes).toHaveLength(3);
     expect(collection.games).toHaveLength(0);
 
@@ -274,6 +275,7 @@ describe("StorageService.loadCollection", () => {
       };
       delete rawCollection.revision;
       delete rawCollection.intentions;
+      delete rawCollection.attentionDispositions;
       delete rawCollection.commandReceipts;
       const entries: string[] = [];
       const fileOps = createMockFileOps({ [COLLECTION_PATH]: JSON.stringify(rawCollection) });
@@ -320,6 +322,7 @@ describe("StorageService.loadCollection", () => {
     delete rawCollection.entertainmentBenchmark;
     delete rawCollection.revision;
     delete rawCollection.intentions;
+    delete rawCollection.attentionDispositions;
     delete rawCollection.commandReceipts;
     expect(rawGame).not.toHaveProperty("acquisition");
     expect(rawCollection).not.toHaveProperty("entertainmentBenchmark");
@@ -620,6 +623,7 @@ describe("StorageService.saveConfig", () => {
       bggAuthToken: "tok",
       username: null,
       groundedAnalysis: null,
+      profileAttentionCardLimit: 6,
       profileEntityPolicy: {
         mechanic: { overviewLimit: 1, minimumSupportedGames: 2 },
         designer: { overviewLimit: 2, minimumSupportedGames: 3 },

@@ -90,7 +90,7 @@ function futureSourceCollection(
   commandReceipts: unknown[] = [],
 ) {
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
     id: "collection",
     name: "Collection",
     axes: [],
@@ -100,6 +100,7 @@ function futureSourceCollection(
     revision: 1,
     games: [futureSourceGame("game-4")],
     intentions,
+    attentionDispositions: [],
     commandReceipts,
   };
 }
