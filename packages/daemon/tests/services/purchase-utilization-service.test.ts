@@ -75,9 +75,7 @@ function game(overrides: Partial<DurableGame> = {}): DurableGame {
 
 function collection(overrides: Partial<Collection> = {}): Collection {
   return {
-    schemaVersion: 8,
-    acceptedPlaySources: createAcceptedPlaySourceData(),
-    attentionFeedback: [],
+    schemaVersion: 7,
     revision: 0,
     id: "collection-1",
     name: "Test",
@@ -874,4 +872,3 @@ describe("PurchaseUtilizationService response enrichment", () => {
     expect(serialized).not.toContain("not-applicable");
   });
 });
-import { createAcceptedPlaySourceData } from "@shelf-judge/shared";

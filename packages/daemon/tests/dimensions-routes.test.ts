@@ -113,9 +113,7 @@ function createTestApp() {
   const storageService = {
     loadCollection: () =>
       Promise.resolve<Collection>({
-        schemaVersion: 8,
-        acceptedPlaySources: createAcceptedPlaySourceData(),
-        attentionFeedback: [],
+        schemaVersion: 7,
         revision: 0,
         id: "collection-1",
         name: "Test",
@@ -275,4 +273,3 @@ describe("PUT /api/games/:id/dimensions", () => {
     expect(data.purchaseUtilization).toBeDefined();
   });
 });
-import { createAcceptedPlaySourceData } from "@shelf-judge/shared";

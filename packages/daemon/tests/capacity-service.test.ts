@@ -91,9 +91,7 @@ function createMockStorage(units: ShelfUnit[], axes?: Axis[]): StorageService {
     saveShelfConfig: () => Promise.resolve(),
     loadCollection: () =>
       Promise.resolve({
-        schemaVersion: 8,
-        acceptedPlaySources: createAcceptedPlaySourceData(),
-        attentionFeedback: [],
+        schemaVersion: 7,
         revision: 0,
         id: "mock",
         name: "Mock",
@@ -1026,4 +1024,3 @@ describe("capacity service", () => {
     });
   });
 });
-import { createAcceptedPlaySourceData } from "@shelf-judge/shared";

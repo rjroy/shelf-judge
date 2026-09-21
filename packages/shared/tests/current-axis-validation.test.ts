@@ -591,8 +591,6 @@ describe("legacy contracts", () => {
 describe("current persisted collection validation", () => {
   const currentCollection = {
     schemaVersion: CURRENT_COLLECTION_SCHEMA_VERSION,
-    acceptedPlaySources: createAcceptedPlaySourceData(),
-    attentionFeedback: [],
     revision: 0,
     id: "collection-1",
     name: "Current",
@@ -833,4 +831,3 @@ describe("current persisted collection validation", () => {
     ).toBe(false);
   });
 });
-import { createAcceptedPlaySourceData } from "../src/index";

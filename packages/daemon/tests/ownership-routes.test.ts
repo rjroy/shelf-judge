@@ -122,9 +122,7 @@ const prevOwned = makeGame("prev", "Delta", "previously-owned");
 // Mutable collection for setOwnership tests
 function makeCollection(): Collection {
   return {
-    schemaVersion: 8,
-    acceptedPlaySources: createAcceptedPlaySourceData(),
-    attentionFeedback: [],
+    schemaVersion: 7,
     revision: 0,
     id: "coll-1",
     name: "Test",
@@ -667,4 +665,3 @@ describe("legacy data migration", () => {
     expect(loaded.games[0].ownership).toBe("owned");
   });
 });
-import { createAcceptedPlaySourceData } from "@shelf-judge/shared";

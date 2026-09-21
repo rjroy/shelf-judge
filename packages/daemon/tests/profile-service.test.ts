@@ -112,6 +112,70 @@ describe("ProfileService", () => {
     expect(computations).toBe(5);
   });
 
+  test("recomputes a version-11 generic intention card into the zero-play presentation", async () => {
+    const ctx = createTestApp();
+    const created = await ctx.gameService.addGame({ name: "Unplayed intention" });
+    const collection = await ctx.storageService.loadCollection();
+    const game = collection.games.find(({ id }) => id === created.game.id);
+    if (!game) throw new Error("Expected created game");
+    game.numPlays = 0;
+    game.playCountEvidence = {
+      status: "valid",
+      value: 0,
+      source: "manual",
+      observedAt: "2026-09-20T00:00:00.000Z",
+    };
+    collection.intentions.push({
+      intentionId: "unplayed-intention",
+      gameId: game.id,
+      kind: "want-to-play",
+      baseline: null,
+      createdAt: "2026-09-20T00:00:00.000Z",
+      version: 1,
+      resolution: null,
+    });
+    collection.revision += 1;
+    collection.updatedAt = "2026-09-20T00:00:00.000Z";
+    await ctx.storageService.saveCollection(collection);
+
+    const current = await ctx.profileService.getProfile();
+    expect(current.status).toBe("available");
+    const cached = await ctx.storageService.loadProfile();
+    if (!cached) throw new Error("Expected current profile cache");
+    const oldGenericCache = JSON.stringify(cached)
+      .replace('"algorithmVersion":12', '"algorithmVersion":11')
+      .replace('"decisionFamily":"unplayed-owner-wanted"', '"decisionFamily":"play-intention"')
+      .replace(
+        '"question":"Is there a reason you haven’t played this?"',
+        '"question":"Do you still want to play Unplayed intention?"',
+      );
+    ctx.fileOps.files.set("/test/data/profile.json", oldGenericCache);
+
+    let computations = 0;
+    const service = createProfileService({
+      storageService: ctx.storageService,
+      displayedFitnessService: {
+        ...ctx.displayedFitnessService,
+        async listGamesFromSnapshot(snapshot, options) {
+          computations += 1;
+          return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+        },
+      },
+    });
+
+    const result = await service.getProfile();
+    expect(computations).toBe(1);
+    expect(result.status).toBe("available");
+    if (result.status !== "available") throw new Error("Expected available profile");
+    const attention = result.attention.items.find(
+      ({ id }) => id === "attention:unplayed-intention",
+    );
+    if (!attention) throw new Error("Expected recomputed intention card");
+    expect(attention.decisionFamily).toBe("unplayed-owner-wanted");
+    expect(attention.question).toBe("Is there a reason you haven’t played this?");
+    expect((await ctx.storageService.loadProfile())?.algorithmVersion).toBe(12);
+  });
+
   test("recomputes a current-identity cache that does not match the collection source", async () => {
     const ctx = createTestApp();
     await jsonRequest(ctx.app, "POST", "/api/games", { name: "Source game" });

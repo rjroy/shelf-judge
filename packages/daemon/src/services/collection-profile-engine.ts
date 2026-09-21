@@ -368,12 +368,18 @@ function attentionItem(
   intention: CollectionProfileCollectionSource["intentions"][number],
 ): CollectionProfileAttentionItem {
   const currentPlayEvidence = attentionPlayEvidence(game);
+  const unplayedOwnerWanted =
+    intention.kind === "want-to-play" &&
+    currentPlayEvidence.status === "valid" &&
+    currentPlayEvidence.playCount === 0;
   return {
     id: `attention:${intention.intentionId}`,
-    decisionFamily: "play-intention",
+    decisionFamily: unplayedOwnerWanted ? "unplayed-owner-wanted" : "play-intention",
     intention: structuredClone(intention),
     gameName: game.name,
-    question: `Do you still want to play ${game.name}?`,
+    question: unplayedOwnerWanted
+      ? "Is there a reason you haven’t played this?"
+      : `Do you still want to play ${game.name}?`,
     whyNow: "You asked Shelf Judge to keep this intention visible.",
     currentPlayEvidence,
     responses: ["leave-visible", "complete", "retire", "correct-or-refresh-evidence"],

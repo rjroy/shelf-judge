@@ -304,14 +304,7 @@ export interface CollectionV7 extends Omit<CollectionV6, "schemaVersion"> {
   bggPlaySessions?: BggPlaySession[];
 }
 
-export interface CollectionV8 extends Omit<CollectionV7, "schemaVersion" | "commandReceipts"> {
-  schemaVersion: 8;
-  acceptedPlaySources: import("./accepted-play-sources").AcceptedPlaySourceData;
-  attentionFeedback: import("./attention-feedback").AttentionFeedbackEvent[];
-  commandReceipts: CommandReceipt[];
-}
-
-export type Collection = CollectionV8;
+export type Collection = CollectionV7;
 
 // Fitness score types from .lore/designs/mvp-fitness-model.md
 
@@ -971,10 +964,7 @@ export interface OwnerGameNoteCommandReceipt {
   accepted: Omit<OwnerGameNoteAcceptedMetadata, "replayed">;
 }
 
-export type CommandReceipt =
-  | IntentionCommandReceipt
-  | OwnerGameNoteCommandReceipt
-  | import("./attention-feedback").AttentionFeedbackCommandReceipt;
+export type CommandReceipt = IntentionCommandReceipt | OwnerGameNoteCommandReceipt;
 
 export type CollectionMutationResult<Value> =
   | { outcome: "accepted"; changed: true; value: Value }
@@ -1068,16 +1058,11 @@ export type AttentionPlayEvidence =
 
 export interface CollectionProfileAttentionItem {
   id: string;
-  decisionFamily: import("./attention-feedback").AttentionFamily;
+  decisionFamily: "play-intention" | "unplayed-owner-wanted";
   intention: PlayIntention;
   gameName: string;
   question: string;
-  whyNow:
-    | "You asked Shelf Judge to keep this intention visible."
-    | "You want to play this game, and current accepted play evidence records no plays.";
-  /** Event IDs are display-only and never qualification inputs. */
-  feedbackEventIds?: string[];
-  acceptedPlayEvidence?: import("./attention-source-evidence").AttentionAcceptedPlayEvidence;
+  whyNow: "You asked Shelf Judge to keep this intention visible.";
   currentPlayEvidence: AttentionPlayEvidence;
   responses: ["leave-visible", "complete", "retire", "correct-or-refresh-evidence"];
   abstentionBasis: "Only an explicit active intention qualifies.";
@@ -1145,7 +1130,7 @@ export type CollectionProfileResult = CollectionProfile | CollectionProfileUnava
 
 export interface ProfileSourceIdentity {
   collectionId: string;
-  collectionSchemaVersion: 8;
+  collectionSchemaVersion: 7;
   collectionRevision: number;
   tournamentHash: string;
   predictionSettingsHash: string;
@@ -1153,7 +1138,7 @@ export interface ProfileSourceIdentity {
 }
 
 export interface ProfileData {
-  contractVersion: 10;
+  contractVersion: 9;
   algorithmVersion: 12;
   sourceIdentity: ProfileSourceIdentity;
   profile: CollectionProfile;

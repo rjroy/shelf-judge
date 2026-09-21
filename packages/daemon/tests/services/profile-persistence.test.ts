@@ -113,9 +113,9 @@ describe("useful profile persistence", () => {
       const serialized = JSON.stringify(current);
       const artifacts = [
         serialized
-          .replace('"contractVersion":10', '"contractVersion":9')
+          .replace('"contractVersion":9', '"contractVersion":8')
           .replace('"algorithmVersion":12', '"algorithmVersion":11'),
-        serialized.replace('"contractVersion":10', '"contractVersion":9'),
+        serialized.replace('"contractVersion":9', '"contractVersion":8'),
         serialized.replace('"algorithmVersion":12', '"algorithmVersion":11'),
         serialized
           .replaceAll('"bestFit":', '"rating":')

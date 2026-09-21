@@ -19,7 +19,7 @@ req-prefix: USEFUL-PROF
 
 The owner reviewed and approved this product and behavior specification. The amended adjusted-fit requirements are implemented and passed terminal acceptance.
 
-**Authority notice:** This file remains the authority for shipped and implemented Profile behavior. [Expanded Profile Attention Opportunities](../../../work/specs/expanded-profile-attention-opportunities.md) is approved and normative for future attention behavior, covering the attention model and item contract (REQ-USEFUL-PROF-25, 30-32, and 45), neutral ordering (REQ-USEFUL-PROF-31), the empty state (REQ-USEFUL-PROF-37), purchase-utilization disposition (REQ-USEFUL-PROF-39), and cache and source expectations (REQ-USEFUL-PROF-49). This implemented reference's non-conflicting intention lifecycle, evidence-warning, ownership-transition, history, and no-reopen rules remain authoritative until implementation reconciliation. Implementation must reconcile this reference and its evidence with the approved amendment.
+**Authority notice:** This file is the authority for Profile behavior. [Expanded Profile Attention Opportunities](../../../work/specs/expanded-profile-attention-opportunities.md) adds one approved presentation rule: an active owned `want-to-play` intention with a valid current play-count projection of exactly zero uses the specific unplayed question; every other active intention uses the generic question. This file remains authoritative for lifecycle, completion, warnings, ownership transitions, history, ordering, and read-only projection behavior.
 
 Once approved, this specification supersedes the Profile Overview behavior in [Collection Identity and Trusted Insight Profiling](../../../archive/specs/collection/collection-profiling.md). The older document remains the record of the implemented contract before this redesign. It does not justify retaining a surface that this specification removes.
 
@@ -66,11 +66,11 @@ The owner explicitly records, "I intend to play Heat: Pedal to the Metal." At th
 
 The attention item asks:
 
-> **Do you still intend to play Heat: Pedal to the Metal?**
+> **Is there a reason you haven’t played this?**
 >
-> You asked Shelf Judge to keep this first-play intention visible. The recorded play count was 0 when you added it and is still 0.
+> You asked Shelf Judge to keep this intention visible, and the current recorded play count is 0.
 
-The owner can prioritize the play, retire the intention, mark it complete from personal knowledge, or correct play data. Prioritizing is an external action and leaves the item visible until valid current play evidence exceeds the stored baseline or the owner resolves it. Shelf Judge applies no due date, age, urgency, or overdue language and does not conclude that the game should be sold or that the owner failed.
+The owner can prioritize the play, retire the intention, mark it complete from personal knowledge, or correct play data. Prioritizing is an external action and leaves the item visible until valid current play evidence exceeds the stored baseline or the owner resolves it. Historical `first-play` and `replay` intentions, and every case without a valid current zero projection, keep the generic play-intention question. Shelf Judge applies no due date, age, urgency, or overdue language and does not conclude that the game should be sold or that the owner failed.
 
 If there are no active intentions, the section says:
 
@@ -158,7 +158,7 @@ Axis distributions remain diagnostic evidence under this identity question. They
 
 The section contains:
 
-1. Every active owner-created play or replay intention.
+1. Every active owner-created play or replay intention, with the specific unplayed question only for an owned active `want-to-play` intention whose valid current play-count projection is exactly zero.
 2. A successful nothing-to-decide state when there is no active intention.
 3. An evidence warning when current play data cannot establish automatic completion.
 4. A path from every item to the game and controls that can resolve it.
@@ -180,8 +180,8 @@ Every reported attention item must expose:
 | Field               | Required meaning                                                                                                                                   |
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Stable ID           | One durable `intentionId` for this owner-created intention. The card ID derives from it.                                                           |
-| Decision family     | `play-intention`; signals do not create separate families.                                                                                         |
-| Question            | "Do you still intend to play/replay [game]?" in owner language.                                                                                    |
+| Decision family     | One existing `play-intention` card per intention; the unplayed wording is presentation only, not a new durable family.                              |
+| Question            | `Is there a reason you haven’t played this?` for an owned active `want-to-play` intention with valid current count `0`; otherwise `Do you still want to play ${game.name}?`. |
 | Why now             | The owner explicitly asked Shelf Judge to keep this intention visible.                                                                             |
 | Evidence            | Intention kind, creation time, baseline play count, current play-count state and value when valid, evidence source, and evidence observation time. |
 | Plausible responses | Leave visible or prioritize externally, complete, retire, or correct/refresh evidence.                                                             |
@@ -293,14 +293,14 @@ Every requirement is assigned to one headline question. Delivery requirements ar
 
 ### Question 2: What Deserves My Attention Or A Decision Now?
 
-25. **REQ-USEFUL-PROF-25 (amended by shelf-judge-a8l):** Attention items come only from explicit owner-maintained Want to play intentions, including preserved historical first-play/replay intentions.
+25. **REQ-USEFUL-PROF-25 (amended by shelf-judge-a8l):** Attention items come only from explicit owner-maintained Want to play intentions, including preserved historical first-play/replay intentions. An owned active `want-to-play` intention with a valid current play-count projection of exactly zero uses the specific unplayed question; every other active intention uses the generic play-intention question. This is presentation only and creates no new durable intention or card.
 26. **REQ-USEFUL-PROF-26 (superseded by shelf-judge-a8l for primary creation):** Historical first-play/replay creation required a currently owned game, valid current play count, and matching kind. The current primary Want to play action is not count-gated; a game that is not currently owned remains ineligible.
 27. **REQ-USEFUL-PROF-27:** Ownership, age, purchase state, fitness, low play count, outlier distance, redundancy, and BGG metadata must never create or imply a play intention.
 28. **REQ-USEFUL-PROF-28:** Every active intention must appear immediately and remain visible without a deadline, reminder schedule, age threshold, urgency score, overdue state, or time-based ordering.
-29. **REQ-USEFUL-PROF-29:** Missing, invalid, or stale current play evidence must attach an exact warning and correction destination without hiding the active intention or claiming that it remains unplayed.
+29. **REQ-USEFUL-PROF-29:** Missing, invalid, or stale current play evidence must attach an exact warning and correction destination without hiding the active intention, claiming that it remains unplayed, or selecting the specific unplayed question.
 30. **REQ-USEFUL-PROF-30:** A reported attention item must satisfy every field in the Attention Item Contract and must provide completion, retirement, and evidence-correction destinations while allowing the intention to remain active without penalty.
 31. **REQ-USEFUL-PROF-31:** The attention section must order active items deterministically by NFC-normalized game name in Unicode code-point order and stable game ID, without using creation time or play count.
-32. **REQ-USEFUL-PROF-32:** One active intention must create exactly one card. Other metrics must not create duplicate cards or competing decision families.
+32. **REQ-USEFUL-PROF-32:** One active intention must create exactly one card. The unplayed question is a copy variation on that card, not another family or card. Other metrics must not create duplicate cards or competing decision families.
 33. **REQ-USEFUL-PROF-33:** Completing or retiring an intention must persist the resolution, actor or source, and resolution time in durable collection source data separate from the disposable profile cache.
 34. **REQ-USEFUL-PROF-34:** A trustworthy later observed play-count increase above a trustworthy captured baseline must complete the active intention during the data update that observes it. An absent baseline remains absent and cannot authorize automatic completion; reading the profile must not mutate durable intention state.
 35. **REQ-USEFUL-PROF-35:** The owner must be able to mark an intention complete from personal knowledge without forcing an unsupported change to recorded play count.
@@ -338,7 +338,7 @@ The profile cache must be invalidated by changes to:
 - the configured entity policy, including any class's `minimumSupportedGames`; and
 - the profile contract or algorithm version.
 
-The current disposable profile contract is version 9 and its algorithm is version 11. The durable collection is schema version 7. No profile cache migration is required: an older version or a profile whose serialized entity policy differs from current configuration is discarded and recomputed. A collection migration is required when durable intentions, resolutions, BGG metadata completeness, dated BGG play sessions, or another collection source field changes schema.
+The current disposable profile contract is version 9 and its algorithm is version 12. The durable collection is schema version 7. No profile cache migration is required: an older version, including version 11 before the zero-play `want-to-play` presentation rule, or a profile whose serialized entity policy differs from current configuration is discarded and recomputed. A collection migration is required when durable intentions, resolutions, BGG metadata completeness, dated BGG play sessions, or another collection source field changes schema.
 
 Collection migration must write atomically. A failed or interrupted migration leaves the last validated source artifact unchanged and loadable. Repeating migration from the same prior version produces the same current artifact without duplicate history or further semantic changes.
 
@@ -465,9 +465,9 @@ Every successful mutation returns the accepted durable intention, version, and a
 5. Independently derive exact adjusted means from entity games, comparator games, and each class's serialized `minimumSupportedGames`. Verify `bestFit` uses exact adjusted mean, count, normalized name, and BGG ID in order; diagnostic `support` remains count-first; every ordering is a complete permutation; and the overview is the supported prefix of `bestFit` capped at the configured length. Cover every Adjusted-Fit Scenario, including equal displayed values with unequal exact values and a limited entity that leads the full ordering.
 6. Parse representative BGG thing responses with zero, one, and multiple designer and artist links. Verify new and refreshed games retain IDs, names, completeness, and observation time, migrated old games remain refresh-needed until real data is fetched, failed refresh preserves last-valid eligibility with a warning, and games without BGG IDs are unrefreshable without a false refresh action.
 7. Exercise the intention lifecycle from no intention through create, leave active across repeated reads and long elapsed time, complete, retire, automatic observed-play completion, ownership ending, re-ownership, and later explicit new intention. Reject creation for a game that is not currently owned. Verify IDs behave as specified and durable history survives daemon restart and profile-cache deletion.
-8. Create Want to play with missing, invalid, stale, and timestamp-less evidence and verify a null baseline. Derive optional first-play/replay context only from trustworthy current evidence. Preserve historical kinds, baselines, lifecycle records, and original command receipts through migration and replay. Reject duplicate active intentions and stale expected versions.
+8. Create Want to play with missing, invalid, stale, and timestamp-less evidence and verify a null baseline. Verify that only an owned active `want-to-play` intention with a valid current zero projection uses the specific unplayed question; verify nonzero, unavailable, and invalid projections plus historical `first-play` and `replay` use the generic question. Preserve historical kinds, baselines, lifecycle records, and original command receipts through migration and replay. Reject duplicate active intentions and stale expected versions.
 9. Verify every active intention appears immediately and remains visible with identical neutral language and ordering after arbitrary clock advancement. Confirm no date, age, urgency, overdue, countdown, or elapsed-time field affects the result.
-10. Verify only valid current play evidence strictly greater than baseline completes the intention during the data update. Cover a corrected count below baseline followed by an increase that remains at or below baseline. Missing, invalid, stale, equal, or lower evidence must leave it visible, with a warning where applicable, and repeated profile reads must cause no durable write.
+10. Verify only valid current play evidence strictly greater than baseline completes the intention during the data update. Cover a corrected count below baseline followed by an increase that remains at or below baseline. Missing, invalid, stale, equal, or lower evidence must leave it visible, with a warning where applicable, and repeated profile reads must cause no durable write. Changing only the unplayed-versus-generic presentation must not mutate durable state.
 11. Replay the same command ID and canonical payload and verify the original success result returns without duplicate intentions or resolutions. Reuse the ID with a changed payload and verify rejection; use a new ID with a stale version and verify a current-state conflict. Simulate persistence failure and verify no success is reported.
 12. Verify the web and CLI can create, complete, and retire intentions and that their validated results match the subsequent profile output.
 13. Verify empty collection, supported identity, limited identity, missing metadata, missing ratings, evaluated-empty, active intentions, nothing-to-decide, evidence warnings, profile recomputation failure, transport failure, and validation failure remain visibly distinct.

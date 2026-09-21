@@ -113,7 +113,7 @@ describe("storage collection migration ordering and recovery", () => {
       const migrated = await service.loadCollection();
       const persistedAfterMigration = await fs.readFile(collectionPath, "utf8");
       expect(JSON.parse(persistedAfterMigration)).toEqual(migrated);
-      expect(migrated.schemaVersion).toBe(8);
+      expect(migrated.schemaVersion).toBe(7);
       expect(
         await fs.stat(profilePath).then(
           () => true,
@@ -200,7 +200,7 @@ describe("storage collection migration ordering and recovery", () => {
           collectionMigrationDependencies: migrationDependencies,
         });
         const migrated = await restarted.loadCollection();
-        expect(migrated.schemaVersion).toBe(8);
+        expect(migrated.schemaVersion).toBe(7);
         expect(migrated.games.map(({ ownerNote }) => ownerNote)).toEqual([
           { state: "missing", version: 0, updatedAt: null },
         ]);
@@ -268,9 +268,7 @@ describe("storage collection migration ordering and recovery", () => {
       logger: validationLog,
     });
     const invalidCurrent: Collection = {
-      schemaVersion: 8,
-      acceptedPlaySources: createAcceptedPlaySourceData(),
-      attentionFeedback: [],
+      schemaVersion: 7,
       revision: 0,
       id: "collection-1",
       name: "",
@@ -384,7 +382,7 @@ describe("storage collection migration ordering and recovery", () => {
 
     const migrated = await service.loadCollection();
 
-    expect(migrated.schemaVersion).toBe(8);
+    expect(migrated.schemaVersion).toBe(7);
     expect(invalidated).toEqual(["v1-derived-artifact"]);
     expect(JSON.parse(fileOps.files.get(COLLECTION_PATH) ?? "null")).toEqual(migrated);
   });
@@ -488,8 +486,7 @@ describe("storage collection migration ordering and recovery", () => {
     expect(fileOps.files.get(COLLECTION_PATH)).toBe(original);
 
     const loaded = await service.loadCollection();
-    expect(loaded.schemaVersion).toBe(8);
+    expect(loaded.schemaVersion).toBe(7);
     expect(JSON.parse(fileOps.files.get(COLLECTION_PATH) ?? "null")).toEqual(loaded);
   });
 });
-import { createAcceptedPlaySourceData } from "@shelf-judge/shared";

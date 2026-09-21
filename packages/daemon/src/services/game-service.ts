@@ -799,16 +799,6 @@ export function createGameService(deps: GameServiceDeps): GameService {
                 ),
             );
             collection.games.splice(index, 1);
-            // Permanent deletion already rejects games with intention/feedback history.
-            // Remove the additive source records with their game, including migration metadata.
-            const sources = collection.acceptedPlaySources;
-            sources.legacyGameIds = sources.legacyGameIds.filter((gameId) => gameId !== id);
-            sources.evaluatorPolicies = sources.evaluatorPolicies.filter((p) => p.gameId !== id);
-            sources.observations = sources.observations.filter((o) => o.gameId !== id);
-            sources.checks = sources.checks.filter((c) => c.gameId !== id);
-            sources.freshnessBoundaries = sources.freshnessBoundaries.filter(
-              (b) => b.gameId !== id,
-            );
             collection.updatedAt = now();
             const lifecycleContext: PermanentGameDeletionContext = {
               gameId: id,

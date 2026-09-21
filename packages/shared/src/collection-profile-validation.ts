@@ -7,8 +7,6 @@ import type {
 } from "./types";
 import { ExactRational } from "./exact-rational";
 import { OwnerGameNoteCommandReceiptSchema } from "./owner-game-note";
-import { AttentionFamilySchema, AttentionFeedbackCommandReceiptSchema } from "./attention-feedback";
-import { AttentionAcceptedPlayEvidenceSchema } from "./attention-source-evidence";
 import {
   CollectionProfileEntityPolicySchema,
   DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
@@ -559,7 +557,6 @@ export const IntentionCommandReceiptSchema = z
   });
 
 export const CommandReceiptSchema = z.union([
-  AttentionFeedbackCommandReceiptSchema,
   OwnerGameNoteCommandReceiptSchema,
   IntentionCommandReceiptSchema,
 ]);
@@ -618,7 +615,6 @@ export const CollectionProfileSourceRecordsSchema = z
       });
     if (
       source.commandReceipts.some((receipt) => {
-        if ("receiptType" in receipt && receipt.receiptType === "attention-feedback") return false;
         const gameId = "request" in receipt ? receipt.request.gameId : receipt.gameId;
         return !gameIds.has(gameId);
       })
@@ -1060,16 +1056,11 @@ const AttentionPlayEvidenceSchema = z.union([
 export const CollectionProfileAttentionItemSchema = z
   .object({
     id: IdSchema,
-    decisionFamily: AttentionFamilySchema,
+    decisionFamily: z.enum(["play-intention", "unplayed-owner-wanted"]),
     intention: PlayIntentionSchema,
     gameName: z.string().min(1),
     question: z.string().min(1),
-    whyNow: z.enum([
-      "You asked Shelf Judge to keep this intention visible.",
-      "You want to play this game, and current accepted play evidence records no plays.",
-    ]),
-    feedbackEventIds: z.array(z.string().uuid()).optional(),
-    acceptedPlayEvidence: AttentionAcceptedPlayEvidenceSchema.optional(),
+    whyNow: z.literal("You asked Shelf Judge to keep this intention visible."),
     currentPlayEvidence: AttentionPlayEvidenceSchema,
     responses: z.tuple([
       z.literal("leave-visible"),
@@ -1092,54 +1083,23 @@ export const CollectionProfileAttentionItemSchema = z
   })
   .strict()
   .superRefine((item, context) => {
-    if (
-      item.acceptedPlayEvidence !== undefined &&
-      item.acceptedPlayEvidence.gameId !== item.intention.gameId
-    )
-      context.addIssue({
-        code: "custom",
-        path: ["acceptedPlayEvidence", "gameId"],
-        message: "Accepted evidence must identify the intention game",
-      });
-    if (
-      item.feedbackEventIds &&
-      new Set(item.feedbackEventIds).size !== item.feedbackEventIds.length
-    )
-      context.addIssue({
-        code: "custom",
-        path: ["feedbackEventIds"],
-        message: "Feedback event IDs must be unique",
-      });
-    if (
-      item.decisionFamily === "unplayed-owner-wanted" &&
-      (item.intention.kind !== "want-to-play" ||
-        item.intention.baseline === null ||
-        item.intention.baseline.playCount !== 0)
-    )
+    const requiresUnplayedPresentation =
+      item.intention.resolution === null &&
+      item.intention.kind === "want-to-play" &&
+      item.currentPlayEvidence.status === "valid" &&
+      item.currentPlayEvidence.playCount === 0;
+    const expectedDecisionFamily = requiresUnplayedPresentation
+      ? "unplayed-owner-wanted"
+      : "play-intention";
+    const expectedQuestion = requiresUnplayedPresentation
+      ? "Is there a reason you haven’t played this?"
+      : `Do you still want to play ${item.gameName}?`;
+    if (item.decisionFamily !== expectedDecisionFamily)
       context.addIssue({
         code: "custom",
         path: ["decisionFamily"],
         message:
-          "Unplayed presentation requires a non-replay Want to play intention with a baseline",
-      });
-    const expectedQuestion =
-      item.decisionFamily === "unplayed-owner-wanted"
-        ? `Do you still want to play ${item.gameName} for the first time?`
-        : `Do you still want to play ${item.gameName}?`;
-    const expectedWhy =
-      item.decisionFamily === "unplayed-owner-wanted"
-        ? "You want to play this game, and current accepted play evidence records no plays."
-        : "You asked Shelf Judge to keep this intention visible.";
-    if (
-      item.whyNow !== expectedWhy ||
-      (item.decisionFamily === "unplayed-owner-wanted" &&
-        (item.acceptedPlayEvidence?.status !== "agreement" ||
-          item.acceptedPlayEvidence.count !== 0))
-    )
-      context.addIssue({
-        code: "custom",
-        path: ["acceptedPlayEvidence"],
-        message: "Presentation must contain its family-specific relevance and accepted evidence",
+          "Attention decision family must match the active Want to play and current play evidence state",
       });
     if (item.intention.resolution !== null)
       context.addIssue({
@@ -1347,8 +1307,7 @@ function createAvailableCollectionProfileSchema(policy: CollectionProfileEntityP
       const sorted = [...profile.attention.items].sort(
         (left, right) =>
           compareCodePoints(left.gameName, right.gameName) ||
-          compareCodePoints(left.intention.gameId, right.intention.gameId) ||
-          compareCodePoints(left.decisionFamily, right.decisionFamily),
+          compareCodePoints(left.intention.gameId, right.intention.gameId),
       );
       if (
         sorted.map(({ id }) => id).join(",") !==

@@ -10,6 +10,7 @@ import {
   OwnershipMutationResultSchema,
   PlayEvidenceMutationResultSchema,
   PlayIntentionSchema,
+  CollectionProfileAttentionItemSchema,
   intentionMutationResultMatchesCommand,
   type IntentionCommand,
   CollectionProfileEntityClassResultSchema,
@@ -89,9 +90,7 @@ function futureSourceCollection(
   commandReceipts: unknown[] = [],
 ) {
   return {
-    schemaVersion: 8,
-    acceptedPlaySources: createAcceptedPlaySourceData(),
-    attentionFeedback: [],
+    schemaVersion: 7,
     id: "collection",
     name: "Collection",
     axes: [],
@@ -106,6 +105,74 @@ function futureSourceCollection(
 }
 
 describe("collection profile source contracts", () => {
+  test("requires the unplayed presentation for qualifying Want to play attention", () => {
+    const attention = {
+      id: `attention:${activeIntentionFixture.intentionId}`,
+      decisionFamily: "unplayed-owner-wanted",
+      intention: { ...activeIntentionFixture, kind: "want-to-play", baseline: null },
+      gameName: "Game",
+      question: "Is there a reason you haven’t played this?",
+      whyNow: "You asked Shelf Judge to keep this intention visible.",
+      currentPlayEvidence: {
+        status: "valid",
+        playCount: 0,
+        source: "manual",
+        observedAt: "2026-08-27T10:00:00.000Z",
+        stale: false,
+      },
+      responses: ["leave-visible", "complete", "retire", "correct-or-refresh-evidence"],
+      abstentionBasis: "Only an explicit active intention qualifies.",
+      resolution: null,
+      reopenCondition: "Create a new explicit intention after resolution.",
+      destination: {
+        gameId: activeIntentionFixture.gameId,
+        operationId: "shelf.game.intention.manage",
+      },
+      evidenceDestination: {
+        gameId: activeIntentionFixture.gameId,
+        operationId: "shelf.game.plays.set",
+      },
+    };
+
+    expect(CollectionProfileAttentionItemSchema.safeParse(attention).success).toBe(true);
+    expect(
+      CollectionProfileAttentionItemSchema.safeParse({
+        ...attention,
+        decisionFamily: "play-intention",
+        question: "Do you still want to play Game?",
+      }).success,
+    ).toBe(false);
+    expect(
+      CollectionProfileAttentionItemSchema.safeParse({
+        ...attention,
+        decisionFamily: "play-intention",
+        question: "Do you still want to play Game?",
+        currentPlayEvidence: { ...attention.currentPlayEvidence, playCount: 1 },
+      }).success,
+    ).toBe(true);
+    expect(
+      CollectionProfileAttentionItemSchema.safeParse({
+        ...attention,
+        currentPlayEvidence: { ...attention.currentPlayEvidence, playCount: 1 },
+      }).success,
+    ).toBe(false);
+    expect(
+      CollectionProfileAttentionItemSchema.safeParse({
+        ...attention,
+        decisionFamily: "play-intention",
+        question: "Do you still want to play Game?",
+        intention: {
+          ...attention.intention,
+          kind: "first-play",
+          baseline: {
+            playCount: 0,
+            evidenceSource: "manual",
+            observedAt: "2026-08-27T09:00:00.000Z",
+          },
+        },
+      }).success,
+    ).toBe(true);
+  });
   test("accepts migrated session storage in the current profile source without leaking it into historical validation", () => {
     const source = { ...futureSourceCollection(), bggPlaySessions: [] };
     expect(CollectionProfileCollectionSourceSchema.safeParse(source).success).toBe(true);
@@ -1303,4 +1370,3 @@ describe("collection profile attention contract", () => {
     expect(CollectionProfileResultSchema.safeParse(alreadyCompletedByEvidence).success).toBe(false);
   });
 });
-import { createAcceptedPlaySourceData } from "../src/index";

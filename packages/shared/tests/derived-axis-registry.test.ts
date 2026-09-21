@@ -906,9 +906,7 @@ describe("current-axis helpers", () => {
 
   test("supports the active versioned persisted collection contract", () => {
     const collection: Collection = {
-      schemaVersion: 8,
-      acceptedPlaySources: createAcceptedPlaySourceData(),
-      attentionFeedback: [],
+      schemaVersion: 7,
       revision: 0,
       id: "collection",
       name: "Collection",
@@ -925,8 +923,7 @@ describe("current-axis helpers", () => {
       createdAt: "2026-01-01T00:00:00Z",
       updatedAt: "2026-01-01T00:00:00Z",
     };
-    expect(collection.schemaVersion).toBe(8);
+    expect(collection.schemaVersion).toBe(7);
     expect(collection.axes).toEqual([personal, tournament, derived, disabled]);
   });
 });
-import { createAcceptedPlaySourceData } from "../src/index";
