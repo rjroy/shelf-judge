@@ -49,10 +49,23 @@ import {
   attentionCandidateStorageFor,
   createAttentionCandidateOracle,
   createAttentionCandidateService,
+  createAttentionCandidateProductionSourceLoader,
   productionAttentionCandidateDependenciesForGame,
   type AttentionCandidateService,
 } from "../../src/services/attention-candidate-service.js";
 import { profileSourceCoordinatorFor } from "../../src/services/profile-source-coordinator.js";
+import {
+  createAttentionCandidateMaintenanceRecovery,
+  createAttentionDispositionGlobalMaintenance,
+  type AttentionCandidateMaintenanceRecovery,
+  type AttentionDispositionGlobalMaintenance,
+} from "../../src/services/attention-disposition-maintenance.js";
+import type { AttentionDispositionWinner } from "../../src/services/attention-disposition-compatibility.js";
+import type { AttentionDisposition } from "@shelf-judge/shared";
+import {
+  createAttentionDispositionService,
+  type AttentionDispositionService,
+} from "../../src/services/attention-disposition-service.js";
 
 type MockFileOps = ReturnType<typeof createMockFileOps>;
 
@@ -71,6 +84,9 @@ export interface TestAppContext<TFileOps extends FileOps = MockFileOps> {
   intentionService: IntentionService;
   ownerGameNoteService: OwnerGameNoteService;
   attentionCandidateService: AttentionCandidateService;
+  attentionCandidateMaintenanceRecovery: AttentionCandidateMaintenanceRecovery;
+  attentionDispositionGlobalMaintenance: AttentionDispositionGlobalMaintenance;
+  attentionDispositionService: AttentionDispositionService;
   bggClient: BggClient | undefined;
   groundedAnalysisProvider: GroundedAnalysisProvider;
   groundedAnalysisTransportController: GroundedAnalysisTransportController;
@@ -89,6 +105,9 @@ export interface TestAppOptions<TFileOps extends FileOps = MockFileOps> {
   ownerGameNoteService?: OwnerGameNoteService;
   groundedAnalysisProvider?: GroundedAnalysisProvider;
   onShutdown?: () => void | Promise<void>;
+  storedRuleMatches?: (
+    dispositions: readonly AttentionDisposition[],
+  ) => Promise<readonly AttentionDispositionWinner[]>;
 }
 
 export function createTestPurchaseUtilizationService(
@@ -135,10 +154,16 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     fileOps,
   });
   let attentionCandidateService: AttentionCandidateService | null = null;
+  let attentionDispositionGlobalMaintenance: AttentionDispositionGlobalMaintenance | null = null;
   const collectionMutationService = createCollectionMutationService({
     storageService,
     async postCommitObserver(event) {
-      if (attentionCandidateService === null || event.impact === null) return;
+      if (
+        attentionCandidateService === null ||
+        event.impact === null ||
+        event.context.trigger.startsWith("attention:")
+      )
+        return;
       await attentionCandidateService.maintainAfterCollectionCommit(event.impact);
     },
   });
@@ -159,7 +184,9 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
   const maintainCandidateSource = async (
     impact: import("../../src/services/attention-candidate-service.js").AttentionMutationImpact,
   ) => {
-    if (attentionCandidateService !== null) await attentionCandidateService.maintain(impact);
+    if (attentionDispositionGlobalMaintenance === null)
+      throw new Error("Attention disposition global maintenance is unavailable");
+    await attentionDispositionGlobalMaintenance(impact);
   };
   const tournamentService = createTournamentService({
     storageService,
@@ -194,6 +221,84 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     clock: { now: () => new Date(options?.now?.() ?? "2026-01-01T00:00:00.000Z") },
     oracle: createAttentionCandidateOracle(displayedFitnessService),
     dependenciesForGame: productionAttentionCandidateDependenciesForGame,
+    recoveryRequired: () => attentionDispositionGlobalMaintenance?.recoveryRequired() ?? false,
+  });
+  const dispositionOracle = createAttentionCandidateOracle(displayedFitnessService);
+  const dispositionSource = createAttentionCandidateProductionSourceLoader(storageService);
+  attentionDispositionGlobalMaintenance = createAttentionDispositionGlobalMaintenance({
+    collectionMutations: collectionMutationService,
+    storedRuleMatches: async (dispositions) => {
+      if (options?.storedRuleMatches !== undefined) return options.storedRuleMatches(dispositions);
+      const source = await dispositionSource();
+      return dispositionOracle.evaluateStoredRules(
+        { ...source, collection: { ...source.collection, attentionDispositions: [] } },
+        options?.now?.() ?? "2026-01-01T00:00:00.000Z",
+        dispositions.map((disposition) => ({
+          gameId: disposition.gameId,
+          ruleId: disposition.ruleId,
+        })),
+      );
+    },
+    maintainCandidates: async (impact) => {
+      await attentionCandidateService?.maintain(impact);
+    },
+    invalidateCandidates: async () => {
+      await attentionCandidateService?.invalidate();
+    },
+  });
+  const attentionCandidateMaintenanceRecovery = createAttentionCandidateMaintenanceRecovery({
+    recoverCompatibility: () => {
+      if (attentionDispositionGlobalMaintenance === null)
+        throw new Error("Attention disposition global maintenance is unavailable");
+      return attentionDispositionGlobalMaintenance.recover();
+    },
+    ensureFresh: () => {
+      if (attentionCandidateService === null)
+        throw new Error("Attention candidates are unavailable");
+      return attentionCandidateService.ensureFresh();
+    },
+  });
+  const attentionDispositionService = createAttentionDispositionService({
+    collectionMutations: collectionMutationService,
+    clock: { now: () => new Date(options?.now?.() ?? "2026-01-01T00:00:00.000Z") },
+    currentSelection: async (collection, gameId) => {
+      const source = await dispositionSource();
+      const evaluation = await dispositionOracle.evaluate(
+        { ...source, collection },
+        options?.now?.() ?? "2026-01-01T00:00:00.000Z",
+        [gameId],
+      );
+      const winner = evaluation.evaluations.find(
+        (candidate) => candidate.gameId === gameId,
+      )?.winner;
+      return winner === null || winner === undefined
+        ? null
+        : {
+            gameId,
+            ruleId: winner.ruleId,
+            ruleVersion: winner.ruleVersion,
+            fingerprint: winner.fingerprint,
+          };
+    },
+    maintenance: {
+      async maintainAfterCollectionCommit(impact) {
+        if (attentionCandidateService === null) return { state: "unavailable" };
+        return attentionCandidateService.maintainAfterCollectionCommit(impact);
+      },
+    },
+  });
+  collectionMutationService.setDispositionWinners(async (_prior, collection, _context, gameIds) => {
+    const source = await dispositionSource();
+    return dispositionOracle.evaluateStoredRules(
+      {
+        ...source,
+        collection: { ...collection, attentionDispositions: [] },
+      },
+      options?.now?.() ?? "2026-01-01T00:00:00.000Z",
+      collection.attentionDispositions
+        .filter((disposition) => gameIds.includes(disposition.gameId))
+        .map((disposition) => ({ gameId: disposition.gameId, ruleId: disposition.ruleId })),
+    );
   });
   const intentionService =
     options?.intentionService ??
@@ -236,6 +341,7 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     predictionService,
     displayedFitnessService,
     intentionService,
+    attentionDispositionService,
     ownerGameNoteService,
     groundedAnalysisProvider,
     reflectionRuntime,
@@ -260,6 +366,9 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     intentionService,
     ownerGameNoteService,
     attentionCandidateService: attentionCandidateService,
+    attentionCandidateMaintenanceRecovery,
+    attentionDispositionGlobalMaintenance,
+    attentionDispositionService,
     bggClient,
     groundedAnalysisProvider,
     groundedAnalysisTransportController,

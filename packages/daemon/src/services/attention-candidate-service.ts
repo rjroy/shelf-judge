@@ -12,7 +12,11 @@ import {
 } from "@shelf-judge/shared";
 import type { ProfileSourceCoordinator } from "./profile-source-coordinator.js";
 import type { DisplayedFitnessService } from "./displayed-fitness-service.js";
-import { computeAttentionCandidates } from "./attention-candidate-engine.js";
+import {
+  computeAttentionCandidates,
+  evaluateAttentionStoredRule,
+  type AttentionStoredRuleMatch,
+} from "./attention-candidate-engine.js";
 import {
   PURCHASE_UTILIZATION_PROJECTION_VERSION,
   projectPurchaseUtilization,
@@ -91,6 +95,16 @@ export interface AttentionCandidateOracle<
     evaluatedAt: string,
     targetGameIds?: readonly string[],
   ): Promise<AttentionCandidateOracleResult>;
+}
+
+export interface AttentionDispositionCompatibilityOracle<
+  Source extends AttentionCandidateSource = AttentionCandidateSource,
+> {
+  evaluateStoredRules(
+    source: Source,
+    evaluatedAt: string,
+    storedRules: readonly { readonly gameId: string; readonly ruleId: string }[],
+  ): Promise<readonly AttentionStoredRuleMatch[]>;
 }
 export interface AttentionCandidateProductionSource extends AttentionCandidateSource {
   readonly tournament: TournamentData;
@@ -207,6 +221,7 @@ export function createAttentionCandidateService(
     oracle: deps.oracle,
     dependenciesForGame: deps.dependenciesForGame,
     onMaintenanceError: deps.onMaintenanceError,
+    recoveryRequired: deps.recoveryRequired,
     loadSource,
     sourceGeneration: deps.productionStorage?.attentionCandidateSourceGeneration?.bind(
       deps.productionStorage,
@@ -216,15 +231,18 @@ export function createAttentionCandidateService(
 
 /** Production-ready adapter: it delegates scoring to the accepted Phase 2 oracle. */
 export function createAttentionCandidateOracle(
-  displayedFitness: DisplayedFitnessService,
+  displayedFitness: DisplayedFitnessService | (() => DisplayedFitnessService),
   dependencies: {
     readonly projectPurchaseUtilization?: typeof projectPurchaseUtilization;
   } = {},
-): AttentionCandidateOracle<AttentionCandidateProductionSource> {
+): AttentionCandidateOracle<AttentionCandidateProductionSource> &
+  AttentionDispositionCompatibilityOracle<AttentionCandidateProductionSource> {
   const project = dependencies.projectPurchaseUtilization ?? projectPurchaseUtilization;
+  const fitnessService = () =>
+    typeof displayedFitness === "function" ? displayedFitness() : displayedFitness;
   return {
     async evaluate(source, evaluatedAt, targetGameIds) {
-      const fitness = await displayedFitness.listGamesFromSnapshot(source, {
+      const fitness = await fitnessService().listGamesFromSnapshot(source, {
         includePredicted: true,
         targetGameIds,
       });
@@ -249,6 +267,30 @@ export function createAttentionCandidateOracle(
         ),
       };
     },
+    async evaluateStoredRules(source, evaluatedAt, storedRules) {
+      const targetGameIds = [...new Set(storedRules.map((stored) => stored.gameId))];
+      const fitness = await fitnessService().listGamesFromSnapshot(source, {
+        includePredicted: true,
+        targetGameIds,
+      });
+      const projections = new Map(
+        fitness.map((entry) => [
+          entry.game.id,
+          project(entry, source.collection.entertainmentBenchmark),
+        ]),
+      );
+      const input = {
+        collection: source.collection,
+        evaluatedAt,
+        displayedFitness: fitness,
+        purchaseUtilizationProjectionByGameId: projections,
+        displayedFitnessSourceIdentity: source.identity,
+      };
+      return storedRules.flatMap((stored) => {
+        const match = evaluateAttentionStoredRule(input, stored.gameId, stored.ruleId);
+        return match === null ? [] : [match];
+      });
+    },
   };
 }
 export interface AttentionCandidateServiceDependencies<
@@ -272,6 +314,8 @@ export interface AttentionCandidateServiceDependencies<
   readonly sourceGeneration?: () => number;
   /** Test observer for the error intentionally converted to retryable unavailability. */
   readonly onMaintenanceError?: (error: unknown) => void;
+  /** Durable disposition reconciliation must finish before candidates can publish. */
+  readonly recoveryRequired?: () => boolean;
 }
 
 export type AttentionCandidateAvailability =
@@ -360,6 +404,7 @@ export class AttentionCandidateService<
   constructor(private readonly dependencies: AttentionCandidateServiceDependencies<Source>) {}
 
   async ensureFresh(): Promise<AttentionCandidateAvailability> {
+    if (this.dependencies.recoveryRequired?.()) return { state: "unavailable", retryable: true };
     const cached = this.cached;
     const generation = this.dependencies.sourceGeneration?.();
     const now = this.dependencies.clock.now();
@@ -373,6 +418,8 @@ export class AttentionCandidateService<
       return { state: "available", artifact: cached.artifact };
     return this.dependencies.coordinator.runExclusive(async () => {
       try {
+        if (this.dependencies.recoveryRequired?.())
+          return { state: "unavailable", retryable: true };
         const source = await this.dependencies.loadSource();
         const loaded = await this.dependencies.storage.loadAttentionCandidates();
         const artifact = loaded === null ? null : AttentionCandidateArtifactSchema.parse(loaded);
@@ -419,6 +466,16 @@ export class AttentionCandidateService<
         return { state: "unavailable", retryable: true };
       }
     });
+  }
+
+  /** Fail closed after an authoritative source commit cannot be reconciled. */
+  async invalidate(): Promise<void> {
+    this.cached = null;
+    try {
+      await this.dependencies.storage.discardAttentionCandidates();
+    } catch {
+      // Freshness validation still prevents a stale artifact from publication.
+    }
   }
 
   /** Rebase a previous collection revision after its durable commit. */

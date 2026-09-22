@@ -47,6 +47,11 @@ export type {
   CollectionV8,
   AttentionDisposition,
   AttentionCommandReceipt,
+  AttentionDispositionCommandBase,
+  NotNowAttentionCommand,
+  IntentionalAttentionCommand,
+  AttentionDispositionCommand,
+  AttentionDispositionCommandResult,
   AttentionExactValue,
   AttentionRuleDefinition,
   AttentionCandidateWinner,
@@ -203,6 +208,14 @@ export type {
 } from "./types";
 
 export {
+  NotNowAttentionCommandSchema,
+  IntentionalAttentionCommandSchema,
+  AttentionDispositionCommandSchema,
+  AttentionDispositionCommandErrorSchema,
+  AttentionDispositionCommandResultSchema,
+} from "./attention-disposition-command";
+
+export {
   ATTENTION_CANDIDATE_ARTIFACT_INDEX_VERSION,
   ATTENTION_CANDIDATE_ARTIFACT_SCHEMA_VERSION,
   AttentionCandidateArtifactIdentitySchema,
@@ -260,6 +273,7 @@ export {
   CollectionSchemaV8,
   AttentionDispositionSchema,
   AttentionCommandReceiptSchema,
+  attentionDispositionRequestFingerprint,
   AttentionCommandReceiptUnionSchema,
   AttentionRuleDefinitionSchema,
   AttentionCandidateWinnerSchema,

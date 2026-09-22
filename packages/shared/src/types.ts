@@ -330,10 +330,49 @@ export interface AttentionCommandReceipt {
   operation: "not-now" | "intentional";
   gameId: string;
   ruleId: string;
+  ruleVersion: number;
   expectedVersion: number;
   requestFingerprint: string;
+  requestPayload: AttentionDispositionCommand;
   accepted: AttentionDisposition;
 }
+
+/** Owner-authored command addressing the currently selected attention winner. */
+export interface AttentionDispositionCommandBase {
+  commandId: string;
+  gameId: string;
+  ruleId: string;
+  ruleVersion: number;
+  /** The selected winner's stable, non-clock identity. */
+  fingerprint: string;
+  /** Current disposition version, or zero when there is no disposition. */
+  expectedVersion: number;
+}
+
+export interface NotNowAttentionCommand extends AttentionDispositionCommandBase {
+  operation: "not-now";
+}
+
+export interface IntentionalAttentionCommand extends AttentionDispositionCommandBase {
+  operation: "intentional";
+}
+
+export type AttentionDispositionCommand = NotNowAttentionCommand | IntentionalAttentionCommand;
+
+export type AttentionDispositionCommandResult =
+  | { outcome: "accepted"; receipt: AttentionCommandReceipt; attentionUnavailable?: true }
+  | { outcome: "replayed"; receipt: AttentionCommandReceipt }
+  | {
+      outcome: "rejected";
+      error:
+        | { code: "validation" }
+        | { code: "command-reuse"; commandId: string }
+        | { code: "game-not-found"; gameId: string }
+        | { code: "ineligible-game"; gameId: string }
+        | { code: "stale-version"; gameId: string; expectedVersion: number }
+        | { code: "candidate-mismatch"; gameId: string }
+        | { code: "persistence-failure" };
+    };
 
 export interface CollectionV8 extends Omit<CollectionV7, "schemaVersion" | "commandReceipts"> {
   schemaVersion: 8;

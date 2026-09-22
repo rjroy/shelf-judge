@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import {
   AXIS_VALIDATION_CODES,
   CodedAxisValidationError,
@@ -690,16 +691,29 @@ describe("current persisted collection validation", () => {
     version: 1,
   };
 
-  const attentionReceipt = (accepted = snoozedDisposition, expectedVersion = 0) => ({
-    receiptType: "attention-disposition" as const,
-    commandId: "5f8f63d0-e6c4-4f5b-a6c8-2a933e2aab1d",
-    operation: "not-now" as const,
-    gameId: "game-1",
-    ruleId: "attention-rule",
-    expectedVersion,
-    requestFingerprint: "a".repeat(64),
-    accepted,
-  });
+  const attentionReceipt = (accepted = snoozedDisposition, expectedVersion = 0) => {
+    const requestPayload = {
+      commandId: "5f8f63d0-e6c4-4f5b-a6c8-2a933e2aab1d",
+      operation: "not-now" as const,
+      gameId: "game-1",
+      ruleId: "attention-rule",
+      ruleVersion: 1,
+      fingerprint: accepted.fingerprint,
+      expectedVersion,
+    };
+    return {
+      receiptType: "attention-disposition" as const,
+      commandId: requestPayload.commandId,
+      operation: requestPayload.operation,
+      gameId: requestPayload.gameId,
+      ruleId: requestPayload.ruleId,
+      ruleVersion: requestPayload.ruleVersion,
+      expectedVersion: requestPayload.expectedVersion,
+      requestFingerprint: createHash("sha256").update(JSON.stringify(requestPayload)).digest("hex"),
+      requestPayload,
+      accepted,
+    };
+  };
 
   const intentionalDisposition = (fingerprint = "c".repeat(64), version = 1) => ({
     gameId: "game-1",
@@ -710,16 +724,29 @@ describe("current persisted collection validation", () => {
     version,
   });
 
-  const intentionalReceipt = (accepted = intentionalDisposition(), expectedVersion = 0) => ({
-    receiptType: "attention-disposition" as const,
-    commandId: "f55c56d0-e6c4-4f5b-a6c8-2a933e2aab1d",
-    operation: "intentional" as const,
-    gameId: "game-1",
-    ruleId: "attention-rule",
-    expectedVersion,
-    requestFingerprint: "d".repeat(64),
-    accepted,
-  });
+  const intentionalReceipt = (accepted = intentionalDisposition(), expectedVersion = 0) => {
+    const requestPayload = {
+      commandId: "f55c56d0-e6c4-4f5b-a6c8-2a933e2aab1d",
+      operation: "intentional" as const,
+      gameId: "game-1",
+      ruleId: "attention-rule",
+      ruleVersion: 1,
+      fingerprint: accepted.fingerprint,
+      expectedVersion,
+    };
+    return {
+      receiptType: "attention-disposition" as const,
+      commandId: requestPayload.commandId,
+      operation: requestPayload.operation,
+      gameId: requestPayload.gameId,
+      ruleId: requestPayload.ruleId,
+      ruleVersion: requestPayload.ruleVersion,
+      expectedVersion: requestPayload.expectedVersion,
+      requestFingerprint: createHash("sha256").update(JSON.stringify(requestPayload)).digest("hex"),
+      requestPayload,
+      accepted,
+    };
+  };
 
   function asProfileSource<T extends { games: Array<{ ownerNote: unknown }> }>(source: T) {
     return {
@@ -739,6 +766,23 @@ describe("current persisted collection validation", () => {
       attentionDispositions: [snoozedDisposition],
     };
     expect(CollectionSchema.safeParse(collection).success).toBe(true);
+    expect(
+      CollectionSchema.safeParse({
+        ...collection,
+        commandReceipts: [{ ...attentionReceipt(), requestFingerprint: "0".repeat(64) }],
+      }).success,
+    ).toBe(false);
+    expect(
+      CollectionSchema.safeParse({
+        ...collection,
+        commandReceipts: [
+          {
+            ...attentionReceipt(),
+            accepted: { ...snoozedDisposition, fingerprint: "f".repeat(64) },
+          },
+        ],
+      }).success,
+    ).toBe(false);
     expect(
       CollectionProfileCollectionSourceSchema.safeParse(
         asProfileSource({
@@ -836,18 +880,7 @@ describe("current persisted collection validation", () => {
       ...currentCollection,
       games: [ownedGame()],
       attentionDispositions: [intentional],
-      commandReceipts: [
-        {
-          receiptType: "attention-disposition" as const,
-          commandId: "5f8f63d0-e6c4-4f5b-a6c8-2a933e2aab1d",
-          operation: "intentional" as const,
-          gameId: "game-1",
-          ruleId: "attention-rule",
-          expectedVersion: 0,
-          requestFingerprint: "a".repeat(64),
-          accepted: intentional,
-        },
-      ],
+      commandReceipts: [intentionalReceipt(intentional)],
     };
     expect(CollectionSchema.safeParse(collection).success).toBe(true);
     expect(

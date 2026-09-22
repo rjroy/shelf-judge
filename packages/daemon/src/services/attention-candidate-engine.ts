@@ -59,6 +59,13 @@ export interface AttentionCandidateResult {
   readonly calculationVersion: number;
 }
 
+export interface AttentionStoredRuleMatch {
+  readonly gameId: string;
+  readonly ruleId: string;
+  readonly ruleVersion: number;
+  readonly fingerprint: string;
+}
+
 function earliestBoundary(boundaries: readonly string[]): string | null {
   return (
     boundaries
@@ -79,6 +86,49 @@ function earliestBoundary(boundaries: readonly string[]): string | null {
 const zero = new ExactRational(0n);
 const one = new ExactRational(1n);
 
+function ruleContext(
+  input: AttentionCandidateEngineInput,
+  game: Collection["games"][number],
+  fitness: ReadonlyMap<string, GameWithScore>,
+) {
+  return {
+    game,
+    intentions: input.collection.intentions,
+    bggPlaySessions: input.collection.bggPlaySessions ?? [],
+    evaluatedAt: input.evaluatedAt,
+    purchaseProjection: input.purchaseUtilizationProjectionByGameId.get(game.id) ?? null,
+    displayedFitness: fitness.get(game.id),
+    displayedFitnessSourceIdentity: input.displayedFitnessSourceIdentity,
+  };
+}
+
+/**
+ * Re-evaluates one stored rule without selecting a current winner. Durable
+ * intentional state is compatible with a still-matching stored rule even when
+ * another rule now ranks above it.
+ */
+export function evaluateAttentionStoredRule(
+  input: AttentionCandidateEngineInput,
+  gameId: string,
+  ruleId: string,
+): AttentionStoredRuleMatch | null {
+  const catalog = input.catalog ?? attentionRuleCatalog;
+  validateAttentionRuleCatalog(catalog, input.displayedFitnessSourceIdentity);
+  const game = input.collection.games.find((candidate) => candidate.id === gameId);
+  const rule = catalog.find((candidate) => candidate.id === ruleId);
+  if (game === undefined || game.ownership !== "owned" || rule === undefined) return null;
+  const fitness = new Map(input.displayedFitness.map((entry) => [entry.game.id, entry]));
+  const context = ruleContext(input, game, fitness);
+  const match = rule.evaluate(context);
+  if (match === null) return null;
+  return {
+    gameId,
+    ruleId: rule.id,
+    ruleVersion: rule.version,
+    fingerprint: ruleFingerprint(rule, context, match.fingerprint),
+  };
+}
+
 function assertUnit(value: ExactRational, label: string): void {
   if (value.compare(zero) < 0 || value.compare(one) > 0) {
     throw new Error(`${label} must be within [0, 1]`);
@@ -97,15 +147,7 @@ export function computeAttentionCandidates(
   for (const game of input.collection.games) {
     if (game.ownership !== "owned") continue;
     if (targetGameIds !== null && !targetGameIds.has(game.id)) continue;
-    const context = {
-      game,
-      intentions: input.collection.intentions,
-      bggPlaySessions: input.collection.bggPlaySessions ?? [],
-      evaluatedAt: input.evaluatedAt,
-      purchaseProjection: input.purchaseUtilizationProjectionByGameId.get(game.id) ?? null,
-      displayedFitness: fitness.get(game.id),
-      displayedFitnessSourceIdentity: input.displayedFitnessSourceIdentity,
-    };
+    const context = ruleContext(input, game, fitness);
     const disposition =
       input.collection.attentionDispositions.find((candidate) => candidate.gameId === game.id) ??
       null;

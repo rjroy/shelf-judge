@@ -22,7 +22,7 @@ import {
   sameProfileSourceIdentity,
   type ProfileSources,
 } from "./profile-source-coordinator.js";
-import type { AttentionCandidateService } from "./attention-candidate-service.js";
+import type { AttentionCandidateReadFreshness } from "./attention-disposition-maintenance.js";
 
 export interface ProfileService {
   getProfile(): Promise<CollectionProfileResult>;
@@ -33,7 +33,7 @@ export interface ProfileServiceDeps {
   displayedFitnessService: DisplayedFitnessService;
   now?: () => string;
   /** Candidate freshness is a prerequisite for every Profile publication. */
-  attentionCandidates?: Pick<AttentionCandidateService, "ensureFresh">;
+  attentionCandidates?: AttentionCandidateReadFreshness;
 }
 
 function unavailable(

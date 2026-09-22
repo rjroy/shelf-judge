@@ -11,7 +11,7 @@ source_plan: .lore/work/plans/fitness-ranked-profile-attention.md
 - [x] Phase 1: source schema, additive contracts, and compatibility cutover preparation (accepted)
 - [x] Phase 2: pure rule catalog and candidate oracle (accepted)
 - [x] Phase 3: disposable candidate persistence and freshness coordination (accepted)
-- [ ] Phase 4: atomic disposition commands and source mutations (pending)
+- [x] Phase 4: atomic disposition commands and source mutations (accepted)
 - [ ] Phase 5: Profile, config, and CLI contract cutover (pending)
 - [ ] Phase 6: web rendering and command relay (pending)
 - [ ] Phase 7: cross-cutting oracle, performance, and authority reconciliation (pending)
@@ -76,27 +76,396 @@ Following review escalations, the user explicitly authorized the third P2-6 corr
 
 ## Accepted current-worktree manifest
 
-Captured after closing `shelf-judge-cq1.2`, before the notes’ final self-reference. Each entry records exact porcelain status, index blob identity or `ABSENT`, and working-tree SHA-256 or deletion marker. This notes file is intentionally recorded with `SELF-REFERENCE: omitted`; no self-hash is claimed.
+Captured after Phase 4 acceptance finalization and Beads export regeneration,
+before this notes file’s final self-reference. Each entry records exact
+porcelain status, index blob identity or `ABSENT`, and working-tree SHA-256 or
+deletion marker. This notes file is intentionally recorded with
+`SELF-REFERENCE: omitted`; no self-hash is claimed.
 
-| Status | Path                                                              | Index                                      | Working tree                                                       |
-| ------ | ----------------------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------------ |
-| ` M`   | `.beads/interactions.jsonl`                                       | `69b686a799e5b2816e1b245c4f816a4f6ddd432a` | `e149f73e03ebe3752a34285fcb8180da30bd08779013eebbd88df6bea445d902` |
-| ` M`   | `.beads/issues.jsonl`                                             | `50e17aa53a27fedf5b69a36daae1d32400da77d4` | `57d8985fd8f5fcfa84eeeef72287b4f7303c6cbf0f27e94e97d5a1b378cdb4e8` |
-| ` M`   | `.lore/work/notes/fitness-ranked-profile-attention.md`            | `c27a4c57fc5c38581532efaa03aef2c5a31ae4c8` | `SELF-REFERENCE: omitted`                                          |
-| ` M`   | `packages/daemon/src/services/collection-profile-engine.ts`       | `ee77a22d946d02ae93a42aa59bd383d19cf2c264` | `a11bf1201cd8b8b7ed685a21d202affa2ef6205d8cf4eab972fb0d9b83775ca6` |
-| ` M`   | `packages/daemon/src/services/purchase-utilization-service.ts`    | `021e22b63f7d7902713b2396dd12939a6661682d` | `a4bd3e07ca7eebf9c4ebb1b6a9a70f32597177e71736d0dce77fffff1b782e72` |
-| ` M`   | `packages/daemon/tests/services/game-projection.test.ts`          | `3930e85aaa1cf0cb9e3d4078453c0906ab082117` | `21691334daba328e18eeaf77ce7eae4e4047a1e9f3332e30f4d2d3cda2be7146` |
-| ` M`   | `packages/shared/src/index.ts`                                    | `5a6b99da8333f1def70f50f40ea5ad33c4248a43` | `2fcdd9d62cdf1f9f03aeb6c4331d3fb5df7edc5402d25ebd696c5d21a9bb2ddd` |
-| ` M`   | `packages/shared/src/validation.ts`                               | `ddbe623dcbf8acc0e9ec105e0f3d7073a0505de5` | `2f5186e13b8a497abc2d49b14c6c900bef042c1d2aafed834f25d9ae3aa928aa` |
-| ` M`   | `packages/shared/tests/purchase-utilization.test.ts`              | `b6e9f108405c461711a354ba6fae9fd67ac9b3e2` | `31d5c4d8b18903fa6f043016b9faf27f692faa487287b858db3c36e09b10c880` |
-| `??`   | `packages/daemon/src/services/attention-candidate-engine.ts`      | `ABSENT`                                   | `a53c795b01c21a8d78048db3dea4b81eab139cafd5a902770168fd52354bafde` |
-| `??`   | `packages/daemon/src/services/attention-rule-catalog.ts`          | `ABSENT`                                   | `27ffaa7db991cdaa739dfb4543344d627590a9cf1bb13ad71a61637cb56073f3` |
-| `??`   | `packages/daemon/src/services/purchase-utilization-projection.ts` | `ABSENT`                                   | `d47fb9cc9995bbef977b5061a943efa0787ba708d73a79f341e75cbfe4214d7e` |
-| `??`   | `packages/daemon/tests/attention-candidate-engine.test.ts`        | `ABSENT`                                   | `c84d7921625b3e64f16a1995e58ed08a99543ed9e23f7232c6ea613c8fd787d8` |
+| Status | Path | Index | Working tree |
+| --- | --- | --- | --- |
+| ` M` | `.beads/interactions.jsonl` | `47b8f4621ff51070b1fe00f930a70c2a51d6d6fd` | `192de11e06fc48b886a16ec4a6909da4a2cae1517b9babf34b9808b266f1860b` |
+| ` M` | `.beads/issues.jsonl` | `9b81573becf48f19dd70b7b0f6dbe8fca998ba96` | `ff9dcf26c3f181a3f8b3fe178a5521692b9c971708240ad2ba6ae533db3eef28` |
+| ` M` | `.lore/work/notes/fitness-ranked-profile-attention.md` | `87cd0e26d894f01fa231bf353369974bb5d3a143` | `SELF-REFERENCE: omitted` |
+| ` M` | `packages/daemon/src/app.ts` | `05d593d69ed0be5105cc5fa5762f670dcc995c62` | `94ea365f474c1fc647e5fc4b086dff88610b4fbd2302a76aafe2bc17548be14d` |
+| ` M` | `packages/daemon/src/index.ts` | `d8fc5da250f817e3e87111aa3bcf12378e13b871` | `ff8024ecf7737096260aa3befb439eddfd83b6c627f74706472240a6a86c1b28` |
+| ` M` | `packages/daemon/src/services/attention-candidate-engine.ts` | `3d92eabb4917e0ca58e5f9e3536a01d2ad0e01e3` | `9680ba95093d64f080948d22b0447db7d80b194b4091ea5af003d25f795bd9b8` |
+| ` M` | `packages/daemon/src/services/attention-candidate-service.ts` | `db304c3fe7bb5b86185b82b375b7cf6b14fb54e6` | `293f78b4b7865e30d2449b1d71287f71209b4a4a331dbeef957592d87c9cdc08` |
+| ` M` | `packages/daemon/src/services/collection-mutation-service.ts` | `fab148013549fe1e68b5fe90e8f298924cf4e73c` | `e740397dfb8916f37d994a88475d68b8cffd9dc1f35610266d11a49ad2eb05f3` |
+| ` M` | `packages/daemon/src/services/game-service.ts` | `e8f40046d7b38b9b5e673009f77dacd9676f05ce` | `b6411494ef0422aeb9406e0a1f11847e4df764efe166129455344b1780501de3` |
+| ` M` | `packages/daemon/src/services/profile-service.ts` | `e26d9c1ac32688892894537d97bc7f6ecf5d9615` | `ec8c0354e867995a78844a066af3e46335f6701002f358af6d917d9c4ea807ef` |
+| ` M` | `packages/daemon/tests/helpers/test-app.ts` | `a640ff44c4c261db1221f51e161a300f7a120f0e` | `770efd6b2ff78a65e1f2408df2ba9ec906514e6cbf68a2774f482648b0efcfe3` |
+| ` M` | `packages/daemon/tests/phase3-direct-integration.test.ts` | `39c12de7dc21b53d907f4dd9b93e195e114dbec3` | `2a331d4c54f4ec06d4292befe394d0f4d4bbde73439235fe855fa2a814aa0e28` |
+| ` M` | `packages/daemon/tests/services/attention-candidate-service.test.ts` | `d54fb631a927f98d5558d8d3e8a49497eaac8a22` | `435cac349056b976311c46ced3032f3ece89c8d2e5619928cfbc56b98a196372` |
+| ` M` | `packages/shared/src/collection-profile-validation.ts` | `8fc99c96a7bae93fb5a801c4d80082b441dcc9fb` | `c3c7908a6540e014123d5bc306a3f1ed53dc44821b7376cbabae28ae2e2ebbb6` |
+| ` M` | `packages/shared/src/index.ts` | `5b8cdde65553eeb26e8a8e9e42797eae22be6b40` | `7ca40859f98a274fe3cd186b216fea6cb2eed598fba1ac2cc60bf71a67b20e8c` |
+| ` M` | `packages/shared/src/types.ts` | `71efd0324869d16935aa51722ea12165970231e1` | `2247e669c44977b78800cccdb4e9d6196f3d39b6e9a4dc133dafc7e887381934` |
+| ` M` | `packages/shared/src/validation.ts` | `1bf8e65955105e62ec0dba70e81742407d2a9aa9` | `09ffb2bc89ad01e1be7b9ca0e63770bd0516640b9e8979c6f697b66f2b796ee1` |
+| ` M` | `packages/shared/tests/current-axis-validation.test.ts` | `8023f8dc2564aff353427f78d1e4baf023d2cfe9` | `19d04b5871fd78348035022cfd91c4990ecfef8888df54fd575101de4d6fb743` |
+| `??` | `packages/daemon/src/routes/profile-attention.ts` | `ABSENT` | `9e630581d0b0e3228f489e9aa1a6742a92e6ec456562d5916c3c0c4f24d94981` |
+| `??` | `packages/daemon/src/services/attention-disposition-compatibility.ts` | `ABSENT` | `112759a43f8a49236763319d9a51245cd097646433e099e01a4c0f816c8ac067` |
+| `??` | `packages/daemon/src/services/attention-disposition-maintenance.ts` | `ABSENT` | `82e06be07b9911d912a04285bddc4a667f29655d439bc9062f6238ad43b4dbe3` |
+| `??` | `packages/daemon/src/services/attention-disposition-service.ts` | `ABSENT` | `ed8f4384bae56bb58f9879acfea5dbacb5283be84bbd83c3a9e6642a97a83958` |
+| `??` | `packages/daemon/tests/routes/profile-attention.test.ts` | `ABSENT` | `7958563fc1a1d9a7a6819c7f6609dd4254a2a7735271e31419c86946587b7a65` |
+| `??` | `packages/daemon/tests/services/attention-disposition-service.test.ts` | `ABSENT` | `27ee87add8b2b389666a991e0461616517288160cd9ac8f849b1d8ff21f6fa69` |
+| `??` | `packages/shared/src/attention-disposition-command.ts` | `ABSENT` | `594ad4aac391047fa49a7c794b16ce2a3aa5e5668ea87548dc96dabd78b5679a` |
+| `??` | `packages/shared/tests/attention-disposition-command.test.ts` | `ABSENT` | `8b718a20abfdaeedf094b1246dc720e55289b9e9741f3a1f1cd0a83d5849024c` |
 
 <!-- CURRENT-WORKTREE-MANIFEST -->
 
 ## Phase 3 / Phase 4 boundary (authorized 2026-09-21)
+
+## Phase 4 Gate A implementation (pending independent validation)
+
+- Added strict shared `not-now` and `intentional` command schemas and exported
+  types in `packages/shared/src/attention-disposition-command.ts`; commands
+  bind UUID command ID, game, rule ID/version, selected non-clock fingerprint,
+  and expected disposition version.
+- Added `packages/daemon/src/services/attention-disposition-service.ts`. It
+  performs serialized collection mutation, durable validated receipts,
+  canonical replay/reuse behavior, current-owner/current-selection/version
+  checks, exact 720-hour UTC snoozes, and post-commit maintenance reporting.
+- Attention disposition mutations identify an exact game candidate impact after
+  their durable collection commit. No route or public Profile contract wiring
+  was added, preserving the Gate A boundary.
+- Initial `bun run typecheck` passed after these edits. Focused tests, lint,
+  formatting, diff validation, and independent review remain required; this
+  gate intentionally remains pending.
+
+### Gate A completion validation (2026-09-21)
+
+- Shared command, error, and result schemas are strict and exported.
+  `AttentionDispositionService` accepts only strict, canonicalized owner
+  commands. Its receipt's `requestFingerprint` is a canonical SHA-256 of the
+  entire payload excluding the idempotency UUID, while the durable disposition
+  retains the selected winner's non-clock fingerprint. Replays validate and
+  return that receipt without scoring, saving, or maintenance; changed UUID
+  reuse is rejected.
+- Both commands run through the collection mutation boundary and validate game
+  existence/ownership, expected disposition version, and the exact current
+  selected candidate. Source persistence failure leaves the prior collection
+  intact. After a source commit, exact-game candidate maintenance runs; an
+  unavailable or throwing disposable maintenance result is reported as accepted
+  with `attentionUnavailable`, never as a source rejection.
+- `not-now` stores whole-game snooze state with response and expiry instants
+  exactly 720 hours apart. `intentional` stores only winner rule/version and
+  non-clock fingerprint. The existing candidate suite covers the resulting
+  hidden-row/no-alternate and source-identity-race maintenance semantics.
+
+### Gate A exact validation evidence
+
+- Focused command: `bun test packages/shared/tests/current-axis-validation.test.ts packages/daemon/tests/services/attention-disposition-service.test.ts packages/daemon/tests/services/attention-candidate-service.test.ts packages/daemon/tests/services/collection-mutation-service.test.ts` — **70 passed, 0 failed, 401 expectations**.
+- `bun run typecheck` — passed.
+- `bun run lint` — passed.
+- Changed supported files formatted with `bunx prettier --write`.
+- `git diff --check` — passed.
+
+### Gate A changed-file manifest
+
+| Path | Working tree SHA-256 |
+| --- | --- |
+| `packages/shared/src/types.ts` | `28a8a3291fa2e2c72f2f1a389667cf13424cdc7573d9aa8ca2d2143ff55c151c` |
+| `packages/shared/src/index.ts` | `a1c8c32f49e2add86f49e1573857ed08193a04083cd573bd0a94eec750fea497` |
+| `packages/shared/src/collection-profile-validation.ts` | `4150bbdcc1cc58897bbea5b6787a6628e86d93aaf3795068a4ff74be8f57e9d2` |
+| `packages/shared/src/attention-disposition-command.ts` | `fc49994f95619f43f3fac5e23ab4c82431acc05a3bb786514ab4bcd56a237a41` |
+| `packages/shared/tests/current-axis-validation.test.ts` | `b870dfce375705e6dcde42a86f1d3065cdc145bea2c8659033dad6ac20c222c1` |
+| `packages/daemon/src/services/collection-mutation-service.ts` | `1091b16940da944be9d969c1744c9132d7b14bc423baa22011a546e765ac6848` |
+| `packages/daemon/src/services/attention-disposition-service.ts` | `185383b7094d7c1c6bee36032ee7866585031c9ffa039cca055748cd9d1addb9` |
+| `packages/daemon/tests/services/attention-disposition-service.test.ts` | `f14b83c25999c50826cf165473916a252b08fa8990f38b1430f97e3bacf33aa0` |
+
+Gate A remains **awaiting independent verification**. Gates B and C were not
+implemented.
+
+### Phase 4 Gate B progress (2026-09-21)
+
+- Gate A is accepted locally and remains awaiting independent verification.
+- Gate B is in progress. The collection mutation boundary now accepts one
+  authoritative post-mutation winner resolver and clears only checked,
+  incompatible intentional dispositions in the same validated Collection save.
+  Ownership transitions away from owned clear either durable disposition. The
+  compatibility helper deliberately receives pure-oracle winners rather than a
+  candidate artifact, and typed mutation impacts bound local checks so clock and
+  unrelated identity-only changes cannot clear durable state.
+- Current implementation evidence: `attention-disposition-compatibility.ts`,
+  `collection-mutation-service.ts`, daemon composition in `index.ts`, and
+  focused disposition tests. Global writer/coordinator maintenance and the
+  complete dependency-family matrix remain required before Gate B can advance.
+
+### Gate B coordinator integration (2026-09-21)
+
+- The collection boundary now obtains unsuppressed post-mutation winners from
+  the production pure candidate oracle over the authoritative post-mutation
+  Collection and current global sources. It never uses a candidate artifact as
+  durable authority. Typed local impacts constrain intentional checks; snoozes
+  remain untouched except for ownership loss.
+- Global tournament, prediction, and redundancy maintenance now first runs a
+  coordinator-serialized Collection compatibility mutation. If it clears an
+  intentional disposition, that Collection revision is persisted before its one
+  post-commit global candidate maintenance attempt. If nothing clears, normal
+  global candidate maintenance runs once. Candidate failure remains fail-closed
+  and does not replay either source save.
+- Focused disposition/mutation tests: **24 passed, 95 expectations**. Focused
+  mutation-impact/candidate/Profile integration tests: **37 passed, 255
+  expectations**. `bun run typecheck`, `bun run lint`, Prettier on changed
+  files, and `git diff --check` passed.
+
+Gate B remains **awaiting independent verification**. The next reviewer should
+exercise the global coordinator path and expanded dependency-family matrix with
+production fixtures before accepting this gate.
+
+### GB correction work in progress (2026-09-21)
+
+- **GB-1:** compatibility now has a stored-rule oracle path. It evaluates the
+  disposition's own catalog rule and its canonical non-clock fingerprint rather
+  than comparing the disposition to the newly selected winner.
+- **GB-2:** daemon composition creates the durable global compatibility
+  coordinator before tournament reconciliation and runs a startup global pass
+  before candidate recovery; the former no-op maintenance callback is removed.
+- **GB-3:** a global compatibility/oracle failure after a source save is
+  fail-closed for disposable attention publication and does not propagate back
+  to reject or replay the durable source operation.
+
+Partial validation only: `bun run typecheck` passed and
+`bun test packages/daemon/tests/services/attention-disposition-service.test.ts packages/daemon/tests/attention-candidate-engine.test.ts packages/daemon/tests/phase3-direct-integration.test.ts`
+passed (**45 tests, 292 expectations**). Required production-boundary family,
+startup/catalog-mismatch, post-commit source-count tests, lint, formatting, and
+the complete Gate B suite remain outstanding. Gate B remains **awaiting targeted
+verification**.
+
+### GB-1 / GB-3 targeted correction evidence (2026-09-21)
+
+- Stored-rule matching is now a first-class production-oracle operation:
+  `evaluateStoredRules()` projects the authoritative source with the same
+  catalog, displayed-fitness service, and purchase-utilization projection as
+  candidate evaluation, then calls the shared stored-rule evaluator. It does
+  not compare a durable intention with the selected winner.
+- Global maintenance records a failed compatibility attempt as recovery work,
+  invalidates disposable candidates, and returns to the committed source
+  writer. Startup recovery invokes that reconciliation before `ensureFresh()`;
+  a successful source-maintenance pass is not repeated by startup.
+- The focused Gate B command ran **117 tests, 501 expectations**, including
+  disposition, oracle, collection-mutation, startup/persistence, tournament,
+  and config integrations. `bun run typecheck`, `bun run lint`, scoped
+  Prettier for changed Phase 4 files, and `git diff --check` passed.
+
+Gate B remains **awaiting targeted verification**. The working tree does not
+modify `packages/web/app/globals.css`; it was deliberately excluded from the
+scoped Phase 4 formatter run.
+
+### Phase 4 Gate C progress (2026-09-21)
+
+- Gate B is accepted. Gate C is in progress and adds the canonical Profile
+  owner-command route surface for `not-now` and `intentional`, with strict
+  shared request schemas, idempotent result envelopes, and coherent validation,
+  conflict, ownership, and persistence status mappings.
+- Daemon and test composition now construct one disposition service from the
+  authoritative source loader and production candidate oracle under the shared
+  collection/coordinator boundary. Command-owned maintenance reports post-commit
+  candidate unavailability without reclassifying the durable command, while the
+  general observer deliberately skips that operation to prevent a duplicate
+  rebuild.
+- Initial focused route test and `bun run typecheck` pass. Broader Gate C route,
+  Profile-read-only, persistence, recovery, and independent verification remain
+  required. Gate C remains **awaiting independent verification**.
+
+### Gate C implementation validation (2026-09-21)
+
+- Production and test-app composition each build a single disposition service
+  from the shared mutation service, candidate oracle/source loader, clock, and
+  candidate recovery boundary. The post-commit observer skips attention-owned
+  trigger contexts, leaving the command service as the sole maintenance caller.
+- `POST /api/profile/attention/not-now` and `POST
+  /api/profile/attention/intentional` are listed daemon operations. Both
+  preserve strict payload operation identity and return the shared accepted,
+  replayed, or rejected envelope. Validation is 400, missing games 404,
+  ownership 422, reuse/stale/candidate conflicts 409, and source persistence
+  failure 503.
+- Production-equivalent route fixtures accept both commands against a real
+  underused-purchase winner, assert one maintenance attempt, exact 720-hour
+  snooze expiry, intentional winner fingerprint, and durable receipt/state.
+  Direct command and Profile integration suites retain replay, conflict,
+  committed-response-loss, recovery, and read-only Profile coverage.
+- Validation: focused route/Profile/disposition/direct/collection command:
+  **84 passed, 0 failed, 395 expectations**. `bun run typecheck`, `bun run
+  lint`, scoped Prettier, and `git diff --check` passed. No web files changed,
+  so a web build was not applicable.
+
+Gate C remains **awaiting independent verification**.
+
+### Gate C corrections GC-1 / GC-2 (2026-09-21)
+
+- **GC-1:** Production and test current-selection resolvers now score the
+  actual serialized Collection, including active dispositions. Identical
+  receipts still replay before selection. Fresh commands cannot extend a
+  snooze, convert a snooze to intentional, or replace intentional state: the
+  oracle exposes no selected candidate, so they reject without source or
+  candidate maintenance. At exact snooze expiry, the oracle naturally exposes
+  the candidate again and a monotonic next-version command is accepted.
+- **GC-2:** A successful later serialized global reconciliation now retires a
+  previous recovery marker before candidate publication. Candidate publication
+  remains independently fail-closed under Phase 3. Production-style coverage
+  exercises failed reconciliation, read-only unavailable Profile responses, a
+  later committed writer clearing the marker and republishing candidates, and
+  the explicit recovery control.
+- Route integration now deep-compares the full Collection around an accepted
+  command, proving only disposition/receipt/revision/timestamp fields change,
+  and covers active replacement rejection with one maintenance attempt.
+
+### GC-1 / GC-2 validation (2026-09-21)
+
+- Focused Gate C route, Profile, disposition, candidate, collection, direct,
+  and shared command suite: **156 passed, 0 failed, 913 expectations**.
+- `bun run typecheck`, `bun run lint`, `bun run build`, scoped Prettier, and
+  `git diff --check` passed.
+
+Gate C remains **awaiting independent verification**.
+
+### GB-3 / GB-V1 production-evidence closure (2026-09-21)
+
+- `runtime recovery reconciles a committed tournament write before publishing
+  candidates` now seeds a UUID-addressable real `underused-purchase` winner
+  through the canonical disposition command, delegates recovery matching to
+  the real production oracle/source loader after a first controlled fault, and
+  verifies the repeated exact `{ gameId, ruleId: "underused-purchase" }`
+  target, one tournament save, one compatibility-clear revision, receipt
+  retention, and publication only after recovery.
+- `GB-V1 refreshBggData clears only the incompatible stored play rule via
+  production oracle wiring` now supplies the concrete BGG plays response and
+  asserts the resulting `bggPlaySessions` field plus one Collection rename.
+  Snooze writer controls assert retained receipt equality and one Collection
+  save. `GB-V1 acquisition route atomically clears a real underused-purchase
+  intention` and both `GB-V1 setOwnership clears … disposition` cases assert
+  atomic clear, receipt retention, one revision/save, and one maintenance
+  attempt through production APIs.
+- Gate B focused suite: `bun test packages/shared/tests/current-axis-validation.test.ts
+  packages/daemon/tests/services/attention-disposition-service.test.ts
+  packages/daemon/tests/services/attention-candidate-service.test.ts
+  packages/daemon/tests/services/collection-mutation-service.test.ts
+  packages/daemon/tests/attention-candidate-engine.test.ts
+  packages/daemon/tests/phase3-direct-integration.test.ts` — **121 passed,
+  0 failed, 765 expectations**. `bun run typecheck`, `bun run lint`, and
+  `git diff --check` passed.
+
+| Path | Working tree SHA-256 |
+| --- | --- |
+| `packages/daemon/src/index.ts` | `9e0d149ed6cca3601998e5c8d399b04df6d1e895dd697de634ecccfd0dd587d1` |
+| `packages/daemon/src/services/attention-candidate-engine.ts` | `9680ba95093d64f080948d22b0447db7d80b194b4091ea5af003d25f795bd9b8` |
+| `packages/daemon/src/services/attention-candidate-service.ts` | `1ba7a6b430ee1fd0df451f350d897c45d640f0556b4f7498b3f3905eedd8962b` |
+| `packages/daemon/src/services/attention-disposition-compatibility.ts` | `112759a43f8a49236763319d9a51245cd097646433e099e01a4c0f816c8ac067` |
+| `packages/daemon/src/services/attention-disposition-maintenance.ts` | `249350df61b3038e298bf163fca75ada346e82f3243ce5a34ce211b608c0275f` |
+| `packages/daemon/tests/helpers/test-app.ts` | `c7c32a8b96ee98edb936eff1a7b8d33fb6baa07db6e49a72e1e52c9c73a9c150` |
+| `packages/daemon/tests/phase3-direct-integration.test.ts` | `096c19902e3007c5556542236c34a822d9442951f31ad7140b17bf4b70139b56` |
+| `packages/daemon/tests/services/attention-disposition-service.test.ts` | `06b3235fa00dfa51187e650bc647867f0b715dc72e3964abe80672a7f0f58ce7` |
+
+### GB-V1-1 final evidence closure (2026-09-21)
+
+- `GB-V1 refreshBggData clears only the incompatible stored play rule via production oracle wiring` now creates both intentional dispositions through the Gate A command service from production candidates, retains both durable receipts, and verifies concrete BGG play sessions with one source save, revision, and maintenance attempt.
+- `GB-V1 intention complete atomically clears only its real explicit-intention disposition` and `GB-V1 intention retire atomically clears only its real explicit-intention disposition` create intentions through the production intention service, then resolve them with their durable IDs and versions. Both retain receipts, preserve an unrelated disposition, and assert one revision/save/maintenance attempt. Matching `preserves a real snooze receipt` controls cover complete and retire.
+- `GB-V1 acquisition route atomically clears a real underused-purchase intention` now includes a command-created unrelated disposition and receipt, proving target-only invalidation preserves unrelated durable state.
+- Validation: direct integration **21 passed, 0 failed, 136 expectations**; disposition/intention/BGG/acquisition services **139 passed, 0 failed, 905 expectations**; full Gate B focused suite **125 passed, 0 failed, 789 expectations**. `bun run typecheck`, `bun run lint`, changed-file Prettier (excluding unchanged `globals.css`), and `git diff --check` passed.
+
+### Gate B boundary matrix expansion (2026-09-21)
+
+- Added collection-boundary table cases for the play evidence, BGG session,
+  purchase acquisition, and intention local dependency families. Each proves
+  one save/revision and one post-commit observer when an authoritative winner
+  fingerprint changes. Unrelated identity-only and no-op paths preserve the
+  intentional disposition without extra save/maintenance.
+- Added both snoozed and intentional ownership-removal cases through the
+  mutation service. Both clear in the initiating revision with exactly one
+  collection save; the existing command suite retains receipt monotonicity,
+  response-loss classification, candidate-unavailable handling, and replay
+  evidence.
+- Focused Gate B matrix: **58 passed, 299 expectations** across disposition,
+  collection-mutation, mutation-impact, candidate-service, and Profile service
+  tests. `bun run typecheck`, `bun run lint`, changed-file Prettier, and `git
+  diff --check` passed.
+
+### Gate B global coordinator boundary (2026-09-21)
+
+- Extracted the global disposition-maintenance entrypoint and wired production
+  tournament/prediction callbacks through it after candidate/oracle composition.
+  It clears incompatible intentional state in a coordinator-owned Collection
+  revision before the collection observer rebuilds candidates; unchanged global
+  state skips the Collection save and invokes one normal global rebuild.
+- Direct executable cases cover a changed rule version and matching snooze
+  control, including source revision/save and observer versus fallback-rebuild
+  counts. Focused disposition service: **17 passed, 84 expectations**.
+- `bun run typecheck`, `bun run lint`, changed-file Prettier, and `git diff
+  --check` passed. Gate B remains awaiting independent verification.
+
+### Gate A review corrections (GA-1 through GA-5)
+
+- **GA-1:** disposition version lookup now takes the maximum of active state
+  and attention receipt history, preventing a post-clear version reset.
+- **GA-2:** owner commands opt into collection persistence-outcome
+  classification, so a save response lost after an exact durable reread is an
+  accepted command rather than a false persistence rejection.
+- **GA-3:** receipts retain their strict canonical request payload and a
+  SHA-256 binding. Collection validation recomputes the hash and proves every
+  payload field, including selected non-clock fingerprint, equals its receipt
+  and accepted disposition. Schema tests reject independently corrupted hashes
+  and accepted fingerprints.
+- **GA-4:** command maintenance moved into the mutation boundary's
+  post-persistence callback. It runs once before the accepted response; its
+  unavailable result is reported without rolling back source state. The normal
+  collection observer remains for non-command writers.
+- **GA-5:** command UUIDs normalize to lowercase at parsing and strict command
+  schemas retain the durable rule identifier grammar.
+
+Correction validation: focused shared/disposition/candidate/collection mutation
+command passed **70 tests, 403 expectations**; `bun run typecheck`, `bun run
+lint`, changed-file Prettier, and `git diff --check` passed. Gate A remains
+awaiting targeted independent verification.
+
+### Targeted correction evidence update
+
+- GA-1 now has a direct command-service test: v1 is accepted, an authorized
+  setup clear retains its receipt, a changed winner accepts at v2, both durable
+  receipts replay, and stale v0 rejects.
+- GA-2 directly covers persist-then-reject recovery and reject-before-persist,
+  including exactly-once maintenance only for the verified durable commit.
+- GA-4 directly covers one integrated maintenance call with both available and
+  unavailable outcomes, preserving the committed collection revision when
+  attention is unavailable.
+- `bun test packages/daemon/tests/services/attention-disposition-service.test.ts`
+  passed: **9 tests, 40 expectations**. The full focused matrix must be rerun
+  after this notes update before independent verification.
+
+### Final correction-round validation (2026-09-21)
+
+- Focused shared/disposition/candidate/storage/impact/collection matrix:
+  **96 passed, 0 failed, 594 expectations**.
+- `bun run typecheck`, `bun run lint`, changed-file Prettier, and `git diff
+  --check`: passed.
+
+| Path | Working tree SHA-256 |
+| --- | --- |
+| `packages/shared/src/types.ts` | `2247e669c44977b78800cccdb4e9d6196f3d39b6e9a4dc133dafc7e887381934` |
+| `packages/shared/src/validation.ts` | `09ffb2bc89ad01e1be7b9ca0e63770bd0516640b9e8979c6f697b66f2b796ee1` |
+| `packages/shared/src/collection-profile-validation.ts` | `de3ba9940f3ed36365a5defd7f6b9d478fcb765fec3c852dea434947857951a8` |
+| `packages/shared/src/attention-disposition-command.ts` | `10a6efec3805e1709d54662bdf37443e10fbaf57838e8be341b3d941a4e08807` |
+| `packages/shared/src/index.ts` | `7ca40859f98a274fe3cd186b216fea6cb2eed598fba1ac2cc60bf71a67b20e8c` |
+| `packages/shared/tests/current-axis-validation.test.ts` | `19d04b5871fd78348035022cfd91c4990ecfef8888df54fd575101de4d6fb743` |
+| `packages/daemon/src/services/attention-disposition-service.ts` | `9fc9a476067e43e918a3813a07f5be456cb0fe305e2b1f76ae059522968f3e6c` |
+| `packages/daemon/src/services/collection-mutation-service.ts` | `0b1f4be059a111b906b1a6edb6cbe1b723a38917e9b39b685354bb92e4b38188` |
+| `packages/daemon/tests/services/attention-disposition-service.test.ts` | `c8a3f447fc3a676c93d07c803c0ded5341030a2de1691e57567d18f9b91be402` |
+
+Gate A remains awaiting independent targeted verification.
+
+### Final GA-4 / GA-5 closure
+
+- Maintenance is now a required disposition-service dependency. Every new
+  committed command invokes it exactly once from the serialized
+  post-persistence callback; replay, rejection, and pre-persistence failure do
+  not invoke it. Production app/route composition remains Gate C work.
+- Commands reuse the exported durable `StableRuleIdSchema`; direct schema tests
+  prove matching acceptance and rejection grammar, strict unknown-key and UUID
+  validation, and lowercase UUID normalization. A service test proves
+  uppercase/lowercase UUID replay produces one durable receipt.
+- Final focused matrix: **99 passed, 0 failed, 615 expectations**. `bun run
+  typecheck`, `bun run lint`, changed-file Prettier, and `git diff --check`
+  passed.
 
 Phase 3 owns writer notification, incremental and global disposable-candidate
 freshness, inactive stale dispositions in disposable output, and fail-closed
@@ -405,6 +774,96 @@ Validation:
 | ` M` | `packages/daemon/src/services/attention-rule-catalog.ts` | unchanged | `53e3472beb129b79b06faf106860fbefcb61571b5ef3c2840f4077e30a4e9516` |
 | `??` | `packages/daemon/src/services/attention-candidate-service.ts` | `ABSENT` | `1a580e09d492f3252223c42db90fecf11a34be804b67e8d7e0a7639deb4a3465` |
 | `??` | `packages/shared/tests/attention-candidate-artifact.test.ts` | `ABSENT` | `2ada048104f47c7f4028de79b08642a4b9439604362485b43c2f43d3609f583f` |
+
+## Phase 4 execution initialization (2026-09-21)
+
+**Baseline:** `HEAD 8f32a1ddf601eef166843ac866c6fb61d5a5b9f8`
+(`8f32a1d`). **Claimed bead:** `shelf-judge-cq1.4`.
+
+Phases 1, 2, and 3 are accepted. Phase 4 is now in progress; Phases 5, 6,
+and 7 remain pending. This initialization preserves the accepted Phase 3
+history and its boundary: Phase 3 owns disposable candidate freshness,
+inactive stale-disposition representation, and fail-closed publication. Phase
+4 owns durable disposition commands and durable clearing of incompatible
+dispositions, performed atomically with source mutation or serialized global
+maintenance, never during Profile rendering.
+
+### Resumable execution gates
+
+#### Gate A: shared command/result contracts and disposition service/replay
+
+- Finalize strict shared request, result, conflict, and receipt contracts for
+  `not-now` and `intentional`: UUID command ID, game ID, stable rule ID, and
+  expected disposition/source version.
+- Add `attention-disposition-service` with serialized collection retry
+  semantics. It must validate current ownership and the addressed current
+  selected winner, write the minimal durable record plus receipt, calculate
+  snooze expiry as response instant plus exactly 720 hours, and return the
+  recorded validated receipt for a byte-equivalent replay.
+- Reject changed-payload command-ID reuse and return structured validation,
+  stale-version, game-not-found, candidate-mismatch, command-reuse, and
+  persistence outcomes without changing source or candidates.
+
+#### Gate B: atomic local/global clearing through the mutation boundary
+
+- Extend the collection mutation boundary and local mutation callers to carry
+  exact affected-game contexts and post-commit candidate-maintenance impacts.
+- From post-mutation inputs, clear an intentional disposition permanently at
+  the first relevant declared non-clock fingerprint or rule-version mismatch;
+  clear either disposition on ownership loss. Snoozes ignore dependency and
+  rule-version changes until their exact expiry, except for ownership loss.
+- Commit source mutation and any derived disposition deletion in one validated
+  collection revision. Only after that accepted commit, invoke candidate
+  maintenance under the existing coordinator; candidate maintenance failure is
+  fail-closed/unavailable and does not replay or roll back the committed source
+  mutation. Global version incompatibility is handled by serialized maintenance,
+  not GET.
+
+#### Gate C: routes, production/test wiring, and GET-purity/failure integration
+
+- Register daemon-owned Profile action routes and inject the disposition
+  service through production app/index and test-app wiring.
+- Cover command receipts/replay, structured failures, local and global source
+  changes, candidate-maintenance failure, and pure GET behavior through routes
+  and production-style integration fixtures.
+- Do not cut over the public Profile card contract, card cap/CLI surfaces, or
+  web rendering/action relay. Those remain Phase 5 and Phase 6 work; the
+  browser continues to perform no scoring, ranking, disposition lifecycle, or
+  fallback inference.
+
+### Obligation-to-executable-evidence map
+
+| Obligation / plan commitment | Gate | Affected consumers and boundary | Concrete executable evidence |
+| --- | --- | --- | --- |
+| REQ 12: existing intention lifecycle remains durable and competes normally | B | `intention-service`, collection mutation boundary, candidate maintenance; legacy intention routes | Extend `packages/daemon/tests/services/intention-service.test.ts` and `packages/daemon/tests/routes/collection.test.ts`; run the Phase 4 focused command below. |
+| REQ 14: viewing/GET has no mutation or score turnover | C | `profile-service`, `routes/profile.ts`, coordinator, collection storage | Add GET revision/write/disposition assertions in `packages/daemon/tests/routes/profile.test.ts` and `packages/daemon/tests/profile-service.test.ts`; run `bun test packages/daemon/tests/routes/profile.test.ts packages/daemon/tests/profile-service.test.ts`. |
+| REQ 15: Not now suppresses the whole game for exactly 720 hours and ownership loss clears it | A, B, C | shared command/receipt schemas, disposition service, ownership/game mutations, candidate service, Profile action route | Controlled-clock disposition/service and route fixtures prove exact expiry, no alternate winner after dependency/rule changes, ordinary expiry reevaluation, and atomic ownership clearing; run the Phase 4 focused command. |
+| REQ 16: intentional persists only while rule version and non-clock fingerprint match, then clears once | A, B, C | rule catalog fingerprint inputs, local/global mutation paths, serialized maintenance, candidate service | Fixtures cover match, unrelated input/clock passage, first local and global mismatch, ownership loss, and reversion non-revival; extend collection-mutation, purchase-utilization, and Profile route tests; run the Phase 4 focused command. |
+| REQ 17: dispositions are local, minimal, durable, owner-scoped, and separate from source domains | A, B | Collection v8 root schemas, receipt schemas, disposition service, storage mutation transaction | Schema/receipt assertions plus service tests prove only root disposition/receipt records change and existing intentions/evidence/purchase/history do not; run `bun test packages/daemon/tests/services/collection-mutation-service.test.ts packages/daemon/tests/routes/collection.test.ts`. |
+| REQ 18: local dependency updates are targeted; global/recovery updates may rebuild | B | `collection-mutation-service`, affected game mutation callers, `attention-candidate-service`, coordinator | Instrument exact game impact and global impact fixtures, including post-commit maintenance; compare incremental result with the candidate oracle in collection-mutation and integration tests. |
+| REQ 19: controlled UTC due maintenance avoids repeated read evaluation | B, C | candidate due index/service, injected clock, Profile service/route | Controlled-clock fixture proves the 720-hour disposition boundary is maintained once through candidate maintenance and repeated pre-due GETs do no source write; run focused Phase 4 command plus `packages/daemon/tests/profile-service.test.ts`. |
+| REQ 20: daemon-owned, validated, atomic candidate/Profile publication; no read-side source mutation | A, B, C | shared validators, disposition service, mutation coordinator, candidate service, Profile routes/app wiring | Acceptance/replay and persistence-failure fixtures assert one source commit, post-commit maintenance only, no partial publication, structured failure, and pure GET; run focused Phase 4 command and `bun run typecheck`. |
+| REQ 24: no authored rules, free text, exposure decay, notifications, providers/AI, or accepted-source conflicts | A, C | shared public contracts, daemon route surface, app wiring | Contract and route fixtures accept only enumerated command/disposition fields and assert no GET lifecycle side effect; review changed-file manifest against Phase 4 boundary; run `bun run typecheck`. |
+| Plan: commands require UUID IDs, expected version, owned/current selected winner validation | A, C | shared validation/types, disposition service, `routes/profile.ts` | Request-validation, stale-version, game-not-found, and candidate-mismatch route/service cases in `packages/daemon/tests/routes/profile.test.ts`. |
+| Plan: canonical identical replay returns receipt; changed payload reuse conflicts | A, C | root command receipts, disposition service, Profile action routes | Service and route replay/reuse matrix in `packages/daemon/tests/routes/profile.test.ts` and collection route tests. |
+| Plan: source commit precedes candidate maintenance under coordinator; failures do not replay source commit | B, C | collection mutation observer, coordinator, candidate service, app/test wiring | Persistence-failure integration fixture asserts committed collection state once, discarded/unavailable candidate state, and later recovery; extend `packages/daemon/tests/services/collection-mutation-service.test.ts`. |
+| Plan: old intention actions remain lifecycle-compatible and only update competitive candidate context | B, C | intention service/routes, collection mutation impact, candidate service | Existing intention route/service regressions plus candidate-impact assertions in `packages/daemon/tests/services/intention-service.test.ts` and `packages/daemon/tests/routes/collection.test.ts`. |
+| Plan Phase 4 executable command and local acceptance gate | A, B, C | all Phase 4 daemon/shared consumers | `bun test packages/daemon/tests/services/collection-mutation-service.test.ts packages/daemon/tests/routes/profile.test.ts packages/daemon/tests/routes/collection.test.ts packages/daemon/tests/services/purchase-utilization-service.test.ts && bun run typecheck`; then `bunx prettier --write .lore/work/notes/fitness-ranked-profile-attention.md` and `git diff --check`. |
+
+### Current pending manifest summary
+
+At initialization, the worktree is at the baseline above with one pending
+tracked change: `M .beads/issues.jsonl`. No production code, tests, Beads
+state, or accepted Phase 3 manifest entries were altered by this initialization;
+the notes file becomes the only implementation-workflow artifact changed here.
+
+### Authority reconciliation
+
+No concrete planning gap or source contradiction was found. The approved spec
+requires derived clearing to occur in the atomic source-update or
+candidate-maintenance transaction, and the approved Phase 3/4 boundary assigns
+only that durable clearing and command causality to Phase 4. Implementation can
+proceed within Gates A through C.
 | `??` | `packages/daemon/tests/services/attention-candidate-storage.test.ts` | `ABSENT` | `c107bf9433ef39d3bcf7f172b2a2992315b0604bc4e93ec258c0e071d3aa6d97` |
 | ` M` | `packages/daemon/tests/services/displayed-fitness-service.test.ts` | unchanged | `f37a66f1c6980ce352e6658c1afa509db133ab0c3873b53ba512b56b17a8d79b` |
 | ` M` | `packages/daemon/tests/services/prediction-service.test.ts` | unchanged | `873d4b47a80a136bc1bd383e7ada24d5feb5f36f72e28c4cc347d21bdc0a6fd1` |
@@ -504,3 +963,174 @@ established self-reference convention: `SELF-REFERENCE: omitted`.
 | `??` | `packages/daemon/tests/services/attention-mutation-impact.test.ts` | `ABSENT` | `7b5310497af9bb6bc46fab916f308c462fca98ecd24486780fdbf2e46ce4c440` |
 | `??` | `packages/shared/src/attention-candidate-artifact.ts` | `ABSENT` | `6c237198ecb8d89e0a17e55b32eac043e8bdfcc6e63a56484d8d07702c8f43e2` |
 | `??` | `packages/shared/tests/attention-candidate-artifact.test.ts` | `ABSENT` | `2ada048104f47c7f4028de79b08642a4b9439604362485b43c2f43d3609f583f` |
+
+### Phase 4 Gate B global completion (2026-09-21)
+
+- Added production-boundary global-maintenance cases through
+  `createAttentionDispositionGlobalMaintenance` and the injected pure winner
+  path. Dependency rule-version and scoring fingerprint changes clear active
+  intentional dispositions before candidate publication, while matching
+  intentional dispositions and snoozes make no source save. Ownership-loss
+  clearing remains covered by the collection mutation boundary.
+- The failure/recovery case proves a committed global clear remains durable when
+  candidate publication is unavailable, recovery publishes without replaying
+  the source clear, and durable command receipts advance the next disposition
+  version monotonically.
+- Focused Gate B plus disposition/candidate/Profile integration suite:
+  **108 passed, 0 failed, 626 expectations**. The single disposition service
+  suite additionally passed **21 tests, 120 expectations**.
+- `bun run typecheck` and `bun run lint` passed. Changed-file Prettier passed.
+
+| Status | Path | Index | Working tree SHA-256 |
+| --- | --- | --- | --- |
+| `??` | `packages/daemon/tests/services/attention-disposition-service.test.ts` | `ABSENT` | `f0e2def082c1a7cb9877c27186c38ddcb9c75c6378e22fcd405cef6e6f0de73f` |
+| ` M` | `.lore/work/notes/fitness-ranked-profile-attention.md` | unchanged | `SELF-REFERENCE: omitted` |
+
+### Gate B correction validation (2026-09-21)
+
+- **GB-V1 BGG production writer:** `Phase 3 direct integration evidence >
+  GB-V1 refreshBggData clears only the incompatible stored play rule via
+  production oracle wiring` builds the known-valid `refreshedBggResult` with
+  `createCompleteEntityMetadata`, invokes `gameService.refreshBggData`, and
+  proves the production stored-rule oracle clears only the affected
+  `never-played` intentional disposition in the writer's same revision while
+  retaining an unrelated disposition and making one candidate-maintenance
+  attempt.
+- **GB-V1 acquisition and lifecycle writers:** `Phase 3 direct integration
+  evidence > GB-V1 acquisition and intention writers reconcile their stored
+  rules without touching another game` uses the acquisition HTTP route and
+  `intentionService.execute(create/complete)`. It proves the local
+  underused-purchase disposition clears only for the acquired game, the
+  companion remains, an explicit-intention snooze survives completion, its
+  expiry is exactly 720 hours, and `gameService.setOwnership(...,
+  "previously-owned")` is the concrete early-clear path.
+
+- **GB-3 recovery correction:** the daemon startup and Profile paths now share
+  `createAttentionCandidateRecovery`, which runs durable global disposition
+  reconciliation before candidate freshness. The test-app production harness
+  mirrors this wiring. Direct integration proves a tournament write commits
+  once, an unavailable first stored-rule evaluation invalidates candidates,
+  recovery clears the incompatible intentional disposition in one later
+  Collection revision while retaining its receipt, then publishes candidates
+  once without replaying the tournament write.
+
+- **GB-1:** stored-rule compatibility coverage is green through the disposition
+  service suite, including the underused stored-rule/current-winner mismatch
+  control.
+- **GB-2:** daemon global-coordinator integration is green through the direct
+  integration suite, including post-commit source-save ordering.
+- **GB-3:** committed-source recovery remains green when global compatibility
+  resolution or candidate publication fails, without replaying the source save.
+- Complete focused Gate B correction suite: **95 passed, 0 failed, 549
+  expectations** across disposition, candidate service/storage/engine,
+  collection-mutation, mutation-impact, Profile, and direct-integration tests.
+  `bun run typecheck`, `bun run lint`, changed-file Prettier, and `git diff
+  --check` passed.
+
+| Status | Path | Working tree SHA-256 |
+| --- | --- | --- |
+| ` M` | `packages/daemon/tests/phase3-direct-integration.test.ts` | `096c19902e3007c5556542236c34a822d9442951f31ad7140b17bf4b70139b56` |
+| ` M` | `.lore/work/notes/fitness-ranked-profile-attention.md` | `SELF-REFERENCE: omitted` |
+
+### Gate B GB-V1 durable-snooze controls (2026-09-21)
+
+- Replaced the ad hoc acquisition/intention seed with one fresh-app helper that
+  uses the production source loader and oracle to select a real current
+  candidate, then persists its `not-now` disposition through the Gate A command
+  service. The helper snapshots the durable receipt-backed snooze at the
+  already-covered exact `720h` expiry.
+- Table-tested fresh instances for `intentionService.setPlayCount`,
+  `gameService.refreshBggData`, the acquisition route, and
+  `intentionService.execute(create)`. Each concrete writer commits one
+  Collection revision, invokes production candidate maintenance once, and
+  leaves the snapshot byte-for-byte equal as the sole disposition.
+- The exact-expiry authority remains `AttentionDispositionService > writes an
+  exact 720-hour whole-game snooze and canonical durable receipt`; no duplicate
+  expiry calculation was added. The existing ownership-loss early-clear control
+  remains in the direct integration file.
+- Validation: direct integration passed (**14 tests**); the disposition and
+  oracle suites passed (**40 tests**). `bun run typecheck`, `bun run lint`,
+  touched-file Prettier, and `git diff --check` passed.
+
+### Gate B GB-V1-2 Profile recovery purity correction (2026-09-21)
+
+- Candidate construction now propagates the durable-recovery gate into the candidate service. Profile reads use only the side-effect-free freshness API; while global compatibility recovery is pending they fail closed before source, artifact, or oracle work.
+- The direct regression verifies repeated Profile GETs remain unavailable with one stored-rule attempt and unchanged Collection/candidate state. The explicit daemon maintenance recovery performs the second compatibility attempt, then publishes candidates and permits a read-only Profile GET.
+
+## P4-DEL-1 correction and nested coordinator evidence
+
+Permanent `game.remove` now atomically removes the deleted game's active attention disposition and only its typed `attention-disposition` command receipts, alongside its owner-note receipts. Production-composed regression coverage exercises both snoozed and intentional commands, verifies one deletion revision/save, rejects reuse of the removed command ID as `game-not-found`, and preserves an unrelated game's complete durable record.
+
+The direct global-writer regression enters `profileSourceCoordinatorFor(storage).runExclusive`, invokes tournament `afterSourceSave`, then invokes global disposition maintenance and a collection mutation through that same coordinator. It completes with the source saved once and ordered `source-saved`, `durable-clear`, then `candidate-publication`, proving reentrant serialization without duplicate maintenance or deadlock.
+
+## Accepted Phase 4 (2026-09-22)
+
+The seven-phase feature remains **in progress**. Phases 1, 2, 3, and 4 are
+accepted and complete. Phases 5, 6, and 7 remain pending; Phase 5 is ready and
+was not claimed or otherwise mutated during this closure.
+
+Gates A through C are accepted. The authorized Phase 3/4 boundary was honored:
+Phase 3 provides disposable candidate freshness, inactive stale-disposition
+output, and fail-closed Profile publication; Phase 4 provides the durable
+owner-response lifecycle and atomic clearing of incompatible dispositions.
+
+Phase 4 delivers validated `not-now` and `intentional` disposition command
+routes with canonical receipt replay and structured failures. Local owner/source
+mutations atomically clear incompatible records in the collection revision;
+serialized global maintenance performs global clearing before candidate
+publication. Runtime and startup recovery reconcile durable compatibility
+without blocking unrelated daemon availability. Profile GET remains pure and
+fails closed while recovery is pending. Game deletion atomically removes the
+deleted game's disposition and typed command receipts while preserving unrelated
+records.
+
+Accepted findings: GA-1 through GA-5, GB-1 through GB-3, GB-V1, GB-V1-2,
+GC-1 through GC-2, and P4-DEL-1 are closed. This includes exact 720-hour
+whole-game snoozes, intentional compatibility/reversion behavior, ownership-loss
+clearing, reentrant coordinator ordering, recovery without source replay, and
+the deletion lifecycle closure.
+
+### Final accepted evidence
+
+- Focused correction: **78 pass**.
+- Full suite: **3,122 pass, 1 skip, 0 fail across 187 files**.
+- `bun run typecheck`, `bun run lint`, `bun run build`, changed-file Prettier,
+  and `git diff --check`: **pass**.
+- Terminal reviewer accepted Phase 4.
+
+### Accepted Phase 4 current-worktree manifest
+
+Captured after closing `shelf-judge-cq1.4`. Every pending path records exact
+porcelain status, index blob identity or `ABSENT`, and working-tree SHA-256 (or
+a deletion marker). Passive Beads exports are included and were regenerated only
+by normal `bd` operation. This notes file follows the established
+self-reference convention: `SELF-REFERENCE: omitted`.
+
+| Status | Path | Index | Working tree SHA-256 |
+| --- | --- | --- | --- |
+| ` M` | `.beads/interactions.jsonl` | `47b8f4621ff51070b1fe00f930a70c2a51d6d6fd` | `192de11e06fc48b886a16ec4a6909da4a2cae1517b9babf34b9808b266f1860b` |
+| ` M` | `.beads/issues.jsonl` | `9b81573becf48f19dd70b7b0f6dbe8fca998ba96` | `f8a6db4fe60436df4dbec62e821ce6e28a62038ec6f973f0421e4089a453966a` |
+| ` M` | `.lore/work/notes/fitness-ranked-profile-attention.md` | `87cd0e26d894f01fa231bf353369974bb5d3a143` | `SELF-REFERENCE: omitted` |
+| ` M` | `packages/daemon/src/app.ts` | `05d593d69ed0be5105cc5fa5762f670dcc995c62` | `94ea365f474c1fc647e5fc4b086dff88610b4fbd2302a76aafe2bc17548be14d` |
+| ` M` | `packages/daemon/src/index.ts` | `d8fc5da250f817e3e87111aa3bcf12378e13b871` | `ff8024ecf7737096260aa3befb439eddfd83b6c627f74706472240a6a86c1b28` |
+| ` M` | `packages/daemon/src/services/attention-candidate-engine.ts` | `3d92eabb4917e0ca58e5f9e3536a01d2ad0e01e3` | `9680ba95093d64f080948d22b0447db7d80b194b4091ea5af003d25f795bd9b8` |
+| ` M` | `packages/daemon/src/services/attention-candidate-service.ts` | `db304c3fe7bb5b86185b82b375b7cf6b14fb54e6` | `293f78b4b7865e30d2449b1d71287f71209b4a4a331dbeef957592d87c9cdc08` |
+| ` M` | `packages/daemon/src/services/collection-mutation-service.ts` | `fab148013549fe1e68b5fe90e8f298924cf4e73c` | `e740397dfb8916f37d994a88475d68b8cffd9dc1f35610266d11a49ad2eb05f3` |
+| ` M` | `packages/daemon/src/services/game-service.ts` | `e8f40046d7b38b9b5e673009f77dacd9676f05ce` | `b6411494ef0422aeb9406e0a1f11847e4df764efe166129455344b1780501de3` |
+| ` M` | `packages/daemon/src/services/profile-service.ts` | `e26d9c1ac32688892894537d97bc7f6ecf5d9615` | `ec8c0354e867995a78844a066af3e46335f6701002f358af6d917d9c4ea807ef` |
+| ` M` | `packages/daemon/tests/helpers/test-app.ts` | `a640ff44c4c261db1221f51e161a300f7a120f0e` | `770efd6b2ff78a65e1f2408df2ba9ec906514e6cbf68a2774f482648b0efcfe3` |
+| ` M` | `packages/daemon/tests/phase3-direct-integration.test.ts` | `39c12de7dc21b53d907f4dd9b93e195e114dbec3` | `2a331d4c54f4ec06d4292befe394d0f4d4bbde73439235fe855fa2a814aa0e28` |
+| ` M` | `packages/daemon/tests/services/attention-candidate-service.test.ts` | `d54fb631a927f98d5558d8d3e8a49497eaac8a22` | `435cac349056b976311c46ced3032f3ece89c8d2e5619928cfbc56b98a196372` |
+| ` M` | `packages/shared/src/collection-profile-validation.ts` | `8fc99c96a7bae93fb5a801c4d80082b441dcc9fb` | `c3c7908a6540e014123d5bc306a3f1ed53dc44821b7376cbabae28ae2e2ebbb6` |
+| ` M` | `packages/shared/src/index.ts` | `5b8cdde65553eeb26e8a8e9e42797eae22be6b40` | `7ca40859f98a274fe3cd186b216fea6cb2eed598fba1ac2cc60bf71a67b20e8c` |
+| ` M` | `packages/shared/src/types.ts` | `71efd0324869d16935aa51722ea12165970231e1` | `2247e669c44977b78800cccdb4e9d6196f3d39b6e9a4dc133dafc7e887381934` |
+| ` M` | `packages/shared/src/validation.ts` | `1bf8e65955105e62ec0dba70e81742407d2a9aa9` | `09ffb2bc89ad01e1be7b9ca0e63770bd0516640b9e8979c6f697b66f2b796ee1` |
+| ` M` | `packages/shared/tests/current-axis-validation.test.ts` | `8023f8dc2564aff353427f78d1e4baf023d2cfe9` | `19d04b5871fd78348035022cfd91c4990ecfef8888df54fd575101de4d6fb743` |
+| `??` | `packages/daemon/src/routes/profile-attention.ts` | `ABSENT` | `9e630581d0b0e3228f489e9aa1a6742a92e6ec456562d5916c3c0c4f24d94981` |
+| `??` | `packages/daemon/src/services/attention-disposition-compatibility.ts` | `ABSENT` | `112759a43f8a49236763319d9a51245cd097646433e099e01a4c0f816c8ac067` |
+| `??` | `packages/daemon/src/services/attention-disposition-maintenance.ts` | `ABSENT` | `82e06be07b9911d912a04285bddc4a667f29655d439bc9062f6238ad43b4dbe3` |
+| `??` | `packages/daemon/src/services/attention-disposition-service.ts` | `ABSENT` | `ed8f4384bae56bb58f9879acfea5dbacb5283be84bbd83c3a9e6642a97a83958` |
+| `??` | `packages/daemon/tests/routes/profile-attention.test.ts` | `ABSENT` | `7958563fc1a1d9a7a6819c7f6609dd4254a2a7735271e31419c86946587b7a65` |
+| `??` | `packages/daemon/tests/services/attention-disposition-service.test.ts` | `ABSENT` | `27ee87add8b2b389666a991e0461616517288160cd9ac8f849b1d8ff21f6fa69` |
+| `??` | `packages/shared/src/attention-disposition-command.ts` | `ABSENT` | `594ad4aac391047fa49a7c794b16ce2a3aa5e5668ea87548dc96dabd78b5679a` |
+| `??` | `packages/shared/tests/attention-disposition-command.test.ts` | `ABSENT` | `8b718a20abfdaeedf094b1246dc720e55289b9e9741f3a1f1cd0a83d5849024c` |

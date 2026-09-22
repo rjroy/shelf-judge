@@ -13,6 +13,7 @@ import { createGroundedAnalysisRoutes } from "./routes/grounded-analysis.js";
 import { createShutdownRoutes } from "./routes/shutdown.js";
 import { createTournamentRoutes } from "./routes/tournament.js";
 import { createProfileRoutes } from "./routes/profile.js";
+import { createProfileAttentionRoutes } from "./routes/profile-attention.js";
 import { createPredictionRoutes } from "./routes/prediction.js";
 import { createNicheRoutes } from "./routes/niche.js";
 import { createRedundancyRoutes } from "./routes/redundancy.js";
@@ -57,6 +58,7 @@ import { createAnalystAttestationService } from "./services/analyst-attestation-
 import { createAnalystTranscriptValidator } from "./services/analyst-transcript-validator.js";
 import { createAnalystTurnService } from "./services/analyst-turn-service.js";
 import type { ProfileSourceCoordinator } from "./services/profile-source-coordinator.js";
+import type { AttentionDispositionService } from "./services/attention-disposition-service.js";
 
 export interface AppDeps {
   storageService: StorageService;
@@ -68,6 +70,7 @@ export interface AppDeps {
   predictionService: PredictionService;
   displayedFitnessService: DisplayedFitnessService;
   intentionService: IntentionService;
+  attentionDispositionService: AttentionDispositionService;
   ownerGameNoteService: OwnerGameNoteService;
   groundedAnalysisProvider: GroundedAnalysisProvider;
   reflectionRuntime: ReflectionRuntime;
@@ -99,6 +102,7 @@ export function createApp(deps: AppDeps): AppResult {
     predictionService,
     displayedFitnessService,
     intentionService,
+    attentionDispositionService,
     ownerGameNoteService,
     groundedAnalysisProvider,
     reflectionRuntime,
@@ -135,6 +139,7 @@ export function createApp(deps: AppDeps): AppResult {
   const importRouteModule = createImportRoutes({ gameService, bggClient });
   const tournamentRouteModule = createTournamentRoutes({ tournamentService, gameService });
   const profileRouteModule = createProfileRoutes({ profileService });
+  const profileAttentionRouteModule = createProfileAttentionRoutes({ attentionDispositionService });
   const predictionRouteModule = createPredictionRoutes({ predictionService, storageService });
   const nicheRouteModule = createNicheRoutes({ storageService });
   const redundancyRouteModule = createRedundancyRoutes({
@@ -281,6 +286,7 @@ export function createApp(deps: AppDeps): AppResult {
     ...importRouteModule.operations,
     ...tournamentRouteModule.operations,
     ...profileRouteModule.operations,
+    ...profileAttentionRouteModule.operations,
     ...predictionRouteModule.operations,
     ...nicheRouteModule.operations,
     ...redundancyRouteModule.operations,
@@ -318,6 +324,7 @@ export function createApp(deps: AppDeps): AppResult {
   app.route("/api", importRouteModule.routes);
   app.route("/api", tournamentRouteModule.routes);
   app.route("/api", profileRouteModule.routes);
+  app.route("/api", profileAttentionRouteModule.routes);
   app.route("/api", predictionRouteModule.routes);
   app.route("/api", nicheRouteModule.routes);
   app.route("/api", redundancyRouteModule.routes);

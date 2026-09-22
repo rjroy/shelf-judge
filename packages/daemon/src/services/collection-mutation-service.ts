@@ -12,12 +12,21 @@ import {
   type CollectionMutationOperation,
   type TestCollectionMutationOperation,
 } from "./attention-mutation-impact.js";
+import type { AttentionDispositionWinner } from "./attention-disposition-compatibility.js";
+import { clearIncompatibleAttentionDispositions } from "./attention-disposition-compatibility.js";
+import type { AttentionMutationImpact } from "./attention-candidate-service.js";
 
 export interface CollectionMutationContext {
-  operation: CollectionMutationOperation | TestCollectionMutationOperation;
+  operation:
+    | CollectionMutationOperation
+    | TestCollectionMutationOperation
+    | "attention-disposition"
+    | "attention-disposition-maintenance";
   trigger: string;
   gameIds?: readonly string[];
   intentionIds?: readonly string[];
+  /** Coordinator-only global source maintenance after a non-Collection writer saves. */
+  maintenanceImpact?: AttentionMutationImpact;
 }
 
 export interface CollectionMutationPostCommitEvent {
@@ -88,6 +97,9 @@ export interface CollectionMutationService {
       collection: Collection,
     ) => CollectionMutationDecision<Value> | Promise<CollectionMutationDecision<Value>>,
   ): Promise<CollectionMutationOutcome<Value>>;
+  setDispositionWinners(
+    resolver: NonNullable<CollectionMutationServiceDeps["dispositionWinners"]>,
+  ): void;
 }
 
 export interface CollectionMutationServiceDeps {
@@ -95,6 +107,13 @@ export interface CollectionMutationServiceDeps {
   revisionStrategy?: CollectionRevisionStrategy;
   logger?: Logger;
   postCommitObserver?: (event: CollectionMutationPostCommitEvent) => Promise<void>;
+  /** Derives unsuppressed post-mutation winners from authoritative source inputs. */
+  dispositionWinners?: (
+    prior: Collection,
+    accepted: Collection,
+    context: CollectionMutationContext,
+    affectedGameIds: readonly string[],
+  ) => Promise<readonly AttentionDispositionWinner[]>;
 }
 
 const coordinators = new WeakMap<object, CollectionMutationService>();
@@ -103,6 +122,20 @@ function hasCollectionPersistence(
   storageService: CollectionReader,
 ): storageService is CollectionReader & CollectionPersistence {
   return "saveCollection" in storageService && typeof storageService.saveCollection === "function";
+}
+
+function isAttentionDispositionOperation(
+  operation: CollectionMutationContext["operation"],
+): operation is "attention-disposition" {
+  return operation === "attention-disposition";
+}
+
+function mutationImpact(context: CollectionMutationContext) {
+  if (context.operation === "attention-disposition-maintenance")
+    return context.maintenanceImpact ?? null;
+  if (context.operation === "attention-disposition")
+    return { kind: "games" as const, gameIds: [...(context.gameIds ?? [])] };
+  return attentionImpactForCollectionMutation(context.operation, context.gameIds);
 }
 
 export function collectionMutationServiceFor(
@@ -123,6 +156,7 @@ export function createCollectionMutationService(
   const existing = coordinators.get(deps.storageService);
   if (existing) return existing;
   const revisionStrategy = deps.revisionStrategy ?? collectionRevisionStrategy;
+  let dispositionWinners = deps.dispositionWinners;
   const logger = deps.logger ?? createLogger("collection-mutation");
   const profileSourceCoordinator = profileSourceCoordinatorFor(deps.storageService);
   let operations: Promise<void> = Promise.resolve();
@@ -213,6 +247,24 @@ export function createCollectionMutationService(
 
         let accepted: Collection;
         try {
+          if (
+            dispositionWinners &&
+            !isAttentionDispositionOperation(context.operation) &&
+            context.operation !== "attention-disposition-maintenance"
+          ) {
+            const impact = mutationImpact(context);
+            const affectedGameIds =
+              impact?.kind === "global"
+                ? candidate.attentionDispositions.map((disposition) => disposition.gameId)
+                : (impact?.gameIds ?? []);
+            const winners = await dispositionWinners(current, candidate, context, affectedGameIds);
+            clearIncompatibleAttentionDispositions(
+              current,
+              candidate,
+              winners,
+              new Set(affectedGameIds),
+            );
+          }
           accepted = CollectionSchema.parse(revisionStrategy.advance(candidate, current));
         } catch (error) {
           logger.warn("collection mutation rejected", {
@@ -293,12 +345,16 @@ export function createCollectionMutationService(
             throw error;
           }
         }
-        if (deps.postCommitObserver) {
+        if (
+          deps.postCommitObserver &&
+          !isAttentionDispositionOperation(context.operation) &&
+          context.operation !== "attention-disposition-maintenance"
+        ) {
           await deps.postCommitObserver({
             context,
             prior: current,
             accepted,
-            impact: attentionImpactForCollectionMutation(context.operation, context.gameIds),
+            impact: mutationImpact(context),
           });
         }
         logger.log("collection mutation completed", {
@@ -317,7 +373,12 @@ export function createCollectionMutationService(
     );
   }
 
-  const service = { mutate };
+  const service: CollectionMutationService = {
+    mutate,
+    setDispositionWinners(resolver) {
+      dispositionWinners = resolver;
+    },
+  };
   coordinators.set(deps.storageService, service);
   return service;
 }

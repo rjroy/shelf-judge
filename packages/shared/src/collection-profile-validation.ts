@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { createHash } from "node:crypto";
 import type {
   CollectionProfileEntityPolicy,
   IntentionCommand,
@@ -17,7 +18,7 @@ const IdSchema = z.string().min(1);
 const SafeCountSchema = z.number().int().safe().min(0);
 const PositiveSafeIntegerSchema = z.number().int().safe().positive();
 const FiniteNumberSchema = z.number().finite();
-const StableRuleIdSchema = z.string().regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/);
+export const StableRuleIdSchema = z.string().regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/);
 const CanonicalFingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/);
 
 function valuesMatch(left: number, right: number): boolean {
@@ -604,12 +605,45 @@ export const AttentionCommandReceiptSchema = z
     operation: z.enum(["not-now", "intentional"]),
     gameId: IdSchema,
     ruleId: StableRuleIdSchema,
+    ruleVersion: PositiveSafeIntegerSchema,
     expectedVersion: SafeCountSchema,
     requestFingerprint: CanonicalFingerprintSchema,
+    requestPayload: z
+      .object({
+        commandId: z.string().uuid(),
+        operation: z.enum(["not-now", "intentional"]),
+        gameId: IdSchema,
+        ruleId: StableRuleIdSchema,
+        ruleVersion: PositiveSafeIntegerSchema,
+        fingerprint: CanonicalFingerprintSchema,
+        expectedVersion: SafeCountSchema,
+      })
+      .strict(),
     accepted: AttentionDispositionSchema,
   })
   .strict()
   .superRefine((receipt, context) => {
+    const canonicalRequest = attentionDispositionRequestFingerprint(receipt.requestPayload);
+    if (receipt.requestFingerprint !== canonicalRequest)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["requestFingerprint"],
+        message: "Receipt request fingerprint must match its canonical request",
+      });
+    if (
+      receipt.commandId !== receipt.requestPayload.commandId ||
+      receipt.operation !== receipt.requestPayload.operation ||
+      receipt.gameId !== receipt.requestPayload.gameId ||
+      receipt.ruleId !== receipt.requestPayload.ruleId ||
+      receipt.ruleVersion !== receipt.requestPayload.ruleVersion ||
+      receipt.expectedVersion !== receipt.requestPayload.expectedVersion ||
+      receipt.accepted.fingerprint !== receipt.requestPayload.fingerprint
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["requestPayload"],
+        message: "Receipt request must exactly describe the accepted command and candidate",
+      });
     if (receipt.gameId !== receipt.accepted.gameId)
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -628,6 +662,12 @@ export const AttentionCommandReceiptSchema = z
         path: ["accepted", "ruleId"],
         message: "Receipt disposition must retain the requested rule",
       });
+    if (receipt.accepted.ruleVersion !== receipt.ruleVersion)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["accepted", "ruleVersion"],
+        message: "Receipt disposition must retain the requested rule version",
+      });
     if (
       receipt.expectedVersion === Number.MAX_SAFE_INTEGER ||
       receipt.accepted.version !== receipt.expectedVersion + 1
@@ -638,6 +678,30 @@ export const AttentionCommandReceiptSchema = z
         message: "Accepted receipt version must be exactly one greater than the expected version",
       });
   });
+
+export function attentionDispositionRequestFingerprint(request: {
+  commandId: string;
+  operation: "not-now" | "intentional";
+  gameId: string;
+  ruleId: string;
+  ruleVersion: number;
+  fingerprint: string;
+  expectedVersion: number;
+}): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        commandId: request.commandId,
+        operation: request.operation,
+        gameId: request.gameId,
+        ruleId: request.ruleId,
+        ruleVersion: request.ruleVersion,
+        fingerprint: request.fingerprint,
+        expectedVersion: request.expectedVersion,
+      }),
+    )
+    .digest("hex");
+}
 
 export const AttentionCommandReceiptUnionSchema = z.union([
   OwnerGameNoteCommandReceiptSchema,

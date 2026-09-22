@@ -225,6 +225,39 @@ describe("AttentionCandidateService core", () => {
     expect(fixture.oracleCalls).toBe(0);
     expect(fixture.saves).toBe(0);
   });
+  test("fails closed without reading, evaluating, or publishing while durable recovery is required", async () => {
+    let reads = 0;
+    let saves = 0;
+    let evaluations = 0;
+    const service = new AttentionCandidateService({
+      coordinator: { runExclusive: (operation) => operation() },
+      clock: { now: () => new Date("2026-01-02T00:00:00.000Z") },
+      recoveryRequired: () => true,
+      loadSource: () => {
+        reads += 1;
+        return Promise.resolve(source());
+      },
+      storage: {
+        loadAttentionCandidates: () => {
+          reads += 1;
+          return Promise.resolve(null);
+        },
+        saveAttentionCandidates: () => {
+          saves += 1;
+          return Promise.resolve();
+        },
+        discardAttentionCandidates: () => Promise.resolve(),
+      },
+      oracle: {
+        evaluate: () => {
+          evaluations += 1;
+          return Promise.resolve({ evaluations: [], presentations: new Map() });
+        },
+      },
+    });
+    expect(await service.ensureFresh()).toEqual({ state: "unavailable", retryable: true });
+    expect({ reads, saves, evaluations }).toEqual({ reads: 0, saves: 0, evaluations: 0 });
+  });
   test("a warmed bounded cache checks only clock and source generation until generation changes", async () => {
     const current = source(1, [ownedGame("due"), ownedGame("later")]);
     let generation = 0;
