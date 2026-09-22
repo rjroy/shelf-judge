@@ -5240,6 +5240,62 @@ body {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: start;
   column-gap: var(--profile-gap);
+  row-gap: var(--profile-gap);
+}
+
+.attention-card--quiet {
+  border-top: 3px solid var(--score-color);
+  box-shadow: 0 8px 24px rgb(44 34 24 / 5%);
+}
+.attention-card--quiet h3 {
+  font-size: clamp(1.15rem, 1.5vw, 1.45rem);
+  line-height: 1.25;
+}
+.attention-decision {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.attention-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.attention-card-actions [role="status"] {
+  flex-basis: 100%;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+.attention-limit-control {
+  margin-top: 2rem;
+  padding: 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  max-width: 36rem;
+}
+.attention-limit-control > label {
+  display: block;
+  font-weight: 700;
+}
+.attention-limit-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.attention-limit-row input {
+  width: 7rem;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+.attention-limit-control :focus-visible {
+  outline: 3px solid var(--action);
+  outline-offset: 3px;
 }
 
 @media (max-width: 760px) {
@@ -5408,7 +5464,6 @@ body {
 .profile-entity-summary a {
   min-height: 0;
 }
-
 
 .profile-diagnostic-link {
   margin-top: 18px;

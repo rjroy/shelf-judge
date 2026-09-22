@@ -13,7 +13,7 @@ source_plan: .lore/work/plans/fitness-ranked-profile-attention.md
 - [x] Phase 3: disposable candidate persistence and freshness coordination (accepted)
 - [x] Phase 4: atomic disposition commands and source mutations (accepted)
 - [x] Phase 5: Profile, config, and CLI contract cutover (accepted)
-- [ ] Phase 6: web rendering and command relay (pending; only the user-authorized minimal web compatibility migration needed to restore build/lint after the shared contract cutover is complete)
+- [x] Phase 6: web rendering and command relay (accepted)
 - [ ] Phase 7: cross-cutting oracle, performance, and authority reconciliation (pending)
 
 ## Accepted Phase 2
@@ -182,7 +182,102 @@ included. This notes file follows the established self-reference convention:
 | ` M` | `packages/web/components/profile/attention-section.tsx` | `3630587fb271b18e8f0284ff382739e7a2eb897d` | `9a97ad10819ee662d5aeebc1e035c1bb4cdbe8ca32ced90cb78e17bcbfcbb702` |
 | ` M` | `packages/web/tests/profile-consumers-integration.test.tsx` | `3743391dccd260e4e1ab0ac289b2ac5eac058cbb` | `5f6770a576c0c8ef240226106bfe6598f616591a038b659bb6b717c2537e3354` |
 
+## Accepted Phase 6 (2026-09-22)
+
+Phase 6 is accepted; Phase 7 remains pending, so the feature status stays
+`in_progress`. The web now renders daemon-ranked cards, reasons, decisions,
+evidence, and action destinations in supplied order/count; relays validated
+whole-game commands without client scoring or fallback inference; exposes the
+server-owned 0–24 card limit in Settings; and distinguishes loading, populated,
+successful-empty, and unavailable states. Responsive rendering preserves the
+daemon order and configured cap, including a seven-card configured result.
+
+| Approved obligation | Acceptance evidence |
+| --- | --- |
+| REQ-RANKED-ATTN-13 | Cards show why they surfaced, the decision, supporting evidence, and relevant actions/correction destinations. |
+| REQ-RANKED-ATTN-14 | Read-only presentation does not mutate state; only validated explicit commands relay owner responses. |
+| REQ-RANKED-ATTN-20 | Scoring/publication remain daemon-owned; browser relays validated commands and does no scoring or read-side collection mutation. |
+| REQ-RANKED-ATTN-21 | UI keeps successful empty results distinct from loading, unavailable, and invalid/unavailable computation states. |
+| REQ-RANKED-ATTN-22 | Default six-card desktop layout is three columns by two rows; responsive rendering preserves ranked order and configured cap, tested with cap 7. |
+| REQ-RANKED-ATTN-24 | No runtime-authored rules, free-text feedback, exposure decay, notifications, provider/AI behavior, or accepted-source conflict machinery was added. |
+
+### Phase 6 validation and review
+
+- Full `bun run test`: **3,147 passed, 1 skipped, 0 failed**; focused web
+  suite: **48 passed**.
+- Final useful-profile Playwright: **57 passed, 3 expected skips** across four
+  projects; browser TypeScript passed.
+- `bun run typecheck`, `bun run lint`, `bun run build`, changed-source
+  Prettier, and `git diff --check`: passed. Visual inspection found no material
+  issue.
+- Reviewer finding **P6-01** is closed: ranked UUID game-detail fixtures did
+  not match the requested IDs. The fixtures were corrected to match game
+  details and intention, and a Playwright destination-navigation test was
+  added.
+- Phase 7 still owns cross-cutting oracle/performance validation and authority
+  reconciliation; acceptance of the web phase does not complete that work.
+
+### Accepted Phase 6 current-worktree manifest
+
+Captured after the parent tracker mutations and this Phase 6 note update. The
+manifest records every current modified or untracked path, exact porcelain
+status, index blob identity or `ABSENT`, and working-tree SHA-256. Beads exports
+are recorded as found; `.beads/issues.jsonl` was regenerated from authoritative
+Dolt state after the earlier manifest capture. This note was not used to modify
+Beads. This file follows the established self-reference convention:
+`SELF-REFERENCE: omitted`.
+
+| Status | Path | Index | Working tree SHA-256 |
+| --- | --- | --- | --- |
+| ` M` | `.beads/interactions.jsonl` | `24d071bf5305d167ab0273270ff0eac1cce0d17b` | `6793a7fbb6d8efffbcf208110026676307eb17b0b3bed842867d63910d7bde74` |
+| ` M` | `.beads/issues.jsonl` | `ca262653928ee01258e134909f4d66b3bc9cfa5c` | `d872511bdce3fe610376a014d2ec2bb4b4076d88034f7178fb32dd0d0d75ef6d` |
+| ` M` | `.lore/work/notes/fitness-ranked-profile-attention.md` | `7b789b503d60bb356e698fc0bb3f8486e0494b23` | `SELF-REFERENCE: omitted` |
+| ` M` | `packages/web/app/globals.css` | `49de7038e098ca2211a7f633aa76f67d071a774b` | `3f3e54c48ac8c933c0457c1504f0c97b2e0cb53fd26f25dd67d0447286b1c1d7` |
+| ` M` | `packages/web/app/settings/page.tsx` | `fa226189ed5b18b3f50e9b9ed1af3684d82a7985` | `a397f26929ec5da4aed547b6617620fea2fbed42212e4edff671899f4ec98736` |
+| ` M` | `packages/web/components/profile/attention-section.tsx` | `d5b9d72726b738219941c7a9379d7069917acdfe` | `ab135bd9e47b183ec2314003eb6db1cc0e049e94c8f670724078c6322c555d4d` |
+| ` M` | `packages/web/e2e/fixture-daemon.ts` | `ef8ff6a3d605bf1135f6e0f87f269dc2f43544c7` | `7d5bce8c52f5d66a6597a3388a708984e02cf789b26bc26c9a78e18bba2e48af` |
+| ` M` | `packages/web/e2e/useful-profile.pw.ts` | `d7758ce4af51c560cd406b4f71f01ca9493e458d` | `cc2644d5ffd34325ebbf8588d6a5ede0e6619f520c819c53fc5a9edea4cebad4` |
+| ` M` | `packages/web/lib/api.ts` | `d2cafef5f72153ea8458ef95723f505de99a64fd` | `897f2847a66225f51b654a6c7060e1c5adfb0ae27caab2a558a5e07aa42ec545` |
+| ` M` | `packages/web/lib/browser-mutations.ts` | `5f4c62ad182e56e8f181669644b5c218a10f9edb` | `405c4c14d6b941e2f3d7914ca5d5a1a5051f3ce91ff2b29fec4dc2134abe82c0` |
+| ` M` | `packages/web/tests/browser-mutations.test.ts` | `397fa19fa368970d670730375bdd2c0abb6e253f` | `3cb04aa73e0178be6193f1bdebd61ecea8a42df6d880d53b498d6a1ca53d8dc3` |
+| ` M` | `packages/web/tests/profile-api.test.ts` | `d17c45ad79d863b1c063ed42387910e3bd7178f0` | `f4f2645bd5bdde5f2cb52347406544671e1933ff5becd4362d54e7920579945b` |
+| ` M` | `packages/web/tests/profile-consumers-integration.test.tsx` | `9c5d7d8b1d7f27ffbb64d5e3b8fba31ac5a90771` | `dd9691b30482dacf2e1c55aaef7233dc4b21d841d5c63883e4e8dff2e6419dfd` |
+| `??` | `packages/web/app/loading.tsx` | `ABSENT` | `2480b0056297d48371489402f7ad25b2f62572c72bb346f80308249fe1594077` |
+| `??` | `packages/web/components/attention-limit-control.tsx` | `ABSENT` | `e98727b13f6af2b34e773e89f939c53c9e34d2dcc3a6fa0eb0606c76b7730662` |
+| `??` | `packages/web/components/profile/attention-card-actions.tsx` | `ABSENT` | `961f18d34822d167cd751beb4301c82eafc0bef9c4f354b5448a5c6d03283ec6` |
+
 <!-- CURRENT-WORKTREE-MANIFEST -->
+
+### Post-acceptance maintenance manifest (shelf-judge-4jx)
+
+After Phase 6 acceptance, the user authorized the Impeccable sidecar-only
+refresh tracked as `shelf-judge-4jx` (closed). This separate maintenance
+updated `.beads/interactions.jsonl`, `.beads/issues.jsonl`, and
+`packages/web/.impeccable/design.json`; it is not a Phase 6 behavior change.
+The accepted Phase 6 manifest above remains the historical acceptance snapshot.
+This post-acceptance manifest captures all current modified/untracked paths,
+exact porcelain status, index blob identity or `ABSENT`, and working-tree
+SHA-256. Notes self-reference is omitted.
+
+| Status | Path | Index | Working tree SHA-256 |
+| --- | --- | --- | --- |
+| ` M` | `.beads/interactions.jsonl` | `24d071bf5305d167ab0273270ff0eac1cce0d17b` | `0ca6703f3f689c0487ef4c2d302fa54c29d0df348013b2af9d3c4e260688f358` |
+| ` M` | `.beads/issues.jsonl` | `ca262653928ee01258e134909f4d66b3bc9cfa5c` | `96637eb9acb5d21caf8f23c63f919db5a32a84cf3ae02e967a955393e9b34b8d` |
+| ` M` | `.lore/work/notes/fitness-ranked-profile-attention.md` | `7b789b503d60bb356e698fc0bb3f8486e0494b23` | `SELF-REFERENCE: omitted` |
+| ` M` | `packages/web/.impeccable/design.json` | `aafc3de1b906d6c8078580c3c707bdf3140e3a06` | `8b28c52421397411598696b31e447de3fa99fe960b1c4a4779ad163fdce27682` |
+| ` M` | `packages/web/app/globals.css` | `49de7038e098ca2211a7f633aa76f67d071a774b` | `3f3e54c48ac8c933c0457c1504f0c97b2e0cb53fd26f25dd67d0447286b1c1d7` |
+| ` M` | `packages/web/app/settings/page.tsx` | `fa226189ed5b18b3f50e9b9ed1af3684d82a7985` | `a397f26929ec5da4aed547b6617620fea2fbed42212e4edff671899f4ec98736` |
+| ` M` | `packages/web/components/profile/attention-section.tsx` | `d5b9d72726b738219941c7a9379d7069917acdfe` | `ab135bd9e47b183ec2314003eb6db1cc0e049e94c8f670724078c6322c555d4d` |
+| ` M` | `packages/web/e2e/fixture-daemon.ts` | `ef8ff6a3d605bf1135f6e0f87f269dc2f43544c7` | `7d5bce8c52f5d66a6597a3388a708984e02cf789b26bc26c9a78e18bba2e48af` |
+| ` M` | `packages/web/e2e/useful-profile.pw.ts` | `d7758ce4af51c560cd406b4f71f01ca9493e458d` | `cc2644d5ffd34325ebbf8588d6a5ede0e6619f520c819c53fc5a9edea4cebad4` |
+| ` M` | `packages/web/lib/api.ts` | `d2cafef5f72153ea8458ef95723f505de99a64fd` | `897f2847a66225f51b654a6c7060e1c5adfb0ae27caab2a558a5e07aa42ec545` |
+| ` M` | `packages/web/lib/browser-mutations.ts` | `5f4c62ad182e56e8f181669644b5c218a10f9edb` | `405c4c14d6b941e2f3d7914ca5d5a1a5051f3ce91ff2b29fec4dc2134abe82c0` |
+| ` M` | `packages/web/tests/browser-mutations.test.ts` | `397fa19fa368970d670730375bdd2c0abb6e253f` | `3cb04aa73e0178be6193f1bdebd61ecea8a42df6d880d53b498d6a1ca53d8dc3` |
+| ` M` | `packages/web/tests/profile-api.test.ts` | `d17c45ad79d863b1c063ed42387910e3bd7178f0` | `f4f2645bd5bdde5f2cb52347406544671e1933ff5becd4362d54e7920579945b` |
+| ` M` | `packages/web/tests/profile-consumers-integration.test.tsx` | `9c5d7d8b1d7f27ffbb64d5e3b8fba31ac5a90771` | `dd9691b30482dacf2e1c55aaef7233dc4b21d841d5c63883e4e8dff2e6419dfd` |
+| `??` | `packages/web/app/loading.tsx` | `ABSENT` | `2480b0056297d48371489402f7ad25b2f62572c72bb346f80308249fe1594077` |
+| `??` | `packages/web/components/attention-limit-control.tsx` | `ABSENT` | `e98727b13f6af2b34e773e89f939c53c9e34d2dcc3a6fa0eb0606c76b7730662` |
+| `??` | `packages/web/components/profile/attention-card-actions.tsx` | `ABSENT` | `961f18d34822d167cd751beb4301c82eafc0bef9c4f354b5448a5c6d03283ec6` |
 
 ## Phase 3 / Phase 4 boundary (authorized 2026-09-21)
 

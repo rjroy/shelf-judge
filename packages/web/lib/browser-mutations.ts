@@ -10,6 +10,9 @@ import {
   OwnerGameNoteReadResultSchema,
   OwnerGameNoteSetRequestSchema,
   OwnerGameNoteClearRequestSchema,
+  AttentionDispositionCommandTemplateSchema,
+  AttentionDispositionCommandSchema,
+  AttentionDispositionCommandResultSchema,
   type IntentionMutationError,
   type IntentionCommand,
   type IntentionMutationResult,
@@ -22,10 +25,120 @@ import {
   type OwnerGameNoteMutationResult,
   type OwnerGameNoteReadResult,
   type OwnerGameNoteSetRequest,
+  type AttentionDispositionCommandTemplate,
+  type AttentionDispositionCommandResult,
 } from "@shelf-judge/shared";
 import { generateBrowserUuid } from "@/lib/browser-uuid";
 
 export type BrowserFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+function profileAttentionCardLimit(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 24;
+}
+
+function attentionResultStatus(result: AttentionDispositionCommandResult): number {
+  if (result.outcome !== "rejected") return 200;
+  switch (result.error.code) {
+    case "validation":
+      return 400;
+    case "game-not-found":
+      return 404;
+    case "stale-version":
+    case "candidate-mismatch":
+    case "command-reuse":
+      return 409;
+    case "ineligible-game":
+      return 422;
+    case "persistence-failure":
+      return 503;
+  }
+}
+
+function attentionResultMatchesRequest(
+  command: ReturnType<typeof AttentionDispositionCommandTemplateSchema.parse> & {
+    commandId: string;
+  },
+  result: AttentionDispositionCommandResult,
+): boolean {
+  if (result.outcome === "accepted" || result.outcome === "replayed") {
+    const { requestPayload } = result.receipt;
+    return (
+      result.receipt.commandId === command.commandId &&
+      result.receipt.operation === command.operation &&
+      result.receipt.gameId === command.gameId &&
+      result.receipt.ruleId === command.ruleId &&
+      result.receipt.ruleVersion === command.ruleVersion &&
+      result.receipt.expectedVersion === command.expectedVersion &&
+      requestPayload.commandId === command.commandId &&
+      requestPayload.operation === command.operation &&
+      requestPayload.gameId === command.gameId &&
+      requestPayload.ruleId === command.ruleId &&
+      requestPayload.ruleVersion === command.ruleVersion &&
+      requestPayload.fingerprint === command.fingerprint &&
+      requestPayload.expectedVersion === command.expectedVersion
+    );
+  }
+  const { error } = result;
+  if (error.code === "command-reuse") return error.commandId === command.commandId;
+  if ("gameId" in error && error.gameId !== command.gameId) return false;
+  if (error.code === "stale-version" && error.expectedVersion !== command.expectedVersion)
+    return false;
+  return true;
+}
+
+export async function respondToAttention(
+  template: AttentionDispositionCommandTemplate,
+  fetcher: BrowserFetch = fetch,
+  createCommandId: () => string = generateBrowserUuid,
+): Promise<AttentionDispositionCommandResult> {
+  const parsedTemplate = AttentionDispositionCommandTemplateSchema.parse(template);
+  const command = AttentionDispositionCommandSchema.parse({
+    ...parsedTemplate,
+    commandId: createCommandId(),
+  });
+  const response = await fetcher(`/api/daemon/profile/attention/${command.operation}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(command),
+  });
+  const result = AttentionDispositionCommandResultSchema.parse(await responseJson(response));
+  if (response.status !== attentionResultStatus(result)) {
+    throw new Error("Daemon returned an incoherent profile attention status.");
+  }
+  if (!attentionResultMatchesRequest(command, result))
+    incoherentResponse("profile attention request");
+  return result;
+}
+
+export async function setProfileAttentionCardLimit(
+  limit: number,
+  fetcher: BrowserFetch = fetch,
+): Promise<number> {
+  if (!profileAttentionCardLimit(limit)) {
+    throw new Error("Profile attention card limit must be an integer from 0 to 24.");
+  }
+  const response = await fetcher("/api/daemon/config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ profileAttentionCardLimit: limit }),
+  });
+  const body = await responseJson(response);
+  if (!response.ok) {
+    const message =
+      typeof body === "object" && body !== null && "error" in body && typeof body.error === "string"
+        ? body.error
+        : `Profile attention card limit update failed (${response.status}).`;
+    throw new Error(message);
+  }
+  const updated =
+    typeof body === "object" && body !== null && "profileAttentionCardLimit" in body
+      ? body.profileAttentionCardLimit
+      : undefined;
+  if (!profileAttentionCardLimit(updated)) {
+    throw new Error("Daemon returned an invalid profile attention card limit.");
+  }
+  return updated;
+}
 
 async function responseJson(response: Response): Promise<unknown> {
   try {

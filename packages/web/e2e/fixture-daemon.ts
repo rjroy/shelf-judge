@@ -1,5 +1,8 @@
 import {
   AxisSchema,
+  AttentionCommandReceiptSchema,
+  AttentionDispositionCommandSchema,
+  AttentionDispositionCommandResultSchema,
   AnalystConfigurationSchema,
   CollectionProfileResultSchema,
   GameDetailWithPurchaseUtilizationSchema,
@@ -13,8 +16,11 @@ import {
   REFLECTION_QUESTION_IDS,
   ReflectionGetResultSchema,
   canonicalizeOwnerGameNoteRequest,
+  attentionDispositionRequestFingerprint,
   calculatePurchaseUtilization,
   type CollectionProfileResult,
+  type CollectionProfileAttentionCard,
+  type AttentionDispositionCommand,
   type Game,
   type GameDetailWithPurchaseUtilization,
   type GameWithPurchaseUtilization,
@@ -54,6 +60,7 @@ const gameId = "game-4";
 
 type Scenario =
   | "profile"
+  | "ranked-attention"
   | "empty"
   | "unavailable"
   | "create"
@@ -157,6 +164,83 @@ const profileFixture: CollectionProfileResult = (() => {
     },
   ];
   return CollectionProfileResultSchema.parse(profile);
+})();
+
+const rankedAttentionGameIds = Array.from(
+  { length: 6 },
+  (_, index) => `55000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+);
+
+const rankedAttentionCards: CollectionProfileAttentionCard[] = (() => {
+  const template =
+    profileFixture.status === "available" ? profileFixture.attention.cards[0] : undefined;
+  if (template === undefined) throw new Error("Expected ranked attention template card");
+  const templateIntention = template.intention;
+  if (templateIntention === null) throw new Error("Expected explicit intention template card");
+  return rankedAttentionGameIds.map((gameId, index) => {
+    const cardNumber = index + 1;
+    const fingerprint = createHash("sha256").update(`ranked-attention-${cardNumber}`).digest("hex");
+    const command = (operation: "not-now" | "intentional") => ({
+      operation,
+      gameId,
+      ruleId: "explicit-intention",
+      ruleVersion: 1,
+      fingerprint,
+      expectedVersion: 0,
+    });
+    const actions: CollectionProfileAttentionCard["actions"] = [
+      {
+        action: "resolve-intention",
+        operationId: "shelf.game.intention.complete",
+        destination: { gameId, operationId: "shelf.game.intention.complete" },
+        command: null,
+      },
+      {
+        action: "retire-intention",
+        operationId: "shelf.game.intention.retire",
+        destination: { gameId, operationId: "shelf.game.intention.retire" },
+        command: null,
+      },
+      {
+        action: "not-now",
+        operationId: "shelf.profile.attention.not-now",
+        destination: { gameId, operationId: "shelf.profile.attention.not-now" },
+        command: command("not-now"),
+      },
+      {
+        action: "intentional",
+        operationId: "shelf.profile.attention.intentional",
+        destination: { gameId, operationId: "shelf.profile.attention.intentional" },
+        command: command("intentional"),
+      },
+      {
+        action: "open-game",
+        operationId: "shelf.game.get",
+        destination: { gameId, operationId: "shelf.game.get" },
+        command: null,
+      },
+    ];
+    return {
+      ...structuredClone(template),
+      id: `attention:${gameId}:explicit-intention`,
+      gameId,
+      gameName: `Ranked decision ${cardNumber}`,
+      question: `Question for ranked decision ${cardNumber}?`,
+      reason: `Daemon-supplied reason ${cardNumber}.`,
+      scoreExplanation: `Daemon-supplied score explanation ${cardNumber}.`,
+      actions,
+      intention: {
+        ...templateIntention,
+        gameId,
+        intentionId: `ranked-intention-${cardNumber}`,
+      },
+      evidence: {
+        ...template.evidence,
+        intentionId: `ranked-intention-${cardNumber}`,
+      },
+      nonClockFingerprint: fingerprint,
+    };
+  });
 })();
 
 function baseGame(): Game {
@@ -519,6 +603,14 @@ let reflectionState: ReflectionGetResult = createReflectionState();
 let activeReflectionBatch: { batchId: string; questionIds: ReflectionQuestionId[] } | null = null;
 let reflectionFixtureMode: "normal" | "malformed" | "configuration-race" = "normal";
 let reflectionCurrentGameName: string | null = null;
+let profileAttentionCardLimit = 6;
+let attentionCommandBodies: Array<Record<string, unknown>> = [];
+let attentionReceipts = new Map<string, ReturnType<typeof AttentionCommandReceiptSchema.parse>>();
+let suppressedAttentionGames = new Set<string>();
+let attentionProfileGets = 0;
+let attentionConfigGets = 0;
+let attentionConfigPuts = 0;
+let attentionConfigPutBodies: Array<Record<string, unknown>> = [];
 const analystCancelledConversations = new Set<string>();
 let profileNavigationTelemetry = createProfileNavigationTelemetry();
 
@@ -922,6 +1014,14 @@ function reset(next: Scenario): void {
   reflectionFixtureMode = "normal";
   reflectionCurrentGameName = null;
   profileNavigationTelemetry = createProfileNavigationTelemetry();
+  profileAttentionCardLimit = 6;
+  attentionCommandBodies = [];
+  attentionReceipts = new Map();
+  suppressedAttentionGames = new Set();
+  attentionProfileGets = 0;
+  attentionConfigGets = 0;
+  attentionConfigPuts = 0;
+  attentionConfigPutBodies = [];
   analystCancelledConversations.clear();
   persistOwnerNoteState();
   if (next === "manual-values") {
@@ -934,7 +1034,16 @@ function reset(next: Scenario): void {
 
 function detail(requestedGameId = gameId): GameDetailWithPurchaseUtilization {
   const definition = collectionDefinitions.find(({ id }) => id === requestedGameId);
-  let detailGame = definition === undefined ? game : collectionGame(definition);
+  const rankedAttentionCard =
+    scenario === "ranked-attention"
+      ? rankedAttentionCards.find(({ gameId: candidateId }) => candidateId === requestedGameId)
+      : undefined;
+  let detailGame =
+    definition !== undefined
+      ? collectionGame(definition)
+      : rankedAttentionCard !== undefined
+        ? { ...baseGame(), id: requestedGameId, name: rankedAttentionCard.gameName }
+        : game;
   if (requestedGameId === "game-1" && reflectionCurrentGameName !== null) {
     detailGame = { ...detailGame, name: reflectionCurrentGameName };
   }
@@ -974,7 +1083,8 @@ function detail(requestedGameId = gameId): GameDetailWithPurchaseUtilization {
           })
         : utilization(detailGame, definition),
     intentions: {
-      activeIntention: requestedGameId === gameId ? active : null,
+      activeIntention:
+        requestedGameId === gameId ? active : (rankedAttentionCard?.intention ?? null),
       resolvedHistory: requestedGameId === gameId ? history : [],
     },
   });
@@ -1206,6 +1316,7 @@ async function handle(request: Request): Promise<Response> {
     const requested = (await body(request)).scenario;
     if (
       requested !== "profile" &&
+      requested !== "ranked-attention" &&
       requested !== "empty" &&
       requested !== "unavailable" &&
       requested !== "create" &&
@@ -1223,6 +1334,46 @@ async function handle(request: Request): Promise<Response> {
 
   if (path === "/api/test/profile-navigation-telemetry" && request.method === "GET") {
     return json(profileNavigationTelemetry);
+  }
+
+  if (path === "/api/test/attention-state" && request.method === "GET") {
+    return json({
+      profileGets: attentionProfileGets,
+      configGets: attentionConfigGets,
+      configPuts: attentionConfigPuts,
+      configPutBodies: attentionConfigPutBodies,
+      configLimit: profileAttentionCardLimit,
+      commandBodies: attentionCommandBodies,
+      suppressedGameIds: [...suppressedAttentionGames],
+      receipts: [...attentionReceipts.values()],
+    });
+  }
+
+  if (path === "/api/config" && request.method === "GET") {
+    attentionConfigGets += 1;
+    return json({ profileAttentionCardLimit });
+  }
+
+  if (path === "/api/config" && request.method === "PUT") {
+    attentionConfigPuts += 1;
+    const requestBody = await body(request);
+    attentionConfigPutBodies.push(requestBody);
+    const limit = requestBody.profileAttentionCardLimit;
+    if (
+      Object.keys(requestBody).length !== 1 ||
+      typeof limit !== "number" ||
+      !Number.isSafeInteger(limit) ||
+      limit < 0 ||
+      limit > 24
+    ) {
+      return json({ error: "profileAttentionCardLimit must be an integer from 0 to 24" }, 400);
+    }
+    profileAttentionCardLimit = limit;
+    return json({ profileAttentionCardLimit });
+  }
+
+  if (path === "/api/collection/entertainment-benchmark" && request.method === "GET") {
+    return json({ entertainmentBenchmark: null });
   }
 
   if (path === "/api/test/owner-note-state") {
@@ -1357,13 +1508,128 @@ async function handle(request: Request): Promise<Response> {
     return json({ ok: true });
   }
 
+  const attentionCommandMatch = path.match(/^\/api\/profile\/attention\/(not-now|intentional)$/);
+  if (attentionCommandMatch !== null && request.method === "POST") {
+    const requestBody = await body(request);
+    attentionCommandBodies.push({ method: request.method, path, body: requestBody });
+    const parsed = AttentionDispositionCommandSchema.safeParse(requestBody);
+    const operation = attentionCommandMatch[1];
+    if (!parsed.success || parsed.data.operation !== operation) {
+      return json(
+        AttentionDispositionCommandResultSchema.parse({
+          outcome: "rejected",
+          error: { code: "validation" },
+        }),
+        400,
+      );
+    }
+    const command: AttentionDispositionCommand = parsed.data;
+    const replay = attentionReceipts.get(command.commandId);
+    if (replay !== undefined) {
+      return json(
+        AttentionDispositionCommandResultSchema.parse({ outcome: "replayed", receipt: replay }),
+      );
+    }
+    const card = rankedAttentionCards.find(
+      ({ gameId: candidateId }) => candidateId === command.gameId,
+    );
+    const template = card?.actions.find(({ action }) => action === command.operation)?.command;
+    if (
+      template === null ||
+      template === undefined ||
+      template.ruleId !== command.ruleId ||
+      template.ruleVersion !== command.ruleVersion ||
+      template.fingerprint !== command.fingerprint ||
+      template.expectedVersion !== command.expectedVersion
+    ) {
+      return json(
+        AttentionDispositionCommandResultSchema.parse({
+          outcome: "rejected",
+          error: { code: "candidate-mismatch", gameId: command.gameId },
+        }),
+        409,
+      );
+    }
+    const accepted =
+      command.operation === "not-now"
+        ? {
+            gameId: command.gameId,
+            kind: "snoozed" as const,
+            ruleId: command.ruleId,
+            ruleVersion: command.ruleVersion,
+            fingerprint: command.fingerprint,
+            responseAt: "2026-08-28T10:00:00.000Z",
+            expiresAt: "2026-09-27T10:00:00.000Z",
+            version: command.expectedVersion + 1,
+          }
+        : {
+            gameId: command.gameId,
+            kind: "intentional" as const,
+            ruleId: command.ruleId,
+            ruleVersion: command.ruleVersion,
+            fingerprint: command.fingerprint,
+            version: command.expectedVersion + 1,
+          };
+    const receipt = AttentionCommandReceiptSchema.parse({
+      receiptType: "attention-disposition",
+      commandId: command.commandId,
+      operation: command.operation,
+      gameId: command.gameId,
+      ruleId: command.ruleId,
+      ruleVersion: command.ruleVersion,
+      expectedVersion: command.expectedVersion,
+      requestFingerprint: attentionDispositionRequestFingerprint(command),
+      requestPayload: command,
+      accepted,
+    });
+    attentionReceipts.set(command.commandId, receipt);
+    suppressedAttentionGames.add(command.gameId);
+    return json(AttentionDispositionCommandResultSchema.parse({ outcome: "accepted", receipt }));
+  }
+
   if (path === "/api/profile" && request.method === "GET") {
+    attentionProfileGets += 1;
     const response =
       scenario === "empty"
         ? emptyUsefulProfileFixture
         : scenario === "unavailable"
           ? unavailableUsefulProfileFixture
-          : profileFixture;
+          : scenario === "ranked-attention"
+            ? (() => {
+                const profile = structuredClone(profileFixture);
+                if (profile.status !== "available") return profile;
+                for (const entityClass of ["mechanic", "designer", "artist"] as const) {
+                  const result = profile.identity.classes[entityClass];
+                  const exclusionTemplate = result.exclusions[0];
+                  if (exclusionTemplate === undefined) {
+                    throw new Error(`Expected ${entityClass} exclusion fixture`);
+                  }
+                  result.metadataReadiness.ownedGameCount += rankedAttentionCards.length;
+                  result.metadataReadiness.completeGameCount += rankedAttentionCards.length;
+                  result.exclusions.push(
+                    ...rankedAttentionCards.map((card) => ({
+                      ...structuredClone(exclusionTemplate),
+                      gameId: card.gameId,
+                      gameName: card.gameName,
+                    })),
+                  );
+                }
+                const cards = rankedAttentionCards
+                  .filter(({ gameId: candidateId }) => !suppressedAttentionGames.has(candidateId))
+                  .slice(0, profileAttentionCardLimit);
+                profile.attention = {
+                  state:
+                    profileAttentionCardLimit === 0
+                      ? "disabled"
+                      : cards.length > 0
+                        ? "ranked"
+                        : "no-winner",
+                  cardLimit: profileAttentionCardLimit,
+                  cards,
+                };
+                return profile;
+              })()
+            : profileFixture;
     return json(CollectionProfileResultSchema.parse(response));
   }
 

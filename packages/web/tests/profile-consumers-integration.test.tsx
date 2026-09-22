@@ -9,6 +9,7 @@ import { DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY } from "@shelf-judge/shared";
 import { loadProfileOverview, ProfileOverviewContent, type ProfileOverviewState } from "@/app/page";
 import { IdentitySection } from "@/components/profile/identity-section";
 import { AttentionSection } from "@/components/profile/attention-section";
+import { AttentionLimitControl } from "@/components/attention-limit-control";
 import {
   canonicalUsefulProfileFixtures,
   emptyUsefulProfileFixture,
@@ -312,6 +313,14 @@ describe("identity state distinctions", () => {
 });
 
 describe("attention presentation", () => {
+  test("settings renders an explicit server-supplied integer and accessible save feedback region", () => {
+    const html = renderToStaticMarkup(<AttentionLimitControl initialLimit={0} />);
+    expect(html).toContain('type="number"');
+    expect(html).toContain('min="0"');
+    expect(html).toContain('max="24"');
+    expect(html).toContain('value="0"');
+    expect(html).toContain('aria-live="polite"');
+  });
   test("renders daemon-ranked cards and their supplied explanation", () => {
     const html = renderToStaticMarkup(
       <AttentionSection attention={usefulProfileFixture.attention} collectionState="populated" />,
@@ -327,6 +336,7 @@ describe("attention presentation", () => {
       "Stable intention ID",
       "intention-1",
       "shelf.game.intention.complete",
+      "Manage intention",
       "command template supplied",
     ])
       expect(html).toContain(text);
@@ -354,6 +364,37 @@ describe("attention presentation", () => {
     expect(html.indexOf("Second Game")).toBeLessThan(html.indexOf("Heat"));
     expect(html.match(/Stable intention ID/g)).toHaveLength(1);
     expect(html).toContain("2 plays; last played 2025-01-01");
+  });
+
+  test("renders all six daemon cards in order with supplied decision, evidence, score, and actions", () => {
+    const cards = Array.from({ length: 6 }, (_, index) => {
+      const card = structuredClone(usefulProfileFixture.attention.cards[0]);
+      card.id = `rank-${index}`;
+      card.gameName = `Rank ${index}`;
+      card.question = `Decision ${index}`;
+      card.reason = `Reason ${index}`;
+      card.scoreExplanation = `Score detail ${index}`;
+      card.intention = null;
+      card.actions = index === 0 ? card.actions : [];
+      return card;
+    });
+    const html = renderToStaticMarkup(
+      <AttentionSection
+        attention={{ ...usefulProfileFixture.attention, cards }}
+        collectionState="populated"
+      />,
+    );
+    expect(html.match(/<article id="rank-/g)).toHaveLength(6);
+    expect(cards.map(({ id }) => html.indexOf(`id="${id}"`))).toEqual(
+      [...cards.keys()].map((index) => html.indexOf(`id="rank-${index}"`)),
+    );
+    for (let index = 0; index < 6; index++) {
+      expect(html).toContain(`Reason ${index}`);
+      expect(html).toContain(`Decision ${index}`);
+      expect(html).toContain(`Score detail ${index}`);
+    }
+    expect(html).toContain('href="/games/game-4"');
+    expect(html.match(/Not now/g)).toHaveLength(1);
   });
 
   test.each([

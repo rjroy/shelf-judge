@@ -4,6 +4,7 @@ import type {
   CollectionProfileAttentionCard,
   CollectionProfileAttentionEvidence,
 } from "@shelf-judge/shared";
+import { AttentionCardActions } from "./attention-card-actions";
 
 function intentionKindLabel(
   kind: NonNullable<CollectionProfileAttentionCard["intention"]>["kind"],
@@ -39,25 +40,33 @@ function AttentionCard({ card }: { card: CollectionProfileAttentionCard }) {
       <p className="profile-status-label">{card.gameName}</p>
 
       <div className="profile-actions">
-        {card.actions.map((action) =>
-          action.operationId === "shelf.game.get" ? (
-            <Link
-              key={action.action}
-              className="btn btn-primary"
-              href={`/games/${action.destination.gameId}`}
-            >
-              Open {card.gameName}
-            </Link>
-          ) : (
-            <span
-              key={action.action}
-              className="btn btn-secondary"
-              aria-label={`${action.action} action`}
-            >
-              {action.action}
-            </span>
-          ),
-        )}
+        {card.actions
+          .filter((action) => action.command === null)
+          .map((action) =>
+            action.operationId === "shelf.game.get" ? (
+              <Link
+                key={action.action}
+                className="btn btn-primary"
+                href={`/games/${action.destination.gameId}`}
+              >
+                Open {card.gameName}
+              </Link>
+            ) : (
+              <Link
+                key={action.action}
+                className="btn btn-secondary"
+                href={`/games/${action.destination.gameId}`}
+                aria-label={`${action.action} for ${card.gameName}`}
+              >
+                {action.action === "resolve-intention"
+                  ? "Manage intention"
+                  : action.action === "retire-intention"
+                    ? "Intention history"
+                    : action.action}
+              </Link>
+            ),
+          )}
+        <AttentionCardActions actions={card.actions} />
       </div>
 
       <details>
@@ -134,7 +143,7 @@ function AttentionCard({ card }: { card: CollectionProfileAttentionCard }) {
           <ul>
             {card.actions.map((action) => (
               <li key={`${action.action}-detail`}>
-                {action.action} · {action.operationId} · destination {action.destination.gameId}
+                {action.action} · {action.operationId}
                 {action.command !== null && " · command template supplied"}
               </li>
             ))}

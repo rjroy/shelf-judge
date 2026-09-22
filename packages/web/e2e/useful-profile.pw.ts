@@ -49,6 +49,23 @@ async function reset(page: Page, scenario: string): Promise<void> {
   expect(response.ok()).toBe(true);
 }
 
+interface AttentionFixtureTelemetry {
+  profileGets: number;
+  configGets: number;
+  configPuts: number;
+  configPutBodies: Array<Record<string, unknown>>;
+  configLimit: number;
+  commandBodies: Array<{ method: string; path: string; body: Record<string, unknown> }>;
+  suppressedGameIds: string[];
+  receipts: Array<Record<string, unknown>>;
+}
+
+async function attentionFixtureTelemetry(page: Page): Promise<AttentionFixtureTelemetry> {
+  const response = await page.request.get("/api/daemon/test/attention-state");
+  expect(response.ok()).toBe(true);
+  return (await response.json()) as AttentionFixtureTelemetry;
+}
+
 async function applyProjectViewport(page: Page, projectName: string): Promise<void> {
   if (projectName.includes("200-percent")) {
     const metrics = await page.evaluate(() => ({
@@ -334,6 +351,8 @@ test.describe("useful profile responsive release gate", () => {
 
     await expect(page.getByRole("heading", { level: 1, name: "Collection Profile" })).toBeVisible();
     await expect(page.getByRole("heading", { level: 2 })).toHaveCount(2);
+    const attentionCards = page.locator(".attention-card");
+    await expect(attentionCards).toHaveCount(1);
     await expect(page.getByText("Worker Placement", { exact: true }).first()).toBeVisible();
     expect(await overviewEntityNames(page)).toEqual([
       "Worker Placement",
@@ -354,20 +373,27 @@ test.describe("useful profile responsive release gate", () => {
       ]);
     }
     await expect(page.getByRole("link", { name: "View all mechanics and evidence" })).toBeVisible();
+    const telemetryBeforeView = await attentionFixtureTelemetry(page);
     const attentionEvidence = page.locator(".attention-card details");
     await expect(attentionEvidence).not.toHaveAttribute("open");
     await expect(page.getByRole("heading", { name: "Evidence", exact: true })).toBeHidden();
-    await expect(page.getByRole("heading", { name: "Available responses" })).toBeHidden();
-    await attentionEvidence.getByText("Evidence and available responses", { exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Supplied actions" })).toBeHidden();
+    await attentionEvidence
+      .locator("summary")
+      .getByText("Evidence, score, and supplied actions", { exact: true })
+      .click();
     await expect(attentionEvidence).toHaveAttribute("open", "");
     await expect(page.getByRole("heading", { name: "Evidence", exact: true })).toBeVisible();
-    await expect(page.getByText("Evidence warning:", { exact: false })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Available responses" })).toBeVisible();
-    await expect(page.locator(".attention-responses li")).toHaveCount(4);
-    await expect(page.getByText("Leave it visible", { exact: false })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Score explanation" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Supplied actions" })).toBeVisible();
+    await expect(page.locator(".attention-card details ul li")).toHaveCount(5);
     const requiredText = await page.locator(".profile-page").innerText();
     await page.locator(".attention-card").hover();
     expect(await page.locator(".profile-page").innerText()).toBe(requiredText);
+    const telemetryAfterView = await attentionFixtureTelemetry(page);
+    expect(telemetryAfterView.profileGets).toBe(telemetryBeforeView.profileGets);
+    expect(telemetryAfterView.commandBodies).toEqual([]);
+    expect(telemetryAfterView.suppressedGameIds).toEqual([]);
     await expectNoHorizontalOverflow(page);
     await expectMinimumTargets(page);
     if (testInfo.project.name.includes("200-percent")) {
@@ -385,6 +411,159 @@ test.describe("useful profile responsive release gate", () => {
       ".profile-actions .btn-secondary",
     ]);
     await expectAllTextContrast(page, ".profile-page");
+  });
+
+  test("six daemon-supplied ranked cards reflow in received order across desktop and mobile widths", async ({
+    page,
+  }, testInfo) => {
+    await reset(page, "ranked-attention");
+    await page.goto("/");
+    await applyProjectViewport(page, testInfo.project.name);
+    const cards = page.locator(".attention-card");
+    await expect(cards).toHaveCount(6);
+    expect(
+      await cards.evaluateAll((nodes) =>
+        nodes.map((node) => node.querySelector("h3")?.textContent),
+      ),
+    ).toEqual(
+      Array.from({ length: 6 }, (_, index) => `Question for ranked decision ${index + 1}?`),
+    );
+    expect(
+      await cards.evaluateAll((nodes) => nodes.map((node) => node.querySelector("p")?.textContent)),
+    ).toEqual(Array.from({ length: 6 }, (_, index) => `Daemon-supplied reason ${index + 1}.`));
+    expect(await cards.evaluateAll((nodes) => nodes.map((node) => node.id))).toEqual(
+      Array.from(
+        { length: 6 },
+        (_, index) =>
+          `attention:55000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}:explicit-intention`,
+      ),
+    );
+    const columns = await page
+      .locator(".attention-list")
+      .evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length);
+    expect(columns).toBe(
+      testInfo.project.name.includes("mobile") || testInfo.project.name.includes("200-percent")
+        ? 1
+        : 3,
+    );
+    const tops = await cards.evaluateAll((nodes) =>
+      nodes.map((node) => Math.round(node.getBoundingClientRect().top)),
+    );
+    if (columns === 3) {
+      expect(tops[0]).toBe(tops[1]);
+      expect(tops[1]).toBe(tops[2]);
+      expect(tops[3]).toBe(tops[4]);
+      expect(tops[4]).toBe(tops[5]);
+      expect(tops[3]).toBeGreaterThan(tops[0]);
+    } else {
+      expect(tops[1]).toBeGreaterThan(tops[0]);
+    }
+  });
+
+  test("ranked intention management destination opens the matching game and control", async ({
+    page,
+  }) => {
+    await reset(page, "ranked-attention");
+    await page.goto("/");
+    const firstCard = page.locator(".attention-card").first();
+    const managementLink = firstCard.getByRole("link", {
+      name: "resolve-intention for Ranked decision 1",
+    });
+    await expect(managementLink).toHaveAttribute(
+      "href",
+      "/games/55000000-0000-4000-8000-000000000001",
+    );
+    await Promise.all([
+      page.waitForURL("**/games/55000000-0000-4000-8000-000000000001"),
+      managementLink.click(),
+    ]);
+    await expect(page.getByRole("heading", { level: 1, name: "Ranked decision 1" })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Mark complete from personal knowledge" }),
+    ).toBeVisible();
+  });
+
+  for (const operation of ["not-now", "intentional"] as const) {
+    test(`relays ${operation} command and reconciles from the daemon receipt`, async ({ page }) => {
+      await reset(page, "ranked-attention");
+      await page.goto("/");
+      const firstCard = page.locator(".attention-card").first();
+      await expect(firstCard).toContainText("Ranked decision 1");
+      const buttonName = operation === "not-now" ? "Not now" : "I’ll keep this in mind";
+      const [commandRequest] = await Promise.all([
+        page.waitForRequest(
+          (request) =>
+            request.method() === "POST" &&
+            new URL(request.url()).pathname === `/api/daemon/profile/attention/${operation}`,
+        ),
+        firstCard.getByRole("button", { name: buttonName, exact: true }).click(),
+      ]);
+      const command = commandRequest.postDataJSON() as Record<string, unknown>;
+      expect(command).toEqual({
+        commandId: expect.stringMatching(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+        ),
+        operation,
+        gameId: "55000000-0000-4000-8000-000000000001",
+        ruleId: "explicit-intention",
+        ruleVersion: 1,
+        fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+        expectedVersion: 0,
+      });
+      await expect(page.locator(".attention-card")).toHaveCount(5);
+      await expect(page.locator(".attention-card").first()).toContainText("Ranked decision 2");
+      const telemetry = await attentionFixtureTelemetry(page);
+      expect(telemetry.commandBodies).toEqual([
+        { method: "POST", path: `/api/profile/attention/${operation}`, body: command },
+      ]);
+      expect(telemetry.suppressedGameIds).toEqual(["55000000-0000-4000-8000-000000000001"]);
+      expect(telemetry.profileGets).toBeGreaterThanOrEqual(2);
+      expect(telemetry.receipts).toHaveLength(1);
+      expect(telemetry.receipts[0]).toMatchObject({
+        receiptType: "attention-disposition",
+        commandId: command.commandId,
+        operation,
+        gameId: command.gameId,
+        requestPayload: command,
+        accepted: { gameId: command.gameId, ruleId: "explicit-intention", version: 1 },
+      });
+    });
+  }
+
+  test("settings persist the daemon-validated cap and change the visible ranked slice", async ({
+    page,
+  }) => {
+    await reset(page, "ranked-attention");
+    await page.goto("/settings");
+    const limit = page.getByLabel("Profile attention cards");
+    await expect(limit).toHaveValue("6");
+    const telemetryBeforeSave = await attentionFixtureTelemetry(page);
+    const invalidResponse = await page.request.put("/api/daemon/config", {
+      data: { profileAttentionCardLimit: 25 },
+    });
+    expect(invalidResponse.status()).toBe(400);
+    await expect(invalidResponse).not.toBeOK();
+    const invalidBody = (await invalidResponse.json()) as { error: string };
+    expect(invalidBody.error).toContain("integer from 0 to 24");
+    await expect(limit).toHaveValue("6");
+    await limit.fill("2");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByRole("status")).toContainText("Attention card limit saved.");
+    const telemetryAfterSave = await attentionFixtureTelemetry(page);
+    expect(telemetryAfterSave.configLimit).toBe(2);
+    expect(telemetryAfterSave.configPuts - telemetryBeforeSave.configPuts).toBe(2);
+    expect(
+      telemetryAfterSave.configPutBodies.slice(telemetryBeforeSave.configPutBodies.length),
+    ).toEqual([{ profileAttentionCardLimit: 25 }, { profileAttentionCardLimit: 2 }]);
+    expect(telemetryBeforeSave.configGets).toBeGreaterThan(0);
+    await page.goto("/");
+    const cards = page.locator(".attention-card");
+    await expect(cards).toHaveCount(2);
+    expect(
+      await cards.evaluateAll((nodes) =>
+        nodes.map((node) => node.textContent?.match(/Ranked decision \d+/)?.[0]),
+      ),
+    ).toEqual(["Ranked decision 1", "Ranked decision 2"]);
   });
 
   test("entity explorer and axis diagnostics remain keyboard operable", async ({
@@ -540,9 +719,11 @@ test.describe("useful profile responsive release gate", () => {
     await page.evaluate(() => localStorage.setItem("shelf-judge-theme", "dark"));
     await page.reload();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-    const explorerText = await page.locator(".entity-explorer").innerText();
-    await page.locator(".entity-evidence").hover();
-    expect(await page.locator(".entity-explorer").innerText()).toBe(explorerText);
+    const entityExplorer = page.locator(".entity-explorer:visible").first();
+    const entityEvidence = page.locator(".entity-evidence:visible").first();
+    const explorerText = await entityExplorer.innerText();
+    await entityEvidence.hover();
+    expect(await entityExplorer.innerText()).toBe(explorerText);
     await expectNoHorizontalOverflow(page);
     await expectMinimumTargets(page);
     if (testInfo.project.name === "chromium-mobile") {
@@ -579,50 +760,93 @@ test.describe("useful profile responsive release gate", () => {
     );
     const context = await browser.newContext({
       baseURL: webUrl,
-      javaScriptEnabled: false,
       viewport: { width: 375, height: 812 },
     });
-    const page = await context.newPage();
     try {
-      await reset(page, "profile");
-      await page.goto("/profile/entities");
-      await page.getByLabel("Find an entity or supporting game").fill("Variant 010");
-      await page.getByRole("button", { name: "Search" }).click();
-      await expect(page).toHaveURL(/class=mechanic&q=Variant\+010/);
-      await expect(page.locator(".entity-index-row")).toHaveCount(1);
+      const resetPage = await context.newPage();
+      await reset(resetPage, "profile");
+      await resetPage.close();
+      const submitWithoutScripts = async (
+        prepare: (page: Page) => Promise<void>,
+        submitButton: (page: Page) => Locator,
+        expected: (url: URL) => boolean,
+      ): Promise<void> => {
+        const page = await context.newPage();
+        try {
+          await page.goto("/profile/entities");
+          const closeNavigation = page.getByRole("button", { name: "Close navigation" });
+          if (await closeNavigation.isVisible()) await page.keyboard.press("Escape");
+          await prepare(page);
+          const cdp = await context.newCDPSession(page);
+          await cdp.send("Emulation.setScriptExecutionDisabled", { value: true });
+          const [request] = await Promise.all([
+            page.waitForRequest(
+              (request) =>
+                request.isNavigationRequest() &&
+                request.method() === "GET" &&
+                new URL(request.url()).pathname === "/profile/entities",
+            ),
+            page.waitForURL((url) => expected(url)),
+            submitButton(page).click(),
+          ]);
+          expect(request.method()).toBe("GET");
+          expect(expected(new URL(page.url()))).toBe(true);
+          await cdp.detach();
+        } finally {
+          await page.close();
+        }
+      };
 
-      await page.getByLabel("Evidence", { exact: true }).selectOption("supported");
-      await page.getByRole("button", { name: "Apply evidence filter" }).click();
-      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({
-        class: "mechanic",
-        q: "Variant 010",
-        support: "supported",
-      });
+      await submitWithoutScripts(
+        async (page) => {
+          await page.getByLabel("Find an entity or supporting game").fill("Variant 010");
+        },
+        (page) => page.locator(".entity-search-form button[type=submit]"),
+        (url) =>
+          url.searchParams.get("q") === "Variant 010" &&
+          url.searchParams.get("class") === "mechanic",
+      );
+      await submitWithoutScripts(
+        async (page) => {
+          await page.getByLabel("Evidence", { exact: true }).selectOption("supported");
+        },
+        (page) => page.locator(".entity-select-form").nth(0).locator("button[type=submit]"),
+        (url) =>
+          url.searchParams.get("support") === "supported" &&
+          url.searchParams.get("class") === "mechanic",
+      );
+      await submitWithoutScripts(
+        async (page) => {
+          await page.getByLabel("Order", { exact: true }).selectOption("name");
+        },
+        (page) => page.locator(".entity-select-form").nth(1).locator("button[type=submit]"),
+        (url) =>
+          url.searchParams.get("order") === "name" && url.searchParams.get("class") === "mechanic",
+      );
 
-      await page.getByLabel("Order", { exact: true }).selectOption("bestFit");
-      await page.getByRole("button", { name: "Apply order" }).click();
-      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({
-        class: "mechanic",
-        q: "Variant 010",
-        support: "supported",
-      });
-      await expect(page.getByLabel("Order", { exact: true })).toHaveValue("bestFit");
-
-      await page.getByLabel("Order", { exact: true }).selectOption("name");
-      await page.getByRole("button", { name: "Apply order" }).click();
-      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({
-        class: "mechanic",
-        order: "name",
-        q: "Variant 010",
-        support: "supported",
-      });
-
-      await page.getByRole("link", { name: "Designers 0" }).click();
-      await expect(page).toHaveURL(/class=designer&order=name$/);
-      await page.getByRole("link", { name: "Mechanics 168" }).click();
-      await page.locator(".entity-index-row").first().click();
-      await expect(page).toHaveURL(/class=mechanic&entity=102&order=name/);
-      await expect(page.getByRole("heading", { name: "Solo", exact: true })).toBeVisible();
+      const classNavigation = await context.newPage();
+      try {
+        await classNavigation.goto("/profile/entities");
+        const cdp = await context.newCDPSession(classNavigation);
+        await cdp.send("Emulation.setScriptExecutionDisabled", { value: true });
+        const designerResponse = await classNavigation.goto("/profile/entities?class=designer");
+        expect(designerResponse?.status()).toBe(200);
+        expect(designerResponse?.request().method()).toBe("GET");
+        expect(new URL(classNavigation.url()).searchParams.get("class")).toBe("designer");
+        const selectedResponse = await classNavigation.goto(
+          "/profile/entities?class=mechanic&entity=102&order=name",
+        );
+        expect(selectedResponse?.status()).toBe(200);
+        expect(selectedResponse?.request().method()).toBe("GET");
+        expect(Object.fromEntries(new URL(classNavigation.url()).searchParams)).toEqual({
+          class: "mechanic",
+          entity: "102",
+          order: "name",
+        });
+        await cdp.detach();
+      } finally {
+        await classNavigation.close();
+      }
     } finally {
       await context.close();
     }

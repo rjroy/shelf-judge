@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import type { Game, PlayIntention } from "@shelf-judge/shared";
+import {
+  attentionDispositionRequestFingerprint,
+  type AttentionDispositionCommandTemplate,
+  type Game,
+  type PlayIntention,
+} from "@shelf-judge/shared";
 import { canonicalIntentionMutationCases } from "../../shared/tests/fixtures/intention-mutation";
 import {
   changeOwnership,
@@ -12,6 +17,8 @@ import {
   resolveIntention,
   setAdditionalBggIds,
   setOwnerGameNote,
+  respondToAttention,
+  setProfileAttentionCardLimit,
 } from "@/lib/browser-mutations";
 
 function jsonResponse(body: object, status = 200): Response {
@@ -93,6 +100,115 @@ async function rejection(action: () => Promise<unknown>): Promise<unknown> {
 }
 
 describe("browser mutation boundaries", () => {
+  test("posts attention commands and validates accepted and replay receipts", async () => {
+    const commandId = "44000000-0000-4000-8000-000000000001";
+    const template: AttentionDispositionCommandTemplate = {
+      operation: "intentional",
+      gameId: "44000000-0000-4000-8000-000000000002",
+      ruleId: "low-fit",
+      ruleVersion: 1,
+      fingerprint: "a".repeat(64),
+      expectedVersion: 0,
+    };
+    const request = { ...template, commandId };
+    const result = {
+      outcome: "accepted" as const,
+      receipt: {
+        receiptType: "attention-disposition" as const,
+        commandId,
+        operation: template.operation,
+        gameId: template.gameId,
+        ruleId: template.ruleId,
+        ruleVersion: template.ruleVersion,
+        expectedVersion: template.expectedVersion,
+        requestFingerprint: attentionDispositionRequestFingerprint(request),
+        requestPayload: request,
+        accepted: {
+          gameId: template.gameId,
+          kind: "intentional" as const,
+          ruleId: template.ruleId,
+          ruleVersion: template.ruleVersion,
+          fingerprint: template.fingerprint,
+          version: 1,
+        },
+      },
+    };
+    const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    const fetcher = (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input, init });
+      return Promise.resolve(jsonResponse(result));
+    };
+    expect(await respondToAttention(template, fetcher, () => commandId)).toEqual(result);
+    expect(requests[0]?.input).toBe("/api/daemon/profile/attention/intentional");
+    expect(requestBody(requests[0]?.init)).toEqual(request);
+    expect(
+      await respondToAttention(
+        template,
+        () => Promise.resolve(jsonResponse({ ...result, outcome: "replayed" })),
+        () => commandId,
+      ),
+    ).toMatchObject({ outcome: "replayed" });
+  });
+
+  test("preserves coherent stale attention rejection and rejects incoherent receipts", async () => {
+    const commandId = "44000000-0000-4000-8000-000000000001";
+    const template: AttentionDispositionCommandTemplate = {
+      operation: "not-now",
+      gameId: "44000000-0000-4000-8000-000000000002",
+      ruleId: "low-fit",
+      ruleVersion: 2,
+      fingerprint: "b".repeat(64),
+      expectedVersion: 4,
+    };
+    const stale = {
+      outcome: "rejected" as const,
+      error: { code: "stale-version" as const, gameId: template.gameId, expectedVersion: 4 },
+    };
+    expect(
+      await respondToAttention(
+        template,
+        () => Promise.resolve(jsonResponse(stale, 409)),
+        () => commandId,
+      ),
+    ).toEqual(stale);
+    expect(
+      respondToAttention(
+        { ...template, extra: true } as never,
+        () => Promise.resolve(jsonResponse(stale, 409)),
+        () => commandId,
+      ),
+    ).rejects.toThrow();
+  });
+
+  test("validates and updates attention card limit without losing server errors", async () => {
+    let calls = 0;
+    expect(
+      setProfileAttentionCardLimit(25, () => {
+        calls += 1;
+        return Promise.resolve(jsonResponse({}));
+      }),
+    ).rejects.toThrow("integer from 0 to 24");
+    expect(calls).toBe(0);
+    expect(
+      await setProfileAttentionCardLimit(0, (input, init) => {
+        expect(input).toBe("/api/daemon/config");
+        expect(init?.method).toBe("PUT");
+        expect(requestBody(init)).toEqual({ profileAttentionCardLimit: 0 });
+        return Promise.resolve(jsonResponse({ profileAttentionCardLimit: 0 }));
+      }),
+    ).toBe(0);
+    expect(
+      setProfileAttentionCardLimit(4, () =>
+        Promise.resolve(jsonResponse({ error: "Validation failed" }, 400)),
+      ),
+    ).rejects.toThrow("Validation failed");
+    expect(
+      setProfileAttentionCardLimit(4, () =>
+        Promise.resolve(jsonResponse({ profileAttentionCardLimit: 25 })),
+      ),
+    ).rejects.toThrow("invalid profile attention card limit");
+  });
+
   test("creates Want to play without a kind or play-count baseline", async () => {
     const commandId = "44000000-0000-4000-8000-000000000001";
     const result = await createIntention(

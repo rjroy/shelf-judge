@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY } from "@shelf-judge/shared";
-import { getProfile } from "@/lib/api";
+import { getProfile, getProfileAttentionCardLimit } from "@/lib/api";
 import {
   canonicalUsefulProfileFixtures,
   usefulProfileFixture,
@@ -17,6 +17,19 @@ async function rejectionMessage(action: () => Promise<unknown>): Promise<string>
 }
 
 describe("web profile API boundary", () => {
+  test("reads only a valid configured attention card limit", async () => {
+    expect(
+      await getProfileAttentionCardLimit(() =>
+        Promise.resolve({ profileAttentionCardLimit: 24, bggAuthToken: "secret" }),
+      ),
+    ).toBe(24);
+    for (const limit of [-1, 25, 1.5, "6", null]) {
+      expect(
+        getProfileAttentionCardLimit(() => Promise.resolve({ profileAttentionCardLimit: limit })),
+      ).rejects.toThrow("invalid profile attention card limit");
+    }
+  });
+
   test.each(canonicalUsefulProfileFixtures)(
     "runtime-validates and preserves canonical %s",
     async (_label, fixture) => {
