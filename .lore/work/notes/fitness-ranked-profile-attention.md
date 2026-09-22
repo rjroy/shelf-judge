@@ -12,8 +12,8 @@ source_plan: .lore/work/plans/fitness-ranked-profile-attention.md
 - [x] Phase 2: pure rule catalog and candidate oracle (accepted)
 - [x] Phase 3: disposable candidate persistence and freshness coordination (accepted)
 - [x] Phase 4: atomic disposition commands and source mutations (accepted)
-- [ ] Phase 5: Profile, config, and CLI contract cutover (pending)
-- [ ] Phase 6: web rendering and command relay (pending)
+- [x] Phase 5: Profile, config, and CLI contract cutover (accepted)
+- [ ] Phase 6: web rendering and command relay (pending; only the user-authorized minimal web compatibility migration needed to restore build/lint after the shared contract cutover is complete)
 - [ ] Phase 7: cross-cutting oracle, performance, and authority reconciliation (pending)
 
 ## Accepted Phase 2
@@ -110,6 +110,77 @@ deletion marker. This notes file is intentionally recorded with
 | `??` | `packages/daemon/tests/services/attention-disposition-service.test.ts` | `ABSENT` | `27ee87add8b2b389666a991e0461616517288160cd9ac8f849b1d8ff21f6fa69` |
 | `??` | `packages/shared/src/attention-disposition-command.ts` | `ABSENT` | `594ad4aac391047fa49a7c794b16ce2a3aa5e5668ea87548dc96dabd78b5679a` |
 | `??` | `packages/shared/tests/attention-disposition-command.test.ts` | `ABSENT` | `8b718a20abfdaeedf094b1246dc720e55289b9e9741f3a1f1cd0a83d5849024c` |
+
+## Accepted Phase 5 (2026-09-22)
+
+Phase 5 is accepted and complete. The seven-phase feature remains **in
+progress** overall: Phases 1 through 5 are accepted; Phase 6 is ready,
+unclaimed, and pending implementation; and Phase 7 remains pending. The only
+web work completed in this phase was the user-authorized minimal presentation
+contract compatibility migration required to restore build/lint after the
+shared contract cutover. Phase 6 rendering and command-relay implementation
+remains pending.
+
+Phase 5 acceptance covers the public ranked card contract versions **10/13**,
+exact strict rank/card validation, and post-rank cap slicing in the inclusive
+`0..24` range with default `6`. Candidate-source identity is separate from
+Profile-publication identity, and stale or otherwise incompatible caches are
+rejected. Profile-only config changes invalidate Profile without candidate
+work. Daemon candidate-artifact publication is fail-closed and Profile reads
+remain read-pure. CLI config and action operations relay validated daemon
+contracts without local scoring or ranking. The minimal web migration updates
+presentation consumers to the shared contract without client scoring, client
+settings execution, or client action execution.
+
+### Final accepted validation evidence
+
+- Full `bun run test`: **3,141 pass, 1 skip, 0 fail, 17,854 expectations
+  across 187 files**.
+- `bun run typecheck`, `bun run lint`, `bun run build`, changed-file Prettier,
+  and `git diff --check`: **pass**.
+- Terminal reviewer: **accepted**.
+
+### Accepted Phase 5 current-worktree manifest
+
+Captured after updating the Phase 5/parent Beads records and regenerating the
+passive Beads exports, before this section's final self-reference. Every
+pending current path records exact porcelain status, index blob identity or
+`ABSENT`, and working-tree SHA-256 (or a deletion marker). Beads files are
+included. This notes file follows the established self-reference convention:
+`SELF-REFERENCE: omitted`.
+
+| Status | Path | Index | Working tree SHA-256 |
+| --- | --- | --- | --- |
+| ` M` | `.beads/interactions.jsonl` | `49ad1555ecc2936ad56ef2f28e86c09fcb2f2c12` | `108aa6940a3f251939bc84fb1ab6c0934c6f2dcbfca5725c6daaa06b5b9e30d2` |
+| ` M` | `.beads/issues.jsonl` | `50fe7bb0357d6c9d534cd0e7a415e0e46c3dacaf` | `510653dd9181aba9c5ddfaa59b2d8f96053157bcb270e59469c190a19d13a419` |
+| ` M` | `.lore/work/notes/fitness-ranked-profile-attention.md` | `c5b960445cb92ab8814659eb573c50a4ef94a63d` | `SELF-REFERENCE: omitted` |
+| ` M` | `packages/cli/src/commands/config.ts` | `b764d9927209f5e5c8fe1764235c61bab8767a94` | `f1b526785c7e099457123aa05cb19f7b51e5922751dc36acc39f5caef5745897` |
+| ` M` | `packages/cli/src/commands/profile.ts` | `08142f205749f75bc098c5fa425b8898d9774bc3` | `a9152068da5a3ce17db4e494f2011a0ec08c4ccc5441feda450fc0cfb052cf9d` |
+| ` M` | `packages/cli/src/index.ts` | `8e4173874e711ac4a6a8def0e2a3849b06ee375b` | `6d0fc01343cd7d472788d578376ac7d8c5f6ac858c241320a768c8f38c788b97` |
+| ` M` | `packages/cli/tests/commands/config.test.ts` | `abe771ff097bc543f6130a6ead1efc68a52f0b26` | `1e906031f897b13f388f5d358e053ca57297ef3ab1d91286f9fb796473774074` |
+| ` M` | `packages/cli/tests/commands/profile.test.ts` | `778bf815106b9c7421b54c9c9321bb49045969f2` | `1fabacfb741c3744827013559c2a3bdc503fe0600d569d45086daa14f7e0083f` |
+| ` M` | `packages/cli/tests/index.test.ts` | `078d41eb1e8b86556bbd66e7d2770a03e683cf5f` | `407db32cd8c3387df2060dcb084d6b0022502806ce51c65ddd181cb8764cc007` |
+| ` M` | `packages/daemon/src/services/analyst-evidence-projections.ts` | `7894a35d2e00cfa351a04071b225b37411452bdb` | `bb190ca6800d2d8707817ac9127f16d61bea45721fedb4432ac6d6fa70674817` |
+| ` M` | `packages/daemon/src/services/collection-profile-engine.ts` | `def313985ab539495e277a2f3ed6dca8a70cb6d5` | `b0e498f49a9cabeb9daad8698f7a8ce98210a8224a560e36dfbc97bc4ca355d4` |
+| ` M` | `packages/daemon/src/services/profile-service.ts` | `45a66291a3a6076b3ccd009fa7733db5a5786f7d` | `069d74555fb63050e0be12ec7058be423c7b628fc6fecf63448e289694da9489` |
+| ` M` | `packages/daemon/tests/collection-profile-engine.test.ts` | `5bf1086886271f2cccd99191c49c90bdae949139` | `e0e2b1152c9b7179096a474a1c4c941496a9dcf28ea779b85918261f15e3020a` |
+| ` M` | `packages/daemon/tests/integration/owner-game-notes-persisted-flow.test.ts` | `c5cb012931ae3d8135f470c444b2364ade5f7f1d` | `34b08b36b3be847887cd86a33f227908e015da54ae3ef274b0e2bce2c9a7a8cf` |
+| ` M` | `packages/daemon/tests/integration/useful-profile-persisted-flow.test.ts` | `5d23780ac343d5bbe8fb531c0279cb6f61790ca2` | `e748151b378f28294df8c20950dd280b5786bc9e6596f2383ab7bc4f4e4537b7` |
+| ` M` | `packages/daemon/tests/phase3-direct-integration.test.ts` | `76fbb00b43f8d5a178ade69633ae14765023e895` | `c0a08cd610c3f01b9d60a6382375ef48db3b23e9c3a35d9e4e95ca7685c309a8` |
+| ` M` | `packages/daemon/tests/profile-service.test.ts` | `485f6952244c5aac5a5960717a1133991ff46895` | `d055cbe15bb59e0b6d62ae72e2697914dc0ff01b807914e74fc9a7fb6bef1490` |
+| ` M` | `packages/daemon/tests/services/analyst-evidence-projections.test.ts` | `8f306b86402f96fe6066ab1ab780050f1648e120` | `505a45ca2c39f159eda5d45414b4f8bc718b9a87c2c682ae091d1283455e6a33` |
+| ` M` | `packages/daemon/tests/services/profile-persistence.test.ts` | `4851debc8e74d2b4c3fb1021746d10821dfd8855` | `4e3ed34e55390612f75f4e5c7046487a0774d33066cb55d007a5a7cb837cc12e` |
+| ` M` | `packages/daemon/tests/services/reflection-evidence-service.test.ts` | `702a894c3595061df1ba3fd0f1ce05a84cc3b05d` | `14bec9cd992806ef9ffccda63ee6fdb72606db06accf088eec8a137c51f8f272` |
+| ` M` | `packages/daemon/tests/services/storage-service.test.ts` | `e5241299801d1a17e65737b556c8e6ed6b6a91b8` | `9a2d6ccd738a68173ab1358dca95420839b2649e02b6d306fe729795df90d131` |
+| ` M` | `packages/shared/src/attention-disposition-command.ts` | `f07bfa87f6427a9bf64d250f0fcc2e0c421750cd` | `d4d6f4424bb14e6c43ea86c32032c2eb5d32cd6116270844dd8d371a0a9ce204` |
+| ` M` | `packages/shared/src/collection-profile-validation.ts` | `42aa6ba19e45fe526a2751f3a68935271347d99b` | `067450e6d850cfb15173ba2ca7f16b144b96059be8dab359e089d8b4972f0d0a` |
+| ` M` | `packages/shared/src/index.ts` | `da45f5a60be938ac8256d6a1b749613afc3eff17` | `638b97f916fef94453330f2272352995efa6684053de3a3d3fb5a6511473428b` |
+| ` M` | `packages/shared/src/types.ts` | `5422bf712111df035a65b166f630ce7928237a88` | `502f88e92cf95361b17b2b46b528cec797a837ba5eb87ae719bf5f1289c0cdde` |
+| ` M` | `packages/shared/src/validation.ts` | `e74c61197d3487c7317b6151764a36cbf8984795` | `feaf1e126dedd070b75e97475c3acbfc1b3543f0b1e813be2cd6b2e1ed1c7ee0` |
+| ` M` | `packages/shared/tests/fixtures/useful-profile.ts` | `610d5e7fd49f065e61df2a926ae481af42995167` | `e458f6054a075adaf4fc6f28279eaadb0a5fcf15c5c8f445d4f2de3f49a1a99c` |
+| ` M` | `packages/shared/tests/useful-profile-contract.test.ts` | `3da6389d5b333a8e186a9908794671e858ff4fc1` | `5aa5b1b5b67a470f2067634af4f94982271b22d475a639e778ec428ebd3dafe2` |
+| ` M` | `packages/web/components/profile/attention-section.tsx` | `3630587fb271b18e8f0284ff382739e7a2eb897d` | `9a97ad10819ee662d5aeebc1e035c1bb4cdbe8ca32ced90cb78e17bcbfcbb702` |
+| ` M` | `packages/web/tests/profile-consumers-integration.test.tsx` | `3743391dccd260e4e1ab0ac289b2ac5eac058cbb` | `5f6770a576c0c8ef240226106bfe6598f616591a038b659bb6b717c2537e3354` |
 
 <!-- CURRENT-WORKTREE-MANIFEST -->
 

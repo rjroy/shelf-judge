@@ -54,7 +54,8 @@ import {
   CollectionProfileSourceRecordsSchema,
   createCollectionProfileEntityClassResultSchema,
   CollectionProfileEntityClassResultSchema,
-  CollectionProfileAttentionItemSchema,
+  CollectionProfileAttentionCardSchema,
+  AttentionExactValueSchema,
   ResolvedPlayIntentionHistoryItemSchema,
   ResolvedPlayIntentionHistorySchema,
   GameIntentionDetailSchema,
@@ -85,7 +86,8 @@ export {
   CollectionProfileSourceRecordsSchema,
   createCollectionProfileEntityClassResultSchema,
   CollectionProfileEntityClassResultSchema,
-  CollectionProfileAttentionItemSchema,
+  CollectionProfileAttentionCardSchema,
+  AttentionExactValueSchema,
   ResolvedPlayIntentionHistoryItemSchema,
   ResolvedPlayIntentionHistorySchema,
   GameIntentionDetailSchema,
@@ -94,8 +96,8 @@ export {
 };
 
 export const CURRENT_COLLECTION_SCHEMA_VERSION = 8 as const;
-export const CURRENT_PROFILE_CONTRACT_VERSION = 9 as const;
-export const CURRENT_PROFILE_ALGORITHM_VERSION = 12 as const;
+export const CURRENT_PROFILE_CONTRACT_VERSION = 10 as const;
+export const CURRENT_PROFILE_ALGORITHM_VERSION = 13 as const;
 const AmountInputSchema = z.string().superRefine((value, context) => {
   try {
     parseAmountInput(value);
@@ -1510,91 +1512,35 @@ export function createCollectionProfileSnapshotSchema(policy: CollectionProfileE
           });
         }
       }
-      const activeIntentions = source.intentions
-        .filter(({ resolution }) => resolution === null)
-        .sort((left, right) => {
-          const leftName = source.games.find(({ id }) => id === left.gameId)?.name ?? "";
-          const rightName = source.games.find(({ id }) => id === right.gameId)?.name ?? "";
-          return (
-            compareNormalizedCodePoints(leftName, rightName) ||
-            compareNormalizedCodePoints(left.gameId, right.gameId)
-          );
-        });
-      if (
-        profile.attention.items.length !== activeIntentions.length ||
-        profile.attention.items.some((item, index) => {
-          const sourceIntention = activeIntentions[index];
-          const sourceGame = source.games.find(({ id }) => id === sourceIntention?.gameId);
-          return (
-            sourceIntention === undefined ||
-            sourceGame === undefined ||
-            item.gameName !== sourceGame.name ||
-            JSON.stringify(item.intention) !== JSON.stringify(sourceIntention)
-          );
-        })
-      ) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["profile", "attention", "items"],
-          message: "Attention items must correspond exactly to every durable active intention",
-        });
-      }
-      for (const [itemIndex, item] of profile.attention.items.entries()) {
-        const game = source.games.find(({ id }) => id === item.intention.gameId);
-        if (game === undefined) continue;
-        const evidence = game.playCountEvidence;
-        const latestCheck = game.latestPlayCountCheck;
-        const stale =
-          evidence.status === "valid" &&
-          latestCheck !== null &&
-          latestCheck.status !== "valid" &&
-          (evidence.observedAt === null ||
-            Date.parse(latestCheck.observedAt) > Date.parse(evidence.observedAt));
-        const expectedEvidence =
-          evidence.status === "valid" && !stale
-            ? {
-                status: "valid" as const,
-                playCount: evidence.value,
-                source: evidence.source,
-                observedAt: evidence.observedAt,
-                stale: false as const,
-              }
-            : evidence.status === "valid"
-              ? {
-                  status: "stale" as const,
-                  playCount: evidence.value,
-                  source: evidence.source,
-                  observedAt: evidence.observedAt,
-                  warning: "A newer BGG check did not provide a valid play count." as const,
-                }
-              : evidence.status === "invalid" || latestCheck?.status === "invalid"
-                ? {
-                    status: "invalid" as const,
-                    playCount: null,
-                    source: evidence.source,
-                    observedAt: evidence.observedAt,
-                    warning: "Current play evidence is invalid." as const,
-                  }
-                : {
-                    status: "missing" as const,
-                    playCount: null,
-                    source: evidence.source,
-                    observedAt: evidence.observedAt,
-                    warning: "Current play evidence is missing." as const,
-                  };
-        const expectedOperation =
-          expectedEvidence.status === "valid" || game.bggId === null
-            ? "shelf.game.plays.set"
-            : "shelf.game.bgg.refresh";
-        if (
-          JSON.stringify(item.currentPlayEvidence) !== JSON.stringify(expectedEvidence) ||
-          item.evidenceDestination.operationId !== expectedOperation
-        ) {
+      const ownedSourceGames = new Map(
+        source.games
+          .filter(({ ownership }) => ownership === "owned")
+          .map((game) => [game.id, game]),
+      );
+      for (const [cardIndex, card] of profile.attention.cards.entries()) {
+        const sourceGame = ownedSourceGames.get(card.gameId);
+        if (sourceGame === undefined || sourceGame.name !== card.gameName) {
           context.addIssue({
             code: z.ZodIssueCode.custom,
-            path: ["profile", "attention", "items", itemIndex, "currentPlayEvidence"],
-            message: "Attention play evidence and destination must match durable current evidence",
+            path: ["profile", "attention", "cards", cardIndex, "gameId"],
+            message: "Attention card must identify a currently owned source game and its name",
           });
+        }
+        if (card.ruleId === "explicit-intention") {
+          const sourceIntention = source.intentions.find(
+            (intention) => intention.gameId === card.gameId && intention.resolution === null,
+          );
+          if (
+            sourceIntention === undefined ||
+            card.intention === null ||
+            JSON.stringify(card.intention) !== JSON.stringify(sourceIntention)
+          ) {
+            context.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ["profile", "attention", "cards", cardIndex, "intention"],
+              message: "Explicit-intention card must match the durable active intention",
+            });
+          }
         }
       }
       for (const entityClass of ["mechanic", "designer", "artist"] as const) {
@@ -2123,6 +2069,76 @@ export const ProfileSourceIdentitySchema = z
   })
   .strict();
 
+export const ProfileAttentionCandidatePublicationIdentitySchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    indexVersion: z.literal(1),
+    evaluatedAt: z.string().datetime({ offset: true }),
+    identity: z
+      .object({
+        collectionId: z.string().min(1),
+        collectionSchemaVersion: z.literal(CURRENT_COLLECTION_SCHEMA_VERSION),
+        collectionRevision: z.number().int().nonnegative().safe(),
+        tournamentHash: Sha256Schema,
+        predictionSettingsHash: Sha256Schema,
+        redundancySettingsHash: Sha256Schema,
+        calculationVersion: z.number().int().safe().positive(),
+        ruleCatalogVersion: z.number().int().safe().positive(),
+        dependencyVersion: z.number().int().safe().positive(),
+        projectionVersion: z.number().int().safe().positive(),
+        catalogRuleVersions: z
+          .array(
+            z
+              .object({
+                ruleId: z.string().regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/),
+                ruleVersion: z.number().int().safe().positive(),
+                scoringVersion: z.number().int().safe().positive(),
+              })
+              .strict(),
+          )
+          .superRefine((rules, context) => {
+            for (let index = 1; index < rules.length; index += 1) {
+              const prior = rules[index - 1];
+              const current = rules[index];
+              if (prior !== undefined && current !== undefined && prior.ruleId < current.ruleId)
+                continue;
+              context.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: [index, "ruleId"],
+                message: "Candidate catalog rule versions must be unique and sorted",
+              });
+            }
+          }),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const ProfilePublicationIdentitySchema = z
+  .object({
+    source: ProfileSourceIdentitySchema,
+    profileAttentionCardLimit: z.number().int().safe().min(0).max(24),
+    attentionCandidates: ProfileAttentionCandidatePublicationIdentitySchema,
+  })
+  .strict()
+  .superRefine((identity, context) => {
+    const candidate = identity.attentionCandidates.identity;
+    const source = identity.source;
+    if (
+      candidate.collectionId !== source.collectionId ||
+      candidate.collectionSchemaVersion !== source.collectionSchemaVersion ||
+      candidate.collectionRevision !== source.collectionRevision ||
+      candidate.tournamentHash !== source.tournamentHash ||
+      candidate.predictionSettingsHash !== source.predictionSettingsHash ||
+      candidate.redundancySettingsHash !== source.redundancySettingsHash
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["attentionCandidates", "identity"],
+        message: "Attention candidate publication identity must match Profile source identity",
+      });
+  });
+
 export const PredictionSettingsSchema = z
   .object({
     stageThresholds: z
@@ -2165,7 +2181,7 @@ export function createProfileDataSchema(policy: CollectionProfileEntityPolicy) {
     .object({
       contractVersion: z.literal(CURRENT_PROFILE_CONTRACT_VERSION),
       algorithmVersion: z.literal(CURRENT_PROFILE_ALGORITHM_VERSION),
-      sourceIdentity: ProfileSourceIdentitySchema,
+      publicationIdentity: ProfilePublicationIdentitySchema,
       profile: createCollectionProfileResultSchema(policy).refine(
         (profile) => profile.status === "available",
         {
@@ -2181,6 +2197,16 @@ export function createProfileDataSchema(policy: CollectionProfileEntityPolicy) {
           code: z.ZodIssueCode.custom,
           path: ["profile", "computedAt"],
           message: "Profile timestamps must match",
+        });
+      }
+      if (
+        data.profile.status === "available" &&
+        data.profile.attention.cardLimit !== data.publicationIdentity.profileAttentionCardLimit
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["profile", "attention", "cardLimit"],
+          message: "Profile attention card limit must match its publication identity",
         });
       }
     });

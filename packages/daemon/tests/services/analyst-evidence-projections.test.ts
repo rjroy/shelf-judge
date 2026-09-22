@@ -24,6 +24,7 @@ describe("AnalystProjectionSnapshotService Profile cache parity", () => {
     const snapshot = await createAnalystProjectionSnapshotService({
       storageService: ctx.storageService,
       displayedFitnessService: ctx.displayedFitnessService,
+      profileService: ctx.profileService,
     }).capture();
 
     expect(
@@ -57,6 +58,7 @@ describe("AnalystProjectionSnapshotService Profile cache parity", () => {
     const snapshot = await createAnalystProjectionSnapshotService({
       storageService: ctx.storageService,
       displayedFitnessService: ctx.displayedFitnessService,
+      profileService: ctx.profileService,
     }).capture();
 
     expect(
@@ -67,13 +69,6 @@ describe("AnalystProjectionSnapshotService Profile cache parity", () => {
           gameId: game.id,
           kind: "want-to-play",
           baseline: { playCount: 2, evidenceSource: "manual", observedAt },
-          currentPlayEvidence: {
-            status: "valid",
-            playCount: 2,
-            source: "manual",
-            observedAt,
-            stale: false,
-          },
         },
       ],
     });
@@ -95,6 +90,7 @@ describe("AnalystProjectionSnapshotService Profile cache parity", () => {
     await createAnalystProjectionSnapshotService({
       storageService: ctx.storageService,
       displayedFitnessService: ctx.displayedFitnessService,
+      profileService: ctx.profileService,
     }).capture();
 
     expect(cacheWrites).toBe(0);
@@ -115,9 +111,16 @@ describe("AnalystProjectionSnapshotService Profile cache parity", () => {
       await saveProfile(profile);
     };
 
+    const fixedProfileService = createProfileService({
+      storageService: ctx.storageService,
+      displayedFitnessService: ctx.displayedFitnessService,
+      attentionCandidates: ctx.attentionCandidateService,
+      now: () => "2026-09-06T00:00:00.000Z",
+    });
     await createAnalystProjectionSnapshotService({
       storageService: ctx.storageService,
       displayedFitnessService: ctx.displayedFitnessService,
+      profileService: fixedProfileService,
       now: () => "2026-09-06T00:00:00.000Z",
     }).capture();
     expect(cacheWrites).toBe(1);
@@ -126,6 +129,7 @@ describe("AnalystProjectionSnapshotService Profile cache parity", () => {
     const ordinaryProfile = await createProfileService({
       storageService: ctx.storageService,
       displayedFitnessService: ctx.displayedFitnessService,
+      attentionCandidates: ctx.attentionCandidateService,
       now: () => "2026-09-06T00:00:00.000Z",
     }).getProfile();
 

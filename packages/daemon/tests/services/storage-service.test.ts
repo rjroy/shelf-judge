@@ -758,15 +758,32 @@ function makeEmptyProfileData(computedAt = "2026-01-01T00:00:00.000Z"): ProfileD
     minNeighbors: 1,
     expectedNeighbors: 5,
   };
+  const source = profileSourceIdentity({
+    collection,
+    tournament,
+    predictionSettings,
+    redundancySettings,
+  });
   return {
     contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
     algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
-    sourceIdentity: profileSourceIdentity({
-      collection,
-      tournament,
-      predictionSettings,
-      redundancySettings,
-    }),
+    publicationIdentity: {
+      source,
+      profileAttentionCardLimit: 0,
+      attentionCandidates: {
+        schemaVersion: 1,
+        indexVersion: 1,
+        evaluatedAt: computedAt,
+        identity: {
+          ...source,
+          calculationVersion: 1,
+          ruleCatalogVersion: 1,
+          dependencyVersion: 1,
+          projectionVersion: 1,
+          catalogRuleVersions: [],
+        },
+      },
+    },
     profile: computeCollectionProfile({ collection, fitnessResults: new Map(), computedAt }),
     computedAt,
   };

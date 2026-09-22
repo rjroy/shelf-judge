@@ -10,7 +10,10 @@ import {
   OwnershipMutationResultSchema,
   PlayEvidenceMutationResultSchema,
   PlayIntentionSchema,
-  CollectionProfileAttentionItemSchema,
+  CollectionProfileAttentionCardSchema,
+  ProfileDataSchema,
+  CURRENT_PROFILE_CONTRACT_VERSION,
+  CURRENT_PROFILE_ALGORITHM_VERSION,
   intentionMutationResultMatchesCommand,
   type IntentionCommand,
   CollectionProfileEntityClassResultSchema,
@@ -105,74 +108,184 @@ function futureSourceCollection(
   };
 }
 
-describe("collection profile source contracts", () => {
-  test("requires the unplayed presentation for qualifying Want to play attention", () => {
-    const attention = {
-      id: `attention:${activeIntentionFixture.intentionId}`,
-      decisionFamily: "unplayed-owner-wanted",
-      intention: { ...activeIntentionFixture, kind: "want-to-play", baseline: null },
-      gameName: "Game",
-      question: "Is there a reason you haven’t played this?",
-      whyNow: "You asked Shelf Judge to keep this intention visible.",
-      currentPlayEvidence: {
-        status: "valid",
-        playCount: 0,
-        source: "manual",
-        observedAt: "2026-08-27T10:00:00.000Z",
-        stale: false,
+function attentionCard(
+  gameId: string,
+  gameName: string,
+  ruleId: string,
+  score: { numerator: string; denominator: string },
+) {
+  const card = structuredClone(usefulProfileFixture.attention.cards[0]);
+  card.id = `attention:${gameId}:${ruleId}`;
+  card.gameId = gameId;
+  card.gameName = gameName;
+  card.ruleId = ruleId;
+  card.nonClockFingerprint = "b".repeat(64);
+  card.signalStrength = score;
+  card.categoryWeight = { numerator: "1", denominator: "1" };
+  card.attentionScore = score;
+  card.intention = ruleId === "explicit-intention" ? card.intention : null;
+  card.evidence =
+    ruleId === "explicit-intention"
+      ? card.evidence
+      : {
+          kind: "play-count",
+          value: 0,
+          source: "manual",
+          observedAt: "2026-08-27T10:00:00.000Z",
+        };
+  card.actions = [
+    {
+      action: "want-to-play",
+      operationId: "shelf.game.intention.set",
+      destination: { gameId, operationId: "shelf.game.intention.set" },
+      command: null,
+    },
+    {
+      action: "not-now",
+      operationId: "shelf.profile.attention.not-now",
+      destination: { gameId, operationId: "shelf.profile.attention.not-now" },
+      command: {
+        operation: "not-now",
+        gameId,
+        ruleId,
+        ruleVersion: 1,
+        fingerprint: "b".repeat(64),
+        expectedVersion: 0,
       },
-      responses: ["leave-visible", "complete", "retire", "correct-or-refresh-evidence"],
-      abstentionBasis: "Only an explicit active intention qualifies.",
-      resolution: null,
-      reopenCondition: "Create a new explicit intention after resolution.",
-      destination: {
-        gameId: activeIntentionFixture.gameId,
-        operationId: "shelf.game.intention.manage",
+    },
+    {
+      action: "intentional",
+      operationId: "shelf.profile.attention.intentional",
+      destination: { gameId, operationId: "shelf.profile.attention.intentional" },
+      command: {
+        operation: "intentional",
+        gameId,
+        ruleId,
+        ruleVersion: 1,
+        fingerprint: "b".repeat(64),
+        expectedVersion: 0,
       },
-      evidenceDestination: {
-        gameId: activeIntentionFixture.gameId,
-        operationId: "shelf.game.plays.set",
-      },
-    };
+    },
+    {
+      action: "open-game",
+      operationId: "shelf.game.get",
+      destination: { gameId, operationId: "shelf.game.get" },
+      command: null,
+    },
+  ];
+  if (card.intention !== null) card.intention.gameId = gameId;
+  return card;
+}
 
-    expect(CollectionProfileAttentionItemSchema.safeParse(attention).success).toBe(true);
-    expect(
-      CollectionProfileAttentionItemSchema.safeParse({
-        ...attention,
-        decisionFamily: "play-intention",
-        question: "Do you still want to play Game?",
-      }).success,
-    ).toBe(false);
-    expect(
-      CollectionProfileAttentionItemSchema.safeParse({
-        ...attention,
-        decisionFamily: "play-intention",
-        question: "Do you still want to play Game?",
-        currentPlayEvidence: { ...attention.currentPlayEvidence, playCount: 1 },
-      }).success,
-    ).toBe(true);
-    expect(
-      CollectionProfileAttentionItemSchema.safeParse({
-        ...attention,
-        currentPlayEvidence: { ...attention.currentPlayEvidence, playCount: 1 },
-      }).success,
-    ).toBe(false);
-    expect(
-      CollectionProfileAttentionItemSchema.safeParse({
-        ...attention,
-        decisionFamily: "play-intention",
-        question: "Do you still want to play Game?",
-        intention: {
-          ...attention.intention,
-          kind: "first-play",
-          baseline: {
-            playCount: 0,
-            evidenceSource: "manual",
-            observedAt: "2026-08-27T09:00:00.000Z",
+describe("collection profile source contracts", () => {
+  test("accepts ranked cards and only associates explicit-intention cards", () => {
+    const attention = {
+      id: "attention:game-4:never-played",
+      gameId: "game-4",
+      gameName: "Game",
+      ruleId: "never-played",
+      ruleVersion: 1,
+      dependencyVersion: 1,
+      nonClockFingerprint: "a".repeat(64),
+      reason: "You have not recorded a play of Game.",
+      question: "Do you want to make a plan to play it?",
+      scoreExplanation: "Signal strength 1 × category weight 0.6 = attention score 0.6.",
+      actions: [
+        {
+          action: "want-to-play",
+          operationId: "shelf.game.intention.set",
+          destination: { gameId: "game-4", operationId: "shelf.game.intention.set" },
+          command: null,
+        },
+        {
+          action: "not-now",
+          operationId: "shelf.profile.attention.not-now",
+          destination: { gameId: "game-4", operationId: "shelf.profile.attention.not-now" },
+          command: {
+            operation: "not-now",
+            gameId: "game-4",
+            ruleId: "never-played",
+            ruleVersion: 1,
+            fingerprint: "a".repeat(64),
+            expectedVersion: 0,
           },
         },
+        {
+          action: "intentional",
+          operationId: "shelf.profile.attention.intentional",
+          destination: { gameId: "game-4", operationId: "shelf.profile.attention.intentional" },
+          command: {
+            operation: "intentional",
+            gameId: "game-4",
+            ruleId: "never-played",
+            ruleVersion: 1,
+            fingerprint: "a".repeat(64),
+            expectedVersion: 0,
+          },
+        },
+        {
+          action: "open-game",
+          operationId: "shelf.game.get",
+          destination: { gameId: "game-4", operationId: "shelf.game.get" },
+          command: null,
+        },
+        {
+          action: "correct-play-data",
+          operationId: "shelf.game.plays.set",
+          destination: { gameId: "game-4", operationId: "shelf.game.plays.set" },
+          command: null,
+        },
+      ],
+      evidence: {
+        kind: "play-count",
+        value: 0,
+        source: "manual",
+        observedAt: "2026-08-27T10:00:00.000Z",
+      },
+      intention: null,
+      disposition: { state: "none", expectedVersion: 0 },
+      signalStrength: { numerator: "1", denominator: "1" },
+      categoryWeight: { numerator: "3", denominator: "5" },
+      attentionScore: { numerator: "3", denominator: "5" },
+    };
+
+    expect(CollectionProfileAttentionCardSchema.safeParse(attention).success).toBe(true);
+    expect(
+      CollectionProfileAttentionCardSchema.safeParse({
+        ...attention,
+        intention: activeIntentionFixture,
       }).success,
-    ).toBe(true);
+    ).toBe(false);
+    expect(
+      CollectionProfileAttentionCardSchema.safeParse({
+        ...attention,
+        signalStrength: { numerator: "2", denominator: "1" },
+      }).success,
+    ).toBe(false);
+    expect(
+      CollectionProfileAttentionCardSchema.safeParse({
+        ...attention,
+        attentionScore: { numerator: "1", denominator: "2" },
+      }).success,
+    ).toBe(false);
+    expect(
+      CollectionProfileAttentionCardSchema.safeParse({
+        ...attention,
+        categoryWeight: { numerator: "6", denominator: "5" },
+      }).success,
+    ).toBe(false);
+    expect(
+      CollectionProfileAttentionCardSchema.safeParse({
+        ...attention,
+        evidence: { source: "unbounded" },
+      }).success,
+    ).toBe(false);
+    expect(
+      CollectionProfileAttentionCardSchema.safeParse({
+        ...attention,
+        disposition: { state: "snoozed", expectedVersion: 0 },
+      }).success,
+    ).toBe(false);
   });
   test("accepts migrated session storage in the current profile source without leaking it into historical validation", () => {
     const source = { ...futureSourceCollection(), bggPlaySessions: [] };
@@ -1190,11 +1303,11 @@ describe("collection profile identity contract", () => {
 });
 
 describe("collection profile attention contract", () => {
-  test("accepts active attention, resolved history, nothing-to-decide, and unavailable", () => {
+  test("accepts ranked attention, successful-empty attention, and unavailable", () => {
     expect(CollectionProfileResultSchema.safeParse(usefulProfileFixture).success).toBe(true);
 
     const nothing = structuredClone(usefulProfileFixture);
-    nothing.attention = { state: "nothing-to-decide", items: [] };
+    nothing.attention = { state: "no-winner", cardLimit: 6, cards: [] };
     expect(CollectionProfileResultSchema.safeParse(nothing).success).toBe(true);
 
     expect(
@@ -1217,6 +1330,109 @@ describe("collection profile attention contract", () => {
         },
       }).success,
     ).toBe(true);
+  });
+
+  test("rejects Profile cards that are not globally ranked by exact score and tie-breaks", () => {
+    const decreasingScore = structuredClone(usefulProfileFixture);
+    decreasingScore.attention.cards = [
+      attentionCard("game-b", "Beta", "rule-a", { numerator: "1", denominator: "2" }),
+      attentionCard("game-a", "Alpha", "rule-b", { numerator: "3", denominator: "5" }),
+    ];
+    expect(CollectionProfileResultSchema.safeParse(decreasingScore).success).toBe(false);
+
+    const nameInversion = structuredClone(usefulProfileFixture);
+    nameInversion.attention.cards = [
+      attentionCard("game-a", "Beta", "rule-a", { numerator: "1", denominator: "2" }),
+      attentionCard("game-b", "Alpha", "rule-b", { numerator: "1", denominator: "2" }),
+    ];
+    expect(CollectionProfileResultSchema.safeParse(nameInversion).success).toBe(false);
+
+    const nfcGameIdInversion = structuredClone(usefulProfileFixture);
+    nfcGameIdInversion.attention.cards = [
+      attentionCard("game-b", "e\u0301clair", "rule-a", { numerator: "1", denominator: "2" }),
+      attentionCard("game-a", "éclair", "rule-b", { numerator: "1", denominator: "2" }),
+    ];
+    expect(CollectionProfileResultSchema.safeParse(nfcGameIdInversion).success).toBe(false);
+
+    const ruleInversion = structuredClone(usefulProfileFixture);
+    ruleInversion.attention.cards = [
+      attentionCard("same-game", "Same", "z-rule", { numerator: "1", denominator: "2" }),
+      attentionCard("same-game", "Same", "a-rule", { numerator: "1", denominator: "2" }),
+    ];
+    expect(CollectionProfileResultSchema.safeParse(ruleInversion).success).toBe(false);
+  });
+
+  test("requires real UTC calendar dates for dormant evidence", () => {
+    const dormant = attentionCard("dormant-game", "Dormant", "dormant", {
+      numerator: "1",
+      denominator: "2",
+    });
+    dormant.evidence = { kind: "dormant", lastPlayedOn: "2024-02-29", playCount: 1 };
+    expect(CollectionProfileAttentionCardSchema.safeParse(dormant).success).toBe(true);
+
+    for (const lastPlayedOn of ["2023-02-29", "2024-02-30", "2024-13-01", "2024-00-01"]) {
+      expect(
+        CollectionProfileAttentionCardSchema.safeParse({
+          ...dormant,
+          evidence: { ...dormant.evidence, lastPlayedOn },
+        }).success,
+      ).toBe(false);
+    }
+  });
+
+  test("rejects pre-ranked Profile cache versions and identities without the presentation cap", () => {
+    const cache = {
+      contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
+      algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
+      publicationIdentity: {
+        source: {
+          collectionId: "collection",
+          collectionSchemaVersion: 8,
+          collectionRevision: 1,
+          tournamentHash: "a".repeat(64),
+          predictionSettingsHash: "b".repeat(64),
+          redundancySettingsHash: "c".repeat(64),
+        },
+        profileAttentionCardLimit: 6,
+        attentionCandidates: {
+          schemaVersion: 1,
+          indexVersion: 1,
+          evaluatedAt: "2026-08-27T12:00:00.000Z",
+          identity: {
+            collectionId: "collection",
+            collectionSchemaVersion: 8,
+            collectionRevision: 1,
+            tournamentHash: "a".repeat(64),
+            predictionSettingsHash: "b".repeat(64),
+            redundancySettingsHash: "c".repeat(64),
+            calculationVersion: 1,
+            ruleCatalogVersion: 1,
+            dependencyVersion: 1,
+            projectionVersion: 1,
+            catalogRuleVersions: [
+              { ruleId: "dormant", ruleVersion: 1, scoringVersion: 1 },
+              { ruleId: "explicit-intention", ruleVersion: 1, scoringVersion: 1 },
+              { ruleId: "never-played", ruleVersion: 1, scoringVersion: 1 },
+              { ruleId: "underused-purchase", ruleVersion: 1, scoringVersion: 1 },
+            ],
+          },
+        },
+      },
+      profile: usefulProfileFixture,
+      computedAt: usefulProfileFixture.computedAt,
+    };
+    expect(ProfileDataSchema.safeParse(cache).success).toBe(true);
+    expect(
+      ProfileDataSchema.safeParse({
+        ...cache,
+        contractVersion: CURRENT_PROFILE_CONTRACT_VERSION - 1,
+      }).success,
+    ).toBe(false);
+    const { profileAttentionCardLimit: _limit, ...oldIdentity } = cache.publicationIdentity;
+    expect(_limit).toBe(6);
+    expect(
+      ProfileDataSchema.safeParse({ ...cache, publicationIdentity: oldIdentity }).success,
+    ).toBe(false);
   });
 
   test("orders resolved history by resolution time descending then intention ID", () => {
@@ -1329,28 +1545,21 @@ describe("collection profile attention contract", () => {
       }).success,
     ).toBe(false);
 
-    const mismatchedPlayEvidence = structuredClone(source);
-    mismatchedPlayEvidence.games[3].playCountEvidence = {
-      status: "valid",
-      value: 0,
-      source: "manual",
-      observedAt: "2026-08-27T10:00:00.000Z",
-    };
+    const mismatchedCardGame = structuredClone(source);
+    mismatchedCardGame.games[3].name = "Different Heat";
     expect(
       CollectionProfileSnapshotSchema.safeParse({
-        source: mismatchedPlayEvidence,
+        source: mismatchedCardGame,
         profile: usefulProfileFixture,
       }).success,
     ).toBe(false);
   });
 
-  test("rejects impossible attention cards and urgency fields", () => {
-    const wrongQuestion = structuredClone(usefulProfileFixture);
-    wrongQuestion.attention.items[0].question = "Should you sell Heat?";
-    expect(CollectionProfileResultSchema.safeParse(wrongQuestion).success).toBe(false);
-
+  test("rejects impossible attention cards and score fields", () => {
     const resolved = structuredClone(usefulProfileFixture);
-    resolved.attention.items[0].intention.resolution = {
+    if (resolved.attention.cards[0]?.intention === null)
+      throw new Error("Expected explicit-intention fixture");
+    resolved.attention.cards[0].intention.resolution = {
       outcome: "completed",
       source: "owner-confirmed",
       resolvedAt: "2026-08-27T12:00:00.000Z",
@@ -1358,16 +1567,22 @@ describe("collection profile attention contract", () => {
     expect(CollectionProfileResultSchema.safeParse(resolved).success).toBe(false);
 
     const urgency = structuredClone(usefulProfileFixture) as unknown as Record<string, unknown>;
-    const attention = urgency.attention as { items: Array<Record<string, unknown>> };
-    attention.items[0].urgency = "high";
+    const attention = urgency.attention as { cards: Array<Record<string, unknown>> };
+    attention.cards[0].urgency = "high";
     expect(CollectionProfileResultSchema.safeParse(urgency).success).toBe(false);
 
     const contradictoryEmpty = structuredClone(usefulProfileFixture);
-    contradictoryEmpty.attention.state = "nothing-to-decide";
+    contradictoryEmpty.attention.state = "no-winner";
+    contradictoryEmpty.attention.cards = [structuredClone(usefulProfileFixture.attention.cards[0])];
     expect(CollectionProfileResultSchema.safeParse(contradictoryEmpty).success).toBe(false);
 
-    const alreadyCompletedByEvidence = structuredClone(usefulProfileFixture);
-    alreadyCompletedByEvidence.attention.items[0].currentPlayEvidence.playCount = 1;
-    expect(CollectionProfileResultSchema.safeParse(alreadyCompletedByEvidence).success).toBe(false);
+    const wrongIdentity = structuredClone(usefulProfileFixture);
+    wrongIdentity.attention.cards[0].ruleId = "never-played";
+    wrongIdentity.attention.cards[0].intention = null;
+    expect(CollectionProfileResultSchema.safeParse(wrongIdentity).success).toBe(false);
+
+    const invalidProduct = structuredClone(usefulProfileFixture);
+    invalidProduct.attention.cards[0].attentionScore = { numerator: "1", denominator: "2" };
+    expect(CollectionProfileResultSchema.safeParse(invalidProduct).success).toBe(false);
   });
 });

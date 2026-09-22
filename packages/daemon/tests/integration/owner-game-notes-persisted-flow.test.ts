@@ -234,8 +234,8 @@ describe("owner-note persisted flow", () => {
         ...profileBeforeNote,
         computedAt: null,
       });
-      expect(profileCacheAfterNote.sourceIdentity.collectionRevision).toBeGreaterThan(
-        profileCacheBeforeNote.sourceIdentity.collectionRevision,
+      expect(profileCacheAfterNote.publicationIdentity.source.collectionRevision).toBeGreaterThan(
+        profileCacheBeforeNote.publicationIdentity.source.collectionRevision,
       );
 
       await restarted.gameService.removeGame(manual.id);

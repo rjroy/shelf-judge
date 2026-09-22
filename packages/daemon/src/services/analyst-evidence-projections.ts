@@ -196,26 +196,28 @@ const ActiveIntentionSchema = z
       .nullable(),
     createdAt: TimestampSchema,
     version: z.number().int().safe().positive(),
-    currentPlayEvidence: z.union([
-      z
-        .object({
-          status: z.literal("valid"),
-          playCount: z.number().int().min(0),
-          source: z.string(),
-          observedAt: TimestampSchema,
-          stale: z.literal(false),
-        })
-        .strict(),
-      z
-        .object({
-          status: z.enum(["missing", "invalid", "stale"]),
-          playCount: z.number().int().min(0).nullable(),
-          source: z.string().nullable(),
-          observedAt: TimestampSchema.nullable(),
-          warning: z.string(),
-        })
-        .strict(),
-    ]),
+    currentPlayEvidence: z
+      .union([
+        z
+          .object({
+            status: z.literal("valid"),
+            playCount: z.number().int().min(0),
+            source: z.string(),
+            observedAt: TimestampSchema,
+            stale: z.literal(false),
+          })
+          .strict(),
+        z
+          .object({
+            status: z.enum(["missing", "invalid", "stale"]),
+            playCount: z.number().int().min(0).nullable(),
+            source: z.string().nullable(),
+            observedAt: TimestampSchema.nullable(),
+            warning: z.string(),
+          })
+          .strict(),
+      ])
+      .optional(),
   })
   .strict();
 const ProfileEvidenceSharedSchema = {
@@ -712,20 +714,26 @@ function profileSources(
   profile: CollectionProfile,
   gamesById: ReadonlyMap<string, Game>,
   collectionRevision: number,
+  intentions: CollectionProfileCollectionSource["intentions"],
 ): AnalystEvidenceSource[] {
   if (profile.status !== "available") return [];
-  const activeIntentions = profile.attention.items.map(
-    ({ intention, gameName, currentPlayEvidence }) => ({
-      intentionId: intention.intentionId,
-      gameId: intention.gameId,
-      gameName,
-      kind: intention.kind,
-      baseline: intention.baseline,
-      createdAt: intention.createdAt,
-      version: intention.version,
-      currentPlayEvidence,
-    }),
-  );
+  const activeIntentions = intentions.flatMap((intention) => {
+    if (intention.resolution !== null) return [];
+    const game = gamesById.get(intention.gameId);
+    return game === undefined
+      ? []
+      : [
+          {
+            intentionId: intention.intentionId,
+            gameId: intention.gameId,
+            gameName: game.name,
+            kind: intention.kind,
+            baseline: intention.baseline,
+            createdAt: intention.createdAt,
+            version: intention.version,
+          },
+        ];
+  });
   const entityClasses: CollectionProfileEntityClass[] = ["mechanic", "designer", "artist"];
   return entityClasses.flatMap((entityClass) => {
     const result = profile.identity.classes[entityClass];
@@ -809,7 +817,9 @@ export function buildAnalystProjectionSnapshot(input: {
     throw new Error("Analyst snapshot must contain every collection game exactly once");
   const gamesById = new Map(collection.games.map((game) => [game.id, game]));
   const profileEvidence =
-    profile.status === "available" ? profileSources(profile, gamesById, collection.revision) : [];
+    profile.status === "available"
+      ? profileSources(profile, gamesById, collection.revision, collection.intentions)
+      : [];
   const sources = collection.games
     .slice()
     .sort((a, b) => compareText(a.id, b.id))

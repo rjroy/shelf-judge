@@ -1032,23 +1032,15 @@ describe("computeCollectionProfile", () => {
       computedAt: "2099-08-28T00:00:00.000Z",
     });
 
-    expect(first.attention.items.map(({ gameName }) => gameName)).toEqual(["Zed", "😀 Game"]);
-    expect(first.attention.items[0]).toMatchObject({
-      question: "Do you still want to play Zed?",
-      currentPlayEvidence: {
-        status: "stale",
-        warning: "A newer BGG check did not provide a valid play count.",
-      },
-      evidenceDestination: { operationId: "shelf.game.bgg.refresh" },
-    });
     expect(first.attention).toEqual(advanced.attention);
+    expect(first.attention).toEqual({ state: "disabled", cardLimit: 0, cards: [] });
     expect(first.identity).toEqual(advanced.identity);
     expect(
       CollectionProfileSnapshotSchema.safeParse({ source: collection, profile: first }).success,
     ).toBe(true);
   });
 
-  test("uses the unplayed owned want-to-play presentation only for valid zero current evidence", () => {
+  test("does not construct intention-shaped attention cards", () => {
     const metadata = createCompleteEntityMetadata(
       { mechanic: [], designer: [], artist: [] },
       "2026-08-27T00:00:00.000Z",
@@ -1153,46 +1145,14 @@ describe("computeCollectionProfile", () => {
       fitnessResults: new Map(),
       computedAt: "2026-08-28T00:00:00.000Z",
     });
-    const byId = new Map(profile.attention.items.map((item) => [item.id, item]));
-
-    expect(profile.attention.items).toHaveLength(intentions.length);
-    expect(byId.get("attention:valid-zero-want")).toMatchObject({
-      decisionFamily: "unplayed-owner-wanted",
-      question: "Is there a reason you haven’t played this?",
-      responses: ["leave-visible", "complete", "retire", "correct-or-refresh-evidence"],
-    });
-    for (const intentionId of [
-      "nonzero-want",
-      "missing-want",
-      "invalid-want",
-      "stale-want",
-      "first-play",
-      "replay",
-    ]) {
-      expect(byId.get(`attention:${intentionId}`)).toMatchObject({
-        id: `attention:${intentionId}`,
-        decisionFamily: "play-intention",
-      });
-    }
-    expect(byId.get("attention:missing-want")?.currentPlayEvidence).toMatchObject({
-      status: "missing",
-      warning: "Current play evidence is missing.",
-    });
-    expect(byId.get("attention:invalid-want")?.currentPlayEvidence).toMatchObject({
-      status: "invalid",
-      warning: "Current play evidence is invalid.",
-    });
-    expect(byId.get("attention:stale-want")?.currentPlayEvidence).toMatchObject({
-      status: "stale",
-      warning: "A newer BGG check did not provide a valid play count.",
-    });
+    expect(profile.attention).toEqual({ state: "disabled", cardLimit: 0, cards: [] });
     expect(collection).toEqual(before);
     expect(CollectionProfileSnapshotSchema.safeParse({ source: collection, profile }).success).toBe(
       true,
     );
   });
 
-  test("distinguishes empty collection from populated nothing-to-decide", () => {
+  test("retains collection identity independently of attention publication", () => {
     const emptyCollection = makeUsefulCollection([
       makeGame({ id: "old", name: "Old", ownership: "previously-owned" }),
     ]);
@@ -1209,13 +1169,13 @@ describe("computeCollectionProfile", () => {
     });
 
     expect(empty.identity.collectionState).toBe("empty");
-    expect(empty.attention.state).toBe("empty-collection");
     expect(populated.identity.collectionState).toBe("populated");
-    expect(populated.attention.state).toBe("nothing-to-decide");
+    expect(empty.attention.state).toBe("disabled");
+    expect(populated.attention.state).toBe("disabled");
     expect(empty.identity.classes.mechanic.result).toBe("not-evaluated");
     expect(populated.identity.classes.mechanic.result).toBe("not-evaluated");
-    expect(empty.attention.items).toEqual([]);
-    expect(populated.attention.items).toEqual([]);
+    expect(empty.attention.cards).toEqual([]);
+    expect(populated.attention.cards).toEqual([]);
     expect(
       CollectionProfileSnapshotSchema.safeParse({ source: emptyCollection, profile: empty })
         .success,
@@ -1228,7 +1188,7 @@ describe("computeCollectionProfile", () => {
     ).toBe(true);
   });
 
-  test("projects missing and invalid attention evidence without hiding intentions", () => {
+  test("does not project legacy intention evidence into Profile", () => {
     const missing = makeGame({ id: "missing", name: "Missing", bggId: null });
     const invalidEvidence = { presence: "present" as const, value: "not-a-count" };
     const invalid = makeGame({
@@ -1286,21 +1246,7 @@ describe("computeCollectionProfile", () => {
       computedAt: "2026-08-28T00:00:00.000Z",
     });
 
-    expect(profile.attention.items).toHaveLength(2);
-    expect(profile.attention.items.find(({ gameName }) => gameName === "Missing")).toMatchObject({
-      currentPlayEvidence: {
-        status: "missing",
-        warning: "Current play evidence is missing.",
-      },
-      evidenceDestination: { operationId: "shelf.game.plays.set" },
-    });
-    expect(profile.attention.items.find(({ gameName }) => gameName === "Invalid")).toMatchObject({
-      currentPlayEvidence: {
-        status: "invalid",
-        warning: "Current play evidence is invalid.",
-      },
-      evidenceDestination: { operationId: "shelf.game.bgg.refresh" },
-    });
+    expect(profile.attention).toEqual({ state: "disabled", cardLimit: 0, cards: [] });
     expect(CollectionProfileSnapshotSchema.safeParse({ source: collection, profile }).success).toBe(
       true,
     );

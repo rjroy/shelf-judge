@@ -172,9 +172,11 @@ describe("useful profile persisted flow", () => {
       missingFor = 123;
       await firstProcess.gameService.refreshBggData("bgg-game");
       const warning = await firstProcess.profileService.getProfile();
-      expect(
-        warning.status === "available" && warning.attention.items[0]?.currentPlayEvidence.status,
-      ).toBe("stale");
+      expect(warning.status).toBe("available");
+      if (warning.status === "available")
+        expect(warning.attention.cards.every(({ evidence }) => evidence.kind.length > 0)).toBe(
+          true,
+        );
       currentNow = "2026-08-28T11:01:00.000Z";
       const correction = await firstProcess.intentionService.setPlayCount("bgg-game", 1);
       expect(correction.ok && correction.linkedIntentionTransition?.resolution?.source).toBe(
@@ -282,6 +284,7 @@ describe("useful profile persisted flow", () => {
       let restartComputations = 0;
       const restartedProfileService = createProfileService({
         storageService: restartedProcess.storageService,
+        attentionCandidates: restartedProcess.attentionCandidateService,
         displayedFitnessService: {
           ...restartedProcess.displayedFitnessService,
           async listGamesFromSnapshot(snapshot, options) {

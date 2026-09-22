@@ -20,6 +20,9 @@ const AttentionDispositionCommandBaseSchema = z
   })
   .strict();
 
+export const AttentionDispositionCommandTemplateBaseSchema =
+  AttentionDispositionCommandBaseSchema.omit({ commandId: true }).strict();
+
 export const NotNowAttentionCommandSchema = AttentionDispositionCommandBaseSchema.extend({
   operation: z.literal("not-now"),
 }).strict();
@@ -32,6 +35,17 @@ export const AttentionDispositionCommandSchema = z.discriminatedUnion("operation
   NotNowAttentionCommandSchema,
   IntentionalAttentionCommandSchema,
 ]);
+
+export const AttentionDispositionCommandTemplateSchema = z.discriminatedUnion("operation", [
+  AttentionDispositionCommandTemplateBaseSchema.extend({
+    operation: z.literal("not-now"),
+  }).strict(),
+  AttentionDispositionCommandTemplateBaseSchema.extend({
+    operation: z.literal("intentional"),
+  }).strict(),
+]);
+
+export type { AttentionDispositionCommandTemplate } from "./types";
 
 export const AttentionDispositionCommandErrorSchema = z.discriminatedUnion("code", [
   z.object({ code: z.literal("validation") }).strict(),

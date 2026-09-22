@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ProfileDataSchema } from "@shelf-judge/shared";
+import { CollectionProfileResultSchema, ProfileDataSchema } from "@shelf-judge/shared";
 import type { DisplayedFitnessService } from "../src/services/displayed-fitness-service.js";
 import { createProfileService } from "../src/services/profile-service.js";
 import type { StorageService } from "../src/services/storage-service.js";
@@ -29,6 +29,35 @@ describe("profile source identity", () => {
 });
 
 describe("ProfileService", () => {
+  test("publishes disabled, ranked, and exact post-ranking cap prefixes", async () => {
+    const ctx = createTestApp();
+    for (let index = 0; index < 8; index += 1)
+      await ctx.gameService.addGame({
+        name: `Unplayed ${String(index).padStart(2, "0")}`,
+        numPlays: 0,
+      });
+
+    const config = await ctx.storageService.loadConfig();
+    await ctx.storageService.saveConfig({ ...config, profileAttentionCardLimit: 24 });
+    const uncapped = await ctx.profileService.getProfile();
+    if (uncapped.status !== "available") throw new Error("Expected an available uncapped Profile");
+    const rankedIds = uncapped.attention.cards.map(({ id }) => id);
+    expect(rankedIds).toHaveLength(8);
+    const candidateBytes = ctx.fileOps.files.get("/test/data/attention-candidates.json");
+
+    for (const limit of [0, 1, 6, 24]) {
+      const currentConfig = await ctx.storageService.loadConfig();
+      await ctx.storageService.saveConfig({ ...currentConfig, profileAttentionCardLimit: limit });
+      const result = await ctx.profileService.getProfile();
+      expect(result.status).toBe("available");
+      if (result.status !== "available") continue;
+      expect(CollectionProfileResultSchema.safeParse(result).success).toBe(true);
+      expect(result.attention.cards.map(({ id }) => id)).toEqual(rankedIds.slice(0, limit));
+      expect(result.attention.state).toBe(limit === 0 ? "disabled" : "ranked");
+      expect(ctx.fileOps.files.get("/test/data/attention-candidates.json")).toBe(candidateBytes);
+    }
+  });
+
   test("omits note-only source differences from Profile output and profile.json", async () => {
     const ctx = createTestApp();
     await ctx.gameService.addGame({ name: "Note-isolated source" });
@@ -53,6 +82,7 @@ describe("ProfileService", () => {
 
     const withNote = await createProfileService({
       storageService: ctx.storageService,
+      attentionCandidates: ctx.attentionCandidateService,
       displayedFitnessService: ctx.displayedFitnessService,
     }).getProfile();
     const persisted = ctx.fileOps.files.get("/test/data/profile.json");
@@ -76,43 +106,44 @@ describe("ProfileService", () => {
     };
     const service = createProfileService({
       storageService: ctx.storageService,
+      attentionCandidates: ctx.attentionCandidateService,
       displayedFitnessService,
       now: () => `2026-08-28T00:00:0${clock++}.000Z`,
     });
 
     const first = await service.getProfile();
-    const firstIdentity = (await ctx.storageService.loadProfile())!.sourceIdentity;
+    const firstIdentity = (await ctx.storageService.loadProfile())!.publicationIdentity.source;
     expect(first.status).toBe("available");
     expect(await service.getProfile()).toEqual(first);
     expect(computations).toBe(1);
 
     await jsonRequest(ctx.app, "POST", "/api/games", { name: "Changed collection" });
     await service.getProfile();
-    const collectionIdentity = (await ctx.storageService.loadProfile())!.sourceIdentity;
+    const collectionIdentity = (await ctx.storageService.loadProfile())!.publicationIdentity.source;
     expect(collectionIdentity.collectionRevision).toBeGreaterThan(firstIdentity.collectionRevision);
 
     await ctx.tournamentService.updateSettings({ normalizationHalfWidth: 450 });
     await service.getProfile();
-    const tournamentIdentity = (await ctx.storageService.loadProfile())!.sourceIdentity;
+    const tournamentIdentity = (await ctx.storageService.loadProfile())!.publicationIdentity.source;
     expect(tournamentIdentity.tournamentHash).not.toBe(collectionIdentity.tournamentHash);
 
     await ctx.predictionService.updateSettings({ defaultK: 6 });
     await service.getProfile();
-    const predictionIdentity = (await ctx.storageService.loadProfile())!.sourceIdentity;
+    const predictionIdentity = (await ctx.storageService.loadProfile())!.publicationIdentity.source;
     expect(predictionIdentity.predictionSettingsHash).not.toBe(
       tournamentIdentity.predictionSettingsHash,
     );
 
     await jsonRequest(ctx.app, "PATCH", "/api/redundancy/settings", { enabled: true });
     await service.getProfile();
-    const redundancyIdentity = (await ctx.storageService.loadProfile())!.sourceIdentity;
+    const redundancyIdentity = (await ctx.storageService.loadProfile())!.publicationIdentity.source;
     expect(redundancyIdentity.redundancySettingsHash).not.toBe(
       predictionIdentity.redundancySettingsHash,
     );
     expect(computations).toBe(5);
   });
 
-  test("recomputes a version-11 generic intention card into the zero-play presentation", async () => {
+  test("discards older and malformed attention Profile caches", async () => {
     const ctx = createTestApp();
     const created = await ctx.gameService.addGame({ name: "Unplayed intention" });
     const collection = await ctx.storageService.loadCollection();
@@ -142,18 +173,20 @@ describe("ProfileService", () => {
     expect(current.status).toBe("available");
     const cached = await ctx.storageService.loadProfile();
     if (!cached) throw new Error("Expected current profile cache");
-    const oldGenericCache = JSON.stringify(cached)
-      .replace('"algorithmVersion":12', '"algorithmVersion":11')
-      .replace('"decisionFamily":"unplayed-owner-wanted"', '"decisionFamily":"play-intention"')
-      .replace(
-        '"question":"Is there a reason you haven’t played this?"',
-        '"question":"Do you still want to play Unplayed intention?"',
-      );
+    const oldGeneric = structuredClone(cached);
+    oldGeneric.algorithmVersion = 12 as never;
+    (oldGeneric.profile.attention as unknown as Record<string, unknown>) = {
+      state: "empty",
+      cardLimit: 6,
+      items: [],
+    };
+    const oldGenericCache = JSON.stringify(oldGeneric);
     ctx.fileOps.files.set("/test/data/profile.json", oldGenericCache);
 
     let computations = 0;
     const service = createProfileService({
       storageService: ctx.storageService,
+      attentionCandidates: ctx.attentionCandidateService,
       displayedFitnessService: {
         ...ctx.displayedFitnessService,
         async listGamesFromSnapshot(snapshot, options) {
@@ -167,13 +200,9 @@ describe("ProfileService", () => {
     expect(computations).toBe(1);
     expect(result.status).toBe("available");
     if (result.status !== "available") throw new Error("Expected available profile");
-    const attention = result.attention.items.find(
-      ({ id }) => id === "attention:unplayed-intention",
-    );
-    if (!attention) throw new Error("Expected recomputed intention card");
-    expect(attention.decisionFamily).toBe("unplayed-owner-wanted");
-    expect(attention.question).toBe("Is there a reason you haven’t played this?");
-    expect((await ctx.storageService.loadProfile())?.algorithmVersion).toBe(12);
+    expect(result.attention.state).toBe("ranked");
+    expect(result.attention.cards).toHaveLength(1);
+    expect((await ctx.storageService.loadProfile())?.algorithmVersion).toBe(13);
   });
 
   test("recomputes a current-identity cache that does not match the collection source", async () => {
@@ -192,6 +221,7 @@ describe("ProfileService", () => {
     let computations = 0;
     const service = createProfileService({
       storageService: ctx.storageService,
+      attentionCandidates: ctx.attentionCandidateService,
       displayedFitnessService: {
         ...ctx.displayedFitnessService,
         async listGamesFromSnapshot(snapshot, options) {
@@ -222,6 +252,7 @@ describe("ProfileService", () => {
 
     const result = await createProfileService({
       storageService: ctx.storageService,
+      attentionCandidates: ctx.attentionCandidateService,
       displayedFitnessService: {
         listGames: () => Promise.resolve([]),
         listGamesFromSnapshot: () => Promise.reject(new Error("fitness failed")),
@@ -283,6 +314,7 @@ describe("ProfileService", () => {
       };
       const service = createProfileService({
         storageService: ctx.storageService,
+        attentionCandidates: ctx.attentionCandidateService,
         displayedFitnessService,
       });
 
@@ -307,7 +339,7 @@ describe("ProfileService", () => {
       const firstCacheRaw = fileOps.files.get("/test/data/profile.json");
       if (firstCacheRaw === undefined) throw new Error("First profile cache was not published");
       const firstIdentity = profileSourceIdentity(capturedSources);
-      expect(ProfileDataSchema.parse(JSON.parse(firstCacheRaw)).sourceIdentity).toEqual(
+      expect(ProfileDataSchema.parse(JSON.parse(firstCacheRaw)).publicationIdentity.source).toEqual(
         firstIdentity,
       );
 
@@ -330,7 +362,9 @@ describe("ProfileService", () => {
         redundancySettings,
       });
       expect(secondIdentity).not.toEqual(firstIdentity);
-      expect((await ctx.storageService.loadProfile())?.sourceIdentity).toEqual(secondIdentity);
+      expect((await ctx.storageService.loadProfile())?.publicationIdentity.source).toEqual(
+        secondIdentity,
+      );
     }
   });
 
@@ -354,6 +388,7 @@ describe("ProfileService", () => {
     let snapshotCaptured = false;
     const service = createProfileService({
       storageService: ctx.storageService,
+      attentionCandidates: ctx.attentionCandidateService,
       displayedFitnessService: {
         ...ctx.displayedFitnessService,
         async listGamesFromSnapshot(snapshot, options) {
@@ -398,6 +433,7 @@ describe("ProfileService", () => {
     };
     const service = createProfileService({
       storageService: ctx.storageService,
+      attentionCandidates: ctx.attentionCandidateService,
       displayedFitnessService: ctx.displayedFitnessService,
     });
 
@@ -423,6 +459,7 @@ describe("ProfileService", () => {
     const before = await ctx.storageService.loadCollection();
     const service = createProfileService({
       storageService: ctx.storageService,
+      attentionCandidates: ctx.attentionCandidateService,
       displayedFitnessService: {
         listGames: () => Promise.resolve([]),
         listGamesFromSnapshot: () => Promise.reject(new Error("fitness failed")),
@@ -448,6 +485,7 @@ describe("ProfileService", () => {
     };
     const validation = await createProfileService({
       storageService: invalidStorage,
+      attentionCandidates: validationContext.attentionCandidateService,
       displayedFitnessService: validationContext.displayedFitnessService,
     }).getProfile();
     expect(validation.status).toBe("unavailable");
@@ -460,6 +498,7 @@ describe("ProfileService", () => {
     };
     const malformed = await createProfileService({
       storageService: malformedStorage,
+      attentionCandidates: validationContext.attentionCandidateService,
       displayedFitnessService: validationContext.displayedFitnessService,
     }).getProfile();
     expect(malformed.status).toBe("unavailable");
@@ -473,6 +512,7 @@ describe("ProfileService", () => {
     };
     const transport = await createProfileService({
       storageService: failingStorage,
+      attentionCandidates: transportContext.attentionCandidateService,
       displayedFitnessService: transportContext.displayedFitnessService,
     }).getProfile();
     expect(transport).toEqual({

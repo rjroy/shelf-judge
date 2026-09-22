@@ -138,28 +138,82 @@ export const usefulProfileFixture: CollectionProfile = {
     axisDistributions: [],
   },
   attention: {
-    state: "active",
-    items: [
+    state: "ranked",
+    cardLimit: 6,
+    cards: [
       {
-        id: "attention:intention-1",
-        decisionFamily: "play-intention",
+        id: "attention:game-4:explicit-intention",
+        gameId: "game-4",
+        ruleId: "explicit-intention",
+        ruleVersion: 1,
+        dependencyVersion: 1,
         intention: activeIntentionFixture,
         gameName: "Heat",
         question: "Do you still want to play Heat?",
-        whyNow: "You asked Shelf Judge to keep this intention visible.",
-        currentPlayEvidence: {
-          status: "valid",
-          playCount: 0,
-          source: "bgg-collection",
-          observedAt: "2026-08-27T10:00:00.000Z",
-          stale: false,
+        reason: "You marked Heat as Want to play.",
+        scoreExplanation: "Signal strength 1 × category weight 0.7 = attention score 0.7.",
+        actions: [
+          {
+            action: "resolve-intention",
+            operationId: "shelf.game.intention.complete",
+            destination: { gameId: "game-4", operationId: "shelf.game.intention.complete" },
+            command: null,
+          },
+          {
+            action: "retire-intention",
+            operationId: "shelf.game.intention.retire",
+            destination: { gameId: "game-4", operationId: "shelf.game.intention.retire" },
+            command: null,
+          },
+          {
+            action: "not-now",
+            operationId: "shelf.profile.attention.not-now",
+            destination: { gameId: "game-4", operationId: "shelf.profile.attention.not-now" },
+            command: {
+              operation: "not-now",
+              gameId: "game-4",
+              ruleId: "explicit-intention",
+              ruleVersion: 1,
+              fingerprint: "a".repeat(64),
+              expectedVersion: 0,
+            },
+          },
+          {
+            action: "intentional",
+            operationId: "shelf.profile.attention.intentional",
+            destination: { gameId: "game-4", operationId: "shelf.profile.attention.intentional" },
+            command: {
+              operation: "intentional",
+              gameId: "game-4",
+              ruleId: "explicit-intention",
+              ruleVersion: 1,
+              fingerprint: "a".repeat(64),
+              expectedVersion: 0,
+            },
+          },
+          {
+            action: "open-game",
+            operationId: "shelf.game.get",
+            destination: { gameId: "game-4", operationId: "shelf.game.get" },
+            command: null,
+          },
+        ],
+        evidence: {
+          kind: "intention",
+          intentionId: "intention-1",
+          intentionKind: "first-play",
+          createdAt: "2026-08-27T10:01:00.000Z",
+          baseline: {
+            playCount: 0,
+            evidenceSource: "bgg-collection",
+            observedAt: "2026-08-27T10:00:00.000Z",
+          },
         },
-        responses: ["leave-visible", "complete", "retire", "correct-or-refresh-evidence"],
-        abstentionBasis: "Only an explicit active intention qualifies.",
-        resolution: null,
-        reopenCondition: "Create a new explicit intention after resolution.",
-        destination: { gameId: "game-4", operationId: "shelf.game.intention.manage" },
-        evidenceDestination: { gameId: "game-4", operationId: "shelf.game.plays.set" },
+        disposition: { state: "none", expectedVersion: 0 },
+        nonClockFingerprint: "a".repeat(64),
+        signalStrength: { numerator: "1", denominator: "1" },
+        categoryWeight: { numerator: "7", denominator: "10" },
+        attentionScore: { numerator: "7", denominator: "10" },
       },
     ],
   },
@@ -168,7 +222,7 @@ export const usefulProfileFixture: CollectionProfile = {
 
 export const supportedUsefulProfileFixture: CollectionProfile = {
   ...structuredClone(usefulProfileFixture),
-  attention: { state: "nothing-to-decide", items: [] },
+  attention: { state: "no-winner", cardLimit: 6, cards: [] },
 };
 
 export const limitedUsefulProfileFixture: CollectionProfile = (() => {
@@ -208,13 +262,6 @@ export const activeUsefulProfileFixture: CollectionProfile = structuredClone(use
 
 export const warningUsefulProfileFixture: CollectionProfile = (() => {
   const profile = structuredClone(activeUsefulProfileFixture);
-  profile.attention.items[0].currentPlayEvidence = {
-    status: "stale",
-    playCount: 0,
-    source: "bgg-collection",
-    observedAt: "2026-08-27T10:00:00.000Z",
-    warning: "A newer BGG check did not provide a valid play count.",
-  };
   return profile;
 })();
 
@@ -230,7 +277,7 @@ export const nothingToDecideUsefulProfileFixture: CollectionProfile = {
     },
     axisDistributions: [],
   },
-  attention: { state: "nothing-to-decide", items: [] },
+  attention: { state: "no-winner", cardLimit: 6, cards: [] },
   computedAt: "2026-08-27T12:00:00.000Z",
 };
 
@@ -267,7 +314,7 @@ export const emptyUsefulProfileFixture: CollectionProfile = {
     },
     axisDistributions: [],
   },
-  attention: { state: "empty-collection", items: [] },
+  attention: { state: "empty-collection", cardLimit: 6, cards: [] },
   computedAt: "2026-08-27T12:00:00.000Z",
 };
 

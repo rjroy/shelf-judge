@@ -406,6 +406,7 @@ describe("ReflectionEvidenceService", () => {
     const analystProjectionSnapshotService = createAnalystProjectionSnapshotService({
       storageService: context.storageService,
       displayedFitnessService: context.displayedFitnessService,
+      profileService: context.profileService,
     });
     const service = createReflectionEvidenceService({
       storageService: context.storageService,

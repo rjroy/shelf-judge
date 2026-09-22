@@ -1020,6 +1020,7 @@ describe("Phase 3 direct integration evidence", () => {
     };
     const profile = createProfileService({
       storageService: ctx.storageService,
+      attentionCandidates: ctx.attentionCandidateService,
       displayedFitnessService: fitness,
     });
 
