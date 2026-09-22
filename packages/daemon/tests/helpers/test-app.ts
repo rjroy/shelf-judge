@@ -45,6 +45,14 @@ import {
   createReflectionRuntime,
   type ReflectionRuntime,
 } from "../../src/services/reflection-runtime.js";
+import {
+  attentionCandidateStorageFor,
+  createAttentionCandidateOracle,
+  createAttentionCandidateService,
+  productionAttentionCandidateDependenciesForGame,
+  type AttentionCandidateService,
+} from "../../src/services/attention-candidate-service.js";
+import { profileSourceCoordinatorFor } from "../../src/services/profile-source-coordinator.js";
 
 type MockFileOps = ReturnType<typeof createMockFileOps>;
 
@@ -62,6 +70,7 @@ export interface TestAppContext<TFileOps extends FileOps = MockFileOps> {
   displayedFitnessService: DisplayedFitnessService;
   intentionService: IntentionService;
   ownerGameNoteService: OwnerGameNoteService;
+  attentionCandidateService: AttentionCandidateService;
   bggClient: BggClient | undefined;
   groundedAnalysisProvider: GroundedAnalysisProvider;
   groundedAnalysisTransportController: GroundedAnalysisTransportController;
@@ -125,7 +134,14 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     configPath,
     fileOps,
   });
-  const collectionMutationService = createCollectionMutationService({ storageService });
+  let attentionCandidateService: AttentionCandidateService | null = null;
+  const collectionMutationService = createCollectionMutationService({
+    storageService,
+    async postCommitObserver(event) {
+      if (attentionCandidateService === null || event.impact === null) return;
+      await attentionCandidateService.maintainAfterCollectionCommit(event.impact);
+    },
+  });
   const reflectionRuntime = createReflectionRuntime({
     dataDir,
     fileOps,
@@ -140,7 +156,15 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
   const bggClient = options?.bggClient;
 
   const axisService = createAxisService({ storageService, collectionMutationService });
-  const tournamentService = createTournamentService({ storageService });
+  const maintainCandidateSource = async (
+    impact: import("../../src/services/attention-candidate-service.js").AttentionMutationImpact,
+  ) => {
+    if (attentionCandidateService !== null) await attentionCandidateService.maintain(impact);
+  };
+  const tournamentService = createTournamentService({
+    storageService,
+    afterSourceSave: maintainCandidateSource,
+  });
   const gameService = createGameService({
     storageService,
     collectionMutationService,
@@ -156,11 +180,20 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     fitnessService,
     tournamentService,
     bggClient,
+    afterSourceSave: maintainCandidateSource,
   });
   const displayedFitnessService = createDisplayedFitnessService({
     gameService,
     predictionService,
     storageService,
+  });
+  attentionCandidateService = createAttentionCandidateService({
+    coordinator: profileSourceCoordinatorFor(storageService),
+    storage: attentionCandidateStorageFor(storageService),
+    productionStorage: storageService,
+    clock: { now: () => new Date(options?.now?.() ?? "2026-01-01T00:00:00.000Z") },
+    oracle: createAttentionCandidateOracle(displayedFitnessService),
+    dependenciesForGame: productionAttentionCandidateDependenciesForGame,
   });
   const intentionService =
     options?.intentionService ??
@@ -179,6 +212,7 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
   const profileService = createProfileService({
     storageService,
     displayedFitnessService,
+    attentionCandidates: attentionCandidateService,
   });
   const unavailableGroundedConfiguration: GroundedProviderStartupConfiguration = {
     status: "unavailable",
@@ -206,6 +240,8 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     groundedAnalysisProvider,
     reflectionRuntime,
     bggClient,
+    profileSourceCoordinator: profileSourceCoordinatorFor(storageService),
+    afterCandidateSourceSave: maintainCandidateSource,
     onShutdown: options?.onShutdown,
   });
 
@@ -223,6 +259,7 @@ export function createTestApp<TFileOps extends FileOps = MockFileOps>(
     displayedFitnessService,
     intentionService,
     ownerGameNoteService,
+    attentionCandidateService: attentionCandidateService,
     bggClient,
     groundedAnalysisProvider,
     groundedAnalysisTransportController,

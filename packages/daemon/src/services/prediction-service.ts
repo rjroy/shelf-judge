@@ -27,6 +27,7 @@ import { computePredictedFitness, assessReadiness } from "./prediction-engine";
 import type { ReferenceGameCandidate, ClusterMembership } from "./prediction-engine";
 import { canonicalSuggestedPlayerPoll } from "./suggested-player-poll.js";
 import { profileSourceCoordinatorFor } from "./profile-source-coordinator.js";
+import type { AttentionMutationImpact } from "./attention-candidate-service.js";
 
 export interface PredictedGameResult {
   game: Game;
@@ -46,11 +47,12 @@ export interface PredictionService {
   predictGame(gameId: string): Promise<PredictedGameResult>;
   predictBggGame(bggId: number): Promise<PredictedGameResult>;
   getReadiness(): Promise<PredictionReadiness>;
-  listGamesWithPredictions(): Promise<GameWithScore[]>;
+  listGamesWithPredictions(targetGameIds?: readonly string[]): Promise<GameWithScore[]>;
   listGamesWithPredictionsFromSnapshot?(
     collection: CollectionProfileCollectionSource,
     tournamentData: TournamentData,
     settings: PredictionSettings,
+    targetGameIds?: readonly string[],
   ): Promise<GameWithScore[]>;
   getSettings(): Promise<PredictionSettings>;
   updateSettings(patch: Partial<PredictionSettings>): Promise<PredictionSettings>;
@@ -62,6 +64,7 @@ export interface PredictionServiceDeps {
   tournamentService: TournamentService;
   bggClient?: BggClient;
   now?: () => string;
+  afterSourceSave?: (impact: AttentionMutationImpact) => Promise<void>;
 }
 
 function flattenVector(fv: FeatureVector): number[] {
@@ -185,9 +188,16 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
 
   function listGamesWithPredictionsFromContext(
     ctx: Awaited<ReturnType<typeof loadPredictionContext>>,
+    targetGameIds?: readonly string[],
   ): GameWithScore[] {
     const results: GameWithScore[] = [];
-    for (const game of ctx.games) {
+    const targets =
+      targetGameIds === undefined
+        ? ctx.games
+        : ctx.games.filter(
+            (game) => game.ownership !== "previously-owned" && new Set(targetGameIds).has(game.id),
+          );
+    for (const game of targets) {
       const actualScore = fitnessService.calculateScore(game, ctx.axes, ctx.tournamentData);
       const allRated = actualScore && actualScore.ratedAxisCount === ctx.axes.length;
       const targetVector = ctx.gameVectors.get(game.id);
@@ -495,14 +505,19 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
       );
     },
 
-    async listGamesWithPredictions(): Promise<GameWithScore[]> {
+    async listGamesWithPredictions(targetGameIds): Promise<GameWithScore[]> {
       const ctx = await loadPredictionContext();
-      return listGamesWithPredictionsFromContext(ctx);
+      return listGamesWithPredictionsFromContext(ctx, targetGameIds);
     },
 
-    async listGamesWithPredictionsFromSnapshot(collection, tournamentData, settings) {
+    async listGamesWithPredictionsFromSnapshot(
+      collection,
+      tournamentData,
+      settings,
+      targetGameIds,
+    ) {
       const ctx = await loadPredictionContext({ collection, tournamentData, settings });
-      return listGamesWithPredictionsFromContext(ctx);
+      return listGamesWithPredictionsFromContext(ctx, targetGameIds);
     },
 
     async getSettings(): Promise<PredictionSettings> {
@@ -514,6 +529,7 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
         const current = await storageService.loadPredictionSettings();
         const updated: PredictionSettings = { ...current, ...patch };
         await storageService.savePredictionSettings(updated);
+        await deps.afterSourceSave?.({ kind: "global", reason: "prediction" });
         return updated;
       });
     },

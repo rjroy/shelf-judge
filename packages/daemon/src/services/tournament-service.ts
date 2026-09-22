@@ -14,6 +14,7 @@ import { matchesBggTag } from "@shelf-judge/shared";
 import type { StorageService } from "./storage-service.js";
 import { calculateNewRatings, normalizeElo, shouldDisplayRanking } from "./elo-engine.js";
 import { profileSourceCoordinatorFor } from "./profile-source-coordinator.js";
+import type { AttentionMutationImpact } from "./attention-candidate-service.js";
 
 export interface TournamentService {
   startSession(filters: SessionFilter[] | null, games: GameWithScore[]): Promise<TournamentSession>;
@@ -45,6 +46,7 @@ export interface TournamentReconciliationResult {
 
 export interface TournamentServiceDeps {
   storageService: StorageService;
+  afterSourceSave?: (impact: AttentionMutationImpact) => Promise<void>;
 }
 
 function applyFilters(games: GameWithScore[], filters: SessionFilter[]): GameWithScore[] {
@@ -186,6 +188,10 @@ export function deriveDisplayStats(
 export function createTournamentService(deps: TournamentServiceDeps): TournamentService {
   const { storageService } = deps;
   const profileSourceCoordinator = profileSourceCoordinatorFor(storageService);
+  const saveTournament = async (data: TournamentData): Promise<void> => {
+    await storageService.saveTournament(data);
+    await deps.afterSourceSave?.({ kind: "global", reason: "tournament" });
+  };
 
   const service: TournamentService = {
     async startSession(
@@ -224,7 +230,7 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
       };
 
       data.sessions.push(session);
-      await storageService.saveTournament(data);
+      await saveTournament(data);
       return session;
     },
 
@@ -246,7 +252,7 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
       session.status = "completed";
       session.comparisons = [];
       session.updatedAt = new Date().toISOString();
-      await storageService.saveTournament(data);
+      await saveTournament(data);
       return session;
     },
 
@@ -269,7 +275,7 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
         session.status = "completed";
         session.comparisons = [];
         session.updatedAt = new Date().toISOString();
-        await storageService.saveTournament(data);
+        await saveTournament(data);
         return null;
       }
 
@@ -293,7 +299,7 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
         session.status = "completed";
         session.comparisons = [];
         session.updatedAt = new Date().toISOString();
-        await storageService.saveTournament(data);
+        await saveTournament(data);
         return null;
       }
       const fewestComparisons = Math.min(
@@ -329,7 +335,7 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
       session.status = "completed";
       session.comparisons = [];
       session.updatedAt = new Date().toISOString();
-      await storageService.saveTournament(data);
+      await saveTournament(data);
       return null;
     },
 
@@ -436,7 +442,7 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
         data.gameStats[loserId].recentComparisons.pop();
       }
 
-      await storageService.saveTournament(data);
+      await saveTournament(data);
       return comparison;
     },
 
@@ -480,7 +486,7 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
       );
       data.settings.normalizationHalfWidth = halfWidth;
 
-      await storageService.saveTournament(data);
+      await saveTournament(data);
       return { normalized: Object.keys(data.gameStats).length };
     },
 
@@ -492,7 +498,7 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
       ]);
       availableGameIds.delete(gameId);
       removeUnavailableGames(data, availableGameIds);
-      await storageService.saveTournament(data);
+      await saveTournament(data);
     },
 
     async reconcileWithCollection(): Promise<TournamentReconciliationResult> {
@@ -500,7 +506,7 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
       const data = await storageService.loadTournament();
       const result = removeUnavailableGames(data, new Set(collection.games.map((game) => game.id)));
       if (result.changed) {
-        await storageService.saveTournament(data);
+        await saveTournament(data);
       }
       return result;
     },
@@ -513,7 +519,7 @@ export function createTournamentService(deps: TournamentServiceDeps): Tournament
     async updateSettings(patch: Partial<TournamentSettings>): Promise<TournamentSettings> {
       const data = await storageService.loadTournament();
       Object.assign(data.settings, patch);
-      await storageService.saveTournament(data);
+      await saveTournament(data);
       return data.settings;
     },
   };

@@ -22,6 +22,7 @@ import {
   sameProfileSourceIdentity,
   type ProfileSources,
 } from "./profile-source-coordinator.js";
+import type { AttentionCandidateService } from "./attention-candidate-service.js";
 
 export interface ProfileService {
   getProfile(): Promise<CollectionProfileResult>;
@@ -31,6 +32,8 @@ export interface ProfileServiceDeps {
   storageService: StorageService;
   displayedFitnessService: DisplayedFitnessService;
   now?: () => string;
+  /** Candidate freshness is a prerequisite for every Profile publication. */
+  attentionCandidates?: Pick<AttentionCandidateService, "ensureFresh">;
 }
 
 function unavailable(
@@ -83,6 +86,12 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
         }
 
         const identity = profileSourceIdentity(sources);
+        if (deps.attentionCandidates) {
+          const candidates = await deps.attentionCandidates.ensureFresh();
+          if (candidates.state === "unavailable") {
+            return unavailable("recomputation", new Error("Attention candidates are unavailable"));
+          }
+        }
         let stored: ProfileData | null;
         try {
           stored = await storageService.loadProfile();
@@ -127,7 +136,23 @@ export function createProfileService(deps: ProfileServiceDeps): ProfileService {
             source: sources.collection,
             profile,
           }).profile as CollectionProfile;
-          const finalIdentity = profileSourceIdentity(sources);
+          const [
+            finalCollection,
+            finalTournament,
+            finalPredictionSettings,
+            finalRedundancySettings,
+          ] = await Promise.all([
+            storageService.loadCollection(),
+            storageService.loadTournament(),
+            storageService.loadPredictionSettings(),
+            storageService.loadRedundancySettings(),
+          ]);
+          const finalIdentity = profileSourceIdentity({
+            collection: projectProfileCollectionSource(finalCollection),
+            tournament: finalTournament,
+            predictionSettings: finalPredictionSettings,
+            redundancySettings: finalRedundancySettings,
+          });
           if (!sameProfileSourceIdentity(identity, finalIdentity)) {
             throw new Error("Profile source snapshot changed during computation");
           }

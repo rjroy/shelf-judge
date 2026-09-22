@@ -33,6 +33,8 @@ export interface AttentionCandidateEngineInput {
     readonly redundancySettingsHash: string;
   };
   readonly catalog?: readonly AttentionRuleDefinition[];
+  /** Incremental maintenance may request exact IDs; omitted remains the complete oracle. */
+  readonly targetGameIds?: readonly string[];
 }
 
 export interface AttentionCandidateMatch {
@@ -91,8 +93,10 @@ export function computeAttentionCandidates(
   const fitness = new Map(input.displayedFitness.map((entry) => [entry.game.id, entry]));
   const evaluations: AttentionCandidateEvaluation[] = [];
   const presentation = new Map<string, AttentionCandidateMatch>();
+  const targetGameIds = input.targetGameIds === undefined ? null : new Set(input.targetGameIds);
   for (const game of input.collection.games) {
     if (game.ownership !== "owned") continue;
+    if (targetGameIds !== null && !targetGameIds.has(game.id)) continue;
     const context = {
       game,
       intentions: input.collection.intentions,

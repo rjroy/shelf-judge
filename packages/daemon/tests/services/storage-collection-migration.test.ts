@@ -418,7 +418,12 @@ describe("storage collection migration ordering and recovery", () => {
 
     const collection = await service.loadCollection();
 
-    expect(order).toEqual(["collection-profile", "wishlist-predictions", "future-predictions"]);
+    expect(order).toEqual([
+      "collection-profile",
+      "wishlist-predictions",
+      "attention-candidates",
+      "future-predictions",
+    ]);
     expect(CollectionSchema.parse(collection)).toEqual(collection);
     const futureAttempt = fileOps.calls.findIndex(
       (call) => call.method === "writeFile" && call.args[0].endsWith("future.invalidated"),

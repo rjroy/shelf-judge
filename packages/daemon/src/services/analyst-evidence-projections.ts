@@ -19,6 +19,7 @@ import type { DisplayedGameFitness, DisplayedFitnessService } from "./displayed-
 import { projectProfileCollectionSource } from "./game-projection.js";
 import { canonicalSha256, profileSourceCoordinatorFor } from "./profile-source-coordinator.js";
 import { createProfileService } from "./profile-service.js";
+import type { ProfileService } from "./profile-service.js";
 import type { StorageService } from "./storage-service.js";
 
 const IdSchema = z.string().min(1);
@@ -862,14 +863,18 @@ export function buildAnalystProjectionSnapshot(input: {
 export function createAnalystProjectionSnapshotService(deps: {
   storageService: StorageService;
   displayedFitnessService: DisplayedFitnessService;
+  /** The daemon Profile gate is shared so analyst snapshots cannot bypass candidate freshness. */
+  profileService?: ProfileService;
   now?: () => string;
 }) {
   const coordinator = profileSourceCoordinatorFor(deps.storageService);
-  const profileService = createProfileService({
-    storageService: deps.storageService,
-    displayedFitnessService: deps.displayedFitnessService,
-    now: deps.now,
-  });
+  const profileService =
+    deps.profileService ??
+    createProfileService({
+      storageService: deps.storageService,
+      displayedFitnessService: deps.displayedFitnessService,
+      now: deps.now,
+    });
   return Object.freeze({
     capture: () =>
       coordinator.runExclusive(async () => {

@@ -56,6 +56,7 @@ import { createAnalystEvidenceService } from "./services/analyst-evidence-servic
 import { createAnalystAttestationService } from "./services/analyst-attestation-service.js";
 import { createAnalystTranscriptValidator } from "./services/analyst-transcript-validator.js";
 import { createAnalystTurnService } from "./services/analyst-turn-service.js";
+import type { ProfileSourceCoordinator } from "./services/profile-source-coordinator.js";
 
 export interface AppDeps {
   storageService: StorageService;
@@ -73,6 +74,10 @@ export interface AppDeps {
   groundedFeatureAnalyzers?: readonly GroundedFeatureAnalyzer<unknown>[];
   bggClient?: BggClient;
   onShutdown?: () => void | Promise<void>;
+  profileSourceCoordinator?: ProfileSourceCoordinator;
+  afterCandidateSourceSave?: (
+    impact: import("./services/attention-candidate-service.js").AttentionMutationImpact,
+  ) => Promise<void>;
 }
 
 export interface AppResult {
@@ -132,7 +137,10 @@ export function createApp(deps: AppDeps): AppResult {
   const profileRouteModule = createProfileRoutes({ profileService });
   const predictionRouteModule = createPredictionRoutes({ predictionService, storageService });
   const nicheRouteModule = createNicheRoutes({ storageService });
-  const redundancyRouteModule = createRedundancyRoutes({ storageService });
+  const redundancyRouteModule = createRedundancyRoutes({
+    storageService,
+    afterSourceSave: deps.afterCandidateSourceSave,
+  });
   const shelfService = createShelfService({ storageService, collectionMutationService });
   const capacityService = createCapacityService({ storageService, gameService });
   const shelfRouteModule = createShelfRoutes({ shelfService, capacityService });
@@ -146,6 +154,7 @@ export function createApp(deps: AppDeps): AppResult {
   const analystProjectionSnapshotService = createAnalystProjectionSnapshotService({
     storageService,
     displayedFitnessService,
+    profileService,
   });
   const reflectionProjectionSnapshotService = createReflectionProjectionSnapshotService({
     storageService,
@@ -284,7 +293,10 @@ export function createApp(deps: AppDeps): AppResult {
   ];
 
   const helpRouteModule = createHelpRoutes({ operations: allOperations });
-  const configRouteModule = createConfigRoutes({ storageService });
+  const configRouteModule = createConfigRoutes({
+    storageService,
+    coordinator: deps.profileSourceCoordinator,
+  });
   const shutdownRouteModule = createShutdownRoutes({
     async onShutdown() {
       await analystRouteModule.cancelActive();

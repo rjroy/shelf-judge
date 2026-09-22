@@ -203,6 +203,18 @@ export type {
 } from "./types";
 
 export {
+  ATTENTION_CANDIDATE_ARTIFACT_INDEX_VERSION,
+  ATTENTION_CANDIDATE_ARTIFACT_SCHEMA_VERSION,
+  AttentionCandidateArtifactIdentitySchema,
+  AttentionCandidateArtifactRowSchema,
+  AttentionCandidateArtifactSchema,
+} from "./attention-candidate-artifact";
+export type {
+  AttentionCandidateArtifact,
+  AttentionCandidateArtifactIdentity,
+} from "./attention-candidate-artifact";
+
+export {
   DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
   CollectionProfileEntityPolicySchema,
 } from "./collection-profile-entity-policy";

@@ -7,9 +7,14 @@ import {
 import { z } from "zod";
 import type { StorageService } from "../services/storage-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
+import {
+  profileSourceCoordinatorFor,
+  type ProfileSourceCoordinator,
+} from "../services/profile-source-coordinator.js";
 
 export interface ConfigRoutesDeps {
   storageService: StorageService;
+  coordinator?: ProfileSourceCoordinator;
 }
 
 const UpdateConfigSchema = z.object({
@@ -22,6 +27,7 @@ const UpdateConfigSchema = z.object({
 
 export function createConfigRoutes(deps: ConfigRoutesDeps): RouteModule {
   const { storageService } = deps;
+  const coordinator = deps.coordinator ?? profileSourceCoordinatorFor(storageService);
   const routes = new Hono();
 
   // GET /config
@@ -53,29 +59,36 @@ export function createConfigRoutes(deps: ConfigRoutesDeps): RouteModule {
     }
 
     try {
-      const config = await storageService.loadConfig();
+      return await coordinator.runExclusive(async () => {
+        const config = await storageService.loadConfig();
 
-      if (parsed.data.bggAuthToken !== undefined) {
-        config.bggAuthToken = parsed.data.bggAuthToken;
-      }
-      if (parsed.data.groundedAnalysis !== undefined) {
-        config.groundedAnalysis = parsed.data.groundedAnalysis;
-      }
-      if (parsed.data.username !== undefined) {
-        config.username = parsed.data.username;
-      }
-      if (parsed.data.profileEntityPolicy !== undefined) {
-        config.profileEntityPolicy = parsed.data.profileEntityPolicy;
-      }
-      if (parsed.data.profileAttentionCardLimit !== undefined) {
-        config.profileAttentionCardLimit = parsed.data.profileAttentionCardLimit;
-      }
+        if (parsed.data.bggAuthToken !== undefined) {
+          config.bggAuthToken = parsed.data.bggAuthToken;
+        }
+        if (parsed.data.groundedAnalysis !== undefined) {
+          config.groundedAnalysis = parsed.data.groundedAnalysis;
+        }
+        if (parsed.data.username !== undefined) {
+          config.username = parsed.data.username;
+        }
+        if (parsed.data.profileEntityPolicy !== undefined) {
+          config.profileEntityPolicy = parsed.data.profileEntityPolicy;
+        }
+        if (parsed.data.profileAttentionCardLimit !== undefined) {
+          config.profileAttentionCardLimit = parsed.data.profileAttentionCardLimit;
+        }
 
-      await storageService.saveConfig(config);
+        await storageService.saveConfig(config);
+        if (
+          parsed.data.profileAttentionCardLimit !== undefined ||
+          parsed.data.profileEntityPolicy !== undefined
+        )
+          await storageService.discardProfile?.();
 
-      return c.json({
-        ...config,
-        bggAuthToken: config.bggAuthToken ? "***configured***" : null,
+        return c.json({
+          ...config,
+          bggAuthToken: config.bggAuthToken ? "***configured***" : null,
+        });
       });
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 500);

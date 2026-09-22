@@ -7,12 +7,24 @@ import { createLogger, type Logger } from "./logger.js";
 import type { CollectionPersistence, CollectionReader } from "./storage-service.js";
 import { profileSourceCoordinatorFor } from "./profile-source-coordinator.js";
 import { canonicalSha256 } from "./profile-source-coordinator.js";
+import {
+  attentionImpactForCollectionMutation,
+  type CollectionMutationOperation,
+  type TestCollectionMutationOperation,
+} from "./attention-mutation-impact.js";
 
 export interface CollectionMutationContext {
-  operation: string;
+  operation: CollectionMutationOperation | TestCollectionMutationOperation;
   trigger: string;
   gameIds?: readonly string[];
   intentionIds?: readonly string[];
+}
+
+export interface CollectionMutationPostCommitEvent {
+  readonly context: CollectionMutationContext;
+  readonly prior: Collection;
+  readonly accepted: Collection;
+  readonly impact: ReturnType<typeof attentionImpactForCollectionMutation>;
 }
 
 export interface CollectionDurableIdentity {
@@ -82,6 +94,7 @@ export interface CollectionMutationServiceDeps {
   storageService: CollectionReader & CollectionPersistence;
   revisionStrategy?: CollectionRevisionStrategy;
   logger?: Logger;
+  postCommitObserver?: (event: CollectionMutationPostCommitEvent) => Promise<void>;
 }
 
 const coordinators = new WeakMap<object, CollectionMutationService>();
@@ -279,6 +292,14 @@ export function createCollectionMutationService(
             });
             throw error;
           }
+        }
+        if (deps.postCommitObserver) {
+          await deps.postCommitObserver({
+            context,
+            prior: current,
+            accepted,
+            impact: attentionImpactForCollectionMutation(context.operation, context.gameIds),
+          });
         }
         logger.log("collection mutation completed", {
           ...fields,

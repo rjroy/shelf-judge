@@ -10,6 +10,7 @@ import type { PurchaseUtilizationProjection } from "./purchase-utilization-proje
 
 export const ATTENTION_RULE_CATALOG_VERSION = 1;
 export const ATTENTION_RULE_DEPENDENCY_VERSION = 1;
+export const ATTENTION_RULE_SCORING_VERSION = 1;
 /** Global identities that can change the score consumed by purchase utilization. */
 export const PURCHASE_FITNESS_SOURCE_IDENTITY_KEYS = [
   "tournamentHash",
@@ -220,7 +221,7 @@ export const attentionRuleCatalog: readonly AttentionRuleDefinition[] = [
     id: "never-played",
     version: 1,
     dependencyVersion: 1,
-    scoringVersion: 1,
+    scoringVersion: ATTENTION_RULE_SCORING_VERSION,
     categoryWeight: new ExactRational(3n, 5n),
     supersedes: [],
     dependencies: [
@@ -254,7 +255,7 @@ export const attentionRuleCatalog: readonly AttentionRuleDefinition[] = [
     id: "dormant",
     version: 1,
     dependencyVersion: 1,
-    scoringVersion: 1,
+    scoringVersion: ATTENTION_RULE_SCORING_VERSION,
     categoryWeight: new ExactRational(4n, 5n),
     supersedes: [],
     dependencies: [
@@ -310,7 +311,7 @@ export const attentionRuleCatalog: readonly AttentionRuleDefinition[] = [
     id: "underused-purchase",
     version: 1,
     dependencyVersion: 1,
-    scoringVersion: 1,
+    scoringVersion: ATTENTION_RULE_SCORING_VERSION,
     categoryWeight: one,
     supersedes: [],
     dependencies: [
@@ -349,7 +350,7 @@ export const attentionRuleCatalog: readonly AttentionRuleDefinition[] = [
     id: "explicit-intention",
     version: 1,
     dependencyVersion: 1,
-    scoringVersion: 1,
+    scoringVersion: ATTENTION_RULE_SCORING_VERSION,
     categoryWeight: new ExactRational(7n, 10n),
     supersedes: [],
     dependencies: [
