@@ -225,6 +225,10 @@ const rankedAttentionCards: CollectionProfileAttentionCard[] = (() => {
       id: `attention:${gameId}:explicit-intention`,
       gameId,
       gameName: `Ranked decision ${cardNumber}`,
+      gameImageUrl:
+        cardNumber === 2
+          ? null
+          : "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 160 220'%3E%3Crect width='160' height='220' fill='%232e5f8a'/%3E%3Ccircle cx='80' cy='82' r='42' fill='%23f4f1ec'/%3E%3C/svg%3E",
       question: `Question for ranked decision ${cardNumber}?`,
       reason: `Daemon-supplied reason ${cardNumber}.`,
       scoreExplanation: `Daemon-supplied score explanation ${cardNumber}.`,

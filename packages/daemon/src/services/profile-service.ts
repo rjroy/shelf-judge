@@ -247,6 +247,7 @@ function attentionCards(
       id: `attention:${game.id}:${winner.ruleId}`,
       gameId: game.id,
       gameName: game.name,
+      gameImageUrl: game.imageUrl,
       ruleId: winner.ruleId,
       ruleVersion: winner.ruleVersion,
       dependencyVersion: row.evaluation.dependencyVersion,

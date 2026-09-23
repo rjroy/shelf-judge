@@ -421,6 +421,10 @@ test.describe("useful profile responsive release gate", () => {
     await applyProjectViewport(page, testInfo.project.name);
     const cards = page.locator(".attention-card");
     await expect(cards).toHaveCount(6);
+    await expect(page.locator(".attention-game-image")).toHaveCount(5);
+    await expect(page.locator(".attention-game-fallback")).toHaveCount(6);
+    await expect(cards.nth(1).locator(".attention-game-art")).toBeVisible();
+    await expect(cards.first().locator(".attention-game-title")).toHaveText("Ranked decision 1");
     expect(
       await cards.evaluateAll((nodes) =>
         nodes.map((node) => node.querySelector("h3")?.textContent),
@@ -449,6 +453,8 @@ test.describe("useful profile responsive release gate", () => {
     const tops = await cards.evaluateAll((nodes) =>
       nodes.map((node) => Math.round(node.getBoundingClientRect().top)),
     );
+    await expectNoHorizontalOverflow(page);
+    await expectMinimumTargets(page);
     if (columns === 3) {
       expect(tops[0]).toBe(tops[1]);
       expect(tops[1]).toBe(tops[2]);

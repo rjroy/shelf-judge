@@ -1331,6 +1331,7 @@ export const CollectionProfileAttentionCardSchema = z
     id: IdSchema,
     gameId: IdSchema,
     gameName: z.string().min(1),
+    gameImageUrl: z.string().url().nullable(),
     ruleId: StableRuleIdSchema,
     ruleVersion: PositiveSafeIntegerSchema,
     dependencyVersion: PositiveSafeIntegerSchema,

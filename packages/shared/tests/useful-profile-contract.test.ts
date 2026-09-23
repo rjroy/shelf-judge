@@ -183,6 +183,7 @@ describe("collection profile source contracts", () => {
       id: "attention:game-4:never-played",
       gameId: "game-4",
       gameName: "Game",
+      gameImageUrl: null,
       ruleId: "never-played",
       ruleVersion: 1,
       dependencyVersion: 1,
@@ -250,6 +251,21 @@ describe("collection profile source contracts", () => {
     };
 
     expect(CollectionProfileAttentionCardSchema.safeParse(attention).success).toBe(true);
+    for (const gameImageUrl of [null, "https://example.com/game.jpg"]) {
+      const parsed = CollectionProfileAttentionCardSchema.parse({ ...attention, gameImageUrl });
+      expect(parsed.gameImageUrl).toBe(gameImageUrl);
+    }
+    expect(
+      CollectionProfileAttentionCardSchema.safeParse({
+        ...attention,
+        gameImageUrl: "not a URL",
+      }).success,
+    ).toBe(false);
+    expect(
+      CollectionProfileAttentionCardSchema.safeParse(
+        Object.fromEntries(Object.entries(attention).filter(([key]) => key !== "gameImageUrl")),
+      ).success,
+    ).toBe(false);
     expect(
       CollectionProfileAttentionCardSchema.safeParse({
         ...attention,

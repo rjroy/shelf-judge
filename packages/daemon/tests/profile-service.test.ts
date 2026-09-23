@@ -35,6 +35,60 @@ describe("profile source identity", () => {
 });
 
 describe("ProfileService", () => {
+  test("projects canonical game image URLs into public attention cards and rebuilds old caches", async () => {
+    const ctx = createTestApp();
+    await ctx.gameService.addGame({
+      name: "Image card",
+      numPlays: 0,
+      imageUrl: "https://example.com/image-card.jpg",
+    });
+    await ctx.gameService.addGame({ name: "No image card", numPlays: 0, imageUrl: null });
+
+    const first = await ctx.profileService.getProfile();
+    expect(first.status).toBe("available");
+    if (first.status !== "available") throw new Error("Expected an available Profile");
+    expect(
+      first.attention.cards.map(({ gameName, gameImageUrl }) => [gameName, gameImageUrl]),
+    ).toEqual([
+      ["Image card", "https://example.com/image-card.jpg"],
+      ["No image card", null],
+    ]);
+
+    const raw = ctx.fileOps.files.get("/test/data/profile.json");
+    if (raw === undefined) throw new Error("Expected a persisted Profile cache");
+    const legacy = JSON.parse(raw) as {
+      profile: { attention: { cards: Record<string, unknown>[] } };
+    };
+    for (const card of legacy.profile.attention.cards) delete card.gameImageUrl;
+    ctx.fileOps.files.set("/test/data/profile.json", JSON.stringify(legacy));
+
+    let recomputations = 0;
+    const refreshed = await createProfileService({
+      storageService: ctx.storageService,
+      attentionCandidates: ctx.attentionCandidateService,
+      displayedFitnessService: {
+        ...ctx.displayedFitnessService,
+        async listGamesFromSnapshot(snapshot, options) {
+          recomputations += 1;
+          return ctx.displayedFitnessService.listGamesFromSnapshot(snapshot, options);
+        },
+      },
+    }).getProfile();
+
+    expect(recomputations).toBe(1);
+    expect(refreshed.status).toBe("available");
+    if (refreshed.status !== "available")
+      throw new Error("Expected an available refreshed Profile");
+    expect(refreshed.attention.cards.map(({ gameImageUrl }) => gameImageUrl)).toEqual([
+      "https://example.com/image-card.jpg",
+      null,
+    ]);
+    const refreshedCache = JSON.parse(ctx.fileOps.files.get("/test/data/profile.json")!) as {
+      profile: { attention: { cards: Record<string, unknown>[] } };
+    };
+    expect(refreshedCache.profile.attention.cards[0]).toHaveProperty("gameImageUrl");
+  });
+
   test("publishes disabled, ranked, and exact post-ranking cap prefixes", async () => {
     const ctx = createTestApp();
     for (let index = 0; index < 8; index += 1)

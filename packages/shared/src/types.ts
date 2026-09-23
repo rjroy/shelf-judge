@@ -1219,6 +1219,7 @@ export interface CollectionProfileAttentionCard {
   id: string;
   gameId: string;
   gameName: string;
+  gameImageUrl: string | null;
   ruleId: string;
   ruleVersion: number;
   dependencyVersion: number;
@@ -1328,7 +1329,7 @@ export interface ProfilePublicationIdentity {
 }
 
 export interface ProfileData {
-  contractVersion: 10;
+  contractVersion: 11;
   algorithmVersion: 13;
   publicationIdentity: ProfilePublicationIdentity;
   profile: CollectionProfile;

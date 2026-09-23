@@ -342,6 +342,35 @@ describe("attention presentation", () => {
       expect(html).toContain(text);
     expect(html).toContain('data-attention-state="ranked"');
     expect(html).toContain('href="/games/game-4"');
+    expect(html).toContain('aria-label="Open Heat"');
+    expect(html).not.toContain("Open Heat</a>");
+    expect(html).not.toContain("A game to consider");
+    expect(html).not.toContain("View game");
+    expect(html).toContain('class="attention-game-art"');
+    expect(html).toContain('class="attention-game-fallback"');
+  });
+
+  test("makes the game artwork and title the card's primary link when a thumbnail is supplied", () => {
+    const card = {
+      ...structuredClone(usefulProfileFixture.attention.cards[0]),
+      gameName: "A Very Long Game Name That Must Wrap Without Clipping",
+      gameImageUrl: "https://example.test/cover.jpg",
+    };
+    const html = renderToStaticMarkup(
+      <AttentionSection
+        attention={{ ...usefulProfileFixture.attention, cards: [card] }}
+        collectionState="populated"
+      />,
+    );
+
+    expect(html).toContain(
+      'aria-label="Open A Very Long Game Name That Must Wrap Without Clipping"',
+    );
+    expect(html).not.toContain("A game to consider");
+    expect(html).not.toContain("View game");
+    expect(html).toContain("background-image:url(&quot;https://example.test/cover.jpg&quot;)");
+    expect(html.indexOf('class="attention-game"')).toBeLessThan(html.indexOf(card.reason));
+    expect(html).toContain(card.question);
   });
 
   test("preserves received ranked order and does not fabricate intention content", () => {

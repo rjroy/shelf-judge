@@ -35,37 +35,49 @@ function AttentionCard({ card }: { card: CollectionProfileAttentionCard }) {
       className="attention-card attention-card--quiet"
       aria-labelledby={headingId}
     >
-      <h3 id={headingId}>{card.question}</h3>
-      <p>{card.reason}</p>
-      <p className="profile-status-label">{card.gameName}</p>
+      <Link
+        className="attention-game"
+        href={`/games/${card.gameId}`}
+        aria-label={`Open ${card.gameName}`}
+      >
+        <span className="attention-game-art" aria-hidden="true">
+          <span className="attention-game-fallback">{card.gameName.trim().charAt(0) || "?"}</span>
+          {card.gameImageUrl ? (
+            // A background image layers over the fallback, which remains visible if the URL fails.
+            <span
+              className="attention-game-image"
+              style={{ backgroundImage: `url("${card.gameImageUrl.replaceAll('"', "%22")}")` }}
+            />
+          ) : null}
+        </span>
+        <span className="attention-game-copy">
+          <span className="attention-game-title">{card.gameName}</span>
+        </span>
+      </Link>
+      <div className="attention-context">
+        <p className="attention-reason">{card.reason}</p>
+        <h3 id={headingId} className="attention-decision">
+          {card.question}
+        </h3>
+      </div>
 
       <div className="profile-actions">
         {card.actions
-          .filter((action) => action.command === null)
-          .map((action) =>
-            action.operationId === "shelf.game.get" ? (
-              <Link
-                key={action.action}
-                className="btn btn-primary"
-                href={`/games/${action.destination.gameId}`}
-              >
-                Open {card.gameName}
-              </Link>
-            ) : (
-              <Link
-                key={action.action}
-                className="btn btn-secondary"
-                href={`/games/${action.destination.gameId}`}
-                aria-label={`${action.action} for ${card.gameName}`}
-              >
-                {action.action === "resolve-intention"
-                  ? "Manage intention"
-                  : action.action === "retire-intention"
-                    ? "Intention history"
-                    : action.action}
-              </Link>
-            ),
-          )}
+          .filter((action) => action.command === null && action.operationId !== "shelf.game.get")
+          .map((action) => (
+            <Link
+              key={action.action}
+              className="btn btn-secondary"
+              href={`/games/${action.destination.gameId}`}
+              aria-label={`${action.action} for ${card.gameName}`}
+            >
+              {action.action === "resolve-intention"
+                ? "Manage intention"
+                : action.action === "retire-intention"
+                  ? "Intention history"
+                  : action.action}
+            </Link>
+          ))}
         <AttentionCardActions actions={card.actions} />
       </div>
 

@@ -144,6 +144,7 @@ export const usefulProfileFixture: CollectionProfile = {
       {
         id: "attention:game-4:explicit-intention",
         gameId: "game-4",
+        gameImageUrl: null,
         ruleId: "explicit-intention",
         ruleVersion: 1,
         dependencyVersion: 1,
