@@ -252,6 +252,31 @@ describe("profile reflection command parsing", () => {
   );
 });
 
+describe("profile attention command parsing", () => {
+  test.each([
+    ["not-now", "profile attention not-now"],
+    ["intentional", "profile attention intentional"],
+  ])("keeps the %s template and command flags for the relay", (operation, commandPath) => {
+    expect(
+      parseArgs([
+        "bun",
+        "shelf-judge",
+        "profile",
+        "attention",
+        operation,
+        "{template}",
+        "--command-id",
+        "command-id",
+        "--json",
+      ]),
+    ).toMatchObject({
+      commandPath,
+      positional: ["{template}", "--command-id", "command-id"],
+      json: true,
+    });
+  });
+});
+
 describe("Collection Analyst command parsing", () => {
   test.each([
     [

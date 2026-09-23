@@ -85,6 +85,8 @@ async function quarantine(
 
 const profilePath = (dataDir: string): string => path.join(dataDir, "profile.json");
 const wishlistPath = (dataDir: string): string => path.join(dataDir, "wishlist.json");
+const attentionCandidatesPath = (dataDir: string): string =>
+  path.join(dataDir, "attention-candidates.json");
 
 const profileDescriptor: CollectionArtifactDescriptor = {
   identity: "collection-profile",
@@ -154,9 +156,19 @@ const wishlistDescriptor: CollectionArtifactDescriptor = {
   },
 };
 
+const attentionCandidatesDescriptor: CollectionArtifactDescriptor = {
+  identity: "attention-candidates",
+  dependencyVersion: CURRENT_COLLECTION_SCHEMA_VERSION,
+  path: attentionCandidatesPath,
+  async invalidate(context): Promise<void> {
+    await context.fileOps.unlink(attentionCandidatesPath(context.dataDir));
+  },
+};
+
 export const COLLECTION_ARTIFACTS: readonly CollectionArtifactDescriptor[] = [
   profileDescriptor,
   wishlistDescriptor,
+  attentionCandidatesDescriptor,
 ];
 
 export function createCollectionArtifactContext(

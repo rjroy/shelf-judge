@@ -399,13 +399,14 @@ function makeUsefulCollection(
   intentions: Collection["intentions"] = [],
 ): CollectionProfileCollectionSource {
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
     revision: 1,
     id: "collection",
     name: "Collection",
     axes: [makeAxis({ id: "fun", name: "Fun", weight: 100 })],
     games,
     intentions,
+    attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
     createdAt: "2026-08-27T00:00:00.000Z",
@@ -1031,23 +1032,127 @@ describe("computeCollectionProfile", () => {
       computedAt: "2099-08-28T00:00:00.000Z",
     });
 
-    expect(first.attention.items.map(({ gameName }) => gameName)).toEqual(["Zed", "😀 Game"]);
-    expect(first.attention.items[0]).toMatchObject({
-      question: "Do you still want to play Zed?",
-      currentPlayEvidence: {
-        status: "stale",
-        warning: "A newer BGG check did not provide a valid play count.",
-      },
-      evidenceDestination: { operationId: "shelf.game.bgg.refresh" },
-    });
     expect(first.attention).toEqual(advanced.attention);
+    expect(first.attention).toEqual({ state: "disabled", cardLimit: 0, cards: [] });
     expect(first.identity).toEqual(advanced.identity);
     expect(
       CollectionProfileSnapshotSchema.safeParse({ source: collection, profile: first }).success,
     ).toBe(true);
   });
 
-  test("distinguishes empty collection from populated nothing-to-decide", () => {
+  test("does not construct intention-shaped attention cards", () => {
+    const metadata = createCompleteEntityMetadata(
+      { mechanic: [], designer: [], artist: [] },
+      "2026-08-27T00:00:00.000Z",
+    );
+    const validZero = makeGame({
+      id: "valid-zero",
+      name: "Valid zero",
+      bggId: 1,
+      entityMetadata: metadata,
+      numPlays: 0,
+      playCountEvidence: {
+        status: "valid",
+        value: 0,
+        source: "manual",
+        observedAt: "2026-08-27T01:00:00.000Z",
+      },
+    });
+    const nonzero = makeGame({
+      ...validZero,
+      id: "nonzero",
+      name: "Nonzero",
+      numPlays: 1,
+      playCountEvidence: {
+        status: "valid",
+        value: 1,
+        source: "manual",
+        observedAt: "2026-08-27T01:00:00.000Z",
+      },
+    });
+    const missing = makeGame({
+      id: "missing",
+      name: "Missing",
+      entityMetadata: createInitialEntityMetadata(null),
+    });
+    const invalidEvidence = { presence: "present" as const, value: "not-a-count" };
+    const invalid = makeGame({
+      id: "invalid",
+      name: "Invalid",
+      bggId: 2,
+      entityMetadata: metadata,
+      playCountEvidence: {
+        status: "invalid",
+        evidence: invalidEvidence,
+        source: "manual",
+        observedAt: "2026-08-27T01:00:00.000Z",
+      },
+    });
+    const stale = makeGame({
+      ...validZero,
+      id: "stale",
+      name: "Stale",
+      latestPlayCountCheck: { status: "missing", observedAt: "2026-08-27T02:00:00.000Z" },
+    });
+    const intentions: Collection["intentions"] = [validZero, nonzero, missing, invalid, stale].map(
+      (game) => ({
+        intentionId: `${game.id}-want`,
+        gameId: game.id,
+        kind: "want-to-play" as const,
+        baseline: null,
+        createdAt: "2026-08-27T01:01:00.000Z",
+        version: 1 as const,
+        resolution: null,
+      }),
+    );
+    const firstPlay = makeGame({ ...validZero, id: "first-play-game", name: "First play" });
+    const replay = makeGame({ ...validZero, id: "replay-game", name: "Replay" });
+    intentions.push(
+      {
+        intentionId: "first-play",
+        gameId: firstPlay.id,
+        kind: "first-play",
+        baseline: {
+          playCount: 0,
+          evidenceSource: "manual",
+          observedAt: "2026-08-27T01:00:00.000Z",
+        },
+        createdAt: "2026-08-27T01:01:00.000Z",
+        version: 1,
+        resolution: null,
+      },
+      {
+        intentionId: "replay",
+        gameId: replay.id,
+        kind: "replay",
+        baseline: {
+          playCount: 1,
+          evidenceSource: "manual",
+          observedAt: "2026-08-27T01:00:00.000Z",
+        },
+        createdAt: "2026-08-27T01:01:00.000Z",
+        version: 1,
+        resolution: null,
+      },
+    );
+    const collection = makeUsefulCollection(
+      [validZero, nonzero, missing, invalid, stale, firstPlay, replay],
+      intentions,
+    );
+    const before = structuredClone(collection);
+    const profile = computeCollectionProfile({
+      collection,
+      fitnessResults: new Map(),
+      computedAt: "2026-08-28T00:00:00.000Z",
+    });
+    expect(profile.attention).toEqual({ state: "disabled", cardLimit: 0, cards: [] });
+    expect(collection).toEqual(before);
+    expect(CollectionProfileSnapshotSchema.safeParse({ source: collection, profile }).success).toBe(
+      true,
+    );
+  });
+
+  test("retains collection identity independently of attention publication", () => {
     const emptyCollection = makeUsefulCollection([
       makeGame({ id: "old", name: "Old", ownership: "previously-owned" }),
     ]);
@@ -1064,13 +1169,13 @@ describe("computeCollectionProfile", () => {
     });
 
     expect(empty.identity.collectionState).toBe("empty");
-    expect(empty.attention.state).toBe("empty-collection");
     expect(populated.identity.collectionState).toBe("populated");
-    expect(populated.attention.state).toBe("nothing-to-decide");
+    expect(empty.attention.state).toBe("disabled");
+    expect(populated.attention.state).toBe("disabled");
     expect(empty.identity.classes.mechanic.result).toBe("not-evaluated");
     expect(populated.identity.classes.mechanic.result).toBe("not-evaluated");
-    expect(empty.attention.items).toEqual([]);
-    expect(populated.attention.items).toEqual([]);
+    expect(empty.attention.cards).toEqual([]);
+    expect(populated.attention.cards).toEqual([]);
     expect(
       CollectionProfileSnapshotSchema.safeParse({ source: emptyCollection, profile: empty })
         .success,
@@ -1083,7 +1188,7 @@ describe("computeCollectionProfile", () => {
     ).toBe(true);
   });
 
-  test("projects missing and invalid attention evidence without hiding intentions", () => {
+  test("does not project legacy intention evidence into Profile", () => {
     const missing = makeGame({ id: "missing", name: "Missing", bggId: null });
     const invalidEvidence = { presence: "present" as const, value: "not-a-count" };
     const invalid = makeGame({
@@ -1141,21 +1246,7 @@ describe("computeCollectionProfile", () => {
       computedAt: "2026-08-28T00:00:00.000Z",
     });
 
-    expect(profile.attention.items).toHaveLength(2);
-    expect(profile.attention.items.find(({ gameName }) => gameName === "Missing")).toMatchObject({
-      currentPlayEvidence: {
-        status: "missing",
-        warning: "Current play evidence is missing.",
-      },
-      evidenceDestination: { operationId: "shelf.game.plays.set" },
-    });
-    expect(profile.attention.items.find(({ gameName }) => gameName === "Invalid")).toMatchObject({
-      currentPlayEvidence: {
-        status: "invalid",
-        warning: "Current play evidence is invalid.",
-      },
-      evidenceDestination: { operationId: "shelf.game.bgg.refresh" },
-    });
+    expect(profile.attention).toEqual({ state: "disabled", cardLimit: 0, cards: [] });
     expect(CollectionProfileSnapshotSchema.safeParse({ source: collection, profile }).success).toBe(
       true,
     );

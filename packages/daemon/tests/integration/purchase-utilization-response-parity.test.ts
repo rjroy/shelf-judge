@@ -59,7 +59,7 @@ describe("canonical purchase utilization response parity", () => {
       updatedAt: UTILIZATION_OBSERVED_AT,
     }));
     const collection: Collection = {
-      schemaVersion: 7,
+      schemaVersion: 8,
       revision: 0,
       id: "parity-collection",
       name: "Parity",
@@ -79,6 +79,7 @@ describe("canonical purchase utilization response parity", () => {
       games,
       entertainmentBenchmark: canonicalUtilizationCases[0].input.entertainmentBenchmark,
       intentions: [],
+      attentionDispositions: [],
       commandReceipts: [],
       createdAt: UTILIZATION_OBSERVED_AT,
       updatedAt: UTILIZATION_OBSERVED_AT,

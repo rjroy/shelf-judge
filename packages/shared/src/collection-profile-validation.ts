@@ -1,5 +1,7 @@
 import { z } from "zod";
+import { createHash } from "node:crypto";
 import type {
+  AttentionExactValue,
   CollectionProfileEntityPolicy,
   IntentionCommand,
   IntentionMutationResult,
@@ -17,6 +19,93 @@ const IdSchema = z.string().min(1);
 const SafeCountSchema = z.number().int().safe().min(0);
 const PositiveSafeIntegerSchema = z.number().int().safe().positive();
 const FiniteNumberSchema = z.number().finite();
+export const StableRuleIdSchema = z.string().regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/);
+const CanonicalFingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/);
+
+const PublicAttentionActionIdSchema = z.enum([
+  "want-to-play",
+  "not-now",
+  "intentional",
+  "open-game",
+  "correct-play-data",
+  "correct-purchase-data",
+  "resolve-intention",
+  "retire-intention",
+]);
+const PublicAttentionOperationIdSchema = z.enum([
+  "shelf.profile.attention.not-now",
+  "shelf.profile.attention.intentional",
+  "shelf.game.get",
+  "shelf.game.plays.set",
+  "shelf.game.refresh-bgg",
+  "shelf.game.intention.set",
+  "shelf.game.intention.complete",
+  "shelf.game.intention.retire",
+  "shelf.game.set-acquisition",
+  "shelf.game.set-manual-values",
+]);
+const PublicAttentionDestinationSchema = z
+  .object({ gameId: IdSchema, operationId: PublicAttentionOperationIdSchema })
+  .strict();
+
+function attentionGcd(left: bigint, right: bigint): bigint {
+  let a = left < 0n ? -left : left;
+  let b = right < 0n ? -right : right;
+  while (b !== 0n) {
+    const remainder = a % b;
+    a = b;
+    b = remainder;
+  }
+  return a;
+}
+
+/** Canonical exact [0, 1] rational used by the public ranked card contract. */
+export const AttentionExactValueSchema = z
+  .object({
+    numerator: z.string().regex(/^(?:0|[1-9]\d*)$/, "Numerator must be canonical"),
+    denominator: z.string().regex(/^[1-9]\d*$/, "Denominator must be canonical"),
+  })
+  .strict()
+  .superRefine(({ numerator, denominator }, context) => {
+    const n = BigInt(numerator);
+    const d = BigInt(denominator);
+    if (n === 0n && d !== 1n)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["denominator"],
+        message: "Zero must be represented as 0/1",
+      });
+    else if (attentionGcd(n, d) !== 1n)
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "Exact fraction must be reduced" });
+    if (n > d)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Exact attention value must be within [0, 1]",
+      });
+  });
+
+const AttentionDispositionCommandTemplateSchema = z.discriminatedUnion("operation", [
+  z
+    .object({
+      operation: z.literal("not-now"),
+      gameId: IdSchema,
+      ruleId: StableRuleIdSchema,
+      ruleVersion: PositiveSafeIntegerSchema,
+      fingerprint: CanonicalFingerprintSchema,
+      expectedVersion: SafeCountSchema,
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("intentional"),
+      gameId: IdSchema,
+      ruleId: StableRuleIdSchema,
+      ruleVersion: PositiveSafeIntegerSchema,
+      fingerprint: CanonicalFingerprintSchema,
+      expectedVersion: SafeCountSchema,
+    })
+    .strict(),
+]);
 
 function valuesMatch(left: number, right: number): boolean {
   return Object.is(left, right);
@@ -39,6 +128,36 @@ function compareCodePoints(left: string, right: string): number {
     if (difference !== 0) return difference;
   }
   return leftPoints.length - rightPoints.length;
+}
+
+function isValidUtcDateOnly(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (match === null) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return (
+    !Number.isNaN(date.valueOf()) &&
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() + 1 === month &&
+    date.getUTCDate() === day
+  );
+}
+
+function compareAttentionCards(
+  left: { attentionScore: AttentionExactValue; gameName: string; gameId: string; ruleId: string },
+  right: { attentionScore: AttentionExactValue; gameName: string; gameId: string; ruleId: string },
+): number {
+  const scoreDifference =
+    BigInt(right.attentionScore.numerator) * BigInt(left.attentionScore.denominator) -
+    BigInt(left.attentionScore.numerator) * BigInt(right.attentionScore.denominator);
+  return (
+    (scoreDifference < 0n ? -1 : scoreDifference > 0n ? 1 : 0) ||
+    compareCodePoints(left.gameName, right.gameName) ||
+    compareCodePoints(left.gameId, right.gameId) ||
+    compareCodePoints(left.ruleId, right.ruleId)
+  );
 }
 
 const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
@@ -170,6 +289,40 @@ export const PlayIntentionBaselineSchema = z
     observedAt: TimestampSchema,
   })
   .strict();
+
+const AttentionCardEvidenceSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("play-count"),
+      value: z.literal(0),
+      source: FieldObservationSourceSchema,
+      observedAt: TimestampSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("dormant"),
+      lastPlayedOn: z.string().refine(isValidUtcDateOnly, "Must be a valid UTC calendar date"),
+      playCount: SafeCountSchema.positive(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("purchase-utilization"),
+      multiplier: AttentionExactValueSchema,
+      achievedPercent: z.number().int().safe().min(0).max(100),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("intention"),
+      intentionId: IdSchema,
+      intentionKind: z.enum(["want-to-play", "first-play", "replay"]),
+      createdAt: TimestampSchema,
+      baseline: PlayIntentionBaselineSchema.nullable(),
+    })
+    .strict(),
+]);
 
 export const PlayIntentionResolutionSchema = z.union([
   z
@@ -559,6 +712,151 @@ export const IntentionCommandReceiptSchema = z
 export const CommandReceiptSchema = z.union([
   OwnerGameNoteCommandReceiptSchema,
   IntentionCommandReceiptSchema,
+]);
+
+export const AttentionDispositionSchema = z.union([
+  z
+    .object({
+      gameId: IdSchema,
+      kind: z.literal("snoozed"),
+      ruleId: StableRuleIdSchema,
+      ruleVersion: PositiveSafeIntegerSchema,
+      fingerprint: CanonicalFingerprintSchema,
+      responseAt: TimestampSchema,
+      expiresAt: TimestampSchema,
+      version: PositiveSafeIntegerSchema,
+    })
+    .strict()
+    .superRefine((value, context) => {
+      if (Date.parse(value.expiresAt) !== Date.parse(value.responseAt) + 30 * 24 * 60 * 60 * 1000) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["expiresAt"],
+          message: "Snooze expiry must be exactly 720 hours after the response",
+        });
+      }
+    }),
+  z
+    .object({
+      gameId: IdSchema,
+      kind: z.literal("intentional"),
+      ruleId: StableRuleIdSchema,
+      ruleVersion: PositiveSafeIntegerSchema,
+      fingerprint: CanonicalFingerprintSchema,
+      version: PositiveSafeIntegerSchema,
+    })
+    .strict(),
+]);
+
+export const AttentionCommandReceiptSchema = z
+  .object({
+    receiptType: z.literal("attention-disposition"),
+    commandId: z.string().uuid(),
+    operation: z.enum(["not-now", "intentional"]),
+    gameId: IdSchema,
+    ruleId: StableRuleIdSchema,
+    ruleVersion: PositiveSafeIntegerSchema,
+    expectedVersion: SafeCountSchema,
+    requestFingerprint: CanonicalFingerprintSchema,
+    requestPayload: z
+      .object({
+        commandId: z.string().uuid(),
+        operation: z.enum(["not-now", "intentional"]),
+        gameId: IdSchema,
+        ruleId: StableRuleIdSchema,
+        ruleVersion: PositiveSafeIntegerSchema,
+        fingerprint: CanonicalFingerprintSchema,
+        expectedVersion: SafeCountSchema,
+      })
+      .strict(),
+    accepted: AttentionDispositionSchema,
+  })
+  .strict()
+  .superRefine((receipt, context) => {
+    const canonicalRequest = attentionDispositionRequestFingerprint(receipt.requestPayload);
+    if (receipt.requestFingerprint !== canonicalRequest)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["requestFingerprint"],
+        message: "Receipt request fingerprint must match its canonical request",
+      });
+    if (
+      receipt.commandId !== receipt.requestPayload.commandId ||
+      receipt.operation !== receipt.requestPayload.operation ||
+      receipt.gameId !== receipt.requestPayload.gameId ||
+      receipt.ruleId !== receipt.requestPayload.ruleId ||
+      receipt.ruleVersion !== receipt.requestPayload.ruleVersion ||
+      receipt.expectedVersion !== receipt.requestPayload.expectedVersion ||
+      receipt.accepted.fingerprint !== receipt.requestPayload.fingerprint
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["requestPayload"],
+        message: "Receipt request must exactly describe the accepted command and candidate",
+      });
+    if (receipt.gameId !== receipt.accepted.gameId)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["accepted", "gameId"],
+        message: "Receipt disposition must identify the requested game",
+      });
+    if ((receipt.operation === "not-now") !== (receipt.accepted.kind === "snoozed"))
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["operation"],
+        message: "Receipt operation must match the accepted disposition",
+      });
+    if (receipt.accepted.ruleId !== receipt.ruleId)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["accepted", "ruleId"],
+        message: "Receipt disposition must retain the requested rule",
+      });
+    if (receipt.accepted.ruleVersion !== receipt.ruleVersion)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["accepted", "ruleVersion"],
+        message: "Receipt disposition must retain the requested rule version",
+      });
+    if (
+      receipt.expectedVersion === Number.MAX_SAFE_INTEGER ||
+      receipt.accepted.version !== receipt.expectedVersion + 1
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["accepted", "version"],
+        message: "Accepted receipt version must be exactly one greater than the expected version",
+      });
+  });
+
+export function attentionDispositionRequestFingerprint(request: {
+  commandId: string;
+  operation: "not-now" | "intentional";
+  gameId: string;
+  ruleId: string;
+  ruleVersion: number;
+  fingerprint: string;
+  expectedVersion: number;
+}): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        commandId: request.commandId,
+        operation: request.operation,
+        gameId: request.gameId,
+        ruleId: request.ruleId,
+        ruleVersion: request.ruleVersion,
+        fingerprint: request.fingerprint,
+        expectedVersion: request.expectedVersion,
+      }),
+    )
+    .digest("hex");
+}
+
+export const AttentionCommandReceiptUnionSchema = z.union([
+  OwnerGameNoteCommandReceiptSchema,
+  IntentionCommandReceiptSchema,
+  AttentionCommandReceiptSchema,
 ]);
 
 export const CollectionProfileGameSourceExtensionSchema = z
@@ -1028,107 +1326,172 @@ export function createCollectionProfileEntityClassResultSchema(
 export const CollectionProfileEntityClassResultSchema =
   createCollectionProfileEntityClassResultSchema(DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY);
 
-const AttentionPlayEvidenceSchema = z.union([
-  z
-    .object({
-      status: z.literal("valid"),
-      playCount: SafeCountSchema,
-      source: FieldObservationSourceSchema,
-      observedAt: TimestampSchema,
-      stale: z.literal(false),
-    })
-    .strict(),
-  z
-    .object({
-      status: z.enum(["missing", "invalid", "stale"]),
-      playCount: SafeCountSchema.nullable(),
-      source: FieldObservationSourceSchema.nullable(),
-      observedAt: TimestampSchema.nullable(),
-      warning: z.enum([
-        "Current play evidence is missing.",
-        "Current play evidence is invalid.",
-        "A newer BGG check did not provide a valid play count.",
-      ]),
-    })
-    .strict(),
-]);
-
-export const CollectionProfileAttentionItemSchema = z
+export const CollectionProfileAttentionCardSchema = z
   .object({
     id: IdSchema,
-    decisionFamily: z.literal("play-intention"),
-    intention: PlayIntentionSchema,
+    gameId: IdSchema,
     gameName: z.string().min(1),
+    gameImageUrl: z.string().url().nullable(),
+    ruleId: StableRuleIdSchema,
+    ruleVersion: PositiveSafeIntegerSchema,
+    dependencyVersion: PositiveSafeIntegerSchema,
+    nonClockFingerprint: CanonicalFingerprintSchema,
+    reason: z.string().min(1),
     question: z.string().min(1),
-    whyNow: z.literal("You asked Shelf Judge to keep this intention visible."),
-    currentPlayEvidence: AttentionPlayEvidenceSchema,
-    responses: z.tuple([
-      z.literal("leave-visible"),
-      z.literal("complete"),
-      z.literal("retire"),
-      z.literal("correct-or-refresh-evidence"),
-    ]),
-    abstentionBasis: z.literal("Only an explicit active intention qualifies."),
-    resolution: z.null(),
-    reopenCondition: z.literal("Create a new explicit intention after resolution."),
-    destination: z
-      .object({ gameId: IdSchema, operationId: z.literal("shelf.game.intention.manage") })
-      .strict(),
-    evidenceDestination: z
-      .object({
-        gameId: IdSchema,
-        operationId: z.enum(["shelf.game.plays.set", "shelf.game.bgg.refresh"]),
-      })
-      .strict(),
+    scoreExplanation: z.string().min(1),
+    actions: z
+      .array(
+        z
+          .object({
+            action: PublicAttentionActionIdSchema,
+            operationId: PublicAttentionOperationIdSchema,
+            destination: PublicAttentionDestinationSchema,
+            command: AttentionDispositionCommandTemplateSchema.nullable(),
+          })
+          .strict(),
+      )
+      .min(1),
+    evidence: AttentionCardEvidenceSchema,
+    intention: PlayIntentionSchema.nullable(),
+    disposition: z.object({ state: z.literal("none"), expectedVersion: SafeCountSchema }).strict(),
+    signalStrength: AttentionExactValueSchema,
+    categoryWeight: AttentionExactValueSchema,
+    attentionScore: AttentionExactValueSchema,
   })
   .strict()
   .superRefine((item, context) => {
-    const expectedQuestion = `Do you still want to play ${item.gameName}?`;
-    if (item.intention.resolution !== null)
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["intention", "resolution"],
-        message: "Attention requires an active intention",
-      });
-    if (item.id !== `attention:${item.intention.intentionId}`)
+    const isExplicitIntention = item.ruleId === "explicit-intention";
+    if (item.id !== `attention:${item.gameId}:${item.ruleId}`)
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["id"],
-        message: "Attention ID must derive from the intention ID",
+        message: "Attention card ID must deterministically identify its game and rule",
       });
-    if (item.question !== expectedQuestion)
+    const actionOperationIds: Record<string, string> = {
+      "want-to-play": "shelf.game.intention.set",
+      "not-now": "shelf.profile.attention.not-now",
+      intentional: "shelf.profile.attention.intentional",
+      "open-game": "shelf.game.get",
+      "correct-play-data": "shelf.game.plays.set",
+      "correct-purchase-data": "shelf.game.set-acquisition",
+      "resolve-intention": "shelf.game.intention.complete",
+      "retire-intention": "shelf.game.intention.retire",
+    };
+    const actionIds = new Set(item.actions.map(({ action }) => action));
+    if (actionIds.size !== item.actions.length)
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["question"],
-        message: "Attention question must match the game and intention kind",
+        path: ["actions"],
+        message: "Attention actions must be unique",
       });
+    for (const requiredAction of ["not-now", "intentional"] as const)
+      if (!actionIds.has(requiredAction))
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["actions"],
+          message: `Attention cards must supply the ${requiredAction} command action`,
+        });
+    for (const [actionIndex, action] of item.actions.entries()) {
+      if (
+        action.operationId !== actionOperationIds[action.action] ||
+        action.destination.gameId !== item.gameId ||
+        action.destination.operationId !== action.operationId
+      )
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["actions", actionIndex],
+          message: "Attention action must provide its concrete operation and card destination",
+        });
+      if (action.action === "not-now" || action.action === "intentional") {
+        if (
+          action.command === null ||
+          action.command.operation !== action.action ||
+          action.command.gameId !== item.gameId ||
+          action.command.ruleId !== item.ruleId ||
+          action.command.ruleVersion !== item.ruleVersion ||
+          action.command.fingerprint !== item.nonClockFingerprint ||
+          action.command.expectedVersion !== item.disposition.expectedVersion
+        )
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["actions", actionIndex, "command"],
+            message: "Attention command template must match the visible card identity and version",
+          });
+      } else if (action.command !== null) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["actions", actionIndex, "command"],
+          message: "Only disposition actions may carry an attention command template",
+        });
+      }
+    }
+    if (isExplicitIntention && item.intention === null)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["intention", "resolution"],
+        message: "An explicit-intention card must include its active intention",
+      });
+    if (!isExplicitIntention && item.intention !== null)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["intention"],
+        message: "Only an explicit-intention card may include an intention",
+      });
+    if (item.intention !== null) {
+      if (item.intention.resolution !== null)
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["intention", "resolution"],
+          message: "Attention card intentions must be active",
+        });
+      if (item.intention.gameId !== item.gameId)
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["intention", "gameId"],
+          message: "Attention card intention must identify the card game",
+        });
+    }
+    const expectedEvidenceKind =
+      item.ruleId === "never-played"
+        ? "play-count"
+        : item.ruleId === "dormant"
+          ? "dormant"
+          : item.ruleId === "underused-purchase"
+            ? "purchase-utilization"
+            : item.ruleId === "explicit-intention"
+              ? "intention"
+              : null;
+    if (expectedEvidenceKind !== null && item.evidence.kind !== expectedEvidenceKind)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["evidence", "kind"],
+        message: "Attention evidence must match the selected rule",
+      });
+    if (item.ruleId === "explicit-intention" && item.intention !== null) {
+      if (
+        item.evidence.kind !== "intention" ||
+        item.evidence.intentionId !== item.intention.intentionId ||
+        item.evidence.intentionKind !== item.intention.kind ||
+        item.evidence.createdAt !== item.intention.createdAt ||
+        JSON.stringify(item.evidence.baseline) !== JSON.stringify(item.intention.baseline)
+      )
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["evidence"],
+          message: "Intention evidence must match the attached active intention",
+        });
+    }
+    const signal = BigInt(item.signalStrength.numerator) * BigInt(item.categoryWeight.numerator);
+    const denominator =
+      BigInt(item.signalStrength.denominator) * BigInt(item.categoryWeight.denominator);
     if (
-      item.destination.gameId !== item.intention.gameId ||
-      item.evidenceDestination.gameId !== item.intention.gameId
+      signal * BigInt(item.attentionScore.denominator) !==
+      BigInt(item.attentionScore.numerator) * denominator
     )
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["destination"],
-        message: "Attention destinations must identify the intention game",
-      });
-    if (
-      item.currentPlayEvidence.status === "valid" &&
-      item.evidenceDestination.operationId !== "shelf.game.plays.set"
-    )
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["evidenceDestination"],
-        message: "Valid play evidence must retain the manual correction destination",
-      });
-    if (
-      item.currentPlayEvidence.status === "valid" &&
-      item.intention.baseline !== null &&
-      item.currentPlayEvidence.playCount > item.intention.baseline.playCount
-    )
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["currentPlayEvidence", "playCount"],
-        message: "A current play increase must already have completed the intention",
+        path: ["attentionScore"],
+        message: "Attention score must equal signal strength multiplied by category weight",
       });
   });
 
@@ -1246,8 +1609,9 @@ function createAvailableCollectionProfileSchema(policy: CollectionProfileEntityP
         .strict(),
       attention: z
         .object({
-          state: z.enum(["active", "nothing-to-decide", "empty-collection"]),
-          items: z.array(CollectionProfileAttentionItemSchema),
+          state: z.enum(["ranked", "no-winner", "empty-collection", "disabled"]),
+          cardLimit: z.number().int().safe().min(0).max(24),
+          cards: z.array(CollectionProfileAttentionCardSchema),
         })
         .strict(),
       computedAt: TimestampSchema,
@@ -1268,38 +1632,53 @@ function createAvailableCollectionProfileSchema(policy: CollectionProfileEntityP
             message: "Class map key must match entity class",
           });
       const expectedAttentionState =
-        profile.attention.items.length > 0
-          ? "active"
+        profile.attention.cardLimit === 0
+          ? "disabled"
           : profile.identity.collectionState === "empty"
             ? "empty-collection"
-            : "nothing-to-decide";
+            : profile.attention.cards.length > 0
+              ? "ranked"
+              : "no-winner";
       if (profile.attention.state !== expectedAttentionState)
         context.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["attention", "state"],
           message: `Attention state must be ${expectedAttentionState}`,
         });
-      const itemIds = profile.attention.items.map(({ intention }) => intention.intentionId);
-      const gameIds = profile.attention.items.map(({ intention }) => intention.gameId);
-      if (new Set(itemIds).size !== itemIds.length || new Set(gameIds).size !== gameIds.length)
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["attention", "items"],
-          message: "Attention items must map one-to-one to active intentions and games",
-        });
-      const sorted = [...profile.attention.items].sort(
-        (left, right) =>
-          compareCodePoints(left.gameName, right.gameName) ||
-          compareCodePoints(left.intention.gameId, right.intention.gameId),
-      );
       if (
-        sorted.map(({ id }) => id).join(",") !==
-        profile.attention.items.map(({ id }) => id).join(",")
+        profile.attention.cards.length > profile.attention.cardLimit ||
+        (profile.attention.cardLimit === 0 && profile.attention.cards.length > 0)
       )
         context.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ["attention", "items"],
-          message: "Attention items must use deterministic name and game-ID order",
+          path: ["attention", "cards"],
+          message: "Attention cards must respect the configured card limit",
+        });
+      const rankedCards = [...profile.attention.cards].sort(compareAttentionCards);
+      if (
+        rankedCards.map(({ id }) => id).join("\u0000") !==
+        profile.attention.cards.map(({ id }) => id).join("\u0000")
+      )
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["attention", "cards"],
+          message:
+            "Attention cards must be globally ranked by exact score, normalized game name, game ID, then rule ID",
+        });
+      const cardIds = profile.attention.cards.map(({ id }) => id);
+      const gameIds = profile.attention.cards.map(({ gameId }) => gameId);
+      const gameRuleIds = profile.attention.cards.map(
+        ({ gameId, ruleId }) => `${gameId}\u0000${ruleId}`,
+      );
+      if (
+        new Set(cardIds).size !== cardIds.length ||
+        new Set(gameIds).size !== gameIds.length ||
+        new Set(gameRuleIds).size !== gameRuleIds.length
+      )
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["attention", "cards"],
+          message: "Attention cards must have unique IDs and one winner per game",
         });
       const ownedCounts = Object.values(profile.identity.classes).map(
         ({ metadataReadiness }) => metadataReadiness.ownedGameCount,
@@ -1339,12 +1718,12 @@ function createAvailableCollectionProfileSchema(policy: CollectionProfileEntityP
           message: "Every identity class must describe the same owned-game universe",
         });
       if (
-        profile.attention.items.some(({ intention }) => !firstUniverse.has(intention.gameId)) ||
-        (profile.identity.collectionState === "empty" && profile.attention.items.length > 0)
+        profile.attention.cards.some(({ gameId }) => !firstUniverse.has(gameId)) ||
+        (profile.identity.collectionState === "empty" && profile.attention.cards.length > 0)
       )
         context.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ["attention", "items"],
+          path: ["attention", "cards"],
           message: "Attention items must reference currently owned games",
         });
     });

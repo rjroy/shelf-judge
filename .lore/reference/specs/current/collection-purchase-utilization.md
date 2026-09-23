@@ -18,11 +18,13 @@ req-prefix: UTIL
 
 ## Goal
 
-Help the owner understand which games were good purchases.
+Show an owner-defined, modeled comparison between a game's landed purchase cost and the use represented by recorded plays, using current fitness and the owner's entertainment benchmark.
 
-The feature compares what a game cost with how much use it has received and how well it fits the owner's preferences. Its purpose is to keep the owner honest about whether they got their money's worth.
+The result is conditional on simplifying assumptions and does not establish objectively whether a purchase was good or bad. It helps the owner inspect the calculation and decide what it means to them.
 
 This is not about resale value and it does not decide whether a game should be kept or sold.
+
+**Authority notice:** This specification remains authoritative for the exact per-game utilization formula, evidence, game-detail result, and owner-selected collection-list sorts. The approved [Fitness-ranked Profile attention](../../../work/specs/fitness-ranked-profile-attention.md) specification permits a narrow Profile-only `underused-purchase` candidate derived from a valid existing `not-met` utilization result. That candidate uses the existing exact value multiplier and shortfall formula; it does not alter this calculation or collection sorting. It does not authorize collection auto-sort, collection aggregation or brief placement, resale or purchase recommendations, or claim that real collection results have been reviewed.
 
 ## What The Owner Sees
 
@@ -135,7 +137,7 @@ Shelf Judge treats all entered amounts as the owner's one implicit personal curr
 
 For additional plays, "Unreachable at current fitness" is larger than any finite estimate. It appears first when sorting high to low and after all finite estimates when sorting low to high. Results that cannot be calculated appear last in either direction.
 
-This is a user-selected way to inspect the collection. Shelf Judge does not automatically label the first games in the sort as bad purchases or place them in the collection brief.
+This is a user-selected way to inspect the collection. Shelf Judge does not automatically label the first games in the sort as bad purchases, alter collection ordering without the owner's selection, or place results in the collection brief. The separate Profile-only ranked-attention exception is not a collection sort and does not imply a reviewed real-data judgment.
 
 ## Important Choices
 
@@ -252,9 +254,9 @@ Recorded plays are also lifetime totals. Shelf Judge does not try to decide whic
 
 ## Deferred Collection Insight
 
-The first release calculates each game independently and adds user-selected collection-list sorts. The collection does not currently contain purchase costs or an entertainment benchmark, so there is no real data proving that an automatic ranking or collection summary would be useful.
+The first release calculates each game independently and adds user-selected collection-list sorts. A separate approved Profile attention rule may rank a qualifying underused-purchase result against other attention reasons; this is a bounded decision-support candidate, not an automatic collection ranking or summary. The collection has not undergone the real-data review needed to establish that broader purchase interpretation is useful.
 
-Before this becomes a collection insight, the owner must review real results across:
+Before broader collection-wide purchase interpretation (such as automatic ranking, aggregation, summary, or brief placement) is proposed, the owner must review real results across:
 
 - cheap and expensive games
 - played and unplayed games
@@ -266,7 +268,7 @@ Before this becomes a collection insight, the owner must review real results acr
 
 That review should answer whether the feature identifies genuinely good and poor purchases rather than merely producing interesting arithmetic.
 
-Automatic ranking, interpretation, and brief placement also depend on the separate Trusted Collection Insights work. The user-selected sorts in this spec do not depend on that work.
+Broader automatic collection ranking, interpretation, and brief placement also depend on the separate Trusted Collection Insights work and real-data review. The narrow Profile attention candidate and user-selected sorts in this spec do not imply that either prerequisite has been satisfied for broader uses.
 
 ## Technical Contract
 
@@ -387,7 +389,7 @@ Each result component has an explicit `calculated`, `unavailable`, `not-applicab
 11. Test amounts with zero, one, and two fractional digits, invalid precision, safe-integer boundaries, exact storage as hundredths, and malformed persisted amounts.
 12. Verify source and observation information survives daemon, web, and CLI responses.
 13. Verify ascending and descending web sorts for remaining money, additional plays, displayed-money ties, unreachable games, unavailable games, gifts, and zero-cost purchases. Remaining-money sorts must use the rounded-hundredths display key, including an exact-zero/sub-cent tie; additional-play sorts must use whole-number results and the specified availability order. Zero-play and fitness-zero remaining values count as calculated sort values even when other result components are unavailable. Unavailable and not-applicable results remain together at the end. Ties must keep ascending name and ID order in both primary directions; cover NFC-equivalent names, non-ASCII code-point ordering, and the stable-ID fallback.
-14. Verify the release contains no automatic collection judgment, aggregation, brief candidate, currency metadata or conversion, or purchase-value fitness axis.
+14. Verify there is no automatic collection ranking, aggregation, brief candidate, currency metadata or conversion, or purchase-value fitness axis. Separately verify any Profile underused-purchase candidate reuses the canonical exact utilization result and does not change collection ordering or make a buy/keep/sell or resale recommendation.
 15. Ask a fresh reviewer to explain the feature, the fitness-6 benchmark, both examples, value remaining, and estimated additional plays without reading the Technical Contract. Treat inability to do so as a spec failure.
 
 ## Follow-Up Questions

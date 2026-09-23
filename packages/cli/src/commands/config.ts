@@ -10,6 +10,7 @@ interface ConfigData {
     modelId: string;
     extensionIds: string[];
   } | null;
+  profileAttentionCardLimit?: number;
 }
 
 export async function configGet(
@@ -38,8 +39,27 @@ export async function configGet(
       ["grounded-analysis.provider", groundedAnalysis?.providerId ?? "(not set)"],
       ["grounded-analysis.model", groundedAnalysis?.modelId ?? "(not set)"],
       ["grounded-analysis.extensions", groundedAnalysis?.extensionIds.join(", ") || "(none)"],
+      [
+        "profile-attention-card-limit",
+        data.profileAttentionCardLimit === undefined
+          ? "(not set)"
+          : String(data.profileAttentionCardLimit),
+      ],
     ],
   );
+}
+
+function parseProfileAttentionCardLimit(value: string): number {
+  // Keep parsing stricter than Number(): signs, decimals, exponents, whitespace,
+  // and non-canonical leading zeroes are not daemon configuration values.
+  if (!/^(?:0|[1-9][0-9]*)$/.test(value)) {
+    throw new Error("profile-attention-card-limit must be a canonical whole number from 0 to 24");
+  }
+  const limit = Number(value);
+  if (!Number.isSafeInteger(limit) || limit < 0 || limit > 24) {
+    throw new Error("profile-attention-card-limit must be a canonical whole number from 0 to 24");
+  }
+  return limit;
 }
 
 export async function configSet(
@@ -68,6 +88,9 @@ export async function configSet(
       const detail = error instanceof Error ? error.message : "invalid JSON";
       throw new Error(`Invalid grounded-analysis JSON: ${detail}`);
     }
+  }
+  if (key === "profile-attention-card-limit") {
+    bodyMap[key] = { profileAttentionCardLimit: parseProfileAttentionCardLimit(value) };
   }
 
   const body = bodyMap[key];

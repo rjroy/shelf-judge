@@ -1,12 +1,8 @@
 import {
   AcquisitionMutationRequestSchema,
-  calculatePurchaseUtilization,
   EntertainmentBenchmarkMutationRequestSchema,
   NotFoundError,
   parseAmountInput,
-  projectFitnessScore,
-  resolveEffectivePlayingTime,
-  resolveEffectivePlayerCount,
   type AcquisitionMutationRequest,
   type EntertainmentBenchmark,
   type Game,
@@ -19,6 +15,7 @@ import {
   type CollectionMutationService,
 } from "./collection-mutation-service.js";
 import { createLogger, type Logger } from "./logger.js";
+import { enrichGameWithPurchaseUtilization } from "./purchase-utilization-projection.js";
 
 export interface PurchaseUtilizationService {
   getEntertainmentBenchmark(): Promise<EntertainmentBenchmark>;
@@ -353,24 +350,10 @@ export function createPurchaseUtilizationService(
     },
 
     enrichGames(games, entertainmentBenchmark, responseKind) {
-      const enriched = games.map((entry): GameWithPurchaseUtilization => {
-        const displayScore =
-          entry.score === null ? null : projectFitnessScore(String(entry.score.score));
-        return {
-          ...entry,
-          displayScore,
-          purchaseUtilization: calculatePurchaseUtilization({
-            acquisition: entry.game.acquisition,
-            entertainmentBenchmark,
-            playCount: entry.game.playCountEvidence,
-            duration: resolveEffectivePlayingTime(entry.game),
-            playerRange: entry.game.playerRangeEvidence,
-            suggestedPlayerPoll: entry.game.suggestedPlayerPoll,
-            playerCountOverride: resolveEffectivePlayerCount(entry.game, null),
-            fitness: displayScore,
-          }),
-        };
-      });
+      const enriched = games.map(
+        (entry): GameWithPurchaseUtilization =>
+          enrichGameWithPurchaseUtilization(entry, entertainmentBenchmark),
+      );
       logger.log("purchase utilization response enrichment completed", {
         responseKind,
         gameCount: enriched.length,

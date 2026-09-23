@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type {
-  CollectionV7,
+  CollectionV8,
   DurableGame,
   GameDetailWithPurchaseUtilization,
   GameWithPurchaseUtilization,
@@ -29,6 +29,30 @@ import { createTestApp, jsonRequest } from "../helpers/test-app.js";
 const SENTINEL = "OWNER-NOTE-SENTINEL-1d4.4";
 
 describe("game projections", () => {
+  test("keeps internal purchase projection metadata out of strict list and detail responses", async () => {
+    const context = createTestApp();
+    const added = await context.gameService.addGame({ name: "Purchase projection boundary" });
+
+    const listResponse = await jsonRequest(context.app, "GET", "/api/games");
+    expect(listResponse.status).toBe(200);
+    const list = (await listResponse.json()) as GameWithPurchaseUtilization[];
+    const listEntry = list.find((entry) => entry.game.id === added.game.id);
+    if (!listEntry) throw new Error("Expected list entry");
+
+    const detailResponse = await jsonRequest(context.app, "GET", `/api/games/${added.game.id}`);
+    expect(detailResponse.status).toBe(200);
+    const detail = (await detailResponse.json()) as GameDetailWithPurchaseUtilization;
+
+    for (const response of [listEntry, detail]) {
+      expect(response).not.toHaveProperty("calculationVersion");
+      expect(response).not.toHaveProperty("dependencyVersion");
+      expect(JSON.stringify(response)).not.toContain("calculationVersion");
+      expect(JSON.stringify(response)).not.toContain("dependencyVersion");
+    }
+    expect(detail.displayScore).toBe(listEntry.displayScore);
+    expect(detail.purchaseUtilization).toEqual(listEntry.purchaseUtilization);
+  });
+
   test("physically removes owner notes from every broad game-bearing shape", async () => {
     const context = createTestApp({ now: () => "2026-08-31T12:00:00.000Z" });
     const addResponse = await jsonRequest(context.app, "POST", "/api/games", {
@@ -169,9 +193,9 @@ describe("game projections", () => {
     const context = createTestApp();
     const game = (await context.gameService.addGame({ name: "Detail Game" })).game;
     const collection = await context.storageService.loadCollection();
-    const durable: CollectionV7 = {
+    const durable: CollectionV8 = {
       ...collection,
-      schemaVersion: 7,
+      schemaVersion: 8,
       games: [
         {
           ...game,
@@ -197,9 +221,9 @@ describe("game projections", () => {
     const context = createTestApp();
     const game = (await context.gameService.addGame({ name: "Serialized Detail" })).game;
     const collection = await context.storageService.loadCollection();
-    const durable: CollectionV7 = {
+    const durable: CollectionV8 = {
       ...collection,
-      schemaVersion: 7,
+      schemaVersion: 8,
       games: [
         {
           ...game,

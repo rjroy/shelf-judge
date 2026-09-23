@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   calculatePurchaseUtilization,
+  ExactUtilizationValueSchema,
   resolveModeledPlayerCount,
   type FieldEvidence,
   type PlayerRangeEvidence,
@@ -98,6 +99,36 @@ function input(overrides: Partial<PurchaseUtilizationInput> = {}): PurchaseUtili
 }
 
 describe("purchase utilization canonical calculations", () => {
+  test("accepts only canonical reduced exact utilization fractions", () => {
+    expect(
+      ExactUtilizationValueSchema.safeParse({ exact: { numerator: "0", denominator: "1" } })
+        .success,
+    ).toBe(true);
+    expect(
+      ExactUtilizationValueSchema.safeParse({ exact: { numerator: "1", denominator: "10" } })
+        .success,
+    ).toBe(true);
+    expect(
+      ExactUtilizationValueSchema.safeParse({ exact: { numerator: "11", denominator: "10" } })
+        .success,
+    ).toBe(true);
+    expect(
+      ExactUtilizationValueSchema.safeParse({ exact: { numerator: "01", denominator: "10" } })
+        .success,
+    ).toBe(false);
+    expect(
+      ExactUtilizationValueSchema.safeParse({ exact: { numerator: "1", denominator: "010" } })
+        .success,
+    ).toBe(false);
+    expect(
+      ExactUtilizationValueSchema.safeParse({ exact: { numerator: "2", denominator: "10" } })
+        .success,
+    ).toBe(false);
+    expect(
+      ExactUtilizationValueSchema.safeParse({ exact: { numerator: "0", denominator: "2" } })
+        .success,
+    ).toBe(false);
+  });
   test("calculates the $60 canonical example exactly", () => {
     const result = calculatePurchaseUtilization(input());
 

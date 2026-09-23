@@ -19,6 +19,7 @@ import type { DisplayedGameFitness, DisplayedFitnessService } from "./displayed-
 import { projectProfileCollectionSource } from "./game-projection.js";
 import { canonicalSha256, profileSourceCoordinatorFor } from "./profile-source-coordinator.js";
 import { createProfileService } from "./profile-service.js";
+import type { ProfileService } from "./profile-service.js";
 import type { StorageService } from "./storage-service.js";
 
 const IdSchema = z.string().min(1);
@@ -195,26 +196,28 @@ const ActiveIntentionSchema = z
       .nullable(),
     createdAt: TimestampSchema,
     version: z.number().int().safe().positive(),
-    currentPlayEvidence: z.union([
-      z
-        .object({
-          status: z.literal("valid"),
-          playCount: z.number().int().min(0),
-          source: z.string(),
-          observedAt: TimestampSchema,
-          stale: z.literal(false),
-        })
-        .strict(),
-      z
-        .object({
-          status: z.enum(["missing", "invalid", "stale"]),
-          playCount: z.number().int().min(0).nullable(),
-          source: z.string().nullable(),
-          observedAt: TimestampSchema.nullable(),
-          warning: z.string(),
-        })
-        .strict(),
-    ]),
+    currentPlayEvidence: z
+      .union([
+        z
+          .object({
+            status: z.literal("valid"),
+            playCount: z.number().int().min(0),
+            source: z.string(),
+            observedAt: TimestampSchema,
+            stale: z.literal(false),
+          })
+          .strict(),
+        z
+          .object({
+            status: z.enum(["missing", "invalid", "stale"]),
+            playCount: z.number().int().min(0).nullable(),
+            source: z.string().nullable(),
+            observedAt: TimestampSchema.nullable(),
+            warning: z.string(),
+          })
+          .strict(),
+      ])
+      .optional(),
   })
   .strict();
 const ProfileEvidenceSharedSchema = {
@@ -711,20 +714,26 @@ function profileSources(
   profile: CollectionProfile,
   gamesById: ReadonlyMap<string, Game>,
   collectionRevision: number,
+  intentions: CollectionProfileCollectionSource["intentions"],
 ): AnalystEvidenceSource[] {
   if (profile.status !== "available") return [];
-  const activeIntentions = profile.attention.items.map(
-    ({ intention, gameName, currentPlayEvidence }) => ({
-      intentionId: intention.intentionId,
-      gameId: intention.gameId,
-      gameName,
-      kind: intention.kind,
-      baseline: intention.baseline,
-      createdAt: intention.createdAt,
-      version: intention.version,
-      currentPlayEvidence,
-    }),
-  );
+  const activeIntentions = intentions.flatMap((intention) => {
+    if (intention.resolution !== null) return [];
+    const game = gamesById.get(intention.gameId);
+    return game === undefined
+      ? []
+      : [
+          {
+            intentionId: intention.intentionId,
+            gameId: intention.gameId,
+            gameName: game.name,
+            kind: intention.kind,
+            baseline: intention.baseline,
+            createdAt: intention.createdAt,
+            version: intention.version,
+          },
+        ];
+  });
   const entityClasses: CollectionProfileEntityClass[] = ["mechanic", "designer", "artist"];
   return entityClasses.flatMap((entityClass) => {
     const result = profile.identity.classes[entityClass];
@@ -808,7 +817,9 @@ export function buildAnalystProjectionSnapshot(input: {
     throw new Error("Analyst snapshot must contain every collection game exactly once");
   const gamesById = new Map(collection.games.map((game) => [game.id, game]));
   const profileEvidence =
-    profile.status === "available" ? profileSources(profile, gamesById, collection.revision) : [];
+    profile.status === "available"
+      ? profileSources(profile, gamesById, collection.revision, collection.intentions)
+      : [];
   const sources = collection.games
     .slice()
     .sort((a, b) => compareText(a.id, b.id))
@@ -862,14 +873,18 @@ export function buildAnalystProjectionSnapshot(input: {
 export function createAnalystProjectionSnapshotService(deps: {
   storageService: StorageService;
   displayedFitnessService: DisplayedFitnessService;
+  /** The daemon Profile gate is shared so analyst snapshots cannot bypass candidate freshness. */
+  profileService?: ProfileService;
   now?: () => string;
 }) {
   const coordinator = profileSourceCoordinatorFor(deps.storageService);
-  const profileService = createProfileService({
-    storageService: deps.storageService,
-    displayedFitnessService: deps.displayedFitnessService,
-    now: deps.now,
-  });
+  const profileService =
+    deps.profileService ??
+    createProfileService({
+      storageService: deps.storageService,
+      displayedFitnessService: deps.displayedFitnessService,
+      now: deps.now,
+    });
   return Object.freeze({
     capture: () =>
       coordinator.runExclusive(async () => {

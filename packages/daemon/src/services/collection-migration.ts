@@ -5,6 +5,7 @@ import {
   CollectionSchemaV4,
   CollectionSchemaV5,
   CollectionSchemaV6,
+  CollectionSchemaV7,
   createInitialEntityMetadata,
   isUsableSuggestedPlayerPoll,
   type Axis,
@@ -713,6 +714,19 @@ function migrateVersionSixToSeven(raw: unknown): CollectionMigrationStepResult {
   };
 }
 
+function migrateVersionSevenToEight(raw: unknown): CollectionMigrationStepResult {
+  const historical = CollectionSchemaV7.parse(raw);
+  return {
+    data: {
+      ...historical,
+      schemaVersion: 8,
+      attentionDispositions: [],
+    },
+    convertedAxisCount: 0,
+    disabledAxisCount: 0,
+  };
+}
+
 export const COLLECTION_MIGRATION_STEPS: readonly CollectionMigrationStep[] = [
   {
     fromVersion: 0,
@@ -748,6 +762,11 @@ export const COLLECTION_MIGRATION_STEPS: readonly CollectionMigrationStep[] = [
     fromVersion: 6,
     toVersion: 7,
     migrate: migrateVersionSixToSeven,
+  },
+  {
+    fromVersion: 7,
+    toVersion: 8,
+    migrate: migrateVersionSevenToEight,
   },
 ];
 

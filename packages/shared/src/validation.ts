@@ -23,6 +23,8 @@ import type {
   EnabledAxis,
   NativeScale,
   CollectionProfileEntityPolicy,
+  AttentionCommandReceipt,
+  AttentionDisposition,
   ToleranceLevel,
   JsonValue,
 } from "./types";
@@ -45,10 +47,15 @@ import {
   IntentionMutationErrorSchema,
   IntentionCommandReceiptSchema,
   CommandReceiptSchema,
+  AttentionDispositionSchema,
+  AttentionCommandReceiptSchema,
+  AttentionCommandReceiptUnionSchema,
+  attentionDispositionRequestFingerprint,
   CollectionProfileSourceRecordsSchema,
   createCollectionProfileEntityClassResultSchema,
   CollectionProfileEntityClassResultSchema,
-  CollectionProfileAttentionItemSchema,
+  CollectionProfileAttentionCardSchema,
+  AttentionExactValueSchema,
   ResolvedPlayIntentionHistoryItemSchema,
   ResolvedPlayIntentionHistorySchema,
   GameIntentionDetailSchema,
@@ -72,10 +79,15 @@ export {
   IntentionMutationErrorSchema,
   IntentionCommandReceiptSchema,
   CommandReceiptSchema,
+  AttentionDispositionSchema,
+  AttentionCommandReceiptSchema,
+  AttentionCommandReceiptUnionSchema,
+  attentionDispositionRequestFingerprint,
   CollectionProfileSourceRecordsSchema,
   createCollectionProfileEntityClassResultSchema,
   CollectionProfileEntityClassResultSchema,
-  CollectionProfileAttentionItemSchema,
+  CollectionProfileAttentionCardSchema,
+  AttentionExactValueSchema,
   ResolvedPlayIntentionHistoryItemSchema,
   ResolvedPlayIntentionHistorySchema,
   GameIntentionDetailSchema,
@@ -83,9 +95,9 @@ export {
   CollectionProfileResultSchema,
 };
 
-export const CURRENT_COLLECTION_SCHEMA_VERSION = 7 as const;
-export const CURRENT_PROFILE_CONTRACT_VERSION = 9 as const;
-export const CURRENT_PROFILE_ALGORITHM_VERSION = 11 as const;
+export const CURRENT_COLLECTION_SCHEMA_VERSION = 8 as const;
+export const CURRENT_PROFILE_CONTRACT_VERSION = 11 as const;
+export const CURRENT_PROFILE_ALGORITHM_VERSION = 13 as const;
 const AmountInputSchema = z.string().superRefine((value, context) => {
   try {
     parseAmountInput(value);
@@ -1087,38 +1099,232 @@ export const BggPlaySessionSchema = z
   })
   .strict();
 
-export const CollectionSchemaV7 = CollectionSchemaV6Base.omit({ schemaVersion: true })
+const CollectionSchemaV7Base = CollectionSchemaV6Base.omit({ schemaVersion: true })
   .extend({
     schemaVersion: z.literal(7),
     bggPlaySessions: z.array(BggPlaySessionSchema).optional(),
   })
+  .strict();
+
+export const CollectionSchemaV7 = CollectionSchemaV7Base.superRefine((source, context) => {
+  const { bggPlaySessions, ...v6Source } = source;
+  void bggPlaySessions;
+  const v6Projection = CollectionSchemaV6.safeParse({
+    ...v6Source,
+    schemaVersion: 6,
+  });
+  if (!v6Projection.success) {
+    for (const issue of v6Projection.error.issues) context.addIssue(issue);
+  }
+  const seen = new Set<number>();
+  for (const [index, session] of (source.bggPlaySessions ?? []).entries()) {
+    if (seen.has(session.playId)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["bggPlaySessions", index, "playId"],
+        message: "BGG play IDs must be unique",
+      });
+    }
+    seen.add(session.playId);
+  }
+});
+
+export const CollectionSchemaV8 = CollectionSchemaV7Base.omit({
+  schemaVersion: true,
+  commandReceipts: true,
+})
+  .extend({
+    schemaVersion: z.literal(8),
+    attentionDispositions: z.array(AttentionDispositionSchema),
+    commandReceipts: z.array(AttentionCommandReceiptUnionSchema),
+  })
   .strict()
   .superRefine((source, context) => {
-    const { bggPlaySessions, ...v6Source } = source;
-    void bggPlaySessions;
-    const v6Projection = CollectionSchemaV6.safeParse({
-      ...v6Source,
-      schemaVersion: 6,
+    const { attentionDispositions, ...v7Source } = source;
+    void attentionDispositions;
+    const v7Projection = CollectionSchemaV7.safeParse({
+      ...v7Source,
+      schemaVersion: 7,
+      commandReceipts: source.commandReceipts.filter(
+        (receipt) => !("receiptType" in receipt && receipt.receiptType === "attention-disposition"),
+      ),
     });
-    if (!v6Projection.success) {
-      for (const issue of v6Projection.error.issues) context.addIssue(issue);
+    if (!v7Projection.success) {
+      for (const issue of v7Projection.error.issues) context.addIssue(issue);
     }
-    const seen = new Set<number>();
-    for (const [index, session] of (source.bggPlaySessions ?? []).entries()) {
-      if (seen.has(session.playId)) {
+    const gameIds = new Set(source.games.map(({ id }) => id));
+    const ownedGameIds = new Set(
+      source.games.filter(({ ownership }) => ownership === "owned").map(({ id }) => id),
+    );
+    const dispositionGameIds = source.attentionDispositions.map(({ gameId }) => gameId);
+    if (new Set(dispositionGameIds).size !== dispositionGameIds.length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["attentionDispositions"],
+        message: "A game may have at most one attention disposition",
+      });
+    }
+    for (const [index, disposition] of source.attentionDispositions.entries()) {
+      if (!ownedGameIds.has(disposition.gameId))
         context.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ["bggPlaySessions", index, "playId"],
-          message: "BGG play IDs must be unique",
+          path: ["attentionDispositions", index, "gameId"],
+          message: "Every attention disposition must reference a currently owned game",
         });
+    }
+    const commandIds = source.commandReceipts.map(({ commandId }) => commandId);
+    if (new Set(commandIds).size !== commandIds.length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["commandReceipts"],
+        message: "Command receipt IDs must be unique across command families",
+      });
+    }
+    for (const [index, receipt] of source.commandReceipts.entries()) {
+      if (!("receiptType" in receipt) || receipt.receiptType !== "attention-disposition") continue;
+      if (!gameIds.has(receipt.gameId))
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["commandReceipts", index, "gameId"],
+          message: "Every attention receipt must reference a source game",
+        });
+    }
+    const attentionReceipts = source.commandReceipts.filter(
+      (receipt): receipt is AttentionCommandReceipt =>
+        "receiptType" in receipt && receipt.receiptType === "attention-disposition",
+    );
+    for (const [index, receipt] of attentionReceipts.entries()) {
+      const matchingDisposition = source.attentionDispositions.find(
+        ({ gameId }) => gameId === receipt.gameId,
+      );
+      if (
+        matchingDisposition !== undefined &&
+        matchingDisposition.version < receipt.accepted.version
+      )
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["attentionDispositions"],
+          message: "Current attention dispositions cannot predate accepted receipts",
+        });
+      if (
+        matchingDisposition !== undefined &&
+        matchingDisposition.version === receipt.accepted.version &&
+        !sameAttentionDisposition(matchingDisposition, receipt.accepted)
+      )
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["attentionDispositions"],
+          message:
+            "Current attention disposition must match the accepted receipt at the same version",
+        });
+      for (const priorReceipt of attentionReceipts.slice(0, index)) {
+        if (
+          priorReceipt.gameId === receipt.gameId &&
+          priorReceipt.accepted.version === receipt.accepted.version &&
+          !sameAttentionDisposition(priorReceipt.accepted, receipt.accepted)
+        )
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["commandReceipts"],
+            message: "Accepted attention receipts cannot conflict at the same game version",
+          });
       }
-      seen.add(session.playId);
     }
   });
 
-export const CollectionSchema = CollectionSchemaV7;
+function sameAttentionDisposition(
+  left: AttentionDisposition,
+  right: AttentionDisposition,
+): boolean {
+  if (left.gameId !== right.gameId || left.kind !== right.kind || left.version !== right.version)
+    return false;
+  if (left.kind === "snoozed" && right.kind === "snoozed")
+    return (
+      left.ruleId === right.ruleId &&
+      left.ruleVersion === right.ruleVersion &&
+      left.fingerprint === right.fingerprint &&
+      left.responseAt === right.responseAt &&
+      left.expiresAt === right.expiresAt
+    );
+  if (left.kind === "intentional" && right.kind === "intentional")
+    return (
+      left.ruleId === right.ruleId &&
+      left.ruleVersion === right.ruleVersion &&
+      left.fingerprint === right.fingerprint
+    );
+  return false;
+}
 
-export const CollectionProfileCollectionSourceV6Schema = CollectionSchemaV6Base.omit({
+const CanonicalExactRationalSchema = z
+  .object({
+    numerator: z.string().regex(/^(?:0|[1-9]\d*)$/, "Numerator must be canonical"),
+    denominator: z.string().regex(/^[1-9]\d*$/, "Denominator must be canonical"),
+  })
+  .strict()
+  .superRefine(({ numerator, denominator }, context) => {
+    const numeratorValue = BigInt(numerator);
+    const denominatorValue = BigInt(denominator);
+    if (numeratorValue === 0n && denominatorValue !== 1n) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["denominator"],
+        message: "Zero must be represented as 0/1",
+      });
+    } else if (exactUtilizationGreatestCommonDivisor(numeratorValue, denominatorValue) !== 1n) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "Exact fraction must be reduced" });
+    }
+  });
+const AttentionUnitExactValueSchema = CanonicalExactRationalSchema.refine(
+  ({ numerator, denominator }) => BigInt(numerator) <= BigInt(denominator),
+  "Exact attention value must be within [0, 1]",
+);
+export const AttentionRuleDefinitionSchema = z
+  .object({
+    id: z.string().regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/),
+    version: z.number().int().safe().positive(),
+    dependencyVersion: z.number().int().safe().positive(),
+    scoringVersion: z.number().int().safe().positive(),
+  })
+  .strict();
+export const AttentionCandidateWinnerSchema = z
+  .object({
+    ruleId: z.string().regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/),
+    ruleVersion: z.number().int().safe().positive(),
+    signalStrength: AttentionUnitExactValueSchema,
+    categoryWeight: AttentionUnitExactValueSchema,
+    attentionScore: AttentionUnitExactValueSchema,
+    fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const signal = BigInt(value.signalStrength.numerator) * BigInt(value.categoryWeight.numerator);
+    const denominator =
+      BigInt(value.signalStrength.denominator) * BigInt(value.categoryWeight.denominator);
+    if (
+      signal * BigInt(value.attentionScore.denominator) !==
+      BigInt(value.attentionScore.numerator) * denominator
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["attentionScore"],
+        message: "Attention score must equal signal strength multiplied by category weight",
+      });
+    }
+  });
+export const AttentionCandidateEvaluationSchema = z
+  .object({
+    gameId: z.string().min(1),
+    winner: AttentionCandidateWinnerSchema.nullable(),
+    disposition: AttentionDispositionSchema.nullable(),
+    nextEvaluationBoundary: z.string().datetime({ offset: true }).nullable(),
+    dependencyVersion: z.number().int().safe().positive(),
+    ruleCatalogVersion: z.number().int().safe().positive(),
+  })
+  .strict();
+
+export const CollectionSchema = CollectionSchemaV8;
+
+const CollectionProfileCollectionSourceV7Base = CollectionSchemaV6Base.omit({
   schemaVersion: true,
   games: true,
 })
@@ -1127,8 +1333,10 @@ export const CollectionProfileCollectionSourceV6Schema = CollectionSchemaV6Base.
     games: z.array(GameSchema),
     bggPlaySessions: z.array(BggPlaySessionSchema).optional(),
   })
-  .strict()
-  .superRefine((source, context) => {
+  .strict();
+
+export const CollectionProfileCollectionSourceV6Schema =
+  CollectionProfileCollectionSourceV7Base.superRefine((source, context) => {
     const { bggPlaySessions, ...historicalSource } = source;
     void bggPlaySessions;
     const v5Projection = CollectionSchemaV5.safeParse({
@@ -1163,7 +1371,103 @@ export const CollectionProfileCollectionSourceV6Schema = CollectionSchemaV6Base.
     }
   });
 
-export const CollectionProfileCollectionSourceSchema = CollectionProfileCollectionSourceV6Schema;
+export const CollectionProfileCollectionSourceSchema = CollectionProfileCollectionSourceV7Base.omit(
+  { schemaVersion: true, commandReceipts: true },
+)
+  .extend({
+    schemaVersion: z.literal(8),
+    attentionDispositions: z.array(AttentionDispositionSchema),
+    commandReceipts: z.array(AttentionCommandReceiptUnionSchema),
+  })
+  .strict()
+  .superRefine((source, context) => {
+    const { attentionDispositions, ...v7Source } = source;
+    void attentionDispositions;
+    const v7Projection = CollectionProfileCollectionSourceV6Schema.safeParse({
+      ...v7Source,
+      schemaVersion: 7,
+      commandReceipts: source.commandReceipts.filter(
+        (receipt) => !("receiptType" in receipt && receipt.receiptType === "attention-disposition"),
+      ),
+    });
+    if (!v7Projection.success) {
+      for (const issue of v7Projection.error.issues) context.addIssue(issue);
+    }
+    const gameIds = new Set(source.games.map(({ id }) => id));
+    const ownedGameIds = new Set(
+      source.games.filter(({ ownership }) => ownership === "owned").map(({ id }) => id),
+    );
+    const dispositionIds = source.attentionDispositions.map(({ gameId }) => gameId);
+    if (new Set(dispositionIds).size !== dispositionIds.length)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["attentionDispositions"],
+        message: "A game may have at most one attention disposition",
+      });
+    if (dispositionIds.some((gameId) => !ownedGameIds.has(gameId)))
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["attentionDispositions"],
+        message: "Every attention disposition must reference a currently owned game",
+      });
+    const commandIds = source.commandReceipts.map(({ commandId }) => commandId);
+    if (new Set(commandIds).size !== commandIds.length)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["commandReceipts"],
+        message: "Command receipt IDs must be unique across command families",
+      });
+    for (const [index, receipt] of source.commandReceipts.entries()) {
+      if (!("receiptType" in receipt) || receipt.receiptType !== "attention-disposition") continue;
+      if (!gameIds.has(receipt.gameId))
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["commandReceipts", index, "gameId"],
+          message: "Every attention receipt must reference a source game",
+        });
+    }
+    const attentionReceipts = source.commandReceipts.filter(
+      (receipt): receipt is AttentionCommandReceipt =>
+        "receiptType" in receipt && receipt.receiptType === "attention-disposition",
+    );
+    for (const [index, receipt] of attentionReceipts.entries()) {
+      const matchingDisposition = source.attentionDispositions.find(
+        ({ gameId }) => gameId === receipt.gameId,
+      );
+      if (
+        matchingDisposition !== undefined &&
+        matchingDisposition.version < receipt.accepted.version
+      )
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["attentionDispositions"],
+          message: "Current attention dispositions cannot predate accepted receipts",
+        });
+      if (
+        matchingDisposition !== undefined &&
+        matchingDisposition.version === receipt.accepted.version &&
+        !sameAttentionDisposition(matchingDisposition, receipt.accepted)
+      )
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["attentionDispositions"],
+          message:
+            "Current attention disposition must match the accepted receipt at the same version",
+        });
+      for (const priorReceipt of attentionReceipts.slice(0, index)) {
+        if (
+          priorReceipt.gameId === receipt.gameId &&
+          priorReceipt.accepted.version === receipt.accepted.version &&
+          !sameAttentionDisposition(priorReceipt.accepted, receipt.accepted)
+        )
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["commandReceipts"],
+            message: "Accepted attention receipts cannot conflict at the same game version",
+          });
+      }
+    }
+  });
 
 function compareNormalizedCodePoints(left: string, right: string): number {
   const leftPoints = Array.from(left.normalize("NFC"), (value) => value.codePointAt(0) ?? 0);
@@ -1208,91 +1512,35 @@ export function createCollectionProfileSnapshotSchema(policy: CollectionProfileE
           });
         }
       }
-      const activeIntentions = source.intentions
-        .filter(({ resolution }) => resolution === null)
-        .sort((left, right) => {
-          const leftName = source.games.find(({ id }) => id === left.gameId)?.name ?? "";
-          const rightName = source.games.find(({ id }) => id === right.gameId)?.name ?? "";
-          return (
-            compareNormalizedCodePoints(leftName, rightName) ||
-            compareNormalizedCodePoints(left.gameId, right.gameId)
-          );
-        });
-      if (
-        profile.attention.items.length !== activeIntentions.length ||
-        profile.attention.items.some((item, index) => {
-          const sourceIntention = activeIntentions[index];
-          const sourceGame = source.games.find(({ id }) => id === sourceIntention?.gameId);
-          return (
-            sourceIntention === undefined ||
-            sourceGame === undefined ||
-            item.gameName !== sourceGame.name ||
-            JSON.stringify(item.intention) !== JSON.stringify(sourceIntention)
-          );
-        })
-      ) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["profile", "attention", "items"],
-          message: "Attention items must correspond exactly to every durable active intention",
-        });
-      }
-      for (const [itemIndex, item] of profile.attention.items.entries()) {
-        const game = source.games.find(({ id }) => id === item.intention.gameId);
-        if (game === undefined) continue;
-        const evidence = game.playCountEvidence;
-        const latestCheck = game.latestPlayCountCheck;
-        const stale =
-          evidence.status === "valid" &&
-          latestCheck !== null &&
-          latestCheck.status !== "valid" &&
-          (evidence.observedAt === null ||
-            Date.parse(latestCheck.observedAt) > Date.parse(evidence.observedAt));
-        const expectedEvidence =
-          evidence.status === "valid" && !stale
-            ? {
-                status: "valid" as const,
-                playCount: evidence.value,
-                source: evidence.source,
-                observedAt: evidence.observedAt,
-                stale: false as const,
-              }
-            : evidence.status === "valid"
-              ? {
-                  status: "stale" as const,
-                  playCount: evidence.value,
-                  source: evidence.source,
-                  observedAt: evidence.observedAt,
-                  warning: "A newer BGG check did not provide a valid play count." as const,
-                }
-              : evidence.status === "invalid" || latestCheck?.status === "invalid"
-                ? {
-                    status: "invalid" as const,
-                    playCount: null,
-                    source: evidence.source,
-                    observedAt: evidence.observedAt,
-                    warning: "Current play evidence is invalid." as const,
-                  }
-                : {
-                    status: "missing" as const,
-                    playCount: null,
-                    source: evidence.source,
-                    observedAt: evidence.observedAt,
-                    warning: "Current play evidence is missing." as const,
-                  };
-        const expectedOperation =
-          expectedEvidence.status === "valid" || game.bggId === null
-            ? "shelf.game.plays.set"
-            : "shelf.game.bgg.refresh";
-        if (
-          JSON.stringify(item.currentPlayEvidence) !== JSON.stringify(expectedEvidence) ||
-          item.evidenceDestination.operationId !== expectedOperation
-        ) {
+      const ownedSourceGames = new Map(
+        source.games
+          .filter(({ ownership }) => ownership === "owned")
+          .map((game) => [game.id, game]),
+      );
+      for (const [cardIndex, card] of profile.attention.cards.entries()) {
+        const sourceGame = ownedSourceGames.get(card.gameId);
+        if (sourceGame === undefined || sourceGame.name !== card.gameName) {
           context.addIssue({
             code: z.ZodIssueCode.custom,
-            path: ["profile", "attention", "items", itemIndex, "currentPlayEvidence"],
-            message: "Attention play evidence and destination must match durable current evidence",
+            path: ["profile", "attention", "cards", cardIndex, "gameId"],
+            message: "Attention card must identify a currently owned source game and its name",
           });
+        }
+        if (card.ruleId === "explicit-intention") {
+          const sourceIntention = source.intentions.find(
+            (intention) => intention.gameId === card.gameId && intention.resolution === null,
+          );
+          if (
+            sourceIntention === undefined ||
+            card.intention === null ||
+            JSON.stringify(card.intention) !== JSON.stringify(sourceIntention)
+          ) {
+            context.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ["profile", "attention", "cards", cardIndex, "intention"],
+              message: "Explicit-intention card must match the durable active intention",
+            });
+          }
         }
       }
       for (const entityClass of ["mechanic", "designer", "artist"] as const) {
@@ -1455,9 +1703,20 @@ const PurchaseUtilizationReasonSchema = z.enum([
   "unreachable-at-current-fitness",
 ]);
 
-const ExactUtilizationValueSchema = z
+function exactUtilizationGreatestCommonDivisor(left: bigint, right: bigint): bigint {
+  let numerator = left;
+  let denominator = right;
+  while (denominator !== 0n) {
+    const remainder = numerator % denominator;
+    numerator = denominator;
+    denominator = remainder;
+  }
+  return numerator;
+}
+
+export const ExactUtilizationValueSchema = z
   .object({
-    exact: z.object({ numerator: z.string(), denominator: z.string() }).strict(),
+    exact: CanonicalExactRationalSchema,
   })
   .strict();
 
@@ -1810,6 +2069,76 @@ export const ProfileSourceIdentitySchema = z
   })
   .strict();
 
+export const ProfileAttentionCandidatePublicationIdentitySchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    indexVersion: z.literal(1),
+    evaluatedAt: z.string().datetime({ offset: true }),
+    identity: z
+      .object({
+        collectionId: z.string().min(1),
+        collectionSchemaVersion: z.literal(CURRENT_COLLECTION_SCHEMA_VERSION),
+        collectionRevision: z.number().int().nonnegative().safe(),
+        tournamentHash: Sha256Schema,
+        predictionSettingsHash: Sha256Schema,
+        redundancySettingsHash: Sha256Schema,
+        calculationVersion: z.number().int().safe().positive(),
+        ruleCatalogVersion: z.number().int().safe().positive(),
+        dependencyVersion: z.number().int().safe().positive(),
+        projectionVersion: z.number().int().safe().positive(),
+        catalogRuleVersions: z
+          .array(
+            z
+              .object({
+                ruleId: z.string().regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/),
+                ruleVersion: z.number().int().safe().positive(),
+                scoringVersion: z.number().int().safe().positive(),
+              })
+              .strict(),
+          )
+          .superRefine((rules, context) => {
+            for (let index = 1; index < rules.length; index += 1) {
+              const prior = rules[index - 1];
+              const current = rules[index];
+              if (prior !== undefined && current !== undefined && prior.ruleId < current.ruleId)
+                continue;
+              context.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: [index, "ruleId"],
+                message: "Candidate catalog rule versions must be unique and sorted",
+              });
+            }
+          }),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const ProfilePublicationIdentitySchema = z
+  .object({
+    source: ProfileSourceIdentitySchema,
+    profileAttentionCardLimit: z.number().int().safe().min(0).max(24),
+    attentionCandidates: ProfileAttentionCandidatePublicationIdentitySchema,
+  })
+  .strict()
+  .superRefine((identity, context) => {
+    const candidate = identity.attentionCandidates.identity;
+    const source = identity.source;
+    if (
+      candidate.collectionId !== source.collectionId ||
+      candidate.collectionSchemaVersion !== source.collectionSchemaVersion ||
+      candidate.collectionRevision !== source.collectionRevision ||
+      candidate.tournamentHash !== source.tournamentHash ||
+      candidate.predictionSettingsHash !== source.predictionSettingsHash ||
+      candidate.redundancySettingsHash !== source.redundancySettingsHash
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["attentionCandidates", "identity"],
+        message: "Attention candidate publication identity must match Profile source identity",
+      });
+  });
+
 export const PredictionSettingsSchema = z
   .object({
     stageThresholds: z
@@ -1852,7 +2181,7 @@ export function createProfileDataSchema(policy: CollectionProfileEntityPolicy) {
     .object({
       contractVersion: z.literal(CURRENT_PROFILE_CONTRACT_VERSION),
       algorithmVersion: z.literal(CURRENT_PROFILE_ALGORITHM_VERSION),
-      sourceIdentity: ProfileSourceIdentitySchema,
+      publicationIdentity: ProfilePublicationIdentitySchema,
       profile: createCollectionProfileResultSchema(policy).refine(
         (profile) => profile.status === "available",
         {
@@ -1868,6 +2197,16 @@ export function createProfileDataSchema(policy: CollectionProfileEntityPolicy) {
           code: z.ZodIssueCode.custom,
           path: ["profile", "computedAt"],
           message: "Profile timestamps must match",
+        });
+      }
+      if (
+        data.profile.status === "available" &&
+        data.profile.attention.cardLimit !== data.publicationIdentity.profileAttentionCardLimit
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["profile", "attention", "cardLimit"],
+          message: "Profile attention card limit must match its publication identity",
         });
       }
     });

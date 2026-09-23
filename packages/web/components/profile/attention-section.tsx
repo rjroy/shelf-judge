@@ -1,110 +1,166 @@
 import Link from "next/link";
-import type { CollectionProfile, CollectionProfileAttentionItem } from "@shelf-judge/shared";
+import type {
+  CollectionProfile,
+  CollectionProfileAttentionCard,
+  CollectionProfileAttentionEvidence,
+} from "@shelf-judge/shared";
+import { AttentionCardActions } from "./attention-card-actions";
 
-const responseLabels: Record<CollectionProfileAttentionItem["responses"][number], string> = {
-  "leave-visible": "Leave it visible or prioritize the play outside Shelf Judge",
-  complete: "Mark the intention complete from personal knowledge",
-  retire: "Retire it because it is no longer an intention",
-  "correct-or-refresh-evidence": "Correct or refresh the play evidence before deciding",
-};
-
-function evidenceActionLabel(item: CollectionProfileAttentionItem): string {
-  return item.evidenceDestination.operationId === "shelf.game.bgg.refresh"
-    ? "Refresh play evidence"
-    : "Correct play evidence";
+function intentionKindLabel(
+  kind: NonNullable<CollectionProfileAttentionCard["intention"]>["kind"],
+): string {
+  return kind === "want-to-play" ? "Want to play" : kind === "first-play" ? "First play" : "Replay";
 }
 
-function AttentionItem({ item }: { item: CollectionProfileAttentionItem }) {
-  const headingId = `${item.id}-heading`;
-  const evidenceId = `${item.id}-evidence`;
-  const current = item.currentPlayEvidence;
+function evidenceDescription(evidence: CollectionProfileAttentionEvidence): string {
+  switch (evidence.kind) {
+    case "play-count":
+      return `${evidence.value} plays from ${evidence.source}, observed ${evidence.observedAt}`;
+    case "dormant":
+      return `${evidence.playCount} plays; last played ${evidence.lastPlayedOn}`;
+    case "purchase-utilization":
+      return `${evidence.achievedPercent}% achieved at ${evidence.multiplier.numerator}/${evidence.multiplier.denominator} utilization`;
+    case "intention":
+      return `${intentionKindLabel(evidence.intentionKind)} created ${evidence.createdAt}`;
+  }
+}
+
+function AttentionCard({ card }: { card: CollectionProfileAttentionCard }) {
+  const headingId = `${card.id}-heading`;
+  const isExplicitIntention = card.ruleId === "explicit-intention" && card.intention !== null;
+
   return (
     <article
-      id={item.id}
+      id={card.id}
       className="attention-card attention-card--quiet"
       aria-labelledby={headingId}
     >
-      <h3 id={headingId}>{item.question}</h3>
-      <p>{item.whyNow}</p>
-      <div className="profile-actions">
-        <Link className="btn btn-primary" href={`/games/${item.destination.gameId}`}>
-          Review intention for {item.gameName}
-        </Link>
-        <Link className="btn btn-secondary" href={`/games/${item.evidenceDestination.gameId}`}>
-          {evidenceActionLabel(item)}
-        </Link>
+      <Link
+        className="attention-game"
+        href={`/games/${card.gameId}`}
+        aria-label={`Open ${card.gameName}`}
+      >
+        <span className="attention-game-art" aria-hidden="true">
+          <span className="attention-game-fallback">{card.gameName.trim().charAt(0) || "?"}</span>
+          {card.gameImageUrl ? (
+            // A background image layers over the fallback, which remains visible if the URL fails.
+            <span
+              className="attention-game-image"
+              style={{ backgroundImage: `url("${card.gameImageUrl.replaceAll('"', "%22")}")` }}
+            />
+          ) : null}
+        </span>
+        <span className="attention-game-copy">
+          <span className="attention-game-title">{card.gameName}</span>
+        </span>
+      </Link>
+      <div className="attention-context">
+        <p className="attention-reason">{card.reason}</p>
+        <h3 id={headingId} className="attention-decision">
+          {card.question}
+        </h3>
       </div>
+
+      <div className="profile-actions">
+        {card.actions
+          .filter((action) => action.command === null && action.operationId !== "shelf.game.get")
+          .map((action) => (
+            <Link
+              key={action.action}
+              className="btn btn-secondary"
+              href={`/games/${action.destination.gameId}`}
+              aria-label={`${action.action} for ${card.gameName}`}
+            >
+              {action.action === "resolve-intention"
+                ? "Manage intention"
+                : action.action === "retire-intention"
+                  ? "Intention history"
+                  : action.action}
+            </Link>
+          ))}
+        <AttentionCardActions actions={card.actions} />
+      </div>
+
       <details>
-        <summary>Evidence and available responses</summary>
-        <p className="profile-status-label">Active play intention</p>
-        <section className="attention-evidence" aria-labelledby={evidenceId}>
-          <h4 id={evidenceId}>Evidence</h4>
+        <summary>Evidence, score, and supplied actions</summary>
+        <section className="attention-evidence" aria-labelledby={`${card.id}-evidence`}>
+          <h4 id={`${card.id}-evidence`}>Evidence</h4>
           <dl className="profile-facts">
             <div>
-              <dt>Intention</dt>
+              <dt>Rule</dt>
               <dd>
-                {item.intention.kind === "want-to-play"
-                  ? "Want to play"
-                  : `${item.intention.kind === "first-play" ? "First play" : "Replay"} (historical)`}
+                {card.ruleId} (version {card.ruleVersion})
               </dd>
             </div>
             <div>
-              <dt>Created</dt>
-              <dd>{item.intention.createdAt}</dd>
+              <dt>Evidence</dt>
+              <dd>{evidenceDescription(card.evidence)}</dd>
             </div>
+            {card.evidence.kind === "intention" && (
+              <div>
+                <dt>Evidence intention</dt>
+                <dd>{card.evidence.intentionId}</dd>
+              </div>
+            )}
+          </dl>
+        </section>
+
+        {isExplicitIntention && card.intention !== null && (
+          <section aria-label="Explicit intention association">
+            <h4>Explicit intention</h4>
+            <dl className="profile-facts">
+              <div>
+                <dt>Intention</dt>
+                <dd>{intentionKindLabel(card.intention.kind)}</dd>
+              </div>
+              <div>
+                <dt>Stable intention ID</dt>
+                <dd>{card.intention.intentionId}</dd>
+              </div>
+              <div>
+                <dt>Created</dt>
+                <dd>{card.intention.createdAt}</dd>
+              </div>
+            </dl>
+          </section>
+        )}
+
+        <section aria-label="Score explanation">
+          <h4>Score explanation</h4>
+          <p>{card.scoreExplanation}</p>
+          <dl className="profile-facts">
             <div>
-              <dt>Baseline</dt>
+              <dt>Signal strength</dt>
               <dd>
-                {item.intention.baseline === null
-                  ? "No reliable recorded play-count baseline"
-                  : `${item.intention.baseline.playCount} plays from ${item.intention.baseline.evidenceSource}, observed ${item.intention.baseline.observedAt}`}
+                {card.signalStrength.numerator}/{card.signalStrength.denominator}
               </dd>
             </div>
             <div>
-              <dt>Current evidence</dt>
+              <dt>Category weight</dt>
               <dd>
-                {current.status === "valid"
-                  ? `${current.playCount} plays from ${current.source}, observed ${current.observedAt}`
-                  : `${current.status}; ${current.playCount === null ? "no valid count" : `${current.playCount} plays`}${current.source === null ? "" : ` from ${current.source}`}${current.observedAt === null ? "" : `, observed ${current.observedAt}`}`}
+                {card.categoryWeight.numerator}/{card.categoryWeight.denominator}
+              </dd>
+            </div>
+            <div>
+              <dt>Attention score</dt>
+              <dd>
+                {card.attentionScore.numerator}/{card.attentionScore.denominator}
               </dd>
             </div>
           </dl>
-          {current.status !== "valid" && (
-            <p className="profile-warning" role="status">
-              Evidence warning: {current.warning}
-            </p>
-          )}
         </section>
-        <section className="attention-responses" aria-label="Available responses">
-          <h4>Available responses</h4>
+
+        <section aria-label="Supplied actions">
+          <h4>Supplied actions</h4>
           <ul>
-            {item.responses.map((response) => (
-              <li key={response}>{responseLabels[response]}</li>
+            {card.actions.map((action) => (
+              <li key={`${action.action}-detail`}>
+                {action.action} · {action.operationId}
+                {action.command !== null && " · command template supplied"}
+              </li>
             ))}
           </ul>
         </section>
-        <dl className="profile-facts">
-          <div>
-            <dt>Stable intention ID</dt>
-            <dd>{item.intention.intentionId}</dd>
-          </div>
-          <div>
-            <dt>Decision family</dt>
-            <dd>{item.decisionFamily}</dd>
-          </div>
-          <div>
-            <dt>Why this qualifies</dt>
-            <dd>{item.abstentionBasis}</dd>
-          </div>
-          <div>
-            <dt>Resolution</dt>
-            <dd>Active, with no recorded resolution.</dd>
-          </div>
-          <div>
-            <dt>Reopen condition</dt>
-            <dd>{item.reopenCondition}</dd>
-          </div>
-        </dl>
       </details>
     </article>
   );
@@ -117,26 +173,34 @@ export function AttentionSection({
   attention: CollectionProfile["attention"];
   collectionState: CollectionProfile["identity"]["collectionState"];
 }) {
+  const state = attention.state as string;
+  const empty = state === "empty" || state === "no-winner";
+
   return (
     <section className="profile-question" aria-labelledby="attention-question">
       <h2 id="attention-question">What deserves my attention or a decision now?</h2>
-      {attention.state === "active" ? (
-        <div className="attention-list" data-attention-state="active">
-          {attention.items.map((item) => (
-            <AttentionItem key={item.id} item={item} />
-          ))}
-        </div>
-      ) : attention.state === "empty-collection" || collectionState === "empty" ? (
+      {collectionState === "empty" || state === "empty-collection" ? (
         <div className="profile-state" data-attention-state="empty-collection">
           <p className="profile-status-label">Empty collection</p>
           <p>There are no active collection decisions because there are no owned games.</p>
         </div>
-      ) : (
-        <div className="profile-state profile-success" data-attention-state="nothing-to-decide">
-          <p className="profile-status-label">Available profile, no active intentions</p>
+      ) : state === "disabled" || attention.cardLimit === 0 ? (
+        <div className="profile-state" data-attention-state="disabled">
+          <p className="profile-status-label">Attention disabled</p>
+          <p>Attention cards are disabled for this profile.</p>
+        </div>
+      ) : empty ? (
+        <div className="profile-state profile-success" data-attention-state="empty">
+          <p className="profile-status-label">Available profile, no attention cards</p>
           <p>
             <strong>Nothing needs attention right now.</strong>
           </p>
+        </div>
+      ) : (
+        <div className="attention-list" data-attention-state="ranked">
+          {attention.cards.map((card) => (
+            <AttentionCard key={card.id} card={card} />
+          ))}
         </div>
       )}
     </section>

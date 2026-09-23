@@ -94,7 +94,7 @@ describe("owner-note persisted flow", () => {
       const first = createTestApp({ bggClient, configPath, dataDir, fileOps, now });
       const migrated = await first.storageService.loadCollection();
       const migratedBgg = migrated.games.find(({ id }) => id === bggGameId);
-      expect(migrated.schemaVersion).toBe(7);
+      expect(migrated.schemaVersion).toBe(8);
       expect(migratedBgg?.ownerNote).toEqual({ state: "missing", version: 0, updatedAt: null });
       expect(JSON.stringify(migratedBgg?.ownerNote)).not.toContain("description");
       if (migratedBgg?.bggData === null || migratedBgg === undefined)
@@ -234,8 +234,8 @@ describe("owner-note persisted flow", () => {
         ...profileBeforeNote,
         computedAt: null,
       });
-      expect(profileCacheAfterNote.sourceIdentity.collectionRevision).toBeGreaterThan(
-        profileCacheBeforeNote.sourceIdentity.collectionRevision,
+      expect(profileCacheAfterNote.publicationIdentity.source.collectionRevision).toBeGreaterThan(
+        profileCacheBeforeNote.publicationIdentity.source.collectionRevision,
       );
 
       await restarted.gameService.removeGame(manual.id);

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-09-13T00:00:00.000Z",
+  "generatedAt": "2026-09-22T00:00:00.000Z",
   "title": "Design System: Shelf Judge Web",
   "extensions": {
     "colorMeta": {
@@ -308,6 +308,11 @@
         "name": "mobile",
         "value": "600px",
         "purpose": "Compact field sizing and mobile navigation behavior."
+      },
+      {
+        "name": "profile-grid-reflow",
+        "value": "760px",
+        "purpose": "Reflow the ranked Profile attention grid from three columns to one without changing card order."
       }
     ]
   },
@@ -318,7 +323,7 @@
       "refersTo": "button-primary",
       "description": "Primary commit action for a form or task.",
       "html": "<button class=\"ds-btn-primary\">Save changes</button>",
-      "css": ".ds-btn-primary { padding: 7px 14px; border: 0; border-radius: 5px; background: var(--action); color: var(--on-action); font: 500 13px Inter, sans-serif; cursor: pointer; transition: background 0.1s; } .ds-btn-primary:hover { background: var(--action-hover); } .ds-btn-primary:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; } .ds-btn-primary:active { opacity: 0.9; }"
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border: 0; border-radius: 5px; background: var(--action); color: var(--on-action); font: 500 13px Inter, sans-serif; text-decoration: none; cursor: pointer; transition: background 0.1s; } .ds-btn-primary:hover:not(:disabled) { background: var(--action-hover); } .ds-btn-primary:focus-visible { outline: 3px solid var(--action); outline-offset: 3px; } .ds-btn-primary:disabled { opacity: 0.6; cursor: default; }"
     },
     {
       "name": "Secondary Button",
@@ -326,7 +331,7 @@
       "refersTo": "button-secondary",
       "description": "A bordered secondary action beside a primary commit action.",
       "html": "<button class=\"ds-btn-secondary\">Cancel</button>",
-      "css": ".ds-btn-secondary { padding: 7px 14px; border: 1px solid var(--border-strong); border-radius: 5px; background: transparent; color: var(--text-secondary); font: 500 13px Inter, sans-serif; cursor: pointer; transition: background 0.1s; } .ds-btn-secondary:hover { background: var(--bg-base); } .ds-btn-secondary:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }"
+      "css": ".ds-btn-secondary { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border: 1px solid var(--border-strong); border-radius: 5px; background: transparent; color: var(--text-secondary); font: 500 13px Inter, sans-serif; text-decoration: none; cursor: pointer; transition: background 0.1s; } .ds-btn-secondary:hover:not(:disabled) { background: var(--bg-base); } .ds-btn-secondary:focus-visible { outline: 3px solid var(--action); outline-offset: 3px; } .ds-btn-secondary:disabled { opacity: 0.6; cursor: default; }"
     },
     {
       "name": "Text Field",
@@ -334,7 +339,7 @@
       "refersTo": "input",
       "description": "A compact field for collection configuration and numeric entry.",
       "html": "<label class=\"ds-field\"><span>Axis name</span><input class=\"ds-input\" value=\"Replayability\" /></label>",
-      "css": ".ds-field { display: grid; gap: 6px; color: var(--text-secondary); font: 600 11px Inter, sans-serif; letter-spacing: 0.04em; text-transform: uppercase; } .ds-input { width: 100%; padding: 8px 12px; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--bg-elevated); color: var(--text-primary); font: 13px Inter, sans-serif; letter-spacing: normal; text-transform: none; } .ds-input:focus { outline: 2px solid var(--action); outline-offset: 1px; }"
+      "css": ".ds-field { display: grid; gap: 6px; color: var(--text-secondary); font: 600 11px Inter, sans-serif; letter-spacing: 0.04em; text-transform: uppercase; } .ds-input { width: 100%; min-height: 44px; padding: 8px 12px; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--bg-elevated); color: var(--text-primary); font: 13px Inter, sans-serif; letter-spacing: normal; text-transform: none; } .ds-input:focus-visible { outline: 3px solid var(--action); outline-offset: 3px; }"
     },
     {
       "name": "Sidebar Navigation Item",
@@ -342,7 +347,7 @@
       "refersTo": "nav-active",
       "description": "The persistent dark-rail navigation and selected route treatment.",
       "html": "<nav class=\"ds-nav\"><span class=\"ds-nav-label\">Library</span><a class=\"ds-nav-item ds-nav-item-active\" href=\"#\"><svg viewBox=\"0 0 16 16\" aria-hidden=\"true\"><path d=\"M2 2h12v12H2zM5 5h6v1H5zm0 3h6v1H5z\"/></svg>Collection</a><a class=\"ds-nav-item\" href=\"#\">Wishlist</a></nav>",
-      "css": ".ds-nav { width: 200px; padding: 16px 0; background: var(--nav-bg); font-family: Inter, sans-serif; } .ds-nav-label { display: block; margin: 12px 0 6px; padding: 0 20px; color: color-mix(in srgb, var(--nav-text) 35%, transparent); font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; } .ds-nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 20px; border-left: 3px solid transparent; color: color-mix(in srgb, var(--nav-text) 65%, transparent); font-size: 13px; text-decoration: none; transition: all 0.1s; } .ds-nav-item svg { width: 16px; height: 16px; fill: currentColor; } .ds-nav-item:hover { background: color-mix(in srgb, var(--nav-text) 6%, transparent); color: var(--nav-text); } .ds-nav-item:focus-visible { outline: 2px solid var(--score-color); outline-offset: -2px; } .ds-nav-item-active { border-left-color: var(--nav-active); background: color-mix(in srgb, var(--score-color) 12%, transparent); color: var(--nav-text); font-weight: 500; }"
+      "css": ".ds-nav { width: 200px; padding: 16px 0; background: var(--nav-bg); font-family: Inter, sans-serif; } .ds-nav-label { display: block; margin: 12px 0 6px; padding: 0 20px; color: color-mix(in srgb, var(--nav-text) 35%, transparent); font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; } .ds-nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 20px; border-left: 3px solid transparent; color: color-mix(in srgb, var(--nav-text) 65%, transparent); font-size: 13px; text-decoration: none; transition: all 0.1s; } .ds-nav-item svg { width: 16px; height: 16px; fill: currentColor; } .ds-nav-item:hover { background: color-mix(in srgb, var(--nav-text) 6%, transparent); color: var(--nav-text); } .ds-nav-item:focus-visible { outline: 3px solid var(--score-color); outline-offset: -2px; } .ds-nav-item-active { border-left-color: var(--nav-active); background: color-mix(in srgb, var(--score-color) 12%, transparent); color: var(--nav-text); font-weight: 500; }"
     },
     {
       "name": "Axis Card",
@@ -350,7 +355,15 @@
       "refersTo": "card",
       "description": "A compact bordered container for a collection scoring axis.",
       "html": "<article class=\"ds-card\"><div><strong>Replayability</strong><p>How likely the game is to return to the table.</p></div><span class=\"ds-weight\">25%</span></article>",
-      "css": ".ds-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-surface); color: var(--text-primary); font: 13px Inter, sans-serif; transition: border-color 0.1s; } .ds-card:hover { border-color: var(--border-strong); } .ds-card:focus-within { outline: 2px solid var(--action); outline-offset: 1px; } .ds-card p { margin: 3px 0 0; color: var(--text-muted); font-size: 11px; } .ds-weight { color: var(--text-primary); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }"
+      "css": ".ds-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-surface); color: var(--text-primary); font: 13px Inter, sans-serif; transition: border-color 0.1s; } .ds-card:hover { border-color: var(--border-strong); } .ds-card:focus-within { outline: 3px solid var(--action); outline-offset: 3px; } .ds-card p { margin: 3px 0 0; color: var(--text-muted); font-size: 11px; } .ds-weight { color: var(--text-primary); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }"
+    },
+    {
+      "name": "Ranked Attention Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "A daemon-ranked Profile decision card with supplied reason, next steps, and progressively disclosed evidence.",
+      "html": "<article class=\"ds-attention-card\"><h3>Would you like to revisit Heat?</h3><p>You marked Heat as Want to play.</p><p class=\"ds-game-name\">Heat</p><div class=\"ds-actions\"><a href=\"#\">Open Heat</a><button type=\"button\">Not now</button></div><details><summary>Evidence, score, and supplied actions</summary><p>Signal strength 1 × category weight 0.7 = attention score 0.7.</p></details></article>",
+      "css": ".ds-attention-card { min-width: 0; padding: clamp(16px, 3vw, 24px); border: 1px solid var(--border); border-top: 3px solid var(--score-color); border-radius: 8px; background: var(--bg-surface); color: var(--text-primary); box-shadow: 0 8px 24px rgb(44 34 24 / 5%); overflow-wrap: anywhere; font: 400 15px/1.5 Inter, sans-serif; } .ds-attention-card h3 { margin: 0 0 12px; font-size: clamp(1.15rem, 1.5vw, 1.45rem); line-height: 1.25; } .ds-attention-card p { color: var(--text-secondary); } .ds-game-name { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; } .ds-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; } .ds-attention-card a, .ds-attention-card button { min-width: 44px; min-height: 44px; padding: 7px 14px; border: 1px solid var(--border-strong); border-radius: 5px; background: transparent; color: var(--action); font: 500 13px Inter, sans-serif; } .ds-attention-card a:focus-visible, .ds-attention-card button:focus-visible { outline: 3px solid var(--action); outline-offset: 3px; } .ds-attention-card summary { cursor: pointer; }"
     },
     {
       "name": "Score Indicator",

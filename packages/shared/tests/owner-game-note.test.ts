@@ -3,6 +3,7 @@ import {
   AddGameResultSchema,
   CollectionGameV5Schema,
   CollectionProfileCollectionSourceV6Schema,
+  CollectionProfileCollectionSourceSchema,
   CollectionProfileSourceRecordsSchema,
   CollectionSchema,
   CollectionSchemaV5,
@@ -325,7 +326,8 @@ describe("owner note receipt and collection contracts", () => {
     expect(
       CollectionSchema.safeParse({
         ...baseCollection,
-        schemaVersion: 7,
+        schemaVersion: 8,
+        attentionDispositions: [],
         games: [{ ...canonicalPublicGame, ownerNote: missingOwnerNote }],
       }).success,
     ).toBe(true);
@@ -363,9 +365,10 @@ describe("owner note receipt and collection contracts", () => {
     ).toBe(false);
     expect(CollectionProfileCollectionSourceV6Schema.safeParse(v6).success).toBe(false);
     expect(
-      CollectionProfileCollectionSourceV6Schema.safeParse({
+      CollectionProfileCollectionSourceSchema.safeParse({
         ...v6,
-        schemaVersion: 7,
+        schemaVersion: 8,
+        attentionDispositions: [],
         games: [canonicalPublicGame],
       }).success,
     ).toBe(true);

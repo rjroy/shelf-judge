@@ -12,6 +12,10 @@ import {
   collectionMutationServiceFor,
   type CollectionMutationService,
 } from "./collection-mutation-service.js";
+import {
+  CollectionMutationOperation,
+  type CollectionMutationOperation as MutationOperation,
+} from "./attention-mutation-impact.js";
 
 export interface ShelfInput {
   id?: string;
@@ -108,7 +112,7 @@ export function createShelfService(deps: ShelfServiceDeps): ShelfService {
     deps.collectionMutationService ?? collectionMutationServiceFor(storageService);
 
   async function mutateConfig<Value>(
-    operation: string,
+    operation: MutationOperation,
     update: (previous: ShelfConfiguration) => { next: ShelfConfiguration; value: Value },
   ): Promise<{ value: Value; clearedAssignmentCount: number }> {
     const outcome = await collectionMutationService.mutate(
@@ -174,7 +178,7 @@ export function createShelfService(deps: ShelfServiceDeps): ShelfService {
       }
 
       const { value: config, clearedAssignmentCount } = await mutateConfig(
-        "shelf.config.set",
+        CollectionMutationOperation.shelfConfigSet,
         (existing) => {
           const next = {
             units,
@@ -196,22 +200,25 @@ export function createShelfService(deps: ShelfServiceDeps): ShelfService {
         if (shelfErr) throw new ShelfValidationError(shelfErr);
       }
 
-      const { value: unit } = await mutateConfig("shelf.unit.add", (config) => {
-        const unit: ShelfUnit = {
-          id: uuidv4(),
-          name: input.name,
-          shelves: input.shelves.map((s) => buildShelf({ ...s, id: undefined })),
-        };
-        config.units.push(unit);
-        config.updatedAt = new Date().toISOString();
-        return { next: config, value: unit };
-      });
+      const { value: unit } = await mutateConfig(
+        CollectionMutationOperation.shelfUnitAdd,
+        (config) => {
+          const unit: ShelfUnit = {
+            id: uuidv4(),
+            name: input.name,
+            shelves: input.shelves.map((s) => buildShelf({ ...s, id: undefined })),
+          };
+          config.units.push(unit);
+          config.updatedAt = new Date().toISOString();
+          return { next: config, value: unit };
+        },
+      );
       return unit;
     },
 
     async updateUnit(id: string, input: UpdateUnitInput): Promise<ShelfUnitMutationResult> {
       const { value: unit, clearedAssignmentCount } = await mutateConfig(
-        "shelf.unit.update",
+        CollectionMutationOperation.shelfUnitUpdate,
         (config) => {
           const unitIndex = config.units.findIndex((unit) => unit.id === id);
           if (unitIndex === -1) throw new ShelfNotFoundError(id);
@@ -247,13 +254,16 @@ export function createShelfService(deps: ShelfServiceDeps): ShelfService {
     },
 
     async removeUnit(id: string): Promise<ShelfUnitRemovalResult> {
-      const { clearedAssignmentCount } = await mutateConfig("shelf.unit.remove", (config) => {
-        const unitIndex = config.units.findIndex((unit) => unit.id === id);
-        if (unitIndex === -1) throw new ShelfNotFoundError(id);
-        config.units.splice(unitIndex, 1);
-        config.updatedAt = new Date().toISOString();
-        return { next: config, value: undefined };
-      });
+      const { clearedAssignmentCount } = await mutateConfig(
+        CollectionMutationOperation.shelfUnitRemove,
+        (config) => {
+          const unitIndex = config.units.findIndex((unit) => unit.id === id);
+          if (unitIndex === -1) throw new ShelfNotFoundError(id);
+          config.units.splice(unitIndex, 1);
+          config.updatedAt = new Date().toISOString();
+          return { next: config, value: undefined };
+        },
+      );
       return { removed: true, clearedAssignmentCount };
     },
   };

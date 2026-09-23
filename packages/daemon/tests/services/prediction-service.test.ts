@@ -15,6 +15,7 @@ import {
 } from "@shelf-judge/shared";
 import { createPredictionService } from "../../src/services/prediction-service.js";
 import { createFitnessService } from "../../src/services/fitness-service.js";
+import type { FitnessService } from "../../src/services/fitness-service.js";
 import type { BggGameData } from "@shelf-judge/shared";
 import type { StorageService } from "../../src/services/storage-service.js";
 import type { TournamentService } from "../../src/services/tournament-service.js";
@@ -141,13 +142,14 @@ function makeGame(
 
 function makeCollection(games: DurableGame[], axes: Axis[]): Collection {
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
     revision: 0,
     id: "test-col",
     name: "Test Collection",
     axes,
     games,
     intentions: [],
+    attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
     createdAt: now,
@@ -240,6 +242,50 @@ describe("prediction-service", () => {
     games.push(makeGame("target", "Target Game", {}));
     return makeCollection(games, axes);
   }
+
+  test("targeted prediction preserves full reference context while scoring only target output", async () => {
+    const collection = buildRatedCollection(6);
+    const baseFitness = createFitnessService();
+    const scored: string[] = [];
+    const fitness: FitnessService = {
+      calculateScore(game, axes, tournamentData) {
+        scored.push(game.id);
+        return baseFitness.calculateScore(game, axes, tournamentData);
+      },
+    };
+    const service = createPredictionService({
+      storageService: createStubStorage(collection),
+      fitnessService: fitness,
+      tournamentService: createStubTournamentService(),
+    });
+    const full = await service.listGamesWithPredictions();
+    scored.length = 0;
+    const targeted = await service.listGamesWithPredictions(["target", "target", "missing"]);
+    const fullTarget = full.find((entry) => entry.game.id === "target");
+    if (fullTarget === undefined) throw new Error("Missing full prediction target");
+
+    expect(targeted.map((entry) => entry.game.id)).toEqual(["target"]);
+    expect(targeted[0]).toEqual(fullTarget);
+    expect(scored).toEqual(["target", "target"]);
+    expect(targeted[0]?.score?.predictionMeta?.referenceGameCount).toBe(
+      fullTarget.score?.predictionMeta?.referenceGameCount,
+    );
+
+    const actualCollection = buildRatedCollection(6);
+    const actualTarget = actualCollection.games.find((game) => game.id === "target");
+    if (actualTarget === undefined) throw new Error("Missing actual target fixture");
+    actualTarget.ratings = { theme: 8 };
+    const actualService = createPredictionService({
+      storageService: createStubStorage(actualCollection),
+      fitnessService: fitness,
+      tournamentService: createStubTournamentService(),
+    });
+    const fullActual = await actualService.listGamesWithPredictions();
+    scored.length = 0;
+    const targetedActual = await actualService.listGamesWithPredictions(["target"]);
+    expect(targetedActual).toEqual(fullActual.filter((entry) => entry.game.id === "target"));
+    expect(scored).toEqual(["target"]);
+  });
 
   describe("predictGame", () => {
     test("returns predicted fitness for unrated game with enough reference data", async () => {

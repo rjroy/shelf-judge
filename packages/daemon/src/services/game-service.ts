@@ -25,6 +25,8 @@ import {
   type PlayerRangeEvidence,
   type PlayEvidenceMutationResult,
   type OwnershipMutationResult,
+  type AttentionCommandReceipt,
+  type OwnerGameNoteCommandReceipt,
   ManualGameValuesMutationRequestSchema,
 } from "@shelf-judge/shared";
 import type { CollectionPersistence, StorageService } from "./storage-service.js";
@@ -50,6 +52,18 @@ import {
 
 const STALE_THRESHOLD_DAYS = 7;
 const STALE_THRESHOLD_MS = STALE_THRESHOLD_DAYS * 24 * 60 * 60 * 1000;
+
+type GameScopedDeletionReceipt = AttentionCommandReceipt | OwnerGameNoteCommandReceipt;
+
+function isGameScopedDeletionReceipt(
+  receipt: Collection["commandReceipts"][number],
+  gameId: string,
+): receipt is GameScopedDeletionReceipt {
+  if (!("receiptType" in receipt) || receipt.gameId !== gameId) return false;
+  return (
+    receipt.receiptType === "owner-game-note" || receipt.receiptType === "attention-disposition"
+  );
+}
 
 export interface RefreshSummary {
   refreshed: number;
@@ -791,12 +805,10 @@ export function createGameService(deps: GameServiceDeps): GameService {
             if (intentionIds.length > 0) throw new GameHistoryConflictError(id, intentionIds);
             const priorSourceIdentity = collectionDurableIdentity(collection);
             collection.commandReceipts = collection.commandReceipts.filter(
-              (receipt) =>
-                !(
-                  "receiptType" in receipt &&
-                  receipt.receiptType === "owner-game-note" &&
-                  receipt.gameId === id
-                ),
+              (receipt) => !isGameScopedDeletionReceipt(receipt, id),
+            );
+            collection.attentionDispositions = collection.attentionDispositions.filter(
+              (disposition) => disposition.gameId !== id,
             );
             collection.games.splice(index, 1);
             collection.updatedAt = now();

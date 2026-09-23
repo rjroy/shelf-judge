@@ -10,6 +10,7 @@ import { createMockFileOps } from "../helpers/mock-file-ops.js";
 const DATA_DIR = "/test/data";
 const PROFILE_PATH = `${DATA_DIR}/profile.json`;
 const WISHLIST_PATH = `${DATA_DIR}/wishlist.json`;
+const ATTENTION_CANDIDATES_PATH = `${DATA_DIR}/attention-candidates.json`;
 
 function logger(): Logger & { messages: string[] } {
   const messages: string[] = [];
@@ -44,20 +45,23 @@ function validEntry(overrides: Record<string, unknown> = {}): Record<string, unk
 }
 
 describe("collection artifact manifest", () => {
-  test("is ordered and owns profile deletion plus wishlist prediction clearing", async () => {
+  test("is ordered and owns profile/candidate deletion plus wishlist prediction clearing", async () => {
     expect(COLLECTION_ARTIFACTS.map((artifact) => artifact.identity)).toEqual([
       "collection-profile",
       "wishlist-predictions",
+      "attention-candidates",
     ]);
     const fileOps = createMockFileOps({
       [PROFILE_PATH]: "malformed disposable profile",
       [WISHLIST_PATH]: JSON.stringify([validEntry()]),
+      [ATTENTION_CANDIDATES_PATH]: "obsolete disposable candidates",
     });
     const context = createCollectionArtifactContext(DATA_DIR, fileOps, logger());
 
     for (const artifact of COLLECTION_ARTIFACTS) await artifact.invalidate(context);
 
     expect(fileOps.files.has(PROFILE_PATH)).toBe(false);
+    expect(fileOps.files.has(ATTENTION_CANDIDATES_PATH)).toBe(false);
     expect(JSON.parse(fileOps.files.get(WISHLIST_PATH) ?? "null")).toEqual([
       {
         id: "wish-1",

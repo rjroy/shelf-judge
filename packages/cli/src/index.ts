@@ -45,7 +45,7 @@ import {
   tournamentStop,
   tournamentStats,
 } from "./commands/tournament.js";
-import { profileCommand } from "./commands/profile.js";
+import { profileAttentionCommand, profileCommand } from "./commands/profile.js";
 import { profileReflectionsCommand } from "./commands/profile-reflections.js";
 import { analystAsk, analystChat } from "./commands/analyst.js";
 import { predictGame, predictBggGame, predictReadiness } from "./commands/predict.js";
@@ -138,6 +138,8 @@ const COMMANDS: Record<string, number> = {
   "profile reflections enable": 3,
   "profile reflections disable": 3,
   "profile reflections delete": 3,
+  "profile attention not-now": 3,
+  "profile attention intentional": 3,
   "analyst ask": 2,
   "analyst chat": 2,
   "import bgg-collection": 2,
@@ -161,6 +163,8 @@ const EXACT_POSITIONAL_COMMANDS = new Set([
   "game note get",
   "game note set",
   "game note clear",
+  "profile attention not-now",
+  "profile attention intentional",
 ]);
 
 interface ParsedArgs {
@@ -626,6 +630,12 @@ async function main(): Promise<void> {
       break;
     case "profile":
       output = await profileCommand(client, args, opts);
+      break;
+    case "profile attention not-now":
+      output = await profileAttentionCommand(client, "not-now", args, opts);
+      break;
+    case "profile attention intentional":
+      output = await profileAttentionCommand(client, "intentional", args, opts);
       break;
     case "profile reflections":
     case "profile reflections refresh":

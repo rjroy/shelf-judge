@@ -1,5 +1,6 @@
 import * as path from "node:path";
 import { v4 as uuidv4 } from "uuid";
+import { z } from "zod";
 import type {
   Collection,
   AppConfig,
@@ -12,6 +13,7 @@ import type {
   ShelfConfiguration,
   InvalidEvidence,
   JsonValue,
+  AttentionCandidateArtifact,
 } from "@shelf-judge/shared";
 import {
   AcquisitionSchema,
@@ -27,6 +29,7 @@ import {
   EntertainmentBenchmarkSchema,
   TournamentDataSchema,
   ShelfConfigurationSchema,
+  AttentionCandidateArtifactSchema,
 } from "@shelf-judge/shared";
 import type { FileOps } from "./file-ops.js";
 import { atomicWrite, type TemporaryPathForAttempt } from "./file-ops.js";
@@ -62,6 +65,11 @@ export interface StorageService extends CollectionReader, CollectionPersistence 
   loadProfile(): Promise<ProfileData | null>;
   discardProfile?(): Promise<void>;
   saveProfile(data: ProfileData): Promise<void>;
+  loadAttentionCandidates?(): Promise<AttentionCandidateArtifact | null>;
+  saveAttentionCandidates?(data: AttentionCandidateArtifact): Promise<void>;
+  discardAttentionCandidates?(): Promise<void>;
+  /** Process-local invalidation token for candidate source inputs. */
+  attentionCandidateSourceGeneration?(): number;
   loadPredictionSettings(): Promise<PredictionSettings>;
   savePredictionSettings(settings: PredictionSettings): Promise<void>;
   loadNicheSettings(): Promise<NicheSettings>;
@@ -109,6 +117,7 @@ function createDefaultCollection(dependencies?: CollectionMigrationDependencies)
     ],
     games: [],
     intentions: [],
+    attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: null,
     createdAt: now,
@@ -162,6 +171,9 @@ export function decodeStoredCollection(raw: unknown, logger: Logger): StoredColl
     (raw.schemaVersion !== 3 &&
       raw.schemaVersion !== 4 &&
       raw.schemaVersion !== 5 &&
+      // V7 was current when this recovery boundary was introduced. Keep that
+      // established eligibility while it is migrated sequentially to V8.
+      raw.schemaVersion !== 7 &&
       raw.schemaVersion !== CURRENT_COLLECTION_SCHEMA_VERSION)
   ) {
     return { data: raw, normalized: false };
@@ -227,6 +239,7 @@ function defaultConfig(): AppConfig {
     bggAuthToken: null,
     groundedAnalysis: null,
     profileEntityPolicy: structuredClone(DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY),
+    profileAttentionCardLimit: 6,
     username: null,
   };
 }
@@ -234,6 +247,10 @@ function defaultConfig(): AppConfig {
 function parseConfig(value: unknown): AppConfig {
   if (typeof value !== "object" || value === null) throw new Error("Config must be an object");
   const config = value as Record<string, unknown>;
+  const profileAttentionCardLimit =
+    config.profileAttentionCardLimit === undefined
+      ? 6
+      : z.number().int().min(0).max(24).parse(config.profileAttentionCardLimit);
   return {
     bggAuthToken:
       typeof config.bggAuthToken === "string" || config.bggAuthToken === null
@@ -246,6 +263,7 @@ function parseConfig(value: unknown): AppConfig {
     profileEntityPolicy: CollectionProfileEntityPolicySchema.parse(
       config.profileEntityPolicy ?? DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY,
     ),
+    profileAttentionCardLimit,
     username:
       typeof config.username === "string" || config.username === null ? config.username : null,
   };
@@ -258,6 +276,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
   const collectionPath = path.join(dataDir, "collection.json");
   const tournamentPath = path.join(dataDir, "tournament.json");
   const profilePath = path.join(dataDir, "profile.json");
+  const attentionCandidatesPath = path.join(dataDir, "attention-candidates.json");
 
   // Per-file in-flight load promise. Serializes concurrent first-time loads so
   // two callers don't both race to write `<file>.tmp` and one ends up renaming
@@ -265,6 +284,11 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
   // and the lock has no observable effect.
   const inFlightLoads = new Map<string, Promise<unknown>>();
   let profileOperations: Promise<void> = Promise.resolve();
+  let attentionCandidateOperations: Promise<void> = Promise.resolve();
+  let attentionCandidateSourceGeneration = 0;
+  const advanceAttentionCandidateSourceGeneration = () => {
+    attentionCandidateSourceGeneration += 1;
+  };
   function withLoadLock<T>(filePath: string, fn: () => Promise<T>): Promise<T> {
     const existing = inFlightLoads.get(filePath);
     if (existing) return existing as Promise<T>;
@@ -278,6 +302,15 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
   function withProfileLock<T>(fn: () => Promise<T>): Promise<T> {
     const operation = profileOperations.then(fn, fn);
     profileOperations = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return operation;
+  }
+
+  function withAttentionCandidateLock<T>(fn: () => Promise<T>): Promise<T> {
+    const operation = attentionCandidateOperations.then(fn, fn);
+    attentionCandidateOperations = operation.then(
       () => undefined,
       () => undefined,
     );
@@ -350,6 +383,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
         if (!exists) {
           const collection = createDefaultCollection(deps.collectionMigrationDependencies);
           await persistCollection(collection);
+          advanceAttentionCandidateSourceGeneration();
           return collection;
         }
 
@@ -433,12 +467,14 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
         }
 
         await persistCollection(validated);
+        advanceAttentionCandidateSourceGeneration();
         return validated;
       });
     },
 
     async saveCollection(collection: Collection): Promise<void> {
       await persistCollection(collection);
+      advanceAttentionCandidateSourceGeneration();
     },
 
     loadConfig: loadAppConfig,
@@ -457,6 +493,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
           const tournament = createDefaultTournament();
           await fileOps.mkdir(dataDir);
           await writeAtomically(tournamentPath, JSON.stringify(tournament, null, 2));
+          advanceAttentionCandidateSourceGeneration();
           return tournament;
         }
 
@@ -467,6 +504,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
 
         if (migrated) {
           await writeAtomically(tournamentPath, JSON.stringify(validated, null, 2));
+          advanceAttentionCandidateSourceGeneration();
         }
 
         return validated;
@@ -477,6 +515,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
       const validated = TournamentDataSchema.parse(data);
       await fileOps.mkdir(dataDir);
       await writeAtomically(tournamentPath, JSON.stringify(validated, null, 2));
+      advanceAttentionCandidateSourceGeneration();
     },
 
     loadProfile(): Promise<ProfileData | null> {
@@ -514,6 +553,43 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
       });
     },
 
+    loadAttentionCandidates(): Promise<AttentionCandidateArtifact | null> {
+      return withAttentionCandidateLock(async () => {
+        if (!(await fileOps.exists(attentionCandidatesPath))) return null;
+        try {
+          return AttentionCandidateArtifactSchema.parse(
+            JSON.parse(await fileOps.readFile(attentionCandidatesPath)),
+          );
+        } catch (error) {
+          logger.warn(
+            `attention candidates invalid; discarding path=${attentionCandidatesPath}`,
+            error,
+          );
+          await fileOps.unlink(attentionCandidatesPath);
+          return null;
+        }
+      });
+    },
+
+    saveAttentionCandidates(data: AttentionCandidateArtifact): Promise<void> {
+      return withAttentionCandidateLock(async () => {
+        const validated = AttentionCandidateArtifactSchema.parse(data);
+        await fileOps.mkdir(dataDir);
+        await writeAtomically(attentionCandidatesPath, JSON.stringify(validated, null, 2));
+      });
+    },
+
+    discardAttentionCandidates(): Promise<void> {
+      return withAttentionCandidateLock(async () => {
+        if (await fileOps.exists(attentionCandidatesPath))
+          await fileOps.unlink(attentionCandidatesPath);
+      });
+    },
+
+    attentionCandidateSourceGeneration(): number {
+      return attentionCandidateSourceGeneration;
+    },
+
     saveProfile(data: ProfileData): Promise<void> {
       return withProfileLock(async () => {
         const config = await loadAppConfig();
@@ -536,6 +612,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
       const { settings, migrated } = normalizePredictionSettings(JSON.parse(raw));
       if (migrated) {
         await writeAtomically(predictionSettingsPath, JSON.stringify(settings, null, 2));
+        advanceAttentionCandidateSourceGeneration();
       }
       return settings;
     },
@@ -547,6 +624,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
         await fileOps.mkdir(dataDir);
         await writeAtomically(predictionSettingsPath, JSON.stringify(validated, null, 2));
         await invalidateProfile("prediction-settings");
+        advanceAttentionCandidateSourceGeneration();
       });
     },
 
@@ -581,6 +659,7 @@ export function createStorageService(deps: StorageServiceDeps): StorageService {
         await fileOps.mkdir(dataDir);
         await writeAtomically(redundancySettingsPath, JSON.stringify(validated, null, 2));
         await invalidateProfile("redundancy-settings");
+        advanceAttentionCandidateSourceGeneration();
       });
     },
 

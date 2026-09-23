@@ -2,11 +2,13 @@ import { Hono } from "hono";
 import { toErrorMessage } from "@shelf-judge/shared";
 import type { RedundancySettings } from "@shelf-judge/shared";
 import type { StorageService } from "../services/storage-service.js";
+import type { AttentionMutationImpact } from "../services/attention-candidate-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
 import { profileSourceCoordinatorFor } from "../services/profile-source-coordinator.js";
 
 export interface RedundancyRoutesDeps {
   storageService: StorageService;
+  afterSourceSave?: (impact: AttentionMutationImpact) => Promise<void>;
 }
 
 const VALID_STAGES = new Set(["annotation", "integrated"]);
@@ -140,6 +142,7 @@ export function createRedundancyRoutes(deps: RedundancyRoutesDeps): RouteModule 
         }
 
         await storageService.saveRedundancySettings(updated);
+        await deps.afterSourceSave?.({ kind: "global", reason: "redundancy" });
         return c.json(updated);
       });
     } catch (err) {

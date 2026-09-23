@@ -3,7 +3,6 @@
 import type {
   CollectionProfileCollectionSource,
   CollectionProfile,
-  CollectionProfileAttentionItem,
   CollectionProfileClassExclusion,
   CollectionProfileEntityClass,
   CollectionProfileEntityClassResult,
@@ -29,7 +28,7 @@ export interface CollectionProfileInput {
 
 const PROFILE_ENTITY_CLASSES: CollectionProfileEntityClass[] = ["mechanic", "designer", "artist"];
 
-function compareNormalizedCodePoints(left: string, right: string): number {
+export function compareNormalizedCodePoints(left: string, right: string): number {
   const leftPoints = Array.from(left.normalize("NFC"), (value) => value.codePointAt(0) ?? 0);
   const rightPoints = Array.from(right.normalize("NFC"), (value) => value.codePointAt(0) ?? 0);
   for (let index = 0; index < Math.min(leftPoints.length, rightPoints.length); index += 1) {
@@ -318,79 +317,6 @@ function computeEntityClass(
   };
 }
 
-function attentionPlayEvidence(game: Game): CollectionProfileAttentionItem["currentPlayEvidence"] {
-  const evidence = game.playCountEvidence;
-  const latestCheck = game.latestPlayCountCheck;
-  const stale =
-    evidence.status === "valid" &&
-    latestCheck !== null &&
-    latestCheck.status !== "valid" &&
-    (evidence.observedAt === null ||
-      Date.parse(latestCheck.observedAt) > Date.parse(evidence.observedAt));
-  if (evidence.status === "valid" && evidence.observedAt !== null && !stale) {
-    return {
-      status: "valid",
-      playCount: evidence.value,
-      source: evidence.source,
-      observedAt: evidence.observedAt,
-      stale: false,
-    };
-  }
-  if (evidence.status === "valid" && stale) {
-    return {
-      status: "stale",
-      playCount: evidence.value,
-      source: evidence.source,
-      observedAt: evidence.observedAt,
-      warning: "A newer BGG check did not provide a valid play count.",
-    };
-  }
-  if (evidence.status === "invalid" || latestCheck?.status === "invalid") {
-    return {
-      status: "invalid",
-      playCount: null,
-      source: evidence.source,
-      observedAt: evidence.observedAt,
-      warning: "Current play evidence is invalid.",
-    };
-  }
-  return {
-    status: "missing",
-    playCount: null,
-    source: evidence.source,
-    observedAt: evidence.observedAt,
-    warning: "Current play evidence is missing.",
-  };
-}
-
-function attentionItem(
-  game: Game,
-  intention: CollectionProfileCollectionSource["intentions"][number],
-): CollectionProfileAttentionItem {
-  const currentPlayEvidence = attentionPlayEvidence(game);
-  return {
-    id: `attention:${intention.intentionId}`,
-    decisionFamily: "play-intention",
-    intention: structuredClone(intention),
-    gameName: game.name,
-    question: `Do you still want to play ${game.name}?`,
-    whyNow: "You asked Shelf Judge to keep this intention visible.",
-    currentPlayEvidence,
-    responses: ["leave-visible", "complete", "retire", "correct-or-refresh-evidence"],
-    abstentionBasis: "Only an explicit active intention qualifies.",
-    resolution: null,
-    reopenCondition: "Create a new explicit intention after resolution.",
-    destination: { gameId: game.id, operationId: "shelf.game.intention.manage" },
-    evidenceDestination: {
-      gameId: game.id,
-      operationId:
-        currentPlayEvidence.status === "valid" || game.bggId === null
-          ? "shelf.game.plays.set"
-          : "shelf.game.bgg.refresh",
-    },
-  };
-}
-
 /** Compute the useful collection profile without reading or mutating external state. */
 export function computeCollectionProfile(input: CollectionProfileInput): CollectionProfile {
   const entityPolicy = input.entityPolicy ?? DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY;
@@ -399,18 +325,6 @@ export function computeCollectionProfile(input: CollectionProfileInput): Collect
   const ownedFitnessResults = new Map(
     [...input.fitnessResults].filter(([gameId]) => gamesById.has(gameId)),
   );
-  const items = input.collection.intentions
-    .flatMap((intention) => {
-      const game = gamesById.get(intention.gameId);
-      return intention.resolution === null && game !== undefined
-        ? [attentionItem(game, intention)]
-        : [];
-    })
-    .sort(
-      (left, right) =>
-        compareNormalizedCodePoints(left.gameName, right.gameName) ||
-        compareNormalizedCodePoints(left.intention.gameId, right.intention.gameId),
-    );
   const collectionState = ownedGames.length === 0 ? "empty" : "populated";
   return {
     status: "available",
@@ -429,13 +343,9 @@ export function computeCollectionProfile(input: CollectionProfileInput): Collect
       ),
     },
     attention: {
-      state:
-        items.length > 0
-          ? "active"
-          : collectionState === "empty"
-            ? "empty-collection"
-            : "nothing-to-decide",
-      items,
+      state: "disabled",
+      cardLimit: 0,
+      cards: [],
     },
     computedAt: input.computedAt,
   };

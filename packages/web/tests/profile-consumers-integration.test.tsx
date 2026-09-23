@@ -9,6 +9,7 @@ import { DEFAULT_COLLECTION_PROFILE_ENTITY_POLICY } from "@shelf-judge/shared";
 import { loadProfileOverview, ProfileOverviewContent, type ProfileOverviewState } from "@/app/page";
 import { IdentitySection } from "@/components/profile/identity-section";
 import { AttentionSection } from "@/components/profile/attention-section";
+import { AttentionLimitControl } from "@/components/attention-limit-control";
 import {
   canonicalUsefulProfileFixtures,
   emptyUsefulProfileFixture,
@@ -312,101 +313,146 @@ describe("identity state distinctions", () => {
 });
 
 describe("attention presentation", () => {
-  test("renders the full active contract in neutral language with evidence destinations", () => {
+  test("settings renders an explicit server-supplied integer and accessible save feedback region", () => {
+    const html = renderToStaticMarkup(<AttentionLimitControl initialLimit={0} />);
+    expect(html).toContain('type="number"');
+    expect(html).toContain('min="0"');
+    expect(html).toContain('max="24"');
+    expect(html).toContain('value="0"');
+    expect(html).toContain('aria-live="polite"');
+  });
+  test("renders daemon-ranked cards and their supplied explanation", () => {
     const html = renderToStaticMarkup(
       <AttentionSection attention={usefulProfileFixture.attention} collectionState="populated" />,
     );
 
     for (const text of [
       "Do you still want to play Heat?",
-      "You asked Shelf Judge to keep this intention visible.",
+      "You marked Heat as Want to play.",
       "First play",
-      "Created",
-      "Baseline",
-      "Current evidence",
+      "Score explanation",
+      "Signal strength",
+      "Attention score",
       "Stable intention ID",
       "intention-1",
-      "Decision family",
-      "play-intention",
-      "Leave it visible or prioritize the play outside Shelf Judge",
-      "Mark the intention complete from personal knowledge",
-      "Retire it because it is no longer an intention",
-      "Correct or refresh the play evidence before deciding",
-      "Only an explicit active intention qualifies.",
-      "Active, with no recorded resolution.",
-      "Create a new explicit intention after resolution.",
+      "shelf.game.intention.complete",
+      "Manage intention",
+      "command template supplied",
     ])
       expect(html).toContain(text);
-    expect(html).toContain('aria-labelledby="attention:intention-1-evidence"');
-    expect(html.match(/href="\/games\/game-4"/g)).toHaveLength(2);
-    expect(html).not.toMatch(/overdue|urgent|late|neglect/i);
+    expect(html).toContain('data-attention-state="ranked"');
+    expect(html).toContain('href="/games/game-4"');
+    expect(html).toContain('aria-label="Open Heat"');
+    expect(html).not.toContain("Open Heat</a>");
+    expect(html).not.toContain("A game to consider");
+    expect(html).not.toContain("View game");
+    expect(html).toContain('class="attention-game-art"');
+    expect(html).toContain('class="attention-game-fallback"');
   });
 
-  test("keeps an active intention visible with its exact stale warning", () => {
-    const item = structuredClone(usefulProfileFixture.attention.items[0]);
-    item.currentPlayEvidence = {
-      status: "stale",
-      playCount: 0,
-      source: "bgg-collection",
-      observedAt: "2026-08-27T10:00:00.000Z",
-      warning: "A newer BGG check did not provide a valid play count.",
+  test("makes the game artwork and title the card's primary link when a thumbnail is supplied", () => {
+    const card = {
+      ...structuredClone(usefulProfileFixture.attention.cards[0]),
+      gameName: "A Very Long Game Name That Must Wrap Without Clipping",
+      gameImageUrl: "https://example.test/cover.jpg",
     };
-    item.evidenceDestination = { gameId: "game-4", operationId: "shelf.game.bgg.refresh" };
     const html = renderToStaticMarkup(
       <AttentionSection
-        attention={{ state: "active", items: [item] }}
+        attention={{ ...usefulProfileFixture.attention, cards: [card] }}
         collectionState="populated"
       />,
     );
 
-    expect(html).toContain(item.question);
-    expect(html).toContain(`Evidence warning: ${item.currentPlayEvidence.warning}`);
-    expect(html).toContain("Refresh play evidence");
+    expect(html).toContain(
+      'aria-label="Open A Very Long Game Name That Must Wrap Without Clipping"',
+    );
+    expect(html).not.toContain("A game to consider");
+    expect(html).not.toContain("View game");
+    expect(html).toContain("background-image:url(&quot;https://example.test/cover.jpg&quot;)");
+    expect(html.indexOf('class="attention-game"')).toBeLessThan(html.indexOf(card.reason));
+    expect(html).toContain(card.question);
+  });
+
+  test("preserves received ranked order and does not fabricate intention content", () => {
+    const first = structuredClone(usefulProfileFixture.attention.cards[0]);
+    const second = structuredClone(first);
+    second.id = "attention:game-5:dormant";
+    second.gameId = "game-5";
+    second.gameName = "Second Game";
+    second.ruleId = "dormant";
+    second.question = "Would you like to revisit Second Game?";
+    second.reason = "Second Game has been dormant.";
+    second.intention = null;
+    second.evidence = { kind: "dormant", lastPlayedOn: "2025-01-01", playCount: 2 };
+    const html = renderToStaticMarkup(
+      <AttentionSection
+        attention={{ ...usefulProfileFixture.attention, cards: [second, first] }}
+        collectionState="populated"
+      />,
+    );
+    expect(html.indexOf("Second Game")).toBeLessThan(html.indexOf("Heat"));
+    expect(html.match(/Stable intention ID/g)).toHaveLength(1);
+    expect(html).toContain("2 plays; last played 2025-01-01");
+  });
+
+  test("renders all six daemon cards in order with supplied decision, evidence, score, and actions", () => {
+    const cards = Array.from({ length: 6 }, (_, index) => {
+      const card = structuredClone(usefulProfileFixture.attention.cards[0]);
+      card.id = `rank-${index}`;
+      card.gameName = `Rank ${index}`;
+      card.question = `Decision ${index}`;
+      card.reason = `Reason ${index}`;
+      card.scoreExplanation = `Score detail ${index}`;
+      card.intention = null;
+      card.actions = index === 0 ? card.actions : [];
+      return card;
+    });
+    const html = renderToStaticMarkup(
+      <AttentionSection
+        attention={{ ...usefulProfileFixture.attention, cards }}
+        collectionState="populated"
+      />,
+    );
+    expect(html.match(/<article id="rank-/g)).toHaveLength(6);
+    expect(cards.map(({ id }) => html.indexOf(`id="${id}"`))).toEqual(
+      [...cards.keys()].map((index) => html.indexOf(`id="rank-${index}"`)),
+    );
+    for (let index = 0; index < 6; index++) {
+      expect(html).toContain(`Reason ${index}`);
+      expect(html).toContain(`Decision ${index}`);
+      expect(html).toContain(`Score detail ${index}`);
+    }
+    expect(html).toContain('href="/games/game-4"');
+    expect(html.match(/Not now/g)).toHaveLength(1);
   });
 
   test.each([
-    ["missing" as const, "Current play evidence is missing." as const],
-    ["invalid" as const, "Current play evidence is invalid." as const],
-  ])("keeps an active intention visible with its exact %s warning", (status, warning) => {
-    const item = structuredClone(usefulProfileFixture.attention.items[0]);
-    item.currentPlayEvidence = { status, playCount: null, source: null, observedAt: null, warning };
+    ["empty" as const, 'data-attention-state="empty"'],
+    ["disabled" as const, 'data-attention-state="disabled"'],
+  ])("renders the supplied %s state distinctly", (state, marker) => {
     const html = renderToStaticMarkup(
       <AttentionSection
-        attention={{ state: "active", items: [item] }}
+        attention={
+          {
+            ...usefulProfileFixture.attention,
+            state,
+            cards: [],
+            cardLimit: state === "disabled" ? 0 : 6,
+          } as never
+        }
         collectionState="populated"
       />,
     );
-    expect(html).toContain(item.question);
-    expect(html).toContain(`Evidence warning: ${warning}`);
+    expect(html).toContain(marker);
   });
 
-  test("renders every supplied active intention in supplied order without ranking it", () => {
-    const second = structuredClone(usefulProfileFixture.attention.items[0]);
-    second.id = "attention:intention-2";
-    second.intention.intentionId = "intention-2";
-    second.intention.gameId = "game-5";
-    second.gameName = "Second Game";
-    second.question = "Do you still want to play Second Game?";
-    second.destination.gameId = "game-5";
-    second.evidenceDestination.gameId = "game-5";
-    const items = [usefulProfileFixture.attention.items[0], second];
-    const html = renderToStaticMarkup(
-      <AttentionSection attention={{ state: "active", items }} collectionState="populated" />,
-    );
-
-    expect(html.indexOf("Heat?")).toBeLessThan(html.indexOf("Second Game?"));
-    expect(html.match(/Active play intention/g)).toHaveLength(2);
-  });
-
-  test("renders nothing-to-decide only for an available populated profile with no items", () => {
+  test("renders empty collection separately", () => {
     const html = renderToStaticMarkup(
       <AttentionSection
-        attention={{ state: "nothing-to-decide", items: [] }}
+        attention={{ state: "empty-collection", cardLimit: 6, cards: [] }}
         collectionState="populated"
       />,
     );
-    expect(html).toContain('data-attention-state="nothing-to-decide"');
-    expect(html).toContain("Nothing needs attention right now.");
-    expect(html).toContain("Available profile, no active intentions");
+    expect(html).toContain('data-attention-state="empty-collection"');
   });
 });

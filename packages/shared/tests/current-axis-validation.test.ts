@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import {
   AXIS_VALIDATION_CODES,
   CodedAxisValidationError,
+  CollectionProfileCollectionSourceSchema,
   CreateAxisSchema,
   CollectionSchema,
   CURRENT_COLLECTION_SCHEMA_VERSION,
@@ -597,12 +599,304 @@ describe("current persisted collection validation", () => {
     axes: [communityRatingAxis()],
     games: [],
     intentions: [],
+    attentionDispositions: [],
     commandReceipts: [],
     bggPlaySessions: [],
     entertainmentBenchmark: null,
     createdAt: timestamp,
     updatedAt: timestamp,
   };
+
+  const ownedGame = () => ({
+    id: "game-1",
+    bggId: null,
+    name: "Attention Game",
+    yearPublished: null,
+    minPlayers: null,
+    maxPlayers: null,
+    bestPlayers: null,
+    playingTime: null,
+    imageUrl: null,
+    bggData: {
+      communityRating: 0,
+      bayesAverage: 0,
+      weight: null,
+      numWeightVotes: 0,
+      description: null,
+      mechanics: [],
+      categories: [],
+      families: [],
+      subdomains: [],
+      bestPlayerCount: null,
+      fetchedAt: timestamp,
+    },
+    numPlays: null,
+    acquisition: { state: "unknown" },
+    playCountEvidence: { status: "missing", source: "manual", observedAt: null },
+    durationEvidence: { status: "missing", source: "manual", observedAt: null },
+    playerRangeEvidence: { status: "missing", source: "manual", observedAt: null },
+    suggestedPlayerPoll: {
+      status: "valid",
+      state: "absent",
+      buckets: [],
+      source: "manual",
+      observedAt: null,
+    },
+    bestPlayersInvalidEvidence: null,
+    manualValues: { playingTime: null, playerCount: null },
+    entityMetadata: {
+      mechanic: {
+        state: "unrefreshable",
+        entities: [],
+        observedAt: null,
+        refreshFailure: null,
+        correctionDestination: null,
+        explanation: "This game has no BGG ID, so Shelf Judge cannot refresh entity metadata.",
+      },
+      designer: {
+        state: "unrefreshable",
+        entities: [],
+        observedAt: null,
+        refreshFailure: null,
+        correctionDestination: null,
+        explanation: "This game has no BGG ID, so Shelf Judge cannot refresh entity metadata.",
+      },
+      artist: {
+        state: "unrefreshable",
+        entities: [],
+        observedAt: null,
+        refreshFailure: null,
+        correctionDestination: null,
+        explanation: "This game has no BGG ID, so Shelf Judge cannot refresh entity metadata.",
+      },
+    },
+    latestPlayCountCheck: null,
+    ownership: "owned",
+    boxDimensions: null,
+    manualShelfId: null,
+    ownerNote: { state: "missing", version: 0, updatedAt: null },
+    ratings: {},
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  });
+
+  const snoozedDisposition = {
+    gameId: "game-1",
+    kind: "snoozed" as const,
+    ruleId: "attention-rule",
+    ruleVersion: 1,
+    fingerprint: "b".repeat(64),
+    responseAt: "2026-01-01T00:00:00Z",
+    expiresAt: "2026-01-31T00:00:00Z",
+    version: 1,
+  };
+
+  const attentionReceipt = (accepted = snoozedDisposition, expectedVersion = 0) => {
+    const requestPayload = {
+      commandId: "5f8f63d0-e6c4-4f5b-a6c8-2a933e2aab1d",
+      operation: "not-now" as const,
+      gameId: "game-1",
+      ruleId: "attention-rule",
+      ruleVersion: 1,
+      fingerprint: accepted.fingerprint,
+      expectedVersion,
+    };
+    return {
+      receiptType: "attention-disposition" as const,
+      commandId: requestPayload.commandId,
+      operation: requestPayload.operation,
+      gameId: requestPayload.gameId,
+      ruleId: requestPayload.ruleId,
+      ruleVersion: requestPayload.ruleVersion,
+      expectedVersion: requestPayload.expectedVersion,
+      requestFingerprint: createHash("sha256").update(JSON.stringify(requestPayload)).digest("hex"),
+      requestPayload,
+      accepted,
+    };
+  };
+
+  const intentionalDisposition = (fingerprint = "c".repeat(64), version = 1) => ({
+    gameId: "game-1",
+    kind: "intentional" as const,
+    ruleId: "attention-rule",
+    ruleVersion: 1,
+    fingerprint,
+    version,
+  });
+
+  const intentionalReceipt = (accepted = intentionalDisposition(), expectedVersion = 0) => {
+    const requestPayload = {
+      commandId: "f55c56d0-e6c4-4f5b-a6c8-2a933e2aab1d",
+      operation: "intentional" as const,
+      gameId: "game-1",
+      ruleId: "attention-rule",
+      ruleVersion: 1,
+      fingerprint: accepted.fingerprint,
+      expectedVersion,
+    };
+    return {
+      receiptType: "attention-disposition" as const,
+      commandId: requestPayload.commandId,
+      operation: requestPayload.operation,
+      gameId: requestPayload.gameId,
+      ruleId: requestPayload.ruleId,
+      ruleVersion: requestPayload.ruleVersion,
+      expectedVersion: requestPayload.expectedVersion,
+      requestFingerprint: createHash("sha256").update(JSON.stringify(requestPayload)).digest("hex"),
+      requestPayload,
+      accepted,
+    };
+  };
+
+  function asProfileSource<T extends { games: Array<{ ownerNote: unknown }> }>(source: T) {
+    return {
+      ...source,
+      games: source.games.map((game) => {
+        const profileGame = { ...game };
+        Reflect.deleteProperty(profileGame, "ownerNote");
+        return profileGame;
+      }),
+    };
+  }
+
+  test("requires attention dispositions to reference currently owned games", () => {
+    const collection = {
+      ...currentCollection,
+      games: [ownedGame()],
+      attentionDispositions: [snoozedDisposition],
+    };
+    expect(CollectionSchema.safeParse(collection).success).toBe(true);
+    expect(
+      CollectionSchema.safeParse({
+        ...collection,
+        commandReceipts: [{ ...attentionReceipt(), requestFingerprint: "0".repeat(64) }],
+      }).success,
+    ).toBe(false);
+    expect(
+      CollectionSchema.safeParse({
+        ...collection,
+        commandReceipts: [
+          {
+            ...attentionReceipt(),
+            accepted: { ...snoozedDisposition, fingerprint: "f".repeat(64) },
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      CollectionProfileCollectionSourceSchema.safeParse(
+        asProfileSource({
+          ...collection,
+          games: [{ ...ownedGame(), ownership: "previously-owned" }],
+        }),
+      ).success,
+    ).toBe(false);
+    expect(
+      CollectionSchema.safeParse({
+        ...collection,
+        games: [{ ...ownedGame(), ownership: "previously-owned" }],
+      }).success,
+    ).toBe(false);
+  });
+
+  test("validates attention disposition durability and receipt history", () => {
+    const collection = {
+      ...currentCollection,
+      games: [ownedGame()],
+      attentionDispositions: [snoozedDisposition],
+      commandReceipts: [attentionReceipt()],
+    };
+    expect(CollectionSchema.safeParse(collection).success).toBe(true);
+    expect(
+      CollectionSchema.safeParse({
+        ...collection,
+        attentionDispositions: [{ ...snoozedDisposition, version: 1 }],
+        commandReceipts: [attentionReceipt({ ...snoozedDisposition, version: 2 }, 1)],
+      }).success,
+    ).toBe(false);
+    expect(
+      CollectionSchema.safeParse({
+        ...collection,
+        attentionDispositions: [intentionalDisposition("e".repeat(64))],
+        commandReceipts: [intentionalReceipt(intentionalDisposition("f".repeat(64)))],
+      }).success,
+    ).toBe(false);
+    expect(
+      CollectionSchema.safeParse({
+        ...collection,
+        attentionDispositions: [{ ...snoozedDisposition, version: 2 }],
+      }).success,
+    ).toBe(true);
+    expect(
+      CollectionSchema.safeParse({
+        ...collection,
+        attentionDispositions: [],
+      }).success,
+    ).toBe(true);
+    expect(
+      CollectionSchema.safeParse({
+        ...collection,
+        attentionDispositions: [],
+        commandReceipts: [
+          intentionalReceipt(intentionalDisposition("e".repeat(64))),
+          {
+            ...intentionalReceipt(intentionalDisposition("f".repeat(64))),
+            commandId: "e55c56d0-e6c4-4f5b-a6c8-2a933e2aab1d",
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      CollectionSchema.safeParse({
+        ...collection,
+        commandReceipts: [{ ...attentionReceipt(), status: "rejected" }],
+      }).success,
+    ).toBe(false);
+
+    expect(
+      CollectionProfileCollectionSourceSchema.safeParse(asProfileSource(collection)).success,
+    ).toBe(true);
+    expect(
+      CollectionProfileCollectionSourceSchema.safeParse(
+        asProfileSource({
+          ...collection,
+          attentionDispositions: [{ ...snoozedDisposition, version: 1 }],
+          commandReceipts: [attentionReceipt({ ...snoozedDisposition, version: 2 }, 1)],
+        }),
+      ).success,
+    ).toBe(false);
+  });
+
+  test("keeps intentional dispositions minimal and snooze expiry exact", () => {
+    const intentional = {
+      gameId: "game-1",
+      kind: "intentional" as const,
+      ruleId: "attention-rule",
+      ruleVersion: 1,
+      fingerprint: "b".repeat(64),
+      version: 1,
+    };
+    const collection = {
+      ...currentCollection,
+      games: [ownedGame()],
+      attentionDispositions: [intentional],
+      commandReceipts: [intentionalReceipt(intentional)],
+    };
+    expect(CollectionSchema.safeParse(collection).success).toBe(true);
+    expect(
+      CollectionSchema.safeParse({
+        ...collection,
+        attentionDispositions: [{ ...intentional, responseAt: timestamp }],
+      }).success,
+    ).toBe(false);
+    expect(
+      CollectionSchema.safeParse({
+        ...currentCollection,
+        games: [ownedGame()],
+        attentionDispositions: [{ ...snoozedDisposition, expiresAt: "2026-01-30T00:00:00Z" }],
+      }).success,
+    ).toBe(false);
+  });
 
   test("accepts the strict current schema", () => {
     expect(CollectionSchema.parse(currentCollection)).toEqual(currentCollection);
@@ -809,7 +1103,7 @@ describe("current persisted collection validation", () => {
   });
 
   test("rejects future versions and extra persisted fields", () => {
-    expect(CollectionSchema.safeParse({ ...currentCollection, schemaVersion: 8 }).success).toBe(
+    expect(CollectionSchema.safeParse({ ...currentCollection, schemaVersion: 9 }).success).toBe(
       false,
     );
     expect(CollectionSchema.safeParse({ ...currentCollection, unexpected: true }).success).toBe(

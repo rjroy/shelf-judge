@@ -113,7 +113,7 @@ describe("storage collection migration ordering and recovery", () => {
       const migrated = await service.loadCollection();
       const persistedAfterMigration = await fs.readFile(collectionPath, "utf8");
       expect(JSON.parse(persistedAfterMigration)).toEqual(migrated);
-      expect(migrated.schemaVersion).toBe(7);
+      expect(migrated.schemaVersion).toBe(8);
       expect(
         await fs.stat(profilePath).then(
           () => true,
@@ -131,6 +131,114 @@ describe("storage collection migration ordering and recovery", () => {
 
       expect(await service.loadCollection()).toEqual(migrated);
       expect(await fs.readFile(collectionPath, "utf8")).toBe(persistedAfterMigration);
+    } finally {
+      await fs.rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  test("recovers malformed v7 acquisition and benchmark data before migrating to v8", async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "shelf-judge-v7-recovery-"));
+    const collectionPath = path.join(dataDir, "collection.json");
+    const fixtureText = await Bun.file(
+      new URL("../fixtures/collection-schema-v5-owner-notes.json", import.meta.url),
+    ).text();
+
+    try {
+      await fs.writeFile(collectionPath, fixtureText, "utf8");
+      const initial = createStorageService({
+        dataDir,
+        configPath: path.join(dataDir, "config.json"),
+        fileOps: createFileOps(),
+        logger: logger(),
+        collectionMigrationDependencies: migrationDependencies,
+      });
+      await initial.loadCollection();
+
+      const persistedV8 = JSON.parse(await fs.readFile(collectionPath, "utf8")) as unknown;
+      if (!persistedV8 || typeof persistedV8 !== "object" || Array.isArray(persistedV8)) {
+        throw new Error("Expected the migration fixture to persist an object");
+      }
+      const persistedV7: Record<string, unknown> = { ...persistedV8, schemaVersion: 7 };
+      delete persistedV7.attentionDispositions;
+      const persistedGames = persistedV7.games as unknown[];
+      if (!Array.isArray(persistedGames) || persistedGames[0] === undefined) {
+        throw new Error("Expected the migration fixture to contain a game");
+      }
+      const firstGame = persistedGames[0];
+      if (!firstGame || typeof firstGame !== "object" || Array.isArray(firstGame)) {
+        throw new Error("Expected the migration fixture game to be an object");
+      }
+      persistedV7.games = [
+        {
+          ...firstGame,
+          acquisition: { state: "purchase", amount: { hundredths: "12345" } },
+        },
+      ];
+      persistedV7.entertainmentBenchmark = {
+        state: "configured",
+        amount: { hundredths: "12345" },
+      };
+      await fs.writeFile(collectionPath, JSON.stringify(persistedV7), "utf8");
+
+      const service = createStorageService({
+        dataDir,
+        configPath: path.join(dataDir, "config.json"),
+        fileOps: createFileOps(),
+        logger: logger(),
+        collectionMigrationDependencies: migrationDependencies,
+      });
+      const migrated = await service.loadCollection();
+
+      expect(migrated.schemaVersion).toBe(8);
+      expect(migrated.attentionDispositions).toEqual([]);
+      expect(migrated.games[0]?.acquisition).toEqual({
+        state: "invalid",
+        evidence: {
+          presence: "present",
+          value: { state: "purchase", amount: { hundredths: "12345" } },
+        },
+      });
+      expect(migrated.entertainmentBenchmark).toEqual({
+        state: "invalid",
+        evidence: {
+          presence: "present",
+          value: { state: "configured", amount: { hundredths: "12345" } },
+        },
+      });
+      const persistedAfterMigration = await fs.readFile(collectionPath, "utf8");
+      expect(JSON.parse(persistedAfterMigration)).toEqual(migrated);
+      expect(await service.loadCollection()).toEqual(migrated);
+      expect(await fs.readFile(collectionPath, "utf8")).toBe(persistedAfterMigration);
+
+      const irrecoverable = {
+        ...persistedV7,
+        games: [{ ...firstGame, name: "", acquisition: null }],
+      };
+      await fs.writeFile(collectionPath, JSON.stringify(irrecoverable), "utf8");
+      const irrecoverableService = createStorageService({
+        dataDir,
+        configPath: path.join(dataDir, "config.json"),
+        fileOps: createFileOps(),
+        logger: logger(),
+      });
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(irrecoverableService.loadCollection()).rejects.toThrow();
+
+      await fs.writeFile(
+        collectionPath,
+        JSON.stringify({ ...irrecoverable, schemaVersion: 9 }),
+        "utf8",
+      );
+      const futureService = createStorageService({
+        dataDir,
+        configPath: path.join(dataDir, "config.json"),
+        fileOps: createFileOps(),
+        logger: logger(),
+      });
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(futureService.loadCollection()).rejects.toThrow(
+        "Unsupported collection schema version 9",
+      );
     } finally {
       await fs.rm(dataDir, { recursive: true, force: true });
     }
@@ -200,7 +308,7 @@ describe("storage collection migration ordering and recovery", () => {
           collectionMigrationDependencies: migrationDependencies,
         });
         const migrated = await restarted.loadCollection();
-        expect(migrated.schemaVersion).toBe(7);
+        expect(migrated.schemaVersion).toBe(8);
         expect(migrated.games.map(({ ownerNote }) => ownerNote)).toEqual([
           { state: "missing", version: 0, updatedAt: null },
         ]);
@@ -248,13 +356,13 @@ describe("storage collection migration ordering and recovery", () => {
       dataDir: DATA_DIR,
       configPath: "/test/config.json",
       fileOps: createMockFileOps({
-        [COLLECTION_PATH]: JSON.stringify({ ...historicalCollection, schemaVersion: 8 }),
+        [COLLECTION_PATH]: JSON.stringify({ ...historicalCollection, schemaVersion: 9 }),
       }),
       logger: migrationLog,
     });
     // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
     await expect(migrationService.loadCollection()).rejects.toThrow(
-      "Unsupported collection schema version 8",
+      "Unsupported collection schema version 9",
     );
     expect(
       migrationLog.entries.some((entry) => entry.includes("collection migration failed")),
@@ -268,13 +376,14 @@ describe("storage collection migration ordering and recovery", () => {
       logger: validationLog,
     });
     const invalidCurrent: Collection = {
-      schemaVersion: 7,
+      schemaVersion: 8,
       revision: 0,
       id: "collection-1",
       name: "",
       axes: [],
       games: [],
       intentions: [],
+      attentionDispositions: [],
       commandReceipts: [],
       entertainmentBenchmark: null,
       createdAt: NOW,
@@ -309,7 +418,12 @@ describe("storage collection migration ordering and recovery", () => {
 
     const collection = await service.loadCollection();
 
-    expect(order).toEqual(["collection-profile", "wishlist-predictions", "future-predictions"]);
+    expect(order).toEqual([
+      "collection-profile",
+      "wishlist-predictions",
+      "attention-candidates",
+      "future-predictions",
+    ]);
     expect(CollectionSchema.parse(collection)).toEqual(collection);
     const futureAttempt = fileOps.calls.findIndex(
       (call) => call.method === "writeFile" && call.args[0].endsWith("future.invalidated"),
@@ -382,7 +496,7 @@ describe("storage collection migration ordering and recovery", () => {
 
     const migrated = await service.loadCollection();
 
-    expect(migrated.schemaVersion).toBe(7);
+    expect(migrated.schemaVersion).toBe(8);
     expect(invalidated).toEqual(["v1-derived-artifact"]);
     expect(JSON.parse(fileOps.files.get(COLLECTION_PATH) ?? "null")).toEqual(migrated);
   });
@@ -486,7 +600,7 @@ describe("storage collection migration ordering and recovery", () => {
     expect(fileOps.files.get(COLLECTION_PATH)).toBe(original);
 
     const loaded = await service.loadCollection();
-    expect(loaded.schemaVersion).toBe(7);
+    expect(loaded.schemaVersion).toBe(8);
     expect(JSON.parse(fileOps.files.get(COLLECTION_PATH) ?? "null")).toEqual(loaded);
   });
 });

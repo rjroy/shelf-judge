@@ -51,10 +51,27 @@ async function currentData(storage: ReturnType<typeof createStorageService>): Pr
     redundancySettings,
   };
   const computedAt = "2026-08-28T12:00:00.000Z";
+  const source = profileSourceIdentity(sources);
   return {
     contractVersion: CURRENT_PROFILE_CONTRACT_VERSION,
     algorithmVersion: CURRENT_PROFILE_ALGORITHM_VERSION,
-    sourceIdentity: profileSourceIdentity(sources),
+    publicationIdentity: {
+      source,
+      profileAttentionCardLimit: 0,
+      attentionCandidates: {
+        schemaVersion: 1,
+        indexVersion: 1,
+        evaluatedAt: computedAt,
+        identity: {
+          ...source,
+          calculationVersion: 1,
+          ruleCatalogVersion: 1,
+          dependencyVersion: 1,
+          projectionVersion: 1,
+          catalogRuleVersions: [],
+        },
+      },
+    },
     profile: computeCollectionProfile({ collection, fitnessResults: new Map(), computedAt }),
     computedAt,
   };
@@ -66,7 +83,11 @@ async function currentEntityData(
   const data = await currentData(storage);
   const profile = structuredClone(usefulProfileFixture);
   profile.computedAt = data.computedAt;
-  return { ...data, profile };
+  return {
+    ...data,
+    publicationIdentity: { ...data.publicationIdentity, profileAttentionCardLimit: 6 },
+    profile,
+  };
 }
 
 describe("useful profile persistence", () => {
@@ -90,7 +111,13 @@ describe("useful profile persistence", () => {
       const current = await currentData(storage);
       const artifacts = [
         { ...current, contractVersion: 6, algorithmVersion: 8 },
-        { ...current, sourceIdentity: { ...current.sourceIdentity, tournamentHash: "bad" } },
+        {
+          ...current,
+          publicationIdentity: {
+            ...current.publicationIdentity,
+            source: { ...current.publicationIdentity.source, tournamentHash: "bad" },
+          },
+        },
         JSON.stringify(current).replace('"collectionRevision":0', '"collectionRevision":1e400'),
       ];
 
@@ -113,10 +140,10 @@ describe("useful profile persistence", () => {
       const serialized = JSON.stringify(current);
       const artifacts = [
         serialized
-          .replace('"contractVersion":9', '"contractVersion":8')
-          .replace('"algorithmVersion":11', '"algorithmVersion":10'),
-        serialized.replace('"contractVersion":9', '"contractVersion":8'),
-        serialized.replace('"algorithmVersion":11', '"algorithmVersion":10'),
+          .replace('"contractVersion":11', '"contractVersion":9')
+          .replace('"algorithmVersion":13', '"algorithmVersion":12'),
+        serialized.replace('"contractVersion":11', '"contractVersion":10'),
+        serialized.replace('"algorithmVersion":13', '"algorithmVersion":12'),
         serialized
           .replaceAll('"bestFit":', '"rating":')
           .replace(/"adjustedMeanCurrentFitness":[^,]+,/g, ""),

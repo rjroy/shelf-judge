@@ -13,6 +13,7 @@ import { createGroundedAnalysisRoutes } from "./routes/grounded-analysis.js";
 import { createShutdownRoutes } from "./routes/shutdown.js";
 import { createTournamentRoutes } from "./routes/tournament.js";
 import { createProfileRoutes } from "./routes/profile.js";
+import { createProfileAttentionRoutes } from "./routes/profile-attention.js";
 import { createPredictionRoutes } from "./routes/prediction.js";
 import { createNicheRoutes } from "./routes/niche.js";
 import { createRedundancyRoutes } from "./routes/redundancy.js";
@@ -56,6 +57,8 @@ import { createAnalystEvidenceService } from "./services/analyst-evidence-servic
 import { createAnalystAttestationService } from "./services/analyst-attestation-service.js";
 import { createAnalystTranscriptValidator } from "./services/analyst-transcript-validator.js";
 import { createAnalystTurnService } from "./services/analyst-turn-service.js";
+import type { ProfileSourceCoordinator } from "./services/profile-source-coordinator.js";
+import type { AttentionDispositionService } from "./services/attention-disposition-service.js";
 
 export interface AppDeps {
   storageService: StorageService;
@@ -67,12 +70,17 @@ export interface AppDeps {
   predictionService: PredictionService;
   displayedFitnessService: DisplayedFitnessService;
   intentionService: IntentionService;
+  attentionDispositionService: AttentionDispositionService;
   ownerGameNoteService: OwnerGameNoteService;
   groundedAnalysisProvider: GroundedAnalysisProvider;
   reflectionRuntime: ReflectionRuntime;
   groundedFeatureAnalyzers?: readonly GroundedFeatureAnalyzer<unknown>[];
   bggClient?: BggClient;
   onShutdown?: () => void | Promise<void>;
+  profileSourceCoordinator?: ProfileSourceCoordinator;
+  afterCandidateSourceSave?: (
+    impact: import("./services/attention-candidate-service.js").AttentionMutationImpact,
+  ) => Promise<void>;
 }
 
 export interface AppResult {
@@ -94,6 +102,7 @@ export function createApp(deps: AppDeps): AppResult {
     predictionService,
     displayedFitnessService,
     intentionService,
+    attentionDispositionService,
     ownerGameNoteService,
     groundedAnalysisProvider,
     reflectionRuntime,
@@ -130,9 +139,13 @@ export function createApp(deps: AppDeps): AppResult {
   const importRouteModule = createImportRoutes({ gameService, bggClient });
   const tournamentRouteModule = createTournamentRoutes({ tournamentService, gameService });
   const profileRouteModule = createProfileRoutes({ profileService });
+  const profileAttentionRouteModule = createProfileAttentionRoutes({ attentionDispositionService });
   const predictionRouteModule = createPredictionRoutes({ predictionService, storageService });
   const nicheRouteModule = createNicheRoutes({ storageService });
-  const redundancyRouteModule = createRedundancyRoutes({ storageService });
+  const redundancyRouteModule = createRedundancyRoutes({
+    storageService,
+    afterSourceSave: deps.afterCandidateSourceSave,
+  });
   const shelfService = createShelfService({ storageService, collectionMutationService });
   const capacityService = createCapacityService({ storageService, gameService });
   const shelfRouteModule = createShelfRoutes({ shelfService, capacityService });
@@ -146,6 +159,7 @@ export function createApp(deps: AppDeps): AppResult {
   const analystProjectionSnapshotService = createAnalystProjectionSnapshotService({
     storageService,
     displayedFitnessService,
+    profileService,
   });
   const reflectionProjectionSnapshotService = createReflectionProjectionSnapshotService({
     storageService,
@@ -272,6 +286,7 @@ export function createApp(deps: AppDeps): AppResult {
     ...importRouteModule.operations,
     ...tournamentRouteModule.operations,
     ...profileRouteModule.operations,
+    ...profileAttentionRouteModule.operations,
     ...predictionRouteModule.operations,
     ...nicheRouteModule.operations,
     ...redundancyRouteModule.operations,
@@ -284,7 +299,10 @@ export function createApp(deps: AppDeps): AppResult {
   ];
 
   const helpRouteModule = createHelpRoutes({ operations: allOperations });
-  const configRouteModule = createConfigRoutes({ storageService });
+  const configRouteModule = createConfigRoutes({
+    storageService,
+    coordinator: deps.profileSourceCoordinator,
+  });
   const shutdownRouteModule = createShutdownRoutes({
     async onShutdown() {
       await analystRouteModule.cancelActive();
@@ -306,6 +324,7 @@ export function createApp(deps: AppDeps): AppResult {
   app.route("/api", importRouteModule.routes);
   app.route("/api", tournamentRouteModule.routes);
   app.route("/api", profileRouteModule.routes);
+  app.route("/api", profileAttentionRouteModule.routes);
   app.route("/api", predictionRouteModule.routes);
   app.route("/api", nicheRouteModule.routes);
   app.route("/api", redundancyRouteModule.routes);

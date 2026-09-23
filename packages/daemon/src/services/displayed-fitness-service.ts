@@ -30,6 +30,8 @@ export interface DisplayedGameFitness extends GameWithScore {
 export interface DisplayedFitnessOptions {
   includePredicted: boolean;
   includeNiches?: boolean;
+  /** Limits returned work to owned games. Omitted retains the established full result. */
+  targetGameIds?: readonly string[];
 }
 
 export interface DisplayedFitnessService {
@@ -99,6 +101,23 @@ function applyRedundancy(
   }
 }
 
+function targetIds(options: DisplayedFitnessOptions): readonly string[] | undefined {
+  return options.targetGameIds === undefined
+    ? undefined
+    : [...new Set(options.targetGameIds)].sort();
+}
+
+function targetEntries(
+  entries: GameWithScore[],
+  targets: readonly string[] | undefined,
+): GameWithScore[] {
+  if (targets === undefined) return entries;
+  const requested = new Set(targets);
+  return entries.filter(
+    (entry) => entry.game.ownership !== "previously-owned" && requested.has(entry.game.id),
+  );
+}
+
 export function createDisplayedFitnessService(
   deps: DisplayedFitnessServiceDeps,
 ): DisplayedFitnessService {
@@ -106,23 +125,34 @@ export function createDisplayedFitnessService(
 
   return {
     async listGames(options): Promise<DisplayedGameFitness[]> {
+      const targets = targetIds(options);
       let predictedGames: GameWithScore[] | undefined;
-      const getPredictedGames = async (): Promise<GameWithScore[]> => {
+      const getPredictedGames = async (
+        targetGameIds?: readonly string[],
+      ): Promise<GameWithScore[]> => {
         if (!predictionService) return gameService.listGames();
-        predictedGames ??= await predictionService.listGamesWithPredictions();
-        return predictedGames;
+        if (targetGameIds === undefined) {
+          predictedGames ??= await predictionService.listGamesWithPredictions();
+          return predictedGames;
+        }
+        return predictionService.listGamesWithPredictions(targetGameIds);
       };
 
-      const allGames =
+      const completeGames =
         options.includePredicted && predictionService
-          ? await getPredictedGames()
+          ? await getPredictedGames(targets)
           : await gameService.listGames();
+      const allGames = targetEntries(completeGames, targets);
       const ownedGames = allGames.filter((entry) => entry.game.ownership !== "previously-owned");
 
       if (options.includeNiches && predictionService) {
         const nicheSettings = storageService ? await storageService.loadNicheSettings() : undefined;
         const nicheUniverse = options.includePredicted
-          ? ownedGames
+          ? targets === undefined
+            ? ownedGames
+            : (await getPredictedGames()).filter(
+                (entry) => entry.game.ownership !== "previously-owned",
+              )
           : (await getPredictedGames()).filter(
               (entry) => entry.game.ownership !== "previously-owned",
             );
@@ -135,7 +165,7 @@ export function createDisplayedFitnessService(
       if (storageService) {
         const redundancySettings = await storageService.loadRedundancySettings();
         const universe =
-          !options.includePredicted && predictionService
+          (!options.includePredicted || targets !== undefined) && predictionService
             ? (await getPredictedGames()).filter(
                 (entry) => entry.game.ownership !== "previously-owned",
               )
@@ -157,9 +187,10 @@ export function createDisplayedFitnessService(
     },
 
     async listGamesFromSnapshot(snapshot, options): Promise<DisplayedGameFitness[]> {
+      const targets = targetIds(options);
       const collection = structuredClone(snapshot.collection);
       const tournament = structuredClone(snapshot.tournament);
-      const allGames = options.includePredicted
+      const completeGames = options.includePredicted
         ? await (() => {
             if (!predictionService?.listGamesWithPredictionsFromSnapshot) {
               throw new Error("Snapshot prediction requires prediction service");
@@ -168,21 +199,39 @@ export function createDisplayedFitnessService(
               collection,
               tournament,
               structuredClone(snapshot.predictionSettings),
+              targets,
             );
           })()
         : (() => {
             if (gameService.listGamesFromSnapshot === undefined) {
               throw new Error("Snapshot fitness requires snapshot-capable game service");
             }
-            return gameService.listGamesFromSnapshot(collection, tournament);
+            return gameService.listGamesFromSnapshot(
+              targets === undefined
+                ? collection
+                : {
+                    ...collection,
+                    games: collection.games.filter((game) => targets.includes(game.id)),
+                  },
+              tournament,
+            );
           })();
+      const allGames = targetEntries(completeGames, targets);
       const ownedGames = allGames.filter((entry) => entry.game.ownership !== "previously-owned");
       if (options.includeNiches && predictionService) {
         if (predictionService.listGamesWithPredictionsFromSnapshot === undefined) {
           throw new Error("Snapshot niches require snapshot-capable prediction service");
         }
         const nicheUniverse = options.includePredicted
-          ? ownedGames
+          ? targets === undefined
+            ? ownedGames
+            : (
+                await predictionService.listGamesWithPredictionsFromSnapshot(
+                  collection,
+                  tournament,
+                  structuredClone(snapshot.predictionSettings),
+                )
+              ).filter((entry) => entry.game.ownership !== "previously-owned")
           : (
               await predictionService.listGamesWithPredictionsFromSnapshot(
                 collection,
@@ -193,11 +242,32 @@ export function createDisplayedFitnessService(
         const nicheMap = computeNichePositions(nicheUniverse, snapshot.nicheSettings);
         for (const entry of allGames) entry.nichePosition = nicheMap.get(entry.game.id) ?? null;
       }
+      const redundancyUniverse =
+        targets === undefined
+          ? undefined
+          : options.includePredicted
+            ? predictionService?.listGamesWithPredictionsFromSnapshot === undefined
+              ? undefined
+              : (
+                  await predictionService.listGamesWithPredictionsFromSnapshot(
+                    collection,
+                    tournament,
+                    structuredClone(snapshot.predictionSettings),
+                  )
+                ).filter((entry) => entry.game.ownership !== "previously-owned")
+            : (() => {
+                if (gameService.listGamesFromSnapshot === undefined)
+                  throw new Error("Snapshot redundancy requires snapshot-capable game service");
+                return gameService
+                  .listGamesFromSnapshot(collection, tournament)
+                  .filter((entry) => entry.game.ownership !== "previously-owned");
+              })();
       applyRedundancy(
         ownedGames,
         structuredClone(snapshot.redundancySettings),
         collection,
         tournament,
+        redundancyUniverse,
       );
       return allGames.map((entry) => ({
         ...entry,

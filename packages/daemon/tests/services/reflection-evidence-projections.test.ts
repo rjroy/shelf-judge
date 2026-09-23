@@ -163,13 +163,14 @@ function fixture() {
     game("game-4", "Heat", []),
   ];
   const collection: CollectionProfileCollectionSource = {
-    schemaVersion: 7,
+    schemaVersion: 8,
     revision: 9,
     id: "collection-1",
     name: "Collection",
     axes: [],
     games,
     intentions: [],
+    attentionDispositions: [],
     commandReceipts: [],
     entertainmentBenchmark: {
       state: "configured",

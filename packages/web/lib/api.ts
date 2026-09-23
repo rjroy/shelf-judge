@@ -267,6 +267,25 @@ export async function getProfile(
   return parseCollectionProfileResponse(response, profileEntityPolicy(response));
 }
 
+/** Read only the configured profile attention card cap; never expose daemon config. */
+export async function getProfileAttentionCardLimit(
+  load: () => Promise<unknown> = () => daemonJson("/api/config"),
+): Promise<number> {
+  const response: unknown = await load();
+  if (
+    typeof response !== "object" ||
+    response === null ||
+    !("profileAttentionCardLimit" in response) ||
+    typeof response.profileAttentionCardLimit !== "number" ||
+    !Number.isSafeInteger(response.profileAttentionCardLimit) ||
+    response.profileAttentionCardLimit < 0 ||
+    response.profileAttentionCardLimit > 24
+  ) {
+    throw new Error("Daemon returned an invalid profile attention card limit.");
+  }
+  return response.profileAttentionCardLimit;
+}
+
 // Tournament API functions
 
 import type {

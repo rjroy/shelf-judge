@@ -295,7 +295,7 @@ export interface CollectionV6 extends Omit<
 > {
   schemaVersion: 6;
   games: DurableGame[];
-  commandReceipts: CommandReceipt[];
+  commandReceipts: (IntentionCommandReceipt | OwnerGameNoteCommandReceipt)[];
 }
 
 export interface CollectionV7 extends Omit<CollectionV6, "schemaVersion"> {
@@ -304,7 +304,117 @@ export interface CollectionV7 extends Omit<CollectionV6, "schemaVersion"> {
   bggPlaySessions?: BggPlaySession[];
 }
 
-export type Collection = CollectionV7;
+export type AttentionDisposition =
+  | {
+      gameId: string;
+      kind: "snoozed";
+      ruleId: string;
+      ruleVersion: number;
+      fingerprint: string;
+      responseAt: string;
+      expiresAt: string;
+      version: number;
+    }
+  | {
+      gameId: string;
+      kind: "intentional";
+      ruleId: string;
+      ruleVersion: number;
+      fingerprint: string;
+      version: number;
+    };
+
+export interface AttentionCommandReceipt {
+  receiptType: "attention-disposition";
+  commandId: string;
+  operation: "not-now" | "intentional";
+  gameId: string;
+  ruleId: string;
+  ruleVersion: number;
+  expectedVersion: number;
+  requestFingerprint: string;
+  requestPayload: AttentionDispositionCommand;
+  accepted: AttentionDisposition;
+}
+
+/** Owner-authored command addressing the currently selected attention winner. */
+export interface AttentionDispositionCommandBase {
+  commandId: string;
+  gameId: string;
+  ruleId: string;
+  ruleVersion: number;
+  /** The selected winner's stable, non-clock identity. */
+  fingerprint: string;
+  /** Current disposition version, or zero when there is no disposition. */
+  expectedVersion: number;
+}
+
+export interface NotNowAttentionCommand extends AttentionDispositionCommandBase {
+  operation: "not-now";
+}
+
+export interface IntentionalAttentionCommand extends AttentionDispositionCommandBase {
+  operation: "intentional";
+}
+
+export type AttentionDispositionCommand = NotNowAttentionCommand | IntentionalAttentionCommand;
+
+/** Daemon-supplied attention command payload; clients add only commandId. */
+export type AttentionDispositionCommandTemplate =
+  | Omit<NotNowAttentionCommand, "commandId">
+  | Omit<IntentionalAttentionCommand, "commandId">;
+
+export type AttentionDispositionCommandResult =
+  | { outcome: "accepted"; receipt: AttentionCommandReceipt; attentionUnavailable?: true }
+  | { outcome: "replayed"; receipt: AttentionCommandReceipt }
+  | {
+      outcome: "rejected";
+      error:
+        | { code: "validation" }
+        | { code: "command-reuse"; commandId: string }
+        | { code: "game-not-found"; gameId: string }
+        | { code: "ineligible-game"; gameId: string }
+        | { code: "stale-version"; gameId: string; expectedVersion: number }
+        | { code: "candidate-mismatch"; gameId: string }
+        | { code: "persistence-failure" };
+    };
+
+export interface CollectionV8 extends Omit<CollectionV7, "schemaVersion" | "commandReceipts"> {
+  schemaVersion: 8;
+  attentionDispositions: AttentionDisposition[];
+  commandReceipts: (
+    | IntentionCommandReceipt
+    | OwnerGameNoteCommandReceipt
+    | AttentionCommandReceipt
+  )[];
+}
+
+export type Collection = CollectionV8;
+
+/** Additive internal contracts for the future disposable attention projection. */
+export type AttentionExactValue = { numerator: string; denominator: string };
+export interface AttentionRuleDefinition {
+  id: string;
+  version: number;
+  dependencyVersion: number;
+  scoringVersion: number;
+}
+export interface AttentionCandidateWinner {
+  ruleId: string;
+  ruleVersion: number;
+  signalStrength: AttentionExactValue;
+  categoryWeight: AttentionExactValue;
+  attentionScore: AttentionExactValue;
+  fingerprint: string;
+}
+export interface AttentionCandidateEvaluation {
+  gameId: string;
+  winner: AttentionCandidateWinner | null;
+  disposition: AttentionDisposition | null;
+  nextEvaluationBoundary: string | null;
+  dependencyVersion: number;
+  ruleCatalogVersion: number;
+}
 
 // Fitness score types from .lore/designs/mvp-fitness-model.md
 
@@ -700,6 +810,7 @@ export interface AppConfig {
   bggAuthToken: string | null;
   groundedAnalysis: GroundedProviderIdentity | null;
   profileEntityPolicy: CollectionProfileEntityPolicy;
+  profileAttentionCardLimit: number;
   username: string | null;
 }
 
@@ -964,7 +1075,10 @@ export interface OwnerGameNoteCommandReceipt {
   accepted: Omit<OwnerGameNoteAcceptedMetadata, "replayed">;
 }
 
-export type CommandReceipt = IntentionCommandReceipt | OwnerGameNoteCommandReceipt;
+export type CommandReceipt =
+  | IntentionCommandReceipt
+  | OwnerGameNoteCommandReceipt
+  | AttentionCommandReceipt;
 
 export type CollectionMutationResult<Value> =
   | { outcome: "accepted"; changed: true; value: Value }
@@ -1037,42 +1151,89 @@ export interface CollectionProfileEntityClassResult {
   orderings: CollectionProfileEntityOrderings;
 }
 
-export type AttentionPlayEvidence =
+export type CollectionProfileAttentionActionId =
+  | "want-to-play"
+  | "not-now"
+  | "intentional"
+  | "open-game"
+  | "correct-play-data"
+  | "correct-purchase-data"
+  | "resolve-intention"
+  | "retire-intention";
+
+export type CollectionProfileAttentionOperationId =
+  | "shelf.profile.attention.not-now"
+  | "shelf.profile.attention.intentional"
+  | "shelf.game.get"
+  | "shelf.game.plays.set"
+  | "shelf.game.refresh-bgg"
+  | "shelf.game.intention.set"
+  | "shelf.game.intention.complete"
+  | "shelf.game.intention.retire"
+  | "shelf.game.set-acquisition"
+  | "shelf.game.set-manual-values";
+
+export interface CollectionProfileAttentionDestination {
+  gameId: string;
+  operationId: CollectionProfileAttentionOperationId;
+}
+
+export interface CollectionProfileAttentionAction {
+  action: CollectionProfileAttentionActionId;
+  operationId: CollectionProfileAttentionOperationId;
+  destination: CollectionProfileAttentionDestination;
+  command: AttentionDispositionCommandTemplate | null;
+}
+
+export type CollectionProfileAttentionEvidence =
   | {
-      status: "valid";
-      playCount: number;
+      kind: "play-count";
+      value: 0;
       source: FieldObservationSource;
       observedAt: string;
-      stale: false;
     }
   | {
-      status: "missing" | "invalid" | "stale";
-      playCount: number | null;
-      source: FieldObservationSource | null;
-      observedAt: string | null;
-      warning:
-        | "Current play evidence is missing."
-        | "Current play evidence is invalid."
-        | "A newer BGG check did not provide a valid play count.";
+      kind: "dormant";
+      lastPlayedOn: string;
+      playCount: number;
+    }
+  | {
+      kind: "purchase-utilization";
+      multiplier: AttentionExactValue;
+      achievedPercent: number;
+    }
+  | {
+      kind: "intention";
+      intentionId: string;
+      intentionKind: PlayIntentionKind;
+      createdAt: string;
+      baseline: PlayIntentionBaseline | null;
     };
 
-export interface CollectionProfileAttentionItem {
+/**
+ * One daemon-selected attention situation. This is deliberately independent of
+ * the durable intention lifecycle: an intention is only attached for the
+ * explicit-intention rule.
+ */
+export interface CollectionProfileAttentionCard {
   id: string;
-  decisionFamily: "play-intention";
-  intention: PlayIntention;
+  gameId: string;
   gameName: string;
+  gameImageUrl: string | null;
+  ruleId: string;
+  ruleVersion: number;
+  dependencyVersion: number;
+  nonClockFingerprint: string;
+  reason: string;
   question: string;
-  whyNow: "You asked Shelf Judge to keep this intention visible.";
-  currentPlayEvidence: AttentionPlayEvidence;
-  responses: ["leave-visible", "complete", "retire", "correct-or-refresh-evidence"];
-  abstentionBasis: "Only an explicit active intention qualifies.";
-  resolution: null;
-  reopenCondition: "Create a new explicit intention after resolution.";
-  destination: { gameId: string; operationId: "shelf.game.intention.manage" };
-  evidenceDestination: {
-    gameId: string;
-    operationId: "shelf.game.plays.set" | "shelf.game.bgg.refresh";
-  };
+  scoreExplanation: string;
+  actions: CollectionProfileAttentionAction[];
+  evidence: CollectionProfileAttentionEvidence;
+  intention: PlayIntention | null;
+  disposition: { state: "none"; expectedVersion: number };
+  signalStrength: AttentionExactValue;
+  categoryWeight: AttentionExactValue;
+  attentionScore: AttentionExactValue;
 }
 
 export interface ResolvedPlayIntentionHistoryItem {
@@ -1114,8 +1275,9 @@ export interface CollectionProfile {
     axisDistributions: CollectionProfileAxisDistribution[];
   };
   attention: {
-    state: "active" | "nothing-to-decide" | "empty-collection";
-    items: CollectionProfileAttentionItem[];
+    state: "ranked" | "no-winner" | "empty-collection" | "disabled";
+    cardLimit: number;
+    cards: CollectionProfileAttentionCard[];
   };
   computedAt: string;
 }
@@ -1130,17 +1292,46 @@ export type CollectionProfileResult = CollectionProfile | CollectionProfileUnava
 
 export interface ProfileSourceIdentity {
   collectionId: string;
-  collectionSchemaVersion: 7;
+  collectionSchemaVersion: 8;
   collectionRevision: number;
   tournamentHash: string;
   predictionSettingsHash: string;
   redundancySettingsHash: string;
 }
 
+export interface ProfileAttentionCandidatePublicationIdentity {
+  schemaVersion: 1;
+  indexVersion: 1;
+  evaluatedAt: string;
+  identity: {
+    collectionId: string;
+    collectionSchemaVersion: 8;
+    collectionRevision: number;
+    tournamentHash: string;
+    predictionSettingsHash: string;
+    redundancySettingsHash: string;
+    calculationVersion: number;
+    ruleCatalogVersion: number;
+    dependencyVersion: number;
+    projectionVersion: number;
+    catalogRuleVersions: Array<{
+      ruleId: string;
+      ruleVersion: number;
+      scoringVersion: number;
+    }>;
+  };
+}
+
+export interface ProfilePublicationIdentity {
+  source: ProfileSourceIdentity;
+  profileAttentionCardLimit: number;
+  attentionCandidates: ProfileAttentionCandidatePublicationIdentity;
+}
+
 export interface ProfileData {
-  contractVersion: 9;
-  algorithmVersion: 11;
-  sourceIdentity: ProfileSourceIdentity;
+  contractVersion: 11;
+  algorithmVersion: 13;
+  publicationIdentity: ProfilePublicationIdentity;
   profile: CollectionProfile;
   computedAt: string;
 }
