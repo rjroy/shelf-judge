@@ -1,7 +1,7 @@
 ---
 title: Expanded profile attention opportunities
 date: 2026-09-20
-status: approved
+status: superseded
 tags: [collection, profile, attention]
 modules: [shared, daemon, web]
 related:
@@ -10,6 +10,18 @@ req-prefix: PROFILE-ATTN
 ---
 
 # Expanded Profile Attention Opportunities
+
+> **Supersession notice (2026-09-22):** The attention-selection requirements in
+> this historical specification are superseded by the approved
+> [Fitness-ranked Profile Attention specification](fitness-ranked-profile-attention.md).
+> That replacement changes which games and reasons become attention cards,
+> including making active intentions competitive candidates rather than
+> guaranteed one-card-per-intention output. This notice is limited to attention
+> selection; this file is retained for historical discoverability and is not an
+> authority for the current selection model. Existing intention lifecycle,
+> completion, retirement, ownership, warning, history, and read-only projection
+> contracts remain governed by the current Profile authority and applicable
+> lifecycle specifications, not superseded here.
 
 ## Purpose
 

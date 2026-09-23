@@ -19,7 +19,7 @@ req-prefix: USEFUL-PROF
 
 The owner reviewed and approved this product and behavior specification. The amended adjusted-fit requirements are implemented and passed terminal acceptance.
 
-**Authority notice:** This file is the authority for Profile behavior. [Expanded Profile Attention Opportunities](../../../work/specs/expanded-profile-attention-opportunities.md) adds one approved presentation rule: an active owned `want-to-play` intention with a valid current play-count projection of exactly zero uses the specific unplayed question; every other active intention uses the generic question. This file remains authoritative for lifecycle, completion, warnings, ownership transitions, history, ordering, and read-only projection behavior.
+**Authority notice:** This file is the authority for Profile identity behavior and the durable intention lifecycle. Ranked attention behavior is defined by the approved [Fitness-ranked Profile attention](../../../work/specs/fitness-ranked-profile-attention.md) specification, which supersedes the earlier intention-only attention presentation and ordering requirements below. Active intentions and their completion, retirement, ownership-transition, evidence, and history semantics remain authoritative here; attention candidates, selection, ranking, and the configured visible cap follow the ranked-attention specification. Profile reads remain read-only with respect to collection source state.
 
 Once approved, this specification supersedes the Profile Overview behavior in [Collection Identity and Trusted Insight Profiling](../../../archive/specs/collection/collection-profiling.md). The older document remains the record of the implemented contract before this redesign. It does not justify retaining a surface that this specification removes.
 
@@ -34,11 +34,11 @@ The Collection Profile must answer exactly two questions:
 1. **What does my collection reveal about me?**
 2. **What deserves my attention or a decision now?**
 
-The first answer describes supported patterns in the owner's current collection. The second is a small inbox of choices the owner has explicitly made timely. Neither answer is a dashboard of everything Shelf Judge can calculate.
+The first answer describes supported patterns in the owner's current collection. The second is a capped, ranked set of current situations that may merit owner judgment, including but not limited to situations the owner explicitly recorded. Neither answer is a dashboard of everything Shelf Judge can calculate.
 
-The first release answers the identity question by ranking mechanics, designers, and artists by comparator-adjusted current fitness of associated owned games. It answers the attention question with a gentle list of explicit play and replay intentions that the owner chose to keep visible.
+The first release answers the identity question by ranking mechanics, designers, and artists by comparator-adjusted current fitness of associated owned games. Profile attention evaluates built-in rules for currently owned games, selects at most one reason per game, globally ranks winning cards, and applies the configured card limit. An explicit play intention is one candidate reason among discovered situations; it is not guaranteed a visible slot.
 
-It is a successful result for the profile to say that the available evidence does not yet support an identity statement or that nothing needs attention.
+It is a successful result for the profile to say that the available evidence does not yet support an identity statement or that no eligible attention cards remain after rule evaluation, dispositions, and the configured cap.
 
 ## Representative Experiences
 
@@ -60,23 +60,23 @@ One owned game is credited to an artist and has current fitness `9.2`. The artis
 
 The drilldown says that one game is not enough to establish a recurring collection pattern. Shelf Judge does not fill the overview with impressive but unsupported single-game averages.
 
-### A Gentle Play Intention
+### A Ranked Never-Played Situation
 
-The owner explicitly records, "I intend to play Heat: Pedal to the Metal." At that time the game has zero recorded plays.
+Current Profile play-count evidence validly reports zero plays for Heat: Pedal to the Metal.
 
-The attention item asks:
+If its never-played rule wins per-game selection and ranks within the visible cap, the card says:
 
-> **Is there a reason you haven’t played this?**
+> **You have not recorded a play of Heat: Pedal to the Metal.**
 >
-> You asked Shelf Judge to keep this intention visible, and the current recorded play count is 0.
+> Do you want to make a plan to play it, intentionally keep it without a plan, or reconsider it?
 
-The owner can prioritize the play, retire the intention, mark it complete from personal knowledge, or correct play data. Prioritizing is an external action and leaves the item visible until valid current play evidence exceeds the stored baseline or the owner resolves it. Historical `first-play` and `replay` intentions, and every case without a valid current zero projection, keep the generic play-intention question. Shelf Judge applies no due date, age, urgency, or overdue language and does not conclude that the game should be sold or that the owner failed.
+This card can exist without an intention. Separately, an active intention remains durable and follows its existing lifecycle: it can lose per-game selection or a visible slot; valid current play evidence strictly above its stored baseline may complete it during the data update; the owner can complete or retire it explicitly. Profile visibility does not change that lifecycle. Shelf Judge does not infer that the owner failed or should sell the game.
 
-If there are no active intentions, the section says:
+If there are no selected cards, the section may say:
 
 > **Nothing needs attention right now.**
 
-It does not substitute unrelated outliers, low-utilization purchases, or model disagreements to avoid an empty inbox.
+This successful empty state can occur even while active intentions exist. It does not substitute unrelated findings; only the approved ranked-attention rules can produce cards, and any cards are subject to per-game selection, dispositions, ranking, and cap.
 
 ## Product Model
 
@@ -113,7 +113,7 @@ The overview shows the first configured number of supported entities from each c
 
 > Superseded for primary intention creation by `shelf-judge-a8l`: a user may author a general Want to play action without count evidence. The historical first-play/replay kinds below remain compatibility and automatic-completion bookkeeping, not the primary expression of desire.
 
-The first release historically supported two owner-created intention kinds:
+The intention lifecycle historically supported two owner-created intention kinds:
 
 - `first-play`: play a currently unplayed game;
 - `replay`: play a game that already has at least one recorded play.
@@ -134,7 +134,7 @@ The owner can resolve an active item by:
 
 Completion and retirement persist. A completed or retired intention does not reopen because the profile recomputes or because an unrelated score changes. Only an explicit new intention creates another active item with a new intention ID and baseline.
 
-Leaving the intention active is a valid response. The profile does not interpret continued visibility as delay, failure, or deferral.
+Leaving the intention active is a valid response. The lifecycle does not interpret a continued active state as delay, failure, or deferral, whether or not the intention is currently selected for a Profile card.
 
 ## Information Hierarchy
 
@@ -158,20 +158,20 @@ Axis distributions remain diagnostic evidence under this identity question. They
 
 The section contains:
 
-1. Every active owner-created play or replay intention, with the specific unplayed question only for an owned active `want-to-play` intention whose valid current play-count projection is exactly zero.
-2. A successful nothing-to-decide state when there is no active intention.
-3. An evidence warning when current play data cannot establish automatic completion.
-4. A path from every item to the game and controls that can resolve it.
+1. The daemon-selected, globally ranked winning attention cards for eligible owned games, up to the configured limit. Initial reasons include valid never-played evidence, sufficiently old trustworthy dated play history, an underused purchase established by existing purchase utilization, and an active explicit intention.
+2. A successful empty state when no cards remain after evaluation and selection; active intentions may exist but lose a per-game rule comparison, a visible slot, or be hidden by a disposition.
+3. Relevant evidence warnings, correction destinations, and actions for each selected card.
+4. A path from every item to the game and controls appropriate to its winning reason.
 
-Items are ordered by NFC-normalized game name in Unicode code-point order, then stable game ID. Creation time and play count do not affect order. The number of cards does not create urgency or a score.
+Cards are ordered by exact attention score descending, then NFC-normalized game name, stable game ID, and stable rule ID. The configured cap is applied after ranking. Attention score measures competition for a limited Profile slot, not game fitness or urgency; the tie-break keys do not add priority signals.
 
 Attention section state precedence is:
 
 1. Profile unavailable, when the profile cannot be recomputed or validated.
-2. Active intentions, with evidence warnings attached where needed.
-3. Nothing needs attention, when there is no active intention.
+2. Ranked selected cards, with relevant evidence warnings attached where needed.
+3. Successful empty when no selected cards are returned, including when there are no eligible candidates or the configured cap is zero.
 
-Missing or stale play evidence must never hide an active owner-created intention. It prevents automatic completion, not visibility.
+Missing or stale play evidence does not erase or resolve a durable intention, but it may make a rule abstain or affect a selected card's evidence. It prevents automatic intention completion; it does not imply zero plays. Whether an intention appears as a card is governed by candidate eligibility, per-game winner selection, ranking, dispositions, and the visible cap.
 
 ## Attention Item Contract
 
@@ -180,17 +180,15 @@ Every reported attention item must expose:
 | Field               | Required meaning                                                                                                                                   |
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Stable ID           | One durable `intentionId` for this owner-created intention. The card ID derives from it.                                                           |
-| Decision family     | One existing `play-intention` card per intention; the unplayed wording is presentation only, not a new durable family.                              |
-| Question            | `Is there a reason you haven’t played this?` for an owned active `want-to-play` intention with valid current count `0`; otherwise `Do you still want to play ${game.name}?`. |
-| Why now             | The owner explicitly asked Shelf Judge to keep this intention visible.                                                                             |
-| Evidence            | Intention kind, creation time, baseline play count, current play-count state and value when valid, evidence source, and evidence observation time. |
-| Plausible responses | Leave visible or prioritize externally, complete, retire, or correct/refresh evidence.                                                             |
-| Abstention basis    | Only explicit active intentions qualify; low play count, age, purchase, ownership, or metadata alone does not.                                     |
-| Resolution          | `null` while active; otherwise the owner or observed-play resolution and its time.                                                                 |
-| Reopen condition    | A new explicit intention after resolution, with a new intention ID.                                                                                |
-| Destination         | The relevant game detail intention controls; evidence refresh may also link to collection refresh.                                                 |
+| Field               | Required meaning |
+| ------------------- | ---------------- |
+| Card identity        | Stable game-and-winning-rule identity; an explicit-intention card also retains its associated intention identity. |
+| Winning reason       | One applicable, unsuperseded rule selected for this game; no game produces more than one card. |
+| Ranking              | Exact attention score descending, then normalized game name, stable game ID, and stable rule ID; the configured cap follows ranking. |
+| Evidence and actions | The winning rule's relevant evidence, decision, actions, and correction destinations. |
+| Intention lifecycle  | An intention card is backed by an active explicit intention. Its durable completion, retirement, ownership, and history semantics remain as defined in this file. |
 
-One intention creates at most one attention item. Purchase utilization, fitness, outlier distance, and other facts may be supporting context only if this specification names them. The first release does not, so they cannot create or duplicate a card.
+An active intention may qualify for an explicit-intention candidate but is not guaranteed a card or slot. Other approved rules can produce cards without an intention. Purchase utilization is permitted only through the approved underused-purchase Profile rule, which reuses its existing calculation; it does not add a purchase-utilization card to the collection view or change purchase-utilization sorting, recommendations, resale behavior, or the requirement for real-data review before broader collection interpretation.
 
 ## Existing Surface Disposition
 
@@ -209,9 +207,9 @@ These decisions apply to the Profile Overview and its profile-specific game-deta
 | Grounded narration                                                     | **Disappear**                     | It only restates removed findings. Remove the profile narration action and output.                                                                                   |
 | Trusted-insight abstention cards for removed families                  | **Disappear with their families** | Abstention remains mandatory only for analyses retained by this specification.                                                                                       |
 | Prediction residuals                                                   | **Deferred**                      | Do not compute or show them until a prior prediction can be compared with a later owner judgment and a clear response is specified.                                  |
-| Neglect and generic play history                                       | **Change**                        | Only an explicit active play/replay intention can enter attention. Counts remain completion evidence, not intent, urgency, or neglect.                               |
+| Neglect and generic play history                                       | **Change**                        | Play history and counts do not imply an owner intention. The approved evidence-backed never-played and dormant rules may independently enter ranked attention; an explicit intention is another candidate, not a prerequisite for attention. These rules create no inferred intention, and play history alone is not urgency or neglect. |
 | Redundancy                                                             | **Remain outside profile**        | Existing collection inspection may remain. It cannot create a profile decision without an owner-stated role and curation constraint.                                 |
-| Purchase utilization                                                   | **Remain outside profile**        | Keep game-detail results and owner-selected collection sorts. It cannot create profile attention without separate real-data review and approval.                     |
+| Purchase utilization                                                   | **Narrow Profile exception**      | The approved underused-purchase rule may use a qualifying existing utilization result as one ranked Profile candidate. This does not imply collection auto-sort, automatic judgment, resale or buy/keep/sell recommendations, aggregation or brief placement, or that real collection data has been reviewed. Game-detail results and owner-selected collection sorts remain governed by the purchase-utilization specification. |
 | Collection-wide averages, variance, absence, and rarity                | **Disappear from profile**        | No demonstrated user job in this release.                                                                                                                            |
 
 Removing a field from the profile contract does not require erasing historical source data. It does require removing the active computation and consumer surface unless another approved feature uses it.
@@ -236,11 +234,11 @@ The result state is computed from usable evidence even when metadata readiness i
 
 ### Nothing To Decide
 
-When there is no active intention, the attention section says nothing needs attention right now.
+When no cards are selected, the attention section reports a successful empty state. This does not establish that there are no active intentions: candidates may abstain, lose per-game selection, be suppressed by a disposition, rank below the configured cap, or be disabled by a zero cap.
 
 ### Missing Or Stale Play Evidence
 
-When current play evidence becomes missing, invalid, or older than a known collection refresh, Shelf Judge keeps the explicit intention visible and attaches the exact evidence warning plus a refresh or correction destination. It does not claim that the intention remains unplayed and cannot complete it automatically until valid evidence shows a count above baseline.
+When current play evidence becomes missing, invalid, or older than a known collection refresh, Shelf Judge does not erase or resolve the durable intention. Ranked attention evaluates each rule using its declared evidence dependencies; a card that is selected and depends on that evidence must communicate the applicable uncertainty and correction destination. Missing or stale evidence does not establish that a game remains unplayed and cannot complete the intention automatically; valid current evidence must show a count above baseline.
 
 ### Stale Derived Profile
 
@@ -280,7 +278,7 @@ Every requirement is assigned to one headline question. Delivery requirements ar
 12. **REQ-USEFUL-PROF-12:** BGG thing metadata must preserve mechanic, designer, and artist link IDs and names, distinguish complete empty results from metadata not yet fetched, and retain source observation time.
 13. **REQ-USEFUL-PROF-13:** Existing games whose persisted schema cannot establish designer or artist completeness must migrate to a refresh-needed state rather than to a misleading complete empty list.
 14. **REQ-USEFUL-PROF-14:** Metadata refresh must update all three entity classes atomically for a game. A failed refresh must preserve complete last-validated metadata as eligible with a refresh-failed warning; migrated refresh-needed data remains ineligible. The first release has no age-based metadata expiration.
-15. **REQ-USEFUL-PROF-15:** Axis distributions must remain reachable as diagnostic drilldown under the identity question and must not be narrated as collection identity or attention.
+15. **REQ-USEFUL-PROF-15:** Axis distributions must remain reachable as diagnostic drilldown under the identity question and must not be narrated as collection identity or attention-rule candidates.
 16. **REQ-USEFUL-PROF-16:** Mechanics frequency, categories, families, subdomains, BGG weight clustering, axis weights, utility declarations, variance, rarity, absence, and collection-wide averages must not appear as standalone identity findings.
 17. **REQ-USEFUL-PROF-17:** The identity answer must expose the independent result, metadata-readiness, and exclusion dimensions defined in this specification, plus refresh-failed warnings and whole-profile errors, without converting one into another.
 18. **REQ-USEFUL-PROF-18:** Identity computation must be deterministic local computation and must make no network or model call; metadata refresh remains a separate owner-initiated operation.
@@ -293,27 +291,27 @@ Every requirement is assigned to one headline question. Delivery requirements ar
 
 ### Question 2: What Deserves My Attention Or A Decision Now?
 
-25. **REQ-USEFUL-PROF-25 (amended by shelf-judge-a8l):** Attention items come only from explicit owner-maintained Want to play intentions, including preserved historical first-play/replay intentions. An owned active `want-to-play` intention with a valid current play-count projection of exactly zero uses the specific unplayed question; every other active intention uses the generic play-intention question. This is presentation only and creates no new durable intention or card.
+25. **REQ-USEFUL-PROF-25 (attention selection superseded by `fitness-ranked-profile-attention`):** An explicit-intention attention candidate must be backed by a currently owned game with an active owner-maintained intention, including preserved historical first-play/replay intentions. The approved ranked-attention specification governs candidate selection, presentation, ranking, and visibility; an active intention is not guaranteed a selected card or visible slot. Any presentation variation must not create or mutate durable intention state.
 26. **REQ-USEFUL-PROF-26 (superseded by shelf-judge-a8l for primary creation):** Historical first-play/replay creation required a currently owned game, valid current play count, and matching kind. The current primary Want to play action is not count-gated; a game that is not currently owned remains ineligible.
 27. **REQ-USEFUL-PROF-27:** Ownership, age, purchase state, fitness, low play count, outlier distance, redundancy, and BGG metadata must never create or imply a play intention.
-28. **REQ-USEFUL-PROF-28:** Every active intention must appear immediately and remain visible without a deadline, reminder schedule, age threshold, urgency score, overdue state, or time-based ordering.
-29. **REQ-USEFUL-PROF-29:** Missing, invalid, or stale current play evidence must attach an exact warning and correction destination without hiding the active intention, claiming that it remains unplayed, or selecting the specific unplayed question.
-30. **REQ-USEFUL-PROF-30:** A reported attention item must satisfy every field in the Attention Item Contract and must provide completion, retirement, and evidence-correction destinations while allowing the intention to remain active without penalty.
-31. **REQ-USEFUL-PROF-31:** The attention section must order active items deterministically by NFC-normalized game name in Unicode code-point order and stable game ID, without using creation time or play count.
-32. **REQ-USEFUL-PROF-32:** One active intention must create exactly one card. The unplayed question is a copy variation on that card, not another family or card. Other metrics must not create duplicate cards or competing decision families.
+28. **REQ-USEFUL-PROF-28 (visibility superseded by `fitness-ranked-profile-attention`):** Intention lifecycle must not acquire a deadline, reminder schedule, overdue state, or read-side mutation. Whether an active intention appears in Profile attention is governed by ranked rule selection, disposition, and cap semantics in the approved ranked-attention specification.
+29. **REQ-USEFUL-PROF-29:** Missing, invalid, or stale current play evidence must not imply zero or authorize automatic intention completion. When an applicable selected card depends on such evidence, it must communicate the relevant uncertainty and correction destination; read-side evidence failure must not mutate or resolve durable intention state. Candidate eligibility and card visibility follow ranked-attention rule dependencies and selection.
+30. **REQ-USEFUL-PROF-30 (card contract superseded by `fitness-ranked-profile-attention`):** Ranked cards must use the winning-rule card contract from the approved ranked-attention specification. An explicit-intention card must expose appropriate existing intention actions without changing the durable lifecycle contract or penalizing an intention left active.
+31. **REQ-USEFUL-PROF-31 (ordering superseded by `fitness-ranked-profile-attention`):** Profile attention must use ranked-attention's exact score ordering and deterministic tie-breakers; intention creation time and play count do not independently rank intention candidates.
+32. **REQ-USEFUL-PROF-32 (one-card-per-game selection supersedes intention-card guarantee):** An active intention may contribute the explicit-intention rule for its game, but does not guarantee a card; the daemon emits at most one winning-rule card per game and applies global ranking and the configured cap as specified by ranked attention.
 33. **REQ-USEFUL-PROF-33:** Completing or retiring an intention must persist the resolution, actor or source, and resolution time in durable collection source data separate from the disposable profile cache.
 34. **REQ-USEFUL-PROF-34:** A trustworthy later observed play-count increase above a trustworthy captured baseline must complete the active intention during the data update that observes it. An absent baseline remains absent and cannot authorize automatic completion; reading the profile must not mutate durable intention state.
 35. **REQ-USEFUL-PROF-35:** The owner must be able to mark an intention complete from personal knowledge without forcing an unsupported change to recorded play count.
 36. **REQ-USEFUL-PROF-36:** A completed or retired intention must become active again only through a new explicit intention with a new intention ID and a baseline captured only when trustworthy evidence is available.
-37. **REQ-USEFUL-PROF-37:** When there is no active intention, the profile must show a successful nothing-needs-attention state and must not substitute another metric to populate the section.
-38. **REQ-USEFUL-PROF-38:** Active intentions, evidence warnings, and resolved history must use the observable fields, ordering, and destinations in this specification and remain distinguishable from an empty collection and profile failure.
-39. **REQ-USEFUL-PROF-39:** Tournament divergence, comparator-backed axis questions, outliers, narration, prediction residuals, redundancy, and purchase utilization must not appear in profile attention in this release.
+37. **REQ-USEFUL-PROF-37 (empty-state meaning superseded by `fitness-ranked-profile-attention`):** A successful empty attention result means no cards were selected for presentation, not necessarily that no active intention exists. Empty-state semantics, including a zero configured cap, follow the ranked-attention specification; errors remain distinct from successful empty.
+38. **REQ-USEFUL-PROF-38:** The explicit-intention candidate and its evidence must be backed by the active intention and use its lifecycle fields as defined here; ranked card selection, ordering, and visibility follow the approved ranked-attention specification. Resolved history must use the fields, ordering, and destination in this specification and remain distinguishable from active state, successful empty, and profile failure.
+39. **REQ-USEFUL-PROF-39 (purchase-utilization exception):** Tournament divergence, comparator-backed axis questions, outliers, narration, prediction residuals, and redundancy must not appear in Profile attention in this release. The narrowly defined underused-purchase rule is the sole approved purchase-utilization Profile candidate and is governed by `fitness-ranked-profile-attention`; it does not authorize other purchase-value surfaces or behavior.
 40. **REQ-USEFUL-PROF-40:** Daemon operations must support create, complete, and retire using the public command and result contract in this specification; command-ID replay must return the original accepted result without creating duplicate intentions or resolutions.
 41. **REQ-USEFUL-PROF-41:** Web and CLI must provide equivalent intention mutations and expose the resulting validated intention or conflict; profile JSON must expose the same resulting attention state, and CLI failures must use a nonzero exit status with the structured error on standard error.
 42. **REQ-USEFUL-PROF-42:** Concurrent mutation must reject a stale expected intention version rather than overwrite a newer resolution, and the consumer must present a refresh-and-review response.
 43. **REQ-USEFUL-PROF-43:** Intention mutations and automatic completion must log the attempted transition, trigger, game and intention identity, prior state/version, and outcome without logging unrelated collection contents.
 44. **REQ-USEFUL-PROF-44:** Existing collections must migrate atomically and repeatably with no intentions and no fabricated resolution history. Failure or interruption must preserve the last valid collection for safe retry; existing play counts remain evidence but do not create intentions.
-45. **REQ-USEFUL-PROF-45:** The shared runtime contract must reject impossible intention kinds, invalid or mismatched baselines, duplicate active intentions for one game, contradictory resolutions, and attention items not backed by an active explicit intention.
+45. **REQ-USEFUL-PROF-45:** The shared runtime contract must reject impossible intention kinds, invalid or mismatched baselines, duplicate active intentions for one game, and contradictory resolutions. Ranked attention cards must validate against their winning-rule contract; an explicit-intention card must be backed by an active explicit intention, while discovered-rule cards need not have an associated intention.
 46. **REQ-USEFUL-PROF-46:** The attention UI must announce mutation success and failure, associate validation errors with controls, preserve focus after updates, and provide keyboard and touch access without relying on color or hover.
 47. **REQ-USEFUL-PROF-47:** Attention cards and intention controls must fit without horizontal page overflow in current Chromium at `375x812`, `768x1024`, and `1440x900` CSS pixels and at 200% desktop zoom; actions may stack but no response or evidence may disappear, interactive targets must be at least `44x44` CSS pixels, and mobile form text must be at least `16px`.
 48. **REQ-USEFUL-PROF-48:** A profile load or recomputation failure must show attention as unavailable with retry, not as nothing needing attention, and must not delete or rewrite durable intentions.
@@ -326,9 +324,9 @@ This section constrains implementation where product behavior depends on a consi
 
 ### Source And Derived Data
 
-Durable owner intent and resolution history belong in versioned collection source data. Computed entity adjusted fits, attention projections, insufficiency states, and ordering belong in the disposable versioned profile cache.
+Durable owner intent and resolution history belong in versioned collection source data. Computed entity adjusted fits and insufficiency states belong in the disposable versioned Profile cache. Ranked-attention candidates and their dependency state belong in the separately versioned disposable candidate artifact defined by the approved ranked-attention specification; selected cards and their score order are daemon-published Profile output. Neither artifact is authority for durable intention history.
 
-The profile cache must be invalidated by changes to:
+The Profile cache and ranked-attention candidate projection are distinct derived artifacts and must be invalidated or updated according to their declared dependencies. Relevant inputs include changes to:
 
 - ownership;
 - BGG entity metadata or its completeness state;
@@ -338,7 +336,7 @@ The profile cache must be invalidated by changes to:
 - the configured entity policy, including any class's `minimumSupportedGames`; and
 - the profile contract or algorithm version.
 
-The current disposable profile contract is version 9 and its algorithm is version 12. The durable collection is schema version 7. No profile cache migration is required: an older version, including version 11 before the zero-play `want-to-play` presentation rule, or a profile whose serialized entity policy differs from current configuration is discarded and recomputed. A collection migration is required when durable intentions, resolutions, BGG metadata completeness, dated BGG play sessions, or another collection source field changes schema.
+The current disposable Profile contract is version 10 and its algorithm is version 13. Ranked attention also has separately versioned candidate state. The durable collection is schema version 8. No Profile cache migration is required: an older contract/algorithm version or a Profile whose serialized entity policy differs from current configuration is discarded and recomputed. Candidate artifact compatibility and recovery follow the ranked-attention authority. A collection migration is required when durable intentions, resolutions, BGG metadata completeness, dated BGG play sessions, attention dispositions, or another collection source field changes schema.
 
 Collection migration must write atomically. A failed or interrupted migration leaves the last validated source artifact unchanged and loadable. Repeating migration from the same prior version produces the same current artifact without duplicate history or further semantic changes.
 
@@ -465,13 +463,13 @@ Every successful mutation returns the accepted durable intention, version, and a
 5. Independently derive exact adjusted means from entity games, comparator games, and each class's serialized `minimumSupportedGames`. Verify `bestFit` uses exact adjusted mean, count, normalized name, and BGG ID in order; diagnostic `support` remains count-first; every ordering is a complete permutation; and the overview is the supported prefix of `bestFit` capped at the configured length. Cover every Adjusted-Fit Scenario, including equal displayed values with unequal exact values and a limited entity that leads the full ordering.
 6. Parse representative BGG thing responses with zero, one, and multiple designer and artist links. Verify new and refreshed games retain IDs, names, completeness, and observation time, migrated old games remain refresh-needed until real data is fetched, failed refresh preserves last-valid eligibility with a warning, and games without BGG IDs are unrefreshable without a false refresh action.
 7. Exercise the intention lifecycle from no intention through create, leave active across repeated reads and long elapsed time, complete, retire, automatic observed-play completion, ownership ending, re-ownership, and later explicit new intention. Reject creation for a game that is not currently owned. Verify IDs behave as specified and durable history survives daemon restart and profile-cache deletion.
-8. Create Want to play with missing, invalid, stale, and timestamp-less evidence and verify a null baseline. Verify that only an owned active `want-to-play` intention with a valid current zero projection uses the specific unplayed question; verify nonzero, unavailable, and invalid projections plus historical `first-play` and `replay` use the generic question. Preserve historical kinds, baselines, lifecycle records, and original command receipts through migration and replay. Reject duplicate active intentions and stale expected versions.
-9. Verify every active intention appears immediately and remains visible with identical neutral language and ordering after arbitrary clock advancement. Confirm no date, age, urgency, overdue, countdown, or elapsed-time field affects the result.
-10. Verify only valid current play evidence strictly greater than baseline completes the intention during the data update. Cover a corrected count below baseline followed by an increase that remains at or below baseline. Missing, invalid, stale, equal, or lower evidence must leave it visible, with a warning where applicable, and repeated profile reads must cause no durable write. Changing only the unplayed-versus-generic presentation must not mutate durable state.
+8. Create Want to play with missing, invalid, stale, and timestamp-less evidence and verify a null baseline. Verify no presentation or selection decision changes the intention's durable kind, baseline, lifecycle record, or command receipt. Preserve historical `first-play` and `replay` kinds, baselines, lifecycle records, and original command receipts through migration and replay. Reject duplicate active intentions and stale expected versions.
+9. Verify attention follows the approved ranked-attention rule eligibility, winner selection, exact score ordering, deterministic tie-breakers, dispositions, and cap. Include active intentions that lose to another rule for the same game, rank below the visible cap, or are hidden by a disposition; verify durable intention state is unchanged.
+10. Verify only valid current play evidence strictly greater than baseline completes the intention during the data update. Cover a corrected count below baseline followed by an increase that remains at or below baseline. Missing, invalid, stale, equal, or lower evidence must not complete it. Repeated Profile reads and candidate publication must cause no durable intention, evidence, or history write.
 11. Replay the same command ID and canonical payload and verify the original success result returns without duplicate intentions or resolutions. Reuse the ID with a changed payload and verify rejection; use a new ID with a stale version and verify a current-state conflict. Simulate persistence failure and verify no success is reported.
 12. Verify the web and CLI can create, complete, and retire intentions and that their validated results match the subsequent profile output.
-13. Verify empty collection, supported identity, limited identity, missing metadata, missing ratings, evaluated-empty, active intentions, nothing-to-decide, evidence warnings, profile recomputation failure, transport failure, and validation failure remain visibly distinct.
-14. Verify the Profile Overview and game-detail profile surfaces no longer render narration, divergence, comparator-backed axis questions, outliers, standalone BGG clustering, axis weights, or utility declarations. Verify purchase utilization and redundancy remain available only in their independently approved destinations.
+13. Verify empty collection, supported identity, limited identity, missing metadata, missing ratings, evaluated-empty, populated ranked attention, successful empty attention (including zero cap and no selected candidates), evidence warnings, Profile recomputation failure, transport failure, and validation failure remain visibly distinct. Do not infer that successful empty means there are no active intentions.
+14. Verify the Profile Overview and game-detail profile surfaces no longer render narration, divergence, comparator-backed axis questions, outliers, standalone BGG clustering, axis weights, or utility declarations. Verify the approved underused-purchase rule is limited to ranked Profile attention, while purchase calculation/detail and owner-selected collection sorts remain independently governed; it does not introduce collection auto-sort, resale or buy/keep/sell recommendations, or an unreviewed broader collection judgment.
 15. Verify semantic heading order, accessible names and descriptions, linked evidence, focus visibility, focus retention, status announcements, field-error association, non-color-only states, contrast, and keyboard operation.
 16. Exercise the real rendered page in current Chromium at `375x812`, `768x1024`, and `1440x900` CSS pixels and at 200% desktop zoom. Verify no horizontal page overflow, clipped evidence, hover-only content, target below `44x44` CSS pixels, inaccessible action, focus loss, or mobile input zoom regression. Real-browser evidence is a release gate; if no runner exists, add one or record equivalent manual Chromium evidence rather than accepting source inspection.
 17. Verify old profile cache versions are discarded and every listed source change invalidates the affected projection. Run migration fixtures for the current schema, each supported prior schema, malformed partial input, simulated persistence interruption, restart, and repeated load. Existing collections must gain no fabricated intentions or complete designer/artist metadata, and failed migration must preserve the last valid artifact.
@@ -484,6 +482,6 @@ The owner approved these first-version choices on 2026-08-27:
 
 1. **Supported identity threshold:** the class's configured `minimumSupportedGames`, three by default, controls overview placement; associations below it remain limited drilldown evidence.
 2. **Veto treatment:** include the same displayed current fitness of `0`, visibly identify the veto, and never substitute hypothetical fitness.
-3. **Intention visibility:** every explicit active intention remains in a gentle list without dates, aging, urgency, or overdue language until valid current play evidence exceeds its baseline or the owner resolves it.
+3. **Intention lifecycle:** an explicit active intention has no date-based aging, urgency, or overdue state and remains durable until valid current play evidence exceeds its baseline or the owner resolves it. Profile visibility is now governed by the approved ranked-attention specification; not every active intention is guaranteed a card or visible slot.
 
 Changing one of these choices requires updating the examples, requirements, technical contract, and validation together before approval.

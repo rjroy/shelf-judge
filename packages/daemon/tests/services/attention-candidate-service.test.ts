@@ -264,7 +264,16 @@ describe("AttentionCandidateService core", () => {
     let sourceLoads = 0;
     let artifactLoads = 0;
     let clockReads = 0;
+    let rowAccesses = 0;
     let oracleCalls = 0;
+    let saves = 0;
+    const bounded = dueArtifact(current);
+    const stored = new Proxy(bounded, {
+      get(target, property) {
+        if (property === "rows") rowAccesses += 1;
+        return target[property as keyof AttentionCandidateArtifact];
+      },
+    });
     const service = new AttentionCandidateService({
       coordinator: { runExclusive: (operation) => operation() },
       clock: {
@@ -281,9 +290,12 @@ describe("AttentionCandidateService core", () => {
       storage: {
         loadAttentionCandidates: () => {
           artifactLoads += 1;
-          return Promise.resolve(dueArtifact(current));
+          return Promise.resolve(stored);
         },
-        saveAttentionCandidates: () => Promise.resolve(),
+        saveAttentionCandidates: () => {
+          saves += 1;
+          return Promise.resolve();
+        },
         discardAttentionCandidates: () => Promise.resolve(),
       },
       oracle: {
@@ -295,30 +307,36 @@ describe("AttentionCandidateService core", () => {
     });
 
     expect((await service.ensureFresh()).state).toBe("available");
-    expect({ sourceLoads, artifactLoads, oracleCalls }).toEqual({
+    expect({ sourceLoads, artifactLoads, oracleCalls, saves }).toEqual({
       sourceLoads: 1,
       artifactLoads: 1,
       oracleCalls: 0,
+      saves: 0,
     });
+    expect(rowAccesses).toBeGreaterThan(0);
     const warmClockReads = clockReads;
+    const warmRowAccesses = rowAccesses;
     expect((await service.ensureFresh()).state).toBe("available");
-    expect({ sourceLoads, artifactLoads, oracleCalls, clockReads }).toEqual({
+    expect({ sourceLoads, artifactLoads, rowAccesses, oracleCalls, saves, clockReads }).toEqual({
       sourceLoads: 1,
       artifactLoads: 1,
+      rowAccesses: warmRowAccesses,
       oracleCalls: 0,
+      saves: 0,
       clockReads: warmClockReads + 1,
     });
 
     generation += 1;
     expect((await service.ensureFresh()).state).toBe("available");
-    expect({ sourceLoads, artifactLoads, oracleCalls }).toEqual({
+    expect({ sourceLoads, artifactLoads, oracleCalls, saves }).toEqual({
       sourceLoads: 2,
       artifactLoads: 2,
       oracleCalls: 0,
+      saves: 0,
     });
   });
   test("a warmed null-boundary cache avoids all candidate validation work until generation changes", async () => {
-    const current = source(1);
+    const current = source(1, [ownedGame("due"), ownedGame("later")]);
     let generation = 0;
     let sourceLoads = 0;
     let artifactLoads = 0;
@@ -327,12 +345,24 @@ describe("AttentionCandidateService core", () => {
     let displayedFitnessCalls = 0;
     let oracleCalls = 0;
     let saves = 0;
-    const stored = new Proxy(artifact(current), {
-      get(target, property) {
-        if (property === "rows") rowAccesses += 1;
-        return target[property as keyof AttentionCandidateArtifact];
+    const unbounded = dueArtifact(current);
+    const stored = new Proxy(
+      {
+        ...unbounded,
+        rows: unbounded.rows.map((row) => ({
+          ...row,
+          evaluation: { ...row.evaluation, nextEvaluationBoundary: null },
+        })),
+        dueBuckets: [],
+        earliestBoundary: null,
       },
-    });
+      {
+        get(target, property) {
+          if (property === "rows") rowAccesses += 1;
+          return target[property as keyof AttentionCandidateArtifact];
+        },
+      },
+    );
     const service = new AttentionCandidateService({
       coordinator: { runExclusive: (operation) => operation() },
       clock: {

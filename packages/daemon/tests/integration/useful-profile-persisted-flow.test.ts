@@ -7,7 +7,14 @@ import { parseThingItems } from "../../src/services/bgg-xml-parser.js";
 import { createFileOps } from "../../src/services/file-ops.js";
 import { GameHistoryConflictError } from "../../src/services/game-service.js";
 import { createProfileService } from "../../src/services/profile-service.js";
-import { createTestApp } from "../helpers/test-app.js";
+import {
+  attentionCandidateStorageFor,
+  createAttentionCandidateProductionSourceLoader,
+} from "../../src/services/attention-candidate-service.js";
+import { computeAttentionCandidates } from "../../src/services/attention-candidate-engine.js";
+import { projectPurchaseUtilization } from "../../src/services/purchase-utilization-projection.js";
+import { createAttentionDispositionService } from "../../src/services/attention-disposition-service.js";
+import { createTestApp, jsonRequest } from "../helpers/test-app.js";
 
 const fixturePath = path.join(import.meta.dir, "../fixtures/useful-profile-schema-v3.json");
 const commandIds = {
@@ -47,6 +54,377 @@ function result(bggId: number, observedAt: string, plays: number | "missing"): B
 }
 
 describe("useful profile persisted flow", () => {
+  test("fans an integrated redundancy peer rating change into persisted purchase attention", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "shelf-judge-redundancy-fanout-"));
+    const dataDir = path.join(root, "data");
+    const configPath = path.join(root, "config.json");
+    const currentNow = "2026-08-28T11:00:00.000Z";
+    const now = () => currentNow;
+    const fileOps = createFileOps();
+    await fileOps.mkdir(dataDir);
+    const bggClient: BggClient = {
+      isConfigured: () => true,
+      searchGames: () => Promise.resolve([]),
+      getUserCollection: () => Promise.resolve([]),
+      getPlayCount: () => Promise.reject(new Error("not implemented")),
+      getGame: (bggId) => Promise.resolve(result(bggId, currentNow, 1)),
+      getGames: () => Promise.resolve(new Map()),
+    };
+    const app = createTestApp({ fileOps, dataDir, configPath, now, bggClient });
+    const candidateStorage = attentionCandidateStorageFor(app.storageService);
+
+    const recompute = async () => {
+      const source = await createAttentionCandidateProductionSourceLoader(app.storageService)();
+      const fitness = await app.displayedFitnessService.listGamesFromSnapshot(source, {
+        includePredicted: true,
+      });
+      const purchaseProjectionByGameId = new Map(
+        fitness.map((entry) => [
+          entry.game.id,
+          projectPurchaseUtilization(entry, source.collection.entertainmentBenchmark),
+        ]),
+      );
+      const full = computeAttentionCandidates({
+        collection: source.collection,
+        evaluatedAt: currentNow,
+        displayedFitness: fitness,
+        purchaseUtilizationProjectionByGameId: purchaseProjectionByGameId,
+        displayedFitnessSourceIdentity: source.identity,
+      });
+      const artifact = await candidateStorage.loadAttentionCandidates();
+      if (artifact === null) throw new Error("Expected durable candidate artifact");
+      const storedRows = artifact.rows
+        .map(({ gameId, evaluation }) => [gameId, evaluation] as const)
+        .sort(([left], [right]) => left.localeCompare(right));
+      const expectedRows = full.evaluations
+        .map(({ gameId, ...evaluation }) => [gameId, { gameId, ...evaluation }] as const)
+        .sort(([left], [right]) => left.localeCompare(right));
+      expect(storedRows).toEqual(expectedRows);
+
+      const profile = await app.profileService.getProfile();
+      expect(profile.status).toBe("available");
+      if (profile.status !== "available") throw new Error("Expected public Profile cards");
+      const cards = profile.attention.cards
+        .map(
+          ({ gameId, ruleId, attentionScore }) =>
+            [gameId, ruleId, attentionScore.numerator, attentionScore.denominator] as const,
+        )
+        .sort(([left], [right]) => left.localeCompare(right));
+      const expectedCards = full.evaluations
+        .flatMap(({ gameId, winner }) =>
+          winner === null
+            ? []
+            : [
+                [
+                  gameId,
+                  winner.ruleId,
+                  winner.attentionScore.numerator,
+                  winner.attentionScore.denominator,
+                ] as const,
+              ],
+        )
+        .sort(([left], [right]) => left.localeCompare(right));
+      expect(cards).toEqual(expectedCards);
+      return { artifact, cards, fitness, full, purchaseProjectionByGameId };
+    };
+
+    try {
+      const peerA = await app.gameService.addGame({ name: "Peer A", bggId: 901 });
+      const targetB = await app.gameService.addGame({ name: "Target B", bggId: 902 });
+      await app.gameService.refreshBggData(peerA.game.id);
+      await app.gameService.refreshBggData(targetB.game.id);
+      const axis = await app.axisService.createAxis({
+        name: "Redundancy personal fit",
+        weight: 100,
+        source: "personal",
+      });
+      await app.gameService.rateGame(peerA.game.id, { [axis.id]: 10 });
+      await app.gameService.rateGame(targetB.game.id, { [axis.id]: 6 });
+
+      const settings = await jsonRequest(app.app, "PATCH", "/api/redundancy/settings", {
+        enabled: true,
+        stage: "integrated",
+        similarityThreshold: 0.1,
+        maxPenalty: 2,
+        minNeighbors: 1,
+        expectedNeighbors: 5,
+      });
+      expect(settings.status).toBe(200);
+      const benchmark = await jsonRequest(
+        app.app,
+        "PUT",
+        "/api/collection/entertainment-benchmark",
+        {
+          amount: "10.00",
+        },
+      );
+      expect(benchmark.status).toBe(200);
+      const acquisition = await jsonRequest(
+        app.app,
+        "PUT",
+        `/api/games/${targetB.game.id}/acquisition`,
+        { state: "purchase", amount: "500.00" },
+      );
+      expect(acquisition.status).toBe(200);
+
+      const before = await recompute();
+      const beforePeer = before.fitness.find(({ game }) => game.id === peerA.game.id);
+      const beforeTarget = before.fitness.find(({ game }) => game.id === targetB.game.id);
+      const beforeProjection = before.purchaseProjectionByGameId.get(targetB.game.id);
+      const beforeWinner = before.full.evaluations.find(
+        ({ gameId }) => gameId === targetB.game.id,
+      )?.winner;
+      const beforeCard = before.cards.find(([gameId]) => gameId === targetB.game.id);
+      if (!beforePeer?.score || !beforeTarget?.score || beforeProjection === undefined)
+        throw new Error("Expected scored redundancy peers and purchase projection");
+      expect(
+        beforeTarget.score.redundancyAdjustment?.nicheNeighbors.some(
+          ({ gameId }) => gameId === peerA.game.id,
+        ),
+      ).toBe(true);
+      expect(beforeWinner?.ruleId).toBe("underused-purchase");
+      expect(beforeCard?.[1]).toBe("underused-purchase");
+
+      await app.gameService.rateGame(peerA.game.id, { [axis.id]: 1 });
+      const after = await recompute();
+      const afterPeer = after.fitness.find(({ game }) => game.id === peerA.game.id);
+      const afterTarget = after.fitness.find(({ game }) => game.id === targetB.game.id);
+      const afterProjection = after.purchaseProjectionByGameId.get(targetB.game.id);
+      const afterWinner = after.full.evaluations.find(
+        ({ gameId }) => gameId === targetB.game.id,
+      )?.winner;
+      const afterCard = after.cards.find(([gameId]) => gameId === targetB.game.id);
+      if (!afterPeer?.score || !afterTarget?.score || afterProjection === undefined)
+        throw new Error("Expected recomputed peer scores and purchase projection");
+      expect(afterPeer.score.score).not.toBe(beforePeer.score.score);
+      expect(afterTarget.score.score).not.toBe(beforeTarget.score.score);
+      expect(afterProjection.purchaseUtilization.components.valueMultiplier).not.toEqual(
+        beforeProjection.purchaseUtilization.components.valueMultiplier,
+      );
+      expect(afterWinner?.ruleId).toBe("underused-purchase");
+      expect(afterWinner?.attentionScore).not.toEqual(beforeWinner?.attentionScore);
+      expect(afterCard?.[1]).toBe("underused-purchase");
+      expect(afterCard?.slice(2)).not.toEqual(beforeCard?.slice(2));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps nonempty persisted candidates oracle-equivalent across changes, clock recovery, and corruption", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "shelf-judge-candidate-flow-"));
+    const dataDir = path.join(root, "data");
+    const configPath = path.join(root, "config.json");
+    const collectionPath = path.join(dataDir, "collection.json");
+    const candidatePath = path.join(dataDir, "attention-candidates.json");
+    const profilePath = path.join(dataDir, "profile.json");
+    let currentNow = "2026-08-28T11:00:00.000Z";
+    const now = () => currentNow;
+    const fileOps = createFileOps();
+    await fileOps.mkdir(dataDir);
+    const bggClient: BggClient = {
+      isConfigured: () => true,
+      searchGames: () => Promise.resolve([]),
+      getUserCollection: () => Promise.resolve([]),
+      getPlayCount: () => Promise.reject(new Error("not implemented")),
+      getGame: (bggId) => Promise.resolve(result(bggId, currentNow, 0)),
+      getGames: () => Promise.resolve(new Map()),
+    };
+    const app = createTestApp({ fileOps, dataDir, configPath, now, bggClient });
+    const assertOracleParity = async (context = app) => {
+      const source = await createAttentionCandidateProductionSourceLoader(context.storageService)();
+      const artifact = await attentionCandidateStorageFor(
+        context.storageService,
+      ).loadAttentionCandidates();
+      if (artifact === null) throw new Error("Expected durable candidate artifact");
+      const fitness = await context.displayedFitnessService.listGamesFromSnapshot(source, {
+        includePredicted: true,
+      });
+      const recomputed = computeAttentionCandidates({
+        collection: source.collection,
+        evaluatedAt: currentNow,
+        displayedFitness: fitness,
+        purchaseUtilizationProjectionByGameId: new Map(
+          fitness.map((entry) => [
+            entry.game.id,
+            projectPurchaseUtilization(entry, source.collection.entertainmentBenchmark),
+          ]),
+        ),
+        displayedFitnessSourceIdentity: source.identity,
+      });
+      expect(artifact.rows).toHaveLength(
+        source.collection.games.filter(({ ownership }) => ownership === "owned").length,
+      );
+      const artifactEvaluations = artifact.rows
+        .map(({ gameId, evaluation }) => [gameId, evaluation] as const)
+        .sort(([left], [right]) => left.localeCompare(right));
+      const oracleEvaluations = recomputed.evaluations
+        .map(({ gameId, ...evaluation }) => [gameId, { gameId, ...evaluation }] as const)
+        .sort(([left], [right]) => left.localeCompare(right));
+      expect(artifactEvaluations).toEqual(oracleEvaluations);
+      const profile = await context.profileService.getProfile();
+      expect(profile.status).toBe("available");
+      if (profile.status !== "available") throw new Error("Expected available Profile cards");
+      const expectedCards = recomputed.evaluations
+        .flatMap(({ gameId, winner }) =>
+          winner === null
+            ? []
+            : [
+                [
+                  gameId,
+                  winner.ruleId,
+                  winner.attentionScore.numerator,
+                  winner.attentionScore.denominator,
+                ],
+              ],
+        )
+        .sort(([left], [right]) => String(left).localeCompare(String(right)));
+      const actualCards = profile.attention.cards
+        .map(({ gameId, ruleId, attentionScore }) => [
+          gameId,
+          ruleId,
+          attentionScore.numerator,
+          attentionScore.denominator,
+        ])
+        .sort(([left], [right]) => String(left).localeCompare(String(right)));
+      expect(actualCards).toEqual(expectedCards);
+      return { artifact, recomputed, fitness };
+    };
+
+    try {
+      const added = await app.gameService.addGame({ name: "Persisted attention game", bggId: 987 });
+      await app.gameService.refreshBggData(added.game.id);
+      const initial = await assertOracleParity();
+      const axis = await app.axisService.createAxis({
+        name: "Changed-input evidence",
+        weight: 100,
+        source: "personal",
+      });
+      await app.gameService.rateGame(added.game.id, { [axis.id]: 10 });
+      const baseline = await assertOracleParity();
+      expect(baseline.fitness.some(({ score }) => score !== null)).toBe(true);
+      expect(baseline.artifact.identity.collectionRevision).not.toBe(
+        initial.artifact.identity.collectionRevision,
+      );
+      expect(baseline.artifact.rows.some(({ evaluation }) => evaluation.winner !== null)).toBe(
+        true,
+      );
+
+      const mutationGame = await app.gameService.addGame({
+        name: "Persisted mutation evidence",
+        bggId: 988,
+      });
+      await app.gameService.refreshBggData(mutationGame.game.id);
+      await assertOracleParity();
+      const intention = await app.intentionService.execute({
+        type: "create",
+        commandId: "31000000-0000-4000-8000-000000000005",
+        gameId: mutationGame.game.id,
+        kind: "first-play",
+        expectedActiveIntention: "absent",
+      });
+      expect(intention.ok).toBe(true);
+      await assertOracleParity();
+      currentNow = "2026-08-28T11:01:00.000Z";
+      const playCorrection = await app.intentionService.setPlayCount(mutationGame.game.id, 1);
+      expect(playCorrection.ok).toBe(true);
+      await assertOracleParity();
+      const acquisition = await jsonRequest(
+        app.app,
+        "PUT",
+        `/api/games/${mutationGame.game.id}/acquisition`,
+        { state: "purchase", amount: "20.00" },
+      );
+      expect(acquisition.status).toBe(200);
+      await assertOracleParity();
+      await app.tournamentService.updateSettings({ normalizationHalfWidth: 401 });
+      await assertOracleParity();
+
+      const winner = baseline.recomputed.evaluations.find(
+        ({ gameId }) => gameId === added.game.id,
+      )?.winner;
+      if (winner === null || winner === undefined)
+        throw new Error("Expected an actionable candidate");
+
+      const dispositions = createAttentionDispositionService({
+        collectionMutations: app.collectionMutationService,
+        clock: { now: () => new Date(currentNow) },
+        currentSelection: () => Promise.resolve({ gameId: added.game.id, ...winner }),
+        maintenance: app.attentionCandidateService,
+      });
+      const snoozed = await dispositions.execute({
+        operation: "not-now",
+        commandId: "31000000-0000-4000-8000-000000000004",
+        gameId: added.game.id,
+        ruleId: winner.ruleId,
+        ruleVersion: winner.ruleVersion,
+        fingerprint: winner.fingerprint,
+        expectedVersion: 0,
+      });
+      expect(snoozed.outcome).toBe("accepted");
+      const snoozedState = await assertOracleParity();
+      const persistedBeforeClockAdvance = await readFile(candidatePath, "utf8");
+      const snooze = snoozedState.artifact.rows.find(({ gameId }) => gameId === added.game.id);
+      expect(snooze?.evaluation.winner).toBeNull();
+      expect(snooze?.evaluation.nextEvaluationBoundary).toBe("2026-09-27T11:01:00.000Z");
+
+      currentNow = "2026-09-27T11:00:59.999Z";
+      const beforeBoundary = await app.attentionCandidateService.ensureFresh();
+      expect(beforeBoundary.state).toBe("available");
+      if (beforeBoundary.state !== "available")
+        throw new Error("Expected candidates before boundary");
+      expect(
+        beforeBoundary.artifact.rows.find(({ gameId }) => gameId === added.game.id)?.evaluation
+          .winner,
+      ).toBeNull();
+      currentNow = "2026-09-27T11:01:00.000Z";
+      const atBoundary = await app.attentionCandidateService.ensureFresh();
+      expect(atBoundary.state).toBe("available");
+      if (atBoundary.state !== "available") throw new Error("Expected candidates at boundary");
+      expect(
+        atBoundary.artifact.rows.find(({ gameId }) => gameId === added.game.id)?.evaluation.winner,
+      ).not.toBeNull();
+      await assertOracleParity();
+
+      const beforeRead = {
+        collection: await readFile(collectionPath, "utf8"),
+        candidates: await readFile(candidatePath, "utf8"),
+      };
+      await app.profileService.getProfile();
+      expect(await readFile(collectionPath, "utf8")).toBe(beforeRead.collection);
+      expect(await readFile(candidatePath, "utf8")).toBe(beforeRead.candidates);
+      expect(await fileOps.exists(profilePath)).toBe(true);
+
+      currentNow = "2026-09-28T11:02:00.000Z";
+      await writeFile(candidatePath, persistedBeforeClockAdvance, "utf8");
+      const restarted = createTestApp({ fileOps, dataDir, configPath, now, bggClient });
+      const afterDowntime = await restarted.attentionCandidateService.ensureFresh();
+      expect(afterDowntime.state).toBe("available");
+      if (afterDowntime.state !== "available")
+        throw new Error("Expected restart candidate recovery");
+      expect(afterDowntime.artifact.evaluatedAt).toBe(currentNow);
+      expect(afterDowntime.artifact.rows).toHaveLength(2);
+      expect(
+        afterDowntime.artifact.rows.find(({ gameId }) => gameId === added.game.id)?.evaluation
+          .winner,
+      ).not.toBeNull();
+      await assertOracleParity(restarted);
+
+      await writeFile(candidatePath, '{"corrupt":true}', "utf8");
+      const recoveredProcess = createTestApp({ fileOps, dataDir, configPath, now, bggClient });
+      const repaired = await recoveredProcess.attentionCandidateService.ensureFresh();
+      expect(repaired.state).toBe("available");
+      if (repaired.state !== "available") throw new Error("Expected corrupt artifact rebuild");
+      expect(repaired.artifact.rows).toHaveLength(2);
+      expect(
+        repaired.artifact.rows.find(({ gameId }) => gameId === added.game.id)?.evaluation.winner,
+      ).not.toBeNull();
+      expect(await readFile(candidatePath, "utf8")).not.toBe('{"corrupt":true}');
+      await assertOracleParity(recoveredProcess);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("migrates v3 through real atomic files and preserves exact lifecycle state across restart", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "shelf-judge-profile-flow-"));
     const dataDir = path.join(root, "data");

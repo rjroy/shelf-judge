@@ -1,7 +1,7 @@
 ---
 title: "Implementation plan: expanded profile attention opportunities"
 date: 2026-09-20
-status: approved
+status: executed
 tags: [plan, profile, attention, intention-lifecycle]
 modules: [shared, daemon, web]
 related:
@@ -10,6 +10,17 @@ related:
 ---
 
 # Implementation plan: expanded profile attention opportunities
+
+> **Execution and supersession record (2026-09-22):** The original presentation
+> refinement was implemented, then its attention-selection scope was replaced by
+> the approved [fitness-ranked attention specification](../specs/fitness-ranked-profile-attention.md)
+> and [replacement plan](fitness-ranked-profile-attention.md). Treat this plan
+> as an execution record, not as current selection guidance. The replacement is
+> specifically about attention selection; this does not retire the active
+> intention lifecycle, completion, retirement, warning, or history contracts.
+> The earlier instruction to reconcile the current Profile reference is retained
+> as historical plan context; this docs-only reconciliation did not edit any
+> `.lore/reference/` file.
 
 ## Scope
 

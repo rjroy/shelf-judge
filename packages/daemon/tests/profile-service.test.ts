@@ -13,6 +13,12 @@ import {
 import { createMockFileOps } from "./helpers/mock-file-ops.js";
 import { createTestApp, jsonRequest } from "./helpers/test-app.js";
 
+async function loadAttentionCandidates(storageService: StorageService) {
+  if (storageService.loadAttentionCandidates === undefined)
+    throw new Error("Attention candidate storage is unavailable");
+  return storageService.loadAttentionCandidates();
+}
+
 describe("profile source identity", () => {
   test("canonicalizes recursively sorted object keys before hashing", () => {
     const left = { z: [{ b: 2, a: 1 }], a: { y: true, x: null } };
@@ -263,18 +269,40 @@ describe("ProfileService", () => {
     expect(await ctx.storageService.loadProfile()).toBeNull();
   });
 
-  test("publishes the captured identity before each of the four source mutations", async () => {
+  test("serializes Profile publication against source mutations and detects a cap writer", async () => {
     const sourcePaths = {
       collection: "/test/data/collection.json",
       tournament: "/test/data/tournament.json",
       prediction: "/test/data/prediction-settings.json",
       redundancy: "/test/data/redundancy-settings.json",
+      config: "/test/config.json",
     } as const;
 
     for (const source of Object.keys(sourcePaths) as Array<keyof typeof sourcePaths>) {
       const fileOps = createMockFileOps();
       const ctx = createTestApp({ fileOps });
-      await ctx.gameService.addGame({ name: "Profile source baseline" });
+      const created = await ctx.gameService.addGame({ name: "Profile source candidate" });
+      const baselineCollection = await ctx.storageService.loadCollection();
+      const candidate = baselineCollection.games.find(({ id }) => id === created.game.id);
+      if (!candidate) throw new Error("Expected profile candidate game");
+      candidate.numPlays = 0;
+      candidate.playCountEvidence = {
+        status: "valid",
+        value: 0,
+        source: "manual",
+        observedAt: "2026-09-20T00:00:00.000Z",
+      };
+      baselineCollection.intentions.push({
+        intentionId: "profile-source-candidate",
+        gameId: candidate.id,
+        kind: "want-to-play",
+        baseline: null,
+        createdAt: "2026-09-20T00:00:00.000Z",
+        version: 1,
+        resolution: null,
+      });
+      baselineCollection.revision += 1;
+      await ctx.storageService.saveCollection(baselineCollection);
       await ctx.storageService.loadTournament();
 
       let snapshotCaptured!: () => void;
@@ -294,7 +322,7 @@ describe("ProfileService", () => {
       let armed = false;
       const rename = fileOps.rename.bind(fileOps);
       fileOps.rename = async (from, to) => {
-        if (armed && to === "/test/data/profile.json") {
+        if (armed && source !== "config" && to === "/test/data/profile.json") {
           await rename(from, to);
           profilePublished();
           await releasePublicationPromise;
@@ -328,11 +356,32 @@ describe("ProfileService", () => {
             ? ctx.tournamentService.updateSettings({ normalizationHalfWidth: 450 })
             : source === "prediction"
               ? ctx.predictionService.updateSettings({ defaultK: 7 })
-              : jsonRequest(ctx.app, "PATCH", "/api/redundancy/settings", { enabled: true });
+              : source === "redundancy"
+                ? jsonRequest(ctx.app, "PATCH", "/api/redundancy/settings", { enabled: true })
+                : ctx.storageService
+                    .loadConfig()
+                    .then((config) =>
+                      ctx.storageService.saveConfig({ ...config, profileAttentionCardLimit: 0 }),
+                    );
       await Promise.resolve();
-      expect(sourcePersistenceStarted).toBe(false);
+      expect(sourcePersistenceStarted).toBe(source === "config");
 
+      if (source === "config") await mutation;
       releaseComputation();
+      if (source === "config") {
+        expect((await profileRead).status).toBe("unavailable");
+        const artifact = await loadAttentionCandidates(ctx.storageService);
+        const winner = artifact?.rows.find((row) => row.gameId === candidate.id)?.evaluation.winner;
+        expect(winner?.attentionScore.numerator).not.toBe("0");
+        expect(winner).not.toBeNull();
+        const postWriteProfile = await service.getProfile();
+        expect(postWriteProfile.status).toBe("available");
+        if (postWriteProfile.status !== "available")
+          throw new Error("Expected available post-write Profile");
+        expect(postWriteProfile.attention.state).toBe("disabled");
+        expect(postWriteProfile.attention.cards).toEqual([]);
+        continue;
+      }
       await profilePublishedPromise;
       expect(sourcePersistenceStarted).toBe(false);
       if (capturedSources === null) throw new Error("Profile source snapshot was not captured");
@@ -342,13 +391,29 @@ describe("ProfileService", () => {
       expect(ProfileDataSchema.parse(JSON.parse(firstCacheRaw)).publicationIdentity.source).toEqual(
         firstIdentity,
       );
+      const firstProfile = ProfileDataSchema.parse(JSON.parse(firstCacheRaw)).profile;
+      expect(firstProfile.attention.cards).toHaveLength(1);
+      expect(firstProfile.attention.cards[0]).toMatchObject({
+        gameId: candidate.id,
+        ruleId: "explicit-intention",
+      });
+      expect(firstProfile.attention.cards[0]?.attentionScore.numerator).not.toBe("0");
 
       releasePublication();
       expect((await profileRead).status).toBe("available");
       await mutation;
       expect(sourcePersistenceStarted).toBe(true);
 
-      expect((await service.getProfile()).status).toBe("available");
+      const updatedProfile = await service.getProfile();
+      expect(updatedProfile.status).toBe("available");
+      if (updatedProfile.status !== "available") continue;
+      expect(updatedProfile.attention.state).toBe("ranked");
+      expect(updatedProfile.attention.cards).toHaveLength(1);
+      const updatedArtifact = await loadAttentionCandidates(ctx.storageService);
+      expect(
+        updatedArtifact?.rows.find((row) => row.gameId === candidate.id)?.evaluation.winner
+          ?.attentionScore,
+      ).toEqual(updatedProfile.attention.cards[0]?.attentionScore);
       const [collection, tournament, predictionSettings, redundancySettings] = await Promise.all([
         ctx.storageService.loadCollection(),
         ctx.storageService.loadTournament(),
