@@ -466,45 +466,89 @@ describe("Analyst daemon routes", () => {
   });
 
   test("fails closed when identity tracking is full without forgetting prior bindings", async () => {
-    const context = createTestApp({ groundedAnalysisProvider: configuredProvider() });
+    const provider = configuredProvider();
+    const context = createTestApp({ groundedAnalysisProvider: provider });
+    const attestationService = createAnalystAttestationService();
+    const evidenceService = createAnalystEvidenceService({
+      storageService: context.storageService,
+      projectionSnapshotService: {
+        capture: () =>
+          Promise.resolve({
+            collectionId: "collection-1",
+            collectionRevision: 1,
+            snapshotFingerprint: "identity-capacity-test",
+            sources: [],
+            page: () => {
+              throw new Error("No evidence pages are requested by this provider");
+            },
+          } satisfies AnalystProjectionSnapshot),
+      },
+      ownerGameNoteService: context.ownerGameNoteService,
+      ownerNoteAuthorizationScope: {
+        gameIds: [],
+        allowCollectionSynthesis: false,
+        allowLocalTextSearch: false,
+      },
+      citationSecret: new Uint8Array(32).fill(4),
+    });
+    const analystRoutes = createAnalystRoutes({
+      getConfigurationStatus: () => provider.configurationStatus,
+      transcriptValidator: createAnalystTranscriptValidator({
+        attestationService,
+        provider: { providerId: "provider", modelId: "model" },
+      }),
+      evidenceService,
+      turnService: createAnalystTurnService({ provider, evidenceService, log: () => undefined }),
+      attestationService,
+    });
     for (let index = 0; index < 1_024; index += 1) {
-      const response = await jsonRequest(
-        context.app,
-        "POST",
-        "/api/analyst/turns/stream",
-        turnRequest({ conversationId: `conversation-${index}`, requestId: `request-${index}` }),
-      );
+      const response = await analystRoutes.routes.request("http://localhost/analyst/turns/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          turnRequest({ conversationId: `conversation-${index}`, requestId: `request-${index}` }),
+        ),
+      });
       expect(eventTypes(await response.text()).at(-1)).toBe("completed");
     }
 
-    const reused = await jsonRequest(
-      context.app,
-      "POST",
-      "/api/analyst/turns/stream",
-      turnRequest({ conversationId: "conversation-0", requestId: "request-0" }),
-    );
+    const reused = await analystRoutes.routes.request("http://localhost/analyst/turns/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(
+        turnRequest({ conversationId: "conversation-0", requestId: "request-0" }),
+      ),
+    });
     expect(await reused.json()).toEqual({ outcome: "request-id-misuse", requestId: "request-0" });
 
-    const changedCapability = await jsonRequest(
-      context.app,
-      "POST",
-      "/api/analyst/turns/stream",
-      turnRequest({
-        conversationId: "conversation-0",
-        conversationCapability: "b".repeat(64),
-        requestId: "request-after-capacity",
-      }),
+    const changedCapability = await analystRoutes.routes.request(
+      "http://localhost/analyst/turns/stream",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          turnRequest({
+            conversationId: "conversation-0",
+            conversationCapability: "b".repeat(64),
+            requestId: "request-after-capacity",
+          }),
+        ),
+      },
     );
     expect(await changedCapability.json()).toEqual({
       outcome: "request-id-misuse",
       requestId: "request-after-capacity",
     });
 
-    const unavailable = await jsonRequest(
-      context.app,
-      "POST",
-      "/api/analyst/turns/stream",
-      turnRequest({ conversationId: "conversation-overflow", requestId: "request-overflow" }),
+    const unavailable = await analystRoutes.routes.request(
+      "http://localhost/analyst/turns/stream",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          turnRequest({ conversationId: "conversation-overflow", requestId: "request-overflow" }),
+        ),
+      },
     );
     expect(unavailable.status).toBe(503);
     expect(await unavailable.json()).toEqual({

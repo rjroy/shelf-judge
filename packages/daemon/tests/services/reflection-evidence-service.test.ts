@@ -370,35 +370,32 @@ describe("ReflectionEvidenceService", () => {
     const collection = await context.storageService.loadCollection();
     const templateGame = collection.games.find(({ id }) => id === fixtureGame.id);
     if (templateGame === undefined) throw new Error("Expected durable fixture game");
-    const games = Array.from({ length: 200 }, (_, index) =>
-      index === 0
-        ? templateGame
-        : {
-            ...structuredClone(templateGame),
-            id: crypto.randomUUID(),
-            name: `Lazy reflection game ${String(index + 1).padStart(3, "0")}`,
-          },
-    );
+    const games = Array.from({ length: 200 }, (_, index) => ({
+      ...templateGame,
+      ...(index === 0 ? {} : { id: crypto.randomUUID() }),
+      name: `Lazy reflection game ${String(index + 1).padStart(3, "0")}`,
+      ownerNote:
+        index === 0
+          ? {
+              state: "present" as const,
+              version: 1,
+              updatedAt: UPDATED_AT,
+              text: "Quick setup makes this easy to bring to the table.",
+            }
+          : index === 1
+            ? {
+                state: "present" as const,
+                version: 1,
+                updatedAt: UPDATED_AT,
+                text: "Quick setup means this gets played after work.",
+              }
+            : templateGame.ownerNote,
+    }));
     await context.storageService.saveCollection({ ...collection, revision: 200, games });
     const selected = games.slice(0, 2).map(({ id }) => id);
     const [firstGameId, secondGameId] = selected;
     if (firstGameId === undefined || secondGameId === undefined)
       throw new Error("Expected selected fixture games");
-    expect(
-      await context.ownerGameNoteService.set(firstGameId, {
-        commandId: "66000000-0000-4000-8000-000000000010",
-        expectedVersion: 0,
-        text: "Quick setup makes this easy to bring to the table.",
-      }),
-    ).toMatchObject({ ok: true });
-    expect(
-      await context.ownerGameNoteService.set(secondGameId, {
-        commandId: "66000000-0000-4000-8000-000000000011",
-        expectedVersion: 0,
-        text: "Quick setup means this gets played after work.",
-      }),
-    ).toMatchObject({ ok: true });
-
     const reflectionProjectionSnapshotService = createReflectionProjectionSnapshotService({
       storageService: context.storageService,
       displayedFitnessService: context.displayedFitnessService,
