@@ -55,7 +55,7 @@ bun run dev    # daemon (bun --watch) + next dev
 bun run start  # daemon (bun) + next start
 ```
 
-Each workspace package defines its own `dev` and `start` scripts. The root scripts wire them together via `bun run --filter`.
+The daemon and web packages each define `dev` and `start` scripts. The root `dev` script runs them via `bun run --cwd packages/daemon dev` and `bun run --cwd packages/web dev`; the root `start` script uses `bun run --filter` to launch each package's `start` script.
 
 ## Unix Socket Connectivity
 
