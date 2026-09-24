@@ -4,9 +4,11 @@ import { createRedundancyRoutes } from "../src/routes/redundancy";
 import type { RedundancySettings } from "@shelf-judge/shared";
 import type { StorageService } from "../src/services/storage-service";
 import { DEFAULT_REDUNDANCY_SETTINGS } from "../src/services/redundancy-engine";
+import { createSettingsRouteStorageStub } from "./helpers/settings-route-storage";
 
 function createMockStorageService(): StorageService & { settings: RedundancySettings } {
   const mock = {
+    ...createSettingsRouteStorageStub(),
     settings: { ...DEFAULT_REDUNDANCY_SETTINGS },
     loadRedundancySettings() {
       return Promise.resolve(structuredClone(mock.settings));
@@ -15,28 +17,6 @@ function createMockStorageService(): StorageService & { settings: RedundancySett
       mock.settings = structuredClone(s);
       return Promise.resolve();
     },
-    // Stubs for unused StorageService methods
-    loadCollection: () => Promise.reject(new Error("not implemented")),
-    saveCollection: () => Promise.resolve(),
-    loadConfig: () => Promise.reject(new Error("not implemented")),
-    saveConfig: () => Promise.resolve(),
-    loadTournament: () => Promise.reject(new Error("not implemented")),
-    saveTournament: () => Promise.resolve(),
-    loadProfile: () => Promise.resolve(null),
-    saveProfile: () => Promise.resolve(),
-    loadPredictionSettings: () =>
-      Promise.resolve({
-        stageThresholds: [5, 15, 30] as [number, number, number],
-        defaultK: 5,
-        minSimilarityThreshold: 0.2,
-      }),
-    savePredictionSettings: () => Promise.resolve(),
-    loadNicheSettings: () => Promise.resolve({ ignoredTags: [] }),
-    saveNicheSettings: () => Promise.resolve(),
-    loadWishlist: () => Promise.resolve([]),
-    saveWishlist: () => Promise.resolve(),
-    loadShelfConfig: () => Promise.resolve({ units: [], createdAt: "", updatedAt: "" }),
-    saveShelfConfig: () => Promise.resolve(),
   };
   return mock;
 }
