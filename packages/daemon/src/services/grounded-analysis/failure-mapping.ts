@@ -1,5 +1,9 @@
 import { GroundedCapabilityError } from "./capability-inspection.js";
-import type { GroundedProviderUsage, GroundedUsageUnavailable } from "@shelf-judge/shared";
+import {
+  toErrorMessage,
+  type GroundedProviderUsage,
+  type GroundedUsageUnavailable,
+} from "@shelf-judge/shared";
 
 export type GroundedAnalysisFailureReason =
   | "cancelled"
@@ -78,7 +82,7 @@ function numericStatus(value: unknown): number | undefined {
 
 function failureEvidence(error: unknown): FailureEvidence {
   const name = error instanceof Error ? error.name : "";
-  const message = error instanceof Error ? error.message : String(error);
+  const message = toErrorMessage(error);
   let code: string | undefined;
   let status: number | undefined;
 

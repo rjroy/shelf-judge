@@ -1,5 +1,10 @@
 import { v4 as uuidv4 } from "uuid";
-import type { WishlistEntry, WishlistBreakdownEntry, NicheImpact } from "@shelf-judge/shared";
+import {
+  toErrorMessage,
+  type WishlistEntry,
+  type WishlistBreakdownEntry,
+  type NicheImpact,
+} from "@shelf-judge/shared";
 import type { StorageService } from "./storage-service.js";
 import type { PredictionService, PredictedGameResult } from "./prediction-service.js";
 import type { GameService } from "./game-service.js";
@@ -167,7 +172,7 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
           wishlist[i] = updated;
           refreshed++;
         } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
+          const message = toErrorMessage(err);
           errors.push(`${existing.name}: ${message}`);
         }
       }

@@ -13,6 +13,7 @@ import {
   type IntentionCommandReceipt,
   type CommandReceipt,
   GameIntentionDetailSchema,
+  toErrorMessage,
 } from "@shelf-judge/shared";
 import type { CollectionMutationService } from "./collection-mutation-service.js";
 import { createLogger, type Logger } from "./logger.js";
@@ -456,7 +457,7 @@ export function createIntentionService(deps: IntentionServiceDeps): IntentionSer
       });
       return result;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       const failedContext = commandContext as OwnerCommandLogContext | null;
       logger.error("intention transition outcome", {
         trigger: "owner-command",

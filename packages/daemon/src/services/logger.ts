@@ -1,3 +1,5 @@
+import { toErrorMessage } from "@shelf-judge/shared";
+
 export interface Logger {
   log(...args: unknown[]): void;
   warn(...args: unknown[]): void;
@@ -25,7 +27,7 @@ function serializeDiagnostic(value: object): string {
       return nestedValue;
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = toErrorMessage(error);
     return `[Unable to serialize diagnostic: ${message}]`;
   }
 }
