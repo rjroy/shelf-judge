@@ -1,5 +1,4 @@
 import {
-  AxisSchema,
   AttentionCommandReceiptSchema,
   AttentionDispositionCommandSchema,
   AttentionDispositionCommandResultSchema,
@@ -8,40 +7,66 @@ import {
   GameDetailWithPurchaseUtilizationSchema,
   IntentionMutationResultSchema,
   OwnerGameNoteClearRequestSchema,
-  OwnerGameNoteAcceptedMetadataSchema,
   OwnerGameNoteMutationResultSchema,
-  OwnerGameNoteSchema,
   OwnerGameNoteSetRequestSchema,
-  REFLECTION_CONTRACT_VERSION,
   REFLECTION_QUESTION_IDS,
+  REFLECTION_QUESTION_POLICIES,
   ReflectionGetResultSchema,
-  canonicalizeOwnerGameNoteRequest,
   attentionDispositionRequestFingerprint,
   calculatePurchaseUtilization,
-  type CollectionProfileResult,
-  type CollectionProfileAttentionCard,
   type AttentionDispositionCommand,
-  type Game,
   type GameDetailWithPurchaseUtilization,
-  type GameWithPurchaseUtilization,
-  type NichePosition,
   type OwnerGameNote,
-  type OwnerGameNoteAcceptedMetadata,
   type PlayIntention,
-  type PurchaseUtilizationResult,
   type ResolvedPlayIntentionHistory,
   type ReflectionGetResult,
   type ReflectionQuestionId,
-  type TournamentGameStatsDisplay,
 } from "@shelf-judge/shared";
-import { createHash } from "node:crypto";
-import { lstatSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { lstatSync, readFileSync, rmSync } from "node:fs";
 import { createConnection } from "node:net";
 import {
   emptyUsefulProfileFixture,
   unavailableUsefulProfileFixture,
-  warningUsefulProfileFixture,
 } from "../../shared/tests/fixtures/useful-profile";
+import {
+  createFixtureAxis,
+  createProfileFixture,
+  createRankedAttentionCards,
+  baseGame,
+  activeIntention,
+  observedAt,
+  externalObservedAt,
+  createdAt,
+  resolvedAt,
+  gameId,
+} from "./fixture/data";
+import {
+  collectionDefinitions,
+  collectionGame,
+  collectionEntries,
+  createCollectionState,
+  score,
+  nichePosition,
+  utilization,
+  tournamentStats,
+  type CollectionFixtureState,
+} from "./fixture/collection";
+import {
+  createReflectionState,
+  reflectionResult,
+  guidedAbstention,
+  isReflectionQuestionId,
+} from "./fixture/reflections";
+import {
+  createOwnerNoteState,
+  persistOwnerNoteState,
+  reconstructOwnerNoteState,
+  ownerNote,
+  noteRequestMatches,
+  ownerNoteRequestFingerprint,
+  type NoteOperation,
+  type OwnerNoteFixtureState,
+} from "./fixture/owner-note-state";
 
 const configuredSocketPath = process.env.SHELF_JUDGE_SOCKET;
 if (configuredSocketPath === undefined) throw new Error("SHELF_JUDGE_SOCKET is required");
@@ -51,12 +76,9 @@ if (!Number.isSafeInteger(healthPort) || healthPort < 1 || healthPort > 65_535) 
   throw new Error("SHELF_JUDGE_E2E_FIXTURE_PORT must be a valid TCP port");
 }
 const ownerNotePersistencePath = `${socketPath}.owner-notes.json`;
-
-const observedAt = "2026-08-28T10:00:00.000Z";
-const externalObservedAt = "2026-08-28T10:05:00.000Z";
-const createdAt = "2026-08-28T10:01:00.000Z";
-const resolvedAt = "2026-08-28T12:00:00.000Z";
-const gameId = "game-4";
+const axis = createFixtureAxis();
+const profileFixture = createProfileFixture(axis);
+const rankedAttentionCards = createRankedAttentionCards(profileFixture);
 
 type Scenario =
   | "profile"
@@ -70,33 +92,6 @@ type Scenario =
   | "manual-values"
   | "owner-notes";
 
-type NoteOperation = "set" | "clear";
-
-interface NoteReceipt {
-  operation: NoteOperation;
-  gameId: string;
-  expectedVersion: number;
-  requestFingerprint: string;
-  accepted: Omit<OwnerGameNoteAcceptedMetadata, "replayed">;
-}
-
-interface OwnerNoteFixtureState {
-  notes: Map<string, OwnerGameNote>;
-  receipts: Map<string, NoteReceipt>;
-  collectionRevision: number;
-  failNextMutation: boolean;
-  dropNextAcceptedResponse: boolean;
-  delayNextMutation: boolean;
-  releaseMutation: (() => void) | null;
-  mutationBodies: Array<{
-    method: string;
-    gameId: string;
-    body: Record<string, unknown>;
-  }>;
-  restartCount: number;
-  deletionBlockers: Map<string, string[]>;
-}
-
 interface ManualValuesFixtureState {
   blockNextMutation: boolean;
   blockNextDetail: boolean;
@@ -108,494 +103,8 @@ interface ManualValuesFixtureState {
   maxActiveMutations: number;
 }
 
-interface CollectionFixtureState {
-  thumbnails: boolean;
-  deletedIds: Set<string>;
-  previouslyOwnedIds: Set<string>;
-  empty: boolean;
-  axesAvailable: boolean;
-  tournamentAvailable: boolean;
-  predictionsAvailable: boolean;
-  nichesAvailable: boolean;
-  integratedRedundancy: boolean;
-}
-
-const axis = AxisSchema.parse({
-  id: "axis-enjoyment",
-  name: "Enjoyment",
-  description: "How much I enjoy playing",
-  weight: 1,
-  enabled: true,
-  source: "personal",
-  createdAt,
-  updatedAt: createdAt,
-});
-
-const profileFixture: CollectionProfileResult = (() => {
-  const profile = structuredClone(warningUsefulProfileFixture);
-  const mechanic = profile.identity.classes.mechanic;
-  const workerPlacement = mechanic.entities.find(({ entityId }) => entityId === 101);
-  const solo = mechanic.entities.find(({ entityId }) => entityId === 102);
-  if (workerPlacement === undefined) throw new Error("Expected mechanic fixture evidence");
-  if (solo === undefined) throw new Error("Expected limited mechanic fixture evidence");
-  const generatedEntities = Array.from({ length: 166 }, (_, index) => ({
-    ...structuredClone(workerPlacement),
-    entityId: 1_000 + index,
-    name: `Worker Placement Variant ${String(index + 1).padStart(3, "0")}`,
-  }));
-  const generatedIds = generatedEntities.map(({ entityId }) => entityId);
-  mechanic.entities = [workerPlacement, solo, ...generatedEntities];
-  mechanic.orderings = {
-    bestFit: [solo.entityId, workerPlacement.entityId, ...generatedIds],
-    support: [workerPlacement.entityId, ...generatedIds, solo.entityId],
-    name: [solo.entityId, workerPlacement.entityId, ...generatedIds],
-  };
-  mechanic.overviewEntityIds = [workerPlacement.entityId, ...generatedIds.slice(0, 2)];
-  profile.identity.axisDistributions = [
-    {
-      axisId: axis.id,
-      axisName: axis.name,
-      mean: 6,
-      median: 6,
-      standardDeviation: Math.sqrt(8),
-      range: { min: 2, max: 10 },
-      ratedGameCount: 4,
-      histogram: [0, 1, 0, 0, 0, 2, 0, 0, 0, 1],
-    },
-  ];
-  return CollectionProfileResultSchema.parse(profile);
-})();
-
-const rankedAttentionGameIds = Array.from(
-  { length: 6 },
-  (_, index) => `55000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
-);
-
-const rankedAttentionCards: CollectionProfileAttentionCard[] = (() => {
-  const template =
-    profileFixture.status === "available" ? profileFixture.attention.cards[0] : undefined;
-  if (template === undefined) throw new Error("Expected ranked attention template card");
-  const templateIntention = template.intention;
-  if (templateIntention === null) throw new Error("Expected explicit intention template card");
-  return rankedAttentionGameIds.map((gameId, index) => {
-    const cardNumber = index + 1;
-    const fingerprint = createHash("sha256").update(`ranked-attention-${cardNumber}`).digest("hex");
-    const command = (operation: "not-now" | "intentional") => ({
-      operation,
-      gameId,
-      ruleId: "explicit-intention",
-      ruleVersion: 1,
-      fingerprint,
-      expectedVersion: 0,
-    });
-    const actions: CollectionProfileAttentionCard["actions"] = [
-      {
-        action: "resolve-intention",
-        operationId: "shelf.game.intention.complete",
-        destination: { gameId, operationId: "shelf.game.intention.complete" },
-        command: null,
-      },
-      {
-        action: "retire-intention",
-        operationId: "shelf.game.intention.retire",
-        destination: { gameId, operationId: "shelf.game.intention.retire" },
-        command: null,
-      },
-      {
-        action: "not-now",
-        operationId: "shelf.profile.attention.not-now",
-        destination: { gameId, operationId: "shelf.profile.attention.not-now" },
-        command: command("not-now"),
-      },
-      {
-        action: "intentional",
-        operationId: "shelf.profile.attention.intentional",
-        destination: { gameId, operationId: "shelf.profile.attention.intentional" },
-        command: command("intentional"),
-      },
-      {
-        action: "open-game",
-        operationId: "shelf.game.get",
-        destination: { gameId, operationId: "shelf.game.get" },
-        command: null,
-      },
-    ];
-    return {
-      ...structuredClone(template),
-      id: `attention:${gameId}:explicit-intention`,
-      gameId,
-      gameName: `Ranked decision ${cardNumber}`,
-      gameImageUrl:
-        cardNumber === 2
-          ? null
-          : "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 160 220'%3E%3Crect width='160' height='220' fill='%232e5f8a'/%3E%3Ccircle cx='80' cy='82' r='42' fill='%23f4f1ec'/%3E%3C/svg%3E",
-      question: `Question for ranked decision ${cardNumber}?`,
-      reason: `Daemon-supplied reason ${cardNumber}.`,
-      scoreExplanation: `Daemon-supplied score explanation ${cardNumber}.`,
-      actions,
-      intention: {
-        ...templateIntention,
-        gameId,
-        intentionId: `ranked-intention-${cardNumber}`,
-      },
-      evidence: {
-        ...template.evidence,
-        intentionId: `ranked-intention-${cardNumber}`,
-      },
-      nonClockFingerprint: fingerprint,
-    };
-  });
-})();
-
-function baseGame(): Game {
-  const completeEmptyMetadata = {
-    state: "complete" as const,
-    entities: [],
-    observedAt,
-    refreshFailure: null,
-    correctionDestination: null,
-  };
-  return {
-    id: gameId,
-    bggId: null,
-    name: "Heat: Pedal to the Metal With A Deliberately Long Fixture Name",
-    yearPublished: 2022,
-    minPlayers: 1,
-    maxPlayers: 6,
-    bestPlayers: 5,
-    playingTime: 60,
-    imageUrl: null,
-    bggData: null,
-    numPlays: 0,
-    acquisition: { state: "unknown" },
-    playCountEvidence: { status: "valid", value: 0, source: "bgg-plays", observedAt },
-    durationEvidence: { status: "valid", value: 60, source: "manual", observedAt },
-    playerRangeEvidence: {
-      status: "valid",
-      value: { minPlayers: 1, maxPlayers: 6 },
-      source: "manual",
-      observedAt,
-    },
-    suggestedPlayerPoll: {
-      status: "valid",
-      state: "absent",
-      buckets: [],
-      source: "manual",
-      observedAt: null,
-    },
-    bestPlayersInvalidEvidence: null,
-    manualValues: { playingTime: null, playerCount: null },
-    entityMetadata: {
-      mechanic: completeEmptyMetadata,
-      designer: completeEmptyMetadata,
-      artist: completeEmptyMetadata,
-    },
-    latestPlayCountCheck: null,
-    ownership: "owned",
-    boxDimensions: null,
-    manualShelfId: null,
-    ratings: { [axis.id]: 6 },
-    createdAt,
-    updatedAt: createdAt,
-  };
-}
-
-interface CollectionDefinition {
-  readonly id: string;
-  readonly name: string;
-  readonly score: number | null;
-  readonly plays: number;
-  readonly players: readonly [number, number];
-  readonly dimensions: {
-    readonly width: number;
-    readonly height: number;
-    readonly depth: number;
-  } | null;
-  readonly remaining: string | null;
-  readonly additional: string | null;
-  readonly previouslyOwned?: boolean;
-}
-
-const collectionDefinitions: readonly CollectionDefinition[] = [
-  {
-    id: "game-1",
-    name: "Atlas Equal",
-    score: 8,
-    plays: 0,
-    players: [1, 2] as const,
-    dimensions: null,
-    remaining: "600",
-    additional: "9",
-  },
-  {
-    id: "game-2",
-    name: "Borealis: A Deliberately Long Collection Game Name for Responsive Navigation Evidence",
-    score: 8,
-    plays: 0,
-    players: [2, 4] as const,
-    dimensions: null,
-    remaining: "200",
-    additional: "3",
-  },
-  {
-    id: "game-3",
-    name: "Cinder Equal",
-    score: 8,
-    plays: 2,
-    players: [2, 5] as const,
-    dimensions: { width: 12, height: 12, depth: 3 },
-    remaining: "200",
-    additional: "3",
-  },
-  {
-    id: "game-5",
-    name: "Distant Previously Owned",
-    score: 7,
-    plays: 0,
-    players: [1, 2] as const,
-    dimensions: null,
-    remaining: "400",
-    additional: "6",
-    previouslyOwned: true,
-  },
-  {
-    id: "game-6",
-    name: "Isolated Beacon",
-    score: null,
-    plays: 0,
-    players: [2, 2] as const,
-    dimensions: null,
-    remaining: null,
-    additional: null,
-  },
-  {
-    id: "game-7",
-    name: "Zephyr Mutable Target With Another Exceptionally Long Name for Full Accessible Labels",
-    score: 5,
-    plays: 4,
-    players: [3, 6] as const,
-    dimensions: { width: 10, height: 10, depth: 2 },
-    remaining: null,
-    additional: "12",
-  },
-];
-
-function collectionGame(definition: CollectionDefinition): Game {
-  const game = baseGame();
-  const ownership =
-    definition.previouslyOwned === true || collectionState.previouslyOwnedIds.has(definition.id)
-      ? "previously-owned"
-      : "owned";
-  return {
-    ...game,
-    id: definition.id,
-    name: definition.name,
-    yearPublished: 2010 + Number(definition.id.slice(5)),
-    minPlayers: definition.players[0],
-    maxPlayers: definition.players[1],
-    bestPlayers: definition.players[0],
-    playingTime: definition.score === null ? null : 30 + Number(definition.id.slice(5)) * 10,
-    numPlays: definition.plays,
-    playCountEvidence: {
-      status: "valid",
-      value: definition.plays,
-      source: "manual",
-      observedAt,
-    },
-    playerRangeEvidence: {
-      status: "valid",
-      value: { minPlayers: definition.players[0], maxPlayers: definition.players[1] },
-      source: "manual",
-      observedAt,
-    },
-    boxDimensions: definition.dimensions,
-    ownership,
-    ratings: definition.score === null ? {} : { [axis.id]: definition.score },
-    updatedAt: `2026-08-${String(10 + Number(definition.id.slice(5))).padStart(2, "0")}T10:00:00.000Z`,
-  };
-}
-
-function utilization(game: Game, definition: CollectionDefinition): PurchaseUtilizationResult {
-  const base = calculatePurchaseUtilization({
-    acquisition: game.acquisition,
-    entertainmentBenchmark: null,
-    playCount: game.playCountEvidence,
-    duration: game.durationEvidence,
-    playerRange: game.playerRangeEvidence,
-    suggestedPlayerPoll: game.suggestedPlayerPoll,
-    fitness: definition.score === null ? null : definition.score.toFixed(1),
-  });
-  const valueRemaining: PurchaseUtilizationResult["components"]["valueRemaining"] =
-    definition.remaining === null
-      ? { label: "Value remaining", outcome: "unavailable", display: "Unavailable", reasons: [] }
-      : {
-          label: "Value remaining",
-          outcome: "calculated",
-          value: { exact: { numerator: definition.remaining, denominator: "1" } },
-          display: `$${definition.remaining}`,
-          reasons: [],
-        };
-  const estimatedAdditionalPlays: PurchaseUtilizationResult["components"]["estimatedAdditionalPlays"] =
-    definition.additional === null
-      ? {
-          label: "Estimated additional plays to value threshold",
-          outcome: "unavailable",
-          display: "Unavailable",
-          reasons: [],
-        }
-      : {
-          label: "Estimated additional plays to value threshold",
-          outcome: "calculated",
-          value: { wholePlays: definition.additional },
-          display: definition.additional,
-          reasons: [],
-        };
-  return {
-    ...base,
-    components: { ...base.components, valueRemaining, estimatedAdditionalPlays },
-    sort: {
-      valueRemainingHundredths: definition.remaining,
-      estimatedAdditionalPlays:
-        definition.additional === null
-          ? { category: "unavailable", wholePlays: null }
-          : { category: "finite", wholePlays: definition.additional },
-    },
-  };
-}
-
-function score(definition: CollectionDefinition, predicted: boolean) {
-  if (definition.score === null && !predicted) return null;
-  const value = definition.score ?? 6.5;
-  return {
-    score: predicted ? value + 0.25 : value,
-    ratedAxisCount: definition.score === null ? 0 : 1,
-    totalAxisCount: 1,
-    breakdown: [],
-    vetoed: false,
-    vetoedBy: null,
-    hypotheticalScore: null,
-    predictionMeta: predicted
-      ? {
-          readinessStage: 3 as const,
-          confidence: "strong" as const,
-          predictedAxisCount: definition.score === null ? 1 : 0,
-          actualAxisCount: definition.score === null ? 0 : 1,
-          referenceGameCount: 4,
-          coveragePercent: 1,
-        }
-      : null,
-    redundancyAdjustment: {
-      penalty: Number(definition.id.slice(5)) / 10,
-      originalScore: value,
-      adjustedScore: value - Number(definition.id.slice(5)) / 10,
-      nicheNeighbors: [],
-      nicheRank: 1,
-      nicheSize: 2,
-    },
-  };
-}
-
-function neighbor(definition: CollectionDefinition) {
-  return {
-    gameId: definition.id,
-    gameName: definition.name,
-    fitnessScore: definition.score ?? 6.5,
-    isPredicted: definition.score === null,
-  };
-}
-
-function nichePosition(definition: CollectionDefinition): NichePosition {
-  const atlas = collectionDefinitions[0];
-  const borealis = collectionDefinitions[1];
-  if (atlas === undefined || borealis === undefined)
-    throw new Error("Collection fixture is incomplete");
-  const shared = {
-    type: "mechanic" as const,
-    name: "Shared Strategy",
-    size: 4,
-    rank: Number(definition.id.slice(5)),
-    isChampion: definition.id === atlas.id,
-    champion: neighbor(atlas),
-    above: definition.id === atlas.id ? [] : [neighbor(atlas)],
-    below: definition.id === borealis.id ? [] : [neighbor(borealis)],
-  };
-  const niches: NichePosition["niches"] = [shared];
-  if (definition.id === atlas.id || definition.id === borealis.id) {
-    niches.push({ ...shared, type: "category", name: "Duplicate Membership" });
-  }
-  return { niches };
-}
-
-function collectionEntry(
-  definition: CollectionDefinition,
-  options: { predicted: boolean; niches: boolean },
-): GameWithPurchaseUtilization {
-  const game = collectionGame(definition);
-  const fitness = score(definition, options.predicted);
-  return {
-    game,
-    score: fitness,
-    displayScore: fitness === null ? null : fitness.score.toFixed(1),
-    purchaseUtilization: utilization(game, definition),
-    nichePosition: options.niches ? nichePosition(definition) : null,
-  };
-}
-
-function collectionEntries(
-  options: {
-    predicted?: boolean;
-    niches?: boolean;
-  } = {},
-): GameWithPurchaseUtilization[] {
-  if (collectionState.empty) return [];
-  if (collectionState.thumbnails) {
-    const definition = collectionDefinitions[0];
-    if (definition === undefined) throw new Error("Expected collection fixture definition");
-    return Array.from({ length: 100 }, (_, index) => {
-      const entry = collectionEntry(definition, { predicted: false, niches: false });
-      entry.game.id = `thumbnail-${index}`;
-      entry.game.name = `Thumbnail ${String(index).padStart(3, "0")}`;
-      entry.game.imageUrl = `/test-thumbnails/${index}.svg`;
-      return entry;
-    });
-  }
-  return collectionDefinitions
-    .filter(({ id }) => !collectionState.deletedIds.has(id))
-    .map((definition) =>
-      collectionEntry(definition, {
-        predicted: options.predicted === true,
-        niches: options.niches === true,
-      }),
-    );
-}
-
-function tournamentStats(definition: CollectionDefinition): TournamentGameStatsDisplay {
-  const value = 4 + Number(definition.id.slice(5)) / 2;
-  return {
-    eloRating: 1400 + value * 20,
-    comparisonCount: 8,
-    normalizedScore: value,
-    displayLabel: value.toFixed(1),
-    wins: 4,
-    losses: 4,
-    recentComparisons: [],
-  };
-}
-
-function activeIntention(id = "intention-browser-1"): PlayIntention {
-  return {
-    intentionId: id,
-    gameId,
-    kind: "first-play",
-    baseline: { playCount: 0, evidenceSource: "manual", observedAt },
-    createdAt,
-    version: 1,
-    resolution: null,
-  };
-}
-
 let scenario: Scenario = "profile";
-let game = baseGame();
+let game = baseGame(axis);
 let active: PlayIntention | null = activeIntention();
 let history: ResolvedPlayIntentionHistory = [];
 let staleOnce = false;
@@ -629,174 +138,6 @@ function createProfileNavigationTelemetry(): ProfileNavigationTelemetry {
   return { profileGets: 0, reflectionsGets: 0, ownerNoteGets: 0, reflectionRefreshes: 0 };
 }
 
-function isReflectionQuestionId(value: unknown): value is ReflectionQuestionId {
-  return (
-    typeof value === "string" && REFLECTION_QUESTION_IDS.some((questionId) => questionId === value)
-  );
-}
-
-function createReflectionState(): ReflectionGetResult {
-  return ReflectionGetResultSchema.parse({
-    contractVersion: REFLECTION_CONTRACT_VERSION,
-    configuration: {
-      status: "configured",
-      identity: { providerId: "fixture-provider", modelId: "fixture-model", extensionIds: [] },
-    },
-    settings: {
-      version: 1,
-      questions: REFLECTION_QUESTION_IDS.map((questionId) => ({ questionId, enabled: true })),
-    },
-    questions: REFLECTION_QUESTION_IDS.map((questionId) => ({
-      questionId,
-      enabled: true,
-      cache: { state: "none" },
-      attempt: { state: "idle" },
-    })),
-  });
-}
-
-function reflectionResult(questionId: ReflectionQuestionId, outcome: "answered" | "abstained") {
-  const base = {
-    supportingBlocks:
-      outcome === "answered"
-        ? [
-            {
-              text: "Two independent notes support this bounded pattern.",
-              citationIds: ["note-1", "note-2", "score-1"],
-            },
-          ]
-        : [],
-    citations:
-      outcome === "answered"
-        ? [
-            {
-              citationId: "note-1",
-              sourceId: "game-1",
-              sourceVersion: "1",
-              canonicalSummary: "Owner note for Atlas Equal",
-              destination: { operationId: "shelf.game.get", parameters: { gameId: "game-1" } },
-              sourceDisplayContext: { kind: "game", gameTitle: "Atlas Equal" },
-              evidenceClass: "owner-game-note",
-              testimony: true,
-            },
-            {
-              citationId: "note-2",
-              sourceId: "game-2",
-              sourceVersion: "1",
-              canonicalSummary: "Owner note for Borealis",
-              destination: { operationId: "shelf.game.get", parameters: { gameId: "game-2" } },
-              sourceDisplayContext: { kind: "game", gameTitle: "Borealis" },
-              evidenceClass: "owner-game-note",
-              testimony: true,
-            },
-            {
-              citationId: "score-1",
-              sourceId: "game-1-score",
-              sourceVersion: "1",
-              canonicalSummary: "Current fitness score",
-              destination: { operationId: "shelf.game.get", parameters: { gameId: "game-1" } },
-              sourceDisplayContext: { kind: "game", gameTitle: "Atlas Equal" },
-              evidenceClass: "current-scoring",
-              testimony: false,
-            },
-          ]
-        : [],
-    scope: {
-      examinedPresentNoteCount: outcome === "answered" ? 2 : 0,
-      totalPresentNoteCount: outcome === "answered" ? 2 : 0,
-      examinedGameCount: outcome === "answered" ? 2 : 0,
-      relevantEligibleGameCount: outcome === "answered" ? 2 : 0,
-      excludedGameCount: 0,
-      exhaustiveNotes: true,
-      ...(questionId === "pattern-exceptions" ? { patternCandidateIds: [] } : {}),
-    },
-    evidenceIdentity: {
-      manifestVersion: 2,
-      questionId,
-      questionVersion: REFLECTION_QUESTION_POLICIES[questionId].questionVersion,
-      collectionId: "fixture-collection",
-      collectionSchemaVersion: 7,
-      collectionRevision: 1,
-      profileContractVersion: 1,
-      profileAlgorithmVersion: 1,
-      providerId: "fixture-provider",
-      modelId: "fixture-model",
-    },
-    dependencies:
-      outcome === "answered"
-        ? [
-            { category: "note", gameId: "game-1", noteVersion: 1 },
-            { category: "note", gameId: "game-2", noteVersion: 1 },
-          ]
-        : [],
-    generatedAt: observedAt,
-    usage: { state: "unavailable" },
-  };
-  return outcome === "answered"
-    ? {
-        ...base,
-        outcome,
-        centralSynthesis: {
-          text: "Quick setup recurs in owner testimony while current scores provide context.",
-          citationIds: ["note-1", "note-2", "score-1"],
-        },
-      }
-    : {
-        ...base,
-        outcome,
-        reason: "no-owner-testimony",
-        explanation: "No current owner testimony is available for this question.",
-      };
-}
-
-function guidedAbstention(
-  questionId: ReflectionQuestionId,
-  kind: "missing-current-testimony" | "existing-notes-not-examined" | "non-note-blocker",
-) {
-  const result = reflectionResult(questionId, "abstained");
-  const guidance = {
-    "missing-current-testimony": {
-      reason: "no-owner-testimony" as const,
-      message:
-        "No current owner testimony was available among the games considered. Relevant notes could help only when they bear on this question, and do not guarantee an answer.",
-    },
-    "existing-notes-not-examined": {
-      reason: "no-owner-testimony" as const,
-      message:
-        "Current notes are present but were not examined in this attempt. Adding more notes may not help.",
-    },
-    "non-note-blocker": {
-      reason: "no-material-synthesis" as const,
-      message:
-        "The evidence did not support a meaningful synthesis. More notes may not produce an answer.",
-    },
-  }[kind];
-  return {
-    ...result,
-    reason: guidance.reason,
-    abstentionGuidance: {
-      kind,
-      message: guidance.message,
-      refreshInstruction:
-        "After editing, select Refresh this question to check the updated evidence.",
-    },
-  };
-}
-
-function createCollectionState(): CollectionFixtureState {
-  return {
-    thumbnails: false,
-    deletedIds: new Set(),
-    previouslyOwnedIds: new Set(),
-    empty: false,
-    axesAvailable: true,
-    tournamentAvailable: true,
-    predictionsAvailable: true,
-    nichesAvailable: true,
-    integratedRedundancy: false,
-  };
-}
-
 function createManualValuesState(): ManualValuesFixtureState {
   return {
     blockNextMutation: false,
@@ -808,166 +149,6 @@ function createManualValuesState(): ManualValuesFixtureState {
     activeMutations: 0,
     maxActiveMutations: 0,
   };
-}
-
-function createOwnerNoteState(): OwnerNoteFixtureState {
-  return {
-    notes: new Map(),
-    receipts: new Map(),
-    collectionRevision: 1,
-    failNextMutation: false,
-    dropNextAcceptedResponse: false,
-    delayNextMutation: false,
-    releaseMutation: null,
-    mutationBodies: [],
-    restartCount: 0,
-    deletionBlockers: new Map(),
-  };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function assertExactKeys(
-  value: Record<string, unknown>,
-  keys: readonly string[],
-  label: string,
-): void {
-  const actual = Object.keys(value).sort();
-  const expected = [...keys].sort();
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-    throw new Error(`Invalid persisted ${label} keys`);
-  }
-}
-
-function persistOwnerNoteState(): void {
-  writeFileSync(
-    ownerNotePersistencePath,
-    JSON.stringify({
-      formatVersion: 1,
-      notes: Array.from(ownerNoteState.notes),
-      receipts: Array.from(ownerNoteState.receipts),
-      collectionRevision: ownerNoteState.collectionRevision,
-    }),
-  );
-}
-
-function reconstructOwnerNoteState(): OwnerNoteFixtureState {
-  const value: unknown = JSON.parse(readFileSync(ownerNotePersistencePath, "utf8"));
-  if (!isRecord(value)) throw new Error("Invalid persisted owner note state");
-  assertExactKeys(
-    value,
-    ["formatVersion", "notes", "receipts", "collectionRevision"],
-    "owner note state",
-  );
-  if (value.formatVersion !== 1 || !Number.isSafeInteger(value.collectionRevision)) {
-    throw new Error("Invalid persisted owner note state metadata");
-  }
-  if (!Array.isArray(value.notes) || !Array.isArray(value.receipts)) {
-    throw new Error("Invalid persisted owner note state entries");
-  }
-
-  const reconstructed = createOwnerNoteState();
-  reconstructed.collectionRevision = value.collectionRevision as number;
-  for (const entry of value.notes) {
-    if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== "string") {
-      throw new Error("Invalid persisted owner note entry");
-    }
-    const noteValue: unknown = entry[1];
-    reconstructed.notes.set(entry[0], OwnerGameNoteSchema.parse(noteValue));
-  }
-  for (const entry of value.receipts) {
-    if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== "string") {
-      throw new Error("Invalid persisted owner note receipt entry");
-    }
-    const receiptValue: unknown = entry[1];
-    if (!isRecord(receiptValue)) throw new Error("Invalid persisted owner note receipt");
-    assertExactKeys(
-      receiptValue,
-      ["operation", "gameId", "expectedVersion", "requestFingerprint", "accepted"],
-      "owner note receipt",
-    );
-    if (
-      (receiptValue.operation !== "set" && receiptValue.operation !== "clear") ||
-      typeof receiptValue.gameId !== "string" ||
-      !Number.isSafeInteger(receiptValue.expectedVersion) ||
-      typeof receiptValue.requestFingerprint !== "string" ||
-      !/^[a-f0-9]{64}$/.test(receiptValue.requestFingerprint)
-    ) {
-      throw new Error("Invalid persisted owner note receipt identity");
-    }
-    if (!isRecord(receiptValue.accepted)) throw new Error("Invalid persisted acceptance metadata");
-    const accepted = OwnerGameNoteAcceptedMetadataSchema.parse({
-      ...receiptValue.accepted,
-      replayed: false,
-    });
-    reconstructed.receipts.set(entry[0], {
-      operation: receiptValue.operation,
-      gameId: receiptValue.gameId,
-      expectedVersion: receiptValue.expectedVersion as number,
-      requestFingerprint: receiptValue.requestFingerprint,
-      accepted: {
-        commandId: accepted.commandId,
-        gameId: accepted.gameId,
-        operation: accepted.operation,
-        state: accepted.state,
-        version: accepted.version,
-        updatedAt: accepted.updatedAt,
-        collectionRevision: accepted.collectionRevision,
-        alreadyClear: accepted.alreadyClear,
-      },
-    });
-  }
-  return reconstructed;
-}
-
-function ownerNote(gameId: string): OwnerGameNote {
-  return ownerNoteState.notes.get(gameId) ?? { state: "missing", version: 0, updatedAt: null };
-}
-
-function noteRequestMatches(
-  receipt: NoteReceipt,
-  operation: NoteOperation,
-  gameId: string,
-  expectedVersion: number,
-  text?: string,
-): boolean {
-  return (
-    receipt.operation === operation &&
-    receipt.gameId === gameId &&
-    receipt.expectedVersion === expectedVersion &&
-    receipt.requestFingerprint ===
-      ownerNoteRequestFingerprint(operation, gameId, expectedVersion, text)
-  );
-}
-
-function ownerNoteRequestFingerprint(
-  operation: NoteOperation,
-  gameId: string,
-  expectedVersion: number,
-  text?: string,
-): string {
-  return createHash("sha256")
-    .update(
-      canonicalizeOwnerGameNoteRequest(
-        operation === "set"
-          ? {
-              operation,
-              commandId: "00000000-0000-4000-8000-000000000000",
-              gameId,
-              expectedVersion,
-              text: text ?? "",
-            }
-          : {
-              operation,
-              commandId: "00000000-0000-4000-8000-000000000000",
-              gameId,
-              expectedVersion,
-            },
-      ),
-    )
-    .digest("hex");
 }
 
 async function waitForOwnerNoteRelease(): Promise<void> {
@@ -992,7 +173,7 @@ async function waitForManualValuesRelease(kind: "mutation" | "detail"): Promise<
 
 function reset(next: Scenario): void {
   scenario = next;
-  game = baseGame();
+  game = baseGame(axis);
   if (next === "active") {
     game.numPlays = 3;
     game.lastPlayedAt = "2026-08-26";
@@ -1027,7 +208,7 @@ function reset(next: Scenario): void {
   attentionConfigPuts = 0;
   attentionConfigPutBodies = [];
   analystCancelledConversations.clear();
-  persistOwnerNoteState();
+  persistOwnerNoteState(ownerNoteState, ownerNotePersistencePath);
   if (next === "manual-values") {
     game.manualValues = {
       playingTime: { value: 90, source: "manual", confirmedAt: observedAt },
@@ -1044,9 +225,9 @@ function detail(requestedGameId = gameId): GameDetailWithPurchaseUtilization {
       : undefined;
   let detailGame =
     definition !== undefined
-      ? collectionGame(definition)
+      ? collectionGame(definition, collectionState, axis)
       : rankedAttentionCard !== undefined
-        ? { ...baseGame(), id: requestedGameId, name: rankedAttentionCard.gameName }
+        ? { ...baseGame(axis), id: requestedGameId, name: rankedAttentionCard.gameName }
         : game;
   if (requestedGameId === "game-1" && reflectionCurrentGameName !== null) {
     detailGame = { ...detailGame, name: reflectionCurrentGameName };
@@ -1068,7 +249,7 @@ function detail(requestedGameId = gameId): GameDetailWithPurchaseUtilization {
   return GameDetailWithPurchaseUtilizationSchema.parse({
     game: {
       ...detailGame,
-      ownerNote: ownerNote(requestedGameId),
+      ownerNote: ownerNote(ownerNoteState, requestedGameId),
     },
     score: detailScore,
     bggDataStale: false,
@@ -1228,7 +409,7 @@ async function mutateOwnerNote(
   }
 
   await waitForOwnerNoteRelease();
-  const current = ownerNote(requestedGameId);
+  const current = ownerNote(ownerNoteState, requestedGameId);
   if (current.version !== command.expectedVersion) {
     return json(
       OwnerGameNoteMutationResultSchema.parse({
@@ -1287,7 +468,7 @@ async function mutateOwnerNote(
     ),
     accepted: storedAccepted,
   });
-  persistOwnerNoteState();
+  persistOwnerNoteState(ownerNoteState, ownerNotePersistencePath);
 
   if (ownerNoteState.dropNextAcceptedResponse) {
     ownerNoteState.dropNextAcceptedResponse = false;
@@ -1407,7 +588,7 @@ async function handle(request: Request): Promise<Response> {
       }
       if (requested.releaseMutation === true) ownerNoteState.releaseMutation?.();
       if (typeof requested.externalGameId === "string") {
-        const current = ownerNote(requested.externalGameId);
+        const current = ownerNote(ownerNoteState, requested.externalGameId);
         const version = current.version + 1;
         const next =
           typeof requested.externalText === "string"
@@ -1424,7 +605,7 @@ async function handle(request: Request): Promise<Response> {
               } satisfies OwnerGameNote);
         ownerNoteState.notes.set(requested.externalGameId, next);
         ownerNoteState.collectionRevision += 1;
-        persistOwnerNoteState();
+        persistOwnerNoteState(ownerNoteState, ownerNotePersistencePath);
       }
       if (typeof requested.blockDeletionGameId === "string") {
         const ids = Array.isArray(requested.intentionIds)
@@ -1442,7 +623,7 @@ async function handle(request: Request): Promise<Response> {
   if (path === "/api/test/owner-note-restart" && request.method === "POST") {
     const restartCount = ownerNoteState.restartCount + 1;
     ownerNoteState.releaseMutation?.();
-    ownerNoteState = reconstructOwnerNoteState();
+    ownerNoteState = reconstructOwnerNoteState(ownerNotePersistencePath);
     ownerNoteState.restartCount = restartCount;
     return json({ ok: true, restartCount: ownerNoteState.restartCount });
   }
@@ -2032,7 +1213,7 @@ async function handle(request: Request): Promise<Response> {
       return json({ error: "Predictions unavailable" }, 503);
     if (niches && !collectionState.nichesAvailable)
       return json({ error: "Niches unavailable" }, 503);
-    return json(collectionEntries({ predicted, niches }));
+    return json(collectionEntries(collectionState, axis, { predicted, niches }));
   }
   const noteMatch = path.match(/^\/api\/games\/([^/]+)\/note$/);
   if (noteMatch !== null) {
@@ -2041,7 +1222,7 @@ async function handle(request: Request): Promise<Response> {
       return json({ error: `Game not found: ${requestedGameId}` }, 404);
     }
     if (request.method === "GET") {
-      return json({ gameId: requestedGameId, note: ownerNote(requestedGameId) });
+      return json({ gameId: requestedGameId, note: ownerNote(ownerNoteState, requestedGameId) });
     }
     if (request.method === "PUT") return mutateOwnerNote(request, requestedGameId, "set");
     if (request.method === "DELETE") return mutateOwnerNote(request, requestedGameId, "clear");
@@ -2074,7 +1255,8 @@ async function handle(request: Request): Promise<Response> {
     }
     if (requestedGameId === gameId) game = { ...game, ownership, updatedAt: externalObservedAt };
     const definition = collectionDefinitions.find(({ id }) => id === requestedGameId);
-    const changedGame = definition === undefined ? game : collectionGame(definition);
+    const changedGame =
+      definition === undefined ? game : collectionGame(definition, collectionState, axis);
     return json({ game: changedGame, linkedIntentionTransition: null });
   }
 
@@ -2092,7 +1274,7 @@ async function handle(request: Request): Promise<Response> {
     for (const [commandId, receipt] of ownerNoteState.receipts) {
       if (receipt.gameId === requestedGameId) ownerNoteState.receipts.delete(commandId);
     }
-    persistOwnerNoteState();
+    persistOwnerNoteState(ownerNoteState, ownerNotePersistencePath);
     return new Response(null, { status: 204 });
   }
 
@@ -2327,4 +1509,3 @@ async function shutdown(): Promise<void> {
 
 process.once("SIGINT", () => void shutdown());
 process.once("SIGTERM", () => void shutdown());
-import { REFLECTION_QUESTION_POLICIES } from "@shelf-judge/shared";

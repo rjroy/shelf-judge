@@ -3,9 +3,11 @@ import { Hono } from "hono";
 import { createNicheRoutes } from "../src/routes/niche";
 import type { NicheSettings } from "@shelf-judge/shared";
 import type { StorageService } from "../src/services/storage-service";
+import { createSettingsRouteStorageStub } from "./helpers/settings-route-storage";
 
 function createMockStorageService(): StorageService & { settings: NicheSettings } {
   const mock = {
+    ...createSettingsRouteStorageStub(),
     settings: { ignoredTags: [] } as NicheSettings,
     loadNicheSettings() {
       return Promise.resolve(structuredClone(mock.settings));
@@ -14,37 +16,6 @@ function createMockStorageService(): StorageService & { settings: NicheSettings 
       mock.settings = structuredClone(s);
       return Promise.resolve();
     },
-    // Stubs for unused StorageService methods
-    loadCollection: () => Promise.reject(new Error("not implemented")),
-    saveCollection: () => Promise.resolve(),
-    loadConfig: () => Promise.reject(new Error("not implemented")),
-    saveConfig: () => Promise.resolve(),
-    loadTournament: () => Promise.reject(new Error("not implemented")),
-    saveTournament: () => Promise.resolve(),
-    loadProfile: () => Promise.resolve(null),
-    saveProfile: () => Promise.resolve(),
-    loadPredictionSettings: () =>
-      Promise.resolve({
-        stageThresholds: [5, 15, 30] as [number, number, number],
-        defaultK: 5,
-        minSimilarityThreshold: 0.2,
-      }),
-    savePredictionSettings: () => Promise.resolve(),
-    loadRedundancySettings: () =>
-      Promise.resolve({
-        enabled: false,
-        stage: "annotation" as const,
-        similarityThreshold: 0.6,
-        maxPenalty: 2.0,
-        componentWeights: { binary: 0.4, continuous: 0.3, personalAxes: 0.3 },
-        minNeighbors: 1,
-        expectedNeighbors: 5,
-      }),
-    saveRedundancySettings: () => Promise.resolve(),
-    loadWishlist: () => Promise.resolve([]),
-    saveWishlist: () => Promise.resolve(),
-    loadShelfConfig: () => Promise.resolve({ units: [], createdAt: "", updatedAt: "" }),
-    saveShelfConfig: () => Promise.resolve(),
   };
   return mock;
 }

@@ -64,7 +64,6 @@ function evidenceService(overrides: Partial<AnalystEvidenceService>): AnalystEvi
     grep: () => Promise.reject(new Error("grep was not configured")),
     compareNoteDependencies: () => Promise.resolve("current"),
     withCurrentNoteDependencies: (_dependencies, operation) => operation(),
-    withRetrievedEvidence: (retrieved, operation) => operation(retrieved),
     handoff: (_snapshot, retrieved, deliver) => deliver(retrieved),
     revalidate: () => Promise.resolve({ valid: true }),
     inspectCitation: () => Promise.reject(new Error("inspect was not configured")),

@@ -81,13 +81,13 @@ test("collection toggles and sorting expose state and respond to Enter and Space
     .poll(() => page.locator(".game-row[id]").evaluateAll((rows) => rows.map((row) => row.id)))
     .toEqual([...ascending].reverse());
 
-  const lastRated = page.getByRole("button", { name: /^Last Rated:/ });
-  if (await lastRated.isVisible()) {
-    await tabTo(page, lastRated);
+  const lastUpdated = page.getByRole("button", { name: /^Last Updated:/ });
+  if (await lastUpdated.isVisible()) {
+    await tabTo(page, lastUpdated);
     await page.keyboard.press("Enter");
-    await expect(lastRated).toHaveAccessibleName("Last Rated: sorted descending");
+    await expect(lastUpdated).toHaveAccessibleName("Last Updated: sorted descending");
     await page.keyboard.press("Space");
-    await expect(lastRated).toHaveAccessibleName("Last Rated: sorted ascending");
+    await expect(lastUpdated).toHaveAccessibleName("Last Updated: sorted ascending");
     await expect(gameSort).toHaveAttribute("aria-pressed", "false");
   }
 

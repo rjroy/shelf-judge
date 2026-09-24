@@ -4,7 +4,6 @@ import {
   AnalystEvidenceSourceChangedError,
   createAnalystEvidenceService,
 } from "../../src/services/analyst-evidence-service.js";
-import { createAnalystCompletionService } from "../../src/services/analyst-completion-service.js";
 import { profileSourceCoordinatorFor } from "../../src/services/profile-source-coordinator.js";
 import type {
   AnalystEvidenceSource,
@@ -300,7 +299,7 @@ describe("Analyst evidence retrieval", () => {
     expect(accumulated.noteDependencies).toEqual([{ gameId: "b", noteVersion: 2 }]);
     expect(reads.every((gameId) => gameId === "b")).toBe(true);
     await expect(
-      service.withRetrievedEvidence(accumulated, () => Promise.resolve("authenticated")),
+      service.handoff(localSnapshot, accumulated, () => Promise.resolve("authenticated")),
     ).resolves.toBe("authenticated");
   });
 
@@ -1146,7 +1145,7 @@ describe("Analyst evidence retrieval", () => {
     ).rejects.toBeInstanceOf(AnalystEvidenceSourceChangedError);
   });
 
-  test("rejects an older package at completion after later retrieval expands dependencies", async () => {
+  test("rejects an older package at handoff after later retrieval expands dependencies", async () => {
     const states: Record<string, NoteState> = {
       a: { state: "present", version: 1, updatedAt: "2026-09-06T12:00:00.000Z", text: "A" },
       b: { state: "present", version: 1, updatedAt: "2026-09-06T12:00:00.000Z", text: "B" },
@@ -1167,47 +1166,21 @@ describe("Analyst evidence retrieval", () => {
       evidenceClasses: ["owner-game-note"],
       gameIds: ["b"],
     });
-    let attestations = 0;
-    const completion = createAnalystCompletionService({
-      attestationService: {
-        attest() {
-          attestations += 1;
-          return "attestation";
-        },
-        verifies: () => false,
-      },
-      withRetrievedEvidence: (value, operation) => service.withRetrievedEvidence(value, operation),
-    });
-    const submission = (retrieved: typeof latest) => ({
-      outcome: "answered" as const,
-      blocks: [
-        { text: "Grounded", citationIds: retrieved.citations.map(({ citationId }) => citationId) },
-      ],
-      citations: retrieved.citations,
-      usage: { state: "unavailable" as const },
-    });
-    expect(
-      await completion.complete({
-        submission: submission(first),
-        retrieved: first,
-        mandatoryUncertaintyCitationIds: new Set(),
-        conversationId: "conversation",
-        turnIndex: 0,
-        provider: { providerId: "provider", modelId: "model" },
-      }),
-    ).toEqual({ valid: false, reason: "source-changed" });
-    expect(attestations).toBe(0);
+    let deliveries = 0;
     await expect(
-      completion.complete({
-        submission: submission(latest),
-        retrieved: latest,
-        mandatoryUncertaintyCitationIds: new Set(),
-        conversationId: "conversation",
-        turnIndex: 0,
-        provider: { providerId: "provider", modelId: "model" },
+      service.handoff(snapshot, first, () => {
+        deliveries += 1;
+        return Promise.resolve("delivered");
       }),
-    ).resolves.toMatchObject({ valid: true });
-    expect(attestations).toBe(1);
+    ).rejects.toBeInstanceOf(AnalystEvidenceSourceChangedError);
+    expect(deliveries).toBe(0);
+    await expect(
+      service.handoff(snapshot, latest, () => {
+        deliveries += 1;
+        return Promise.resolve("delivered");
+      }),
+    ).resolves.toBe("delivered");
+    expect(deliveries).toBe(1);
   });
 
   test.each(["set", "clear"] as const)(

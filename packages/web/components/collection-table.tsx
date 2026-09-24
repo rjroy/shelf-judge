@@ -1151,11 +1151,11 @@ export function CollectionTable({
         <button
           type="button"
           aria-pressed={sort.field === "updatedAt"}
-          aria-label={`Last Rated: ${sort.field === "updatedAt" ? `sorted ${sort.direction === "asc" ? "ascending" : "descending"}` : "sort by last rated"}`}
+          aria-label={`Last Updated: ${sort.field === "updatedAt" ? `sorted ${sort.direction === "asc" ? "ascending" : "descending"}` : "sort by last updated"}`}
           className={`last-rated-col col-label sortable${sort.field === "updatedAt" ? " sort-active" : ""}`}
           onClick={handleLastRatedHeaderClick}
         >
-          Last Rated
+          Last Updated
           {sort.field === "updatedAt" && <span className="sort-arrow">{dirArrow}</span>}
         </button>
         <button

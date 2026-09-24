@@ -24,7 +24,7 @@ Shelf Judge is a board game collection curation tool. It scores every game in yo
 
 The minimum useful loop is:
 
-1. **Create your axes** — define what matters to you (Settings → Axes)
+1. **Create your axes** — define what matters to you (open Axes from the Settings section of the navigation, not from the General settings page)
 2. **Add a game** — search BGG or add manually (Library → Add Games)
 3. **Rate it** — score the game on each axis from the game detail page
 4. **See the fitness score** — the collection view ranks everything by score

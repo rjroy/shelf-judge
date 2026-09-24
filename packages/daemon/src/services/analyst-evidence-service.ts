@@ -199,11 +199,6 @@ export interface AnalystEvidenceService {
     dependencies: readonly AnalystNoteDependency[],
     operation: () => Promise<Value>,
   ): Promise<Value>;
-  /** Authenticates a retrieval object and supplies the daemon-stored package. */
-  withRetrievedEvidence<Value>(
-    retrieved: AnalystRetrievedEvidence,
-    operation: (retrieved: AnalystRetrievedEvidence) => Promise<Value>,
-  ): Promise<Value>;
   /** Safe provider seam: validates that a retrieved turn cannot drop examined dependencies. */
   handoff<Value>(
     snapshot: AnalystProjectionSnapshot,
@@ -1442,25 +1437,6 @@ export function createAnalystEvidenceService(deps: {
     },
     compareNoteDependencies,
     withCurrentNoteDependencies,
-    async withRetrievedEvidence<Value>(
-      retrieved: AnalystRetrievedEvidence,
-      operation: (retrieved: AnalystRetrievedEvidence) => Promise<Value>,
-    ): Promise<Value> {
-      const packageRecord = packages.get(retrieved);
-      if (packageRecord === undefined) throw new AnalystEvidenceSourceChangedError();
-      return coordinator.runExclusive(async () => {
-        const turn = turns.get(packageRecord.snapshot);
-        if (turn === undefined) throw new AnalystEvidenceSourceChangedError();
-        const expectedDependencies = noteDependenciesFor(turn);
-        if (
-          canonicalSha256(packageRecord.retrieved.noteDependencies) !==
-            canonicalSha256(expectedDependencies) ||
-          (await compareParsedNoteDependencies(expectedDependencies)) === "stale"
-        )
-          throw new AnalystEvidenceSourceChangedError();
-        return operation(packageRecord.retrieved);
-      });
-    },
     async handoff<Value>(
       snapshot: AnalystProjectionSnapshot,
       retrieved: AnalystRetrievedEvidence,
