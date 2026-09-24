@@ -2794,19 +2794,6 @@ body {
 
 /* ===== Inline Style Replacements ===== */
 
-/* Score badge component (inline display variant, complements table .score-value) */
-.score-badge-not-rated {
-  color: var(--text-muted);
-  font-style: italic;
-  font-size: var(--text-xs);
-}
-
-.score-badge-inline {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
 /* Refresh all button */
 .refresh-all-wrapper {
   display: inline-flex;

@@ -424,9 +424,6 @@ import type {
   Shelf,
   ShelfUnit,
   ShelfConfiguration,
-  ShelfConfigMutationResult,
-  ShelfUnitMutationResult,
-  ShelfUnitRemovalResult,
   ShelfCapacityResult,
   ShelfAssignment,
   AssignedGame,
@@ -438,53 +435,8 @@ export async function getShelfConfig(): Promise<ShelfConfiguration> {
   return daemonJson("/api/shelf/config");
 }
 
-export async function setShelfConfig(units: ShelfUnit[]): Promise<ShelfConfigMutationResult> {
-  return daemonJson("/api/shelf/config", { method: "PUT", body: { units } });
-}
-
-export async function addShelfUnit(input: {
-  name: string;
-  shelves: Array<{ name: string; width: number; height: number | null; depth: number }>;
-}): Promise<ShelfUnit> {
-  return daemonJson("/api/shelf/units", { method: "POST", body: input });
-}
-
-export async function updateShelfUnit(
-  id: string,
-  input: {
-    name?: string;
-    shelves?: Array<{
-      id?: string;
-      name: string;
-      width: number;
-      height: number | null;
-      depth: number;
-    }>;
-  },
-): Promise<ShelfUnitMutationResult> {
-  return daemonJson(`/api/shelf/units/${id}`, { method: "PUT", body: input });
-}
-
-export async function removeShelfUnit(id: string): Promise<ShelfUnitRemovalResult> {
-  return daemonJson(`/api/shelf/units/${id}`, { method: "DELETE" });
-}
-
 export async function getShelfCapacity(): Promise<ShelfCapacityResult> {
   return daemonJson("/api/shelf/capacity");
-}
-
-export async function setGameShelfAssignment(
-  gameId: string,
-  shelfId: string | null,
-): Promise<{ game: import("@shelf-judge/shared").Game }> {
-  const result = PublicGameMutationResultSchema.parse(
-    await daemonJson(`/api/games/${gameId}/shelf-assignment`, {
-      method: "PUT",
-      body: { shelfId },
-    }),
-  );
-  if (result.game.id !== gameId) throw new Error("Daemon returned a game for a different request.");
-  return result;
 }
 
 // Redundancy settings API functions
@@ -508,36 +460,7 @@ export async function updateRedundancySettings(
   });
 }
 
-// Wishlist API functions
-
 import type { WishlistEntry, WishlistBreakdownEntry } from "@shelf-judge/shared";
-
-export async function listWishlist(): Promise<WishlistEntry[]> {
-  return daemonJson("/api/wishlist");
-}
-
-export async function addToWishlist(bggId: number): Promise<{ entry: WishlistEntry }> {
-  return daemonJson("/api/wishlist", {
-    method: "POST",
-    body: { bggId },
-  });
-}
-
-export async function removeFromWishlist(id: string): Promise<{ removed: boolean }> {
-  return daemonJson(`/api/wishlist/${id}`, { method: "DELETE" });
-}
-
-export async function clearWishlist(): Promise<{ removed: number }> {
-  return daemonJson("/api/wishlist", { method: "DELETE" });
-}
-
-export async function refreshWishlistEntry(id: string): Promise<{ entry: WishlistEntry }> {
-  return daemonJson(`/api/wishlist/${id}/refresh`, { method: "POST" });
-}
-
-export async function refreshAllWishlist(): Promise<{ refreshed: number; errors: string[] }> {
-  return daemonJson("/api/wishlist/refresh", { method: "POST" });
-}
 
 // Re-export types for convenience
 export type {
