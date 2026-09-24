@@ -12,6 +12,11 @@ function validateType(type: string): asserts type is NicheTagFilter["type"] {
   }
 }
 
+function nicheError(data: NicheSettings, fallback: string): Error {
+  const err = data as unknown as { error: string };
+  return new Error(err.error ?? fallback);
+}
+
 export async function nicheIgnored(
   client: DaemonClient,
   _args: string[],
@@ -20,8 +25,7 @@ export async function nicheIgnored(
   const { ok, data } = await client.get<NicheSettings>("/api/niches/settings");
 
   if (!ok) {
-    const err = data as unknown as { error: string };
-    throw new Error(err.error ?? "Failed to load niche settings");
+    throw nicheError(data, "Failed to load niche settings");
   }
 
   if (opts.json) return printOutput(data.ignoredTags, opts);
@@ -56,8 +60,7 @@ export async function nicheIgnore(
   });
 
   if (!ok) {
-    const err = data as unknown as { error: string };
-    throw new Error(err.error ?? "Failed to ignore tag");
+    throw nicheError(data, "Failed to ignore tag");
   }
 
   if (opts.json) return printOutput(data, opts);
@@ -85,8 +88,7 @@ export async function nicheUnignore(
   });
 
   if (!ok) {
-    const err = data as unknown as { error: string };
-    throw new Error(err.error ?? "Failed to unignore tag");
+    throw nicheError(data, "Failed to unignore tag");
   }
 
   if (opts.json) return printOutput(data, opts);
