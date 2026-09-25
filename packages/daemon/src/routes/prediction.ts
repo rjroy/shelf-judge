@@ -1,21 +1,12 @@
 import { Hono } from "hono";
 import { toErrorMessage } from "@shelf-judge/shared";
-import type { GameWithScore, Game, RedundancyAdjustment } from "@shelf-judge/shared";
+import type { RedundancyAdjustment } from "@shelf-judge/shared";
 import type { PredictionService } from "../services/prediction-service.js";
 import type { StorageService } from "../services/storage-service.js";
 import type { RouteModule, OperationDefinition } from "../operations.js";
 import { computeNicheImpact } from "../services/niche-engine.js";
-import { computeRedundancyAdjustments } from "../services/redundancy-engine.js";
-import {
-  buildVocabulary,
-  computeContinuousRanges,
-  encodeGame,
-  getOrderedVectorAxes,
-  getVectorAxisValues,
-} from "../services/feature-vector.js";
-import type { FeatureVector } from "../services/feature-vector.js";
-import { deriveDisplayStats } from "../services/tournament-service.js";
 import { projectPredictedGameResponse } from "../services/game-projection.js";
+import { computeRedundancyPreview } from "../services/redundancy-preview.js";
 
 export interface PredictionRoutesDeps {
   predictionService: PredictionService;
@@ -87,44 +78,18 @@ export function createPredictionRoutes(deps: PredictionRoutesDeps): RouteModule 
       let redundancyPreview: RedundancyAdjustment | null = null;
       if (storageService) {
         const redundancySettings = await storageService.loadRedundancySettings();
-        if (redundancySettings.enabled) {
+        if (redundancySettings.enabled && result.predictionUnavailable === null) {
           const [collection, tournamentData] = await Promise.all([
             storageService.loadCollection(),
             storageService.loadTournament(),
           ]);
-          const gamesWithBgg = collection.games.filter((g) => g.bggData);
-          const vocabulary = buildVocabulary(gamesWithBgg);
-          const ranges = computeContinuousRanges(gamesWithBgg);
-          const vectorAxes = getOrderedVectorAxes(collection.axes);
-
-          const vectorCache = new Map<string, FeatureVector>();
-          const getFeatureVector = (game: Game): FeatureVector => {
-            const cached = vectorCache.get(game.id);
-            if (cached) return cached;
-            const values = getVectorAxisValues(
-              game,
-              vectorAxes,
-              deriveDisplayStats(game.id, tournamentData).normalizedScore,
-            );
-            const vec = encodeGame(game, vocabulary, vectorAxes, values, ranges);
-            vectorCache.set(game.id, vec);
-            return vec;
-          };
-
-          // Create temporary GameWithScore for the candidate
-          const candidateGws: GameWithScore = {
-            game: result.game,
-            score: result.score,
-          };
-
-          // Run full redundancy pass with candidate included.
-          // Pre-redundancy scores are used for existing games (REQ-REDUN-23).
-          const adjustments = computeRedundancyAdjustments(
-            [...allGames, candidateGws],
+          redundancyPreview = computeRedundancyPreview(
+            { game: result.game, score: result.score },
+            collection,
+            tournamentData,
+            allGames,
             redundancySettings,
-            getFeatureVector,
           );
-          redundancyPreview = adjustments.get(result.game.id) ?? null;
         }
       }
 

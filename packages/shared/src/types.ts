@@ -1505,6 +1505,7 @@ export interface WishlistEntry {
   predictionConfidence: PredictionConfidence | null;
   predictedBreakdown: WishlistBreakdownEntry[] | null;
   nicheImpact: NicheImpact | null;
+  redundancyPreview: RedundancyAdjustment | null;
   addedAt: string; // ISO 8601
 }
 

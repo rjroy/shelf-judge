@@ -687,6 +687,7 @@ describe("Integration: End-to-end scenarios", () => {
           predictionConfidence: null,
           predictedBreakdown: null,
           nicheImpact: null,
+          redundancyPreview: null,
           addedAt: "2025-01-02T00:00:00.000Z",
         },
       ]);

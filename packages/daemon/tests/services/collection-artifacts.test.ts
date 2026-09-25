@@ -40,6 +40,14 @@ function validEntry(overrides: Record<string, unknown> = {}): Record<string, unk
     predictionConfidence: "strong",
     predictedBreakdown: [{ axisName: "Fun", rating: 8, confidence: "strong" }],
     nicheImpact: null,
+    redundancyPreview: {
+      penalty: 1,
+      originalScore: 7,
+      adjustedScore: 6,
+      nicheNeighbors: [],
+      nicheRank: 2,
+      nicheSize: 1,
+    },
     ...overrides,
   };
 }
@@ -74,6 +82,7 @@ describe("collection artifact manifest", () => {
         predictionConfidence: null,
         predictedBreakdown: null,
         nicheImpact: null,
+        redundancyPreview: null,
       },
     ]);
   });

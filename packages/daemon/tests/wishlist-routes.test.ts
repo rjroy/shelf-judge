@@ -31,6 +31,7 @@ function makeEntry(id: string, bggId: number, name: string, addedAt: string): Wi
     predictionConfidence: "strong",
     predictedBreakdown: [{ axisName: "Fun", rating: 7, confidence: "strong" }],
     nicheImpact: null,
+    redundancyPreview: null,
     addedAt,
   };
 }

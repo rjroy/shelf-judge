@@ -9,6 +9,7 @@ import type {
   PredictionConfidence,
   NicheImpact,
   NicheImpactEntry,
+  RedundancyAdjustment,
 } from "@shelf-judge/shared";
 import { relativeDate } from "@/lib/date-utils";
 
@@ -100,6 +101,42 @@ function NicheImpactPanel({ nicheImpact }: { nicheImpact: NicheImpact }) {
   );
 }
 
+export function WishlistRedundancyPreview({
+  preview,
+  predictionAvailable,
+}: {
+  preview: RedundancyAdjustment | null | undefined;
+  predictionAvailable: boolean;
+}) {
+  if (!preview || !predictionAvailable) return null;
+  return (
+    <div className="preview-redundancy" aria-label="Redundancy adjustment">
+      <div className="preview-redundancy-title">Redundancy</div>
+      <div className="preview-redundancy-score">
+        With redundancy: <strong>{preview.adjustedScore.toFixed(1)}</strong>
+        {preview.penalty > 0 && (
+          <span className="preview-redundancy-penalty"> (-{preview.penalty.toFixed(1)})</span>
+        )}
+      </div>
+      {preview.nicheNeighbors.length > 0 ? (
+        <div className="preview-redundancy-neighbors">
+          {preview.nicheNeighbors.slice(0, 3).map((neighbor) => (
+            <div key={neighbor.gameId} className="preview-redundancy-neighbor">
+              <span className="preview-redundancy-neighbor-name">{neighbor.gameName}</span>
+              <span className="preview-redundancy-neighbor-sim">
+                {(neighbor.similarity * 100).toFixed(0)}%
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="preview-redundancy-empty">No similar games in collection.</div>
+      )}
+      <div className="wc-redundancy-note">Snapshot from when added or last refreshed.</div>
+    </div>
+  );
+}
+
 function WishlistCard({
   entry,
   onRemove,
@@ -117,6 +154,10 @@ function WishlistCard({
 
   const hasBreakdown = entry.predictedBreakdown && entry.predictedBreakdown.length > 0;
   const hasPrediction = entry.predictedScore !== null;
+  // Keep the presentation compatible while the shared contract is being updated in parallel.
+  const redundancyPreview = (
+    entry as WishlistEntry & { redundancyPreview?: RedundancyAdjustment | null }
+  ).redundancyPreview;
 
   return (
     <div className="wishlist-card">
@@ -152,6 +193,10 @@ function WishlistCard({
               </span>
             )}
           </div>
+          <WishlistRedundancyPreview
+            preview={redundancyPreview}
+            predictionAvailable={hasPrediction}
+          />
           <div className="wc-added">
             Added {relativeDate(entry.addedAt)}
             {!hasPrediction && (

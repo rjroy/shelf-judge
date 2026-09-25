@@ -56,6 +56,7 @@ type ClearedWishlistEntry = z.output<typeof WishlistCoreEntrySchema> & {
   predictionConfidence: null;
   predictedBreakdown: null;
   nicheImpact: null;
+  redundancyPreview: null;
 };
 
 function defaultQuarantinePath(activePath: string, attempt: number): string {
@@ -139,6 +140,7 @@ const wishlistDescriptor: CollectionArtifactDescriptor = {
         predictionConfidence: null,
         predictedBreakdown: null,
         nicheImpact: null,
+        redundancyPreview: null,
       });
     }
 
