@@ -49,6 +49,7 @@ interface WishlistEntry {
   predictionConfidence: PredictionConfidence | null; // confidence at time of save
   predictedBreakdown: WishlistBreakdownEntry[] | null; // per-axis snapshot, null if unavailable
   nicheImpact: NicheImpact | null; // niche impact at time of save
+  redundancyPreview: RedundancyAdjustment | null; // candidate-only preview at time of save, null if disabled or unavailable
   addedAt: string; // ISO 8601
 }
 
@@ -63,7 +64,7 @@ interface WishlistBreakdownEntry {
 
 - REQ-WISH-3: A wishlist entry is identified by BGG ID. Only BGG games can be wishlisted. Manual games (no BGG ID) cannot be wishlisted because they have no BGG data to preview, and the wishlist's purpose is fitness evaluation, not bookmarking. Attempting to wishlist a game already in the wishlist (same `bggId`) is rejected with a clear message.
 
-- REQ-WISH-4: A wishlist entry stores a snapshot, not a live reference. The `predictedScore`, `predictionConfidence`, `predictedBreakdown`, and `nicheImpact` fields reflect the state at time of wishlisting. They are not automatically refreshed when axes, ratings, or collection composition change. Rationale: the snapshot records the user's decision context. A "Refresh" action (REQ-WISH-11) lets the user explicitly update predictions when they want current data.
+- REQ-WISH-4: A wishlist entry stores a snapshot, not a live reference. The `predictedScore`, `predictionConfidence`, `predictedBreakdown`, `nicheImpact`, and `redundancyPreview` fields reflect the state at time of wishlisting. They are not automatically refreshed when axes, ratings, redundancy settings, or collection composition change. `redundancyPreview` is the candidate game's `RedundancyAdjustment` computed against the current collection's pre-redundancy scores; it does not preview changes to existing games' penalties. It is null when redundancy is disabled or the preview is unavailable (including when there are no qualifying niche neighbors). Rationale: the snapshot records the user's decision context. A "Refresh" action (REQ-WISH-11) lets the user explicitly recompute the snapshot using current data.
 
 ### Adding to Wishlist
 
@@ -85,7 +86,7 @@ interface WishlistBreakdownEntry {
 
 ### Refreshing Predictions
 
-- REQ-WISH-11: Users can refresh the predicted fitness for a single wishlist entry or for all entries. A refresh re-runs the prediction engine against the current collection state (current axes, ratings, and games) and updates `predictedScore`, `predictionConfidence`, `predictedBreakdown`, and `nicheImpact` in place. The `addedAt` timestamp does not change. This lets the user see how a wishlisted game's fitness has changed as their collection evolves.
+- REQ-WISH-11: Users can refresh the predicted fitness for a single wishlist entry or for all entries. A refresh re-runs the prediction engine against the current collection state (current axes, ratings, and games) and recomputes the candidate-only `redundancyPreview` against the current collection's pre-redundancy scores, updating `predictedScore`, `predictionConfidence`, `predictedBreakdown`, `nicheImpact`, and `redundancyPreview` in place. `redundancyPreview` is null when redundancy is disabled or unavailable; it reports only the candidate's prospective adjustment, not changes to existing games' penalties. Refresh does not write to the collection or change existing games' scores or adjustments. The `addedAt` timestamp does not change. This lets the user see how a wishlisted game's fitness and redundancy preview have changed as their collection evolves.
 
 - REQ-WISH-12: A bulk refresh ("Refresh All") re-fetches BGG data and re-runs predictions for every entry. This is potentially expensive (one BGG API call per entry if data is stale). The daemon processes entries sequentially with rate limiting, same as collection refresh. The response reports how many entries were refreshed and any errors.
 

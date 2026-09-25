@@ -7,7 +7,7 @@ import type {
   TournamentAxis,
   TournamentData,
 } from "@shelf-judge/shared";
-import { AxisSchema } from "@shelf-judge/shared";
+import { AxisSchema, FitnessResultResponseSchema } from "@shelf-judge/shared";
 import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import { createFitnessService } from "../../src/services/fitness-service.js";
 import { migrateCollection } from "../../src/services/collection-migration.js";
@@ -126,12 +126,34 @@ describe("derived fitness", () => {
           effectiveRating: expected,
           unit: "fit score",
           provenance:
-            "BoardGameGeek suggested-player-count poll with publisher-declared bounds fallback",
+            "Manual player count, BGG-derived best-player count, or publisher-declared player range",
+          playerCountFact: { source: "publisherRange", minPlayers, maxPlayers },
           configurationSummary: `Target: ${targetPlayerCount} player${targetPlayerCount === 1 ? "" : "s"}`,
         });
       }
     },
   );
+
+  test("propagates fractional best-player range and validates optional response fact", () => {
+    const axis = derived("playerCountFit", { targetPlayerCount: 4 });
+    const result = service.calculateScore(game({ bestPlayers: 3.5 }), [axis]);
+    expect(result?.score).toBe(10);
+    expect(entry(result, axis.id).playerCountFact).toEqual({
+      source: "bestPlayers",
+      minPlayers: 3,
+      maxPlayers: 4,
+    });
+    expect(FitnessResultResponseSchema.safeParse(result).success).toBe(true);
+    expect(
+      FitnessResultResponseSchema.safeParse({
+        ...result,
+        breakdown: result?.breakdown.map((row) => ({
+          ...row,
+          playerCountFact: { source: "manual", minPlayers: 5, maxPlayers: 3 },
+        })),
+      }).success,
+    ).toBe(false);
+  });
 
   test.each([
     [90, 240, 90, 90],
@@ -245,7 +267,12 @@ describe("derived fitness", () => {
       overrideValue: null,
       overridden: false,
     });
-    expect(entry(result, "playerCountFit")).toMatchObject({ sourceValue: 10, effectiveRating: 10 });
+    expect(entry(result, "playerCountFit")).toMatchObject({
+      sourceValue: 10,
+      scoringRawValue: 10,
+      effectiveRating: 10,
+      playerCountFact: { source: "manual", minPlayers: 4, maxPlayers: 4 },
+    });
   });
 
   test("one manual value does not replace the other field or invent missing source data", () => {

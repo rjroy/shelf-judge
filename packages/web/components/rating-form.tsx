@@ -3,7 +3,11 @@
 import { useReducer } from "react";
 import { useRouter } from "next/navigation";
 import type { Axis, FitnessResult } from "@shelf-judge/shared";
-import { axisAcceptsScoreOverride, getRatingLabel } from "@shelf-judge/shared";
+import {
+  axisAcceptsScoreOverride,
+  getRatingLabel,
+  PLAYER_COUNT_FIT_DERIVED_FIELD_ID,
+} from "@shelf-judge/shared";
 
 export interface RatingFormProps {
   gameId: string;
@@ -145,7 +149,8 @@ export function RatingFormContent({
   const { ratings, saving, error } = state;
 
   const personalAxes = editableAxes.filter((axis) => axis.source === "personal");
-  const derivedAxes = editableAxes.filter((axis) => axis.source === "derived");
+  // Derived facts remain useful even when their axis does not allow a manual override.
+  const derivedAxes = axes.filter((axis) => axis.enabled && axis.source === "derived");
   const resolvedByAxis = new Map(
     ((score ?? predictionScore)?.breakdown ?? []).map((entry) => [entry.axisId, entry]),
   );
@@ -294,10 +299,13 @@ export function RatingFormContent({
             <div className="panel-section-title bgg-section-title">Derived Axes</div>
 
             {derivedAxes.map((axis) => {
-              const hasOverride = ratings[axis.id] !== undefined && ratings[axis.id] !== "";
+              const hasOverride =
+                axisAcceptsScoreOverride(axis) &&
+                ratings[axis.id] !== undefined &&
+                ratings[axis.id] !== "";
               const resolution = resolvedByAxis.get(axis.id);
               const effectiveRating = resolution?.effectiveRating ?? null;
-              const ratingControl = hasOverride ? (
+              const ratingControl = !axisAcceptsScoreOverride(axis) ? null : hasOverride ? (
                 <>
                   <div className="bgg-auto-value overridden">
                     <span>Stored override (1-10): {ratings[axis.id]}</span>
@@ -376,6 +384,22 @@ export function RatingFormContent({
                   ? `Scoring input: ${resolution.scoringRawValue} ${resolution.unit ?? ""}`
                   : null;
 
+              const playerCountFact = resolution?.playerCountFact;
+              const isPlayerCountFit =
+                axis.source === "derived" &&
+                axis.derivedField === PLAYER_COUNT_FIT_DERIVED_FIELD_ID;
+              const playerCountFactLabel = playerCountFact
+                ? playerCountFact.source === "manual"
+                  ? `Manual player count: ${playerCountFact.minPlayers} ${playerCountFact.minPlayers === 1 ? "player" : "players"}`
+                  : playerCountFact.source === "bestPlayers"
+                    ? playerCountFact.minPlayers === playerCountFact.maxPlayers
+                      ? `BGG best-player count: ${playerCountFact.minPlayers} ${playerCountFact.minPlayers === 1 ? "player" : "players"}`
+                      : `BGG best-player count: ${playerCountFact.minPlayers}–${playerCountFact.maxPlayers} players`
+                    : playerCountFact.minPlayers === playerCountFact.maxPlayers
+                      ? `Publisher range: ${playerCountFact.minPlayers} ${playerCountFact.minPlayers === 1 ? "player" : "players"}`
+                      : `Publisher range: ${playerCountFact.minPlayers}–${playerCountFact.maxPlayers} players`
+                : null;
+
               if (axis.name === "Complexity") {
                 return (
                   <div key={axis.id} className="rating-field complexity-inline-facts">
@@ -406,7 +430,19 @@ export function RatingFormContent({
                   </div>
                   {axis.description && <div className="rating-field-desc">{axis.description}</div>}
                   <div className="derived-rating-facts">
-                    {resolution?.sourceValue === null || resolution === undefined ? (
+                    {isPlayerCountFit ? (
+                      <>
+                        <span>
+                          {playerCountFactLabel ??
+                            (resolution?.sourceValue == null
+                              ? "Player count unavailable"
+                              : `Computed fit score: ${resolution.sourceValue} / 10`)}
+                        </span>
+                        {resolution?.configurationSummary && (
+                          <span>{resolution.configurationSummary}</span>
+                        )}
+                      </>
+                    ) : resolution?.sourceValue === null || resolution === undefined ? (
                       <span>Source metadata unavailable</span>
                     ) : (
                       <span>
@@ -421,8 +457,10 @@ export function RatingFormContent({
                           Scoring input: {resolution.scoringRawValue} {resolution.unit ?? ""}
                         </span>
                       )}
-                    {resolution?.provenance && <span>{resolution.provenance}</span>}
-                    {resolution?.configurationSummary && (
+                    {!isPlayerCountFit && resolution?.provenance && (
+                      <span>{resolution.provenance}</span>
+                    )}
+                    {!isPlayerCountFit && resolution?.configurationSummary && (
                       <span>{resolution.configurationSummary}</span>
                     )}
                   </div>

@@ -47,7 +47,7 @@ function makeGame(bggId: number, name: string): Game {
       weight: 3.0,
       numWeightVotes: 100,
       description: null,
-      mechanics: [],
+      mechanics: [{ id: 1, name: "Deck Building" }],
       categories: [],
       families: [],
       subdomains: [],
@@ -121,6 +121,7 @@ function makeFitnessResult(score: number, unavailable: boolean): FitnessResult {
 function createMockStorage(
   wishlist: WishlistEntry[] = [],
   collection?: Partial<Collection>,
+  redundancyEnabled = false,
 ): StorageService {
   let stored = structuredClone(wishlist);
   const coll: Collection = {
@@ -152,7 +153,12 @@ function createMockStorage(
     // Unused stubs
     loadConfig: () => Promise.reject(new Error("not implemented")),
     saveConfig: () => Promise.resolve(),
-    loadTournament: () => Promise.reject(new Error("not implemented")),
+    loadTournament: () =>
+      Promise.resolve({
+        settings: { kFactorThreshold: 15, normalizationHalfWidth: 400 },
+        sessions: [],
+        gameStats: {},
+      }),
     saveTournament: () => Promise.resolve(),
     loadProfile: () => Promise.resolve(null),
     saveProfile: () => Promise.resolve(),
@@ -165,7 +171,7 @@ function createMockStorage(
     savePredictionSettings: () => Promise.resolve(),
     loadRedundancySettings: () =>
       Promise.resolve({
-        enabled: false,
+        enabled: redundancyEnabled,
         stage: "annotation" as const,
         similarityThreshold: 0.6,
         maxPenalty: 2.0,
@@ -179,14 +185,17 @@ function createMockStorage(
   };
 }
 
-function createMockPredictionService(results: Map<number, PredictedGameResult>): PredictionService {
+function createMockPredictionService(
+  results: Map<number, PredictedGameResult>,
+  allGames: { game: Game; score: FitnessResult | null }[] = [],
+): PredictionService {
   return {
     predictBggGame: (bggId: number) => {
       const r = results.get(bggId);
       if (!r) return Promise.reject(new Error(`No game found with BGG ID ${bggId}`));
       return Promise.resolve(r);
     },
-    listGamesWithPredictions: () => Promise.resolve([]),
+    listGamesWithPredictions: () => Promise.resolve(allGames),
     predictGame: () => Promise.reject(new Error("not implemented")),
     getReadiness: () => Promise.reject(new Error("not implemented")),
     getSettings: () => Promise.reject(new Error("not implemented")),
@@ -265,6 +274,7 @@ describe("wishlist service", () => {
     expect(entry.predictedBreakdown![0].confidence).toBe("strong");
     expect(entry.addedAt).toBeTruthy();
     expect(entry.id).toBeTruthy();
+    expect(entry.redundancyPreview).toBeNull();
   });
 
   test("add with Stage 0 creates entry with null prediction fields", async () => {
@@ -276,6 +286,85 @@ describe("wishlist service", () => {
     expect(entry.predictedScore).toBeNull();
     expect(entry.predictionConfidence).toBeNull();
     expect(entry.predictedBreakdown).toBeNull();
+    expect(entry.redundancyPreview).toBeNull();
+  });
+
+  test("add stores candidate-only redundancy preview when enabled", async () => {
+    const peer = makeGame(300, "Higher Scoring Peer");
+    peer.id = "collection-peer";
+    const peerScore = makeFitnessResult(9, false);
+    storage = createMockStorage(
+      [],
+      {
+        games: [{ ...peer, ownerNote: { state: "missing", version: 0, updatedAt: null } }],
+      },
+      true,
+    );
+    predictionService = createMockPredictionService(predictions, [
+      { game: peer, score: peerScore },
+    ]);
+
+    const entry = await createWishlistService({
+      storageService: storage,
+      predictionService,
+      gameService,
+    }).add(100);
+    expect(entry.redundancyPreview).not.toBeNull();
+    expect(entry.redundancyPreview?.originalScore).toBe(7.5);
+    expect(entry.redundancyPreview?.penalty).toBeGreaterThan(0);
+    expect(entry.redundancyPreview?.nicheNeighbors.map((neighbor) => neighbor.gameId)).toEqual([
+      "collection-peer",
+    ]);
+    expect((await storage.loadCollection()).games.map((game) => game.id)).toEqual([
+      "collection-peer",
+    ]);
+    expect(
+      (
+        await createWishlistService({
+          storageService: storage,
+          predictionService,
+          gameService,
+        }).list()
+      )[0].redundancyPreview,
+    ).toEqual(entry.redundancyPreview);
+  });
+
+  test("single refresh recomputes the redundancy preview", async () => {
+    const peer = makeGame(300, "Higher Scoring Peer");
+    peer.id = "collection-peer";
+    const existing: WishlistEntry = {
+      id: "entry-refresh",
+      bggId: 100,
+      name: "Test Game",
+      yearPublished: 2020,
+      thumbnailUrl: null,
+      predictedScore: 5,
+      predictionConfidence: "weak",
+      predictedBreakdown: null,
+      nicheImpact: null,
+      redundancyPreview: null,
+      addedAt: NOW,
+    };
+    storage = createMockStorage(
+      [existing],
+      {
+        games: [{ ...peer, ownerNote: { state: "missing", version: 0, updatedAt: null } }],
+      },
+      true,
+    );
+    predictionService = createMockPredictionService(predictions, [
+      { game: peer, score: makeFitnessResult(9, false) },
+    ]);
+
+    const refreshed = await createWishlistService({
+      storageService: storage,
+      predictionService,
+      gameService,
+    }).refresh(existing.id);
+    expect(refreshed.id).toBe(existing.id);
+    expect(refreshed.addedAt).toBe(existing.addedAt);
+    expect(refreshed.redundancyPreview).not.toBeNull();
+    expect(refreshed.redundancyPreview?.originalScore).toBe(7.5);
   });
 
   test("add rejects duplicate bggId in wishlist", async () => {
@@ -289,6 +378,7 @@ describe("wishlist service", () => {
       predictionConfidence: "strong",
       predictedBreakdown: null,
       nicheImpact: null,
+      redundancyPreview: null,
       addedAt: NOW,
     };
     storage = createMockStorage([existing]);
@@ -321,6 +411,7 @@ describe("wishlist service", () => {
       predictionConfidence: "strong",
       predictedBreakdown: null,
       nicheImpact: null,
+      redundancyPreview: null,
       addedAt: NOW,
     };
     storage = createMockStorage([existing]);
@@ -349,6 +440,7 @@ describe("wishlist service", () => {
         predictionConfidence: null,
         predictedBreakdown: null,
         nicheImpact: null,
+        redundancyPreview: null,
         addedAt: NOW,
       },
       {
@@ -361,6 +453,7 @@ describe("wishlist service", () => {
         predictionConfidence: null,
         predictedBreakdown: null,
         nicheImpact: null,
+        redundancyPreview: null,
         addedAt: NOW,
       },
     ];
@@ -385,6 +478,7 @@ describe("wishlist service", () => {
       predictionConfidence: "weak",
       predictedBreakdown: null,
       nicheImpact: null,
+      redundancyPreview: null,
       addedAt: originalAddedAt,
     };
     storage = createMockStorage([existing]);
@@ -408,6 +502,7 @@ describe("wishlist service", () => {
       predictionConfidence: "strong",
       predictedBreakdown: null,
       nicheImpact: null,
+      redundancyPreview: null,
       addedAt: NOW,
     };
     storage = createMockStorage([existing]);
@@ -437,6 +532,7 @@ describe("wishlist service", () => {
         predictionConfidence: "weak",
         predictedBreakdown: null,
         nicheImpact: null,
+        redundancyPreview: null,
         addedAt: "2026-01-01T00:00:00.000Z",
       },
       {
@@ -449,6 +545,14 @@ describe("wishlist service", () => {
         predictionConfidence: null,
         predictedBreakdown: null,
         nicheImpact: null,
+        redundancyPreview: {
+          penalty: 1,
+          originalScore: 5,
+          adjustedScore: 4,
+          nicheNeighbors: [],
+          nicheRank: 2,
+          nicheSize: 1,
+        },
         addedAt: "2026-01-02T00:00:00.000Z",
       },
     ];
@@ -463,5 +567,13 @@ describe("wishlist service", () => {
     const list = await svc.list();
     expect(list[0].predictedScore).toBe(7.5); // updated
     expect(list[1].predictedScore).toBeNull(); // unchanged (error)
+    expect(list[1].redundancyPreview).toEqual({
+      penalty: 1,
+      originalScore: 5,
+      adjustedScore: 4,
+      nicheNeighbors: [],
+      nicheRank: 2,
+      nicheSize: 1,
+    }); // failed refresh retains the previous snapshot
   });
 });

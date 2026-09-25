@@ -126,6 +126,7 @@ describe("storage collection migration ordering and recovery", () => {
           predictedScore: null,
           predictionConfidence: null,
           predictedBreakdown: null,
+          redundancyPreview: null,
         },
       ]);
 

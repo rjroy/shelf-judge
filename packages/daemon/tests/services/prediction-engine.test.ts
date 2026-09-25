@@ -19,11 +19,19 @@ import {
   type ReferenceGameCandidate,
   type SimilarityMatch,
 } from "../../src/services/prediction-engine.js";
-import type { Vocabulary } from "../../src/services/feature-vector.js";
+import type { FeatureVector, Vocabulary } from "../../src/services/feature-vector.js";
 
 const timestamp = "2026-01-01T00:00:00.000Z";
 const settings = DEFAULT_PREDICTION_SETTINGS;
 const fitness = createFitnessService();
+
+function vector(
+  binary: number[] = [1],
+  continuous: number[] = [0.5],
+  personalAxes: number[] | null = null,
+): FeatureVector {
+  return { binary, continuous, personalAxes };
+}
 
 function game(overrides: Partial<Game> = {}): Game {
   const bggId = overrides.bggId === undefined ? 1 : overrides.bggId;
@@ -116,7 +124,7 @@ function references(axisId: string, rating = 7, count = 5): ReferenceGameCandida
   return Array.from({ length: count }, (_, index) => ({
     gameId: `reference-${index}`,
     gameName: `Reference ${index}`,
-    vector: [1, 0.5],
+    vector: vector(),
     ratings: { [axisId]: rating },
   }));
 }
@@ -131,7 +139,7 @@ function compute(
     target,
     axes,
     refs,
-    [1, 0.5],
+    vector(),
     settings,
     stage,
     (actualGame, actualAxes) => fitness.calculateScore(actualGame, actualAxes),
@@ -139,21 +147,21 @@ function compute(
 }
 
 describe("prediction primitives", () => {
-  test("finds nearest rated candidates by cosine similarity", () => {
+  test("finds nearest rated candidates by feature-vector similarity", () => {
     const matches = findKNearestForAxis(
-      [1, 0.5],
+      vector(),
       [
         ...references("fun", 7, 1),
         {
           gameId: "stable",
           gameName: "Stable",
-          vector: [1, 0.5],
+          vector: vector(),
           ratings: { fun: 8 },
         },
         {
           gameId: "other-axis",
           gameName: "Other",
-          vector: [1, 0.5],
+          vector: vector(),
           ratings: { theme: 10 },
         },
       ],
@@ -162,6 +170,67 @@ describe("prediction primitives", () => {
       0.2,
     );
     expect(matches.map(({ gameId }) => gameId)).toEqual(["reference-0", "stable"]);
+  });
+
+  test("mechanic/category overlap ranks candidates using Jaccard similarity", () => {
+    const matches = findKNearestForAxis(
+      vector([1, 1, 0], [0]),
+      [
+        {
+          gameId: "mechanic-overlap",
+          gameName: "Mechanic",
+          vector: vector([1, 0, 0], [0]),
+          ratings: { fun: 7 },
+        },
+        {
+          gameId: "category-overlap",
+          gameName: "Category",
+          vector: vector([0, 1, 0], [0]),
+          ratings: { fun: 8 },
+        },
+        {
+          gameId: "unrelated",
+          gameName: "Unrelated",
+          vector: vector([0, 0, 1], [0]),
+          ratings: { fun: 9 },
+        },
+      ],
+      "fun",
+      5,
+      0,
+    );
+    expect(matches.map(({ gameId }) => gameId)).toEqual([
+      "mechanic-overlap",
+      "category-overlap",
+      "unrelated",
+    ]);
+    expect(matches[0]?.similarity).toBeCloseTo(1 - 2 / 7, 6);
+    expect(matches[2]?.similarity).toBeCloseTo(1 - 4 / 7, 6);
+  });
+
+  test("personal-axis values, including other rated axes, do not affect similarity", () => {
+    const matches = findKNearestForAxis(
+      vector([1], [0], [0]),
+      [
+        {
+          gameId: "same-features",
+          gameName: "Same",
+          vector: vector([1], [0], [1]),
+          ratings: { fun: 8, theme: 1 },
+        },
+        {
+          gameId: "different-features",
+          gameName: "Different",
+          vector: vector([0], [1], [0]),
+          ratings: { fun: 6, theme: 10 },
+        },
+      ],
+      "fun",
+      5,
+      0,
+    );
+    expect(matches.map(({ gameId }) => gameId)).toEqual(["same-features"]);
+    expect(matches[0]?.similarity).toBe(1);
   });
 
   test("assigns confidence from match count, similarity, and variance", () => {
@@ -378,13 +447,13 @@ function match(gameId: string, similarity: number, rating: number): SimilarityMa
 
 describe("restored prediction primitive boundaries", () => {
   test("returns only the requested number of nearest games", () => {
-    const result = findKNearestForAxis([1, 0.5], references("fun", 7, 6), "fun", 3, 0);
+    const result = findKNearestForAxis(vector(), references("fun", 7, 6), "fun", 3, 0);
     expect(result).toHaveLength(3);
   });
 
   test("excludes candidates without the requested axis", () => {
     const result = findKNearestForAxis(
-      [1, 0.5],
+      vector(),
       [...references("fun", 7, 1), { ...references("theme", 8, 1)[0], gameId: "theme-only" }],
       "fun",
       5,
@@ -395,10 +464,10 @@ describe("restored prediction primitive boundaries", () => {
 
   test("excludes candidates below minimum similarity", () => {
     const result = findKNearestForAxis(
-      [1, 0],
+      vector([1, 0], [0]),
       [
-        { ...references("fun", 8, 1)[0], vector: [1, 0] },
-        { ...references("fun", 5, 1)[0], gameId: "orthogonal", vector: [0, 1] },
+        { ...references("fun", 8, 1)[0], vector: vector([1, 0], [0]) },
+        { ...references("fun", 5, 1)[0], gameId: "orthogonal", vector: vector([0, 1], [0]) },
       ],
       "fun",
       5,
@@ -407,12 +476,55 @@ describe("restored prediction primitive boundaries", () => {
     expect(result).toHaveLength(1);
   });
 
+  test("zero-similarity candidates are excluded even when the threshold is zero", () => {
+    const matches = findKNearestForAxis(
+      vector([1, 0], [0]),
+      [{ ...references("fun", 9, 1)[0], vector: vector([0, 1], [1]) }],
+      "fun",
+      5,
+      0,
+    );
+    expect(matches).toEqual([]);
+    expect(predictAxisRating(matches)).toBeNull();
+  });
+
+  test("zero-similarity candidates do not affect k, rating, or confidence", () => {
+    const target = vector([1, 0], [0]);
+    const candidates = [
+      ...Array.from({ length: 3 }, (_, index) => ({
+        ...references("fun", 6 + index, 1)[0],
+        gameId: `positive-${index}`,
+        vector: vector([1, 0], [0]),
+      })),
+      ...Array.from({ length: 3 }, (_, index) => ({
+        ...references("fun", 10, 1)[0],
+        gameId: `zero-${index}`,
+        vector: vector([0, 1], [1]),
+      })),
+    ];
+
+    const matches = findKNearestForAxis(target, candidates, "fun", 5, 0);
+    expect(matches.map(({ gameId }) => gameId)).toEqual(["positive-0", "positive-1", "positive-2"]);
+    expect(predictAxisRating(matches)).toMatchObject({
+      rating: 7,
+      confidence: "moderate",
+      avgSimilarity: 1,
+    });
+  });
+
+  test("minimum similarity threshold is applied after converting distance to similarity", () => {
+    const candidate = { ...references("fun", 7, 1)[0], vector: vector([0, 1], [0]) };
+    const target = vector([1, 0], [0]);
+    expect(findKNearestForAxis(target, [candidate], "fun", 5, 0.428)).toHaveLength(1);
+    expect(findKNearestForAxis(target, [candidate], "fun", 5, 0.43)).toHaveLength(0);
+  });
+
   test("returns fewer than k when fewer candidates qualify", () => {
-    expect(findKNearestForAxis([1, 0.5], references("fun", 7, 1), "fun", 5, 0)).toHaveLength(1);
+    expect(findKNearestForAxis(vector(), references("fun", 7, 1), "fun", 5, 0)).toHaveLength(1);
   });
 
   test("returns no neighbors when no candidate rates the axis", () => {
-    expect(findKNearestForAxis([1, 0.5], references("theme", 7, 2), "fun", 5, 0)).toEqual([]);
+    expect(findKNearestForAxis(vector(), references("theme", 7, 2), "fun", 5, 0)).toEqual([]);
   });
 
   test("computes the hand-calculated similarity-weighted average", () => {

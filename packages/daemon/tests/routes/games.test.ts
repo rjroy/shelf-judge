@@ -1002,6 +1002,32 @@ describe("Game Routes", () => {
       expect(results.length).toBe(2);
       expect(results[0].name).toBe("Wingspan");
     });
+
+    test("passes request cancellation through to GameService search", async () => {
+      let serviceSignal: AbortSignal | undefined;
+      const bggClient = createMockBggClient();
+      ctx = createTestApp({ bggClient });
+      ctx.gameService.searchGames = (_query, signal) => {
+        serviceSignal = signal;
+        return new Promise((_resolve, reject) => {
+          signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("aborted", "AbortError")),
+            { once: true },
+          );
+        });
+      };
+      const controller = new AbortController();
+      const responsePromise = ctx.app.request("/api/games/search?q=cancel", {
+        signal: controller.signal,
+      });
+      await Promise.resolve();
+      controller.abort();
+
+      const response = await responsePromise;
+      expect(serviceSignal?.aborted).toBe(true);
+      expect(response.status).toBe(204);
+    });
   });
 
   describe("POST /api/games/refresh", () => {

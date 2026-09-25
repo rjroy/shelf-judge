@@ -393,9 +393,10 @@ export function createGameRoutes(deps: GameRoutesDeps): RouteModule {
     }
 
     try {
-      const results = await gameService.searchGames(query);
+      const results = await gameService.searchGames(query, c.req.raw.signal);
       return c.json(results);
     } catch (err) {
+      if (c.req.raw.signal.aborted) return c.body(null, 204);
       return c.json({ error: toErrorMessage(err) }, 500);
     }
   });

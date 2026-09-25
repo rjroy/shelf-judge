@@ -425,6 +425,8 @@ export {
   summarizeDerivedAxisConfiguration,
   getDerivedFieldDiscovery,
   getDerivedSuggestionProjections,
+  WEIGHT_DERIVED_FIELD_ID,
+  PLAYER_COUNT_FIT_DERIVED_FIELD_ID,
 } from "./derived-axis-registry";
 export type {
   DerivedAxisRegistry,

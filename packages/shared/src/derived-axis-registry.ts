@@ -305,6 +305,7 @@ export function createDerivedAxisFromPayload(
 // Analyst evidence references this registered deterministic projection by name.
 export const PURCHASE_UTILIZATION_EVIDENCE_FIELD = "purchaseUtilization" as const;
 export const WEIGHT_DERIVED_FIELD_ID = "weight" as const;
+export const PLAYER_COUNT_FIT_DERIVED_FIELD_ID = "playerCountFit" as const;
 
 export const DERIVED_AXIS_REGISTRY = {
   communityRating: defineDerivedField({
@@ -383,11 +384,12 @@ export const DERIVED_AXIS_REGISTRY = {
     acceptsScoreOverride: false,
     label: "Player Count Fit",
     description:
-      "Scores a target player count using BGG suggested-player-count poll data, falling back to publisher bounds.",
-    provenance: "BoardGameGeek suggested-player-count poll with publisher-declared bounds fallback",
+      "Scores target-player fit from a confirmed manual count, otherwise BGG best-player count, otherwise the publisher player range.",
+    provenance:
+      "Manual player count, BGG-derived best-player count, or publisher-declared player range",
     unit: "fit score",
     missingValuePolicy:
-      "Falls back to publisher bounds when poll data is unavailable; missing only when neither source is valid.",
+      "Uses the first valid source in order: manual player count, BGG best-player count, publisher player range; missing when none is valid.",
     configurationSchema: targetPlayerCountSchema,
     configurationValidation: {
       field: "targetPlayerCount",
@@ -411,7 +413,11 @@ export const DERIVED_AXIS_REGISTRY = {
       if (manual !== null && manual.status === "valid") {
         const penalty = 2 * Math.abs(target - manual.value);
         const value = Math.min(10, Math.max(1, 10 - penalty));
-        return { sourceValue: value, scoringRawValue: value };
+        return {
+          sourceValue: value,
+          scoringRawValue: value,
+          playerCountFact: { source: "manual", minPlayers: manual.value, maxPlayers: manual.value },
+        };
       }
       const best = game.bestPlayers;
       if (best != null && Number.isFinite(best) && best > 0) {
@@ -420,7 +426,11 @@ export const DERIVED_AXIS_REGISTRY = {
         const maxBest = Math.ceil(best);
         const penalty = 2 * Math.min(Math.abs(target - minBest), Math.abs(target - maxBest));
         const value = Math.min(10, Math.max(1, 10 - penalty));
-        return { sourceValue: value, scoringRawValue: value };
+        return {
+          sourceValue: value,
+          scoringRawValue: value,
+          playerCountFact: { source: "bestPlayers", minPlayers: minBest, maxPlayers: maxBest },
+        };
       }
       const minimum = game.minPlayers;
       const maximum = game.maxPlayers;
@@ -440,7 +450,11 @@ export const DERIVED_AXIS_REGISTRY = {
           ? Math.max(target - minimum, maximum - target)
           : Math.abs(target - minimum) + Math.abs(target - maximum);
       const value = Math.min(10, Math.max(1, 10 - penalty));
-      return { sourceValue: value, scoringRawValue: value };
+      return {
+        sourceValue: value,
+        scoringRawValue: value,
+        playerCountFact: { source: "publisherRange", minPlayers: minimum, maxPlayers: maximum },
+      };
     },
     suggestionAnalysis: {
       attribute: "best player count or publisher range midpoint",
@@ -449,7 +463,7 @@ export const DERIVED_AXIS_REGISTRY = {
     templateDefaults: {
       name: "Player Count Fit",
       description:
-        "Scores a target player count using BGG suggested-player-count poll data, falling back to publisher bounds.",
+        "Scores target-player fit from a confirmed manual count, otherwise BGG best-player count, otherwise the publisher player range.",
       weight: 50,
       preferenceShape: "higher-is-better",
       configuration: {},

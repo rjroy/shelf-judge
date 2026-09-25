@@ -9,18 +9,46 @@ import type {
   PredictionConfidence,
   NicheImpact,
   NicheImpactEntry,
+  RedundancyAdjustment,
 } from "@shelf-judge/shared";
 import { relativeDate } from "@/lib/date-utils";
 
-type SortField = "addedAt" | "predictedScore" | "name";
+type SortField = "addedAt" | "predictedScore" | "redundancy" | "name";
+const WISHLIST_SORT_STORAGE_KEY = "shelf-judge:wishlist-sort";
+const DEFAULT_SORT_FIELD: SortField = "addedAt";
 
-const SORT_OPTIONS: { value: SortField; label: string }[] = [
+export const SORT_OPTIONS: { value: SortField; label: string }[] = [
   { value: "addedAt", label: "Date Added" },
   { value: "predictedScore", label: "Predicted Score" },
+  { value: "redundancy", label: "With Redundancy" },
   { value: "name", label: "Name" },
 ];
 
-function sortEntries(entries: WishlistEntry[], field: SortField): WishlistEntry[] {
+export function loadWishlistSortField(storage: Pick<Storage, "getItem"> | null): SortField {
+  if (!storage) return DEFAULT_SORT_FIELD;
+  try {
+    const storedValue = storage.getItem(WISHLIST_SORT_STORAGE_KEY);
+    return SORT_OPTIONS.some((option) => option.value === storedValue)
+      ? (storedValue as SortField)
+      : DEFAULT_SORT_FIELD;
+  } catch {
+    return DEFAULT_SORT_FIELD;
+  }
+}
+
+export function saveWishlistSortField(
+  storage: Pick<Storage, "setItem"> | null,
+  sortField: SortField,
+): void {
+  if (!storage) return;
+  try {
+    storage.setItem(WISHLIST_SORT_STORAGE_KEY, sortField);
+  } catch {
+    // Storage may be disabled or unavailable; sorting still works for this session.
+  }
+}
+
+export function sortEntries(entries: WishlistEntry[], field: SortField): WishlistEntry[] {
   const sorted = [...entries];
   switch (field) {
     case "addedAt":
@@ -32,6 +60,16 @@ function sortEntries(entries: WishlistEntry[], field: SortField): WishlistEntry[
         if (a.predictedScore === null) return 1;
         if (b.predictedScore === null) return -1;
         return b.predictedScore - a.predictedScore;
+      });
+      break;
+    case "redundancy":
+      sorted.sort((a, b) => {
+        const aScore = a.predictedScore === null ? null : a.redundancyPreview?.adjustedScore;
+        const bScore = b.predictedScore === null ? null : b.redundancyPreview?.adjustedScore;
+        if (aScore == null && bScore == null) return 0;
+        if (aScore == null) return 1;
+        if (bScore == null) return -1;
+        return bScore - aScore;
       });
       break;
     case "name":
@@ -100,6 +138,42 @@ function NicheImpactPanel({ nicheImpact }: { nicheImpact: NicheImpact }) {
   );
 }
 
+export function WishlistRedundancyPreview({
+  preview,
+  predictionAvailable,
+}: {
+  preview: RedundancyAdjustment | null | undefined;
+  predictionAvailable: boolean;
+}) {
+  if (!preview || !predictionAvailable) return null;
+  return (
+    <div className="preview-redundancy" aria-label="Redundancy adjustment">
+      <div className="preview-redundancy-title">Redundancy</div>
+      <div className="preview-redundancy-score">
+        With redundancy: <strong>{preview.adjustedScore.toFixed(1)}</strong>
+        {preview.penalty > 0 && (
+          <span className="preview-redundancy-penalty"> (-{preview.penalty.toFixed(1)})</span>
+        )}
+      </div>
+      {preview.nicheNeighbors.length > 0 ? (
+        <div className="preview-redundancy-neighbors">
+          {preview.nicheNeighbors.slice(0, 3).map((neighbor) => (
+            <div key={neighbor.gameId} className="preview-redundancy-neighbor">
+              <span className="preview-redundancy-neighbor-name">{neighbor.gameName}</span>
+              <span className="preview-redundancy-neighbor-sim">
+                {(neighbor.similarity * 100).toFixed(0)}%
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="preview-redundancy-empty">No similar games in collection.</div>
+      )}
+      <div className="wc-redundancy-note">Snapshot from when added or last refreshed.</div>
+    </div>
+  );
+}
+
 function WishlistCard({
   entry,
   onRemove,
@@ -117,6 +191,7 @@ function WishlistCard({
 
   const hasBreakdown = entry.predictedBreakdown && entry.predictedBreakdown.length > 0;
   const hasPrediction = entry.predictedScore !== null;
+  const redundancyPreview = entry.redundancyPreview;
 
   return (
     <div className="wishlist-card">
@@ -152,6 +227,10 @@ function WishlistCard({
               </span>
             )}
           </div>
+          <WishlistRedundancyPreview
+            preview={redundancyPreview}
+            predictionAvailable={hasPrediction}
+          />
           <div className="wc-added">
             Added {relativeDate(entry.addedAt)}
             {!hasPrediction && (
@@ -246,9 +325,30 @@ export default function WishlistPage() {
   const [entries, setEntries] = useState<WishlistEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [sortField, setSortField] = useState<SortField>("addedAt");
+  const [sortField, setSortField] = useState<SortField>(DEFAULT_SORT_FIELD);
+  const [sortPreferenceLoaded, setSortPreferenceLoaded] = useState(false);
   const [refreshingAll, setRefreshingAll] = useState(false);
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
+
+  useEffect(() => {
+    let restoredSortField = DEFAULT_SORT_FIELD;
+    try {
+      restoredSortField = loadWishlistSortField(window.localStorage);
+    } catch {
+      // Accessing localStorage itself can throw in restricted browser contexts.
+    }
+    setSortField(restoredSortField);
+    setSortPreferenceLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!sortPreferenceLoaded) return;
+    try {
+      saveWishlistSortField(window.localStorage, sortField);
+    } catch {
+      // Accessing localStorage itself can throw in restricted browser contexts.
+    }
+  }, [sortField, sortPreferenceLoaded]);
 
   useEffect(() => {
     void (async () => {

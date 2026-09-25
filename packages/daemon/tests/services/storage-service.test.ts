@@ -896,6 +896,7 @@ function makeWishlistEntry(overrides: Partial<WishlistEntry> = {}): WishlistEntr
     predictionConfidence: "moderate",
     predictedBreakdown: [{ axisName: "Community Rating", rating: 8, confidence: "moderate" }],
     nicheImpact: null,
+    redundancyPreview: null,
     addedAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
   };
@@ -970,7 +971,20 @@ describe("StorageService.loadCollection — tournament axis migration", () => {
     const stored = legacyCollectionWithoutTournamentAxis();
     const wishlist: WishlistEntry[] = [
       makeWishlistEntry({ id: "wl-a", bggId: 1, name: "A" }),
-      makeWishlistEntry({ id: "wl-b", bggId: 2, name: "B", predictedScore: 6.0 }),
+      makeWishlistEntry({
+        id: "wl-b",
+        bggId: 2,
+        name: "B",
+        predictedScore: 6.0,
+        redundancyPreview: {
+          penalty: 1,
+          originalScore: 6,
+          adjustedScore: 5,
+          nicheNeighbors: [],
+          nicheRank: 2,
+          nicheSize: 1,
+        },
+      }),
     ];
     const { service, fileOps } = makeService({
       [COLLECTION_PATH]: JSON.stringify(stored),
@@ -985,11 +999,14 @@ describe("StorageService.loadCollection — tournament axis migration", () => {
       expect(entry.predictedScore).toBeNull();
       expect(entry.predictedBreakdown).toBeNull();
       expect(entry.predictionConfidence).toBeNull();
+      expect(entry.redundancyPreview).toBeNull();
     }
     // User-owned metadata is preserved.
     expect(onDisk[0].bggId).toBe(1);
     expect(onDisk[0].name).toBe("A");
     expect(onDisk[1].bggId).toBe(2);
+    expect(onDisk[1].id).toBe("wl-b");
+    expect(onDisk[1].addedAt).toBe(wishlist[1].addedAt);
   });
 
   test("does not touch wishlist when migration is a no-op", async () => {

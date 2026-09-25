@@ -4,11 +4,13 @@ import {
   type WishlistEntry,
   type WishlistBreakdownEntry,
   type NicheImpact,
+  type RedundancyAdjustment,
 } from "@shelf-judge/shared";
 import type { StorageService } from "./storage-service.js";
 import type { PredictionService, PredictedGameResult } from "./prediction-service.js";
 import type { GameService } from "./game-service.js";
 import { computeNicheImpact } from "./niche-engine.js";
+import { computeRedundancyPreview } from "./redundancy-preview.js";
 
 export interface WishlistService {
   list(): Promise<WishlistEntry[]>;
@@ -30,6 +32,7 @@ function buildEntry(
   bggId: number,
   result: PredictedGameResult,
   nicheImpact: NicheImpact,
+  redundancyPreview: RedundancyAdjustment | null,
 ): WishlistEntry {
   const isUnavailable = result.predictionUnavailable !== null;
 
@@ -58,17 +61,16 @@ function buildEntry(
     predictionConfidence: isUnavailable ? null : (result.score.predictionMeta?.confidence ?? null),
     predictedBreakdown,
     nicheImpact: nicheImpact.wouldJoin.length > 0 ? nicheImpact : null,
+    redundancyPreview,
     addedAt: new Date().toISOString(),
   };
 }
 
-async function computeNicheImpactForResult(
-  predictionService: PredictionService,
-  storageService: StorageService,
+function computeNicheImpactForResult(
   result: PredictedGameResult,
-): Promise<NicheImpact> {
-  const nicheSettings = await storageService.loadNicheSettings();
-  const allGames = await predictionService.listGamesWithPredictions();
+  allGames: Awaited<ReturnType<PredictionService["listGamesWithPredictions"]>>,
+  nicheSettings: Awaited<ReturnType<StorageService["loadNicheSettings"]>>,
+): NicheImpact {
   return computeNicheImpact(allGames, result.game, result.score, nicheSettings);
 }
 
@@ -92,13 +94,25 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
       }
 
       const result = await predictionService.predictBggGame(bggId);
-      const nicheImpact = await computeNicheImpactForResult(
-        predictionService,
-        storageService,
-        result,
-      );
+      const [nicheSettings, allGames, redundancySettings, tournamentData] = await Promise.all([
+        storageService.loadNicheSettings(),
+        predictionService.listGamesWithPredictions(),
+        storageService.loadRedundancySettings(),
+        storageService.loadTournament(),
+      ]);
+      const nicheImpact = computeNicheImpactForResult(result, allGames, nicheSettings);
+      const redundancyPreview =
+        result.predictionUnavailable === null
+          ? computeRedundancyPreview(
+              { game: result.game, score: result.score },
+              collection,
+              tournamentData,
+              allGames,
+              redundancySettings,
+            )
+          : null;
 
-      const entry = buildEntry(bggId, result, nicheImpact);
+      const entry = buildEntry(bggId, result, nicheImpact, redundancyPreview);
       wishlist.push(entry);
       await storageService.saveWishlist(wishlist);
       return entry;
@@ -130,13 +144,27 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
 
       const existing = wishlist[index];
       const result = await predictionService.predictBggGame(existing.bggId);
-      const nicheImpact = await computeNicheImpactForResult(
-        predictionService,
-        storageService,
-        result,
-      );
+      const [collection, nicheSettings, redundancySettings, tournamentData, allGames] =
+        await Promise.all([
+          storageService.loadCollection(),
+          storageService.loadNicheSettings(),
+          storageService.loadRedundancySettings(),
+          storageService.loadTournament(),
+          predictionService.listGamesWithPredictions(),
+        ]);
+      const nicheImpact = computeNicheImpactForResult(result, allGames, nicheSettings);
 
-      const updated = buildEntry(existing.bggId, result, nicheImpact);
+      const redundancyPreview =
+        result.predictionUnavailable === null
+          ? computeRedundancyPreview(
+              { game: result.game, score: result.score },
+              collection,
+              tournamentData,
+              allGames,
+              redundancySettings,
+            )
+          : null;
+      const updated = buildEntry(existing.bggId, result, nicheImpact, redundancyPreview);
       // Preserve original id and addedAt (REQ-WISH-11)
       updated.id = existing.id;
       updated.addedAt = existing.addedAt;
@@ -152,21 +180,33 @@ export function createWishlistService(deps: WishlistServiceDeps): WishlistServic
       const errors: string[] = [];
 
       // Preload shared data once rather than per-entry
-      const nicheSettings = await storageService.loadNicheSettings();
-      const allGames = await predictionService.listGamesWithPredictions();
+      const [nicheSettings, allGames, collection, redundancySettings, tournamentData] =
+        await Promise.all([
+          storageService.loadNicheSettings(),
+          predictionService.listGamesWithPredictions(),
+          storageService.loadCollection(),
+          storageService.loadRedundancySettings(),
+          storageService.loadTournament(),
+        ]);
 
       for (let i = 0; i < wishlist.length; i++) {
         const existing = wishlist[i];
         try {
           const result = await predictionService.predictBggGame(existing.bggId);
-          const nicheImpact = computeNicheImpact(
-            allGames,
-            result.game,
-            result.score,
-            nicheSettings,
-          );
+          const nicheImpact = computeNicheImpactForResult(result, allGames, nicheSettings);
 
-          const updated = buildEntry(existing.bggId, result, nicheImpact);
+          const redundancyPreview =
+            result.predictionUnavailable === null
+              ? computeRedundancyPreview(
+                  { game: result.game, score: result.score },
+                  collection,
+                  tournamentData,
+                  allGames,
+                  redundancySettings,
+                )
+              : null;
+
+          const updated = buildEntry(existing.bggId, result, nicheImpact, redundancyPreview);
           updated.id = existing.id;
           updated.addedAt = existing.addedAt;
           wishlist[i] = updated;
