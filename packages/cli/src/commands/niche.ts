@@ -1,6 +1,7 @@
 // Niche commands: ignored, ignore, unignore
 import type { NicheSettings, NicheTagFilter } from "@shelf-judge/shared";
 import type { DaemonClient } from "../client.js";
+import { responseError } from "../errors.js";
 import type { OutputOptions } from "../output.js";
 import { formatTable, printOutput } from "../output.js";
 
@@ -12,11 +13,6 @@ function validateType(type: string): asserts type is NicheTagFilter["type"] {
   }
 }
 
-function nicheError(data: NicheSettings, fallback: string): Error {
-  const err = data as unknown as { error: string };
-  return new Error(err.error ?? fallback);
-}
-
 export async function nicheIgnored(
   client: DaemonClient,
   _args: string[],
@@ -25,7 +21,7 @@ export async function nicheIgnored(
   const { ok, data } = await client.get<NicheSettings>("/api/niches/settings");
 
   if (!ok) {
-    throw nicheError(data, "Failed to load niche settings");
+    throw responseError(data, "Failed to load niche settings");
   }
 
   if (opts.json) return printOutput(data.ignoredTags, opts);
@@ -60,7 +56,7 @@ export async function nicheIgnore(
   });
 
   if (!ok) {
-    throw nicheError(data, "Failed to ignore tag");
+    throw responseError(data, "Failed to ignore tag");
   }
 
   if (opts.json) return printOutput(data, opts);
@@ -88,7 +84,7 @@ export async function nicheUnignore(
   });
 
   if (!ok) {
-    throw nicheError(data, "Failed to unignore tag");
+    throw responseError(data, "Failed to unignore tag");
   }
 
   if (opts.json) return printOutput(data, opts);

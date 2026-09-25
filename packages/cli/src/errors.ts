@@ -7,6 +7,11 @@ export class StructuredCliError extends Error {
   }
 }
 
+export function responseError(body: unknown, fallback: string): Error {
+  const err = body as { error: string };
+  return new Error(err.error ?? fallback);
+}
+
 export function formatCliError(error: unknown): string {
   if (error instanceof StructuredCliError) {
     return JSON.stringify(error.details, null, 2);
