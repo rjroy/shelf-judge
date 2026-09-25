@@ -1,6 +1,7 @@
 // Redundancy commands: settings, enable, disable, stage, set
 import type { RedundancySettings } from "@shelf-judge/shared";
 import type { DaemonClient } from "../client.js";
+import { responseError } from "../errors.js";
 import type { OutputOptions } from "../output.js";
 import { formatTable, printOutput } from "../output.js";
 
@@ -30,8 +31,7 @@ export async function redundancySettings(
   const { ok, data } = await client.get<RedundancySettings>("/api/redundancy/settings");
 
   if (!ok) {
-    const err = data as unknown as { error: string };
-    throw new Error(err.error ?? "Failed to load redundancy settings");
+    throw responseError(data, "Failed to load redundancy settings");
   }
 
   if (opts.json) return printOutput(data, opts);
@@ -49,8 +49,7 @@ export async function redundancyEnable(
   });
 
   if (!ok) {
-    const err = data as unknown as { error: string };
-    throw new Error(err.error ?? "Failed to enable redundancy");
+    throw responseError(data, "Failed to enable redundancy");
   }
 
   if (opts.json) return printOutput(data, opts);
@@ -68,8 +67,7 @@ export async function redundancyDisable(
   });
 
   if (!ok) {
-    const err = data as unknown as { error: string };
-    throw new Error(err.error ?? "Failed to disable redundancy");
+    throw responseError(data, "Failed to disable redundancy");
   }
 
   if (opts.json) return printOutput(data, opts);
@@ -93,8 +91,7 @@ export async function redundancyStage(
   });
 
   if (!ok) {
-    const err = data as unknown as { error: string };
-    throw new Error(err.error ?? "Failed to set redundancy stage");
+    throw responseError(data, "Failed to set redundancy stage");
   }
 
   if (opts.json) return printOutput(data, opts);
@@ -164,8 +161,7 @@ export async function redundancySet(
   });
 
   if (!ok) {
-    const err = data as unknown as { error: string };
-    throw new Error(err.error ?? `Failed to set ${key}`);
+    throw responseError(data, `Failed to set ${key}`);
   }
 
   if (opts.json) return printOutput(data, opts);
