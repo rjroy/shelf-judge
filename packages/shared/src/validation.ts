@@ -1881,6 +1881,18 @@ export const FitnessResultResponseSchema = z
           derivedField: DerivedFieldIdSchema.nullable(),
           sourceValue: FiniteNumberSchema.nullable(),
           scoringRawValue: FiniteNumberSchema.nullable(),
+          playerCountFact: z
+            .object({
+              source: z.enum(["manual", "bestPlayers", "publisherRange"]),
+              minPlayers: z.number().int().safe().positive(),
+              maxPlayers: z.number().int().safe().positive(),
+            })
+            .strict()
+            .refine(({ minPlayers, maxPlayers }) => minPlayers <= maxPlayers, {
+              message: "Minimum players cannot exceed maximum players",
+              path: ["maxPlayers"],
+            })
+            .optional(),
           effectiveRating: FiniteNumberSchema.nullable(),
           preferenceShape: z.enum(["higher-is-better", "lower-is-better", "sweet-spot"]),
           curveAffected: z.boolean(),

@@ -377,12 +377,12 @@ describe("derived axis registry contract", () => {
       id: "playerCountFit",
       label: "Player Count Fit",
       description:
-        "Scores a target player count using BGG suggested-player-count poll data, falling back to publisher bounds.",
+        "Scores target-player fit from a confirmed manual count, otherwise BGG best-player count, otherwise the publisher player range.",
       provenance:
-        "BoardGameGeek suggested-player-count poll with publisher-declared bounds fallback",
+        "Manual player count, BGG-derived best-player count, or publisher-declared player range",
       unit: "fit score",
       missingValuePolicy:
-        "Falls back to publisher bounds when poll data is unavailable; missing only when neither source is valid.",
+        "Uses the first valid source in order: manual player count, BGG best-player count, publisher player range; missing when none is valid.",
       nativeScaleDiscovery: { type: "fixed", min: 1, max: 10 },
       defaultNativeScale: { min: 1, max: 10 },
     });
@@ -398,7 +398,7 @@ describe("derived axis registry contract", () => {
     expect(definition.templateDefaults).toEqual({
       name: "Player Count Fit",
       description:
-        "Scores a target player count using BGG suggested-player-count poll data, falling back to publisher bounds.",
+        "Scores target-player fit from a confirmed manual count, otherwise BGG best-player count, otherwise the publisher player range.",
       weight: 50,
       preferenceShape: "higher-is-better",
       configuration: {},
@@ -521,12 +521,12 @@ describe("derived axis registry contract", () => {
           id: "playerCountFit",
           label: "Player Count Fit",
           description:
-            "Scores a target player count using BGG suggested-player-count poll data, falling back to publisher bounds.",
+            "Scores target-player fit from a confirmed manual count, otherwise BGG best-player count, otherwise the publisher player range.",
           provenance:
-            "BoardGameGeek suggested-player-count poll with publisher-declared bounds fallback",
+            "Manual player count, BGG-derived best-player count, or publisher-declared player range",
           unit: "fit score",
           missingValuePolicy:
-            "Falls back to publisher bounds when poll data is unavailable; missing only when neither source is valid.",
+            "Uses the first valid source in order: manual player count, BGG best-player count, publisher player range; missing when none is valid.",
           nativeScaleDiscovery: { type: "fixed", min: 1, max: 10 },
           nativeScale: { min: 1, max: 10 },
           configuration: [
@@ -541,7 +541,7 @@ describe("derived axis registry contract", () => {
           template: {
             name: "Player Count Fit",
             description:
-              "Scores a target player count using BGG suggested-player-count poll data, falling back to publisher bounds.",
+              "Scores target-player fit from a confirmed manual count, otherwise BGG best-player count, otherwise the publisher player range.",
             weight: 50,
             preferenceShape: "higher-is-better",
             configuration: {},
@@ -753,6 +753,7 @@ describe("derived value resolution", () => {
     expect(resolveDerivedAxisValue(playerAxis, makeGame({ minPlayers, maxPlayers }))).toEqual({
       sourceValue: expected,
       scoringRawValue: expected,
+      playerCountFact: { source: "publisherRange", minPlayers, maxPlayers },
     });
   });
 
@@ -764,6 +765,7 @@ describe("derived value resolution", () => {
     expect(resolveDerivedAxisValue(playerAxis, makeGame({ bestPlayers }))).toEqual({
       sourceValue: expected,
       scoringRawValue: expected,
+      playerCountFact: { source: "bestPlayers", minPlayers: bestPlayers, maxPlayers: bestPlayers },
     });
   });
 
@@ -771,10 +773,12 @@ describe("derived value resolution", () => {
     expect(resolveDerivedAxisValue(playerAxis, makeGame({ bestPlayers: 3.5 }))).toEqual({
       sourceValue: 10,
       scoringRawValue: 10,
+      playerCountFact: { source: "bestPlayers", minPlayers: 3, maxPlayers: 4 },
     });
     expect(resolveDerivedAxisValue(playerAxis, makeGame({ bestPlayers: 2.5 }))).toEqual({
       sourceValue: 8,
       scoringRawValue: 8,
+      playerCountFact: { source: "bestPlayers", minPlayers: 2, maxPlayers: 3 },
     });
   });
 
@@ -785,7 +789,11 @@ describe("derived value resolution", () => {
           playerAxis,
           makeGame({ bestPlayers, minPlayers: 3, maxPlayers: 5 }),
         ),
-      ).toEqual({ sourceValue: 9, scoringRawValue: 9 });
+      ).toEqual({
+        sourceValue: 9,
+        scoringRawValue: 9,
+        playerCountFact: { source: "publisherRange", minPlayers: 3, maxPlayers: 5 },
+      });
     }
   });
 
@@ -798,6 +806,23 @@ describe("derived value resolution", () => {
     ).toBeNull();
   });
 
+  test("manual player count takes precedence and is reported as a singular fact", () => {
+    const game = makeGame({
+      bestPlayers: 3.5,
+      minPlayers: 2,
+      maxPlayers: 5,
+      manualValues: {
+        playingTime: null,
+        playerCount: { value: 2, source: "manual", confirmedAt: "2026-01-01T00:00:00Z" },
+      },
+    });
+    expect(resolveDerivedAxisValue(playerAxis, game)).toEqual({
+      sourceValue: 6,
+      scoringRawValue: 6,
+      playerCountFact: { source: "manual", minPlayers: 2, maxPlayers: 2 },
+    });
+  });
+
   test("grades target 100 within imported bounds above 100", () => {
     const target100: DerivedAxis<"playerCountFit"> = {
       ...playerAxis,
@@ -808,6 +833,7 @@ describe("derived value resolution", () => {
     ).toEqual({
       sourceValue: 1,
       scoringRawValue: 1,
+      playerCountFact: { source: "publisherRange", minPlayers: 1, maxPlayers: 500 },
     });
   });
 

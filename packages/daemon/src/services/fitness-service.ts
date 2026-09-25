@@ -124,6 +124,9 @@ export function createFitnessService(): FitnessService {
               : axis.source === "derived" || scoringValue === null
                 ? null
                 : scoringValue,
+          ...(resolution?.playerCountFact === undefined
+            ? {}
+            : { playerCountFact: resolution.playerCountFact }),
           effectiveRating: displayedRating,
           preferenceShape: shape,
           curveAffected:

@@ -37,7 +37,7 @@ const derivedAxis: Axis = {
 const playerCountAxis: Axis = {
   ...derivedAxis,
   id: "player-count-axis",
-  name: "Player Count Fit",
+  name: "Group Size Match",
   derivedField: "playerCountFit",
   configuration: { targetPlayerCount: 4 },
 };
@@ -263,12 +263,59 @@ describe("RatingForm controller", () => {
 
     expect(html).toContain("Very Good");
     expect(html).not.toContain("Stored override (1-10): 8");
-    expect(html).not.toContain("Target: 4 players");
-    expect(html).not.toContain("Scoring cap: 240 minutes");
+    expect(html).toContain("Target: 4 players");
+    expect(html).toContain("Scoring cap: 240 minutes");
   });
 
   test("renders metadata fallback when no derived score is available", () => {
-    expect(renderForm()).not.toContain("Source metadata unavailable");
+    expect(renderForm()).toContain("Source metadata unavailable");
+  });
+
+  test("shows truthful player-count facts and labels fit scores separately", () => {
+    const renderPlayerFact = (
+      source: "manual" | "bestPlayers" | "publisherRange",
+      minPlayers: number,
+      maxPlayers: number,
+      effectiveRating: number | null = 8,
+    ) => {
+      const base = derivedScore(playerCountAxis, "playerCountFit", 10, effectiveRating);
+      const result = {
+        ...base,
+        breakdown: [
+          {
+            ...base.breakdown[0],
+            playerCountFact: { source, minPlayers, maxPlayers },
+          },
+        ],
+      } as unknown as FitnessResult;
+      return renderForm({ axes: [playerCountAxis], score: result });
+    };
+
+    expect(renderPlayerFact("manual", 1, 1)).toContain("Manual player count: 1 player");
+    expect(renderPlayerFact("manual", 4, 4)).toContain("Manual player count: 4 players");
+    expect(renderPlayerFact("bestPlayers", 3, 3)).toContain("BGG best-player count: 3 players");
+    expect(renderPlayerFact("bestPlayers", 3, 4)).toContain("BGG best-player count: 3–4 players");
+    expect(renderPlayerFact("publisherRange", 1, 1)).toContain("Publisher range: 1 player");
+    expect(renderPlayerFact("publisherRange", 2, 5)).toContain("Publisher range: 2–5 players");
+
+    const legacy = renderForm({
+      axes: [playerCountAxis],
+      score: derivedScore(playerCountAxis, "playerCountFit", 10, 8),
+    });
+    expect(legacy).toContain("Computed fit score: 10 / 10");
+    expect(legacy).not.toContain("Published value: 10");
+    expect(legacy).not.toContain("10 players");
+    expect(legacy).not.toContain("Published BoardGameGeek");
+
+    const curved = derivedScore(playerCountAxis, "playerCountFit", 6, 3);
+    expect(renderForm({ axes: [playerCountAxis], score: curved })).toContain(
+      "Computed fit score: 6 / 10",
+    );
+    const unavailable = renderForm({
+      axes: [playerCountAxis],
+      score: derivedScore(playerCountAxis, "playerCountFit", null, null),
+    });
+    expect(unavailable).toContain("Player count unavailable");
   });
 
   test("keeps Complexity facts concise without provenance or configuration details", () => {

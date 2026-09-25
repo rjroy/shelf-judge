@@ -434,6 +434,7 @@ export interface FitnessBreakdownEntry {
   derivedField: DerivedFieldId | null;
   sourceValue: number | null;
   scoringRawValue: number | null;
+  playerCountFact?: PlayerCountFact;
   effectiveRating: number | null;
   preferenceShape: PreferenceShape;
   curveAffected: boolean;
@@ -446,9 +447,16 @@ export interface FitnessBreakdownEntry {
   referenceGames: ReferenceGame[] | null;
 }
 
+export interface PlayerCountFact {
+  source: "manual" | "bestPlayers" | "publisherRange";
+  minPlayers: number;
+  maxPlayers: number;
+}
+
 export interface DerivedValueResolution {
   sourceValue: number;
   scoringRawValue: number;
+  playerCountFact?: PlayerCountFact;
 }
 
 export interface DerivedConfigurationPropertyDiscovery {
