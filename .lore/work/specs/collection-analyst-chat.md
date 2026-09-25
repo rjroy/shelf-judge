@@ -17,7 +17,13 @@ req-prefix: ANALYST
 > **Lifecycle note, 2026-09-15:** This implemented work specification is retained
 > for requirement traceability. Current operational authority is
 > `.lore/reference/` and delivered code; historical planning prerequisites do not
-> create new work.
+> create new work. A proposed **Analyst-only, bounded BGG discovery and
+> preview tool** extension lives at
+> `.lore/work/specs/collection-analyst-bgg-discovery.md` (`approved`). It does not
+> supersede this document's original BGG-lookup exclusion or closed evidence
+> manifest, and it is not established reference or shipped behavior. Until
+> implementation updates the manifest, disclosure, payload tests, and delivered
+> code, existing chat remains collection-evidence-only.
 
 ## Goal
 
@@ -202,7 +208,7 @@ After binding and before any prompt or evidence is supplied, the integration mus
 
 Shelf Judge does not infer availability from one environment variable or implement provider credentials itself. It lets pi-agent and the selected provider resolve authentication, then reports the actual categorized result. Missing model configuration, unknown provider or model, missing extension binding, authentication failure, provider refusal, rate limit, and provider outage are distinguishable unavailable states without exposing credential values.
 
-The current `architecture-pattern.md` Claude-Agent-SDK-only rule conflicts with this draft's pi-agent boundary. Neither this draft nor the Reflections draft supersedes that current reference. Before shared grounded-analysis implementation can be approved or started, the owner must approve the provider-architecture change and planning must update or supersede the reference with one authoritative pi-agent decision. Owner rejection requires revising both provider contracts; it must not produce separate provider stacks.
+Historical decision note: this draft originally recorded a conflict with a Claude-Agent-SDK-only architecture rule and requested owner approval before implementation. That decision was made on 2026-08-30; the current `.lore/reference/architecture-pattern.md` now requires the shared daemon-owned pi-agent boundary. The former approval prerequisite is resolved, not an active blocker.
 
 ### Budgets And Retrieval Bounds
 
@@ -463,7 +469,7 @@ This draft records these first-release choices for owner approval:
 
 1. **Question model:** chat is user-directed and open-ended, not a predefined set of analytical jobs. Supported-work examples clarify the evidence boundary rather than restrict question wording.
 2. **Retention:** conversations are ephemeral only and disappear on reload, page-state destruction, CLI exit, daemon restart, or explicit new conversation.
-3. **Model integration:** both drafts select one shared pi-agent boundary rather than separate provider stacks. Implementation remains blocked until the owner approves that architecture change and planning updates or supersedes the current Claude-only reference.
+3. **Model integration (resolved 2026-08-30):** both drafts selected one shared pi-agent boundary rather than separate provider stacks. The owner approved this change and `.lore/reference/architecture-pattern.md` is the current authority; this historical approval item is not an implementation blocker.
 4. **Disclosure:** disclose provider, model, evidence transmission, owner-note use, retention, and budget policy before the first send in every new conversation.
 5. **Budgets:** Shelf Judge imposes no fixed token or monetary caps; it discloses this and reports provider usage and cost when available.
 
