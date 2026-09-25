@@ -13,15 +13,16 @@ import type {
 } from "@shelf-judge/shared";
 import { relativeDate } from "@/lib/date-utils";
 
-type SortField = "addedAt" | "predictedScore" | "name";
+type SortField = "addedAt" | "predictedScore" | "redundancy" | "name";
 
-const SORT_OPTIONS: { value: SortField; label: string }[] = [
+export const SORT_OPTIONS: { value: SortField; label: string }[] = [
   { value: "addedAt", label: "Date Added" },
   { value: "predictedScore", label: "Predicted Score" },
+  { value: "redundancy", label: "With Redundancy" },
   { value: "name", label: "Name" },
 ];
 
-function sortEntries(entries: WishlistEntry[], field: SortField): WishlistEntry[] {
+export function sortEntries(entries: WishlistEntry[], field: SortField): WishlistEntry[] {
   const sorted = [...entries];
   switch (field) {
     case "addedAt":
@@ -33,6 +34,16 @@ function sortEntries(entries: WishlistEntry[], field: SortField): WishlistEntry[
         if (a.predictedScore === null) return 1;
         if (b.predictedScore === null) return -1;
         return b.predictedScore - a.predictedScore;
+      });
+      break;
+    case "redundancy":
+      sorted.sort((a, b) => {
+        const aScore = a.predictedScore === null ? null : a.redundancyPreview?.adjustedScore;
+        const bScore = b.predictedScore === null ? null : b.redundancyPreview?.adjustedScore;
+        if (aScore == null && bScore == null) return 0;
+        if (aScore == null) return 1;
+        if (bScore == null) return -1;
+        return bScore - aScore;
       });
       break;
     case "name":
@@ -154,10 +165,7 @@ function WishlistCard({
 
   const hasBreakdown = entry.predictedBreakdown && entry.predictedBreakdown.length > 0;
   const hasPrediction = entry.predictedScore !== null;
-  // Keep the presentation compatible while the shared contract is being updated in parallel.
-  const redundancyPreview = (
-    entry as WishlistEntry & { redundancyPreview?: RedundancyAdjustment | null }
-  ).redundancyPreview;
+  const redundancyPreview = entry.redundancyPreview;
 
   return (
     <div className="wishlist-card">
