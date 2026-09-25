@@ -94,7 +94,7 @@ export interface GameService {
   ): GameWithScore[];
   rateGame(id: string, ratings: Record<string, number | null>): Promise<GameWithScore>;
   removeGame(id: string): Promise<void>;
-  searchGames(query: string): Promise<BggSearchResult[]>;
+  searchGames(query: string, signal?: AbortSignal): Promise<BggSearchResult[]>;
   refreshBggData(gameId: string): Promise<PlayEvidenceMutationResult>;
   refreshAllBggData(): Promise<RefreshSummary>;
   setOwnership(id: string, ownership: OwnershipStatus): Promise<OwnershipMutationResult>;
@@ -964,8 +964,8 @@ export function createGameService(deps: GameServiceDeps): GameService {
       return value;
     },
 
-    async searchGames(query: string): Promise<BggSearchResult[]> {
-      return configuredBggClient().searchGames(query);
+    async searchGames(query: string, signal?: AbortSignal): Promise<BggSearchResult[]> {
+      return configuredBggClient().searchGames(query, signal);
     },
 
     async setAdditionalBggIds(id: string, bggIds: number[]): Promise<Game> {

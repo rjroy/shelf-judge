@@ -51,7 +51,7 @@ export interface BatchProgressEvent {
 }
 
 export interface BggClient {
-  searchGames(query: string): Promise<BggSearchResult[]>;
+  searchGames(query: string, signal?: AbortSignal): Promise<BggSearchResult[]>;
   getGame(bggId: number): Promise<BggGameResult>;
   getGames(
     bggIds: number[],
@@ -67,12 +67,47 @@ export interface BggClientDeps {
   fetchFn?: typeof fetch;
   delayMs?: number;
   delayFn?: (ms: number) => Promise<void>;
+  fetchTimeoutMs?: number;
   now?: () => string;
   logger?: Logger;
 }
 
 function defaultDelay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function abortError(reason?: unknown): DOMException {
+  if (reason instanceof DOMException && reason.name === "AbortError") return reason;
+  return new DOMException(
+    reason instanceof Error ? reason.message : "The operation was aborted",
+    "AbortError",
+  );
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw abortError(signal.reason);
+}
+
+function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  throwIfAborted(signal);
+  if (!signal) return defaultDelay(ms);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(done, ms);
+    function cleanup() {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", aborted);
+    }
+    function done() {
+      cleanup();
+      resolve();
+    }
+    function aborted() {
+      cleanup();
+      reject(abortError(signal?.reason));
+    }
+    signal.addEventListener("abort", aborted, { once: true });
+    if (signal.aborted) aborted();
+  });
 }
 
 function classifyRequestedItemOutcome<T>(
@@ -160,12 +195,22 @@ export function createBggClient(deps: BggClientDeps): BggClient {
   const { config, delayMs = DEFAULT_DELAY_MS } = deps;
   const fetchFn = deps.fetchFn ?? fetch;
   const delayFn = deps.delayFn ?? defaultDelay;
+  const fetchTimeoutMs = deps.fetchTimeoutMs ?? FETCH_TIMEOUT_MS;
   const now = deps.now ?? (() => new Date().toISOString());
   const logger = deps.logger ?? createLogger("bgg");
 
   let lastRequestTime = 0;
   let currentDelayMs = delayMs;
   let requestQueue: Promise<void> = Promise.resolve();
+  const searchResponseState = new WeakMap<
+    Response,
+    { timedOut: () => boolean; cleanup: () => void }
+  >();
+
+  function cleanupSearchResponse(response: Response): void {
+    searchResponseState.get(response)?.cleanup();
+    searchResponseState.delete(response);
+  }
 
   function assertConfigured(): void {
     if (!config.bggAuthToken) {
@@ -183,47 +228,83 @@ export function createBggClient(deps: BggClientDeps): BggClient {
 
   let rateLimitRetries = 0;
 
-  async function throttledFetch(url: string, retryCount = 0): Promise<Response> {
+  async function throttledFetch(
+    url: string,
+    retryCount = 0,
+    signal?: AbortSignal,
+  ): Promise<Response> {
+    throwIfAborted(signal);
     const now = Date.now();
     const elapsed = now - lastRequestTime;
     if (elapsed < currentDelayMs && lastRequestTime > 0) {
       const waitMs = currentDelayMs - elapsed;
       logger.log(`throttle: waiting ${waitMs}ms before next request`);
-      await delayFn(waitMs);
+      if (signal) await abortableDelay(waitMs, signal);
+      else await delayFn(waitMs);
     }
+    throwIfAborted(signal);
     lastRequestTime = Date.now();
 
     logger.log(`fetch: ${url}`);
     let response: Response;
+    let abortFromCaller: (() => void) | undefined;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
+    let retainTimeoutThroughBody = false;
+    const controller = new AbortController();
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-      try {
-        response = await fetchFn(url, { headers: authHeaders(), signal: controller.signal });
-      } finally {
-        clearTimeout(timeoutId);
+      abortFromCaller = () => controller.abort(abortError(signal?.reason));
+      signal?.addEventListener("abort", abortFromCaller, { once: true });
+      if (signal?.aborted) abortFromCaller();
+      timeoutId = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, fetchTimeoutMs);
+      // Aborting stops local transport/work; BGG may still finish processing a request it received.
+      response = await fetchFn(url, { headers: authHeaders(), signal: controller.signal });
+      if (signal?.aborted) {
+        void response.body?.cancel().catch(() => {});
+        throw abortError(signal.reason);
+      }
+      if (signal && abortFromCaller) {
+        retainTimeoutThroughBody = true;
+        searchResponseState.set(response, {
+          timedOut: () => timedOut,
+          cleanup: () => {
+            if (timeoutId !== undefined) clearTimeout(timeoutId);
+            signal.removeEventListener("abort", abortFromCaller!);
+          },
+        });
       }
     } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") {
-        logger.error(`timeout after ${FETCH_TIMEOUT_MS / 1000}s: ${url}`);
-        throw new Error(`BGG API request timed out after ${FETCH_TIMEOUT_MS / 1000}s`);
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+      if (abortFromCaller) signal?.removeEventListener("abort", abortFromCaller);
+      if (signal?.aborted) throw abortError(signal.reason);
+      if (timedOut || (err instanceof DOMException && err.name === "AbortError")) {
+        logger.error(`timeout after ${fetchTimeoutMs / 1000}s: ${url}`);
+        throw new Error(`BGG API request timed out after ${fetchTimeoutMs / 1000}s`);
       }
       logger.error(`fetch error: ${toErrorMessage(err)}`);
       throw new Error(`BGG API request failed: ${toErrorMessage(err)}`);
+    } finally {
+      if (!retainTimeoutThroughBody && timeoutId !== undefined) clearTimeout(timeoutId);
     }
 
     logger.log(`response: ${response.status} from ${url}`);
 
     // Handle 429 rate limiting with bounded retries
     if (response.status === 429) {
+      cleanupSearchResponse(response);
+      void response.body?.cancel().catch(() => {});
       rateLimitRetries++;
       logger.warn(`rate limited (429), retry ${rateLimitRetries}/${MAX_429_RETRIES}`);
       if (rateLimitRetries > MAX_429_RETRIES) {
         throw new Error(`BGG API rate limited after ${MAX_429_RETRIES} retries. Try again later.`);
       }
-      await delayFn(BACKOFF_429_MS);
+      if (signal) await abortableDelay(BACKOFF_429_MS, signal);
+      else await delayFn(BACKOFF_429_MS);
       currentDelayMs = 10000; // Slow recovery: 1 req/10s after backoff
-      return throttledFetch(url, retryCount);
+      return throttledFetch(url, retryCount, signal);
     }
 
     // Successful non-429 response: reset retry counter and gradually recover rate.
@@ -237,13 +318,16 @@ export function createBggClient(deps: BggClientDeps): BggClient {
 
     // Handle 502/503 server errors with retry
     if ((response.status === 502 || response.status === 503) && retryCount < MAX_5XX_RETRIES) {
+      cleanupSearchResponse(response);
+      void response.body?.cancel().catch(() => {});
       logger.warn(`server error (${response.status}), retry ${retryCount + 1}/${MAX_5XX_RETRIES}`);
-      await delayFn(RETRY_5XX_MS);
-      return throttledFetch(url, retryCount + 1);
+      if (signal) await abortableDelay(RETRY_5XX_MS, signal);
+      else await delayFn(RETRY_5XX_MS);
+      return throttledFetch(url, retryCount + 1, signal);
     }
 
     if (!response.ok && response.status !== 202) {
-      const body = await response.text();
+      const body = signal ? await readSearchResponse(response, signal) : await response.text();
       logger.error(`HTTP ${response.status}: ${body}`);
       throw new Error(`BGG API returned HTTP ${response.status}: ${body}`);
     }
@@ -251,16 +335,63 @@ export function createBggClient(deps: BggClientDeps): BggClient {
     return response;
   }
 
-  function queuedFetch(url: string): Promise<Response> {
+  function queuedFetch(url: string, signal?: AbortSignal): Promise<Response> {
     const result = requestQueue.then(
-      () => throttledFetch(url),
-      () => throttledFetch(url),
+      () => throttledFetch(url, 0, signal),
+      () => throttledFetch(url, 0, signal),
     );
     requestQueue = result.then(
       () => undefined,
       () => undefined,
     );
-    return result;
+    if (!signal) return result;
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const cleanup = () => signal.removeEventListener("abort", onAbort);
+      const onAbort = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(abortError(signal.reason));
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      result.then(
+        (response) => {
+          if (settled) {
+            cleanupSearchResponse(response);
+            void response.body?.cancel().catch(() => {});
+            return;
+          }
+          settled = true;
+          cleanup();
+          resolve(response);
+        },
+        (error: unknown) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(error instanceof Error ? error : new Error(toErrorMessage(error)));
+        },
+      );
+      if (signal.aborted) onAbort();
+    });
+  }
+
+  async function readSearchResponse(response: Response, signal?: AbortSignal): Promise<string> {
+    try {
+      throwIfAborted(signal);
+      return await response.text();
+    } catch (error) {
+      const state = searchResponseState.get(response);
+      if (signal?.aborted) throw abortError(signal.reason);
+      if (state?.timedOut()) {
+        logger.error(`timeout after ${fetchTimeoutMs / 1000}s while reading response body`);
+        throw new Error(`BGG API request timed out after ${fetchTimeoutMs / 1000}s`);
+      }
+      throw error;
+    } finally {
+      cleanupSearchResponse(response);
+    }
   }
 
   async function fetchWithRetry202(url: string): Promise<{ xml: string; observedAt: string }> {
@@ -299,8 +430,9 @@ export function createBggClient(deps: BggClientDeps): BggClient {
       return Boolean(config.bggAuthToken);
     },
 
-    async searchGames(query: string): Promise<BggSearchResult[]> {
+    async searchGames(query: string, signal?: AbortSignal): Promise<BggSearchResult[]> {
       assertConfigured();
+      throwIfAborted(signal);
       const url = `${BGG_BASE_URL}/search?query=${encodeURIComponent(query)}&type=boardgame`;
       logger.log("search fetch attempt", {
         query,
@@ -310,11 +442,13 @@ export function createBggClient(deps: BggClientDeps): BggClient {
       let searchObservedAt: string | null = null;
       let results: BggSearchResult[];
       try {
-        const response = await queuedFetch(url);
-        const xml = await response.text();
+        const response = await queuedFetch(url, signal);
+        const xml = await readSearchResponse(response, signal);
+        throwIfAborted(signal);
         searchObservedAt = now();
         results = parseSearchResponse(xml, searchObservedAt);
       } catch (err) {
+        if (signal?.aborted) throw abortError(signal.reason);
         logger.error("search fetch outcome", {
           query,
           bggIds: [],
@@ -347,6 +481,7 @@ export function createBggClient(deps: BggClientDeps): BggClient {
 
       // Enrich first 20 results with thumbnail URLs from the /thing endpoint
       if (results.length > 0) {
+        throwIfAborted(signal);
         const enrichIds = results.slice(0, MAX_BATCH_SIZE).map((r) => r.bggId);
         logger.log("thing enrichment attempt", {
           bggIds: enrichIds,
@@ -355,8 +490,9 @@ export function createBggClient(deps: BggClientDeps): BggClient {
         let thingObservedAt: string | null = null;
         try {
           const thingUrl = `${BGG_BASE_URL}/thing?id=${enrichIds.join(",")}&type=boardgame`;
-          const thingResponse = await queuedFetch(thingUrl);
-          const thingXml = await thingResponse.text();
+          const thingResponse = await queuedFetch(thingUrl, signal);
+          const thingXml = await readSearchResponse(thingResponse, signal);
+          throwIfAborted(signal);
           thingObservedAt = now();
           const thingItems = parseThingItems(thingXml, thingObservedAt);
 
@@ -388,6 +524,7 @@ export function createBggClient(deps: BggClientDeps): BggClient {
             ),
           });
         } catch (err) {
+          if (signal?.aborted) throw abortError(signal.reason);
           logger.warn("thing enrichment outcome", {
             bggIds: enrichIds,
             returnedBggIds: [],

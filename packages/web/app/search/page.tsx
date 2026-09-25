@@ -203,6 +203,7 @@ export default function SearchPage() {
   const [manualYear, setManualYear] = useState("");
   const [previews, setPreviews] = useState<Record<number, PreviewState>>({});
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchControllerRef = useRef<AbortController | null>(null);
   const [wishlistedIds, setWishlistedIds] = useState<Set<number>>(new Set());
   const [wishlisting, setWishlisting] = useState<number | null>(null);
 
@@ -223,33 +224,60 @@ export default function SearchPage() {
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = null;
+    searchControllerRef.current?.abort();
+    searchControllerRef.current = null;
+    setSearching(false);
+    setResults([]);
+    setPreviews({});
+
     if (query.length < 2) {
-      setResults([]);
+      setError(null);
+      setSearching(false);
       return;
     }
 
     debounceRef.current = setTimeout(() => {
+      const controller = new AbortController();
+      searchControllerRef.current = controller;
       void (async () => {
         setSearching(true);
         setError(null);
         try {
-          const res = await fetch(`/api/daemon/games/search?q=${encodeURIComponent(query)}`);
+          const res = await fetch(`/api/daemon/games/search?q=${encodeURIComponent(query)}`, {
+            signal: controller.signal,
+          });
+          if (controller.signal.aborted) return;
           if (!res.ok) {
             const data = (await res.json().catch(() => ({ error: "Search failed" }))) as {
               error?: string;
             };
+            if (controller.signal.aborted) return;
             throw new Error(data.error ?? `Search failed: ${res.status}`);
           }
-          setResults((await res.json()) as BggSearchResult[]);
+          const nextResults = (await res.json()) as BggSearchResult[];
+          if (controller.signal.aborted) return;
+          setResults(nextResults);
           setPreviews({});
         } catch (err) {
+          if (controller.signal.aborted) return;
           setError(err instanceof Error ? err.message : "Search failed");
           setResults([]);
         } finally {
-          setSearching(false);
+          if (!controller.signal.aborted) {
+            setSearching(false);
+            if (searchControllerRef.current === controller) searchControllerRef.current = null;
+          }
         }
       })();
     }, 400);
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+      searchControllerRef.current?.abort();
+      searchControllerRef.current = null;
+    };
   }, [query]);
 
   async function handlePreview(bggId: number) {

@@ -49,6 +49,11 @@ function searchXml(ids: readonly number[]): string {
     .join("")}</items>`;
 }
 
+function requestUrl(input: string | URL | Request): string {
+  if (input instanceof Request) return input.url;
+  return input instanceof URL ? input.href : input;
+}
+
 function completeThingItem(id: number): string {
   return `<item type="boardgame" id="${id}">
     <name type="primary" value="Game ${id}"/>
@@ -268,6 +273,149 @@ describe("BggClient", () => {
   });
 
   describe("searchGames", () => {
+    test("drops an aborted queued search before sending it to BGG", async () => {
+      let finishFirst!: (response: Response) => void;
+      const calls: string[] = [];
+      const fetchFn = ((input: string | URL | Request) => {
+        calls.push(requestUrl(input));
+        return new Promise<Response>((resolve) => {
+          finishFirst = resolve;
+        });
+      }) as typeof fetch;
+      const queuedClient = createBggClient({
+        config: { bggAuthToken: "test-token", username: null },
+        fetchFn,
+        delayMs: 0,
+      });
+      const first = queuedClient.searchGames("first");
+      await Promise.resolve();
+      const controller = new AbortController();
+      const obsolete = queuedClient.searchGames("obsolete", controller.signal);
+      controller.abort();
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(obsolete).rejects.toMatchObject({ name: "AbortError" });
+      finishFirst(new Response("<items></items>"));
+      await first;
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toContain("query=first");
+    });
+
+    test("aborts an active search fetch without recording a failure", async () => {
+      const logs: unknown[][] = [];
+      let seenSignal: AbortSignal | undefined;
+      const fetchFn = ((_input: string | URL | Request, init?: RequestInit) => {
+        seenSignal = init?.signal as AbortSignal;
+        return new Promise<Response>((_resolve, reject) => {
+          seenSignal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("aborted", "AbortError")),
+            {
+              once: true,
+            },
+          );
+        });
+      }) as typeof fetch;
+      const abortClient = createBggClient({
+        config: { bggAuthToken: "test-token", username: null },
+        fetchFn,
+        delayMs: 0,
+        logger: {
+          log: (...args: unknown[]) => logs.push(args),
+          warn: (...args: unknown[]) => logs.push(args),
+          error: (...args: unknown[]) => logs.push(args),
+        },
+      });
+      const controller = new AbortController();
+      const searching = abortClient.searchGames("active", controller.signal);
+      await Promise.resolve();
+      controller.abort();
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(searching).rejects.toMatchObject({ name: "AbortError" });
+      expect(seenSignal?.aborted).toBe(true);
+      expect(logs.some(([message]) => message === "search fetch outcome")).toBe(false);
+    });
+
+    test("keeps the fetch timeout active through a stalled search response body", async () => {
+      let fetchSignal: AbortSignal | undefined;
+      const fetchFn = ((_input: string | URL | Request, init?: RequestInit) => {
+        fetchSignal = init?.signal as AbortSignal;
+        const body = new ReadableStream<Uint8Array>({
+          start(stream) {
+            fetchSignal?.addEventListener(
+              "abort",
+              () => stream.error(fetchSignal?.reason ?? new DOMException("aborted", "AbortError")),
+              { once: true },
+            );
+          },
+        });
+        return Promise.resolve(new Response(body));
+      }) as typeof fetch;
+      const timedClient = createBggClient({
+        config: { bggAuthToken: "test-token", username: null },
+        fetchFn,
+        delayMs: 0,
+        fetchTimeoutMs: 5,
+      });
+
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(
+        timedClient.searchGames("stalled", new AbortController().signal),
+      ).rejects.toThrow("BGG API request timed out");
+      expect(fetchSignal?.aborted).toBe(true);
+    });
+
+    test("interrupts a rate-limit retry delay when the search is aborted", async () => {
+      const calls: string[] = [];
+      const fetchFn = ((input: string | URL | Request) => {
+        calls.push(requestUrl(input));
+        setTimeout(() => controller.abort(), 0);
+        return Promise.resolve(new Response("", { status: 429 }));
+      }) as typeof fetch;
+      const controller = new AbortController();
+      const retryClient = createBggClient({
+        config: { bggAuthToken: "test-token", username: null },
+        fetchFn,
+        delayMs: 0,
+      });
+
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(retryClient.searchGames("retry", controller.signal)).rejects.toMatchObject({
+        name: "AbortError",
+      });
+      expect(calls).toHaveLength(1);
+    });
+
+    test("does not start thumbnail enrichment if cancellation arrives after search parsing", async () => {
+      const controller = new AbortController();
+      const calls: string[] = [];
+      const fetchFn = ((input: string | URL | Request) => {
+        calls.push(requestUrl(input));
+        return Promise.resolve(
+          new Response(
+            '<items><item type="boardgame" id="77"><name type="primary" value="Game"/></item></items>',
+          ),
+        );
+      }) as typeof fetch;
+      const enrichmentClient = createBggClient({
+        config: { bggAuthToken: "test-token", username: null },
+        fetchFn,
+        delayMs: 0,
+        now: () => {
+          controller.abort();
+          return "2026-09-24T00:00:00.000Z";
+        },
+      });
+
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(enrichmentClient.searchGames("enrich", controller.signal)).rejects.toMatchObject(
+        {
+          name: "AbortError",
+        },
+      );
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toContain("/search?");
+    });
+
     test("enriches results with thumbnail URLs from thing batch", async () => {
       const searchXml = await readFixture("search-wingspan.xml");
       const thingBatchXml = await readFixture("thing-search-batch.xml");
