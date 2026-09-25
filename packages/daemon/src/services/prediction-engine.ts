@@ -18,8 +18,8 @@ import {
   isEnabledScoringAxis,
   summarizeDerivedAxisConfiguration,
 } from "@shelf-judge/shared";
-import { cosineSimilarity } from "./feature-vector";
-import type { Vocabulary } from "./feature-vector";
+import { compositeDistance } from "./feature-vector";
+import type { FeatureVector, Vocabulary } from "./feature-vector";
 
 export const DEFAULT_PREDICTION_SETTINGS: PredictionSettings = {
   stageThresholds: [5, 15, 30],
@@ -30,7 +30,7 @@ export const DEFAULT_PREDICTION_SETTINGS: PredictionSettings = {
 export interface ReferenceGameCandidate {
   gameId: string;
   gameName: string;
-  vector: number[];
+  vector: FeatureVector;
   ratings: Record<string, number>;
 }
 
@@ -56,25 +56,31 @@ export interface PredictedFitnessResult {
 
 /**
  * Find the k most similar games that have a rating on the target axis.
- * Similarity is cosine similarity between the target and candidate vectors.
+ * Similarity is one minus the composite feature distance. Personal-axis values
+ * are deliberately excluded so ratings (including other rated axes) cannot
+ * leak into the neighbor selection.
  * Excludes candidates below minSimilarity. Returns sorted descending by similarity.
  */
 export function findKNearestForAxis(
-  targetVector: number[],
+  targetVector: FeatureVector,
   referenceGames: ReferenceGameCandidate[],
   axisId: string,
   k: number,
   minSimilarity: number,
 ): SimilarityMatch[] {
   const matches: SimilarityMatch[] = [];
+  const targetFeatures: FeatureVector = { ...targetVector, personalAxes: null };
 
   for (const candidate of referenceGames) {
     const rating = candidate.ratings[axisId];
     if (rating === undefined) continue;
 
-    const similarity = cosineSimilarity(targetVector, candidate.vector);
+    const candidateFeatures: FeatureVector = { ...candidate.vector, personalAxes: null };
+    const similarity = 1 - compositeDistance(targetFeatures, candidateFeatures).composite;
 
-    if (similarity < minSimilarity) continue;
+    // A zero-weight neighbor contributes nothing to the weighted estimate and
+    // must not inflate k or the match-count confidence calculation.
+    if (similarity <= 0 || similarity < minSimilarity) continue;
 
     matches.push({
       gameId: candidate.gameId,
@@ -153,7 +159,7 @@ export function computePredictedFitness(
   game: Game,
   axes: Axis[],
   referenceGames: ReferenceGameCandidate[],
-  targetVector: number[],
+  targetVector: FeatureVector,
   settings: PredictionSettings,
   readinessStage: 0 | 1 | 2 | 3,
   calculateActualScore: (game: Game, axes: Axis[]) => FitnessResult | null,

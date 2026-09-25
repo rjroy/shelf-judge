@@ -307,6 +307,32 @@ describe("prediction-service", () => {
       }
     });
 
+    test("uses mechanic and category overlap to rank service-level references", async () => {
+      const collection = buildRatedCollection(6);
+      collection.games.forEach((candidate, index) => {
+        if (candidate.id === "target" || candidate.bggData === null) return;
+        candidate.bggData.mechanics = [
+          {
+            id: index === 0 ? 1 : index + 10,
+            name: index === 0 ? "Dice Rolling" : `Mechanic ${index}`,
+          },
+        ];
+        candidate.bggData.categories = [{ id: 1, name: "Strategy" }];
+      });
+      const service = createPredictionService({
+        storageService: createStubStorage(collection),
+        fitnessService: createFitnessService(),
+        tournamentService: createStubTournamentService(),
+      });
+
+      const result = await service.predictGame("target");
+      const theme = result.score.breakdown.find((entry) => entry.axisId === "theme");
+      expect(theme?.referenceGames?.[0]?.gameId).toBe("rated-0");
+      expect(theme?.referenceGames?.[0]?.similarity).toBeGreaterThan(
+        theme?.referenceGames?.[1]?.similarity ?? 0,
+      );
+    });
+
     test("keeps prediction vectors stable with player-count and capped play-time axes", async () => {
       const collection = buildRatedCollection(6);
       const target = collection.games.find((candidate) => candidate.id === "target");
@@ -364,14 +390,9 @@ describe("prediction-service", () => {
         getVectorAxisValues(target, baselineVectorAxes, null),
         ranges,
       );
-      const flattenedVector = [
-        ...vector.binary,
-        ...vector.continuous,
-        ...(vector.personalAxes ?? []),
-      ];
       expect(vector).toEqual(baselineVector);
-      expect(flattenedVector).toHaveLength(9);
-      expect(flattenedVector.every(Number.isFinite)).toBe(true);
+      expect(vector.binary.length + vector.continuous.length).toBe(8);
+      expect([...vector.binary, ...vector.continuous].every(Number.isFinite)).toBe(true);
 
       expect(requireRow(playerCountAxis.id)).toMatchObject({
         source: "derived",

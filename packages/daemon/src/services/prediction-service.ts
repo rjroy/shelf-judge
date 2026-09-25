@@ -67,10 +67,6 @@ export interface PredictionServiceDeps {
   afterSourceSave?: (impact: AttentionMutationImpact) => Promise<void>;
 }
 
-function flattenVector(fv: FeatureVector): number[] {
-  return [...fv.binary, ...fv.continuous, ...(fv.personalAxes ?? [])];
-}
-
 export function createPredictionService(deps: PredictionServiceDeps): PredictionService {
   const { storageService, fitnessService, bggClient } = deps;
   const profileSourceCoordinator = profileSourceCoordinatorFor(storageService);
@@ -111,7 +107,7 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
 
     // Build game ratings map and feature vectors
     const gameRatings = new Map<string, Record<string, number>>();
-    const gameVectors = new Map<string, number[]>();
+    const gameVectors = new Map<string, FeatureVector>();
 
     for (const game of games) {
       const ratings: Record<string, number> = {};
@@ -140,7 +136,7 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
           allGameStats[game.id]?.normalizedScore,
         );
         const fv = encodeGame(game, vocabulary, vectorAxes, resolved, ranges);
-        gameVectors.set(game.id, flattenVector(fv));
+        gameVectors.set(game.id, fv);
       }
     }
 
@@ -400,7 +396,7 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
       // Encode the temporary game using the collection's vocabulary and ranges
       const resolved = getVectorAxisValues(tempGame, ctx.vectorAxes, null);
       const fv = encodeGame(tempGame, ctx.vocabulary, ctx.vectorAxes, resolved, ctx.ranges);
-      const targetVector = flattenVector(fv);
+      const targetVector = fv;
 
       const { fitnessResult } = computePredictedFitness(
         tempGame,
