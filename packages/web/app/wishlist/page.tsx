@@ -169,7 +169,6 @@ export function WishlistRedundancyPreview({
       ) : (
         <div className="preview-redundancy-empty">No similar games in collection.</div>
       )}
-      <div className="wc-redundancy-note">Snapshot from when added or last refreshed.</div>
     </div>
   );
 }
