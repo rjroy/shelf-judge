@@ -14,6 +14,8 @@ import type {
 import { relativeDate } from "@/lib/date-utils";
 
 type SortField = "addedAt" | "predictedScore" | "redundancy" | "name";
+const WISHLIST_SORT_STORAGE_KEY = "shelf-judge:wishlist-sort";
+const DEFAULT_SORT_FIELD: SortField = "addedAt";
 
 export const SORT_OPTIONS: { value: SortField; label: string }[] = [
   { value: "addedAt", label: "Date Added" },
@@ -21,6 +23,30 @@ export const SORT_OPTIONS: { value: SortField; label: string }[] = [
   { value: "redundancy", label: "With Redundancy" },
   { value: "name", label: "Name" },
 ];
+
+export function loadWishlistSortField(storage: Pick<Storage, "getItem"> | null): SortField {
+  if (!storage) return DEFAULT_SORT_FIELD;
+  try {
+    const storedValue = storage.getItem(WISHLIST_SORT_STORAGE_KEY);
+    return SORT_OPTIONS.some((option) => option.value === storedValue)
+      ? (storedValue as SortField)
+      : DEFAULT_SORT_FIELD;
+  } catch {
+    return DEFAULT_SORT_FIELD;
+  }
+}
+
+export function saveWishlistSortField(
+  storage: Pick<Storage, "setItem"> | null,
+  sortField: SortField,
+): void {
+  if (!storage) return;
+  try {
+    storage.setItem(WISHLIST_SORT_STORAGE_KEY, sortField);
+  } catch {
+    // Storage may be disabled or unavailable; sorting still works for this session.
+  }
+}
 
 export function sortEntries(entries: WishlistEntry[], field: SortField): WishlistEntry[] {
   const sorted = [...entries];
@@ -299,9 +325,30 @@ export default function WishlistPage() {
   const [entries, setEntries] = useState<WishlistEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [sortField, setSortField] = useState<SortField>("addedAt");
+  const [sortField, setSortField] = useState<SortField>(DEFAULT_SORT_FIELD);
+  const [sortPreferenceLoaded, setSortPreferenceLoaded] = useState(false);
   const [refreshingAll, setRefreshingAll] = useState(false);
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
+
+  useEffect(() => {
+    let restoredSortField = DEFAULT_SORT_FIELD;
+    try {
+      restoredSortField = loadWishlistSortField(window.localStorage);
+    } catch {
+      // Accessing localStorage itself can throw in restricted browser contexts.
+    }
+    setSortField(restoredSortField);
+    setSortPreferenceLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!sortPreferenceLoaded) return;
+    try {
+      saveWishlistSortField(window.localStorage, sortField);
+    } catch {
+      // Accessing localStorage itself can throw in restricted browser contexts.
+    }
+  }, [sortField, sortPreferenceLoaded]);
 
   useEffect(() => {
     void (async () => {

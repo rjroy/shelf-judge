@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import type { WishlistEntry } from "@shelf-judge/shared";
-import { sortEntries, SORT_OPTIONS } from "@/app/wishlist/page";
+import {
+  loadWishlistSortField,
+  saveWishlistSortField,
+  sortEntries,
+  SORT_OPTIONS,
+} from "@/app/wishlist/page";
 
 function entry(
   id: string,
@@ -55,5 +60,54 @@ describe("wishlist redundancy sorting", () => {
 
   test("offers the With Redundancy sort menu option", () => {
     expect(SORT_OPTIONS).toContainEqual({ value: "redundancy", label: "With Redundancy" });
+  });
+});
+
+describe("wishlist sort preference", () => {
+  const storageKey = "shelf-judge:wishlist-sort";
+
+  test("loads and saves a valid sort field using the wishlist-specific key", () => {
+    const values = new Map<string, string>([[storageKey, "name"]]);
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    };
+
+    expect(loadWishlistSortField(storage)).toBe("name");
+    saveWishlistSortField(storage, "redundancy");
+    expect(values.get(storageKey)).toBe("redundancy");
+  });
+
+  test("defaults when the preference is missing, obsolete, or corrupt", () => {
+    const values = new Map<string, string>();
+    const storage = { getItem: (key: string) => values.get(key) ?? null };
+
+    expect(loadWishlistSortField(storage)).toBe("addedAt");
+    values.set(storageKey, "old-sort-mode");
+    expect(loadWishlistSortField(storage)).toBe("addedAt");
+    values.set(storageKey, "{broken-json");
+    expect(loadWishlistSortField(storage)).toBe("addedAt");
+    expect(loadWishlistSortField(null)).toBe("addedAt");
+  });
+
+  test("ignores storage methods that are unavailable or throw", () => {
+    expect(
+      loadWishlistSortField({
+        getItem: () => {
+          throw new Error("storage blocked");
+        },
+      }),
+    ).toBe("addedAt");
+    expect(() =>
+      saveWishlistSortField(
+        {
+          setItem: () => {
+            throw new Error("storage blocked");
+          },
+        },
+        "name",
+      ),
+    ).not.toThrow();
+    expect(() => saveWishlistSortField(null, "name")).not.toThrow();
   });
 });
