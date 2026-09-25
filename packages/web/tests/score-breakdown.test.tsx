@@ -177,6 +177,64 @@ describe("BreakdownRow — rating interpretation labels", () => {
 });
 
 describe("BreakdownRow derived facts", () => {
+  test("shows the actual player count and keeps the computed fit score distinct", () => {
+    const entry = makeEntry({
+      axisName: "Player Count Fit",
+      source: "derived",
+      derivedField: "playerCountFit",
+      playerCountFact: { source: "manual", minPlayers: 1, maxPlayers: 1 },
+      scoringRawValue: 8,
+      effectiveRating: 8,
+      unit: "fit score",
+    });
+    const html = renderToString(<ScoreBreakdown score={makeResult([entry])} />).replaceAll(
+      "<!-- -->",
+      "",
+    );
+    expect(html).toContain("Manual player count: 1 player");
+    expect(html).not.toContain("Computed fit score");
+    expect(html).toContain(">8</div>");
+    expect(html).toContain('<th class="right">Scoring Input</th>');
+  });
+
+  test.each([
+    [{ source: "bestPlayers", minPlayers: 3, maxPlayers: 4 }, "3–4 players"],
+    [{ source: "publisherRange", minPlayers: 2, maxPlayers: 5 }, "Publisher range: 2–5 players"],
+    [{ source: "bestPlayers", minPlayers: 2, maxPlayers: 2 }, "2 players"],
+  ] as const)("renders player count source context and ranges", (fact, expected) => {
+    const entry = makeEntry({
+      source: "derived",
+      derivedField: "playerCountFit",
+      playerCountFact: fact,
+      scoringRawValue: 6,
+      unit: "fit score",
+    });
+    const html = renderToString(<ScoreBreakdown score={makeResult([entry])} />).replaceAll(
+      "<!-- -->",
+      "",
+    );
+    expect(html).toContain(expected);
+    expect(html).not.toContain("Computed fit score");
+    expect(html).toContain('<td class="right breakdown-raw">' + expected + "</td>");
+  });
+
+  test("does not label the fit score as a player count when the fact is missing", () => {
+    const entry = makeEntry({
+      source: "derived",
+      derivedField: "playerCountFit",
+      scoringRawValue: 7,
+      unit: "fit score",
+    });
+    const html = renderToString(<ScoreBreakdown score={makeResult([entry])} />).replaceAll(
+      "<!-- -->",
+      "",
+    );
+    expect(html).toContain("Player count unavailable");
+    expect(html).not.toContain("Computed fit score");
+    expect(html).toContain('<td class="right breakdown-raw">Player count unavailable</td>');
+    expect(html).not.toContain("Manual player count: 7");
+  });
+
   test("qualifies derived veto values with the breakdown unit", () => {
     const entry = makeEntry({
       axisId: "duration",

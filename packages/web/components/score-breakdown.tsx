@@ -8,7 +8,7 @@ import type {
   PredictionConfidence,
   ReferenceGame,
 } from "@shelf-judge/shared";
-import { getRatingLabel } from "@shelf-judge/shared";
+import { getRatingLabel, PLAYER_COUNT_FIT_DERIVED_FIELD_ID } from "@shelf-judge/shared";
 
 export function ScoreBreakdown({
   score,
@@ -182,6 +182,8 @@ function BreakdownRow({
 
   const hasFactualDetails =
     entry.derivedField != null || (entry.overridden && entry.sourceValue != null);
+  const isPlayerCountFit =
+    entry.source === "derived" && entry.derivedField === PLAYER_COUNT_FIT_DERIVED_FIELD_ID;
 
   return (
     <>
@@ -226,7 +228,9 @@ function BreakdownRow({
           )}
         </td>
         <td className="right breakdown-raw">
-          {entry.scoringRawValue != null ? (
+          {isPlayerCountFit ? (
+            formatPlayerCountFact(entry.playerCountFact)
+          ) : entry.scoringRawValue != null ? (
             formatValue(entry.scoringRawValue, entry.unit)
           ) : (
             <span className="breakdown-dash">&mdash;</span>
@@ -279,6 +283,22 @@ function BreakdownRow({
       )}
     </>
   );
+}
+
+function formatPlayerCountFact(fact: FitnessBreakdownEntry["playerCountFact"]): string {
+  if (!fact) return "Player count unavailable";
+  const source =
+    fact.source === "manual"
+      ? "Manual player count"
+      : fact.source === "publisherRange"
+        ? "Publisher range"
+        : null;
+  if (fact.minPlayers === fact.maxPlayers) {
+    const count = `${fact.minPlayers} ${fact.minPlayers === 1 ? "player" : "players"}`;
+    return source ? `${source}: ${count}` : count;
+  }
+  const range = `${fact.minPlayers}–${fact.maxPlayers} players`;
+  return source ? `${source}: ${range}` : range;
 }
 
 function formatValue(value: number | null | undefined, unit: string | null | undefined): string {
