@@ -1,5 +1,5 @@
 import { XMLParser } from "fast-xml-parser";
-import { createCompleteEntityMetadata } from "@shelf-judge/shared";
+import { createCompleteEntityMetadata, WEIGHT_DERIVED_FIELD_ID } from "@shelf-judge/shared";
 import type {
   BggGameData,
   BggTag,
@@ -387,8 +387,79 @@ export interface ThingItem {
   entityMetadata: EntityMetadataByClass;
 }
 
+/** Bounded Thing-only facts intended for preview scoring, not persistence/model projection. */
+export interface BoardgameScoringThing {
+  bggId: number;
+  type: string | null;
+  primaryName: string | null;
+  yearPublished: number | null;
+  minPlayers: number | null;
+  maxPlayers: number | null;
+  playingTime: number | null;
+  weight: number | null;
+  categories: BggTag[];
+  mechanics: BggTag[];
+  suggestedPlayerPoll: ParsedSuggestedPlayerPoll;
+  missingFields: Array<
+    | "yearPublished"
+    | "minPlayers"
+    | "maxPlayers"
+    | "playingTime"
+    | typeof WEIGHT_DERIVED_FIELD_ID
+    | "categories"
+    | "suggestedPlayerPoll"
+  >;
+}
+
 export function parseThingItems(xml: string, observedAt = new Date().toISOString()): ThingItem[] {
   return parseThingDocument(xml, observedAt);
+}
+
+/** Parses the additional structured Thing fields needed for a local scoring preview. */
+export function parseBoardgameScoringThings(
+  xml: string,
+  observedAt = new Date().toISOString(),
+): BoardgameScoringThing[] {
+  const parsed = parser.parse(xml) as BggXmlDocument;
+  assertBggXml(parsed, "thing");
+  return ensureArray(parsed?.items?.item).map((item) => {
+    const names = ensureArray(item.name);
+    const primary = names.find((name) => name["@_type"] === "primary")?.["@_value"];
+    const links = ensureArray(item.link);
+    const polls = ensureArray(item.poll);
+    const playerPoll = polls.find((poll) => poll["@_name"] === "suggested_numplayers");
+    const missingFields: BoardgameScoringThing["missingFields"] = [
+      ...(item.yearpublished?.["@_value"] === undefined ? ["yearPublished" as const] : []),
+      ...(item.minplayers?.["@_value"] === undefined ? ["minPlayers" as const] : []),
+      ...(item.maxplayers?.["@_value"] === undefined ? ["maxPlayers" as const] : []),
+      ...(item.playingtime?.["@_value"] === undefined ? ["playingTime" as const] : []),
+      ...(item.statistics?.ratings?.averageweight?.["@_value"] === undefined
+        ? [WEIGHT_DERIVED_FIELD_ID]
+        : []),
+      ...(!links.some((link) => link["@_type"] === "boardgamecategory")
+        ? ["categories" as const]
+        : []),
+      ...(playerPoll === undefined ? ["suggestedPlayerPoll" as const] : []),
+    ];
+    const thing = parseThingItem(item, observedAt);
+    return {
+      bggId: thing.bggId,
+      type: item["@_type"] ?? null,
+      primaryName: primary === undefined ? null : cleanupString(primary).trim(),
+      yearPublished: thing.metadata.yearPublished,
+      minPlayers: thing.metadata.minPlayers,
+      maxPlayers: thing.metadata.maxPlayers,
+      playingTime: thing.metadata.playingTime,
+      weight: thing.bggData.weight,
+      categories: thing.bggData.categories.slice(0, 40),
+      mechanics: thing.bggData.mechanics.slice(0, 40),
+      suggestedPlayerPoll: {
+        ...thing.suggestedPlayerPoll,
+        buckets: thing.suggestedPlayerPoll.buckets.slice(0, 30),
+      },
+      missingFields,
+    };
+  });
 }
 
 export function parseSearchResponse(

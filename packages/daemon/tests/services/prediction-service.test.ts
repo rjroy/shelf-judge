@@ -768,6 +768,29 @@ describe("prediction-service", () => {
         getGame: getGameError
           ? () => Promise.reject(getGameError)
           : () => Promise.resolve(getGameResult ?? makeBggResult("Test Game")),
+        getBoardgameFacts: (ids) => {
+          if (getGameError) {
+            return Promise.resolve({
+              facts: [],
+              failures: ids.map((bggId) => ({ bggId, code: "MissingGame" as const })),
+            });
+          }
+          const result = getGameResult ?? makeBggResult("Test Game");
+          return Promise.resolve({
+            facts: ids.map((bggId) => ({
+              bggId,
+              primaryName: result.metadata.name,
+              yearPublished: result.metadata.yearPublished,
+              yearMissing: result.metadata.yearPublished === null,
+              mechanics: result.bggData.mechanics,
+              mechanicsMissing: false,
+              mechanicsComplete: true,
+              warnings: [],
+              observedAt: result.metadataObservation?.observedAt ?? now,
+            })),
+            failures: [],
+          });
+        },
         getGames: () => Promise.reject(new Error("not implemented")),
         getUserCollection: () => Promise.reject(new Error("not implemented")),
         getPlayCount: () => Promise.reject(new Error("not implemented")),
@@ -832,10 +855,15 @@ describe("prediction-service", () => {
       expect(result.game.id).toBe("preview-99999");
       expect(result.game.name).toBe("New Game");
       expect(result.game.bggId).toBe(99999);
-      expect(result.game.bestPlayers).toBe(3);
-      expect(result.game.entityMetadata).toEqual(bggObservations.entityMetadata);
+      expect(result.game.bestPlayers).toBeNull();
+      expect(result.game.entityMetadata).toEqual(createInitialEntityMetadata(99999));
       expect(result.score).toBeDefined();
-      expect(result.bggObservations).toEqual(bggObservations);
+      expect(result.bggObservations).toBeUndefined();
+      expect(result.game.playCountEvidence).toMatchObject({
+        status: "missing",
+        source: "bgg-collection",
+      });
+      expect(result.score.predictionMeta).not.toBeNull();
       // Temporary game has no ratings, so all personal axes should be predicted
       const themeEntry = result.score.breakdown.find((e) => e.axisId === "theme");
       expect(themeEntry).toBeDefined();
@@ -882,13 +910,10 @@ describe("prediction-service", () => {
 
       const result = await service.predictBggGame(99999);
 
-      expect(result.game.suggestedPlayerPoll).toEqual({
-        status: "invalid",
-        state: "unusable",
+      expect(result.game.suggestedPlayerPoll).toMatchObject({
+        status: "valid",
+        state: "absent",
         buckets: [],
-        evidence: { presence: "present", value: malformedBuckets },
-        source: "bgg-suggested-player-poll",
-        observedAt,
       });
       expect(result.game.createdAt).toBe(previewCreatedAt);
       expect(result.score).toBeDefined();
@@ -932,20 +957,10 @@ describe("prediction-service", () => {
       const poll = (await service.predictBggGame(99999)).game.suggestedPlayerPoll;
 
       expect(SuggestedPlayerPollSchema.safeParse(poll).success).toBe(true);
-      expect(poll).toEqual({
-        source: "bgg-suggested-player-poll",
-        observedAt,
-        status: "invalid",
-        state: "unusable",
-        buckets: [],
-        evidence: { presence: "present", value: ["undefined", bucket] },
-      });
-      expect(JSON.stringify(poll)).toBe(
-        '{"source":"bgg-suggested-player-poll","observedAt":"2026-08-25T12:00:00.000Z","status":"invalid","state":"unusable","buckets":[],"evidence":{"presence":"present","value":["undefined",{"playerCount":"2","best":1,"recommended":2,"notRecommended":3}]}}',
-      );
+      expect(poll).toMatchObject({ status: "valid", state: "absent", buckets: [] });
     });
 
-    test("delegates to predictGame when bggId exists in collection", async () => {
+    test("returns verified existing game from collection without a collection fetch", async () => {
       const collection = buildRatedCollection(6);
       // Give one game a specific bggId
       collection.games[0].bggId = 42;
@@ -1053,6 +1068,365 @@ describe("prediction-service", () => {
       expect(result.predictionUnavailable).not.toBeNull();
       expect(result.predictionUnavailable!.reason).toBe("stage-0");
       expect(result.predictionUnavailable!.gamesNeeded).toBe(2); // 5 - 3
+    });
+
+    test("enriches a verified fact with scoring input without fetching a user collection", async () => {
+      const collection = buildRatedCollection(6);
+      const storage = createStubStorage(collection);
+      const bggClient = createStubBggClient(makeBggResult("Fact Game"));
+      let getGameCalls = 0;
+      let collectionCalls = 0;
+      bggClient.getGame = () => {
+        getGameCalls++;
+        return Promise.reject(new Error("must not fetch legacy Thing data"));
+      };
+      bggClient.getUserCollection = () => {
+        collectionCalls++;
+        return Promise.reject(new Error("must not fetch collection"));
+      };
+      bggClient.getBoardgameScoringInput = (bggId) =>
+        Promise.resolve({
+          bggId,
+          type: "boardgame",
+          primaryName: "Rich Verified Fact",
+          yearPublished: 2024,
+          minPlayers: 2,
+          maxPlayers: 4,
+          playingTime: 60,
+          weight: 2.5,
+          categories: [],
+          mechanics: [{ id: 4, name: "Worker Placement" }],
+          suggestedPlayerPoll: { state: "absent" as const, buckets: [] },
+          missingFields: ["suggestedPlayerPoll" as const],
+          observedAt: now,
+        });
+      const service = createPredictionService({
+        storageService: storage,
+        fitnessService: createFitnessService(),
+        tournamentService: createStubTournamentService(),
+        bggClient,
+      });
+      const result = await service.predictBggGame(99999, {
+        verifiedFact: {
+          bggId: 99999,
+          primaryName: "Verified Fact",
+          yearPublished: 2024,
+          yearMissing: false,
+          mechanics: [{ id: 4, name: "Worker Placement" }],
+          mechanicsMissing: false,
+          mechanicsComplete: true,
+          warnings: [],
+          observedAt: now,
+        },
+      });
+      expect(result.game.name).toBe("Rich Verified Fact");
+      expect(result.game.bggData?.mechanics).toEqual([{ id: 4, name: "Worker Placement" }]);
+      expect(result.game.playingTime).toBe(60);
+      expect(result.previewIdentity).toMatchObject({
+        calculationVersion: "bgg-fitness-preview-v2",
+        source: "bgg-thing-scoring-input",
+        bggObservedAt: now,
+        collectionRevision: 0,
+      });
+      expect(result.previewIdentity?.predictionSettingsVersion).toMatch(/^sha256-/);
+      expect(getGameCalls).toBe(0);
+      expect(collectionCalls).toBe(0);
+    });
+
+    test("facts-first and direct previews use the same rich calculation and shared attempt budget", async () => {
+      const client = createStubBggClient();
+      const scoringInput = {
+        bggId: 99999,
+        type: "boardgame" as const,
+        primaryName: "Parity Game",
+        yearPublished: 2022,
+        minPlayers: 2,
+        maxPlayers: 5,
+        playingTime: 75,
+        weight: 3.1,
+        categories: [{ id: 21, name: "Economic" }],
+        mechanics: [{ id: 22, name: "Worker Placement" }],
+        suggestedPlayerPoll: { state: "absent" as const, buckets: [] },
+        missingFields: ["suggestedPlayerPoll" as const],
+        observedAt: now,
+      };
+      const budgets: unknown[] = [];
+      let collectionCalls = 0;
+      client.getBoardgameScoringInput = (_bggId, _signal, budget) => {
+        budgets.push(budget);
+        return Promise.resolve(scoringInput);
+      };
+      client.getUserCollection = () => {
+        collectionCalls++;
+        return Promise.reject(new Error("preview must not fetch a user collection"));
+      };
+      const service = createPredictionService({
+        storageService: createStubStorage(buildRatedCollection(6)),
+        fitnessService: createFitnessService(),
+        tournamentService: createStubTournamentService(),
+        bggClient: client,
+      });
+      const attemptBudget = { tryConsume: () => true };
+      const cachedFact = {
+        bggId: 99999,
+        primaryName: "Narrow Fact",
+        yearPublished: 2022,
+        yearMissing: false,
+        mechanics: [{ id: 22, name: "Worker Placement" }],
+        mechanicsMissing: false,
+        mechanicsComplete: true,
+        warnings: [],
+        observedAt: now,
+      };
+      const factsFirst = await service.predictBggGame(99999, {
+        verifiedFact: cachedFact,
+        attemptBudget,
+      });
+      const direct = await service.predictBggGame(99999, { attemptBudget });
+      expect(factsFirst.score.score).toBe(direct.score.score);
+      expect(factsFirst.previewIdentity?.source).toBe(direct.previewIdentity?.source);
+      expect(factsFirst.previewIdentity?.source).toBe("bgg-thing-scoring-input");
+      expect(factsFirst.game).toMatchObject({
+        name: "Parity Game",
+        playingTime: 75,
+        minPlayers: 2,
+        maxPlayers: 5,
+      });
+      expect(budgets).toEqual([attemptBudget, attemptBudget]);
+      expect(collectionCalls).toBe(0);
+    });
+
+    test("uses one rich verified scoring Thing input for preview scoring", async () => {
+      const client = createStubBggClient();
+      let scoringCalls = 0;
+      let factsCalls = 0;
+      client.getBoardgameFacts = () => {
+        factsCalls++;
+        return Promise.reject(new Error("must reuse scoring Thing input"));
+      };
+      client.getBoardgameScoringInput = (bggId) => {
+        scoringCalls++;
+        return Promise.resolve({
+          bggId,
+          type: "boardgame",
+          primaryName: "Rich Thing",
+          yearPublished: 2021,
+          minPlayers: 2,
+          maxPlayers: 5,
+          playingTime: 75,
+          weight: 3.25,
+          categories: [{ id: 21, name: "Economic" }],
+          mechanics: [{ id: 22, name: "Worker Placement" }],
+          suggestedPlayerPoll: {
+            state: "usable",
+            buckets: [{ playerCount: "3", best: 10, recommended: 20, notRecommended: 1 }],
+          },
+          missingFields: [],
+          observedAt: now,
+        });
+      };
+      const service = createPredictionService({
+        storageService: createStubStorage(buildRatedCollection(6)),
+        fitnessService: createFitnessService(),
+        tournamentService: createStubTournamentService(),
+        bggClient: client,
+      });
+
+      const result = await service.predictBggGame(99999);
+
+      expect(scoringCalls).toBe(1);
+      expect(factsCalls).toBe(0);
+      expect(result.game).toMatchObject({
+        name: "Rich Thing",
+        yearPublished: 2021,
+        minPlayers: 2,
+        maxPlayers: 5,
+        playingTime: 75,
+        durationEvidence: { status: "valid", value: 75, source: "bgg-thing", observedAt: now },
+        playerRangeEvidence: {
+          status: "valid",
+          value: { minPlayers: 2, maxPlayers: 5 },
+          source: "bgg-thing",
+        },
+        bggData: {
+          weight: 3.25,
+          categories: [{ id: 21, name: "Economic" }],
+          mechanics: [{ id: 22, name: "Worker Placement" }],
+        },
+        suggestedPlayerPoll: {
+          state: "usable",
+          buckets: [{ playerCount: "3", best: 10, recommended: 20, notRecommended: 1 }],
+        },
+      });
+      expect(result.previewIdentity).toMatchObject({
+        calculationVersion: "bgg-fitness-preview-v2",
+        source: "bgg-thing-scoring-input",
+        bggObservedAt: now,
+      });
+    });
+
+    test("matches additional BGG IDs and preserves actual ownership/current score", async () => {
+      const collection = buildRatedCollection(6);
+      const existing = collection.games[0];
+      existing.bggId = 15;
+      existing.additionalBggIds = [42];
+      existing.ownership = "previously-owned";
+      existing.ratings = { theme: 7 };
+      const service = createPredictionService({
+        storageService: createStubStorage(collection),
+        fitnessService: createFitnessService(),
+        tournamentService: createStubTournamentService(),
+        bggClient: createStubBggClient(),
+      });
+      const result = await service.predictBggGame(42);
+      expect(result.game.id).toBe(existing.id);
+      expect(result.game.ownership).toBe("previously-owned");
+      expect(result.score.predictionMeta).toBeNull();
+      expect(result.score.score).toBeGreaterThan(0);
+    });
+
+    test("retains verified rich Thing facts for an existing game with stale local metadata", async () => {
+      const collection = buildRatedCollection(6);
+      const existing = collection.games[0];
+      existing.bggId = 42;
+      existing.name = "Old local title";
+      existing.yearPublished = 1990;
+      existing.bggData = makeBggData(["Old local mechanic"]);
+      const client = createStubBggClient();
+      const observedAt = "2026-09-25T12:00:00.000Z";
+      client.getBoardgameScoringInput = (bggId) =>
+        Promise.resolve({
+          bggId,
+          type: "boardgame",
+          primaryName: "Verified Thing title",
+          yearPublished: 2024,
+          minPlayers: 2,
+          maxPlayers: 4,
+          playingTime: 60,
+          weight: 2.5,
+          categories: [],
+          mechanics: [{ id: 7, name: "Verified Thing mechanic" }],
+          suggestedPlayerPoll: { state: "absent" as const, buckets: [] },
+          missingFields: [],
+          observedAt,
+        });
+      const service = createPredictionService({
+        storageService: createStubStorage(collection),
+        fitnessService: createFitnessService(),
+        tournamentService: createStubTournamentService(),
+        bggClient: client,
+      });
+
+      const preview = await service.predictBggGame(42);
+
+      expect(preview.game.id).toBe(existing.id);
+      expect(preview.game.name).toBe("Old local title");
+      expect(preview.verifiedFact).toMatchObject({
+        bggId: 42,
+        primaryName: "Verified Thing title",
+        yearPublished: 2024,
+        mechanics: [{ id: 7, name: "Verified Thing mechanic" }],
+        observedAt,
+      });
+    });
+
+    test("rejects multiple local matches across primary and additional BGG IDs", async () => {
+      const collection = buildRatedCollection(6);
+      collection.games[0].bggId = 42;
+      collection.games[1].additionalBggIds = [42];
+      const service = createPredictionService({
+        storageService: createStubStorage(collection),
+        fitnessService: createFitnessService(),
+        tournamentService: createStubTournamentService(),
+        bggClient: createStubBggClient(),
+      });
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(service.predictBggGame(42)).rejects.toThrow("Ambiguous collection match");
+    });
+
+    test("propagates abort before acquiring Thing facts", async () => {
+      const controller = new AbortController();
+      controller.abort();
+      let factCalls = 0;
+      const client = createStubBggClient();
+      client.getBoardgameFacts = () => {
+        factCalls++;
+        return Promise.resolve({ facts: [], failures: [] });
+      };
+      const service = createPredictionService({
+        storageService: createStubStorage(buildRatedCollection(6)),
+        fitnessService: createFitnessService(),
+        tournamentService: createStubTournamentService(),
+        bggClient: client,
+      });
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(service.predictBggGame(99999, { signal: controller.signal })).rejects.toThrow();
+      expect(factCalls).toBe(0);
+    });
+
+    test("passes a caller-owned HTTP attempt budget to the Thing facts request", async () => {
+      let receivedBudget: unknown;
+      const client = createStubBggClient();
+      const factClient = client.getBoardgameFacts?.bind(client);
+      if (!factClient) throw new Error("facts method unavailable in test fixture");
+      client.getBoardgameFacts = (ids, signal, budget) => {
+        receivedBudget = budget;
+        return factClient(ids, signal, budget);
+      };
+      const budget = { tryConsume: () => true };
+      const service = createPredictionService({
+        storageService: createStubStorage(buildRatedCollection(6)),
+        fitnessService: createFitnessService(),
+        tournamentService: createStubTournamentService(),
+        bggClient: client,
+      });
+      await service.predictBggGame(99999, { attemptBudget: budget });
+      expect(receivedBudget).toBe(budget);
+    });
+
+    test("does not preview missing or non-boardgame Thing identities", async () => {
+      const client = createStubBggClient();
+      client.getBoardgameFacts = (ids) =>
+        Promise.resolve({
+          facts: [],
+          failures: ids.map((bggId) => ({ bggId, code: "NonBoardgame" as const })),
+        });
+      const service = createPredictionService({
+        storageService: createStubStorage(buildRatedCollection(6)),
+        fitnessService: createFitnessService(),
+        tournamentService: createStubTournamentService(),
+        bggClient: client,
+      });
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      await expect(service.predictBggGame(99999)).rejects.toThrow("NonBoardgame");
+    });
+
+    test("falls back to current local evidence when Thing verification fails for an existing match", async () => {
+      const collection = buildRatedCollection(6);
+      const existing = collection.games[0];
+      existing.bggId = 73;
+      existing.ownership = "previously-owned";
+      const client = createStubBggClient();
+      client.getBoardgameFacts = (ids) =>
+        Promise.resolve({
+          facts: [],
+          failures: ids.map((bggId) => ({ bggId, code: "NonBoardgame" as const })),
+        });
+      const service = createPredictionService({
+        storageService: createStubStorage(collection),
+        fitnessService: createFitnessService(),
+        tournamentService: createStubTournamentService(),
+        bggClient: client,
+      });
+      const result = await service.predictBggGame(73);
+      expect(result.game.id).toBe(existing.id);
+      expect(result.game.ownership).toBe("previously-owned");
+      expect(result.bggVerification).toEqual({
+        status: "existing-local-unverified",
+        failure: "NonBoardgame",
+      });
+      expect(result.previewIdentity?.bggObservedAt).toBeNull();
+      expect(result.score.score).toBeGreaterThan(0);
     });
   });
 });

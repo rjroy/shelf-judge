@@ -1,5 +1,7 @@
 import {
   AnalystConfigurationSchema,
+  ANALYST_DISCLOSURE_VERSION,
+  ANALYST_MANIFEST_VERSION,
   AnalystFinalSchema,
   AnalystStreamEventSchema,
   type AnalystTurnRequest,
@@ -13,10 +15,14 @@ type AnalystMessage = AnalystTurnRequest["messages"][number];
 interface AnalystConfiguration {
   readonly providerId: string;
   readonly modelId: string;
+  readonly manifestVersion: typeof ANALYST_MANIFEST_VERSION;
+  readonly disclosureVersion: typeof ANALYST_DISCLOSURE_VERSION;
   readonly localRetention: string;
   readonly cancellation: string;
   readonly evidenceClasses: readonly string[];
   readonly relevantOwnerNotesMayBeTransmitted: boolean;
+  readonly selectedOwnerTitleOrBggIdsMayBeSentToBgg: boolean;
+  readonly bggProcessingIsSeparateFromProviderProcessing: boolean;
   readonly maximumTranscriptMessages: number;
   readonly maximumTranscriptCharacters: number;
 }
@@ -45,10 +51,16 @@ async function configuration(client: DaemonClient): Promise<AnalystConfiguration
   return {
     providerId: parsed.configuration.identity.providerId,
     modelId: parsed.configuration.identity.modelId,
+    manifestVersion: parsed.manifestVersion,
+    disclosureVersion: parsed.disclosureVersion,
     localRetention: parsed.disclosure.localRetention,
     cancellation: parsed.disclosure.cancellation,
     evidenceClasses: parsed.disclosure.evidenceClasses,
     relevantOwnerNotesMayBeTransmitted: parsed.disclosure.relevantOwnerNotesMayBeTransmitted,
+    selectedOwnerTitleOrBggIdsMayBeSentToBgg:
+      parsed.disclosure.selectedOwnerTitleOrBggIdsMayBeSentToBgg,
+    bggProcessingIsSeparateFromProviderProcessing:
+      parsed.disclosure.bggProcessingIsSeparateFromProviderProcessing,
     maximumTranscriptMessages: parsed.disclosure.maximumTranscriptMessages,
     maximumTranscriptCharacters: parsed.disclosure.maximumTranscriptCharacters,
   };
@@ -85,6 +97,12 @@ async function acknowledge(configuration: AnalystConfiguration, io: AnalystIo): 
     `Relevant owner notes may be transmitted: ${configuration.relevantOwnerNotesMayBeTransmitted ? "yes" : "no"}.`,
   );
   io.writeError(
+    `Selected owner titles or BGG IDs may be sent to BGG: ${configuration.selectedOwnerTitleOrBggIdsMayBeSentToBgg ? "yes" : "no"}.`,
+  );
+  io.writeError(
+    `BGG processing is separate from provider processing: ${configuration.bggProcessingIsSeparateFromProviderProcessing ? "yes" : "no"}.`,
+  );
+  io.writeError(
     `${configuration.localRetention} Provider processing and retention follow its policy.`,
   );
   io.writeError(`This application has no token or monetary cap. ${configuration.cancellation}`);
@@ -117,7 +135,13 @@ async function streamTurn(
     conversationCapability: conversation.capability,
     requestId,
     turnIndex: messages.filter((message) => message.role === "analyst").length,
-    disclosure: { providerId: config.providerId, modelId: config.modelId, acknowledged: true },
+    disclosure: {
+      providerId: config.providerId,
+      modelId: config.modelId,
+      manifestVersion: config.manifestVersion,
+      disclosureVersion: config.disclosureVersion,
+      acknowledged: true,
+    },
     messages,
   };
   let completed: AnalystMessage | undefined;
@@ -160,6 +184,10 @@ async function streamTurn(
             content: result.blocks.map((block) => block.text).join("\n\n"),
             outcome: result.outcome,
             noteDependencies: event.noteDependencies,
+            ...(event.discoveryIds === undefined ? {} : { discoveryIds: event.discoveryIds }),
+            ...(event.discoveryDigest === undefined
+              ? {}
+              : { discoveryDigest: event.discoveryDigest }),
             validationAttestation: event.validationAttestation,
           };
         }

@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import type {
   Game,
+  Collection,
   FitnessResult,
   GameWithScore,
   PredictionReadiness,
@@ -10,11 +12,19 @@ import type {
   TournamentGameStatsDisplay,
 } from "@shelf-judge/shared";
 import { isEnabledScoringAxis } from "@shelf-judge/shared";
+import { createInitialEntityMetadata } from "@shelf-judge/shared";
 import type { StorageService } from "./storage-service";
 import type { FitnessService } from "./fitness-service";
 import type { TournamentService } from "./tournament-service";
 import { deriveDisplayStats } from "./tournament-service";
-import type { BggClient, BggGameResult } from "./bgg-client";
+import { BggClientError } from "./bgg-client";
+import type {
+  BggClient,
+  BggGameResult,
+  BoardgameFactResult,
+  BoardgameScoringInput,
+  BggRequestAttemptBudget,
+} from "./bgg-client";
 import {
   buildVocabulary,
   computeContinuousRanges,
@@ -25,13 +35,15 @@ import {
 import type { FeatureVector } from "./feature-vector";
 import { computePredictedFitness, assessReadiness } from "./prediction-engine";
 import type { ReferenceGameCandidate, ClusterMembership } from "./prediction-engine";
-import { canonicalSuggestedPlayerPoll } from "./suggested-player-poll.js";
 import { profileSourceCoordinatorFor } from "./profile-source-coordinator.js";
 import type { AttentionMutationImpact } from "./attention-candidate-service.js";
+import { canonicalSuggestedPlayerPoll } from "./suggested-player-poll.js";
 
 export interface PredictedGameResult {
   game: Game;
   score: FitnessResult;
+  /** Verified BGG Thing identity/facts used by this preview, independent of local game metadata. */
+  verifiedFact?: BoardgameFactResult;
   predictionUnavailable: PredictionUnavailable | null;
   bggObservations?: Pick<
     BggGameResult,
@@ -41,11 +53,42 @@ export interface PredictedGameResult {
     | "collectionData"
     | "entityMetadata"
   >;
+  previewIdentity?: {
+    calculationVersion: "bgg-fitness-preview-v2";
+    source: "bgg-thing-scoring-input" | "bgg-thing-facts-fallback" | "local-unverified";
+    calculatedAt: string;
+    bggObservedAt: string | null;
+    collectionRevision: number;
+    predictionSettingsVersion: string;
+    tournamentDataVersion: string;
+  };
+  bggVerification?:
+    | { status: "verified" }
+    | { status: "existing-local-unverified"; failure: string };
+}
+
+export interface PredictionSnapshot {
+  collection: Collection;
+  settings: PredictionSettings;
+  tournamentData: TournamentData;
+}
+
+function contentVersion(value: unknown): string {
+  return `sha256-${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
 }
 
 export interface PredictionService {
   predictGame(gameId: string): Promise<PredictedGameResult>;
-  predictBggGame(bggId: number): Promise<PredictedGameResult>;
+  predictBggGame(
+    bggId: number,
+    options?: {
+      signal?: AbortSignal;
+      verifiedFact?: BoardgameFactResult;
+      verifiedScoringInput?: BoardgameScoringInput;
+      attemptBudget?: BggRequestAttemptBudget;
+      snapshot?: PredictionSnapshot;
+    },
+  ): Promise<PredictedGameResult>;
   getReadiness(): Promise<PredictionReadiness>;
   listGamesWithPredictions(targetGameIds?: readonly string[]): Promise<GameWithScore[]>;
   listGamesWithPredictionsFromSnapshot?(
@@ -167,6 +210,7 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
     else readinessStage = 0;
 
     return {
+      collectionRevision: collection.revision,
       games,
       axes,
       vectorAxes,
@@ -257,124 +301,228 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
       return { game, score: fitnessResult, predictionUnavailable };
     },
 
-    async predictBggGame(bggId: number): Promise<PredictedGameResult> {
-      if (!bggClient) {
+    async predictBggGame(
+      bggId: number,
+      options: {
+        signal?: AbortSignal;
+        verifiedFact?: BoardgameFactResult;
+        verifiedScoringInput?: BoardgameScoringInput;
+        attemptBudget?: BggRequestAttemptBudget;
+        snapshot?: PredictionSnapshot;
+      } = {},
+    ): Promise<PredictedGameResult> {
+      if (!bggClient && !options.verifiedFact && !options.verifiedScoringInput) {
         throw new Error("BGG integration is not configured. Cannot predict games by BGG ID.");
       }
-
-      // Check if this bggId already exists in the collection
-      const ctx = await loadPredictionContext();
-      const existingGame = ctx.games.find((g) => g.bggId === bggId);
-      if (existingGame) {
-        // Delegate to existing predictGame path
-        return this.predictGame(existingGame.id);
+      if (!Number.isSafeInteger(bggId) || bggId <= 0) throw new Error(`Invalid BGG ID: ${bggId}`);
+      options.signal?.throwIfAborted();
+      const ctx = await loadPredictionContext(options.snapshot);
+      const matches = ctx.games.filter((game) =>
+        [game.bggId, ...(game.additionalBggIds ?? [])].includes(bggId),
+      );
+      if (matches.length > 1) throw new Error(`Ambiguous collection match for BGG ID ${bggId}`);
+      let facts: Awaited<ReturnType<NonNullable<BggClient["getBoardgameFacts"]>>> | undefined;
+      let scoringInput: BoardgameScoringInput | undefined = options.verifiedScoringInput;
+      let verificationFailure: string | null = null;
+      // A verified fact is sufficient to establish Thing identity, but it is
+      // intentionally narrower than the scoring projection. Always obtain the
+      // rich scoring input before using that fact for a preview; otherwise the
+      // preview would silently score placeholder player/time/category values.
+      if (!scoringInput && bggClient?.getBoardgameScoringInput) {
+        try {
+          scoringInput = await bggClient.getBoardgameScoringInput(
+            bggId,
+            options.signal,
+            options.attemptBudget,
+          );
+          if (
+            scoringInput.bggId !== bggId ||
+            scoringInput.type !== "boardgame" ||
+            !scoringInput.primaryName
+          ) {
+            throw new Error("MismatchedId");
+          }
+        } catch (error) {
+          if (options.signal?.aborted) throw error;
+          verificationFailure =
+            error instanceof BggClientError
+              ? error.code
+              : error instanceof Error && error.message === "MismatchedId"
+                ? "MismatchedId"
+                : ((error as { code?: string })?.code ?? "unavailable");
+        }
       }
-
-      // Fetch BGG data for the game
-      const bggResult = await bggClient.getGame(bggId);
-
-      // Build a temporary Game object (not persisted)
+      if (!scoringInput && !options.verifiedFact) {
+        try {
+          facts = await bggClient?.getBoardgameFacts?.(
+            [bggId],
+            options.signal,
+            options.attemptBudget,
+          );
+        } catch (error) {
+          if (options.signal?.aborted) throw error;
+          verificationFailure = error instanceof BggClientError ? error.code : "unavailable";
+        }
+      } else if (options.verifiedFact) {
+        facts = { facts: [options.verifiedFact], failures: [] };
+      }
+      if (options.verifiedFact && !scoringInput && !verificationFailure) {
+        verificationFailure = "ScoringInputUnavailable";
+      }
+      options.signal?.throwIfAborted();
+      if (
+        scoringInput &&
+        (scoringInput.bggId !== bggId ||
+          scoringInput.type !== "boardgame" ||
+          !scoringInput.primaryName)
+      ) {
+        scoringInput = undefined;
+        verificationFailure = "MismatchedId";
+      }
+      // A successful rich Thing read is the authoritative identity for the
+      // preview, even when the caller supplied a narrower cached fact first.
+      if (scoringInput) {
+        facts = {
+          facts: [
+            {
+              bggId,
+              primaryName: scoringInput.primaryName!,
+              yearPublished: scoringInput.yearPublished,
+              yearMissing: scoringInput.missingFields.includes("yearPublished"),
+              mechanics: scoringInput.mechanics,
+              mechanicsMissing: false,
+              mechanicsComplete: true,
+              warnings: [],
+              observedAt: scoringInput.observedAt,
+            },
+          ],
+          failures: [],
+        };
+      }
+      const serviceFailure = facts?.failures.find((item) => item.bggId === bggId);
+      const fact = facts?.facts.find((item) => item.bggId === bggId);
+      if (serviceFailure) verificationFailure = serviceFailure.code;
+      if (!fact && !verificationFailure) verificationFailure = facts ? "unverified" : "unavailable";
+      if (verificationFailure && !matches[0]) {
+        if (verificationFailure === "MissingGame")
+          throw new Error(`No game found with BGG ID ${bggId}`);
+        throw new Error(`BGG Thing verification failed (${verificationFailure}) for ${bggId}`);
+      }
+      const previewIdentity: NonNullable<PredictedGameResult["previewIdentity"]> = {
+        calculationVersion: "bgg-fitness-preview-v2",
+        source: verificationFailure
+          ? "local-unverified"
+          : scoringInput
+            ? "bgg-thing-scoring-input"
+            : "bgg-thing-facts-fallback",
+        calculatedAt: now(),
+        bggObservedAt: fact?.observedAt ?? null,
+        collectionRevision: ctx.collectionRevision,
+        predictionSettingsVersion: contentVersion(ctx.settings),
+        tournamentDataVersion: contentVersion(ctx.tournamentData),
+      };
+      if (matches[0]) {
+        const game = matches[0];
+        const score = fitnessService.calculateScore(game, ctx.axes, ctx.tournamentData);
+        if (verificationFailure) {
+          if (!score) throw new Error("Existing local score is unavailable");
+          return {
+            game,
+            score,
+            predictionUnavailable: null,
+            previewIdentity,
+            bggVerification: { status: "existing-local-unverified", failure: verificationFailure },
+          };
+        }
+        if (score && score.ratedAxisCount === ctx.axes.length) {
+          return {
+            game,
+            score,
+            predictionUnavailable: null,
+            previewIdentity,
+            verifiedFact: fact,
+            bggVerification: { status: "verified" },
+          };
+        }
+        const targetVector = ctx.gameVectors.get(game.id);
+        if (!targetVector) {
+          if (!score) throw new Error("Existing local score is unavailable");
+          return { game, score, predictionUnavailable: null, previewIdentity, verifiedFact: fact };
+        }
+        const predicted = computePredictedFitness(
+          game,
+          ctx.axes,
+          ctx.referenceGames,
+          targetVector,
+          ctx.settings,
+          ctx.readinessStage,
+          (candidate, axes) => fitnessService.calculateScore(candidate, axes, ctx.tournamentData),
+        ).fitnessResult;
+        const threshold = ctx.settings.stageThresholds[0];
+        return {
+          game,
+          score: predicted,
+          predictionUnavailable:
+            ctx.readinessStage === 0
+              ? {
+                  reason: "stage-0",
+                  ratedGameCount: ctx.ratedGameCount,
+                  gamesNeeded: threshold - ctx.ratedGameCount,
+                }
+              : null,
+          previewIdentity,
+          verifiedFact: fact,
+          bggVerification: { status: "verified" },
+        };
+      }
+      if (!fact) throw new Error(`BGG Thing did not verify BGG ID ${bggId}`);
+      const bggData = {
+        communityRating: 0,
+        bayesAverage: 0,
+        weight: scoringInput?.weight ?? null,
+        numWeightVotes: 0,
+        description: null,
+        mechanics: scoringInput?.mechanics ?? fact.mechanics,
+        categories: scoringInput?.categories ?? [],
+        families: [],
+        subdomains: [],
+        bestPlayerCount: null,
+        fetchedAt: fact.observedAt,
+      };
       const observedAt = now();
-      const rangeObservation = bggResult.playerRangeObservation;
-      const rangePresent =
-        rangeObservation?.fieldsReturned.includes("minPlayers") === true &&
-        rangeObservation.fieldsReturned.includes("maxPlayers");
-      const validRange =
-        rangePresent &&
-        bggResult.metadata.minPlayers !== null &&
-        bggResult.metadata.maxPlayers !== null &&
-        Number.isSafeInteger(bggResult.metadata.minPlayers) &&
-        Number.isSafeInteger(bggResult.metadata.maxPlayers) &&
-        bggResult.metadata.minPlayers > 0 &&
-        bggResult.metadata.minPlayers <= bggResult.metadata.maxPlayers
-          ? {
-              minPlayers: bggResult.metadata.minPlayers,
-              maxPlayers: bggResult.metadata.maxPlayers,
-            }
-          : null;
-      const durationPresent =
-        bggResult.metadataObservation?.fieldsReturned.includes("playingTime") === true;
-      const validDuration =
-        durationPresent &&
-        bggResult.metadata.playingTime !== null &&
-        Number.isSafeInteger(bggResult.metadata.playingTime) &&
-        bggResult.metadata.playingTime > 0
-          ? bggResult.metadata.playingTime
-          : null;
-      const playObservation = bggResult.collectionData?.observation;
-      const playPresent = playObservation?.fieldsReturned.includes("numPlays") === true;
-      const plays = bggResult.collectionData?.numPlays ?? null;
-      const validPlays =
-        playPresent && plays !== null && Number.isSafeInteger(plays) && plays >= 0 ? plays : null;
       const tempGame: Game = {
         id: `preview-${bggId}`,
         bggId,
-        name: bggResult.metadata.name,
-        yearPublished: bggResult.metadata.yearPublished,
-        minPlayers: validRange?.minPlayers ?? null,
-        maxPlayers: validRange?.maxPlayers ?? null,
-        bestPlayers: bggResult.bggData.bestPlayerCount,
-        playingTime: validDuration,
-        imageUrl: bggResult.metadata.imageUrl,
-        numPlays: validPlays,
-        bggData: bggResult.bggData,
+        name: fact.primaryName,
+        yearPublished: scoringInput?.yearPublished ?? fact.yearPublished,
+        minPlayers: scoringInput?.minPlayers ?? null,
+        maxPlayers: scoringInput?.maxPlayers ?? null,
+        bestPlayers: null,
+        playingTime: scoringInput?.playingTime ?? null,
+        imageUrl: null,
+        numPlays: null,
+        bggData,
         acquisition: { state: "unknown" },
-        playCountEvidence:
-          validPlays !== null
-            ? {
-                status: "valid",
-                value: validPlays,
-                source: "bgg-collection",
-                observedAt: playObservation?.observedAt ?? null,
-              }
-            : playPresent
-              ? {
-                  status: "invalid",
-                  evidence: { presence: "present", value: plays },
-                  source: "bgg-collection",
-                  observedAt: playObservation?.observedAt ?? null,
-                }
-              : { status: "missing", source: "bgg-collection", observedAt: null },
+        playCountEvidence: { status: "missing", source: "bgg-collection", observedAt: null },
         durationEvidence:
-          validDuration !== null
-            ? {
+          scoringInput?.playingTime == null
+            ? { status: "missing", source: "bgg-thing", observedAt: null }
+            : {
                 status: "valid",
-                value: validDuration,
+                value: scoringInput.playingTime,
                 source: "bgg-thing",
-                observedAt: bggResult.metadataObservation?.observedAt ?? null,
-              }
-            : durationPresent
-              ? {
-                  status: "invalid",
-                  evidence: { presence: "present", value: bggResult.metadata.playingTime },
-                  source: "bgg-thing",
-                  observedAt: bggResult.metadataObservation?.observedAt ?? null,
-                }
-              : { status: "missing", source: "bgg-thing", observedAt: null },
+                observedAt: scoringInput.observedAt,
+              },
         playerRangeEvidence:
-          validRange !== null
+          scoringInput?.minPlayers != null && scoringInput.maxPlayers != null
             ? {
                 status: "valid",
-                value: validRange,
-                source: "bgg-player-range",
-                observedAt: rangeObservation?.observedAt ?? null,
+                value: { minPlayers: scoringInput.minPlayers, maxPlayers: scoringInput.maxPlayers },
+                source: "bgg-thing",
+                observedAt: scoringInput.observedAt,
               }
-            : rangeObservation !== undefined && rangeObservation.fieldsReturned.length > 0
-              ? {
-                  status: "invalid",
-                  evidence: {
-                    minPlayers: rangeObservation.fieldsReturned.includes("minPlayers")
-                      ? { presence: "present", value: bggResult.metadata.minPlayers }
-                      : { presence: "missing" },
-                    maxPlayers: rangeObservation.fieldsReturned.includes("maxPlayers")
-                      ? { presence: "present", value: bggResult.metadata.maxPlayers }
-                      : { presence: "missing" },
-                  },
-                  source: "bgg-player-range",
-                  observedAt: rangeObservation.observedAt,
-                }
-              : { status: "missing", source: "bgg-player-range", observedAt: null },
-        suggestedPlayerPoll: canonicalSuggestedPlayerPoll(bggResult.suggestedPlayerPoll) ?? {
+            : { status: "missing", source: "bgg-player-range", observedAt: null },
+        suggestedPlayerPoll: canonicalSuggestedPlayerPoll(scoringInput?.suggestedPlayerPoll) ?? {
           status: "valid",
           state: "absent",
           buckets: [],
@@ -383,7 +531,7 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
         },
         bestPlayersInvalidEvidence: null,
         manualValues: { playingTime: null, playerCount: null },
-        entityMetadata: structuredClone(bggResult.entityMetadata),
+        entityMetadata: createInitialEntityMetadata(bggId),
         latestPlayCountCheck: null,
         ownership: "owned",
         boxDimensions: null,
@@ -423,20 +571,9 @@ export function createPredictionService(deps: PredictionServiceDeps): Prediction
         game: tempGame,
         score: fitnessResult,
         predictionUnavailable,
-        ...(bggResult.metadataObservation ||
-        bggResult.playerRangeObservation ||
-        bggResult.suggestedPlayerPoll ||
-        bggResult.collectionData
-          ? {
-              bggObservations: {
-                metadataObservation: bggResult.metadataObservation,
-                playerRangeObservation: bggResult.playerRangeObservation,
-                suggestedPlayerPoll: bggResult.suggestedPlayerPoll,
-                collectionData: bggResult.collectionData,
-                entityMetadata: bggResult.entityMetadata,
-              },
-            }
-          : {}),
+        previewIdentity,
+        verifiedFact: fact,
+        bggVerification: { status: "verified" },
       };
     },
 

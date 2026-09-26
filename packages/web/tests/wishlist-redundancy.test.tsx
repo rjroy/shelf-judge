@@ -45,7 +45,7 @@ describe("wishlist redundancy preview", () => {
     expect(html).toContain("91%");
     expect(html).toContain("Similar Three");
     expect(html).not.toContain("Similar Four");
-    expect(html).toContain("Snapshot from when added or last refreshed.");
+    expect(html).not.toContain("Snapshot from when added or last refreshed.");
   });
 
   test("shows the empty-neighbors message without claiming a penalty", () => {

@@ -1,13 +1,18 @@
 import {
   ANALYST_CONTRACT_VERSION,
+  ANALYST_DISCLOSURE_VERSION,
   ANALYST_EVIDENCE_CLASSES,
   ANALYST_MANIFEST_VERSION,
   AnalystCancelRequestSchema,
   AnalystCancelResultSchema,
   AnalystCitationInspectRequestSchema,
   AnalystCitationInspectResultSchema,
+  AnalystCitationInspectionRecordSchema,
   AnalystConfigurationGetRequestSchema,
   AnalystConfigurationSchema,
+  AnalystDiscoveryIdsSchema,
+  AnalystDiscoveryViewSchema,
+  AnalystFitnessPreviewViewSchema,
   AnalystOperationResultSchema,
   AnalystStreamEventSchema,
   AnalystTurnRequestSchema,
@@ -28,12 +33,14 @@ import {
   createGroundedStreamWriter,
   type GroundedStreamEncoding,
 } from "../services/grounded-analysis/stream-writer.js";
+import { GroundedAnalysisError } from "../services/grounded-analysis/failure-mapping.js";
 
 const INVALID_REQUEST_ID = "invalid-request";
 const OPERATION_PREFIX = "shelf.analyst";
 const SYSTEM_PROMPT =
   "You are Shelf Judge's Collection Analyst. Use the available read-only collection discovery tools as needed, then provide a conversational final answer.";
 const MAX_RETAINED_CONVERSATION_IDENTITIES = 1_024;
+const ANALYST_TURN_DEADLINE_MS = 120_000;
 
 const operationResultSchema = {
   type: "object",
@@ -43,17 +50,33 @@ const operationResultSchema = {
 } satisfies Record<string, OperationJsonValue>;
 const configurationResponseSchema = {
   type: "object",
-  required: ["contractVersion", "manifestVersion", "configuration", "disclosure"],
+  required: [
+    "contractVersion",
+    "manifestVersion",
+    "disclosureVersion",
+    "configuration",
+    "bgg",
+    "disclosure",
+  ],
   additionalProperties: false,
   properties: {
     contractVersion: { const: ANALYST_CONTRACT_VERSION },
     manifestVersion: { const: ANALYST_MANIFEST_VERSION },
+    disclosureVersion: { const: ANALYST_DISCLOSURE_VERSION },
     configuration: { type: "object" },
+    bgg: {
+      type: "object",
+      required: ["status"],
+      additionalProperties: false,
+      properties: { status: { enum: ["configured", "not-configured", "unauthorized"] } },
+    },
     disclosure: {
       type: "object",
       required: [
         "evidenceClasses",
         "relevantOwnerNotesMayBeTransmitted",
+        "selectedOwnerTitleOrBggIdsMayBeSentToBgg",
+        "bggProcessingIsSeparateFromProviderProcessing",
         "localRetention",
         "providerProcessingAndRetentionFollowProviderPolicy",
         "applicationTokenCap",
@@ -66,6 +89,8 @@ const configurationResponseSchema = {
       properties: {
         evidenceClasses: { type: "array", items: { type: "string" } },
         relevantOwnerNotesMayBeTransmitted: { const: true },
+        selectedOwnerTitleOrBggIdsMayBeSentToBgg: { const: true },
+        bggProcessingIsSeparateFromProviderProcessing: { const: true },
         localRetention: { type: "string" },
         providerProcessingAndRetentionFollowProviderPolicy: { const: true },
         applicationTokenCap: { const: null },
@@ -115,7 +140,10 @@ const citationInspectResponseSchema = {
   required: ["state", "destination"],
   additionalProperties: false,
   properties: {
-    state: { enum: ["current", "superseded"] },
+    state: { enum: ["current", "superseded", "historical"] },
+    inspectedAt: { type: "string", format: "date-time" },
+    view: { type: "object" },
+    authenticationToken: { type: "string" },
     destination: {
       type: "object",
       required: ["operationId", "parameters"],
@@ -125,6 +153,7 @@ const citationInspectResponseSchema = {
 } satisfies Record<string, OperationJsonValue>;
 
 type AnalystTurnService = ReturnTypeOfAnalystTurnService;
+type CitationInspectionRecord = ReturnType<typeof AnalystCitationInspectionRecordSchema.parse>;
 type AnalystStreamPayload = AnalystStreamEvent extends infer Event
   ? Event extends AnalystStreamEvent
     ? Omit<Event, "version" | "operationId" | "sequence" | "occurredAt">
@@ -149,6 +178,20 @@ async function readJson(context: { req: { json(): Promise<unknown> } }): Promise
 
 function encodingFor(accept: string | undefined): GroundedStreamEncoding {
   return accept?.toLowerCase().includes("application/x-ndjson") ? "ndjson" : "sse";
+}
+
+function inspectionTime(record: CitationInspectionRecord): string {
+  if (record.view.kind === "discovery") {
+    const result = record.view.result;
+    if (result.status === "ok") return result.observedAt;
+  } else if (record.view.kind === "item") {
+    const result = record.view.result;
+    if ("facts" in result) return result.facts[0]?.observedAt ?? new Date().toISOString();
+  } else {
+    const result = record.view.result;
+    if ("calculatedAt" in result) return result.calculatedAt;
+  }
+  return new Date().toISOString();
 }
 
 function operationResult(value: unknown, requestId: string) {
@@ -179,14 +222,21 @@ function transcriptPrompt(request: AnalystTurnRequest): string {
   });
 }
 
-function configuration(status: GroundedProviderConfigurationStatus) {
+function configuration(
+  status: GroundedProviderConfigurationStatus,
+  bggStatus: AnalystBggConfigurationStatus,
+) {
   return AnalystConfigurationSchema.parse({
     contractVersion: ANALYST_CONTRACT_VERSION,
     manifestVersion: ANALYST_MANIFEST_VERSION,
+    disclosureVersion: ANALYST_DISCLOSURE_VERSION,
     configuration: status,
+    bgg: { status: bggStatus },
     disclosure: {
       evidenceClasses: ANALYST_EVIDENCE_CLASSES,
       relevantOwnerNotesMayBeTransmitted: true,
+      selectedOwnerTitleOrBggIdsMayBeSentToBgg: true,
+      bggProcessingIsSeparateFromProviderProcessing: true,
       localRetention: "Shelf Judge does not persist Analyst conversations.",
       providerProcessingAndRetentionFollowProviderPolicy: true,
       applicationTokenCap: null,
@@ -199,9 +249,13 @@ function configuration(status: GroundedProviderConfigurationStatus) {
   });
 }
 
+type AnalystBggConfigurationStatus = "configured" | "not-configured" | "unauthorized";
+
 export interface AnalystRoutesDeps {
   /** Read at request time; callers must acknowledge the configured provider identity. */
   readonly getConfigurationStatus: () => GroundedProviderConfigurationStatus;
+  /** BGG credentials are never returned; only their non-secret availability is disclosed. */
+  readonly getBggConfigurationStatus?: () => AnalystBggConfigurationStatus;
   readonly transcriptValidator: AnalystTranscriptValidator;
   readonly evidenceService: AnalystEvidenceService;
   readonly turnService: AnalystTurnService;
@@ -219,6 +273,7 @@ export function createAnalystRoutes(deps: AnalystRoutesDeps): AnalystRouteModule
   const operations = createActiveGroundedOperationRegistry();
   const configurationStatus = () =>
     GroundedProviderConfigurationStatusSchema.parse(deps.getConfigurationStatus());
+  const bggConfigurationStatus = () => deps.getBggConfigurationStatus?.() ?? "not-configured";
   const active = new Map<
     string,
     {
@@ -235,6 +290,8 @@ export function createAnalystRoutes(deps: AnalystRoutesDeps): AnalystRouteModule
   >();
   const requestConversation = new Map<string, string>();
   const createOperationId = deps.createOperationId ?? (() => crypto.randomUUID());
+  // Inspection signatures intentionally use the attestation service's process-local key.
+  // They become unverifiable after restart, which safely falls back to live inspection.
 
   const identityTrackingUnavailable = (request: AnalystTurnRequest) =>
     (!conversationIdentity.has(request.conversationId) &&
@@ -257,7 +314,9 @@ export function createAnalystRoutes(deps: AnalystRoutesDeps): AnalystRouteModule
       current.identity.providerId === expectedIdentity.providerId &&
       current.identity.modelId === expectedIdentity.modelId &&
       request.disclosure.providerId === current.identity.providerId &&
-      request.disclosure.modelId === current.identity.modelId;
+      request.disclosure.modelId === current.identity.modelId &&
+      request.disclosure.manifestVersion === ANALYST_MANIFEST_VERSION &&
+      request.disclosure.disclosureVersion === ANALYST_DISCLOSURE_VERSION;
     return { matches, unavailable: false } as const;
   };
 
@@ -267,7 +326,7 @@ export function createAnalystRoutes(deps: AnalystRoutesDeps): AnalystRouteModule
         unavailable(INVALID_REQUEST_ID, "invalid-analyst-configuration-request"),
         400,
       );
-    return context.json(configuration(configurationStatus()));
+    return context.json(configuration(configurationStatus(), bggConfigurationStatus()));
   });
 
   routes.post("/analyst/citations/inspect", async (context) => {
@@ -282,6 +341,35 @@ export function createAnalystRoutes(deps: AnalystRoutesDeps): AnalystRouteModule
         400,
       );
     try {
+      const request = AnalystCitationInspectRequestSchema.parse(body);
+      if (request.inspection !== undefined) {
+        const candidate = request.inspection;
+        const record = deps.attestationService.verifyInspectionRecord(candidate, {
+          conversationId: candidate.conversationId,
+          requestId: candidate.requestId,
+          turnIndex: candidate.turnIndex,
+          attestationDigest: candidate.attestationDigest,
+        });
+        const identity = request.citation;
+        if (
+          record === null ||
+          record.citation.citationId !== identity.citationId ||
+          record.citation.sourceId !== identity.sourceId ||
+          record.citation.sourceVersion !== identity.sourceVersion ||
+          record.citation.evidenceClass !== identity.evidenceClass
+        )
+          throw new Error("Invalid citation inspection record");
+        const inspectedAt = inspectionTime(record);
+        return context.json(
+          AnalystCitationInspectResultSchema.parse({
+            state: "historical",
+            destination: record.citation.destination,
+            inspectedAt,
+            view: record.view,
+            authenticationToken: record.authenticationToken,
+          }),
+        );
+      }
       return context.json(
         AnalystCitationInspectResultSchema.parse(await deps.evidenceService.inspectCitation(body)),
       );
@@ -332,7 +420,9 @@ export function createAnalystRoutes(deps: AnalystRoutesDeps): AnalystRouteModule
     const identity = providerConfiguration.identity;
     if (
       request.disclosure.providerId !== identity.providerId ||
-      request.disclosure.modelId !== identity.modelId
+      request.disclosure.modelId !== identity.modelId ||
+      request.disclosure.manifestVersion !== ANALYST_MANIFEST_VERSION ||
+      request.disclosure.disclosureVersion !== ANALYST_DISCLOSURE_VERSION
     )
       return context.json(
         operationResult(
@@ -434,6 +524,11 @@ export function createAnalystRoutes(deps: AnalystRoutesDeps): AnalystRouteModule
       capability: request.conversationCapability,
       feature: "collection-analyst",
     });
+    const turnController = new AbortController();
+    const abortTurn = () => turnController.abort(operation.signal.reason);
+    operation.signal.addEventListener("abort", abortTurn, { once: true });
+    let deadlineExpired = false;
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
     let settle = () => {};
     const settled = new Promise<void>((resolve) => {
       settle = resolve;
@@ -475,6 +570,7 @@ export function createAnalystRoutes(deps: AnalystRoutesDeps): AnalystRouteModule
       return event;
     };
     const throwIfInterrupted = () => {
+      if (deadlineExpired) throw new Error("Analyst turn deadline exceeded");
       if (operation.signal.aborted)
         throw new DOMException("Analyst turn interrupted", "AbortError");
     };
@@ -510,6 +606,18 @@ export function createAnalystRoutes(deps: AnalystRoutesDeps): AnalystRouteModule
         controller = streamController;
         void (async () => {
           try {
+            let rejectDeadline: (error: Error) => void = () => undefined;
+            const deadline = new Promise<never>((_resolve, reject) => {
+              rejectDeadline = reject;
+            });
+            void deadline.catch(() => undefined);
+            deadlineTimer = setTimeout(() => {
+              deadlineExpired = true;
+              turnController.abort(
+                new DOMException("Analyst turn deadline exceeded", "TimeoutError"),
+              );
+              rejectDeadline(new Error("Analyst turn deadline exceeded"));
+            }, ANALYST_TURN_DEADLINE_MS);
             await emitNonterminal({
               type: "accepted",
               terminal: false,
@@ -532,10 +640,19 @@ export function createAnalystRoutes(deps: AnalystRoutesDeps): AnalystRouteModule
               requestId: request.requestId,
               status: "started",
             });
-            const result = await deps.turnService.run({
+            // Owner-message indexes are zero-based positions within this array, not transcript indexes.
+            const ownerMessages = request.messages.flatMap((message) =>
+              message.role === "owner" ? [message.content] : [],
+            );
+            const runInput = {
               systemPrompt: SYSTEM_PROMPT,
               prompt: transcriptPrompt(request),
-              signal: operation.signal,
+              signal: turnController.signal,
+              ownerMessages,
+              acceptedDiscoveryIds: prior.discoveryIds.map(({ bggId }) => bggId),
+              // TODO(analyst-turn-service): declare these route-owned identity fields on run input.
+              conversationId: request.conversationId,
+              turnIndex: request.turnIndex,
               audit: {
                 operationId,
                 batchId: request.conversationId,
@@ -547,14 +664,18 @@ export function createAnalystRoutes(deps: AnalystRoutesDeps): AnalystRouteModule
                 evidenceClassCounts: [],
                 evidenceIdentityHash: request.conversationId,
               },
-            });
+            };
+            const runPromise = deps.turnService.run(runInput);
+            // A provider that ignores AbortSignal still cannot complete this HTTP turn late.
+            void runPromise.catch(() => undefined);
+            const result = await Promise.race([runPromise, deadline]);
             throwIfInterrupted();
             if (!("output" in result)) {
               const failure =
                 result.reason === "source-changed"
                   ? { reason: "evidence-load" as const, safeDetail: "source-changed" }
                   : result.reason === "handoff-failed"
-                    ? { reason: "provider-outage" as const, safeDetail: "provider-handoff-failed" }
+                    ? { reason: "internal" as const, safeDetail: "evidence-handoff-failed" }
                     : { reason: "output-validation" as const, safeDetail: "invalid-submission" };
               await publishTerminal("failed", {
                 type: "failed",
@@ -590,6 +711,30 @@ export function createAnalystRoutes(deps: AnalystRoutesDeps): AnalystRouteModule
                 ).values(),
               ];
               const content = result.output.blocks.map(({ text }) => text).join("\n\n");
+              if (!("discoveryIds" in result))
+                throw new Error("Analyst turn result omitted finalized discovery IDs");
+              const emittedIdsResult = AnalystDiscoveryIdsSchema.safeParse(result.discoveryIds);
+              if (!emittedIdsResult.success) throw new Error("Analyst discovery IDs are invalid");
+              const discoveryIds = emittedIdsResult.data;
+              if (!("discovery" in result) || !("fitnessPreview" in result))
+                throw new Error("Analyst turn result omitted finalized BGG views");
+              const discovery = AnalystDiscoveryViewSchema.parse(result.discovery);
+              const fitnessPreview = AnalystFitnessPreviewViewSchema.parse(result.fitnessPreview);
+              const finalizedCandidates = new Map<number, "search" | "hot">();
+              for (const observation of discovery) {
+                if (observation.status !== "ok") continue;
+                const source = observation.source === "hot" ? "hot" : "search";
+                for (const candidate of observation.candidates) {
+                  if (!finalizedCandidates.has(candidate.bggId))
+                    finalizedCandidates.set(candidate.bggId, source);
+                }
+              }
+              if (
+                finalizedCandidates.size !== discoveryIds.length ||
+                discoveryIds.some(({ bggId, source }) => finalizedCandidates.get(bggId) !== source)
+              )
+                throw new Error("Analyst discovery IDs do not match finalized candidates");
+              const discoveryDigest = deps.attestationService.discoveryDigest(discoveryIds);
               const validationAttestation = deps.attestationService.attest({
                 conversationId: request.conversationId,
                 turnIndex: request.turnIndex,
@@ -598,7 +743,33 @@ export function createAnalystRoutes(deps: AnalystRoutesDeps): AnalystRouteModule
                 content,
                 outcome: result.output.outcome,
                 noteDependencies: uniqueDependencies,
+                discoveryDigest,
               });
+              const attestationDigest =
+                deps.attestationService.attestationDigest(validationAttestation);
+              const inspectionRecords = (
+                "inspectionRecords" in result ? result.inspectionRecords : []
+              ).map((candidate) => {
+                const unsigned = AnalystCitationInspectionRecordSchema.innerType()
+                  .omit({
+                    attestationDigest: true,
+                    authenticationToken: true,
+                  })
+                  .parse(candidate);
+                return deps.attestationService.issueInspectionRecord({
+                  ...unsigned,
+                  attestationDigest,
+                });
+              });
+              const discoveryReceipts = discoveryIds.map(({ bggId, source }) =>
+                deps.attestationService.issueDiscoveryReceipt({
+                  conversationId: request.conversationId,
+                  turnIndex: request.turnIndex,
+                  attestationDigest,
+                  bggId,
+                  source,
+                }),
+              );
               for (const block of result.output.blocks)
                 await emitNonterminal({
                   type: "validated-block",
@@ -620,6 +791,12 @@ export function createAnalystRoutes(deps: AnalystRoutesDeps): AnalystRouteModule
                 conversationId: request.conversationId,
                 requestId: request.requestId,
                 result: result.output,
+                discovery,
+                fitnessPreview,
+                discoveryIds,
+                discoveryDigest,
+                discoveryReceipts,
+                citationInspections: inspectionRecords,
                 noteDependencies: uniqueDependencies,
                 validationAttestation,
               });
@@ -639,6 +816,23 @@ export function createAnalystRoutes(deps: AnalystRoutesDeps): AnalystRouteModule
                 } catch {
                   // The consumer already detached; cleanup still runs below.
                 }
+              } else if (deadlineExpired) {
+                try {
+                  await publishTerminal("failed", {
+                    type: "failed",
+                    terminal: true,
+                    conversationId: request.conversationId,
+                    requestId: request.requestId,
+                    reason: "transport",
+                    safeDetail: "turn-deadline",
+                  });
+                } catch {
+                  try {
+                    streamController.error(error);
+                  } catch {
+                    // The consumer already detached; cleanup still runs below.
+                  }
+                }
               } else if (interrupted && state?.outcome === "cancelled") {
                 try {
                   await emit({
@@ -651,14 +845,21 @@ export function createAnalystRoutes(deps: AnalystRoutesDeps): AnalystRouteModule
                   // Cancellation is already terminal in the registry.
                 }
               } else {
+                const groundedFailure =
+                  error instanceof GroundedAnalysisError && error.reason !== "cancelled"
+                    ? error
+                    : undefined;
                 try {
                   await publishTerminal("failed", {
                     type: "failed",
                     terminal: true,
                     conversationId: request.conversationId,
                     requestId: request.requestId,
-                    reason: "internal",
-                    safeDetail: "turn-failed",
+                    reason:
+                      groundedFailure && groundedFailure.reason !== "cancelled"
+                        ? groundedFailure.reason
+                        : "internal",
+                    safeDetail: groundedFailure?.safeDetail ?? "turn-failed",
                   });
                 } catch {
                   try {
@@ -679,6 +880,8 @@ export function createAnalystRoutes(deps: AnalystRoutesDeps): AnalystRouteModule
             } catch {
               // A detached transport must not prevent operation settlement.
             } finally {
+              if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
+              operation.signal.removeEventListener("abort", abortTurn);
               controller = undefined;
               transport.release();
               operations.cleanup(operationId);

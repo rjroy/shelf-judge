@@ -7,7 +7,6 @@ import {
   projectFitnessScore,
   resolveEffectivePlayerCount,
   resolveEffectivePlayingTime,
-  type AnalystEvidenceClass,
   type CollectionProfile,
   type CollectionProfileCollectionSource,
   type CollectionProfileEntityClass,
@@ -388,12 +387,22 @@ export const ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST = Object.freeze({
   }),
 });
 
+/** Evidence emitted by this collection projection, excluding BGG turn-local evidence. */
+export type AnalystCollectionEvidenceClass =
+  keyof typeof ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST.evidence;
+
+export function isAnalystCollectionEvidenceClass(
+  evidenceClass: string,
+): evidenceClass is AnalystCollectionEvidenceClass {
+  return Object.hasOwn(ANALYST_DETERMINISTIC_EVIDENCE_MANIFEST.evidence, evidenceClass);
+}
+
 export interface AnalystEvidencePageCursor {
   readonly snapshotFingerprint: string;
   readonly offset: number;
 }
 export interface AnalystEvidenceSource {
-  readonly evidenceClass: AnalystEvidenceClass;
+  readonly evidenceClass: AnalystCollectionEvidenceClass;
   readonly sourceId: string;
   readonly sourceVersion: string;
   readonly citationId: string;
@@ -439,7 +448,7 @@ function tags(values: readonly { id: number; name: string }[]) {
   ].sort((a, b) => compareText(a.name, b.name) || a.id - b.id);
 }
 function source(
-  evidenceClass: AnalystEvidenceSource["evidenceClass"],
+  evidenceClass: AnalystCollectionEvidenceClass,
   sourceId: string,
   sourceIdentity: unknown,
   payload: unknown,

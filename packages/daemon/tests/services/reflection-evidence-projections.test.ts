@@ -346,7 +346,11 @@ describe("Reflection deterministic evidence projections", () => {
     expect(
       analyst.sources.find(({ sourceId }) => sourceId === "game:game-1:structure")?.observedAt,
     ).toBeUndefined();
-    expect(ANALYST_EVIDENCE_MANIFEST.classes.map(({ id, fields }) => ({ id, fields }))).toEqual([
+    expect(
+      ANALYST_EVIDENCE_MANIFEST.classes
+        .filter(({ id }) => !id.startsWith("bgg-"))
+        .map(({ id, fields }) => ({ id, fields })),
+    ).toEqual([
       {
         id: "game-identity-ownership",
         fields: ["gameId", "displayName", "bggId", "ownershipState"],
@@ -428,6 +432,12 @@ describe("Reflection deterministic evidence projections", () => {
       },
       { id: "owner-game-note", fields: ["gameId", "noteVersion", "state", "text"] },
     ]);
+    expect(Object.keys(REFLECTION_DETERMINISTIC_EVIDENCE_MANIFEST.evidence)).not.toContain(
+      "bgg-search-observation",
+    );
+    expect(Object.keys(REFLECTION_DETERMINISTIC_EVIDENCE_MANIFEST.evidence)).not.toContain(
+      "bgg-thing-facts",
+    );
     expect(buildAnalystProjectionSnapshot(structuredClone(fixture())).snapshotFingerprint).toBe(
       analyst.snapshotFingerprint,
     );
