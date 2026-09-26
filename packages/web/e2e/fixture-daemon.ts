@@ -129,6 +129,7 @@ let attentionConfigPuts = 0;
 let attentionConfigPutBodies: Array<Record<string, unknown>> = [];
 const analystCancelledConversations = new Set<string>();
 const analystEofConversations = new Set<string>();
+const analystFailureConversations = new Set<string>();
 const currentDiscoveryInspectionConversations = new Set<string>();
 let profileNavigationTelemetry = createProfileNavigationTelemetry();
 
@@ -309,6 +310,7 @@ function reset(next: Scenario): void {
   attentionConfigPutBodies = [];
   analystCancelledConversations.clear();
   analystEofConversations.clear();
+  analystFailureConversations.clear();
   currentDiscoveryInspectionConversations.clear();
   persistOwnerNoteState(ownerNoteState, ownerNotePersistencePath);
   if (next === "manual-values") {
@@ -1024,61 +1026,91 @@ async function handle(request: Request): Promise<Response> {
     };
     const lastMessage = parsedRequest.data.messages.at(-1);
     const ownerText = lastMessage?.role === "owner" ? lastMessage.content : "";
-    const discovery = ownerText.includes("zero-hit")
-      ? [
-          {
-            status: "ok",
-            source: "title",
-            observedAt: now,
-            returnedCount: 0,
-            emittedCount: 0,
-            truncated: false,
-            observationCitationId: "discovery-zero",
-            candidates: [],
-          },
-        ]
-      : ownerText.includes("hot limited")
+    const failureCase = ownerText.match(
+      /^failure-(authentication|rate-limit|provider-outage|evidence-load|deadline|output-validation|unknown)$/,
+    );
+    const failureKey = failureCase ? `${conversationId}:${failureCase[1]}` : undefined;
+    if (failureCase && failureKey && !analystFailureConversations.has(failureKey)) {
+      analystFailureConversations.add(failureKey);
+      const reason =
+        failureCase[1] === "deadline"
+          ? "transport"
+          : failureCase[1] === "unknown"
+            ? "internal"
+            : failureCase[1];
+      return new Response(
+        event(0, { type: "accepted", terminal: false, conversationId, requestId, turnIndex }) +
+          event(1, {
+            type: "failed",
+            terminal: true,
+            conversationId,
+            requestId,
+            reason,
+            ...(failureCase[1] === "deadline" ? { safeDetail: "turn-deadline" } : {}),
+          }),
+        { headers: { "Content-Type": "text/event-stream" } },
+      );
+    }
+    const bggThrottled = /reviewbggHot|title-search.*throttled|throttled.*title-search/i.test(
+      ownerText,
+    );
+    const discovery = bggThrottled
+      ? [{ status: "error", code: "BggThrottled", retryable: true }]
+      : ownerText.includes("zero-hit")
         ? [
             {
               status: "ok",
-              source: "hot",
+              source: "title",
               observedAt: now,
-              returnedCount: 8,
-              emittedCount: 8,
+              returnedCount: 0,
+              emittedCount: 0,
               truncated: false,
-              observationCitationId: "hot-limited",
-              candidates: [
-                candidate(174430, "Atlas Equal", "candidate-hot"),
-                candidate(13, "Catan", "candidate-catan"),
-                candidate(1, "Die Macher", "candidate-die-macher"),
-                candidate(2, "Dragonmaster", "candidate-dragonmaster"),
-                candidate(3, "Samurai", "candidate-samurai"),
-                candidate(4, "Tal der Könige", "candidate-tal"),
-                candidate(5, "Acquire", "candidate-acquire"),
-                candidate(6, "Acquire: Long Candidate Name for Narrow Screens", "candidate-long"),
-              ],
+              observationCitationId: "discovery-zero",
+              candidates: [],
             },
           ]
-        : ownerText.includes("truncated") || ownerText.includes("partial")
+        : ownerText.includes("hot limited")
           ? [
               {
                 status: "ok",
-                source: "title",
+                source: "hot",
                 observedAt: now,
-                returnedCount: 12,
-                emittedCount: 10,
-                truncated: true,
-                observationCitationId: "discovery-truncated",
-                candidates: Array.from({ length: 10 }, (_, index) =>
-                  candidate(
-                    1000 + index,
-                    `Fixture Candidate ${index + 1}`,
-                    `candidate-${index + 1}`,
-                  ),
-                ),
+                returnedCount: 8,
+                emittedCount: 8,
+                truncated: false,
+                observationCitationId: "hot-limited",
+                candidates: [
+                  candidate(174430, "Atlas Equal", "candidate-hot"),
+                  candidate(13, "Catan", "candidate-catan"),
+                  candidate(1, "Die Macher", "candidate-die-macher"),
+                  candidate(2, "Dragonmaster", "candidate-dragonmaster"),
+                  candidate(3, "Samurai", "candidate-samurai"),
+                  candidate(4, "Tal der Könige", "candidate-tal"),
+                  candidate(5, "Acquire", "candidate-acquire"),
+                  candidate(6, "Acquire: Long Candidate Name for Narrow Screens", "candidate-long"),
+                ],
               },
             ]
-          : undefined;
+          : ownerText.includes("truncated") || ownerText.includes("partial")
+            ? [
+                {
+                  status: "ok",
+                  source: "title",
+                  observedAt: now,
+                  returnedCount: 12,
+                  emittedCount: 10,
+                  truncated: true,
+                  observationCitationId: "discovery-truncated",
+                  candidates: Array.from({ length: 10 }, (_, index) =>
+                    candidate(
+                      1000 + index,
+                      `Fixture Candidate ${index + 1}`,
+                      `candidate-${index + 1}`,
+                    ),
+                  ),
+                },
+              ]
+            : undefined;
     const previewState = [
       "predicted",
       "existing",
@@ -1101,7 +1133,9 @@ async function handle(request: Request): Promise<Response> {
         sourceVersion,
       })),
     ];
-    const discoveryEvidence = discovery?.[0];
+    const firstDiscovery = discovery?.[0];
+    const discoveryEvidence =
+      firstDiscovery && "observationCitationId" in firstDiscovery ? firstDiscovery : undefined;
     const discoveryCitation =
       discoveryEvidence === undefined
         ? undefined
@@ -1125,23 +1159,32 @@ async function handle(request: Request): Promise<Response> {
     const finalCitations =
       discoveryCitation === undefined ? citations : [...citations, discoveryCitation];
     const result = {
-      outcome: "answered",
+      outcome: bggThrottled ? "abstained" : "answered",
       blocks: [
         {
-          text: ownerText.includes("**owner literal**")
-            ? "**bold**\n\n1. First\n2. Second"
-            : answerFor(ownerText, previewState),
-          citationIds: finalCitations.map(({ citationId }) => citationId),
+          text: bggThrottled
+            ? "The BGG Hot sample is temporarily unavailable because BGG is limiting requests. No candidates or fitness score were available. You can ask again later."
+            : ownerText.includes("**owner literal**")
+              ? "**bold**\n\n1. First\n2. Second"
+              : answerFor(ownerText, previewState),
+          citationIds: bggThrottled ? [] : finalCitations.map(({ citationId }) => citationId),
         },
       ],
-      citations: finalCitations,
+      citations: bggThrottled ? [] : finalCitations,
       usage: { state: "unavailable" },
+      ...(bggThrottled ? { reason: "insufficient-evidence" } : {}),
     };
-    const discoveryIds = discovery?.flatMap((item) =>
-      item.candidates.map(({ bggId }) => ({
-        bggId,
-        source: item.source === "title" ? "search" : "hot",
-      })),
+    const discoveryIds = (
+      discovery as
+        | { status: string; source?: string; candidates?: { bggId: number }[] }[]
+        | undefined
+    )?.flatMap((item) =>
+      item.status === "ok"
+        ? (item.candidates ?? []).map(({ bggId }) => ({
+            bggId,
+            source: item.source === "title" ? "search" : "hot",
+          }))
+        : [],
     );
     const receiptBatch = ownerText.match(/^receipt-batch-(\d+)$/i);
     const citationInspections =

@@ -479,3 +479,76 @@ test("Collection Analyst offers retry when a stream ends before a terminal event
   expect(turnBodies).toHaveLength(2);
   expect(turnBodies[1]).toMatchObject({ turnIndex: 0, messages: [{ role: "owner" }] });
 });
+
+test("Collection Analyst explains safe failure causes, retains the question, and retries without showing an unvalidated answer", async ({
+  page,
+}) => {
+  const cases = [
+    ["authentication", /could not sign in to its provider/i],
+    ["rate-limit", /too many requests/i],
+    ["provider-outage", /temporarily unavailable/i],
+    ["evidence-load", /collection evidence could not be prepared/i],
+    ["deadline", /took too long to respond/i],
+    ["output-validation", /could not be checked against collection evidence/i],
+    ["unknown", /could not finish checking this response/i],
+  ] as const;
+  await page.goto("/analyst");
+  for (const [kind, guidance] of cases) {
+    const question = `failure-${kind}`;
+    await page.getByLabel("Your question").fill(question);
+    await page.getByRole("button", { name: "Ask Analyst" }).click();
+    await page.getByRole("button", { name: "Acknowledge and send" }).click();
+    await expect(page.getByRole("status")).toContainText(guidance);
+    await expect(page.getByRole("status")).not.toContainText(
+      /turn-deadline|upstream|internal|JSON/i,
+    );
+    await expect(
+      page.getByLabel("Analyst conversation").getByText(question, { exact: true }),
+    ).toBeVisible();
+    const retainedTurn = page
+      .getByLabel("Analyst conversation")
+      .getByRole("article")
+      .filter({ hasText: question });
+    await expect(retainedTurn).toHaveCount(1);
+    await expect(retainedTurn.getByText("Atlas Equal is supported", { exact: false })).toHaveCount(
+      0,
+    );
+    await expect(page.getByRole("button", { name: "Retry question" })).toBeVisible();
+    await page.getByRole("button", { name: "Retry question" }).click();
+    await expect(page.getByText("Validated answer complete.")).toBeVisible();
+    await expect(
+      page.getByText("Atlas Equal is supported by current validated collection evidence.").last(),
+    ).toBeVisible();
+  }
+});
+
+test("Collection Analyst keeps a BGG Hot throttle separate from provider failures and shows no fabricated results", async ({
+  page,
+}) => {
+  await page.goto("/analyst");
+  await page.getByLabel("Your question").fill("reviewBggHot");
+  await page.getByRole("button", { name: "Ask Analyst" }).click();
+  await page.getByRole("button", { name: "Acknowledge and send" }).click();
+
+  const turn = page.getByLabel("Analyst conversation").getByRole("article").last();
+  await expect(
+    turn.getByText("The BGG Hot sample is temporarily unavailable", { exact: false }),
+  ).toBeVisible();
+  await expect(
+    turn.getByRole("heading", { name: "BGG is temporarily limiting requests" }),
+  ).toBeVisible();
+  await expect(turn).toContainText("No candidates or fitness score were available.");
+  await expect(turn.getByRole("list", { name: "Citations" })).toHaveCount(0);
+  await expect(turn.locator(".analyst-candidates")).toHaveCount(0);
+  await expect(turn.locator(".analyst-preview")).toHaveCount(0);
+  await expect(page.getByRole("status")).toContainText("Validated answer complete.");
+  await expect(page.getByRole("status")).not.toContainText(/provider|too many requests|outage/i);
+
+  await page.getByLabel("Your question").fill("Which game should I play?");
+  await page.getByRole("button", { name: "Ask Analyst" }).click();
+  await page.getByRole("button", { name: "Acknowledge and send" }).click();
+  await expect(page.getByText("Validated answer complete.")).toBeVisible();
+  await expect(
+    page.getByText("Atlas Equal is supported by current validated collection evidence.").last(),
+  ).toBeVisible();
+});

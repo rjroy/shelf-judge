@@ -96,6 +96,37 @@ function progressFor(event: AnalystStreamEvent): string | undefined {
   return undefined;
 }
 
+function failureGuidance(event: Extract<AnalystStreamEvent, { type: "failed" }>): string {
+  const isTurnDeadline = event.reason === "transport" && event.safeDetail === "turn-deadline";
+  switch (event.reason) {
+    case "authentication":
+      return "The Analyst could not sign in to its provider. Check the provider credentials in settings, then retry.";
+    case "rate-limit":
+      return "The provider is receiving too many requests. Wait a little, then retry.";
+    case "provider-outage":
+      return "The provider is temporarily unavailable. Try again shortly.";
+    case "model-configuration":
+    case "extension-binding":
+      return "The Analyst setup needs attention. Check the provider and model configuration, then retry.";
+    case "evidence-load":
+      return "Collection evidence could not be prepared. Check that your collection is available, then retry.";
+    case "internal":
+      return "The Analyst could not finish checking this response. No answer was shown. Retry, and contact support if it keeps happening.";
+    case "context-exhaustion":
+      return "This conversation has become too long to process. Start a new conversation with a shorter question.";
+    case "output-validation":
+      return "The response could not be checked against collection evidence, so it was not shown as an answer. You can retry or rephrase the question.";
+    case "transport":
+      return isTurnDeadline
+        ? "The Analyst took too long to respond. Retry your question, or try a shorter one."
+        : "The connection ended before the response was ready. Check your connection, then retry.";
+    case "provider-refusal":
+      return "The provider could not answer this question. Try rephrasing it.";
+    default:
+      return "The Analyst could not complete this question. Your question is still here; you can retry or rephrase it.";
+  }
+}
+
 function BggLink({ id, children }: { id: number; children: ReactNode }) {
   return (
     <a href={`https://boardgamegeek.com/boardgame/${id}`} target="_blank" rel="noopener noreferrer">
@@ -555,13 +586,15 @@ export function AnalystChat() {
           setLive("The Analyst request was cancelled.");
         } else if (event.type === "failed") {
           setState("failed");
-          setLive(`The Analyst is unavailable: ${event.reason}.`);
+          setLive(failureGuidance(event));
         }
       });
-    } catch (error) {
+    } catch {
       if (active.current?.requestId === requestId && !controller.signal.aborted) {
         setState("failed");
-        setLive(error instanceof Error ? error.message : "The Analyst request failed.");
+        setLive(
+          "The response could not be completed. No unverified answer was shown. Check your connection and retry the question.",
+        );
       }
     } finally {
       if (active.current?.requestId === requestId) active.current = null;

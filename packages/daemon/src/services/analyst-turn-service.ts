@@ -4,6 +4,8 @@ import {
   AnalystFinalSchema,
   AnalystCitationInspectionUnsignedRecordSchema,
   AnalystCitationInspectionViewSchema,
+  AnalystDiscoveryViewSchema,
+  AnalystFitnessPreviewViewSchema,
   ANALYST_CITATION_INSPECTION_MAX_COUNT,
   ANALYST_CITATION_INSPECTION_MAX_RECORD_BYTES,
   ANALYST_CITATION_INSPECTION_MAX_TOTAL_BYTES,
@@ -383,6 +385,7 @@ function analystTools(
   log: AnalystTurnLogSink,
   toolLifecycle: ReturnType<typeof createGroundedToolLifecycleDiagnostics>,
   reserveToolInvocation: () => boolean,
+  onToolStage: (name: string, outcome: "attempt" | "success" | "failed" | "rejected") => void,
 ): ReturnType<typeof createCollectionTools> {
   const request = (parameters: Record<string, unknown>) => ({
     ...parameters,
@@ -394,7 +397,10 @@ function analystTools(
   const tools = createCollectionTools({
     signal,
     redact: modelVisible,
-    onStage: ({ name, outcome, ...details }) => logStage(log, audit, name, outcome, details),
+    onStage: ({ name, outcome, ...details }) => {
+      onToolStage(name, outcome);
+      logStage(log, audit, name, outcome, details);
+    },
     toolLifecycle,
     operations: {
       top: (parameters) => evidenceService.top(snapshot, request(parameters)),
@@ -531,6 +537,17 @@ export function createAnalystTurnService(deps: {
       const fitnessPreview: unknown[] = [];
       const thingFacts: unknown[] = [];
       const emittedIds = new Set<number>();
+      let invokedToolCount = 0;
+      let successfulToolCount = 0;
+      let invokedBggToolCount = 0;
+      let failedBggToolCount = 0;
+      const trackCollectionToolStage = (
+        _name: string,
+        outcome: "attempt" | "success" | "failed" | "rejected",
+      ) => {
+        if (outcome === "attempt") invokedToolCount++;
+        else if (outcome === "success") successfulToolCount++;
+      };
       let invocationCount = 0;
       const reserveToolInvocation = () => {
         if (invocationCount >= 24) return false;
@@ -585,6 +602,20 @@ export function createAnalystTurnService(deps: {
         },
         onAuthorizedIds: (ids) => ids.forEach((id) => emittedIds.add(id)),
         onResult: (name, value) => {
+          invokedToolCount++;
+          invokedBggToolCount++;
+          const result = value as {
+            status?: unknown;
+            state?: unknown;
+            facts?: unknown;
+          } | null;
+          const hasUsefulPartialFacts =
+            result?.status === "partial" && Array.isArray(result.facts) && result.facts.length > 0;
+          const hasUsefulLocalPreview =
+            result?.status === "partial" && result.state === "existing-local-unverified";
+          if (result?.status === "ok" || hasUsefulPartialFacts || hasUsefulLocalPreview)
+            successfulToolCount++;
+          else failedBggToolCount++;
           if (name === "searchBggTitles" || name === "reviewBggHot") discovery.push(value);
           if (name === "previewBggFitness") fitnessPreview.push(value);
           if (name === "readBggFacts") thingFacts.push(value);
@@ -606,6 +637,7 @@ export function createAnalystTurnService(deps: {
               log,
               limitedToolLifecycle,
               reserveToolInvocation,
+              trackCollectionToolStage,
             ),
             ...bggTools,
           ],
@@ -621,6 +653,49 @@ export function createAnalystTurnService(deps: {
       logStage(log, audit, "provider", "success");
       if (input.signal.aborted) discardStagedBgg();
       throwIfAborted(input.signal);
+      if (invokedToolCount > 0 && successfulToolCount === 0) {
+        throwIfAborted(input.signal);
+        const safeDiscoveryFailures = discovery
+          .filter(
+            (value) =>
+              !!value &&
+              typeof value === "object" &&
+              (value as { status?: unknown }).status === "error" &&
+              AnalystDiscoveryViewSchema.safeParse([value]).success,
+          )
+          .slice(0, 20);
+        const safeFitnessFailures = fitnessPreview
+          .filter(
+            (value) =>
+              !!value &&
+              typeof value === "object" &&
+              ["error", "unavailable"].includes(String((value as { status?: unknown }).status)) &&
+              AnalystFitnessPreviewViewSchema.safeParse([value]).success,
+          )
+          .slice(0, 10);
+        result = {
+          ...result,
+          output: AnalystSubmissionSchema.parse({
+            outcome: "abstained",
+            reason: "insufficient-evidence",
+            blocks: [
+              {
+                text:
+                  invokedBggToolCount > 0 && failedBggToolCount === invokedBggToolCount
+                    ? "I cannot provide a grounded answer because the evidence checks failed. BGG discovery or game-detail information could not be verified during this turn."
+                    : "I cannot provide a grounded answer because the collection evidence checks failed. No BGG information was verified during this turn.",
+                citationIds: [],
+              },
+            ],
+          }),
+        };
+        discardStagedBgg();
+        discovery.splice(0, discovery.length, ...safeDiscoveryFailures);
+        fitnessPreview.length = 0;
+        fitnessPreview.push(...safeFitnessFailures);
+        thingFacts.length = 0;
+        emittedIds.clear();
+      }
       let accumulated: AnalystRetrievedEvidence;
       try {
         accumulated = await abortable(

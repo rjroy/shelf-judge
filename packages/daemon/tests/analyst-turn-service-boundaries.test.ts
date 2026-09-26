@@ -8,6 +8,7 @@ import {
   projectFitnessPreview,
 } from "../src/services/analyst-turn-service.js";
 import type { GroundedAnalysisProvider } from "../src/services/grounded-analysis/provider.js";
+import { BggClientError } from "../src/services/bgg-client.js";
 
 // These tools must not use session context; fail if an implementation starts doing so.
 const unusedContext = new Proxy({} as ExtensionContext, {
@@ -250,6 +251,219 @@ describe("Analyst turn service boundaries", () => {
 
     expect(await failure(service.run(request(new AbortController().signal)))).toMatchObject({
       message: "stop after manifest inspection",
+    });
+  });
+
+  test("keeps BGG 429 tool-local and accepts a valid abstention without fabricated evidence", async () => {
+    let providerCalls = 0;
+    let observedToolResult: unknown;
+    const provider = unavailableProvider(async (analysisRequest) => {
+      providerCalls++;
+      const search = analysisRequest.retrievalTools?.find(({ name }) => name === "searchBggTitles");
+      const preview = analysisRequest.retrievalTools?.find(
+        ({ name }) => name === "previewBggFitness",
+      );
+      if (search === undefined || preview === undefined) throw new Error("BGG tools missing");
+      const response = await search.execute(
+        "search",
+        { ownerMessageIndex: 0, start: 14, end: 18 },
+        undefined,
+        undefined,
+        unusedContext,
+      );
+      const content = response.content[0];
+      if (content.type !== "text") throw new Error("Expected JSON BGG tool result");
+      observedToolResult = JSON.parse(content.text) as unknown;
+      await preview.execute("preview", { bggId: 174430 }, undefined, undefined, unusedContext);
+      return {
+        output: {
+          outcome: "answered",
+          blocks: [{ text: "Azul is the best result.", citationIds: [] }],
+        },
+        usage: { state: "unavailable" },
+      } as never;
+    });
+    const service = createAnalystTurnService({
+      provider,
+      bggClient: {
+        isConfigured: () => true,
+        searchBoardgameTitles: () => Promise.reject(new BggClientError("rate-limited", 429)),
+      } as never,
+      previewFitness: () => Promise.resolve({ kind: "failed", code: "BggThrottled" }),
+      evidenceService: evidenceService({
+        accumulatedEvidence: () =>
+          Promise.resolve({
+            snapshotFingerprint: snapshot.snapshotFingerprint,
+            evidence: {} as never,
+            citations: [],
+            noteDependencies: [],
+            scope: {
+              totalSourceCount: 0,
+              matchingSourceCount: 0,
+              examinedSourceCount: 0,
+              exhaustive: true,
+            },
+            nextCursor: null,
+          }),
+      }),
+    });
+
+    const result = await service.run({
+      ...request(new AbortController().signal),
+      ownerMessages: ["Please search Azul and BGG ID 174430"],
+      conversationId: "conversation",
+      turnIndex: 0,
+    });
+
+    expect(providerCalls).toBe(1);
+    expect(observedToolResult).toEqual({
+      status: "error",
+      code: "BggThrottled",
+      retryable: true,
+    });
+    expect(result).toMatchObject({
+      output: {
+        outcome: "abstained",
+        reason: "insufficient-evidence",
+        blocks: [
+          {
+            text: "I cannot provide a grounded answer because the evidence checks failed. BGG discovery or game-detail information could not be verified during this turn.",
+            citationIds: [],
+          },
+        ],
+      },
+      discoveryIds: [],
+      discovery: [{ status: "error", code: "BggThrottled", retryable: true }],
+      fitnessPreview: [
+        {
+          status: "unavailable",
+          state: "unavailable",
+          bggId: 174430,
+          code: "BggThrottled",
+          retryable: true,
+          predictionUnavailable: null,
+        },
+      ],
+    });
+    if (!("inspectionRecords" in result)) throw new Error("Expected finalized turn result");
+    expect(result.inspectionRecords).toEqual([]);
+    expect(result.retrieved.flatMap(({ citations }) => citations)).toEqual([]);
+    expect(JSON.stringify(result)).not.toContain("Azul is the best result.");
+    expect(JSON.stringify(result)).not.toContain("BggClientError");
+    expect(JSON.stringify(result)).not.toContain("observationCitationId");
+    expect(JSON.stringify(result)).not.toContain("score");
+  });
+
+  test("preserves a qualified partial answer when collection evidence succeeds despite BGG 429", async () => {
+    const citation = {
+      citationId: "collection-citation",
+      sourceId: "game-1",
+      sourceVersion: "collection-revision-1",
+      evidenceClass: "game-identity-ownership",
+      canonicalSummary: "Collection game evidence",
+      testimony: false,
+      destination: { operationId: "shelf.game.get", parameters: { gameId: "game-1" } },
+    } as const;
+    const provider = unavailableProvider(async (analysisRequest) => {
+      const top = analysisRequest.retrievalTools?.find(({ name }) => name === "top");
+      const search = analysisRequest.retrievalTools?.find(({ name }) => name === "searchBggTitles");
+      if (top === undefined || search === undefined) throw new Error("Expected evidence tools");
+      await top.execute("top", { rankBy: "fitness" }, undefined, undefined, unusedContext);
+      const response = await search.execute(
+        "search",
+        { ownerMessageIndex: 0, start: 14, end: 18 },
+        undefined,
+        undefined,
+        unusedContext,
+      );
+      const content = response.content[0];
+      if (content.type !== "text") throw new Error("Expected JSON BGG tool result");
+      expect(JSON.parse(content.text)).toEqual({
+        status: "error",
+        code: "BggThrottled",
+        retryable: true,
+      });
+      return {
+        output: {
+          outcome: "partial",
+          blocks: [
+            {
+              text: "This collection includes Game. I could not verify BGG information because the lookup was rate limited.",
+              citationIds: [citation.citationId],
+              uncertainty: "BGG identity could not be verified.",
+            },
+          ],
+        },
+        usage: { state: "unavailable" },
+      } as never;
+    });
+    const service = createAnalystTurnService({
+      provider,
+      bggClient: {
+        isConfigured: () => true,
+        searchBoardgameTitles: () => Promise.reject(new BggClientError("rate-limited", 429)),
+      } as never,
+      evidenceService: evidenceService({
+        top: () =>
+          Promise.resolve({
+            snapshotFingerprint: snapshot.snapshotFingerprint,
+            entries: [
+              {
+                gameId: "game-1",
+                name: "Game",
+                fitness: 8,
+                breakdown: [],
+                citations: [citation, { ...citation, citationId: "collection-citation-2" }],
+              },
+            ],
+            scope: {
+              totalGameCount: 1,
+              matchingGameCount: 1,
+              examinedGameCount: 1,
+              exhaustive: true,
+            },
+            nextCursor: null,
+            truncated: false,
+          }),
+        accumulatedEvidence: () =>
+          Promise.resolve({
+            snapshotFingerprint: snapshot.snapshotFingerprint,
+            evidence: {} as never,
+            citations: [citation, { ...citation, citationId: "collection-citation-2" }],
+            noteDependencies: [],
+            scope: {
+              totalSourceCount: 1,
+              matchingSourceCount: 1,
+              examinedSourceCount: 1,
+              exhaustive: true,
+            },
+            nextCursor: null,
+          }),
+      }),
+    });
+
+    const result = await service.run({
+      ...request(new AbortController().signal),
+      ownerMessages: ["Please search Azul"],
+      conversationId: "conversation",
+      turnIndex: 0,
+    });
+
+    expect(result).toMatchObject({
+      output: {
+        outcome: "partial",
+        blocks: [
+          {
+            text: "This collection includes Game. I could not verify BGG information because the lookup was rate limited.",
+            citationIds: [citation.citationId],
+            uncertainty: "BGG identity could not be verified.",
+          },
+        ],
+        citations: [citation],
+      },
+      discovery: [{ status: "error", code: "BggThrottled", retryable: true }],
+      discoveryIds: [],
+      fitnessPreview: [],
     });
   });
 

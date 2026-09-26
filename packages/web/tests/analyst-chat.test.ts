@@ -41,6 +41,15 @@ describe("Collection Analyst chat", () => {
     expect(source).toContain("ref={composer}");
   });
 
+  test("uses safe, reason-specific failure guidance and never surfaces caught provider errors", () => {
+    expect(source).toContain("function failureGuidance");
+    expect(source).toContain('case "authentication"');
+    expect(source).toContain('case "evidence-load"');
+    expect(source).toContain('case "output-validation"');
+    expect(source).toContain("The Analyst took too long to respond.");
+    expect(source).not.toContain("setLive(error instanceof Error ? error.message");
+  });
+
   test("renders discovery and preview as daemon-authored ephemeral views", () => {
     expect(source).toContain('aria-label={title ? "BGG title matches" : "BGG Hot sample"}');
     expect(source).toContain("No matches in this title search.");

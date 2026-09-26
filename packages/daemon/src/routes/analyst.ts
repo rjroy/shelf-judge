@@ -33,6 +33,7 @@ import {
   createGroundedStreamWriter,
   type GroundedStreamEncoding,
 } from "../services/grounded-analysis/stream-writer.js";
+import { GroundedAnalysisError } from "../services/grounded-analysis/failure-mapping.js";
 
 const INVALID_REQUEST_ID = "invalid-request";
 const OPERATION_PREFIX = "shelf.analyst";
@@ -674,7 +675,7 @@ export function createAnalystRoutes(deps: AnalystRoutesDeps): AnalystRouteModule
                 result.reason === "source-changed"
                   ? { reason: "evidence-load" as const, safeDetail: "source-changed" }
                   : result.reason === "handoff-failed"
-                    ? { reason: "provider-outage" as const, safeDetail: "provider-handoff-failed" }
+                    ? { reason: "internal" as const, safeDetail: "evidence-handoff-failed" }
                     : { reason: "output-validation" as const, safeDetail: "invalid-submission" };
               await publishTerminal("failed", {
                 type: "failed",
@@ -844,14 +845,21 @@ export function createAnalystRoutes(deps: AnalystRoutesDeps): AnalystRouteModule
                   // Cancellation is already terminal in the registry.
                 }
               } else {
+                const groundedFailure =
+                  error instanceof GroundedAnalysisError && error.reason !== "cancelled"
+                    ? error
+                    : undefined;
                 try {
                   await publishTerminal("failed", {
                     type: "failed",
                     terminal: true,
                     conversationId: request.conversationId,
                     requestId: request.requestId,
-                    reason: "internal",
-                    safeDetail: "turn-failed",
+                    reason:
+                      groundedFailure && groundedFailure.reason !== "cancelled"
+                        ? groundedFailure.reason
+                        : "internal",
+                    safeDetail: groundedFailure?.safeDetail ?? "turn-failed",
                   });
                 } catch {
                   try {

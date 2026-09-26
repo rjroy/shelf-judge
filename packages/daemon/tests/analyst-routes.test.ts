@@ -11,6 +11,7 @@ import type { AnalystProjectionSnapshot } from "../src/services/analyst-evidence
 import { createAnalystTranscriptValidator } from "../src/services/analyst-transcript-validator.js";
 import type { AnalystTranscriptValidator } from "../src/services/analyst-transcript-validator.js";
 import { createAnalystTurnService } from "../src/services/analyst-turn-service.js";
+import { GroundedAnalysisError } from "../src/services/grounded-analysis/failure-mapping.js";
 
 const capability = "a".repeat(64);
 
@@ -94,6 +95,53 @@ function completedProviderOutput(
     output: "I need authorized evidence.",
     usage: { state: "unavailable" as const },
   };
+}
+
+function createRouteWithTurnRun(run: () => Promise<unknown>) {
+  const context = createTestApp({ groundedAnalysisProvider: configuredProvider() });
+  const evidenceService = createAnalystEvidenceService({
+    storageService: context.storageService,
+    projectionSnapshotService: {
+      capture: () =>
+        Promise.resolve({
+          collectionId: "collection-1",
+          collectionRevision: 1,
+          snapshotFingerprint: "route-failure-test",
+          sources: [],
+          page: () => {
+            throw new Error("No evidence pages are requested by this test");
+          },
+        } satisfies AnalystProjectionSnapshot),
+    },
+    ownerGameNoteService: context.ownerGameNoteService,
+    ownerNoteAuthorizationScope: {
+      gameIds: [],
+      allowCollectionSynthesis: false,
+      allowLocalTextSearch: false,
+    },
+    citationSecret: new Uint8Array(32).fill(9),
+  });
+  return createAnalystRoutes({
+    getConfigurationStatus: () => ({
+      status: "configured",
+      identity: { providerId: "provider", modelId: "model", extensionIds: [] },
+    }),
+    transcriptValidator: {
+      validate: () => Promise.resolve({ valid: true, discoveryIds: [] }),
+    },
+    evidenceService,
+    turnService: { run } as never,
+    attestationService: createAnalystAttestationService(),
+  });
+}
+
+async function streamRouteFailure(routes: ReturnType<typeof createRouteWithTurnRun>) {
+  const response = await routes.routes.request("http://localhost/analyst/turns/stream", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(turnRequest()),
+  });
+  return events(await response.text());
 }
 
 describe("Analyst daemon routes", () => {
@@ -239,6 +287,63 @@ describe("Analyst daemon routes", () => {
       .map((line) => JSON.parse(line) as { type: string });
     expect(ndjson.headers.get("content-type")).toContain("application/x-ndjson");
     expect(ndjsonEvents.at(-1)?.type).toBe("completed");
+  });
+
+  test("reports evidence handoff failures as internal without publishing an answer", async () => {
+    const routes = createRouteWithTurnRun(() =>
+      Promise.resolve({ valid: false, reason: "handoff-failed" }),
+    );
+    const streamEvents = await streamRouteFailure(routes);
+    const terminal = streamEvents.filter((event) => event.terminal === true);
+
+    expect(terminal).toHaveLength(1);
+    expect(terminal[0]).toMatchObject({
+      type: "failed",
+      reason: "internal",
+      safeDetail: "evidence-handoff-failed",
+    });
+    expect(streamEvents.some((event) => event.type === "completed")).toBe(false);
+  });
+
+  test("preserves typed grounded failures and safe details while hiding causes", async () => {
+    const failures = [
+      ["provider-outage", "provider-unavailable"],
+      ["authentication", "provider-authentication-failed"],
+      ["rate-limit", "provider-rate-limited"],
+      ["transport", "provider-transport-failed"],
+    ] as const;
+
+    for (const [reason, safeDetail] of failures) {
+      const routes = createRouteWithTurnRun(() =>
+        Promise.reject(
+          new GroundedAnalysisError(reason, safeDetail, {
+            cause: new Error("private provider response"),
+          }),
+        ),
+      );
+      const streamEvents = await streamRouteFailure(routes);
+      const terminal = streamEvents.filter((event) => event.terminal === true);
+
+      expect(terminal).toHaveLength(1);
+      expect(terminal[0]).toMatchObject({ type: "failed", reason, safeDetail });
+      expect(JSON.stringify(streamEvents)).not.toContain("private provider response");
+      expect(streamEvents.some((event) => event.type === "completed")).toBe(false);
+    }
+  });
+
+  test("keeps unknown thrown errors internal and does not expose their message", async () => {
+    const routes = createRouteWithTurnRun(() => Promise.reject(new Error("private raw error")));
+    const streamEvents = await streamRouteFailure(routes);
+    const terminal = streamEvents.filter((event) => event.terminal === true);
+
+    expect(terminal).toHaveLength(1);
+    expect(terminal[0]).toMatchObject({
+      type: "failed",
+      reason: "internal",
+      safeDetail: "turn-failed",
+    });
+    expect(JSON.stringify(streamEvents)).not.toContain("private raw error");
+    expect(streamEvents.some((event) => event.type === "completed")).toBe(false);
   });
 
   test("accepts an authorized cancellation during provider work and rejects reuse while active", async () => {
